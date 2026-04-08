@@ -1,9 +1,3 @@
-<<<<<<< HEAD
-# VOC_ai_agent
-building an ai agent that collects and analyze VOC(voice of customer)
-=======
-=======
->>>>>>> d88792d (streamlit attached)
 # VOC Intelligence API
 
 FastAPI backend for multi-channel Voice of Customer ingestion, retrieval, and insight generation. Korean-first, English-compatible.
