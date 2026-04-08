@@ -1,0 +1,100 @@
+[
+  {
+    "query_id": "Q01",
+    "relevant_evidence_ids": [
+      "8d06f4a206eae2ce_001",
+      "8bd6508d1d69f14a_000",
+      "f1c39030eceeb859_000",
+      "e51803a92209e1c0_000",
+      "d641df094b9178dc_001"
+    ],
+    "expected_themes": ["배터리 소모", "충전 빈도"],
+    "must_mention_facts": ["3시간", "하루에 두 번 충전", "케이스 휴대"],
+    "must_not_claim": ["배터리가 오래 간다", "배터리 문제 없다"]
+  },
+  {
+    "query_id": "Q02",
+    "relevant_evidence_ids": [
+      "5d533e26bc3c31ba_000",
+      "5d533e26bc3c31ba_001",
+      "528c4e96042422ba_000",
+      "ffc16fee98b1ceda_001",
+      "e51803a92209e1c0_002",
+      "fe665c328bcbbf14_000"
+    ],
+    "expected_themes": ["착용감 불편", "이어팁 문제"],
+    "must_mention_facts": ["귀가 아프다", "이어팁이 안 맞음", "이어팁 빠짐"],
+    "must_not_claim": ["착용감이 편하다", "착용감 문제 없다"]
+  },
+  {
+    "query_id": "Q03",
+    "relevant_evidence_ids": [
+      "e51803a92209e1c0_000"
+    ],
+    "expected_themes": ["short battery life"],
+    "must_mention_facts": ["3 hours", "dies too fast"],
+    "must_not_claim": ["battery life is excellent", "no battery issues"]
+  },
+  {
+    "query_id": "Q04",
+    "relevant_evidence_ids": [
+      "8d06f4a206eae2ce_000",
+      "8bd6508d1d69f14a_000",
+      "bbc2092e45d79bd9_000",
+      "2fb6cd9d935e8819_000",
+      "f1c39030eceeb859_000",
+      "6ed379df6ae3682e_000",
+      "5d533e26bc3c31ba_000",
+      "5a05dd01f4a8bd3b_000",
+      "528c4e96042422ba_000",
+      "6ed379df6ae3682e_002",
+      "f1bc6ce661937f99_000"
+    ],
+    "expected_themes": ["배터리 소모", "노이즈캔슬링", "착용감", "음질", "가격"],
+    "must_mention_facts": ["노이즈캔슬링 긍정 평가 다수", "배터리 불만 다수", "착용감 의견 갈림"],
+    "must_not_claim": ["전반적으로 부정적이다", "전반적으로 문제 없다"]
+  },
+  {
+    "query_id": "Q05",
+    "relevant_evidence_ids": [
+      "bbc2092e45d79bd9_000",
+      "6ed379df6ae3682e_000",
+      "b3e38f3040de5d2e_000",
+      "33d6f892e0cac9a8_000",
+      "f1bc6ce661937f99_001"
+    ],
+    "expected_themes": ["노이즈캔슬링 성능"],
+    "must_mention_facts": ["대부분 긍정적 평가"],
+    "must_not_claim": ["노이즈캔슬링에 불만이 많다", "노이즈캔슬링이 부족하다"]
+  },
+  {
+    "query_id": "Q06",
+    "relevant_evidence_ids": [
+      "8bd6508d1d69f14a_000",
+      "e51803a92209e1c0_000",
+      "8d06f4a206eae2ce_001",
+      "f1c39030eceeb859_000",
+      "5d533e26bc3c31ba_000",
+      "5d533e26bc3c31ba_001",
+      "528c4e96042422ba_000",
+      "ffc16fee98b1ceda_001"
+    ],
+    "expected_themes": ["배터리 개선", "착용감 개선"],
+    "must_mention_facts": ["배터리 3시간", "귀 통증", "이어팁 문제"],
+    "must_not_claim": ["개선할 점이 없다", "모든 사용자가 만족한다"]
+  },
+  {
+    "query_id": "Q10",
+    "relevant_evidence_ids": [],
+    "expected_themes": [],
+    "must_mention_facts": ["관련 데이터 없음"],
+    "must_not_claim": ["무선 충전 속도가 빠르다", "무선 충전 속도가 느리다"]
+  },
+  {
+    "query_id": "Q11",
+    "relevant_evidence_ids": [],
+    "expected_themes": [],
+    "must_mention_facts": ["해당 제품 데이터 없음"],
+    "must_not_claim": ["에어팟 프로 5세대 평가가 좋다", "에어팟 프로 5세대 평가가 나쁘다"]
+  }
+]

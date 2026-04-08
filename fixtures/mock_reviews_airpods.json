@@ -1,0 +1,209 @@
+[
+  {
+    "text": "노이즈캔슬링은 정말 좋은데 배터리가 너무 빨리 닳아요. 하루에 두 번은 충전해야 합니다.",
+    "rating": 4,
+    "author": "리뷰어A",
+    "date": "2024년 7월 10일",
+    "language": "ko",
+    "source_id": "mock-ko-001",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "착용감이 별로예요. 오래 끼고 있으면 귀가 아파요. 가격 대비 좀 실망스럽습니다.",
+    "rating": 2,
+    "author": "리뷰어B",
+    "date": "2024년 7월 25일",
+    "language": "ko",
+    "source_id": "mock-ko-002",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "노이즈캔슬링 최고예요!",
+    "rating": 5,
+    "author": "리뷰어C",
+    "date": "2024년 8월 5일",
+    "language": "ko",
+    "source_id": "mock-ko-003",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "배터리가 3시간밖에 안 가요. 착용감도 불편하고 이 가격에 이 정도면 너무 비싸다고 생각합니다. 다음에는 다른 제품 살 거예요.",
+    "rating": 1,
+    "author": "리뷰어D",
+    "date": "2024년 8월 15일",
+    "language": "ko",
+    "source_id": "mock-ko-004",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "음질이 정말 깨끗하고 선명합니다. 통화할 때도 상대방이 잘 들린다고 해요.",
+    "rating": 4,
+    "author": "리뷰어E",
+    "date": "2024년 9월 1일",
+    "language": "ko",
+    "source_id": "mock-ko-005",
+    "metadata": {"platform": "mock", "verified_purchase": false}
+  },
+  {
+    "text": "배터리 소모가 너무 심해서 외출할 때 항상 케이스를 들고 다녀야 해요.",
+    "rating": 2,
+    "author": "리뷰어F",
+    "date": "2024년 9월 12일",
+    "language": "ko",
+    "source_id": "mock-ko-006",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "노이즈캔슬링이 진짜 뛰어나요. 음질도 이전 모델보다 훨씬 좋아졌습니다. 착용감도 편해서 오래 써도 괜찮아요.",
+    "rating": 5,
+    "author": "리뷰어G",
+    "date": "2024년 9월 28일",
+    "language": "ko",
+    "source_id": "mock-ko-007",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "가격이 좀 부담되긴 하지만 음질은 만족스러워요. 세일할 때 사는 걸 추천합니다.",
+    "rating": 3,
+    "author": "리뷰어H",
+    "date": "2024년 10월 5일",
+    "language": "ko",
+    "source_id": "mock-ko-008",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "배터리가 빨리 닳긴 하는데 충전 속도가 빨라서 그럭저럭 쓸 만해요.",
+    "rating": 3,
+    "author": "리뷰어I",
+    "date": "2024년 10월 18일",
+    "language": "ko",
+    "source_id": "mock-ko-009",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "귀가 작은 편인데 이어팁이 안 맞아요. 통화 품질도 기대 이하였습니다.",
+    "rating": 2,
+    "author": "리뷰어J",
+    "date": "2024년 10월 30일",
+    "language": "ko",
+    "source_id": "mock-ko-010",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "AirPods Pro 노이즈캔슬링이 진짜 좋아요. Sound quality도 만족스럽습니다.",
+    "rating": 4,
+    "author": "리뷰어K",
+    "date": "2024년 11월 8일",
+    "language": "ko",
+    "source_id": "mock-ko-011",
+    "metadata": {"platform": "mock", "verified_purchase": false}
+  },
+  {
+    "text": "노이즈캔슬링 최고예요!",
+    "rating": 5,
+    "author": "리뷰어L",
+    "date": "2024년 11월 15일",
+    "language": "ko",
+    "source_id": "mock-ko-012",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Great noise cancellation but the fit is uncomfortable for long listening sessions. Ear tips keep falling out.",
+    "rating": 3,
+    "author": "ReviewerM",
+    "date": "2024-08-20",
+    "language": "en",
+    "source_id": "mock-en-001",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Battery life is decent, about 5-6 hours with ANC on. Sound quality is excellent for the price range.",
+    "rating": 4,
+    "author": "ReviewerN",
+    "date": "2024-09-15",
+    "language": "en",
+    "source_id": "mock-en-002",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Battery dies way too fast, barely lasts 3 hours. For the price you pay, this is unacceptable. The fit is also terrible with the default ear tips.",
+    "rating": 1,
+    "author": "ReviewerO",
+    "date": "2024-10-02",
+    "language": "en",
+    "source_id": "mock-en-003",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Best noise cancellation I've ever used in earbuds.",
+    "rating": 5,
+    "author": "ReviewerP",
+    "date": "2024-10-20",
+    "language": "en",
+    "source_id": "mock-en-004",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Sound quality is crisp and balanced. Phone calls are clear on both ends.",
+    "rating": 4,
+    "author": "ReviewerQ",
+    "date": "2024-11-01",
+    "language": "en",
+    "source_id": "mock-en-005",
+    "metadata": {"platform": "mock", "verified_purchase": false}
+  },
+  {
+    "text": "Way too expensive for what you get.",
+    "rating": 2,
+    "author": "ReviewerR",
+    "date": "2024-11-10",
+    "language": "en",
+    "source_id": "mock-en-006",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "노이즈캔슬링은 만족스러운데 배터리가 4시간이면 꺼져요. ANC 켜면 더 빨리 닳습니다.",
+    "rating": 3,
+    "author": "리뷰어M",
+    "date": "2024년 11월 20일",
+    "language": "ko",
+    "source_id": "mock-ko-013",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "착용감이 좋아서 하루종일 써도 편해요. 가격은 비싸지만 그만한 가치가 있다고 생각합니다.",
+    "rating": 4,
+    "author": "리뷰어N",
+    "date": "2024년 11월 25일",
+    "language": "ko",
+    "source_id": "mock-ko-014",
+    "metadata": {"platform": "mock", "verified_purchase": false}
+  },
+  {
+    "text": "30만원이 넘는 가격에 이 품질은 말이 안 됩니다.",
+    "rating": 1,
+    "author": "리뷰어O",
+    "date": "2024년 12월 1일",
+    "language": "ko",
+    "source_id": "mock-ko-015",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "The fit is really uncomfortable after an hour, my ears start to ache. Sound quality is surprisingly good though, very detailed mids and highs.",
+    "rating": 3,
+    "author": "ReviewerS",
+    "date": "2024-11-22",
+    "language": "en",
+    "source_id": "mock-en-007",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  },
+  {
+    "text": "Battery easily lasts 6-7 hours even with ANC on, which is impressive. Noise cancellation is top-tier, blocks out everything on my commute.",
+    "rating": 4,
+    "author": "ReviewerT",
+    "date": "2024-12-05",
+    "language": "en",
+    "source_id": "mock-en-008",
+    "metadata": {"platform": "mock", "verified_purchase": true}
+  }
+]

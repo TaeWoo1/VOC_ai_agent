@@ -1,0 +1,15 @@
+[
+  {"query_id": "Q01", "query_text": "배터리 소모에 대한 불만은 어떤가요?", "query_language": "ko", "category": "specific_complaint", "difficulty": "easy", "expected_response_language": "ko"},
+  {"query_id": "Q02", "query_text": "착용감에 대한 불만 사항을 정리해주세요.", "query_language": "ko", "category": "specific_complaint", "difficulty": "medium", "expected_response_language": "ko"},
+  {"query_id": "Q03", "query_text": "What are the main complaints about battery life?", "query_language": "en", "category": "specific_complaint", "difficulty": "easy", "expected_response_language": "en"},
+  {"query_id": "Q04", "query_text": "에어팟 프로에 대한 전반적인 평가는 어떤가요?", "query_language": "ko", "category": "sentiment_overview", "difficulty": "medium", "expected_response_language": "ko"},
+  {"query_id": "Q05", "query_text": "노이즈캔슬링 기능에 대한 평가를 정리해주세요.", "query_language": "ko", "category": "sentiment_overview", "difficulty": "easy", "expected_response_language": "ko"},
+  {"query_id": "Q06", "query_text": "제품팀이 가장 먼저 개선해야 할 점은 무엇인가요?", "query_language": "ko", "category": "actionable", "difficulty": "medium", "expected_response_language": "ko"},
+  {"query_id": "Q07", "query_text": "What improvements should be prioritized for the next version?", "query_language": "en", "category": "actionable", "difficulty": "medium", "expected_response_language": "en"},
+  {"query_id": "Q08", "query_text": "에어팟 프로 괜찮아요?", "query_language": "ko", "category": "ambiguous", "difficulty": "hard", "expected_response_language": "ko"},
+  {"query_id": "Q09", "query_text": "Is it worth buying?", "query_language": "en", "category": "ambiguous", "difficulty": "hard", "expected_response_language": "en"},
+  {"query_id": "Q10", "query_text": "무선 충전 속도는 어떤가요?", "query_language": "ko", "category": "unsupported", "difficulty": "hard", "expected_response_language": "ko"},
+  {"query_id": "Q11", "query_text": "에어팟 프로 5세대는 어떤가요?", "query_language": "ko", "category": "unsupported", "difficulty": "hard", "expected_response_language": "ko"},
+  {"query_id": "Q12", "query_text": "배터리와 음질 중 어느 쪽 평가가 더 좋은가요?", "query_language": "ko", "category": "comparison", "difficulty": "medium", "expected_response_language": "ko"},
+  {"query_id": "Q13", "query_text": "How does the noise cancellation compare to the fit and comfort?", "query_language": "en", "category": "comparison", "difficulty": "medium", "expected_response_language": "en"}
+]
