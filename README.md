@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 # VOC_ai_agent
 building an ai agent that collects and analyze VOC(voice of customer)
 =======
+=======
+>>>>>>> d88792d (streamlit attached)
 # VOC Intelligence API
 
 FastAPI backend for multi-channel Voice of Customer ingestion, retrieval, and insight generation. Korean-first, English-compatible.
@@ -161,6 +164,15 @@ docker run --rm -e OPENAI_API_KEY=your-key -p 8000:8000 voc-api
 
 The service binds to Render's `PORT` automatically via `pydantic-settings`.
 
+## Demo UI
+
+A thin Streamlit client is included for presentation purposes. It calls the backend API — no logic of its own.
+
+```bash
+# Requires the backend running
+streamlit run app_demo.py
+```
+
 ## Tech Stack
 
 - **Python 3.11** / FastAPI / Uvicorn
@@ -168,4 +180,3 @@ The service binds to Render's `PORT` automatically via `pydantic-settings`.
 - **ChromaDB** (embedded) for vector indexing and retrieval
 - **OpenAI API** for embeddings (`text-embedding-3-small`) and generation (`gpt-4o-mini`)
 - Structured JSON logging with per-run `run_id` context
->>>>>>> 685d85b (Finalize VOC Intelligence API MVP)
