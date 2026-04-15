@@ -57,14 +57,15 @@ class IngestResult:
 class VOCPipeline:
     """Orchestrates the VOC pipeline."""
 
-    def __init__(self, embedder: Embedder, indexer: ChunkIndexer, generator: InsightGenerator):
-        self._connectors = {"mock": MockConnector}
+    def __init__(self, embedder: Embedder, indexer: ChunkIndexer, generator: InsightGenerator, connectors=None):
+        self._connectors = connectors or {"mock": MockConnector}
         self._embedder = embedder
         self._indexer = indexer
         self._generator = generator
 
     async def ingest(
-        self, keyword: str, run_id: str, connector_name: str = "mock", max_results: int = 100,
+        self, keyword: str, run_id: str, connector_name: str = "mock",
+        max_results: int = 100, collect_params: CollectParams | None = None,
     ) -> IngestResult:
         """Run collect → normalize → dedup → evidence → chunk → embed → index."""
         result = IngestResult(run_id=run_id)
@@ -76,7 +77,8 @@ class VOCPipeline:
             if connector_cls is None:
                 raise ValueError(f"Unknown connector: {connector_name}")
             connector = connector_cls()
-            raw_reviews = await connector.collect(keyword, CollectParams(max_results=max_results))
+            params = collect_params or CollectParams(max_results=max_results)
+            raw_reviews = await connector.collect(keyword, params)
             result.stages.append(StageResult(
                 name="collected", count=len(raw_reviews),
                 duration_ms=_elapsed_ms(t0),

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     openai_generation_model: str = "gpt-4o-mini"
     openai_judge_model: str = "gpt-4o"
     chroma_persist_dir: str = "./chroma_data"
+    db_path: str = "./voc_data.db"
 
     # API server
     host: str = "0.0.0.0"

@@ -47,6 +47,25 @@ Evidence:
 # TODO: implement when team handoff generation is needed
 TEAM_HANDOFF_PROMPT = ""
 
+# --- Monitoring prompts (used as "question" input to pipeline.query()) ---
+# These steer the LLM's focus while the output shape remains VOCInsight.
+
+MONITORING_DASHBOARD_PROMPT = (
+    "이 제품/매장의 전체 리뷰를 운영자 관점에서 종합 분석해주세요. "
+    "주요 불만사항, 반복적으로 나타나는 이슈, 긍정적인 테마, "
+    "그리고 가장 시급하게 대응해야 할 문제를 중심으로 정리해주세요."
+)
+
+MONITORING_ISSUES_PROMPT = (
+    "이 제품/매장 리뷰에서 나타나는 불만사항과 문제점을 심각도별로 분석해주세요. "
+    "반복적으로 언급되는 이슈와 즉시 대응이 필요한 문제를 중심으로 정리해주세요."
+)
+
+MONITORING_SUMMARY_PROMPT = (
+    "이 제품/매장의 최근 리뷰 상황을 2-3문장으로 간결하게 요약해주세요. "
+    "전반적인 고객 반응과 주요 동향을 중심으로 작성해주세요."
+)
+
 
 def format_evidence_context(retrieved_chunks: list[dict]) -> str:
     """Format retrieved chunks into a string for prompt injection.
