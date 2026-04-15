@@ -19,7 +19,7 @@ class RawReview(BaseModel):
     TODO: Consider adding raw_title for sources that separate title from body
     """
 
-    source_channel: Literal["naver", "csv", "mock"]
+    source_channel: Literal["naver", "csv", "mock", "google_business"]
     source_id: str | None = None
     source_url: str | None = None
     raw_text: str

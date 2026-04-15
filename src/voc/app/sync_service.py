@@ -221,6 +221,9 @@ class SyncService:
             file_path = config.get("file_path")
             if file_path:
                 return CollectParams(max_results=max_results, language_filter=file_path)
+        elif connector_type == "google_business":
+            # Pass full config as JSON string — connector parses it
+            return CollectParams(max_results=max_results, language_filter=json.dumps(config))
         # For mock and other connectors, use default params
         return None
 

@@ -21,12 +21,14 @@ CHANNEL_DOMAIN_MAP: dict[str, str] = {
     "mock": "mock.local",
     "naver": "shopping.naver.com",
     "csv": "csv.local",
+    "google_business": "business.google.com",
 }
 
 CHANNEL_RATING_SCALES: dict[str, tuple[int, int]] = {
     "mock": (1, 5),
     "naver": (1, 5),
     "csv": (1, 5),
+    "google_business": (1, 5),
 }
 
 VALID_LANGUAGES: set[str] = {"ko", "en"}
