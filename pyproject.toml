@@ -21,6 +21,19 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.1",
+    "import-linter>=2.0",
+]
+# M0: SaaS-evolution dependencies. Added but not yet wired into runtime.
+# See /Users/taewookang/.claude/plans/foamy-tickling-canyon.md §E for milestone-by-milestone activation.
+saas = [
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "arq>=0.25",
+    "apscheduler>=3.10",
+    "qdrant-client>=1.7",
+    "prometheus-client>=0.19",
+    "playwright>=1.40",
 ]
 
 [build-system]
@@ -38,3 +51,36 @@ asyncio_mode = "auto"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+# import-linter: enforce that the deterministic critical path never reaches into
+# LLM, embedding, chunking, or vector-store code. See plan §C.4.
+#
+# M0 scope: only packages that exist today are listed in source_modules.
+# TODO(M2): add "src.voc.workers.ingest_worker" to source_modules once the module
+#           is created — it is the core deterministic worker and must remain free
+#           of LLM/embedding/vector imports.
+# TODO(M2): once src/voc/connectors/ is fully migrated into src/voc/adapters/,
+#           remove the legacy connectors package; it is intentionally NOT in
+#           source_modules today to avoid touching deprecated code in M0.
+[tool.importlinter]
+# `src` is the top-level package in this repo (src/__init__.py exists), so the
+# entire src.voc.* tree is reached as a sub-package of "src". grimp requires the
+# top-level name here, not the dotted sub-path.
+root_packages = ["src"]
+
+[[tool.importlinter.contracts]]
+name = "Critical path stays deterministic — no LLM, embedding, chunking, or vector-store imports"
+type = "forbidden"
+source_modules = [
+    "src.voc.adapters",
+    "src.voc.policy",
+    "src.voc.ingestion",
+]
+forbidden_modules = [
+    "src.voc.analysis",
+    "src.voc.generation",
+    "src.voc.llm",
+    "src.voc.processing.chunker",
+    "src.voc.processing.embedder",
+    "src.voc.processing.indexer",
+]
