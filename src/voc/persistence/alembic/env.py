@@ -7,9 +7,9 @@ URL precedence:
     1. DATABASE_URL environment variable (production override)
     2. sqlalchemy.url from alembic.ini (default: SQLite dev DB)
 
-target_metadata is intentionally an empty MetaData() in PR 1 — no SQLAlchemy
-models exist yet.  PR 2 will populate it; once populated, `alembic revision
---autogenerate` will become useful.  Until then, migrations are hand-written.
+target_metadata is wired to the SQLAlchemy models registered under
+src.voc.persistence.models so `alembic revision --autogenerate` can compare
+the live DB schema against the model definitions.
 """
 
 from __future__ import annotations
@@ -18,7 +18,10 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import MetaData, engine_from_config, pool
+from sqlalchemy import Float, engine_from_config, pool
+from sqlalchemy.dialects.sqlite import REAL as SqliteREAL
+
+from src.voc.persistence.models import metadata as models_metadata
 
 # Alembic Config object — provides access to alembic.ini values.
 config = context.config
@@ -32,10 +35,31 @@ if _database_url:
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Empty metadata for PR 1 — autogenerate has nothing to compare against yet.
-# PR 2 (SQLAlchemy models for existing tables) replaces this with the real
-# metadata import: `from src.voc.persistence.models import metadata`.
-target_metadata: MetaData = MetaData()
+# Wired in PR 2: importing src.voc.persistence.models registers the four
+# baseline tables (entities, sync_jobs, source_connections, snapshots) on
+# the shared MetaData, so `alembic revision --autogenerate` can compare the
+# live DB schema against the model definitions.
+target_metadata = models_metadata
+
+
+def _compare_type(ctx, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Narrow comparator override: suppress the SQLite REAL ↔ generic Float
+    false positive.
+
+    SQLite reflects REAL columns as ``sqlalchemy.dialects.sqlite.REAL``,
+    while our cross-dialect models declare them as ``sqlalchemy.Float``.
+    The two render to identical SQLite DDL (``REAL``), so treating them as
+    drift would force every snapshot-rating model to import a SQLite-only
+    type.  Returning False here means "no change"; returning None defers
+    to Alembic's default comparison for everything else.
+
+    This rule fires ONLY for SQLite; on Postgres the dialect-class identity
+    issue does not arise and the default comparator runs as usual.
+    """
+    if ctx.dialect.name == "sqlite":
+        if isinstance(inspected_type, SqliteREAL) and isinstance(metadata_type, Float):
+            return False
+    return None
 
 
 def run_migrations_offline() -> None:
@@ -47,7 +71,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         # Render type comparisons against the SQL dialect of the URL.
-        compare_type=True,
+        compare_type=_compare_type,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -65,7 +89,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            compare_type=True,
+            compare_type=_compare_type,
         )
         with context.begin_transaction():
             context.run_migrations()
