@@ -1,9 +1,10 @@
-"""CSV file upload endpoint for entity-scoped source import."""
+"""File upload endpoints for entity-scoped source import (CSV and JSON)."""
 
 from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,4 +106,122 @@ async def upload_csv(
         "path": str(dest),
         "row_count": row_count,
         "columns": fieldnames,
+    }
+
+
+@router.post("/{entity_id}/upload/json")
+async def upload_json(
+    entity_id: str,
+    file: UploadFile,
+    entity_repo: EntityRepository = Depends(get_entity_repo),
+    source_repo: SourceConnectionRepository = Depends(get_source_repo),
+):
+    """Upload a JSON file of reviews for an entity.
+
+    The JSON file must contain an array of objects, each with at least a "text"
+    field. Optional fields: rating, author, date, language, source_id,
+    source_url, source_channel, metadata.
+
+    This is the recommended import format for browser-captured review data
+    (e.g. via Playwright MCP) because it preserves metadata better than CSV.
+
+    Provenance information (how the data was captured, from which platform)
+    should be recorded in the source connection config, not in individual
+    review objects.
+    """
+    entity = entity_repo.get(entity_id)
+    if entity is None:
+        raise HTTPException(status_code=404, detail=f"Entity '{entity_id}' not found")
+
+    if not file.filename or not file.filename.endswith(".json"):
+        raise HTTPException(status_code=400, detail="File must be a .json file")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
+
+    # Validate JSON structure
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+
+    if not isinstance(data, list):
+        raise HTTPException(status_code=400, detail="JSON must contain an array at top level")
+
+    # Validate that entries have "text" field
+    review_count = 0
+    for i, entry in enumerate(data):
+        if not isinstance(entry, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Entry at index {i} is not an object",
+            )
+        if "text" not in entry or not str(entry["text"]).strip():
+            continue
+        review_count += 1
+
+    if review_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="JSON contains no entries with non-empty 'text' field",
+        )
+
+    # Save file under entity_id directory
+    entity_dir = UPLOADS_DIR / entity_id
+    entity_dir.mkdir(parents=True, exist_ok=True)
+    dest = entity_dir / file.filename
+    dest.write_text(text, encoding="utf-8")
+
+    # Create or update json_import source connection with explicit file path
+    existing = source_repo.find_by_entity_and_type(entity_id, "json_import")
+    if existing:
+        source_repo.update(existing["connection_id"], {
+            "config": {
+                "file_path": str(dest),
+                "filename": file.filename,
+                "review_count": review_count,
+            },
+            "status": "active",
+            "error_message": None,
+        })
+        connection_id = existing["connection_id"]
+    else:
+        connection_id = uuid4().hex[:12]
+        source_repo.save({
+            "connection_id": connection_id,
+            "entity_id": entity_id,
+            "connector_type": "json_import",
+            "source_type": "owned",
+            "display_name": f"JSON 업로드 — {file.filename}",
+            "status": "active",
+            "config": {
+                "file_path": str(dest),
+                "filename": file.filename,
+                "review_count": review_count,
+            },
+            "capabilities": {
+                "sync_mode": "manual",
+                "data_format": "json",
+                "supports_incremental": False,
+                "requires_upload": True,
+                "requires_auth": False,
+                "operator_assisted": True,
+            },
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    logger.info("JSON uploaded", extra={
+        "entity_id": entity_id, "filename": file.filename,
+        "review_count": review_count, "connection_id": connection_id,
+    })
+
+    return {
+        "entity_id": entity_id,
+        "connection_id": connection_id,
+        "filename": file.filename,
+        "path": str(dest),
+        "review_count": review_count,
     }

@@ -69,17 +69,45 @@ class SyncService:
         run_id_var.set(job_id)
 
         # Determine what to ingest: source connections or legacy entity.connector
-        sources = self._source_repo.list_by_entity(entity_id, status="active")
+        all_sources = self._source_repo.list_by_entity(entity_id)
+        sources = [s for s in all_sources if s.get("status") == "active"]
+        skipped = [s for s in all_sources if s.get("status") != "active"]
+        source_summary: list[dict] = []
+        skipped_summary: list[dict] = []
+
+        for s in skipped:
+            skipped_summary.append({
+                "connection_id": s["connection_id"],
+                "connector_type": s["connector_type"],
+                "display_name": s["display_name"],
+                "reason": f"status={s.get('status', 'unknown')}",
+            })
 
         if sources:
-            total_collected, total_indexed, succeeded, failed, all_stages, all_errors = (
+            total_collected, total_indexed, succeeded, failed, all_stages, all_errors, source_summary = (
                 await self._ingest_from_sources(entity, sources, max_results)
             )
+            ingest_mode = "source_connections"
         else:
             # Backward compat: use entity.connector for all keywords
+            connector = entity.get("connector", "mock")
             total_collected, total_indexed, succeeded, failed, all_stages, all_errors = (
                 await self._ingest_legacy(entity, max_results)
             )
+            ingest_mode = "legacy_fallback"
+            legacy_status = "completed" if failed == 0 else ("partial" if succeeded > 0 else "failed")
+            source_summary = [{
+                "connection_id": None,
+                "connector_type": connector,
+                "display_name": f"레거시 커넥터 ({connector})",
+                "collected": total_collected,
+                "indexed": total_indexed,
+                "status": legacy_status,
+                "errors": all_errors[:5],
+                "error_summary": self._build_error_summary(
+                    legacy_status, total_collected, succeeded, failed, all_errors,
+                ),
+            }]
 
         if failed == 0:
             status = "completed"
@@ -87,6 +115,12 @@ class SyncService:
             status = "failed"
         else:
             status = "partial"
+
+        job_metadata = {
+            "ingest_mode": ingest_mode,
+            "source_summary": source_summary,
+            "skipped_sources": skipped_summary,
+        }
 
         self._job_repo.complete(
             job_id,
@@ -96,6 +130,12 @@ class SyncService:
             stages_json=json.dumps(all_stages),
             errors_json=json.dumps(all_errors),
         )
+        # Write metadata separately — complete() doesn't accept it
+        self._job_repo._conn.execute(
+            "UPDATE sync_jobs SET metadata_json = ? WHERE job_id = ?",
+            (json.dumps(job_metadata, ensure_ascii=False), job_id),
+        )
+        self._job_repo._conn.commit()
 
         if succeeded > 0:
             self._entity_repo.update(entity_id, {
@@ -125,14 +165,18 @@ class SyncService:
 
     async def _ingest_from_sources(
         self, entity: dict, sources: list[dict], max_results: int,
-    ) -> tuple[int, int, int, int, list[dict], list[str]]:
-        """Ingest using explicit source connections."""
+    ) -> tuple[int, int, int, int, list[dict], list[str], list[dict]]:
+        """Ingest using explicit source connections.
+
+        Returns the standard tallies plus a per-source summary list.
+        """
         all_stages: list[dict] = []
         all_errors: list[str] = []
         total_collected = 0
         total_indexed = 0
         succeeded = 0
         failed = 0
+        source_summary: list[dict] = []
 
         for source in sources:
             connector_type = source["connector_type"]
@@ -140,6 +184,12 @@ class SyncService:
 
             # Build collect_params from source connection config
             collect_params = self._build_collect_params(connector_type, config, max_results)
+
+            src_collected = 0
+            src_indexed = 0
+            src_succeeded = 0
+            src_failed = 0
+            src_errors: list[str] = []
 
             for kw in entity["product_keywords"]:
                 sub_rid = generate_run_id("ingest")
@@ -153,7 +203,10 @@ class SyncService:
                     )
                 except Exception as e:
                     failed += 1
-                    all_errors.append(f"source '{source['display_name']}' keyword '{kw}': {e}")
+                    src_failed += 1
+                    err_msg = f"keyword '{kw}': {e}"
+                    all_errors.append(f"source '{source['display_name']}' {err_msg}")
+                    src_errors.append(err_msg)
                     logger.error(
                         "Source ingest failed",
                         extra={"connection_id": source["connection_id"], "keyword": kw},
@@ -166,10 +219,36 @@ class SyncService:
                 total_indexed += i
                 succeeded += s
                 failed += f
+                src_collected += c
+                src_indexed += i
+                src_succeeded += s
+                src_failed += f
                 all_stages.extend(stages)
                 all_errors.extend(errors)
+                if errors:
+                    src_errors.extend(errors)
 
-        return total_collected, total_indexed, succeeded, failed, all_stages, all_errors
+            if src_failed == 0:
+                src_status = "completed"
+            elif src_succeeded == 0:
+                src_status = "failed"
+            else:
+                src_status = "partial"
+
+            source_summary.append({
+                "connection_id": source["connection_id"],
+                "connector_type": connector_type,
+                "display_name": source["display_name"],
+                "collected": src_collected,
+                "indexed": src_indexed,
+                "status": src_status,
+                "errors": src_errors[:5],
+                "error_summary": self._build_error_summary(
+                    src_status, src_collected, src_succeeded, src_failed, src_errors,
+                ),
+            })
+
+        return total_collected, total_indexed, succeeded, failed, all_stages, all_errors, source_summary
 
     async def _ingest_legacy(
         self, entity: dict, max_results: int,
@@ -213,11 +292,38 @@ class SyncService:
         return total_collected, total_indexed, succeeded, failed, all_stages, all_errors
 
     @staticmethod
+    def _build_error_summary(
+        status: str,
+        collected: int,
+        succeeded: int,
+        failed: int,
+        errors: list[str],
+    ) -> str:
+        """Build a short human-readable summary for a source's refresh outcome."""
+        if status == "completed":
+            if collected == 0:
+                return "데이터 없음 (빈 소스이거나 파일/설정 확인 필요)"
+            return f"{collected}건 수집 완료"
+        elif status == "partial":
+            return f"{succeeded} keyword 성공, {failed} keyword 실패"
+        else:
+            # failed
+            if errors:
+                # Use first error, truncated
+                first = errors[0]
+                if len(first) > 120:
+                    first = first[:117] + "..."
+                return first
+            if collected == 0:
+                return "데이터 없음 (파일 또는 설정 확인 필요)"
+            return "실패"
+
+    @staticmethod
     def _build_collect_params(
         connector_type: str, config: dict, max_results: int,
     ) -> CollectParams | None:
         """Build connector-specific CollectParams from source connection config."""
-        if connector_type == "csv":
+        if connector_type in ("csv", "json_import"):
             file_path = config.get("file_path")
             if file_path:
                 return CollectParams(max_results=max_results, language_filter=file_path)

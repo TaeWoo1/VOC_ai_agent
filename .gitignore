@@ -21,8 +21,10 @@ env/
 *.swp
 *.swo
 
-# ChromaDB local persistence
+# Data persistence (local dev)
 chroma_data/
+voc_data.db
+uploads/
 
 # Eval results (tracked selectively)
 eval_data/results/*.json
@@ -33,3 +35,4 @@ eval_data/results/*.json
 # OS
 .DS_Store
 Thumbs.db
+.Rhistory

@@ -85,33 +85,23 @@ The current implementation should be treated as:
 The current query flow is useful, but it is **not yet the final product surface**.
 Future planning should prioritize a monitoring-oriented UX and entity-centered flow over adding more generic AI features.
 
-### Current product gap
+### Current product state
 
-Right now, the system is more "question-driven analysis" than "entity-driven monitoring".
-
-The desired future direction is closer to:
-
-- monitor a specific product/store/entity
-- periodically ingest new reviews
-- summarize recent review changes
-- surface major pain points, severity, and action needs
-- help sellers/store owners understand the overall review picture quickly
+The system is now entity-driven monitoring with:
+- entity/product/store management
+- source connection lifecycle
+- operator-facing monitoring reports
+- refresh/snapshot history with trend tracking
+- Streamlit operator console
 
 ### Guidance for future planning
 
 When proposing next steps, prefer these directions:
 
-1. entity-centered flows over free-form chat UX
-2. monitoring / summarization / alert-like workflows over more agent complexity
-3. small operational improvements over architectural expansion
+1. operational reliability over new AI features
+2. scheduled refresh / alerting over more analysis complexity
+3. small UX improvements over architectural expansion
 4. reuse of the existing backend logic over redesign
-
-Prefer future work like:
-- entity/product/store abstraction
-- recent review summaries
-- new review monitoring
-- owner-facing overview endpoints
-- monitoring-oriented thin UI
 
 Avoid jumping into:
 - multi-agent orchestration
@@ -139,15 +129,22 @@ Implemented:
 - generation
 - run tracking
 - Docker / Render deployment
-- thin Streamlit demo
+- SQLite persistence (entities, sync jobs, snapshots, source connections)
+- source connection CRUD, validation, lifecycle management
+- CSV upload as first-class source flow
+- JSON import for browser-captured data
+- Google Business Profile connector (spike/scaffold)
+- SyncService with source-aware refresh, job metadata, skipped/executed tracking
+- monitoring-oriented Streamlit operator console
+- demo assets (examples/)
 
 Not yet implemented / not finalized:
 - team handoff generation
-- advanced retrieval strategy
+- advanced retrieval strategy (filtered + reranked)
 - evaluation runner integration
-- real production connectors
-- persistent storage
-- monitoring-oriented product flow
+- scheduled/automatic refresh
+- multi-tenant isolation
+- authentication / authorization
 
 ### Planning preference
 
@@ -176,8 +173,7 @@ Do not expand scope unnecessarily.
 - `src/voc/retrieval/retriever.py` — `"filtered_reranked"` strategy raises `NotImplementedError`.
 - `src/voc/generation/insight_gen.py` — `generate_team_handoff()` raises `NotImplementedError`.
 - `src/voc/analysis/report.py` — both functions raise `NotImplementedError`.
-- `src/voc/connectors/` — only `mock.py` is implemented. Naver and CSV are not scaffolded.
-- Test files in `tests/` are skeletons with TODOs.
+- `src/voc/connectors/` — `mock.py`, `csv.py`, `json_import.py` are implemented. `google_business.py` is a spike. Naver is not scaffolded.
 
 ## Environment
 

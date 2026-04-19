@@ -128,6 +128,12 @@ class SourceConnectionCreate(BaseModel):
     capabilities: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceConnectionUpdate(BaseModel):
+    display_name: str | None = None
+    status: str | None = None  # "active" / "inactive"
+    config: dict[str, Any] | None = None
+
+
 class SourceConnectionResponse(BaseModel):
     connection_id: str
     entity_id: str
@@ -140,6 +146,27 @@ class SourceConnectionResponse(BaseModel):
     last_synced_at: str | None = None
     error_message: str | None = None
     created_at: str
+
+
+# --- Source validation DTOs ---
+
+
+class ValidationCheckResponse(BaseModel):
+    name: str
+    passed: bool
+    detail: str = ""
+
+
+class SourceValidationResponse(BaseModel):
+    connection_id: str
+    connector_type: str
+    status: str  # current source_connection status
+    readiness: str  # ready/manual_ready/config_incomplete/auth_missing/file_missing/not_implemented
+    checks: list[ValidationCheckResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    sync_mode: str = "unknown"  # manual/api/auto/unknown
+    requires_upload: bool = False
 
 
 # --- Monitoring DTOs (operator-facing) ---

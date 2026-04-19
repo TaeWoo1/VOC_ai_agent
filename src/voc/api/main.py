@@ -21,6 +21,7 @@ from src.voc.app.sync_service import SyncService
 from src.voc.config import get_settings
 from src.voc.connectors.csv import CSVConnector
 from src.voc.connectors.google_business import GoogleBusinessConnector
+from src.voc.connectors.json_import import JsonImportConnector
 from src.voc.connectors.mock import MockConnector
 from src.voc.generation.insight_gen import InsightGenerator
 from src.voc.logging import setup_logging
@@ -46,7 +47,12 @@ async def lifespan(app: FastAPI):
     generator = InsightGenerator()
 
     # Connector registry
-    connectors = {"mock": MockConnector, "csv": CSVConnector, "google_business": GoogleBusinessConnector}
+    connectors = {
+        "mock": MockConnector,
+        "csv": CSVConnector,
+        "json_import": JsonImportConnector,
+        "google_business": GoogleBusinessConnector,
+    }
     pipeline = VOCPipeline(embedder=embedder, indexer=indexer, generator=generator, connectors=connectors)
 
     # Persistence

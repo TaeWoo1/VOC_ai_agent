@@ -1,0 +1,137 @@
+[
+  {
+    "text": "배송은 빠른데 제품 포장이 너무 부실했어요. 박스가 찌그러져 있었습니다.",
+    "rating": 2,
+    "author": "네이버구매자01",
+    "date": "2025-03-28",
+    "language": "ko",
+    "source_id": "nv-20250328-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "노이즈캔슬링 성능은 좋은데 바람 소리가 너무 많이 들어와요. 야외에서는 별로입니다.",
+    "rating": 3,
+    "author": "네이버구매자02",
+    "date": "2025-03-29",
+    "language": "ko",
+    "source_id": "nv-20250329-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "한쪽 이어폰에서 소리가 안 나와요. 불량인 것 같습니다. AS 접수했습니다.",
+    "rating": 1,
+    "author": "네이버구매자03",
+    "date": "2025-03-30",
+    "language": "ko",
+    "source_id": "nv-20250330-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "음질 좋고 착용감도 편합니다. 다만 케이스가 미끄러워서 잘 떨어뜨려요.",
+    "rating": 4,
+    "author": "네이버구매자04",
+    "date": "2025-04-01",
+    "language": "ko",
+    "source_id": "nv-20250401-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "충전 케이스에 넣어도 충전이 안 될 때가 있어요. 접촉 불량인 것 같습니다.",
+    "rating": 2,
+    "author": "네이버구매자05",
+    "date": "2025-04-02",
+    "language": "ko",
+    "source_id": "nv-20250402-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "가성비 최고! 이 가격에 이 정도 노이즈캔슬링이면 충분합니다.",
+    "rating": 5,
+    "author": "네이버구매자06",
+    "date": "2025-04-03",
+    "language": "ko",
+    "source_id": "nv-20250403-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "구매한 지 2주 만에 배터리가 2시간밖에 안 갑니다. 초기 불량 의심됩니다.",
+    "rating": 1,
+    "author": "네이버구매자07",
+    "date": "2025-04-05",
+    "language": "ko",
+    "source_id": "nv-20250405-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "통화 품질이 정말 좋아졌어요. 이전 모델보다 확실히 개선되었습니다.",
+    "rating": 4,
+    "author": "네이버구매자08",
+    "date": "2025-04-06",
+    "language": "ko",
+    "source_id": "nv-20250406-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "소리가 작아요. 볼륨 최대로 해도 시끄러운 곳에서는 잘 안 들립니다.",
+    "rating": 2,
+    "author": "네이버구매자09",
+    "date": "2025-04-07",
+    "language": "ko",
+    "source_id": "nv-20250407-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "디자인이 예쁘고 가벼워요. 운동할 때도 빠지지 않아서 좋습니다.",
+    "rating": 5,
+    "author": "네이버구매자10",
+    "date": "2025-04-08",
+    "language": "ko",
+    "source_id": "nv-20250408-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "배터리 문제가 심각합니다. 완충 후 3시간도 안 돼서 방전됩니다. AS 센터에서도 정상이라고 하네요.",
+    "rating": 1,
+    "author": "네이버구매자11",
+    "date": "2025-04-09",
+    "language": "ko",
+    "source_id": "nv-20250409-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "블루투스 연결이 자주 끊겨요. 특히 사람 많은 곳에서 심합니다.",
+    "rating": 2,
+    "author": "네이버구매자12",
+    "date": "2025-04-10",
+    "language": "ko",
+    "source_id": "nv-20250410-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "선물용으로 샀는데 포장이 깔끔하고 만족합니다. 음질도 좋다고 하네요.",
+    "rating": 5,
+    "author": "네이버구매자13",
+    "date": "2025-04-11",
+    "language": "ko",
+    "source_id": "nv-20250411-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "이어팁 사이즈가 맞는 게 없어요. 별도로 구매해야 했습니다.",
+    "rating": 3,
+    "author": "네이버구매자14",
+    "date": "2025-04-12",
+    "language": "ko",
+    "source_id": "nv-20250412-001",
+    "source_channel": "naver"
+  },
+  {
+    "text": "좌측 이어폰 터치가 잘 안 먹혀요. 여러 번 탭해야 반응합니다.",
+    "rating": 2,
+    "author": "네이버구매자15",
+    "date": "2025-04-13",
+    "language": "ko",
+    "source_id": "nv-20250413-001",
+    "source_channel": "naver"
+  }
+]
