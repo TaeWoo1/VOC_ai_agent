@@ -62,6 +62,33 @@ BANNED_FRAMINGS_KO: tuple[str, ...] = (
     "미쳤어요",
 )
 
+# Extra clusters scanned only at the planner stage (the LLM has more
+# room to drift than a static template). Layout-stage scanning sticks
+# to BANNED_FRAMINGS_KO so audit-quote text containing legit medical
+# vocabulary (e.g. "치료" in a verbatim review) doesn't trip on the
+# narrower public-string walk.
+PLANNER_MEDICAL_BANNED_KO: tuple[str, ...] = (
+    "치료",
+    "완치",
+    "보장",
+    "부작용 없음",
+    "효능 보장",
+)
+
+PLANNER_ATTACK_BANNED_KO: tuple[str, ...] = (
+    "사기",
+    "거짓말",
+    "기만",
+    "조작된",
+)
+
+PLANNER_EXPOSE_BANNED_KO: tuple[str, ...] = (
+    "숨긴",
+    "속고",
+    "폭로",
+    "은폐",
+)
+
 # Layout slot names that are allowed to surface as rendered text. Anything
 # under `audit.*` is held back. New page types should declare their
 # user-visible string fields here; otherwise the safety walker will
@@ -95,6 +122,9 @@ PUBLIC_TEXT_FIELDS: frozenset[str] = frozenset({
     "rank",
     "number",
     "short_name",
+    # v1.2 long-layout additions:
+    "why_note",
+    "who_note",
 })
 
 PUBLIC_LIST_FIELDS: frozenset[str] = frozenset({
@@ -117,6 +147,8 @@ PUBLIC_LIST_FIELDS: frozenset[str] = frozenset({
     "fit_items",
     "consider_items",
     "actions",
+    # v1.2 signature page:
+    "aside_items",
 })
 
 # Allowed `language` values. New locales add here; the safety contract
@@ -327,6 +359,114 @@ def validate_cardnews_safety(
             rule="language_missing",
             location="<root>.language",
             detail="layout must carry a top-level `language` field",
+        ))
+
+    if violations:
+        raise CardnewsSafetyError(tuple(violations))
+
+
+# ---------------------------------------------------------------------------
+# Planner-stage validator
+# ---------------------------------------------------------------------------
+
+
+def _walk_plan_strings(node: object, path: str) -> Iterator[tuple[str, str]]:
+    """Walk every string in a content_plan dict.
+
+    Unlike `_walk_public_strings` (which uses a field allowlist for the
+    layout to keep audit fields out), the content_plan has NO audit
+    fields by contract — every string in it is consumer-facing. So we
+    walk every string indiscriminately.
+    """
+    if isinstance(node, dict):
+        for k, v in node.items():
+            child_path = f"{path}.{k}" if path else k
+            if isinstance(v, str):
+                yield child_path, v
+            elif isinstance(v, (dict, list)):
+                yield from _walk_plan_strings(v, child_path)
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            if isinstance(item, str):
+                yield f"{path}[{i}]", item
+            elif isinstance(item, (dict, list)):
+                yield from _walk_plan_strings(item, f"{path}[{i}]")
+
+
+def validate_content_plan_safety(
+    plan: dict,
+    *,
+    extra_banned: Iterable[str] | None = None,
+) -> None:
+    """Run the consumer-safety contract over a content_plan dict.
+
+    This runs BEFORE layout build — catching banned framings at the
+    source means the layout never gets a chance to embed them, and the
+    operator sees a clean diagnostic from the planner output rather
+    than a cryptic render-time abort.
+
+    Catches:
+      * `BANNED_FRAMINGS_KO` (clickbait / brand-attack / consumer-as-
+        ignorant — same list the layout enforces)
+      * `PLANNER_MEDICAL_BANNED_KO` (cosmetics shouldn't make medical
+        promises)
+      * `PLANNER_ATTACK_BANNED_KO` (brand-attack / accusation cluster)
+      * `PLANNER_EXPOSE_BANNED_KO` (exposé / 폭로 framing cluster)
+
+    Raises `CardnewsSafetyError` on any violation.
+    """
+    if not isinstance(plan, dict):
+        raise CardnewsSafetyError(
+            (SafetyViolation(
+                rule="malformed",
+                location="<root>",
+                detail="content_plan must be a dict",
+            ),)
+        )
+
+    violations: list[SafetyViolation] = []
+    base_banned = (
+        tuple(BANNED_FRAMINGS_KO)
+        + tuple(PLANNER_MEDICAL_BANNED_KO)
+        + tuple(PLANNER_ATTACK_BANNED_KO)
+        + tuple(PLANNER_EXPOSE_BANNED_KO)
+    )
+    banned = base_banned + tuple(
+        s for s in (extra_banned or ()) if isinstance(s, str) and s
+    )
+
+    rule_for: dict[str, str] = {}
+    for term in BANNED_FRAMINGS_KO:
+        rule_for[term] = "banned_framing"
+    for term in PLANNER_MEDICAL_BANNED_KO:
+        rule_for[term] = "medical_claim"
+    for term in PLANNER_ATTACK_BANNED_KO:
+        rule_for[term] = "brand_attack"
+    for term in PLANNER_EXPOSE_BANNED_KO:
+        rule_for[term] = "expose_framing"
+
+    for path, text in _walk_plan_strings(plan, ""):
+        if not text:
+            continue
+        for term in banned:
+            if term in text:
+                violations.append(SafetyViolation(
+                    rule=rule_for.get(term, "banned_framing"),
+                    location=path,
+                    matched=term,
+                    detail="content_plan must not carry this framing — "
+                           "see ko_cardnews_content_plan.md banned list",
+                ))
+
+    # Language presence check — content_plan carries `language` at top
+    # level only (no nested page-level language fields). Single check.
+    lang = plan.get("language")
+    if not isinstance(lang, str) or lang not in ALLOWED_LANGUAGES:
+        violations.append(SafetyViolation(
+            rule="language_invalid",
+            location="<root>.language",
+            matched=str(lang),
+            detail=f"language must be one of {sorted(ALLOWED_LANGUAGES)}",
         ))
 
     if violations:
