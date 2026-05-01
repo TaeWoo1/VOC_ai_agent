@@ -1,0 +1,28 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--cta">
+  <div class="cta-chip">{{ page.chip }}</div>
+  <h1 class="cta-title">{{ page.title }}</h1>
+  {% if page.lead %}<div class="cta-lead">{{ page.lead }}</div>{% endif %}
+
+  {% if page.actions %}
+  <div class="cta-actions">
+    {% for a in page.actions %}
+    <div class="cta-action">
+      <div class="cta-action-num">0{{ loop.index }}</div>
+      <div class="cta-action-body">
+        <div class="cta-action-title">{{ a.title }}</div>
+        <div class="cta-action-text">{{ a.body }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if page.disclosure %}
+  <div class="cta-disclosure">{{ page.disclosure }}</div>
+  {% endif %}
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

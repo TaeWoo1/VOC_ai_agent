@@ -1,0 +1,33 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--attr page--attr-caution">
+  <div class="attr-chip attr-chip--caution">{{ page.chip }}</div>
+  <h1 class="attr-label">{{ page.label_ko }}</h1>
+  <div class="attr-ratio">
+    <div class="attr-ratio-pill attr-ratio-pill--satisfied">만족 {{ page.ratio_strip.satisfied }}건</div>
+    <div class="attr-ratio-pill attr-ratio-pill--split">갈림 {{ page.ratio_strip.split }}건</div>
+  </div>
+
+  <div class="attr-section">
+    <div class="attr-section-label">리뷰에서 반복된 의견</div>
+    <div class="attr-phrase-card attr-phrase-card--caution">
+      <div class="attr-phrase">{{ page.evidence_phrase_ko }}</div>
+    </div>
+  </div>
+
+  <div class="attr-section attr-section--side">
+    <div class="attr-tip-card attr-tip-card--caution">
+      <span class="attr-tip-label">먼저 확인하면 좋은 포인트</span>
+      <div class="attr-tip">{{ page.tip_ko }}</div>
+    </div>
+    {% if page.secondary_note %}
+    <div class="attr-secondary attr-secondary--caution">
+      <span class="attr-secondary-label">참고</span>
+      <div class="attr-secondary-text">{{ page.secondary_note }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

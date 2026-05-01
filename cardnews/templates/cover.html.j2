@@ -1,0 +1,25 @@
+{% extends "base.html.j2" %}
+{% block page %}
+{% set has_image = page.product_image and page.product_image.local_path %}
+<div class="page page--cover {% if not has_image %}cover--no-image{% endif %}">
+  <div class="cover-photo-slot"
+       {% if has_image %}style="background-image: url('file://{{ page.product_image.local_path }}');"{% endif %}>
+  </div>
+  <div class="cover-grain"></div>
+  <div class="cover-content">
+    <div class="cover-tag">{{ page.chip }}</div>
+    <div class="cover-foot">
+      <h1 class="cover-title">{{ page.title }}</h1>
+      <div class="cover-subtitle">{{ page.subtitle }}</div>
+      <div class="cover-takeaway">{{ page.takeaway_ko }}</div>
+      {% if page.chip_strip %}
+      <div class="cover-chip-strip">
+        {% for c in page.chip_strip %}
+        <span class="cover-chip">#{{ c }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

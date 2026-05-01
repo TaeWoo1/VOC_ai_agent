@@ -1,0 +1,25 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--checkpoints">
+  <div class="checkpoints-chip">{{ page.chip }}</div>
+  <h1 class="checkpoints-title">{{ page.title }}</h1>
+  {% if page.subtitle %}<div class="checkpoints-subtitle">{{ page.subtitle }}</div>{% endif %}
+
+  {% if page.numbered_items %}
+  <div class="checkpoints-list">
+    {% for it in page.numbered_items %}
+    <div class="checkpoints-card">
+      <div class="checkpoints-card-num">{{ it.number }}</div>
+      <div class="checkpoints-card-body">
+        <div class="checkpoints-card-label">{{ it.label }}</div>
+        <div class="checkpoints-card-count">{{ it.count }}</div>
+        <div class="checkpoints-card-note">{{ it.note }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

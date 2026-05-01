@@ -1,0 +1,25 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--loved">
+  <div class="loved-chip">{{ page.chip }}</div>
+  <h1 class="loved-title">{{ page.title }}</h1>
+  {% if page.subtitle %}<div class="loved-subtitle">{{ page.subtitle }}</div>{% endif %}
+
+  {% if page.ranked_items %}
+  <div class="loved-rank">
+    {% for it in page.ranked_items %}
+    <div class="loved-row">
+      <div class="loved-row-rank">{{ it.rank }}</div>
+      <div class="loved-row-body">
+        <div class="loved-row-label">{{ it.label }}</div>
+        <div class="loved-row-meta"><span class="loved-row-count">{{ it.count }}</span></div>
+        <div class="loved-row-note">{{ it.note }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

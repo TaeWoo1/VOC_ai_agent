@@ -1,0 +1,1052 @@
+/* Cardnews v1.1 — distinct visual pattern per page type.
+ *
+ * Design language:
+ *   - Cover / CTA: dark canvas (sienna_vark mood), full-bleed image
+ *     slot or atmospheric gradient + chip strip + takeaway box.
+ *   - Hook: cream canvas, large editorial type, mini metric pills.
+ *   - Method: cream canvas, lightweight inline mini-cards.
+ *   - Loved: ranked rows with serif numerals (#1, #2, #3).
+ *   - Divides: horizontal proportion bars (sat / split halves).
+ *   - Checkpoints: numbered tiles with accent bars.
+ *   - Caution / Positive attr: enriched spotlight with phrase + tip + note.
+ *   - Audience: 2-column sage / amber layout.
+ *
+ * Hard rule: every page is exactly 1080×1350; layouts must fill
+ * the canvas (no large bottom whitespace).
+ */
+
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+:root {
+  --canvas-cream: #f5efe6;
+  --canvas-cream-warm: #efe6d6;
+  --canvas-dark: #1a1a1d;
+  --canvas-deep: #2a1f1d;
+
+  --ink-primary: #1a1a1d;
+  --ink-on-dark: #f5efe6;
+  --ink-muted: #6b6b70;
+  --ink-muted-on-dark: #a8a8ad;
+  --ink-accent: #c87f5a;
+
+  --chip-warm-amber: #c87f5a;
+  --chip-warm-amber-soft: #f0d2bf;
+  --chip-sage: #6b8a6e;
+  --chip-sage-soft: #d3dfd1;
+  --chip-pink: #d4807f;
+  --chip-pink-soft: #f0cccb;
+  --chip-dark: #2a2a2d;
+  --chip-cream-deep: #c9b89a;
+
+  --card-cream: #ffffff;
+  --card-cream-2: #faf6ee;
+  --card-shadow: 0 1px 0 rgba(26, 26, 29, 0.04),
+                 0 8px 24px -12px rgba(26, 26, 29, 0.12);
+  --card-shadow-strong: 0 2px 0 rgba(26, 26, 29, 0.06),
+                        0 14px 32px -10px rgba(26, 26, 29, 0.18);
+
+  --font-sans: 'Pretendard', -apple-system, BlinkMacSystemFont,
+               'Helvetica Neue', sans-serif;
+  --font-serif: 'Cormorant Garamond', 'Pretendard', serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  width: 1080px;
+  height: 1350px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--canvas-cream);
+  color: var(--ink-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+  font-feature-settings: "ss01", "ss02";
+}
+
+.page {
+  position: relative;
+  width: 1080px;
+  height: 1350px;
+  overflow: hidden;
+}
+
+.page-index {
+  position: absolute;
+  right: 80px;
+  bottom: 56px;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+}
+
+.page--cover .page-index,
+.page--cta .page-index {
+  color: var(--ink-on-dark);
+  opacity: 0.5;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Cover (sienna_vark mood, redesigned)
+ * -------------------------------------------------------------------------- */
+
+.page--cover {
+  background: var(--canvas-dark);
+  color: var(--ink-on-dark);
+}
+
+.cover-photo-slot {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center center;
+  filter: brightness(0.55) contrast(1.05) saturate(0.85);
+}
+
+.cover--no-image .cover-photo-slot {
+  background-image:
+    radial-gradient(ellipse at 30% 18%, rgba(212, 128, 127, 0.42), transparent 55%),
+    radial-gradient(ellipse at 78% 82%, rgba(200, 127, 90, 0.3), transparent 50%),
+    radial-gradient(circle at 60% 50%, rgba(245, 239, 230, 0.06), transparent 60%),
+    linear-gradient(135deg, #2a1f1d 0%, #4a3530 50%, #6b4838 100%);
+  filter: none;
+}
+
+.cover-grain {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.35) 100%),
+    radial-gradient(circle at 50% 50%, transparent 0%, rgba(0, 0, 0, 0.45) 100%);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.cover-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cover-tag {
+  font-family: var(--font-sans);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--ink-on-dark);
+  opacity: 0.78;
+}
+
+.cover-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.cover-title {
+  font-family: var(--font-sans);
+  font-size: 96px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--ink-on-dark);
+  word-break: keep-all;
+  margin: 0;
+}
+
+.cover-subtitle {
+  font-family: var(--font-sans);
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--ink-on-dark);
+  opacity: 0.82;
+  word-break: keep-all;
+}
+
+.cover-takeaway {
+  font-family: var(--font-sans);
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink-on-dark);
+  word-break: keep-all;
+  padding: 26px 32px;
+  background: rgba(245, 239, 230, 0.08);
+  border-left: 4px solid var(--ink-accent);
+  border-radius: 4px;
+}
+
+.cover-chip-strip {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.cover-chip {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--ink-on-dark);
+  padding: 10px 20px;
+  border: 1.5px solid rgba(245, 239, 230, 0.3);
+  border-radius: 999px;
+  background: rgba(245, 239, 230, 0.08);
+}
+
+/* -------------------------------------------------------------------------- *
+ * Hook page
+ * -------------------------------------------------------------------------- */
+
+.page--hook {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.hook-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-pink);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.hook-metrics {
+  display: flex;
+  gap: 16px;
+  margin-top: 36px;
+}
+
+.hook-metric {
+  flex: 1 1 0;
+  background: var(--card-cream);
+  border-radius: 16px;
+  padding: 26px 22px 22px;
+  text-align: left;
+  box-shadow: var(--card-shadow);
+}
+
+.hook-metric-value {
+  font-family: var(--font-sans);
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--ink-primary);
+}
+
+.hook-metric-label {
+  margin-top: 10px;
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+.hook-lead {
+  margin-top: 56px;
+  font-family: var(--font-sans);
+  font-size: 60px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.hook-supporting {
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.hook-line {
+  position: relative;
+  font-family: var(--font-sans);
+  font-size: 36px;
+  font-weight: 500;
+  line-height: 1.35;
+  padding-left: 28px;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.hook-line-bar {
+  position: absolute;
+  left: 0;
+  top: 14px;
+  width: 14px;
+  height: 14px;
+  background: var(--chip-pink);
+  border-radius: 50%;
+}
+
+.hook-closer {
+  margin-top: auto;
+  padding-top: 32px;
+  font-family: var(--font-sans);
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  letter-spacing: -0.005em;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Method page (lighter, sidebar feel)
+ * -------------------------------------------------------------------------- */
+
+.page--method {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.method-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-dark);
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.method-title {
+  margin: 28px 0 8px;
+  font-size: 56px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.method-subtitle {
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  line-height: 1.4;
+  margin-bottom: 36px;
+  word-break: keep-all;
+}
+
+.method-cards {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 36px;
+}
+
+.method-card {
+  flex: 1 1 0;
+  background: var(--card-cream);
+  padding: 28px 24px;
+  border-radius: 14px;
+  box-shadow: var(--card-shadow);
+  border-top: 3px solid var(--chip-warm-amber);
+}
+
+.method-card-label {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.method-card-value {
+  margin-top: 14px;
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-primary);
+  line-height: 1.1;
+}
+
+.method-note {
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  padding: 22px 26px;
+  background: var(--canvas-cream-warm);
+  border-radius: 12px;
+  border-left: 4px solid var(--ink-accent);
+  margin-bottom: auto;
+  word-break: keep-all;
+}
+
+.method-disclosure {
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+  font-style: italic;
+  margin-top: 32px;
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Loved page (ranked grid)
+ * -------------------------------------------------------------------------- */
+
+.page--loved {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.loved-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-sage);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.loved-title {
+  margin: 28px 0 8px;
+  font-size: 60px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.loved-subtitle {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 36px;
+  word-break: keep-all;
+}
+
+.loved-rank {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.loved-row {
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+  background: var(--card-cream);
+  padding: 32px 36px;
+  border-radius: 18px;
+  box-shadow: var(--card-shadow);
+}
+
+.loved-row-rank {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 96px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--chip-sage);
+  letter-spacing: -0.05em;
+  min-width: 110px;
+}
+
+.loved-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  flex: 1 1 0;
+}
+
+.loved-row-label {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.loved-row-meta { display: flex; gap: 12px; align-items: baseline; }
+
+.loved-row-count {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--chip-sage);
+  padding: 4px 12px;
+  background: var(--chip-sage-soft);
+  border-radius: 999px;
+}
+
+.loved-row-note {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Divides page (horizontal proportion bars)
+ * -------------------------------------------------------------------------- */
+
+.page--divides {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.divides-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-pink);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.divides-title {
+  margin: 28px 0 8px;
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  word-break: keep-all;
+}
+
+.divides-subtitle {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 40px;
+  word-break: keep-all;
+}
+
+.divides-list {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.divides-row {
+  background: var(--card-cream);
+  padding: 28px 32px;
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+
+.divides-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.divides-row-label {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.divides-row-counts {
+  display: flex;
+  gap: 12px;
+}
+
+.divides-count {
+  font-size: 20px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.divides-count--sat { background: var(--chip-sage-soft); color: var(--chip-sage); }
+.divides-count--split { background: var(--chip-warm-amber-soft); color: var(--chip-warm-amber); }
+
+.divides-bar {
+  height: 22px;
+  border-radius: 999px;
+  overflow: hidden;
+  display: flex;
+  background: var(--canvas-cream-warm);
+  margin-bottom: 14px;
+}
+
+.divides-bar-sat { background: var(--chip-sage); height: 100%; }
+.divides-bar-split { background: var(--chip-warm-amber); height: 100%; }
+
+.divides-row-note {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Checkpoints page (numbered tiles with accent)
+ * -------------------------------------------------------------------------- */
+
+.page--checkpoints {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.checkpoints-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-warm-amber);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.checkpoints-title {
+  margin: 28px 0 8px;
+  font-size: 56px;
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.025em;
+  word-break: keep-all;
+}
+
+.checkpoints-subtitle {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 40px;
+  word-break: keep-all;
+}
+
+.checkpoints-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.checkpoints-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  background: var(--card-cream);
+  padding: 32px 36px;
+  border-radius: 18px;
+  box-shadow: var(--card-shadow);
+  border-left: 6px solid var(--chip-warm-amber);
+}
+
+.checkpoints-card-num {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 80px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--chip-warm-amber);
+  letter-spacing: -0.04em;
+  min-width: 100px;
+}
+
+.checkpoints-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  flex: 1 1 0;
+}
+
+.checkpoints-card-label {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.checkpoints-card-count {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--chip-warm-amber);
+  padding: 4px 12px;
+  background: var(--chip-warm-amber-soft);
+  border-radius: 999px;
+  align-self: flex-start;
+}
+
+.checkpoints-card-note {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Caution / Positive attribute spotlight pages
+ * -------------------------------------------------------------------------- */
+
+.page--attr {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.page--attr-positive { background: linear-gradient(180deg, var(--canvas-cream) 0%, var(--canvas-cream) 100%); }
+
+.attr-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 26px;
+  font-size: 24px;
+  font-weight: 700;
+  border-radius: 8px;
+  letter-spacing: -0.005em;
+}
+
+.attr-chip--caution { background: var(--chip-warm-amber); color: #ffffff; }
+.attr-chip--positive { background: var(--chip-sage); color: #ffffff; }
+
+.attr-label {
+  margin: 28px 0 28px;
+  font-size: 96px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.attr-ratio {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 36px;
+}
+
+.attr-ratio-pill {
+  flex: 0 0 auto;
+  padding: 16px 26px;
+  border-radius: 999px;
+  font-size: 24px;
+  font-weight: 700;
+  background: var(--card-cream);
+  box-shadow: var(--card-shadow);
+}
+
+.attr-ratio-pill--satisfied { color: var(--chip-sage); }
+.attr-ratio-pill--split { color: var(--chip-warm-amber); }
+
+.attr-section { margin-bottom: 28px; }
+
+.attr-section-label {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 12px;
+}
+
+.attr-phrase-card {
+  background: var(--card-cream);
+  border-radius: 18px;
+  padding: 38px 42px;
+  box-shadow: var(--card-shadow-strong);
+  border-left: 6px solid var(--chip-warm-amber);
+}
+
+.attr-phrase-card--positive { border-left-color: var(--chip-sage); }
+
+.attr-phrase {
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.attr-section--side {
+  margin-top: auto;
+  display: flex;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.attr-tip-card {
+  flex: 1 1 60%;
+  background: var(--canvas-cream-warm);
+  border-radius: 14px;
+  padding: 22px 26px;
+}
+
+.attr-tip-card--positive { background: var(--chip-sage-soft); }
+
+.attr-tip-label {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.attr-tip {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.attr-secondary {
+  flex: 1 1 40%;
+  background: var(--card-cream);
+  border-radius: 14px;
+  padding: 22px 26px;
+  box-shadow: var(--card-shadow);
+}
+
+.attr-secondary-label {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.attr-secondary-text {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Audience page (2-column sage / amber)
+ * -------------------------------------------------------------------------- */
+
+.page--audience {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.audience-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-dark);
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+.audience-title {
+  margin: 28px 0 8px;
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  word-break: keep-all;
+}
+
+.audience-subtitle {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 36px;
+  word-break: keep-all;
+}
+
+.audience-grid {
+  display: flex;
+  gap: 18px;
+  flex: 1 1 auto;
+}
+
+.audience-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.audience-col-header {
+  margin-bottom: 16px;
+}
+
+.audience-col-tag {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 700;
+  padding: 8px 18px;
+  border-radius: 6px;
+  color: #ffffff;
+}
+
+.audience-col-tag--fit { background: var(--chip-sage); }
+.audience-col-tag--consider { background: var(--chip-warm-amber); }
+
+.audience-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.audience-card {
+  background: var(--card-cream);
+  border-radius: 14px;
+  padding: 24px 26px;
+  box-shadow: var(--card-shadow);
+}
+
+.audience-card--fit { border-top: 4px solid var(--chip-sage); }
+.audience-card--consider { border-top: 4px solid var(--chip-warm-amber); }
+
+.audience-card-label {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin-bottom: 8px;
+}
+
+.audience-card-note {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+/* -------------------------------------------------------------------------- *
+ * CTA page (Instagram-native action cards)
+ * -------------------------------------------------------------------------- */
+
+.page--cta {
+  background: var(--canvas-dark);
+  color: var(--ink-on-dark);
+  padding: 96px 80px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cta-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: rgba(245, 239, 230, 0.12);
+  color: var(--ink-on-dark);
+  font-size: 22px;
+  font-weight: 600;
+  border-radius: 6px;
+  letter-spacing: 0.08em;
+}
+
+.cta-title {
+  margin: 28px 0 16px;
+  font-size: 76px;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: var(--ink-on-dark);
+  word-break: keep-all;
+}
+
+.cta-lead {
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--ink-on-dark);
+  opacity: 0.78;
+  line-height: 1.4;
+  margin-bottom: 44px;
+  word-break: keep-all;
+}
+
+.cta-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 auto;
+}
+
+.cta-action {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  background: rgba(245, 239, 230, 0.07);
+  border: 1px solid rgba(245, 239, 230, 0.15);
+  border-radius: 16px;
+  padding: 26px 30px;
+}
+
+.cta-action-num {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 56px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink-accent);
+  letter-spacing: -0.04em;
+  min-width: 80px;
+}
+
+.cta-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  flex: 1 1 0;
+}
+
+.cta-action-title {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ink-on-dark);
+  letter-spacing: -0.015em;
+}
+
+.cta-action-text {
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink-on-dark);
+  opacity: 0.78;
+  line-height: 1.4;
+  word-break: keep-all;
+}
+
+.cta-disclosure {
+  font-size: 17px;
+  line-height: 1.55;
+  color: var(--ink-muted-on-dark);
+  margin-top: 24px;
+  word-break: keep-all;
+  font-style: italic;
+}
