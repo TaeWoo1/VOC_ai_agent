@@ -1,0 +1,8 @@
+# Brand-20 dry-run · validated pilot subset (5 of 20)
+# Generated 2026-05-05 · Used by scripts/build_review_ops_package_index.py
+# Each line is a single run_dir path (one per line). Lines starting with '#' are ignored.
+outputs/image_smoke_v247
+outputs/batch_oy_top8_real_20260504_134107_3_lip_makeup_muzigae_mansion_water_tint
+outputs/batch_oy_top8_real_20260504_134107_2_lip_makeup_hince_raw_glow_gel_tint
+outputs/batch_oy_top8_real_20260504_134107_1_base_makeup_tirtir_red_cushion
+outputs/batch_oy_top8_real_20260504_031451_1_lip_makeup_fwee_pudding_pot
