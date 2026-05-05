@@ -26,8 +26,58 @@ chroma_data/
 voc_data.db
 uploads/
 
+# Phase 2E snapshot trend artifacts (generated per pipeline run, local dev)
+data/phase2e_snapshots/
+
+# Phase 1 report outputs (generated, local dev)
+reports/
+
+# Pipeline run artifacts (analysis_report, content_plan, layout, manifest,
+# cardnews PNGs) — every run lands under outputs/content_packages/<run>/.
+# Treated as runtime artifacts; not committed.
+outputs/
+
+# Coupang beauty scrape artifacts + debug dumps from scripts/scrape_coupang_reviews.py
+coupang/coupang_blush_*.csv
+coupang/coupang_blush_*.jsonl
+debug_dumps/
+
+# SQLite working files (any *.db plus WAL/SHM siblings)
+*.db
+*.db-shm
+*.db-wal
+
+# Root-level runtime state + scratch
+/retry_queue.json
+/test.py
+/logs/
+
+# Generated cardnews renders (per-account Instagram output)
+cardnews/Instagram/
+
+# Generated PDF reports living under docs/ (do not blanket-ignore docs/)
+docs/*.pdf
+
+# Coupang scrape artifacts (broaden beyond coupang_blush_* above)
+coupang/*.csv
+coupang/*.jsonl
+coupang/*.txt
+coupang/*.ipynb
+coupang/.DS_Store
+!coupang/.gitkeep
+
+# Data subtrees that are runtime-only (do not blanket-ignore data/ —
+# phase1_lexicons and other curated subdirs must remain trackable)
+data/collection_artifacts/
+data/diagnostics/
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/.DS_Store
+
 # Eval results (tracked selectively)
 eval_data/results/*.json
+eval_data/.DS_Store
 
 # Claude Code
 .claude/
@@ -36,3 +86,5 @@ eval_data/results/*.json
 .DS_Store
 Thumbs.db
 .Rhistory
+# Added by code-review-graph
+.code-review-graph/
