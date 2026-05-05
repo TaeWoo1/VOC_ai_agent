@@ -344,15 +344,64 @@ def product_slug_from_briefing(briefing: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Consumer-facing title cleaning. Mirrors cardnews_long_layout._clean_consumer_title
+# so {product} placeholders in cover headline templates stay free of seller
+# promo noise like "[말끔모공]", "더블 기획", "리필기획", "5g", "100+100매".
+# Cleans display only — never mutates analysis_report.product fields.
+_LEADING_BRACKET_RE = re.compile(r"^\s*\[[^\]]*\]\s*")
+_TRAILING_PROMO_PATTERNS_EP: tuple[str, ...] = (
+    r"\s*\([^()]*\)\s*$",
+    r"\s*골라담기\s*$",
+    r"\s*세트\s*$",
+    r"\s*증정기획\s*$",
+    r"\s*리필기획\s*$",
+    r"\s*더블\s*기획\s*$",
+    r"\s*한정\s*기획\s*$",
+    r"\s*신규컬러\s*$",
+    r"\s*증정\s*$",
+    r"\s*단품\s*/\s*기획\s*$",
+    r"\s*기획\s*/\s*단품\s*$",
+    r"\s*\d+\s*Colors?\s*$",
+    r"\s*\d+\s*종\s*$",
+    r"\s*\d+(?:\.\d+)?\s*(?:ml|mL|g|G|kg|mg)\s*(?:X\s*\d+)?\s*$",
+    r"\s*\d+\s*매(?:\s*\+\s*\d+\s*매)?\s*$",
+    r"\s*\d+\s*대용량\s*기획\s*$",
+    r"\s*대용량\s*기획\s*$",
+)
+_TRAILING_PROMO_RES_EP: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p) for p in _TRAILING_PROMO_PATTERNS_EP
+)
+
+
+def _clean_consumer_title(name: str | None) -> str:
+    if not name:
+        return name or ""
+    s = name.strip()
+    while True:
+        nxt = _LEADING_BRACKET_RE.sub("", s).strip()
+        if nxt == s:
+            break
+        s = nxt
+    changed = True
+    while changed:
+        changed = False
+        for pat in _TRAILING_PROMO_RES_EP:
+            nxt = pat.sub("", s).strip()
+            if nxt and nxt != s:
+                s = nxt
+                changed = True
+                break
+    return s.strip() or name.strip()
+
+
 def _short_product_name(name_ko: str) -> str:
     name = name_ko.strip()
     if not name:
         return "리뷰 정리 노트"
-    # Strip common quantity-tail patterns (e.g. "200매 대용량 …") so the
-    # subline doesn't blow the budget.
+    cleaned = _clean_consumer_title(name)
     tail_re = re.compile(r"\s+\d+(?:매|개|ml|g|호|종|회|kg|mg|입|병|장|cm|mm)")
-    parts = tail_re.split(name, maxsplit=1)
-    short = parts[0].strip() if parts else name
+    parts = tail_re.split(cleaned, maxsplit=1)
+    short = parts[0].strip() if parts else cleaned
     return _truncate(short, 22)
 
 

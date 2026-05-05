@@ -129,6 +129,59 @@ _QUANTITY_TAIL_RE = re.compile(
     r"\s+\d+(?:매|개|ml|g|호|종|회|kg|mg|입|병|장|cm|mm)"
 )
 
+# Consumer-facing product title cleaner — strips seller promo noise from
+# raw OliveYoung names so cardnews covers/headlines never expose strings
+# like "[말끔모공]", "더블 기획", "리필기획", "5g", "100+100매" to consumers.
+# Cleans display only — never mutates analysis_report.product fields.
+_LEADING_BRACKET_RE = re.compile(r"^\s*\[[^\]]*\]\s*")
+_TRAILING_PROMO_PATTERNS: tuple[str, ...] = (
+    r"\s*\([^()]*\)\s*$",                          # any trailing (…)
+    r"\s*골라담기\s*$",
+    r"\s*세트\s*$",
+    r"\s*증정기획\s*$",
+    r"\s*리필기획\s*$",
+    r"\s*더블\s*기획\s*$",
+    r"\s*한정\s*기획\s*$",
+    r"\s*신규컬러\s*$",
+    r"\s*증정\s*$",
+    r"\s*단품\s*/\s*기획\s*$",
+    r"\s*기획\s*/\s*단품\s*$",
+    r"\s*\d+\s*Colors?\s*$",                        # 24 Colors
+    r"\s*\d+\s*종\s*$",                             # 5종, 7종
+    r"\s*\d+(?:\.\d+)?\s*(?:ml|mL|g|G|kg|mg)\s*(?:X\s*\d+)?\s*$",  # 50ml, 200mlX2
+    r"\s*\d+\s*매(?:\s*\+\s*\d+\s*매)?\s*$",       # 100매, 100+100매
+    r"\s*\d+\s*대용량\s*기획\s*$",                  # 200매 대용량 기획
+    r"\s*대용량\s*기획\s*$",
+)
+_TRAILING_PROMO_RES: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p) for p in _TRAILING_PROMO_PATTERNS
+)
+
+
+def _clean_consumer_title(name: str | None) -> str:
+    """Strip leading "[promo]" brackets and trailing promo/option/capacity
+    fragments from a raw merch headline, producing a consumer-safe title.
+    Falls back to the trimmed input when cleaning leaves an empty string."""
+    if not name:
+        return name or ""
+    s = name.strip()
+    while True:
+        nxt = _LEADING_BRACKET_RE.sub("", s).strip()
+        if nxt == s:
+            break
+        s = nxt
+    changed = True
+    while changed:
+        changed = False
+        for pat in _TRAILING_PROMO_RES:
+            nxt = pat.sub("", s).strip()
+            if nxt and nxt != s:
+                s = nxt
+                changed = True
+                break
+    return s.strip() or name.strip()
+
+
 
 def _assert_self_forbidden(text: str, location: str) -> None:
     for term in _SELF_FORBIDDEN_TOKENS:
@@ -153,8 +206,9 @@ def _short_product_name(name_ko: str | None) -> str:
     fallback when the plan subline is empty."""
     if not name_ko:
         return "리뷰 정리 노트"
-    parts = _QUANTITY_TAIL_RE.split(name_ko, maxsplit=1)
-    short = parts[0].strip() if parts else name_ko.strip()
+    cleaned = _clean_consumer_title(name_ko)
+    parts = _QUANTITY_TAIL_RE.split(cleaned, maxsplit=1)
+    short = parts[0].strip() if parts else cleaned.strip()
     return _truncate(short, 22)
 
 
