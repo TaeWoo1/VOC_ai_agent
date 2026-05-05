@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ report.product.display_product_name or "리뷰 운영 진단 리포트" }} · 리뷰 운영 진단 리포트</title>
+  <style>
+    :root {
+      --fg: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --bg: #ffffff;
+      --card-bg: #f9fafb;
+      --accent: #0f766e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 28px;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+        "Pretendard", "Noto Sans KR", sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+    header {
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px 0; }
+    .subtitle { color: var(--muted); font-size: 14px; margin: 0; }
+
+    .meta-row {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 20px 0 28px;
+    }
+    .metric-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .metric-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .metric-value { font-size: 22px; font-weight: 600; }
+    .metric-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    section {
+      margin-bottom: 22px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+    section h2 {
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      color: var(--accent);
+    }
+    section .empty {
+      color: var(--muted);
+      font-size: 13px;
+      font-style: italic;
+    }
+    section .section-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 10px 0;
+      line-height: 1.5;
+    }
+
+    .asset-list { list-style: none; padding: 0; margin: 0; }
+    .asset-item {
+      border-top: 1px solid var(--border);
+      padding: 10px 0;
+    }
+    .asset-item:first-child { border-top: 0; padding-top: 4px; }
+    .asset-quote {
+      font-size: 13px;
+      color: var(--fg);
+      margin: 0 0 6px 0;
+    }
+    .asset-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .asset-meta .chip {
+      background: var(--card-bg);
+      padding: 1px 8px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+    .asset-action {
+      font-size: 12px;
+      color: var(--accent);
+      margin-top: 4px;
+    }
+    .asset-more {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .cluster-list { list-style: none; padding: 0; margin: 0; }
+    .cluster-item {
+      border-top: 1px solid var(--border);
+      padding: 10px 0;
+    }
+    .cluster-item:first-child { border-top: 0; padding-top: 4px; }
+    .cluster-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .cluster-label { font-weight: 600; font-size: 14px; }
+    .cluster-count { color: var(--accent); font-size: 13px; }
+    .cluster-method {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 1px 8px;
+      border-radius: 10px;
+    }
+    .cluster-summary {
+      font-size: 13px;
+      color: var(--fg);
+      margin: 4px 0 4px 0;
+    }
+    .cluster-seeds {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .risk-group {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .risk-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+    .risk-group-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .risk-group-label { font-weight: 600; font-size: 14px; }
+    .risk-group-count { color: var(--accent); font-size: 13px; }
+
+    .stale-band {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+    .stale-band:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+    .stale-band-head {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+    .stale-band-sub { font-size: 11px; color: var(--muted); }
+
+    .exec-summary {
+      margin: 0 0 22px 0;
+      padding: 12px 14px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--fg);
+      line-height: 1.55;
+    }
+
+    .action-list { list-style: none; padding: 0; margin: 0; }
+    .action-item {
+      border-top: 1px solid var(--border);
+      padding: 10px 0;
+    }
+    .action-item:first-child { border-top: 0; padding-top: 4px; }
+    .action-head {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      flex-wrap: wrap;
+      margin-bottom: 4px;
+    }
+    .action-topic { font-weight: 600; font-size: 13px; }
+    .action-chip {
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 1px 8px;
+      border-radius: 10px;
+    }
+    .action-body {
+      font-size: 13px;
+      color: var(--fg);
+      margin: 0 0 4px 0;
+      white-space: pre-wrap;
+    }
+    .action-rationale { font-size: 11px; color: var(--muted); }
+
+    footer {
+      margin-top: 28px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+    .auxiliary-note {
+      margin-top: 22px;
+      padding: 10px 12px;
+      background: var(--card-bg);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">리뷰 운영 진단 리포트</div>
+    <h1>{{ report.product.header_title or report.product.display_product_name or report.product.raw_product_name or "제품명 미상" }}</h1>
+    <p class="subtitle">쌓인 리뷰 중 상세페이지·답글·제품 개선에 활용할 수 있는 신호를 정리했습니다.</p>
+    <div class="meta-row">
+      {% if report.product.brand_name %}<span>브랜드: {{ report.product.brand_name }}</span>{% endif %}
+      {% if report.product.source_channel %}<span>채널: {{ report.product.source_channel }}</span>{% endif %}
+      {% if report.product.selected_profile_id %}<span>프로파일: {{ report.product.selected_profile_id }}</span>{% endif %}
+      {% if report.product.analysis_period.start or report.product.analysis_period.end %}
+      <span>분석 기간: {{ report.product.analysis_period.start or "-" }} ~ {{ report.product.analysis_period.end or "-" }}</span>
+      {% endif %}
+      <span>생성: {{ report.generated_at.strftime("%Y-%m-%d %H:%M UTC") }}</span>
+      <span>스키마: {{ report.schema_version }}</span>
+    </div>
+  </header>
+
+  {% if report.executive_summary %}
+  <p class="exec-summary">{{ report.executive_summary }}</p>
+  {% endif %}
+
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="metric-label">총 리뷰</div>
+      <div class="metric-value">{{ report.metrics.total_reviews }}</div>
+      <div class="metric-sub">평균 별점 {{ "%.2f"|format(report.metrics.average_rating) }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">갱신 필요 (180일+ 부정)</div>
+      <div class="metric-value">{{ report.metrics.stale_negative_count }}</div>
+      <div class="metric-sub">현재 상태 확인 후보</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">즉시 대응 필요</div>
+      <div class="metric-value">{{ report.metrics.unreplied_negative_count }}</div>
+      <div class="metric-sub">답글 미회신 부정/혼합</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">활용 가능 긍정</div>
+      <div class="metric-value">{{ report.asset_counts.usable }}</div>
+      <div class="metric-sub">상세페이지/콘텐츠 후보</div>
+    </div>
+  </div>
+
+  <section>
+    <h2>1. 전체 리뷰 현황</h2>
+    <p>총 {{ report.metrics.total_reviews }}건. 부정/혼합 비중 {{ "%.1f"|format(report.metrics.negative_mixed_ratio * 100) }}%, 최근 90일 내 비중 {{ "%.1f"|format(report.metrics.recent_review_ratio * 100) }}%.</p>
+  </section>
+
+  {% macro render_assets(items, total, label=none) -%}
+    {% if items %}
+      <ul class="asset-list">
+      {% for item in items %}
+        <li class="asset-item">
+          <p class="asset-quote">"{{ item.quote }}"</p>
+          <div class="asset-meta">
+            {% if item.rating is not none %}<span class="chip">★ {{ "%.1f"|format(item.rating) }}</span>{% endif %}
+            {% if item.review_date %}<span class="chip">{{ item.review_date }}</span>{% endif %}
+            {% if item.product_option %}<span class="chip">{{ item.product_option }}</span>{% endif %}
+            <span class="chip">답글 {{ "있음" if item.has_brand_reply else "없음" }}</span>
+            {% if label %}<span class="chip">{{ label }}</span>{% endif %}
+          </div>
+          {% if item.suggested_action %}<div class="asset-action">→ {{ item.suggested_action }}</div>{% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+      {% if total and total > items|length %}
+        <p class="asset-more">상위 {{ items|length }}건 표시 · 전체 {{ total }}건</p>
+      {% endif %}
+    {% else %}
+      <p class="empty">해당 분류에 부합하는 리뷰가 발견되지 않았어요.</p>
+    {% endif %}
+  {%- endmacro %}
+
+  <section>
+    <h2>2. 신호 클러스터 (반복 키워드)</h2>
+    {% if report.emergent_clusters %}
+    <ul class="cluster-list">
+    {% for cluster in report.emergent_clusters %}
+      <li class="cluster-item">
+        <div class="cluster-row">
+          <span class="cluster-label">{{ cluster.label }}</span>
+          <span class="cluster-count">반복 {{ cluster.evidence_count }}건</span>
+          <span class="cluster-method">{{ cluster.method }}</span>
+        </div>
+        <p class="cluster-summary">{{ cluster.summary }}</p>
+        <div class="cluster-seeds">키워드: {{ cluster.keyword_seeds|join(", ") }}{% if cluster.linked_attribute %} · 연관 속성: {{ cluster.linked_attribute }}{% endif %}</div>
+      </li>
+    {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">반복 점화된 신호 클러스터가 발견되지 않았어요. 리뷰 표본이 더 누적되면 신호가 또렷해질 가능성이 있습니다.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>3. 활용 가능한 긍정 리뷰</h2>
+    {{ render_assets(report.assets.usable, report.asset_counts.usable, label="활용 자산") }}
+  </section>
+
+  <section>
+    <h2>4. 갱신이 필요한 과거 리뷰</h2>
+    {% set actionable = report.assets.stale | selectattr('stale_band', 'equalto', 'actionable') | list %}
+    {% set cold = report.assets.stale | selectattr('stale_band', 'equalto', 'cold') | list %}
+    {% if actionable or cold %}
+      {% if actionable %}
+      <div class="stale-band">
+        <div class="stale-band-head">갱신 확인 후보 <span class="stale-band-sub">(180–720일)</span></div>
+        {{ render_assets(actionable, actionable | length, label="갱신 확인 후보") }}
+      </div>
+      {% endif %}
+      {% if cold %}
+      <div class="stale-band">
+        <div class="stale-band-head">장기 과거 리뷰 <span class="stale-band-sub">(720일+)</span></div>
+        {{ render_assets(cold, cold | length, label="장기 과거 리뷰") }}
+      </div>
+      {% endif %}
+    {% else %}
+      {{ render_assets(report.assets.stale, report.asset_counts.stale, label="갱신 확인 후보") }}
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>5. 즉시 대응이 필요한 리스크 리뷰</h2>
+    {% if report.risk_groups %}
+      {% for group in report.risk_groups %}
+      <div class="risk-group">
+        <div class="risk-group-head">
+          <span class="risk-group-label">{{ group.label }}</span>
+          <span class="risk-group-count">반복 {{ group.evidence_count }}건</span>
+        </div>
+        {{ render_assets(group.items, group.evidence_count, label=group.label) }}
+      </div>
+      {% endfor %}
+    {% else %}
+      {{ render_assets(report.assets.risk, report.asset_counts.risk, label="리스크 후보") }}
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>6. 리뷰 기반 상세페이지/FAQ 보완 후보</h2>
+    <p class="section-note">아래 문구는 리뷰 신호를 바탕으로 만든 후보입니다. 실제 상세페이지의 기존 문구·이미지·옵션 안내와 대조한 뒤 반영 여부를 결정하는 것을 권장합니다.</p>
+    {% if report.generated_actions.landing_page_copy %}
+    <ul class="action-list">
+      {% for item in report.generated_actions.landing_page_copy %}
+      <li class="action-item">
+        <div class="action-head">
+          <span class="action-topic">{{ item.topic }}</span>
+          {% if item.section_hint %}<span class="action-chip">{{ item["section_hint"] }}</span>{% endif %}
+        </div>
+        <p class="action-body">{{ item["copy"] }}</p>
+        <div class="action-rationale">{{ item.rationale }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">해당 분류에 부합하는 신호가 발견되지 않았어요.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    {% set _ch = report.product.source_channel %}
+    {% if _ch == "oliveyoung" %}
+    <h2>7. 1:1 문의/CS 응대 문구 초안</h2>
+    <p class="section-note">올리브영 리뷰에는 직접 답글을 남기기 어려울 수 있어, 아래 문구는 1:1 문의·CS 상담·자사몰 응대 시 참고할 수 있는 초안으로 제공합니다.</p>
+    {% elif _ch %}
+    <h2>7. 리뷰 답글 초안</h2>
+    {% else %}
+    <h2>7. 고객 응대 문구 초안</h2>
+    {% endif %}
+    {% if report.generated_actions.reply_drafts %}
+    <ul class="action-list">
+      {% for d in report.generated_actions.reply_drafts %}
+      <li class="action-item">
+        <div class="action-head">
+          <span class="action-topic">답글 초안</span>
+          {% if d.rating is not none %}<span class="action-chip">★ {{ "%.1f"|format(d.rating) }}</span>{% endif %}
+          {% if d.review_date %}<span class="action-chip">{{ d.review_date }}</span>{% endif %}
+          <span class="action-chip">{{ d.tone }}</span>
+        </div>
+        <p class="action-body">{{ d.draft }}</p>
+        <div class="action-rationale">{{ d.rationale }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">해당 분류에 부합하는 신호가 발견되지 않았어요.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>8. OEM/기획팀 확인 질문</h2>
+    {% if report.generated_actions.oem_questions %}
+    <ul class="action-list">
+      {% for q in report.generated_actions.oem_questions %}
+      <li class="action-item">
+        <div class="action-head">
+          <span class="action-chip">{{ q.category }}</span>
+          {% if q.linked_attribute %}<span class="action-chip">속성: {{ q.linked_attribute }}</span>{% endif %}
+        </div>
+        <p class="action-body">{{ q.question }}</p>
+        <div class="action-rationale">{{ q.rationale }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">해당 분류에 부합하는 신호가 발견되지 않았어요.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>9. 운영 자산 수</h2>
+    <ul>
+      <li>활용 가능한 긍정 리뷰: {{ report.asset_counts.usable }}건</li>
+      <li>갱신 필요 리뷰: {{ report.asset_counts.stale }}건</li>
+      <li>즉시 대응 필요 리뷰: {{ report.asset_counts.risk }}건</li>
+      <li>인사이트 리뷰: {{ report.asset_counts.insight }}건</li>
+    </ul>
+  </section>
+
+  <p class="auxiliary-note">이 리포트는 기존 VOC 분석 산출물에 이어 같은 run 데이터를 운영 액션 관점으로 재가공한 보조 리포트입니다. 기존 seller PDF / consumer cardnews와 함께 검토하실 때 참고하시기 바랍니다.</p>
+
+  <footer>
+    {{ report.disclaimer }}
+  </footer>
+</body>
+</html>
