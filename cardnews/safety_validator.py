@@ -279,6 +279,80 @@ class CardnewsSafetyError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# Cardnews mode taxonomy & guard (Phase A)
+# ---------------------------------------------------------------------------
+#
+# The 3 reserved cardnews modes per docs/instagram_voc_brand_strategy.md
+# (108888e §9) and docs/instagram_voc_publishing_checklist.md
+# (6dc8a0f §1):
+#
+#   - `private_demo`           — current renderer output. Brand/product
+#                                names + raw quotes + raw metrics OK.
+#                                NEVER publishable to Instagram or other
+#                                public channels. 1:1 비공개 (DM/email)
+#                                only.
+#   - `public_education`       — Instagram public posts. Anonymized /
+#                                category-level only. Planner not
+#                                implemented yet — Phase B.
+#   - `consented_case_study`   — brand-identified public posts under
+#                                explicit written consent. Planner not
+#                                implemented yet — Phase C.
+#
+# `_ALLOWED_CARDNEWS_MODES_TODAY` lists modes whose planner is
+# implementable RIGHT NOW. Any other known mode raises
+# `planner_not_implemented` so callers cannot mislabel a private_demo-
+# shaped artifact as something publishable. When Phase B / C planners
+# land, this set widens.
+
+_KNOWN_CARDNEWS_MODES: frozenset[str] = frozenset({
+    "private_demo",
+    "public_education",
+    "consented_case_study",
+})
+
+_ALLOWED_CARDNEWS_MODES_TODAY: frozenset[str] = frozenset({
+    "private_demo",
+})
+
+
+def validate_cardnews_mode(mode: str) -> None:
+    """Phase A mode guard. Raises ``CardnewsSafetyError`` if ``mode`` is
+    unknown OR known-but-not-yet-implementable.
+
+    Policy source: ``docs/instagram_voc_brand_strategy.md`` (108888e §9)
+    Operating gate: ``docs/instagram_voc_publishing_checklist.md``
+    (6dc8a0f §1).
+
+    Raises with ``rule="unknown_mode"`` when ``mode`` is not in the
+    reserved 3-mode taxonomy at all, and with ``rule="planner_not_
+    implemented"`` when ``mode`` is reserved but its planner has not
+    landed yet (today: any mode other than ``private_demo``).
+    """
+    if mode not in _KNOWN_CARDNEWS_MODES:
+        raise CardnewsSafetyError((SafetyViolation(
+            rule="unknown_mode",
+            location="cardnews_mode",
+            matched=mode,
+            detail=(
+                f"unknown cardnews_mode={mode!r}; known modes: "
+                f"{sorted(_KNOWN_CARDNEWS_MODES)!r}"
+            ),
+        ),))
+    if mode not in _ALLOWED_CARDNEWS_MODES_TODAY:
+        raise CardnewsSafetyError((SafetyViolation(
+            rule="planner_not_implemented",
+            location="cardnews_mode",
+            matched=mode,
+            detail=(
+                f"cardnews_mode={mode!r} is reserved per the strategy "
+                f"doc but its planner is not implemented yet. Today "
+                f"only 'private_demo' is renderable. See "
+                f"docs/instagram_voc_brand_strategy.md §10 Phase B."
+            ),
+        ),))
+
+
+# ---------------------------------------------------------------------------
 # Walkers
 # ---------------------------------------------------------------------------
 

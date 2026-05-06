@@ -136,15 +136,35 @@ mock, pass `--allow-mock-fallback` explicitly — opt-in only.
 
 | Field | Purpose |
 |---|---|
-| `schema_version` | Manifest format version. |
+| `schema_version` | Manifest format version. **Currently `"1.1"`** (1.0 → 1.1 added `cardnews_mode` + `cardnews_mode_constraints`; all other fields unchanged). |
 | `generated_at` | UTC timestamp of the layout build. |
 | `language` | Locale (currently always `"ko"`). |
+| `cardnews_mode` | Phase A: machine-readable mode lock. One of `"private_demo"` (today's only renderable mode), `"public_education"` (reserved — Phase B), `"consented_case_study"` (reserved — Phase C). Validated by `cardnews.safety_validator.validate_cardnews_mode` before any HTML is written. |
+| `cardnews_mode_constraints` | Self-describing block. For `private_demo`: `{publishable_to_public_channels: false, intended_distribution: "1:1 비공개 (DM/email)", policy_doc: "docs/instagram_voc_brand_strategy.md", policy_commit_hint: "108888e"}`. Operators reading the manifest see at a glance whether the artifact is publishable. |
 | `page_count` | Equals `len(pages)` and `len(pages/*.png)` on disk. |
 | `analysis_report_sha256` | Audit pointer to the input report. |
 | `content_plan_sha256` | Audit pointer to the editorial plan that drove this render. |
 | `product` | `{name_ko, external_id, source_url, category}`. |
 | `product_image_source` | One of `cli_path / cli_url / analysis_report / fallback_gradient`. |
 | `pages[]` | `{index, type, png}` per page; `png` is relative to the run dir. |
+
+### Cardnews mode dispatch
+
+| Mode | Implementable today? | Distribution | Planner status |
+|---|---|---|---|
+| `private_demo` | **Yes** (default) | 1:1 비공개 (DM/email) only. **NEVER** publishable to Instagram or any public channel. | Current `cardnews/render.py` output. |
+| `public_education` | No — raises `CardnewsSafetyError(rule="planner_not_implemented")` | Public Instagram (anonymized / category-level only) | Phase B (`docs/instagram_voc_brand_strategy.md` §10). Gated on first 20 manual `public_education` posts being published with 0 policy violations per `docs/instagram_voc_publishing_checklist.md` §8.3. |
+| `consented_case_study` | No — raises `CardnewsSafetyError(rule="planner_not_implemented")` | Public Instagram (brand-identified, under explicit written consent) | Phase C (`docs/instagram_voc_brand_strategy.md` §10). |
+| any other string | No — raises `CardnewsSafetyError(rule="unknown_mode")` | — | Not in the reserved 3-mode taxonomy. |
+
+The CLI exposes `--cardnews-mode` but argparse `choices` is locked to
+`["private_demo"]` until Phase B / C planners ship. The validator
+enforces the same lock at the function level for any caller that
+bypasses the CLI.
+
+Policy sources (binding):
+- `docs/instagram_voc_brand_strategy.md` (`108888e` §9)
+- `docs/instagram_voc_publishing_checklist.md` (`6dc8a0f` §1)
 
 `layout.json` carries the full layout dict (the safety-validated input
 to render) plus the same two checksums — re-render from `layout.json`

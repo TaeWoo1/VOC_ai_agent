@@ -34,6 +34,7 @@ from playwright.sync_api import sync_playwright
 
 from cardnews.safety_validator import (
     CardnewsSafetyError,
+    validate_cardnews_mode,
     validate_cardnews_safety,
 )
 from src.voc.content.cardnews_long_layout import build_long_cardnews_layout
@@ -305,6 +306,7 @@ def render_cardnews(
     layout: dict,
     out_dir: Path,
     *,
+    cardnews_mode: str = "private_demo",
     product_image_path: str | None = None,
     product_image_url: str | None = None,
     analysis_report_path: Path | None = None,
@@ -318,6 +320,16 @@ def render_cardnews(
     Calls `validate_cardnews_safety(layout)` before any HTML render.
     Raises `CardnewsSafetyError` on violation; nothing is written.
 
+    `cardnews_mode` defaults to ``"private_demo"`` per Phase A of
+    docs/instagram_voc_brand_strategy.md (108888e). Any other reserved
+    mode (``public_education``, ``consented_case_study``) requires a
+    planner that does not exist yet — calling this function with
+    those modes raises ``CardnewsSafetyError`` (kind=
+    ``planner_not_implemented``). Unknown modes raise with kind=
+    ``unknown_mode``. The mode is recorded in the rendered manifest
+    so an operator can tell at a glance whether the artifact is
+    publishable to public channels.
+
     `analysis_report_path` is an optional hint for resolving the
     run-package root when a relative `image_local_path` was recorded
     in the analysis_report (collection-stage fetch always writes a
@@ -330,6 +342,9 @@ def render_cardnews(
     """
     out_dir = Path(out_dir).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Phase A guard: fail-fast before any pages/CSS/HTML is staged.
+    # Failure leaves the run dir empty (just `out_dir` itself).
+    validate_cardnews_mode(cardnews_mode)
     pages_dir = out_dir / "pages"
     pages_dir.mkdir(exist_ok=True)
     work_dir = out_dir / "_work"
@@ -456,19 +471,13 @@ def render_cardnews(
         finally:
             browser.close()
 
-    manifest = {
-        "schema_version": "1.0",
-        "generated_at": layout.get("generated_at"),
-        "language": layout.get("language"),
-        "page_count": total_pages,
-        "analysis_report_sha256": layout.get("analysis_report_sha256"),
-        # Audit trail back to the editorial planner output. Lets a
-        # future re-render confirm "same plan in, same pages out."
-        "content_plan_sha256": layout.get("content_plan_sha256"),
-        "product": layout.get("product"),
-        "product_image_source": resolved.source,
-        "pages": rendered,
-    }
+    manifest = _build_render_manifest(
+        layout=layout,
+        total_pages=total_pages,
+        rendered=rendered,
+        product_image_source=resolved.source,
+        cardnews_mode=cardnews_mode,
+    )
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -478,6 +487,71 @@ def render_cardnews(
         encoding="utf-8",
     )
     return manifest
+
+
+# ---------------------------------------------------------------------------
+# Manifest assembly (extracted to make the manifest shape unit-testable
+# without launching Playwright)
+# ---------------------------------------------------------------------------
+
+
+def _mode_constraints_block(cardnews_mode: str) -> dict:
+    """Return the self-describing constraints block written into the
+    manifest for the given cardnews_mode. Today only ``private_demo``
+    is implementable, so the block is hard-coded to its semantics; the
+    helper exists so Phase B / C planners can extend the dispatch
+    cleanly without reshaping the manifest writer."""
+    if cardnews_mode == "private_demo":
+        return {
+            "publishable_to_public_channels": False,
+            "intended_distribution": "1:1 비공개 (DM/email)",
+            "policy_doc": "docs/instagram_voc_brand_strategy.md",
+            "policy_commit_hint": "108888e",
+        }
+    # Defensive: validate_cardnews_mode() should have raised before we
+    # reach here. If a future planner widens
+    # _ALLOWED_CARDNEWS_MODES_TODAY without updating this dispatch,
+    # fail loudly so the manifest never ships with a stale constraints
+    # block.
+    raise AssertionError(
+        f"_mode_constraints_block: no constraints defined for "
+        f"cardnews_mode={cardnews_mode!r} — update this helper in "
+        f"lockstep with safety_validator._ALLOWED_CARDNEWS_MODES_TODAY"
+    )
+
+
+def _build_render_manifest(
+    *,
+    layout: dict,
+    total_pages: int,
+    rendered: list[dict],
+    product_image_source: str,
+    cardnews_mode: str,
+) -> dict:
+    """Assemble the cardnews render manifest dict.
+
+    Schema version 1.1 (1.0 → 1.1 adds ``cardnews_mode`` +
+    ``cardnews_mode_constraints``). All other fields are byte-for-byte
+    identical to schema 1.0 so legacy consumers keep working.
+    """
+    return {
+        "schema_version": "1.1",
+        "generated_at": layout.get("generated_at"),
+        "language": layout.get("language"),
+        # Phase A: machine-readable mode lock + human-readable
+        # constraints block. Operators reading the manifest see
+        # immediately whether the artifact is publishable.
+        "cardnews_mode": cardnews_mode,
+        "cardnews_mode_constraints": _mode_constraints_block(cardnews_mode),
+        "page_count": total_pages,
+        "analysis_report_sha256": layout.get("analysis_report_sha256"),
+        # Audit trail back to the editorial planner output. Lets a
+        # future re-render confirm "same plan in, same pages out."
+        "content_plan_sha256": layout.get("content_plan_sha256"),
+        "product": layout.get("product"),
+        "product_image_source": product_image_source,
+        "pages": rendered,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +656,23 @@ def _main(argv: list[str] | None = None) -> int:
             "for ad-hoc developer runs."
         ),
     )
+    # Phase A cardnews_mode lock. Choices intentionally limited to
+    # `private_demo` until the public_education planner (Phase B) and
+    # the consented_case_study planner (Phase C) ship. Argparse rejects
+    # other values at parse time so the CLI is the outermost lock.
+    parser.add_argument(
+        "--cardnews-mode",
+        type=str,
+        default="private_demo",
+        choices=["private_demo"],
+        help=(
+            "Cardnews artifact mode (default: private_demo). "
+            "public_education and consented_case_study are reserved per "
+            "docs/instagram_voc_brand_strategy.md (108888e §9) but their "
+            "planners are not implemented yet — they cannot be selected "
+            "from the CLI. See §10 Phase B / Phase C."
+        ),
+    )
     args = parser.parse_args(argv)
 
     out_dir = args.out_dir
@@ -622,6 +713,7 @@ def _main(argv: list[str] | None = None) -> int:
         manifest = render_cardnews(
             layout,
             out_dir,
+            cardnews_mode=args.cardnews_mode,
             product_image_path=args.product_image_path,
             product_image_url=args.product_image_url,
             analysis_report_path=args.analysis_report,
