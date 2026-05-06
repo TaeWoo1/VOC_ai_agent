@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voc-intelligence.local/schemas/editorial_cardnews.schema.json",
+  "title": "Editorial Cardnews",
+  "description": "LLM-polished version of skeleton_cardnews.json. Same 7-slide structure, same locked titles, same numeric content; only tone is varied. Per-slide `skeleton: {...}` carries the source text for audit; `preserved_numerics[]` lists the integers (≥10) the validator was watching. The top-level `polish_log` records selected angle, model/temperature, retry count, validator history, and cache hit. Phase D1 ships KO Instagram only.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "lang",
+    "channel",
+    "format",
+    "polished",
+    "source_skeleton_sha256",
+    "source_brief_sha256",
+    "confidence_level",
+    "selected_angle",
+    "slides",
+    "polish_log"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"},
+    "lang": {"type": "string", "const": "ko"},
+    "channel": {"type": "string", "const": "instagram"},
+    "format": {"type": "string", "const": "cardnews_7slide"},
+    "polished": {"type": "boolean", "const": true},
+    "source_skeleton_sha256": {"type": "string"},
+    "source_brief_sha256": {"type": "string"},
+    "source_analysis_report_sha256": {"type": ["string", "null"]},
+    "confidence_level": {"type": "string", "enum": ["weak", "moderate", "strong"]},
+    "product": {"type": "object", "additionalProperties": true},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "selected_angle": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["angle_id", "selection_mode", "selection_reason"],
+      "properties": {
+        "angle_id": {"type": "string", "pattern": "^h[0-9]+$"},
+        "type": {"type": "string", "enum": ["strength", "tradeoff", "risk", "segment"]},
+        "ko": {"type": "string"},
+        "priority_score": {"type": ["number", "null"]},
+        "evidence_n": {"type": ["integer", "null"]},
+        "selection_mode": {"type": "string"},
+        "selection_reason": {"type": "string"},
+        "fallback_chain": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "slides": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["index", "type", "title", "source_brief_fields"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 1, "maximum": 7},
+          "type": {
+            "type": "string",
+            "enum": ["hook", "loved", "divides", "fit", "watch_outs", "best_for", "method"]
+          },
+          "title": {"type": "string"},
+          "subtitle": {"type": "string"},
+          "bullets": {"type": "array", "items": {"type": "string"}},
+          "for_bullets": {"type": "array", "items": {"type": "string"}},
+          "not_for_bullets": {"type": "array", "items": {"type": "string"}},
+          "disclosure": {"type": "string"},
+          "skeleton": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Original skeleton fields for this slide (audit copy)."
+          },
+          "preserved_numerics": {
+            "type": "array",
+            "items": {"type": "integer"},
+            "description": "Integers ≥10 the validator preserved on this slide."
+          },
+          "source_brief_fields": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "description": "Brief paths the LLM cited as the basis for this slide."
+          }
+        }
+      }
+    },
+    "polish_log": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "model",
+        "temperature",
+        "system_prompt_version",
+        "polish_mode",
+        "retry_count",
+        "fallback_used",
+        "validator_history",
+        "cache"
+      ],
+      "properties": {
+        "model": {"type": "string"},
+        "temperature": {"type": "number"},
+        "system_prompt_version": {"type": "string"},
+        "polish_mode": {"type": "string", "enum": ["full", "hook_only"]},
+        "style_seed": {"type": ["integer", "null"]},
+        "retry_count": {"type": "integer", "minimum": 0},
+        "fallback_used": {"type": "boolean"},
+        "validator_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["attempt", "ok", "blocking_count"],
+            "properties": {
+              "attempt": {"type": "integer", "minimum": 1},
+              "ok": {"type": "boolean"},
+              "blocking_count": {"type": "integer", "minimum": 0},
+              "advisory_count": {"type": "integer", "minimum": 0},
+              "blocking_rules": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "cache": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["hit", "key"],
+          "properties": {
+            "hit": {"type": "boolean"},
+            "key": {"type": "string"}
+          }
+        },
+        "elapsed_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "blocking_flags", "advisory_flags"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "blocking_flags": {"type": "array"},
+        "advisory_flags": {"type": "array"}
+      }
+    }
+  }
+}
