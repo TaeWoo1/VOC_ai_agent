@@ -733,11 +733,26 @@ at `todo` until operator dispatches.
 ### C-001 — `detail_page_snapshot` design (read + plan only)
 
 - **role**: Implementation Agent
-- **status**: todo
-- **goal**: Produce a design document for capturing OliveYoung
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `5df35fc docs(design): add detail page snapshot design`
+- **closed_at**: 2026-05-07
+- **decision recorded**: C-001 completed as design-only. The durable
+  design reference is `docs/detail_page_snapshot_design.md`. C-002
+  should implement the writer/module first, then connector / pipeline
+  / renderer / index integration in smaller follow-up tickets.
+  Investigation grounded three load-bearing findings:
+  (a) `manifest.provenance.snapshot` slot already exists at
+  `schema_version="1.2"` (currently `status="skipped"`) — C-002 fills
+  it with no schema bump; (b) the OY warm session connector already
+  captures most of the harvest (og:image, page_url, html_length,
+  breadcrumb, total_review_count_available, etc.), so C-002 adds only
+  2-3 new getters; (c) the snapshot makes the public-vs-collected
+  review-count gap a first-class structured field (e.g. needly run
+  showed collected=441 vs storefront=6,912).
+- **goal** *(historical)*: Produce a design document for capturing OliveYoung
   product detail page snapshots (HTML, breadcrumb, og:title) into a
   per-run audit artifact. **Design only, no code in this ticket.**
-- **context**: Brand-20 row-order verification (`4464c81`) used a
+- **context** *(historical)*: Brand-20 row-order verification (`4464c81`) used a
   one-off CDP probe (`/tmp/brand20_probe_cdp.py`). Making this a
   durable per-run snapshot would let every Phase 2E run carry
   evidence of the product page state at collection time, supporting
