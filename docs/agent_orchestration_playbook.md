@@ -582,14 +582,95 @@ at `todo` until operator dispatches.
   - decision made → close as `done`
   - decision deferred → keep as `blocked-on-operator-decision`
 
+### A-002 — add filesystem handoff protocol
+
+- **role**: Orchestrator Agent
+- **status**: **done** (closed 2026-05-06)
+- **closed_by**: `daf8668 chore(agents): add handoff protocol and Claude subagent setup`
+- **closed_at**: 2026-05-06
+- **decision recorded**: filesystem handoff protocol landed; chat-only
+  reports are incomplete. The §5 "Filesystem handoff protocol"
+  subsection requires every sub-agent to write
+  `ops/agent_handoffs/<ticket-id>.md`; the §4 ticket template carries
+  a `handoff file:` field; the §6 commit-protocol rule #8 makes a
+  missing handoff file a hard incomplete signal.
+- **goal** *(historical)*: Update §5 of this playbook so sub-agent
+  outputs are not chat-only — every sub-agent must write a handoff
+  file the orchestrator can read directly from sibling worktrees.
+- **context** *(historical)*: P-001 and O-001 were running in
+  separate worktrees and the orchestrator session in main could not
+  see other Claude sessions without operator-pasted excerpts.
+  Filesystem-mediated handoffs make repo-on-disk the single source
+  of truth for cross-session work, in line with §1 "Source of truth".
+- **scope**:
+  - in: `docs/agent_orchestration_playbook.md`
+  - out: code, tests, instagram docs, configs, generated artifacts,
+    `.mcp.json`, `figma_plugin/`, probe scripts, buyer_journey test
+- **output**:
+  - new §5 subsection "Filesystem handoff protocol"
+  - §4 ticket template carries a required `handoff file:` field
+  - §6 commit-protocol rule #8: missing handoff = incomplete ticket
+- **stop conditions**:
+  - patch reviewed → committed in `daf8668` (bundled with A-003)
+
+### A-003 — add Claude Code native subagent setup
+
+- **role**: Orchestrator Agent
+- **status**: **done** (closed 2026-05-06)
+- **closed_by**: `daf8668 chore(agents): add handoff protocol and Claude subagent setup`
+- **closed_at**: 2026-05-06
+- **decision recorded**: Claude Code native subagent setup tracked;
+  `/orchestrate` available. Five subagent definitions (`orchestrator`,
+  `product-strategy`, `implementation`, `qa-regression`, `ops-data`)
+  plus the `/orchestrate` slash command live under `.claude/agents/`
+  and `.claude/commands/`. `.gitignore` was narrowed so the shared
+  agent definitions and `/orchestrate` are version-controlled while
+  local `.claude/settings*.json`, `.claude/skills/`, and the
+  placeholder commands `close-ticket.md` / `review-handoffs.md`
+  remain per-clone.
+- **goal** *(historical)*: Add repo-local Claude Code subagent
+  definitions and an `/orchestrate` slash command so the operator can
+  give one instruction to an orchestrator that delegates to specialist
+  subagents — the single-session counterpart to §3 multi-worktree mode.
+- **context** *(historical)*: §3 multi-worktree mode is the right
+  shape for heavy multi-turn work but adds friction for small,
+  well-scoped goals. Claude Code's built-in subagent mechanism plus a
+  custom slash command provides a parallel single-session option
+  without replacing worktree discipline.
+- **scope**:
+  - in: `.claude/agents/{orchestrator,product-strategy,implementation,qa-regression,ops-data}.md`,
+    `.claude/commands/orchestrate.md`,
+    `docs/agent_orchestration_playbook.md` §11, `.gitignore` narrow
+    exception block
+  - out: code under `src/`/`cardnews/`/`scripts/`, tests, instagram
+    docs, generated artifacts, other `.claude/` files (settings,
+    skills, placeholder commands)
+- **output**:
+  - 5 subagent definitions + 1 slash command tracked under `.claude/`
+  - new §11 "Claude Code native subagent mode" in playbook
+  - prior §11 Maintenance cadence renumbered to §12
+  - narrow `.gitignore` exception block keeping settings, skills, and
+    placeholder commands per-clone
+- **stop conditions**:
+  - patch reviewed → committed in `daf8668` (bundled with A-002)
+
 ### P-001 — Post 002 manuscript draft
 
 - **role**: Product / Strategy Agent
-- **status**: todo
-- **goal**: Draft `docs/instagram_public_education_post_002.md` —
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `0a3403e docs(instagram): draft public education post 002`
+- **closed_at**: 2026-05-07
+- **decision recorded**: Post 002 accepted as-is using the liberal
+  citation pattern; `6dc8a0f` is honored operationally through the
+  §5 14-row safety table rather than via a front-matter SHA citation,
+  mirroring Post 001's pattern. Topic locked: "상세페이지에 없는
+  정보는 리뷰에서 반복됩니다" (W2 sequence #9 from `108888e` §7).
+  Card 2 영문 차용어 `surface` retained; dual-pillar (primary 상세
+  페이지 개선 신호 / secondary 리뷰 → 내부 확인 질문) retained.
+- **goal** *(historical)*: Draft `docs/instagram_public_education_post_002.md` —
   the second public_education manifesto-style post per the strategy
   doc's first 20-topic list (`108888e` §7).
-- **context**: Post 001 is locked (`648b728`). The publishing
+- **context** *(historical)*: Post 001 is locked (`648b728`). The publishing
   checklist (`6dc8a0f`) and DM script (`7879a7d`) are ready. Post 002
   topic recommendation: pick from the W2 launch sequence in
   `108888e` §7 (currently #12 "부정 리뷰를 제품 문제로 단정하면 안
