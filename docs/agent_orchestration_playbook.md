@@ -484,16 +484,24 @@ at `todo` until operator dispatches.
 ### A-001 — lock Template F pricing-language patch
 
 - **role**: Operator (decision needed) → Product (execution)
-- **status**: blocked-on-operator-decision
-- **goal**: Decide whether v1.0 of `docs/instagram_voc_dm_response_
-  script.md` Template F (currently no numeric prices) is the final
-  shippable form, or whether to draft a v1.1 with a numeric price
-  band.
-- **context**: Template F was patched in-place during v1.0 to remove
-  the `[HOLD: 견적 범위]` blocking placeholder. The current text
-  defers numeric prices to a future v1.1 revision per Appendix A.
-  Operator has not yet decided whether v1.1 is needed for first
-  publish, or only after first paid conversions stabilize the bands.
+- **status**: **done** (closed 2026-05-06)
+- **closed_by**: `be54569 docs(instagram): lock Template F pricing language`
+- **closed_at**: 2026-05-06
+- **decision recorded**: v1.0 final without numeric price bands.
+  Numeric bands explicitly deferred to a future v1.1 revision after
+  first paid-conversion data stabilizes per `bc17ed4` §6 weekly
+  review (per `7879a7d` Appendix A "v1.1 candidate — numeric price
+  bands" item).
+- **goal** *(historical)*: Decide whether v1.0 of `docs/instagram_voc_
+  dm_response_script.md` Template F (currently no numeric prices) is
+  the final shippable form, or whether to draft a v1.1 with a numeric
+  price band.
+- **context** *(historical)*: Template F was patched in-place during
+  v1.0 to remove the `[HOLD: 견적 범위]` blocking placeholder. The
+  current text defers numeric prices to a future v1.1 revision per
+  Appendix A. Operator has not yet decided whether v1.1 is needed for
+  first publish, or only after first paid conversions stabilize the
+  bands.
 - **scope**:
   - in: `docs/instagram_voc_dm_response_script.md` (Template F + Appendix A only, if v1.1 is decided)
   - out: any other doc, any code
