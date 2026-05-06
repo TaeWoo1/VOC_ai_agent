@@ -39,11 +39,16 @@ from dataclasses import dataclass
 # Ban list — authoritative for consumer-facing cardnews
 # ---------------------------------------------------------------------------
 #
-# Specified verbatim by the product owner. Substring match. The single
-# Hangul `독` is intentionally aggressive: in a cosmetics-review cardnews
-# body the cost of a false positive (catching `독자` / `독립`) is much
-# lower than the cost of letting `독한` / `독성` through. If it bites in
-# real content, narrow it then; never default to permissive on a tone rule.
+# Specified verbatim by the product owner. Substring match.
+#
+# Narrowing note (2026-05-01):
+# The single Hangul `독` was originally on this list as an aggressive
+# catch for `독한` / `독성`. It bit a legitimate LLM signature paragraph
+# at the word `독특` (distinctive — exactly the natural vocabulary for a
+# "이 제품만의 포인트" page). The signature page semantics make `독특`
+# practically guaranteed to appear in good copy, so the single-char ban
+# is too aggressive. Replaced with the specific hostile compounds
+# (`독한`, `독성`, `독해`, `독함`).
 
 BANNED_FRAMINGS_KO: tuple[str, ...] = (
     "브랜드가 숨긴",
@@ -55,11 +60,21 @@ BANNED_FRAMINGS_KO: tuple[str, ...] = (
     "소비자들은 속고 있다",
     "절대 사지 마세요",
     "최악",
-    "독",
+    "독한",
+    "독성",
+    "독해",
+    "독함",
     "부작용",
     "무조건",
     "인생템",
     "미쳤어요",
+    # CTA-shape ban (v2.0): the framing "갈리는 제품 추천 받고 싶다면…"
+    # asks the reader to solicit polarized-product recommendations,
+    # which positions the carousel as a recommendation aggregator
+    # rather than an analysis. The narrower substring catches the
+    # solicitation framing without bothering observational mentions
+    # of "호불호 갈리는 제품" elsewhere on the page.
+    "갈리는 제품 추천",
 )
 
 # Extra clusters scanned only at the planner stage (the LLM has more
@@ -73,6 +88,18 @@ PLANNER_MEDICAL_BANNED_KO: tuple[str, ...] = (
     "보장",
     "부작용 없음",
     "효능 보장",
+    # Efficacy-maximizing patterns. Cosmetics review summaries
+    # are observational — the buyer-facing surface should never imply
+    # the product enhances, maximizes, or guarantees an effect.
+    # `효능` is broad and may bite legitimate copy in adjacent
+    # contexts (product info pages); on the consumer cardnews
+    # surface that's the desired behavior — push the planner away
+    # from efficacy framing entirely.
+    "효과가 극대화",
+    "효과를 극대화",
+    "효과를 높",
+    "효과가 확실",
+    "효능",
 )
 
 PLANNER_ATTACK_BANNED_KO: tuple[str, ...] = (
@@ -125,6 +152,45 @@ PUBLIC_TEXT_FIELDS: frozenset[str] = frozenset({
     # v1.2 long-layout additions:
     "why_note",
     "who_note",
+    # v2.0 long-layout additions:
+    "corpus_footer",   # cover micro-text (분석 기준 absorbed)
+    "closing_note",    # summary closing-note (judgment criterion)
+    "sub",             # one_liner sub-line
+    "tip",             # checkpoint slide tip (v2.0 single-message page)
+    # v2.1 long-layout additions — spotlight pages:
+    "what_reviewers_liked",  # positive_spotlight body
+    "why_it_matters",        # positive_spotlight aside (also signature aside via 'note')
+    "who_benefits",          # positive_spotlight aside (분-ending sentence)
+    "split_signal",          # caution_spotlight metric line
+    "likely_context",        # caution_spotlight aside
+    "check_before_buy",      # caution_spotlight aside
+    # v2.1.1 — one_liner roadmap mini-nav label (kept for backward compat
+    # so a v2.1 layout still passes the validator; v2.2 layouts no longer
+    # emit it).
+    "roadmap_label",
+    "signal_count",          # insight_spotlight metric line
+    "interpretation",        # insight_spotlight body paragraph
+    "who_should_check",      # insight_spotlight aside (also signature surface)
+    # v2.2 — one_liner densification (replaces v2.1.1 roadmap mini-nav)
+    "framing_note",          # one_liner: why-this-product-is-read-this-way
+    # v2.2 — why_divides per-axis sub-line ("axis" + "why" pair)
+    "axis",
+    "why",
+    # v2.3 (legacy) — cover hook-type classifier (kept for backward
+    # compat with already-shipped layouts).
+    "hook_type",
+    # v2.4 — controlled-variety cover hook composition fields.
+    # `hook_intent` and `product_angle` are Literal values; the
+    # planner picks them from a closed enum, but they're treated as
+    # public strings so the safety walker still scans them defensively.
+    "hook_intent",
+    "product_angle",
+    # v2.3 — fit/consider item supporting line.
+    "signal_hint",
+    # v2.3 — summary one-liner conclusion (above the pre-purchase checks).
+    "one_liner_conclusion",
+    # v2.3 — sparse-page aux_block tile (title + body text).
+    "text",
 })
 
 PUBLIC_LIST_FIELDS: frozenset[str] = frozenset({
@@ -149,6 +215,20 @@ PUBLIC_LIST_FIELDS: frozenset[str] = frozenset({
     "actions",
     # v1.2 signature page:
     "aside_items",
+    # v2.0 additions — string-list fields:
+    "axes",        # why_divides axis lines
+    "takeaways",   # summary takeaway sentences
+    # v2.0 additions — dict-list fields (documentation):
+    "slides",      # checkpoints (v2.0: 1..3 individual slide pages)
+    # v2.1.1 — one_liner roadmap mini-nav (dict items: number, label).
+    # Kept for backward compat; v2.2 layouts emit `metric_pills` instead.
+    "roadmap_items",
+    # v2.2 — one_liner numeric anchors (string list).
+    "metric_pills",
+    # v2.2 — why_divides paired axis + why-line (dict items).
+    "axis_pairs",
+    # v2.2 — cta supporting save/like/comment actions (string list).
+    "support_actions",
 })
 
 # Allowed `language` values. New locales add here; the safety contract

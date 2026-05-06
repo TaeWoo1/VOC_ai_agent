@@ -1,0 +1,36 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--why-divides">
+  <div class="why-chip">{{ page.chip }}</div>
+  <h1 class="why-headline">{{ page.headline }}</h1>
+
+  {% if page.axis_pairs %}
+  <div class="why-axes">
+    {% for pair in page.axis_pairs %}
+    <div class="why-axis">
+      <div class="why-axis-num">{{ '%02d'|format(loop.index) }}</div>
+      <div class="why-axis-content">
+        <div class="why-axis-text">{{ pair.axis }}</div>
+        {% if pair.why %}<div class="why-axis-why">{{ pair.why }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif page.axes %}
+  <div class="why-axes">
+    {% for a in page.axes %}
+    <div class="why-axis">
+      <div class="why-axis-num">{{ '%02d'|format(loop.index) }}</div>
+      <div class="why-axis-content">
+        <div class="why-axis-text">{{ a }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if page.note %}<div class="why-note">{{ page.note }}</div>{% endif %}
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

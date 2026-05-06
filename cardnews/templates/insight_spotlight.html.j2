@@ -1,0 +1,17 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--insight-spotlight">
+  <div class="spotlight-chip spotlight-chip--insight">{{ page.chip }}</div>
+  <h1 class="spotlight-headline">{{ page.headline }}</h1>
+  <div class="spotlight-count">{{ page.signal_count }}</div>
+
+  <p class="spotlight-interpretation">{{ page.interpretation }}</p>
+
+  <div class="spotlight-who-line">
+    <span class="spotlight-who-tag">먼저 확인하면 좋은 분</span>
+    <span class="spotlight-who-text">{{ page.who_should_check }}</span>
+  </div>
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

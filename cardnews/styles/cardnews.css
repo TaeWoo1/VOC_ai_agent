@@ -109,13 +109,63 @@ html, body {
   filter: brightness(0.55) contrast(1.05) saturate(0.85);
 }
 
-.cover--no-image .cover-photo-slot {
+.cover--no-image .cover-photo-slot,
+.cover--cutout-mode .cover-photo-slot,
+.cover--cutout-mode {
   background-image:
     radial-gradient(ellipse at 30% 18%, rgba(212, 128, 127, 0.42), transparent 55%),
     radial-gradient(ellipse at 78% 82%, rgba(200, 127, 90, 0.3), transparent 50%),
     radial-gradient(circle at 60% 50%, rgba(245, 239, 230, 0.06), transparent 60%),
     linear-gradient(135deg, #2a1f1d 0%, #4a3530 50%, #6b4838 100%);
   filter: none;
+}
+
+/* v2.4 — floating product cutout in the bottom-right corner.
+ * Used when the cover has a pre-fetched product image AND the layout
+ * usage is `cover_cutout` (not full-bleed). The cutout is sized at
+ * 28% of canvas width (within the requested 26..32% band) and is
+ * positioned with safe insets so the headline + chip-strip row never
+ * collide with it. The image is contained, not cropped, so product
+ * shape and packaging stay legible.
+ *
+ * Layering:
+ *   .cover-photo-slot      — background gradient (cutout-mode reuses
+ *                            the no-image gradient so the cover keeps
+ *                            its strong color block).
+ *   .cover-grain           — vignette overlay
+ *   .cover-content         — chip + foot block (z-index 2)
+ *   .cover-product-cutout  — floating product image (z-index 3)
+ *
+ * The cutout sits ABOVE the grain but does NOT cover the headline
+ * text — the right inset gives the headline room to wrap on the
+ * left half of the canvas. */
+.cover-product-cutout {
+  position: absolute;
+  z-index: 3;
+  right: 60px;
+  bottom: 80px;
+  width: 28%;        /* 1080 * 0.28 ≈ 302 px on the logical canvas */
+  max-width: 340px;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  pointer-events: none;
+  /* Soft drop shadow so the cutout reads as floating product photo
+   * over the dark gradient. */
+  filter: drop-shadow(0 18px 32px rgba(0, 0, 0, 0.45));
+}
+
+.cover-product-cutout-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* Subtle rounded edge — most product hero images are rectangular
+   * but rounded corners read better on Instagram than hard 90deg
+   * crops. Falls back to a clean square when the image already has
+   * its own rounded edges. */
+  border-radius: 18px;
+  background: rgba(245, 239, 230, 0.04);
 }
 
 .cover-grain {
@@ -154,38 +204,41 @@ html, body {
   gap: 28px;
 }
 
-.cover-title {
+/* v1.2 — cover headline is the editorial hook (large, multi-line),
+ * subline is the supporting product name + review count. */
+.cover-headline {
   font-family: var(--font-sans);
-  font-size: 96px;
+  font-size: 82px;
   font-weight: 800;
-  line-height: 1.08;
+  line-height: 1.16;
   letter-spacing: -0.035em;
   color: var(--ink-on-dark);
   word-break: keep-all;
   margin: 0;
 }
 
-.cover-subtitle {
+.cover-subline {
   font-family: var(--font-sans);
   font-size: 30px;
-  font-weight: 400;
-  line-height: 1.4;
+  font-weight: 500;
+  line-height: 1.45;
   color: var(--ink-on-dark);
   opacity: 0.82;
   word-break: keep-all;
+  letter-spacing: -0.01em;
 }
 
-.cover-takeaway {
-  font-family: var(--font-sans);
-  font-size: 38px;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--ink-on-dark);
-  word-break: keep-all;
-  padding: 26px 32px;
-  background: rgba(245, 239, 230, 0.08);
-  border-left: 4px solid var(--ink-accent);
-  border-radius: 4px;
+/* v2.5 — when a product cutout floats in the bottom-right (cutout-mode),
+ * reserve a left column so the headline/subline never collide with it.
+ * Cutout footprint: width 28% (~302 logical px) + right inset 60px →
+ * left edge at canvas-right-302-60 = 718. Text area starts at left pad
+ * 80, so a 600px headline ends at x=680, leaving ~38px gap. Without
+ * this constraint the 82px Korean headline reflows past x=720 and gets
+ * visually clipped by the cutout (was: 메디힐 / fwee_pudding / 니들리). */
+.cover--cutout-mode .cover-headline,
+.cover--cutout-mode .cover-subline,
+.cover--cutout-mode .cover-corpus-footer {
+  max-width: 600px;
 }
 
 .cover-chip-strip {
@@ -203,6 +256,21 @@ html, body {
   border: 1.5px solid rgba(245, 239, 230, 0.3);
   border-radius: 999px;
   background: rgba(245, 239, 230, 0.08);
+}
+
+/* v2.0 — analysis-basis micro-text on the cover. Replaces the v1.x
+ * standalone `method` slide. Stays small + italic so it doesn't
+ * compete with the editorial headline. */
+.cover-corpus-footer {
+  margin-top: 10px;
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--ink-on-dark);
+  opacity: 0.62;
+  letter-spacing: 0.01em;
+  word-break: keep-all;
 }
 
 /* -------------------------------------------------------------------------- *
@@ -648,10 +716,13 @@ html, body {
   gap: 22px;
 }
 
+/* v1.2 densified tile: head row (number + label + count), body
+ * (tip + why/who pair). Top-2 entries instead of top-3 so each
+ * tile has room to carry the editorial weight. */
 .checkpoints-card {
   display: flex;
-  align-items: flex-start;
-  gap: 28px;
+  flex-direction: column;
+  gap: 18px;
   background: var(--card-cream);
   padding: 32px 36px;
   border-radius: 18px;
@@ -659,22 +730,28 @@ html, body {
   border-left: 6px solid var(--chip-warm-amber);
 }
 
+.checkpoints-card-head {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
 .checkpoints-card-num {
   flex: 0 0 auto;
   font-family: var(--font-serif);
-  font-size: 80px;
+  font-size: 76px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 0.9;
   color: var(--chip-warm-amber);
   letter-spacing: -0.04em;
-  min-width: 100px;
+  min-width: 92px;
 }
 
-.checkpoints-card-body {
+.checkpoints-card-headline {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 4px;
   flex: 1 1 0;
 }
 
@@ -687,7 +764,7 @@ html, body {
 }
 
 .checkpoints-card-count {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--chip-warm-amber);
   padding: 4px 12px;
@@ -696,11 +773,57 @@ html, body {
   align-self: flex-start;
 }
 
-.checkpoints-card-note {
-  font-size: 22px;
-  font-weight: 500;
+.checkpoints-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.checkpoints-card-tip {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink-primary);
+  line-height: 1.36;
+  word-break: keep-all;
+  padding: 12px 18px;
+  background: var(--canvas-cream-warm);
+  border-radius: 10px;
+}
+
+.checkpoints-card-why-who {
+  display: flex;
+  gap: 18px;
+}
+
+.checkpoints-card-why,
+.checkpoints-card-who {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(200, 127, 90, 0.06);
+}
+
+.checkpoints-card-who {
+  background: rgba(107, 138, 110, 0.08);
+}
+
+.checkpoints-card-tag {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   color: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+.checkpoints-card-why-text,
+.checkpoints-card-who-text {
+  font-size: 20px;
+  font-weight: 500;
   line-height: 1.4;
+  color: var(--ink-primary);
   word-break: keep-all;
 }
 
@@ -990,63 +1113,1042 @@ html, body {
   word-break: keep-all;
 }
 
-.cta-actions {
+/* v2.2.1 single hero CTA — SAVE-primary. Bigger title, taller hero
+ * card so the SAVE invitation visually dominates the page; the
+ * support row underneath reads as secondary. */
+.cta-hero {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex: 1 1 auto;
+  align-items: center;
+  gap: 36px;
+  background: linear-gradient(135deg, rgba(200, 127, 90, 0.22) 0%, rgba(212, 128, 127, 0.16) 100%);
+  border: 2px solid rgba(200, 127, 90, 0.55);
+  border-radius: 24px;
+  padding: 56px 60px;
+  margin-top: 36px;
+  flex: 0 0 auto;
 }
 
-.cta-action {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-  background: rgba(245, 239, 230, 0.07);
-  border: 1px solid rgba(245, 239, 230, 0.15);
-  border-radius: 16px;
-  padding: 26px 30px;
-}
-
-.cta-action-num {
+.cta-hero-arrow {
   flex: 0 0 auto;
   font-family: var(--font-serif);
-  font-size: 56px;
-  font-weight: 600;
+  font-size: 112px;
+  font-weight: 500;
+  line-height: 0.9;
+  color: var(--ink-accent);
+}
+
+.cta-hero-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1 1 0;
+}
+
+.cta-hero-title {
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--ink-on-dark);
+  line-height: 1.16;
+  word-break: keep-all;
+}
+
+.cta-hero-text {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--ink-on-dark);
+  opacity: 0.86;
+  line-height: 1.48;
+  word-break: keep-all;
+}
+
+/* v2.2 — supporting save / like / comment row beneath the primary
+ * CTA hero. Three short bulleted sentences; flex-column for vertical
+ * stacking; margin-top breathes them away from the hero. The
+ * disclosure block keeps its `margin-top: auto` push so the support
+ * rows naturally sit between hero and disclosure. */
+.cta-support {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cta-support-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.cta-support-bullet {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 28px;
   line-height: 1;
+  color: var(--ink-accent-on-dark, rgba(255, 255, 255, 0.86));
+  padding-top: 4px;
+}
+
+.cta-support-text {
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: var(--ink-on-dark, #f5ece2);
+  word-break: keep-all;
+}
+
+.cta-disclosure {
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--ink-muted-on-dark);
+  margin-top: auto;
+  padding-top: 36px;
+  word-break: keep-all;
+  font-style: italic;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Signature page (v1.2) — editorial pull-quote
+ * -------------------------------------------------------------------------- */
+
+.page--signature {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.signature-rule {
+  position: absolute;
+  top: 80px;
+  left: 80px;
+  width: 96px;
+  height: 6px;
+  background: var(--ink-accent);
+  border-radius: 999px;
+}
+
+.signature-chip {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 32px;
+  padding: 12px 22px;
+  background: var(--ink-primary);
+  color: var(--ink-on-dark);
+  font-size: 22px;
+  font-weight: 700;
+  border-radius: 6px;
+  letter-spacing: -0.005em;
+}
+
+.signature-headline {
+  margin: 28px 0 12px;
+  font-family: var(--font-sans);
+  font-size: 72px;
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -0.035em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.signature-meta {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-accent);
+  margin-bottom: 24px;
+}
+
+.signature-context {
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin: 0 0 36px;
+  padding: 26px 30px;
+  background: var(--card-cream);
+  border-radius: 18px;
+  border-left: 6px solid var(--ink-accent);
+  box-shadow: var(--card-shadow);
+}
+
+.signature-grid {
+  display: flex;
+  gap: 18px;
+  margin-top: auto;
+}
+
+.signature-aside {
+  flex: 1 1 0;
+  background: var(--canvas-cream-warm);
+  border-radius: 16px;
+  padding: 26px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.signature-aside:last-child {
+  background: var(--chip-sage-soft);
+}
+
+.signature-aside-label {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+.signature-aside-note {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* ========================================================================== *
+ * v2.0 — 12-section narrative page types
+ * ========================================================================== */
+
+/* -------------------------------------------------------------------------- *
+ * One-liner page — short rhythmic sentence (replaces v1.x hook)
+ * -------------------------------------------------------------------------- */
+
+.page--one-liner {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.one-liner-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-pink);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.one-liner-body {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 880px;
+  /* v2.2.1 — tightened from 64px so the headline lands closer to
+   * the chip and the rest of the column reads as one stacked block
+   * instead of a top half + sparse bottom half. */
+  margin-top: 36px;
+}
+
+.one-liner-headline {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 76px;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.035em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.one-liner-sub {
+  font-size: 28px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+
+/* v2.1.1 — roadmap mini-nav below the headline. Uses the natural
+ * `margin-top: auto` push so the roadmap sits in the bottom third
+ * of the page, leaving a quiet middle band that visually frames the
+ * top headline. The thin separator hairline cues "what's next" without
+ * looking like a corpus footer. */
+.one-liner-roadmap {
+  margin-top: auto;
+  padding-top: 40px;
+  border-top: 1px solid rgba(60, 40, 28, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.one-liner-roadmap-label {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-secondary, var(--ink-muted));
+  text-transform: none;
+}
+
+.one-liner-roadmap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.one-liner-roadmap-row {
+  display: flex;
+  align-items: baseline;
+  gap: 22px;
+}
+
+.one-liner-roadmap-num {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--ink-accent);
+  letter-spacing: -0.02em;
+  min-width: 56px;
+}
+
+.one-liner-roadmap-text {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  letter-spacing: -0.01em;
+  word-break: keep-all;
+}
+
+/* v2.2.1 — pills sit immediately under the headline body, no
+ * `margin-top: auto` push. Letting the framing-note land right under
+ * the pills (rather than stretching to the bottom) packs the slide
+ * content into a single coherent column instead of a top + sparse
+ * bottom split. The page-index footer then naturally sits below. */
+.one-liner-pills {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.one-liner-pill {
+  flex: 0 0 auto;
+  padding: 14px 26px;
+  border-radius: 999px;
+  background: var(--card-cream, #fff7ec);
+  border: 1px solid rgba(60, 40, 28, 0.18);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* v2.2 — framing note ("왜 이렇게 봐야 할까") sits below the pill row.
+ * Marker line is small; the explanation is the visual anchor of the
+ * bottom half. Both pinned via the .one-liner-pills `margin-top: auto`
+ * push above. */
+.one-liner-framing {
+  margin-top: 24px;
+  padding: 30px 34px;
+  background: var(--canvas-cream-warm, rgba(60, 40, 28, 0.04));
+  border-radius: 16px;
+  border-left: 6px solid var(--ink-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* v2.2.1 — give the framing card real vertical presence so the
+   * slide reads as having a substantive interpretive block below the
+   * pills, not a thin afterthought line. */
+  min-height: 180px;
+}
+
+.one-liner-framing-marker {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-accent);
+  text-transform: none;
+}
+
+.one-liner-framing-text {
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Why-divides page — interpretation axes
+ * -------------------------------------------------------------------------- */
+
+.page--why-divides {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.why-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--ink-accent);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.why-headline {
+  margin: 28px 0 36px;
+  font-size: 60px;
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+  word-break: keep-all;
+}
+
+.why-axes {
+  display: flex;
+  flex-direction: column;
+  /* v2.2.1 — three rows must fit comfortably + leave space for the
+   * note. Tighter gap + slightly larger card padding makes each row
+   * feel like a real info block instead of a thin strip. */
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.why-axis {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  background: var(--card-cream);
+  padding: 32px 36px;
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  border-left: 6px solid var(--ink-accent);
+  /* v2.2.1 — minimum vertical presence so a single-line `why` doesn't
+   * collapse the row. Each axis card now reads as a stacked title +
+   * why-line block rather than a thin tag row. */
+  min-height: 132px;
+}
+
+.why-axis-num {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 600;
+  line-height: 0.9;
   color: var(--ink-accent);
   letter-spacing: -0.04em;
   min-width: 80px;
 }
 
-.cta-action-body {
+.why-axis-text {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.36;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  padding-top: 8px;
+}
+
+/* v2.2 — wraps the axis-text + the new "why" sub-line so they share
+ * a single column to the right of the big number. Without this the
+ * axis number would sit to the left of just the title and the why-line
+ * would push out from a misaligned baseline. */
+.why-axis-content {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 6px;
-  flex: 1 1 0;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.cta-action-title {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--ink-on-dark);
-  letter-spacing: -0.015em;
+.why-axis-why {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-secondary, var(--ink-muted));
+  word-break: keep-all;
 }
 
-.cta-action-text {
+.why-note {
+  margin-top: auto;
+  padding: 20px 26px;
+  background: var(--canvas-cream-warm);
+  border-radius: 12px;
+  border-left: 4px solid var(--ink-accent);
   font-size: 22px;
   font-weight: 500;
-  color: var(--ink-on-dark);
-  opacity: 0.78;
-  line-height: 1.4;
+  color: var(--ink-primary);
+  line-height: 1.45;
   word-break: keep-all;
 }
 
-.cta-disclosure {
-  font-size: 17px;
-  line-height: 1.55;
-  color: var(--ink-muted-on-dark);
-  margin-top: 24px;
+/* -------------------------------------------------------------------------- *
+ * Checkpoint slide page (single focused message — was multi-card v1.x)
+ * -------------------------------------------------------------------------- */
+
+.page--checkpoint {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.checkpoint-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-warm-amber);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.checkpoint-num {
+  margin: 28px 0 12px;
+  font-family: var(--font-serif);
+  font-size: 132px;
+  font-weight: 600;
+  line-height: 0.9;
+  color: var(--chip-warm-amber);
+  letter-spacing: -0.04em;
+}
+
+.checkpoint-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.checkpoint-label {
+  font-size: 60px;
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+  color: var(--ink-primary);
   word-break: keep-all;
-  font-style: italic;
+}
+
+.checkpoint-count {
+  align-self: flex-start;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--chip-warm-amber);
+  padding: 6px 16px;
+  background: var(--chip-warm-amber-soft);
+  border-radius: 999px;
+}
+
+.checkpoint-tip {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--ink-primary);
+  line-height: 1.4;
+  padding: 32px 36px;
+  background: var(--canvas-cream-warm);
+  border-radius: 14px;
+  border-left: 6px solid var(--chip-warm-amber);
+  word-break: keep-all;
+  margin-bottom: 28px;
+  /* v2.2.1 — give the tip card real vertical presence so it doesn't
+   * read as a thin one-line strip on a tall page. */
+  min-height: 132px;
+  display: flex;
+  align-items: center;
+}
+
+.checkpoint-why-who {
+  display: flex;
+  gap: 18px;
+  /* v2.2.1 — drop margin-top: auto so the why/who pair sits right
+   * under the tip card. The page-index footer fills the bottom band
+   * naturally; the previous push left a sparse middle band. */
+  margin-top: 12px;
+}
+
+.checkpoint-why,
+.checkpoint-who {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 28px 30px;
+  border-radius: 12px;
+  background: rgba(200, 127, 90, 0.08);
+  /* v2.2.1 — match the tip card's vertical weight. */
+  min-height: 152px;
+}
+
+.checkpoint-who {
+  background: rgba(107, 138, 110, 0.1);
+}
+
+.checkpoint-tag {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+}
+
+.checkpoint-why-text,
+.checkpoint-who-text {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Fit / Consider — single-column buyer-profile lists (audience split)
+ * -------------------------------------------------------------------------- */
+
+.page--fit,
+.page--consider {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.fit-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-sage);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.consider-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--chip-warm-amber);
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.fit-title,
+.consider-title {
+  margin: 28px 0 8px;
+  font-size: 60px;
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+  word-break: keep-all;
+}
+
+.fit-subtitle,
+.consider-subtitle {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  margin-bottom: 36px;
+  word-break: keep-all;
+}
+
+.fit-list,
+.consider-list {
+  display: flex;
+  flex-direction: column;
+  /* v2.2.1 — flex-grow + space-between distributes 2–4 cards across
+   * the available column. The previous fixed gap left a tall sparse
+   * band when only 2 cards landed. */
+  gap: 24px;
+  flex: 1 1 auto;
+  justify-content: space-between;
+  padding-top: 12px;
+  padding-bottom: 24px;
+}
+
+.fit-card,
+.consider-card {
+  background: var(--card-cream);
+  border-radius: 16px;
+  padding: 40px 44px;
+  box-shadow: var(--card-shadow);
+  /* v2.2.1 — taller min-height so each card reads as a substantive
+   * info block, not a thin name strip. With justify-content
+   * space-between on the list, this stretches naturally to fill. */
+  min-height: 184px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.fit-card { border-left: 6px solid var(--chip-sage); }
+.consider-card { border-left: 6px solid var(--chip-warm-amber); }
+
+.fit-card-label,
+.consider-card-label {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.36;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin-bottom: 8px;
+}
+
+.fit-card-note,
+.consider-card-note {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+/* v2.3 — fit/consider supporting "근거 signal" / "확인할 키워드" line.
+ * Sits between label and count-note; visually subordinate to label,
+ * but more prominent than the count tail. */
+.fit-card-hint,
+.consider-card-hint {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.42;
+  color: var(--ink-secondary, #4a4036);
+  margin: 6px 0 10px;
+  word-break: keep-all;
+}
+
+/* v2.3 — generic aux_block tile for the layout density policy.
+ * Lives at the bottom of sparse pages (single-slide checkpoint, 2-item
+ * fit/consider, etc.). Must read as a small framing aside, NOT a
+ * primary card — the card hierarchy stays intact. */
+.aux-block {
+  margin-top: 22px;
+  padding: 22px 26px;
+  background: var(--chip-sage-soft, rgba(108, 145, 110, 0.08));
+  border-radius: 14px;
+  border-left: 4px solid var(--chip-sage, #6c916e);
+}
+
+.aux-block-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-accent, #6c916e);
+  margin-bottom: 6px;
+  text-transform: none;
+}
+
+.aux-block-text {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Summary page — 2..4 takeaways + closing-note (judgment criterion)
+ * -------------------------------------------------------------------------- */
+
+.page--summary {
+  background: var(--canvas-cream);
+  padding: 80px 80px 96px;
+  display: flex;
+  flex-direction: column;
+}
+
+.summary-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 12px 22px;
+  background: var(--ink-primary);
+  color: var(--ink-on-dark);
+  font-size: 22px;
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+.summary-headline {
+  margin: 28px 0 36px;
+  font-size: 60px;
+  font-weight: 800;
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+  word-break: keep-all;
+}
+
+/* v2.3 — judgment-frame summary "한 줄 결론" pull card.
+ * Sits above the pre-purchase check list. Acts as the strongest
+ * one-sentence read of the corpus. Visually heavier than a row but
+ * lighter than the headline. */
+.summary-conclusion {
+  margin-bottom: 28px;
+  padding: 26px 28px;
+  background: var(--ink-primary);
+  border-radius: 16px;
+}
+
+.summary-conclusion-tag {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-accent-on-dark, rgba(255, 255, 255, 0.66));
+  margin-bottom: 8px;
+}
+
+.summary-conclusion-text {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink-on-dark, #f5ece2);
+  word-break: keep-all;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  /* v2.2.1 — let the takeaway list flex-grow + space-between so 2 vs
+   * 4 takeaways both fill the column instead of clumping at the top. */
+  gap: 22px;
+  flex: 1 1 auto;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+/* v2.3 — small "구매 전 볼 것" tag above the takeaway list, reframing
+ * the rows as pre-purchase check questions. */
+.summary-list-tag {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-accent, #6c916e);
+  margin-bottom: 6px;
+}
+
+.summary-row {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  padding: 36px 40px;
+  background: var(--card-cream);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+  /* v2.2.1 — taller min-height so the row reads as a real takeaway
+   * card, not a label strip. */
+  min-height: 156px;
+}
+
+.summary-row-num {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 56px;
+  font-weight: 600;
+  line-height: 0.9;
+  color: var(--ink-accent);
+  letter-spacing: -0.04em;
+  min-width: 72px;
+}
+
+.summary-row-text {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  padding-top: 6px;
+}
+
+.summary-closing {
+  margin-top: auto;
+  padding: 24px 28px;
+  background: var(--chip-sage-soft);
+  border-radius: 14px;
+  border-left: 6px solid var(--chip-sage);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+/* ===========================================================
+ * v2.1 — Spotlight pages (positive / caution / insight)
+ *
+ * Three deep-dive page types share a common shell:
+ *   .page--*-spotlight  (positive=warm, caution=amber, insight=sage)
+ *   .spotlight-chip      (chip pill at top, color per polarity)
+ *   .spotlight-headline  (large title)
+ *   .spotlight-count     (small metric line)
+ *   .spotlight-grid      (2-aside grid: WHY + WHO/CHECK)
+ * =========================================================== */
+
+.page--positive-spotlight,
+.page--caution-spotlight,
+.page--insight-spotlight {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: 96px 92px 80px;
+  background: var(--bg-cream);
+  position: relative;
+  gap: 30px;
+}
+
+.page--caution-spotlight {
+  background: var(--chip-amber-soft, #faf3e6);
+}
+
+.page--insight-spotlight {
+  background: var(--chip-sage-soft, #eef2ec);
+}
+
+.spotlight-chip {
+  align-self: flex-start;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 10px 18px;
+  border-radius: 999px;
+  color: var(--ink-primary);
+  background: var(--card-cream);
+  border: 2px solid var(--ink-secondary);
+}
+
+.spotlight-chip--positive {
+  background: var(--chip-pink-soft, #fbe9e9);
+  border-color: var(--chip-pink, #d68f8f);
+  color: #7a3a3a;
+}
+
+.spotlight-chip--caution {
+  background: #f5e6c4;
+  border-color: var(--chip-amber, #c89a3e);
+  color: #6b4a14;
+}
+
+.spotlight-chip--insight {
+  background: #d8e2d3;
+  border-color: var(--chip-sage, #6f8866);
+  color: #2f4a2a;
+}
+
+.spotlight-headline {
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.025em;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin: 0;
+}
+
+.spotlight-count {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--ink-secondary);
+}
+
+.spotlight-body {
+  margin-top: 6px;
+}
+
+.spotlight-what {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.55;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin: 0;
+  padding: 56px 40px;
+  background: var(--card-cream);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+
+.spotlight-interpretation {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--ink-primary);
+  word-break: keep-all;
+  margin: 6px 0 0;
+  padding: 60px 40px;
+  background: var(--card-cream);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+
+.spotlight-grid {
+  display: flex;
+  flex-direction: column;
+  /* v2.2.1 — drop the bottom-push and let the grid sit right under
+   * the body card. With each aside at min-height 160 the column fills
+   * naturally; the previous `margin-top: auto` left a sparse middle. */
+  gap: 22px;
+  margin-top: 24px;
+}
+
+.spotlight-aside {
+  padding: 36px 36px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  border-left: 8px solid var(--ink-accent);
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.spotlight-aside-label {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-secondary);
+  text-transform: none;
+  margin-bottom: 12px;
+}
+
+.spotlight-aside-note {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
+}
+
+.spotlight-who-line {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 30px 34px;
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  border-left: 8px solid var(--chip-sage, #6f8866);
+  min-height: 140px;
+  justify-content: center;
+}
+
+.spotlight-who-tag {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink-secondary);
+  margin-bottom: 4px;
+}
+
+.spotlight-who-text {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink-primary);
+  word-break: keep-all;
 }

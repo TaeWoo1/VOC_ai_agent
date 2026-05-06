@@ -5,15 +5,23 @@
   <h1 class="cta-title">{{ page.title }}</h1>
   {% if page.lead %}<div class="cta-lead">{{ page.lead }}</div>{% endif %}
 
-  {% if page.actions %}
-  <div class="cta-actions">
-    {% for a in page.actions %}
-    <div class="cta-action">
-      <div class="cta-action-num">0{{ loop.index }}</div>
-      <div class="cta-action-body">
-        <div class="cta-action-title">{{ a.title }}</div>
-        <div class="cta-action-text">{{ a.body }}</div>
-      </div>
+  {% if page.actions and page.actions|length > 0 %}
+  {% set primary = page.actions[0] %}
+  <div class="cta-hero">
+    <div class="cta-hero-arrow">→</div>
+    <div class="cta-hero-body">
+      <div class="cta-hero-title">{{ primary.title }}</div>
+      <div class="cta-hero-text">{{ primary.body }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if page.support_actions and page.support_actions|length > 0 %}
+  <div class="cta-support">
+    {% for a in page.support_actions %}
+    <div class="cta-support-row">
+      <div class="cta-support-bullet">·</div>
+      <div class="cta-support-text">{{ a }}</div>
     </div>
     {% endfor %}
   </div>
