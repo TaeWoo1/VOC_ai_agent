@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "description": "12-row sanity batch for tone_mismatch LLM audit prototype. Composition: 4 FN anchors (current signal miss), 3 TP anchors (current signal catches), 5 controls (NOT tone_mismatch). Review text NOT duplicated here — pulled from DB at runtime.",
+  "source_anchor": "docs/phase2_tone_mismatch_rubric.md §6 (FN anchors) + §7 (negative patterns) + manual sanity review",
+  "rows": [
+    {"review_id": "0c7e6768c6c5f424", "bucket": "FN_anchor"},
+    {"review_id": "344ec6f2dec4d266", "bucket": "FN_anchor"},
+    {"review_id": "b90a1c49102025e4", "bucket": "FN_anchor"},
+    {"review_id": "e30e541c008163d0", "bucket": "FN_anchor"},
+    {"review_id": "2604f12baf2b2bbb", "bucket": "TP_anchor"},
+    {"review_id": "9665eaca8c3d9904", "bucket": "TP_anchor"},
+    {"review_id": "d1fbaf6c2c5bfd95", "bucket": "TP_anchor"},
+    {"review_id": "03e27646a14d0a17", "bucket": "control_positive_fit"},
+    {"review_id": "98fd309c25fb9d1e", "bucket": "control_positive_fit"},
+    {"review_id": "910076d664d4b78a", "bucket": "control_pigment_only"},
+    {"review_id": "1bbf833319fd3a3c", "bucket": "control_shade_only"},
+    {"review_id": "4b958dd193650531", "bucket": "control_self_tone_no_mismatch"}
+  ]
+}

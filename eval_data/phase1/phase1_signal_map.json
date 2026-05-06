@@ -1,0 +1,23 @@
+{
+  "version": "0.9-draft",
+  "status": "draft",
+  "description": "Maps human-language concern tags (golden file) to pipeline signal IDs. Empty arrays are explicit coverage gaps — the pipeline has no rule for that concern today.",
+  "tag_to_expected_signals": {
+    "durability_concern": ["persistence_reservation"],
+    "shade_mismatch": ["shade_mismatch"],
+    "tone_mismatch": ["tone_mismatch"],
+    "pigment_complaint": ["pigment_complaint"],
+    "value_complaint": ["value_complaint"],
+    "application_difficulty": ["application_issue"],
+    "base_makeup_disruption": ["application_issue"],
+    "authenticity_doubt": ["coupang_authenticity_concern"],
+    "skin_irritation": ["skin_irritation_concern"],
+
+    "packaging_complaint": ["packaging_complaint"],
+
+    "marketing_deception": [],
+    "seller_trust_concern": [],
+    "return_intent": [],
+    "generic_negative": []
+  }
+}

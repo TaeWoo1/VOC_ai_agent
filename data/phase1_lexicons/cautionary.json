@@ -1,0 +1,141 @@
+{
+  "version": "1.13",
+  "entries": [
+    {
+      "id": "persistence_reservation",
+      "display_label": "지속력 유보",
+      "patterns": [
+        "지속력이 긴 편은 아니",
+        "지속력도 파우더",
+        "색이 금방 날라",
+        "금방 날라가",
+        "금방 날아가",
+        "어느순간 사라",
+        "유지력이 아쉬",
+        "유지력이 약",
+        "지속력이 약",
+        "지속력 약함"
+      ],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "tone_mismatch",
+      "display_label": "톤 부적합 경고",
+      "patterns": ["극웜", "너무 극", "라이트톤에게는 비추", "웜톤 베스트 비추"],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "pigment_complaint",
+      "display_label": "발색 불만",
+      "patterns": [
+        "발색이 별로",
+        "최악의 발색",
+        "발색도 좀 연한",
+        "이정도의 발색",
+        "덕지덕지 발라도",
+        "홍당무처럼",
+        "자주색이 되",
+        "발색은 너무 약",
+        "발색 기대",
+        "발색이 1도",
+        "색상 자체가 너무 연",
+        "티는 안",
+        "티도안나",
+        "별로 안나서",
+        "흰 끼 돌",
+        "발색이 약합",
+        "발색이 너무 약"
+      ],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "value_complaint",
+      "display_label": "가격·가치 불만",
+      "patterns": ["돈 아까", "돈아까", "이가격대", "비싼지", "가격대비 실망"],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "application_issue",
+      "display_label": "바르기·밑화장 문제",
+      "patterns": [
+        "어떻게 쓰는거예요",
+        "어떻게 바르시",
+        "발리는 양이 아주 작",
+        "잘 얹어지지 않",
+        "피부화장이 밀리고",
+        "밑화장까지 벗겨",
+        "양조절 너무",
+        "베이스화장밀림",
+        "초보자가 쓰기엔",
+        "베이스가 까져요",
+        "베이스가 까짐",
+        "베이스가 잘 까",
+        "베이스가 너무 잘 까",
+        "베이스 까짐이 너무",
+        "베이스 다 밀려",
+        "다 벗겨져요",
+        "손으로 바르면 뭉침",
+        "양조절이 조금 어려",
+        "난이도가 있",
+        "베이스 벗겨져"
+      ],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "packaging_complaint",
+      "display_label": "포장·개봉·배송 파손 불만",
+      "patterns": [
+        "뚜껑 여는",
+        "뚜껑이 열때",
+        "깨져서 와서",
+        "비닐로 달랑",
+        "뜯어보자마자 분해"
+      ],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "shade_mismatch",
+      "display_label": "기대 색상·실물 색상 불일치",
+      "patterns": [
+        "베이지 라기 보다",
+        "베이지 색일줄 알았",
+        "사진과 전혀",
+        "이거보다 더 밝은"
+      ],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "eyeshadow_fallout",
+      "display_label": "가루 날림 (아이섀도우)",
+      "patterns": [
+        "가루날림이 심",
+        "가루날림 제일",
+        "가루가 튀",
+        "가루날림이 좀 있"
+      ],
+      "min_doc_freq": 2,
+      "categories": ["eyeshadow"]
+    },
+    {
+      "id": "shade_mismatch",
+      "display_label": "기대 색상·실물 색상 불일치",
+      "patterns": [
+        "색을 잘못골",
+        "눈에 올렸을 때 동",
+        "형광+채도"
+      ],
+      "min_doc_freq": 2,
+      "categories": ["eyeshadow"]
+    },
+    {
+      "id": "tone_mismatch",
+      "display_label": "톤 부적합 경고",
+      "patterns": [
+        "쿨은 절대",
+        "웜톤분들은 사용하기 좀 어려울"
+      ],
+      "min_doc_freq": 2,
+      "categories": ["eyeshadow"]
+    }
+  ]
+}
