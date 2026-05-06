@@ -61,6 +61,56 @@ CREATE TABLE IF NOT EXISTS snapshots (
     summary_text      TEXT,
     dashboard_json    TEXT
 );
+
+-- Phase 1 (Coupang + OliveYoung bait report). Throwaway after Phase 2 cutover.
+-- Lean schema by design: no FK, no UNIQUE on (channel, fingerprint), minimal NOT NULL.
+-- Identity generators (review_id, content_fingerprint) match the future SA `reviews`
+-- table so the Phase 2 migration is a 1:1 copy. Do not tighten constraints here.
+CREATE TABLE IF NOT EXISTS phase1_reviews (
+    review_id            TEXT PRIMARY KEY,
+    source_channel       TEXT NOT NULL,
+    source_method        TEXT NOT NULL,
+    source_id            TEXT,
+    source_url           TEXT,
+    text                 TEXT NOT NULL,
+    rating_normalized    REAL,
+    rating_raw           REAL,
+    review_date          TEXT,
+    language             TEXT,
+    content_fingerprint  TEXT NOT NULL,
+    is_duplicate         INTEGER DEFAULT 0,
+    duplicate_of         TEXT,
+    product_keyword      TEXT,
+    product_external_id  TEXT,
+    channel_meta_json    TEXT,
+    derived_json         TEXT,
+    raw_metadata_json    TEXT,
+    run_id               TEXT,
+    collected_at         TEXT NOT NULL,
+    ingested_at          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_phase1_reviews_channel
+    ON phase1_reviews(source_channel);
+CREATE INDEX IF NOT EXISTS ix_phase1_reviews_keyword
+    ON phase1_reviews(product_keyword);
+CREATE INDEX IF NOT EXISTS ix_phase1_reviews_date
+    ON phase1_reviews(review_date);
+CREATE INDEX IF NOT EXISTS ix_phase1_reviews_channel_fingerprint
+    ON phase1_reviews(source_channel, content_fingerprint);
+
+CREATE TABLE IF NOT EXISTS phase1_runs (
+    run_id            TEXT PRIMARY KEY,
+    channel           TEXT NOT NULL,
+    requested_target  TEXT NOT NULL,
+    started_at        TEXT NOT NULL,
+    finished_at       TEXT,
+    quality_status    TEXT NOT NULL,
+    summary_json      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_phase1_runs_channel_started
+    ON phase1_runs(channel, started_at);
 """
 
 

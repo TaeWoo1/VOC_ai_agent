@@ -8,6 +8,7 @@ Pipeline order:
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import unicodedata
 from datetime import date, datetime
@@ -16,12 +17,17 @@ from urllib.parse import urlparse
 from src.voc.schemas.raw import RawReview
 from src.voc.schemas.canonical import CanonicalReview
 
+logger = logging.getLogger(__name__)
+
+TEXT_LENGTH_FLOOR: int = 10  # cleaned text below this is rejected (Phase 1 semantic rule)
 
 CHANNEL_DOMAIN_MAP: dict[str, str] = {
     "mock": "mock.local",
     "naver": "shopping.naver.com",
     "csv": "csv.local",
     "google_business": "business.google.com",
+    "coupang": "coupang.com",
+    "oliveyoung": "oliveyoung.co.kr",
 }
 
 CHANNEL_RATING_SCALES: dict[str, tuple[int, int]] = {
@@ -29,6 +35,8 @@ CHANNEL_RATING_SCALES: dict[str, tuple[int, int]] = {
     "naver": (1, 5),
     "csv": (1, 5),
     "google_business": (1, 5),
+    "coupang": (1, 5),
+    "oliveyoung": (1, 5),
 }
 
 VALID_LANGUAGES: set[str] = {"ko", "en"}
@@ -44,6 +52,10 @@ def normalize(raw: RawReview) -> CanonicalReview:
         raise ValueError("raw_text is empty or whitespace-only")
 
     text = _clean_text(raw.raw_text)
+    if len(text) < TEXT_LENGTH_FLOOR:
+        raise ValueError(
+            f"cleaned text below {TEXT_LENGTH_FLOOR}-char floor (got {len(text)})"
+        )
     language = _assign_language(raw.raw_language, text)
     review_date = _parse_date(raw.raw_date)
     rating = _normalize_rating(raw.raw_rating, raw.source_channel)
@@ -130,6 +142,11 @@ def _normalize_rating(raw_rating: float | int | None, source_channel: str) -> fl
     if hi == lo:
         return 0.5
     normalized = (raw_rating - lo) / (hi - lo)
+    if normalized < 0.0 or normalized > 1.0:
+        logger.warning(
+            "rating %s out of range for channel %s (scale=%s-%s); clamping",
+            raw_rating, source_channel, lo, hi,
+        )
     return max(0.0, min(1.0, normalized))
 
 
@@ -158,3 +175,17 @@ def _generate_review_id(
     else:
         key = f"{source_channel}::{content_fingerprint}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+# Public alias — `_generate_review_id` was internal to this module, but the
+# Phase 2E multi-sort membership tracker (src/voc/app/sort_membership.py)
+# needs to reproduce the same review_id values that the normalizer assigns.
+# Exposing a stable public name avoids consumers reaching into the private
+# helper. The signature matches the source-id-only path: when source_id is
+# present (always true for OY API rows), the fingerprint argument is unused.
+def generate_review_id(
+    source_channel: str,
+    source_id: str | None,
+    content_fingerprint: str = "",
+) -> str:
+    return _generate_review_id(source_channel, source_id, content_fingerprint)

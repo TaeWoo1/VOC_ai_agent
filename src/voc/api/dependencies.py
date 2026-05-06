@@ -7,7 +7,10 @@ from fastapi import Request
 from src.voc.api.store import RunStore
 from src.voc.app.monitoring import MonitoringService
 from src.voc.app.orchestrator import VOCPipeline
+from src.voc.app.phase1_pipeline import Phase1Pipeline
 from src.voc.app.sync_service import SyncService
+from src.voc.persistence.phase1_review_repository import Phase1ReviewRepository
+from src.voc.persistence.phase1_run_repository import Phase1RunRepository
 from src.voc.persistence.repository import (
     EntityRepository,
     SnapshotRepository,
@@ -54,3 +57,18 @@ def get_snapshot_repo(request: Request) -> SnapshotRepository:
 def get_source_repo(request: Request) -> SourceConnectionRepository:
     """Return the source connection repository from app state."""
     return request.app.state.source_repo
+
+
+def get_phase1_review_repo(request: Request) -> Phase1ReviewRepository:
+    """Return the Phase 1 review repository from app state."""
+    return request.app.state.phase1_review_repo
+
+
+def get_phase1_run_repo(request: Request) -> Phase1RunRepository:
+    """Return the Phase 1 run audit repository from app state."""
+    return request.app.state.phase1_run_repo
+
+
+def get_phase1_pipeline(request: Request) -> Phase1Pipeline:
+    """Return the Phase 1 ingestion pipeline from app state."""
+    return request.app.state.phase1_pipeline
