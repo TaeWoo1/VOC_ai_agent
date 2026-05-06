@@ -79,8 +79,16 @@ data/.DS_Store
 eval_data/results/*.json
 eval_data/.DS_Store
 
-# Claude Code
-.claude/
+# Claude Code: narrow ignore — track shared agent definitions and the
+# /orchestrate slash command so docs/agent_orchestration_playbook.md §11
+# stays truthful in fresh clones. Everything else under .claude/ stays
+# per-clone (settings, skills, other commands).
+.claude/*
+!.claude/agents/
+!.claude/agents/*.md
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/orchestrate.md
 
 # OS
 .DS_Store

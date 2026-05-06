@@ -290,6 +290,8 @@ Every operator → agent dispatch lands as a ticket. Tickets live in
   - <pytest / grep / inspector commands the agent must run before handoff>
 - **output**:
   - <markdown file written | code patch | report | yaml ledger row>
+- **handoff file**: `ops/agent_handoffs/<ticket-id>.md` (required; see
+  §5 "Filesystem handoff protocol")
 - **stop conditions**:
   - <when to stop and ask vs when to continue>
   - default: stop after summary, do not stage, do not commit
@@ -347,6 +349,60 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 The "Untracked / uncommitted state" block is **mandatory**. The
 operator must always know what is on disk that has not been committed.
 
+### Filesystem handoff protocol
+
+The chat-form payload above is **commentary**, not the handoff. The
+orchestrator runs in the main worktree and cannot see other Claude
+sessions; it can only see files. Therefore:
+
+- **Chat output is not the source of truth.** Repo-on-disk is (per
+  §1.2 "Source of truth"). A sub-agent that reports only in chat has
+  not handed off.
+- **Every sub-agent must write a handoff file** to
+  `ops/agent_handoffs/<ticket-id>.md` inside its own worktree. Create
+  the directory if missing:
+  ```bash
+  mkdir -p ops/agent_handoffs
+  ```
+- **The handoff file must include**, at minimum:
+  - ticket id
+  - role
+  - worktree path (absolute, e.g. `/Users/<you>/Downloads/workspace/aiagent-product`)
+  - branch (`git rev-parse --abbrev-ref HEAD`)
+  - files changed
+  - commands run
+  - test results
+  - risks
+  - proposed commit message
+  - next recommendation
+  - `git status --short` output (verbatim)
+  - `git diff --stat` output (verbatim)
+
+  The fields above are a superset of the §5 chat payload — the
+  on-disk handoff is what the orchestrator actually reads.
+
+- **Orchestrator read pattern.** The orchestrator (or operator
+  directly) reads the handoff file from the sibling worktree
+  without entering it:
+  ```bash
+  cat ../aiagent-product/ops/agent_handoffs/P-001.md
+  git -C ../aiagent-product status --short
+  git -C ../aiagent-product diff --stat
+  ```
+  These three commands are the canonical inspection set: the file
+  for narrative + metadata, `git status --short` for working-tree
+  state, `git diff --stat` for change shape.
+
+- **File hygiene.**
+  - Handoff files are **untracked by default**. They are **not**
+    staged unless the operator explicitly asks to commit them.
+  - They may be deleted after the ticket is closed, or archived
+    into `docs/agent_handoffs_archive/` if the contents are useful
+    for future reference.
+  - `ops/agent_handoffs/` is expected to appear under "Untracked"
+    in the §5 chat-form "Untracked / uncommitted state" block;
+    that is normal, not a leak.
+
 ---
 
 ## 6. Commit protocol
@@ -379,6 +435,15 @@ Hard rules for the commit step:
 7. **Show `git log --oneline -1` and `git status --short` after the
    commit** so the operator can confirm the SHA and the residual
    working tree state in the same handoff.
+8. **Handoff file is the completion gate.** A ticket is **not
+   complete** unless `ops/agent_handoffs/<ticket-id>.md` exists in
+   the agent's worktree and follows the §5 "Filesystem handoff
+   protocol" payload. Chat-only reports are commentary, not
+   handoffs. The orchestrator (or operator directly) reads the file
+   via `cat ../aiagent-<role>/ops/agent_handoffs/<ticket-id>.md`
+   before accepting the ticket. If the file is missing, the agent
+   has not handed off — return the ticket with "no handoff file
+   found" and let the agent re-emit on disk.
 
 ---
 
@@ -659,7 +724,188 @@ at `todo` until operator dispatches.
 
 ---
 
-## 11. Maintenance cadence
+## 11. Claude Code native subagent mode
+
+§3 (worktree / branch discipline) describes the **multi-session
+multi-worktree** mode: each specialist is a separate Claude Code
+session running in a sibling worktree, and the operator pastes (or the
+orchestrator reads, post-A-002) handoff files between them. That mode
+is the right shape when work is heavy, branches are long-lived, or the
+operator wants visible isolation per role.
+
+This section adds the **single-session native mode**, where the
+operator runs **one** Claude Code session in the main worktree and the
+orchestrator delegates to specialist roles via Claude Code's built-in
+**subagent** mechanism (`.claude/agents/*.md`) plus the
+`/orchestrate` slash command (`.claude/commands/orchestrate.md`). The
+two modes are not exclusive — they coexist and the operator picks
+per task.
+
+### When to use native subagents
+
+Use native subagent mode when **any** of these are true:
+
+- The goal is small enough to fit in a single operator session (one
+  doc draft + one read-only inspection, a single bug-fix + its test,
+  etc.).
+- File scopes are clearly disjoint, so concurrency is structural
+  rather than physical.
+- The operator wants a single handoff to review at the end, not 2–4
+  paste-backs.
+- No long-lived topic branch is needed (the work lands as one or two
+  commits on `main` or one short-lived branch).
+
+Prefer the §3 multi-worktree mode when **any** of these are true:
+
+- A specialist's work will span many turns and needs an isolated
+  branch (e.g. P-001 post drafting in `aiagent-product` over
+  multiple revisions).
+- Two writers need to operate on overlapping files but want a clean
+  per-branch history before integration.
+- The operator wants visible separation for accountability /
+  policy-chain reasons (e.g. brand content drafting kept off the
+  main worktree until the safety check is signed).
+- Live collection is involved — `aiagent-ops` isolates the working
+  tree from concurrent doc edits.
+
+### Subagent definitions
+
+Five subagents live in `.claude/agents/`:
+
+| File | Subagent name | Maps to playbook role |
+|---|---|---|
+| `orchestrator.md` | `orchestrator` | §2.1 Orchestrator |
+| `product-strategy.md` | `product-strategy` | §2.2 Product / Strategy |
+| `implementation.md` | `implementation` | §2.3 Implementation |
+| `qa-regression.md` | `qa-regression` | §2.4 QA / Regression |
+| `ops-data.md` | `ops-data` | §2.5 Ops / Data |
+
+Each definition file carries: `name`, `description` (used by Claude
+Code to decide when to invoke), `tools` allowlist, role instructions,
+allowed / forbidden areas, stage / commit restrictions, and the
+handoff requirement. The role wording mirrors §2 of this playbook —
+when this playbook changes a role boundary, the matching subagent
+file must be updated in the same change.
+
+### Concurrency rule
+
+**At most one writer subagent per orchestration unit**, unless:
+
+1. File scopes are **provably disjoint** (no path overlap, no shared
+   protected file at risk), AND
+2. The operator **explicitly approves** the parallel layout in the
+   dispatching turn (e.g. "...run Product post 002 and Implementation
+   cardnews planner stub IN PARALLEL").
+
+Read-only subagents (`qa-regression`, read-only `ops-data` tasks like
+Brand-20 readiness) may run in parallel with each other and with one
+writer. The orchestrator must print the concurrency plan to chat
+before dispatching so the operator can abort if the plan is wrong.
+
+Why this rule: two writers in the same session can both stage edits
+to overlapping files within one turn, and the §6 commit protocol's
+"stage explicitly by path" discipline cannot reliably untangle a
+post-hoc collision. Parallelism is cheaper to constrain up front than
+to reconcile after.
+
+### Filesystem handoff is still required
+
+Native subagent mode does **not** relax the §5 "Filesystem handoff
+protocol". Every subagent — including those running in the same
+process as the orchestrator — must write
+`ops/agent_handoffs/<ticket-id>.md`. Chat output from a subagent is
+commentary, not authority, even when the orchestrator can technically
+read the subagent's chat result inline.
+
+Reasons:
+
+- Uniform review surface — operator reviews a file, not a
+  conversation log.
+- Audit trail — handoff files survive the session; chat does not.
+- Mode-portability — a ticket can move from native mode to multi-
+  worktree mode (or vice versa) without changing how the handoff
+  is consumed.
+
+### `/orchestrate` slash command
+
+`.claude/commands/orchestrate.md` defines the slash command. Usage:
+
+```
+/orchestrate <operator goal in plain language>
+```
+
+The command equips the current Claude session as the orchestrator,
+re-grounds it from this playbook + `CLAUDE.md`, decomposes the goal
+into tickets per §4, prints a concurrency plan, dispatches to the
+appropriate subagent(s), reads each subagent's handoff file directly
+from the filesystem, and synthesizes a unified review per §7.
+
+It enforces:
+
+- no commit / no push / no `git add` / no history rewrite
+- no live collection unless the goal **explicitly** names a goodsNo
+  or batch in the dispatching turn (per §8 — per-batch
+  authorization, never standing)
+- no edit to CLAUDE.md §6 protected files unless explicitly
+  authorized in the same turn
+- one writer subagent default, parallel writers only on explicit
+  operator approval
+
+#### Examples
+
+```
+/orchestrate Draft Post 002 and run Brand-20 readiness check. Do not commit.
+```
+→ Two tickets. Product-strategy writes
+`docs/instagram_public_education_post_002.md` (writer). Ops-data
+runs read-only Brand-20 readiness (reader). One writer + one reader
+→ parallel allowed. Both write handoff files. Orchestrator
+synthesizes.
+
+```
+/orchestrate Triage the buyer_journey drift test failure. Read-only.
+```
+→ One ticket, qa-regression. Read-only inspection, single-
+recommendation handoff. No writer. Orchestrator surfaces the
+recommendation to the operator.
+
+```
+/orchestrate Authorize live collection of A000000214231 only and run smoke.
+```
+→ One ticket, ops-data, with **explicit per-batch authorization for
+A000000214231**. The goodsNo named in the operator turn IS the
+authorization. Smoke runs `scripts/run_all.py` for that one SKU,
+verifies `cardnews_mode == "private_demo"` and `schema_version ==
+"1.1"` in the manifest, writes handoff.
+
+#### What `/orchestrate` does NOT do
+
+- It does not stage, commit, push, or run anything destructive.
+- It does not invent missing scope. If the goal is ambiguous about
+  which files to touch or which subagent owns a piece, the
+  orchestrator stops and asks.
+- It does not absorb a subagent's chat output as a handoff. If the
+  expected `ops/agent_handoffs/<ticket-id>.md` is missing, the
+  ticket is incomplete and gets returned (per §6 #8).
+
+### Mode selection — quick rule
+
+| Situation | Mode |
+|---|---|
+| Single goal, fits one session, scopes obvious | native (`/orchestrate`) |
+| Heavy multi-turn drafting, isolation desired | multi-worktree (§3) |
+| Live collection batch | multi-worktree (`aiagent-ops`) |
+| One writer + one read-only check | native, parallel |
+| Two writers on disjoint scopes | multi-worktree by default; native only if operator explicitly approves |
+| Two writers on overlapping scopes | multi-worktree, never native |
+
+When in doubt: **multi-worktree**. Native mode is a convenience for
+small, well-scoped tasks; it is not a replacement for the worktree
+discipline that protects the repo state.
+
+---
+
+## 12. Maintenance cadence
 
 ### Daily start (Operator + Orchestrator, ~10 min)
 
