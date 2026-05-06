@@ -767,13 +767,23 @@ at `todo` until operator dispatches.
 ### Q-001 — `buyer_journey` drift read-only triage
 
 - **role**: QA / Regression Agent
-- **status**: todo
-- **goal**: Investigate the assertion drift in
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `7cea019 test(content): add buyer journey fixture regression test`
+- **closed_at**: 2026-05-07
+- **decision recorded**: QA triage found fixture drift; implementation
+  applied Path A by repointing the degraded fixture to
+  `shared/_pre_retry_snapshot/20260502T122159Z/analysis_report.json`.
+  Producer (`src/voc/content/cardnews_buyer_journey.py`) was not
+  regressed; root cause was a later live retry-recovery run that
+  rewrote `shared/analysis_report.json` to the post-retry success
+  state without re-pointing the test. Resolved via single-line
+  fixture-path repoint in I-Q001-A → committed `7cea019`.
+- **goal** *(historical)*: Investigate the assertion drift in
   `tests/test_content/test_cardnews_buyer_journey.py` (currently
   untracked; 1 known failing test against the regenerated run-003
   fixture). Decide whether to fix the test, regenerate the fixture,
   or open a `impl/` ticket to fix the producer code.
-- **context**: This test was deferred from Group A and Group C
+- **context** *(historical)*: This test was deferred from Group A and Group C
   commits. It hard-codes
   `sorts_failed=["RATING_ASC", "RECOMMENDED_DESC"]` but the current
   run-003 fixture has 5/5 sorts succeeded → produces
@@ -802,6 +812,49 @@ at `todo` until operator dispatches.
   - recommendation ready → handoff
   - if more than one fix is reasonable → present the trade-offs,
     let operator pick
+
+### I-Q001-A — repoint buyer_journey degraded fixture
+
+- **role**: Implementation Agent
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `7cea019 test(content): add buyer journey fixture regression test`
+- **closed_at**: 2026-05-07
+- **decision recorded**: One-file test addition; no production code
+  change; assertions not relaxed. Path A from Q-001 applied verbatim:
+  fixture path repointed from `shared/analysis_report.json` to
+  `shared/_pre_retry_snapshot/20260502T122159Z/analysis_report.json`
+  in `tests/test_content/test_cardnews_buyer_journey.py`. Test gates
+  green pre-commit: 12/12 scoped, 1129/1129 broad
+  (`tests/test_content/`). The test file was previously untracked
+  (deferred from Group A and Group C commits); the commit lands it as
+  `A` (added), not `M` (modified).
+- **goal** *(historical)*: Apply Q-001 Path A by repointing the
+  buyer_journey degraded fixture path to the pre-retry snapshot,
+  without modifying production code or relaxing assertions.
+- **context** *(historical)*: Q-001
+  (`ops/agent_handoffs/Q-001.md`) identified fixture drift as the
+  root cause and recommended Path A; orchestrator triage synthesis at
+  `ops/agent_handoffs/O-A-Q001.md` confirmed the single fix path.
+  Implementation handoff at `ops/agent_handoffs/I-Q001-A.md`;
+  orchestrator implementation synthesis at
+  `ops/agent_handoffs/O-A-IQ001A.md`. Handoff files remain untracked
+  by design per playbook §5 file hygiene.
+- **scope**:
+  - in: `tests/test_content/test_cardnews_buyer_journey.py` (single
+    file; one-line fixture-path repoint at L298-302)
+  - out: `src/`, `cardnews/`, `scripts/`, `docs/`, `outputs/`,
+    `configs/`, `.claude/`, `data/`, `eval_data/`, any other test,
+    any production code
+- **commands** (verification gates run pre-commit):
+  - `PYTHONPATH=. pytest tests/test_content/test_cardnews_buyer_journey.py -q` → 12 passed
+  - `PYTHONPATH=. pytest tests/test_content/ -q` → 1129 passed
+  - `git diff --cached --name-only` → only the test file
+- **output**:
+  - one new tracked file
+    (`tests/test_content/test_cardnews_buyer_journey.py`); commit
+    `7cea019`
+- **stop conditions**:
+  - tests green + commit clean → handoff (achieved)
 
 ---
 
