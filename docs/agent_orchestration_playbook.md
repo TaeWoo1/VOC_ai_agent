@@ -696,6 +696,17 @@ at `todo` until operator dispatches.
 
 - **role**: Ops / Data Agent
 - **status**: todo
+- **blocked_on**: `I-OY-RATING-SORTS-IMPL` — the O-001 smoke + resume
+  produced 2 of 3 clean run-packages (Tocobo `A000000179126`, Anua
+  `A000000207901`) but surfaced a repeated RATING_ASC / RATING_DESC
+  `sort_control_failure` across all 3 SKUs touched today. Brand-20
+  fan-out to the remaining 17 SKUs (and the deferred TIRTIR
+  `A000000214231` retry) waits on the rating-sort fix plus a
+  one-product verification re-collection. See
+  `ops/agent_handoffs/O-001-smoke-trio.md` and
+  `ops/agent_handoffs/O-A-O001-resume.md` for the smoke results, and
+  `ops/agent_handoffs/I-OY-RATING-SORTS.md` /
+  `ops/agent_handoffs/O-A-IORS.md` for the triage + recommended fix.
 - **goal**: Confirm Brand-20 collection batch can run end-to-end
   against the current code (post-`a2b2ae6` cardnews_mode guard) without
   surprises. Read-only verification first; no live collection.
@@ -1019,6 +1030,146 @@ at `todo` until operator dispatches.
 - **stop conditions**:
   - plan or patch only after H-002 has been used at least once
   - operator approval required before starting
+
+### I-OY-RATING-SORTS — RATING_* `sort_control_failure` read-only triage
+
+- **role**: QA / Regression Agent
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `handoff-only` — read-only triage produced no tracked
+  commit; the design + recommendation live in the handoff files
+- **closed_at**: 2026-05-07
+- **handoff**:
+  - `ops/agent_handoffs/I-OY-RATING-SORTS.md` (402 lines, 14 sections,
+    qa-regression triage)
+  - `ops/agent_handoffs/O-A-IORS.md` (orchestrator synthesis)
+- **decision recorded**: Read-only triage found that RATING_ASC /
+  RATING_DESC failure is **not** primarily login/session expiry, **not**
+  sun-care category-specific, and **not** pipeline expectation
+  mismatch. Cross-category probe falsified the category hypothesis
+  (espoir 2026-05-05 succeeded all 5 sorts; needly 2026-05-05 failed
+  RATING_* the same way). The strongest hypothesis is DOM render
+  variability on the rating-axis sort tabs (labels not always
+  inline-rendered at hunt time). The connector has only one commit in
+  tree (`47d7631`); the change vector is OY-side, not ours. Recommended
+  single fix path: **DOM probe widening + a distinct
+  `sort_control_unreachable` terminal status** so rating-sort control
+  reachability is not conflated with `blocked_or_empty_state` real
+  blocked/empty result states. Three alternatives rejected with
+  reasoning: selector substring update (would risk clicking `랭킹`
+  nav), category-specific branch (falsified by cross-category probe),
+  status-rename-only (half a fix; doesn't recover data).
+- **goal** *(historical)*: Investigate why RATING_ASC and RATING_DESC
+  produce `sort_control_failure` across TIRTIR, Tocobo, and Anua O-001
+  smoke runs. Determine whether selector drift, login/session artifact,
+  category-specific DOM behavior, or pipeline expectation mismatch.
+  Produce one recommended fix path. Read-only — no code edits, no
+  tests run, no live collection.
+- **context** *(historical)*: O-001 smoke/resume revealed all 3 OY
+  sun-care SKUs touched today failed RATING_ASC + RATING_DESC with the
+  same `blocked_or_empty_state` signature, despite primary corpus
+  DATETIME_DESC + USEFUL_SCORE_DESC + RECOMMENDED_DESC succeeding on
+  the same logged-in session.
+- **scope**:
+  - in: read-only inspection of
+    `src/voc/connectors/oliveyoung_browser_api.py`,
+    `src/voc/app/collection_summary.py`, the O-001 handoff chain, the
+    Tocobo + Anua + TIRTIR run-package collection_summary.json files,
+    cross-category older run dirs, `/tmp/phase2e_pipeline_*.json` step
+    manifests
+  - out: any code edit, any test edit, any commit, any live collection
+- **commands**:
+  - `git log --oneline -30 -- src/voc/connectors/oliveyoung_browser_api.py`
+  - `grep -nE 'RATING_ASC|RATING_DESC|sort_tab|sort_control|sort_button|sortType' src/voc/connectors/oliveyoung_browser_api.py`
+- **output**:
+  - QA-style report with single-recommendation conclusion (handoff +
+    orchestrator synthesis)
+- **stop conditions**:
+  - recommendation ready → handoff (achieved)
+
+### I-OY-RATING-SORTS-IMPL — DOM probe widening + `sort_control_unreachable` status
+
+- **role**: Implementation Agent
+- **status**: todo
+- **goal**: Implement the rating-sort control fix recommended by
+  I-OY-RATING-SORTS: widen the DOM probe before
+  `_click_sort_button_robust`; add a new terminal status
+  `sort_control_unreachable` distinct from `blocked_or_empty_state`;
+  route the new status through `collection_summary.py` and
+  `inspect_run_quality.py`; add unit tests covering reachable,
+  unreachable, and summary-classification behavior.
+- **context**: O-001 smoke/resume found repeated RATING_ASC /
+  RATING_DESC failures across Tocobo and Anua after login was restored;
+  prior forensic data also showed the same signature on TIRTIR's
+  pre-login run (different failure mode — auth-walled, not
+  sort-control — but related symptom). Brand-20 fan-out to the
+  remaining 17 SKUs and the deferred TIRTIR retry should wait on this
+  fix, OR proceed only under an explicit operator-named "known soft
+  failure" decision per the O-A-O001-resume Path B option.
+- **scope**:
+  - in: `src/voc/connectors/oliveyoung_browser_api.py` —
+    `_click_sort_button_robust` (~3003-3155), `_trigger_review_list_api`
+    cascade (~3225-3290), terminal-status branch (~1383-1555); add new
+    status string + DOM probe widening
+  - in: `src/voc/app/collection_summary.py` — recognise the new
+    `sort_control_unreachable` status in `_has_auth_evidence_entry` /
+    `_is_blocked_entry`; route to `sort_control_failure_by_sort` cleanly
+    without lossy aliasing through `blocked_or_empty_state`
+  - in: `scripts/inspect_run_quality.py` — update warning string for
+    the new status
+  - in: `tests/test_connectors/...` — connector unit tests for
+    reachable / unreachable behavior
+  - in: `tests/test_app/test_collection_summary.py` — classifier unit
+    test for the new status routing
+  - out: live collection (separate ops dispatch after this lands);
+    credentials; public publish; generated outputs under `outputs/`;
+    unrelated connectors; CLAUDE.md §6 protected detector / aggregate /
+    lexicon / golden / IMPACTS_KO / RECOMMENDATIONS_KO / verdict
+    template files unless explicitly required and approved
+- **requirements**:
+  - Before `_click_sort_button_robust`, scroll the sort row / scope
+    into view (idempotent — does not change behavior when the row is
+    already visible)
+  - If rating labels are absent on first poll, probe **safe**
+    disclosure affordances (e.g. text-equals match against
+    `{"정렬", "더보기", "전체보기", "필터", "정렬 기준"}`) inside the
+    sort scope only; do NOT use broad substring selectors that could
+    click `랭킹` / category-nav elements
+  - Add terminal status `sort_control_unreachable` emitted when the
+    target sort control cannot be reached after the widened probe; do
+    NOT emit it for true blocked/empty result states
+  - Route the new status through `collection_summary.py` to
+    `sort_control_failure_by_sort` cleanly (NOT through
+    `blocked_or_empty_state`)
+  - Update `inspect_run_quality.py` warning string for the new status
+  - Preserve existing `blocked_or_empty_state` semantics for true
+    blocked/empty result states (no behavior regression on currently
+    succeeding sorts)
+  - Add unit tests for: (a) sort-row not present on initial poll →
+    disclosure click → second poll succeeds (rescue path); (b) sort-row
+    not present after disclosure click → terminal
+    `sort_control_unreachable`; (c) `collection_summary` correctly
+    classifies the new status as `sort_control_failure: true` without
+    any false `auth_evidence`; (d) renderer / inspector display the
+    new status verbatim
+  - Do NOT run live collection in this implementation ticket
+- **commands** (verification gates run pre-commit):
+  - `pytest tests/test_app/test_collection_summary.py -v`
+  - `pytest tests/test_connectors/ -v` (or wherever the connector unit
+    tests live)
+- **output**:
+  - 3-5 modified files (connector + classifier + inspector); 1-2 new
+    test files
+- **stop conditions**:
+  - patch + tests green → handoff
+  - no live collection in this ticket
+  - no stage; no commit until reviewed
+  - acceptance gate (post-merge ops dispatch): one-product
+    re-collection on Tocobo or Anua observes either RATING_ASC
+    `max_cap_reached` with `raw>0, inserted>0` (rescue succeeded) OR
+    `RATING_ASC: status=sort_control_unreachable,
+    sort_control_failure_by_sort.RATING_ASC=true,
+    anti_bot_or_blocked_by_sort.RATING_ASC=false` (rescue did not
+    succeed but the diagnostic now distinguishes the cause cleanly)
 
 ---
 
