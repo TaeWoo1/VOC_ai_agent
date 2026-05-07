@@ -696,17 +696,34 @@ at `todo` until operator dispatches.
 
 - **role**: Ops / Data Agent
 - **status**: todo
-- **blocked_on**: `I-OY-RATING-SORTS-IMPL` — the O-001 smoke + resume
-  produced 2 of 3 clean run-packages (Tocobo `A000000179126`, Anua
-  `A000000207901`) but surfaced a repeated RATING_ASC / RATING_DESC
-  `sort_control_failure` across all 3 SKUs touched today. Brand-20
-  fan-out to the remaining 17 SKUs (and the deferred TIRTIR
-  `A000000214231` retry) waits on the rating-sort fix plus a
-  one-product verification re-collection. See
-  `ops/agent_handoffs/O-001-smoke-trio.md` and
-  `ops/agent_handoffs/O-A-O001-resume.md` for the smoke results, and
-  `ops/agent_handoffs/I-OY-RATING-SORTS.md` /
-  `ops/agent_handoffs/O-A-IORS.md` for the triage + recommended fix.
+- **blocked_on**: `one-product live verification after fdd5793` —
+  the I-OY-RATING-SORTS-IMPL code/test patch landed at
+  `fdd5793 fix(connectors): widen OY sort-row probe and classify
+  unreachable controls` (8 files: connector + dataclass + batch
+  classifier + summary classifier + inspector + 3 test files; +1158/-6
+  lines; 38 + 75 + 433 scoped + 3920 broad tests green). The
+  remaining acceptance gate is a single one-product live re-collection
+  on Tocobo (`A000000179126`) OR Anua (`A000000207901`) — both
+  already known-good post-login SKUs from the O-001 resume. Pass
+  condition is either:
+  (a) RATING_ASC `max_cap_reached` with `raw>0, inserted>0` (rescue
+      path succeeded — DOM probe widening recovered the rating tab); OR
+  (b) `RATING_ASC: status=sort_control_unreachable,
+      sort_control_failure_by_sort.RATING_ASC=true,
+      anti_bot_or_blocked_by_sort.RATING_ASC=false` (rescue did not
+      succeed but the diagnostic now distinguishes the cause cleanly,
+      without conflating with anti-bot / auth failure).
+  Either outcome unblocks Brand-20 fan-out for the remaining 17 SKUs
+  (per `ops/agent_handoffs/O-A-O001-resume.md` Path A — the
+  principled path). TIRTIR (`A000000214231`) remains off-limits
+  until the operator dispatches a fresh ticket naming it
+  specifically. See `ops/agent_handoffs/O-001-smoke-trio.md` and
+  `ops/agent_handoffs/O-A-O001-resume.md` for the smoke results;
+  `ops/agent_handoffs/I-OY-RATING-SORTS.md` and
+  `ops/agent_handoffs/O-A-IORS.md` for the triage + recommended
+  fix; and `ops/agent_handoffs/I-OY-RATING-SORTS-IMPL.md` +
+  `ops/agent_handoffs/O-A-IORSI.md` for the implementation handoff
+  + synthesis.
 - **goal**: Confirm Brand-20 collection batch can run end-to-end
   against the current code (post-`a2b2ae6` cardnews_mode guard) without
   surprises. Read-only verification first; no live collection.
@@ -1089,15 +1106,56 @@ at `todo` until operator dispatches.
 ### I-OY-RATING-SORTS-IMPL — DOM probe widening + `sort_control_unreachable` status
 
 - **role**: Implementation Agent
-- **status**: todo
-- **goal**: Implement the rating-sort control fix recommended by
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `fdd5793 fix(connectors): widen OY sort-row probe and classify unreachable controls`
+- **closed_at**: 2026-05-07
+- **decision recorded**: Implementation added DOM probe widening
+  (new `_widen_sort_row_probe` method on `_PlaywrightReviewSession`
+  with idempotent scroll-into-view + at-most-one disclosure click,
+  scoped to the sort container, exact-text match against the
+  curated `SORT_DISCLOSURE_AFFORDANCE_LABELS_KO = ("정렬", "더보기",
+  "전체보기", "필터", "정렬 기준")` allow-list — substring matching
+  was deliberately rejected because `랭킹` contains `랭`), the new
+  `sort_control_unreachable` terminal status, and full classifier /
+  summary / inspector routing across:
+  `src/voc/app/connector_run_summary.py` (new `sort_control_unreachable: bool = False` field);
+  `src/voc/app/collection_batch.py` (added to `ALL_STATUSES`;
+  `classify_status` precedence ahead of the conflated
+  `false_empty_state_detected → blocked_or_empty_state` branch —
+  HTTP 403/429 still wins);
+  `src/voc/app/collection_summary.py` (new status in
+  `EXPLICIT_FAILURE_STATUSES`; `_is_blocked_entry` short-circuits
+  to False so `anti_bot_or_blocked_by_sort` stays False);
+  `scripts/inspect_run_quality.py` (dedicated Korean warning
+  `정렬 컨트롤 도달 실패 — UI 변경 가능성, 재수집 또는 셀렉터
+  점검 필요`, particle-free verb form for grammar safety across
+  sort names). Tests: 8 new connector tests in
+  `tests/test_connectors/test_oliveyoung_sort_control_unreachable.py`
+  + 5 new classifier tests in
+  `tests/test_app/test_collection_summary.py` + 3 new batch-classifier
+  tests in `tests/test_app/test_collection_batch.py`. Gates: 38 + 75
+  + 433 scoped, 3920 + 1 skipped broad — all green. **No live
+  collection was run** in this ticket per scope. **Acceptance now
+  requires one-product live verification** on Tocobo
+  (`A000000179126`) or Anua (`A000000207901`) — tracked under O-001's
+  updated `blocked_on` annotation as a separate ops dispatch.
+  Scope nuance: 3 files outside the literal allowed list
+  (`connector_run_summary.py`, `collection_batch.py`,
+  `tests/test_app/test_collection_batch.py`) were added as necessary
+  plumbing for the new status's data-flow and test coverage —
+  operator approved option A (accept broader scope as natural
+  implementation surface) before the commit. See
+  `ops/agent_handoffs/I-OY-RATING-SORTS-IMPL.md` (10-section §5
+  handoff) and `ops/agent_handoffs/O-A-IORSI.md` (orchestrator
+  synthesis with scope-nuance audit).
+- **goal** *(historical)*: Implement the rating-sort control fix recommended by
   I-OY-RATING-SORTS: widen the DOM probe before
   `_click_sort_button_robust`; add a new terminal status
   `sort_control_unreachable` distinct from `blocked_or_empty_state`;
   route the new status through `collection_summary.py` and
   `inspect_run_quality.py`; add unit tests covering reachable,
   unreachable, and summary-classification behavior.
-- **context**: O-001 smoke/resume found repeated RATING_ASC /
+- **context** *(historical)*: O-001 smoke/resume found repeated RATING_ASC /
   RATING_DESC failures across Tocobo and Anua after login was restored;
   prior forensic data also showed the same signature on TIRTIR's
   pre-login run (different failure mode — auth-walled, not
