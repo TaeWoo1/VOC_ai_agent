@@ -871,6 +871,155 @@ at `todo` until operator dispatches.
 - **stop conditions**:
   - tests green + commit clean → handoff (achieved)
 
+### H-001 — project-native harness architecture (design-only)
+
+- **role**: Implementation Agent
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `a1ddd99 docs(agents): add project-native harness design`
+- **closed_at**: 2026-05-07
+- **decision recorded**: H-001 completed as design-only. The durable
+  design reference is `docs/agent_harness_design.md` (1,227 lines, 12
+  sections + appendix). The project will **not** wholesale adopt
+  external Harness/Ouroboros frameworks; instead, the existing
+  orchestration playbook remains binding and H-002/H-003 extract
+  repeated patterns from this session's handoff corpus into
+  project-native skills + evaluation gates. Three load-bearing
+  decisions: (a) the harness extends the playbook, never replaces it
+  — playbook stays canonical for §4 ticket template, §5 handoff
+  protocol, §6 commit protocol, §8 forbidden actions, §11
+  concurrency; (b) a 4-tier evaluation matrix
+  (mechanical / semantic / policy / operator) defines uniform
+  pass/fail surfaces, with semantic + operator tiers staying
+  judgment-based until ~more orchestration data accumulates; (c) the
+  six human-gated actions (commit, push, live collection,
+  credentials, public publish, external messages) remain
+  operator-only with no relaxation path in this design.
+- **goal** *(historical)*: Define a lightweight project-native
+  harness for this repo, inspired by Harness (Supervisor /
+  Producer-Reviewer / Pipeline / Fan-out-Fan-in / Expert-Pool
+  patterns) and Ouroboros (seed → execute → evaluate → closeout →
+  evolve loop) but not adopting either wholesale. Cover 8 named
+  topics: why-not-wholesale, current-system-summary, mapping to 5
+  Harness patterns, Ouroboros loop, 5 candidate skills, 6
+  human-gated actions, 4-tier evaluation gates, H-002/H-003
+  implementation plan.
+- **context** *(historical)*: This session produced a rich corpus of
+  real orchestrations (Q-001 read-only triage → I-Q001-A fix; C-001
+  design-only doc; O-001-smoke-trio with mid-flight emergency stop
+  + resume; I-OY-RATING-SORTS read-only code triage). Each pattern
+  has repeated enough that codifying it as a skill is now warranted.
+  H-001 names the patterns; H-002/H-003 will implement them.
+- **scope**:
+  - in: `docs/agent_harness_design.md` (new); `ops/agent_handoffs/H-001.md`
+    (new, untracked)
+  - out: any code change, any test addition, any edits to existing
+    docs (playbook, OUTPUT_CONTRACT, instagram_*); live collection;
+    staging; committing
+- **commands**:
+  - none (design doc only)
+- **output**:
+  - `docs/agent_harness_design.md` committed at `a1ddd99`; H-001 handoff
+    at `ops/agent_handoffs/H-001.md` (untracked); orchestrator synthesis
+    at `ops/agent_handoffs/O-A-H001.md` (untracked)
+- **stop conditions**:
+  - design ready + handoff written → close
+  - implementation deferred to H-002 / H-003
+
+### H-002 — extract first project-native harness skills
+
+- **role**: Implementation Agent
+- **status**: todo
+- **goal**: Create the first two low-risk reusable skill files
+  recommended by H-001 §6 + §9:
+  - `board-closeout` (§10 board-edit pattern)
+  - `fixture-drift-triage` (read-only QA pattern producing one fix
+    path)
+- **context**: These two patterns have already repeated in
+  A-001/A-002/A-003/P-001/Q-001/I-Q001-A/C-001/H-001 closeouts and
+  the Q-001 triage. H-001 §9 recommends extracting them first
+  because they are low-risk (no live collection, no public publish,
+  no credentials), non-destructive (read-only QA + markdown-only
+  board edits), and easy to validate by dry-running on a synthetic
+  ticket in-session.
+- **scope**:
+  - in: `.claude/skills/board-closeout/SKILL.md` (new)
+  - in: `.claude/skills/fixture-drift-triage/SKILL.md` (new)
+  - optional: `docs/agent_orchestration_playbook.md` cross-references
+    if the skill file format requires it
+  - out: code under `src/`, `cardnews/`, `scripts/`, `tests/`; live
+    collection; public publish; credentials; generated outputs under
+    `outputs/`; any other `.claude/` file; CLAUDE.md §6 protected
+    files
+- **requirements**:
+  - Match the format of any existing `.claude/skills/*.md` files
+    (read for format reference; do NOT edit them)
+  - Each skill spec must include: name, description, when-to-trigger,
+    when-to-skip, allowed/forbidden tools, allowed/forbidden file
+    scope, required handoff structure, example invocation
+  - Acceptance: each skill, when invoked, produces a structured
+    handoff matching the freehand precedent (`aa8cb96` / `149ab15`
+    for board-closeout; `Q-001.md` for fixture-drift-triage)
+- **commands**:
+  - in-session dry run on a synthetic ticket (no real ticket close,
+    no real test fail)
+- **output**:
+  - 2 new files under `.claude/skills/`
+- **stop conditions**:
+  - skills written → handoff
+  - no stage; no commit until operator review
+  - if the skill format conflicts with any existing `.claude/skills/`
+    file, flag and ask
+
+### H-003 — extract advanced harness skills and evolve loop
+
+- **role**: Orchestrator Agent / Implementation Agent
+- **status**: todo
+- **goal**: After H-002 patterns have been exercised at least once
+  in real tasks, extract the harder three skills + add the
+  evolve-loop convention to the playbook:
+  - `smoke-collection-forensics` (orchestrator emergency-stop write-up
+    pattern; precedent `O-001-smoke-trio.md` lines 1-217)
+  - `instagram-public-education-review` (14-row safety check + locked
+    CTA + policy-chain SHA citations; precedent playbook §7 last block)
+  - `detail-page-snapshot-design` (read-code + write-design with
+    file:line provenance + risk list + test plan; precedent C-001 →
+    `docs/detail_page_snapshot_design.md` and H-001 →
+    `docs/agent_harness_design.md`)
+  - optional: playbook `## 12. Maintenance cadence` amendment that
+    promotes "evolve" from convention to weekly review item
+    (per H-001 §5)
+- **context**: H-003 should wait until H-002's two skills have been
+  used in at least one real orchestration. The harder three skills
+  involve more cross-cutting concerns (live-collection forbidden
+  actions for forensics, brand policy chain + Korean editorial for
+  instagram-review, code-grounding ability for detail-page-snapshot).
+  Premature codification risks encoding patterns from too small a
+  sample (H-001 §10 risk list).
+- **scope**:
+  - in: `.claude/skills/` (new files only — `smoke-collection-forensics/`,
+    `instagram-public-education-review/`, `detail-page-snapshot-design/`)
+  - optional: `docs/agent_orchestration_playbook.md` §12 amendment
+  - optional: `docs/agent_harness_design.md` follow-up note (e.g. v1
+    revision after seeing H-002 in use)
+  - out: live collection; credentials; public publish; code under
+    `src/` / `cardnews/` / `scripts/` / `tests/` unless explicitly
+    scoped in a re-dispatch; CLAUDE.md §6 protected files
+- **requirements**:
+  - H-002 skills must have been invoked at least once in a real
+    orchestration before H-003 starts
+  - Each skill spec carries the same fields required for H-002
+  - Evolve-loop amendment (if included) is a small targeted edit to
+    playbook §12, not a rewrite
+- **commands**:
+  - none until skill drafts exist; then in-session dry run per skill
+- **output**:
+  - up to 3 new skill files under `.claude/skills/`
+  - optional: small playbook §12 patch
+  - optional: harness design v1 follow-up note
+- **stop conditions**:
+  - plan or patch only after H-002 has been used at least once
+  - operator approval required before starting
+
 ---
 
 ## 11. Claude Code native subagent mode
