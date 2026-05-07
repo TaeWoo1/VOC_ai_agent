@@ -590,12 +590,16 @@ def run_multi_sort_scrape(
         # Jitter between sorts (skip before the first).
         if idx > 1:
             jitter = random.uniform(*_MULTI_SORT_JITTER_RANGE_S)
-            print(f"  [multi-sort jitter] sleeping {jitter:.1f}s before next sort")
+            print(
+                f"  [multi-sort jitter] sleeping {jitter:.1f}s before next sort",
+                flush=True,
+            )
             time.sleep(jitter)
 
         print(
             f"  [multi-sort {idx}/{n_sorts}] role={role} sort={sort_type} cap={cap}"
             f"{' (STRICT — will retry until loaded)' if wait_until_sort_loaded else ''}",
+            flush=True,
         )
 
         if wait_until_sort_loaded:
@@ -1089,6 +1093,13 @@ def run_scraper(manifest_path: Path) -> dict:
     ]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(REPO)
+    # Force unbuffered Python stdout in the scraper subprocess so
+    # per-page connector progress reaches the parent's captured
+    # output live (the parent uses capture_output=True). Without
+    # this, slow sorts (e.g. fwee step5 RECOMMENDED_DESC ~14 min)
+    # produce no observable progress until the subprocess exits.
+    # See ops/agent_handoffs/O-002-FWEE-WEDGE-TRIAGE.md.
+    env["PYTHONUNBUFFERED"] = "1"
     print(f"  → invoking scraper: {' '.join(cmd[:3])} ... (this may take 30-60 seconds)")
     result = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=str(REPO))
     print(f"  scraper exit={result.returncode}")

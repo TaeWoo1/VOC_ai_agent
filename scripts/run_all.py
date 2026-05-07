@@ -230,6 +230,12 @@ def _run_phase2e_pipeline(
 
     env = os.environ.copy()
     env["PYTHONPATH"] = str(REPO)
+    # Force unbuffered Python stdout in the subprocess so per-sort
+    # progress lines reach the captured log live. Two prior triages
+    # (O-001 stream timeout, O-002 fwee "wedge") were misdiagnosed
+    # because this log was 0 bytes during a long-running step. See
+    # ops/agent_handoffs/O-002-FWEE-WEDGE-TRIAGE.md.
+    env["PYTHONUNBUFFERED"] = "1"
     if extra_env:
         env.update(extra_env)
 
@@ -326,6 +332,10 @@ def _run_cardnews_png_render(
     env["PYTHONPATH"] = (
         str(REPO) + os.pathsep + env.get("PYTHONPATH", "")
     ).rstrip(os.pathsep)
+    # Same observability rationale as the phase2e launch above —
+    # unbuffered stdout so cardnews.render progress is visible in
+    # captured logs.
+    env["PYTHONUNBUFFERED"] = "1"
 
     print("[orchestrator] cardnews.render command:")
     print(f"  {' '.join(cmd)}")
