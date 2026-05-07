@@ -864,6 +864,64 @@ def test_run_batch_halt_on_auth_expired_mid_batch(tmp_path):
     assert report.products[0].status == "auth_expired_mid_batch"
 
 
+def test_run_batch_routes_sort_control_unreachable_through_projection(tmp_path):
+    """Regression guard for I-OY-RATING-SORTS-IMPL-V2.
+
+    The connector sets `sort_control_unreachable=True` on its summary
+    dict when the widened sort-row probe exhausts the deadline. The
+    flag is serialized into batch_summary.json correctly (verified live
+    on Tocobo run-002 — see ops/agent_handoffs/I-OY-RATING-SORTS-RUNTIME-TRIAGE.md
+    §3 for the smoking-gun artifact).
+
+    However, fdd5793 forgot to forward this key from the ingest CLI's
+    summary dict into the explicit per-key projection dict that
+    `_run_one_product` builds and passes into `classify_status`. So
+    even though `classify_status` had a working precedence branch
+    (collection_batch.py:180-182) and the unit tests for that branch
+    passed, at runtime `summary.get("sort_control_unreachable")`
+    returned `None` because the key was absent from the projection.
+    Execution then fell through to the `false_empty_state_detected`
+    branch and emitted `blocked_or_empty_state` instead.
+
+    This test exercises the full `run_batch` → `_run_one_product` →
+    `classify_status` seam: the synthetic stdout JSON carries both
+    flags True (mirroring the real Tocobo batch_summary.json shape),
+    and the resulting `ProductResult.status` must be
+    `sort_control_unreachable`, not `blocked_or_empty_state`. If the
+    projection key is dropped again, this assertion fails.
+
+    `sort_control_unreachable` is intentionally NOT in HALT_STATUSES,
+    so the batch should keep running.
+    """
+    manifest = _build_manifest(tmp_path, "b_sort_unreach", ["A1"])
+    runner = _stub_runner(_ok_summary_stdout(
+        quality_status="invalid",
+        rows_inserted=0,
+        records_parsed=0,
+        # Both flags are True on the connector summary, mirroring the
+        # observed live shape for Tocobo A000000179126 RATING_ASC.
+        sort_control_unreachable=True,
+        false_empty_state_detected=True,
+        false_empty_retry_count=2,
+        # `blocked=True` is what false-empty exhaustion sets; the new
+        # branch must still win because `sort_control_unreachable`
+        # short-circuits before the `blocked` / false-empty checks.
+        blocked=True,
+    ))
+    report = run_batch(
+        manifest=manifest, artifact_root=tmp_path, runner_fn=runner,
+    )
+    assert len(report.products) == 1
+    p = report.products[0]
+    assert p.status == "sort_control_unreachable", (
+        f"projection should forward sort_control_unreachable to "
+        f"classify_status; got status={p.status!r} instead. This "
+        f"means the key was dropped before reaching classify_status."
+    )
+    # Not a halt status — batch keeps running.
+    assert report.halted is False
+
+
 def test_run_batch_continues_on_parser_error(tmp_path):
     """parser_error is invalid but NOT halt-causing; batch continues."""
     manifest = _build_manifest(tmp_path, "b_parser", ["A1", "A2"])

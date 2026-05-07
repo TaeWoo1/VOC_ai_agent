@@ -759,6 +759,7 @@ def _build_product_result(
         "cdp_attach_failed": summary.get("cdp_attach_failed"),
         "page_open_failed": summary.get("page_open_failed"),
         "false_empty_state_detected": summary.get("false_empty_state_detected"),
+        "sort_control_unreachable": summary.get("sort_control_unreachable"),
         "review_api_response_count": summary.get("review_api_response_count"),
         "scrolled_to_review_area": summary.get("scrolled_to_review_area"),
         "review_more_button_clicked": summary.get("review_more_button_clicked"),
