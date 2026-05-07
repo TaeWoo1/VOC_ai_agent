@@ -249,6 +249,118 @@ def test_blocking_statuses_constant_includes_expected_set():
     assert expected.issubset(BLOCKING_STATUSES)
 
 
+def test_sort_control_unreachable_not_in_blocking_statuses():
+    """`sort_control_unreachable` is intentionally OUTSIDE
+    BLOCKING_STATUSES. It signals the connector reached the page but
+    couldn't find the sort tab — that is not an anti-bot signal,
+    so it must not flip `anti_bot_or_blocked_by_sort` to True."""
+    assert "sort_control_unreachable" not in BLOCKING_STATUSES
+
+
+# -----------------------------------------------------------------------------
+# Sort-control-unreachable terminal status (I-OY-RATING-SORTS-IMPL).
+#
+# When the connector's widened sort-row probe (scroll-into-view +
+# scope-limited disclosure-affordance click) cannot surface the
+# requested sort tab, `_click_sort_button_robust` exhausts its
+# deadline and the connector emits `status="sort_control_unreachable"`.
+# The classifier must treat this as a sort-control failure (routes to
+# `sort_control_failure_by_sort: true`) but NOT as auth evidence and
+# NOT as anti-bot/blocked. Operator's named test case (c).
+# -----------------------------------------------------------------------------
+
+
+def _sort_control_unreachable_entry(sort_type: str) -> dict:
+    """Per-sort entry shaped like the connector emits when its widened
+    sort-row probe failed to find the target sort tab AND the deadline
+    poll exhausted. The connector simultaneously sets `blocked=True`
+    (because false-empty escalation runs on the page-default cursor
+    response stream after the failed click), but `classify_status`
+    short-circuits to `sort_control_unreachable` BEFORE the false-empty
+    branch."""
+    return {
+        "sort_type": sort_type,
+        "status": "sort_control_unreachable",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "raw_records_seen": 0,
+        "attempts": 2,
+        "error": None,
+        "prod_summary": {
+            # The connector also sets these flags on the same run —
+            # the classifier still returns the unreachable status
+            # because the new check runs first.
+            "false_empty_state_detected": True,
+            "false_empty_retry_count": 2,
+            "sort_control_unreachable": True,
+            "blocked": True,
+            "auth_error": False,
+            "http_403_seen": False,
+            "http_429_seen": False,
+            "http_401_or_login_required_seen": False,
+            "human_check_detected": False,
+            "interstitial_detected": False,
+            "login_state_observed": "logged_in",
+            # Diagnostic — labels the connector saw on the page when
+            # the hunt expired. Useful for operator triage.
+            "available_sort_button_labels": [
+                "최신순", "유용한 순", "도움순", "정렬",
+            ],
+        },
+    }
+
+
+def test_sort_control_unreachable_routes_to_failure_without_auth_evidence():
+    """Operator's test case (c). All three boolean assertions on the
+    same fixture: `sort_control_failure_by_sort` is True; the
+    `auth_evidence_by_sort` flag is False; the
+    `anti_bot_or_blocked_by_sort` flag is False."""
+    summaries = [
+        _ok_entry("DATETIME_DESC"),
+        _sort_control_unreachable_entry("RATING_ASC"),
+    ]
+    out = build_collection_summary(
+        product_url="https://x", goods_no="A1", product_name="x",
+        corpus_mode="observable_multi_sort",
+        primary_sort="DATETIME_DESC",
+        per_sort_summaries=summaries,
+        sorts_attempted_plan=["DATETIME_DESC", "RATING_ASC"],
+    )
+    # Routed to sort-control failure bucket.
+    assert out["sort_control_failure_by_sort"]["RATING_ASC"] is True
+    assert "RATING_ASC" in out["sorts_with_sort_control_failure"]
+    # NOT auth evidence.
+    assert out["auth_evidence_by_sort"]["RATING_ASC"] is False
+    assert "RATING_ASC" not in out["sorts_blocked_or_anti_bot"]
+    # NOT anti-bot / blocked. The legacy column reflects this too.
+    assert out["anti_bot_or_blocked_by_sort"]["RATING_ASC"] is False
+    # Per-sort detail mirrors the per-bucket flags.
+    detail = out["per_sort"]["RATING_ASC"]
+    assert detail["status"] == "sort_control_unreachable"
+    assert detail["is_sort_control_failure"] is True
+    assert detail["has_auth_evidence"] is False
+    assert detail["anti_bot_or_blocked"] is False
+    # Healthy peer is unaffected.
+    assert "DATETIME_DESC" in out["sorts_succeeded"]
+
+
+def test_sort_control_unreachable_failure_reason_carries_status_string():
+    """The audit string in `success_reason` must surface the new status
+    name (not the legacy `failed_blocked:blocked_or_empty_state`)."""
+    summaries = [_sort_control_unreachable_entry("RATING_ASC")]
+    out = build_collection_summary(
+        product_url="https://x", goods_no="A1", product_name="x",
+        corpus_mode="observable_multi_sort",
+        primary_sort="RATING_ASC",
+        per_sort_summaries=summaries,
+        sorts_attempted_plan=["RATING_ASC"],
+    )
+    assert (
+        out["per_sort"]["RATING_ASC"]["success_reason"]
+        == "failed_status:sort_control_unreachable"
+    )
+
+
 # -----------------------------------------------------------------------------
 # Skip-scrape — stub sidecar with empty sort lists.
 # -----------------------------------------------------------------------------
@@ -701,3 +813,115 @@ class TestInspectScriptHandlesPending:
         result = self._run_inspect(run_dir)
         assert "completed" in result.stdout.lower()
         assert "2026-05-01T13:00:00Z" in result.stdout
+
+
+# -----------------------------------------------------------------------------
+# I-OY-RATING-SORTS-IMPL — inspector wiring for the new terminal status.
+# Operator's named test case (d): given a synthetic collection_summary
+# carrying `status: "sort_control_unreachable"` on RATING_ASC, the
+# inspector must surface a warning that DISTINGUISHES the new status
+# from the legacy `정렬 전환 실패` message.
+# -----------------------------------------------------------------------------
+
+
+class TestInspectScriptSurfacesSortControlUnreachable:
+    """Inspector contract: synthesize a collection_summary with the
+    new status, run `inspect_sorts_block` directly, and assert the
+    warning string set."""
+
+    def _run_inspect_sorts_block(
+        self, collection: dict,
+    ) -> tuple[list[str], str]:
+        import importlib.util
+        import io
+        from contextlib import redirect_stdout
+        spec = importlib.util.spec_from_file_location(
+            "_inspect_for_sort_control_unreachable",
+            str(Path(__file__).resolve().parent.parent.parent
+                / "scripts" / "inspect_run_quality.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        warnings: list[str] = []
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            mod.inspect_sorts_block(collection, warnings)
+        return warnings, buf.getvalue()
+
+    def test_unreachable_status_surfaces_dedicated_warning(self):
+        """Synthetic manifest fixture carries the new status. Inspector
+        warning must contain the operator-named label
+        `정렬 컨트롤 도달 실패` and reference UI-change / re-collection
+        / selector-check guidance — distinct from the legacy
+        `정렬 전환 실패` message."""
+        collection = {
+            "schema_version": "1.1",
+            "analysis_status": "completed",
+            "skipped_scrape": False,
+            "sorts_attempted": ["DATETIME_DESC", "RATING_ASC"],
+            "sorts_succeeded": ["DATETIME_DESC"],
+            "sorts_failed": ["RATING_ASC"],
+            "sorts_blocked_or_anti_bot": [],
+            "sorts_with_sort_control_failure": ["RATING_ASC"],
+            "sorts_reused_via_default_response": [],
+            "partial_success": True,
+            "per_sort": {
+                "DATETIME_DESC": {
+                    "status": "max_cap_reached",
+                    "attempts": 1,
+                    "raw_records_seen": 2143,
+                    "rows_inserted": 2029,
+                },
+                "RATING_ASC": {
+                    "status": "sort_control_unreachable",
+                    "attempts": 2,
+                    "raw_records_seen": 0,
+                    "rows_inserted": 0,
+                    "auth_wall_subreason": None,
+                },
+            },
+        }
+        warnings, output = self._run_inspect_sorts_block(collection)
+        joined = " ".join(warnings)
+        # Dedicated message for the new status.
+        assert "정렬 컨트롤 도달 실패" in joined, (
+            f"new-status warning not present:\n{joined}"
+        )
+        # Distinct from the legacy `정렬 전환 실패` message — the
+        # legacy sort_not_reached bucket should be empty for this
+        # fixture (the only failure is the new status).
+        assert "정렬 전환 실패" not in joined
+        # Warning surfaces UI-shape recovery guidance, not a re-login
+        # prompt.
+        assert "UI 변경" in joined or "셀렉터 점검" in joined
+        # And the per-sort row carries the new status string verbatim.
+        assert "sort_control_unreachable" in output
+
+    def test_unreachable_does_not_emit_anti_bot_warning(self):
+        """The new status must NOT trigger the anti-bot/auth-wall
+        warning string. Operator action differs (selector maintenance,
+        not re-login)."""
+        collection = {
+            "schema_version": "1.1",
+            "analysis_status": "completed",
+            "skipped_scrape": False,
+            "sorts_attempted": ["RATING_ASC"],
+            "sorts_succeeded": [],
+            "sorts_failed": ["RATING_ASC"],
+            "sorts_blocked_or_anti_bot": [],
+            "sorts_with_sort_control_failure": ["RATING_ASC"],
+            "sorts_reused_via_default_response": [],
+            "partial_success": False,
+            "per_sort": {
+                "RATING_ASC": {
+                    "status": "sort_control_unreachable",
+                    "attempts": 2,
+                    "raw_records_seen": 0,
+                    "rows_inserted": 0,
+                },
+            },
+        }
+        warnings, _ = self._run_inspect_sorts_block(collection)
+        joined = " ".join(warnings)
+        assert "anti-bot" not in joined.lower()
+        assert "auth-wall" not in joined.lower()

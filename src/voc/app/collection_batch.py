@@ -65,6 +65,15 @@ ALL_STATUSES: frozenset[str] = frozenset({
     "anonymous_auth_wall",
     "auth_expired_mid_batch",
     "blocked_or_empty_state",
+    # Added 2026-05-07 — `_click_sort_button_robust` exhausted its
+    # hunt deadline without finding the target sort-tab label, even
+    # after the widening probe (scroll-into-view + scope-limited
+    # disclosure-affordance click). Distinct from
+    # `blocked_or_empty_state` (anti-bot soft block) — this is a
+    # UI-shape signal that OY moved or hid the rating tabs. The batch
+    # runner should NOT halt and the operator should NOT re-login;
+    # the recovery is connector-side selector / probe maintenance.
+    "sort_control_unreachable",
     "partial_artifact_only",
     "parser_error",
     "unknown_failure",
@@ -156,6 +165,21 @@ def classify_status(summary: dict[str, Any]) -> str:
     blocked = bool(summary.get("blocked"))
     http_403 = bool(summary.get("http_403_seen"))
     http_429 = bool(summary.get("http_429_seen"))
+    # Sort-control-unreachable comes BEFORE the generic false-empty /
+    # anti-bot checks. The connector sets this flag only when its
+    # widened sort-row probe (scroll-into-view + scope-limited
+    # disclosure-affordance click) failed to surface the requested
+    # rating tab AND the deadline poll never matched. The page's
+    # cursor API then naturally times out (because the connector's
+    # `_expected_sort_type` filter rejects default-sort responses),
+    # which in turn trips the false-empty marker — so without this
+    # branch the run would masquerade as `blocked_or_empty_state`
+    # (an anti-bot signal) when the actual cause is OY's UI moving
+    # the tabs out of inline view. A real HTTP block (403/429) still
+    # wins; that strictly indicates the connector reached the API.
+    sort_unreachable = bool(summary.get("sort_control_unreachable"))
+    if sort_unreachable and not http_403 and not http_429:
+        return "sort_control_unreachable"
     # False-empty review-state must classify BEFORE generic anti_bot,
     # because the connector sets `blocked=True` when its false-empty
     # retry budget is exhausted. Without this branch, all false-empty

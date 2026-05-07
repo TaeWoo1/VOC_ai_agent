@@ -177,6 +177,17 @@ class ConnectorRunSummary(BaseModel):
     # observed.
     false_empty_state_detected: bool = False
     false_empty_retry_count: int = 0
+    # True iff `_click_sort_button_robust` exhausted its hunt deadline
+    # without locating the target sort-tab label, after the widening
+    # probe (scroll-into-view + scope-limited disclosure-affordance
+    # click). Distinct from `false_empty_state_detected` — this signals
+    # OY's PDP review-sort row did not render the requested rating tab
+    # (a UI-shape signal, NOT an anti-bot signal). Routed by
+    # `collection_batch.classify_status` to the terminal status
+    # `sort_control_unreachable`, which `collection_summary.py` then
+    # promotes to `sort_control_failure_by_sort: true` without flipping
+    # `auth_evidence_by_sort` or `anti_bot_or_blocked_by_sort`.
+    sort_control_unreachable: bool = False
 
     # ---- Anti-bot / interstitial recovery telemetry (Phase 2E, additive) ----
     # `interstitial_detected` is True if at least one DOM probe during

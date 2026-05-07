@@ -257,13 +257,25 @@ def inspect_sorts_block(
     if sort_control_failures:
         # NO-AUTH-EVIDENCE bucket. Operator action differs — fix the
         # connector's click / scroll / wait logic, do NOT re-login.
-        # Distinguish the two common subreasons in the warning text
-        # so the operator can prioritize.
+        # Distinguish three subreasons so the operator can prioritize:
+        #   1. `sort_control_unreachable` — connector's widened sort-row
+        #      probe (scroll-into-view + disclosure-affordance click)
+        #      could not surface the requested rating tab. UI-shape
+        #      signal; recovery is selector / probe maintenance.
+        #   2. `review_sort_api_not_triggered` family — sort-tab click
+        #      took effect but the cursor API never fired afterward.
+        #   3. Generic sort-not-reached — fallback bucket for any other
+        #      no-auth-evidence sort-control failure.
         per_sort = collection.get("per_sort") or {}
         api_not_fired: list[str] = []
         sort_not_reached: list[str] = []
+        sort_unreachable: list[str] = []
         for st in sort_control_failures:
             entry = per_sort.get(st) or {}
+            status = entry.get("status") or ""
+            if status == "sort_control_unreachable":
+                sort_unreachable.append(st)
+                continue
             sub = entry.get("auth_wall_subreason") or ""
             if sub in (
                 "review_sort_api_not_triggered",
@@ -279,6 +291,14 @@ def inspect_sorts_block(
             sort_control_failures,
             ok=False,
         )
+        if sort_unreachable:
+            # Generic phrasing avoids batchim/particle agreement bugs
+            # across sort-name suffixes (RATING_ASC vs DATETIME_DESC).
+            warnings.append(
+                f"정렬 컨트롤 도달 실패 ({len(sort_unreachable)}개 sort): "
+                f"{sort_unreachable} — UI 변경 가능성, 재수집 또는 "
+                "셀렉터 점검 필요"
+            )
         if sort_not_reached:
             warnings.append(
                 f"정렬 전환 실패 ({len(sort_not_reached)}개 sort): "

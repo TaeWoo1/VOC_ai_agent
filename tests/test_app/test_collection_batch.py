@@ -358,6 +358,70 @@ def test_new_status_does_not_label_as_anti_bot_when_no_markers():
     assert s != "blocked_or_empty_state"
 
 
+# ---------------------------------------------------------------------------
+# I-OY-RATING-SORTS-IMPL — `sort_control_unreachable` precedence in
+# `classify_status`. The flag is set by the connector when the widened
+# sort-row probe exhausts the deadline without finding the target tab.
+# It must take priority over the conflated `blocked_or_empty_state`
+# branch so downstream consumers (`collection_summary.py`,
+# `inspect_run_quality.py`) can distinguish a UI-shape failure from
+# a true anti-bot soft-block.
+# ---------------------------------------------------------------------------
+
+
+def test_status_sort_control_unreachable_takes_priority_over_false_empty():
+    """The connector sets `sort_control_unreachable=True` when the
+    sort tab was not found, AND `false_empty_state_detected=True`
+    because the page kept emitting default-sort responses that the
+    `_expected_sort_type` filter rejected. The new branch must win."""
+    s = classify_status(_summary(
+        quality_status="invalid",
+        rows_inserted=0, records_parsed=0,
+        blocked=True,
+        sort_control_unreachable=True,
+        false_empty_state_detected=True,
+    ))
+    assert s == "sort_control_unreachable"
+
+
+def test_status_sort_control_unreachable_does_not_overshadow_real_http_block():
+    """A real HTTP block (403/429) STILL wins over the new flag.
+    `sort_control_unreachable` only fires when the connector reached
+    the API surface but couldn't find the sort tab; an HTTP-level
+    block strictly indicates the connector did NOT reach the API."""
+    s_403 = classify_status(_summary(
+        quality_status="invalid",
+        rows_inserted=0, records_parsed=0,
+        blocked=True,
+        http_403_seen=True,
+        sort_control_unreachable=True,
+    ))
+    assert s_403 == "anti_bot"
+    s_429 = classify_status(_summary(
+        quality_status="invalid",
+        rows_inserted=0, records_parsed=0,
+        blocked=True,
+        http_429_seen=True,
+        sort_control_unreachable=True,
+    ))
+    assert s_429 == "anti_bot"
+
+
+def test_status_blocked_or_empty_state_unchanged_when_unreachable_flag_absent():
+    """Regression guard: when the new flag is absent (legacy summaries
+    or genuine anti-bot soft blocks), classify_status must still return
+    the legacy `blocked_or_empty_state`."""
+    s = classify_status(_summary(
+        quality_status="invalid",
+        rows_inserted=0, records_parsed=0,
+        blocked=True,
+        false_empty_state_detected=True,
+        # sort_control_unreachable absent — this is the genuine
+        # anti-bot soft-block signature.
+    ))
+    assert s == "blocked_or_empty_state"
+
+
 def test_status_complete_takes_priority_over_max_cap():
     """When both pagination_exhausted=True AND last_observed_has_next=True (impossible
     in practice but defensive), complete wins."""
@@ -380,6 +444,11 @@ def test_all_statuses_are_in_taxonomy():
         "auth_expired_mid_batch",
         "anti_bot",
         "blocked_or_empty_state",
+        # I-OY-RATING-SORTS-IMPL — terminal status emitted when
+        # `_click_sort_button_robust` exhausts its hunt deadline
+        # without finding the target sort tab even after the widening
+        # probe (scroll-into-view + scope-limited disclosure click).
+        "sort_control_unreachable",
         "partial_artifact_only",
         "parser_error",
         "unknown_failure",

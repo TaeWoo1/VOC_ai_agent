@@ -102,6 +102,13 @@ EXPLICIT_FAILURE_STATUSES: frozenset[str] = frozenset({
     "partial_artifact_only",
     "review_list_api_not_seen_but_review_meta_seen",
     "review_api_not_seen",
+    # Added 2026-05-07 — connector reached the page but its widened
+    # sort-row probe could not locate the target rating tab. The
+    # downstream classifier treats this as a sort-control failure
+    # (routes to `sort_control_failure_by_sort: true`) WITHOUT
+    # flipping `auth_evidence_by_sort` or `anti_bot_or_blocked_by_sort`
+    # — see `_is_blocked_entry` and `_has_auth_evidence_entry` below.
+    "sort_control_unreachable",
 })
 
 # Legacy alias kept for any external imports.
@@ -185,15 +192,33 @@ def _success_reason(entry: dict) -> str:
 def _is_blocked_entry(entry: dict) -> bool:
     """True when the per-sort entry indicates an anti-bot / auth
     block. `quality_status` and `status` are both consulted because
-    the connector populates them at different layers."""
-    if entry.get("status") in BLOCKING_STATUSES:
+    the connector populates them at different layers.
+
+    The new `sort_control_unreachable` status is NOT a block — it
+    signals OY's UI moved or hid the requested sort tab, which is a
+    selector / probe maintenance concern, not an anti-bot signal.
+    Even when the connector also records `false_empty_state_detected`
+    on the same run (the false-empty marker can trip after a failed
+    sort-tab click because the page kept emitting default-sort
+    responses that the `_expected_sort_type` filter rejected), the
+    `sort_control_unreachable` flag wins because the upstream cause
+    is the missing tab, not anti-bot throttling.
+    """
+    status = entry.get("status")
+    if status == "sort_control_unreachable":
+        return False
+    if status in BLOCKING_STATUSES:
         return True
     if entry.get("quality_status") in BLOCKING_STATUSES:
         return True
-    # `prod_summary` carries connector-level telemetry. A non-zero
-    # `false_empty_state_detected` is a soft block.
     ps = entry.get("prod_summary")
     if isinstance(ps, dict):
+        # The connector flags `sort_control_unreachable` directly on
+        # the run summary. When set, suppress the false-empty soft-
+        # block heuristic — the failure mode is upstream of the
+        # cursor API.
+        if ps.get("sort_control_unreachable"):
+            return False
         if ps.get("false_empty_state_detected"):
             return True
     return False

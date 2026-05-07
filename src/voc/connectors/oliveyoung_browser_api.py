@@ -884,6 +884,22 @@ class OliveYoungBrowserAPIConnector:
         ".sort-container",
         "[class*='sort']",  # any class containing 'sort'
     )
+    # Disclosure affordances inside the sort scope. When the rating
+    # tabs (`평점 낮은순` / `평점 높은순`) are not inline-rendered on
+    # first poll, OY may hide them behind a "more sort options" /
+    # filter panel. The connector tries each label as an EXACT-text
+    # match (NOT substring — substring would risk clicking a category-
+    # nav element labelled `랭킹` which contains `랭`). At most one
+    # disclosure click per probe; the existing locator chain re-polls
+    # afterward to find the now-revealed rating label.
+    # Scoped to the sort container hits — never page-wide.
+    SORT_DISCLOSURE_AFFORDANCE_LABELS_KO: tuple[str, ...] = (
+        "정렬",
+        "더보기",
+        "전체보기",
+        "필터",
+        "정렬 기준",
+    )
     # OliveYoung occasionally renders a false empty-review state on the
     # review tab during heavy crawling / sort switching, even on products
     # that DO have reviews. Two known marker strings (one heading, one
@@ -1230,6 +1246,13 @@ class OliveYoungBrowserAPIConnector:
         # during sort-button hunts. Drained at end of run from the final
         # session via `get_seen_sort_labels()`.
         available_sort_button_labels: list[str] = []
+        # True iff the most recent sort-button hunt ran to deadline
+        # without locating the requested sort tab AFTER the widening
+        # probe. Drained from `session.get_sort_control_unreachable()`
+        # at end of run. Distinct from `false_empty_state_detected` —
+        # routed by `collection_batch.classify_status` to a separate
+        # terminal status (`sort_control_unreachable`).
+        sort_control_unreachable_observed = False
 
         # ---- PR-4 request-side / cursor telemetry (cumulative across attempts) ----
         cursor_sequence: list[str] = []
@@ -1725,6 +1748,22 @@ class OliveYoungBrowserAPIConnector:
                 logger.debug(
                     "OY browser: get_seen_sort_labels failed in finally: %s", e,
                 )
+            # Drain the sort-control-unreachable terminal flag. Same
+            # best-effort contract — older fakes / external session
+            # impls may not expose the getter.
+            try:
+                _unreachable_fn = getattr(
+                    session, "get_sort_control_unreachable", None,
+                )
+                if _unreachable_fn is not None:
+                    sort_control_unreachable_observed = bool(
+                        _unreachable_fn(),
+                    )
+            except Exception as e:
+                logger.debug(
+                    "OY browser: get_sort_control_unreachable failed in "
+                    "finally: %s", e,
+                )
             try:
                 await session.close()
             except Exception as e:
@@ -1834,6 +1873,8 @@ class OliveYoungBrowserAPIConnector:
             # ---- Phase 2E false-empty recovery telemetry ----
             false_empty_state_detected=false_empty_state_detected,
             false_empty_retry_count=false_empty_retry_count,
+            # ---- Phase 2E sort-control-unreachable terminal flag ----
+            sort_control_unreachable=sort_control_unreachable_observed,
             # ---- Human-check (anti-bot CAPTCHA) telemetry ----
             human_check_detected=human_check_detected,
             human_check_waited_seconds=human_check_waited_s,
@@ -2335,6 +2376,9 @@ class OliveYoungBrowserAPIConnector:
             cdp_endpoint=self._cdp_endpoint,
             sort_button_label_ko=sort_button_label_ko,
             sort_container_candidates=self.SORT_CONTAINER_CANDIDATES,
+            sort_disclosure_affordance_labels_ko=(
+                self.SORT_DISCLOSURE_AFFORDANCE_LABELS_KO
+            ),
             sort_hunt_settle_s=self.SORT_HUNT_SETTLE_S,
             sort_hunt_poll_interval_s=self.SORT_HUNT_POLL_INTERVAL_S,
             false_empty_markers_ko=self.FALSE_EMPTY_MARKERS_KO,
@@ -2399,6 +2443,7 @@ class _PlaywrightReviewSession:
         cdp_endpoint: str | None = None,
         sort_button_label_ko: str | None = None,
         sort_container_candidates: tuple[str, ...] = (),
+        sort_disclosure_affordance_labels_ko: tuple[str, ...] = (),
         sort_hunt_settle_s: float = 0.0,
         sort_hunt_poll_interval_s: float = 1.0,
         false_empty_markers_ko: tuple[str, ...] = (),
@@ -2435,6 +2480,14 @@ class _PlaywrightReviewSession:
         # `has-text` substring collisions on neighboring labels.
         self._sort_button_label_ko = sort_button_label_ko
         self._sort_container_candidates = tuple(sort_container_candidates)
+        # Disclosure affordances probed inside the sort scope when the
+        # target rating label is not inline-rendered on the first poll.
+        # See `OliveYoungBrowserAPIConnector.SORT_DISCLOSURE_AFFORDANCE_LABELS_KO`
+        # for the curated allow-list. Empty tuple disables the widening
+        # probe (legacy behavior).
+        self._sort_disclosure_affordance_labels_ko = tuple(
+            sort_disclosure_affordance_labels_ko,
+        )
         self._sort_hunt_settle_s = float(sort_hunt_settle_s)
         self._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
         self._false_empty_markers_ko = tuple(false_empty_markers_ko)
@@ -2444,6 +2497,15 @@ class _PlaywrightReviewSession:
         # on success AND on failure (clicked target wins; failure path
         # logs everything seen). Connector reads via the getter.
         self._last_seen_sort_labels: list[str] = []
+        # True iff the most recent `_click_sort_button_robust` exhausted
+        # its hunt deadline without ever locating the target rating
+        # label (after scroll-into-view + disclosure-affordance probe).
+        # Distinct from `false_empty_state_detected`: this signals that
+        # OY's PDP DOM did not render the sort tab the connector needs,
+        # which is a UI-shape signal — NOT an anti-bot signal. Drained
+        # by the connector at end of run into the
+        # `sort_control_unreachable` field on `ConnectorRunSummary`.
+        self._sort_control_unreachable: bool = False
         # Legacy substring selector (kept as last-resort fallback). New
         # call sites pass label_ko; old call sites can still pass a
         # selector and the robust path will skip the label-based hunt.
@@ -3000,6 +3062,169 @@ class _PlaywrightReviewSession:
         if self._sort_button_label_ko is not None or self._sort_button_selector is not None:
             await self._click_sort_button_robust()
 
+    async def _widen_sort_row_probe(self) -> None:
+        """DOM probe widening before the main hunt.
+
+        Two coupled, idempotent actions inside the sort scope ONLY:
+
+          1. Scroll the first matching `_sort_container_candidates`
+             element into view. No-op when the row is already visible.
+          2. If the target sort label is still absent, click ONE
+             disclosure affordance (exact-text match against the
+             curated `_sort_disclosure_affordance_labels_ko` allow-list)
+             inside the sort scope. The hunt loop re-polls afterward.
+
+        Operator constraints honored:
+
+          - **Exact-text only** (NOT substring) — `랭킹` contains `랭`,
+            and substring-matching against page-wide nav has historically
+            misdirected clicks.
+          - **At most one disclosure click per probe** — the first
+            allow-listed match clicks; the loop exits regardless of
+            whether the click revealed the target.
+          - **Scope-limited** — both the scroll and the disclosure
+            click are constrained to `_sort_container_candidates` hits.
+            Page-wide enumeration is reserved for the existing hunt
+            loop's page-wide fallback.
+
+        Best-effort: every Playwright call is wrapped; failures fall
+        through to the existing hunt path. Behavior on already-visible
+        sort row: scroll-into-view is a no-op; the disclosure probe
+        never fires because the rating label is found on first poll
+        in the main hunt.
+        """
+        import re
+
+        target_ko = self._sort_button_label_ko
+        page = self._page
+        if page is None or target_ko is None:
+            return
+
+        def _normalize(s: str) -> str:
+            return re.sub(r"\s+", " ", s or "").strip()
+
+        # Pick the first container candidate that exists on the page.
+        # We attempt scroll-into-view on this single hit; subsequent
+        # candidates are not walked (idempotency: scrolling the FIRST
+        # match into view brings the sort row into the viewport, and
+        # repeated scrolls add noise without changing state).
+        first_container = None
+        for selector in self._sort_container_candidates:
+            try:
+                container = page.locator(selector).first
+                if await container.count() > 0:
+                    first_container = container
+                    break
+            except Exception:
+                continue
+
+        if first_container is not None:
+            try:
+                await first_container.scroll_into_view_if_needed(
+                    timeout=1000,
+                )
+            except Exception as e:
+                logger.debug(
+                    "OY sort-scope scroll-into-view skipped (benign): %s",
+                    e,
+                )
+
+        # Probe whether the target label is already inline-rendered
+        # inside any of the candidate containers. If yes, skip the
+        # disclosure-affordance click entirely — the existing hunt loop
+        # will find it on its first poll.
+        target_visible = False
+        for selector in self._sort_container_candidates:
+            try:
+                container = page.locator(selector).first
+                if await container.count() == 0:
+                    continue
+            except Exception:
+                continue
+            for tag_selector in ("button", "a", "[role='button']"):
+                try:
+                    el_locator = container.locator(tag_selector)
+                    n = await el_locator.count()
+                except Exception:
+                    continue
+                for i in range(n):
+                    try:
+                        cand = el_locator.nth(i)
+                        txt = await cand.inner_text(timeout=1000)
+                    except Exception:
+                        continue
+                    if _normalize(txt) == target_ko:
+                        target_visible = True
+                        break
+                if target_visible:
+                    break
+            if target_visible:
+                break
+
+        if target_visible:
+            return
+
+        # Target absent. Try ONE disclosure affordance click inside the
+        # sort scope. Allow-list matching only — broader substrings
+        # would risk clicking category-nav rows.
+        if not self._sort_disclosure_affordance_labels_ko:
+            return
+        disclosure_set = set(self._sort_disclosure_affordance_labels_ko)
+        clicked_disclosure: str | None = None
+        for selector in self._sort_container_candidates:
+            if clicked_disclosure is not None:
+                break
+            try:
+                container = page.locator(selector).first
+                if await container.count() == 0:
+                    continue
+            except Exception:
+                continue
+            for tag_selector in ("button", "a", "[role='button']"):
+                if clicked_disclosure is not None:
+                    break
+                try:
+                    el_locator = container.locator(tag_selector)
+                    n = await el_locator.count()
+                except Exception:
+                    continue
+                for i in range(n):
+                    try:
+                        cand = el_locator.nth(i)
+                        txt = await cand.inner_text(timeout=1000)
+                    except Exception:
+                        continue
+                    norm = _normalize(txt)
+                    if norm in disclosure_set:
+                        try:
+                            try:
+                                await cand.scroll_into_view_if_needed(
+                                    timeout=1000,
+                                )
+                            except Exception:
+                                pass
+                            await cand.click(timeout=3000)
+                            clicked_disclosure = norm
+                        except Exception as e:
+                            logger.info(
+                                "OY sort-disclosure %r click failed "
+                                "(benign): %s",
+                                norm, e,
+                            )
+                        # First match in this iteration wins. Whether
+                        # the click succeeded or not, do not iterate
+                        # through additional affordances on this probe
+                        # — operator contract: at most one disclosure
+                        # click per probe attempt.
+                        break
+
+        if clicked_disclosure is not None:
+            logger.info(
+                "OY sort-disclosure clicked: affordance=%r target=%r "
+                "(re-polling for target label)",
+                clicked_disclosure, target_ko,
+            )
+
     async def _click_sort_button_robust(self) -> None:
         """Find and click the OY review sort button matching
         `self._sort_button_label_ko`.
@@ -3020,6 +3245,18 @@ class _PlaywrightReviewSession:
         diagnose what OY actually rendered. The connector's response
         filter (`_expected_sort_type`) then ensures cold-start times out
         cleanly rather than mis-stamping default-sort rows.
+
+        Before entering the deadline poll, runs `_widen_sort_row_probe`
+        once: scroll-into-view + (conditionally) one disclosure-affordance
+        click inside the sort scope. The probe is idempotent on
+        already-visible sort rows and only fires when the target label
+        is absent.
+
+        On deadline expiry without a click (target_ko set), records
+        `_sort_control_unreachable=True`. The connector drains this into
+        the run summary, where downstream classifier maps it to the
+        terminal status `sort_control_unreachable` (distinct from
+        `blocked_or_empty_state`).
         """
         import re
         import time as _time
@@ -3030,6 +3267,22 @@ class _PlaywrightReviewSession:
         page = self._page
         if page is None:  # defensive — open() should have set it
             return
+
+        # Reset terminal flag at the start of every hunt — the session
+        # might be re-used across attempts if the false-empty recovery
+        # path re-creates the page; we want this signal to reflect the
+        # MOST RECENT hunt's outcome.
+        self._sort_control_unreachable = False
+
+        # Widen the DOM probe before the main hunt. Idempotent on
+        # already-visible sort rows.
+        if target_ko is not None:
+            try:
+                await self._widen_sort_row_probe()
+            except Exception as e:
+                logger.debug(
+                    "OY sort-row widening probe skipped (benign): %s", e,
+                )
 
         def _normalize(s: str) -> str:
             return re.sub(r"\s+", " ", s or "").strip()
@@ -3143,6 +3396,12 @@ class _PlaywrightReviewSession:
         else:
             # De-duplicate labels for log compactness.
             seen_unique = sorted(set(all_labels_seen))[:50]
+            # Mark the run for terminal `sort_control_unreachable`
+            # status. Only fires when a target was set (target_ko is
+            # not None) — when target_ko is None (page-default sort),
+            # not finding it is expected and is not a failure mode.
+            if target_ko is not None:
+                self._sort_control_unreachable = True
             logger.warning(
                 "OY sort-button %r NOT FOUND after %d poll attempts in "
                 "%.1fs deadline. expected_sort=%r. Buttons enumerated in "
@@ -3462,6 +3721,19 @@ class _PlaywrightReviewSession:
         mode is not engaged or the hunt did not execute.
         """
         return list(self._last_seen_sort_labels)
+
+    def get_sort_control_unreachable(self) -> bool:
+        """True iff the most recent `_click_sort_button_robust` exhausted
+        its deadline without ever locating the target rating label
+        (after scroll-into-view + disclosure-affordance probe).
+
+        Distinct from `false_empty_state_detected` — this signals OY's
+        DOM did not render the requested sort tab, NOT an anti-bot
+        soft-block. Drained by the connector at end of run into the
+        `sort_control_unreachable` flag on `ConnectorRunSummary`, which
+        the downstream classifier maps to the new terminal status.
+        """
+        return bool(self._sort_control_unreachable)
 
     def get_observed_sort_types(self) -> dict[str, int]:
         """Phase 2E: tally of `sortType` values seen in request post_data
