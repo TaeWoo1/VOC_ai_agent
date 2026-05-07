@@ -695,39 +695,44 @@ at `todo` until operator dispatches.
 ### O-001 — Brand-20 batch readiness check
 
 - **role**: Ops / Data Agent
-- **status**: todo
-- **blocked_on**: `one-product live verification after fdd5793` —
-  the I-OY-RATING-SORTS-IMPL code/test patch landed at
-  `fdd5793 fix(connectors): widen OY sort-row probe and classify
-  unreachable controls` (8 files: connector + dataclass + batch
-  classifier + summary classifier + inspector + 3 test files; +1158/-6
-  lines; 38 + 75 + 433 scoped + 3920 broad tests green). The
-  remaining acceptance gate is a single one-product live re-collection
-  on Tocobo (`A000000179126`) OR Anua (`A000000207901`) — both
-  already known-good post-login SKUs from the O-001 resume. Pass
-  condition is either:
-  (a) RATING_ASC `max_cap_reached` with `raw>0, inserted>0` (rescue
-      path succeeded — DOM probe widening recovered the rating tab); OR
-  (b) `RATING_ASC: status=sort_control_unreachable,
-      sort_control_failure_by_sort.RATING_ASC=true,
-      anti_bot_or_blocked_by_sort.RATING_ASC=false` (rescue did not
-      succeed but the diagnostic now distinguishes the cause cleanly,
-      without conflating with anti-bot / auth failure).
-  Either outcome unblocks Brand-20 fan-out for the remaining 17 SKUs
-  (per `ops/agent_handoffs/O-A-O001-resume.md` Path A — the
-  principled path). TIRTIR (`A000000214231`) remains off-limits
-  until the operator dispatches a fresh ticket naming it
-  specifically. See `ops/agent_handoffs/O-001-smoke-trio.md` and
-  `ops/agent_handoffs/O-A-O001-resume.md` for the smoke results;
-  `ops/agent_handoffs/I-OY-RATING-SORTS.md` and
-  `ops/agent_handoffs/O-A-IORS.md` for the triage + recommended
-  fix; and `ops/agent_handoffs/I-OY-RATING-SORTS-IMPL.md` +
-  `ops/agent_handoffs/O-A-IORSI.md` for the implementation handoff
-  + synthesis.
-- **goal**: Confirm Brand-20 collection batch can run end-to-end
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `handoff-only` — O-001 is the umbrella readiness
+  ticket; the verification chain produced two production commits
+  (`fdd5793` V1, `69f75af` V2) but no single SHA "closes" O-001
+  itself.
+- **closed_at**: 2026-05-07
+- **decision recorded**: O-001 smoke/resume plus V2 verification
+  completed. Tocobo (`A000000179126`) and Anua (`A000000207901`)
+  produced complete run packages with cardnews tri-tuple
+  (`schema_version="1.1"` / `cardnews_mode="private_demo"` /
+  `cardnews_mode_constraints.publishable_to_public_channels=false`)
+  verified across multiple runs. TIRTIR (`A000000214231`) **remains
+  excluded by operator cooldown** — separate ticket required to
+  retry. The rating-sort issue that surfaced during the resume is
+  now **cleanly diagnosed as `sort_control_unreachable`, NOT anti-bot
+  / auth failure** — V2 live verification on Tocobo run-003
+  confirmed RATING_ASC + RATING_DESC emit `status:
+  "sort_control_unreachable"`, `anti_bot_or_blocked: false`,
+  `is_sort_control_failure: true`, `has_auth_evidence: false`.
+  **Brand-20 fan-out is unblocked** per `ops/agent_handoffs/O-A-O001-resume.md`
+  Path A — every Brand-20 report will mark rating-axis sorts as
+  `sort_control_unreachable`, which is the correct, honest label
+  for the current OY DOM state. The DOM gap (OY hides rating tabs
+  from the post-login profile) is a separate, optional research
+  question — not a fan-out blocker. Full chain handoffs:
+  `ops/agent_handoffs/O-001-smoke-trio.md`,
+  `ops/agent_handoffs/O-A-O001-resume.md`,
+  `ops/agent_handoffs/O-001-one-product-verification.md`,
+  `ops/agent_handoffs/O-A-O001-verify.md`,
+  `ops/agent_handoffs/O-001-one-product-verification-v2.md`,
+  `ops/agent_handoffs/O-A-O001-VERIFY-V2-FINAL.md`. Production
+  commits: `fdd5793` (V1) and `69f75af` (V2). Triages: see
+  I-OY-RATING-SORTS, I-OY-RATING-SORTS-RUNTIME-TRIAGE, and
+  I-OY-RATING-SORTS-IMPL-V2 entries below.
+- **goal** *(historical)*: Confirm Brand-20 collection batch can run end-to-end
   against the current code (post-`a2b2ae6` cardnews_mode guard) without
   surprises. Read-only verification first; no live collection.
-- **context**: Brand-20 seed CSVs were last revised at `4464c81`. The
+- **context** *(historical)*: Brand-20 seed CSVs were last revised at `4464c81`. The
   cardnews_mode guard (`a2b2ae6`) added a manifest field and a
   `validate_cardnews_mode` call; verify the existing pipeline path
   (`scripts/run_phase2e_pipeline.py` → `python -m cardnews.render`)
@@ -1228,6 +1233,146 @@ at `todo` until operator dispatches.
     sort_control_failure_by_sort.RATING_ASC=true,
     anti_bot_or_blocked_by_sort.RATING_ASC=false` (rescue did not
     succeed but the diagnostic now distinguishes the cause cleanly)
+
+### I-OY-RATING-SORTS-RUNTIME-TRIAGE — read-only triage of the V1 runtime gap
+
+- **role**: QA / Regression Agent
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `handoff-only` — read-only triage produced no tracked
+  commit; the design + recommendation live in the handoff files
+- **closed_at**: 2026-05-07
+- **handoff**:
+  - `ops/agent_handoffs/I-OY-RATING-SORTS-RUNTIME-TRIAGE.md` (371
+    lines; full §5 fields + 6-question evidence trace)
+  - `ops/agent_handoffs/O-A-IORS-RUNTIME.md` (orchestrator synthesis)
+- **decision recorded**: Runtime triage found the V1 (`fdd5793`)
+  failure was caused by a missing projection key in
+  `src/voc/app/collection_batch.py`. The connector correctly
+  produced `sort_control_unreachable: true` at the connector layer
+  (verified via `data/collection_artifacts/.../batch_summary.json:199`),
+  but the explicit per-key projection dict that
+  `_build_product_result` constructs and passes into `classify_status`
+  did not include the new key. As a result `classify_status` saw
+  `summary.get("sort_control_unreachable") = None`, the new precedence
+  branch never fired, and the legacy `false_empty_state_detected →
+  blocked_or_empty_state` path won. Five of six layers of the V1 fix
+  were correct; only the projection seam was broken. Single-line fix
+  recommended for IMPL-V2: add
+  `"sort_control_unreachable": summary.get("sort_control_unreachable"),`
+  adjacent to the existing `false_empty_state_detected` key in the
+  projection. Why V1 unit tests passed but live verification failed:
+  connector tests built the session directly; classifier tests
+  constructed synthetic input dicts that explicitly included the
+  key. Neither exercised the `_build_product_result` projection
+  seam. Classic integration-test gap.
+- **goal** *(historical)*: Determine why the `fdd5793` rating-sort
+  fix did not emit `sort_control_unreachable` during the Tocobo
+  one-product live verification. Read-only — no code edits, no live
+  collection. Produce one recommended fix path for an IMPL-V2
+  follow-up.
+- **context** *(historical)*: First Tocobo live verification
+  (run-002) returned verdict `needs_patch` because RATING_ASC +
+  RATING_DESC still observed `status: "blocked_or_empty_state"` and
+  `anti_bot_or_blocked: true` despite `fdd5793` being in HEAD. The
+  classifier-side `is_sort_control_failure: true` flag fired
+  correctly (5 of 6 layers worked), but the new terminal status
+  name was never set at the connector → batch-classifier seam.
+- **scope**:
+  - in: read-only inspection of
+    `src/voc/connectors/oliveyoung_browser_api.py`,
+    `src/voc/app/collection_batch.py`,
+    `src/voc/app/collection_summary.py`,
+    `scripts/inspect_run_quality.py`, the V1 verification handoff
+    chain, the V1 verification run-dir collection_summary.json,
+    `data/collection_artifacts/.../batch_summary.json` forensic
+    artifacts, the V1 run log
+  - out: any code edit, any test edit, any commit, any live
+    collection
+- **commands**:
+  - `grep -nE 'classify_status|_build_product_result' src/voc/app/collection_batch.py`
+  - `jq '.connector.sort_control_unreachable' data/collection_artifacts/<batch>/batch_summary.json`
+- **output**:
+  - QA-style report with single-recommendation conclusion (handoff +
+    orchestrator synthesis)
+- **stop conditions**:
+  - recommendation ready → handoff (achieved)
+
+### I-OY-RATING-SORTS-IMPL-V2 — projection-key fix in `_build_product_result`
+
+- **role**: Implementation Agent
+- **status**: **done** (closed 2026-05-07)
+- **closed_by**: `69f75af fix(app): pass sort_control_unreachable through batch projection`
+- **closed_at**: 2026-05-07
+- **decision recorded**: Added the missing projection key
+  `"sort_control_unreachable": summary.get("sort_control_unreachable"),`
+  in `src/voc/app/collection_batch.py:762` (immediately adjacent to
+  the existing `"false_empty_state_detected"` key per the runtime
+  triage's recommended placement). Added one new integration-style
+  regression test
+  `test_run_batch_routes_sort_control_unreachable_through_projection`
+  in `tests/test_app/test_collection_batch.py:867+` (58 lines). The
+  test drives the full `run_batch → _build_product_result →
+  classify_status` seam with synthetic stdout JSON mirroring the
+  live Tocobo `batch_summary.json:199` shape (carries
+  `sort_control_unreachable=True`, `false_empty_state_detected=True`,
+  `blocked=True`); asserts `ProductResult.status ==
+  "sort_control_unreachable"` and `report.halted is False`. Test
+  gates: `test_collection_batch.py` 76 passed (+1 vs pre-fix),
+  `test_collection_summary.py` 38 passed (unchanged),
+  `test_connectors/` 433 passed (unchanged). Diff: 2 files,
+  +59 / -0. **V2 live verification on Tocobo run-003 confirmed
+  clean diagnostic end-to-end** — RATING_ASC + RATING_DESC now emit
+  `status: "sort_control_unreachable"`, `anti_bot_or_blocked: false`,
+  `is_sort_control_failure: true`, `has_auth_evidence: false`. The
+  conflation V1 had with `blocked_or_empty_state` is broken at
+  runtime. Cardnews tri-tuple held; no regression on the 3
+  currently-succeeding sorts (DATETIME_DESC + USEFUL_SCORE_DESC +
+  RECOMMENDED_DESC). See
+  `ops/agent_handoffs/I-OY-RATING-SORTS-IMPL-V2.md` and
+  `ops/agent_handoffs/O-A-IORS-V2.md` for the implementation
+  handoff + synthesis;
+  `ops/agent_handoffs/O-001-one-product-verification-v2.md` and
+  `ops/agent_handoffs/O-A-O001-VERIFY-V2-FINAL.md` for the live
+  verification.
+- **goal** *(historical)*: Fix the runtime seam found by
+  I-OY-RATING-SORTS-RUNTIME-TRIAGE: add
+  `sort_control_unreachable` to the projection dict in
+  `collection_batch._build_product_result` (single-line addition
+  adjacent to `false_empty_state_detected`), plus one
+  integration-style regression test in `test_collection_batch.py`
+  to cover the seam V1 missed.
+- **context** *(historical)*: V1 (`fdd5793`) shipped with 5 of 6
+  layers correct; the projection seam between connector summary
+  and classifier was the only broken layer. Neither connector unit
+  tests nor classifier unit tests exercised that seam — connector
+  tests built sessions directly, classifier tests constructed
+  synthetic input dicts that already included the key.
+- **scope**:
+  - in: `src/voc/app/collection_batch.py` (projection dict, +1 line)
+  - in: `tests/test_app/test_collection_batch.py` (new integration
+    test)
+  - out: connector edits; `collection_summary.py`;
+    `inspect_run_quality.py`; `connector_run_summary.py`; live
+    collection; credentials; outputs/; voc_data.db; CLAUDE.md §6
+    protected files; staging; committing
+- **requirements**:
+  - Add the projection key adjacent to `false_empty_state_detected`
+  - New integration test asserts end-to-end status routing without
+    `anti_bot_or_blocked` conflation
+  - No connector changes (V1 connector code is correct per the
+    runtime triage)
+- **commands**:
+  - `pytest tests/test_app/test_collection_batch.py -q` → 76 passed
+  - `pytest tests/test_app/test_collection_summary.py -q` → 38 passed
+  - `pytest tests/test_connectors/ -q` → 433 passed
+- **output**:
+  - 2 modified tracked files; commit `69f75af`
+- **stop conditions**:
+  - patch + tests green + handoff written → close (achieved)
+  - acceptance gate (post-merge ops dispatch): live verification on
+    Tocobo or Anua produces verdict A (rescue success) or verdict B
+    (clean diagnostic) — **achieved 2026-05-07 via Tocobo run-003;
+    verdict B verified_clean_diagnostic**
 
 ---
 
