@@ -39,6 +39,20 @@ Boundary rules (§F.2 + Phase 2 OY hardening PR-1 + PR-2):
 Boundaries are inclusive on the OK side: parse_yield == 0.8 → ok,
 parse_warning_ratio == 0.1 → ok.
 
+parse_yield denominator note (added 2026-05-08, fix for
+I-PARSE-YIELD-GATE-CONTAMINATION): the denominator subtracts
+`rows_filtered_by_goods_no` from `raw_records_seen` so 기획-set / multi-option
+OY pages whose API returns heavy cross-product contamination are not
+penalized as if the parser had failed. The connector's `goods_no` filter is
+deliberate, not a parse failure. When `rows_filtered_by_goods_no == 0` (the
+canonical pre-기획 case) the denominator collapses back to `raw_records_seen`
+and the gate's verdict is byte-identical to the legacy rule. True parser
+failures (records arriving on the right goodsNumber but the per-record
+parser rejecting them — counted into `rows_dropped_unparseable` /
+`records_parsed` shortfall WITHOUT being attributed to the goods_no filter)
+still trip parse_yield < 0.5 → invalid, because the dropped count remains in
+the effective denominator.
+
 PR-1 telemetry expansion (additive, backward-compatible):
 The summary now carries distinct boolean flags for each failure-class so
 operators can tell e.g. an HTTP 403 ban from a cold-start timeout — both
@@ -373,7 +387,16 @@ def evaluate_quality_gates(summary: ConnectorRunSummary) -> QualityStatus:
     if summary.blocked or summary.auth_error:
         return "invalid"
 
-    parse_yield = summary.records_parsed / max(summary.raw_records_seen, 1)
+    # Subtract goodsNo-filtered rows (cross-product contamination the
+    # connector deliberately drops on 기획 / multi-option OY pages) from
+    # the parse_yield denominator. When `rows_filtered_by_goods_no == 0`
+    # the effective denominator collapses back to `raw_records_seen` and
+    # the gate's verdict is byte-identical to the legacy rule. See
+    # ops/agent_handoffs/I-PARSE-YIELD-GATE-CONTAMINATION.md.
+    effective_raw = max(
+        summary.raw_records_seen - summary.rows_filtered_by_goods_no, 1,
+    )
+    parse_yield = summary.records_parsed / effective_raw
     if parse_yield < 0.5:
         return "invalid"
 

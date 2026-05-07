@@ -284,3 +284,118 @@ def test_pre_pr4_summary_round_trip_preserves_defaults():
     assert s2.login_state_observed is None
     assert s2.trace_artifact_path is None
     assert evaluate_quality_gates(s2) == "ok"
+
+
+# ---------------------------------------------------------------------------
+# I-PARSE-YIELD-GATE-CONTAMINATION (added 2026-05-08):
+# parse_yield denominator excludes `rows_filtered_by_goods_no` so 기획-set /
+# multi-option OY pages whose API returns cross-product contamination are not
+# penalized as if the parser had failed. See
+# ops/agent_handoffs/O-002-FINGERPRINT-COLLISION-TRIAGE.md and
+# ops/agent_handoffs/I-PARSE-YIELD-GATE-CONTAMINATION.md.
+# ---------------------------------------------------------------------------
+
+def test_high_contamination_with_healthy_parser_is_not_invalid():
+    """Operator-named case (a): heavy goodsNo contamination + healthy parser.
+
+    Mirrors the Anua A000000205555 DATETIME_DESC step1 production case:
+    raw_records_seen=610, rows_filtered_by_goods_no=384, records_parsed=226.
+    Effective denominator = 610 - 384 = 226. parse_yield = 226/226 = 1.0.
+    Pre-fix gate produced 'invalid' (226/610 = 0.370 < 0.5); post-fix gate
+    produces 'ok' / 'degraded' so the pipeline reaches INSERT OR IGNORE.
+    """
+    verdict = evaluate_quality_gates(
+        _summary(
+            raw_records_seen=610,
+            rows_filtered_by_goods_no=384,
+            records_parsed=226,
+        ),
+    )
+    assert verdict != "invalid"
+    # With no other downgrade triggers, this should classify as "ok".
+    assert verdict == "ok"
+
+
+def test_genuine_parse_failure_still_invalid_when_no_goods_no_filter():
+    """Operator-named case (b): true parser failure, no goodsNo filter.
+
+    raw_records_seen=500, rows_filtered_by_goods_no=0, records_parsed=10.
+    Effective denominator = 500 - 0 = 500. parse_yield = 10/500 = 0.02 < 0.5
+    → invalid. The fix does not loosen the gate for parsers that genuinely
+    fail; it only stops attributing legitimate goods_no filter rows to
+    parser failure.
+    """
+    assert evaluate_quality_gates(
+        _summary(
+            raw_records_seen=500,
+            rows_filtered_by_goods_no=0,
+            records_parsed=10,
+        ),
+    ) == "invalid"
+
+
+def test_goods_no_filter_zero_path_byte_identical_to_legacy():
+    """Operator-named case (c): zero/edge case stability.
+
+    For every existing pre-fix test case, `rows_filtered_by_goods_no = 0` is
+    the implicit default. We re-assert the load-bearing legacy verdicts
+    explicitly here so a future regression in the denominator math surfaces
+    against this test before any of the older boundary tests notice.
+    """
+    # Perfect run: 100/100 → 100/(100-0)=1.0 → ok (matches existing test_perfect_run_is_ok)
+    assert evaluate_quality_gates(
+        _summary(raw_records_seen=100, records_parsed=100, rows_filtered_by_goods_no=0),
+    ) == "ok"
+    # Boundary: 49/100 → 49/(100-0)=0.49 < 0.5 → invalid (matches existing
+    # test_parse_yield_below_half_is_invalid)
+    assert evaluate_quality_gates(
+        _summary(raw_records_seen=100, records_parsed=49, rows_filtered_by_goods_no=0),
+    ) == "invalid"
+    # Boundary: 50/100 → 50/(100-0)=0.5 → degraded (matches existing
+    # test_parse_yield_exactly_half_is_degraded_not_invalid)
+    assert evaluate_quality_gates(
+        _summary(raw_records_seen=100, records_parsed=50, rows_filtered_by_goods_no=0),
+    ) == "degraded"
+    # Empty run: 0/0 → max(0-0,1)=1, 0/1=0 < 0.5 → invalid (matches existing
+    # test_zero_seen_zero_parsed_treated_as_ok). The max(...,1) floor is
+    # load-bearing for this case.
+    assert evaluate_quality_gates(
+        _summary(raw_records_seen=0, records_parsed=0, rows_filtered_by_goods_no=0),
+    ) == "invalid"
+
+
+def test_partial_contamination_with_partial_parser_loss_still_degraded():
+    """Mixed case: some goodsNo filter activity AND some genuine parser
+    drops. The fix should credit the goodsNo filter but still penalize the
+    parser drops via the parse_yield ratio.
+
+    raw_records_seen=200, rows_filtered_by_goods_no=80, records_parsed=72.
+    Effective denominator = 200 - 80 = 120. parse_yield = 72/120 = 0.6 →
+    in the [0.5, 0.8) band → degraded.
+    """
+    assert evaluate_quality_gates(
+        _summary(
+            raw_records_seen=200,
+            rows_filtered_by_goods_no=80,
+            records_parsed=72,
+        ),
+    ) == "degraded"
+
+
+def test_filter_consumed_all_raw_seen_uses_floor_to_avoid_zero_division():
+    """Edge case: the goodsNo filter ate every row (raw_records_seen ==
+    rows_filtered_by_goods_no). Denominator pre-floor would be 0; the
+    `max(..., 1)` floor must hold so the gate doesn't divide by zero.
+
+    raw_records_seen=300, rows_filtered_by_goods_no=300, records_parsed=0.
+    Effective denominator = max(300-300, 1) = 1. parse_yield = 0/1 = 0 → invalid.
+    A page that returned only cross-product noise IS invalid (we have no
+    target-product data), so 'invalid' is the correct verdict here.
+    """
+    assert evaluate_quality_gates(
+        _summary(
+            raw_records_seen=300,
+            rows_filtered_by_goods_no=300,
+            records_parsed=0,
+        ),
+    ) == "invalid"
