@@ -61,6 +61,7 @@ import json
 import logging
 import random
 import re
+import sys
 import time
 import uuid
 from collections.abc import Callable
@@ -2463,6 +2464,17 @@ def _emit_progress_heartbeat(
             hn = "false"
         else:
             hn = "?"
+        # NOTE (I-OY-HEARTBEAT-STDOUT-REGRESSION): emit to stderr, NOT
+        # stdout. The ingest subprocess contract
+        # (scripts/ingest_oliveyoung_browser_phase1.py prints exactly one
+        # JSON object to stdout; src/voc/app/collection_batch.py parses
+        # stdout via json.loads) requires stdout to remain a single
+        # parseable JSON document. Heartbeat lines on stdout corrupt
+        # that contract and surface as
+        # "stdout JSON decode failed: Expecting value: line 1 column 2"
+        # which broke Anua A000000205555 v2 re-collection across all
+        # sorts. Stderr preserves the same observability for ops
+        # tailing the subprocess (Popen captures stderr separately).
         print(
             f"[oy-heartbeat] "
             f"goods={goods_no or '?'} "
@@ -2474,6 +2486,7 @@ def _emit_progress_heartbeat(
             f"has_next={hn} "
             f"t=+{int(elapsed_s)}s",
             flush=True,
+            file=sys.stderr,
         )
     except Exception:
         # Heartbeat is observability-only — must never fault the

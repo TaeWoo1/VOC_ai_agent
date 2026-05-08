@@ -288,25 +288,34 @@ async def test_collect_emits_progress_heartbeat_per_ok_response(
 ):
     """I-OY-STEP5-PROGRESS-INDICATOR — assert one heartbeat line per
     successful cursor response (cold-start + each continuation), so a
-    long-running OY pagination loop is visibly alive in stdout.
+    long-running OY pagination loop is visibly alive to ops.
 
     Asserts only structural facts (line count, marker prefix, presence
     of grep-friendly fields). Does NOT lock the exact format string —
     heartbeat content is allowed to evolve. The contract being tested is
     "ops can distinguish progress from hang," not "this exact wording."
+
+    Channel contract (I-OY-HEARTBEAT-STDOUT-REGRESSION): heartbeat lines
+    MUST go to stderr, never stdout. The ingest subprocess wrapper
+    (scripts/ingest_oliveyoung_browser_phase1.py) prints exactly one
+    JSON object to stdout; src/voc/app/collection_batch.py then parses
+    that stdout via json.loads. Heartbeat noise on stdout corrupted the
+    JSON envelope and broke Anua A000000205555 v2 re-collection across
+    all sorts ("Expecting value: line 1 column 2"). This test guards
+    that regression by asserting stdout stays heartbeat-free.
     """
     session = FakeBrowserReviewSession([(200, page1_body), (200, page2_last)])
     c, params = _build_connector(session)
 
     await c.collect(keyword="x", params=params)
 
-    captured = capsys.readouterr().out
+    captured_pair = capsys.readouterr()
     heartbeat_lines = [
-        ln for ln in captured.splitlines()
+        ln for ln in captured_pair.err.splitlines()
         if ln.startswith("[oy-heartbeat]")
     ]
     # One per ok response: cold-start (page1) + continuation (page2).
-    assert len(heartbeat_lines) == 2, captured
+    assert len(heartbeat_lines) == 2, captured_pair.err
     for ln in heartbeat_lines:
         # Grep-friendly field presence — values can shift, names cannot.
         assert "goods=" in ln
@@ -316,6 +325,13 @@ async def test_collect_emits_progress_heartbeat_per_ok_response(
         assert "parsed=" in ln
         assert "has_next=" in ln
         assert "t=+" in ln
+
+    # Subprocess JSON contract guard: stdout must stay heartbeat-free
+    # so json.loads(stdout) in collection_batch.py does not fault on
+    # "[oy-heartbeat] ..." preceding the JSON envelope. This is the
+    # exact production failure that I-OY-HEARTBEAT-STDOUT-REGRESSION
+    # fixes.
+    assert "[oy-heartbeat]" not in captured_pair.out, captured_pair.out
 
 
 @pytest.mark.asyncio
