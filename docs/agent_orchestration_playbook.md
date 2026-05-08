@@ -1374,6 +1374,337 @@ at `todo` until operator dispatches.
     (clean diagnostic) — **achieved 2026-05-07 via Tocobo run-003;
     verdict B verified_clean_diagnostic**
 
+### I-OY-STEP5-PROGRESS-INDICATOR — per-cursor pagination heartbeat
+
+- **role**: Implementation Agent
+- **status**: **done** (closed 2026-05-08)
+- **closed_by**: `90b4f73 chore(connectors): add OY pagination heartbeat`
+- **closed_at**: 2026-05-08
+- **decision recorded**: Added `_emit_progress_heartbeat()` helper
+  emitting one `[oy-heartbeat]` line per successful cursor response
+  with `goods / sort / cursor / raw / parsed / filtered / has_next /
+  t=+Ns`, plus call sites at the cold-start ok branch and the
+  continuation ok branch in
+  `src/voc/connectors/oliveyoung_browser_api.py`. Helper is wrapped
+  in `try/except: pass` so observability cannot fault the loop;
+  uses `flush=True`. New structural test
+  `test_collect_emits_progress_heartbeat_per_ok_response` asserts
+  field-name presence and line count without locking the literal
+  format. Diff: 2 files, +123 / -0. Tests: 434 passed (+1 vs
+  pre-patch). **Note: this commit later regressed the subprocess
+  stdout JSON contract because heartbeat printed to stdout —
+  `print(...)` defaults to `sys.stdout`. The contract requires
+  stdout to be a single JSON object (`scripts/ingest_oliveyoung_
+  browser_phase1.py:466,500` writes `print(json.dumps(...))`;
+  `src/voc/app/collection_batch.py:1127` does
+  `json.loads(stdout)`). Heartbeat lines on stdout caused
+  `Expecting value: line 1 column 2 (char 1)` failures across
+  every Anua v2 sort attempt. Fixed by `b371950` —
+  see I-OY-HEARTBEAT-STDOUT-REGRESSION below.**
+- **goal** *(historical)*: Add lightweight per-cursor / per-page
+  progress heartbeat for long-running OY multi-sort scraping
+  (especially RECOMMENDED_DESC step5) to prevent false-wedge
+  misdiagnosis; observability-only, no behavior changes.
+- **context** *(historical)*: Forensics on Anua A000000205555
+  run-001 partial (post-`258f876`) showed step5 was making 41
+  successful HTTP requests over ~52 minutes (`tag=ok has_next=true`)
+  while ops-data subagent diagnosed a wedge from stale stdout. Same
+  false-wedge pattern as fwee. The trace.jsonl signal needed a
+  stdout-mirror so external observers could distinguish "still
+  progressing" from "true hang" without tailing the trace.
+- **scope**:
+  - in: `src/voc/connectors/oliveyoung_browser_api.py`,
+    `tests/test_connectors/test_oliveyoung_browser_api_runtime.py`
+  - out: live collection; timeout / retry / anti-bot behavior;
+    parse_yield / quality gates; review_id / fingerprint;
+    schema / migrations; `collection_batch.py`;
+    `ingest_oliveyoung_browser_phase1.py`; other scripts;
+    `.claude/`; `.gitignore`
+- **commands** (verification gates run pre-commit):
+  - `python3 -m py_compile src/voc/connectors/oliveyoung_browser_api.py scripts/run_phase2e_pipeline.py` → OK
+  - `PYTHONPATH=. pytest tests/test_connectors/ -q` → 434 passed
+- **output**:
+  - 2 modified tracked files; commit `90b4f73`
+- **stop conditions**:
+  - patch + tests green + handoff written → close (achieved)
+  - subsequently regressed stdout JSON contract; fixed by
+    I-OY-HEARTBEAT-STDOUT-REGRESSION
+
+### I-OY-HEARTBEAT-STDOUT-REGRESSION — route OY heartbeat to stderr
+
+- **role**: Implementation Agent
+- **status**: **done** (closed 2026-05-08)
+- **closed_by**: `b371950 fix(connectors): route OY heartbeat to stderr`
+- **closed_at**: 2026-05-08
+- **decision recorded**: Restored the subprocess stdout JSON
+  contract by adding `file=sys.stderr` to the `print()` call in
+  `_emit_progress_heartbeat` (one keyword arg + `import sys` at
+  the stdlib import block). Heartbeat visibility preserved for ops
+  tailing combined stderr+stdout via `tee`. Test updated:
+  `capsys.readouterr().out` → `.err` for heartbeat capture, plus
+  new contract-guard assertion
+  `assert "[oy-heartbeat]" not in captured_pair.out` so any future
+  regression that re-routes heartbeat back to stdout fails in CI.
+  Existing structural assertions (line count + 7 grep-friendly
+  field-name checks) preserved. Diff: 2 files, +33 / -4. Tests:
+  434 passed (no regression). **End-to-end validation**: Anua
+  A000000205555 v3 run completed all 5 sorts cleanly with no
+  `Expecting value: line 1 column 2` errors; pipeline produced
+  manifest + analysis_report + cardnews + PDF; cardnews tri-tuple
+  verbatim correct.
+- **goal** *(historical)*: Fix the regression introduced by
+  `90b4f73` where OY heartbeat lines printed to stdout corrupted
+  the subprocess JSON contract (`scripts/ingest_oliveyoung_
+  browser_phase1.py:466,500` prints exactly one JSON object;
+  `src/voc/app/collection_batch.py:1127` parses via
+  `json.loads(stdout)`).
+- **context** *(historical)*: Anua v2 (run-002) failed at every
+  sort with `unknown_failure / stdout JSON decode failed:
+  Expecting value: line 1 column 2 (char 1)` — the `[` of
+  `[oy-heartbeat]` at position 0 followed by `o` at position 1
+  matches this failure shape exactly. Diagnosed by
+  O-A-O002-ANUA-V2 orchestrator synthesis, which overrode the
+  ops-data subagent's incorrect `blocked_login_expired` verdict.
+- **scope**:
+  - in: `src/voc/connectors/oliveyoung_browser_api.py`,
+    `tests/test_connectors/test_oliveyoung_browser_api_runtime.py`
+  - out: live collection; timeout / retry / anti-bot behavior;
+    parse_yield / quality gates; review_id / fingerprint;
+    schema / migrations; `collection_batch.py`;
+    `ingest_oliveyoung_browser_phase1.py`; other scripts;
+    `.claude/`; `.gitignore`
+- **commands** (verification gates run pre-commit):
+  - `python3 -m py_compile src/voc/connectors/oliveyoung_browser_api.py` → OK
+  - `PYTHONPATH=. pytest tests/test_connectors/test_oliveyoung_browser_api_runtime.py::test_collect_emits_progress_heartbeat_per_ok_response -q` → 1 passed
+  - `PYTHONPATH=. pytest tests/test_connectors/ -q` → 434 passed
+- **output**:
+  - 2 modified tracked files; commit `b371950`
+- **stop conditions**:
+  - patch + tests green + handoff written → close (achieved)
+  - acceptance gate: Anua A000000205555 v3 single-SKU re-run
+    produces no JSON-parse failures and full pipeline completes —
+    **achieved 2026-05-08 via run `outputs/2026-05-08_anua_run-001/`**
+
+### O-002-brand20-fanout-batch-a — superseded by validated fix chain
+
+- **role**: Ops / Data Agent
+- **status**: **superseded** (closed 2026-05-08)
+- **closed_by**: `handoff-only` — initial halt was diagnosed as
+  `258f876` parse_yield denominator gap; subsequent high-risk SKU
+  validations (Anua v3, Skin1004, Round Lab) confirmed the fix
+  chain handles 기획세트 contamination correctly. The original
+  Anua failure that halted batch-A is no longer a fan-out blocker.
+- **closed_at**: 2026-05-08
+- **decision recorded**: Original dispatch authorized 6 SKUs
+  (A000000205555, A000000215559, A000000225053, A000000202912,
+  A000000249797, A000000179852); halted on SKU 1 (Anua) with all
+  5 sorts producing 0 inserts due to the parse_yield gate
+  short-circuiting on cross-product fingerprint contamination.
+  QA triage falsified the operator's fingerprint-collision
+  hypothesis and pinpointed the parse_yield denominator bug.
+  Fixed by `258f876` (`fix(app): exclude goodsNo-filtered
+  contamination from parse_yield denominator`). Subsequently the
+  heartbeat regression chain (`90b4f73` → `b371950`) was resolved
+  and three high-risk 기획세트 SKUs (Anua, Skin1004, Round Lab)
+  validated end-to-end. Remaining 5 SKUs from the original batch
+  authorization are unblocked but require a fresh per-batch
+  operator dispatch under O-003 below.
+- **goal** *(historical)*: Run Brand-20 fan-out batch A excluding
+  completed/cooldown SKUs.
+- **context** *(historical)*: Followed fwee re-collection success
+  after observability fix (`6150cf1`). Halted on the parse_yield
+  contamination gap; operator initially hypothesized fingerprint
+  collision against sibling A000000207901 (rank 8) which the
+  triage chain falsified.
+- **handoff**:
+  - `ops/agent_handoffs/O-002-brand20-fanout-batch-a.md`
+  - `ops/agent_handoffs/O-A-O002-BATCH-A.md`
+  - `ops/agent_handoffs/O-002-FINGERPRINT-COLLISION-TRIAGE.md`
+  - `ops/agent_handoffs/O-A-FINGERPRINT-TRIAGE.md`
+
+### O-002-anua-rank2-recollection-v2 — failed by heartbeat stdout regression
+
+- **role**: Ops / Data Agent
+- **status**: **failed** (closed 2026-05-08)
+- **closed_by**: `handoff-only` — failure was caused by `90b4f73`
+  printing heartbeat to stdout, breaking the subprocess JSON
+  contract; superseded by v3 after `b371950` landed
+- **closed_at**: 2026-05-08
+- **verdict**: `needs_patch`
+- **decision recorded**: Run halted in 4m52s with all 5 sort
+  attempts emitting `unknown_failure / stdout JSON decode failed:
+  Expecting value: line 1 column 2 (char 1)`. Subagent's initial
+  diagnosis was `blocked_login_expired` (citing `auth_error=True`
+  in stderr and `cookie_present=false` in trace), but
+  orchestrator synthesis O-A-O002-ANUA-V2 falsified that:
+  trace.jsonl from this run shows `tag=ok login_required=false`
+  on every recorded request, and the `line 1 column 2 (char 1)`
+  position is consistent with `[oy-heartbeat]` corrupting stdout.
+  Real root cause was the heartbeat-stdout regression in
+  `90b4f73`. Fixed by `b371950`.
+- **goal** *(historical)*: Anua A000000205555 full re-collection
+  after `90b4f73` heartbeat patch landed; operator's anti-premature-
+  kill discipline carried verbatim from the prior run-001 partial
+  case.
+- **context** *(historical)*: Followed run-001 partial outcome
+  (`anua_partial_but_gate_fixed` — 283 rows landed validating
+  `258f876` parse_yield gate but step5 was killed prematurely). v2
+  was meant to complete the full pipeline with corrected anti-
+  premature-kill discipline.
+- **handoff**:
+  - `ops/agent_handoffs/O-002-anua-rank2-recollection-v2.md`
+  - `ops/agent_handoffs/O-A-O002-ANUA-V2.md`
+
+### O-002-anua-rank2-recollection-v3 — Anua re-collection after stderr fix
+
+- **role**: Ops / Data Agent
+- **status**: **done** (closed 2026-05-08)
+- **closed_by**: `handoff-only` — completed run produced full
+  observable artifact set; no commit closes the orchestration
+  ticket itself
+- **closed_at**: 2026-05-08
+- **verdict**: `anua_partial_but_observable`
+- **run_dir**: `outputs/2026-05-08_anua_run-001/`
+- **decision recorded**: Pipeline ran 16:22 wall-clock end-to-end.
+  1/5 sorts succeeded raw-collection-wise (DATETIME_DESC: 800 raw,
+  39 inserted, quality=degraded); RATING_ASC + RATING_DESC +
+  RECOMMENDED_DESC emitted clean `sort_control_unreachable`
+  (post-`69f75af` projection); USEFUL_SCORE_DESC reused-via-default.
+  Full observable artifact set produced: `manifest.json` (5.1 KB),
+  `shared/collection_summary.json` (6.1 KB),
+  `shared/analysis_report.json` (21.4 KB / 323 reviews analyzed),
+  `seller_report/seller_report_ko.pdf` (134 KB), `cardnews/ko/`
+  (10 PNGs). Cardnews tri-tuple verbatim correct
+  (`schema_version="1.1"` / `cardnews_mode="private_demo"` /
+  `cardnews_mode_constraints.publishable_to_public_channels=false`).
+  DB delta `+39` rows (284 baseline → 323). DB integrity ok. **End-
+  to-end validation of all five session commits**: `258f876` parse_
+  yield gate (39/800 → degraded, not invalid → INSERT happened);
+  `b371950` heartbeat stderr (no JSON corruption); `90b4f73`
+  heartbeat code (81 successful HTTP responses on the same code
+  path); `69f75af` sort_control_unreachable projection (clean
+  diagnostic on 3 sorts); `6150cf1` unbuffered subprocess stdout
+  (9 `[multi-sort N/5]` lines visible in tee'd log). Falsified the
+  v2 `blocked_login_expired` hypothesis: trace shows 81 successful
+  anonymous responses with `cookie_present=false /
+  login_required=false`.
+- **goal** *(historical)*: Complete Anua rank-2 full run-package
+  after the parse_yield fix and heartbeat stderr fix.
+- **context** *(historical)*: Followed v2 failure (heartbeat-stdout
+  regression). v3 verified the full fix chain on a 기획세트 SKU
+  with clean baseline-plus-merge behavior.
+- **handoff**: `ops/agent_handoffs/O-002-anua-rank2-recollection-v3.md`
+
+### O-002-skin1004-verification — Skin1004 high-risk 기획세트 verification
+
+- **role**: Ops / Data Agent
+- **status**: **done** (closed 2026-05-08)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-08
+- **verdict**: `skin1004_partial_but_observable`
+- **run_dir**: `outputs/2026-05-08_product-6c9259b8eb2f_run-001/`
+- **decision recorded**: Pipeline ran 1:08:28 wall-clock. **3/5
+  sorts succeeded** raw-collection-wise (DATETIME_DESC: 1860 raw /
+  561 inserted / quality=degraded; USEFUL_SCORE_DESC: 430 raw / 0
+  inserted / quality=ok / reused-via-default-response;
+  RECOMMENDED_DESC: 550 raw / 37 inserted / quality=ok). RATING_ASC
+  + RATING_DESC emitted clean `sort_control_unreachable`. **First
+  end-to-end RECOMMENDED_DESC pagination this session that ran to
+  natural completion** (max_cap_reached at 50 raw responses) — no
+  premature kill needed. 598 reviews analyzed, full artifact set
+  produced (PDF 147 KB, 18 cardnews PNGs, manifest, summary,
+  analysis_report). Cardnews tri-tuple verbatim correct. DB delta
+  `+598` (0 baseline → 598). Product is `[2입 기획] 스킨1004
+  마다가스카르 센텔라 히알루-시카 워터핏 선세럼 50ml 더블기획` —
+  confirmed 기획세트 high-risk pattern. USEFUL_SCORE_DESC's
+  `anti_bot_or_blocked_by_sort=True` co-existed with `quality=ok`
+  and `reused_via_default_response=True` — clean default-response
+  salvage, surfaced as **possible summary-label ambiguity** per
+  operator's refined rule rather than `blocked_anti_bot`.
+- **goal** *(historical)*: Resume Brand-20 fan-out with one high-
+  risk SKU after Anua v3 validated the OY fix chain end-to-end.
+- **handoff**: `ops/agent_handoffs/O-002-skin1004-verification.md`
+
+### O-002-roundlab-verification — Round Lab high-risk 기획세트 verification
+
+- **role**: Ops / Data Agent
+- **status**: **done** (closed 2026-05-08)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-08
+- **verdict**: `roundlab_partial_but_observable`
+- **run_dir**: `outputs/2026-05-08_product-e40bb0eb502d_run-001/`
+- **decision recorded**: Pipeline ran ~28 min wall-clock end-to-end.
+  **3/5 sorts succeeded** (DATETIME_DESC: 490 raw / 490 inserted /
+  quality=degraded — 100% retention; USEFUL_SCORE_DESC: 50 raw /
+  2 inserted / quality=ok / reused-via-default; **RECOMMENDED_DESC:
+  50 raw / 50 inserted / quality=ok / max_cap_reached — 100%
+  retention with NO goodsNo-filter contamination**). RATING_ASC +
+  RATING_DESC emitted clean `sort_control_unreachable`. 542 reviews
+  analyzed, full artifact set produced (PDF 145 KB, 17 cardnews
+  PNGs, manifest, summary, analysis_report). Cardnews tri-tuple
+  verbatim correct. DB delta `+542` (0 baseline → 542). Product is
+  `[1등썬] 라운드랩 자작나무 수분 선크림 50ml 기획(50ml+크림 20ml/
+  50ml+클렌저 20ml)` — 기획세트 sunscreen. **Third independent end-
+  to-end validation of the fix chain on a 기획세트 SKU**.
+  USEFUL_SCORE_DESC `anti_bot_or_blocked_by_sort=True` correctly
+  classified as summary-label ambiguity per operator's refined
+  rule. Trace evidence across 61 review-cursor requests: 100%
+  HTTP 200, 100% `tag=ok`, 100% `login_required=false`. Pre-flight
+  noted a transient sandbox EPERM on the project tree in the prior
+  turn that resolved after working-directory restoration; the
+  re-dispatch in this turn succeeded cleanly.
+- **goal** *(historical)*: Continue Brand-20 fan-out with the next
+  high-risk SKU after Anua v3 + Skin1004 validations.
+- **handoff**: `ops/agent_handoffs/O-002-roundlab-verification.md`
+
+### O-003-brand20-fanout-resumed — resume remaining Brand-20 fan-out
+
+- **role**: Ops / Data Agent
+- **status**: todo
+- **goal**: Resume remaining Brand-20 fan-out in 3-4 SKU batches,
+  excluding already-completed SKUs (Tocobo, Anua rank 2, Anua rank 8,
+  fwee, Skin1004, Round Lab) and the TIRTIR cooldown SKU
+  (`A000000214231` — separate per-turn authorization required).
+- **context**: After three independent end-to-end 기획세트
+  validations (Anua v3, Skin1004, Round Lab) the OY fix chain
+  (`258f876` + `6150cf1` + `90b4f73` + `b371950` + `69f75af`) is
+  validated for both clean (Round Lab RECOMMENDED_DESC 100%
+  retention) and contamination-heavy (Anua, Skin1004) 기획세트
+  patterns. Remaining ~13-15 Brand-20 SKUs can be fanned out with
+  confidence under per-batch operator authorization.
+- **scope**:
+  - in: live OY collection ONLY for the goodsNo named in the
+    operator's per-turn dispatch
+  - out: any other goodsNo than those named; TIRTIR
+    (`A000000214231`) unless explicitly re-authorized; code/test
+    edits; `.claude/`; `.gitignore`; staging; committing; pushing
+- **requirements**:
+  - 3-4 SKUs per dispatch (not all remaining at once — total wall-
+    clock could exceed 4-8 hours per batch)
+  - 60-120 min budget per SKU
+  - Anti-premature-kill rule: trace.jsonl mtime + `[multi-sort
+    N/5]` lines as primary progress signals; kill ONLY if all of
+    {trace stale > 10 min, run-dir stale > 10 min, wall-clock > 120
+    min}
+  - Per-SKU verdict from {`<sku>_complete`,
+    `<sku>_partial_but_observable`, `blocked_login_expired`,
+    `blocked_anti_bot`, `needs_patch`}
+  - Refined anti-bot rule: do NOT classify a sort as
+    `blocked_anti_bot` based solely on `anti_bot_or_blocked_by_sort`
+    when status=succeeded + raw>0 + quality=ok/degraded + clean
+    trace; surface as "possible summary-label ambiguity" instead
+- **commands**:
+  - per-batch operator-named dispatch
+- **output**:
+  - one handoff per batch under
+    `ops/agent_handoffs/O-003-brand20-fanout-batch-<N>.md`
+- **stop conditions**:
+  - per-batch per-SKU verdict reached → close batch handoff
+  - any new failure mode (e.g. true anti-bot, true login expiry,
+    new connector regression) → stop and surface to operator with
+    a separate triage ticket
+  - all remaining Brand-20 SKUs closed → close O-003
+
 ---
 
 ## 11. Claude Code native subagent mode
