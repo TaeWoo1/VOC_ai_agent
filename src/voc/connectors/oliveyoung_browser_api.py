@@ -1611,6 +1611,22 @@ class OliveYoungBrowserAPIConnector:
                 raw_seen += _count_records(body)
                 _add_unique(body)
                 last_body = body
+                # I-OY-STEP5-PROGRESS-INDICATOR — emit a heartbeat for
+                # the cold-start ok response. cursor_index is reset per
+                # attempt so a retried attempt starts at 1 again; the
+                # trace.jsonl carries the cumulative request_index for
+                # post-mortem cross-reference.
+                cursor_index = 1
+                _emit_progress_heartbeat(
+                    goods_no=target_goods_no,
+                    sort_type=self._sort_type,
+                    cursor_index=cursor_index,
+                    raw_seen=raw_seen,
+                    parsed=len(raws),
+                    filtered=filter_telemetry_total["filtered_by_goods_no"],
+                    has_next=_extract_has_next(body),
+                    elapsed_s=(datetime.now() - started).total_seconds(),
+                )
 
                 # ---- Continuation loop: scroll → wait → parse ----
                 malformed_streak = 0
@@ -1672,6 +1688,23 @@ class OliveYoungBrowserAPIConnector:
                     raw_seen += _count_records(cont_body)
                     _add_unique(cont_body)
                     last_body = cont_body
+                    # I-OY-STEP5-PROGRESS-INDICATOR — heartbeat per
+                    # ok continuation response. One line per response
+                    # is fine: signal sorts cap at ~50 responses;
+                    # DATETIME_DESC tops out around ~226 for a 14-min
+                    # crawl (one line per ~4s, ops-tolerable). See
+                    # ticket notes for the false-wedge rationale.
+                    cursor_index += 1
+                    _emit_progress_heartbeat(
+                        goods_no=target_goods_no,
+                        sort_type=self._sort_type,
+                        cursor_index=cursor_index,
+                        raw_seen=raw_seen,
+                        parsed=len(raws),
+                        filtered=filter_telemetry_total["filtered_by_goods_no"],
+                        has_next=_extract_has_next(cont_body),
+                        elapsed_s=(datetime.now() - started).total_seconds(),
+                    )
                 else:
                     # Loop exited via _should_stop_pagination — distinguish
                     # quota-stop from clean-end-of-stream. Only the latter
@@ -2392,6 +2425,60 @@ def _count_records(body: dict) -> int:
     data = body.get("data") if isinstance(body, dict) else None
     records = data.get("goodsReviewList") if isinstance(data, dict) else None
     return len(records) if isinstance(records, list) else 0
+
+
+def _emit_progress_heartbeat(
+    *,
+    goods_no: str | None,
+    sort_type: str | None,
+    cursor_index: int,
+    raw_seen: int,
+    parsed: int,
+    filtered: int,
+    has_next: bool | None,
+    elapsed_s: float,
+) -> None:
+    """Print one ops-visible heartbeat line for a successful cursor response.
+
+    Mirrors the per-response trace.jsonl signal to stdout so external
+    observers can distinguish "still progressing" from "true hang"
+    without tailing the trace artifact. See the
+    I-OY-STEP5-PROGRESS-INDICATOR ticket for the false-wedge precedent
+    (Anua A000000205555 step5 RECOMMENDED_DESC; trace.jsonl proved 41
+    successful HTTP 200 / has_next=true responses while ops-data
+    diagnosed a wedge from stale stdout).
+
+    Observability-only — never raises into the pagination loop. flush=True
+    because long sorts are launched via subprocess by the orchestrator
+    and any buffering defeats the whole purpose.
+
+    Format is intentionally compact and grep-friendly:
+        [oy-heartbeat] goods=<g> sort=<s> cursor=<n> raw=<r>
+        parsed=<p> filtered=<f> has_next=<true|false|?> t=+<NN>s
+    """
+    try:
+        if has_next is True:
+            hn = "true"
+        elif has_next is False:
+            hn = "false"
+        else:
+            hn = "?"
+        print(
+            f"[oy-heartbeat] "
+            f"goods={goods_no or '?'} "
+            f"sort={sort_type or '?'} "
+            f"cursor={cursor_index} "
+            f"raw={raw_seen} "
+            f"parsed={parsed} "
+            f"filtered={filtered} "
+            f"has_next={hn} "
+            f"t=+{int(elapsed_s)}s",
+            flush=True,
+        )
+    except Exception:
+        # Heartbeat is observability-only — must never fault the
+        # collection loop. Swallow all formatting / IO errors.
+        pass
 
 
 def _extract_has_next(body: dict | None) -> bool | None:

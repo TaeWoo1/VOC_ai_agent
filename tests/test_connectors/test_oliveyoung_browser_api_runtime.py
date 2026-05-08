@@ -283,6 +283,42 @@ async def test_collect_two_pages_yields_all_reviews(page1_body, page2_last):
 
 
 @pytest.mark.asyncio
+async def test_collect_emits_progress_heartbeat_per_ok_response(
+    page1_body, page2_last, capsys,
+):
+    """I-OY-STEP5-PROGRESS-INDICATOR — assert one heartbeat line per
+    successful cursor response (cold-start + each continuation), so a
+    long-running OY pagination loop is visibly alive in stdout.
+
+    Asserts only structural facts (line count, marker prefix, presence
+    of grep-friendly fields). Does NOT lock the exact format string —
+    heartbeat content is allowed to evolve. The contract being tested is
+    "ops can distinguish progress from hang," not "this exact wording."
+    """
+    session = FakeBrowserReviewSession([(200, page1_body), (200, page2_last)])
+    c, params = _build_connector(session)
+
+    await c.collect(keyword="x", params=params)
+
+    captured = capsys.readouterr().out
+    heartbeat_lines = [
+        ln for ln in captured.splitlines()
+        if ln.startswith("[oy-heartbeat]")
+    ]
+    # One per ok response: cold-start (page1) + continuation (page2).
+    assert len(heartbeat_lines) == 2, captured
+    for ln in heartbeat_lines:
+        # Grep-friendly field presence — values can shift, names cannot.
+        assert "goods=" in ln
+        assert "sort=" in ln
+        assert "cursor=" in ln
+        assert "raw=" in ln
+        assert "parsed=" in ln
+        assert "has_next=" in ln
+        assert "t=+" in ln
+
+
+@pytest.mark.asyncio
 async def test_collect_stops_on_has_next_false_without_extra_scroll(page1_body):
     page1_last = copy.deepcopy(page1_body)
     page1_last["data"]["hasNext"] = False
