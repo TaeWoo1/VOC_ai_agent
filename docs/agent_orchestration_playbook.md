@@ -1861,6 +1861,109 @@ at `todo` until operator dispatches.
   19/20 SKUs.**
 - **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-4.md`
 
+### O-005-rating-sort-retry — RATING_ASC / RATING_DESC retry across 15 prior-classified-unreachable Brand-20 SKUs
+
+- **role**: Ops / Data Agent
+- **status**: **done (`rating_tail_coverage_complete_19_of_20`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only` (no umbrella handoff file; per-batch
+  handoffs are the audit trail)
+- **closed_at**: 2026-05-09
+- **verdict**: **`rating_tail_coverage_complete_19_of_20`**
+- **decision recorded**: 15 SKUs covered with targeted RATING_ASC +
+  RATING_DESC retry across pilot + batch 1 + batch 2a + batch 2b.
+  **30/30 rating probes succeeded.** Cumulative DB delta **+442 rows**.
+  **1/30 = 3.3% transient Playwright `Page.goto: Target page closed`
+  flake** (recovered on a single-shot retry; below the 10% threshold
+  for connector-side retry implementation). Combined with the 4 SKUs
+  that had prior 5/5 sort coverage under O-003 (Tocobo 비타,
+  Skinfood, Banila Co, Ilso), Brand-20 non-cooldown rating-tail
+  coverage is now **19/20 complete**. TIRTIR rank 4
+  (`A000000214231`) remains on operator-imposed cooldown per O-004
+  and is excluded from this tally.
+- **value delivered**:
+  - **RATING_ASC** consistently surfaced low-rating tail reviews not
+    captured by DATETIME_DESC / USEFUL_SCORE_DESC / RECOMMENDED_DESC
+    (1★ and 2★ rows that pagination buried in tail positions).
+  - **RATING_DESC** sometimes added high-rating tail rows on SKUs
+    whose prior collection had not exhausted the rating-high axis
+    (most visible on hince and fwee).
+  - **Falsified the prior "기획세트 hides rating tabs"
+    interpretation.** Rating tabs were reachable on every retried
+    SKU when the connector was given a fresh page-render attempt
+    (see updated `Q-OY-SORT-TAB-VISIBILITY-CATALOG` entry below).
+- **handoffs**:
+  - `ops/agent_handoffs/O-005-rating-sort-retry-pilot.md`
+  - `ops/agent_handoffs/O-005-rating-sort-retry-batch-1.md`
+  - `ops/agent_handoffs/O-005-rating-sort-retry-batch-2a.md`
+  - `ops/agent_handoffs/O-005-rating-sort-retry-batch-2b.md`
+
+### O-005-rating-sort-retry-pilot — 3-SKU pilot validating single-sort manifest pattern
+
+- **role**: Ops / Data Agent
+- **status**: **done (`rating_retry_pilot_success`)** (closed 2026-05-09)
+- **verdict**: **`rating_retry_pilot_success`** — 6/6 rating probes
+  succeeded
+- **decision recorded**: Pilot ran 3 prior-classified-unreachable
+  Brand-20 SKUs through targeted RATING_ASC + RATING_DESC
+  single-sort manifests via `scripts/run_oy_collection_batch.py`:
+  Skin1004 (`A000000215559`), Manyo (`A000000107679`), Clio
+  (`A000000219278`). **6/6 probes status=max_cap_reached**, all
+  `logged_in`, zero anti_bot, zero auth_evidence. **DB delta +112
+  rows.** Documented capture-timing artifact: RATING_ASC captures 5
+  sort labels; RATING_DESC captures 4 labels because the low-rating
+  tab collapses post-click (cosmetic, no operational impact — see
+  follow-up `Q-OY-RATING-LABEL-CAPTURE-TIMING`). Established the
+  single-sort manifest pattern reused by all subsequent batches.
+- **handoff**: `ops/agent_handoffs/O-005-rating-sort-retry-pilot.md`
+
+### O-005-rating-sort-retry-batch-1 — Anua rank 2 + Round Lab + hince + beplain
+
+- **role**: Ops / Data Agent
+- **status**: **done (`rating_retry_batch_success`)** (closed 2026-05-09)
+- **verdict**: **`rating_retry_batch_success`** — 8/8 rating probes
+  succeeded
+- **decision recorded**: 4-SKU batch using the pilot's validated
+  single-sort manifest pattern: Anua rank 2 (`A000000205555`),
+  Round Lab (`A000000149135`), hince (`A000000202912`), beplain
+  (`A000000142520`). **8/8 probes status=max_cap_reached**, all
+  `logged_in`, zero anti_bot. **DB delta +176 rows.** One transient
+  Playwright `Page.goto: Target page closed` race occurred and
+  recovered cleanly on a single-shot retry (1/8 within-batch;
+  absorbed into cumulative O-005 1/30 = 3.3% rate).
+- **handoff**: `ops/agent_handoffs/O-005-rating-sort-retry-batch-1.md`
+
+### O-005-rating-sort-retry-batch-2a — Needly + Muzigae + Mediheal + Espoir
+
+- **role**: Ops / Data Agent
+- **status**: **done (`rating_retry_batch_success`)** (closed 2026-05-09)
+- **verdict**: **`rating_retry_batch_success`** — 8/8 rating probes
+  succeeded
+- **decision recorded**: 4-SKU batch: Needly (`A000000225053`),
+  Muzigae (`A000000185439`), Mediheal (`A000000244987`), Espoir
+  (`A000000197490`). **8/8 probes status=max_cap_reached**, all
+  `logged_in`, zero anti_bot, zero transient races. **DB delta +84
+  rows.**
+- **handoff**: `ops/agent_handoffs/O-005-rating-sort-retry-batch-2a.md`
+
+### O-005-rating-sort-retry-batch-2b — Tocobo rank 17 + Jungsaemmool + Anua rank 8 + fwee rank 1 (final batch)
+
+- **role**: Ops / Data Agent
+- **status**: **done (`rating_retry_batch_success`)** (closed 2026-05-09)
+- **verdict**: **`rating_retry_batch_success`** — 8/8 rating probes
+  succeeded
+- **decision recorded**: Final O-005 batch: Tocobo rank 17
+  (`A000000179126`), Jungsaemmool (`A000000139063`), Anua rank 8
+  (`A000000207901`), fwee rank 1 (`A000000246446`). **8/8 probes
+  status=max_cap_reached**, all `logged_in`, zero anti_bot, zero
+  transient races. **DB delta +70 rows** — fwee r1 contributed all
+  +70 (RATING_ASC +43, RATING_DESC +27); the other three SKUs were
+  rating-tail saturated from prior session activity and INSERT OR
+  IGNORE deduped 100% while merging RATING_* sort membership
+  metadata into existing rows (correct idempotent behavior, not a
+  failure). This batch closes O-005 at 19/20 Brand-20 non-cooldown
+  rating-tail coverage.
+- **handoff**: `ops/agent_handoffs/O-005-rating-sort-retry-batch-2b.md`
+
 ### O-004-tirtir-cooldown-decision — operator decision on TIRTIR rank 4
 
 - **role**: Operator (decision needed) → Ops / Data Agent (execution if approved)
@@ -1935,19 +2038,39 @@ at `todo` until operator dispatches.
 ### Q-OY-SORT-TAB-VISIBILITY-CATALOG — document the four UI patterns
 
 - **role**: QA / Regression Agent or Ops / Data Agent (read-only doc work)
-- **status**: **todo (low priority)**
+- **status**: **todo (low priority)** — pattern (2) interpretation
+  revised post-O-005
 - **goal**: Document the four observed OY mobile UI sort-tab
   visibility patterns into a small reference doc under `docs/`
   so future operators recognize them without re-discovery:
   (1) **full 5/5** — single-product SKUs expose all 5 sort
-  tabs (Tocobo 비타, Skinfood, Banila Co); (2) **기획세트 hides
-  rating tabs** — RATING_ASC + RATING_DESC unreachable
-  (~11 SKUs); (3) **inverse-DATETIME** — DATETIME tab hidden
-  but rating tabs available (Ilso); (4) **reduced-tabs** —
-  only DATETIME + USEFUL exposed (Clio). Operator can
-  pre-classify a SKU's expected coverage from product type
-  (single-product vs 기획세트) and avoid surprise during fan-
-  out planning.
+  tabs (Tocobo 비타, Skinfood, Banila Co); (2) **기획세트
+  lazy-renders rating tabs intermittently** — RATING_ASC +
+  RATING_DESC tabs are present in the DOM but slow / lazy-
+  rendered during automation, producing transient
+  `sort_control_unreachable` verdicts that resolve on a fresh
+  page-render attempt (~11 SKUs originally classified this
+  way; all 11 retried successfully under O-005); (3)
+  **inverse-DATETIME** — DATETIME tab hidden but rating tabs
+  available (Ilso); (4) **reduced-tabs** — only DATETIME +
+  USEFUL exposed (Clio). Operator can pre-classify a SKU's
+  expected coverage from product type (single-product vs
+  기획세트), but should treat pattern (2) as "expect retry
+  budget" rather than "expect missing rows."
+- **post-O-005 update (2026-05-09)**: O-005 falsified the
+  original "기획세트 hides rating tabs" interpretation.
+  Across **30/30 single-sort manifest probes** spanning 15
+  SKUs (pilot + batch 1 + batch 2a + batch 2b), every rating
+  tab was reachable when the connector was given a fresh
+  page-render attempt. `sort_control_unreachable` outcomes
+  from the original O-002 / O-003 fan-out were
+  timing / lazy-render false-negatives, **not** true UI
+  absence. Operational mitigation: targeted RATING_ASC /
+  RATING_DESC retry using single-sort manifests via
+  `scripts/run_oy_collection_batch.py` succeeded 30/30. The
+  catalog doc, when written, should reflect this revised
+  interpretation rather than the originally-recorded "hides"
+  framing.
 - **scope**:
   - in: new file under `docs/oy_sort_tab_visibility_catalog.md`
     (or similar)
@@ -1998,6 +2121,69 @@ at `todo` until operator dispatches.
   - patch + tests green → handoff for operator review
   - low priority — operationally the foreground-execution
     discipline established in O-003 is sufficient
+
+### Q-OY-RATING-LABEL-CAPTURE-TIMING — capture sort labels pre-click rather than post-click
+
+- **role**: QA / Regression Agent (triage) → Implementation Agent
+  (small fix if approved)
+- **status**: **todo (low priority — cosmetic forensics improvement)**
+- **goal**: Resolve the cosmetic capture-timing artifact in
+  `available_sort_button_labels`. RATING_ASC captures 5 sort
+  labels (full set); RATING_DESC captures 4 labels because the
+  low-rating tab collapses after the high-rating tab is clicked.
+  Documented across O-005 pilot + batch 1 + batch 2a + batch 2b
+  forensics (every batch shows the same 5-vs-4 split). The
+  current capture point produces forensic noise without affecting
+  collection correctness.
+- **scope**:
+  - in: read-only inspection of label-capture path in
+    `src/voc/connectors/oliveyoung_browser_api.py` and
+    surrounding probe code; small implementation patch if
+    operator approves
+  - out: any live collection
+- **commands**:
+  - `grep -nE 'available_sort_button_labels|sort_button_labels' src/voc/connectors/oliveyoung_browser_api.py src/voc/app/connector_run_summary.py`
+- **output**:
+  - QA-style report with single-recommendation conclusion (move
+    capture pre-click, OR snapshot both before and after, OR
+    document the artifact and accept it)
+- **stop conditions**:
+  - recommendation ready → handoff
+  - operator approves a follow-up implementation ticket if needed
+
+### I-OY-CONNECTOR-NAVIGATION-RACE-RETRY — connector-side single-shot retry for transient `Page.goto` race
+
+- **role**: Implementation Agent
+- **status**: **todo (low priority — defer until rate exceeds threshold)**
+- **goal**: Add a connector-side single-shot retry for transient
+  Playwright `Page.goto: Target page closed` races so the
+  ops-data agent does not need to detect and retry these by
+  hand. Currently the operator-side rule is "retry once with
+  the same shape, then report." Cumulative O-005 race rate is
+  **1/30 = 3.3%**, well below the 10% threshold that would
+  justify connector-side implementation. Keep this ticket open
+  as a tripwire — if the rate climbs into the 10–15% range
+  during future fan-outs, escalate to active implementation.
+- **scope**:
+  - in: `src/voc/connectors/oliveyoung_browser_api.py`
+    navigation path + a focused integration test
+  - out: §6 protected detector / aggregate / lexicon files;
+    live collection
+- **requirements**:
+  - Single retry with full page recreate (not just goto); per
+    existing anti-bot escalation pattern in §9
+  - Telemetry: emit `oy_navigation_retry_used: true` so
+    forensics can distinguish retried-but-succeeded from
+    first-shot success
+  - Test: simulate one `Page.goto: Target page closed` then a
+    clean second attempt; assert recovery
+- **commands**:
+  - `pytest tests/test_connectors/`
+- **output**:
+  - 1 modified production file; 1 new or extended test
+- **stop conditions**:
+  - patch + tests green → handoff for operator review
+  - operator may close as `wontfix` while rate stays below 10%
 
 ---
 
