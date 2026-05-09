@@ -1660,50 +1660,344 @@ at `todo` until operator dispatches.
 ### O-003-brand20-fanout-resumed — resume remaining Brand-20 fan-out
 
 - **role**: Ops / Data Agent
-- **status**: todo
-- **goal**: Resume remaining Brand-20 fan-out in 3-4 SKU batches,
-  excluding already-completed SKUs (Tocobo, Anua rank 2, Anua rank 8,
-  fwee, Skin1004, Round Lab) and the TIRTIR cooldown SKU
-  (`A000000214231` — separate per-turn authorization required).
-- **context**: After three independent end-to-end 기획세트
-  validations (Anua v3, Skin1004, Round Lab) the OY fix chain
-  (`258f876` + `6150cf1` + `90b4f73` + `b371950` + `69f75af`) is
-  validated for both clean (Round Lab RECOMMENDED_DESC 100%
-  retention) and contamination-heavy (Anua, Skin1004) 기획세트
-  patterns. Remaining ~13-15 Brand-20 SKUs can be fanned out with
-  confidence under per-batch operator authorization.
+- **status**: **done (operationally complete at 19/20)** (closed 2026-05-09)
+- **closed_by**: `handoff-only` — fan-out completed across batches 1
+  / 2 (forensic) / Tocobo 비타 analysis-resume / 2-v2 / 3 / 4. Each
+  batch produced its own handoff under
+  `ops/agent_handoffs/O-003-brand20-fanout-batch-<N>.md` plus the
+  beplain-correction and tocobo-vita-analysis-resume specials. No
+  single SHA closes the umbrella ticket — the closure is the
+  union of all per-batch handoffs.
+- **closed_at**: 2026-05-09
+- **decision recorded**: **19 of 20 Brand-20 SKUs validated end-to-
+  end through the fix chain `258f876` + `6150cf1` + `90b4f73` +
+  `b371950` + `69f75af` + `76e94fc`** (queue correction). Each
+  completed SKU produced full observable artifact set (manifest +
+  collection_summary + analysis_report + seller_report PDF +
+  cardnews manifest); cardnews safety tri-tuple
+  (`schema_version="1.1"` / `cardnews_mode="private_demo"` /
+  `cardnews_mode_constraints.publishable_to_public_channels=false`)
+  held verbatim across every generated artifact. **Only TIRTIR
+  rank 4 (`A000000214231`) remains in cooldown** as a separate
+  operator decision (see O-004-tirtir-cooldown-decision below).
+  Per-SKU completion summary by rank: 1 fwee (prior), 2 Anua v3,
+  3 Skin1004, 4 TIRTIR (cooldown), 5 Needly, 6 hince, 7 beplain
+  (corrected goodsNo), 8 Anua rank 8 (prior), 9 Tocobo 비타,
+  10 Ilso, 11 Muzigae, 12 Mediheal, 13 Round Lab, 14 Clio,
+  15 Manyo, 16 Espoir, 17 Tocobo (prior), 18 Jungsaemmool,
+  19 Skinfood, 20 Banila Co. **Four OY UI sort-tab patterns
+  surfaced and cleanly diagnosed** by `69f75af`'s
+  `sort_control_unreachable` projection: (a) full 5/5 single-
+  product (Tocobo 비타, Skinfood, Banila Co); (b) 기획세트 hides
+  rating tabs (11 SKUs — most common); (c) inverse-DATETIME with
+  rating tabs available (Ilso); (d) reduced-tabs only DATETIME +
+  USEFUL (Clio). The connector emits `sort_control_failure: true`
+  on the unreachable sorts WITHOUT masquerading as anti-bot or
+  auth_evidence — these are honest UI-availability signals, not
+  data-quality regressions.
+- **goal** *(historical)*: Resume remaining Brand-20 fan-out in
+  3-4 SKU batches, excluding already-completed SKUs (Tocobo,
+  Anua rank 2, Anua rank 8, fwee, Skin1004, Round Lab) and the
+  TIRTIR cooldown SKU.
+- **context** *(historical)*: After three independent end-to-end
+  기획세트 validations (Anua v3, Skin1004, Round Lab) the OY fix
+  chain was validated for both clean and contamination-heavy
+  patterns. Remaining Brand-20 SKUs were fanned out under per-
+  batch operator authorization.
+- **handoff chain**:
+  - `ops/agent_handoffs/O-003-brand20-fanout-batch-1.md`
+  - `ops/agent_handoffs/I-BEPLAIN-GOODSNO-CORRECTION.md`
+  - `ops/agent_handoffs/O-003-beplain-corrected-goodsno-verification.md`
+  - `ops/agent_handoffs/O-003-brand20-fanout-batch-2.md` (forensic reconstruction)
+  - `ops/agent_handoffs/O-003-tocobo-vita-analysis-resume.md`
+  - `ops/agent_handoffs/O-003-brand20-fanout-batch-2-v2.md`
+  - `ops/agent_handoffs/O-003-brand20-fanout-batch-3.md`
+  - `ops/agent_handoffs/O-003-brand20-fanout-batch-4.md`
+
+### O-003-brand20-fanout-batch-1 — first batch, halted on stale beplain goodsNo
+
+- **role**: Ops / Data Agent
+- **status**: **done (partial_success)** (closed 2026-05-08)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-08
+- **verdict**: `partial_success`
+- **decision recorded**: 4-SKU batch (Needly + hince + beplain +
+  Tocobo 비타). Needly (`A000000225053`) → +11 rows /
+  `partial_observable` / 3/5 sorts. hince (`A000000202912`) →
+  +352 rows / `partial_observable` / 3/5 sorts. beplain
+  (`A000000249797`) → halted on stale goodsNo (footer/nav-only
+  DOM, 0 raw across all sorts); operator manually verified the
+  page returned "상품을 찾을 수 없어요". Tocobo 비타 (`A000000179852`)
+  not run per the per-SKU stop rule. Triggered the beplain
+  goodsNo correction workflow.
+- **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-1.md`
+
+### O-003-beplain-corrected-goodsno-verification — beplain re-verification on corrected goodsNo
+
+- **role**: Ops / Data Agent
+- **status**: **done (`stale_goodsno_confirmed_and_fixed`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only`; preceded by config commit
+  `76e94fc fix(configs): update beplain Brand-20 goodsNo`
+- **closed_at**: 2026-05-09
+- **verdict**: `stale_goodsno_confirmed_and_fixed`
+- **decision recorded**: Single-SKU verification of corrected
+  beplain goodsNo `A000000142520` after operator manual lookup
+  replaced stale `A000000249797`. Run produced 607 reviews
+  analyzed, +607 DB delta, full observable artifact set, cardnews
+  tri-tuple verbatim. **Trace evidence on the same Chrome/CDP
+  session shows 81 successful HTTP 200 responses with
+  `cookie_present=false` and `login_required=false` — the prior
+  beplain "anti-bot/logged-out" diagnosis was a true positive for
+  "no product page exists" (footer-only DOM is what OY serves
+  when goodsNo is missing), NOT for session expiry.** This
+  resolves the previously-ambiguous beplain failure mode and
+  documents stale-goodsNo as a distinct diagnostic class.
+- **handoff**: `ops/agent_handoffs/O-003-beplain-corrected-goodsno-verification.md`
+
+### O-003-brand20-fanout-batch-2 — forensic reconstruction (subagent stream timeout)
+
+- **role**: Ops / Data Agent → Orchestrator (forensic write-up)
+- **status**: **done (`incomplete_timeout_forensics_only`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only` — orchestrator-authored forensic
+  reconstruction after subagent stream timed out at ~5.3h wall-
+  clock without writing the required handoff
+- **closed_at**: 2026-05-09
+- **verdict**: `incomplete_timeout_forensics_only`
+- **decision recorded**: Tocobo 비타 (`A000000179852`) was the
+  only SKU actually attempted. Collection succeeded cleanly (5/5
+  sorts, 608 new rows landed, login_state_observed=logged_in
+  end-to-end), but analysis stage stalled across 3 subagent
+  retry attempts. The 5-hour budget was burned on retry/restart
+  cycles (each `--skip-scrape` resume restarted analysis from
+  review-1 with no checkpoint). The subagent's stream-timeout
+  precedent established a **mandatory incremental-handoff
+  policy** for all subsequent multi-SKU batches: write the
+  handoff after each SKU completes, not at the end. The
+  remaining 3 batch SKUs (Ilso, Muzigae, Mediheal) were never
+  attempted and were carried into batch 2-v2.
+- **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-2.md`
+
+### O-003-tocobo-vita-analysis-resume — analysis-only resume after batch 2 timeout
+
+- **role**: Ops / Data Agent
+- **status**: **done (`tocobo_vita_analysis_complete`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-09
+- **verdict**: `tocobo_vita_analysis_complete`
+- **decision recorded**: `--skip-scrape` resume against the
+  durable 792 DB rows from batch 2's collection stage. Single
+  uninterrupted foreground execution completed analysis +
+  manifest + PDF + cardnews in ~27 minutes — well under the
+  90-min budget. Falsified the analysis-stage instability
+  hypothesis from batch 2: prior 3 retries had been **subagent-
+  side kills**, not OpenAI rate-limits or pipeline crashes. The
+  pipeline runs to completion when given a single uninterrupted
+  foreground execution. Cardnews tri-tuple verbatim. DB row
+  count unchanged (analysis is read-only). Tocobo 비타 became
+  the **first 5/5 sort success this session** (single-product
+  pattern; OY exposes full sort tab set on non-기획세트 SKUs).
+- **handoff**: `ops/agent_handoffs/O-003-tocobo-vita-analysis-resume.md`
+
+### O-003-brand20-fanout-batch-2-v2 — Ilso + Muzigae + Mediheal sequential batch
+
+- **role**: Ops / Data Agent
+- **status**: **done (`partial_success`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-09
+- **verdict**: `partial_success` (3/3 SKUs completed cleanly)
+- **decision recorded**: Required two attempts: first dispatch
+  hit pre-flight failure (CDP listener absent on port 9222 after
+  session boundary; operator relaunched Chrome with
+  `--remote-debugging-port=9222` flag). Second attempt completed
+  all 3 SKUs end-to-end with full observable artifacts. Ilso
+  (`A000000225736`) → +194 rows / `partial_observable` / **4/5
+  sorts (NEW inverse-DATETIME pattern: DATETIME failed but
+  rating tabs succeeded)**. Muzigae (`A000000185439`) → +357
+  net new rows (461 pre-existing + 357 new = 818 total) /
+  `partial_observable` / 3/5 sorts. Mediheal (`A000000244987`)
+  → +438 rows / `partial_observable` / 3/5 sorts. The Ilso
+  inverse pattern is **the third distinct OY UI sort-tab
+  variant** the connector handles cleanly via `69f75af`.
+- **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-2-v2.md`
+
+### O-003-brand20-fanout-batch-3 — Clio + Manyo + Espoir + Jungsaemmool
+
+- **role**: Ops / Data Agent
+- **status**: **done (`partial_success`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-09
+- **verdict**: `partial_success` (4/4 SKUs completed cleanly)
+- **decision recorded**: Clio (`A000000219278`) → +490 rows /
+  `partial_observable` / **2/5 sorts (NEW reduced-tabs pattern:
+  RATING_ASC + RATING_DESC + RECOMMENDED_DESC all
+  sort_control_unreachable; only DATETIME + USEFUL succeeded)**.
+  Manyo (`A000000107679`) → +537 rows / `partial_observable` /
+  3/5 sorts. Espoir (`A000000197490`) → +589 rows /
+  `partial_observable` / 3/5 sorts (cleanest USEFUL salvage of
+  batch — quality=ok, no anti_bot flag). Jungsaemmool
+  (`A000000139063`) → +539 rows / `partial_observable` / 3/5
+  sorts. Clio's reduced-tabs is **the fourth distinct OY UI
+  variant** observed and cleanly diagnosed. The 1h08m wall-
+  clock matches the Skin1004 precedent for similar-corpus 기획세트
+  SKUs.
+- **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-3.md`
+
+### O-003-brand20-fanout-batch-4 — Skinfood + Banila Co (final non-cooldown)
+
+- **role**: Ops / Data Agent
+- **status**: **done (`batch_complete`)** (closed 2026-05-09)
+- **closed_by**: `handoff-only`
+- **closed_at**: 2026-05-09
+- **verdict**: **`batch_complete`** — first non-partial batch this session
+- **decision recorded**: Skinfood (`A000000248098`) → +194 rows /
+  **`skinfood_complete`** / **5/5 sorts succeeded with
+  `partial_success: false`**. Banila Co (`A000000202675`) →
+  +191 rows / **`banila_co_complete`** / **5/5 sorts succeeded
+  with `partial_success: false`**. Both are non-기획세트 single
+  products and matched the Tocobo 비타 full-coverage pattern.
+  All quality_by_sort = ok/degraded; zero anti_bot, zero
+  auth_evidence, zero failed sorts. Cardnews tri-tuple verbatim
+  on both. **This batch closes O-003 non-cooldown fan-out at
+  19/20 SKUs.**
+- **handoff**: `ops/agent_handoffs/O-003-brand20-fanout-batch-4.md`
+
+### O-004-tirtir-cooldown-decision — operator decision on TIRTIR rank 4
+
+- **role**: Operator (decision needed) → Ops / Data Agent (execution if approved)
+- **status**: **todo / deferred**
+- **goal**: Decide whether to re-run TIRTIR (`A000000214231`,
+  rank 4) as a separate single-SKU dispatch or formally defer
+  it as a closed cooldown. Brand-20 fan-out is otherwise
+  complete (19/20).
+- **context**: TIRTIR has been on operator-imposed cooldown
+  since the original O-001 smoke trio (~2026-05-07) where the
+  prior session encountered a degraded login state. Chrome/CDP
+  session has been re-authenticated multiple times since then;
+  beplain corrected-goodsNo verification confirmed the current
+  session is clean (HTTP 200 / login_required=false on 81
+  consecutive cursor responses). The operational risk of a
+  TIRTIR retry is now lower than at the time of the original
+  cooldown. However, the cooldown was an explicit operator
+  decision and has not been lifted.
 - **scope**:
-  - in: live OY collection ONLY for the goodsNo named in the
-    operator's per-turn dispatch
-  - out: any other goodsNo than those named; TIRTIR
-    (`A000000214231`) unless explicitly re-authorized; code/test
-    edits; `.claude/`; `.gitignore`; staging; committing; pushing
+  - in: live OY collection ONLY for `A000000214231` if
+    operator authorizes; otherwise documentation-only closure
+  - out: any other goodsNo; code/test edits; staging;
+    committing
 - **requirements**:
-  - 3-4 SKUs per dispatch (not all remaining at once — total wall-
-    clock could exceed 4-8 hours per batch)
-  - 60-120 min budget per SKU
-  - Anti-premature-kill rule: trace.jsonl mtime + `[multi-sort
-    N/5]` lines as primary progress signals; kill ONLY if all of
-    {trace stale > 10 min, run-dir stale > 10 min, wall-clock > 120
-    min}
-  - Per-SKU verdict from {`<sku>_complete`,
-    `<sku>_partial_but_observable`, `blocked_login_expired`,
-    `blocked_anti_bot`, `needs_patch`}
-  - Refined anti-bot rule: do NOT classify a sort as
-    `blocked_anti_bot` based solely on `anti_bot_or_blocked_by_sort`
-    when status=succeeded + raw>0 + quality=ok/degraded + clean
-    trace; surface as "possible summary-label ambiguity" instead
+  - Operator decision: "lift cooldown and re-run TIRTIR" OR
+    "formally close O-004 as `cooldown_deferred`"
 - **commands**:
-  - per-batch operator-named dispatch
+  - if re-run: standard single-SKU `/orchestrate` dispatch
 - **output**:
-  - one handoff per batch under
-    `ops/agent_handoffs/O-003-brand20-fanout-batch-<N>.md`
+  - either a TIRTIR run package with full observable artifacts
+    OR a closure note confirming TIRTIR remains intentionally
+    out of Brand-20 final tally
 - **stop conditions**:
-  - per-batch per-SKU verdict reached → close batch handoff
-  - any new failure mode (e.g. true anti-bot, true login expiry,
-    new connector regression) → stop and surface to operator with
-    a separate triage ticket
-  - all remaining Brand-20 SKUs closed → close O-003
+  - operator decision recorded → close ticket
+
+### Q-OY-USEFUL-SALVAGE-ANTIBOT-FLAG — connector flag in default-response salvage path
+
+- **role**: QA / Regression Agent
+- **status**: **todo (low priority)**
+- **goal**: Investigate why
+  `anti_bot_or_blocked_by_sort.USEFUL_SCORE_DESC=true` co-
+  occurs with `sorts_reused_via_default_response` containing
+  USEFUL_SCORE_DESC, when the salvage path is the cleanly-
+  succeeding outcome. Several SKUs this fan-out (Skin1004,
+  Round Lab, hince, beplain, Mediheal, Clio, Manyo, Jungsaemmool)
+  exhibited this pattern. The flag fires from the initial
+  detection signal even when the retry's default-response
+  salvage produces a clean outcome — operator's refined anti-
+  bot rule (status=succeeded + raw>0 + quality=ok/degraded +
+  clean trace → "summary-label ambiguity") was used liberally
+  to disambiguate. Triage should propose either: (a) clear the
+  anti_bot flag when reused_via_default_response succeeds with
+  rows landed, OR (b) split the flag into "transient_signal"
+  vs "hard_block" to make the distinction explicit at the
+  schema level.
+- **scope**:
+  - in: read-only inspection of
+    `src/voc/connectors/oliveyoung_browser_api.py`,
+    `src/voc/app/connector_run_summary.py`,
+    `src/voc/app/collection_summary.py`, sample collection_
+    summary.json files from Skin1004 / Round Lab / hince /
+    beplain / Mediheal / Clio / Manyo / Jungsaemmool
+  - out: any code edit, any live collection
+- **commands**:
+  - `grep -nE 'anti_bot|reused_via_default' src/voc/app/connector_run_summary.py src/voc/app/collection_summary.py`
+- **output**:
+  - QA-style report with single-recommendation conclusion
+- **stop conditions**:
+  - recommendation ready → handoff
+  - operator approves a follow-up implementation ticket if needed
+
+### Q-OY-SORT-TAB-VISIBILITY-CATALOG — document the four UI patterns
+
+- **role**: QA / Regression Agent or Ops / Data Agent (read-only doc work)
+- **status**: **todo (low priority)**
+- **goal**: Document the four observed OY mobile UI sort-tab
+  visibility patterns into a small reference doc under `docs/`
+  so future operators recognize them without re-discovery:
+  (1) **full 5/5** — single-product SKUs expose all 5 sort
+  tabs (Tocobo 비타, Skinfood, Banila Co); (2) **기획세트 hides
+  rating tabs** — RATING_ASC + RATING_DESC unreachable
+  (~11 SKUs); (3) **inverse-DATETIME** — DATETIME tab hidden
+  but rating tabs available (Ilso); (4) **reduced-tabs** —
+  only DATETIME + USEFUL exposed (Clio). Operator can
+  pre-classify a SKU's expected coverage from product type
+  (single-product vs 기획세트) and avoid surprise during fan-
+  out planning.
+- **scope**:
+  - in: new file under `docs/oy_sort_tab_visibility_catalog.md`
+    (or similar)
+  - out: any code edit, any test addition, any live collection
+- **commands**:
+  - none (doc-only)
+- **output**:
+  - one new markdown file
+- **stop conditions**:
+  - doc draft ready → handoff for operator review
+
+### I-PHASE2E-ANALYSIS-CHECKPOINT — analysis-stage resilience
+
+- **role**: Implementation Agent
+- **status**: **todo (low priority)**
+- **goal**: Add per-review checkpoint state to the phase2e
+  analysis pipeline so that `--skip-scrape` resume cycles can
+  pick up where a killed prior attempt left off, instead of
+  restarting from review-1. The Tocobo 비타 batch 2 incident
+  burned ~3h of cumulative analysis work across 3 retry
+  attempts because each restart began at review-1.
+- **context**: Currently the analysis stage processes reviews
+  sequentially through Stage 1 (deterministic) → Stage 2 (LLM
+  polarity) → Stage 3 (aggregation). The pipeline emits
+  `pipeline progress: N/total` markers but does not persist
+  intermediate Stage-2 results. A simple fix would write a
+  rolling intermediate JSONL of completed Stage-2 outputs;
+  on resume, the pipeline would skip already-processed reviews.
+- **scope**:
+  - in: `src/voc/reporting/phase2e/` checkpoint helper +
+    integration in the analysis loop
+  - in: tests for resume behavior
+  - out: §6 protected detector / aggregate / lexicon files;
+    live collection
+- **requirements**:
+  - Checkpoint file lives under `outputs/<run-dir>/shared/`
+  - Resume reads checkpoint on startup; skips already-processed
+    reviews
+  - Idempotent: re-running on a complete checkpoint exits
+    cleanly with no LLM calls
+  - Test coverage for: empty checkpoint, partial checkpoint,
+    full checkpoint, corrupt checkpoint
+- **commands**:
+  - `pytest tests/test_reporting/test_phase2e/`
+- **output**:
+  - 2-3 modified production files; 1 new test file
+- **stop conditions**:
+  - patch + tests green → handoff for operator review
+  - low priority — operationally the foreground-execution
+    discipline established in O-003 is sufficient
 
 ---
 
