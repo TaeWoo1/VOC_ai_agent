@@ -1250,6 +1250,23 @@ class OliveYoungBrowserAPIConnector:
         mid_stream_auth_break = False
         pagination_exhausted_clean = False  # set when loop ended on hasNext=False
 
+        # ---- I-OY-OPEN-HANDSHAKE-TIMEOUT telemetry ----
+        # `open_handshake_timed_out` fires when `await session.open(...)`
+        # exceeds `self._cold_start_timeout_s`. Distinct from
+        # `cold_start_timed_out` (which gates the downstream
+        # `wait_for_next_response` cold-start). Without this bound, a
+        # wedged Playwright/CDP target-attach (see
+        # `I-OY-ILSO-VISIBLE-REVIEWS-COLLECTOR-MISS-TRIAGE` §11) hung the
+        # connector for >99 minutes per proof attempt with zero
+        # `/reviews/cursor` traffic, no NDJSON, and no batch_summary —
+        # invisible to the operator until external kill. The flag is
+        # surfaced as `page_open_failed=True` on the summary so
+        # `classify_status()` routes the failure to the existing
+        # `page_open_failed` taxonomy bucket (NOT `anti_bot` and NOT
+        # `max_cap_reached`).
+        open_handshake_timed_out = False
+        open_handshake_error: str | None = None
+
         # ---- PR-2 retry telemetry ----
         auth_retry_attempts_used = 0
 
@@ -1384,7 +1401,45 @@ class OliveYoungBrowserAPIConnector:
             # when a mid-stream auth_break fired AND the retry budget allows
             # another attempt; all other terminal outcomes break out.
             while True:
-                await session.open(self._product_url)
+                # I-OY-OPEN-HANDSHAKE-TIMEOUT — bound the open/navigation
+                # handshake. `session.open()` performs CDP attach (existing
+                # context reuse), `_ctx.new_page()`, listener install, and
+                # `page.goto()`. Any of these can wedge silently when the
+                # CDP target table is poisoned (multi-tab residual + same-
+                # context reuse), and prior to this timeout there was no
+                # outer bound — the connector hung for >99 min per attempt
+                # before external kill. `_cold_start_timeout_s` is reused
+                # rather than introducing a new constructor knob: the
+                # operator-set value already reflects how long the run is
+                # willing to wait for cold-start traffic, and an open that
+                # has not produced even an HTTP response by then is
+                # effectively wedged for the same reasons.
+                try:
+                    await asyncio.wait_for(
+                        session.open(self._product_url),
+                        timeout=self._cold_start_timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    open_handshake_timed_out = True
+                    open_handshake_error = (
+                        f"open_handshake_timeout: session.open() exceeded "
+                        f"{self._cold_start_timeout_s:.0f}s before any "
+                        f"review API request; likely Playwright→CDP "
+                        f"target-attach wedge "
+                        f"(see I-OY-ILSO-VISIBLE-REVIEWS-COLLECTOR-MISS-"
+                        f"TRIAGE)"
+                    )
+                    _note(open_handshake_error)
+                    # Do NOT set `blocked=True`: classify_status would
+                    # then route this to `anti_bot`, which the operator
+                    # explicitly forbids for this failure mode. The
+                    # `page_open_failed` flag we set in the summary
+                    # below is the correct semantic bucket — a CDP /
+                    # navigation handshake that did not complete is, by
+                    # definition, a page-open failure, and
+                    # `classify_status()` checks `page_open_failed`
+                    # BEFORE the blocked / anti-bot branch.
+                    break  # exit outer retry loop; falls through to finally
                 # PR-4: login-state probe on first attempt (informational
                 # only; quality gate ignores this). Best-effort — failures
                 # silently degrade to "unknown".
@@ -2141,6 +2196,19 @@ class OliveYoungBrowserAPIConnector:
             max_scroll_recovery_recreates=int(
                 self._max_scroll_recovery_recreates,
             ),
+            # ---- I-OY-OPEN-HANDSHAKE-TIMEOUT ----
+            # When `asyncio.wait_for(session.open(...))` fired its
+            # TimeoutError, surface it as `page_open_failed=True` so
+            # `classify_status()` routes the failure to the existing
+            # `page_open_failed` bucket (preceded by `cdp_attach_failed`
+            # in priority order; both fire BEFORE the
+            # `blocked / anti_bot` branch). This guarantees the
+            # operator-required "do not misclassify as anti_bot or
+            # max_cap_reached" semantics without inventing a new status
+            # code. The verbatim diagnostic string is mirrored into
+            # `page_open_error` for operator inspection.
+            page_open_failed=bool(open_handshake_timed_out),
+            page_open_error=open_handshake_error,
         )
 
         # ---- Per-sort structured INFO log ----

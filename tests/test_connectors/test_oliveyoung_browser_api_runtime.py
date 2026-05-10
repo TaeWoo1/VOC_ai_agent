@@ -2866,3 +2866,247 @@ async def _no_sleep(_seconds):
     """Replacement for asyncio.sleep used in tests so the recovery
     backoff doesn't add real wall-time."""
     return None
+
+
+# ---------------------------------------------------------------------------
+# I-OY-OPEN-HANDSHAKE-TIMEOUT — bound `await session.open(...)` with
+# `asyncio.wait_for`. Prior to this patch a wedged Playwright/CDP
+# target-attach could hang the connector for >99 minutes per attempt
+# (see `ops/agent_handoffs/I-OY-ILSO-VISIBLE-REVIEWS-COLLECTOR-MISS-
+# TRIAGE.md` §11). The wrapper turns that silent hang into an explicit
+# `page_open_failed` summary with a distinct `open_handshake_timeout`
+# diagnostic in `sample_dropped_reasons`.
+#
+# Required test cases (per ticket):
+#   1. session.open succeeds before timeout → normal happy path.
+#   2. session.open hangs → connector exits with controlled diagnostic.
+#   3. timeout does NOT classify as anti_bot.
+#   4. timeout does NOT classify as max_cap_reached.
+# Plus a regression that the existing scroll-continuation tests (above)
+# still pass against a session whose open() is fast.
+# ---------------------------------------------------------------------------
+
+
+class _HangingOpenSession(FakeBrowserReviewSession):
+    """Session whose `open()` blocks forever via `asyncio.Event().wait()`.
+
+    Combined with a small `cold_start_timeout_s` on the connector
+    (e.g. 0.05s), `asyncio.wait_for` fires `TimeoutError` quickly so the
+    test stays fast. `open_calls` is incremented on entry to keep parity
+    with the parent fake's call-count contract.
+    """
+
+    async def open(self, product_url: str) -> None:
+        self.open_calls += 1
+        self.opened_url = product_url
+        # Wait forever — the connector's `asyncio.wait_for` wrapper
+        # is what we are testing.
+        await asyncio.Event().wait()
+
+
+def _build_open_timeout_connector(session, *, cold_start_timeout_s=0.05):
+    """Build a connector with a tiny `cold_start_timeout_s` so a hanging
+    `session.open()` produces a TimeoutError in milliseconds rather than
+    the production default of 60–90s."""
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        code_mapper=ProfileCodeMapper(),
+        session_factory=lambda: session,
+        cold_start_timeout_s=cold_start_timeout_s,
+    )
+    return c, CollectParams(max_results=100)
+
+
+@pytest.mark.asyncio
+async def test_session_open_succeeds_before_timeout_normal_path(
+    page1_body, page2_last,
+):
+    """Existing happy path: `session.open()` returns immediately (well
+    within the cold-start timeout), continuation proceeds, and the
+    summary carries no open-handshake diagnostic."""
+    session = FakeBrowserReviewSession([(200, page1_body), (200, page2_last)])
+    # Use a generous timeout (1s) so even a slow CI fake completes well
+    # before the wait_for budget elapses.
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=1.0)
+
+    raws = await c.collect(keyword="블러셔", params=params)
+
+    assert len(raws) == 18
+    assert session.open_calls == 1
+    assert session.close_calls == 1
+
+    s = c.last_run_summary
+    assert s is not None
+    # The new flag stays False on the happy path — no open-handshake
+    # timeout fired.
+    assert s.page_open_failed is False
+    assert s.page_open_error is None
+    # The dropped-reasons trail must NOT contain the open-handshake marker.
+    assert not any(
+        "open_handshake_timeout" in r for r in s.sample_dropped_reasons
+    )
+    # Existing happy-path invariants preserved.
+    assert s.blocked is False
+    assert s.auth_error is False
+    assert s.cold_start_timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_session_open_hangs_emits_open_handshake_timeout_diagnostic():
+    """When `session.open()` waits indefinitely, `asyncio.wait_for` fires
+    its TimeoutError and the connector exits cleanly with a distinct
+    `open_handshake_timeout` diagnostic in `sample_dropped_reasons`. No
+    rows are collected; the run terminates without re-entering the
+    cold-start path."""
+    session = _HangingOpenSession([])  # empty queue — never reached
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=0.05)
+
+    raws = await c.collect(keyword="x", params=params)
+
+    # No rows collected (open never completed → cold-start never ran).
+    assert raws == []
+    # The fake's open() was entered exactly once; the wrapper aborted it.
+    assert session.open_calls == 1
+    # Session.close() still ran via the connector's `finally` block.
+    assert session.close_calls == 1
+
+    s = c.last_run_summary
+    assert s is not None
+    # Distinct open-handshake telemetry surfaced.
+    assert s.page_open_failed is True
+    assert s.page_open_error is not None
+    assert "open_handshake_timeout" in s.page_open_error
+    # The diagnostic also lands in sample_dropped_reasons so the
+    # operator's log/grep path catches it.
+    assert any(
+        "open_handshake_timeout" in r for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+    # Distinct from the downstream cold-start timeout flag — the
+    # connector never reached `wait_for_next_response` because
+    # session.open() itself never returned.
+    assert s.cold_start_timed_out is False
+    # Critical: do NOT set `blocked=True` on this path. The classifier
+    # treats `blocked=True` as `anti_bot`, which would misclassify a
+    # CDP-handshake wedge as a server-side block.
+    assert s.blocked is False
+    # No HTTP traffic ever fired, so anti-bot signals stay False.
+    assert s.http_403_seen is False
+    assert s.http_429_seen is False
+    assert s.http_401_or_login_required_seen is False
+    # No data was parsed.
+    assert s.records_parsed == 0
+    assert s.raw_records_seen == 0
+
+
+@pytest.mark.asyncio
+async def test_open_handshake_timeout_does_not_classify_as_anti_bot():
+    """The summary fields produced by an open-handshake timeout must
+    NOT cause `classify_status()` to return `anti_bot`. The
+    `page_open_failed` flag short-circuits BEFORE the
+    `blocked / http_403 / http_429` branch, mapping the failure to the
+    semantically-correct `page_open_failed` taxonomy bucket instead."""
+    from src.voc.app.collection_batch import classify_status
+
+    session = _HangingOpenSession([])
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=0.05)
+    await c.collect(keyword="x", params=params)
+
+    s = c.last_run_summary
+    summary_dict = s.model_dump()
+    # Quality gate — open-handshake timeout takes the `blocked` path
+    # via `evaluate_quality_gates` because we deliberately did NOT set
+    # blocked=True. With 0 records, `parse_yield = 0/1 = 0 < 0.5` so
+    # the gate returns "invalid". That status combined with
+    # page_open_failed=True is what classify_status() consumes.
+    summary_dict["quality_status"] = "invalid"
+
+    status = classify_status(summary_dict)
+    # The contract: the open-handshake timeout MUST NOT be classified
+    # as anti_bot. This is the operator's primary acceptance criterion
+    # for the patch.
+    assert status != "anti_bot", (
+        f"open-handshake timeout misclassified as anti_bot: "
+        f"page_open_failed={summary_dict.get('page_open_failed')}, "
+        f"blocked={summary_dict.get('blocked')}, "
+        f"sample_dropped_reasons={summary_dict.get('sample_dropped_reasons')}"
+    )
+    # Positive assertion: it lands in the correct page_open_failed
+    # bucket. (The existing classify_status priority is: cdp_attach_failed
+    # → page_open_failed → anti_bot → ...).
+    assert status == "page_open_failed"
+
+
+@pytest.mark.asyncio
+async def test_open_handshake_timeout_does_not_classify_as_max_cap_reached():
+    """A connector that never made an HTTP request cannot be
+    `max_cap_reached`. The `page_open_failed` short-circuit prevents
+    the (in any case unreachable) `last_observed_has_next is True`
+    branch from firing for this failure mode."""
+    from src.voc.app.collection_batch import classify_status
+
+    session = _HangingOpenSession([])
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=0.05)
+    await c.collect(keyword="x", params=params)
+
+    s = c.last_run_summary
+    summary_dict = s.model_dump()
+    summary_dict["quality_status"] = "invalid"
+
+    status = classify_status(summary_dict)
+    # Operator's secondary forbidden status.
+    assert status != "max_cap_reached", (
+        f"open-handshake timeout misclassified as max_cap_reached: "
+        f"last_observed_has_next={summary_dict.get('last_observed_has_next')}, "
+        f"page_open_failed={summary_dict.get('page_open_failed')}"
+    )
+    # last_observed_has_next is None on this path (last_body is None
+    # because no body was ever parsed), so even without the
+    # page_open_failed guard the max_cap_reached branch would not fire.
+    # We still assert the contract explicitly because the regression
+    # path the patch closes is "long silent hang masquerading as
+    # something else."
+    assert summary_dict.get("last_observed_has_next") in (None, False)
+
+
+@pytest.mark.asyncio
+async def test_open_handshake_timeout_runs_session_close_in_finally():
+    """The connector's `finally` block must still call `session.close()`
+    even when the open-handshake wrapper aborted. Without this, a
+    timed-out attempt would leak the underlying Playwright objects
+    across the multi-sort orchestrator's subsequent attempts."""
+    session = _HangingOpenSession([])
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=0.05)
+    await c.collect(keyword="x", params=params)
+
+    # session.close() ran exactly once via the connector's `finally`.
+    assert session.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_open_handshake_timeout_uses_cold_start_timeout_value():
+    """The wrapper reuses `self._cold_start_timeout_s` per the ticket's
+    explicit instruction (no new constructor knob). A larger configured
+    timeout means the wait persists longer before firing."""
+    import time as _time
+
+    session = _HangingOpenSession([])
+    # Use a slightly larger budget so the difference vs the ~0.05s
+    # baseline is observable but still fast.
+    c, params = _build_open_timeout_connector(session, cold_start_timeout_s=0.30)
+
+    t0 = _time.monotonic()
+    await c.collect(keyword="x", params=params)
+    elapsed = _time.monotonic() - t0
+
+    # Lower-bound the elapsed time by the configured timeout (minus a
+    # small slack for scheduler jitter on slow CI). Upper-bound by a
+    # generous ceiling — we are not testing scheduler precision, only
+    # that the timeout is plumbed through.
+    assert elapsed >= 0.20, f"timed out too early: {elapsed:.3f}s"
+    assert elapsed < 5.0, f"timed out too late: {elapsed:.3f}s"
+
+    s = c.last_run_summary
+    assert s.page_open_failed is True
+    # Verbatim diagnostic includes the configured timeout value (rounded
+    # via the format string in the connector).
+    assert "exceeded 0s" in s.page_open_error or "exceeded 1s" in s.page_open_error
