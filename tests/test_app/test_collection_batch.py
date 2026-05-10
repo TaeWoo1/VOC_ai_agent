@@ -78,6 +78,92 @@ def test_status_max_cap_reached_when_has_next_true():
     assert classify_status(_summary(last_observed_has_next=True)) == "max_cap_reached"
 
 
+# ---------------------------------------------------------------------------
+# I-OY-SCROLL-CONTINUATION-IMPL — split max_cap_reached into the
+# scroll-continuation-exhausted branch when the connector signals
+# `incomplete_collection=True`. The flag is set whenever the parsed
+# row count is below the operator quota AND the last body advertised
+# more rows; it distinguishes "connector gave up" from "operator-cap
+# fired."
+# ---------------------------------------------------------------------------
+
+
+def test_status_scroll_continuation_exhausted_when_incomplete_with_has_next():
+    """incomplete_collection=True + last_observed_has_next=True →
+    scroll_continuation_exhausted (the connector gave up before the
+    server did). Distinct from max_cap_reached so audits can tell
+    the two apart."""
+    s = classify_status(_summary(
+        last_observed_has_next=True,
+        incomplete_collection=True,
+    ))
+    assert s == "scroll_continuation_exhausted"
+
+
+def test_status_max_cap_reached_when_quota_actually_fired():
+    """incomplete_collection=False with last_observed_has_next=True →
+    max_cap_reached. This is the canonical operator-cap stop: the
+    server still has more rows, but the run consumed its requested
+    quota."""
+    s = classify_status(_summary(
+        last_observed_has_next=True,
+        incomplete_collection=False,
+    ))
+    assert s == "max_cap_reached"
+
+
+def test_status_natural_exhaustion_still_complete():
+    """pagination_exhausted=True takes priority — even when
+    incomplete_collection=True (degenerate; should not happen) the
+    natural-end-of-stream verdict wins."""
+    s = classify_status(_summary(
+        pagination_exhausted=True,
+        last_observed_has_next=False,
+        incomplete_collection=False,
+    ))
+    assert s == "complete"
+
+
+def test_status_legacy_summary_without_incomplete_flag_collapses_to_max_cap():
+    """Pre-patch summaries do not carry `incomplete_collection`. They
+    must still classify as max_cap_reached when has_next=True so
+    rerun-replay of older artifacts is byte-identical to the
+    pre-patch behavior."""
+    s = classify_status({
+        "quality_status": "ok",
+        "rows_inserted": 200,
+        "records_parsed": 200,
+        "raw_records_seen": 200,
+        "blocked": False,
+        "auth_error": False,
+        "mid_stream_auth_break": False,
+        "http_403_seen": False,
+        "http_429_seen": False,
+        "pagination_exhausted": False,
+        "last_observed_has_next": True,
+        # incomplete_collection deliberately absent (legacy shape).
+    })
+    assert s == "max_cap_reached"
+
+
+def test_status_sort_control_unreachable_still_wins_over_scroll_split():
+    """Regression guard: the sort-control-unreachable branch fires
+    BEFORE the successful-states block. Even with incomplete_collection
+    set, a sort-control failure must classify as
+    sort_control_unreachable, not scroll_continuation_exhausted."""
+    s = classify_status(_summary(
+        quality_status="invalid",
+        rows_inserted=0,
+        records_parsed=0,
+        blocked=True,
+        sort_control_unreachable=True,
+        false_empty_state_detected=True,
+        incomplete_collection=True,
+        last_observed_has_next=True,
+    ))
+    assert s == "sort_control_unreachable"
+
+
 def test_status_duplicate_only_when_zero_inserts_with_parsed_rows():
     """0 rows_inserted but records_parsed>0 → duplicate_only."""
     assert classify_status(_summary(
@@ -439,6 +525,11 @@ def test_all_statuses_are_in_taxonomy():
         "authenticated_ok",
         "complete",
         "max_cap_reached",
+        # I-OY-SCROLL-CONTINUATION-IMPL — successful run that gave up
+        # before the server did. Distinct from `max_cap_reached` so
+        # operator audits can tell scroll-continuation exhaustion from
+        # an operator-cap stop.
+        "scroll_continuation_exhausted",
         "duplicate_only",
         "anonymous_auth_wall",
         "auth_expired_mid_batch",

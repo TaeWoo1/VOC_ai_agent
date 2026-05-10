@@ -988,6 +988,20 @@ class OliveYoungBrowserAPIConnector:
     COLD_START_TIMEOUT_S = 30.0
     PAGE_N_TIMEOUT_S = 8.0
     MAX_SCROLL_ATTEMPTS_PER_PAGE = 3
+    # I-OY-SCROLL-CONTINUATION-IMPL — when the per-page scroll budget is
+    # exhausted but the server's last body still says hasNext=True, we
+    # try a bounded number of page-recreate-and-resume cycles before
+    # declaring the run scroll-continuation-exhausted. The recovery
+    # primitive is `_PlaywrightReviewSession.reload_and_reopen_review_tab`
+    # (the same path the false-empty recovery flow already uses); after
+    # the recreate we re-enter the continuation loop and the existing
+    # `seen_ids` dedup set carries the prefix forward so re-walked
+    # cursors do not double-count. Keep this conservative — each
+    # recreate re-walks every cursor up to the current depth, so a
+    # value much above 2 risks turning an already-slow archive crawl
+    # into a runaway. Operators who want a bigger budget on a known-
+    # deep product can override via the constructor kwarg.
+    MAX_SCROLL_RECOVERY_RECREATES = 2
     # Post-sort-click settle window. After session.open() (which clicks
     # the sort button) we peek the response queue for up to this many
     # seconds before invoking the DOM-based false-empty probe. If
@@ -1023,6 +1037,13 @@ class OliveYoungBrowserAPIConnector:
         cold_start_timeout_s: float | None = None,
         page_n_timeout_s: float | None = None,
         max_scroll_attempts_per_page: int | None = None,
+        # I-OY-SCROLL-CONTINUATION-IMPL — recovery budget when the
+        # per-page scroll attempts are exhausted while the server still
+        # signals `hasNext=True`. None falls back to the class default
+        # (`MAX_SCROLL_RECOVERY_RECREATES`). 0 disables recovery entirely
+        # and preserves pre-patch behavior exactly (legacy `_note(...)
+        # break` terminus).
+        max_scroll_recovery_recreates: int | None = None,
         # ---- PR-2 hardening: opt-in auth retry + debug artifacts ----
         # Defaults preserve PR-1 behavior exactly. auth_retry=0 means no
         # retry attempts; the connector breaks on mid-stream auth_error
@@ -1108,6 +1129,22 @@ class OliveYoungBrowserAPIConnector:
             max_scroll_attempts_per_page
             if max_scroll_attempts_per_page is not None
             else self.MAX_SCROLL_ATTEMPTS_PER_PAGE
+        )
+        # I-OY-SCROLL-CONTINUATION-IMPL — recovery budget for the post-
+        # scroll-exhaustion page-recreate path. Validated cheaply (a
+        # negative budget is operator typo).
+        if (
+            max_scroll_recovery_recreates is not None
+            and max_scroll_recovery_recreates < 0
+        ):
+            raise ValueError(
+                f"max_scroll_recovery_recreates must be >= 0 "
+                f"(got {max_scroll_recovery_recreates}); use 0 to disable",
+            )
+        self._max_scroll_recovery_recreates: int = int(
+            max_scroll_recovery_recreates
+            if max_scroll_recovery_recreates is not None
+            else self.MAX_SCROLL_RECOVERY_RECREATES
         )
         # Post-sort-click settle window (seconds). After session.open()
         # returns we wait this long for a matching /cursor response to
@@ -1215,6 +1252,23 @@ class OliveYoungBrowserAPIConnector:
 
         # ---- PR-2 retry telemetry ----
         auth_retry_attempts_used = 0
+
+        # ---- I-OY-SCROLL-CONTINUATION-IMPL telemetry ----
+        # Cumulative across the run (any auth-retry attempt that re-enters
+        # the continuation loop also accumulates into the same counters).
+        #   `scroll_continuation_recovery_attempts` — number of post-scroll-
+        #     exhaustion `reload_and_reopen_review_tab` recreates fired.
+        #   `scroll_continuation_recovery_recovered` — True if at least one
+        #     recovery yielded ≥1 NEW unique row (after seen_ids dedup).
+        #   `scroll_continuation_terminated_with_has_next` — True if the
+        #     run terminated the inner continuation loop while the server's
+        #     last body still said `hasNext=True` AND the recovery budget
+        #     was exhausted (or 0). Distinct from `incomplete_collection`
+        #     because this is the *terminus condition*, while incomplete is
+        #     the *post-condition* derived from the final last_body.
+        scroll_continuation_recovery_attempts = 0
+        scroll_continuation_recovery_recovered = False
+        scroll_continuation_terminated_with_has_next = False
 
         # ---- Human-check (anti-bot CAPTCHA wait) telemetry ----
         # Cumulative across all attempts. `recovery_action` is the
@@ -1643,9 +1697,147 @@ class OliveYoungBrowserAPIConnector:
                         if next_resp is not None:
                             break
                     if next_resp is None:
+                        # I-OY-SCROLL-CONTINUATION-IMPL — the per-page scroll
+                        # budget is exhausted. Before declaring this a final
+                        # terminus, check whether the server still says there
+                        # is more (`hasNext=True`) AND we have recovery budget
+                        # left. If so, page-recreate and re-enter continuation
+                        # with the existing seen_ids dedup carrying the prefix
+                        # forward. Without `hasNext=True` we fall through to
+                        # the legacy break — there is no point recreating just
+                        # to rediscover the same end-of-stream.
+                        recovery_budget = self._max_scroll_recovery_recreates
+                        last_has_next_for_recovery = _extract_has_next(last_body)
+                        if (
+                            recovery_budget > 0
+                            and scroll_continuation_recovery_attempts
+                            < recovery_budget
+                            and last_has_next_for_recovery is True
+                        ):
+                            recreate_fn = getattr(
+                                session, "reload_and_reopen_review_tab", None,
+                            )
+                            if recreate_fn is None:
+                                # Session doesn't expose the recovery primitive
+                                # (legacy fakes); preserve the historical
+                                # terminus message and break out cleanly.
+                                _note(
+                                    f"no continuation after "
+                                    f"{self._max_scroll_attempts} scroll attempts",
+                                )
+                                break
+                            scroll_continuation_recovery_attempts += 1
+                            _note(
+                                f"scroll_continuation_recovery: attempt "
+                                f"{scroll_continuation_recovery_attempts}/"
+                                f"{recovery_budget} — page-recreate after "
+                                f"{self._max_scroll_attempts} failed scrolls "
+                                f"(parsed={len(raws)})",
+                            )
+                            try:
+                                # Stepped backoff before recreate (jittered).
+                                # Mirrors the existing anti-bot recovery
+                                # cadence — never shorter than the
+                                # false-empty path uses.
+                                await asyncio.sleep(
+                                    random.uniform(2.0, 5.0),
+                                )
+                                await recreate_fn()
+                            except Exception as e:
+                                logger.warning(
+                                    "OY scroll_continuation_recovery: "
+                                    "recreate raised (%s); abandoning",
+                                    e,
+                                )
+                                _note(
+                                    f"scroll_continuation_recovery: recreate "
+                                    f"raised ({type(e).__name__}); abandoning",
+                                )
+                                scroll_continuation_terminated_with_has_next = (
+                                    True
+                                )
+                                break
+                            # Wait for the post-recreate cold-start to
+                                # land. Use the cold-start timeout — the
+                                # fresh mount fires its own initial cursor
+                                # request and we treat it the same as a
+                                # cold-start.
+                            try:
+                                first_resp = await session.wait_for_next_response(
+                                    timeout_s=self._cold_start_timeout_s,
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    "OY scroll_continuation_recovery: "
+                                    "post-recreate wait raised (%s); abandoning",
+                                    e,
+                                )
+                                scroll_continuation_terminated_with_has_next = (
+                                    True
+                                )
+                                break
+                            if first_resp is None:
+                                _note(
+                                    "scroll_continuation_recovery: post-"
+                                    "recreate cold-start timed out; abandoning",
+                                )
+                                scroll_continuation_terminated_with_has_next = (
+                                    True
+                                )
+                                break
+                            r_status, r_body = first_resp
+                            r_tag = _classify_http_response(r_status, r_body)
+                            if r_tag != "ok" or r_body is None:
+                                _note(
+                                    f"scroll_continuation_recovery: post-"
+                                    f"recreate first response tag={r_tag}; "
+                                    f"abandoning",
+                                )
+                                scroll_continuation_terminated_with_has_next = (
+                                    True
+                                )
+                                break
+                            # Successful recreate cold-start. Account it as
+                            # an ok response: the seen_ids dedup set ensures
+                            # already-collected rows do not double-count.
+                            raw_seen += _count_records(r_body)
+                            pre_dedup = len(raws)
+                            _add_unique(r_body)
+                            last_body = r_body
+                            if len(raws) > pre_dedup:
+                                scroll_continuation_recovery_recovered = True
+                            cursor_index += 1
+                            _emit_progress_heartbeat(
+                                goods_no=target_goods_no,
+                                sort_type=self._sort_type,
+                                cursor_index=cursor_index,
+                                raw_seen=raw_seen,
+                                parsed=len(raws),
+                                filtered=filter_telemetry_total[
+                                    "filtered_by_goods_no"
+                                ],
+                                has_next=_extract_has_next(r_body),
+                                elapsed_s=(
+                                    datetime.now() - started
+                                ).total_seconds(),
+                            )
+                            continue  # back to the outer while; scroll resumes
+                        # No recovery (budget exhausted, hasNext is not
+                        # True, or recovery disabled). Preserve the
+                        # historical terminus text — operators / log
+                        # readers depend on it. Mark the distinct
+                        # has-next terminus condition when applicable.
+                        if (
+                            last_has_next_for_recovery is True
+                            and scroll_continuation_recovery_attempts
+                            >= recovery_budget
+                        ):
+                            scroll_continuation_terminated_with_has_next = True
                         _note(
                             f"no continuation after "
-                            f"{self._max_scroll_attempts} scroll attempts",
+                            f"{self._max_scroll_attempts} scroll attempts "
+                            f"(recovery_attempts="
+                            f"{scroll_continuation_recovery_attempts})",
                         )
                         break
 
@@ -1933,6 +2125,21 @@ class OliveYoungBrowserAPIConnector:
             ),
             rows_dropped_unparseable=int(
                 filter_telemetry_total["dropped_unparseable"],
+            ),
+            # ---- I-OY-SCROLL-CONTINUATION-IMPL telemetry ----
+            scroll_continuation_recovery_attempts=int(
+                scroll_continuation_recovery_attempts,
+            ),
+            scroll_continuation_recovery_recovered=bool(
+                scroll_continuation_recovery_recovered,
+            ),
+            scroll_continuation_terminated_with_has_next=bool(
+                scroll_continuation_terminated_with_has_next,
+            ),
+            cursor_depth_at_termination=len(cursor_sequence),
+            max_scroll_attempts_per_page=int(self._max_scroll_attempts),
+            max_scroll_recovery_recreates=int(
+                self._max_scroll_recovery_recreates,
             ),
         )
 

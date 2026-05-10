@@ -2497,3 +2497,372 @@ async def test_trigger_review_list_api_runs_without_attribute_error():
     # Cascade ran cleanly with zero matches → no clicks recorded.
     assert sess.get_review_more_button_clicked() is False
     assert sess.get_scrolled_to_review_area() is False
+
+
+# ---------------------------------------------------------------------------
+# I-OY-SCROLL-CONTINUATION-IMPL — connector recovery branch + telemetry
+#
+# When the per-page scroll budget is exhausted while the server still
+# signals `hasNext=True`, the connector now calls
+# `_PlaywrightReviewSession.reload_and_reopen_review_tab()` up to
+# `MAX_SCROLL_RECOVERY_RECREATES` times before declaring the run
+# scroll-continuation-exhausted. The existing `seen_ids` dedup set
+# carries the prefix forward so re-walked rows do not double-count.
+# These tests exercise the new branch end-to-end against a fake
+# session that records recreate calls, prefilled response queues, and
+# an injectable `reload_and_reopen_review_tab` mock.
+# ---------------------------------------------------------------------------
+
+
+class _RecoveryFakeSession(FakeBrowserReviewSession):
+    """`FakeBrowserReviewSession` extended with the recovery primitive.
+
+    `reload_and_reopen_review_tab` is implemented as an awaitable that
+    increments `recreate_calls`. Tests can override it to prime
+    additional responses into the queue at recreate time so the
+    connector's post-recreate cold-start can land a real body.
+    """
+
+    def __init__(self, responses, *, recreate_responses=None, **kw):
+        super().__init__(responses, **kw)
+        self.recreate_calls = 0
+        # `recreate_responses` is a list-of-lists: the i-th element
+        # is the queue prefix to prepend on the i-th recreate call.
+        # Each prefix is consumed wholesale when the recreate fires.
+        self._recreate_responses = list(recreate_responses or [])
+
+    async def reload_and_reopen_review_tab(self) -> None:
+        self.recreate_calls += 1
+        if self._recreate_responses:
+            prefix = self._recreate_responses.pop(0)
+            # Prepend so the next wait_for_next_response sees the
+            # prefix before any existing tail.
+            self._responses = list(prefix) + list(self._responses)
+
+
+def _build_recovery_connector(
+    session, *, recovery_budget=2, max_results=100,
+):
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        code_mapper=ProfileCodeMapper(),
+        session_factory=lambda: session,
+        max_scroll_recovery_recreates=recovery_budget,
+    )
+    return c, CollectParams(max_results=max_results)
+
+
+def test_max_scroll_recovery_recreates_class_constant_present():
+    """The new constant is exposed on the connector class so tests /
+    callers can read the default budget."""
+    assert hasattr(
+        OliveYoungBrowserAPIConnector, "MAX_SCROLL_RECOVERY_RECREATES",
+    )
+    assert OliveYoungBrowserAPIConnector.MAX_SCROLL_RECOVERY_RECREATES == 2
+
+
+def test_max_scroll_recovery_recreates_default_matches_constant():
+    """Constructor with no override falls back to the class constant."""
+    c = OliveYoungBrowserAPIConnector(product_url=PRODUCT_URL)
+    assert (
+        c._max_scroll_recovery_recreates
+        == OliveYoungBrowserAPIConnector.MAX_SCROLL_RECOVERY_RECREATES
+    )
+
+
+def test_max_scroll_recovery_recreates_override_applied():
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        max_scroll_recovery_recreates=5,
+    )
+    assert c._max_scroll_recovery_recreates == 5
+
+
+def test_max_scroll_recovery_recreates_zero_disables_recovery():
+    """Passing 0 explicitly preserves pre-patch behavior — no recreates."""
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        max_scroll_recovery_recreates=0,
+    )
+    assert c._max_scroll_recovery_recreates == 0
+
+
+def test_max_scroll_recovery_recreates_rejects_negative():
+    with pytest.raises(ValueError, match="max_scroll_recovery_recreates"):
+        OliveYoungBrowserAPIConnector(
+            product_url=PRODUCT_URL,
+            max_scroll_recovery_recreates=-1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_calls_reload_when_has_next_true(
+    page1_body, page2_last, monkeypatch,
+):
+    """Scroll-attempt exhaustion while hasNext=True triggers the
+    page-recreate primitive. After recovery the connector resumes
+    continuation and reaches a clean `hasNext=False` body."""
+    # cold-start ok (page1, hasNext=True) → 3 None scrolls (per
+    # default MAX_SCROLL_ATTEMPTS_PER_PAGE = 3) → recovery → recreate
+    # primes a final hasNext=False body → connector terminates clean.
+    session = _RecoveryFakeSession(
+        [(200, page1_body), None, None, None],
+        recreate_responses=[[(200, page2_last)]],
+    )
+    # Make the recovery sleep instant so tests stay fast.
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    raws = await c.collect(keyword="x", params=params)
+
+    # Recovery primitive fired exactly once.
+    assert session.recreate_calls == 1
+    # The post-recovery body had hasNext=False so the run exits
+    # cleanly via _should_stop_pagination.
+    s = c.last_run_summary
+    assert s.scroll_continuation_recovery_attempts == 1
+    assert s.scroll_continuation_recovery_recovered is True
+    assert s.pagination_exhausted is True
+    assert s.last_observed_has_next is False
+    # The connector still preserves the historical "no continuation"
+    # note so log/regex consumers don't regress.
+    assert any(
+        "scroll_continuation_recovery" in r for r in s.sample_dropped_reasons
+    )
+    # Both pages contributed unique rows.
+    assert len(raws) == 18
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_dedup_prevents_double_counting(
+    page1_body, page2_last, monkeypatch,
+):
+    """Recreate that re-emits the same page1 rows must not double-count.
+    The seen_ids set carries the prefix forward across the recreate."""
+    session = _RecoveryFakeSession(
+        [(200, page1_body), None, None, None],
+        # First recreate response is page1 again (re-walking the
+        # already-collected prefix); follow with hasNext=False so
+        # the run terminates.
+        recreate_responses=[[(200, page1_body), (200, page2_last)]],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    raws = await c.collect(keyword="x", params=params)
+
+    # Same 18 unique rows as the happy-path two-page run — the
+    # re-emitted page1 was deduped by source_id.
+    assert len(raws) == 18
+    s = c.last_run_summary
+    assert session.recreate_calls == 1
+    assert s.scroll_continuation_recovery_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_capped_by_budget(
+    page1_body, monkeypatch,
+):
+    """`MAX_SCROLL_RECOVERY_RECREATES` (overridable) caps total
+    page-recreate attempts. After the budget is exhausted with
+    hasNext=True the run is marked
+    `scroll_continuation_terminated_with_has_next=True` and
+    `incomplete_collection=True`."""
+    # Sequence: cold-start ok → 3 None → recreate #1 → 3 None →
+    # recreate #2 → 3 None → terminus (budget exhausted).
+    nones = [None] * 3
+    session = _RecoveryFakeSession(
+        [(200, page1_body)] + nones,
+        recreate_responses=[
+            # recreate 1 → primes another page1 (re-walk prefix), then
+            # 3 Nones so the inner scroll loop exhausts again.
+            [(200, page1_body)] + nones,
+            # recreate 2 → same shape; after this the budget is gone.
+            [(200, page1_body)] + nones,
+        ],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session, recovery_budget=2)
+    await c.collect(keyword="x", params=params)
+
+    s = c.last_run_summary
+    # Both recoveries used.
+    assert session.recreate_calls == 2
+    assert s.scroll_continuation_recovery_attempts == 2
+    # Budget exhausted with server still saying hasNext=True →
+    # incomplete + terminus flag.
+    assert s.scroll_continuation_terminated_with_has_next is True
+    assert s.incomplete_collection is True
+    assert s.last_observed_has_next is True
+    assert s.pagination_exhausted is False
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_skipped_when_recovery_budget_zero(
+    page1_body,
+):
+    """recovery_budget=0 preserves pre-patch behavior exactly: no
+    recreate is attempted even when hasNext=True."""
+    session = _RecoveryFakeSession([(200, page1_body), None, None, None])
+    c, params = _build_recovery_connector(session, recovery_budget=0)
+    await c.collect(keyword="x", params=params)
+
+    assert session.recreate_calls == 0
+    s = c.last_run_summary
+    assert s.scroll_continuation_recovery_attempts == 0
+    # The run terminated with hasNext=True; incomplete_collection is
+    # set as before. The terminus flag stays False because the
+    # connector did not consume any recovery budget — recovery was
+    # disabled rather than exhausted.
+    assert s.incomplete_collection is True
+    assert s.last_observed_has_next is True
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_not_attempted_on_natural_exhaustion(
+    page1_body, page2_last,
+):
+    """When the last body advertises hasNext=False the recovery branch
+    must NOT engage — the run already reached natural exhaustion."""
+    session = _RecoveryFakeSession([(200, page1_body), (200, page2_last)])
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+
+    s = c.last_run_summary
+    assert session.recreate_calls == 0
+    assert s.scroll_continuation_recovery_attempts == 0
+    assert s.scroll_continuation_terminated_with_has_next is False
+    assert s.pagination_exhausted is True
+    assert s.last_observed_has_next is False
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_telemetry_serialized_on_summary(
+    page1_body, page2_last, monkeypatch,
+):
+    """`ConnectorRunSummary` carries the new fields in its dump."""
+    session = _RecoveryFakeSession(
+        [(200, page1_body), None, None, None],
+        recreate_responses=[[(200, page2_last)]],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+    s = c.last_run_summary
+
+    payload = s.model_dump()
+    assert payload["scroll_continuation_recovery_attempts"] == 1
+    assert payload["scroll_continuation_recovery_recovered"] is True
+    assert payload["scroll_continuation_terminated_with_has_next"] is False
+    # cursor_depth_at_termination tracks len(cursor_sequence). Real
+    # Playwright sessions populate `request_log`; the fake's empty log
+    # collapses to 0 — assert the field is at least present and an int.
+    assert isinstance(payload["cursor_depth_at_termination"], int)
+    # Construction-time knobs surface so the summary is self-describing.
+    assert payload["max_scroll_attempts_per_page"] == c._max_scroll_attempts
+    assert (
+        payload["max_scroll_recovery_recreates"]
+        == c._max_scroll_recovery_recreates
+    )
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_summary_defaults_for_legacy_payloads():
+    """A pre-patch summary without the new fields deserializes cleanly
+    via `ConnectorRunSummary`; new fields take their defaults."""
+    from datetime import datetime
+    from src.voc.app.connector_run_summary import ConnectorRunSummary
+
+    legacy_payload = {
+        "run_id": "r1", "channel": "oliveyoung",
+        "requested_target": "https://example", "started_at": datetime.now(),
+    }
+    s = ConnectorRunSummary.model_validate(legacy_payload)
+    assert s.scroll_continuation_recovery_attempts == 0
+    assert s.scroll_continuation_recovery_recovered is False
+    assert s.scroll_continuation_terminated_with_has_next is False
+    assert s.cursor_depth_at_termination == 0
+    assert s.max_scroll_attempts_per_page == 0
+    assert s.max_scroll_recovery_recreates == 0
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_handles_missing_recreate_primitive(
+    page1_body,
+):
+    """When the session does NOT expose `reload_and_reopen_review_tab`
+    (legacy fakes), the recovery branch falls through to the historical
+    terminus message without raising — and recovery_attempts stays 0
+    (no false-positive telemetry)."""
+    # Use the original FakeBrowserReviewSession which lacks
+    # reload_and_reopen_review_tab.
+    session = FakeBrowserReviewSession([(200, page1_body), None, None, None])
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        code_mapper=ProfileCodeMapper(),
+        session_factory=lambda: session,
+        max_scroll_recovery_recreates=2,  # budget present, primitive missing
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    s = c.last_run_summary
+    assert s.scroll_continuation_recovery_attempts == 0
+    # Legacy "no continuation after N scroll attempts" still emitted.
+    assert any(
+        "no continuation after" in r for r in s.sample_dropped_reasons
+    )
+
+
+@pytest.mark.asyncio
+async def test_scroll_recovery_aborts_when_recreate_raises(
+    page1_body, monkeypatch,
+):
+    """If `reload_and_reopen_review_tab` itself raises, the recovery
+    branch logs and breaks out cleanly — the run is marked
+    incomplete + terminated_with_has_next without leaking the
+    exception."""
+
+    class _RaisingRecoverySession(FakeBrowserReviewSession):
+        def __init__(self, responses, **kw):
+            super().__init__(responses, **kw)
+            self.recreate_calls = 0
+
+        async def reload_and_reopen_review_tab(self) -> None:
+            self.recreate_calls += 1
+            raise RuntimeError("recreate failed")
+
+    session = _RaisingRecoverySession([(200, page1_body), None, None, None])
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        code_mapper=ProfileCodeMapper(),
+        session_factory=lambda: session,
+        max_scroll_recovery_recreates=2,
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    s = c.last_run_summary
+    # The recreate fired once and raised; budget is consumed.
+    assert session.recreate_calls == 1
+    assert s.scroll_continuation_recovery_attempts == 1
+    # Terminus flag set because hasNext was True at recreate time.
+    assert s.scroll_continuation_terminated_with_has_next is True
+    assert s.incomplete_collection is True
+    # Drop reason surfaces the abandonment.
+    assert any(
+        "abandoning" in r for r in s.sample_dropped_reasons
+    )
+
+
+async def _no_sleep(_seconds):
+    """Replacement for asyncio.sleep used in tests so the recovery
+    backoff doesn't add real wall-time."""
+    return None

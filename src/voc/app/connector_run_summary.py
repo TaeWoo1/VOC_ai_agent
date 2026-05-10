@@ -363,6 +363,40 @@ class ConnectorRunSummary(BaseModel):
     page_open_failed: bool = False
     page_open_error: str | None = None
 
+    # ---- I-OY-SCROLL-CONTINUATION-IMPL telemetry (additive) ----
+    # When the per-page scroll budget is exhausted but the server still
+    # signals `hasNext=True`, the connector now optionally invokes a
+    # bounded number of `reload_and_reopen_review_tab` recreates and
+    # re-enters the continuation loop. The fields below surface that
+    # behavior so collection_summary.json + downstream audits can
+    # distinguish three previously-conflated outcomes:
+    #
+    #   (a) `pagination_exhausted=True`  — the server returned hasNext=False,
+    #       i.e. the run reached the natural end of the corpus.
+    #   (b) `incomplete_collection=True` AND
+    #       `scroll_continuation_terminated_with_has_next=True` — the run
+    #       gave up while the server still had more rows AND the recovery
+    #       budget was exhausted (or recovery was disabled).
+    #   (c) `incomplete_collection=False` AND `last_observed_has_next=True`
+    #       — the operator-set quota actually fired (true max_cap_reached).
+    #
+    # All four fields default to safe values so pre-patch summaries
+    # deserialize unchanged. Quality-gate decisions for canonical runs are
+    # byte-identical to the pre-patch rule (the gate already reads
+    # `incomplete_collection`; the new fields are observation-only).
+    scroll_continuation_recovery_attempts: int = 0
+    scroll_continuation_recovery_recovered: bool = False
+    scroll_continuation_terminated_with_has_next: bool = False
+    # `cursor_depth_at_termination` mirrors `len(cursor_sequence)` at
+    # end-of-run so operators can see depth-vs-time tradeoff without
+    # walking the (potentially long) cursor list.
+    cursor_depth_at_termination: int = 0
+    # Connector-construction values, surfaced for audit. Pre-patch
+    # callers had to derive these from the manifest; the connector now
+    # emits them so the per-run summary is self-describing.
+    max_scroll_attempts_per_page: int = 0
+    max_scroll_recovery_recreates: int = 0
+
     # ---- Pipeline-level (set by Phase1Pipeline AFTER the connector returns) ----
     pipeline_normalize_rejections: int = 0
 

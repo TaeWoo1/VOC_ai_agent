@@ -80,6 +80,17 @@ EXPLICIT_SUCCESS_STATUSES: frozenset[str] = frozenset({
     "ok",
     "complete",
     "max_cap_reached",
+    # Added 2026-05-10 (I-OY-SCROLL-CONTINUATION-IMPL) — the connector
+    # gave up before the server did (incomplete_collection=True with
+    # last_observed_has_next=True). The scrape ITSELF ran cleanly; we
+    # treat it as a success entry so the carousel/seller pipeline can
+    # proceed against whatever the DB has, while the
+    # `incomplete_collection` flag (and the new
+    # `scroll_continuation_terminated_with_has_next` telemetry) make
+    # the gap auditable. Without this entry the new status would
+    # cascade into `failed_unclassified`, which would break operator
+    # dashboards that read `sorts_succeeded` as the headline number.
+    "scroll_continuation_exhausted",
     "duplicate_only",
     "authenticated_ok",
     # `review_list_api_seen_but_no_rows_kept` is a connector-level

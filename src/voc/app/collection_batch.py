@@ -112,6 +112,19 @@ ALL_STATUSES: frozenset[str] = frozenset({
     "review_list_api_seen_but_no_rows_kept",
     "complete",
     "max_cap_reached",
+    # Added 2026-05-10 (I-OY-SCROLL-CONTINUATION-IMPL) — the connector
+    # successfully ran but the inner continuation loop terminated with
+    # the server still signaling `hasNext=True` AND the in-connector
+    # scroll-recovery budget exhausted. Distinct from `max_cap_reached`
+    # (which is now reserved for the operator-cap-actually-fired case)
+    # so the operator can tell "the connector gave up before the server
+    # did" from "the operator asked for N rows and got them". Quality-
+    # gate-wise the run remains a successful run with degraded quality
+    # (incomplete_collection → degraded), so `_is_success_entry` keeps
+    # treating it as a success row in the per-sort sidecar — the
+    # incompleteness is surfaced via the dedicated
+    # `incomplete_collection` flag and the new telemetry fields.
+    "scroll_continuation_exhausted",
     "duplicate_only",
     "authenticated_ok",
 })
@@ -265,6 +278,17 @@ def classify_status(summary: dict[str, Any]) -> str:
     if summary.get("pagination_exhausted") is True:
         return "complete"
     if summary.get("last_observed_has_next") is True:
+        # I-OY-SCROLL-CONTINUATION-IMPL — when the server still signals
+        # `hasNext=True` we used to collapse every successful-but-not-
+        # exhausted run into `max_cap_reached`, regardless of whether the
+        # operator's quota actually fired. The connector now sets
+        # `incomplete_collection=True` whenever `parsed < quota` AND the
+        # last body advertised more rows; that is the canonical
+        # "connector gave up before server did" signature. Split it out
+        # so audits / dashboards can tell scroll-continuation exhaustion
+        # apart from a real max-cap stop.
+        if summary.get("incomplete_collection") is True:
+            return "scroll_continuation_exhausted"
         return "max_cap_reached"
     rows_inserted = int(summary.get("rows_inserted") or 0)
     records_parsed = int(summary.get("records_parsed") or 0)
@@ -750,6 +774,14 @@ def _build_product_result(
         "login_state_observed": summary.get("login_state_observed"),
         "pagination_exhausted": summary.get("pagination_exhausted"),
         "last_observed_has_next": summary.get("last_observed_has_next"),
+        # I-OY-SCROLL-CONTINUATION-IMPL — `incomplete_collection` is
+        # the connector's existing post-condition flag (set when the
+        # last parsed body advertised more rows than the run delivered);
+        # the new classifier branch reads it to split scroll-continuation
+        # exhaustion out of `max_cap_reached`. Forwarded straight through
+        # so legacy summaries (where the field is absent / None) preserve
+        # the legacy `max_cap_reached` collapse.
+        "incomplete_collection": summary.get("incomplete_collection"),
         "partial_debug_artifact_path": summary.get("partial_debug_artifact_path"),
         "parse_warnings": summary.get("parse_warnings") or 0,
         # 2026-05-01 — diagnostic signals routed into classify_status
@@ -975,6 +1007,13 @@ def render_batch_markdown(report: BatchReport) -> str:
             # to understand `unknown_failure`-shaped runs.
             _NON_DIAGNOSTIC_STATUSES = {
                 "complete", "max_cap_reached",
+                # I-OY-SCROLL-CONTINUATION-IMPL — the new status is
+                # operationally a successful run; the diagnostic block
+                # below (cdp_attach, page_open, etc.) doesn't carry
+                # actionable signal for it. The scroll-recovery
+                # telemetry is surfaced via the connector summary
+                # carried on `ProductResult.summary` instead.
+                "scroll_continuation_exhausted",
                 "duplicate_only", "authenticated_ok",
             }
             if p.status not in _NON_DIAGNOSTIC_STATUSES:
