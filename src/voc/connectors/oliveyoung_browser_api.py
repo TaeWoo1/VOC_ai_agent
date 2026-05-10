@@ -2997,6 +2997,19 @@ class _PlaywrightReviewSession:
         # status code instead of `unknown_failure`.
         self._review_more_button_clicked: bool = False
         self._scrolled_to_review_area: bool = False
+        # I-OY-CDP-PAGE-ADOPTION — when the session reuses an existing
+        # CDP context (`_cdp_endpoint is not None` and `force_fresh_context`
+        # is False), `open()` first looks for a pre-existing page in the
+        # context whose URL targets the same goodsNo as `product_url`.
+        # If found, that page object is adopted instead of creating a
+        # fresh one. This closes the gap diagnosed in the Ilso forensics
+        # handoff: the operator-visible &tab=review page was being
+        # ignored because the connector unconditionally called
+        # `_ctx.new_page()`. Diagnostics are session-local (no
+        # broad-summary schema change in this ticket).
+        self._adopted_existing_page: bool = False
+        self._existing_page_candidate_count: int = 0
+        self._adopted_page_url_at_open: str | None = None
         self._closed = False
 
     def _attach_response_handler(self, page) -> None:
@@ -3287,6 +3300,121 @@ class _PlaywrightReviewSession:
         """
         return self._observed_total_review_count
 
+    @staticmethod
+    def _extract_target_goods_no(product_url: str) -> str | None:
+        """Pull `goodsNo=<X>` from the connector's product URL.
+
+        Uses stdlib `urllib.parse` (lazy-imported, mirroring the
+        precedent set by `_extract_query_params` at module scope). Returns
+        None when the URL does not carry a `goodsNo` query parameter, in
+        which case existing-page adoption is skipped entirely (the
+        fallback path handles unknown-target callers safely).
+        """
+        if not product_url:
+            return None
+        from urllib.parse import urlparse, parse_qs
+        try:
+            q = parse_qs(urlparse(product_url).query, keep_blank_values=True)
+        except Exception:
+            return None
+        values = q.get("goodsNo") or []
+        if not values:
+            return None
+        target = values[0]
+        return target or None
+
+    def _maybe_adopt_existing_page(self, product_url: str):
+        """Inspect `self._ctx.pages` and return a page targeting the same
+        goodsNo as `product_url`, or None if no candidate qualifies.
+
+        Selection contract (operator spec, ticket
+        I-OY-CDP-PAGE-ADOPTION):
+
+          1. Skip pages whose URL is `about:blank`, `chrome://newtab/`,
+             empty, or in the `devtools://` / `chrome://` / `edge://`
+             internal namespace. These are not real product pages even
+             if their URL accidentally contains a fragment that matches
+             the target goodsNo.
+          2. Skip pages whose URL does NOT contain
+             `goodsNo=<target>` — never adopt a page for a different
+             product.
+          3. Score the survivors:
+               +3 if URL contains `tab=review`
+               +2 if URL contains `getGoodsDetail.do`
+               +1 baseline (URL contains `goodsNo=<target>`)
+             The scores stack — a `getGoodsDetail.do` URL with
+             `&tab=review` scores 6, beating a bare detail page (3)
+             and a non-detail URL containing only the goodsNo (1).
+          4. Highest score wins; ties resolved by Playwright's natural
+             list order (first-encountered candidate).
+
+        Side-effects: this method ONLY reads `page.url`. It never
+        clicks, scrolls, navigates, or attaches handlers. The caller
+        (`open`) is responsible for adopting the returned page object
+        and emitting the diagnostic flag. Returns None when no
+        candidate qualifies, in which case the caller falls back to
+        `_ctx.new_page()`.
+
+        Updates the session-local diagnostic counter
+        `self._existing_page_candidate_count` with the number of pages
+        that survived the URL filter (i.e. matched the target goodsNo
+        and were not internal/blank).
+        """
+        target = self._extract_target_goods_no(product_url)
+        if target is None or self._ctx is None:
+            self._existing_page_candidate_count = 0
+            return None
+
+        # `pages` is a sync property on Playwright BrowserContext (both
+        # sync and async APIs). Tolerate any exception so a flaky CDP
+        # state never blocks the fallback path.
+        try:
+            pages = list(self._ctx.pages)
+        except Exception:
+            self._existing_page_candidate_count = 0
+            return None
+
+        goods_marker = f"goodsNo={target}"
+        skip_prefixes = (
+            "about:blank",
+            "chrome://newtab",
+            "chrome://new-tab",
+            "devtools://",
+            "chrome://",
+            "edge://",
+            "view-source:",
+        )
+
+        candidates: list[tuple[int, int, object]] = []
+        for idx, page in enumerate(pages):
+            try:
+                url = page.url or ""
+            except Exception:
+                continue
+            if not url:
+                continue
+            # Internal / blank pages — never adoptable, even if the URL
+            # somehow contains the goodsNo marker (defense against
+            # pathological mocks and Playwright dev tooling).
+            if any(url.startswith(p) for p in skip_prefixes):
+                continue
+            if goods_marker not in url:
+                continue
+            score = 1
+            if "tab=review" in url:
+                score += 3
+            if "getGoodsDetail.do" in url:
+                score += 2
+            # `idx` is the natural-order tiebreaker (lower = earlier).
+            candidates.append((score, idx, page))
+
+        self._existing_page_candidate_count = len(candidates)
+        if not candidates:
+            return None
+        # Highest score wins; on tie, lowest index (first-encountered).
+        candidates.sort(key=lambda t: (-t[0], t[1]))
+        return candidates[0][2]
+
     async def open(self, product_url: str) -> None:
         # v2.4.5 — flip the lifecycle flag IMMEDIATELY so the diagnostic
         # carries proof that open() was reached, even if a later step
@@ -3328,7 +3456,34 @@ class _PlaywrightReviewSession:
                 # Edge case: no existing context. Create one but treat as owned.
                 self._ctx = await self._browser.new_context(locale="ko-KR")
                 self._owns_context = True
-            self._page = await self._ctx.new_page()
+            # I-OY-CDP-PAGE-ADOPTION — before creating a fresh page,
+            # see if the operator already has a tab open on this
+            # goodsNo (preferably one with `&tab=review`). When the
+            # adoption succeeds we skip the goto/navigation entirely:
+            # the operator's own page is already on the review tab and
+            # any additional click/scroll could regress it.
+            adopted = self._maybe_adopt_existing_page(product_url)
+            if adopted is not None:
+                self._page = adopted
+                self._adopted_existing_page = True
+                try:
+                    self._adopted_page_url_at_open = adopted.url
+                except Exception:
+                    self._adopted_page_url_at_open = None
+                logger.info(
+                    "OY browser: adopted_existing_page=true "
+                    "candidate_count=%d page_url=%s",
+                    self._existing_page_candidate_count,
+                    self._adopted_page_url_at_open,
+                )
+            else:
+                self._adopted_existing_page = False
+                logger.info(
+                    "OY browser: adopted_existing_page=false "
+                    "candidate_count=%d (creating new page via fallback)",
+                    self._existing_page_candidate_count,
+                )
+                self._page = await self._ctx.new_page()
         else:
             self._browser = await self._pw.chromium.launch(headless=self._headless)
             self._owns_browser = True
@@ -3354,7 +3509,16 @@ class _PlaywrightReviewSession:
         # recovering from a poisoned session.
         self._attach_response_handler(self._page)
 
-        await self._page.goto(product_url, wait_until="domcontentloaded")
+        # I-OY-CDP-PAGE-ADOPTION — when we adopted an existing page
+        # we deliberately skip the goto. The operator's own page is
+        # already on the product (often on `&tab=review`); navigating
+        # again would (a) risk losing the current review-tab DOM the
+        # operator can already see, and (b) defeat the purpose of
+        # adoption. Downstream `_trigger_review_list_api` still runs
+        # below and will idempotently activate the review tab if the
+        # adopted page wasn't already there.
+        if not self._adopted_existing_page:
+            await self._page.goto(product_url, wait_until="domcontentloaded")
         # Capture the representative product image URL from og:image /
         # JSON-LD BEFORE the review-tab click. The page is on the
         # detail page HTML right now — `page.content()` is a passive

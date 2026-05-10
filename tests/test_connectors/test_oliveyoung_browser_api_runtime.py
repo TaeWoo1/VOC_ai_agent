@@ -3110,3 +3110,544 @@ async def test_open_handshake_timeout_uses_cold_start_timeout_value():
     # Verbatim diagnostic includes the configured timeout value (rounded
     # via the format string in the connector).
     assert "exceeded 0s" in s.page_open_error or "exceeded 1s" in s.page_open_error
+
+
+# ---------------------------------------------------------------------------
+# I-OY-CDP-PAGE-ADOPTION — `_PlaywrightReviewSession.open()` now adopts an
+# existing CDP page whose URL targets the same goodsNo before falling back
+# to `_ctx.new_page()`. Closes the gap diagnosed in
+# `ops/agent_handoffs/I-OY-ILSO-VISIBLE-REVIEWS-COLLECTOR-MISS-TRIAGE.md`:
+# the operator-visible `&tab=review` page was being ignored.
+#
+# Required test cases (operator's spec):
+#   1. adopts existing page when URL contains target goodsNo
+#   2. prefers tab=review page over bare product page
+#   3. does not adopt page for different goodsNo
+#   4. falls back to new_page when no matching page exists
+#   5. adoption avoids calling new_page
+#   6. fallback still calls new_page
+#   7. skips blank / devtools pages
+#   8. adoption records local diagnostics
+#
+# All tests below drive the unit-level `_maybe_adopt_existing_page`
+# helper plus a focused integration test of `open()`'s CDP branch
+# against fakes — no real Playwright is instantiated. Existing
+# scroll-continuation and open-handshake-timeout tests remain green
+# because their fakes never enter `_PlaywrightReviewSession.open`.
+# ---------------------------------------------------------------------------
+
+
+_TARGET_GOODS = "A000000238828"
+_PRODUCT_URL_TAB_REVIEW = (
+    "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+    "?goodsNo=A000000238828&tab=review"
+)
+
+
+class _FakePage:
+    """Stand-in for a Playwright Page exposing the surface the
+    connector touches on adopted pages.
+
+    `_maybe_adopt_existing_page` reads only `page.url`. After the
+    helper returns, however, `open()` calls
+    `_attach_response_handler(self._page)`, which invokes
+    `page.on("response", ...)`. So adopted pages need at minimum a
+    no-op `.on(...)` and the locator/evaluate/content surface
+    `_trigger_review_list_api` would touch (we monkey-patch that out
+    in the integration tests, but the no-op surface is cheap).
+    """
+
+    def __init__(self, url: str):
+        self.url = url
+        self.on_calls: list[tuple[str, object]] = []
+
+    def on(self, event, handler):
+        self.on_calls.append((event, handler))
+
+    async def goto(self, url, wait_until=None):  # pragma: no cover
+        # Adopted pages must NOT have goto called on them — the
+        # adoption branch in open() skips navigation entirely. If a
+        # test ever lands here it is a regression.
+        raise AssertionError("goto called on adopted page — adoption branch broken")
+
+    async def content(self):
+        return "<html></html>"
+
+    def locator(self, selector):
+        class _ZeroLoc:
+            async def count(self_inner):
+                return 0
+
+            async def click(self_inner, timeout=None):  # pragma: no cover
+                return None
+
+            async def scroll_into_view_if_needed(self_inner, timeout=None):
+                return None
+
+            @property
+            def first(self_inner):
+                return self_inner
+        return _ZeroLoc()
+
+    async def evaluate(self, script):
+        return None
+
+
+class _FakeAsyncPage:
+    """Stand-in for a freshly-created Playwright Page on the fallback path.
+
+    `open()` calls `page.goto(...)` and `_attach_response_handler(page)`
+    for new pages. `goto` is async; the response handler attaches via
+    `page.on("response", ...)`. We record both for assertions.
+    """
+
+    def __init__(self, url: str = "about:blank"):
+        self.url = url
+        self.goto_calls: list[tuple[str, dict]] = []
+        self.on_calls: list[tuple[str, object]] = []
+
+    async def goto(self, url, wait_until=None):  # noqa: D401 — Playwright shape
+        self.goto_calls.append((url, {"wait_until": wait_until}))
+        # Update URL so subsequent diagnostics see the navigated page.
+        self.url = url
+
+    def on(self, event, handler):
+        self.on_calls.append((event, handler))
+
+    async def content(self):  # used by the post-goto image capture hook
+        return "<html></html>"
+
+    def locator(self, selector):
+        # The trigger-review-list-api cascade walks locators and counts.
+        # Our fake returns zero matches so every cascade step is a no-op.
+        class _ZeroLoc:
+            async def count(self_inner):
+                return 0
+
+            async def click(self_inner, timeout=None):  # pragma: no cover
+                return None
+
+            async def scroll_into_view_if_needed(self_inner, timeout=None):
+                return None
+
+            @property
+            def first(self_inner):
+                return self_inner
+        return _ZeroLoc()
+
+    async def evaluate(self, script):
+        return None
+
+
+class _FakeBrowser:
+    def __init__(self, contexts):
+        self.contexts = list(contexts)
+
+
+class _FakeBrowserContext:
+    """Captures `pages`, `new_page` calls, and exposes
+    `new_context`-shaped accessors needed by the CDP branch of
+    `_PlaywrightReviewSession.open()`. Tests inject this directly onto
+    the session instance via `object.__new__`."""
+
+    def __init__(self, pages):
+        self.pages = list(pages)
+        self.new_page_calls = 0
+        self._next_page_url = "about:blank"
+
+    async def new_page(self):
+        self.new_page_calls += 1
+        page = _FakeAsyncPage(self._next_page_url)
+        self.pages.append(page)
+        return page
+
+
+def _make_session_for_adoption(pages):
+    """Build a `_PlaywrightReviewSession` instance with just enough
+    state for `_maybe_adopt_existing_page` to run.
+
+    Bypasses `__init__` (which would launch Playwright). Mirrors the
+    pattern at line ~2487 used by
+    `test_trigger_review_list_api_runs_without_attribute_error`.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._ctx = _FakeBrowserContext(pages)
+    sess._existing_page_candidate_count = 0
+    sess._adopted_existing_page = False
+    sess._adopted_page_url_at_open = None
+    return sess
+
+
+def test_adopts_existing_page_when_url_contains_target_goods_no():
+    """Single existing page on the target goodsNo → adopted; the
+    `_existing_page_candidate_count` counter records 1 candidate."""
+    page = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+    sess = _make_session_for_adoption([page])
+
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+
+    assert chosen is page
+    assert sess._existing_page_candidate_count == 1
+
+
+def test_prefers_tab_review_page_over_bare_product_page():
+    """Two candidates: bare detail + `&tab=review`. The `tab=review`
+    page wins because the score (3+2+1=6) beats the bare detail
+    (2+1=3)."""
+    bare = _FakePage(
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        f"?goodsNo={_TARGET_GOODS}",
+    )
+    tab_review = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+    sess = _make_session_for_adoption([bare, tab_review])
+
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+
+    assert chosen is tab_review
+    assert sess._existing_page_candidate_count == 2
+
+
+def test_prefers_tab_review_regardless_of_list_order():
+    """Order-independence: putting `tab=review` first must still pick
+    it over the bare detail page, and putting it last must still pick
+    it. This guards against accidental `pages[0]` shortcuts."""
+    bare_url = (
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        f"?goodsNo={_TARGET_GOODS}"
+    )
+    # Tab-review last
+    sess = _make_session_for_adoption([
+        _FakePage(bare_url),
+        _FakePage(_PRODUCT_URL_TAB_REVIEW),
+    ])
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+    assert "tab=review" in chosen.url
+
+    # Tab-review first
+    sess = _make_session_for_adoption([
+        _FakePage(_PRODUCT_URL_TAB_REVIEW),
+        _FakePage(bare_url),
+    ])
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+    assert "tab=review" in chosen.url
+
+
+def test_does_not_adopt_page_for_different_goods_no():
+    """Pages exist but none target the requested goodsNo → no
+    adoption, candidate_count is 0."""
+    foreign = _FakePage(
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        "?goodsNo=A999999999999&tab=review",
+    )
+    other = _FakePage(
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        "?goodsNo=B000000000000",
+    )
+    sess = _make_session_for_adoption([foreign, other])
+
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+
+    assert chosen is None
+    assert sess._existing_page_candidate_count == 0
+
+
+def test_falls_back_to_new_page_when_no_matching_page_exists():
+    """Empty `pages` list → helper returns None (fallback path
+    activates in `open()`)."""
+    sess = _make_session_for_adoption([])
+
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+
+    assert chosen is None
+    assert sess._existing_page_candidate_count == 0
+
+
+def test_skips_blank_and_devtools_pages():
+    """Pages with `about:blank`, `chrome://newtab/`, `devtools://`
+    URLs must not adopt even if a downstream substring match would
+    otherwise fire — defense against pathological mocks and against
+    accidental devtools/newtab adoption when the operator opens a new
+    tab."""
+    blank = _FakePage("about:blank")
+    newtab = _FakePage("chrome://newtab/")
+    devtools = _FakePage(
+        f"devtools://devtools/bundled/inspector.html?goodsNo={_TARGET_GOODS}",
+    )
+    # Even if a stray internal URL contains the goodsNo marker (it does
+    # in the devtools fake), the prefix filter must drop it.
+    real = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+    sess = _make_session_for_adoption([blank, newtab, devtools, real])
+
+    chosen = sess._maybe_adopt_existing_page(_PRODUCT_URL_TAB_REVIEW)
+
+    assert chosen is real
+    assert sess._existing_page_candidate_count == 1
+
+
+def test_helper_handles_url_without_goods_no_param():
+    """When the connector is configured with a URL that doesn't carry
+    `goodsNo` (degenerate case), the helper returns None without
+    raising — the fallback path stays safe for unknown-target callers."""
+    sess = _make_session_for_adoption([_FakePage(_PRODUCT_URL_TAB_REVIEW)])
+    chosen = sess._maybe_adopt_existing_page("https://example.com/")
+    assert chosen is None
+    assert sess._existing_page_candidate_count == 0
+
+
+def test_extract_target_goods_no_pulls_query_param():
+    """Static helper — confirms goodsNo extraction matches the URL
+    contract OY uses (and does NOT regex it)."""
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    fn = mod._PlaywrightReviewSession._extract_target_goods_no
+    assert fn(_PRODUCT_URL_TAB_REVIEW) == _TARGET_GOODS
+    # No goodsNo → None, no exception.
+    assert fn("https://www.oliveyoung.co.kr/") is None
+    # Empty / None → None, no exception.
+    assert fn("") is None
+    assert fn(None) is None  # type: ignore[arg-type]
+
+
+# ---- integration-shaped tests against the open() CDP branch -------------
+
+
+def _build_cdp_session(pages):
+    """Build a session ready to run `open()` against a fake CDP context.
+
+    Bypasses `__init__` (so Playwright never launches), then sets the
+    fields `open()` reads on the CDP branch:
+      - `_cdp_endpoint` non-None → CDP branch
+      - `_force_fresh_context = False` → reuse existing context
+      - `_browser.contexts[0]` is the fake context
+      - all the diagnostic flags `__init__` would normally seed
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._cdp_endpoint = "http://127.0.0.1:9222"
+    sess._force_fresh_context = False
+    sess._headless = True
+    sess._user_agent = ""
+    sess._viewport = {"width": 1280, "height": 800}
+    sess._storage_state_path = None
+    sess._review_tab_locator = "div.review-tab"
+    sess._scroll_candidates = ()
+    sess._sort_button_label_ko = None
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = ()
+    sess._sort_disclosure_affordance_labels_ko = ()
+    sess._sort_hunt_settle_s = 0.0
+    sess._sort_hunt_poll_interval_s = 1.0
+    sess._false_empty_markers_ko = ()
+    sess._interstitial_markers_ko = ()
+    sess._expected_sort_type = None
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._adopted_existing_page = False
+    sess._existing_page_candidate_count = 0
+    sess._adopted_page_url_at_open = None
+    sess._opened_product_url = None
+    sess._observed_product_image_url = None
+    sess._observed_total_review_count = None
+    sess._observed_breadcrumb = None
+    sess._product_image_capture_diagnostic = {
+        "attempted": False,
+        "page_url": None,
+        "html_length": None,
+        "og_count": 0,
+        "jsonld_count": 0,
+        "twitter_count": 0,
+        "link_image_src_count": 0,
+        "oy_thumbnail_img_count": 0,
+        "selected_source": None,
+        "error": None,
+        "session_id": id(sess),
+        "session_class": "fake",
+        "session_open_called": False,
+        "session_open_url_at_start": None,
+        "capture_hook_reached": False,
+        "session_received_cdp_endpoint": sess._cdp_endpoint,
+    }
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._last_seen_sort_labels = []
+    sess._sort_control_unreachable = False
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._owns_browser = False
+    sess._owns_context = False
+    sess._closed = False
+
+    ctx = _FakeBrowserContext(pages)
+    sess._ctx_for_test = ctx  # back-reference for assertions
+    sess._browser_for_test = _FakeBrowser([ctx])
+    return sess
+
+
+class _FakePlaywright:
+    """Drop-in for `async_playwright().start()`'s return value.
+
+    We patch `async_playwright` at the module level to return an object
+    whose `.start()` yields a chromium-shaped helper that connects over
+    CDP and produces our fake browser. Avoids needing Playwright on
+    the test path.
+    """
+
+    def __init__(self, browser):
+        self._browser = browser
+        self.chromium = self  # so `pw.chromium.connect_over_cdp` works
+
+    async def connect_over_cdp(self, endpoint):
+        return self._browser
+
+    async def stop(self):
+        return None
+
+
+class _FakeAsyncPlaywright:
+    def __init__(self, browser):
+        self._browser = browser
+
+    async def start(self):
+        return _FakePlaywright(self._browser)
+
+
+@pytest.mark.asyncio
+async def test_adoption_avoids_calling_new_page(monkeypatch):
+    """Operator's spec test #5: when adoption succeeds, `_ctx.new_page`
+    is NOT awaited. The integration test runs the full `open()` flow
+    against a fake CDP browser/context."""
+    target_page = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+    sess = _build_cdp_session([target_page])
+
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    monkeypatch.setattr(
+        mod, "async_playwright",
+        lambda: _FakeAsyncPlaywright(sess._browser_for_test),
+        raising=False,
+    )
+    # The capture-image hook calls page.content() — our _FakePage doesn't
+    # have it. Adoption skips the goto AND the capture hook is gated on
+    # the goto-side conditions, but the open() body still runs the
+    # capture try/except. Patch the capture method to a no-op so we can
+    # focus on adoption behavior.
+    async def _noop_capture(*a, **kw):
+        return None
+    sess._capture_product_image_url_from_page = _noop_capture
+
+    async def _noop_trigger(initial_click=True):
+        return None
+    sess._trigger_review_list_api = _noop_trigger
+    sess._capture_total_review_count_from_dom = _noop_capture
+    sess._capture_breadcrumb_from_dom = _noop_capture
+
+    # Inject the import path used inside open() so the real
+    # `from playwright.async_api import async_playwright` line resolves
+    # to our fake. We patch the actual symbol used at runtime.
+    import sys as _sys
+    fake_pw_module = type(_sys)("playwright.async_api")
+    fake_pw_module.async_playwright = lambda: _FakeAsyncPlaywright(
+        sess._browser_for_test,
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright", type(_sys)("playwright"),
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright.async_api", fake_pw_module,
+    )
+
+    await sess.open(_PRODUCT_URL_TAB_REVIEW)
+
+    # Operator contract #5: new_page MUST NOT have been called.
+    assert sess._ctx_for_test.new_page_calls == 0
+    # Operator contract #1: the adopted page is the existing page.
+    assert sess._page is target_page
+    # Operator contract #8: diagnostics recorded.
+    assert sess._adopted_existing_page is True
+    assert sess._existing_page_candidate_count == 1
+    assert sess._adopted_page_url_at_open == _PRODUCT_URL_TAB_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_fallback_still_calls_new_page_and_navigates(monkeypatch):
+    """Operator's spec test #6: when no candidate matches, the
+    fallback path must still call `_ctx.new_page()` and the connector
+    must `goto(product_url)` so the prior happy path stays intact."""
+    # No matching pages in the context.
+    sess = _build_cdp_session(pages=[])
+
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    async def _noop_capture(*a, **kw):
+        return None
+    sess._capture_product_image_url_from_page = _noop_capture
+
+    async def _noop_trigger(initial_click=True):
+        return None
+    sess._trigger_review_list_api = _noop_trigger
+    sess._capture_total_review_count_from_dom = _noop_capture
+    sess._capture_breadcrumb_from_dom = _noop_capture
+
+    import sys as _sys
+    fake_pw_module = type(_sys)("playwright.async_api")
+    fake_pw_module.async_playwright = lambda: _FakeAsyncPlaywright(
+        sess._browser_for_test,
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright", type(_sys)("playwright"),
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright.async_api", fake_pw_module,
+    )
+
+    await sess.open(_PRODUCT_URL_TAB_REVIEW)
+
+    # Fallback path activated: a fresh page was created in the context.
+    assert sess._ctx_for_test.new_page_calls == 1
+    # Diagnostic flag flipped to False — operator can grep this.
+    assert sess._adopted_existing_page is False
+    assert sess._existing_page_candidate_count == 0
+    # The fresh page received a goto(product_url) call.
+    assert isinstance(sess._page, _FakeAsyncPage)
+    assert len(sess._page.goto_calls) == 1
+    assert sess._page.goto_calls[0][0] == _PRODUCT_URL_TAB_REVIEW
+
+
+@pytest.mark.asyncio
+async def test_adoption_records_diagnostics(monkeypatch):
+    """Operator's spec test #8: after adoption, the three diagnostic
+    fields are populated as described in the ticket spec.
+
+    `_adopted_existing_page=True`, `_existing_page_candidate_count>=1`,
+    `_adopted_page_url_at_open` is the chosen URL.
+    """
+    target_page = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+    sess = _build_cdp_session([target_page])
+
+    async def _noop_capture(*a, **kw):
+        return None
+    sess._capture_product_image_url_from_page = _noop_capture
+
+    async def _noop_trigger(initial_click=True):
+        return None
+    sess._trigger_review_list_api = _noop_trigger
+    sess._capture_total_review_count_from_dom = _noop_capture
+    sess._capture_breadcrumb_from_dom = _noop_capture
+
+    import sys as _sys
+    fake_pw_module = type(_sys)("playwright.async_api")
+    fake_pw_module.async_playwright = lambda: _FakeAsyncPlaywright(
+        sess._browser_for_test,
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright", type(_sys)("playwright"),
+    )
+    monkeypatch.setitem(
+        _sys.modules, "playwright.async_api", fake_pw_module,
+    )
+
+    await sess.open(_PRODUCT_URL_TAB_REVIEW)
+
+    assert sess._adopted_existing_page is True
+    assert sess._existing_page_candidate_count >= 1
+    assert sess._adopted_page_url_at_open == _PRODUCT_URL_TAB_REVIEW
