@@ -4044,9 +4044,29 @@ class _PlaywrightReviewSession:
                 self._ctx = self._browser.contexts[0]
                 self._owns_context = False
             else:
-                # Edge case: no existing context. Create one but treat as owned.
-                self._ctx = await self._browser.new_context(locale="ko-KR")
-                self._owns_context = True
+                # I-OY-PIPELINE-CDP-REATTACH-FOR-MULTI-SORT — when CDP
+                # attach returns a browser with NO existing context, we
+                # previously fell back to `new_context(locale="ko-KR")`.
+                # Playwright rejects that call against a CDP-attached
+                # browser with the exact error
+                # `Browser context management is not supported`, which
+                # the pipeline classifies as `cdp_attach_failed`. The
+                # operator-facing contract is clear: a CDP-attached
+                # Chrome must have an open tab on the target goodsNo
+                # before the connector runs. Raise a precondition error
+                # naming the missing operator action so the failure
+                # surface is honest rather than disguised as a
+                # Playwright internal.
+                raise RuntimeError(
+                    "OY connector precondition_failed_no_cdp_context: "
+                    "connect_over_cdp returned a browser with no existing "
+                    "BrowserContext (operator's Chrome has no open tab on "
+                    "the target goodsNo). The connector cannot create a "
+                    "new CDP context — Playwright does not support "
+                    "`browser.new_context()` against a CDP-attached "
+                    "browser. Action: open a tab on the target goodsNo "
+                    "in the operator's Chrome and re-run.",
+                )
             # I-OY-CDP-PAGE-ADOPTION — before creating a fresh page,
             # see if the operator already has a tab open on this
             # goodsNo (preferably one with `&tab=review`). When the
@@ -6388,12 +6408,27 @@ class _PlaywrightReviewSession:
         if self._closed:
             return
         self._closed = True
-        # Close our page unconditionally (we always created it ourselves).
-        if self._page is not None:
+        # I-OY-PIPELINE-CDP-REATTACH-FOR-MULTI-SORT — close the page ONLY
+        # when we created it ourselves. Adopted pages belong to the
+        # operator's CDP Chrome and must outlive the connector subprocess
+        # so the NEXT sort's subprocess can adopt the same tab again.
+        # Before this fix, sort 1's cleanup closed the operator's tab,
+        # which left the next CDP `connect_over_cdp` with an empty
+        # `browser.contexts` list and caused Playwright to raise
+        # `Browser context management is not supported` on the fallback
+        # `new_context(...)` call → pipeline classified as
+        # `cdp_attach_failed`.
+        if self._page is not None and not self._adopted_existing_page:
             try:
                 await self._page.close()
             except Exception as e:
                 logger.debug("OY browser page close failed: %s", e)
+        elif self._page is not None and self._adopted_existing_page:
+            logger.info(
+                "OY browser: leaving adopted CDP page open on close "
+                "(operator tab preserved for subsequent sorts) url=%s",
+                self._adopted_page_url_at_open,
+            )
         # Context and browser: close only if we own them. Under CDP-attach the
         # user's Chrome instance owns both; closing the context would discard
         # the user's session, closing the browser would quit their Chrome.

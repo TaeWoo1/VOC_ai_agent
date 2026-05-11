@@ -3663,6 +3663,317 @@ async def test_adoption_records_diagnostics(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# I-OY-PIPELINE-CDP-REATTACH-FOR-MULTI-SORT — second-sort attach must
+# reuse the SAME operator tab the first sort adopted. The smoke run on
+# Tocobo A000000179852 (handoff
+# ops/agent_handoffs/O-BRAND20-SMOKE-TOCOBO-A000000179852-RETRY.md)
+# showed sort 1 = `complete` and sorts 2-5 = `cdp_attach_failed` with
+# Playwright error `Browser context management is not supported`.
+#
+# Two interacting bugs caused this:
+#   (1) close() unconditionally closed `self._page`, including the
+#       adopted operator tab. After sort 1 the operator's tab was gone
+#       so sort 2's `_maybe_adopt_existing_page` had nothing to adopt.
+#   (2) open() fell back to `new_context(locale="ko-KR")` when
+#       `browser.contexts` was empty. Playwright rejects that call
+#       against a CDP-attached browser with the exact phrase
+#       `Browser context management is not supported`, which the
+#       pipeline classifier routes to `cdp_attach_failed`.
+#
+# Fix: gate the page close on `not self._adopted_existing_page`; raise
+# a clear precondition error in the no-context fallback.
+# ---------------------------------------------------------------------------
+
+
+def _make_session_for_close(*, adopted: bool, owns_browser: bool = False,
+                             owns_context: bool = False):
+    """Build a `_PlaywrightReviewSession` with just enough state for
+    `close()` to run end-to-end. Mirrors the `_make_session_for_adoption`
+    / `_build_cdp_session` pattern: bypass __init__, hand-set the fields
+    the cleanup path reads.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._closed = False
+    sess._adopted_existing_page = bool(adopted)
+    sess._adopted_page_url_at_open = (
+        _PRODUCT_URL_TAB_REVIEW if adopted else None
+    )
+    sess._owns_browser = bool(owns_browser)
+    sess._owns_context = bool(owns_context)
+    sess._pw = None  # close() guards on None and skips pw.stop()
+    return sess
+
+
+class _ClosableFakePage:
+    """`close()`-recording fake for the cleanup-path tests. Mirrors the
+    minimum surface `_PlaywrightReviewSession.close()` touches."""
+
+    def __init__(self):
+        self.close_calls = 0
+
+    async def close(self):
+        self.close_calls += 1
+
+
+class _ClosableFakeBrowserContext:
+    def __init__(self):
+        self.close_calls = 0
+
+    async def close(self):
+        self.close_calls += 1
+
+
+class _ClosableFakeBrowser:
+    def __init__(self):
+        self.close_calls = 0
+
+    async def close(self):
+        self.close_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_connector_cleanup_does_not_close_adopted_cdp_page():
+    """Operator's spec test #2 for the reattach fix: when the connector
+    adopted the operator's existing CDP tab, `close()` must NOT call
+    `page.close()` on it. The page belongs to the operator's Chrome
+    and must survive past the connector subprocess so the next sort
+    can adopt the same tab again.
+    """
+    page = _ClosableFakePage()
+    sess = _make_session_for_close(adopted=True)
+    sess._page = page
+    sess._ctx = _ClosableFakeBrowserContext()
+    sess._browser = _ClosableFakeBrowser()
+
+    await sess.close()
+
+    # The adopted page must NOT be closed.
+    assert page.close_calls == 0
+    # The CDP browser / context must NOT be closed either (we don't own them).
+    assert sess._ctx.close_calls == 0
+    assert sess._browser.close_calls == 0
+    # `_closed` flag flips so the idempotent guard works on a second call.
+    assert sess._closed is True
+
+
+@pytest.mark.asyncio
+async def test_connector_cleanup_still_closes_owned_page_on_fallback():
+    """Regression guard: the legacy launched-browser path (no CDP) and
+    the CDP fallback path (no adoption) must still close the page we
+    created ourselves. Without this, owned-browser leaks would build up
+    on long-running runs.
+    """
+    page = _ClosableFakePage()
+    sess = _make_session_for_close(
+        adopted=False, owns_browser=True, owns_context=True,
+    )
+    sess._page = page
+    sess._ctx = _ClosableFakeBrowserContext()
+    sess._browser = _ClosableFakeBrowser()
+
+    await sess.close()
+
+    # Owned page MUST be closed.
+    assert page.close_calls == 1
+    # Owned context + browser MUST be closed.
+    assert sess._ctx.close_calls == 1
+    assert sess._browser.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_connector_cleanup_idempotent_on_double_close():
+    """The `_closed` guard at the top of `close()` must short-circuit a
+    second invocation — important because the connector's outer
+    try/finally may call `close()` twice on certain error paths.
+    """
+    page = _ClosableFakePage()
+    sess = _make_session_for_close(adopted=False, owns_browser=True,
+                                    owns_context=True)
+    sess._page = page
+    sess._ctx = _ClosableFakeBrowserContext()
+    sess._browser = _ClosableFakeBrowser()
+
+    await sess.close()
+    await sess.close()
+
+    # Each underlying close ran ONCE despite two `close()` invocations.
+    assert page.close_calls == 1
+    assert sess._ctx.close_calls == 1
+    assert sess._browser.close_calls == 1
+
+
+class _CDPBrowserWithoutContextsFake:
+    """Mimics a Playwright Browser returned by `connect_over_cdp` whose
+    `.contexts` list is empty AND whose `.new_context()` raises the
+    exact `Browser context management is not supported` error
+    Playwright emits in that scenario. Verifies the connector takes the
+    precondition_failed path rather than calling `new_context` (which
+    is what produced the smoke run's misleading
+    `Browser context management is not supported` error).
+    """
+
+    def __init__(self):
+        self.contexts = []
+        self.new_context_calls = 0
+
+    async def new_context(self, **kwargs):
+        # Real Playwright shape; the connector MUST NOT reach this.
+        self.new_context_calls += 1
+        raise RuntimeError("Browser context management is not supported")
+
+
+class _AsyncPlaywrightWithBrowser:
+    def __init__(self, browser):
+        self._browser = browser
+        self.chromium = self
+
+    async def connect_over_cdp(self, endpoint):
+        return self._browser
+
+    async def stop(self):
+        return None
+
+
+class _AsyncPlaywrightFactory:
+    def __init__(self, browser):
+        self._browser = browser
+
+    async def start(self):
+        return _AsyncPlaywrightWithBrowser(self._browser)
+
+
+@pytest.mark.asyncio
+async def test_connector_open_raises_precondition_when_cdp_has_no_contexts(
+    monkeypatch,
+):
+    """Operator's spec test #1 for the reattach fix: when CDP attach
+    returns a browser with no existing BrowserContext, the connector
+    MUST raise a clear precondition error rather than fall back to
+    `browser.new_context()` (which Playwright rejects with the exact
+    phrase `Browser context management is not supported`).
+
+    The raised message must contain `connect_over_cdp` so the pipeline
+    error classifier (`_PIPELINE_CDP_ATTACH_HINTS`) still routes the
+    failure to the `cdp_attach_failed` status enum — the surface
+    contract is preserved while the diagnostic is now actionable.
+    """
+    fake_browser = _CDPBrowserWithoutContextsFake()
+    sess = _build_cdp_session(pages=[])
+    sess._browser_for_test = fake_browser  # overwrite the default
+
+    import sys as _sys
+    fake_pw_module = type(_sys)("playwright.async_api")
+    fake_pw_module.async_playwright = lambda: _AsyncPlaywrightFactory(
+        fake_browser,
+    )
+    monkeypatch.setitem(_sys.modules, "playwright", type(_sys)("playwright"))
+    monkeypatch.setitem(_sys.modules, "playwright.async_api", fake_pw_module)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await sess.open(_PRODUCT_URL_TAB_REVIEW)
+
+    msg = str(excinfo.value)
+    # Precondition surface: operator-actionable message.
+    assert "precondition_failed_no_cdp_context" in msg
+    # Routing surface: `_PIPELINE_CDP_ATTACH_HINTS` includes
+    # `connect_over_cdp` so the pipeline still classifies this as
+    # cdp_attach_failed (rather than unknown_failure / page_open_failed).
+    assert "connect_over_cdp" in msg
+    # The connector must NOT have called the unsupported new_context() API.
+    assert fake_browser.new_context_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_simulated_multi_sort_reattaches_to_same_adopted_page(monkeypatch):
+    """Spec test #3 for the reattach fix: simulate two sequential
+    connector invocations against the same fake CDP browser. The
+    first invocation adopts the operator's tab, runs its workflow,
+    then calls `close()`. The second invocation re-runs `open()` and
+    MUST adopt the SAME page object (i.e. the first close did not
+    destroy the tab).
+
+    This in-process test mirrors what the pipeline does at the
+    subprocess boundary: two fresh connector instances, one shared CDP
+    Chrome with one operator-opened tab.
+    """
+    target_page = _FakePage(_PRODUCT_URL_TAB_REVIEW)
+
+    # Sort 1: build a session, open against a fake CDP browser whose
+    # only context contains the operator's tab, then close.
+    sess1 = _build_cdp_session([target_page])
+
+    async def _noop_capture(*a, **kw):
+        return None
+    sess1._capture_product_image_url_from_page = _noop_capture
+    sess1._capture_total_review_count_from_dom = _noop_capture
+    sess1._capture_breadcrumb_from_dom = _noop_capture
+
+    async def _noop_trigger(initial_click=True):
+        return None
+    sess1._trigger_review_list_api = _noop_trigger
+
+    import sys as _sys
+    fake_pw_module = type(_sys)("playwright.async_api")
+    fake_pw_module.async_playwright = lambda: _FakeAsyncPlaywright(
+        sess1._browser_for_test,
+    )
+    monkeypatch.setitem(_sys.modules, "playwright", type(_sys)("playwright"))
+    monkeypatch.setitem(_sys.modules, "playwright.async_api", fake_pw_module)
+
+    await sess1.open(_PRODUCT_URL_TAB_REVIEW)
+    assert sess1._adopted_existing_page is True
+    assert sess1._page is target_page
+
+    # Simulate the operator's tab having a `close` coroutine to detect
+    # accidental cleanup. _FakePage has no `close` method by default;
+    # attach a recorder so we can assert it remained UNCALLED.
+    target_page_close_calls = {"n": 0}
+
+    async def _record_close():
+        target_page_close_calls["n"] += 1
+    target_page.close = _record_close  # type: ignore[attr-defined]
+
+    # First sort cleanup. With the I-OY-PIPELINE-CDP-REATTACH fix, the
+    # adopted page must NOT be closed.
+    sess1._pw = None  # avoid stopping a real playwright we don't have
+    await sess1.close()
+    assert target_page_close_calls["n"] == 0, (
+        "regression: sort-1 cleanup closed the operator's adopted page; "
+        "sort 2 will have nothing to adopt"
+    )
+
+    # Sort 2: build a NEW session against the SAME browser + page set.
+    # The pipeline does this via a fresh subprocess; in-process we
+    # rebuild the session and reuse the same browser/page objects.
+    sess2 = _build_cdp_session([target_page])
+    # Inject the same browser so connect_over_cdp returns it again.
+    sess2._capture_product_image_url_from_page = _noop_capture
+    sess2._capture_total_review_count_from_dom = _noop_capture
+    sess2._capture_breadcrumb_from_dom = _noop_capture
+    sess2._trigger_review_list_api = _noop_trigger
+
+    fake_pw_module2 = type(_sys)("playwright.async_api")
+    fake_pw_module2.async_playwright = lambda: _FakeAsyncPlaywright(
+        sess2._browser_for_test,
+    )
+    monkeypatch.setitem(_sys.modules, "playwright.async_api", fake_pw_module2)
+
+    await sess2.open(_PRODUCT_URL_TAB_REVIEW)
+
+    # Sort 2 must adopt the SAME page — proves the operator's tab
+    # survived sort 1's cleanup.
+    assert sess2._adopted_existing_page is True, (
+        "regression: sort 2 did not adopt; sort-1 cleanup may have "
+        "destroyed the adopted page"
+    )
+    assert sess2._page is target_page
+    # And sort 2 must NOT have created a new page in the context
+    # (which would prove adoption was bypassed).
+    assert sess2._ctx_for_test.new_page_calls == 0
+
+
+# ---------------------------------------------------------------------------
 # I-OY-SCROLL-RECOVERY-COLD-START-REARM — connector recovery cold-start
 # re-arm. The page-recreate step in `reload_and_reopen_review_tab` was
 # previously a passive wait: close old page → new page → re-attach
