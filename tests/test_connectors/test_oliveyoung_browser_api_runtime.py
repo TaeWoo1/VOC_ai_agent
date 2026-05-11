@@ -4837,6 +4837,16 @@ class _ScopedClickLocator:
     by `_target_label_visible` and calls `scroll_into_view_if_needed`
     + `click` on it; this fake records both and can be configured to
     raise on click so the fallback path is exercised.
+
+    I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY adds per-attempt
+    `click_raise_sequence` support: when supplied (non-empty
+    iterable of `bool`), each successive `click()` call consumes
+    one entry — True raises a synthetic stale-element error, False
+    succeeds. Once the sequence is exhausted, subsequent calls
+    behave as `click_should_raise=False` (succeed). This lets a
+    single shared button instance simulate the live-proof timeline
+    where attempt 1 raises but attempt 2 succeeds (DOM transiently
+    re-mounts before the retry).
     """
 
     def __init__(
@@ -4845,10 +4855,17 @@ class _ScopedClickLocator:
         inner_text: str,
         click_should_raise: bool = False,
         scroll_should_raise: bool = False,
+        click_raise_sequence: list[bool] | None = None,
     ):
         self._inner_text = inner_text
         self._click_should_raise = click_should_raise
         self._scroll_should_raise = scroll_should_raise
+        # Copy so the iterator/list isn't shared across fixtures.
+        self._click_raise_sequence: list[bool] | None = (
+            list(click_raise_sequence)
+            if click_raise_sequence is not None
+            else None
+        )
         self.scroll_into_view_calls = 0
         self.click_calls = 0
 
@@ -4873,6 +4890,15 @@ class _ScopedClickLocator:
 
     async def click(self, timeout=None):
         self.click_calls += 1
+        # Per-attempt sequence takes precedence over the legacy
+        # single-boolean knob so the staleness-retry tests can
+        # drive attempt-1-raises / attempt-2-succeeds on the same
+        # instance.
+        if self._click_raise_sequence:
+            raise_this_attempt = self._click_raise_sequence.pop(0)
+            if raise_this_attempt:
+                raise RuntimeError("stale element reference (fake)")
+            return None
         if self._click_should_raise:
             raise RuntimeError("scoped click failed (fake)")
         return None
@@ -4982,6 +5008,7 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
         click_should_raise: bool = False,
         scroll_should_raise: bool = False,
         container_scroll_should_raise: bool = False,
+        click_raise_sequence: list[bool] | None = None,
         sort_container_selectors: tuple[str, ...] = (
             "div.pc-sort",
             ".sort-container",
@@ -4993,6 +5020,7 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
         self._target_button_label = target_button_label
         self._click_should_raise = click_should_raise
         self._scroll_should_raise = scroll_should_raise
+        self._click_raise_sequence = click_raise_sequence
         self.container_scroll_should_raise = container_scroll_should_raise
         self._sort_container_selectors = set(sort_container_selectors)
         # Observability for assertions.
@@ -5011,6 +5039,7 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
                 inner_text=self._target_button_label,
                 click_should_raise=self._click_should_raise,
                 scroll_should_raise=self._scroll_should_raise,
+                click_raise_sequence=self._click_raise_sequence,
             )
         return self._matched_button
 
@@ -5035,6 +5064,7 @@ def _build_scroll_to_sort_session(
     click_should_raise: bool = False,
     scroll_should_raise: bool = False,
     container_scroll_should_raise: bool = False,
+    click_raise_sequence: list[bool] | None = None,
     sort_hunt_settle_s: float = 0.2,
     sort_hunt_poll_interval_s: float = 0.02,
 ):
@@ -5078,12 +5108,14 @@ def _build_scroll_to_sort_session(
             click_should_raise,
             scroll_should_raise,
             container_scroll_should_raise,
+            click_raise_sequence,
         ):
             super().__init__(pages)
             self._target_button_label = target_button_label
             self._click_should_raise = click_should_raise
             self._scroll_should_raise = scroll_should_raise
             self._container_scroll_should_raise = container_scroll_should_raise
+            self._click_raise_sequence = click_raise_sequence
 
         async def new_page(self):
             self.new_page_calls += 1
@@ -5095,6 +5127,7 @@ def _build_scroll_to_sort_session(
                 container_scroll_should_raise=(
                     self._container_scroll_should_raise
                 ),
+                click_raise_sequence=self._click_raise_sequence,
             )
             self.pages.append(page)
             new_page_ref.append(page)
@@ -5106,6 +5139,7 @@ def _build_scroll_to_sort_session(
         click_should_raise,
         scroll_should_raise,
         container_scroll_should_raise,
+        click_raise_sequence,
     )
     sess._page = old_page
     sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
@@ -5241,10 +5275,22 @@ async def test_scoped_click_skips_robust_hunt_when_readiness_matches_target():
 
 @pytest.mark.asyncio
 async def test_scoped_click_falls_back_to_robust_when_click_raises():
-    """Test C — when the matched button's `click()` raises, the
-    cascade falls through to `_click_sort_button_robust`. The
-    existing `sort_control_unreachable` failure-mode contract is
+    """Test C — when the matched button's `click()` raises on every
+    attempt, the cascade exhausts the
+    I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY budget (3 attempts /
+    ~1s wall-clock) and falls through to `_click_sort_button_robust`.
+    The existing `sort_control_unreachable` failure-mode contract is
     preserved on the worst case where the robust hunt also fails.
+
+    Contract delta vs the pre-retry `24d764b` baseline:
+      - OLD: `click_calls == 1` (single attempt, immediate
+        fall-through).
+      - NEW: `click_calls == 3` (1 initial + 2 retries each
+        re-running readiness against the same fake; same-instance
+        button stays clickable so every attempt re-fires).
+    The invariant preserved is: robust hunt is EVENTUALLY invoked
+    after exhaustion. The retry path adds attempts but does not
+    bypass the existing fall-through.
     """
     sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
         sort_button_label_ko="최신순",
@@ -5255,9 +5301,9 @@ async def test_scoped_click_falls_back_to_robust_when_click_raises():
     await sess.reload_and_reopen_review_tab()
 
     new_page = new_page_ref[0]
-    # Scoped click WAS attempted (count incremented) but raised.
-    assert new_page._matched_button.click_calls == 1
-    # Robust hunt WAS invoked as the fallback.
+    # Scoped click WAS attempted on every retry up to the cap (3).
+    assert new_page._matched_button.click_calls == 3
+    # Robust hunt WAS invoked as the fallback after retries exhausted.
     assert "click_sort_button_robust" in ordering_log
 
 
@@ -5271,6 +5317,15 @@ async def test_scoped_click_falls_back_when_container_scroll_raises():
     This covers the edge case where the matched container locator
     becomes stale between the readiness probe and the cascade's
     scroll attempt (production: the page state can drift).
+
+    Contract delta vs the pre-retry `24d764b` baseline: the scoped
+    click attempt count is now bounded by the
+    I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY cap (3 attempts)
+    rather than 1. Container-scroll failure does not prevent the
+    retry from running — the container scroll is best-effort and
+    fires once before the click loop. Robust hunt is EVENTUALLY
+    invoked after click retries exhaust, preserving the failure-
+    mode contract.
     """
     sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
         sort_button_label_ko="최신순",
@@ -5286,9 +5341,9 @@ async def test_scoped_click_falls_back_when_container_scroll_raises():
     new_page = new_page_ref[0]
     # Container scroll WAS attempted (then raised).
     assert new_page.container_scroll_into_view_calls >= 1
-    # Scoped click attempt followed (then raised).
-    assert new_page._matched_button.click_calls == 1
-    # Robust hunt fell back as expected.
+    # Scoped click attempts followed; bounded by the retry cap.
+    assert new_page._matched_button.click_calls == 3
+    # Robust hunt fell back as expected after retries exhausted.
     assert "click_sort_button_robust" in ordering_log
 
 
@@ -5418,6 +5473,409 @@ async def test_scoped_click_skipped_when_readiness_wait_deadlines():
     assert "click_sort_button_robust" in ordering_log
     # Tri-state readiness recorded as False.
     assert sess._post_recreate_sort_area_ready is False
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY — bounded retry loop around
+# the scoped-click block in `_run_post_navigation_review_cascade`.
+#
+# Background: the latest live proof at HEAD `025b021` on
+# goodsNo=A000000225736 (Ilso, DATETIME_DESC) demonstrated a transient
+# mount + sub-second re-unmount race. At `after_review_cascade` the
+# review-tab sort DOM was mounted (sort_pc_count=1,
+# text_has_choisin=true, sort_button_candidates=6) and the readiness
+# wait correctly emitted `signal=target_label_visible target='최신순'`
+# 11ms later. But by `before_scoped_click` (~290ms after cascade
+# snapshot) the DOM had unmounted (sort_pc_count=0,
+# text_has_choisin=false, sort_button_candidates=0), the matched
+# locator was stale, and the cascade fell through to a page-scope
+# click at poll_attempt=7 producing `probes=0`.
+#
+# The retry wraps the scoped click in a bounded loop (3 attempts,
+# ~1s wall-clock). On click failure or locator-unusable, the loop
+# re-invokes `_wait_for_review_sort_area_ready` with a tight budget
+# (0.4s) to refresh the side-channel handles, then retries the
+# scoped click. On exhaustion the cascade falls through to
+# `_click_sort_button_robust` exactly as today.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_retry_succeeds_on_attempt_two(caplog):
+    """A — retry succeeds on attempt 2.
+
+    The first click raises a synthetic stale-element error (mirrors
+    the live-proof race where the matched locator went stale between
+    readiness signal at 17:34:48.421 and click dispatch at
+    17:34:48.700). The retry loop calls
+    `_wait_for_review_sort_area_ready` again with a tight budget
+    (0.4s); the fake page's container/button locator surface is
+    still alive so readiness re-detects the same (now refreshed)
+    matched-button instance, and the second click succeeds.
+
+    Asserts:
+      - `OY scoped sort-button click stale; retrying readiness
+        match: attempt=1 ...` log line present.
+      - `OY scoped sort-button click retry succeeded: attempt=2 ...`
+        log line present.
+      - Robust hunt NOT invoked.
+      - Click attempts == 2 (not 3, not capped); success short-
+        circuits the loop.
+    """
+    import logging as _logging
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_raise_sequence=[True, False],
+    )
+
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Attempt 1 raised, attempt 2 succeeded — 2 click calls total.
+    assert new_page._matched_button.click_calls == 2
+    # Robust hunt NOT invoked because attempt 2 succeeded.
+    assert "click_sort_button_robust" not in ordering_log
+    # Retry-trigger log line present (attempt=1 means the FIRST
+    # attempt failed and we are entering the second attempt).
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(
+        m.startswith("OY scoped sort-button click stale; retrying "
+                     "readiness match: attempt=1")
+        for m in messages
+    ), f"missing retry-trigger log; got {messages!r}"
+    # Retry-succeeded log line present (attempt=2 means the second
+    # attempt is the one that landed).
+    assert any(
+        m.startswith("OY scoped sort-button click retry succeeded: "
+                     "attempt=2")
+        for m in messages
+    ), f"missing retry-success log; got {messages!r}"
+    # `retries exhausted` log line must NOT fire on a successful
+    # retry path.
+    assert not any(
+        m.startswith("OY scoped sort-button click retries exhausted")
+        for m in messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_retry_exhausts_and_falls_back_to_robust(caplog):
+    """B — every scoped click attempt raises; retry budget exhausts;
+    cascade falls through to `_click_sort_button_robust`.
+
+    With `click_should_raise=True` every click raises. The loop
+    runs up to 3 attempts (1 initial + 2 retries), then logs
+    `retries exhausted` and invokes the robust hunt.
+
+    Asserts:
+      - `OY scoped sort-button click stale; retrying readiness
+        match: attempt=N ...` log line present for N=1 AND N=2
+        (the two retry decisions; attempt 3 fails but no further
+        retry happens because the cap was reached).
+      - `OY scoped sort-button click retries exhausted; falling
+        back to robust hunt: attempts=3 ...` log line present.
+      - `_click_sort_button_robust` IS invoked.
+      - The original `falling back to robust hunt:` log line still
+        emits ONCE (preserving the `24d764b` log-line shape).
+    """
+    import logging as _logging
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_should_raise=True,
+    )
+
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Click was attempted up to the cap.
+    assert new_page._matched_button.click_calls == 3
+    # Robust hunt invoked after exhaustion.
+    assert "click_sort_button_robust" in ordering_log
+
+    messages = [r.getMessage() for r in caplog.records]
+    # Retry-trigger fires for attempt=1 (between attempt 1 and 2)
+    # and attempt=2 (between attempt 2 and 3). No retry-trigger
+    # log for attempt=3 because that would imply a 4th attempt.
+    retry_lines = [
+        m
+        for m in messages
+        if m.startswith("OY scoped sort-button click stale; retrying "
+                        "readiness match: attempt=")
+    ]
+    assert len(retry_lines) == 2, (
+        f"expected 2 retry-trigger lines (between attempts 1->2 and "
+        f"2->3); got {retry_lines!r}"
+    )
+    assert any("attempt=1 " in m for m in retry_lines)
+    assert any("attempt=2 " in m for m in retry_lines)
+    # `retries exhausted` log line present once.
+    exhausted_lines = [
+        m
+        for m in messages
+        if m.startswith("OY scoped sort-button click retries exhausted")
+    ]
+    assert len(exhausted_lines) == 1, exhausted_lines
+    assert "attempts=3" in exhausted_lines[0]
+    # The original `falling back to robust hunt:` log line still
+    # fires after exhaustion (preserves the `24d764b` log shape so
+    # existing dashboards / log scans keep matching).
+    fallback_lines = [
+        m
+        for m in messages
+        if m.startswith("OY scoped sort-button click via readiness "
+                        "match failed; falling back to robust hunt:")
+    ]
+    assert len(fallback_lines) == 1, fallback_lines
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_no_retry_when_first_attempt_succeeds(caplog):
+    """C — when attempt 1 succeeds, no retry-trigger / retry-success
+    log lines fire. The `24d764b` baseline behavior is preserved
+    bit-for-bit on the happy path.
+    """
+    import logging as _logging
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+    )
+
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    assert new_page._matched_button.click_calls == 1
+    # Robust hunt NOT invoked.
+    assert "click_sort_button_robust" not in ordering_log
+
+    messages = [r.getMessage() for r in caplog.records]
+    # No retry-trigger log line on the happy path.
+    assert not any(
+        m.startswith("OY scoped sort-button click stale; retrying")
+        for m in messages
+    )
+    # No retry-success log line (only fires when attempt > 1).
+    assert not any(
+        m.startswith("OY scoped sort-button click retry succeeded")
+        for m in messages
+    )
+    # No exhaustion log line.
+    assert not any(
+        m.startswith("OY scoped sort-button click retries exhausted")
+        for m in messages
+    )
+    # No fallback log line (scoped click succeeded so the fall-
+    # through log never emits).
+    assert not any(
+        m.startswith("OY scoped sort-button click via readiness "
+                     "match failed; falling back to robust hunt:")
+        for m in messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_retry_preserves_listener_before_trigger_ordering():
+    """D — listener-before-trigger invariant preserved across retry.
+
+    The retry path does NOT install a new response listener and
+    does NOT re-trigger `_trigger_review_list_api`. The readiness
+    wait is what runs again to refresh the matched-button locator;
+    it sets the side-channel handles but does not touch the
+    listener or the review-tab cascade.
+
+    Asserts:
+      - `_attach_response_handler` runs exactly ONCE (listener
+        installed before any trigger / click).
+      - `_trigger_review_list_api(initial_click=True)` runs at most
+        twice (once for step 6 of the cascade; the cascade may
+        single-shot re-trigger if readiness fails the first time
+        — but the retry-loop's `_wait_for_review_sort_area_ready`
+        invocation does NOT add a third trigger call).
+      - Attach precedes trigger; trigger precedes click attempts.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_raise_sequence=[True, False],
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Listener installed exactly once on the recreated page.
+    assert ordering_log.count("attach_response_handler") == 1
+    attach_index = ordering_log.index("attach_response_handler")
+    trigger_index = ordering_log.index(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    assert attach_index < trigger_index
+    # Retry-loop's readiness re-detection does NOT add a third
+    # trigger call. The single-shot re-trigger inside the readiness
+    # path can run if readiness fails on first wait, but on this
+    # test readiness succeeds first-try so trigger fires once.
+    trigger_count = ordering_log.count(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    assert trigger_count == 1, (
+        f"retry loop must not add new trigger calls; got "
+        f"{trigger_count} trigger invocations"
+    )
+    # Scoped click on the SAME matched-button instance landed on
+    # attempt 2.
+    new_page = new_page_ref[0]
+    assert new_page._matched_button.click_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_retry_preserves_page_state_diagnostics(caplog):
+    """E — page-state diagnostics preserved: `before_scoped_click`
+    fires ONCE before the FIRST attempt and `after_scoped_click`
+    fires ONCE after the LAST attempt (success or fail). Snapshots
+    are NOT emitted per-attempt.
+
+    Design choice documented in handoff: the retry block keeps the
+    `025b021` two-line invariant. Per-attempt snapshots would
+    inflate the log by up to 6 lines per recovery cycle on the
+    worst case (3 attempts × before/after); we keep the bracket
+    semantics so log scans built on the original two-line pair
+    continue to work.
+
+    Driven against a retry-succeeds-on-attempt-2 scenario so the
+    retry loop actually runs.
+    """
+    import logging as _logging
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    new_page_ref: list = []
+
+    class _SnapshotCtx(_FakeBrowserContext):
+        async def new_page(self):
+            self.new_page_calls += 1
+            page = _RecoveryReadinessSnapshotPage(
+                url="about:blank",
+                sort_area_visible_after_count=0,
+                reload_should_raise=True,
+                target_label_visible=True,
+                target_label="최신순",
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    old_page = _RearmFakeAsyncPage(url=_PRODUCT_URL_TAB_REVIEW)
+    sess._ctx = _SnapshotCtx([])
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC"
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = "최신순"
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = 0.2
+    sess._sort_hunt_poll_interval_s = 0.02
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+    # Page-state diagnostic flag enabled — the `before_scoped_click`
+    # / `after_scoped_click` snapshots only emit when this is True.
+    sess._diagnose_post_recreate_page_state = True
+    sess._trigger_review_list_api = (  # type: ignore[assignment]
+        lambda *, initial_click=True: asyncio.sleep(0)
+    )
+    sess._click_sort_button_robust = (  # type: ignore[assignment]
+        lambda: asyncio.sleep(0)
+    )
+
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery page state:")
+    ]
+    before_count = sum(
+        1
+        for m in state_messages
+        if "checkpoint=before_scoped_click" in m
+    )
+    after_count = sum(
+        1
+        for m in state_messages
+        if "checkpoint=after_scoped_click" in m
+    )
+    assert before_count == 1, (
+        f"before_scoped_click must fire ONCE per cascade across "
+        f"the retry loop; got {before_count} snapshots in "
+        f"{state_messages!r}"
+    )
+    assert after_count == 1, (
+        f"after_scoped_click must fire ONCE per cascade across "
+        f"the retry loop; got {after_count} snapshots in "
+        f"{state_messages!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_retry_bounded_wall_clock_on_full_exhaustion():
+    """F — total wall-clock bound. With every click raising, the
+    retry loop must terminate well within ~1.5s (1s scoped retry
+    budget + a small tail for the fall-through to the robust hunt
+    spy, which here returns immediately).
+
+    Drives the same scenario as
+    `test_scoped_click_retry_exhausts_and_falls_back_to_robust`
+    but adds a wall-clock bound to pin the retry's deadline math.
+    The retry budget itself is 1s; per-call `click(timeout=2500)`
+    is bounded by the fake (returns synchronously on raise) and
+    the readiness re-detection budget is 0.4s. The fakes' click
+    raises synchronously so the per-attempt cost is dominated by
+    the readiness re-detection budget.
+    """
+    import time as _time
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_should_raise=True,
+    )
+
+    t0 = _time.monotonic()
+    await sess.reload_and_reopen_review_tab()
+    elapsed = _time.monotonic() - t0
+    # Generous upper bound that still pins the retry to a finite
+    # budget — production target is ~1s for the scoped branch + a
+    # small fall-through tail. Fakes resolve clicks synchronously
+    # so this should be well under the bound in CI.
+    assert elapsed < 1.5, (
+        f"scoped retry loop exceeded wall-clock bound: "
+        f"{elapsed:.3f}s; fakes should resolve in <0.5s total"
+    )
+    # And the loop should reach the cap with the robust hunt
+    # invoked as the documented worst case.
+    new_page = new_page_ref[0]
+    assert new_page._matched_button.click_calls == 3
+    assert "click_sort_button_robust" in ordering_log
 
 
 # ---------------------------------------------------------------------------

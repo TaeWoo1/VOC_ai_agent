@@ -5208,37 +5208,182 @@ class _PlaywrightReviewSession:
                 # (URL, readyState, sort-area counts, target label
                 # visibility). The snapshot is wrapped in try/except
                 # so it cannot abort the click sequence.
+                # I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY — snapshot
+                # fires ONCE BEFORE the first attempt of the retry
+                # loop, never per-attempt. The bracketing
+                # `after_scoped_click` snapshot below fires ONCE AFTER
+                # the LAST attempt (success or failure), preserving the
+                # `025b021` two-line invariant.
                 try:
                     await self._snapshot_recovery_page_state(
                         checkpoint="before_scoped_click",
                     )
                 except Exception:
                     pass
-                try:
-                    try:
-                        await matched_button.scroll_into_view_if_needed(
-                            timeout=1000,
+                # I-OY-RECOVERY-SCOPED-CLICK-STALENESS-RETRY — bounded
+                # retry loop around the scoped click to close the
+                # transient mount + sub-second re-unmount race observed
+                # in the latest live proof on Ilso A000000225736
+                # (HEAD `025b021`): the readiness wait correctly
+                # detected `최신순` at 17:34:48.421 against the DOM
+                # snapshot at 17:34:48.410 (sort_pc_count=1,
+                # text_has_choisin=true, sort_button_candidates=6) but
+                # by `before_scoped_click` at 17:34:48.700 (~290ms
+                # later) the DOM had re-unmounted (sort_pc_count=0,
+                # text_has_choisin=false, sort_button_candidates=0).
+                # The matched-button locator from the first readiness
+                # pass was stale before the click could land.
+                #
+                # Strategy: on the first attempt, behave exactly as
+                # the original `24d764b` scoped-click block (read the
+                # side-channel handles set by the readiness wait that
+                # already ran in step 7, pre-scroll the button, click).
+                # On stale-element or any click/scroll failure,
+                # re-invoke `_wait_for_review_sort_area_ready` with a
+                # very tight budget (0.4s) to refresh the side-channel
+                # handles, then retry the scoped click on the new
+                # locator. Bounds: 3 attempts total (1 initial + 2
+                # retries), total scoped-branch wall-clock budget
+                # ~1s (the existing per-click 2.5s timeout still
+                # applies per attempt, but on failure the retry
+                # readiness budget of 0.4s + per-click attempts are
+                # the dominant cost, and the loop exits as soon as
+                # any attempt succeeds). On exhaustion, fall through
+                # to the existing `_click_sort_button_robust` fallback
+                # — preserves the `_sort_control_unreachable` /
+                # status-classifier contract bit-for-bit.
+                import time as _time
+                _scoped_attempts_max = 3
+                _scoped_retry_readiness_timeout_s = 0.4
+                _scoped_retry_readiness_poll_s = 0.05
+                _scoped_branch_deadline = (
+                    _time.monotonic() + 1.0
+                )
+                _scoped_branch_start = _time.monotonic()
+                _scoped_attempt = 0
+                _scoped_last_error: Exception | None = None
+                while (
+                    _scoped_attempt < _scoped_attempts_max
+                    and _time.monotonic() < _scoped_branch_deadline
+                ):
+                    _scoped_attempt += 1
+                    if _scoped_attempt > 1:
+                        # Re-detection step: the previous click failed.
+                        # Re-run readiness with a tight budget to
+                        # refresh the side-channel handles, then read
+                        # the refreshed matched-button locator. If
+                        # re-detection cannot find a button within
+                        # budget, treat as `locator_missing`.
+                        _elapsed_ms = int(
+                            (_time.monotonic() - _scoped_branch_start)
+                            * 1000.0,
                         )
-                    except Exception:
-                        pass
-                    await matched_button.click(timeout=2500)
-                    scoped_click_succeeded = True
-                    # Record the same diagnostic line shape that
-                    # `_click_sort_button_robust` emits on success so
-                    # downstream log scans see a single uniform format.
-                    logger.info(
-                        "OY sort-button clicked: target=%r expected_sort=%r "
-                        "scope=%s poll_attempt=%d",
-                        self._sort_button_label_ko,
-                        self._expected_sort_type,
-                        "readiness_matched_button",
-                        1,
+                        _reason = (
+                            "click_raised"
+                            if _scoped_last_error is not None
+                            else "locator_missing"
+                        )
+                        logger.info(
+                            "OY scoped sort-button click stale; "
+                            "retrying readiness match: attempt=%d "
+                            "elapsed=%dms reason=%s",
+                            _scoped_attempt - 1, _elapsed_ms, _reason,
+                        )
+                        try:
+                            _ready_retry = (
+                                await self._wait_for_review_sort_area_ready(
+                                    timeout_s=(
+                                        _scoped_retry_readiness_timeout_s
+                                    ),
+                                    poll_interval_s=(
+                                        _scoped_retry_readiness_poll_s
+                                    ),
+                                )
+                            )
+                        except Exception:
+                            _ready_retry = False
+                        if not _ready_retry:
+                            # Readiness re-detection failed; no fresh
+                            # locator. Skip this attempt and let the
+                            # while-condition end the loop (or wall-
+                            # clock deadline expire).
+                            _scoped_last_error = RuntimeError(
+                                "readiness re-detection failed within "
+                                "retry budget",
+                            )
+                            continue
+                        matched_button = getattr(
+                            self, "_last_readiness_matched_button", None,
+                        )
+                        if matched_button is None:
+                            _scoped_last_error = RuntimeError(
+                                "no matched-button locator after "
+                                "readiness re-detection",
+                            )
+                            continue
+                    try:
+                        try:
+                            await matched_button.scroll_into_view_if_needed(
+                                timeout=1000,
+                            )
+                        except Exception:
+                            pass
+                        await matched_button.click(timeout=2500)
+                        scoped_click_succeeded = True
+                        # Record the same diagnostic line shape that
+                        # `_click_sort_button_robust` emits on success
+                        # so downstream log scans see a single uniform
+                        # format. The success log fires once per
+                        # cascade (only on the attempt that landed).
+                        logger.info(
+                            "OY sort-button clicked: target=%r "
+                            "expected_sort=%r scope=%s poll_attempt=%d",
+                            self._sort_button_label_ko,
+                            self._expected_sort_type,
+                            "readiness_matched_button",
+                            1,
+                        )
+                        if _scoped_attempt > 1:
+                            _elapsed_ms = int(
+                                (
+                                    _time.monotonic()
+                                    - _scoped_branch_start
+                                )
+                                * 1000.0,
+                            )
+                            logger.info(
+                                "OY scoped sort-button click retry "
+                                "succeeded: attempt=%d elapsed=%dms",
+                                _scoped_attempt, _elapsed_ms,
+                            )
+                        break
+                    except Exception as e:
+                        _scoped_last_error = e
+                        # Loop continues to the next attempt (which
+                        # will run readiness re-detection); if budget
+                        # is exhausted the while-loop terminates and
+                        # the post-loop fall-through emits the final
+                        # log line and invokes the robust hunt.
+                if not scoped_click_succeeded:
+                    _elapsed_ms = int(
+                        (_time.monotonic() - _scoped_branch_start)
+                        * 1000.0,
                     )
-                except Exception as e:
+                    if _scoped_attempt >= _scoped_attempts_max:
+                        logger.info(
+                            "OY scoped sort-button click retries "
+                            "exhausted; falling back to robust hunt: "
+                            "attempts=%d elapsed=%dms",
+                            _scoped_attempt, _elapsed_ms,
+                        )
+                    # Preserve the original `24d764b` fall-through log
+                    # line shape so existing log scans / dashboards
+                    # still match. Emitted ONLY after the loop has
+                    # given up; not per-attempt.
                     logger.info(
                         "OY scoped sort-button click via readiness "
                         "match failed; falling back to robust hunt: %s",
-                        e,
+                        _scoped_last_error,
                     )
                 # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
                 # snapshot AFTER the scoped click attempt (whether
@@ -5247,6 +5392,8 @@ class _PlaywrightReviewSession:
                 # readyState before vs after — useful to spot the
                 # case where the click landed on the DOM but the
                 # page took a slow tick to update.
+                # Fires ONCE after the LAST attempt of the retry loop
+                # (success or exhaustion) — never per-attempt.
                 try:
                     await self._snapshot_recovery_page_state(
                         checkpoint="after_scoped_click",
