@@ -3869,3 +3869,420 @@ async def test_recovery_rearm_swallows_sort_click_failure():
     await sess.reload_and_reopen_review_tab()
 
     assert "click_sort_button_robust_raised" in ordering_log
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER — bounded readiness wait
+# between the post-recreate review-tab cascade and the sort-button
+# click. Without this, on Ilso A000000225736 the sort-button hunt
+# enumerated only generic site-nav buttons (`최신순` absent in DOM)
+# and the hunt deadlined → status `sort_control_unreachable`.
+#
+# Fix: poll for `div.pc-sort` (or any `_sort_container_candidates`
+# selector) to exist BEFORE the sort-button hunt starts. When the
+# wait deadlines, single-shot re-trigger of the review-tab cascade
+# then re-wait. Readiness signal surfaces via the tri-state getter
+# `get_post_recreate_sort_area_ready()` so the connector loop can
+# emit a narrow `_note` for `sample_dropped_reasons`.
+#
+# Required test cases (mirror the dispatch's required coverage):
+#   A. Wait succeeds — sort area appears on first probe; click fires.
+#   B. Wait-before-click ordering — attach → trigger → wait → click.
+#   C. Wait timeout — sort area never renders; click still runs
+#      (preserves current failure-mode contract); single-shot
+#      re-trigger fired; `_post_recreate_sort_area_ready` is False.
+#   D. Re-trigger behavior — wait fails once, re-trigger fires,
+#      wait succeeds on second attempt → click happens.
+# ---------------------------------------------------------------------------
+
+
+class _SortAreaSimulatorLocator:
+    """Locator stand-in for `_RearmReadinessFakePage` whose `count()`
+    return value is driven by a per-selector predicate captured at
+    construction. `first` returns the same instance so the `.first`
+    chain at `page.locator(sel).first.count()` works."""
+
+    def __init__(self, count_provider):
+        # `count_provider` is a zero-arg callable returning the
+        # locator's current count. Re-invoked on every `count()` so
+        # the production poll loop sees the latest simulator state.
+        self._count_provider = count_provider
+
+    async def count(self):
+        return self._count_provider()
+
+    @property
+    def first(self):
+        return self
+
+    def locator(self, _tag_selector):
+        # The readiness probe's target-label inner-text path drills
+        # into `container.locator("button"/"a"/"[role=button]")`. We
+        # provide a zero-count nested locator so the inner-text path
+        # short-circuits (count==0 → loop body skipped). The
+        # CONTAINER count is what gates the readiness signal in our
+        # tests; that is enough to drive both ready (container
+        # visible) and not-ready (container absent) paths.
+        return _SortAreaSimulatorLocator(lambda: 0)
+
+    async def inner_text(self, timeout=None):  # pragma: no cover
+        return ""
+
+    async def click(self, timeout=None):  # pragma: no cover
+        return None
+
+    async def scroll_into_view_if_needed(self, timeout=None):  # pragma: no cover
+        return None
+
+    def nth(self, _i):  # pragma: no cover
+        return self
+
+
+class _RearmReadinessFakePage(_RearmFakeAsyncPage):
+    """Extension of `_RearmFakeAsyncPage` that lets a test drive
+    "review sort area appears after N polls" semantics. The
+    production readiness wait calls
+    `page.locator(_sort_container_candidates[i]).first.count()` on
+    each poll; we return a count that flips from 0 to 1 once
+    `sort_area_visible_after_count` calls have been observed.
+    """
+
+    def __init__(
+        self,
+        url: str = "about:blank",
+        *,
+        sort_area_visible_after_count: int = 0,
+        sort_container_selectors: tuple[str, ...] = (
+            "div.pc-sort",
+            ".sort-container",
+            "[class*='sort']",
+        ),
+    ):
+        super().__init__(url=url)
+        # Number of count() invocations that must elapse before the
+        # sort container starts to report count>0. 0 means visible
+        # from the first probe.
+        self._sort_area_visible_after_count = sort_area_visible_after_count
+        self._sort_container_selectors = set(sort_container_selectors)
+        # Records every container-selector locator() call so tests
+        # can assert the production code actually probed.
+        self.container_count_calls = 0
+
+    def locator(self, selector):
+        # When the readiness wait probes one of our configured sort
+        # container selectors, return a Simulator locator whose
+        # count() flips True once the threshold is reached.
+        if selector in self._sort_container_selectors:
+            def _count_provider():
+                self.container_count_calls += 1
+                return (
+                    1
+                    if self.container_count_calls
+                    > self._sort_area_visible_after_count
+                    else 0
+                )
+            return _SortAreaSimulatorLocator(_count_provider)
+        # Fall back to the zero-count locator from the parent class
+        # for any other selector (review-tab cascade selectors, etc.).
+        return super().locator(selector)
+
+
+def _build_readiness_session(
+    *,
+    sort_button_label_ko: str | None,
+    sort_area_visible_after_count: int = 0,
+    sort_hunt_settle_s: float = 0.2,
+    sort_hunt_poll_interval_s: float = 0.02,
+):
+    """`_build_rearm_session` variant that wires in the readiness-
+    aware fake page. Crucially, this DOES NOT spy
+    `_wait_for_review_sort_area_ready` — the real method runs against
+    the fake page so we can prove (a) it gets called in the right
+    order, (b) it observes the simulated DOM state, and (c) it
+    updates `_post_recreate_sort_area_ready` correctly.
+
+    Compresses the production deadline so the test runs in <1s even
+    on the negative-path (`not_ready`) case.
+
+    Returns `(session, ordering_log, old_page, new_page_ref)`.
+    `new_page_ref` is a list whose first element will be set to the
+    fresh page object once `_FakeBrowserContext.new_page()` runs;
+    tests can read it to assert against `container_count_calls`.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Old page is a basic rearm fake (will be close()d).
+    old_page = _RearmFakeAsyncPage(url=_PRODUCT_URL_TAB_REVIEW)
+    # Context's `new_page()` returns a readiness-aware fake.
+    new_page_ref: list = []
+
+    class _ReadinessCtx(_FakeBrowserContext):
+        def __init__(self, pages, visible_after):
+            super().__init__(pages)
+            self._visible_after = visible_after
+
+        async def new_page(self):
+            self.new_page_calls += 1
+            page = _RearmReadinessFakePage(
+                url=self._next_page_url,
+                sort_area_visible_after_count=self._visible_after,
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    sess._ctx = _ReadinessCtx([], sort_area_visible_after_count)
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC" if sort_button_label_ko else None
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = sort_button_label_ko
+    sess._sort_button_selector = None
+    # Sort-area readiness wait depends on these.
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = float(sort_hunt_settle_s)
+    sess._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
+    # Tri-state readiness initialised by the constructor in
+    # production; mirror that here so the recovery method sees the
+    # same starting state.
+    sess._post_recreate_sort_area_ready = None
+
+    ordering_log: list[str] = []
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach(page):
+        ordering_log.append("attach_response_handler")
+        return real_attach(page)
+
+    async def _spy_trigger(*, initial_click: bool = True):
+        ordering_log.append(
+            f"trigger_review_list_api(initial_click={initial_click})",
+        )
+
+    # Wrap the REAL readiness wait so the ordering log records when
+    # it ran (we don't replace it — the test's whole point is to
+    # exercise the production wait logic against the simulated DOM).
+    real_wait = sess._wait_for_review_sort_area_ready
+
+    async def _spied_wait(*, timeout_s, poll_interval_s):
+        ordering_log.append("wait_for_review_sort_area_ready")
+        result = await real_wait(
+            timeout_s=timeout_s, poll_interval_s=poll_interval_s,
+        )
+        ordering_log.append(
+            f"wait_for_review_sort_area_ready_returned={result}",
+        )
+        return result
+
+    async def _spy_click_sort():
+        ordering_log.append("click_sort_button_robust")
+
+    sess._attach_response_handler = _spy_attach  # type: ignore[assignment]
+    sess._trigger_review_list_api = _spy_trigger  # type: ignore[assignment]
+    sess._wait_for_review_sort_area_ready = _spied_wait  # type: ignore[assignment]
+    sess._click_sort_button_robust = _spy_click_sort  # type: ignore[assignment]
+    return sess, ordering_log, old_page, new_page_ref
+
+
+@pytest.mark.asyncio
+async def test_recovery_wait_succeeds_when_sort_area_visible_on_first_probe():
+    """Test A — readiness wait observes `div.pc-sort` on the first
+    probe (`sort_area_visible_after_count=0` → container count flips
+    from 0 to 1 immediately). The wait returns True, the sort-button
+    click fires, and `_post_recreate_sort_area_ready` is set to True.
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_readiness_session(
+        sort_button_label_ko="최신순",
+        sort_area_visible_after_count=0,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+    assert "wait_for_review_sort_area_ready_returned=True" in ordering_log
+    # Click fires AFTER the wait succeeds.
+    assert "click_sort_button_robust" in ordering_log
+    # Tri-state readiness recorded as True for the connector's _note.
+    assert sess._post_recreate_sort_area_ready is True
+    assert sess.get_post_recreate_sort_area_ready() is True
+    # The new page was probed for the sort container.
+    assert len(new_page_ref) == 1
+    assert new_page_ref[0].container_count_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_wait_before_click_ordering():
+    """Test B — install-before-trigger-before-wait-before-click
+    invariant. The full ordering for the recovery path is:
+
+        attach_response_handler
+          → trigger_review_list_api(initial_click=True)
+          → wait_for_review_sort_area_ready
+          → click_sort_button_robust
+
+    Extends the prior `test_recovery_rearm_listener_installed_before_sort_click`
+    contract with the new wait step inserted between trigger and
+    click.
+    """
+    sess, ordering_log, _, _ = _build_readiness_session(
+        sort_button_label_ko="최신순",
+        sort_area_visible_after_count=0,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    attach_index = ordering_log.index("attach_response_handler")
+    trigger_index = ordering_log.index(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    wait_index = ordering_log.index("wait_for_review_sort_area_ready")
+    click_index = ordering_log.index("click_sort_button_robust")
+    assert attach_index < trigger_index < wait_index < click_index, (
+        f"recovery readiness wait ordering broken: {ordering_log!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_wait_times_out_then_single_shot_retrigger_then_click_still_runs():
+    """Test C — sort area never renders (`sort_area_visible_after_count`
+    set absurdly high). The first wait deadlines, the single-shot
+    re-trigger fires, the second wait also deadlines,
+    `_post_recreate_sort_area_ready` becomes False, and the sort-button
+    click STILL runs (preserves current failure-mode contract: the
+    hunt's own deadline + diagnostic path classifies the run as
+    `sort_control_unreachable`, exactly as today).
+    """
+    sess, ordering_log, _, new_page_ref = _build_readiness_session(
+        sort_button_label_ko="최신순",
+        # Threshold far higher than any plausible poll count within
+        # the compressed (0.2s, 0.02s) budget; both waits will
+        # exhaust without seeing the container.
+        sort_area_visible_after_count=10_000,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Both waits returned False (one before re-trigger, one after).
+    false_returns = [
+        line for line in ordering_log
+        if line == "wait_for_review_sort_area_ready_returned=False"
+    ]
+    assert len(false_returns) == 2, (
+        f"expected two wait deadlines (one before re-trigger, one "
+        f"after); got {ordering_log!r}"
+    )
+    # Single-shot re-trigger fired between the two waits.
+    trigger_indices = [
+        i for i, line in enumerate(ordering_log)
+        if line == "trigger_review_list_api(initial_click=True)"
+    ]
+    assert len(trigger_indices) == 2, (
+        f"expected exactly two trigger calls (cascade + single-shot "
+        f"re-trigger); got {ordering_log!r}"
+    )
+    # Sort click STILL runs — preserves current failure-mode contract.
+    assert "click_sort_button_robust" in ordering_log
+    # Tri-state readiness recorded as False for the connector's _note.
+    assert sess._post_recreate_sort_area_ready is False
+    assert sess.get_post_recreate_sort_area_ready() is False
+
+
+@pytest.mark.asyncio
+async def test_recovery_wait_succeeds_after_single_shot_retrigger():
+    """Test D — sort area renders only AFTER the re-trigger. Set
+    `sort_area_visible_after_count` so the first wait deadlines but
+    enough container-count probes accumulate during the second wait
+    that it succeeds. The single-shot re-trigger is the load-bearing
+    intervention; assert it fired exactly once and the second wait
+    returned True.
+    """
+    # With sort_hunt_settle_s=0.2 and poll_interval_s=0.02, each
+    # wait's probe loop performs up to ~10 iterations × 3 selector
+    # probes = 30 container-count() calls per wait (less if the
+    # first selector matches and the loop short-circuits; here
+    # the threshold guarantees no short-circuit). Setting the
+    # visibility threshold at 30 — equal to one full wait's probe
+    # budget — means the first wait deadlines (probes 1..30 all
+    # return 0 because 30 is NOT > 30), and the second wait's
+    # very first probe (#31) returns 1 (31 > 30). This produces
+    # the "deadline first, succeed-immediately second" ordering.
+    sess, ordering_log, _, new_page_ref = _build_readiness_session(
+        sort_button_label_ko="최신순",
+        sort_area_visible_after_count=30,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Exactly one False return (before re-trigger) followed by one
+    # True return (after re-trigger).
+    wait_returns = [
+        line for line in ordering_log
+        if line.startswith("wait_for_review_sort_area_ready_returned=")
+    ]
+    assert wait_returns == [
+        "wait_for_review_sort_area_ready_returned=False",
+        "wait_for_review_sort_area_ready_returned=True",
+    ], (
+        f"expected wait-deadline-then-success ordering; got "
+        f"{ordering_log!r}"
+    )
+    # Single-shot re-trigger ran between the two waits.
+    trigger_indices = [
+        i for i, line in enumerate(ordering_log)
+        if line == "trigger_review_list_api(initial_click=True)"
+    ]
+    assert len(trigger_indices) == 2, (
+        f"expected exactly two trigger calls (cascade + single-shot "
+        f"re-trigger); got {ordering_log!r}"
+    )
+    # Listener install ordering preserved across the re-trigger:
+    # `_attach_response_handler` must precede BOTH triggers AND the
+    # re-trigger AND the click.
+    attach_index = ordering_log.index("attach_response_handler")
+    for trigger_index in trigger_indices:
+        assert attach_index < trigger_index
+    click_index = ordering_log.index("click_sort_button_robust")
+    assert attach_index < click_index
+    # Tri-state readiness recorded as True (second wait succeeded).
+    assert sess._post_recreate_sort_area_ready is True
+    assert sess.get_post_recreate_sort_area_ready() is True
+
+
+@pytest.mark.asyncio
+async def test_post_recreate_sort_area_ready_getter_none_before_recreate():
+    """Tri-state contract: `_post_recreate_sort_area_ready` is None
+    when the session has not yet recreated the page (or when the
+    recreate early-returned before reaching the readiness wait —
+    e.g. context loss, sort label not configured). The connector's
+    `_note` path treats None as "no diagnostic to emit," which keeps
+    `sample_dropped_reasons` under the 5-entry cap.
+    """
+    sess, ordering_log, _, _ = _build_readiness_session(
+        sort_button_label_ko=None,
+    )
+
+    # Before any recreate, readiness is None (initialised by the
+    # constructor / `_build_readiness_session`).
+    assert sess.get_post_recreate_sort_area_ready() is None
+
+    # When sort_button_label_ko is None, the recovery method does
+    # NOT run the readiness wait OR the sort click — it's a
+    # page-default-sort path. Readiness stays None.
+    await sess.reload_and_reopen_review_tab()
+    assert "wait_for_review_sort_area_ready" not in ordering_log
+    assert "click_sort_button_robust" not in ordering_log
+    assert sess.get_post_recreate_sort_area_ready() is None

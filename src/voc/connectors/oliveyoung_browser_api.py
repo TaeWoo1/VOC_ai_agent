@@ -1824,6 +1824,38 @@ class OliveYoungBrowserAPIConnector:
                                 "scroll_continuation_recovery: re-armed "
                                 "listener+sort+trigger; awaiting first response",
                             )
+                            # I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER —
+                            # read the session's tri-state readiness
+                            # signal and emit a narrow `_note` when the
+                            # post-recreate sort-area wait deadlined.
+                            # Only the "not ready" case is noted — the
+                            # ready case is implicit (cold-start
+                            # observation that follows will succeed or
+                            # produce its own diagnostic). Skipping the
+                            # ready note keeps `sample_dropped_reasons`
+                            # under the 5-entry cap even in the worst-
+                            # case recovery scenarios. `None` means the
+                            # session didn't reach the readiness wait
+                            # (early-return before step 7) — no note in
+                            # that case.
+                            try:
+                                sort_area_ready_getter = getattr(
+                                    session,
+                                    "get_post_recreate_sort_area_ready",
+                                    None,
+                                )
+                                sort_area_ready = (
+                                    sort_area_ready_getter()
+                                    if sort_area_ready_getter is not None
+                                    else None
+                                )
+                            except Exception:
+                                sort_area_ready = None
+                            if sort_area_ready is False:
+                                _note(
+                                    "scroll_continuation_recovery: review "
+                                    "sort area not ready after recreate",
+                                )
                             # Wait for the post-recreate cold-start to
                                 # land. Use the cold-start timeout — the
                                 # fresh mount fires its own initial cursor
@@ -2893,6 +2925,18 @@ class _PlaywrightReviewSession:
         # by the connector at end of run into the
         # `sort_control_unreachable` field on `ConnectorRunSummary`.
         self._sort_control_unreachable: bool = False
+        # I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER — recorded by
+        # `reload_and_reopen_review_tab` to signal whether the recreated
+        # page's review-tab / sort-area DOM became ready BEFORE the
+        # post-recreate sort-button click. None=not probed yet (initial
+        # open or session never recreated); True=sort area visible within
+        # budget; False=sort area never rendered within budget (the case
+        # observed on Ilso A000000225736 where the recreated page exposed
+        # only generic site-nav buttons). The connector reads this
+        # post-recreate via `get_post_recreate_sort_area_ready()` and
+        # emits a single narrow `_note` so the next post-mortem can tell
+        # whether the wait succeeded or deadlined.
+        self._post_recreate_sort_area_ready: bool | None = None
         # Legacy substring selector (kept as last-resort fallback). New
         # call sites pass label_ko; old call sites can still pass a
         # selector and the robust path will skip the label-based hunt.
@@ -4115,6 +4159,138 @@ class _PlaywrightReviewSession:
         review section into view during this session."""
         return self._scrolled_to_review_area
 
+    async def _wait_for_review_sort_area_ready(
+        self, *, timeout_s: float, poll_interval_s: float,
+    ) -> bool:
+        """I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER.
+
+        Bounded poll for the recreated page's review-tab sort area to
+        render. Returns True as soon as either signal is observed:
+
+          (a) A `_sort_container_candidates` selector matches at least
+              one element on the page (the OY review sort row container,
+              `div.pc-sort` in production), OR
+          (b) The target sort label (`_sort_button_label_ko`) is present
+              as exact normalized text inside the sort scope.
+
+        Both signals reuse infrastructure that `_widen_sort_row_probe`
+        and `_click_sort_button_robust` already rely on, so no new
+        fragile selectors are introduced. Signal (a) is the primary
+        early-exit — the container existing is the necessary precondition
+        for the subsequent sort-button hunt to succeed. Signal (b) is a
+        stronger ready signal used when the target label is configured.
+
+        Returns False on deadline expiry without an observation. Never
+        raises — every Playwright call is wrapped so the caller can
+        fall through to the existing sort-button hunt (which has its
+        own deadline + diagnostic path).
+
+        Why a separate wait vs leaning on `_click_sort_button_robust`'s
+        own `_sort_hunt_settle_s` budget: the post-recreate Ilso log on
+        A000000225736 showed the sort-button hunt enumerating site-nav
+        buttons (categories, share, footer items) — i.e. the hunt found
+        SOMETHING to enumerate but the review-tab sort palette had not
+        rendered yet, so the hunt scope (`page.locator("button")` etc.)
+        matched unrelated DOM. Waiting for `div.pc-sort` to exist
+        BEFORE the hunt starts ensures the hunt's enumeration is
+        scoped to the actual sort row.
+        """
+        import time as _time
+
+        import re
+
+        page = self._page
+        if page is None:
+            return False
+
+        target_ko = self._sort_button_label_ko
+
+        def _normalize(s: str) -> str:
+            return re.sub(r"\s+", " ", s or "").strip()
+
+        async def _container_visible() -> bool:
+            for selector in self._sort_container_candidates:
+                try:
+                    container = page.locator(selector).first
+                    if await container.count() > 0:
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        async def _target_label_visible() -> bool:
+            if target_ko is None:
+                return False
+            for selector in self._sort_container_candidates:
+                try:
+                    container = page.locator(selector).first
+                    if await container.count() == 0:
+                        continue
+                except Exception:
+                    continue
+                for tag_selector in ("button", "a", "[role='button']"):
+                    try:
+                        el_locator = container.locator(tag_selector)
+                        n = await el_locator.count()
+                    except Exception:
+                        continue
+                    for i in range(n):
+                        try:
+                            cand = el_locator.nth(i)
+                            txt = await cand.inner_text(timeout=1000)
+                        except Exception:
+                            continue
+                        if _normalize(txt) == target_ko:
+                            return True
+            return False
+
+        deadline = _time.monotonic() + max(timeout_s, 0.0)
+        attempt = 0
+        signal_used: str | None = None
+        while _time.monotonic() < deadline:
+            attempt += 1
+            try:
+                # Primary signal: sort container exists in DOM. Necessary
+                # precondition for the subsequent sort-button hunt to
+                # find anything; once it's visible the hunt's own poll
+                # budget can wait for the target label to mount.
+                if await _container_visible():
+                    signal_used = "container_visible"
+                    # Stronger secondary check: if the target label is
+                    # configured AND already inline-rendered, surface
+                    # that in the log for diagnostics. Either signal
+                    # short-circuits the readiness wait.
+                    if target_ko is not None:
+                        try:
+                            if await _target_label_visible():
+                                signal_used = "target_label_visible"
+                        except Exception:
+                            pass
+                    logger.info(
+                        "OY review sort area ready after recreate: "
+                        "signal=%s target=%r poll_attempt=%d",
+                        signal_used, target_ko, attempt,
+                    )
+                    return True
+            except Exception as e:
+                logger.debug(
+                    "OY review sort area readiness probe raised (benign): %s",
+                    e,
+                )
+            try:
+                await asyncio.sleep(max(poll_interval_s, 0.0))
+            except Exception:
+                break
+
+        logger.warning(
+            "OY review sort area NOT ready after %d poll attempts in "
+            "%.1fs deadline. target=%r. The subsequent sort-button hunt "
+            "will run anyway and will produce its own diagnostic if it "
+            "deadlines.",
+            attempt, timeout_s, target_ko,
+        )
+        return False
+
     async def reload_and_reopen_review_tab(self) -> None:
         """Recovery step on false-empty: **page-recreate** + re-click review tab.
 
@@ -4207,7 +4383,75 @@ class _PlaywrightReviewSession:
                 "OY review-tab re-click cascade after page recreate "
                 "skipped/failed: %s", e,
             )
-        # 7. I-OY-SCROLL-RECOVERY-COLD-START-REARM — re-fire the target
+        # 7. I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER — between the
+        # review-tab cascade (step 6) and the sort-button click (step
+        # 8), poll for the review-tab sort area to actually render on
+        # the recreated page. The Ilso A000000225736 live proof showed
+        # the recreated page reaching the sort-button hunt with only
+        # site-nav / footer buttons in DOM (`최신순` absent), so the
+        # hunt deadlined and recovery ended `sort_control_unreachable`.
+        # The fix waits for `div.pc-sort` (or any
+        # `_sort_container_candidates` selector) to exist BEFORE we
+        # try to click. Reset to None first so a previous recreate's
+        # value doesn't leak forward into a subsequent recreate that
+        # early-returns at step 1–5 above.
+        self._post_recreate_sort_area_ready = None
+        if (
+            self._sort_button_label_ko is not None
+            or self._sort_button_selector is not None
+        ):
+            # Use the same poll cadence as the sort-button hunt so the
+            # wait + hunt deadlines share the same timing semantics.
+            # Total wall-clock budget for the readiness wait alone is
+            # capped at `_sort_hunt_settle_s` (12s default).
+            try:
+                ready = await self._wait_for_review_sort_area_ready(
+                    timeout_s=self._sort_hunt_settle_s,
+                    poll_interval_s=self._sort_hunt_poll_interval_s,
+                )
+            except Exception as e:
+                # Defensive — the helper already wraps its own calls,
+                # but if asyncio.sleep itself raised (cancellation,
+                # etc.) we fall through to the sort-button hunt rather
+                # than propagating.
+                logger.info(
+                    "OY review sort area readiness wait raised "
+                    "(benign): %s", e,
+                )
+                ready = False
+            # Optional single-shot re-trigger when the first wait
+            # deadlined. Some OY product pages, after page recreate,
+            # need the review-tab cascade fired a SECOND time before
+            # the sort palette renders. Bounded: at most one re-trigger
+            # per recreate (single-shot), and the listener is already
+            # installed at step 4 so the install-before-trigger
+            # invariant remains preserved. If the re-trigger raises,
+            # we still fall through to the sort-button hunt.
+            if not ready:
+                logger.info(
+                    "OY review sort area not ready after first wait — "
+                    "single-shot re-trigger of review-tab cascade",
+                )
+                try:
+                    await self._trigger_review_list_api(initial_click=True)
+                except Exception as e:
+                    logger.info(
+                        "OY post-recreate review-tab re-trigger "
+                        "skipped/failed (benign): %s", e,
+                    )
+                try:
+                    ready = await self._wait_for_review_sort_area_ready(
+                        timeout_s=self._sort_hunt_settle_s,
+                        poll_interval_s=self._sort_hunt_poll_interval_s,
+                    )
+                except Exception as e:
+                    logger.info(
+                        "OY review sort area readiness re-wait raised "
+                        "(benign): %s", e,
+                    )
+                    ready = False
+            self._post_recreate_sort_area_ready = bool(ready)
+        # 8. I-OY-SCROLL-RECOVERY-COLD-START-REARM — re-fire the target
         # sort-button click on the fresh page. Without this, the
         # recreated page emits its page-default sort (USEFUL_SCORE_DESC)
         # and the response interceptor at `_attach_response_handler`
@@ -4217,8 +4461,13 @@ class _PlaywrightReviewSession:
         # listener → review-tab cascade → sort-button click. Mirror it
         # here. The listener is already re-attached at step 4 above,
         # which preserves the install-before-trigger ordering invariant.
-        # Best-effort: failures fall through silently so the existing
-        # recovery telemetry still drives the post-condition.
+        # The sort-button click runs whether or not the readiness wait
+        # at step 7 succeeded — if the wait deadlined, the hunt's own
+        # deadline + diagnostic path classifies the run as
+        # `sort_control_unreachable` exactly as it does today (preserves
+        # the current failure-mode contract). Best-effort: failures
+        # fall through silently so the existing recovery telemetry
+        # still drives the post-condition.
         if (
             self._sort_button_label_ko is not None
             or self._sort_button_selector is not None
@@ -4308,6 +4557,28 @@ class _PlaywrightReviewSession:
         the downstream classifier maps to the new terminal status.
         """
         return bool(self._sort_control_unreachable)
+
+    def get_post_recreate_sort_area_ready(self) -> bool | None:
+        """I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER.
+
+        Tri-state. None when the session has never recreated the page
+        (or the most-recent recreate didn't reach the readiness wait —
+        e.g. early-return on context loss). True when the wait observed
+        the sort-area / target sort label inside the readiness budget.
+        False when the wait deadlined — the recreated page never
+        rendered the review-tab sort palette (the Ilso A000000225736
+        case: post-recreate DOM enumeration came back with only generic
+        site-nav buttons; `최신순` was absent).
+
+        Connector reads this immediately after `recreate_fn()` returns
+        and emits a single narrow `_note` for `sample_dropped_reasons`.
+        Distinct from `get_sort_control_unreachable()` — that one
+        signals the SORT-BUTTON-HUNT deadlined (DOM had a sort row but
+        the target label was absent); this one signals the SORT-AREA
+        itself never rendered (DOM didn't even reach the sort-row
+        state). They can both fire on the same recreate.
+        """
+        return self._post_recreate_sort_area_ready
 
     def get_observed_sort_types(self) -> dict[str, int]:
         """Phase 2E: tally of `sortType` values seen in request post_data
