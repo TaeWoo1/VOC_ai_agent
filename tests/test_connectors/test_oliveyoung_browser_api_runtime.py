@@ -8395,6 +8395,651 @@ async def test_recovery_lazy_mount_nudge_skipped_when_review_count_absent(
     ), messages
 
 
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY tests.
+#
+# The prior O-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-LIVE-PROOF-ILSO live
+# proof (Ilso A000000225736 / DATETIME_DESC at HEAD `9eed039`) showed
+# the cascade itself UNMOUNTS a healthy post-reload sort area on this
+# DOM shape: `after_reload` snapshot at 22:29:08 reported a healthy
+# state (sort_pc_count=1, sort_button_candidates=6, text_has_choisin=true)
+# but the very next `after_review_cascade` snapshot at 22:29:09
+# reported all-zero counts and text_has_choisin=false. The lazy-mount
+# nudge from `9eed039` then fired 4× with success=false trying to
+# re-mount what the cascade had just destroyed.
+#
+# The new gate sits BEFORE the cascade in the reload-first branch of
+# `reload_and_reopen_review_tab`: when the post-reload page-state dict
+# already looks healthy by `_is_healthy_sort_area_state`, the cascade
+# call is skipped entirely so it cannot unmount the healthy state.
+#
+# Tests A–E below cover:
+#   A — predicate unit test (direct dict input).
+#   B — healthy post-reload state skips cascade.
+#   C — unhealthy post-reload state runs cascade as before.
+#   D — skipped cascade returns early; readiness/click do not fire
+#       inside `reload_and_reopen_review_tab` (the cascade contains
+#       both, and the gate is at the cascade call site per spec).
+#   E — cold-start path is untouched (cannot reach the gate).
+# ---------------------------------------------------------------------------
+
+
+def test_is_healthy_sort_area_state_predicate():
+    """Test A — direct unit test of `_is_healthy_sort_area_state`.
+
+    The predicate is a CONFIRMATIVE detector — it must return True
+    iff ALL three signals hold, and False on any single mismatch,
+    a missing key, or an "unknown" token.
+    """
+    from src.voc.connectors.oliveyoung_browser_api import (
+        _is_healthy_sort_area_state,
+        _is_partial_review_mount_state,
+    )
+
+    # Canonical healthy dict matching the live-proof `after_reload`
+    # snapshot (Ilso A000000225736 at 22:29:08): sort_pc_count=1,
+    # sort_button_candidates=6, text_has_choisin=true.
+    canonical = {
+        "sort_pc_count": "1",
+        "sort_button_candidates": "6",
+        "text_has_choisin": "true",
+        # Extra fields the snapshot includes — predicate ignores them.
+        "sort_container_count": "1",
+        "sort_classmatch_count": "7",
+        "text_has_review_count": "true",
+        "readyState": "complete",
+        "url_has_tab_review": "true",
+    }
+    assert _is_healthy_sort_area_state(canonical) is True
+
+    # sort_pc_count=0 → sort container absent → unhealthy.
+    s = dict(canonical)
+    s["sort_pc_count"] = "0"
+    assert _is_healthy_sort_area_state(s) is False
+
+    # sort_button_candidates=0 → no interactive descendants in the
+    # sort container → unhealthy.
+    s = dict(canonical)
+    s["sort_button_candidates"] = "0"
+    assert _is_healthy_sort_area_state(s) is False
+
+    # text_has_choisin=false → target label absent → unhealthy.
+    s = dict(canonical)
+    s["text_has_choisin"] = "false"
+    assert _is_healthy_sort_area_state(s) is False
+
+    # Missing sort_pc_count → defensive default returns False
+    # (predicate is confirmative, not default-yes).
+    s = dict(canonical)
+    del s["sort_pc_count"]
+    assert _is_healthy_sort_area_state(s) is False
+
+    # sort_pc_count="unknown" → non-numeric → False.
+    s = dict(canonical)
+    s["sort_pc_count"] = "unknown"
+    assert _is_healthy_sort_area_state(s) is False
+
+    # sort_button_candidates="unknown" → non-numeric → False.
+    s = dict(canonical)
+    s["sort_button_candidates"] = "unknown"
+    assert _is_healthy_sort_area_state(s) is False
+
+    # Mutual exclusion with the partial-mount predicate: the canonical
+    # PARTIAL-mount dict (text_has_review_count=true, all sort counts
+    # zero, text_has_choisin=false) must return False under the
+    # healthy predicate AND True under the partial predicate.
+    partial = {
+        "text_has_review_count": "true",
+        "sort_pc_count": "0",
+        "sort_container_count": "0",
+        "sort_button_candidates": "0",
+        "text_has_choisin": "false",
+    }
+    assert _is_healthy_sort_area_state(partial) is False
+    assert _is_partial_review_mount_state(partial) is True
+
+
+class _HealthySortAreaFakePage(_RearmFakeAsyncPage):
+    """I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY — page fake whose
+    `_compute_recovery_page_state_dict()` reads as a healthy sort
+    area, modeling the live-proof `after_reload` snapshot.
+
+    Behavior (when `healthy=True`, the default):
+      - `sort_pc_count=1`, `sort_container_count=1`,
+        `sort_classmatch_count=7`
+      - `sort_button_candidates` resolves to 6 (matches the live
+        proof's 6 candidates inside the sort container)
+      - `text_has_choisin=true`, `text_has_review_count=true`
+      - `evaluate("() => document.readyState")` returns `"complete"`
+
+    When `healthy=False`, all sort counts return 0 and text_has_choisin
+    reads false — the unhealthy/partial-mount control for Test C.
+
+    `reload_should_raise` defaults to False so the reload-first
+    branch's `if not reload_raised:` arm runs, which is the only path
+    that can reach the new gate.
+    """
+
+    def __init__(
+        self,
+        url: str = "about:blank",
+        *,
+        healthy: bool = True,
+        sort_container_selectors: tuple[str, ...] = (
+            "div.pc-sort",
+            ".sort-container",
+            "[class*='sort']",
+        ),
+        reload_should_raise: bool = False,
+    ):
+        super().__init__(url=url, reload_should_raise=reload_should_raise)
+        self._healthy = bool(healthy)
+        self._sort_container_selectors = set(sort_container_selectors)
+
+    async def title(self):
+        return "리뷰 - 톤업 크림"
+
+    async def evaluate(self, script):
+        if script and "readyState" in script:
+            return "complete"
+        return None
+
+    def locator(self, selector):
+        outer = self
+        # Sort-container selectors — `_compute_recovery_page_state_dict`
+        # probes these for `sort_pc_count` etc. AND walks the first
+        # match's button/a/[role='button'] descendants for the
+        # `sort_button_candidates` field.
+        if selector in self._sort_container_selectors:
+
+            class _ContainerLocator:
+                async def count(self_inner):
+                    return 1 if outer._healthy else 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+                def locator(self_inner, tag_selector):
+                    class _NestedLocator:
+                        async def count(self_nested):
+                            if not outer._healthy:
+                                return 0
+                            # The live proof reported
+                            # sort_button_candidates=6 — sum across
+                            # button / a / [role=button]. We put all
+                            # 6 on the `button` probe so the loop's
+                            # total ends up at 6 (matches the proof
+                            # exactly).
+                            if tag_selector == "button":
+                                return 6
+                            return 0
+
+                    return _NestedLocator()
+
+                async def inner_text(self_inner, timeout=None):
+                    return "최신순" if outer._healthy else ""
+
+                def nth(self_inner, _i):
+                    return self_inner
+
+                async def click(self_inner, timeout=None):
+                    return None
+
+                async def scroll_into_view_if_needed(self_inner, timeout=None):
+                    return None
+
+            return _ContainerLocator()
+
+        # Text probes — `text=최신순` is the target label, present
+        # iff healthy. `text=리뷰` is the review-count text, always
+        # present.
+        if selector == "text=최신순":
+            class _TextLoc:
+                async def count(self_inner):
+                    return 1 if outer._healthy else 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        if selector == "text=리뷰":
+            class _TextLoc:
+                async def count(self_inner):
+                    return 1
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        if selector in (
+            "text=유용한 순",
+            "text=평점 높은순",
+            "text=평점 낮은순",
+        ):
+            class _TextLoc:
+                async def count(self_inner):
+                    return 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        # Fall through for any other selector (review-tab probes,
+        # readiness wait's sort-container probes when the cascade
+        # actually runs in the unhealthy variant, etc.). Parent's
+        # `_ZeroLoc` returns count=0.
+        return super().locator(selector)
+
+
+def _build_skip_cascade_session(
+    *,
+    healthy: bool,
+    sort_button_label_ko: str | None = "최신순",
+    sort_hunt_settle_s: float = 0.05,
+    sort_hunt_poll_interval_s: float = 0.01,
+):
+    """I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY — build a
+    `_PlaywrightReviewSession` whose OLD page is a
+    `_HealthySortAreaFakePage` and whose cascade / readiness / click
+    paths are spied so tests can assert which steps actually ran.
+
+    Mirrors `_build_reload_first_session` but with the healthy/
+    unhealthy switch driving the `_compute_recovery_page_state_dict`
+    output rather than the readiness-wait simulator.
+
+    Returns `(session, ordering_log, old_page, new_page_ref,
+    cascade_call_count)`. `cascade_call_count` is a list that
+    accumulates 1 per cascade invocation (using a list for closure
+    mutability in the spy).
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    old_page = _HealthySortAreaFakePage(
+        url=_PRODUCT_URL_TAB_REVIEW,
+        healthy=healthy,
+        reload_should_raise=False,
+    )
+
+    new_page_ref: list = []
+
+    class _SkipCascadeCtx(_FakeBrowserContext):
+        async def new_page(self):
+            self.new_page_calls += 1
+            # If the recreate fallback ever runs (it shouldn't on
+            # the healthy path), the new page is a basic fake whose
+            # locator returns zero counts — keeps the test bounded.
+            page = _RearmFakeAsyncPage(
+                url=self._next_page_url,
+                reload_should_raise=True,
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    sess._ctx = _SkipCascadeCtx([])
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC" if sort_button_label_ko else None
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = sort_button_label_ko
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = float(sort_hunt_settle_s)
+    sess._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+    sess._diagnose_post_recreate_page_state = False
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+
+    ordering_log: list[str] = []
+    cascade_call_count: list[int] = []
+
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach(page):
+        ordering_log.append("attach_response_handler")
+        return real_attach(page)
+
+    real_cascade = sess._run_post_navigation_review_cascade
+
+    async def _spy_cascade():
+        # Capture invocations so the test can assert the cascade
+        # was (or wasn't) called.
+        cascade_call_count.append(1)
+        ordering_log.append("run_post_navigation_review_cascade")
+        # Delegate to the real method so all internal spies still
+        # fire end-to-end on the unhealthy branch.
+        return await real_cascade()
+
+    async def _spy_trigger(*, initial_click: bool = True):
+        ordering_log.append(
+            f"trigger_review_list_api(initial_click={initial_click})",
+        )
+
+    async def _spied_wait(
+        *, timeout_s, poll_interval_s,
+        recovery_lazy_mount_nudge: bool = False,
+    ):
+        ordering_log.append(
+            f"wait_for_review_sort_area_ready"
+            f"(recovery_lazy_mount_nudge={recovery_lazy_mount_nudge})",
+        )
+        # On the healthy path the cascade is skipped, so this spy
+        # should NEVER fire. On the unhealthy path it fires from
+        # inside the cascade. Returning False is safe for the
+        # unhealthy variant — the test asserts the cascade was
+        # called, not that readiness succeeded.
+        return False
+
+    async def _spy_click_sort():
+        ordering_log.append("click_sort_button_robust")
+
+    sess._attach_response_handler = _spy_attach  # type: ignore[assignment]
+    sess._run_post_navigation_review_cascade = _spy_cascade  # type: ignore[assignment]
+    sess._trigger_review_list_api = _spy_trigger  # type: ignore[assignment]
+    sess._wait_for_review_sort_area_ready = _spied_wait  # type: ignore[assignment]
+    sess._click_sort_button_robust = _spy_click_sort  # type: ignore[assignment]
+    return sess, ordering_log, old_page, new_page_ref, cascade_call_count
+
+
+@pytest.mark.asyncio
+async def test_healthy_post_reload_state_skips_cascade(caplog):
+    """Test B — when `_compute_recovery_page_state_dict()` reports a
+    healthy sort area immediately after `page.reload()`, the
+    cascade is NOT called and a single "OY recovery cascade skipped"
+    log line fires. The `after_review_cascade` snapshot path still
+    fires (preserves the checkpoint sequence). Strategy is recorded
+    as "reload_succeeded" so existing downstream notes
+    (`scroll_continuation_recovery: retrying via page.reload before
+    recreate`) still emit.
+    """
+    import logging
+    (
+        sess,
+        ordering_log,
+        old_page,
+        new_page_ref,
+        cascade_call_count,
+    ) = _build_skip_cascade_session(healthy=True)
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted on the old page.
+    assert len(old_page.reload_calls) == 1
+    # The cascade was NOT invoked — the gate skipped it.
+    assert cascade_call_count == [], (
+        f"expected zero cascade invocations on healthy skip path; "
+        f"got {cascade_call_count!r}, ordering={ordering_log!r}"
+    )
+    # Recreate fallback was NOT invoked.
+    assert old_page.close_calls == 0
+    assert sess._ctx.new_page_calls == 0
+    assert new_page_ref == []
+    # Strategy is recorded as "reload_succeeded" so the connector's
+    # `scroll_continuation_recovery: retrying via page.reload before
+    # recreate` `_note` still fires.
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+
+    messages = [r.getMessage() for r in caplog.records]
+    skip_lines = [
+        m for m in messages
+        if (
+            "OY recovery cascade skipped: post-navigation sort area "
+            "already healthy:" in m
+        )
+    ]
+    assert len(skip_lines) == 1, (
+        f"expected exactly one cascade-skip log line; got {skip_lines!r}"
+    )
+    # The log line carries the live-proof signals.
+    line = skip_lines[0]
+    assert "sort_pc_count=1" in line, line
+    assert "sort_button_candidates=6" in line, line
+    assert "text_has_choisin=true" in line, line
+
+
+@pytest.mark.asyncio
+async def test_healthy_post_reload_emits_after_review_cascade_snapshot(caplog):
+    """Test B (continued) — even when the cascade is skipped, the
+    `after_review_cascade` checkpoint snapshot still fires so
+    post-mortem log scans see the same `after_reload →
+    after_review_cascade → downstream` sequence the unconditional
+    path would have produced.
+
+    The snapshot helper is a no-op unless
+    `_diagnose_post_recreate_page_state` is True; flip it on so the
+    log line is observable.
+    """
+    import logging
+    (
+        sess,
+        ordering_log,
+        old_page,
+        new_page_ref,
+        cascade_call_count,
+    ) = _build_skip_cascade_session(healthy=True)
+    # Enable the diagnostic snapshot so the after_review_cascade log
+    # line is emitted by `_snapshot_recovery_page_state`.
+    sess._diagnose_post_recreate_page_state = True
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    messages = [r.getMessage() for r in caplog.records]
+    after_reload = [
+        m for m in messages
+        if "OY recovery page state:" in m and "checkpoint=after_reload" in m
+    ]
+    after_cascade = [
+        m for m in messages
+        if (
+            "OY recovery page state:" in m
+            and "checkpoint=after_review_cascade" in m
+        )
+    ]
+    assert len(after_reload) == 1, (
+        f"expected exactly one after_reload snapshot; "
+        f"got {after_reload!r}"
+    )
+    assert len(after_cascade) == 1, (
+        f"expected exactly one after_review_cascade snapshot on the "
+        f"skip path (preserves the checkpoint sequence); "
+        f"got {after_cascade!r}"
+    )
+    # The cascade really was skipped.
+    assert cascade_call_count == []
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_post_reload_state_runs_cascade(caplog):
+    """Test C — when `_compute_recovery_page_state_dict()` reports an
+    UNHEALTHY sort area immediately after `page.reload()`, the gate
+    does NOT fire: the cascade runs exactly as before, the skip log
+    line does NOT fire, and the rest of the reload-first path
+    behaves byte-for-byte like the pre-ticket flow.
+    """
+    import logging
+    (
+        sess,
+        ordering_log,
+        old_page,
+        new_page_ref,
+        cascade_call_count,
+    ) = _build_skip_cascade_session(healthy=False)
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted.
+    assert len(old_page.reload_calls) == 1
+    # The cascade DID run at least once (gate was open — the cascade
+    # call site on the reload-first branch fired). On this fake the
+    # cascade returns False (the spied readiness wait returns False
+    # in this fixture so the test can stay deterministic without
+    # driving the count-flipping simulator), so the recreate fallback
+    # also runs and calls the cascade a second time on the new page —
+    # which is the pre-existing reload-first-then-recreate flow. The
+    # important invariant is that the reload-first branch did NOT
+    # short-circuit on the gate.
+    assert len(cascade_call_count) >= 1, (
+        f"expected at least one cascade invocation on unhealthy path; "
+        f"got {cascade_call_count!r}, ordering={ordering_log!r}"
+    )
+    # The cascade was called on the reload-first branch BEFORE any
+    # `attach_response_handler` (which only fires on the recreate
+    # fallback's listener re-attach). Verifies the gate is at the
+    # correct call site.
+    first_cascade_idx = ordering_log.index(
+        "run_post_navigation_review_cascade",
+    )
+    attach_indexes = [
+        i for i, line in enumerate(ordering_log)
+        if line == "attach_response_handler"
+    ]
+    if attach_indexes:
+        assert first_cascade_idx < attach_indexes[0], (
+            f"first cascade call must be on the reload-first branch "
+            f"(before any recreate-fallback listener re-attach); "
+            f"ordering={ordering_log!r}"
+        )
+    messages = [r.getMessage() for r in caplog.records]
+    skip_lines = [
+        m for m in messages
+        if "OY recovery cascade skipped:" in m
+    ]
+    assert skip_lines == [], (
+        f"skip log line must NOT fire on unhealthy path; got {skip_lines!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_healthy_skip_path_does_not_invoke_readiness_or_click():
+    """Test D — on the healthy skip path the cascade is skipped
+    ENTIRELY. The readiness wait and the scoped/robust click live
+    inside `_run_post_navigation_review_cascade` (steps 7 and 8 of
+    the cascade) and are therefore also skipped when the gate fires.
+
+    Rationale: per the I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY
+    spec the gate sits at the cascade CALL SITE and does not modify
+    the cascade body. The reload-first path returns early with
+    `_post_recreate_strategy_used = "reload_succeeded"`; the
+    connector's outer cold-start path then consumes any cursor
+    response already in flight from the pre-recovery sort selection
+    on the page being reloaded (the response listener registered in
+    `open()` persists across `page.reload()`).
+
+    The next live proof (O-OY-RECOVERY-CASCADE-SKIP-LIVE-PROOF-ILSO)
+    will surface whether the in-flight response model holds in
+    practice on Ilso A000000225736; outcome
+    `cascade_skip_taken_but_failed` would indicate a follow-up needs
+    to re-introduce a scoped click against the already-mounted
+    button.
+    """
+    (
+        sess,
+        ordering_log,
+        old_page,
+        new_page_ref,
+        cascade_call_count,
+    ) = _build_skip_cascade_session(healthy=True)
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Cascade not called.
+    assert cascade_call_count == []
+    # Readiness wait not invoked (the only call sites today are
+    # inside the cascade).
+    readiness_calls = [
+        line for line in ordering_log
+        if line.startswith("wait_for_review_sort_area_ready")
+    ]
+    assert readiness_calls == [], (
+        f"readiness wait must NOT fire on the healthy skip path "
+        f"(the only call sites today are inside the cascade); "
+        f"got {readiness_calls!r}"
+    )
+    # Click not invoked.
+    click_calls = [
+        line for line in ordering_log if line == "click_sort_button_robust"
+    ]
+    assert click_calls == [], (
+        f"sort-button click must NOT fire on the healthy skip path; "
+        f"got {click_calls!r}"
+    )
+    # Strategy still recorded so the connector's `_note` still fires.
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+    # Post-recreate sort area readiness flag is left None — the gate
+    # short-circuits before the cascade can set it, which is the
+    # signal "session didn't reach the readiness wait" per the
+    # connector's existing `sort_area_ready is None → no note`
+    # contract.
+    assert sess.get_post_recreate_sort_area_ready() is None
+
+
+@pytest.mark.asyncio
+async def test_cold_start_path_untouched_by_skip_cascade_gate(caplog):
+    """Test E — the new gate lives in `reload_and_reopen_review_tab`'s
+    reload-first branch. The cold-start path does NOT invoke
+    `reload_and_reopen_review_tab` (only `_open_product_page_with_session_recovery`
+    runs on cold-start), so the new "OY recovery cascade skipped"
+    log line cannot fire on cold-start.
+
+    This test re-uses the existing `_PartialMountFakePage` cold-start
+    surface (the same one that drives Test G of the lazy-mount-nudge
+    suite) and asserts the new log string never appears.
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # Cold-start invocation — no `recovery_lazy_mount_nudge=`,
+        # uses default False. The readiness wait is called directly,
+        # NOT through `reload_and_reopen_review_tab`.
+        await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+        )
+
+    messages = [r.getMessage() for r in caplog.records]
+    skip_lines = [
+        m for m in messages
+        if "OY recovery cascade skipped:" in m
+    ]
+    assert skip_lines == [], (
+        f"new skip-cascade log line must NOT fire on cold-start; "
+        f"got {skip_lines!r}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_recovery_lazy_mount_nudge_cold_start_path_untouched(caplog):
     """Test G — cold-start invocation (default

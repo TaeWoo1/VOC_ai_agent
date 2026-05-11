@@ -3057,6 +3057,65 @@ def _is_partial_review_mount_state(state: dict) -> bool:
     return True
 
 
+def _is_healthy_sort_area_state(state: dict) -> bool:
+    """Return True when the page-state snapshot dict reads like the
+    sort area is ALREADY mounted and clickable, i.e. the review-tab
+    cascade is unnecessary.
+
+    I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY — used by the
+    recovery reload-first branch to skip the cascade when
+    `page.reload()` alone produced a healthy sort area. The prior
+    O-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-LIVE-PROOF-ILSO proof
+    showed the cascade itself UNMOUNTS a healthy post-reload sort
+    area on the Ilso A000000225736 DOM shape: snapshots at the
+    `after_reload` checkpoint reported sort_pc_count=1,
+    sort_button_candidates=6, text_has_choisin=true while the very
+    next `after_review_cascade` snapshot (one second later) reported
+    sort_pc_count=0, sort_button_candidates=0, text_has_choisin=false.
+    The lazy-mount nudge from `9eed039` then fired 4× with
+    success=false trying to re-mount what the cascade itself had
+    just destroyed.
+
+    Three signals must hold (CONFIRMATIVE):
+      - sort_pc_count >= 1
+      - sort_button_candidates >= 1
+      - text_has_choisin == "true"
+
+    Defensive: each count is parsed via int() inside try/except.
+    Missing keys, non-numeric values, "unknown" tokens all fall
+    through to False — the predicate is a CONFIRMATIVE detector,
+    not a default-yes. Values are the stringified shapes that
+    `_compute_recovery_page_state_dict` emits (`"0"` / `"1"` / ... /
+    `"unknown"` for counts; `"true"` / `"false"` / `"unknown"` for
+    booleans), so feeding this predicate the same dict that
+    `_snapshot_recovery_page_state` would have logged keeps the
+    runtime gate and the post-mortem log line bit-for-bit aligned.
+
+    Mutually exclusive with `_is_partial_review_mount_state` by
+    construction: that predicate requires sort_pc_count == "0" and
+    text_has_choisin != "true", both of which this predicate
+    rejects.
+    """
+    # sort_pc_count >= 1
+    try:
+        sort_pc = int(state.get("sort_pc_count", "0") or 0)
+    except (TypeError, ValueError):
+        return False
+    if sort_pc < 1:
+        return False
+    # sort_button_candidates >= 1
+    try:
+        sort_buttons = int(state.get("sort_button_candidates", "0") or 0)
+    except (TypeError, ValueError):
+        return False
+    if sort_buttons < 1:
+        return False
+    # text_has_choisin must be exactly "true" (CONFIRMATIVE).
+    if state.get("text_has_choisin") != "true":
+        return False
+    return True
+
+
 class _PlaywrightReviewSession:
     """Real `BrowserReviewSession` backed by Playwright/Chromium.
 
@@ -5932,6 +5991,99 @@ class _PlaywrightReviewSession:
                     )
                 except Exception:
                     pass
+                # I-OY-RECOVERY-SKIP-CASCADE-WHEN-SORT-HEALTHY — re-read
+                # the same page-state dict the snapshot just emitted and
+                # gate the cascade on the healthy-sort-area predicate.
+                # The prior O-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-LIVE-PROOF-ILSO
+                # proof (Ilso A000000225736 / DATETIME_DESC at HEAD
+                # `9eed039`) showed the cascade itself UNMOUNTS a healthy
+                # post-reload sort area: `after_reload` snapshot at
+                # 22:29:08 reported sort_pc_count=1,
+                # sort_button_candidates=6, text_has_choisin=true; the
+                # very next `after_review_cascade` snapshot at 22:29:09
+                # reported sort_pc_count=0, sort_button_candidates=0,
+                # text_has_choisin=false. The lazy-mount nudge then
+                # fired 4× with success=false trying to re-mount what
+                # the cascade had just destroyed. Skipping the cascade
+                # when the post-reload snapshot is already healthy
+                # avoids that self-inflicted unmount. Reusing
+                # `_compute_recovery_page_state_dict()` (the same helper
+                # `_snapshot_recovery_page_state` consumes) keeps the
+                # runtime predicate and the post-mortem log line bit-
+                # for-bit aligned. Wrapped in try/except so a malformed
+                # Playwright page cannot abort recovery via a diagnostic
+                # probe — `_post_reload_state = None` falls through to
+                # the existing cascade path.
+                _post_reload_state: dict | None = None
+                try:
+                    _post_reload_state = (
+                        await self._compute_recovery_page_state_dict()
+                    )
+                except Exception:
+                    _post_reload_state = None
+                if (
+                    _post_reload_state is not None
+                    and _is_healthy_sort_area_state(_post_reload_state)
+                ):
+                    # Healthy post-reload — skip the cascade entirely.
+                    # The cascade's `_trigger_review_list_api(initial_click=True)`
+                    # is what unmounts a healthy sort area on this DOM
+                    # shape; the readiness wait + scoped click that
+                    # follow it inside the cascade are also skipped.
+                    # The next live proof (recommended ticket
+                    # O-OY-RECOVERY-CASCADE-SKIP-LIVE-PROOF-ILSO) will
+                    # show whether the cursor API still fires off the
+                    # already-mounted sort selection, or whether a
+                    # follow-up needs to re-introduce a scoped click
+                    # on the healthy button.
+                    try:
+                        _sort_pc = int(
+                            _post_reload_state.get("sort_pc_count", "0")
+                            or 0,
+                        )
+                    except (TypeError, ValueError):
+                        _sort_pc = 0
+                    try:
+                        _sort_buttons = int(
+                            _post_reload_state.get(
+                                "sort_button_candidates", "0",
+                            )
+                            or 0,
+                        )
+                    except (TypeError, ValueError):
+                        _sort_buttons = 0
+                    logger.info(
+                        "OY recovery cascade skipped: post-navigation "
+                        "sort area already healthy: sort_pc_count=%d "
+                        "sort_button_candidates=%d text_has_choisin=%s",
+                        _sort_pc,
+                        _sort_buttons,
+                        _post_reload_state.get(
+                            "text_has_choisin", "unknown",
+                        ),
+                    )
+                    # Still emit the `after_review_cascade` snapshot so
+                    # post-mortem log scans see the same checkpoint
+                    # sequence the cascade would have produced
+                    # (`after_reload` → `after_review_cascade` →
+                    # downstream). The page-state at this moment is
+                    # "still healthy from reload" rather than "freshly
+                    # cascaded"; the side-by-side comparison with the
+                    # `after_reload` snapshot is itself a signal that
+                    # the skip path was taken.
+                    try:
+                        await self._snapshot_recovery_page_state(
+                            checkpoint="after_review_cascade",
+                        )
+                    except Exception:
+                        pass
+                    # Mark the strategy as success and return early;
+                    # downstream cold-start consumes any cursor response
+                    # already in flight from the pre-recovery sort
+                    # selection (the same listener registered in
+                    # `open()` persists across reload).
+                    self._post_recreate_strategy_used = "reload_succeeded"
+                    return
                 # 0c. Shared post-navigation cascade on the reloaded
                 # page. Returns True iff the readiness wait observed
                 # the sort area within budget.
