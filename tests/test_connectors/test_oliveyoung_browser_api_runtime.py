@@ -3206,8 +3206,17 @@ class _FakeAsyncPage:
         self.goto_calls: list[tuple[str, dict]] = []
         self.on_calls: list[tuple[str, object]] = []
 
-    async def goto(self, url, wait_until=None):  # noqa: D401 — Playwright shape
-        self.goto_calls.append((url, {"wait_until": wait_until}))
+    async def goto(self, url, wait_until=None, timeout=None):  # noqa: D401
+        # `timeout` is accepted (defaulted None) so the recovery path
+        # `reload_and_reopen_review_tab` — which calls
+        # `goto(url, wait_until="domcontentloaded", timeout=20000)` —
+        # exercises this fake without raising a TypeError on the
+        # extra kwarg. Existing adoption tests do not pass `timeout`
+        # and continue to record `None` in the call dict, preserving
+        # their assertion contracts.
+        self.goto_calls.append(
+            (url, {"wait_until": wait_until, "timeout": timeout}),
+        )
         # Update URL so subsequent diagnostics see the navigated page.
         self.url = url
 
@@ -3651,3 +3660,212 @@ async def test_adoption_records_diagnostics(monkeypatch):
     assert sess._adopted_existing_page is True
     assert sess._existing_page_candidate_count >= 1
     assert sess._adopted_page_url_at_open == _PRODUCT_URL_TAB_REVIEW
+
+
+# ---------------------------------------------------------------------------
+# I-OY-SCROLL-RECOVERY-COLD-START-REARM — connector recovery cold-start
+# re-arm. The page-recreate step in `reload_and_reopen_review_tab` was
+# previously a passive wait: close old page → new page → re-attach
+# listener → goto → review-tab cascade. It did NOT re-fire the
+# sort-button click, so the recreated page emitted its page-default
+# sort (USEFUL_SCORE_DESC) and the `_attach_response_handler` filter
+# (keyed on `_expected_sort_type`) dropped every response —
+# post-recreate cold-start timed out on Ilso A000000225736.
+#
+# Fix: after the review-tab cascade, mirror the initial `open()`
+# sequence by calling `_click_sort_button_robust()` when a sort
+# label or legacy selector is configured. The listener was already
+# re-attached so the install-before-trigger ordering is preserved.
+#
+# Required test cases (mirror the dispatch's required coverage):
+#   A. Recovery re-arm calls sort-button click after page recreate.
+#   B. Listener installed BEFORE sort-button click (ordering invariant).
+#   C. Recovery skips sort-button click when no sort label configured
+#      (legacy behavior preserved for page-default sort).
+#   D. Sort-button click failure is swallowed — recovery does not raise.
+#
+# Tests below drive the REAL `_PlaywrightReviewSession.reload_and_reopen_review_tab`
+# method against an `object.__new__` instance with a minimal hand-built
+# surface (mirrors the pattern at line ~2487 / line ~3265). The earlier
+# E2E recovery tests (`_RecoveryFakeSession`, line ~2517+) exercise the
+# connector loop with an OVERRIDDEN recovery method; they do not cover
+# the post-recreate sort-button click path because the override
+# bypasses the real method entirely. These unit-level tests close that
+# gap.
+# ---------------------------------------------------------------------------
+
+
+class _RearmFakeAsyncPage(_FakeAsyncPage):
+    """Extension of `_FakeAsyncPage` that adds the `.close()` coroutine
+    `reload_and_reopen_review_tab` calls on the OLD page. Also records
+    `close_calls` so tests can assert the page-recreate sequence ran
+    end-to-end."""
+
+    def __init__(self, url: str = "about:blank"):
+        super().__init__(url)
+        self.close_calls = 0
+
+    async def close(self):
+        self.close_calls += 1
+
+
+def _build_rearm_session(*, sort_button_label_ko: str | None):
+    """Construct a `_PlaywrightReviewSession` instance with just enough
+    state for `reload_and_reopen_review_tab` to execute end-to-end
+    without launching Playwright. Mirrors the `_make_session_for_adoption`
+    pattern but configures the surface the recovery method touches:
+    `_ctx`, `_page`, `_opened_product_url`, sort-button config,
+    response-handler-attach state (queue, request log, observed-sort
+    counters, expected sort, api_path), and the trigger-cascade
+    state (`_review_tab_locator`, telemetry flags).
+
+    Returns `(session, ordering_log, old_page)` where `ordering_log`
+    records the method-call sequence on the session for
+    install-before-trigger assertions.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Context with a fake old page; `new_page()` returns a fresh
+    # `_FakeAsyncPage` (defined above) which the recovery method
+    # attaches the response handler to.
+    old_page = _RearmFakeAsyncPage(url=_PRODUCT_URL_TAB_REVIEW)
+    sess._ctx = _FakeBrowserContext([])
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    # Response-handler closure inputs (captured by `_attach_response_handler`).
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC" if sort_button_label_ko else None
+    # Trigger-cascade state.
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    # Sort-button config (recovery's new step).
+    sess._sort_button_label_ko = sort_button_label_ko
+    sess._sort_button_selector = None
+    # Spy out the inner helpers so we can assert call order without
+    # driving the full Playwright surface. The internals of
+    # `_attach_response_handler`, `_trigger_review_list_api`, and
+    # `_click_sort_button_robust` are covered by their dedicated
+    # tests elsewhere in this file.
+    ordering_log: list[str] = []
+
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach(page):
+        ordering_log.append("attach_response_handler")
+        return real_attach(page)
+
+    async def _spy_trigger(*, initial_click: bool = True):
+        ordering_log.append(
+            f"trigger_review_list_api(initial_click={initial_click})",
+        )
+
+    async def _spy_click_sort():
+        ordering_log.append("click_sort_button_robust")
+
+    # Bind the spies onto the instance.
+    sess._attach_response_handler = _spy_attach  # type: ignore[assignment]
+    sess._trigger_review_list_api = _spy_trigger  # type: ignore[assignment]
+    sess._click_sort_button_robust = _spy_click_sort  # type: ignore[assignment]
+    return sess, ordering_log, old_page
+
+
+@pytest.mark.asyncio
+async def test_recovery_rearm_calls_sort_button_click_after_recreate():
+    """`reload_and_reopen_review_tab` re-fires the sort-button click
+    after creating the fresh page. Without this the response filter
+    (keyed on `_expected_sort_type`) drops every response from the
+    page-default sort and the post-recreate cold-start times out
+    (the symptom on Ilso A000000225736).
+    """
+    sess, ordering_log, old_page = _build_rearm_session(
+        sort_button_label_ko="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Old page closed; fresh page created and attached.
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+    # Sort-button click is in the ordering log AFTER the response
+    # handler attach AND after the review-tab cascade.
+    assert "click_sort_button_robust" in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_recovery_rearm_listener_installed_before_sort_click():
+    """Install-before-trigger invariant: `_attach_response_handler`
+    must run BEFORE `_click_sort_button_robust`. If the listener
+    is installed after the sort-button click, the post-click cursor
+    API response races past the listener and the connector misses
+    its cold-start signal. This invariant mirrors the initial
+    `open()` sequence (attach → trigger → click).
+    """
+    sess, ordering_log, _ = _build_rearm_session(
+        sort_button_label_ko="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    attach_index = ordering_log.index("attach_response_handler")
+    trigger_index = ordering_log.index(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    click_index = ordering_log.index("click_sort_button_robust")
+    # Attach must happen first; trigger must happen before click
+    # (the review-tab cascade primes the page so the sort row renders
+    # — the actual sort-button click then re-fires the cursor API).
+    assert attach_index < trigger_index < click_index, (
+        f"recovery cold-start re-arm ordering broken: {ordering_log!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_rearm_skips_sort_click_when_no_label():
+    """When the session has no sort-button label/selector configured
+    (page-default sort path, e.g. USEFUL_SCORE_DESC), the recovery
+    method must NOT call `_click_sort_button_robust`. Preserves legacy
+    behavior for untargeted sorts."""
+    sess, ordering_log, _ = _build_rearm_session(sort_button_label_ko=None)
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Listener + review-tab cascade still run.
+    assert "attach_response_handler" in ordering_log
+    assert any(
+        s.startswith("trigger_review_list_api") for s in ordering_log
+    )
+    # Sort-button click was NOT invoked.
+    assert "click_sort_button_robust" not in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_recovery_rearm_swallows_sort_click_failure():
+    """`_click_sort_button_robust` raising must NOT propagate out of
+    `reload_and_reopen_review_tab`. The recovery method is best-effort
+    — a failed sort-button hunt falls through to the recovery
+    cold-start which will time out cleanly via the existing
+    diagnostic path. Mirrors the existing review-tab cascade's
+    try/except contract (`_trigger_review_list_api` exception swallow)."""
+    sess, ordering_log, _ = _build_rearm_session(
+        sort_button_label_ko="최신순",
+    )
+
+    async def _raising_click():
+        ordering_log.append("click_sort_button_robust_raised")
+        raise RuntimeError("sort-button click failed")
+
+    sess._click_sort_button_robust = _raising_click  # type: ignore[assignment]
+
+    # MUST NOT raise — best-effort, falls through to the connector's
+    # post-recreate `wait_for_next_response` which will then time out
+    # via the existing diagnostic path.
+    await sess.reload_and_reopen_review_tab()
+
+    assert "click_sort_button_robust_raised" in ordering_log

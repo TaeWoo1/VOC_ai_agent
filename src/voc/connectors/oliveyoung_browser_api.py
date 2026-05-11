@@ -1812,6 +1812,18 @@ class OliveYoungBrowserAPIConnector:
                                     True
                                 )
                                 break
+                            # I-OY-SCROLL-RECOVERY-COLD-START-REARM —
+                            # narrow diagnostic so the next post-mortem
+                            # can confirm the recreate path actually
+                            # re-armed the listener + sort + trigger
+                            # pipeline (vs the legacy passive-wait
+                            # behavior that produced the
+                            # `post-recreate cold-start timed out`
+                            # symptom on Ilso A000000225736).
+                            _note(
+                                "scroll_continuation_recovery: re-armed "
+                                "listener+sort+trigger; awaiting first response",
+                            )
                             # Wait for the post-recreate cold-start to
                                 # land. Use the cold-start timeout — the
                                 # fresh mount fires its own initial cursor
@@ -4195,6 +4207,29 @@ class _PlaywrightReviewSession:
                 "OY review-tab re-click cascade after page recreate "
                 "skipped/failed: %s", e,
             )
+        # 7. I-OY-SCROLL-RECOVERY-COLD-START-REARM — re-fire the target
+        # sort-button click on the fresh page. Without this, the
+        # recreated page emits its page-default sort (USEFUL_SCORE_DESC)
+        # and the response interceptor at `_attach_response_handler`
+        # filters every response out (keyed on `_expected_sort_type`),
+        # so the connector's post-recreate cold-start wait times out.
+        # The original `open()` performs the same sequence: attach
+        # listener → review-tab cascade → sort-button click. Mirror it
+        # here. The listener is already re-attached at step 4 above,
+        # which preserves the install-before-trigger ordering invariant.
+        # Best-effort: failures fall through silently so the existing
+        # recovery telemetry still drives the post-condition.
+        if (
+            self._sort_button_label_ko is not None
+            or self._sort_button_selector is not None
+        ):
+            try:
+                await self._click_sort_button_robust()
+            except Exception as e:
+                logger.info(
+                    "OY sort-button re-click after page recreate "
+                    "skipped/failed (benign): %s", e,
+                )
 
     async def wait_for_next_response(
         self, *, timeout_s: float,
