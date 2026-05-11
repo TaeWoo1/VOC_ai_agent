@@ -4803,3 +4803,618 @@ async def test_reload_first_success_listener_not_re_attached():
         f"trigger must precede click on reload-first cascade; "
         f"got {ordering_log!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK — between the readiness
+# wait and the robust sort-button hunt, scroll the readiness-matched
+# element into view AND attempt a scoped immediate click on the button
+# handle the readiness probe already validated. Closes the 12-second
+# race observed on Ilso A000000225736 where
+# `_wait_for_review_sort_area_ready` emitted
+#   signal=target_label_visible target='최신순' poll_attempt=1
+# at 15:01:20 and `_click_sort_button_robust` deadlined 12s later
+# without finding `최신순` in its enumeration.
+#
+# Required test coverage (mirror the dispatch's required cases):
+#   A. Recovery scroll-to-sort-area runs before the sort click on the
+#      recreate path (ordering: attach → trigger → wait → scroll →
+#      click). Scoped click succeeds → robust click NOT invoked.
+#   B. Scoped click after readiness — readiness signal
+#      `target_label_visible` returns a matched element; scoped click
+#      fires on that element; robust hunt NOT called.
+#   C. Fallback to robust click — when the matched button's click
+#      raises, the cascade falls through to `_click_sort_button_robust`.
+#   D. Listener-before-trigger ordering preserved across all new code
+#      paths.
+# ---------------------------------------------------------------------------
+
+
+class _ScopedClickLocator:
+    """Locator stand-in that supports `scroll_into_view_if_needed` /
+    `click` for the button matched by the readiness probe. The
+    production code reads `self._last_readiness_matched_button` set
+    by `_target_label_visible` and calls `scroll_into_view_if_needed`
+    + `click` on it; this fake records both and can be configured to
+    raise on click so the fallback path is exercised.
+    """
+
+    def __init__(
+        self,
+        *,
+        inner_text: str,
+        click_should_raise: bool = False,
+        scroll_should_raise: bool = False,
+    ):
+        self._inner_text = inner_text
+        self._click_should_raise = click_should_raise
+        self._scroll_should_raise = scroll_should_raise
+        self.scroll_into_view_calls = 0
+        self.click_calls = 0
+
+    async def count(self):
+        return 1
+
+    @property
+    def first(self):
+        return self
+
+    def nth(self, _i):
+        return self
+
+    async def inner_text(self, timeout=None):
+        return self._inner_text
+
+    async def scroll_into_view_if_needed(self, timeout=None):
+        self.scroll_into_view_calls += 1
+        if self._scroll_should_raise:
+            raise RuntimeError("scroll_into_view_if_needed failed (fake)")
+        return None
+
+    async def click(self, timeout=None):
+        self.click_calls += 1
+        if self._click_should_raise:
+            raise RuntimeError("scoped click failed (fake)")
+        return None
+
+
+class _ScopedClickButtonLocatorWrapper:
+    """Bridges `container.locator("button")` to the
+    `_ScopedClickLocator` instance shared between test and production.
+    Production's `_target_label_visible` calls
+    `el_locator.count()` then `el_locator.nth(i)` to walk candidates;
+    we model a single-button list whose normalized inner_text matches
+    the target label so the probe records the button on
+    `self._last_readiness_matched_button`.
+    """
+
+    def __init__(self, button: _ScopedClickLocator | None):
+        self._button = button
+
+    async def count(self):
+        return 1 if self._button is not None else 0
+
+    def nth(self, _i):
+        return self._button
+
+
+class _ScopedClickContainerLocator:
+    """Container locator served by `_ScrollableReadinessFakePage` for
+    `_sort_container_candidates`. Carries a per-selector
+    visible-after-count predicate AND, once visible, exposes a child
+    `_ScopedClickButtonLocatorWrapper` so the readiness probe's
+    inner-text drill matches the target label.
+
+    `scroll_into_view_if_needed` is recorded on the OWNER page so
+    tests can assert the production code scrolled the container
+    before the click.
+    """
+
+    def __init__(
+        self,
+        *,
+        owner_page,
+        selector: str,
+        count_provider,
+        button_factory,
+    ):
+        self._owner_page = owner_page
+        self._selector = selector
+        self._count_provider = count_provider
+        self._button_factory = button_factory
+
+    async def count(self):
+        return self._count_provider()
+
+    @property
+    def first(self):
+        return self
+
+    def locator(self, tag_selector):
+        # The production code drills container.locator("button" / "a"
+        # / "[role='button']"). Only the first ("button") returns the
+        # matched-text wrapper; the others return zero-count so the
+        # probe doesn't double-record.
+        if tag_selector == "button":
+            return _ScopedClickButtonLocatorWrapper(self._button_factory())
+        return _ScopedClickButtonLocatorWrapper(None)
+
+    async def scroll_into_view_if_needed(self, timeout=None):
+        self._owner_page.container_scroll_into_view_calls += 1
+        if self._owner_page.container_scroll_should_raise:
+            raise RuntimeError(
+                "container scroll_into_view_if_needed failed (fake)"
+            )
+        return None
+
+
+class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
+    """Page fake that drives the FULL real readiness wait + cascade
+    surface. Unlike `_RearmReadinessFakePage` (which only models
+    container-count semantics) this fake also models the inner
+    target-label match AND a clickable button handle so the new
+    scoped-click cascade can exercise its scroll + click path end
+    to end.
+
+    Configuration knobs:
+      - `target_button_label`: text the readiness probe's inner-text
+        check normalizes against `_sort_button_label_ko`. Set equal
+        to the production target so the probe records a button on
+        `_last_readiness_matched_button`. Set to a different string
+        to drive the `container_visible` only branch (no button
+        handle, no scoped click).
+      - `click_should_raise`: when True, the matched button's
+        `click()` raises so the cascade falls back to
+        `_click_sort_button_robust`.
+      - `scroll_should_raise`: when True, the matched button's
+        `scroll_into_view_if_needed()` raises; per the production
+        contract the cascade still attempts the scoped click.
+      - `container_scroll_should_raise`: when True, the matched
+        container's `scroll_into_view_if_needed()` raises; cascade
+        falls through to the robust hunt.
+    """
+
+    def __init__(
+        self,
+        url: str = "about:blank",
+        *,
+        target_button_label: str | None = "최신순",
+        click_should_raise: bool = False,
+        scroll_should_raise: bool = False,
+        container_scroll_should_raise: bool = False,
+        sort_container_selectors: tuple[str, ...] = (
+            "div.pc-sort",
+            ".sort-container",
+            "[class*='sort']",
+        ),
+        reload_should_raise: bool = True,
+    ):
+        super().__init__(url=url, reload_should_raise=reload_should_raise)
+        self._target_button_label = target_button_label
+        self._click_should_raise = click_should_raise
+        self._scroll_should_raise = scroll_should_raise
+        self.container_scroll_should_raise = container_scroll_should_raise
+        self._sort_container_selectors = set(sort_container_selectors)
+        # Observability for assertions.
+        self.container_scroll_into_view_calls = 0
+        # Shared button instance — the readiness probe records it on
+        # `_last_readiness_matched_button` and the cascade calls
+        # scroll + click on the SAME instance. Created lazily so each
+        # production poll re-uses one stable handle.
+        self._matched_button: _ScopedClickLocator | None = None
+
+    def _make_button(self) -> _ScopedClickLocator | None:
+        if self._target_button_label is None:
+            return None
+        if self._matched_button is None:
+            self._matched_button = _ScopedClickLocator(
+                inner_text=self._target_button_label,
+                click_should_raise=self._click_should_raise,
+                scroll_should_raise=self._scroll_should_raise,
+            )
+        return self._matched_button
+
+    def locator(self, selector):
+        if selector in self._sort_container_selectors:
+            # First container selector visible from the first probe.
+            def _count_provider():
+                return 1
+            return _ScopedClickContainerLocator(
+                owner_page=self,
+                selector=selector,
+                count_provider=_count_provider,
+                button_factory=self._make_button,
+            )
+        return super().locator(selector)
+
+
+def _build_scroll_to_sort_session(
+    *,
+    sort_button_label_ko: str | None = "최신순",
+    target_button_label: str | None = "최신순",
+    click_should_raise: bool = False,
+    scroll_should_raise: bool = False,
+    container_scroll_should_raise: bool = False,
+    sort_hunt_settle_s: float = 0.2,
+    sort_hunt_poll_interval_s: float = 0.02,
+):
+    """Fixture for I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK.
+
+    Wires a session whose context's `new_page()` returns a
+    `_ScrollableReadinessFakePage`. The cascade's REAL readiness
+    wait runs against it so the production code populates
+    `_last_readiness_matched_button` / `_last_readiness_matched_container`.
+    Only `_attach_response_handler`, `_trigger_review_list_api`, and
+    `_click_sort_button_robust` are spied; the readiness wait and
+    the new scoped-click branch run un-mocked.
+
+    `target_button_label` controls whether `_target_label_visible`
+    fires (matched button recorded → scoped click attempted) or only
+    `_container_visible` fires (no button → cascade pre-scrolls
+    container then falls through to robust hunt).
+
+    Returns `(session, ordering_log, old_page, new_page_ref)`.
+    `new_page_ref[0]` is the `_ScrollableReadinessFakePage` on which
+    tests assert `container_scroll_into_view_calls`,
+    `_matched_button.click_calls`, etc.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Old page raises on reload so the cascade exercises the recreate
+    # fallback path; the new fake then drives the cascade on the
+    # recreated page (the typical Ilso-style scenario).
+    old_page = _RearmFakeAsyncPage(
+        url=_PRODUCT_URL_TAB_REVIEW, reload_should_raise=True,
+    )
+
+    new_page_ref: list = []
+
+    class _ScrollableCtx(_FakeBrowserContext):
+        def __init__(
+            self,
+            pages,
+            target_button_label,
+            click_should_raise,
+            scroll_should_raise,
+            container_scroll_should_raise,
+        ):
+            super().__init__(pages)
+            self._target_button_label = target_button_label
+            self._click_should_raise = click_should_raise
+            self._scroll_should_raise = scroll_should_raise
+            self._container_scroll_should_raise = container_scroll_should_raise
+
+        async def new_page(self):
+            self.new_page_calls += 1
+            page = _ScrollableReadinessFakePage(
+                url=self._next_page_url,
+                target_button_label=self._target_button_label,
+                click_should_raise=self._click_should_raise,
+                scroll_should_raise=self._scroll_should_raise,
+                container_scroll_should_raise=(
+                    self._container_scroll_should_raise
+                ),
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    sess._ctx = _ScrollableCtx(
+        [],
+        target_button_label,
+        click_should_raise,
+        scroll_should_raise,
+        container_scroll_should_raise,
+    )
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC" if sort_button_label_ko else None
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = sort_button_label_ko
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = float(sort_hunt_settle_s)
+    sess._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+    # Mirror the production constructor: the new side-channel
+    # handles default to None and are set by the real readiness
+    # wait when its probes succeed.
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+
+    ordering_log: list[str] = []
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach(page):
+        ordering_log.append("attach_response_handler")
+        return real_attach(page)
+
+    async def _spy_trigger(*, initial_click: bool = True):
+        ordering_log.append(
+            f"trigger_review_list_api(initial_click={initial_click})",
+        )
+
+    async def _spy_click_sort():
+        ordering_log.append("click_sort_button_robust")
+
+    sess._attach_response_handler = _spy_attach  # type: ignore[assignment]
+    sess._trigger_review_list_api = _spy_trigger  # type: ignore[assignment]
+    sess._click_sort_button_robust = _spy_click_sort  # type: ignore[assignment]
+    # NOTE: `_wait_for_review_sort_area_ready` is intentionally NOT
+    # spied — the test's purpose is to drive the REAL wait + the
+    # new scoped-click branch end-to-end against the page fake.
+    return sess, ordering_log, old_page, new_page_ref
+
+
+@pytest.mark.asyncio
+async def test_scroll_to_sort_area_runs_before_sort_click_on_recreate():
+    """Test A — ordering invariant: on the recreate fallback path,
+    the new scroll-to-sort-area step fires BEFORE any sort click.
+
+    The cascade's expected ordering on a recreate with the target
+    label matched on the first probe is:
+
+        attach_response_handler
+          → trigger_review_list_api(initial_click=True)
+          → (readiness wait runs against new page — populates
+             `_last_readiness_matched_button` /
+             `_last_readiness_matched_container`)
+          → container scroll_into_view_if_needed
+          → button scroll_into_view_if_needed + click (scoped)
+          → robust click NOT invoked (scoped click succeeded)
+
+    The matched container's scroll count must be >= 1 BEFORE the
+    matched button's click count flips, and the spy
+    `_click_sort_button_robust` must NOT appear in the ordering log.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Cascade ran on the recreate path (old-page reload raises).
+    assert sess._ctx.new_page_calls == 1
+    assert len(new_page_ref) == 1
+    new_page = new_page_ref[0]
+
+    # Container was scrolled into view at least once before any
+    # robust click would fire.
+    assert new_page.container_scroll_into_view_calls >= 1
+
+    # The matched button was clicked exactly once via the scoped
+    # path; the robust hunt was NOT invoked.
+    assert new_page._matched_button is not None
+    assert new_page._matched_button.click_calls == 1
+    assert "click_sort_button_robust" not in ordering_log
+
+    # Tri-state readiness still flips to True (readiness wait found
+    # the container on the first probe).
+    assert sess._post_recreate_sort_area_ready is True
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_skips_robust_hunt_when_readiness_matches_target():
+    """Test B — scoped click on the readiness-matched button.
+
+    When `_wait_for_review_sort_area_ready` records a matched button
+    handle (secondary signal `target_label_visible`), the cascade
+    clicks that handle directly with a short timeout. The robust
+    hunt (`_click_sort_button_robust`) is NOT invoked because the
+    scoped click already fired the target sort.
+
+    This eliminates the DOM-re-query race observed on Ilso
+    A000000225736 where the readiness probe saw `최신순` at
+    poll_attempt=1 but the subsequent robust hunt could not find it
+    12 seconds later.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Matched button handle was populated by the readiness probe.
+    assert sess._last_readiness_matched_button is not None
+    # Robust hunt was NOT invoked.
+    assert "click_sort_button_robust" not in ordering_log
+    # Scoped click landed on the matched button exactly once.
+    new_page = new_page_ref[0]
+    assert new_page._matched_button.click_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_falls_back_to_robust_when_click_raises():
+    """Test C — when the matched button's `click()` raises, the
+    cascade falls through to `_click_sort_button_robust`. The
+    existing `sort_control_unreachable` failure-mode contract is
+    preserved on the worst case where the robust hunt also fails.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_should_raise=True,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Scoped click WAS attempted (count incremented) but raised.
+    assert new_page._matched_button.click_calls == 1
+    # Robust hunt WAS invoked as the fallback.
+    assert "click_sort_button_robust" in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_falls_back_when_container_scroll_raises():
+    """Container `scroll_into_view_if_needed` raising must not
+    prevent the cascade from completing — the scoped click still
+    attempts on the matched button. If the click also raises, the
+    cascade falls through to the robust hunt.
+
+    This covers the edge case where the matched container locator
+    becomes stale between the readiness probe and the cascade's
+    scroll attempt (production: the page state can drift).
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        container_scroll_should_raise=True,
+        # Make the scoped click also raise so the fallback path is
+        # exercised end-to-end.
+        click_should_raise=True,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Container scroll WAS attempted (then raised).
+    assert new_page.container_scroll_into_view_calls >= 1
+    # Scoped click attempt followed (then raised).
+    assert new_page._matched_button.click_calls == 1
+    # Robust hunt fell back as expected.
+    assert "click_sort_button_robust" in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_no_scoped_click_when_container_visible_only_signal():
+    """When the readiness wait fires on the weaker
+    `container_visible` primary signal (no target label match in
+    DOM), there is no matched button to click directly. The cascade
+    pre-scrolls the matched container into view and falls through
+    to `_click_sort_button_robust` for the standard hunt.
+
+    Driven by `target_button_label=None` on the fake so the inner
+    text-match probe never records a button; the container probe
+    still succeeds, so the readiness wait returns True via
+    `container_visible` only.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label=None,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Container was pre-scrolled (provides the deterministic
+    # scroll-to-area benefit even without a button handle).
+    assert new_page.container_scroll_into_view_calls >= 1
+    # No matched button → no scoped click attempted.
+    assert sess._last_readiness_matched_button is None
+    # Robust hunt fell back as the click path.
+    assert "click_sort_button_robust" in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_listener_install_ordering_preserved():
+    """Test D — listener-before-trigger invariant preserved across
+    the new scoped-click branch.
+
+    On the recreate fallback path, `_attach_response_handler` runs
+    BEFORE `_trigger_review_list_api` AND BEFORE any sort-click
+    (scoped or robust). This pins the existing
+    `test_recovery_wait_before_click_ordering` contract with the
+    new scoped-click step inserted between trigger and click.
+    """
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    attach_index = ordering_log.index("attach_response_handler")
+    trigger_index = ordering_log.index(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    # The scoped click on the matched button is observable on the
+    # page-fake itself (not via the ordering log) — assert that the
+    # scoped click happened AFTER both attach and trigger by reading
+    # the call counter (which only increments inside the cascade,
+    # AFTER the readiness wait, which the trigger precedes).
+    new_page = new_page_ref[0]
+    assert attach_index < trigger_index
+    assert new_page._matched_button is not None
+    assert new_page._matched_button.click_calls == 1
+    # Robust hunt was NOT invoked (scoped click succeeded). No
+    # ordering check against the robust click is needed because it
+    # never fired.
+    assert "click_sort_button_robust" not in ordering_log
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_uses_readiness_matched_handle_not_reprobe():
+    """The scoped click MUST operate on the same locator instance
+    the readiness probe recorded. This pins the contract: no DOM
+    re-query between readiness signal and scoped click.
+
+    Asserts that the locator instance stored on
+    `_last_readiness_matched_button` is the SAME object whose
+    `click_calls` counter incremented — i.e. no separate
+    re-enumeration produced a different button handle.
+    """
+    sess, _, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # The recorded handle on the session IS the page's matched
+    # button instance — identity equality, not just count parity.
+    assert sess._last_readiness_matched_button is new_page._matched_button
+    # And that exact handle was clicked.
+    assert new_page._matched_button.click_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_skipped_when_readiness_wait_deadlines():
+    """Defensive contract: when readiness returns False (container
+    never observed within budget), the scoped-click branch must NOT
+    fire on a stale or never-set handle. The cascade falls through
+    to `_click_sort_button_robust` as today, preserving the existing
+    failure-mode contract.
+
+    Uses `_build_readiness_session` with a never-visible threshold,
+    which is the same fixture the prior
+    `test_recovery_wait_times_out_then_single_shot_retrigger_then_click_still_runs`
+    test exercises. The new contract is that the matched-button
+    handle stays None (or is reset to None on entry to the wait),
+    so the cascade cannot accidentally click a previous run's
+    button.
+    """
+    sess, ordering_log, _, _ = _build_readiness_session(
+        sort_button_label_ko="최신순",
+        sort_area_visible_after_count=10_000,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Readiness deadlined → no matched-button handle was set.
+    matched_button = getattr(
+        sess, "_last_readiness_matched_button", None,
+    )
+    assert matched_button is None
+    # Robust hunt still fired (preserves current failure-mode
+    # contract: hunt's own deadline maps to `sort_control_unreachable`).
+    assert "click_sort_button_robust" in ordering_log
+    # Tri-state readiness recorded as False.
+    assert sess._post_recreate_sort_area_ready is False

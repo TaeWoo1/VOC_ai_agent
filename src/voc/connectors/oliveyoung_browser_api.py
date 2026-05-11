@@ -2985,6 +2985,30 @@ class _PlaywrightReviewSession:
         # emits a single narrow `_note` so the next post-mortem can tell
         # whether the wait succeeded or deadlined.
         self._post_recreate_sort_area_ready: bool | None = None
+        # I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK — side-channel
+        # output from `_wait_for_review_sort_area_ready` when the
+        # secondary signal `target_label_visible` fires. Carries the
+        # Playwright locator handle that matched the target sort label
+        # so the cascade can scroll it into view and click it directly,
+        # eliminating the DOM-re-query race that produced the live
+        # symptom on Ilso A000000225736 (readiness emitted
+        # `target_label_visible target='최신순' poll_attempt=1` at
+        # 15:01:20; `_click_sort_button_robust` deadlined at 15:01:32
+        # without finding `최신순` in its enumeration). None means
+        # either (a) the wait deadlined without observing the target
+        # label, or (b) the wait succeeded only via the weaker
+        # `container_visible` primary signal (target label not yet
+        # inline-rendered when the container appeared). The cascade
+        # reads this immediately after the wait returns and falls
+        # back to `_click_sort_button_robust` whenever the handle is
+        # unusable.
+        self._last_readiness_matched_button: object | None = None
+        # I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK — also records
+        # the first matching `_sort_container_candidates` selector so
+        # the cascade can `scroll_into_view_if_needed` on the
+        # container before falling back to the robust hunt when only
+        # the weaker `container_visible` primary signal fired.
+        self._last_readiness_matched_container: object | None = None
         # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — which recovery
         # strategy `reload_and_reopen_review_tab` ended up using on the
         # most recent invocation. The Ilso A000000225736 live proof
@@ -4285,11 +4309,26 @@ class _PlaywrightReviewSession:
         def _normalize(s: str) -> str:
             return re.sub(r"\s+", " ", s or "").strip()
 
+        # I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK — reset
+        # side-channel handles on every entry so a previous wait's
+        # matched-button stale handle never leaks into a subsequent
+        # cascade. Set inside the inner probes when the corresponding
+        # signal fires; the caller reads them immediately after this
+        # method returns True.
+        self._last_readiness_matched_button = None
+        self._last_readiness_matched_container = None
+
         async def _container_visible() -> bool:
             for selector in self._sort_container_candidates:
                 try:
                     container = page.locator(selector).first
                     if await container.count() > 0:
+                        # Side-channel: record the FIRST matching
+                        # container so the caller can pre-scroll it
+                        # into view when only the weaker
+                        # `container_visible` signal fires.
+                        if self._last_readiness_matched_container is None:
+                            self._last_readiness_matched_container = container
                         return True
                 except Exception:
                     continue
@@ -4318,6 +4357,15 @@ class _PlaywrightReviewSession:
                         except Exception:
                             continue
                         if _normalize(txt) == target_ko:
+                            # Side-channel: record the matched
+                            # button locator so the caller can do a
+                            # scoped immediate click without
+                            # re-querying the DOM (eliminating the
+                            # 12-second race observed on Ilso
+                            # A000000225736 where the readiness wait
+                            # saw `최신순` but the subsequent hunt
+                            # could not find it).
+                            self._last_readiness_matched_button = cand
                             return True
             return False
 
@@ -4499,11 +4547,109 @@ class _PlaywrightReviewSession:
                     )
                     ready = False
             self._post_recreate_sort_area_ready = bool(ready)
+        # I-OY-RECOVERY-SCROLL-TO-REVIEW-SORT-AND-CLICK — between
+        # readiness and the robust hunt, attempt to scroll the
+        # readiness-matched element into view AND, when a button
+        # handle is available (secondary signal `target_label_visible`
+        # fired), do a scoped immediate click on that handle. This
+        # closes the 12-second race observed on Ilso A000000225736
+        # where `_wait_for_review_sort_area_ready` saw `최신순` at
+        # poll_attempt=1 but `_click_sort_button_robust` deadlined 12s
+        # later without finding it in its own enumeration. Reusing
+        # the locator the wait already validated eliminates the
+        # DOM-re-query race entirely.
+        #
+        # Best-effort with two-stage fallback:
+        #   (1) Scoped immediate click — short timeout (2.5s). On
+        #       success, return early (skip the robust hunt entirely).
+        #   (2) Pre-scroll the matched container into view, then fall
+        #       through to `_click_sort_button_robust`. This still
+        #       benefits the case where readiness fired on the weaker
+        #       `container_visible` signal only.
+        #   (3) On any failure of (1)/(2), still call
+        #       `_click_sort_button_robust` so the existing
+        #       `sort_control_unreachable` failure-mode contract is
+        #       preserved on the worst case.
+        scoped_click_succeeded = False
+        if (
+            ready
+            and (
+                self._sort_button_label_ko is not None
+                or self._sort_button_selector is not None
+            )
+        ):
+            # `getattr` with default so test fixtures that build a
+            # session via `object.__new__` and spy out
+            # `_wait_for_review_sort_area_ready` (the real wait is the
+            # only writer of these handles) don't trip on the
+            # attribute-missing case. In production both attributes
+            # are initialised in `__init__`.
+            matched_button = getattr(
+                self, "_last_readiness_matched_button", None,
+            )
+            matched_container = getattr(
+                self, "_last_readiness_matched_container", None,
+            )
+            # Pre-scroll the matched container (if any) into view.
+            # The matched container exists whenever readiness returned
+            # True, so this is a deterministic prep step before either
+            # the scoped click OR the robust hunt fallback.
+            if matched_container is not None:
+                try:
+                    await matched_container.scroll_into_view_if_needed(
+                        timeout=2000,
+                    )
+                    logger.info(
+                        "OY scrolled to review sort area before "
+                        "recovery click",
+                    )
+                except Exception as e:
+                    logger.info(
+                        "OY review sort area scroll failed; falling "
+                        "back to robust click: %s", e,
+                    )
+            # Scoped immediate click on the readiness-matched button
+            # when available. The button locator is the EXACT element
+            # the readiness probe just validated; no DOM re-query.
+            if matched_button is not None:
+                try:
+                    try:
+                        await matched_button.scroll_into_view_if_needed(
+                            timeout=1000,
+                        )
+                    except Exception:
+                        pass
+                    await matched_button.click(timeout=2500)
+                    scoped_click_succeeded = True
+                    # Record the same diagnostic line shape that
+                    # `_click_sort_button_robust` emits on success so
+                    # downstream log scans see a single uniform format.
+                    logger.info(
+                        "OY sort-button clicked: target=%r expected_sort=%r "
+                        "scope=%s poll_attempt=%d",
+                        self._sort_button_label_ko,
+                        self._expected_sort_type,
+                        "readiness_matched_button",
+                        1,
+                    )
+                except Exception as e:
+                    logger.info(
+                        "OY scoped sort-button click via readiness "
+                        "match failed; falling back to robust hunt: %s",
+                        e,
+                    )
+
         # Step 8 — sort-button click. Runs whether or not the readiness
         # wait succeeded (preserves current failure-mode contract).
+        # Skipped only when the scoped immediate click above already
+        # clicked the target label, eliminating the duplicate-click
+        # risk on the reloaded/recreated page.
         if (
-            self._sort_button_label_ko is not None
-            or self._sort_button_selector is not None
+            not scoped_click_succeeded
+            and (
+                self._sort_button_label_ko is not None
+                or self._sort_button_selector is not None
+            )
         ):
             try:
                 await self._click_sort_button_robust()
