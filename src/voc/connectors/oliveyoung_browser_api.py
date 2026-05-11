@@ -1848,6 +1848,19 @@ class OliveYoungBrowserAPIConnector:
                                     )
                                 except Exception:
                                     pass
+                                # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
+                                # clear the page-state probe flag at
+                                # the same window-exit points as the
+                                # response probe flag. Both share the
+                                # recovery-window scope.
+                                try:
+                                    setattr(
+                                        session,
+                                        "_diagnose_post_recreate_page_state",
+                                        False,
+                                    )
+                                except Exception:
+                                    pass
 
                             try:
                                 # Stepped backoff before recreate (jittered).
@@ -1870,6 +1883,24 @@ class OliveYoungBrowserAPIConnector:
                                     setattr(
                                         session,
                                         "_diagnose_post_recovery_responses",
+                                        True,
+                                    )
+                                except Exception:
+                                    pass
+                                # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
+                                # enable the page-state probe alongside
+                                # the response probe. The recovery
+                                # primitive and the shared cascade read
+                                # this flag by attribute lookup so the
+                                # change takes effect immediately. The
+                                # two flags share the recovery-window
+                                # scope; they are flipped together to
+                                # keep diagnostic-window semantics
+                                # consistent.
+                                try:
+                                    setattr(
+                                        session,
+                                        "_diagnose_post_recreate_page_state",
                                         True,
                                     )
                                 except Exception:
@@ -3161,6 +3192,26 @@ class _PlaywrightReviewSession:
         self._post_recovery_response_accepted_count: int = 0
         self._post_recovery_response_sort_mismatch_count: int = 0
         self._post_recovery_response_parse_error_count: int = 0
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — diagnostic-only
+        # gate that scopes the page-state-snapshot helper (and the
+        # `_trigger_review_list_api` outcome summary) to the post-
+        # recovery window. Mirrors `_diagnose_post_recovery_responses`:
+        # the connector flips this flag True alongside the response
+        # diagnostic immediately BEFORE `reload_and_reopen_review_tab`
+        # is awaited and flips it False at every exit from the recovery
+        # branch. Default False so initial-open / happy-path collection
+        # emits no page-state probe logs.
+        #
+        # Why a second flag (vs reusing `_diagnose_post_recovery_responses`):
+        # the response-probe flag scopes per-response logging inside the
+        # `_on_response` handler — it should stay True for the entire
+        # post-recreate cursor-cold-start window so every cursor response
+        # is observed. The page-state probe is invoked from a different
+        # surface (the recovery primitive + cascade), so a separate
+        # attribute lookup keeps the two scopes independent in case a
+        # future ticket needs to disable one without the other. The
+        # connector flips both together today.
+        self._diagnose_post_recreate_page_state: bool = False
         # Total review count surfaced by the product page or the cursor
         # API response, when available. Best-effort metadata only; None
         # when the page/API didn't expose it (legacy endpoints, anti-bot
@@ -4457,12 +4508,35 @@ class _PlaywrightReviewSession:
         """
         if self._page is None:
             return
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — local outcome
+        # bookkeeping for the optional trigger-outcome diagnostic line.
+        # These locals are written by the steps below regardless of the
+        # diagnostic flag (zero overhead — assignments are cheap); the
+        # summary line is only emitted when the flag is True. Behavior
+        # of every step is unchanged.
+        review_tab_locator_count: int | str = "unknown"
+        review_tab_scroll_into_view: str = "skipped"
+        review_tab_click_attempted: bool = False
+        review_tab_click_raised: bool = False
+        window_scroll_by_executed: bool = False
         # Step 1: review-tab click.
         if initial_click:
             try:
                 tab = self._page.locator(self._review_tab_locator).first
-                if await tab.count() > 0:
-                    await tab.click(timeout=5000)
+                try:
+                    review_tab_locator_count = int(await tab.count())
+                except Exception:
+                    review_tab_locator_count = "unknown"
+                if (
+                    isinstance(review_tab_locator_count, int)
+                    and review_tab_locator_count > 0
+                ):
+                    review_tab_click_attempted = True
+                    try:
+                        await tab.click(timeout=5000)
+                    except Exception:
+                        review_tab_click_raised = True
+                        raise
             except Exception as e:
                 logger.info(
                     "OY review-tab click skipped/failed (benign): %s", e,
@@ -4473,9 +4547,23 @@ class _PlaywrightReviewSession:
         # by build.
         try:
             tab = self._page.locator(self._review_tab_locator).first
-            if await tab.count() > 0:
-                await tab.scroll_into_view_if_needed(timeout=3000)
-                self._scrolled_to_review_area = True
+            # Refresh the count if Step 1 didn't run (initial_click=False).
+            if review_tab_locator_count == "unknown":
+                try:
+                    review_tab_locator_count = int(await tab.count())
+                except Exception:
+                    review_tab_locator_count = "unknown"
+            if (
+                isinstance(review_tab_locator_count, int)
+                and review_tab_locator_count > 0
+            ):
+                try:
+                    await tab.scroll_into_view_if_needed(timeout=3000)
+                    self._scrolled_to_review_area = True
+                    review_tab_scroll_into_view = "ok"
+                except Exception:
+                    review_tab_scroll_into_view = "failed"
+                    raise
         except Exception as e:
             logger.debug(
                 "OY scroll-into-view skipped (benign): %s", e,
@@ -4486,6 +4574,7 @@ class _PlaywrightReviewSession:
             await self._page.evaluate(
                 "() => window.scrollBy(0, window.innerHeight * 2)"
             )
+            window_scroll_by_executed = True
         except Exception:
             pass
         # Step 3: 리뷰 더보기 click (best-effort).
@@ -4501,6 +4590,33 @@ class _PlaywrightReviewSession:
                     "OY 리뷰 더보기 click via %s skipped (benign): %s",
                     sel, e,
                 )
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — emit a single
+        # compact summary line ONLY when the page-state diagnostic flag
+        # is True (i.e. inside the recovery window). The summary
+        # describes which review-tab cascade steps actually executed,
+        # which is the surface where the live proof showed the
+        # cascade not bringing the sort palette into the DOM. The
+        # behavior of the cascade is unchanged whether the flag is on
+        # or off; only the log emission is gated.
+        try:
+            if getattr(
+                self, "_diagnose_post_recreate_page_state", False,
+            ):
+                logger.info(
+                    "OY recovery trigger outcome: "
+                    "review_tab_locator_count=%s "
+                    "review_tab_scroll_into_view=%s "
+                    "review_tab_click_attempted=%s "
+                    "review_tab_click_raised=%s "
+                    "window_scroll_by_executed=%s",
+                    review_tab_locator_count,
+                    review_tab_scroll_into_view,
+                    "true" if review_tab_click_attempted else "false",
+                    "true" if review_tab_click_raised else "false",
+                    "true" if window_scroll_by_executed else "false",
+                )
+        except Exception:
+            pass
 
     def get_review_more_button_clicked(self) -> bool:
         """Telemetry getter — True iff the cascade clicked
@@ -4666,6 +4782,21 @@ class _PlaywrightReviewSession:
             "deadlines.",
             attempt, timeout_s, target_ko,
         )
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — snapshot the
+        # page state on the readiness-deadline branch so the
+        # post-mortem can see what DOM the page DOES have when the
+        # sort area never appeared. This is the surface the prior
+        # live proof showed only nav/share/category buttons in the
+        # enumeration; the snapshot fields will confirm whether the
+        # sort container was simply absent or whether some other
+        # container shadowed the probe. Best-effort, no-op when the
+        # diagnostic flag is False.
+        try:
+            await self._snapshot_recovery_page_state(
+                checkpoint="sort_readiness_timeout",
+            )
+        except Exception:
+            pass
         return False
 
     def _reload_strategy_eligible(self) -> bool:
@@ -4711,6 +4842,201 @@ class _PlaywrightReviewSession:
             return False
         return f"goodsNo={target}" in current_url
 
+    async def _snapshot_recovery_page_state(
+        self, *, checkpoint: str,
+    ) -> None:
+        """I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG.
+
+        Diagnostic-only helper: emit a single compact key=value log
+        line characterizing the recovered/reloaded page's current
+        state at a named recovery checkpoint. The Ilso A000000225736
+        live proof showed that the SAME recovery code produces TWO
+        different DOM outcomes across runs (`probes=0` on one run
+        because the review-pane never mounted; scoped click fired
+        but no cursor request on a prior run). The next live proof
+        needs URL + readyState + selector counts at every recovery
+        checkpoint to characterize this variance.
+
+        No-op when `_diagnose_post_recreate_page_state` is False
+        (default). Every probe wrapped in try/except so a malformed
+        Playwright page cannot abort recovery — diagnostics are
+        best-effort. Per-probe Playwright `timeout=1000` so the
+        helper's total wall-time stays bounded; no screenshots,
+        no `innerHTML`, no full DOM dumps.
+
+        Fields logged (in stable order):
+          checkpoint=<name>
+          url=<page.url or "unknown">
+          readyState=<document.readyState or "unknown">
+          title=<document.title or "unknown"> (truncated 60 chars)
+          url_has_goodsno=<true|false|unknown>
+          url_has_tab_review=<true|false|unknown>
+          sort_pc_count=<int|unknown>
+          sort_container_count=<int|unknown>
+          sort_classmatch_count=<int|unknown>
+          review_tab_count=<int|unknown>
+          text_has_choisin=<true|false|unknown>
+          text_has_yuyong=<true|false|unknown>
+          text_has_rating_desc=<true|false|unknown>
+          text_has_rating_asc=<true|false|unknown>
+          text_has_review_count=<true|false|unknown>
+          sort_button_candidates=<int|unknown>
+        """
+        if not getattr(
+            self, "_diagnose_post_recreate_page_state", False,
+        ):
+            return
+        page = self._page
+        if page is None:
+            return
+
+        def _bool_str(v: bool) -> str:
+            return "true" if v else "false"
+
+        # URL.
+        try:
+            url = page.url or "unknown"
+        except Exception:
+            url = "unknown"
+        # readyState.
+        try:
+            ready_state = await page.evaluate(
+                "() => document.readyState",
+            )
+            if not isinstance(ready_state, str):
+                ready_state = "unknown"
+        except Exception:
+            ready_state = "unknown"
+        # Title.
+        try:
+            title = await page.title()
+            if not isinstance(title, str):
+                title = "unknown"
+            else:
+                if len(title) > 60:
+                    title = title[:60]
+        except Exception:
+            title = "unknown"
+        # URL contains target goodsNo / tab=review.
+        url_has_goodsno: str = "unknown"
+        try:
+            target = None
+            if self._opened_product_url:
+                target = self._extract_target_goods_no(
+                    self._opened_product_url,
+                )
+            if target and isinstance(url, str):
+                url_has_goodsno = _bool_str(
+                    f"goodsNo={target}" in url,
+                )
+            elif isinstance(url, str):
+                url_has_goodsno = "false"
+        except Exception:
+            url_has_goodsno = "unknown"
+        url_has_tab_review: str = "unknown"
+        try:
+            if isinstance(url, str):
+                url_has_tab_review = _bool_str("tab=review" in url)
+        except Exception:
+            url_has_tab_review = "unknown"
+        # Sort-container counts.
+        async def _count(selector: str) -> str:
+            try:
+                n = await page.locator(selector).count()
+                return str(int(n))
+            except Exception:
+                return "unknown"
+
+        sort_pc_count = await _count("div.pc-sort")
+        sort_container_count = await _count(".sort-container")
+        sort_classmatch_count = await _count("[class*='sort']")
+        # Review-tab locator count.
+        review_tab_count: str = "unknown"
+        try:
+            if getattr(self, "_review_tab_locator", None):
+                review_tab_count = await _count(self._review_tab_locator)
+        except Exception:
+            review_tab_count = "unknown"
+
+        # Text-presence probes.
+        async def _text_present(s: str) -> str:
+            try:
+                n = await page.locator(f"text={s}").count()
+                return _bool_str(int(n) > 0)
+            except Exception:
+                return "unknown"
+
+        text_has_choisin = await _text_present("최신순")
+        text_has_yuyong = await _text_present("유용한 순")
+        text_has_rating_desc = await _text_present("평점 높은순")
+        text_has_rating_asc = await _text_present("평점 낮은순")
+        text_has_review_count = await _text_present("리뷰")
+
+        # Sort-button candidates: count interactive descendants of the
+        # first non-zero `_sort_container_candidates` match. This is
+        # the surface where the live-proof button enumeration showed
+        # ONLY nav/share/category labels (no review controls). A
+        # non-zero count here with all-zero text_has_* signals would
+        # indicate "wrong subtree mounted" vs "no subtree mounted".
+        sort_button_candidates: str = "unknown"
+        try:
+            for selector in getattr(self, "_sort_container_candidates", ()):
+                try:
+                    container = page.locator(selector).first
+                    n = await container.count()
+                    if int(n) == 0:
+                        continue
+                except Exception:
+                    continue
+                total = 0
+                for tag_selector in (
+                    "button", "a", "[role='button']",
+                ):
+                    try:
+                        sub = container.locator(tag_selector)
+                        total += int(await sub.count())
+                    except Exception:
+                        continue
+                sort_button_candidates = str(total)
+                break
+            else:
+                # No matching container — record 0 so the field
+                # distinguishes "no container" from "probe failed".
+                if getattr(self, "_sort_container_candidates", ()):
+                    sort_button_candidates = "0"
+        except Exception:
+            sort_button_candidates = "unknown"
+
+        try:
+            logger.info(
+                "OY recovery page state: "
+                "checkpoint=%s url=%s readyState=%s title=%s "
+                "url_has_goodsno=%s url_has_tab_review=%s "
+                "sort_pc_count=%s sort_container_count=%s "
+                "sort_classmatch_count=%s review_tab_count=%s "
+                "text_has_choisin=%s text_has_yuyong=%s "
+                "text_has_rating_desc=%s text_has_rating_asc=%s "
+                "text_has_review_count=%s sort_button_candidates=%s",
+                checkpoint,
+                url,
+                ready_state,
+                title,
+                url_has_goodsno,
+                url_has_tab_review,
+                sort_pc_count,
+                sort_container_count,
+                sort_classmatch_count,
+                review_tab_count,
+                text_has_choisin,
+                text_has_yuyong,
+                text_has_rating_desc,
+                text_has_rating_asc,
+                text_has_review_count,
+                sort_button_candidates,
+            )
+        except Exception:
+            pass
+
     async def _run_post_navigation_review_cascade(self) -> bool:
         """Shared post-navigation cascade reused by BOTH the reload-first
         path and the close+new_page+goto recreate path.
@@ -4755,6 +5081,18 @@ class _PlaywrightReviewSession:
                 "OY review-tab re-click cascade after recovery "
                 "skipped/failed: %s", e,
             )
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — snapshot the
+        # page state immediately AFTER the review-tab cascade so the
+        # post-mortem can see whether the cascade brought the sort
+        # area into the DOM (the Ilso `probes=0` symptom hinged on
+        # the cascade NOT mounting the sort palette). Best-effort
+        # no-op when the diagnostic flag is False.
+        try:
+            await self._snapshot_recovery_page_state(
+                checkpoint="after_review_cascade",
+            )
+        except Exception:
+            pass
         # Step 7 — readiness wait + optional single-shot re-trigger.
         # Reset to None first so a previous recreate's value doesn't
         # leak forward.
@@ -4864,6 +5202,18 @@ class _PlaywrightReviewSession:
             # when available. The button locator is the EXACT element
             # the readiness probe just validated; no DOM re-query.
             if matched_button is not None:
+                # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
+                # snapshot BEFORE the scoped click so the post-mortem
+                # can see the page state the click is firing against
+                # (URL, readyState, sort-area counts, target label
+                # visibility). The snapshot is wrapped in try/except
+                # so it cannot abort the click sequence.
+                try:
+                    await self._snapshot_recovery_page_state(
+                        checkpoint="before_scoped_click",
+                    )
+                except Exception:
+                    pass
                 try:
                     try:
                         await matched_button.scroll_into_view_if_needed(
@@ -4890,6 +5240,19 @@ class _PlaywrightReviewSession:
                         "match failed; falling back to robust hunt: %s",
                         e,
                     )
+                # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
+                # snapshot AFTER the scoped click attempt (whether
+                # it succeeded or raised). The two snapshots bracket
+                # the click so the post-mortem can compare DOM /
+                # readyState before vs after — useful to spot the
+                # case where the click landed on the DOM but the
+                # page took a slow tick to update.
+                try:
+                    await self._snapshot_recovery_page_state(
+                        checkpoint="after_scoped_click",
+                    )
+                except Exception:
+                    pass
 
         # Step 8 — sort-button click. Runs whether or not the readiness
         # wait succeeded (preserves current failure-mode contract).
@@ -5030,6 +5393,18 @@ class _PlaywrightReviewSession:
                 reload_raised = True
 
             if not reload_raised:
+                # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG —
+                # snapshot AFTER reload returns and BEFORE the shared
+                # cascade so the post-mortem can see what the reload
+                # actually produced (does the document still carry the
+                # review-tab DOM, is `tab=review` still in the URL,
+                # are sort containers present, etc.). Best-effort.
+                try:
+                    await self._snapshot_recovery_page_state(
+                        checkpoint="after_reload",
+                    )
+                except Exception:
+                    pass
                 # 0c. Shared post-navigation cascade on the reloaded
                 # page. Returns True iff the readiness wait observed
                 # the sort area within budget.
@@ -5107,6 +5482,18 @@ class _PlaywrightReviewSession:
                 "OY false-empty: re-navigation after page recreate failed: %s", e,
             )
             return
+        # I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — snapshot
+        # AFTER the recreate path's goto returns and BEFORE the
+        # shared cascade. This is the surface the prior live proof
+        # diagnosed as "review-pane DOM never mounted post-recreate";
+        # the snapshot fields will distinguish "landed on wrong URL"
+        # from "URL ok but DOM subtree absent". Best-effort.
+        try:
+            await self._snapshot_recovery_page_state(
+                checkpoint="after_goto",
+            )
+        except Exception:
+            pass
         # 6–8. Shared post-navigation cascade on the recreated page.
         # The readiness signal is recorded on
         # `self._post_recreate_sort_area_ready` inside the helper;

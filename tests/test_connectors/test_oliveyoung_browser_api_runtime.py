@@ -5930,3 +5930,1049 @@ async def test_post_recovery_summary_log_emitted_on_recovery_exit(
     assert "accepted=" in msg
     assert "sort_mismatch=" in msg
     assert "parse_error=" in msg
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG — page-state snapshot
+# diagnostic. The Ilso A000000225736 live proof showed that the
+# SAME recovery code produces TWO different post-recreate DOM
+# outcomes across runs (`probes=0` on the latest because the review-
+# pane never mounted; scoped click fired but no cursor request on a
+# prior run). The page-state snapshot characterizes the recovered
+# page at six checkpoints so the next live proof has URL / DOM data
+# to inform the next behavioral fix. Diagnostic-only — behavior
+# unchanged.
+# ---------------------------------------------------------------------------
+
+
+class _SnapshotFakePage:
+    """Stand-in Playwright Page for the page-state snapshot tests.
+
+    Exposes the fields the snapshot helper reads:
+      - `url`              (attribute)
+      - `title()`          (async)
+      - `evaluate(script)` (async — returns readyState)
+      - `locator(selector)` — returns a configurable counter
+
+    Per-selector locator counts are configurable via the
+    `selector_counts` mapping. Substring-search style probes for
+    `text=...` selectors are routed through the same mapping; tests
+    pre-populate the keys they want to drive.
+
+    `raise_for_selector` (set) — selectors in this set cause
+    `locator(sel).count()` to raise, simulating a Playwright hiccup
+    on that probe.
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str = (
+            "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+            "?goodsNo=A000000225736&tab=review"
+        ),
+        title: str = "리뷰 - Ilso 톤업 크림",
+        ready_state: str = "complete",
+        selector_counts: dict | None = None,
+        raise_for_selector: set | None = None,
+    ):
+        self.url = url
+        self._title = title
+        self._ready_state = ready_state
+        self.selector_counts = dict(selector_counts or {})
+        self.raise_for_selector = set(raise_for_selector or ())
+        # Records how many times each selector was probed via
+        # `locator(...).count()`. Tests can assert the probe surface.
+        self.locator_calls: list[str] = []
+
+    async def title(self):
+        return self._title
+
+    async def evaluate(self, script):
+        # Only the readyState script is invoked from the snapshot
+        # helper. Returning the configured value is enough.
+        return self._ready_state
+
+    def locator(self, selector):
+        outer = self
+
+        class _Loc:
+            async def count(self_inner):
+                outer.locator_calls.append(selector)
+                if selector in outer.raise_for_selector:
+                    raise RuntimeError("simulated locator.count failure")
+                return outer.selector_counts.get(selector, 0)
+
+            @property
+            def first(self_inner):
+                return self_inner
+
+            def locator(self_inner, sub_selector):
+                # Nested locator for `sort_button_candidates` probe.
+                # Route through the same selector_counts table by
+                # concatenating "<outer>::<sub>".
+                key = f"{selector}::{sub_selector}"
+                outer_obj = outer
+
+                class _SubLoc:
+                    async def count(self_sub):
+                        outer_obj.locator_calls.append(key)
+                        return outer_obj.selector_counts.get(key, 0)
+
+                return _SubLoc()
+
+        return _Loc()
+
+
+def _build_snapshot_session(
+    *,
+    page: _SnapshotFakePage | None = None,
+    opened_product_url: str = (
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        "?goodsNo=A000000225736&tab=review"
+    ),
+    sort_container_candidates: tuple[str, ...] = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    ),
+    review_tab_locator: str = "div.review-tab",
+    diagnostic_flag: bool = True,
+):
+    """Build a `_PlaywrightReviewSession` instance via `object.__new__`
+    with just enough state for `_snapshot_recovery_page_state` to run
+    against a `_SnapshotFakePage`. Mirrors the construction style used
+    by `_build_diagnostic_session`."""
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._page = page if page is not None else _SnapshotFakePage()
+    sess._opened_product_url = opened_product_url
+    sess._sort_container_candidates = tuple(sort_container_candidates)
+    sess._review_tab_locator = review_tab_locator
+    sess._diagnose_post_recreate_page_state = diagnostic_flag
+    return sess
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_state_logs_compact_fields_after_goto(caplog):
+    """A. The snapshot helper emits ONE `OY recovery page state:` log
+    line at the named checkpoint containing all configured fields.
+    Drives the helper with a fake page that has the URL containing
+    `goodsNo=A000000225736&tab=review`, readyState=`complete`,
+    `div.pc-sort` count=1, target sort label visible, review-count
+    text present.
+    """
+    import logging
+    page = _SnapshotFakePage(
+        url=(
+            "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+            "?goodsNo=A000000225736&tab=review"
+        ),
+        title="리뷰 - Ilso 톤업 크림",
+        ready_state="complete",
+        selector_counts={
+            "div.pc-sort": 1,
+            ".sort-container": 0,
+            "[class*='sort']": 3,
+            "div.review-tab": 1,
+            "text=최신순": 1,
+            "text=유용한 순": 1,
+            "text=평점 높은순": 1,
+            "text=평점 낮은순": 1,
+            "text=리뷰": 1,
+            # Sort-button candidates inside the matched container.
+            "div.pc-sort::button": 4,
+            "div.pc-sort::a": 0,
+            "div.pc-sort::[role='button']": 0,
+        },
+    )
+    sess = _build_snapshot_session(page=page)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._snapshot_recovery_page_state(checkpoint="after_goto")
+
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery page state:" in r.getMessage()
+    ]
+    assert len(state_messages) == 1
+    msg = state_messages[0]
+    assert "checkpoint=after_goto" in msg
+    assert "url=https://www.oliveyoung.co.kr" in msg
+    assert "goodsNo=A000000225736" in msg
+    assert "readyState=complete" in msg
+    assert "title=리뷰 - Ilso 톤업 크림" in msg
+    assert "url_has_goodsno=true" in msg
+    assert "url_has_tab_review=true" in msg
+    assert "sort_pc_count=1" in msg
+    assert "sort_container_count=0" in msg
+    assert "sort_classmatch_count=3" in msg
+    assert "review_tab_count=1" in msg
+    assert "text_has_choisin=true" in msg
+    assert "text_has_yuyong=true" in msg
+    assert "text_has_rating_desc=true" in msg
+    assert "text_has_rating_asc=true" in msg
+    assert "text_has_review_count=true" in msg
+    # sort_button_candidates derived from the FIRST matching container
+    # (div.pc-sort, count=1) — button(4) + a(0) + [role='button'](0) = 4.
+    assert "sort_button_candidates=4" in msg
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_state_handles_no_sort_or_review_dom(caplog):
+    """A (variant). When the recovered page has NO sort container and
+    NO target sort labels — the symptom on the prior live proof — the
+    snapshot still emits one line with the corresponding `false` /
+    `0` fields. Confirms the snapshot's signal value: it distinguishes
+    "DOM mounted but missing target" from "DOM not mounted".
+    """
+    import logging
+    # URL on a non-detail page, no goodsNo, no tab=review.
+    page = _SnapshotFakePage(
+        url="https://www.oliveyoung.co.kr/store/main",
+        title="올리브영",
+        ready_state="complete",
+        selector_counts={
+            "div.pc-sort": 0,
+            ".sort-container": 0,
+            "[class*='sort']": 0,
+            "div.review-tab": 0,
+            "text=최신순": 0,
+            "text=유용한 순": 0,
+            "text=평점 높은순": 0,
+            "text=평점 낮은순": 0,
+            "text=리뷰": 0,
+        },
+    )
+    sess = _build_snapshot_session(page=page)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._snapshot_recovery_page_state(
+            checkpoint="sort_readiness_timeout",
+        )
+
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery page state:" in r.getMessage()
+    ]
+    assert len(state_messages) == 1
+    msg = state_messages[0]
+    assert "checkpoint=sort_readiness_timeout" in msg
+    assert "url_has_goodsno=false" in msg
+    assert "url_has_tab_review=false" in msg
+    assert "sort_pc_count=0" in msg
+    assert "sort_container_count=0" in msg
+    assert "sort_classmatch_count=0" in msg
+    assert "text_has_choisin=false" in msg
+    # No matching container → sort_button_candidates is "0" (the
+    # "no container" sentinel).
+    assert "sort_button_candidates=0" in msg
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_state_probe_failure_falls_back_to_unknown(caplog):
+    """B. If `locator(selector).count()` raises for a specific
+    selector, the snapshot emits the line anyway with that field as
+    `unknown`. Other fields populate normally. The helper MUST NOT
+    propagate the exception — diagnostics are best-effort.
+    """
+    import logging
+    page = _SnapshotFakePage(
+        url=(
+            "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+            "?goodsNo=A000000225736&tab=review"
+        ),
+        ready_state="complete",
+        selector_counts={
+            "div.pc-sort": 2,
+            ".sort-container": 0,
+            "[class*='sort']": 5,
+            "div.review-tab": 1,
+            "text=최신순": 1,
+        },
+        # Probe failure for sort-classmatch selector — production-style
+        # Playwright hiccup that the helper must absorb.
+        raise_for_selector={"[class*='sort']"},
+    )
+    sess = _build_snapshot_session(page=page)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # MUST NOT raise.
+        await sess._snapshot_recovery_page_state(checkpoint="after_reload")
+
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery page state:" in r.getMessage()
+    ]
+    assert len(state_messages) == 1
+    msg = state_messages[0]
+    assert "checkpoint=after_reload" in msg
+    # Failing field collapses to "unknown".
+    assert "sort_classmatch_count=unknown" in msg
+    # Other fields still populated normally.
+    assert "sort_pc_count=2" in msg
+    assert "url_has_goodsno=true" in msg
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_state_no_log_when_flag_off(caplog):
+    """E. When `_diagnose_post_recreate_page_state` is False (default,
+    outside the recovery window), the snapshot helper is a fast no-op:
+    no log line, no probes against the page.
+    """
+    import logging
+    page = _SnapshotFakePage()
+    sess = _build_snapshot_session(page=page, diagnostic_flag=False)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._snapshot_recovery_page_state(checkpoint="after_goto")
+
+    # No log line emitted.
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery page state:")
+    ]
+    assert state_messages == []
+    # No locator probes against the page either.
+    assert page.locator_calls == []
+
+
+@pytest.mark.asyncio
+async def test_snapshot_page_state_no_log_when_page_is_none(caplog):
+    """E (variant). The helper bails fast when `self._page` is None
+    (e.g. recovery early-returned before any navigation). No log line,
+    no exception.
+    """
+    import logging
+    sess = _build_snapshot_session(page=None, diagnostic_flag=True)
+    sess._page = None
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # MUST NOT raise.
+        await sess._snapshot_recovery_page_state(checkpoint="after_goto")
+
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery page state:")
+    ]
+    assert state_messages == []
+
+
+# ---------------------------------------------------------------------------
+# C — Recovery checkpoint logs. Drive the real
+# `reload_and_reopen_review_tab` (via `_build_readiness_session`)
+# and assert the six named checkpoints fire in order.
+# ---------------------------------------------------------------------------
+
+
+class _RecoveryReadinessSnapshotPage(_RearmReadinessFakePage):
+    """Extension of `_RearmReadinessFakePage` that adds the snapshot
+    surface (`title()`, `evaluate()`) AND a target-label-visible
+    locator path so the readiness wait's `target_label_visible`
+    signal fires (which arms the scoped-click block and exercises
+    the `before_scoped_click` / `after_scoped_click` checkpoints).
+
+    When `target_label_visible=True`, the container locator returned
+    by `locator(sort_container_selector)` exposes a child
+    `locator("button")` whose `.count()` returns 1 and whose
+    `.nth(0).inner_text()` returns the configured sort label
+    (`target_label`). This is just enough surface to drive the
+    production readiness wait into the target-label branch.
+    """
+
+    def __init__(
+        self,
+        *args,
+        ready_state: str = "complete",
+        target_label_visible: bool = False,
+        target_label: str = "최신순",
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._ready_state_for_snapshot = ready_state
+        self._target_label_visible = target_label_visible
+        self._target_label = target_label
+
+    async def title(self):
+        return "리뷰 - Test Product"
+
+    async def evaluate(self, script):
+        # The snapshot helper invokes `() => document.readyState`;
+        # the parent's `evaluate` returns None which would collapse
+        # to "unknown" in the log. Return the configured ready state
+        # so the integration test sees `readyState=complete`. The
+        # window scroll evaluate in `_trigger_review_list_api` also
+        # passes through here — returning a string is harmless
+        # because that caller discards the return value.
+        return self._ready_state_for_snapshot
+
+    def locator(self, selector):
+        # Hand back a target-label-aware locator only when the
+        # readiness wait probes one of our sort container selectors
+        # AND the test asked for target-label visibility. Otherwise
+        # fall through to the parent's count-flipping semantics.
+        if (
+            self._target_label_visible
+            and selector in self._sort_container_selectors
+        ):
+            outer = self
+
+            class _BtnLoc:
+                # The "button-handle" returned for matched_button.
+                async def scroll_into_view_if_needed(self_inner, timeout=None):
+                    return None
+
+                async def click(self_inner, timeout=None):
+                    return None
+
+                async def inner_text(self_inner, timeout=None):
+                    return outer._target_label
+
+            class _BtnArrayLoc:
+                async def count(self_inner):
+                    return 1
+
+                def nth(self_inner, _i):
+                    return _BtnLoc()
+
+            class _ContainerLoc:
+                async def count(self_inner):
+                    return 1
+
+                def locator(self_inner, sub_selector):
+                    if sub_selector == "button":
+                        return _BtnArrayLoc()
+                    # Non-button tag selectors → zero count.
+                    class _Zero:
+                        async def count(self_z):
+                            return 0
+
+                        def nth(self_z, _i):  # pragma: no cover
+                            return _BtnLoc()
+
+                    return _Zero()
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+                async def scroll_into_view_if_needed(self_inner, timeout=None):
+                    return None
+
+            return _ContainerLoc()
+        return super().locator(selector)
+
+
+@pytest.mark.asyncio
+async def test_recovery_checkpoints_fire_in_order_on_recreate_path():
+    """C. Drive the real `reload_and_reopen_review_tab` through the
+    recreate-fallback branch (reload disabled). With the page-state
+    diagnostic flag flipped True on the session, the four recreate-
+    path checkpoints fire in order:
+        after_goto → after_review_cascade →
+        before_scoped_click → after_scoped_click
+    (Snapshot of `after_reload` is the reload-path-only checkpoint
+    and does NOT fire on the recreate-only branch.)
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Build a context that hands out a recovery-readiness snapshot page.
+    new_page_ref: list = []
+
+    class _SnapshotCtx(_FakeBrowserContext):
+        async def new_page(self):
+            self.new_page_calls += 1
+            page = _RecoveryReadinessSnapshotPage(
+                url="about:blank",
+                sort_area_visible_after_count=0,
+                reload_should_raise=True,
+                target_label_visible=True,
+                target_label="최신순",
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    old_page = _RearmFakeAsyncPage(url=_PRODUCT_URL_TAB_REVIEW)
+    sess._ctx = _SnapshotCtx([])
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC"
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = "최신순"
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = 0.2
+    sess._sort_hunt_poll_interval_s = 0.02
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+    # Flag must be True to exercise the snapshot calls. In production
+    # the connector flips this before invoking recreate.
+    sess._diagnose_post_recreate_page_state = True
+    # Spy out heavy primitives to keep this an ordering test.
+    sess._trigger_review_list_api = (  # type: ignore[assignment]
+        lambda *, initial_click=True: asyncio.sleep(0)
+    )
+    sess._click_sort_button_robust = (  # type: ignore[assignment]
+        lambda: asyncio.sleep(0)
+    )
+
+    import logging as _logging
+    with pytest_capture_log(_logging.INFO) as records:
+        await sess.reload_and_reopen_review_tab()
+
+    state_messages = [
+        r.getMessage()
+        for r in records
+        if r.getMessage().startswith("OY recovery page state:")
+    ]
+    checkpoints = [
+        msg.split("checkpoint=")[1].split(" ")[0]
+        for msg in state_messages
+    ]
+    # Reload-first is eligible by URL contract, but the fake reload
+    # raises (reload_should_raise default True on the OLD page), so
+    # we go straight to the recreate fallback. On the recreate path:
+    # after_goto → after_review_cascade → before_scoped_click →
+    # after_scoped_click.
+    assert checkpoints[:1] == ["after_goto"], (
+        f"first checkpoint must be after_goto on the recreate path; "
+        f"got {checkpoints!r}"
+    )
+    assert "after_review_cascade" in checkpoints
+    assert "before_scoped_click" in checkpoints
+    assert "after_scoped_click" in checkpoints
+    # Order constraints across the recreate path.
+    after_goto_idx = checkpoints.index("after_goto")
+    after_cascade_idx = checkpoints.index("after_review_cascade")
+    before_click_idx = checkpoints.index("before_scoped_click")
+    after_click_idx = checkpoints.index("after_scoped_click")
+    assert (
+        after_goto_idx < after_cascade_idx < before_click_idx < after_click_idx
+    ), f"checkpoint order broken: {checkpoints!r}"
+
+
+@pytest.mark.asyncio
+async def test_recovery_checkpoint_after_reload_fires_on_reload_first_path():
+    """C (variant). On the reload-first success path the
+    `after_reload` checkpoint fires BEFORE `after_review_cascade`.
+    The recreate fallback's `after_goto` does NOT fire because the
+    reload-first path returned early.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Old page reload SUCCEEDS (reload_should_raise=False). The same
+    # page object hosts the post-reload cascade — no new_page() is
+    # invoked on the reload-first success path.
+    old_page = _RecoveryReadinessSnapshotPage(
+        url=_PRODUCT_URL_TAB_REVIEW,
+        sort_area_visible_after_count=0,
+        reload_should_raise=False,
+        target_label_visible=True,
+        target_label="최신순",
+    )
+    sess._ctx = _FakeBrowserContext([])
+    sess._page = old_page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC"
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = "최신순"
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = 0.2
+    sess._sort_hunt_poll_interval_s = 0.02
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+    sess._diagnose_post_recreate_page_state = True
+    sess._trigger_review_list_api = (  # type: ignore[assignment]
+        lambda *, initial_click=True: asyncio.sleep(0)
+    )
+    sess._click_sort_button_robust = (  # type: ignore[assignment]
+        lambda: asyncio.sleep(0)
+    )
+
+    import logging as _logging
+    with pytest_capture_log(_logging.INFO) as records:
+        await sess.reload_and_reopen_review_tab()
+
+    state_messages = [
+        r.getMessage()
+        for r in records
+        if r.getMessage().startswith("OY recovery page state:")
+    ]
+    checkpoints = [
+        msg.split("checkpoint=")[1].split(" ")[0]
+        for msg in state_messages
+    ]
+    # Reload-first success path: after_reload fires; recreate-fallback
+    # checkpoints (after_goto) do not.
+    assert "after_reload" in checkpoints, (
+        f"after_reload must fire on the reload-first path; got {checkpoints!r}"
+    )
+    assert "after_goto" not in checkpoints, (
+        f"after_goto must NOT fire on the reload-first success path; "
+        f"got {checkpoints!r}"
+    )
+    assert "after_review_cascade" in checkpoints
+    # after_reload precedes after_review_cascade.
+    reload_idx = checkpoints.index("after_reload")
+    cascade_idx = checkpoints.index("after_review_cascade")
+    assert reload_idx < cascade_idx
+
+
+@pytest.mark.asyncio
+async def test_recovery_checkpoint_sort_readiness_timeout_fires_on_deadline(
+    caplog,
+):
+    """C (variant). Drive `_wait_for_review_sort_area_ready` to a
+    deadline (sort container never appears) and assert the
+    `sort_readiness_timeout` checkpoint fires alongside the existing
+    `OY review sort area NOT ready` WARNING.
+    """
+    import logging
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Page whose locator counts are always zero — the container never
+    # appears within the compressed deadline.
+    page = _SnapshotFakePage(
+        url=(
+            "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+            "?goodsNo=A000000225736&tab=review"
+        ),
+        ready_state="complete",
+        selector_counts={
+            # All zero → container_visible never fires.
+            "div.pc-sort": 0,
+            ".sort-container": 0,
+            "[class*='sort']": 0,
+            "div.review-tab": 0,
+            "text=최신순": 0,
+            "text=유용한 순": 0,
+            "text=평점 높은순": 0,
+            "text=평점 낮은순": 0,
+            "text=리뷰": 0,
+        },
+    )
+    sess._page = page
+    sess._sort_button_label_ko = "최신순"
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._opened_product_url = (
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        "?goodsNo=A000000225736&tab=review"
+    )
+    sess._review_tab_locator = "div.review-tab"
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+    sess._diagnose_post_recreate_page_state = True
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # Compressed budget so the deadline test stays fast.
+        ready = await sess._wait_for_review_sort_area_ready(
+            timeout_s=0.05, poll_interval_s=0.01,
+        )
+
+    # Existing contract: wait returns False on deadline.
+    assert ready is False
+    # New checkpoint fires.
+    state_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery page state:" in r.getMessage()
+    ]
+    timeout_messages = [
+        msg for msg in state_messages
+        if "checkpoint=sort_readiness_timeout" in msg
+    ]
+    assert len(timeout_messages) == 1
+
+
+# ---------------------------------------------------------------------------
+# D — Trigger outcome diagnostics. Drive `_trigger_review_list_api`
+# directly and assert the `OY recovery trigger outcome:` summary
+# line shape.
+# ---------------------------------------------------------------------------
+
+
+class _TriggerOutcomeFakePage:
+    """Minimal fake page for the trigger-outcome diagnostic tests.
+    Configurable per-locator return values so each test can drive a
+    specific cascade-step outcome.
+    """
+
+    REVIEW_MORE_DEFAULT = "button.review-more"
+
+    def __init__(
+        self,
+        *,
+        review_tab_count: int = 1,
+        scroll_into_view_should_raise: bool = False,
+        click_should_raise: bool = False,
+        evaluate_should_raise: bool = False,
+        more_button_count: int = 0,
+    ):
+        self._review_tab_count = review_tab_count
+        self._scroll_into_view_should_raise = scroll_into_view_should_raise
+        self._click_should_raise = click_should_raise
+        self._evaluate_should_raise = evaluate_should_raise
+        self._more_button_count = more_button_count
+        self.evaluate_calls: list[str] = []
+
+    def locator(self, selector):
+        outer = self
+
+        class _Loc:
+            async def count(self_inner):
+                # Review-tab locator → configured count.
+                # Anything else (review-more selectors) → 0 unless
+                # the test set `more_button_count`.
+                if selector == "div.review-tab":
+                    return outer._review_tab_count
+                return outer._more_button_count
+
+            async def click(self_inner, timeout=None):
+                if outer._click_should_raise:
+                    raise RuntimeError("simulated click failure")
+                return None
+
+            async def scroll_into_view_if_needed(self_inner, timeout=None):
+                if outer._scroll_into_view_should_raise:
+                    raise RuntimeError("simulated scroll failure")
+                return None
+
+            @property
+            def first(self_inner):
+                return self_inner
+
+        return _Loc()
+
+    async def evaluate(self, script):
+        self.evaluate_calls.append(script)
+        if self._evaluate_should_raise:
+            raise RuntimeError("simulated evaluate failure")
+        return None
+
+
+def _build_trigger_session(
+    *,
+    page: _TriggerOutcomeFakePage,
+    diagnostic_flag: bool = True,
+):
+    """Construct a `_PlaywrightReviewSession` with just enough surface
+    for `_trigger_review_list_api` to run end-to-end."""
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._page = page
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._diagnose_post_recreate_page_state = diagnostic_flag
+    return sess
+
+
+@pytest.mark.asyncio
+async def test_trigger_outcome_diagnostic_success_path_logs_summary(caplog):
+    """D. With the diagnostic flag True and the trigger cascade
+    succeeding at every step, the `OY recovery trigger outcome:`
+    summary line shows the expected outcome fields.
+    """
+    import logging
+    page = _TriggerOutcomeFakePage(
+        review_tab_count=1,
+        scroll_into_view_should_raise=False,
+        click_should_raise=False,
+        evaluate_should_raise=False,
+    )
+    sess = _build_trigger_session(page=page)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._trigger_review_list_api(initial_click=True)
+
+    outcome_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery trigger outcome:" in r.getMessage()
+    ]
+    assert len(outcome_messages) == 1
+    msg = outcome_messages[0]
+    assert "review_tab_locator_count=1" in msg
+    assert "review_tab_scroll_into_view=ok" in msg
+    assert "review_tab_click_attempted=true" in msg
+    assert "review_tab_click_raised=false" in msg
+    assert "window_scroll_by_executed=true" in msg
+
+
+@pytest.mark.asyncio
+async def test_trigger_outcome_diagnostic_failing_scroll_does_not_change_behavior(
+    caplog,
+):
+    """D (variant). When `scroll_into_view_if_needed` raises, the
+    cascade still completes (best-effort) AND the outcome line
+    reports `review_tab_scroll_into_view=failed`. Critically the
+    cascade's overall return contract is unchanged — no exception
+    propagates.
+    """
+    import logging
+    page = _TriggerOutcomeFakePage(
+        review_tab_count=1,
+        scroll_into_view_should_raise=True,
+        click_should_raise=False,
+    )
+    sess = _build_trigger_session(page=page)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # MUST NOT raise.
+        await sess._trigger_review_list_api(initial_click=True)
+
+    outcome_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery trigger outcome:" in r.getMessage()
+    ]
+    assert len(outcome_messages) == 1
+    msg = outcome_messages[0]
+    assert "review_tab_scroll_into_view=failed" in msg
+    # Click still attempted (the failure was in Step 2, not Step 1).
+    assert "review_tab_click_attempted=true" in msg
+    # Window scroll ran (Step 2 failure doesn't gate Step 2b's evaluate).
+    assert "window_scroll_by_executed=true" in msg
+
+
+@pytest.mark.asyncio
+async def test_trigger_outcome_diagnostic_no_log_when_flag_off(caplog):
+    """E (variant). When the diagnostic flag is False (default,
+    happy-path collection), `_trigger_review_list_api` runs unchanged
+    AND emits NO `OY recovery trigger outcome:` line. The cascade
+    still completes and updates `_scrolled_to_review_area`.
+    """
+    import logging
+    page = _TriggerOutcomeFakePage(review_tab_count=1)
+    sess = _build_trigger_session(page=page, diagnostic_flag=False)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._trigger_review_list_api(initial_click=True)
+
+    outcome_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery trigger outcome:")
+    ]
+    assert outcome_messages == []
+    # Existing cascade behavior preserved.
+    assert sess._scrolled_to_review_area is True
+
+
+# ---------------------------------------------------------------------------
+# E — Default-flag scope. The new flag is False on init, so no
+# page-state / trigger-outcome logs fire outside the recovery
+# window.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_diagnose_post_recreate_page_state_default_false_on_init():
+    """E. `_diagnose_post_recreate_page_state` is False at session
+    init. Mirrors the contract for the response-probe flag.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess.__init__(
+        headless=True,
+        api_path="/review/api/v2/reviews/cursor",
+        review_tab_locator="div.review-tab",
+        scroll_candidates=(),
+        user_agent="ua",
+        viewport={"width": 800, "height": 600},
+    )
+    assert sess._diagnose_post_recreate_page_state is False
+
+
+@pytest.mark.asyncio
+async def test_diagnose_post_recreate_page_state_toggled_with_response_probe(
+    page1_body, page2_last, monkeypatch,
+):
+    """E (variant). The connector's recovery branch flips
+    `_diagnose_post_recreate_page_state` True alongside
+    `_diagnose_post_recovery_responses` BEFORE the recreate, and back
+    to False at every exit. The two flags share the recovery-window
+    scope.
+    """
+    class _FlagSpyRecoverySession(_RecoveryFakeSession):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.page_state_flag_at_recreate_entry: bool | None = None
+            self.response_flag_at_recreate_entry: bool | None = None
+
+        async def reload_and_reopen_review_tab(self) -> None:
+            self.page_state_flag_at_recreate_entry = bool(
+                getattr(
+                    self, "_diagnose_post_recreate_page_state", False,
+                ),
+            )
+            self.response_flag_at_recreate_entry = bool(
+                getattr(
+                    self, "_diagnose_post_recovery_responses", False,
+                ),
+            )
+            await super().reload_and_reopen_review_tab()
+
+    session = _FlagSpyRecoverySession(
+        [(200, page1_body), None, None, None],
+        recreate_responses=[[(200, page2_last)]],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+
+    # Both flags True at recreate entry.
+    assert session.page_state_flag_at_recreate_entry is True
+    assert session.response_flag_at_recreate_entry is True
+    # Both flags reset to False after the recovery window ends.
+    assert (
+        getattr(session, "_diagnose_post_recreate_page_state", None)
+        is False
+    )
+    assert session._diagnose_post_recovery_responses is False
+
+
+@pytest.mark.asyncio
+async def test_diagnose_post_recreate_page_state_false_after_recreate_raise(
+    page1_body, monkeypatch,
+):
+    """E (variant). When `reload_and_reopen_review_tab` raises, the
+    page-state flag is still reset to False at the recovery-branch
+    exit (the `_close_post_recovery_diag` helper clears BOTH flags).
+    """
+    class _RaisingRecoverySession(_RecoveryFakeSession):
+        async def reload_and_reopen_review_tab(self) -> None:
+            self.recreate_calls += 1
+            raise RuntimeError("simulated recreate failure")
+
+    session = _RaisingRecoverySession(
+        [(200, page1_body), None, None, None],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+
+    assert session.recreate_calls == 1
+    # Flag reset on the raise path.
+    assert (
+        getattr(session, "_diagnose_post_recreate_page_state", None)
+        is False
+    )
+
+
+# Small in-file helper: capture log records at INFO inside a `with`
+# block without the verbose `caplog` boilerplate when the test only
+# needs the records list.
+class pytest_capture_log:  # noqa: N801 (intentional lowercase context helper)
+    """Lightweight log-capture context manager.
+
+    Equivalent to a focused `caplog.at_level(level, logger=<name>)`
+    plus access to `records`. Used by the recovery-checkpoint tests
+    above where we want the records list as a plain in-scope value
+    rather than threading caplog through every assertion.
+    """
+
+    LOGGER_NAME = "src.voc.connectors.oliveyoung_browser_api"
+
+    def __init__(self, level):
+        self.level = level
+        self.records: list = []
+        self._handler = None
+        self._logger = None
+        self._prev_level = None
+
+    def __enter__(self):
+        import logging
+        self._logger = logging.getLogger(self.LOGGER_NAME)
+        self._prev_level = self._logger.level
+        self._logger.setLevel(self.level)
+        records = self.records
+
+        class _ListHandler(logging.Handler):
+            def emit(self_inner, record):
+                records.append(record)
+
+        self._handler = _ListHandler(level=self.level)
+        self._logger.addHandler(self._handler)
+        return self.records
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._logger is not None and self._handler is not None:
+            self._logger.removeHandler(self._handler)
+            self._logger.setLevel(self._prev_level)
+        return False
