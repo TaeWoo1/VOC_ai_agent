@@ -4847,6 +4847,28 @@ class _ScopedClickLocator:
     single shared button instance simulate the live-proof timeline
     where attempt 1 raises but attempt 2 succeeds (DOM transiently
     re-mounts before the retry).
+
+    I-OY-RECOVERY-SCOPED-CLICK-RETRY-BUDGET-FIX extends the locator
+    with two more per-attempt knobs used by the budget-fix tests:
+
+    - `click_call_durations_ms`: when supplied, each successive
+      `click()` first awaits an `asyncio.sleep(d / 1000.0)` of the
+      next entry before raising or returning. Mirrors the live-proof
+      timeline where a doomed `click()` with a stale handle burns
+      ~500ms before the per-call timeout fires. Lets the budget tests
+      assert the wall-clock arithmetic (1.0s budget < 2.5s per-call
+      meant the retry never entered attempt 2; 2.5s budget vs 600ms
+      per-call admits all 3 attempts).
+    - `scroll_raise_sequence`: per-attempt scroll-stale knob analogous
+      to `click_raise_sequence`. When supplied, each successive
+      `scroll_into_view_if_needed()` call consumes one entry — when
+      True, raises with a Playwright-style stale-element message that
+      the budget-fix `_is_stale_locator_error` helper recognises so
+      the retry loop must `continue` to the next iteration WITHOUT
+      calling `click()`. The synthetic exception text reads exactly
+      `Locator.scroll_into_view_if_needed: Element is not attached
+      to the DOM` so the production detector matches the substring
+      it would see in real Playwright traces.
     """
 
     def __init__(
@@ -4856,6 +4878,8 @@ class _ScopedClickLocator:
         click_should_raise: bool = False,
         scroll_should_raise: bool = False,
         click_raise_sequence: list[bool] | None = None,
+        click_call_durations_ms: list[int] | None = None,
+        scroll_raise_sequence: list[bool] | None = None,
     ):
         self._inner_text = inner_text
         self._click_should_raise = click_should_raise
@@ -4864,6 +4888,16 @@ class _ScopedClickLocator:
         self._click_raise_sequence: list[bool] | None = (
             list(click_raise_sequence)
             if click_raise_sequence is not None
+            else None
+        )
+        self._click_call_durations_ms: list[int] | None = (
+            list(click_call_durations_ms)
+            if click_call_durations_ms is not None
+            else None
+        )
+        self._scroll_raise_sequence: list[bool] | None = (
+            list(scroll_raise_sequence)
+            if scroll_raise_sequence is not None
             else None
         )
         self.scroll_into_view_calls = 0
@@ -4884,12 +4918,32 @@ class _ScopedClickLocator:
 
     async def scroll_into_view_if_needed(self, timeout=None):
         self.scroll_into_view_calls += 1
+        # Per-attempt scroll-stale sequence wins over the legacy
+        # single-boolean knob so the budget-fix tests can drive
+        # attempt-1-scroll-stale / attempt-2-scroll-ok on the same
+        # instance.
+        if self._scroll_raise_sequence:
+            raise_this_attempt = self._scroll_raise_sequence.pop(0)
+            if raise_this_attempt:
+                raise RuntimeError(
+                    "Locator.scroll_into_view_if_needed: Element is "
+                    "not attached to the DOM",
+                )
+            return None
         if self._scroll_should_raise:
             raise RuntimeError("scroll_into_view_if_needed failed (fake)")
         return None
 
     async def click(self, timeout=None):
         self.click_calls += 1
+        # Per-attempt call duration (if any) burns wall-clock BEFORE
+        # the raise/return decision so the test can pin the budget
+        # arithmetic. List is consumed via `pop(0)`; once empty the
+        # next call resolves synchronously.
+        if self._click_call_durations_ms:
+            _delay_ms = self._click_call_durations_ms.pop(0)
+            if _delay_ms > 0:
+                await asyncio.sleep(_delay_ms / 1000.0)
         # Per-attempt sequence takes precedence over the legacy
         # single-boolean knob so the staleness-retry tests can
         # drive attempt-1-raises / attempt-2-succeeds on the same
@@ -5009,6 +5063,8 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
         scroll_should_raise: bool = False,
         container_scroll_should_raise: bool = False,
         click_raise_sequence: list[bool] | None = None,
+        click_call_durations_ms: list[int] | None = None,
+        scroll_raise_sequence: list[bool] | None = None,
         sort_container_selectors: tuple[str, ...] = (
             "div.pc-sort",
             ".sort-container",
@@ -5021,6 +5077,8 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
         self._click_should_raise = click_should_raise
         self._scroll_should_raise = scroll_should_raise
         self._click_raise_sequence = click_raise_sequence
+        self._click_call_durations_ms = click_call_durations_ms
+        self._scroll_raise_sequence = scroll_raise_sequence
         self.container_scroll_should_raise = container_scroll_should_raise
         self._sort_container_selectors = set(sort_container_selectors)
         # Observability for assertions.
@@ -5040,6 +5098,8 @@ class _ScrollableReadinessFakePage(_RearmFakeAsyncPage):
                 click_should_raise=self._click_should_raise,
                 scroll_should_raise=self._scroll_should_raise,
                 click_raise_sequence=self._click_raise_sequence,
+                click_call_durations_ms=self._click_call_durations_ms,
+                scroll_raise_sequence=self._scroll_raise_sequence,
             )
         return self._matched_button
 
@@ -5065,6 +5125,8 @@ def _build_scroll_to_sort_session(
     scroll_should_raise: bool = False,
     container_scroll_should_raise: bool = False,
     click_raise_sequence: list[bool] | None = None,
+    click_call_durations_ms: list[int] | None = None,
+    scroll_raise_sequence: list[bool] | None = None,
     sort_hunt_settle_s: float = 0.2,
     sort_hunt_poll_interval_s: float = 0.02,
 ):
@@ -5109,6 +5171,8 @@ def _build_scroll_to_sort_session(
             scroll_should_raise,
             container_scroll_should_raise,
             click_raise_sequence,
+            click_call_durations_ms,
+            scroll_raise_sequence,
         ):
             super().__init__(pages)
             self._target_button_label = target_button_label
@@ -5116,6 +5180,8 @@ def _build_scroll_to_sort_session(
             self._scroll_should_raise = scroll_should_raise
             self._container_scroll_should_raise = container_scroll_should_raise
             self._click_raise_sequence = click_raise_sequence
+            self._click_call_durations_ms = click_call_durations_ms
+            self._scroll_raise_sequence = scroll_raise_sequence
 
         async def new_page(self):
             self.new_page_calls += 1
@@ -5128,6 +5194,8 @@ def _build_scroll_to_sort_session(
                     self._container_scroll_should_raise
                 ),
                 click_raise_sequence=self._click_raise_sequence,
+                click_call_durations_ms=self._click_call_durations_ms,
+                scroll_raise_sequence=self._scroll_raise_sequence,
             )
             self.pages.append(page)
             new_page_ref.append(page)
@@ -5140,6 +5208,8 @@ def _build_scroll_to_sort_session(
         scroll_should_raise,
         container_scroll_should_raise,
         click_raise_sequence,
+        click_call_durations_ms,
+        scroll_raise_sequence,
     )
     sess._page = old_page
     sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
@@ -5876,6 +5946,325 @@ async def test_scoped_click_retry_bounded_wall_clock_on_full_exhaustion():
     new_page = new_page_ref[0]
     assert new_page._matched_button.click_calls == 3
     assert "click_sort_button_robust" in ordering_log
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-SCOPED-CLICK-RETRY-BUDGET-FIX — fix the two interacting
+# bugs the latest live proof on Ilso A000000225736 isolated:
+#
+# Bug 1 — Budget arithmetic. The prior pass's 1.0s wall-clock retry
+# budget was strictly less than the per-attempt click timeout (2.5s);
+# the live proof showed attempt 1's click timing out at +2.5s, by which
+# point the while-condition's elapsed-vs-deadline check fell on the
+# wrong side and attempts 2/3 never entered. The retry-trigger log
+# line never fired. Fix: lower per-attempt click timeout to 600ms,
+# raise wall-clock budget to 2.5s. Worst-case scoped-retry =
+# 3 × 600ms + (2 × 400ms readiness) = ~2.6s, fits the budget with
+# headroom for the inter-iteration overhead.
+#
+# Bug 2 — Stale scroll signal swallowed. The pre-existing try/except
+# around `matched_button.scroll_into_view_if_needed` silently swallowed
+# the `Element is not attached to the DOM` exception and let
+# execution fall through into the doomed `click(timeout=2500)` against
+# a detached handle, burning the budget. Fix: detect the stale phrase
+# via `_is_stale_locator_error`, log a new
+# `OY scoped sort-button scroll stale; retrying without click` line,
+# and `continue` to the next iteration so the readiness re-wait can
+# refresh the side-channel handle.
+#
+# Tests below exercise both fixes against the existing fake-page
+# surface, extended with per-call click durations and per-attempt
+# scroll-stale sequences.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_budget_admits_retry_after_slow_failed_click(
+    caplog,
+):
+    """A1 — budget fix: a 500ms-burning attempt 1 click failure no
+    longer locks out attempts 2/3.
+
+    Pre-fix arithmetic: 1.0s wall-clock budget < 500ms × 2 + per-call
+    overhead. Attempt 2 never entered.
+
+    Post-fix arithmetic: 2.5s budget admits all 3 attempts even when
+    each per-call click burns ~500ms before raising. This variant
+    has attempt 3 succeed → retry-success log fires, robust hunt is
+    NOT invoked.
+    """
+    import logging as _logging
+    import time as _time
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        # All three attempts incur a 500ms wall-clock cost before the
+        # raise/return; attempts 1 + 2 raise (matched_button stale),
+        # attempt 3 returns successfully. The list MUST line up with
+        # the True/False/True/False positions in click_raise_sequence
+        # because both lists are consumed in lockstep per click call.
+        click_raise_sequence=[True, True, False],
+        click_call_durations_ms=[500, 500, 50],
+    )
+
+    t0 = _time.monotonic()
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+    elapsed = _time.monotonic() - t0
+
+    new_page = new_page_ref[0]
+    # All 3 attempts entered. This is the regression target — under
+    # the pre-fix arithmetic only attempt 1 would run.
+    assert new_page._matched_button.click_calls == 3, (
+        f"all 3 attempts must enter under the 2.5s budget; got "
+        f"{new_page._matched_button.click_calls} click calls"
+    )
+    # Robust hunt was NOT invoked because attempt 3 succeeded.
+    assert "click_sort_button_robust" not in ordering_log
+    # Wall-clock bound: 2.5s budget + a small overhead tail.
+    assert elapsed < 2.6, (
+        f"scoped retry exceeded budget: {elapsed:.3f}s "
+        f"(budget=2.5s + overhead)"
+    )
+
+    messages = [r.getMessage() for r in caplog.records]
+    # Retry-trigger fires between attempts 1->2 and 2->3.
+    retry_lines = [
+        m for m in messages
+        if m.startswith(
+            "OY scoped sort-button click stale; retrying readiness "
+            "match: attempt=",
+        )
+    ]
+    assert len(retry_lines) == 2, (
+        f"expected 2 retry-trigger lines under successful 3-attempt "
+        f"path; got {retry_lines!r}"
+    )
+    # Retry-succeeded log fires on attempt 3.
+    assert any(
+        m.startswith(
+            "OY scoped sort-button click retry succeeded: attempt=3",
+        )
+        for m in messages
+    ), f"missing retry-success log on attempt 3; got {messages!r}"
+    # Exhaustion log MUST NOT fire when attempt 3 succeeds.
+    assert not any(
+        m.startswith("OY scoped sort-button click retries exhausted")
+        for m in messages
+    ), f"exhaustion log fired on success path; got {messages!r}"
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_budget_admits_all_three_attempts_when_all_fail(
+    caplog,
+):
+    """A2 — budget fix: every attempt burns ~500ms and raises; the
+    loop still enters all 3 attempts (vs only attempt 1 under the
+    pre-fix arithmetic), exhausts cleanly, and falls back to the
+    robust hunt within the wall-clock bound.
+    """
+    import logging as _logging
+    import time as _time
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        click_should_raise=True,
+        click_call_durations_ms=[500, 500, 500],
+    )
+
+    t0 = _time.monotonic()
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+    elapsed = _time.monotonic() - t0
+
+    new_page = new_page_ref[0]
+    # All 3 attempts entered despite each burning ~500ms.
+    assert new_page._matched_button.click_calls == 3
+    # Robust hunt was invoked exactly once after exhaustion.
+    assert ordering_log.count("click_sort_button_robust") == 1
+    # Wall-clock stayed under the 2.5s budget + a small slack.
+    assert elapsed < 2.6, (
+        f"scoped retry exceeded budget: {elapsed:.3f}s "
+        f"(budget=2.5s + overhead)"
+    )
+
+    messages = [r.getMessage() for r in caplog.records]
+    # Exhaustion log fired exactly once with attempts=3.
+    exhausted_lines = [
+        m for m in messages
+        if m.startswith("OY scoped sort-button click retries exhausted")
+    ]
+    assert len(exhausted_lines) == 1
+    assert "attempts=3" in exhausted_lines[0]
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_stale_scroll_skips_doomed_click_and_retries(
+    caplog,
+):
+    """B — bug 2 fix: a stale scroll exception (`Element is not
+    attached to the DOM`) on attempt 1 must SKIP the doomed click and
+    retry immediately. Attempt 2 re-detects via the readiness wait
+    (the fake page's matched-button surface is still alive) and
+    succeeds.
+
+    Asserts:
+      - Attempt 1's `click()` is NOT called (the scroll-stale exit
+        runs `continue` before reaching the click).
+      - Attempt 2 succeeds: click count is exactly 1 across the whole
+        retry path (NOT 2 — attempt 1 never clicked).
+      - The new `OY scoped sort-button scroll stale; retrying without
+        click` log line fired exactly once.
+      - Robust hunt was NOT invoked.
+      - Retry-succeeded log fires on attempt 2.
+      - The side-channel handle refresh path ran (the readiness
+        re-wait re-set `_last_readiness_matched_button` to a non-None
+        value before attempt 2's click).
+    """
+    import logging as _logging
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        # Attempt 1's scroll raises stale; attempt 2's scroll resolves
+        # cleanly. Click sequence: not consumed on attempt 1 (scroll
+        # short-circuited before the click), consumed on attempt 2
+        # with False so the click returns success.
+        scroll_raise_sequence=[True, False],
+        click_raise_sequence=[False],
+    )
+
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+
+    new_page = new_page_ref[0]
+    # Attempt 1 never clicked. Only attempt 2 reached `click()`.
+    assert new_page._matched_button.click_calls == 1, (
+        f"stale scroll on attempt 1 must skip the click; got "
+        f"{new_page._matched_button.click_calls} click calls"
+    )
+    # Scroll was attempted twice (attempt 1 raised, attempt 2 ok).
+    assert new_page._matched_button.scroll_into_view_calls == 2
+    # Robust hunt NOT invoked — attempt 2's click succeeded.
+    assert "click_sort_button_robust" not in ordering_log
+    # Side-channel handle is still populated after the retry path.
+    assert sess._last_readiness_matched_button is not None
+
+    messages = [r.getMessage() for r in caplog.records]
+    # New scroll-stale log line fired exactly once.
+    scroll_stale_lines = [
+        m for m in messages
+        if m.startswith(
+            "OY scoped sort-button scroll stale; retrying without "
+            "click:",
+        )
+    ]
+    assert len(scroll_stale_lines) == 1, (
+        f"expected exactly 1 scroll-stale log on attempt 1; got "
+        f"{scroll_stale_lines!r}"
+    )
+    assert "attempt=1" in scroll_stale_lines[0]
+    # Retry-succeeded log fires on attempt 2.
+    assert any(
+        m.startswith(
+            "OY scoped sort-button click retry succeeded: attempt=2",
+        )
+        for m in messages
+    ), f"missing retry-success log; got {messages!r}"
+
+
+@pytest.mark.asyncio
+async def test_scoped_click_full_exhaustion_mixes_stale_scroll_and_click_timeout(
+    caplog,
+):
+    """D — full exhaustion stays bounded under a mixed failure
+    pattern. Attempt 1 scroll stale, attempt 2 scroll stale, attempt
+    3 plain click timeout that burns 600ms. The retry path must:
+
+    - Exit within the 2.5s wall-clock budget (+ overhead).
+    - Invoke `_click_sort_button_robust` exactly once.
+    - Fire the retries-exhausted log line.
+    - Carry the most recent exception (the attempt 3 click timeout)
+      as `_scoped_last_error` — surfaced via the original fall-back
+      log line which interpolates `repr(_scoped_last_error)`.
+    """
+    import logging as _logging
+    import time as _time
+
+    sess, ordering_log, _, new_page_ref = _build_scroll_to_sort_session(
+        sort_button_label_ko="최신순",
+        target_button_label="최신순",
+        # Attempts 1+2 scroll stale (no click attempt); attempt 3
+        # scrolls cleanly but the click raises after burning 600ms,
+        # mimicking a plain Playwright `Locator.click: Timeout 600ms
+        # exceeded.` outcome on a slow / unresponsive handle. Drive
+        # the click raise via the per-attempt sequence (the only one
+        # consumed by attempt 3) since `click_raise_sequence` takes
+        # precedence over the legacy `click_should_raise` flag.
+        scroll_raise_sequence=[True, True, False],
+        click_raise_sequence=[True],
+        click_call_durations_ms=[600],
+    )
+
+    t0 = _time.monotonic()
+    with caplog.at_level(_logging.INFO):
+        await sess.reload_and_reopen_review_tab()
+    elapsed = _time.monotonic() - t0
+
+    new_page = new_page_ref[0]
+    # Attempts 1+2 skipped click via scroll-stale exit; attempt 3
+    # reached the click and timed out.
+    assert new_page._matched_button.click_calls == 1, (
+        f"stale-scroll attempts must skip click; got "
+        f"{new_page._matched_button.click_calls} click calls"
+    )
+    # All 3 scroll calls fired (one per attempt).
+    assert new_page._matched_button.scroll_into_view_calls == 3
+    # Robust hunt invoked exactly once after exhaustion.
+    assert ordering_log.count("click_sort_button_robust") == 1
+    # Wall-clock stayed under the 2.5s budget + overhead. The mixed
+    # path is the realistic worst case (no synthetic 500ms × 3
+    # padding here — just 600ms on attempt 3 + readiness re-waits).
+    assert elapsed < 2.6, (
+        f"mixed-failure retry exceeded budget: {elapsed:.3f}s"
+    )
+
+    messages = [r.getMessage() for r in caplog.records]
+    # Exhaustion log fired exactly once.
+    exhausted_lines = [
+        m for m in messages
+        if m.startswith("OY scoped sort-button click retries exhausted")
+    ]
+    assert len(exhausted_lines) == 1
+    assert "attempts=3" in exhausted_lines[0]
+    # Scroll-stale log fired for attempts 1 and 2.
+    scroll_stale_lines = [
+        m for m in messages
+        if m.startswith(
+            "OY scoped sort-button scroll stale; retrying without "
+            "click:",
+        )
+    ]
+    assert len(scroll_stale_lines) == 2
+    assert any("attempt=1" in m for m in scroll_stale_lines)
+    assert any("attempt=2" in m for m in scroll_stale_lines)
+    # The original `falling back to robust hunt:` log still emits
+    # exactly once and its tail carries the LAST exception
+    # (attempt 3's click failure, raised from
+    # `click_raise_sequence=[True]` with the canned synthetic
+    # "stale element reference (fake)" RuntimeError; the retry loop
+    # records it as `_scoped_last_error`).
+    fallback_lines = [
+        m for m in messages
+        if m.startswith(
+            "OY scoped sort-button click via readiness match failed; "
+            "falling back to robust hunt:",
+        )
+    ]
+    assert len(fallback_lines) == 1
+    assert "stale element reference (fake)" in fallback_lines[0]
 
 
 # ---------------------------------------------------------------------------

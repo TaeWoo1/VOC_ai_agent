@@ -2985,6 +2985,31 @@ def _extract_has_next(body: dict | None) -> bool | None:
     return val if isinstance(val, bool) else None
 
 
+def _is_stale_locator_error(exc: BaseException) -> bool:
+    """Return True when `exc` reads like a Playwright stale-element
+    failure.
+
+    I-OY-RECOVERY-SCOPED-CLICK-RETRY-BUDGET-FIX — used by the scoped
+    sort-button retry loop to short-circuit a doomed click attempt
+    the moment `scroll_into_view_if_needed` raises against a detached
+    handle. Playwright's canonical phrasing is "Element is not
+    attached to the DOM"; the `detached` / `stale` tokens are
+    defensive fallbacks in case the wording shifts in a future
+    Playwright release. Case-insensitive substring match against
+    `str(exc)` keeps the detector resilient to surrounding wrapper
+    text added by `Locator.scroll_into_view_if_needed:` prefixes.
+    """
+    msg = str(exc).lower()
+    return any(
+        token in msg
+        for token in (
+            "element is not attached to the dom",
+            "detached",
+            "stale",
+        )
+    )
+
+
 class _PlaywrightReviewSession:
     """Real `BrowserReviewSession` backed by Playwright/Chromium.
 
@@ -5243,21 +5268,38 @@ class _PlaywrightReviewSession:
                 # very tight budget (0.4s) to refresh the side-channel
                 # handles, then retry the scoped click on the new
                 # locator. Bounds: 3 attempts total (1 initial + 2
-                # retries), total scoped-branch wall-clock budget
-                # ~1s (the existing per-click 2.5s timeout still
-                # applies per attempt, but on failure the retry
-                # readiness budget of 0.4s + per-click attempts are
-                # the dominant cost, and the loop exits as soon as
-                # any attempt succeeds). On exhaustion, fall through
-                # to the existing `_click_sort_button_robust` fallback
-                # — preserves the `_sort_control_unreachable` /
-                # status-classifier contract bit-for-bit.
+                # retries).
+                #
+                # I-OY-RECOVERY-SCOPED-CLICK-RETRY-BUDGET-FIX —
+                # corrected the budget arithmetic. The prior pass
+                # used a 1.0s wall-clock budget with a 2.5s per-click
+                # timeout: when attempt 1's click timed out against a
+                # stale locator, ≥2.5s had elapsed at the while-check
+                # so attempts 2/3 never entered (no retry log lines
+                # fired in the Ilso A000000225736 live proof at
+                # `c1455f9`). Live-DOM mount window is sub-second
+                # (290ms snapshot-to-snapshot per `025b021`), so a
+                # ~600ms per-attempt click cap is sufficient — if the
+                # matched handle hasn't clicked within ~600ms it is
+                # almost certainly stale and re-detection is more
+                # useful than waiting 2.5s. Wall-clock budget raised
+                # to 2.5s so 3 × 600ms = 1.8s worst-case click + a
+                # small per-retry readiness re-wait (0.4s × 2 retries)
+                # comfortably fits. The same 600ms cap applies to the
+                # per-attempt `scroll_into_view_if_needed` so a slow
+                # scroll cannot accidentally consume the budget. On
+                # exhaustion, fall through to the existing
+                # `_click_sort_button_robust` fallback — preserves
+                # the `_sort_control_unreachable` / status-classifier
+                # contract bit-for-bit.
                 import time as _time
                 _scoped_attempts_max = 3
                 _scoped_retry_readiness_timeout_s = 0.4
                 _scoped_retry_readiness_poll_s = 0.05
+                _scoped_click_per_attempt_timeout_ms = 600
+                _scoped_scroll_per_attempt_timeout_ms = 600
                 _scoped_branch_deadline = (
-                    _time.monotonic() + 1.0
+                    _time.monotonic() + 2.5
                 )
                 _scoped_branch_start = _time.monotonic()
                 _scoped_attempt = 0
@@ -5322,13 +5364,51 @@ class _PlaywrightReviewSession:
                             )
                             continue
                     try:
+                        _scroll_stale_skip = False
                         try:
                             await matched_button.scroll_into_view_if_needed(
-                                timeout=1000,
+                                timeout=(
+                                    _scoped_scroll_per_attempt_timeout_ms
+                                ),
                             )
-                        except Exception:
-                            pass
-                        await matched_button.click(timeout=2500)
+                        except Exception as _scroll_exc:
+                            # I-OY-RECOVERY-SCOPED-CLICK-RETRY-BUDGET-FIX
+                            # Bug 2 fix: when the scroll wrapper raises
+                            # a stale-element exception ("Element is
+                            # not attached to the DOM" in Playwright's
+                            # phrasing), the matched-button locator is
+                            # already detached. Proceeding into
+                            # `click()` against a detached handle
+                            # burns the per-attempt budget waiting
+                            # for a timeout that cannot succeed. The
+                            # early stale signal is the cue to break
+                            # immediately to the next retry iteration
+                            # so the readiness re-wait can refresh
+                            # `_last_readiness_matched_button` against
+                            # the current DOM. Non-stale scroll
+                            # failures still fall through to the
+                            # click attempt (preserves the pre-fix
+                            # behaviour where a slow / mis-positioned
+                            # element can still be clicked).
+                            if _is_stale_locator_error(_scroll_exc):
+                                _scoped_last_error = _scroll_exc
+                                logger.info(
+                                    "OY scoped sort-button scroll "
+                                    "stale; retrying without click: "
+                                    "attempt=%d error=%r",
+                                    _scoped_attempt,
+                                    _scroll_exc,
+                                )
+                                _scroll_stale_skip = True
+                            else:
+                                pass
+                        if _scroll_stale_skip:
+                            continue
+                        await matched_button.click(
+                            timeout=(
+                                _scoped_click_per_attempt_timeout_ms
+                            ),
+                        )
                         scoped_click_succeeded = True
                         # Record the same diagnostic line shape that
                         # `_click_sort_button_robust` emits on success
