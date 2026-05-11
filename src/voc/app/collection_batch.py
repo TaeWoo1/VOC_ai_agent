@@ -34,11 +34,12 @@ import logging
 import random
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, IO, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -428,20 +429,116 @@ def _product_url(oy_goods_no: str) -> str:
 RunnerFn = Callable[[list[str]], tuple[int, str, str]]
 
 
+def _stream_tee_subprocess(
+    argv: list[str],
+    *,
+    stdout_sink: IO[str] | None = None,
+    stderr_sink: IO[str] | None = None,
+    timeout: float | None = None,
+    env: dict[str, str] | None = None,
+    cwd: str | Path | None = None,
+) -> tuple[int, str, str]:
+    """Run `argv` via Popen with line-buffered stdout/stderr.
+
+    Each line is appended to a per-stream buffer AND written through to the
+    `stdout_sink` / `stderr_sink` as it arrives, so operators tailing a
+    long-running OY collection see the connector's progress logs (e.g.
+    `OY browser: adopted_existing_page=true`, scroll-continuation recovery
+    counters, partial-NDJSON path) live instead of only after the child
+    process exits. Returns the same `(returncode, stdout_text, stderr_text)`
+    tuple that the legacy `subprocess.run(capture_output=True)` path
+    returned, so existing callers continue to work unchanged.
+
+    Two background drain threads are required to avoid the classic
+    pipe-fill deadlock — if the child writes >64 KB to stderr while the
+    parent only reads stdout (or vice versa), the kernel pipe buffer
+    fills and the child blocks on write. Reading both pipes concurrently
+    keeps the child unblocked.
+
+    The `sink.flush()` after each write is load-bearing: when the parent's
+    own stdout is itself a pipe (e.g. `python -m … | tee log.txt`),
+    Python's default block buffering would otherwise re-introduce the
+    same delayed-output gap this function exists to close.
+    """
+    if stdout_sink is None:
+        stdout_sink = sys.stdout
+    if stderr_sink is None:
+        stderr_sink = sys.stderr
+
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        bufsize=1,  # line-buffered
+        text=True,
+        env=env,
+        cwd=str(cwd) if cwd is not None else None,
+    )
+
+    out_lines: list[str] = []
+    err_lines: list[str] = []
+
+    def _drain(pipe, buf, sink):
+        try:
+            for line in iter(pipe.readline, ""):
+                buf.append(line)
+                if sink is not None:
+                    try:
+                        sink.write(line)
+                        sink.flush()
+                    except Exception:
+                        # Sink closure should never abort collection.
+                        pass
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    t_out = threading.Thread(
+        target=_drain, args=(proc.stdout, out_lines, stdout_sink), daemon=True,
+    )
+    t_err = threading.Thread(
+        target=_drain, args=(proc.stderr, err_lines, stderr_sink), daemon=True,
+    )
+    t_out.start()
+    t_err.start()
+
+    try:
+        rc = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        rc = proc.wait()
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+        raise
+
+    t_out.join()
+    t_err.join()
+
+    return rc, "".join(out_lines), "".join(err_lines)
+
+
 def _default_subprocess_runner(argv: list[str]) -> tuple[int, str, str]:
     """Default per-product runner: shell out to the existing ingest CLI.
 
     Returns (returncode, stdout_text, stderr_text). Never raises on non-zero
     returncode — the caller decides what to do with failures based on the
     parsed summary.
+
+    Uses `_stream_tee_subprocess` so the connector's stdout/stderr lines
+    (e.g. `adopted_existing_page=true`, scroll-continuation telemetry,
+    partial-NDJSON path) are visible live in the parent's stdout/stderr
+    AND simultaneously buffered for the caller. Pre-2026-05 this used
+    `subprocess.run(capture_output=True)` which buffered everything until
+    process exit; on long-running archive-complete proofs that meant the
+    operator monitoring the run had no visible progress signal.
     """
-    proc = subprocess.run(
-        argv,
-        capture_output=True,
-        text=True,
-        check=False,
+    logger.info(
+        "OY subprocess starting: cmd=%s",
+        " ".join(str(a) for a in argv),
     )
-    return proc.returncode, proc.stdout, proc.stderr
+    return _stream_tee_subprocess(argv)
 
 
 def _build_ingest_command(
