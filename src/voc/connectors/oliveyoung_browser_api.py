@@ -1789,6 +1789,66 @@ class OliveYoungBrowserAPIConnector:
                                 f"{self._max_scroll_attempts} failed scrolls "
                                 f"(parsed={len(raws)})",
                             )
+
+                            # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE —
+                            # tiny helper closure that emits the
+                            # end-of-recovery-window summary log line
+                            # and flips the session's diagnostic flag
+                            # back to False. Called at EVERY exit from
+                            # the recovery block (recreate raise, wait
+                            # raise, cold-start timeout, malformed
+                            # post-recreate response, AND on the
+                            # successful continuation path before the
+                            # outer `continue`). Best-effort: each step
+                            # is wrapped in try/except so a session
+                            # type that doesn't expose the counters
+                            # (legacy fakes) cannot break the recovery
+                            # path. This helper does NOT itself change
+                            # any behavior — it only logs + clears the
+                            # flag the listener reads to decide whether
+                            # to emit per-response probe lines.
+                            def _close_post_recovery_diag() -> None:
+                                try:
+                                    probes = getattr(
+                                        session,
+                                        "_post_recovery_response_probe_count",
+                                        0,
+                                    )
+                                    accepted = getattr(
+                                        session,
+                                        "_post_recovery_response_accepted_count",
+                                        0,
+                                    )
+                                    sort_mismatch = getattr(
+                                        session,
+                                        "_post_recovery_response_sort_mismatch_count",
+                                        0,
+                                    )
+                                    parse_error = getattr(
+                                        session,
+                                        "_post_recovery_response_parse_error_count",
+                                        0,
+                                    )
+                                    logger.info(
+                                        "OY recovery response timeout "
+                                        "summary: probes=%d accepted=%d "
+                                        "sort_mismatch=%d parse_error=%d",
+                                        int(probes),
+                                        int(accepted),
+                                        int(sort_mismatch),
+                                        int(parse_error),
+                                    )
+                                except Exception:
+                                    pass
+                                try:
+                                    setattr(
+                                        session,
+                                        "_diagnose_post_recovery_responses",
+                                        False,
+                                    )
+                                except Exception:
+                                    pass
+
                             try:
                                 # Stepped backoff before recreate (jittered).
                                 # Mirrors the existing anti-bot recovery
@@ -1797,6 +1857,23 @@ class OliveYoungBrowserAPIConnector:
                                 await asyncio.sleep(
                                     random.uniform(2.0, 5.0),
                                 )
+                                # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE —
+                                # enable per-response probe logging on
+                                # the session BEFORE the recreate
+                                # cascade runs. The cascade's scoped
+                                # click fires the post-recovery cursor
+                                # request; the response handler reads
+                                # this flag by attribute lookup at each
+                                # event, so the change takes effect
+                                # without re-attaching the handler.
+                                try:
+                                    setattr(
+                                        session,
+                                        "_diagnose_post_recovery_responses",
+                                        True,
+                                    )
+                                except Exception:
+                                    pass
                                 await recreate_fn()
                             except Exception as e:
                                 logger.warning(
@@ -1811,6 +1888,7 @@ class OliveYoungBrowserAPIConnector:
                                 scroll_continuation_terminated_with_has_next = (
                                     True
                                 )
+                                _close_post_recovery_diag()
                                 break
                             # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION —
                             # read the session's strategy flag and emit
@@ -1922,6 +2000,7 @@ class OliveYoungBrowserAPIConnector:
                                 scroll_continuation_terminated_with_has_next = (
                                     True
                                 )
+                                _close_post_recovery_diag()
                                 break
                             if first_resp is None:
                                 _note(
@@ -1931,6 +2010,7 @@ class OliveYoungBrowserAPIConnector:
                                 scroll_continuation_terminated_with_has_next = (
                                     True
                                 )
+                                _close_post_recovery_diag()
                                 break
                             r_status, r_body = first_resp
                             r_tag = _classify_http_response(r_status, r_body)
@@ -1943,6 +2023,7 @@ class OliveYoungBrowserAPIConnector:
                                 scroll_continuation_terminated_with_has_next = (
                                     True
                                 )
+                                _close_post_recovery_diag()
                                 break
                             # Successful recreate cold-start. Account it as
                             # an ok response: the seen_ids dedup set ensures
@@ -1968,6 +2049,7 @@ class OliveYoungBrowserAPIConnector:
                                     datetime.now() - started
                                 ).total_seconds(),
                             )
+                            _close_post_recovery_diag()
                             continue  # back to the outer while; scroll resumes
                         # No recovery (budget exhausted, hasNext is not
                         # True, or recovery disabled). Preserve the
@@ -3055,6 +3137,30 @@ class _PlaywrightReviewSession:
         # Telemetry: tally observed sortTypes for the run-end summary.
         self._observed_sort_types_count: dict[str, int] = {}
         self._responses_filtered_out_by_sort: int = 0
+        # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — diagnostic-only
+        # gate that scopes the per-response probe logging to the
+        # post-recreate cold-start window. The flag is flipped True
+        # by the connector in `collect()` immediately BEFORE
+        # `reload_and_reopen_review_tab()` is awaited (so the scoped
+        # click inside the cascade runs with diagnostics enabled),
+        # and flipped False after the post-recreate
+        # `wait_for_next_response` exits — whether the wait
+        # succeeded, timed out, or raised. Default False so that
+        # initial-open / happy-path collection emits no probe logs
+        # (avoids spamming the live tee log on every cursor response).
+        # `_on_response` reads this flag by attribute lookup at each
+        # response event, so the change takes effect immediately
+        # without re-attaching the handler.
+        #
+        # Counters below tally what the probe observed during the
+        # recovery window. They are surfaced ONLY in the
+        # `OY recovery response timeout summary:` log line emitted
+        # at the end of the window; no schema fields change.
+        self._diagnose_post_recovery_responses: bool = False
+        self._post_recovery_response_probe_count: int = 0
+        self._post_recovery_response_accepted_count: int = 0
+        self._post_recovery_response_sort_mismatch_count: int = 0
+        self._post_recovery_response_parse_error_count: int = 0
         # Total review count surfaced by the product page or the cursor
         # API response, when available. Best-effort metadata only; None
         # when the page/API didn't expose it (legacy endpoints, anti-bot
@@ -3191,12 +3297,20 @@ class _PlaywrightReviewSession:
             status = response.status
             ct = (response.headers.get("content-type") or "").lower()
             body: dict | None = None
+            # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — capture the
+            # JSON-decode outcome distinctly so the diagnostic probe at
+            # the bottom of this handler can classify a malformed body
+            # as a parse error vs. a sort_mismatch / accepted response.
+            # The existing `logger.warning` on decode failure is
+            # preserved; this flag is purely local bookkeeping.
+            json_decode_failed = False
             if status == 200 and "application/json" in ct:
                 try:
                     body = await response.json()
                 except Exception as e:
                     logger.warning("OY response JSON decode failed: %s", e)
                     body = None
+                    json_decode_failed = True
             # Opportunistic total-count capture from the response body.
             # Write-once: the FIRST non-None value sticks, so a later
             # truncated/error response can't overwrite a confirmed count.
@@ -3258,6 +3372,144 @@ class _PlaywrightReviewSession:
             request_log.append(entry)
             if should_forward:
                 await queue.put((status, body))
+
+            # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — scoped
+            # diagnostic probe. Gated by
+            # `_diagnose_post_recovery_responses` so the live tee log
+            # is NOT spammed during normal happy-path collection; the
+            # connector flips this flag True only for the post-recreate
+            # cold-start window. Every parse / log call is wrapped in
+            # try/except so a malformed Playwright response cannot
+            # abort collection — diagnostics are best-effort.
+            #
+            # The probe READS FROM the already-parsed values above; it
+            # never re-consumes `response.json()`. `has_next`,
+            # `review_count`, and `cursor` are pulled from
+            # `_extract_response_cursor_meta(body, status)` which was
+            # already invoked when the request_log entry was built.
+            #
+            # `drop_reason` taxonomy (matches the failure-mode picker
+            # in the dispatch):
+            #   - none         — response was accepted onto the queue.
+            #   - sort_mismatch — `expected_sort` was set and the
+            #                     request's `post_data_sort_type`
+            #                     differed, so the response was filtered.
+            #   - parse_error  — `response.json()` raised OR the body
+            #                     parsed but was not a dict / missed
+            #                     expected keys (classifier "malformed").
+            #   - not_post     — request method != POST (cursor API is
+            #                     always POST; non-POST hits the URL by
+            #                     accident).
+            try:
+                if getattr(
+                    self, "_diagnose_post_recovery_responses", False,
+                ):
+                    try:
+                        self._post_recovery_response_probe_count += 1
+                    except Exception:
+                        pass
+                    cursor_meta = entry.get("response", {})
+                    has_next_val = cursor_meta.get("has_next")
+                    review_count_val = cursor_meta.get("record_count")
+                    cursor_val = cursor_meta.get("next_cursor_id")
+                    tag_val = cursor_meta.get("tag")
+                    if json_decode_failed or (
+                        body is None
+                        and status == 200
+                        and "application/json" in ct
+                    ) or tag_val == "malformed":
+                        drop_reason = "parse_error"
+                    elif req_method != "POST" and req_method != "?":
+                        drop_reason = "not_post"
+                    elif not should_forward:
+                        drop_reason = "sort_mismatch"
+                    else:
+                        drop_reason = "none"
+                    if drop_reason == "parse_error":
+                        try:
+                            self._post_recovery_response_parse_error_count += 1
+                        except Exception:
+                            pass
+                        logger.info(
+                            "OY recovery response parse failed: "
+                            "url_kind=cursor status=%s request_method=%s "
+                            "request_sort=%s expected_sort=%s accepted=%s "
+                            "drop_reason=%s has_next=%s review_count=%s "
+                            "cursor=%s",
+                            status,
+                            req_method,
+                            post_data_sort_type
+                            if post_data_sort_type is not None
+                            else "unknown",
+                            expected_sort
+                            if expected_sort is not None
+                            else "unknown",
+                            "false",
+                            drop_reason,
+                            "unknown" if has_next_val is None else has_next_val,
+                            "unknown"
+                            if review_count_val is None
+                            else review_count_val,
+                            "unknown" if cursor_val is None else cursor_val,
+                        )
+                    elif drop_reason == "none":
+                        try:
+                            self._post_recovery_response_accepted_count += 1
+                        except Exception:
+                            pass
+                        logger.info(
+                            "OY recovery response accepted: "
+                            "url_kind=cursor status=%s request_method=%s "
+                            "request_sort=%s expected_sort=%s accepted=%s "
+                            "drop_reason=%s has_next=%s review_count=%s "
+                            "cursor=%s",
+                            status,
+                            req_method,
+                            post_data_sort_type
+                            if post_data_sort_type is not None
+                            else "unknown",
+                            expected_sort
+                            if expected_sort is not None
+                            else "unknown",
+                            "true",
+                            drop_reason,
+                            "unknown" if has_next_val is None else has_next_val,
+                            "unknown"
+                            if review_count_val is None
+                            else review_count_val,
+                            "unknown" if cursor_val is None else cursor_val,
+                        )
+                    else:
+                        if drop_reason == "sort_mismatch":
+                            try:
+                                self._post_recovery_response_sort_mismatch_count += 1
+                            except Exception:
+                                pass
+                        logger.info(
+                            "OY recovery response dropped: "
+                            "url_kind=cursor status=%s request_method=%s "
+                            "request_sort=%s expected_sort=%s accepted=%s "
+                            "drop_reason=%s has_next=%s review_count=%s "
+                            "cursor=%s",
+                            status,
+                            req_method,
+                            post_data_sort_type
+                            if post_data_sort_type is not None
+                            else "unknown",
+                            expected_sort
+                            if expected_sort is not None
+                            else "unknown",
+                            "false",
+                            drop_reason,
+                            "unknown" if has_next_val is None else has_next_val,
+                            "unknown"
+                            if review_count_val is None
+                            else review_count_val,
+                            "unknown" if cursor_val is None else cursor_val,
+                        )
+            except Exception:
+                # Diagnostics are best-effort; never abort collection.
+                pass
 
         page.on("response", _on_response)
 

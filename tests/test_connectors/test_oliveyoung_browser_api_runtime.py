@@ -5418,3 +5418,515 @@ async def test_scoped_click_skipped_when_readiness_wait_deadlines():
     assert "click_sort_button_robust" in ordering_log
     # Tri-state readiness recorded as False.
     assert sess._post_recreate_sort_area_ready is False
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — diagnostic-only response
+# listener probe.
+#
+# Background: the latest Ilso A000000225736 live proof
+# (`O-OY-SCROLL-RECOVERY-SCOPED-CLICK-LIVE-PROOF-ILSO`) demonstrated that
+# the scoped click on the readiness-matched sort button DID fire
+# (`OY sort-button clicked: target='최신순' expected_sort='DATETIME_DESC'
+# scope=readiness_matched_button poll_attempt=1`) but
+# `scroll_continuation_recovery_recovered=false` and the post-recreate
+# `wait_for_next_response` timed out at the cold-start deadline. The
+# wedge has moved off the DOM layer onto the post-recreate cursor /
+# response-queue layer. The probe added in this ticket is
+# diagnostic-only — it does NOT change recovery behavior — and exists so
+# the next live proof can disambiguate four candidate failure modes:
+#   1. No cursor request fired after the scoped click.
+#   2. Cursor request fired but filtered by `_expected_sort_type`.
+#   3. Cursor response arrived with unexpected shape (parse error).
+#   4. Response queue / cursor state stale after recovery.
+# Tests below exercise the listener's new per-response log emission +
+# session-local counter increments under the recovery diagnostic flag.
+# ---------------------------------------------------------------------------
+
+
+class _FakeRequest:
+    """Minimal stand-in for `playwright.Request` that exposes the
+    fields `_on_response` reads: `method`, `url`, `headers`, `post_data`.
+    Headers default to a single accept entry so the redact helper has
+    something to work with."""
+
+    def __init__(self, *, method: str = "POST", url: str | None = None,
+                 post_data: str | None = None,
+                 headers: dict | None = None):
+        self.method = method
+        self.url = url or "https://m.oliveyoung.co.kr/review/api/v2/reviews/cursor"
+        self.post_data = post_data
+        self.headers = headers if headers is not None else {
+            "accept": "application/json",
+        }
+
+
+class _FakeResponse:
+    """Minimal stand-in for `playwright.Response` that exposes the
+    fields `_on_response` reads: `url`, `status`, `headers`, `request`,
+    and an async `json()`. The test controls the JSON outcome by
+    passing `body_json` (the parsed dict) OR `json_should_raise=True`
+    to simulate `response.json()` raising — i.e. the parse-error path.
+    """
+
+    def __init__(
+        self,
+        *,
+        url: str = "https://m.oliveyoung.co.kr/review/api/v2/reviews/cursor",
+        status: int = 200,
+        body_json: dict | None = None,
+        json_should_raise: bool = False,
+        content_type: str = "application/json; charset=utf-8",
+        request: _FakeRequest | None = None,
+    ):
+        self.url = url
+        self.status = status
+        self.headers = {"content-type": content_type}
+        self._body_json = body_json
+        self._json_should_raise = json_should_raise
+        self.request = request or _FakeRequest()
+
+    async def json(self):
+        if self._json_should_raise:
+            raise ValueError("simulated JSON decode failure")
+        return self._body_json
+
+
+def _build_diagnostic_session(
+    *,
+    expected_sort: str | None = "DATETIME_DESC",
+):
+    """Build a minimal `_PlaywrightReviewSession` instance via
+    `object.__new__` and seed exactly the attributes the closure
+    `_on_response` reads. The session does NOT need any browser /
+    Playwright surface — we invoke the closure directly with a fake
+    response object.
+
+    Pattern mirrors `_build_scroll_to_sort_session` (uses
+    `object.__new__` then assigns required attrs) but stripped to the
+    response-handler subset.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._expected_sort_type = expected_sort
+    sess._observed_total_review_count = None
+    # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — diagnostic gate +
+    # counters. Default False; tests flip it True to exercise the
+    # probe path.
+    sess._diagnose_post_recovery_responses = False
+    sess._post_recovery_response_probe_count = 0
+    sess._post_recovery_response_accepted_count = 0
+    sess._post_recovery_response_sort_mismatch_count = 0
+    sess._post_recovery_response_parse_error_count = 0
+    return sess
+
+
+def _attach_and_get_handler(sess):
+    """Attach the response handler to a tiny fake page and return the
+    inner `_on_response` closure for direct invocation. The fake page
+    records the registration but is otherwise a no-op."""
+    captured: list = []
+
+    class _FakePage:
+        def on(self, event, handler):
+            assert event == "response"
+            captured.append(handler)
+
+    sess._attach_response_handler(_FakePage())
+    assert len(captured) == 1
+    return captured[0]
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_diagnostic_flag_default_false_on_init():
+    """A. Flag-lifecycle: `_diagnose_post_recovery_responses` is False
+    at session init. The real constructor (not the test fixture) must
+    default the gate to False so initial-open / happy-path collection
+    emits no probe logs.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    # Re-invoke __init__ with the minimum kwargs required.
+    sess.__init__(
+        headless=True,
+        api_path="/review/api/v2/reviews/cursor",
+        review_tab_locator="div.review-tab",
+        scroll_candidates=(),
+        user_agent="ua",
+        viewport={"width": 800, "height": 600},
+    )
+    assert sess._diagnose_post_recovery_responses is False
+    assert sess._post_recovery_response_probe_count == 0
+    assert sess._post_recovery_response_accepted_count == 0
+    assert sess._post_recovery_response_sort_mismatch_count == 0
+    assert sess._post_recovery_response_parse_error_count == 0
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_diagnostic_flag_true_before_recreate_and_false_after(
+    page1_body, page2_last, monkeypatch,
+):
+    """A. Flag-lifecycle: in `collect()`'s recovery branch the flag is
+    flipped True immediately BEFORE `reload_and_reopen_review_tab` is
+    awaited (so the cascade's scoped click runs with diagnostics on),
+    and flipped False after the post-recreate `wait_for_next_response`
+    exits.
+    """
+    # Custom recovery session that records the flag value at the moment
+    # `reload_and_reopen_review_tab` was entered.
+    class _FlagSpyRecoverySession(_RecoveryFakeSession):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.flag_at_recreate_entry: bool | None = None
+
+        async def reload_and_reopen_review_tab(self) -> None:
+            self.flag_at_recreate_entry = bool(
+                getattr(
+                    self, "_diagnose_post_recovery_responses", False,
+                ),
+            )
+            await super().reload_and_reopen_review_tab()
+
+    session = _FlagSpyRecoverySession(
+        [(200, page1_body), None, None, None],
+        recreate_responses=[[(200, page2_last)]],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+
+    # The flag was True at the moment recreate ran (the cascade's
+    # scoped click runs INSIDE recreate, so the probe is active for
+    # the post-recovery cursor request).
+    assert session.flag_at_recreate_entry is True
+    # And the flag was reset to False after the recovery window ended
+    # (success-path consumption of `r_body` then continue → outer
+    # while → eventually clean termination on hasNext=False).
+    assert session._diagnose_post_recovery_responses is False
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_diagnostic_flag_false_after_recreate_raise(
+    page1_body, monkeypatch,
+):
+    """A. Flag-lifecycle: when `reload_and_reopen_review_tab` itself
+    raises, the flag is still reset to False (the recovery branch's
+    `_close_post_recovery_diag` runs in the except block before
+    break).
+    """
+    class _RaisingRecoverySession(_RecoveryFakeSession):
+        async def reload_and_reopen_review_tab(self) -> None:
+            self.recreate_calls += 1
+            raise RuntimeError("simulated recreate failure")
+
+    session = _RaisingRecoverySession([(200, page1_body), None, None, None])
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    await c.collect(keyword="x", params=params)
+
+    assert session.recreate_calls == 1
+    # Flag reset on the raise path too.
+    assert session._diagnose_post_recovery_responses is False
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_response_accepted_logs_and_counter(caplog):
+    """B. Accepted response: a cursor response whose request
+    `post_data.sortType` matches `_expected_sort_type` is placed onto
+    the queue (existing behavior) AND emits a single
+    `OY recovery response accepted:` log line AND increments
+    `_post_recovery_response_accepted_count`.
+    """
+    import logging
+    sess = _build_diagnostic_session(expected_sort="DATETIME_DESC")
+    sess._diagnose_post_recovery_responses = True
+    handler = _attach_and_get_handler(sess)
+
+    # Construct an OK body that matches the production cursor-API shape
+    # so `_extract_response_cursor_meta` populates has_next / cursor /
+    # review_count.
+    body = {
+        "data": {
+            "hasNext": True,
+            "nextCursorId": "abc123",
+            "goodsReviewList": [{"goodsReviewSeq": "r1"}, {"goodsReviewSeq": "r2"}],
+        },
+    }
+    fake_req = _FakeRequest(
+        post_data=json.dumps({"sortType": "DATETIME_DESC"}),
+    )
+    fake_resp = _FakeResponse(body_json=body, request=fake_req)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await handler(fake_resp)
+
+    # Existing behavior: queued.
+    assert sess._queue.qsize() == 1
+    # New diagnostic: counter incremented, log emitted.
+    assert sess._post_recovery_response_probe_count == 1
+    assert sess._post_recovery_response_accepted_count == 1
+    assert sess._post_recovery_response_sort_mismatch_count == 0
+    assert sess._post_recovery_response_parse_error_count == 0
+    accepted_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery response accepted:" in r.getMessage()
+    ]
+    assert len(accepted_messages) == 1
+    msg = accepted_messages[0]
+    assert "url_kind=cursor" in msg
+    assert "status=200" in msg
+    assert "request_method=POST" in msg
+    assert "request_sort=DATETIME_DESC" in msg
+    assert "expected_sort=DATETIME_DESC" in msg
+    assert "accepted=true" in msg
+    assert "drop_reason=none" in msg
+    assert "has_next=True" in msg
+    assert "review_count=2" in msg
+    assert "cursor=abc123" in msg
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_response_sort_mismatch_logs_and_counter(caplog):
+    """C. Sort-mismatch: a cursor response whose request
+    `post_data.sortType` does NOT match `_expected_sort_type` is
+    dropped (existing behavior: `_responses_filtered_out_by_sort` ++,
+    queue NOT touched) AND emits an `OY recovery response dropped:
+    drop_reason=sort_mismatch` line AND increments
+    `_post_recovery_response_sort_mismatch_count`.
+    """
+    import logging
+    sess = _build_diagnostic_session(expected_sort="DATETIME_DESC")
+    sess._diagnose_post_recovery_responses = True
+    handler = _attach_and_get_handler(sess)
+
+    body = {
+        "data": {
+            "hasNext": True,
+            "nextCursorId": "useful-1",
+            "goodsReviewList": [{"goodsReviewSeq": "r3"}],
+        },
+    }
+    fake_req = _FakeRequest(
+        # Different sortType → filtered out by the existing filter.
+        post_data=json.dumps({"sortType": "USEFUL_SCORE_DESC"}),
+    )
+    fake_resp = _FakeResponse(body_json=body, request=fake_req)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await handler(fake_resp)
+
+    # Existing behavior: NOT queued (sort mismatch).
+    assert sess._queue.qsize() == 0
+    assert sess._responses_filtered_out_by_sort == 1
+    # New diagnostic.
+    assert sess._post_recovery_response_probe_count == 1
+    assert sess._post_recovery_response_accepted_count == 0
+    assert sess._post_recovery_response_sort_mismatch_count == 1
+    assert sess._post_recovery_response_parse_error_count == 0
+    dropped_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery response dropped:" in r.getMessage()
+    ]
+    assert len(dropped_messages) == 1
+    msg = dropped_messages[0]
+    assert "drop_reason=sort_mismatch" in msg
+    assert "accepted=false" in msg
+    assert "request_sort=USEFUL_SCORE_DESC" in msg
+    assert "expected_sort=DATETIME_DESC" in msg
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_response_parse_error_logs_and_counter(caplog):
+    """D. Parse error: a malformed cursor response (e.g.
+    `response.json()` raises, OR the body doesn't shape-match the
+    classifier's expectations) does NOT crash AND emits an
+    `OY recovery response parse failed:` line AND increments
+    `_post_recovery_response_parse_error_count`.
+    """
+    import logging
+    sess = _build_diagnostic_session(expected_sort="DATETIME_DESC")
+    sess._diagnose_post_recovery_responses = True
+    handler = _attach_and_get_handler(sess)
+
+    # Force `response.json()` to raise so the existing handler's
+    # decode-failure path sets `body=None` and the diagnostic
+    # classifies the outcome as parse_error.
+    fake_req = _FakeRequest(
+        post_data=json.dumps({"sortType": "DATETIME_DESC"}),
+    )
+    fake_resp = _FakeResponse(
+        body_json=None,
+        json_should_raise=True,
+        request=fake_req,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # Must not raise — diagnostics are best-effort.
+        await handler(fake_resp)
+
+    # Counter incremented.
+    assert sess._post_recovery_response_probe_count == 1
+    assert sess._post_recovery_response_parse_error_count == 1
+    assert sess._post_recovery_response_accepted_count == 0
+    assert sess._post_recovery_response_sort_mismatch_count == 0
+    parse_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery response parse failed:" in r.getMessage()
+    ]
+    assert len(parse_messages) == 1
+    msg = parse_messages[0]
+    assert "drop_reason=parse_error" in msg
+    assert "accepted=false" in msg
+    # When the body could not be parsed, optional cursor-meta fields
+    # are reported as "unknown" rather than a half-cooked value.
+    assert "has_next=unknown" in msg
+    assert "review_count=unknown" in msg
+    assert "cursor=unknown" in msg
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_response_non_cursor_url_is_ignored(caplog):
+    """E. Non-cursor response: a response whose URL does NOT contain
+    `_api_path` is ignored by the existing handler (early `return`).
+    The diagnostic emits NO log line and increments NO counter. This
+    is the chosen behavior for non-cursor URLs: the handler's early
+    return is preserved unchanged, so non-cursor responses are
+    invisible to the probe — which matches the requirement "no log
+    spam: at most one log line per response."
+    """
+    import logging
+    sess = _build_diagnostic_session(expected_sort="DATETIME_DESC")
+    sess._diagnose_post_recovery_responses = True
+    handler = _attach_and_get_handler(sess)
+
+    fake_req = _FakeRequest(
+        method="GET",
+        url="https://www.oliveyoung.co.kr/store/main",
+    )
+    fake_resp = _FakeResponse(
+        url="https://www.oliveyoung.co.kr/store/main",
+        status=200,
+        body_json=None,
+        request=fake_req,
+    )
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await handler(fake_resp)
+
+    # No counters touched.
+    assert sess._post_recovery_response_probe_count == 0
+    # No probe log emitted for non-cursor URL.
+    probe_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery response ")
+    ]
+    assert probe_messages == []
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_diag_no_logs_when_flag_off(caplog):
+    """Sanity: when the diagnostic flag is False (normal happy-path
+    collection), the listener emits NO probe logs and increments NO
+    counters even for matching cursor responses. This is the
+    happy-path-spam guarantee.
+    """
+    import logging
+    sess = _build_diagnostic_session(expected_sort="DATETIME_DESC")
+    # Flag intentionally NOT flipped on.
+    assert sess._diagnose_post_recovery_responses is False
+    handler = _attach_and_get_handler(sess)
+
+    body = {
+        "data": {
+            "hasNext": True,
+            "nextCursorId": "c1",
+            "goodsReviewList": [{"goodsReviewSeq": "r9"}],
+        },
+    }
+    fake_req = _FakeRequest(
+        post_data=json.dumps({"sortType": "DATETIME_DESC"}),
+    )
+    fake_resp = _FakeResponse(body_json=body, request=fake_req)
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await handler(fake_resp)
+
+    # Existing behavior still works (queued).
+    assert sess._queue.qsize() == 1
+    # NO diagnostic counters bumped, NO probe logs emitted.
+    assert sess._post_recovery_response_probe_count == 0
+    assert sess._post_recovery_response_accepted_count == 0
+    probe_messages = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("OY recovery response ")
+    ]
+    assert probe_messages == []
+
+
+@pytest.mark.asyncio
+async def test_post_recovery_summary_log_emitted_on_recovery_exit(
+    page1_body, page2_last, monkeypatch, caplog,
+):
+    """End-of-recovery-window summary: the connector emits an
+    `OY recovery response timeout summary:` line at every exit from
+    the recovery branch, surfacing the four counters. This is the
+    only place the counters are exposed (no `ConnectorRunSummary`
+    schema change).
+    """
+    import logging
+    session = _RecoveryFakeSession(
+        [(200, page1_body), None, None, None],
+        recreate_responses=[[(200, page2_last)]],
+    )
+    import src.voc.connectors.oliveyoung_browser_api as mod
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+
+    c, params = _build_recovery_connector(session)
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await c.collect(keyword="x", params=params)
+
+    summary_lines = [
+        r.getMessage()
+        for r in caplog.records
+        if "OY recovery response timeout summary:" in r.getMessage()
+    ]
+    # Exactly one summary line for this single-recovery run.
+    assert len(summary_lines) == 1
+    msg = summary_lines[0]
+    assert "probes=" in msg
+    assert "accepted=" in msg
+    assert "sort_mismatch=" in msg
+    assert "parse_error=" in msg
