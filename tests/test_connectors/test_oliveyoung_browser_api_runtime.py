@@ -3696,17 +3696,51 @@ async def test_adoption_records_diagnostics(monkeypatch):
 
 
 class _RearmFakeAsyncPage(_FakeAsyncPage):
-    """Extension of `_FakeAsyncPage` that adds the `.close()` coroutine
-    `reload_and_reopen_review_tab` calls on the OLD page. Also records
-    `close_calls` so tests can assert the page-recreate sequence ran
-    end-to-end."""
+    """Extension of `_FakeAsyncPage` that adds the `.close()` and
+    `.reload()` coroutines `reload_and_reopen_review_tab` calls. Also
+    records `close_calls` and `reload_calls` so tests can assert the
+    page-recovery sequence ran end-to-end.
 
-    def __init__(self, url: str = "about:blank"):
+    `reload_should_raise` controls whether `reload()` raises (forcing
+    the I-OY-RECOVERY-RECREATE-STRATEGY-REVISION reload-first path to
+    fall through to recreate) or succeeds (allowing the reload-first
+    path to proceed into the shared post-navigation cascade).
+    Defaults to `True` so tests built with `_build_rearm_session` /
+    `_build_readiness_session` continue to exercise the historical
+    recreate path; new I-OY-RECOVERY-RECREATE-STRATEGY-REVISION tests
+    that want the reload-first success path pass `reload_should_raise=False`.
+    """
+
+    def __init__(
+        self,
+        url: str = "about:blank",
+        *,
+        reload_should_raise: bool = True,
+    ):
         super().__init__(url)
         self.close_calls = 0
+        self.reload_calls: list[dict] = []
+        self._reload_should_raise = reload_should_raise
 
     async def close(self):
         self.close_calls += 1
+
+    async def reload(self, wait_until=None, timeout=None):
+        # Record the call regardless of outcome so tests can assert
+        # the reload-first path was at least attempted.
+        self.reload_calls.append(
+            {"wait_until": wait_until, "timeout": timeout},
+        )
+        if self._reload_should_raise:
+            raise RuntimeError("reload failed (fake)")
+        # Successful reload is a no-op in the fake — the production
+        # readiness wait + cascade then runs against the fake page
+        # exactly as it would after `goto`. Tests using
+        # `_RearmReadinessFakePage` get count-flipping locator
+        # semantics on the SAME page object (no new_page() involved),
+        # which is the key behavioral difference vs the recreate
+        # path.
+        return None
 
 
 def _build_rearm_session(*, sort_button_label_ko: str | None):
@@ -3957,8 +3991,15 @@ class _RearmReadinessFakePage(_RearmFakeAsyncPage):
             ".sort-container",
             "[class*='sort']",
         ),
+        reload_should_raise: bool = True,
     ):
-        super().__init__(url=url)
+        # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — `reload_should_raise`
+        # forwarded to the parent `_RearmFakeAsyncPage`. Default True
+        # preserves the prior recreate-only behavior in existing tests.
+        # The new reload-first tests pass False so the reload-first
+        # path's readiness wait runs against the simulator on the
+        # SAME page object.
+        super().__init__(url=url, reload_should_raise=reload_should_raise)
         # Number of count() invocations that must elapse before the
         # sort container starts to report count>0. 0 means visible
         # from the first probe.
@@ -4286,3 +4327,479 @@ async def test_post_recreate_sort_area_ready_getter_none_before_recreate():
     assert "wait_for_review_sort_area_ready" not in ordering_log
     assert "click_sort_button_robust" not in ordering_log
     assert sess.get_post_recreate_sort_area_ready() is None
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — Option A (reload-first)
+# recovery path. The Ilso A000000225736 live proof
+# (O-OY-SCROLL-RECOVERY-WAIT-LIVE-PROOF-ILSO) showed the
+# close+new_page+goto recreate landing on a page where the
+# review-tab DOM never re-mounts (`최신순` absent in the enumerated
+# buttons after the 1c1c1f6 12s + 12s wait + single-shot re-trigger).
+# The wedged page itself had successfully served 49 cursors before
+# the scroll-attempt budget exhausted — proof its review-tab DOM was
+# fully functional. Reloading it (preserving page identity, cookies,
+# Playwright listener registration) is a less disruptive recovery.
+#
+# Order of operations on the production path:
+#
+#   0. Reload-first (Option A) — when eligible (page is on the
+#      target goodsNo): drain queue + reset counters in place;
+#      `await self._page.reload(...)`; shared post-navigation
+#      cascade (trigger → readiness wait + optional single-shot
+#      re-trigger → sort click). If readiness wait observes the
+#      sort area within budget → strategy = "reload_succeeded";
+#      RETURN (skip recreate entirely).
+#   1–8. Recreate fallback — historical close+new_page+goto path,
+#      runs when reload-first was ineligible OR when reload itself
+#      raised OR when post-reload readiness deadlined. Strategy
+#      becomes "reload_failed_recreate_fallback" or "recreate_only"
+#      depending on which condition triggered the fallback.
+#
+# Required test coverage (mirror the dispatch's required cases):
+#   A1. Reload-first success — same page object reloaded; readiness
+#       wait observes sort area; click runs on reloaded page;
+#       strategy = "reload_succeeded"; close + new_page NOT called.
+#   A2. Reload raises → fallback to recreate; close + new_page
+#       called; strategy = "reload_failed_recreate_fallback".
+#   A3. Reload succeeds but readiness fails → fallback to recreate;
+#       close + new_page called; strategy =
+#       "reload_failed_recreate_fallback". Document chosen behavior:
+#       the connector falls through to recreate (the production code
+#       picked this over "accept the failed reload" because Ilso live
+#       proof showed that ONE more page-recreate attempt is exactly
+#       what the existing failure-mode contract budgets for).
+#   A4. URL mismatch → reload-first ineligible; strategy =
+#       "recreate_only"; recreate path runs unchanged.
+#   A5. Initial getter state — `get_post_recreate_strategy_used` is
+#       None before any recovery call.
+#   A6. Listener-before-trigger ordering preserved on reload-first
+#       success — no re-attach occurs (listener persists across
+#       reload); but the cascade triggers/click still run, AFTER
+#       reload completes.
+# ---------------------------------------------------------------------------
+
+
+def _build_reload_first_session(
+    *,
+    sort_button_label_ko: str | None,
+    reload_should_raise: bool = False,
+    sort_area_visible_after_count: int = 0,
+    sort_hunt_settle_s: float = 0.2,
+    sort_hunt_poll_interval_s: float = 0.02,
+    opened_product_url: str | None = None,
+    old_page_url: str | None = None,
+):
+    """Test fixture for I-OY-RECOVERY-RECREATE-STRATEGY-REVISION.
+
+    Builds a session whose OLD page is a `_RearmReadinessFakePage` —
+    the same simulator the prior I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER
+    tests use, except it now supports `reload()` and the readiness
+    wait runs against the same page object on the reload-first path
+    (no new_page() involved).
+
+    Differs from `_build_readiness_session` in two ways:
+      1. The OLD page is itself a `_RearmReadinessFakePage` (with the
+         count-flipping locator) rather than a basic `_RearmFakeAsyncPage`.
+         The reload-first path's cascade probes the SAME page object,
+         so the simulator must live on it.
+      2. `reload_should_raise` is exposed so tests can drive both
+         "reload succeeds" (default — A1, A3, A6 scenarios) and
+         "reload raises" (A2 scenario) cases.
+
+    `opened_product_url` and `old_page_url` default to the same URL
+    (`_PRODUCT_URL_TAB_REVIEW`) so reload-first is eligible by
+    default. Tests that exercise the URL-mismatch eligibility path
+    (A4) override `old_page_url` to a different product URL.
+
+    Returns `(session, ordering_log, old_page, new_page_ref)`. The
+    new_page_ref will be populated only if the recreate fallback
+    fires (reload-first failure path).
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    opened_url = opened_product_url or _PRODUCT_URL_TAB_REVIEW
+    old_url = old_page_url or _PRODUCT_URL_TAB_REVIEW
+    old_page = _RearmReadinessFakePage(
+        url=old_url,
+        sort_area_visible_after_count=sort_area_visible_after_count,
+        reload_should_raise=reload_should_raise,
+    )
+
+    new_page_ref: list = []
+
+    class _ReloadFirstCtx(_FakeBrowserContext):
+        def __init__(self, pages, visible_after):
+            super().__init__(pages)
+            self._visible_after = visible_after
+
+        async def new_page(self):
+            self.new_page_calls += 1
+            # The fallback recreate path creates a new page when
+            # reload-first fails. We give it the same simulator
+            # config so the cascade running on the recreate-path
+            # new page observes count = 0 (sort area never visible);
+            # tests that exercise the fallback should check that the
+            # recreate path ran but the readiness on the new page
+            # stayed False.
+            page = _RearmReadinessFakePage(
+                url=self._next_page_url,
+                sort_area_visible_after_count=10_000,
+                reload_should_raise=True,
+            )
+            self.pages.append(page)
+            new_page_ref.append(page)
+            return page
+
+    sess._ctx = _ReloadFirstCtx([], sort_area_visible_after_count)
+    sess._page = old_page
+    sess._opened_product_url = opened_url
+    sess._queue = asyncio.Queue()
+    sess._request_log = []
+    sess._observed_sort_types_count = {}
+    sess._responses_filtered_out_by_sort = 0
+    sess._observed_total_review_count = None
+    sess._api_path = "/review/api/v2/reviews/cursor"
+    sess._expected_sort_type = "DATETIME_DESC" if sort_button_label_ko else None
+    sess._review_tab_locator = "div.review-tab"
+    sess._review_more_button_clicked = False
+    sess._scrolled_to_review_area = False
+    sess._sort_button_label_ko = sort_button_label_ko
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._sort_hunt_settle_s = float(sort_hunt_settle_s)
+    sess._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
+    sess._post_recreate_sort_area_ready = None
+    sess._post_recreate_strategy_used = None
+
+    ordering_log: list[str] = []
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach(page):
+        ordering_log.append("attach_response_handler")
+        return real_attach(page)
+
+    async def _spy_trigger(*, initial_click: bool = True):
+        ordering_log.append(
+            f"trigger_review_list_api(initial_click={initial_click})",
+        )
+
+    real_wait = sess._wait_for_review_sort_area_ready
+
+    async def _spied_wait(*, timeout_s, poll_interval_s):
+        ordering_log.append("wait_for_review_sort_area_ready")
+        result = await real_wait(
+            timeout_s=timeout_s, poll_interval_s=poll_interval_s,
+        )
+        ordering_log.append(
+            f"wait_for_review_sort_area_ready_returned={result}",
+        )
+        return result
+
+    async def _spy_click_sort():
+        ordering_log.append("click_sort_button_robust")
+
+    sess._attach_response_handler = _spy_attach  # type: ignore[assignment]
+    sess._trigger_review_list_api = _spy_trigger  # type: ignore[assignment]
+    sess._wait_for_review_sort_area_ready = _spied_wait  # type: ignore[assignment]
+    sess._click_sort_button_robust = _spy_click_sort  # type: ignore[assignment]
+    return sess, ordering_log, old_page, new_page_ref
+
+
+@pytest.mark.asyncio
+async def test_reload_first_success_skips_close_and_new_page():
+    """Test A1 — reload-first happy path.
+
+    The old page reloads successfully and the readiness wait observes
+    the sort area on the first probe. The shared cascade runs on the
+    SAME page object: trigger → wait → click. The recreate fallback
+    (close + new_page + goto) is NOT invoked. Strategy is recorded as
+    "reload_succeeded". This is the load-bearing case for the Ilso
+    A000000225736 fix — the wedged page that had served 49 cursors
+    successfully gets a less disruptive recovery than the
+    close+new_page+goto that demonstrated the structural DOM gap.
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        sort_area_visible_after_count=0,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted on the old page exactly once.
+    assert len(old_page.reload_calls) == 1
+    # Strategy recorded as "reload_succeeded".
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+    # Old page was NOT closed — we reused it.
+    assert old_page.close_calls == 0
+    # No fresh page was created via the context.
+    assert sess._ctx.new_page_calls == 0
+    assert new_page_ref == []
+    # Cascade ran on the reloaded page: trigger → wait → click.
+    assert "wait_for_review_sort_area_ready_returned=True" in ordering_log
+    assert "click_sort_button_robust" in ordering_log
+    # Readiness recorded as True for the connector's `_note` path.
+    assert sess.get_post_recreate_sort_area_ready() is True
+    # Listener was NOT re-attached on the reload-first path — the
+    # Playwright registration persists across reload (same page
+    # object identity). The install-before-trigger invariant remains
+    # preserved trivially because the listener was already attached
+    # during the prior `open()` call (in production); in test, the
+    # spy is registered at construction time, before any cascade
+    # call could fire.
+    assert "attach_response_handler" not in ordering_log
+    # The simulator on the old page WAS probed (proves the production
+    # code is actually waiting against the right page object).
+    assert old_page.container_count_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_reload_first_falls_back_to_recreate_when_reload_raises():
+    """Test A2 — reload itself raises.
+
+    `_RearmReadinessFakePage(reload_should_raise=True)` makes
+    `page.reload()` throw. The connector logs and swallows the
+    exception, marks strategy "reload_failed_recreate_fallback", and
+    falls through to the historical close+new_page+goto recreate
+    path. Listener IS re-attached on the new page (preserving the
+    install-before-trigger invariant on the recreate path).
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=True,
+        # New page simulator never shows sort area (10_000 visibility
+        # threshold) — proves the fallback path still runs to
+        # completion even when the recreated page also fails.
+        sort_area_visible_after_count=0,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted on the old page exactly once.
+    assert len(old_page.reload_calls) == 1
+    # Strategy recorded as the fallback marker.
+    assert (
+        sess.get_post_recreate_strategy_used()
+        == "reload_failed_recreate_fallback"
+    )
+    # Old page WAS closed by the recreate fallback.
+    assert old_page.close_calls == 1
+    # A fresh page WAS created via the context (recreate path ran).
+    assert sess._ctx.new_page_calls == 1
+    assert len(new_page_ref) == 1
+    # Listener was re-attached on the new page — preserves the
+    # install-before-trigger invariant on the recreate path.
+    assert "attach_response_handler" in ordering_log
+    # Trigger fired AFTER attach (install-before-trigger).
+    attach_index = ordering_log.index("attach_response_handler")
+    trigger_index = ordering_log.index(
+        "trigger_review_list_api(initial_click=True)",
+    )
+    assert attach_index < trigger_index, (
+        f"listener install before trigger broken on recreate fallback: "
+        f"{ordering_log!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reload_first_falls_back_to_recreate_when_readiness_fails():
+    """Test A3 — reload succeeds but post-reload readiness deadlines.
+
+    The reloaded page never shows the sort area (high visibility
+    threshold). Both reload-first waits deadline, the single-shot
+    re-trigger fires between them but doesn't make the sort area
+    appear, so `_run_post_navigation_review_cascade` returns False.
+    The connector then falls through to the historical recreate
+    path. Strategy is recorded as "reload_failed_recreate_fallback".
+
+    Behavior choice: fall-through to recreate (vs accept the failed
+    reload and end with `sort_control_unreachable`). Rationale:
+      - The existing failure-mode contract budgets up to
+        `MAX_SCROLL_RECOVERY_RECREATES` (default 2) page-recreate
+        attempts. Treating the reload-first failure as one of the
+        ways the FIRST attempt can degrade keeps the budget
+        accounting straightforward — the connector still consumes
+        one recovery_attempt, and downstream tooling sees the
+        existing `scroll_continuation_recovery_attempts=1`
+        telemetry.
+      - The recreate fallback's `_post_recreate_sort_area_ready =
+        False` still fires (via the cascade on the new page), so
+        the existing `sort_control_unreachable` classifier path is
+        preserved on the worst case where both paths fail.
+      - The new `_post_recreate_strategy_used` flag distinguishes
+        "reload_failed_recreate_fallback" from "recreate_only" so
+        the post-mortem can see whether the smaller fix was tried.
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        # Never visible: simulator threshold higher than any plausible
+        # poll count within the compressed (0.2s, 0.02s) budget.
+        sort_area_visible_after_count=10_000,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted exactly once (the readiness wait failures
+    # don't re-trigger another reload).
+    assert len(old_page.reload_calls) == 1
+    # Strategy recorded as the fallback marker.
+    assert (
+        sess.get_post_recreate_strategy_used()
+        == "reload_failed_recreate_fallback"
+    )
+    # Cascade on the reloaded page ran (trigger + wait + re-trigger +
+    # wait + click). Both waits returned False.
+    false_returns_before_recreate = [
+        line for line in ordering_log
+        if line == "wait_for_review_sort_area_ready_returned=False"
+    ]
+    # 4 total Falses: 2 from reload-first cascade, 2 from recreate
+    # cascade (since the new page in this fixture also has the
+    # never-visible simulator threshold — by design, to prove the
+    # fallback also runs to completion).
+    assert len(false_returns_before_recreate) == 4, (
+        f"expected four wait deadlines (two reload-first, two "
+        f"recreate); got {ordering_log!r}"
+    )
+    # Old page closed + new page created on the recreate fallback.
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+    assert len(new_page_ref) == 1
+
+
+@pytest.mark.asyncio
+async def test_reload_first_skipped_when_page_url_mismatch():
+    """Test A4 — URL mismatch makes reload-first ineligible.
+
+    The OLD page's URL contains a DIFFERENT goodsNo than
+    `_opened_product_url`. `_reload_strategy_eligible()` returns
+    False; the connector goes straight to the recreate path.
+    Strategy is recorded as "recreate_only".
+    """
+    foreign_url = (
+        "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+        "?goodsNo=B999999999999"
+    )
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        # opened_product_url stays on _TARGET_GOODS; old_page_url is
+        # on a foreign goodsNo. Eligibility short-circuits.
+        old_page_url=foreign_url,
+        # `reload_should_raise` is irrelevant in this scenario because
+        # reload should NOT be called. Use the raising default so any
+        # accidental call would surface as an exception too.
+        reload_should_raise=True,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload was NEVER called on the old page (eligibility failed).
+    assert old_page.reload_calls == []
+    # Strategy recorded as "recreate_only".
+    assert sess.get_post_recreate_strategy_used() == "recreate_only"
+    # Recreate path ran: old page closed, new page created.
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_reload_first_skipped_when_opened_product_url_none():
+    """Test A4 (variant) — missing `_opened_product_url` makes
+    reload-first ineligible.
+
+    `_reload_strategy_eligible` returns False when
+    `_opened_product_url` is None (the session was constructed but
+    `open()` never ran, or was reset). Recreate-only path runs;
+    strategy = "recreate_only". The recreate path itself then
+    early-returns at step 5 (the "no remembered product_url" guard)
+    so close + new_page + attach run, but goto + cascade do not.
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=True,
+    )
+    # Clear the opened URL after fixture construction.
+    sess._opened_product_url = None
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload was NEVER called.
+    assert old_page.reload_calls == []
+    # Strategy = "recreate_only".
+    assert sess.get_post_recreate_strategy_used() == "recreate_only"
+    # Recreate path's steps 1–4 still ran (close + drain + new_page +
+    # attach). Step 5 (goto) early-returns on the None guard.
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_post_recreate_strategy_used_getter_none_before_recovery():
+    """Test A5 — getter initial state.
+
+    `get_post_recreate_strategy_used()` returns None when the
+    session has never invoked `reload_and_reopen_review_tab` (mirror
+    of the prior `get_post_recreate_sort_area_ready` tri-state
+    contract). The connector's strategy-note path treats None as
+    "no diagnostic to emit," keeping `sample_dropped_reasons` clean
+    on pre-recovery summaries.
+    """
+    sess, _, _, _ = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+    )
+
+    # Before any recreate call, the getter reflects the constructor
+    # default (None).
+    assert sess.get_post_recreate_strategy_used() is None
+
+
+@pytest.mark.asyncio
+async def test_reload_first_success_listener_not_re_attached():
+    """Test A6 — on the reload-first SUCCESS path, the connector
+    does NOT call `_attach_response_handler` (the Playwright response
+    listener registration persists across `page.reload()` because
+    the page object identity is preserved). The install-before-
+    trigger invariant remains preserved by the prior `open()` call
+    in production: by the time any trigger fires inside
+    `reload_and_reopen_review_tab`, the listener has been installed
+    since `open()`, well before any cascade call.
+
+    This test pins that contract explicitly: spy never sees an
+    "attach_response_handler" entry on the success path, but the
+    cascade triggers + click still ran on the reloaded page.
+    """
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        sort_area_visible_after_count=0,
+    )
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Reload-first succeeded → no recreate.
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+    # Listener re-attach did NOT happen (production semantics: the
+    # listener persists across page.reload).
+    assert "attach_response_handler" not in ordering_log
+    # But the trigger and click DID fire (cascade ran on the reloaded
+    # page). Trigger appears at least once before click.
+    triggers = [
+        i for i, line in enumerate(ordering_log)
+        if line == "trigger_review_list_api(initial_click=True)"
+    ]
+    assert len(triggers) >= 1, (
+        f"expected trigger to fire on reload-first cascade; "
+        f"got {ordering_log!r}"
+    )
+    click_index = ordering_log.index("click_sort_button_robust")
+    assert triggers[0] < click_index, (
+        f"trigger must precede click on reload-first cascade; "
+        f"got {ordering_log!r}"
+    )

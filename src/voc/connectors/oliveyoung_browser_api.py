@@ -1812,6 +1812,49 @@ class OliveYoungBrowserAPIConnector:
                                     True
                                 )
                                 break
+                            # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION —
+                            # read the session's strategy flag and emit
+                            # narrow `_note` entries describing whether
+                            # the new reload-first path ran (Option A),
+                            # whether it succeeded, and whether control
+                            # fell through to the historical recreate.
+                            # The Ilso A000000225736 live proof
+                            # (`O-OY-SCROLL-RECOVERY-WAIT-LIVE-PROOF-ILSO`)
+                            # showed close+new_page+goto producing a
+                            # page that never re-mounts the review-tab
+                            # DOM; reload-first preserves the page
+                            # object that had successfully served 49
+                            # cursors before the wedge, and only the
+                            # document gets reset. These notes precede
+                            # the existing re-arm note so that on the
+                            # `reload_succeeded` path the post-mortem
+                            # can confirm the new path actually ran.
+                            try:
+                                strategy_getter = getattr(
+                                    session,
+                                    "get_post_recreate_strategy_used",
+                                    None,
+                                )
+                                strategy_used = (
+                                    strategy_getter()
+                                    if strategy_getter is not None
+                                    else None
+                                )
+                            except Exception:
+                                strategy_used = None
+                            if strategy_used in (
+                                "reload_succeeded",
+                                "reload_failed_recreate_fallback",
+                            ):
+                                _note(
+                                    "scroll_continuation_recovery: "
+                                    "retrying via page.reload before recreate",
+                                )
+                            if strategy_used == "reload_failed_recreate_fallback":
+                                _note(
+                                    "scroll_continuation_recovery: reload "
+                                    "strategy failed; falling back to recreate",
+                                )
                             # I-OY-SCROLL-RECOVERY-COLD-START-REARM —
                             # narrow diagnostic so the next post-mortem
                             # can confirm the recreate path actually
@@ -1819,7 +1862,12 @@ class OliveYoungBrowserAPIConnector:
                             # pipeline (vs the legacy passive-wait
                             # behavior that produced the
                             # `post-recreate cold-start timed out`
-                            # symptom on Ilso A000000225736).
+                            # symptom on Ilso A000000225736). Still
+                            # emitted on the reload-first success path
+                            # because the shared cascade re-fires the
+                            # trigger + sort on the reloaded page
+                            # (the listener was already installed by
+                            # `open()` and persists across reload).
                             _note(
                                 "scroll_continuation_recovery: re-armed "
                                 "listener+sort+trigger; awaiting first response",
@@ -2937,6 +2985,35 @@ class _PlaywrightReviewSession:
         # emits a single narrow `_note` so the next post-mortem can tell
         # whether the wait succeeded or deadlined.
         self._post_recreate_sort_area_ready: bool | None = None
+        # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — which recovery
+        # strategy `reload_and_reopen_review_tab` ended up using on the
+        # most recent invocation. The Ilso A000000225736 live proof
+        # demonstrated that the close+new_page+goto recreate produces a
+        # page that never mounts the review-tab DOM, even after the
+        # 1c1c1f6 readiness wait + single-shot re-trigger. The fix tries
+        # `page.reload()` on the existing wedged page first (which still
+        # has the review-tab DOM mounted — cursor 49 had been served
+        # from it), and only falls back to the close+new_page+goto
+        # recreate when reload itself raises or post-reload readiness
+        # remains False. Connector reads this via
+        # `get_post_recreate_strategy_used()` and emits at most two
+        # narrow `_note` entries describing which strategy ran.
+        #
+        # Values:
+        #   None — recreate hasn't been invoked yet OR an early-return
+        #     fired before any strategy could begin (e.g. ctx is None).
+        #   "reload_succeeded" — reload-first ran and the post-reload
+        #     readiness wait observed the sort area; sort-button click
+        #     ran on the reloaded page; recreate fallback was NOT taken.
+        #   "reload_failed_recreate_fallback" — reload-first was
+        #     attempted (eligible by URL match) but either `page.reload`
+        #     raised OR post-reload readiness wait deadlined; control
+        #     fell through to the existing close+new_page+goto path.
+        #   "recreate_only" — reload-first was NOT eligible (e.g.
+        #     `_opened_product_url` missing, OR the page URL doesn't
+        #     contain the target goodsNo, OR `self._page` was None);
+        #     went straight to close+new_page+goto.
+        self._post_recreate_strategy_used: str | None = None
         # Legacy substring selector (kept as last-resort fallback). New
         # call sites pass label_ko; old call sites can still pass a
         # selector and the robust path will skip the label-based hunt.
@@ -4291,42 +4368,300 @@ class _PlaywrightReviewSession:
         )
         return False
 
+    def _reload_strategy_eligible(self) -> bool:
+        """I-OY-RECOVERY-RECREATE-STRATEGY-REVISION.
+
+        True iff the reload-first recovery path can be safely attempted.
+
+        Conditions (ALL must hold):
+          - `self._page` is not None (we have a page object to reload).
+          - `self._opened_product_url` is set AND contains a goodsNo
+            (i.e. `_extract_target_goods_no` resolves a non-empty target).
+          - The current page URL contains `goodsNo=<target>` — i.e. the
+            page object we'd reload is still on the SAME product. This
+            guards against an unrelated drift (e.g. mid-stream navigation
+            to a different page) where reloading would land us nowhere
+            useful.
+
+        Why this matters: the live proof on Ilso A000000225736 showed
+        the wedged page had successfully served 49 cursors before the
+        scrolls stopped producing new responses. The review-tab DOM was
+        clearly mounted and functional on that page. The subsequent
+        close+new_page+goto recreate threw all of that state away and
+        landed on a page where the review-tab DOM never re-mounted
+        (only site-nav / footer buttons enumerated). Reloading the
+        original page is a less disruptive intervention — it preserves
+        the page-level identity (cookies, in-memory JS context, the
+        Playwright listener registration) while resetting the document.
+
+        Returns False when the eligibility conditions are not met; the
+        caller falls through to the existing close+new_page+goto
+        recreate path unchanged.
+        """
+        if self._page is None:
+            return False
+        if not self._opened_product_url:
+            return False
+        target = self._extract_target_goods_no(self._opened_product_url)
+        if not target:
+            return False
+        try:
+            current_url = self._page.url or ""
+        except Exception:
+            return False
+        return f"goodsNo={target}" in current_url
+
+    async def _run_post_navigation_review_cascade(self) -> bool:
+        """Shared post-navigation cascade reused by BOTH the reload-first
+        path and the close+new_page+goto recreate path.
+
+        Runs steps 6–8 of the legacy recovery sequence on `self._page`:
+
+          6. `_trigger_review_list_api(initial_click=True)` — review-tab
+             click + scroll + 리뷰 더보기 cascade (idempotent on adopted
+             / already-active pages).
+          7. `_wait_for_review_sort_area_ready` (with optional single-
+             shot re-trigger on first-wait timeout) — see
+             I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER for rationale.
+             Records the terminal True/False on
+             `self._post_recreate_sort_area_ready`.
+          8. `_click_sort_button_robust()` — re-fires the target sort
+             so the response-handler filter (keyed on
+             `_expected_sort_type`) admits the new cursor API response.
+             Runs whether or not the readiness wait succeeded
+             (preserves the existing `sort_control_unreachable`
+             failure-mode contract).
+
+        Returns the readiness signal (True iff the sort area was
+        observed within the budget). The caller uses this to decide
+        whether the reload-first path was successful — if False, the
+        caller falls through to the recreate path (so the recreate
+        path gets a second shot at mounting the review tab on a fresh
+        page).
+
+        IMPORTANT: this helper does NOT re-attach the response handler.
+        The caller is responsible for ensuring the listener is already
+        installed on `self._page` before invoking this method. On the
+        reload-first path the listener persists across `page.reload()`
+        (same page object); on the recreate path the caller re-attaches
+        to the new page object before calling this helper. This
+        preserves the install-before-trigger invariant.
+        """
+        # Step 6 — review-tab cascade.
+        try:
+            await self._trigger_review_list_api(initial_click=True)
+        except Exception as e:
+            logger.info(
+                "OY review-tab re-click cascade after recovery "
+                "skipped/failed: %s", e,
+            )
+        # Step 7 — readiness wait + optional single-shot re-trigger.
+        # Reset to None first so a previous recreate's value doesn't
+        # leak forward.
+        self._post_recreate_sort_area_ready = None
+        ready: bool = False
+        if (
+            self._sort_button_label_ko is not None
+            or self._sort_button_selector is not None
+        ):
+            try:
+                ready = await self._wait_for_review_sort_area_ready(
+                    timeout_s=self._sort_hunt_settle_s,
+                    poll_interval_s=self._sort_hunt_poll_interval_s,
+                )
+            except Exception as e:
+                logger.info(
+                    "OY review sort area readiness wait raised "
+                    "(benign): %s", e,
+                )
+                ready = False
+            if not ready:
+                logger.info(
+                    "OY review sort area not ready after first wait — "
+                    "single-shot re-trigger of review-tab cascade",
+                )
+                try:
+                    await self._trigger_review_list_api(initial_click=True)
+                except Exception as e:
+                    logger.info(
+                        "OY post-recovery review-tab re-trigger "
+                        "skipped/failed (benign): %s", e,
+                    )
+                try:
+                    ready = await self._wait_for_review_sort_area_ready(
+                        timeout_s=self._sort_hunt_settle_s,
+                        poll_interval_s=self._sort_hunt_poll_interval_s,
+                    )
+                except Exception as e:
+                    logger.info(
+                        "OY review sort area readiness re-wait raised "
+                        "(benign): %s", e,
+                    )
+                    ready = False
+            self._post_recreate_sort_area_ready = bool(ready)
+        # Step 8 — sort-button click. Runs whether or not the readiness
+        # wait succeeded (preserves current failure-mode contract).
+        if (
+            self._sort_button_label_ko is not None
+            or self._sort_button_selector is not None
+        ):
+            try:
+                await self._click_sort_button_robust()
+            except Exception as e:
+                logger.info(
+                    "OY sort-button re-click after recovery "
+                    "skipped/failed (benign): %s", e,
+                )
+        return bool(ready)
+
     async def reload_and_reopen_review_tab(self) -> None:
-        """Recovery step on false-empty: **page-recreate** + re-click review tab.
+        """Recovery step on false-empty / scroll-continuation wedge:
+        try `page.reload()` first (Option A), then fall back to
+        **page-recreate** (close+new_page+goto) + re-click review tab.
 
-        Strengthened from the original `page.reload()` strategy because
-        false-empty appears to be an anti-bot SOFT-BLOCK signal — reloading
-        the same page tab often hits the same poisoned state because OY
-        keeps per-page-instance counters / fingerprints. Closing the page
-        and opening a fresh one in the same context (Option A from the
-        recovery design) gets us a cleaner client-side state without
-        breaking the user's CDP-attached login (the context survives, so
-        cookies / localStorage carry over).
+        I-OY-RECOVERY-RECREATE-STRATEGY-REVISION layered Option A on
+        top of the historical close+new_page+goto strategy. The Ilso
+        A000000225736 live proof (`O-OY-SCROLL-RECOVERY-WAIT-LIVE-PROOF-ILSO`)
+        demonstrated that the close+new_page+goto recreate lands on a
+        page that never mounts the review-tab DOM:
 
-        Best-effort — failures are logged and swallowed so the retry
-        budget can still decide based on the next probe. Drains the
-        response queue and resets the per-session telemetry counters so
-        post-recreate telemetry isn't conflated with the pre-recreate
-        attempt; older entries are already preserved by the connector's
-        outer drain into `trace_records`.
+          WARNING OY review sort area NOT ready after 12 poll attempts
+            in 12.0s deadline. target='최신순'.
+          WARNING OY sort-button '최신순' NOT FOUND after 9 poll
+            attempts in 12.0s deadline. ... Buttons enumerated in sort
+            area: [merchandising / navigation / footer labels only].
+
+        The wedged page itself had successfully served 49 cursors —
+        proof the review-tab DOM was mounted and functional on it.
+        Reloading that page (preserving page identity, cookies, JS
+        context, and the Playwright response listener registration)
+        is a less disruptive recovery: it resets the document while
+        keeping the rest of the page-level state intact. Only when
+        reload itself raises OR post-reload readiness wait deadlines
+        do we fall through to the historical close+new_page+goto
+        recreate.
+
+        Order of operations:
+
+          0. **Reload-first (Option A)** — when eligible
+             (`_reload_strategy_eligible() is True`):
+               0a. Drain response queue + reset session-level counters
+                   in place (the listener captures these by reference;
+                   in-place clear correctly resets the new view).
+               0b. `await self._page.reload(timeout=20000)` — same page
+                   object, document refreshed. The Playwright response
+                   listener registered in `open()` PERSISTS across
+                   reload (registration is on the page object, not the
+                   document), so we do NOT re-attach. This preserves
+                   the install-before-trigger invariant trivially: the
+                   listener has been installed since `open()`, before
+                   ANY trigger on the page.
+               0c. Run the shared post-navigation cascade
+                   (`_run_post_navigation_review_cascade`).
+               0d. On readiness True → record
+                   `_post_recreate_strategy_used = "reload_succeeded"`
+                   and return early. On reload raise OR readiness False
+                   → record `_post_recreate_strategy_used =
+                   "reload_failed_recreate_fallback"` and fall through.
+
+          1–8. **Recreate fallback** — historical close+new_page+goto
+             path:
+               1. Close the poisoned page (best-effort).
+               2. Drain queue + reset counters (no-op if reload-first
+                  already cleared; idempotent).
+               3. `ctx.new_page()` — fresh page in same context (CDP
+                  auth preserved).
+               4. Re-attach response listener to new page (listener-
+                  before-trigger invariant on the recreate path).
+               5. `page.goto(self._opened_product_url, ...)` — re-
+                  navigate to the original product.
+               6–8. Shared post-navigation cascade.
+
+        Best-effort — failures at every step are logged and swallowed
+        so the retry budget in the connector can still decide based on
+        the next probe.
 
         For Fakes / tests that monkey-patch this method, the public
         signature and return semantics are unchanged: a coroutine
-        returning None.
+        returning None. The strategy outcome surfaces to the connector
+        via `get_post_recreate_strategy_used()`.
         """
         ctx = self._ctx
-        old_page = self._page
+        # Reset the strategy flag at entry so a previous attempt's
+        # value never leaks forward into a subsequent recreate that
+        # early-returns before any strategy could begin.
+        self._post_recreate_strategy_used = None
         if ctx is None:
             return
+
+        # Step 0 — Reload-first (Option A). Eligibility is conservative;
+        # the recreate fallback is always available below.
+        if self._reload_strategy_eligible():
+            # 0a. Drain queue + reset session-level accumulators in
+            # place. The existing _on_response closure shares these
+            # by reference (captured in `_attach_response_handler`),
+            # so in-place clear correctly resets the new view.
+            try:
+                self._request_log.clear()
+                self._observed_sort_types_count.clear()
+                self._responses_filtered_out_by_sort = 0
+                while not self._queue.empty():
+                    try:
+                        self._queue.get_nowait()
+                    except Exception:
+                        break
+            except Exception:
+                pass
+            # 0b. Reload the existing page object. The Playwright
+            # response listener persists across reload (same page
+            # identity), so we do NOT re-attach. This trivially
+            # preserves listener-before-trigger because the listener
+            # has been installed since `open()` — well before any
+            # trigger on this page.
+            reload_raised = False
+            try:
+                await self._page.reload(
+                    wait_until="domcontentloaded",
+                    timeout=20000,
+                )
+            except Exception as e:
+                logger.warning(
+                    "OY reload-first strategy: page.reload raised "
+                    "(%s); falling back to recreate", e,
+                )
+                reload_raised = True
+
+            if not reload_raised:
+                # 0c. Shared post-navigation cascade on the reloaded
+                # page. Returns True iff the readiness wait observed
+                # the sort area within budget.
+                reload_ready = await self._run_post_navigation_review_cascade()
+                if reload_ready:
+                    # 0d. Reload-first succeeded — record the strategy
+                    # and skip the recreate fallback entirely.
+                    self._post_recreate_strategy_used = "reload_succeeded"
+                    return
+                logger.info(
+                    "OY reload-first strategy: post-reload review sort "
+                    "area not ready; falling back to recreate",
+                )
+            # Reload-first failed (raised or readiness False). Mark the
+            # strategy and fall through to the historical recreate path.
+            self._post_recreate_strategy_used = "reload_failed_recreate_fallback"
+        else:
+            # Reload-first was not eligible — go straight to recreate.
+            self._post_recreate_strategy_used = "recreate_only"
+
+        # ---- Recreate fallback (steps 1–8) ----
+        old_page = self._page
         # 1. Close the poisoned page (best-effort).
         if old_page is not None:
             try:
                 await old_page.close()
             except Exception as e:
                 logger.info("OY false-empty: old page close failed: %s", e)
-        # 2. Drain queue + reset session-level accumulators. The next
-        # `_on_response` closure (re-attached below) shares these by
-        # reference, so clearing in place is correct.
+        # 2. Drain queue + reset session-level accumulators. Idempotent
+        # if the reload-first path already cleared them.
         try:
             self._request_log.clear()
             self._observed_sort_types_count.clear()
@@ -4374,111 +4709,12 @@ class _PlaywrightReviewSession:
                 "OY false-empty: re-navigation after page recreate failed: %s", e,
             )
             return
-        # 6. Re-click review tab on the fresh page + the scroll +
-        # 리뷰 더보기 cascade, identical to the initial path.
-        try:
-            await self._trigger_review_list_api(initial_click=True)
-        except Exception as e:
-            logger.info(
-                "OY review-tab re-click cascade after page recreate "
-                "skipped/failed: %s", e,
-            )
-        # 7. I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER — between the
-        # review-tab cascade (step 6) and the sort-button click (step
-        # 8), poll for the review-tab sort area to actually render on
-        # the recreated page. The Ilso A000000225736 live proof showed
-        # the recreated page reaching the sort-button hunt with only
-        # site-nav / footer buttons in DOM (`최신순` absent), so the
-        # hunt deadlined and recovery ended `sort_control_unreachable`.
-        # The fix waits for `div.pc-sort` (or any
-        # `_sort_container_candidates` selector) to exist BEFORE we
-        # try to click. Reset to None first so a previous recreate's
-        # value doesn't leak forward into a subsequent recreate that
-        # early-returns at step 1–5 above.
-        self._post_recreate_sort_area_ready = None
-        if (
-            self._sort_button_label_ko is not None
-            or self._sort_button_selector is not None
-        ):
-            # Use the same poll cadence as the sort-button hunt so the
-            # wait + hunt deadlines share the same timing semantics.
-            # Total wall-clock budget for the readiness wait alone is
-            # capped at `_sort_hunt_settle_s` (12s default).
-            try:
-                ready = await self._wait_for_review_sort_area_ready(
-                    timeout_s=self._sort_hunt_settle_s,
-                    poll_interval_s=self._sort_hunt_poll_interval_s,
-                )
-            except Exception as e:
-                # Defensive — the helper already wraps its own calls,
-                # but if asyncio.sleep itself raised (cancellation,
-                # etc.) we fall through to the sort-button hunt rather
-                # than propagating.
-                logger.info(
-                    "OY review sort area readiness wait raised "
-                    "(benign): %s", e,
-                )
-                ready = False
-            # Optional single-shot re-trigger when the first wait
-            # deadlined. Some OY product pages, after page recreate,
-            # need the review-tab cascade fired a SECOND time before
-            # the sort palette renders. Bounded: at most one re-trigger
-            # per recreate (single-shot), and the listener is already
-            # installed at step 4 so the install-before-trigger
-            # invariant remains preserved. If the re-trigger raises,
-            # we still fall through to the sort-button hunt.
-            if not ready:
-                logger.info(
-                    "OY review sort area not ready after first wait — "
-                    "single-shot re-trigger of review-tab cascade",
-                )
-                try:
-                    await self._trigger_review_list_api(initial_click=True)
-                except Exception as e:
-                    logger.info(
-                        "OY post-recreate review-tab re-trigger "
-                        "skipped/failed (benign): %s", e,
-                    )
-                try:
-                    ready = await self._wait_for_review_sort_area_ready(
-                        timeout_s=self._sort_hunt_settle_s,
-                        poll_interval_s=self._sort_hunt_poll_interval_s,
-                    )
-                except Exception as e:
-                    logger.info(
-                        "OY review sort area readiness re-wait raised "
-                        "(benign): %s", e,
-                    )
-                    ready = False
-            self._post_recreate_sort_area_ready = bool(ready)
-        # 8. I-OY-SCROLL-RECOVERY-COLD-START-REARM — re-fire the target
-        # sort-button click on the fresh page. Without this, the
-        # recreated page emits its page-default sort (USEFUL_SCORE_DESC)
-        # and the response interceptor at `_attach_response_handler`
-        # filters every response out (keyed on `_expected_sort_type`),
-        # so the connector's post-recreate cold-start wait times out.
-        # The original `open()` performs the same sequence: attach
-        # listener → review-tab cascade → sort-button click. Mirror it
-        # here. The listener is already re-attached at step 4 above,
-        # which preserves the install-before-trigger ordering invariant.
-        # The sort-button click runs whether or not the readiness wait
-        # at step 7 succeeded — if the wait deadlined, the hunt's own
-        # deadline + diagnostic path classifies the run as
-        # `sort_control_unreachable` exactly as it does today (preserves
-        # the current failure-mode contract). Best-effort: failures
-        # fall through silently so the existing recovery telemetry
-        # still drives the post-condition.
-        if (
-            self._sort_button_label_ko is not None
-            or self._sort_button_selector is not None
-        ):
-            try:
-                await self._click_sort_button_robust()
-            except Exception as e:
-                logger.info(
-                    "OY sort-button re-click after page recreate "
-                    "skipped/failed (benign): %s", e,
-                )
+        # 6–8. Shared post-navigation cascade on the recreated page.
+        # The readiness signal is recorded on
+        # `self._post_recreate_sort_area_ready` inside the helper;
+        # downstream `_click_sort_button_robust` failure still produces
+        # the existing `sort_control_unreachable` classifier path.
+        await self._run_post_navigation_review_cascade()
 
     async def wait_for_next_response(
         self, *, timeout_s: float,
@@ -4579,6 +4815,44 @@ class _PlaywrightReviewSession:
         state). They can both fire on the same recreate.
         """
         return self._post_recreate_sort_area_ready
+
+    def get_post_recreate_strategy_used(self) -> str | None:
+        """I-OY-RECOVERY-RECREATE-STRATEGY-REVISION.
+
+        Which recovery strategy `reload_and_reopen_review_tab` ended up
+        using on the most recent invocation. The Ilso A000000225736
+        live proof showed the historical close+new_page+goto recreate
+        producing a page where the review-tab DOM never re-mounted; the
+        revision layered a reload-first path on top so the existing
+        page (which had successfully served 49 cursors before the
+        wedge) gets a less disruptive refresh attempt before we
+        sacrifice all of its in-memory state.
+
+        Values:
+          None — `reload_and_reopen_review_tab` has never been invoked
+            on this session, OR an early-return fired before any
+            strategy could be decided (e.g. `ctx is None`).
+          "reload_succeeded" — reload-first path ran and the post-
+            reload readiness wait observed the sort area within budget.
+            Sort-button click ran on the reloaded page. The recreate
+            fallback was NOT taken.
+          "reload_failed_recreate_fallback" — reload-first path was
+            eligible and attempted, but either `page.reload` raised OR
+            post-reload readiness wait deadlined. Control fell through
+            to the historical close+new_page+goto recreate path.
+          "recreate_only" — reload-first path was not eligible (e.g.
+            `self._page` was None, `_opened_product_url` was missing,
+            or the current page URL didn't contain the target goodsNo).
+            Went straight to the recreate path.
+
+        Connector reads this immediately after `recreate_fn()` returns
+        and emits one or two narrow `_note` entries describing the
+        strategy. On the "reload_succeeded" path only the entry note is
+        emitted; on the fallback path both entry and fallback notes
+        are emitted; on "recreate_only" / None no strategy note is
+        emitted (the existing recreate-attempt note already covers it).
+        """
+        return self._post_recreate_strategy_used
 
     def get_observed_sort_types(self) -> dict[str, int]:
         """Phase 2E: tally of `sortType` values seen in request post_data
