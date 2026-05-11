@@ -4118,10 +4118,19 @@ def _build_readiness_session(
     # exercise the production wait logic against the simulated DOM).
     real_wait = sess._wait_for_review_sort_area_ready
 
-    async def _spied_wait(*, timeout_s, poll_interval_s):
+    async def _spied_wait(
+        *, timeout_s, poll_interval_s,
+        recovery_lazy_mount_nudge: bool = False,
+    ):
+        # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — forward the new
+        # kwarg through to the real wait so the production cascade's
+        # `recovery_lazy_mount_nudge=True` still drives the real
+        # readiness path correctly.
         ordering_log.append("wait_for_review_sort_area_ready")
         result = await real_wait(
-            timeout_s=timeout_s, poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            recovery_lazy_mount_nudge=recovery_lazy_mount_nudge,
         )
         ordering_log.append(
             f"wait_for_review_sort_area_ready_returned={result}",
@@ -4491,10 +4500,19 @@ def _build_reload_first_session(
 
     real_wait = sess._wait_for_review_sort_area_ready
 
-    async def _spied_wait(*, timeout_s, poll_interval_s):
+    async def _spied_wait(
+        *, timeout_s, poll_interval_s,
+        recovery_lazy_mount_nudge: bool = False,
+    ):
+        # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — forward the new
+        # kwarg through to the real wait so the production cascade's
+        # `recovery_lazy_mount_nudge=True` still drives the real
+        # readiness path correctly.
         ordering_log.append("wait_for_review_sort_area_ready")
         result = await real_wait(
-            timeout_s=timeout_s, poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+            recovery_lazy_mount_nudge=recovery_lazy_mount_nudge,
         )
         ordering_log.append(
             f"wait_for_review_sort_area_ready_returned={result}",
@@ -7823,3 +7841,598 @@ class pytest_capture_log:  # noqa: N801 (intentional lowercase context helper)
             self._logger.removeHandler(self._handler)
             self._logger.setLevel(self._prev_level)
         return False
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — recovery-only nudge to
+# break the "review count text mounted, sort header lazy-component
+# absent" state seen in the O-OY-SCROLL-RECOVERY-BUDGET-FIX-LIVE-PROOF-ILSO
+# proof (Ilso A000000225736 / DATETIME_DESC at HEAD c76f971).
+#
+# Required test cases (mirror the dispatch's required coverage):
+#   A. Predicate `_is_partial_review_mount_state` — direct unit test.
+#   B. Lazy-mount nudge succeeds — sort area mounts after the
+#      round-trip scrollBy.
+#   C. Lazy-mount nudge fails — sort area never appears; existing
+#      timeout path runs unchanged.
+#   D. Nudge is bounded — at most ONE attempt per readiness wait.
+#   E. No nudge fires on already-mounted sort area.
+#   F. No nudge fires when review-count text absent (not partial
+#      mount, just nothing mounted at all).
+#   G. Cold-start path is unaffected — `recovery_lazy_mount_nudge`
+#      default False, none of the three new log strings emitted.
+# ---------------------------------------------------------------------------
+
+
+def test_is_partial_review_mount_state_predicate():
+    """Test A — direct unit test of `_is_partial_review_mount_state`.
+
+    The predicate is a CONFIRMATIVE detector — it must return True
+    iff ALL five live-proof signals hold, and False on any single
+    mismatch OR a missing key.
+    """
+    from src.voc.connectors.oliveyoung_browser_api import (
+        _is_partial_review_mount_state,
+    )
+
+    # Canonical partial-mount dict matching the live-proof signals
+    # (Ilso A000000225736 at c76f971): every recovery snapshot showed
+    # text_has_review_count=true / sort_pc_count=0 / sort_container=0 /
+    # sort_button_candidates=0 / text_has_choisin=false.
+    canonical = {
+        "text_has_review_count": "true",
+        "sort_pc_count": "0",
+        "sort_container_count": "0",
+        "sort_button_candidates": "0",
+        "text_has_choisin": "false",
+        # Extra fields the snapshot includes — predicate ignores them.
+        "readyState": "complete",
+        "url_has_tab_review": "true",
+    }
+    assert _is_partial_review_mount_state(canonical) is True
+
+    # sort_pc_count=1 → sort area DID mount → not partial-mount.
+    s = dict(canonical)
+    s["sort_pc_count"] = "1"
+    assert _is_partial_review_mount_state(s) is False
+
+    # text_has_choisin=true → target label visible → sort header is
+    # in fact mounted; this is "fully mounted", not partial.
+    s = dict(canonical)
+    s["text_has_choisin"] = "true"
+    assert _is_partial_review_mount_state(s) is False
+
+    # text_has_review_count missing → defensive default returns False
+    # (predicate is confirmative, not default-yes).
+    s = dict(canonical)
+    del s["text_has_review_count"]
+    assert _is_partial_review_mount_state(s) is False
+
+    # sort_button_candidates=2 → sort area mounted (buttons exist
+    # inside the container) → not partial-mount.
+    s = dict(canonical)
+    s["sort_button_candidates"] = "2"
+    assert _is_partial_review_mount_state(s) is False
+
+
+class _PartialMountFakePage(_RearmFakeAsyncPage):
+    """I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — page fake that
+    models the live-proof partial-mount state on the recovered page.
+
+    Behavior:
+      - Initial state reports `text_has_review_count=true` (review
+        count text rendered) but ZERO for every sort-area count
+        selector (`div.pc-sort`, `.sort-container`, `[class*='sort']`)
+        AND `text_has_choisin=false`. This matches the c76f971 snapshot
+        verbatim.
+      - `page.evaluate(...)` calls are tallied on `evaluate_calls`
+        and `scroll_by_calls`. When `mount_sort_after_nudge=True`,
+        the FIRST `window.scrollBy(0, 280)` call flips an internal
+        flag; subsequent locator probes then report the sort area as
+        healthy (sort_pc_count=1, sort_button_candidates>=1,
+        text_has_choisin=true).
+      - When `mount_sort_after_nudge=False`, the page stays in the
+        partial-mount state regardless of nudges.
+
+    `evaluate_raises` (default False): when True, every `evaluate`
+    call raises — drives the "page broken / closed mid-nudge" path.
+    """
+
+    def __init__(
+        self,
+        url: str = "about:blank",
+        *,
+        mount_sort_after_nudge: bool = False,
+        review_count_present: bool = True,
+        evaluate_raises: bool = False,
+        sort_container_selectors: tuple = (
+            "div.pc-sort",
+            ".sort-container",
+            "[class*='sort']",
+        ),
+        reload_should_raise: bool = True,
+    ):
+        super().__init__(url=url, reload_should_raise=reload_should_raise)
+        self._mount_sort_after_nudge = mount_sort_after_nudge
+        self._review_count_present = review_count_present
+        self._evaluate_raises = evaluate_raises
+        self._sort_container_selectors = set(sort_container_selectors)
+        # Observability for assertions.
+        self.evaluate_calls: list[str] = []
+        self.scroll_by_calls: list[int] = []
+        # Once True, locator probes report the sort area as healthy.
+        self._sort_mounted = False
+
+    async def title(self):
+        return "리뷰 - 톤업 크림"
+
+    async def evaluate(self, script):
+        self.evaluate_calls.append(script)
+        if self._evaluate_raises:
+            raise RuntimeError("evaluate failed (fake page closed)")
+        # Pattern-match the scrollBy invocations used by the nudge.
+        # The strategy emits two evaluates: +280 then -280.
+        if "scrollBy" in script:
+            # Extract the delta (very loose match — sufficient for
+            # the fake). The production code uses literal "280" /
+            # "-280" in the script body.
+            if ", 280" in script:
+                self.scroll_by_calls.append(280)
+                if self._mount_sort_after_nudge:
+                    self._sort_mounted = True
+            elif ", -280" in script:
+                self.scroll_by_calls.append(-280)
+            return None
+        # Default: the `readyState` probe path from
+        # `_compute_recovery_page_state_dict`.
+        if "readyState" in script:
+            return "complete"
+        return None
+
+    def locator(self, selector):
+        # Sort container probes — return a count locator whose value
+        # depends on the mount flag.
+        if selector in self._sort_container_selectors:
+            outer = self
+
+            class _ContainerLocator:
+                async def count(self_inner):
+                    return 1 if outer._sort_mounted else 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+                def locator(self_inner, tag_selector):
+                    class _NestedLocator:
+                        async def count(self_nested):
+                            # Button count: 1 once mounted, 0 otherwise.
+                            if (
+                                tag_selector == "button"
+                                and outer._sort_mounted
+                            ):
+                                return 1
+                            return 0
+
+                    return _NestedLocator()
+
+                async def inner_text(self_inner, timeout=None):
+                    # When mounted, return the target label so the
+                    # readiness probe's target_label_visible path
+                    # fires too.
+                    return "최신순" if outer._sort_mounted else ""
+
+                def nth(self_inner, _i):
+                    return self_inner
+
+                async def click(self_inner, timeout=None):
+                    return None
+
+                async def scroll_into_view_if_needed(self_inner, timeout=None):
+                    return None
+
+            return _ContainerLocator()
+
+        # Text probes — review-count text always present iff configured;
+        # the target sort-label text only present once mounted.
+        if selector == "text=리뷰":
+            outer = self
+
+            class _TextLoc:
+                async def count(self_inner):
+                    return 1 if outer._review_count_present else 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        if selector == "text=최신순":
+            outer = self
+
+            class _TextLoc:
+                async def count(self_inner):
+                    return 1 if outer._sort_mounted else 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        if selector in ("text=유용한 순", "text=평점 높은순", "text=평점 낮은순"):
+            class _TextLoc:
+                async def count(self_inner):
+                    return 0
+
+                @property
+                def first(self_inner):
+                    return self_inner
+
+            return _TextLoc()
+        # Fall back to the parent's zero-count locator for any other
+        # selector (review-tab probes, etc.).
+        return super().locator(selector)
+
+
+def _build_partial_mount_wait_session(
+    *,
+    mount_sort_after_nudge: bool = False,
+    review_count_present: bool = True,
+    evaluate_raises: bool = False,
+    sort_hunt_settle_s: float = 0.05,
+    sort_hunt_poll_interval_s: float = 0.01,
+):
+    """Construct a `_PlaywrightReviewSession` with a partial-mount
+    page fake assigned as `_page`. Used to drive the REAL
+    `_wait_for_review_sort_area_ready` against the fake's partial-
+    mount semantics.
+
+    The compressed `sort_hunt_settle_s=0.05` budget keeps the test
+    runtime short while still giving the readiness loop enough poll
+    iterations to walk through the partial-mount probes before
+    deadlining.
+    """
+    from src.voc.connectors import oliveyoung_browser_api as mod
+
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    page = _PartialMountFakePage(
+        url=_PRODUCT_URL_TAB_REVIEW,
+        mount_sort_after_nudge=mount_sort_after_nudge,
+        review_count_present=review_count_present,
+        evaluate_raises=evaluate_raises,
+    )
+    sess._page = page
+    sess._opened_product_url = _PRODUCT_URL_TAB_REVIEW
+    sess._sort_button_label_ko = "최신순"
+    sess._sort_button_selector = None
+    sess._sort_container_candidates = (
+        "div.pc-sort",
+        ".sort-container",
+        "[class*='sort']",
+    )
+    sess._review_tab_locator = "div.review-tab"
+    sess._sort_hunt_settle_s = float(sort_hunt_settle_s)
+    sess._sort_hunt_poll_interval_s = float(sort_hunt_poll_interval_s)
+    sess._last_readiness_matched_button = None
+    sess._last_readiness_matched_container = None
+    sess._diagnose_post_recreate_page_state = False
+    return sess, page
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_succeeds_when_sort_mounts_after_scroll(
+    caplog,
+):
+    """Test B — lazy-mount nudge success path. The fake page starts in
+    partial-mount state; the FIRST `window.scrollBy(0, 280)` call
+    flips it into a healthy state; subsequent readiness polls then
+    observe the sort container.
+
+    Assertions (verbatim from ticket spec):
+      - readiness wait returns success
+      - `page.evaluate` called exactly 2 times (scroll-down + scroll-up)
+      - `OY recovery sort header partial mount detected:` log fired
+        at least once
+      - `OY recovery sort header lazy-mount nudge: strategy=...` log
+        fired exactly once
+      - `OY recovery sort header lazy-mount nudge result: success=true`
+        fired exactly once
+      - No `sort_readiness_timeout` checkpoint after success
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=True,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        result = await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+            recovery_lazy_mount_nudge=True,
+        )
+    assert result is True
+    # The two scrollBy calls — production code emits exactly two
+    # `page.evaluate` calls for the nudge (+280 then -280). The
+    # `_compute_recovery_page_state_dict` helper also calls evaluate
+    # for `document.readyState`, so total evaluate count >= 2 + 1
+    # (state-dict computation). We assert the scrollBy count
+    # narrowly.
+    assert len(page.scroll_by_calls) == 2, (
+        f"expected 2 scrollBy calls (round-trip nudge); got "
+        f"{page.scroll_by_calls!r}"
+    )
+    assert page.scroll_by_calls == [280, -280]
+
+    messages = [r.getMessage() for r in caplog.records]
+    partial_detected = [
+        m for m in messages
+        if "OY recovery sort header partial mount detected:" in m
+    ]
+    assert len(partial_detected) >= 1, messages
+    nudge_strategy = [
+        m for m in messages
+        if "OY recovery sort header lazy-mount nudge: strategy=" in m
+    ]
+    assert len(nudge_strategy) == 1, messages
+    assert "strategy=scrollby_280px_round_trip" in nudge_strategy[0]
+    assert "delta_px=280" in nudge_strategy[0]
+    nudge_result = [
+        m for m in messages
+        if "OY recovery sort header lazy-mount nudge result:" in m
+    ]
+    assert len(nudge_result) == 1, messages
+    assert "success=true" in nudge_result[0]
+    # No `OY recovery page state:` snapshot at the timeout checkpoint
+    # after the nudge succeeded — the readiness wait returns True
+    # BEFORE reaching the existing timeout path. (The
+    # `partial mount detected` log line also contains the substring
+    # `checkpoint=sort_readiness_timeout` as a diagnostic field, so
+    # we narrow the match to the `OY recovery page state:` prefix.)
+    timeout_snapshots = [
+        m for m in messages
+        if (
+            "OY recovery page state:" in m
+            and "checkpoint=sort_readiness_timeout" in m
+        )
+    ]
+    assert len(timeout_snapshots) == 0, messages
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_fails_when_sort_never_mounts(caplog):
+    """Test C — lazy-mount nudge failure path. The fake stays in
+    partial-mount state regardless of nudge; the readiness wait
+    timeout path fires after the additional 1.5s budget elapses.
+
+    Assertions:
+      - readiness wait returns failure
+      - `page.evaluate` for scrollBy called exactly 2 times (still
+        attempted the nudge)
+      - partial-mount detected log fired
+      - nudge strategy log fired exactly once
+      - nudge result `success=false` fired exactly once
+      - `sort_readiness_timeout` checkpoint fired after budget elapsed
+        (production emits it when the post-nudge budget also fails)
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+    )
+    # Enable the page-state diagnostic so the
+    # `sort_readiness_timeout` snapshot fires (matches the production
+    # recovery scope where the connector flips this flag True during
+    # recovery).
+    sess._diagnose_post_recreate_page_state = True
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        result = await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+            recovery_lazy_mount_nudge=True,
+        )
+    assert result is False
+    # Still exactly 2 scrollBy calls — the nudge attempt fires even
+    # when it can't mount the sort area.
+    assert page.scroll_by_calls == [280, -280]
+
+    messages = [r.getMessage() for r in caplog.records]
+    partial_detected = [
+        m for m in messages
+        if "OY recovery sort header partial mount detected:" in m
+    ]
+    assert len(partial_detected) == 1, messages
+    nudge_strategy = [
+        m for m in messages
+        if "OY recovery sort header lazy-mount nudge: strategy=" in m
+    ]
+    assert len(nudge_strategy) == 1, messages
+    nudge_result = [
+        m for m in messages
+        if "OY recovery sort header lazy-mount nudge result:" in m
+    ]
+    assert len(nudge_result) == 1, messages
+    assert "success=false" in nudge_result[0]
+    # sort_readiness_timeout checkpoint snapshot fired after the
+    # additional budget elapsed.
+    timeout_snapshots = [
+        m for m in messages
+        if (
+            "OY recovery page state:" in m
+            and "checkpoint=sort_readiness_timeout" in m
+        )
+    ]
+    assert len(timeout_snapshots) == 1, messages
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_bounded_to_one_attempt(caplog):
+    """Test D — at most ONE nudge per readiness wait. The fake stays
+    in partial-mount throughout; the predicate matches on every
+    subsequent poll, but the `_lazy_mount_nudge_attempted` flag must
+    suppress all retries.
+
+    Assertions:
+      - `page.evaluate` scrollBy count == 2 (NOT 4 or 6)
+      - nudge strategy log fired exactly once (NOT 2+)
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+            recovery_lazy_mount_nudge=True,
+        )
+    # Round-trip nudge = exactly 2 scrollBy calls. NOT 4 / 6 even
+    # though the partial-mount predicate keeps matching on every
+    # post-nudge poll.
+    assert page.scroll_by_calls == [280, -280], (
+        f"nudge must fire at most ONCE; got scroll_by_calls="
+        f"{page.scroll_by_calls!r}"
+    )
+    messages = [r.getMessage() for r in caplog.records]
+    nudge_strategy = [
+        m for m in messages
+        if "OY recovery sort header lazy-mount nudge: strategy=" in m
+    ]
+    assert len(nudge_strategy) == 1, messages
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_skipped_when_sort_already_mounted(
+    caplog,
+):
+    """Test E — no nudge fires when the sort area is already mounted.
+    The first readiness poll observes the container immediately; the
+    deadline-approaching nudge gate never runs.
+
+    Assertions:
+      - readiness wait returns success
+      - `page.evaluate` was NOT called for scrollBy (no nudge attempts)
+      - none of the three new log strings fired
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+    )
+    # Pre-mount the sort area — first readiness poll succeeds.
+    page._sort_mounted = True
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        result = await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+            recovery_lazy_mount_nudge=True,
+        )
+    assert result is True
+    assert page.scroll_by_calls == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(
+        "OY recovery sort header partial mount detected:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge result:" in m
+        for m in messages
+    ), messages
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_skipped_when_review_count_absent(
+    caplog,
+):
+    """Test F — predicate returns False when review-count text is
+    absent. This is "page hasn't loaded the review section at all",
+    NOT the partial-mount state. The nudge must not fire.
+
+    Assertions:
+      - readiness wait returns failure (sort area absent, no nudge)
+      - `page.evaluate` was NOT called for scrollBy
+      - none of the three new log strings fired
+      - standard timeout fires
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+        review_count_present=False,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        result = await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+            recovery_lazy_mount_nudge=True,
+        )
+    assert result is False
+    assert page.scroll_by_calls == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(
+        "OY recovery sort header partial mount detected:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge result:" in m
+        for m in messages
+    ), messages
+
+
+@pytest.mark.asyncio
+async def test_recovery_lazy_mount_nudge_cold_start_path_untouched(caplog):
+    """Test G — cold-start invocation (default
+    `recovery_lazy_mount_nudge=False`) must NOT fire ANY of the
+    three new log strings, NOT call `page.evaluate` for the nudge,
+    and behave byte-for-byte like the pre-ticket readiness wait.
+
+    The fake is in partial-mount state — exactly the surface that
+    WOULD trigger the nudge on the recovery path — but because the
+    cold-start caller omits `recovery_lazy_mount_nudge` the gate
+    stays closed.
+    """
+    import logging
+    sess, page = _build_partial_mount_wait_session(
+        mount_sort_after_nudge=False,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        # No `recovery_lazy_mount_nudge=` — uses default False.
+        result = await sess._wait_for_review_sort_area_ready(
+            timeout_s=sess._sort_hunt_settle_s,
+            poll_interval_s=sess._sort_hunt_poll_interval_s,
+        )
+    assert result is False
+    # No nudge attempted.
+    assert page.scroll_by_calls == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any(
+        "OY recovery sort header partial mount detected:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge:" in m
+        for m in messages
+    ), messages
+    assert not any(
+        "OY recovery sort header lazy-mount nudge result:" in m
+        for m in messages
+    ), messages

@@ -3010,6 +3010,53 @@ def _is_stale_locator_error(exc: BaseException) -> bool:
     )
 
 
+def _is_partial_review_mount_state(state: dict) -> bool:
+    """Return True when the page-state snapshot dict reads like the
+    'review count mounted but sort header lazy-component absent'
+    pattern documented by the O-OY-SCROLL-RECOVERY-BUDGET-FIX-LIVE-PROOF-ILSO
+    proof (Ilso A000000225736 / DATETIME_DESC at HEAD c76f971).
+
+    All five signals must hold:
+      - text_has_review_count is truthy (string "true")
+      - sort_pc_count == 0 (string "0")
+      - sort_container_count == 0 (string "0")
+      - sort_button_candidates == 0 (string "0")
+      - text_has_choisin is falsy (NOT "true")
+
+    Defensive: use `.get(..., default)` against the dict so a missing
+    key does not raise. A missing review-count key is treated as
+    "not partial mount" (the predicate is a CONFIRMATIVE detector,
+    not a default-yes). Likewise, "unknown" values for the count /
+    text fields fall through to False — the predicate only fires on
+    a fully observed snapshot that matches the live-proof pattern.
+
+    Values are the stringified shapes that
+    `_snapshot_recovery_page_state` emits (`"true"` / `"false"` /
+    `"unknown"` for text-presence probes; `"0"` / `"1"` / … /
+    `"unknown"` for count probes). Working off the stringified dict
+    keeps the predicate aligned with the dict the diagnostic log
+    line uses, so a future log-line scan can recover the same truth
+    value the runtime did.
+    """
+    # CONFIRMATIVE: review-count text MUST be present (the
+    # distinguishing signal vs "nothing mounted at all"). Missing or
+    # "unknown" or "false" → not partial-mount.
+    if state.get("text_has_review_count") != "true":
+        return False
+    # All three sort-area count signals must be exactly "0".
+    if state.get("sort_pc_count") != "0":
+        return False
+    if state.get("sort_container_count") != "0":
+        return False
+    if state.get("sort_button_candidates") != "0":
+        return False
+    # And the inline target label must be absent (anything other
+    # than "true").
+    if state.get("text_has_choisin") == "true":
+        return False
+    return True
+
+
 class _PlaywrightReviewSession:
     """Real `BrowserReviewSession` backed by Playwright/Chromium.
 
@@ -4655,6 +4702,7 @@ class _PlaywrightReviewSession:
 
     async def _wait_for_review_sort_area_ready(
         self, *, timeout_s: float, poll_interval_s: float,
+        recovery_lazy_mount_nudge: bool = False,
     ) -> bool:
         """I-OY-RECOVERY-WAIT-FOR-REVIEW-TAB-RENDER.
 
@@ -4688,6 +4736,20 @@ class _PlaywrightReviewSession:
         matched unrelated DOM. Waiting for `div.pc-sort` to exist
         BEFORE the hunt starts ensures the hunt's enumeration is
         scoped to the actual sort row.
+
+        I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE: when
+        `recovery_lazy_mount_nudge=True` (recovery cascade callers
+        only — cold-start callers MUST omit / pass False), and the
+        primary deadline expires WITH a partial-mount signal
+        (review-count text mounted but sort header absent — see
+        `_is_partial_review_mount_state`), the wait fires a single
+        bounded round-trip scroll nudge (+280px / -280px) to try to
+        trigger an intersection-observer-based lazy mount, then runs
+        an additional 1.5s readiness budget against the same poll
+        machinery. Bounded to ONE nudge per call regardless of how
+        many polls match the partial-mount predicate. Cold-start
+        callers omit the flag → behavior identical to pre-ticket
+        readiness wait.
         """
         import time as _time
 
@@ -4765,6 +4827,11 @@ class _PlaywrightReviewSession:
         deadline = _time.monotonic() + max(timeout_s, 0.0)
         attempt = 0
         signal_used: str | None = None
+        # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — bound the nudge
+        # to at most ONE attempt per readiness wait. Flipped True the
+        # moment the nudge fires regardless of success; the deadline-
+        # approaching predicate refuses to re-fire while True.
+        _lazy_mount_nudge_attempted = False
         while _time.monotonic() < deadline:
             attempt += 1
             try:
@@ -4799,6 +4866,182 @@ class _PlaywrightReviewSession:
                 await asyncio.sleep(max(poll_interval_s, 0.0))
             except Exception:
                 break
+
+        # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — recovery-only
+        # diagnostic-first nudge to break the "review count rendered
+        # but sort header lazy-component never mounted" state seen in
+        # the O-OY-SCROLL-RECOVERY-BUDGET-FIX-LIVE-PROOF-ILSO proof
+        # (HEAD c76f971). The previous retry path was upstream-gated
+        # because the readiness wait never produced a matched locator
+        # to retry against — every snapshot showed sort_pc_count=0
+        # AND text_has_review_count=true. Hypothesis: the sort header
+        # is wrapped in an intersection-observer-based lazy mount that
+        # never fires because the viewport never crossed the trigger
+        # region. A small bounded scroll round-trip is the smallest
+        # intervention that can disambiguate (and potentially fix)
+        # this state without risking content-shift to the live
+        # collection.
+        #
+        # Gated to recovery callers only (`recovery_lazy_mount_nudge`
+        # default False). Cold-start path is unaffected.
+        if (
+            recovery_lazy_mount_nudge
+            and not _lazy_mount_nudge_attempted
+        ):
+            partial_state: dict | None = None
+            try:
+                partial_state = (
+                    await self._compute_recovery_page_state_dict()
+                )
+            except Exception:
+                partial_state = None
+            if (
+                partial_state is not None
+                and _is_partial_review_mount_state(partial_state)
+            ):
+                # Three-line diagnostic block. Recovery-scoped: only
+                # emitted when the caller asked for the nudge path AND
+                # the partial-mount predicate fires. The cold-start
+                # path (recovery_lazy_mount_nudge=False) never reaches
+                # here so these log strings stay quiet on the happy
+                # path.
+                logger.info(
+                    "OY recovery sort header partial mount detected: "
+                    "checkpoint=%s review_count_present=%s "
+                    "sort_pc_count=%d sort_container_count=%d "
+                    "text_has_choisin=%s readyState=%s "
+                    "url_has_tab_review=%s",
+                    "sort_readiness_timeout",
+                    partial_state.get("text_has_review_count", "unknown"),
+                    int(partial_state.get("sort_pc_count", "0") or 0),
+                    int(partial_state.get("sort_container_count", "0") or 0),
+                    partial_state.get("text_has_choisin", "unknown"),
+                    partial_state.get("readyState", "unknown"),
+                    partial_state.get("url_has_tab_review", "unknown"),
+                )
+                _nudge_start_monotonic = _time.monotonic()
+                # Strategy id is logged BEFORE the JS evaluate so the
+                # post-mortem can correlate the nudge intent even if
+                # the page closes mid-evaluate.
+                _nudge_strategy = "scrollby_280px_round_trip"
+                _nudge_delta_px = 280
+                logger.info(
+                    "OY recovery sort header lazy-mount nudge: "
+                    "strategy=%s delta_px=%d",
+                    _nudge_strategy, _nudge_delta_px,
+                )
+                _lazy_mount_nudge_attempted = True
+                _nudge_raised = False
+                try:
+                    await page.evaluate(
+                        "() => { window.scrollBy(0, 280); }",
+                    )
+                    await asyncio.sleep(0.15)
+                    await page.evaluate(
+                        "() => { window.scrollBy(0, -280); }",
+                    )
+                    await asyncio.sleep(0.15)
+                except Exception as _nudge_exc:
+                    logger.debug(
+                        "OY recovery sort header lazy-mount nudge "
+                        "evaluate raised (benign): %s", _nudge_exc,
+                    )
+                    _nudge_raised = True
+
+                # Additional bounded readiness budget after the nudge.
+                # Mirrors the surrounding poll cadence (poll_interval_s)
+                # and reuses `_container_visible` / `_target_label_visible`
+                # — does NOT re-implement the readiness check, so the
+                # side-channel `_last_readiness_matched_button` /
+                # `_last_readiness_matched_container` are populated
+                # identically to the normal readiness path on success.
+                _nudge_post_budget_s = 1.5
+                _nudge_deadline = (
+                    _time.monotonic() + _nudge_post_budget_s
+                )
+                _post_attempt = 0
+                _nudge_signal_used: str | None = None
+                while (
+                    not _nudge_raised
+                    and _time.monotonic() < _nudge_deadline
+                ):
+                    _post_attempt += 1
+                    try:
+                        if await _container_visible():
+                            _nudge_signal_used = "container_visible"
+                            if target_ko is not None:
+                                try:
+                                    if await _target_label_visible():
+                                        _nudge_signal_used = (
+                                            "target_label_visible"
+                                        )
+                                except Exception:
+                                    pass
+                            # Re-read state for the result log.
+                            try:
+                                _post_state = (
+                                    await self._compute_recovery_page_state_dict()
+                                )
+                            except Exception:
+                                _post_state = None
+                            _spc = (
+                                _post_state.get("sort_pc_count", "0")
+                                if _post_state else "0"
+                            )
+                            _sbc = (
+                                _post_state.get(
+                                    "sort_button_candidates", "0",
+                                )
+                                if _post_state else "0"
+                            )
+                            _elapsed_ms = int(
+                                (_time.monotonic() - _nudge_start_monotonic)
+                                * 1000.0,
+                            )
+                            logger.info(
+                                "OY recovery sort header lazy-mount "
+                                "nudge result: success=%s "
+                                "sort_pc_count_after=%d "
+                                "sort_button_candidates_after=%d "
+                                "elapsed_ms=%d",
+                                "true",
+                                int(_spc) if str(_spc).isdigit() else 0,
+                                int(_sbc) if str(_sbc).isdigit() else 0,
+                                _elapsed_ms,
+                            )
+                            logger.info(
+                                "OY review sort area ready after recreate: "
+                                "signal=%s target=%r poll_attempt=%d",
+                                _nudge_signal_used,
+                                target_ko,
+                                attempt + _post_attempt,
+                            )
+                            return True
+                    except Exception as e:
+                        logger.debug(
+                            "OY review sort area readiness probe "
+                            "raised (benign): %s",
+                            e,
+                        )
+                    try:
+                        await asyncio.sleep(max(poll_interval_s, 0.0))
+                    except Exception:
+                        break
+
+                # Additional budget elapsed (or nudge raised) without
+                # observing the sort area. Log the failed nudge
+                # result before falling through to the existing
+                # timeout path. The classifier outcome remains
+                # `sort_control_unreachable` / `recovered=false`.
+                _elapsed_ms = int(
+                    (_time.monotonic() - _nudge_start_monotonic) * 1000.0,
+                )
+                logger.info(
+                    "OY recovery sort header lazy-mount nudge result: "
+                    "success=%s sort_pc_count_after=%d "
+                    "sort_button_candidates_after=%d elapsed_ms=%d",
+                    "false", 0, 0, _elapsed_ms,
+                )
 
         logger.warning(
             "OY review sort area NOT ready after %d poll attempts in "
@@ -4867,53 +5110,29 @@ class _PlaywrightReviewSession:
             return False
         return f"goodsNo={target}" in current_url
 
-    async def _snapshot_recovery_page_state(
-        self, *, checkpoint: str,
-    ) -> None:
-        """I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG.
+    async def _compute_recovery_page_state_dict(self) -> dict | None:
+        """I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — internal helper
+        that builds the recovery page-state snapshot dict WITHOUT
+        emitting the diagnostic log line. Returns the same key/value
+        shape (stringified values: "true"/"false"/"unknown" for
+        booleans; "<n>"/"unknown" for counts) that
+        `_snapshot_recovery_page_state` logs.
 
-        Diagnostic-only helper: emit a single compact key=value log
-        line characterizing the recovered/reloaded page's current
-        state at a named recovery checkpoint. The Ilso A000000225736
-        live proof showed that the SAME recovery code produces TWO
-        different DOM outcomes across runs (`probes=0` on one run
-        because the review-pane never mounted; scoped click fired
-        but no cursor request on a prior run). The next live proof
-        needs URL + readyState + selector counts at every recovery
-        checkpoint to characterize this variance.
+        Returns None when `self._page` is None (no page to probe).
+        Extracted from `_snapshot_recovery_page_state` so the
+        recovery readiness wait can read the same canonical state
+        the diagnostic log line emits — `_is_partial_review_mount_state`
+        is then a pure dict predicate fed by this helper, keeping the
+        runtime predicate and the post-mortem log line bit-for-bit
+        aligned.
 
-        No-op when `_diagnose_post_recreate_page_state` is False
-        (default). Every probe wrapped in try/except so a malformed
-        Playwright page cannot abort recovery — diagnostics are
-        best-effort. Per-probe Playwright `timeout=1000` so the
-        helper's total wall-time stays bounded; no screenshots,
-        no `innerHTML`, no full DOM dumps.
-
-        Fields logged (in stable order):
-          checkpoint=<name>
-          url=<page.url or "unknown">
-          readyState=<document.readyState or "unknown">
-          title=<document.title or "unknown"> (truncated 60 chars)
-          url_has_goodsno=<true|false|unknown>
-          url_has_tab_review=<true|false|unknown>
-          sort_pc_count=<int|unknown>
-          sort_container_count=<int|unknown>
-          sort_classmatch_count=<int|unknown>
-          review_tab_count=<int|unknown>
-          text_has_choisin=<true|false|unknown>
-          text_has_yuyong=<true|false|unknown>
-          text_has_rating_desc=<true|false|unknown>
-          text_has_rating_asc=<true|false|unknown>
-          text_has_review_count=<true|false|unknown>
-          sort_button_candidates=<int|unknown>
+        Every probe is wrapped in try/except for the same best-effort
+        reason as the logging helper; a malformed Playwright page
+        cannot abort recovery via a diagnostic call.
         """
-        if not getattr(
-            self, "_diagnose_post_recreate_page_state", False,
-        ):
-            return
         page = self._page
         if page is None:
-            return
+            return None
 
         def _bool_str(v: bool) -> str:
             return "true" if v else "false"
@@ -5032,6 +5251,71 @@ class _PlaywrightReviewSession:
         except Exception:
             sort_button_candidates = "unknown"
 
+        return {
+            "url": url,
+            "readyState": ready_state,
+            "title": title,
+            "url_has_goodsno": url_has_goodsno,
+            "url_has_tab_review": url_has_tab_review,
+            "sort_pc_count": sort_pc_count,
+            "sort_container_count": sort_container_count,
+            "sort_classmatch_count": sort_classmatch_count,
+            "review_tab_count": review_tab_count,
+            "text_has_choisin": text_has_choisin,
+            "text_has_yuyong": text_has_yuyong,
+            "text_has_rating_desc": text_has_rating_desc,
+            "text_has_rating_asc": text_has_rating_asc,
+            "text_has_review_count": text_has_review_count,
+            "sort_button_candidates": sort_button_candidates,
+        }
+
+    async def _snapshot_recovery_page_state(
+        self, *, checkpoint: str,
+    ) -> None:
+        """I-OY-RECOVERY-POST-RECREATE-PAGE-STATE-DIAG.
+
+        Diagnostic-only helper: emit a single compact key=value log
+        line characterizing the recovered/reloaded page's current
+        state at a named recovery checkpoint. The Ilso A000000225736
+        live proof showed that the SAME recovery code produces TWO
+        different DOM outcomes across runs (`probes=0` on one run
+        because the review-pane never mounted; scoped click fired
+        but no cursor request on a prior run). The next live proof
+        needs URL + readyState + selector counts at every recovery
+        checkpoint to characterize this variance.
+
+        No-op when `_diagnose_post_recreate_page_state` is False
+        (default). Every probe wrapped in try/except so a malformed
+        Playwright page cannot abort recovery — diagnostics are
+        best-effort. Per-probe Playwright `timeout=1000` so the
+        helper's total wall-time stays bounded; no screenshots,
+        no `innerHTML`, no full DOM dumps.
+
+        Fields logged (in stable order):
+          checkpoint=<name>
+          url=<page.url or "unknown">
+          readyState=<document.readyState or "unknown">
+          title=<document.title or "unknown"> (truncated 60 chars)
+          url_has_goodsno=<true|false|unknown>
+          url_has_tab_review=<true|false|unknown>
+          sort_pc_count=<int|unknown>
+          sort_container_count=<int|unknown>
+          sort_classmatch_count=<int|unknown>
+          review_tab_count=<int|unknown>
+          text_has_choisin=<true|false|unknown>
+          text_has_yuyong=<true|false|unknown>
+          text_has_rating_desc=<true|false|unknown>
+          text_has_rating_asc=<true|false|unknown>
+          text_has_review_count=<true|false|unknown>
+          sort_button_candidates=<int|unknown>
+        """
+        if not getattr(
+            self, "_diagnose_post_recreate_page_state", False,
+        ):
+            return
+        state = await self._compute_recovery_page_state_dict()
+        if state is None:
+            return
         try:
             logger.info(
                 "OY recovery page state: "
@@ -5043,21 +5327,21 @@ class _PlaywrightReviewSession:
                 "text_has_rating_desc=%s text_has_rating_asc=%s "
                 "text_has_review_count=%s sort_button_candidates=%s",
                 checkpoint,
-                url,
-                ready_state,
-                title,
-                url_has_goodsno,
-                url_has_tab_review,
-                sort_pc_count,
-                sort_container_count,
-                sort_classmatch_count,
-                review_tab_count,
-                text_has_choisin,
-                text_has_yuyong,
-                text_has_rating_desc,
-                text_has_rating_asc,
-                text_has_review_count,
-                sort_button_candidates,
+                state["url"],
+                state["readyState"],
+                state["title"],
+                state["url_has_goodsno"],
+                state["url_has_tab_review"],
+                state["sort_pc_count"],
+                state["sort_container_count"],
+                state["sort_classmatch_count"],
+                state["review_tab_count"],
+                state["text_has_choisin"],
+                state["text_has_yuyong"],
+                state["text_has_rating_desc"],
+                state["text_has_rating_asc"],
+                state["text_has_review_count"],
+                state["sort_button_candidates"],
             )
         except Exception:
             pass
@@ -5128,9 +5412,18 @@ class _PlaywrightReviewSession:
             or self._sort_button_selector is not None
         ):
             try:
+                # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — recovery
+                # cascade callers pass `recovery_lazy_mount_nudge=True`
+                # so the readiness wait can fire a single bounded
+                # scroll nudge on the partial-mount path. Cold-start
+                # callers (none today — `_wait_for_review_sort_area_ready`
+                # is only invoked from this recovery cascade) MUST
+                # omit / pass False so the cold-start behavior stays
+                # byte-for-byte identical.
                 ready = await self._wait_for_review_sort_area_ready(
                     timeout_s=self._sort_hunt_settle_s,
                     poll_interval_s=self._sort_hunt_poll_interval_s,
+                    recovery_lazy_mount_nudge=True,
                 )
             except Exception as e:
                 logger.info(
@@ -5151,9 +5444,16 @@ class _PlaywrightReviewSession:
                         "skipped/failed (benign): %s", e,
                     )
                 try:
+                    # I-OY-RECOVERY-SORT-HEADER-LAZY-MOUNT-PROBE — the
+                    # post-retrigger wait is still on the recovery
+                    # path; the predicate is self-bounded (at most
+                    # one nudge per readiness wait instance) so a
+                    # second nudge here only fires if THIS wait still
+                    # sees a partial-mount state after the re-trigger.
                     ready = await self._wait_for_review_sort_area_ready(
                         timeout_s=self._sort_hunt_settle_s,
                         poll_interval_s=self._sort_hunt_poll_interval_s,
+                        recovery_lazy_mount_nudge=True,
                     )
                 except Exception as e:
                     logger.info(
