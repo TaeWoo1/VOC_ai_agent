@@ -1250,6 +1250,17 @@ class OliveYoungBrowserAPIConnector:
         mid_stream_auth_break = False
         pagination_exhausted_clean = False  # set when loop ended on hasNext=False
 
+        # ---- I-OY-CURSOR-API-RATE-LIMIT-HANDLING telemetry ----
+        # Cumulative across the run. Set whenever the session reports a
+        # rate-limit observation (drained via `get_cursor_api_rate_limited`
+        # at every cursor iteration AND on the scroll-failure path). The
+        # flag is the single signal that gates the recovery-cascade
+        # short-circuit and surfaces on `ConnectorRunSummary.cursor_api_rate_limited`.
+        # Distinct from `http_429_seen` (which is path-#1-only): path #2
+        # is the CORS-blocked 429 case that surfaces via `requestfailed`
+        # WITHOUT an observable HTTP status.
+        cursor_api_rate_limited = False
+
         # ---- I-OY-OPEN-HANDSHAKE-TIMEOUT telemetry ----
         # `open_handshake_timed_out` fires when `await session.open(...)`
         # exceeds `self._cold_start_timeout_s`. Distinct from
@@ -1345,6 +1356,46 @@ class OliveYoungBrowserAPIConnector:
         def _note(reason: str) -> None:
             if len(sample_dropped) < 5:
                 sample_dropped.append(reason)
+
+        # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — bookkeeping closure.
+        # `_mark_cursor_rate_limited` is called from EVERY surface that
+        # can observe the throttle:
+        #   - the response handler's `_classify_http_response == "rate_limited"`
+        #     branch (status=429 delivered through the queue) — both
+        #     cold-start and mid-stream.
+        #   - the cascade-skip gate inside the `next_resp is None` branch
+        #     (drains the session flag, which the CORS-blocked
+        #     `requestfailed` handler may have already set).
+        # The sample_dropped reason literal is fixed per the ticket
+        # contract — operators and downstream classifiers grep for it.
+        # The `_appended_sample` gate prevents the literal from being
+        # appended more than once even if the throttle fires across
+        # multiple iterations.
+        _rate_limit_sample_appended = [False]
+
+        def _mark_cursor_rate_limited() -> None:
+            nonlocal cursor_api_rate_limited
+            cursor_api_rate_limited = True
+            if not _rate_limit_sample_appended[0]:
+                _note("cursor_api_rate_limited: 429 Too Many Requests")
+                _rate_limit_sample_appended[0] = True
+
+        def _drain_session_rate_limit_flag() -> bool:
+            """Best-effort getter on the session; returns False when the
+            session doesn't expose the flag (legacy fakes). Side-effect:
+            calls `_mark_cursor_rate_limited()` exactly when the session
+            reports True so the surrounding control flow only needs a
+            boolean."""
+            try:
+                fn = getattr(session, "get_cursor_api_rate_limited", None)
+                if fn is None:
+                    return False
+                observed = bool(fn())
+            except Exception:
+                return False
+            if observed:
+                _mark_cursor_rate_limited()
+            return observed
 
         # Target goodsNo for cross-product filtering. 기획 set products
         # return reviews from multiple sub-products in one cursor
@@ -1710,6 +1761,14 @@ class OliveYoungBrowserAPIConnector:
                     blocked = True
                     http_429_seen = True
                     _note(f"rate_limited on cold start (HTTP {status})")
+                    # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — append the
+                    # canonical sample reason in addition to the existing
+                    # PR-1 reason, and set the new boolean. The
+                    # `_classify_http_response` tag and `http_429_seen`
+                    # flag remain untouched so the auth-wall classifier
+                    # in `auth_wall_diagnostics.py` and the pipeline
+                    # classifier in `phase1_pipeline.py` are NOT affected.
+                    _mark_cursor_rate_limited()
                     break
                 elif tag == "malformed":
                     parse_warnings += 1
@@ -1752,6 +1811,33 @@ class OliveYoungBrowserAPIConnector:
                         if next_resp is not None:
                             break
                     if next_resp is None:
+                        # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — cascade-skip
+                        # gate. The CORS-blocked 429 case surfaces as zero
+                        # `/reviews/cursor` responses on the queue (the
+                        # browser DROPS the 429 under CORS policy because
+                        # OY returns it without `Access-Control-Allow-Origin`).
+                        # Without this gate the scroll-exhaustion branch
+                        # would fire `reload_and_reopen_review_tab`, which
+                        # resets page state and burns more cursor requests
+                        # — compounding the throttle into a wedge that the
+                        # cascade misclassifies as `sort_control_unreachable`.
+                        # The drain reads from `session.get_cursor_api_rate_limited()`
+                        # (best-effort getattr; legacy fakes return False
+                        # and the gate is a no-op). On confirmed 429 we
+                        # clean-stop with the canonical sample reason and
+                        # `cursor_api_rate_limited=True` on the summary.
+                        # `hasNext` from the last OK body is preserved on
+                        # the summary via the existing `last_observed_has_next`
+                        # field so audit can tell whether the cursor stream
+                        # was truncated.
+                        if _drain_session_rate_limit_flag():
+                            _note(
+                                "cursor_api_rate_limited: scroll continuation "
+                                "skipped (cascade short-circuited; 429 "
+                                "observed during pagination)",
+                            )
+                            blocked = True
+                            break
                         # I-OY-SCROLL-CONTINUATION-IMPL — the per-page scroll
                         # budget is exhausted. Before declaring this a final
                         # terminus, check whether the server still says there
@@ -2123,6 +2209,15 @@ class OliveYoungBrowserAPIConnector:
                         blocked = True
                         http_429_seen = True
                         _note(f"rate_limited mid-stream (HTTP {status})")
+                        # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — mirror the
+                        # cold-start branch: append the canonical sample
+                        # reason and set the dedicated boolean. The
+                        # existing `blocked`/`http_429_seen` flags are
+                        # preserved so the downstream `classify_status`
+                        # path in `collection_batch.py` continues to
+                        # route this to `anti_bot` (which is NOT
+                        # `max_cap_reached` and NOT `sort_control_unreachable`).
+                        _mark_cursor_rate_limited()
                         break
                     if tag == "malformed":
                         parse_warnings += 1
@@ -2250,6 +2345,21 @@ class OliveYoungBrowserAPIConnector:
                     "OY browser: get_sort_control_unreachable failed in "
                     "finally: %s", e,
                 )
+            # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — final drain of the
+            # cursor-rate-limit flag. Covers the case where 429 fired in
+            # a `requestfailed` event AFTER the cascade-skip gate already
+            # ran (or never ran because the inner continuation loop never
+            # entered the `next_resp is None` branch). The drain is
+            # idempotent: `_drain_session_rate_limit_flag` is a no-op when
+            # the session reports False; when True, it appends the canonical
+            # sample reason exactly once thanks to the `_appended` gate.
+            try:
+                _drain_session_rate_limit_flag()
+            except Exception as e:
+                logger.debug(
+                    "OY browser: cursor_rate_limit drain failed in "
+                    "finally: %s", e,
+                )
             try:
                 await session.close()
             except Exception as e:
@@ -2339,6 +2449,8 @@ class OliveYoungBrowserAPIConnector:
             incomplete_collection=incomplete_collection,
             pagination_exhausted=pagination_exhausted_clean,
             last_observed_has_next=last_has_next,
+            # ---- I-OY-CURSOR-API-RATE-LIMIT-HANDLING telemetry ----
+            cursor_api_rate_limited=cursor_api_rate_limited,
             # ---- PR-2 retry telemetry ----
             auth_retry_attempts_used=auth_retry_attempts_used,
             auth_retry_exhausted=auth_retry_exhausted,
@@ -3455,7 +3567,50 @@ class _PlaywrightReviewSession:
         self._adopted_existing_page: bool = False
         self._existing_page_candidate_count: int = 0
         self._adopted_page_url_at_open: str | None = None
+        # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — session-local flag set when
+        # the cursor API returns HTTP 429 OR when a request to the cursor
+        # URL fails with `net::ERR_FAILED` (CORS-blocked 429 on Chromium).
+        # The connector drains this via `get_cursor_api_rate_limited()`
+        # immediately after the per-iteration response/wait check and uses
+        # it to short-circuit the recovery cascade (no reload-first, no
+        # page-recreate). Distinct from `_classify_http_response(...) ==
+        # "rate_limited"` (which is a per-response tag): the session-level
+        # flag aggregates BOTH the response-side observation (status=429)
+        # and the request-failure-side observation (CORS-blocked 429) so
+        # the cascade-skip gate has a single attribute to consult. Defaults
+        # to False; once set, stays True for the rest of the session — a
+        # single rate-limit event is enough to confirm the throttle.
+        self._cursor_api_rate_limited: bool = False
+        # Companion log-once gate. The detection happens inside the
+        # async response/requestfailed handlers which can fire many times
+        # per cursor call; the operator wants exactly one
+        # `OY cursor API rate limited:` log line per detection event
+        # (not per subsequent CORS-blocked request that all surface the
+        # same 429). The flag is reset to False whenever the connector
+        # acknowledges the rate-limit event in `collect()` (so a
+        # subsequent rate-limit in a re-built session can still emit
+        # its own line). Field is not part of the public summary; it
+        # only scopes log volume.
+        self._cursor_api_rate_limited_logged: bool = False
         self._closed = False
+
+    def get_cursor_api_rate_limited(self) -> bool:
+        """I-OY-CURSOR-API-RATE-LIMIT-HANDLING.
+
+        True iff the cursor API has been observed to rate-limit at
+        least once during this session — either via a direct HTTP 429
+        response OR via a `requestfailed` event with
+        `failure.errorText="net::ERR_FAILED"` on the cursor URL (which
+        is what a CORS-blocked 429 surfaces as on Chromium because the
+        browser drops the response before `page.on("response")` fires).
+
+        Connector reads this at every cursor iteration AND on the
+        scroll-failure path so the recovery cascade can be short-
+        circuited cleanly. Best-effort: test fakes that do not implement
+        the getter return False via `getattr(..., default=lambda: False)`
+        and the cascade-skip gate degrades to its legacy behavior.
+        """
+        return bool(self._cursor_api_rate_limited)
 
     def _attach_response_handler(self, page) -> None:
         """Attach the per-`/reviews/cursor` response interceptor to `page`.
@@ -3477,6 +3632,24 @@ class _PlaywrightReviewSession:
             if api_path not in response.url:
                 return
             status = response.status
+            # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — narrow detection at
+            # the earliest point in the response handler. Flag is set
+            # exactly once per detection event; the log line is emitted
+            # exactly once per session via the `_logged` gate so a burst
+            # of 429s in flight at the moment of throttle doesn't spam
+            # the operator's tee log. The flag is read by `collect()`
+            # via `get_cursor_api_rate_limited()` at each iteration to
+            # short-circuit the recovery cascade. NOT routed through
+            # the auth-wall or interstitial classifiers — 429 is server-
+            # side throttling, not an auth gate.
+            if status == 429:
+                self._cursor_api_rate_limited = True
+                if not self._cursor_api_rate_limited_logged:
+                    self._cursor_api_rate_limited_logged = True
+                    logger.warning(
+                        "OY cursor API rate limited: status=429 url=%s",
+                        response.url,
+                    )
             ct = (response.headers.get("content-type") or "").lower()
             body: dict | None = None
             # I-OY-RECOVERY-POST-CLICK-RESPONSE-CAPTURE — capture the
@@ -3694,6 +3867,67 @@ class _PlaywrightReviewSession:
                 pass
 
         page.on("response", _on_response)
+
+        # I-OY-CURSOR-API-RATE-LIMIT-HANDLING — `requestfailed` handler.
+        # The live Ilso A000000225736 reproduction surfaced the 429 not
+        # as a `response` event (the browser DROPPED the response under
+        # CORS policy because OY returned the 429 without the
+        # `Access-Control-Allow-Origin` header that the XHR layer
+        # requires) but as a request failure with
+        # `failure.errorText="net::ERR_FAILED"`. The `_on_response`
+        # path above catches the cases where the response IS delivered
+        # with status 429; this handler catches the CORS-blocked case
+        # so the cascade-skip gate fires in both shapes.
+        def _on_request_failed(request) -> None:
+            try:
+                if api_path not in request.url:
+                    return
+            except Exception:
+                return
+            try:
+                failure = request.failure
+            except Exception:
+                failure = None
+            # Playwright exposes `failure` as either an attribute or a
+            # method depending on the binding version. Probe both
+            # shapes; the test fakes use the attribute form.
+            failure_text: str | None = None
+            try:
+                if callable(failure):
+                    failure_val = failure()
+                else:
+                    failure_val = failure
+                if isinstance(failure_val, str):
+                    failure_text = failure_val
+                elif failure_val is not None:
+                    # Playwright >=1.40 returns an object with
+                    # `errorText`. Defensive attribute access.
+                    failure_text = getattr(
+                        failure_val, "errorText", None,
+                    ) or getattr(failure_val, "error_text", None)
+            except Exception:
+                failure_text = None
+            if not failure_text:
+                return
+            # The operator-observed signature is exactly
+            # `net::ERR_FAILED`. Other Chromium failure codes
+            # (`net::ERR_ABORTED`, `net::ERR_TIMED_OUT`) are NOT rate-
+            # limit signals — they're handled by the existing
+            # cold-start-timeout / scroll-failure paths and must not
+            # masquerade as 429. Substring match keeps us tolerant of
+            # any future trailing context Chromium might append.
+            if "ERR_FAILED" not in failure_text:
+                return
+            self._cursor_api_rate_limited = True
+            if not self._cursor_api_rate_limited_logged:
+                self._cursor_api_rate_limited_logged = True
+                logger.warning(
+                    "OY cursor API rate limited: failure=%s url=%s",
+                    failure_text,
+                    request.url,
+                )
+
+        page.on("requestfailed", _on_request_failed)
 
     async def _capture_total_review_count_from_dom(self) -> int | None:
         """Best-effort DOM scan for the review-count badge.

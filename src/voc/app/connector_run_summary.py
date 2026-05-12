@@ -129,6 +129,26 @@ class ConnectorRunSummary(BaseModel):
     pagination_exhausted: bool = False
     last_observed_has_next: bool | None = None
 
+    # ---- I-OY-CURSOR-API-RATE-LIMIT-HANDLING (additive) ----
+    # True iff the connector observed at least one cursor API rate-limit
+    # event during the run. The two trip conditions:
+    #   1. Response with status=429 on a URL containing
+    #      `/review/api/v2/reviews/cursor`.
+    #   2. `requestfailed` event with `failure.errorText="net::ERR_FAILED"`
+    #      on the same URL substring (CORS-blocked 429 surfaces here on
+    #      Chromium because the browser drops the response before
+    #      `page.on("response")` fires).
+    # Distinct from `http_429_seen` (which is also set on path #1 only —
+    # path #2 cannot observe an HTTP status because the response was
+    # CORS-blocked). When this flag is True, the connector clean-stops
+    # the sort instead of entering the reload-first / page-recreate
+    # recovery cascade — those branches reset page state and burn more
+    # cursor requests, which on a deep-corpus product (~27k reviews,
+    # Ilso A000000225736) compounds the throttle into a wedge that the
+    # cascade misclassifies as `sort_control_unreachable`.
+    # NOT routed through the auth-wall or human-check classifier paths.
+    cursor_api_rate_limited: bool = False
+
     # ---- Connector-level retry + debug telemetry (PR-2, additive) ----
     # Default off / unused so any caller who doesn't opt into retry sees
     # PR-1-equivalent serialization.

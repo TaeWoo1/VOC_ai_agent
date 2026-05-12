@@ -6706,17 +6706,32 @@ def _build_diagnostic_session(
 def _attach_and_get_handler(sess):
     """Attach the response handler to a tiny fake page and return the
     inner `_on_response` closure for direct invocation. The fake page
-    records the registration but is otherwise a no-op."""
-    captured: list = []
+    records the registration but is otherwise a no-op.
+
+    I-OY-CURSOR-API-RATE-LIMIT-HANDLING — `_attach_response_handler`
+    now installs TWO listeners (`response` + `requestfailed`). The
+    helper still returns only the `response` handler since that's
+    what the existing post-recovery diagnostic tests directly invoke;
+    the requestfailed handler is exercised separately by the new
+    rate-limit tests.
+    """
+    captured_response: list = []
+    captured_request_failed: list = []
 
     class _FakePage:
         def on(self, event, handler):
-            assert event == "response"
-            captured.append(handler)
+            if event == "response":
+                captured_response.append(handler)
+            elif event == "requestfailed":
+                captured_request_failed.append(handler)
+            else:
+                raise AssertionError(
+                    f"unexpected page.on event: {event!r}",
+                )
 
     sess._attach_response_handler(_FakePage())
-    assert len(captured) == 1
-    return captured[0]
+    assert len(captured_response) == 1
+    return captured_response[0]
 
 
 @pytest.mark.asyncio
@@ -9728,3 +9743,506 @@ async def test_recovery_reload_branch_bounded_status_on_failure(caplog):
     assert len(fallback_lines) == 1, (
         f"expected one fallback log line; got {fallback_lines!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# I-OY-CURSOR-API-RATE-LIMIT-HANDLING
+#
+# Operator-observed root cause: the OY cursor API
+# (`/review/api/v2/reviews/cursor`) starts returning HTTP 429 on deep-corpus
+# products (Ilso A000000225736, ~27k reviews). Many of those 429 responses
+# are CORS-blocked by Chromium because OY returns them without
+# `Access-Control-Allow-Origin`, so they surface as `requestfailed` with
+# `failure.errorText="net::ERR_FAILED"` rather than `response` events with
+# observable status. The pre-patch connector misclassified the resulting
+# scroll-exhaustion as `sort_control_unreachable` and burned more cursor
+# requests through `reload_and_reopen_review_tab`.
+#
+# Detection lives in `_attach_response_handler`: the `response` path catches
+# status=429, the new `requestfailed` path catches CORS-blocked 429. Both
+# flip `_cursor_api_rate_limited` on the session. The connector drains the
+# flag at every scroll-failure iteration AND in the `finally` block, sets
+# `cursor_api_rate_limited=True` on the run summary, and appends the
+# canonical reason `"cursor_api_rate_limited: 429 Too Many Requests"` to
+# `sample_dropped_reasons`. The recovery cascade is short-circuited.
+# ---------------------------------------------------------------------------
+
+
+def _build_rate_limit_session():
+    """Construct a minimal `_PlaywrightReviewSession` for direct handler
+    invocation. Bypasses the real Playwright dependency by going through
+    `object.__new__` + the regular `__init__`. The `Page` is supplied by
+    the test (no real network)."""
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess.__init__(
+        headless=True,
+        api_path="/review/api/v2/reviews/cursor",
+        review_tab_locator="div.review-tab",
+        scroll_candidates=(),
+        user_agent="ua",
+        viewport={"width": 800, "height": 600},
+    )
+    return sess
+
+
+class _FakeRateLimitPage:
+    """Sequence-recording fake page. Captures both listeners
+    (`response` and `requestfailed`) so the test can drive either path."""
+
+    def __init__(self):
+        self.response_handlers: list = []
+        self.request_failed_handlers: list = []
+
+    def on(self, event, handler):
+        if event == "response":
+            self.response_handlers.append(handler)
+        elif event == "requestfailed":
+            self.request_failed_handlers.append(handler)
+        else:
+            raise AssertionError(f"unexpected page event: {event!r}")
+
+
+class _FakeResponse429:
+    """Minimal fake `Response` carrying status=429 on a cursor URL."""
+
+    def __init__(self, url: str = "https://m.oliveyoung.co.kr/review/api/v2/reviews/cursor"):
+        self.url = url
+        self.status = 429
+        self.headers = {"content-type": "text/html"}
+
+        class _Req:
+            def __init__(self, url):
+                self.method = "POST"
+                self.url = url
+                self.headers = {}
+                self.post_data = None
+        self.request = _Req(url)
+
+    async def json(self):  # pragma: no cover — body irrelevant on 429
+        raise AssertionError("should not be called for 429")
+
+
+class _FakeFailedRequest:
+    """Minimal fake `Request` for a CORS-blocked cursor call."""
+
+    def __init__(
+        self,
+        url: str = "https://m.oliveyoung.co.kr/review/api/v2/reviews/cursor",
+        error_text: str = "net::ERR_FAILED",
+    ):
+        self.url = url
+
+        class _Failure:
+            def __init__(self, text):
+                self.errorText = text
+        # Match Playwright's >=1.40 attribute-style binding (the test
+        # connector's probe handles both attribute and method shapes).
+        self.failure = _Failure(error_text)
+
+
+@pytest.mark.asyncio
+async def test_cursor_response_429_sets_rate_limit_flag(caplog):
+    """A direct 429 response on the cursor URL must:
+      - set `_cursor_api_rate_limited=True` on the session,
+      - emit exactly one `OY cursor API rate limited:` warning log line,
+      - the connector-level drain via `get_cursor_api_rate_limited()`
+        must report True,
+      - downstream collect()-derived state (when the same session is run
+        through `collect()` shaped as a queue with `(429, None)`) must
+        carry `cursor_api_rate_limited=True` on the summary AND the
+        canonical sample reason.
+    """
+    import logging
+    sess = _build_rate_limit_session()
+    page = _FakeRateLimitPage()
+    sess._attach_response_handler(page)
+    assert len(page.response_handlers) == 1
+    assert len(page.request_failed_handlers) == 1
+    response_handler = page.response_handlers[0]
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await response_handler(_FakeResponse429())
+
+    # Session-level state flipped.
+    assert sess._cursor_api_rate_limited is True
+    assert sess.get_cursor_api_rate_limited() is True
+
+    # Exactly one rate-limit warning line.
+    rl_lines = [
+        rec.getMessage() for rec in caplog.records
+        if rec.getMessage().startswith("OY cursor API rate limited:")
+    ]
+    assert len(rl_lines) == 1, rl_lines
+
+    # Drive a fresh collect() with the same shape — a 429 cold-start
+    # response — to verify the connector-level summary picks up the
+    # boolean and canonical sample reason.
+    session = FakeBrowserReviewSession([(429, None)])
+    c, params = _build_connector(session)
+    await c.collect(keyword="x", params=params)
+    s = c.last_run_summary
+    assert s.cursor_api_rate_limited is True
+    assert s.http_429_seen is True
+    assert any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+
+
+@pytest.mark.asyncio
+async def test_cursor_request_failed_with_cors_maps_to_rate_limited(caplog):
+    """A `requestfailed` event with `failure.errorText="net::ERR_FAILED"`
+    on a cursor URL must:
+      - set `_cursor_api_rate_limited=True` on the session,
+      - emit exactly one `OY cursor API rate limited:` warning log line,
+      - report True via the `get_cursor_api_rate_limited()` getter.
+
+    A non-matching failure (`net::ERR_ABORTED` or non-cursor URL) must
+    NOT trip the flag — the patch's discriminator is the substring
+    "ERR_FAILED" on the cursor URL.
+    """
+    import logging
+    sess = _build_rate_limit_session()
+    page = _FakeRateLimitPage()
+    sess._attach_response_handler(page)
+    assert len(page.request_failed_handlers) == 1
+    request_failed_handler = page.request_failed_handlers[0]
+
+    # Non-cursor URL — flag must remain False.
+    request_failed_handler(_FakeFailedRequest(
+        url="https://m.oliveyoung.co.kr/some/other/api",
+        error_text="net::ERR_FAILED",
+    ))
+    assert sess._cursor_api_rate_limited is False
+
+    # Different chromium error on cursor URL — must not trip 429 flag.
+    request_failed_handler(_FakeFailedRequest(
+        error_text="net::ERR_ABORTED",
+    ))
+    assert sess._cursor_api_rate_limited is False
+
+    # Canonical CORS-blocked 429 case — must flip flag and log.
+    with caplog.at_level(
+        logging.WARNING,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        request_failed_handler(_FakeFailedRequest(
+            error_text="net::ERR_FAILED",
+        ))
+
+    assert sess._cursor_api_rate_limited is True
+    assert sess.get_cursor_api_rate_limited() is True
+
+    rl_lines = [
+        rec.getMessage() for rec in caplog.records
+        if rec.getMessage().startswith("OY cursor API rate limited:")
+    ]
+    assert len(rl_lines) == 1, rl_lines
+
+
+class _CursorRateLimitFakeSession(FakeBrowserReviewSession):
+    """Extension that simulates the CORS-blocked 429 shape: cursor
+    responses time out (return None) AND `get_cursor_api_rate_limited()`
+    flips True at a configurable point in the response sequence.
+
+    `rate_limit_after_pop` controls the index after which the getter
+    starts returning True. e.g. value=1 means: serve one response (the
+    cold-start ok page), then the next `wait_for_next_response` returns
+    None AND the cursor flag has flipped — matching the live Ilso
+    repro.
+    """
+
+    def __init__(self, responses, *, rate_limit_after_pop: int = 0,
+                 has_reload_method: bool = True):
+        super().__init__(responses)
+        self._pops = 0
+        self._rate_limit_after_pop = rate_limit_after_pop
+        self._has_reload_method = has_reload_method
+        self.reload_calls = 0
+
+    async def wait_for_next_response(self, *, timeout_s: float):
+        result = await super().wait_for_next_response(timeout_s=timeout_s)
+        self._pops += 1
+        return result
+
+    def get_cursor_api_rate_limited(self) -> bool:
+        return self._pops >= self._rate_limit_after_pop > 0
+
+    # Provide the recovery primitive only when the test wants it
+    # available — the cascade-skip test must prove the gate fires
+    # BEFORE the recovery primitive is invoked.
+    def __getattr__(self, name):
+        if name == "reload_and_reopen_review_tab" and self._has_reload_method:
+            async def _reload():
+                self.reload_calls += 1
+            return _reload
+        raise AttributeError(name)
+
+
+@pytest.mark.asyncio
+async def test_cursor_429_skips_recovery_cascade(page1_body, caplog):
+    """Mid-pagination 429: the cursor flag is set after the cold-start
+    OK response; the continuation loop times out repeatedly because
+    CORS-blocked 429s don't surface as response events. The cascade-skip
+    gate must:
+      - fire BEFORE `reload_and_reopen_review_tab` would be invoked,
+      - leave `reload_calls == 0` on the session,
+      - set `cursor_api_rate_limited=True` on the summary,
+      - leave `last_observed_has_next=True` on the summary (the cursor
+        stream was truncated mid-corpus),
+      - the connector returns the rows it already collected (no data loss
+        on the cold-start page).
+    """
+    import logging
+    # Cold-start serves page1 (hasNext=True). Then the queue is empty,
+    # so every subsequent wait_for_next_response returns None — the
+    # CORS-blocked-429 shape. Rate-limit getter flips True after the
+    # first pop.
+    session = _CursorRateLimitFakeSession(
+        [(200, page1_body)],
+        rate_limit_after_pop=1,
+        has_reload_method=True,  # the primitive exists but must NOT be called
+    )
+    c, params = _build_connector(session)
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        raws = await c.collect(keyword="x", params=params)
+
+    s = c.last_run_summary
+
+    # Cold-start rows preserved.
+    assert len(raws) == 9, len(raws)  # page1 yields 9 target rows after goods-filter
+
+    # Cascade-skip gate fired BEFORE the recovery primitive.
+    assert session.reload_calls == 0, (
+        f"reload_and_reopen_review_tab was invoked {session.reload_calls} "
+        f"times; the cascade-skip gate failed to short-circuit"
+    )
+
+    # Rate-limit boolean surfaced on the summary.
+    assert s.cursor_api_rate_limited is True
+
+    # Canonical sample reason present.
+    assert any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+
+    # The cursor stream was truncated — server still said hasNext=True.
+    assert s.last_observed_has_next is True
+
+    # Final status mapping check: route through `classify_status`. With
+    # `http_429_seen=False` here (because the CORS-blocked path never
+    # carries an observable HTTP status) but `cursor_api_rate_limited=True`
+    # AND `blocked=True` (set by the cascade-skip gate), the classifier
+    # returns `anti_bot` via the legacy `blocked=True` branch.
+    from src.voc.app.collection_batch import classify_status
+    status = classify_status({
+        "blocked": s.blocked,
+        "http_429_seen": s.http_429_seen,
+        "http_403_seen": s.http_403_seen,
+        "cursor_api_rate_limited": s.cursor_api_rate_limited,
+        "auth_error": s.auth_error,
+        "quality_status": "invalid",
+        "last_observed_has_next": s.last_observed_has_next,
+        "sort_control_unreachable": s.sort_control_unreachable,
+        "false_empty_state_detected": s.false_empty_state_detected,
+        "sample_dropped_reasons": s.sample_dropped_reasons,
+        "records_parsed": s.records_parsed,
+        "review_api_response_count": s.review_api_response_count,
+        "scrolled_to_review_area": s.scrolled_to_review_area,
+        "review_more_button_clicked": s.review_more_button_clicked,
+        "total_review_count_available": s.total_review_count_available,
+        "rows_filtered_by_goods_no": s.rows_filtered_by_goods_no,
+        "rows_dropped_unparseable": s.rows_dropped_unparseable,
+        "parse_warnings": s.parse_warnings,
+        "pagination_exhausted": s.pagination_exhausted,
+    })
+    # Must NOT be `max_cap_reached` (would be a clean completion) and
+    # must NOT be `sort_control_unreachable` (the prior misclassification).
+    assert status != "max_cap_reached", status
+    assert status != "sort_control_unreachable", status
+
+
+@pytest.mark.asyncio
+async def test_cursor_429_classifies_without_sleep(page1_body, monkeypatch):
+    """Acceptable-shape implementation: no `asyncio.sleep` or `time.sleep`
+    fires on the rate-limited path. This guards against a future change
+    that adds a backoff into the cascade-skip gate without also adding
+    a test-shortened hook — that would compound throttle on the
+    operator-facing run.
+
+    We pre-collect (200, page1) so the cold-start succeeds, then trip
+    the rate-limit getter, then watch for any `asyncio.sleep` / `time.sleep`
+    invocation during the rate-limited continuation. The existing
+    false-empty / interstitial / backoff paths sleep on OTHER signals
+    (DOM markers, anti-bot escalation), which we explicitly leave
+    untouched per §2.6 — this test isolates the rate-limited branch.
+    """
+    import asyncio as _asyncio
+    import time as _time
+
+    sleep_calls: list = []
+
+    real_asleep = _asyncio.sleep
+    real_tsleep = _time.sleep
+
+    async def _spy_asleep(delay, *args, **kwargs):
+        sleep_calls.append(("asyncio.sleep", delay))
+        # Forward to a near-zero sleep so the loop still yields.
+        return await real_asleep(0)
+
+    def _spy_tsleep(delay):
+        sleep_calls.append(("time.sleep", delay))
+        return real_tsleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy_asleep)
+    monkeypatch.setattr(_time, "sleep", _spy_tsleep)
+
+    session = _CursorRateLimitFakeSession(
+        [(200, page1_body)],
+        rate_limit_after_pop=1,
+        has_reload_method=True,
+    )
+    c, params = _build_connector(session)
+    await c.collect(keyword="x", params=params)
+    s = c.last_run_summary
+    assert s.cursor_api_rate_limited is True
+    assert session.reload_calls == 0
+
+    # None of the recorded sleeps may be attributable to the rate-limit
+    # path. The existing positive-signal probe in the false-empty
+    # pre-check DOES call asyncio.sleep(0.25) and is OUT OF SCOPE for
+    # this ticket (§2.6). We isolate by checking for any sleep with
+    # delay >= 1.0 — the rate-limit acceptable-shape commits to no
+    # bounded backoff, so any second-scale sleep on this path is a
+    # regression. The pre-existing positive-signal probe sleeps 0.25s
+    # per poll; we tolerate those.
+    long_sleeps = [
+        c for c in sleep_calls
+        if isinstance(c[1], (int, float)) and c[1] >= 1.0
+    ]
+    assert long_sleeps == [], (
+        f"rate-limited path triggered a long sleep — the acceptable "
+        f"shape commits to classify-and-stop with no backoff; "
+        f"observed sleeps: {long_sleeps!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_429_response_uses_existing_recovery_path(
+    page1_body, caplog,
+):
+    """A 200-but-empty / scroll-timeout sequence WITHOUT a 429 must
+    follow the legacy recovery cascade. Regression guard for §2.6 —
+    the new rate-limit branch must not steal control from the
+    existing scroll-continuation recovery code path.
+
+    Setup: cold-start ok with hasNext=True, then 3 timeouts → scroll
+    budget exhausted → cascade entry should be reachable. We assert
+    the rate-limit flag stays False AND the existing
+    `scroll_continuation_recovery_attempts` counter behaves identically
+    to the pre-patch path (one recovery attempt, capped by the
+    constructor's `_max_scroll_recovery_recreates`).
+    """
+    # `has_reload_method=True` provides the recovery primitive.
+    # `rate_limit_after_pop=0` means the getter ALWAYS returns False —
+    # this is the non-429 regression scenario.
+    session = _CursorRateLimitFakeSession(
+        [(200, page1_body)],  # only cold-start, subsequent waits time out
+        rate_limit_after_pop=0,  # rate-limit getter stays False
+        has_reload_method=True,
+    )
+    c, params = _build_connector(session)
+    raws = await c.collect(keyword="x", params=params)
+    s = c.last_run_summary
+
+    # Rate-limit flag NOT set — guard against the new branch eating
+    # the non-429 case.
+    assert s.cursor_api_rate_limited is False
+    assert not any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+
+    # The existing recovery cascade SHOULD have been reachable. The
+    # connector's scroll budget is `MAX_SCROLL_ATTEMPTS_PER_PAGE = 3`;
+    # after exhaustion the cascade fires `reload_and_reopen_review_tab`
+    # up to `MAX_SCROLL_RECOVERY_RECREATES = 2` times. On this path
+    # the fake's recreate is a no-op (the queue is still empty after
+    # recreate), so the recovery loop runs to budget exhaustion.
+    assert session.reload_calls >= 1, (
+        f"non-429 scroll-failure path must still enter the recovery "
+        f"cascade; reload_calls={session.reload_calls}"
+    )
+
+    # Cold-start rows preserved (post-goods-filter count).
+    assert len(raws) == 9
+
+
+@pytest.mark.asyncio
+async def test_status_classifier_does_not_collapse_to_max_cap_reached(
+    page1_body,
+):
+    """A 429-truncated run with hasNext=True on the last OK body must
+    NOT route to `max_cap_reached`. The `max_cap_reached` enum is
+    reserved for "operator-set quota actually fired" runs, which
+    require `quality_status` in {ok, degraded} AND no failure flags.
+
+    Per the cascade-skip gate, a 429-confirmed run sets `blocked=True`
+    AND `cursor_api_rate_limited=True`, which routes through the
+    `anti_bot` branch in `classify_status` — NOT through the
+    successful-but-not-exhausted (`last_observed_has_next=True`)
+    branch that emits `max_cap_reached`.
+    """
+    session = _CursorRateLimitFakeSession(
+        [(200, page1_body)],
+        rate_limit_after_pop=1,
+        has_reload_method=True,
+    )
+    c, params = _build_connector(session)
+    await c.collect(keyword="x", params=params)
+    s = c.last_run_summary
+
+    assert s.cursor_api_rate_limited is True
+    assert s.last_observed_has_next is True  # cursor stream was truncated
+    # `blocked=True` was set by the cascade-skip gate when it fired.
+    assert s.blocked is True
+
+    from src.voc.app.collection_batch import classify_status
+    summary_dict = {
+        "blocked": s.blocked,
+        "http_429_seen": s.http_429_seen,
+        "http_403_seen": s.http_403_seen,
+        "auth_error": s.auth_error,
+        "cursor_api_rate_limited": s.cursor_api_rate_limited,
+        "last_observed_has_next": s.last_observed_has_next,
+        "sort_control_unreachable": s.sort_control_unreachable,
+        "false_empty_state_detected": s.false_empty_state_detected,
+        "quality_status": "invalid",
+        "sample_dropped_reasons": s.sample_dropped_reasons,
+        "records_parsed": s.records_parsed,
+        "review_api_response_count": s.review_api_response_count,
+        "scrolled_to_review_area": s.scrolled_to_review_area,
+        "review_more_button_clicked": s.review_more_button_clicked,
+        "total_review_count_available": s.total_review_count_available,
+        "rows_filtered_by_goods_no": s.rows_filtered_by_goods_no,
+        "rows_dropped_unparseable": s.rows_dropped_unparseable,
+        "parse_warnings": s.parse_warnings,
+        "pagination_exhausted": s.pagination_exhausted,
+    }
+    status = classify_status(summary_dict)
+    # The patch quotes `anti_bot` as the actual classifier output for
+    # a 429-confirmed run. This MUST NOT collapse to `max_cap_reached`
+    # — the operator-required separation between "rate-limited
+    # truncation" and "clean operator-cap completion".
+    assert status == "anti_bot", status
+    assert status != "max_cap_reached"
+    assert status != "sort_control_unreachable"
