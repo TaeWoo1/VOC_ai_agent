@@ -19,14 +19,19 @@ from src.voc.app.collection_batch import (
     HALT_STATUSES,
     BatchDefaults,
     BatchManifest,
+    ProductResult,
     ProductSpec,
     _build_ingest_command,
+    _build_product_result,
+    _derive_resume_state,
+    _format_resume_line,
     _infer_auth_header_present,
     classify_status,
     load_manifest,
     render_batch_markdown,
     run_batch,
 )
+from src.voc.app.connector_run_summary import ConnectorRunSummary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO_ROOT / "scripts" / "run_oy_collection_batch.py"
@@ -1349,3 +1354,564 @@ def test_cli_main_writes_summary_on_success(cli_module, tmp_path, monkeypatch):
     assert rc == 0
     assert (artifact_root / "smoke" / "batch_summary.json").exists()
     assert (artifact_root / "smoke" / "batch_summary.md").exists()
+
+
+# ===========================================================================
+# I-OY-RESUME-STATE-OPERATOR-SURFACE (step I-C of multi-session resume policy)
+# ===========================================================================
+#
+# These tests cover the new `ProductResult.resume_state` field, the pure
+# `_derive_resume_state` helper, the `_format_resume_line` formatter, the
+# CLI's per-product resume print, and the Markdown surface. They do not
+# touch the I-B classifier (`derive_retry_intent` on ConnectorRunSummary)
+# — the summary dicts used here carry `retry_intent` directly, as the
+# I-B method would already have written it before the batch driver
+# reads the summary back.
+#
+# Hard-stop posture: no test reaches into `classify_status` or
+# `HALT_STATUSES`; both remain byte-identical, per the ticket's "no
+# change to the status decision tree" invariant.
+
+def _rate_limited_summary(
+    *,
+    retry_intent: str = "retry_after_cooldown",
+    retry_after_minutes: int | None = 90,
+    raw_records_seen: int = 610,
+    cursor_rate_limit_exhausted: bool = True,
+) -> dict:
+    """Build a synthetic connector summary dict carrying I-B's classifier
+    output. Mirrors the shape `ConnectorRunSummary.derive_retry_intent`
+    would have written before `_build_product_result` reads the
+    summary back."""
+    base = _ok_summary_stdout(rows_inserted=0)["summary"]
+    base["raw_records_seen"] = raw_records_seen
+    base["records_parsed"] = raw_records_seen
+    base["retry_intent"] = retry_intent
+    base["retry_after_minutes"] = retry_after_minutes
+    base["cursor_rate_limit_exhausted"] = cursor_rate_limit_exhausted
+    base["cursor_api_rate_limited"] = bool(cursor_rate_limit_exhausted)
+    return base
+
+
+def test_derive_resume_state_returns_none_for_retry_intent_none():
+    """Clean exits (retry_intent="none") must not emit a resume hint —
+    None is the canonical signal for "no operator action needed"."""
+    summary = {"retry_intent": "none", "raw_records_seen": 200}
+    assert _derive_resume_state(summary, "2026-05-13T00:00:00") is None
+
+
+def test_derive_resume_state_returns_none_for_missing_retry_intent():
+    """Legacy pre-I-B summaries (no retry_intent key) deserialize to
+    None just like clean exits — keeps the operator surface stable
+    across the I-A → I-B → I-C rollout."""
+    summary = {"raw_records_seen": 200}
+    assert _derive_resume_state(summary, "2026-05-13T00:00:00") is None
+
+
+def test_derive_resume_state_returns_none_for_unknown_retry_intent():
+    """Forward-compat: an unknown retry_intent string maps to None
+    rather than silently inventing a reason. A future ticket that
+    adds a new I-B branch must also teach the C surface about it."""
+    summary = {"retry_intent": "wait_for_next_business_day"}
+    assert _derive_resume_state(summary, "2026-05-13T00:00:00") is None
+
+
+def test_derive_resume_state_rate_limited_carries_documented_keys():
+    """Rule 1 shape — cursor 429 path. All documented keys are populated."""
+    summary = _rate_limited_summary(
+        retry_intent="retry_after_cooldown",
+        retry_after_minutes=90,
+        raw_records_seen=610,
+        cursor_rate_limit_exhausted=True,
+    )
+    rs = _derive_resume_state(summary, "2026-05-13T20:26:12")
+    assert rs is not None
+    assert rs["retryable"] is True
+    assert rs["reason"] == "cursor_api_rate_limited"
+    assert rs["exhausted"] is True
+    assert rs["stopped_at_records_seen"] == 610
+    assert rs["retry_after_minutes"] == 90
+    assert rs["last_seen_at"] == "2026-05-13T20:26:12"
+    assert rs["retry_intent"] == "retry_after_cooldown"
+
+
+def test_derive_resume_state_manual_review_required_carries_none_retry_after():
+    """Rule 2 shape — auth-wall path. `retry_after_minutes` is carried
+    AS None (not omitted) so consumers can always read the same key
+    set. `exhausted` defaults to False on this path (no cursor 429
+    counter)."""
+    summary = {
+        "retry_intent": "manual_review_required",
+        "retry_after_minutes": None,
+        "raw_records_seen": 12,
+        "cursor_rate_limit_exhausted": False,
+    }
+    rs = _derive_resume_state(summary, "2026-05-13T20:26:12")
+    assert rs is not None
+    assert rs["reason"] == "auth_wall"
+    assert rs["retry_after_minutes"] is None
+    assert "retry_after_minutes" in rs  # carried, not omitted
+    assert rs["exhausted"] is False
+    assert rs["stopped_at_records_seen"] == 12
+    assert rs["retry_intent"] == "manual_review_required"
+
+
+def test_derive_resume_state_non_dict_input_returns_none():
+    """Defensive: a non-dict summary (None, list, etc.) returns None
+    rather than crashing the batch driver."""
+    assert _derive_resume_state(None, "2026-05-13T00:00:00") is None  # type: ignore[arg-type]
+    assert _derive_resume_state([], "2026-05-13T00:00:00") is None  # type: ignore[arg-type]
+
+
+def test_format_resume_line_rate_limited_shape():
+    """The cursor-429 stdout shape matches the spec's example
+    verbatim — operators grep for this exact prefix."""
+    rs = {
+        "reason": "cursor_api_rate_limited",
+        "stopped_at_records_seen": 610,
+        "retry_after_minutes": 90,
+        "retry_intent": "retry_after_cooldown",
+    }
+    line = _format_resume_line(rs)
+    assert line == (
+        "resume: cursor_api_rate_limited · stopped_at=610 · "
+        "retry_after=90min  (retry_intent=retry_after_cooldown)"
+    )
+
+
+def test_format_resume_line_manual_review_uses_manual_token():
+    """The auth-wall path renders `retry_after=manual` rather than a
+    minute count (since retry_after_minutes is None)."""
+    rs = {
+        "reason": "auth_wall",
+        "stopped_at_records_seen": 12,
+        "retry_after_minutes": None,
+        "retry_intent": "manual_review_required",
+    }
+    line = _format_resume_line(rs)
+    assert line == (
+        "resume: auth_wall · stopped_at=12 · "
+        "retry_after=manual  (retry_intent=manual_review_required)"
+    )
+
+
+def test_resume_state_present_only_for_rate_limited_runs(tmp_path):
+    """End-to-end through `_build_product_result`: when the connector
+    summary carries `retry_intent="retry_after_cooldown"`, the
+    constructed ProductResult.resume_state is a dict with the
+    documented keys."""
+    spec = ProductSpec(name="Ilso", oy_goods_no="A000000225736")
+    stdout_json = {
+        "run_id": "r_rl",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": _rate_limited_summary(),
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:26:12",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    assert result.resume_state is not None
+    assert result.resume_state["reason"] == "cursor_api_rate_limited"
+    assert result.resume_state["stopped_at_records_seen"] == 610
+    assert result.resume_state["retry_after_minutes"] == 90
+    assert result.resume_state["last_seen_at"] == "2026-05-13T18:26:12"
+
+
+def test_resume_state_absent_for_clean_runs(tmp_path):
+    """`retry_intent="none"` (the I-A / I-B default for clean exits)
+    yields `resume_state is None`. Tests the regression guard that
+    successful runs do not accidentally surface a resume hint."""
+    spec = ProductSpec(name="OK product", oy_goods_no="A0001")
+    # A canonical clean summary explicitly carries retry_intent="none"
+    # (the I-B classifier writes this at the end of collect()).
+    clean = _ok_summary_stdout(rows_inserted=200)
+    clean["summary"]["retry_intent"] = "none"
+    clean["summary"]["retry_after_minutes"] = None
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:10:00",
+        stdout_json=clean,
+        error=None,
+    )
+    assert result.resume_state is None
+
+
+def test_resume_state_carries_stopped_at_records_seen():
+    """`raw_records_seen` flows verbatim into
+    `resume_state["stopped_at_records_seen"]` — this is the field the
+    operator diffs across passes to confirm coverage is extending."""
+    spec = ProductSpec(name="Ilso", oy_goods_no="A000000225736")
+    stdout_json = {
+        "run_id": "r_rl",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": _rate_limited_summary(raw_records_seen=540),
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T20:18:25",
+        finished_at="2026-05-13T20:26:12",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    assert result.resume_state is not None
+    assert result.resume_state["stopped_at_records_seen"] == 540
+
+
+def test_resume_state_manual_review_required_omits_retry_after_minutes():
+    """Spec-decision: for `retry_intent="manual_review_required"` the
+    resume_state carries `retry_after_minutes: None` (not omitted).
+    Consumers can always read the key; the value being None is the
+    signal to render `retry_after=manual` in the operator surface."""
+    spec = ProductSpec(name="AuthWall", oy_goods_no="A0002")
+    summary = {
+        **_ok_summary_stdout(rows_inserted=0)["summary"],
+        "retry_intent": "manual_review_required",
+        "retry_after_minutes": None,
+        "raw_records_seen": 12,
+        "auth_error": True,
+        "quality_status": "invalid",
+        "login_state_observed": "logged_out",
+    }
+    stdout_json = {
+        "run_id": "r_auth",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": summary,
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T00:00:00",
+        finished_at="2026-05-13T00:01:00",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    assert result.resume_state is not None
+    assert "retry_after_minutes" in result.resume_state
+    assert result.resume_state["retry_after_minutes"] is None
+    assert result.resume_state["reason"] == "auth_wall"
+
+
+def test_run_oy_collection_batch_main_prints_resume_line_on_rate_limited_run(
+    cli_module, tmp_path, monkeypatch, capsys,
+):
+    """The CLI's `main()` prints a `resume:` line under the per-product
+    status header for any product whose resume_state is populated."""
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps({
+        "batch_id": "rl_smoke",
+        "products": [{"name": "Ilso", "oy_goods_no": "A000000225736"}],
+    }), encoding="utf-8")
+
+    # Monkeypatch the runner inside collection_batch to emit a synthetic
+    # rate-limited summary. This bypasses the real subprocess + connector
+    # entirely; the test exercises only the assembly + print path.
+    from src.voc.app import collection_batch as cb
+    rl_stdout = {
+        "run_id": "r_rl",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": _rate_limited_summary(),
+    }
+    monkeypatch.setattr(
+        cb, "_default_subprocess_runner",
+        lambda argv: (0, json.dumps(rl_stdout), ""),
+    )
+
+    artifact_root = tmp_path / "arts"
+    cli_module.main([
+        "--manifest", str(p),
+        "--artifact-root", str(artifact_root),
+    ])
+    captured = capsys.readouterr()
+    # The per-product status header must come BEFORE the resume hint.
+    status_idx = captured.out.find("product A000000225736")
+    resume_idx = captured.out.find("resume: cursor_api_rate_limited")
+    assert status_idx >= 0, captured.out
+    assert resume_idx > status_idx, captured.out
+    assert "stopped_at=610" in captured.out
+    assert "retry_after=90min" in captured.out
+    assert "retry_intent=retry_after_cooldown" in captured.out
+
+
+def test_run_oy_collection_batch_main_omits_resume_line_on_clean_run(
+    cli_module, tmp_path, monkeypatch, capsys,
+):
+    """Clean runs (resume_state is None) do NOT print a `resume:` line —
+    operators reading the live stdout should not be misled into
+    thinking a successful run needs a retry."""
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps({
+        "batch_id": "clean_smoke",
+        "products": [{"name": "OK product", "oy_goods_no": "A0001"}],
+    }), encoding="utf-8")
+
+    from src.voc.app import collection_batch as cb
+    clean_stdout = _ok_summary_stdout(rows_inserted=200)
+    clean_stdout["summary"]["retry_intent"] = "none"
+    clean_stdout["summary"]["retry_after_minutes"] = None
+    monkeypatch.setattr(
+        cb, "_default_subprocess_runner",
+        lambda argv: (0, json.dumps(clean_stdout), ""),
+    )
+
+    artifact_root = tmp_path / "arts"
+    cli_module.main([
+        "--manifest", str(p),
+        "--artifact-root", str(artifact_root),
+    ])
+    captured = capsys.readouterr()
+    assert "product A0001" in captured.out  # status header still prints
+    assert "resume:" not in captured.out
+
+
+def test_render_batch_markdown_includes_resume_line_for_rate_limited(tmp_path):
+    """The Markdown rendering mirrors the stdout resume line so an
+    operator reading the persisted report sees the same hint that
+    the live CLI printed."""
+    manifest = _build_manifest(tmp_path, "b_rl_md", ["A000000225736"])
+    rl_stdout = {
+        "run_id": "r_rl",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": _rate_limited_summary(),
+    }
+    runner = _stub_runner(rl_stdout)
+    report = run_batch(
+        manifest=manifest, artifact_root=tmp_path, runner_fn=runner,
+    )
+    md = render_batch_markdown(report)
+    assert "resume: cursor_api_rate_limited" in md
+    assert "stopped_at=610" in md
+    assert "retry_after=90min" in md
+
+
+def test_render_batch_markdown_omits_resume_line_on_clean_runs(tmp_path):
+    """The clean-exit Markdown does NOT include a resume bullet — the
+    per-product block stays as concise as it was pre-I-C for
+    successful runs."""
+    manifest = _build_manifest(tmp_path, "b_ok_md", ["A0001"])
+    clean = _ok_summary_stdout(rows_inserted=200)
+    clean["summary"]["retry_intent"] = "none"
+    clean["summary"]["retry_after_minutes"] = None
+    runner = _stub_runner(clean)
+    report = run_batch(
+        manifest=manifest, artifact_root=tmp_path, runner_fn=runner,
+    )
+    md = render_batch_markdown(report)
+    assert "resume:" not in md
+
+
+def test_product_result_default_resume_state_is_none():
+    """Regression guard: a default-constructed ProductResult (used by
+    tests that bypass `_build_product_result`) has resume_state=None.
+    Mirrors the I-A invariant that additive operator-facing fields
+    must not change the default shape."""
+    r = ProductResult(
+        name="x", oy_goods_no="A0", started_at="2026-05-13T00:00:00",
+    )
+    assert r.resume_state is None
+
+
+# ===========================================================================
+# I-OY-RESUME-STATE-BATCH-SUMMARY-SURFACE (I-C continuation)
+# ===========================================================================
+#
+# These tests exercise the operator-required keys (goods_no, sort_type,
+# final_status, quality_status, cursor_api_rate_limited, rows_inserted,
+# raw_records_seen, records_parsed, operator_hint) that the batch summary
+# JSON must surface so an operator can read retry/resume state from
+# batch_summary.json without grepping per-product summaries.
+#
+# Empty-when-clean convention chosen: `resume_state is None` for clean
+# runs (preserves the pre-batch I-C convention asserted by
+# `test_resume_state_absent_for_clean_runs`). Documented in handoff §2.
+
+
+def _real_summary_dict(**overrides) -> dict:
+    """Build a real `ConnectorRunSummary`, run the I-B classifier so
+    `retry_intent`/`retry_after_minutes` are derived from rate-limit /
+    auth-wall flags exactly as the connector would, then return the
+    `.model_dump()` view that the batch driver consumes. No mocks; the
+    pydantic class is instantiated directly per ticket constraint."""
+    base = dict(
+        run_id="r_real",
+        channel="oliveyoung",
+        requested_target="A_test",
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:26:12",
+        raw_records_seen=200,
+        records_parsed=200,
+    )
+    base.update(overrides)
+    s = ConnectorRunSummary(**base)
+    s.derive_retry_intent()
+    return s.model_dump(mode="json")
+
+
+def test_batch_summary_resume_state_present_for_retry_after_cooldown(tmp_path):
+    """Cursor-429 path: the per-product entry in batch_summary carries a
+    resume_state block whose `retry_intent`, `retry_after_minutes`,
+    `cursor_api_rate_limited`, and `operator_hint` reflect the I-B
+    classifier output and surface a retryable hint to the operator."""
+    spec = ProductSpec(name="Ilso", oy_goods_no="A000000225736")
+    rl_summary = _real_summary_dict(
+        cursor_api_rate_limited=True,
+        cursor_rate_limit_exhausted=True,
+        raw_records_seen=610,
+        records_parsed=610,
+    )
+    # Verify the I-B classifier wrote what we expect before feeding it
+    # into the batch driver (guards against silent contract drift).
+    assert rl_summary["retry_intent"] == "retry_after_cooldown"
+    assert rl_summary["retry_after_minutes"] == 90
+
+    stdout_json = {
+        "run_id": "r_rl",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": rl_summary,
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:26:12",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    rs = result.resume_state
+    assert rs is not None
+    assert rs["retry_intent"] == "retry_after_cooldown"
+    assert rs["retry_after_minutes"] == 90
+    assert rs["cursor_api_rate_limited"] is True
+    hint = rs["operator_hint"]
+    assert "90" in hint
+    assert "retryable" in hint.lower()
+
+
+def test_batch_summary_resume_state_present_for_manual_review_required(
+    tmp_path,
+):
+    """Auth-wall path: the per-product entry carries a resume_state
+    whose `retry_intent="manual_review_required"`, `retry_after_minutes`
+    is None, and `operator_hint` cleanly signals manual intervention."""
+    spec = ProductSpec(name="AuthWall", oy_goods_no="A0auth")
+    auth_summary = _real_summary_dict(
+        auth_error=True,
+        login_state_observed="logged_out",
+        raw_records_seen=12,
+        records_parsed=12,
+    )
+    assert auth_summary["retry_intent"] == "manual_review_required"
+    assert auth_summary["retry_after_minutes"] is None
+
+    stdout_json = {
+        "run_id": "r_auth",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": auth_summary,
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T00:00:00",
+        finished_at="2026-05-13T00:01:00",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    rs = result.resume_state
+    assert rs is not None
+    assert rs["retry_intent"] == "manual_review_required"
+    assert rs["retry_after_minutes"] is None
+    assert "manual" in rs["operator_hint"].lower()
+
+
+def test_batch_summary_resume_state_none_intent_on_clean_run(tmp_path):
+    """Clean exits (`retry_intent="none"`) map to `resume_state is None`
+    per the empty-when-clean convention (documented in handoff §2).
+    The full per-product entry is still emitted into batch_summary;
+    only the resume_state slot is null."""
+    spec = ProductSpec(name="OK", oy_goods_no="A_ok")
+    clean_summary = _real_summary_dict()  # no rate-limit / auth flags
+    # Sanity-check the I-B classifier's clean-exit output before
+    # feeding it to the batch driver.
+    assert clean_summary["retry_intent"] == "none"
+    assert clean_summary["retry_after_minutes"] is None
+
+    stdout_json = {
+        "run_id": "r_ok",
+        "quality_status": "ok",
+        "rows_inserted": 200,
+        "rows_skipped_by_normalize": 0,
+        "summary": clean_summary,
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T00:00:00",
+        finished_at="2026-05-13T00:10:00",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    # Empty-when-clean: None (not a populated dict with retry_intent=none).
+    assert result.resume_state is None
+
+
+def test_batch_summary_preserves_existing_fields_after_resume_state_addition(
+    tmp_path,
+):
+    """Additive-only invariant: the rate-limit and clean entries both
+    still carry the pre-batch ProductResult fields (`oy_goods_no`,
+    `status`, `quality_status`, `rows_inserted`, `records_parsed`)
+    unchanged. Picks `oy_goods_no` as the representative anchor — it
+    is the field operators sort by, and a silent rename would break
+    every downstream consumer."""
+    spec = ProductSpec(name="Ilso", oy_goods_no="A000000225736")
+    # Rate-limited
+    rl_summary = _real_summary_dict(
+        cursor_api_rate_limited=True,
+        cursor_rate_limit_exhausted=True,
+        raw_records_seen=610,
+        records_parsed=610,
+    )
+    rl_result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:26:12",
+        stdout_json={
+            "run_id": "r_rl",
+            "quality_status": "invalid",
+            "rows_inserted": 0,
+            "rows_skipped_by_normalize": 0,
+            "summary": rl_summary,
+        },
+        error=None,
+    )
+    # Pre-existing ProductResult field stays intact.
+    assert rl_result.oy_goods_no == "A000000225736"
+    assert rl_result.records_parsed == 610
+    # And the new resume_state block lives alongside, not on top of, it.
+    assert rl_result.resume_state is not None
+
+    # Clean
+    clean_result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T00:00:00",
+        finished_at="2026-05-13T00:10:00",
+        stdout_json=_ok_summary_stdout(rows_inserted=200),
+        error=None,
+    )
+    assert clean_result.oy_goods_no == "A000000225736"
+    assert clean_result.rows_inserted == 200
+    # Resume_state is None on clean entries (empty-when-clean).
+    assert clean_result.resume_state is None

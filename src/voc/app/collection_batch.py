@@ -654,6 +654,45 @@ class ProductResult:
     # through `_build_product_result`) deserialize unchanged.
     summary: dict | None = None
 
+    # I-OY-RESUME-STATE-OPERATOR-SURFACE (step I-C of multi-session resume)
+    # — operator-facing view derived from the connector summary's I-B
+    # `retry_intent` / `retry_after_minutes` plus the rate-limit halt
+    # telemetry (raw_records_seen, cursor_rate_limit_exhausted, run
+    # wall-clock end). Populated only when `retry_intent != "none"`;
+    # `None` otherwise (clean exits don't carry resume metadata). This
+    # field is the SINGLE READ POINT for the stdout `resume:` line in
+    # `scripts/run_oy_collection_batch.py` and for the Markdown
+    # "Resume" bullet in `render_batch_markdown` — both surfaces read
+    # the same dict shape so they cannot drift.
+    #
+    # Shape (see `_derive_resume_state` for the authoritative builder):
+    #   {
+    #     "retryable": bool,                    # retry_intent != "none"
+    #     "reason": "cursor_api_rate_limited" |
+    #               "auth_wall",                # from retry_intent
+    #     "exhausted": bool,                    # cursor_rate_limit_exhausted
+    #     "stopped_at_records_seen": int,       # raw_records_seen
+    #     "retry_after_minutes": int | None,    # None for manual_review_required
+    #     "last_seen_at": str,                  # run wall-clock end ISO
+    #     "retry_intent": str,                  # mirrored for direct read
+    #     # I-OY-RESUME-STATE-BATCH-SUMMARY-SURFACE — operator-required
+    #     # context fields (always present on a non-None resume_state):
+    #     "goods_no": str,                       # from ProductSpec
+    #     "sort_type": str | None,               # connector's requested_sort_type
+    #     "final_status": str,                   # batch driver's classify_status
+    #     "quality_status": str | None,          # pipeline gate output
+    #     "cursor_api_rate_limited": bool,       # summary flag, verbatim
+    #     "rows_inserted": int,                  # from top-level stdout JSON
+    #     "raw_records_seen": int,               # mirrors stopped_at_records_seen
+    #     "records_parsed": int,                 # connector counter
+    #     "operator_hint": str,                  # one-line human-readable
+    #   }
+    #
+    # Defaults to None so older fixtures (and the I-A / I-B baselines
+    # whose tests construct ProductResult directly) deserialize
+    # unchanged.
+    resume_state: dict | None = None
+
 
 def _infer_auth_header_present(trace_path: str | None) -> bool | None:
     """Read the trace JSONL (if present) and return whether ALL captured
@@ -747,6 +786,178 @@ _SORT_ROLE_BY_SORT_TYPE_FOR_SIDECAR: dict[str, str] = {
     "USEFUL_SCORE_DESC": "signal",
     "RECOMMENDED_DESC":  "signal",
 }
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RESUME-STATE-OPERATOR-SURFACE (step I-C of multi-session resume)
+# ---------------------------------------------------------------------------
+#
+# `_derive_resume_state` is pure (dict-in / dict-out, no I/O). It reads the
+# I-B classifier output (`retry_intent`, `retry_after_minutes`) that the
+# connector now stamps on the summary at the end of `collect()`, plus the
+# rate-limit halt telemetry the connector already maintains, and produces
+# the operator-facing dict documented on `ProductResult.resume_state`.
+#
+# This module does NOT modify `classify_status` or `HALT_STATUSES` —
+# `resume_state` is an additive, sibling view of the existing status
+# taxonomy. The mapping from `retry_intent` to a human-readable `reason`
+# is:
+#
+#   retry_intent              | reason
+#   --------------------------+--------------------------
+#   retry_after_cooldown      | "cursor_api_rate_limited"
+#   manual_review_required    | "auth_wall"
+#   none                      | (no resume_state emitted)
+#
+# Forward-compat: an unknown `retry_intent` string is treated as "none"
+# (returns None). This keeps the operator surface from silently
+# proliferating reasons when a future ticket adds a new I-B branch.
+
+_RESUME_REASON_BY_RETRY_INTENT: dict[str, str] = {
+    "retry_after_cooldown": "cursor_api_rate_limited",
+    "manual_review_required": "auth_wall",
+}
+
+
+def _derive_resume_state(
+    summary: dict[str, Any],
+    run_end_iso: str,
+    *,
+    goods_no: str | None = None,
+    final_status: str | None = None,
+    rows_inserted: int | None = None,
+) -> dict[str, Any] | None:
+    """Build the operator-facing resume_state dict from a connector summary.
+
+    Returns None when the run does not need a resume hint
+    (``retry_intent`` absent, ``"none"``, or an unrecognized future value).
+    Returns a dict with the documented shape otherwise — see
+    ``ProductResult.resume_state`` for the field list.
+
+    ``retry_after_minutes`` is carried verbatim, including the ``None``
+    value for ``manual_review_required`` (auth-wall runs have no
+    wall-clock recovery; the operator must re-authenticate). The shape
+    is kept stable across branches so downstream consumers can always
+    read the same set of keys.
+
+    I-OY-RESUME-STATE-BATCH-SUMMARY-SURFACE (additive): three optional
+    kwargs let the batch driver pass identification + outcome fields that
+    live outside the connector summary (`goods_no` from `ProductSpec`,
+    `final_status` from `classify_status`, `rows_inserted` from the
+    top-level stdout JSON). These are emitted into the returned dict only
+    when supplied; legacy callers that pass nothing get the pre-batch
+    shape they already test against (existing keys unchanged). The new
+    keys (`goods_no`, `sort_type`, `final_status`, `quality_status`,
+    `cursor_api_rate_limited`, `rows_inserted`, `raw_records_seen`,
+    `records_parsed`, `operator_hint`) round out what the operator needs
+    in `batch_summary.json` per
+    `ops/agent_handoffs/I-OY-RATE-LIMITED-MULTI-SESSION-RESUME-POLICY-PLAN.md`
+    §2 / §7.
+
+    `operator_hint` is a single human-readable string for the operator's
+    eyes:
+      * `retry_after_cooldown`   -> "retryable: re-run after {N} min cooldown"
+      * `manual_review_required` -> "manual: auth wall / human check —
+                                     operator intervention required"
+    No `operator_hint` is emitted for `retry_intent="none"` (covered by
+    the early-return that skips resume_state entirely for clean exits).
+
+    Pure function: no file I/O, no logging. Tests exercise it directly
+    without going through ``run_batch``.
+    """
+    if not isinstance(summary, dict):
+        return None
+    retry_intent = summary.get("retry_intent") or "none"
+    reason = _RESUME_REASON_BY_RETRY_INTENT.get(retry_intent)
+    if reason is None:
+        # Covers retry_intent == "none" AND any forward-compat string the
+        # operator surface has not yet been taught about.
+        return None
+    retry_after_minutes = summary.get("retry_after_minutes")
+    # operator_hint mirrors the retry_intent mapping; the string format
+    # matches the ticket spec exactly so operators can grep for the
+    # canonical phrases ("retryable", "manual").
+    if retry_intent == "retry_after_cooldown":
+        operator_hint = (
+            f"retryable: re-run after {retry_after_minutes} min cooldown"
+        )
+    elif retry_intent == "manual_review_required":
+        operator_hint = (
+            "manual: auth wall / human check — "
+            "operator intervention required"
+        )
+    else:
+        # Should never reach here (reason lookup above already gated on
+        # the known intents) but keep a safe default for forward-compat.
+        operator_hint = f"retryable: retry_intent={retry_intent}"
+    block: dict[str, Any] = {
+        "retryable": True,
+        "reason": reason,
+        # `cursor_rate_limit_exhausted` is meaningful only for the cursor
+        # 429 path; for auth-wall it stays False (default). The field is
+        # always present so consumers can rely on a stable shape.
+        "exhausted": bool(summary.get("cursor_rate_limit_exhausted")),
+        "stopped_at_records_seen": int(summary.get("raw_records_seen") or 0),
+        # `retry_after_minutes` is None for manual_review_required by
+        # design — the operator surface renders this as "manual" rather
+        # than a number (see `_format_resume_line`).
+        "retry_after_minutes": retry_after_minutes,
+        "last_seen_at": run_end_iso,
+        # Mirror the I-B intent string so the operator can grep the
+        # batch_summary.json for a specific intent without reconstructing
+        # it from the reason mapping.
+        "retry_intent": retry_intent,
+        # I-OY-RESUME-STATE-BATCH-SUMMARY-SURFACE — operator-required
+        # context fields. Each is sourced from the connector summary if
+        # present; the three kwargs above let the batch driver supply
+        # values that live outside the summary dict.
+        "cursor_api_rate_limited": bool(summary.get("cursor_api_rate_limited")),
+        "raw_records_seen": int(summary.get("raw_records_seen") or 0),
+        "records_parsed": int(summary.get("records_parsed") or 0),
+        # `quality_status` from the connector summary (the pipeline's
+        # gate output, NOT the batch driver's status taxonomy). Carried
+        # as-is (None when the connector did not classify).
+        "quality_status": summary.get("quality_status"),
+        # `sort_type` records the sort the connector actually requested,
+        # which differs from the manifest default for multi-sort runs.
+        # None when sort-aware mode was off (page-default sort).
+        "sort_type": summary.get("requested_sort_type"),
+        "operator_hint": operator_hint,
+    }
+    # Optional batch-driver-supplied fields. Emitted only when the
+    # caller passed them so older direct callers of _derive_resume_state
+    # (and the tests that hit it without the kwargs) keep the shape they
+    # already test against.
+    if goods_no is not None:
+        block["goods_no"] = goods_no
+    if final_status is not None:
+        block["final_status"] = final_status
+    if rows_inserted is not None:
+        block["rows_inserted"] = int(rows_inserted)
+    return block
+
+
+def _format_resume_line(resume_state: dict[str, Any]) -> str:
+    """Render the one-line operator-facing resume summary.
+
+    Format matches the spec (single shared shape across stdout and the
+    Markdown "Resume" bullet so the two surfaces cannot diverge):
+
+      resume: <reason> · stopped_at=<N> · retry_after=<M>min  (retry_intent=<intent>)
+      resume: auth_wall · stopped_at=<N> · retry_after=manual  (retry_intent=manual_review_required)
+
+    Callers prepend any indentation they want (stdout uses two spaces;
+    Markdown uses the per-product bullet).
+    """
+    reason = resume_state.get("reason", "unknown")
+    stopped_at = resume_state.get("stopped_at_records_seen", 0)
+    minutes = resume_state.get("retry_after_minutes")
+    intent = resume_state.get("retry_intent", "unknown")
+    retry_after = f"{minutes}min" if isinstance(minutes, int) else "manual"
+    return (
+        f"resume: {reason} · stopped_at={stopped_at} · "
+        f"retry_after={retry_after}  (retry_intent={intent})"
+    )
 
 
 def _build_product_result(
@@ -1017,6 +1228,29 @@ def _build_product_result(
         # depends on for the warm-image-capture audit were never
         # serialized into batch_summary.json.
         summary=dict(summary) if isinstance(summary, dict) else None,
+        # I-OY-RESUME-STATE-OPERATOR-SURFACE — derive the resume hint
+        # from the I-B classifier output (`retry_intent` /
+        # `retry_after_minutes`) plus rate-limit halt telemetry. Returns
+        # None for `retry_intent == "none"`, which is the canonical
+        # clean-exit shape; only rate-limited / auth-wall runs carry a
+        # non-None block. `finished_at` is the operator's wall-clock
+        # anchor for the next-pass cadence calculation.
+        #
+        # I-OY-RESUME-STATE-BATCH-SUMMARY-SURFACE — pass the
+        # identification + outcome fields the operator needs in
+        # batch_summary.json. `goods_no` and `rows_inserted` live outside
+        # the connector summary; `final_status` is the batch driver's
+        # classify_status output for THIS product (computed above as
+        # `status`). The summary's own `quality_status` /
+        # `requested_sort_type` are picked up by _derive_resume_state
+        # itself.
+        resume_state=_derive_resume_state(
+            summary if isinstance(summary, dict) else {},
+            finished_at,
+            goods_no=spec.oy_goods_no,
+            final_status=status,
+            rows_inserted=rows_inserted,
+        ),
     )
 
 
@@ -1095,6 +1329,13 @@ def render_batch_markdown(report: BatchReport) -> str:
                 lines.append(f"- error: {p.error}")
             if p.halt_reason:
                 lines.append(f"- halt_reason: {p.halt_reason}")
+            # I-OY-RESUME-STATE-OPERATOR-SURFACE — mirror the stdout
+            # `resume:` line so an operator reading the Markdown report
+            # sees the same hint that the live CLI printed. Omitted on
+            # clean runs (resume_state is None) to keep the per-product
+            # block concise.
+            if p.resume_state is not None:
+                lines.append(f"- {_format_resume_line(p.resume_state)}")
             # 2026-05-01 — diagnostic block. Always emit on non-success
             # statuses so the operator can see what the connector
             # observed (or didn't) without opening the trace JSONL.
