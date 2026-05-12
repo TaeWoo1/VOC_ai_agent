@@ -129,3 +129,241 @@ def test_connector_run_summary_retry_after_minutes_accepts_int_or_none():
     assert _summary(retry_after_minutes=0).retry_after_minutes == 0
     assert _summary(retry_after_minutes=60).retry_after_minutes == 60
     assert _summary(retry_after_minutes=90).retry_after_minutes == 90
+
+
+# =====================================================================
+# I-OY-RETRY-INTENT-CLASSIFICATION-WIRING (I-B of multi-session resume).
+# =====================================================================
+# These tests exercise the `derive_retry_intent()` classifier method on
+# ConnectorRunSummary. They are scoped to the schema layer: the method
+# reads existing flag fields and writes `retry_intent` +
+# `retry_after_minutes`. NO call site is exercised here; the
+# connector-side wiring (one call at the end of `collect()`) is covered
+# by `tests/test_connectors/test_oliveyoung_browser_api_runtime.py`
+# already running through `collect()` and observing the populated
+# fields on `c.last_run_summary` (no assertion modification needed —
+# `retry_intent` is additive, the existing assertions on
+# `cursor_api_rate_limited` etc. are untouched).
+#
+# Operator-defined classification (resume-policy plan §5):
+#   1. cursor_api_rate_limited=True       → retry_after_cooldown / 90
+#   2. auth-wall / human-check / 403      → manual_review_required / None
+#   3. otherwise                           → none / None
+# Rule 4: cursor 429 wins over auth-wall when both fire.
+# Rule 5: final_status is NOT touched anywhere by this method.
+
+
+def test_retry_intent_cursor_api_rate_limited_emits_retry_after_cooldown_90m():
+    """Rule 1 — cursor_api_rate_limited=True maps to retry_after_cooldown / 90.
+
+    Ilso-class halt path. The 90-minute cadence comes from resume-policy
+    plan §6 (live evidence: gaps of >= ~90m restored the boundary to
+    ~610 records; shorter gaps dropped it to 540).
+    """
+    summary = _summary(cursor_api_rate_limited=True)
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "retry_after_cooldown"
+    assert summary.retry_after_minutes == 90
+
+
+def test_retry_intent_auth_error_emits_manual_review_required():
+    """Rule 2 — auth_error=True (no cursor flag) maps to manual_review_required.
+
+    auth_error is the canonical auth-wall signal already used by the
+    Phase 1 quality gate to short-circuit a run to `invalid`; the same
+    signal also flags the run as not-time-recoverable here.
+    """
+    summary = _summary(auth_error=True)
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "manual_review_required"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_mid_stream_auth_break_emits_manual_review_required():
+    """Rule 2 — mid_stream_auth_break=True alone trips manual_review_required.
+
+    Distinct from cold-start auth_error: the session was authenticated
+    when collection started but lost auth partway through. Operator
+    must re-authenticate before any retry can extend coverage.
+    """
+    summary = _summary(mid_stream_auth_break=True)
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "manual_review_required"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_human_check_detected_emits_manual_review_required():
+    """Rule 2 — human_check_detected=True AND human_check_recovered=False.
+
+    The CAPTCHA wait fired AND timed out without the operator clearing
+    it. Re-running the collection immediately produces the same wall.
+    Operator action (refresh the browser, solve the CAPTCHA manually)
+    is required before any retry can possibly help.
+    """
+    summary = _summary(
+        human_check_detected=True,
+        human_check_recovered=False,
+    )
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "manual_review_required"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_human_check_recovered_true_does_not_emit_manual_review_required():
+    """human_check_detected=True AND human_check_recovered=True → no manual review.
+
+    Recovery succeeded — the operator-facing CAPTCHA wait cleared and
+    the session continued normally. There is no operator action
+    pending; classifying this as `manual_review_required` would burn
+    operator attention on a run that already self-recovered. With no
+    cursor-rate-limit signal either, the summary stays at the default
+    `retry_intent="none"`.
+    """
+    summary = _summary(
+        human_check_detected=True,
+        human_check_recovered=True,
+    )
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_http_403_seen_emits_manual_review_required():
+    """Rule 2 — http_403_seen=True (CDN-level hard block) trips manual_review.
+
+    HTTP 403 is the canonical hard-block signal (Cloudflare / Akamai /
+    OY's own anti-bot layer). Unlike cursor 429, it is not just a
+    sliding-window throttle — operator must change their IP, clear
+    cookies, or re-authenticate.
+    """
+    summary = _summary(http_403_seen=True)
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "manual_review_required"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_normal_complete_remains_none():
+    """Rule 3 — clean exit (pagination_exhausted=True, no failure flags).
+
+    The natural-end-of-corpus shape: server returned hasNext=False, no
+    rate-limit, no auth issue. Operator should not be prompted to retry.
+    """
+    summary = _summary(
+        pagination_exhausted=True,
+        # ALL failure flags explicitly at False to make the test
+        # self-documenting (the defaults already match, but spelling
+        # them out guards against future field additions that might
+        # land a non-False default).
+        cursor_api_rate_limited=False,
+        auth_error=False,
+        mid_stream_auth_break=False,
+        http_403_seen=False,
+        human_check_detected=False,
+        human_check_recovered=False,
+    )
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_cursor_429_takes_precedence_over_auth_wall():
+    """Rule 4 — cursor_api_rate_limited=True wins over concurrent auth_error.
+
+    When BOTH a cursor 429 and an auth-wall signal are present, the
+    cooldown-driven retry path takes priority because:
+      (a) the 429 is wall-clock recoverable in isolation,
+      (b) the auth-wall signal may itself be a downstream consequence
+          of the throttle (the page returns a login wall when the
+          throttle has burned the session), and
+      (c) operators reading the dashboard should be told the
+          mechanically-cheaper recovery path first.
+
+    This test pins the precedence: even with auth_error=True
+    coincident, the output is retry_after_cooldown / 90, NOT
+    manual_review_required.
+    """
+    summary = _summary(
+        cursor_api_rate_limited=True,
+        auth_error=True,
+    )
+    summary.derive_retry_intent()
+
+    assert summary.retry_intent == "retry_after_cooldown"
+    assert summary.retry_after_minutes == 90
+
+
+def test_retry_intent_classifier_is_idempotent():
+    """Calling derive_retry_intent() twice yields the same result.
+
+    The method reads flag fields and writes retry_intent /
+    retry_after_minutes; the flags are not mutated by the call, so the
+    second invocation reads the same inputs and writes the same
+    outputs. Idempotency matters because future call paths (e.g.
+    re-rendering a Markdown summary after a partial-summary write)
+    may invoke derive twice on the same instance.
+    """
+    summary = _summary(cursor_api_rate_limited=True)
+
+    summary.derive_retry_intent()
+    first_intent = summary.retry_intent
+    first_minutes = summary.retry_after_minutes
+
+    summary.derive_retry_intent()
+    second_intent = summary.retry_intent
+    second_minutes = summary.retry_after_minutes
+
+    assert first_intent == second_intent == "retry_after_cooldown"
+    assert first_minutes == second_minutes == 90
+
+
+def test_retry_intent_default_construction_remains_none():
+    """I-A invariant guard — default-constructed summary, BEFORE derive call.
+
+    Pre-existing I-A test
+    `test_connector_run_summary_defaults_retry_intent_none_and_minutes_none`
+    asserts the same thing for the schema layer; this one re-asserts it
+    in the I-B test block as a regression guard: even after the
+    classifier method lands, the field defaults are unchanged and the
+    method MUST be called explicitly to populate them. No call site
+    other than the connector's `collect()` finalize hook reads or
+    writes these fields.
+    """
+    summary = _summary()
+
+    # No derive call invoked — fields stay at documented defaults.
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+
+def test_retry_intent_derive_method_must_be_called_explicitly():
+    """Direct field setting does NOT auto-populate retry_intent fields.
+
+    This is the explicit-method variant of the "validator fires on
+    construction" test from the ticket spec. Because the classifier is
+    a method (not a pydantic `model_validator`), constructing a summary
+    with `cursor_api_rate_limited=True` directly via the constructor
+    leaves `retry_intent` at its default "none" until
+    `derive_retry_intent()` is called. This is the I-A invariant
+    (legacy JSON payloads with `cursor_api_rate_limited=True` MUST
+    still deserialize with `retry_intent="none"`); the I-B test
+    `test_connector_run_summary_legacy_summary_without_retry_fields_deserializes_with_defaults`
+    above directly relies on this property.
+    """
+    summary = _summary(cursor_api_rate_limited=True)
+
+    # No derive call — defaults must hold even though the rate-limit
+    # flag is True.
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+    # After explicit call, the rule 1 classification takes effect.
+    summary.derive_retry_intent()
+    assert summary.retry_intent == "retry_after_cooldown"
+    assert summary.retry_after_minutes == 90

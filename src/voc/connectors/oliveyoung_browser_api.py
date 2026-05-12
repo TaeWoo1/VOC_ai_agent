@@ -3204,6 +3204,14 @@ class OliveYoungBrowserAPIConnector:
             len(raws), raw_seen, parse_warnings, blocked, auth_error,
             auth_retry_attempts_used, auth_retry_exhausted, self._product_url,
         )
+        # I-OY-RETRY-INTENT-CLASSIFICATION-WIRING (I-B of multi-session
+        # resume policy): finalize the operator-facing retry_intent /
+        # retry_after_minutes hint by reading the rate-limit / auth-wall
+        # flags already populated on the summary. Pure derivation, no
+        # I/O — see ConnectorRunSummary.derive_retry_intent for the rule
+        # mapping. No change to final_status / classify_status anywhere;
+        # this populates an additive column the operator scheduler reads.
+        self.last_run_summary.derive_retry_intent()
         return raws
 
     async def _wait_for_human_check(

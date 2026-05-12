@@ -483,6 +483,93 @@ class ConnectorRunSummary(BaseModel):
     # ---- Pipeline-level (set by Phase1Pipeline AFTER the connector returns) ----
     pipeline_normalize_rejections: int = 0
 
+    # ------------------------------------------------------------------
+    # I-OY-RETRY-INTENT-CLASSIFICATION-WIRING (Step I-B of multi-session resume)
+    # ------------------------------------------------------------------
+    def derive_retry_intent(self) -> "ConnectorRunSummary":
+        """Populate ``retry_intent`` + ``retry_after_minutes`` from the
+        rate-limit / auth-wall signals already on the summary.
+
+        Operator-defined classification (resume-policy plan §5):
+
+          1. ``cursor_api_rate_limited == True``  →
+             ``retry_intent="retry_after_cooldown"``,
+             ``retry_after_minutes=90``.
+             Wall-clock spacing between sessions is expected to recover
+             coverage (Ilso-class default cadence per plan §6; general
+             OY SKUs may eventually want 60 — kept uniform at 90 here
+             because the only live evidence we have is from Ilso and a
+             higher cadence is the safer default).
+
+          2. ELSE IF any auth-wall / human-check / hard-block signal is
+             True →
+             ``retry_intent="manual_review_required"``,
+             ``retry_after_minutes=None``.
+             Trip conditions (OR):
+               - ``auth_error``
+               - ``mid_stream_auth_break``
+               - ``http_403_seen``
+               - ``human_check_detected and not human_check_recovered``
+             ``human_check_detected and human_check_recovered`` is NOT a
+             trip condition: recovery succeeded, no operator action
+             needed.
+
+          3. ELSE →
+             ``retry_intent="none"``, ``retry_after_minutes=None``.
+
+        Rule 4 (precedence): cursor-API 429 wins over auth-wall when
+        both are present. The 429 path is wall-clock-recoverable on its
+        own; mixing in ``auth_error`` does not change that the throttle
+        cooldown is the right next action.
+
+        Rule 5 (out of scope): ``final_status`` classification is NOT
+        modified by this method. ``retry_intent`` is an additive
+        operator-facing column that lives alongside ``final_status``,
+        never replaces it.
+
+        Idempotency: re-invoking the method on the same instance
+        produces the same result (the method reads the flag fields,
+        which are not mutated here; it writes ``retry_intent`` and
+        ``retry_after_minutes`` deterministically from those flags).
+
+        Default-construction invariant (I-A): a summary whose
+        rate-limit / auth-wall flags are all at their defaults stays
+        at ``retry_intent="none"`` / ``retry_after_minutes=None`` —
+        which is exactly what the defaults already say. Pre-existing
+        tests that construct a summary directly (without calling this
+        method) see no change to the retry_intent fields.
+
+        Returns ``self`` so callers may chain
+        ``summary.derive_retry_intent()`` at the end of ``collect()``
+        without an extra statement.
+        """
+        # Rule 1: cursor 429 path — precedence over auth-wall (rule 4).
+        if self.cursor_api_rate_limited:
+            self.retry_intent = "retry_after_cooldown"
+            self.retry_after_minutes = 90
+            return self
+
+        # Rule 2: auth-wall / human-check / hard-block. ``human_check_recovered``
+        # is the load-bearing distinction: True means the operator's
+        # CAPTCHA wait cleared the page and the session continued; False
+        # paired with ``human_check_detected`` means the wait timed out
+        # and the operator must intervene.
+        manual_review_required = (
+            self.auth_error
+            or self.mid_stream_auth_break
+            or self.http_403_seen
+            or (self.human_check_detected and not self.human_check_recovered)
+        )
+        if manual_review_required:
+            self.retry_intent = "manual_review_required"
+            self.retry_after_minutes = None
+            return self
+
+        # Rule 3: clean exit / non-retryable terminal / nothing to do.
+        self.retry_intent = "none"
+        self.retry_after_minutes = None
+        return self
+
 
 def evaluate_quality_gates(summary: ConnectorRunSummary) -> QualityStatus:
     """Classify a run using ONLY connector-level counters.
