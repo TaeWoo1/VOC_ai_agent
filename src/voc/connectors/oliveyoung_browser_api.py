@@ -1396,6 +1396,28 @@ class OliveYoungBrowserAPIConnector:
         cursor_rate_limit_cooldowns_count = 0
         cursor_rate_limit_retries_count = 0
         cursor_rate_limit_exhausted = False
+        # I-OY-CURSOR-RATE-LIMIT-RETRY-EXHAUSTION-CLASSIFICATION —
+        # connector-side latch. Set True the moment the bounded retry
+        # budget is consumed: either (a) `cursor_rate_limit_retries_count`
+        # reaches `_cursor_rate_limit_max_retries` inside the retry
+        # branch, or (b) the first 429 cascade-skip-gate hit when
+        # `_cursor_rate_limit_max_retries == 0` (no retries available =
+        # budget already exhausted). Once True, the cascade-skip gate
+        # short-circuits on ANY subsequent scroll failure even if the
+        # session's one-shot `_cursor_api_rate_limited` flag was cleared
+        # by an earlier `reset_cursor_api_rate_limited()` AND the next
+        # drain returns False — preventing the live race where a
+        # CORS-blocked second 429 lands asynchronously after the inner
+        # scroll budget has already exhausted, sliding the run into the
+        # `reload_and_reopen_review_tab` recovery cascade (the d0e7b21
+        # invariant violation observed in
+        # O-OY-CURSOR-PACING-LIVE-PROOF-ILSO).
+        _cursor_rate_limit_retry_budget_consumed = False
+        # Bounded log-spam gate: the "OY cursor API rate limit exhausted"
+        # info line should fire at most once per session even if the
+        # short-circuit triggers multiple inner-loop iterations
+        # post-exhaustion.
+        _exhaustion_log_emitted = [False]
         # Log-once gate for the per-cycle pacing line: we emit it on the
         # FIRST pacing sleep of each session and then every 32 cycles
         # thereafter. Without this gate a Tocobo-shape ~792-cursor run
@@ -2008,7 +2030,67 @@ class OliveYoungBrowserAPIConnector:
                         # the summary via the existing `last_observed_has_next`
                         # field so audit can tell whether the cursor stream
                         # was truncated.
-                        if _drain_session_rate_limit_flag():
+                        # I-OY-CURSOR-RATE-LIMIT-RETRY-EXHAUSTION-CLASSIFICATION —
+                        # the cascade-skip gate now checks the connector-
+                        # side `_cursor_rate_limit_retry_budget_consumed`
+                        # latch in addition to draining the session flag.
+                        # Live evidence (O-OY-CURSOR-PACING-LIVE-PROOF-ILSO):
+                        # after the first 429 + bounded retry + post-retry
+                        # second 429, the session's one-shot flag may
+                        # report False at drain time because
+                        # `reset_cursor_api_rate_limited()` cleared it
+                        # synchronously while the CORS-blocked 429
+                        # `requestfailed` event lands a few microseconds
+                        # later. Without the latch the run would fall
+                        # through to the recovery cascade
+                        # (`reload_and_reopen_review_tab`), violating
+                        # the d0e7b21 invariant. With the latch, ANY
+                        # post-exhaustion scroll failure is treated as
+                        # a continuation of the throttle.
+                        _drain_observed = _drain_session_rate_limit_flag()
+                        if (
+                            _drain_observed
+                            or _cursor_rate_limit_retry_budget_consumed
+                        ):
+                            # If the connector-side budget latch is
+                            # already True, short-circuit straight to
+                            # the exhausted-blocked terminus without
+                            # touching the session's reset path or the
+                            # retry counter. Defensive `_mark_*` call
+                            # covers the case where drain returned
+                            # False but the latch fired — the canonical
+                            # 429 sample reason is appended exactly
+                            # once thanks to the `_appended` gate.
+                            if _cursor_rate_limit_retry_budget_consumed:
+                                _mark_cursor_rate_limited()
+                                if not cursor_rate_limit_exhausted:
+                                    cursor_rate_limit_exhausted = True
+                                if not _exhaustion_log_emitted[0]:
+                                    logger.info(
+                                        "OY cursor API rate limit exhausted: "
+                                        "post-retry 429 observed (%d/%d "
+                                        "retries already used); short-"
+                                        "circuiting with blocked=True "
+                                        "(no DOM recovery)",
+                                        cursor_rate_limit_retries_count,
+                                        self._cursor_rate_limit_max_retries,
+                                    )
+                                    _exhaustion_log_emitted[0] = True
+                                _note(
+                                    "cursor_api_rate_limited: bounded "
+                                    "retries exhausted "
+                                    f"({cursor_rate_limit_retries_count}/"
+                                    f"{self._cursor_rate_limit_max_retries})",
+                                )
+                                _note(
+                                    "cursor_api_rate_limited: scroll "
+                                    "continuation skipped (cascade "
+                                    "short-circuited post-exhaustion; "
+                                    "429 re-observed during pagination)",
+                                )
+                                blocked = True
+                                break
+
                             # I-OY-CURSOR-RATE-LIMIT-PACING-POLICY —
                             # bounded cooldown + retry. The drain above
                             # has already (a) set
@@ -2085,6 +2167,18 @@ class OliveYoungBrowserAPIConnector:
                                             e,
                                         )
                                 cursor_rate_limit_retries_count += 1
+                                # I-OY-CURSOR-RATE-LIMIT-RETRY-EXHAUSTION-
+                                # CLASSIFICATION — flip the connector-side
+                                # latch the moment the retry counter
+                                # reaches the budget cap, so the very
+                                # next cascade-skip-gate visit short-
+                                # circuits even if `reset_cursor_api_*`
+                                # cleared the session flag.
+                                if (
+                                    cursor_rate_limit_retries_count
+                                    >= self._cursor_rate_limit_max_retries
+                                ):
+                                    _cursor_rate_limit_retry_budget_consumed = True
                                 logger.info(
                                     "OY cursor API rate limit retry: "
                                     "attempt %d/%d (cursor stream "
@@ -2097,25 +2191,50 @@ class OliveYoungBrowserAPIConnector:
                             # exhausted-vs-disabled distinction is
                             # auditable: `cursor_rate_limit_retries_count
                             # > 0 AND == _cursor_rate_limit_max_retries`
-                            # is exhaustion; `== 0` is disabled.
+                            # is exhaustion; `== 0` is also exhaustion
+                            # under the new semantics (no retries
+                            # available === budget already exhausted),
+                            # set explicitly so operators see the same
+                            # terminal signal whether the 429 path
+                            # bypassed retries or consumed them.
+                            _cursor_rate_limit_retry_budget_consumed = True
                             if (
                                 self._cursor_rate_limit_max_retries > 0
                                 and cursor_rate_limit_retries_count
                                 >= self._cursor_rate_limit_max_retries
                             ):
                                 cursor_rate_limit_exhausted = True
-                                logger.info(
-                                    "OY cursor API rate limit exhausted: "
-                                    "%d/%d retries used; stopping with "
-                                    "blocked=True",
-                                    cursor_rate_limit_retries_count,
-                                    self._cursor_rate_limit_max_retries,
-                                )
+                                if not _exhaustion_log_emitted[0]:
+                                    logger.info(
+                                        "OY cursor API rate limit exhausted: "
+                                        "%d/%d retries used; stopping with "
+                                        "blocked=True",
+                                        cursor_rate_limit_retries_count,
+                                        self._cursor_rate_limit_max_retries,
+                                    )
+                                    _exhaustion_log_emitted[0] = True
                                 _note(
                                     "cursor_api_rate_limited: bounded "
                                     "retries exhausted "
                                     f"({cursor_rate_limit_retries_count}/"
                                     f"{self._cursor_rate_limit_max_retries})",
+                                )
+                            elif self._cursor_rate_limit_max_retries == 0:
+                                # max_retries=0: no retry was ever
+                                # available; mark exhausted on the
+                                # first 429 so the summary signal is
+                                # consistent ("budget consumed" === 0/0).
+                                cursor_rate_limit_exhausted = True
+                                if not _exhaustion_log_emitted[0]:
+                                    logger.info(
+                                        "OY cursor API rate limit exhausted: "
+                                        "0/0 retries available; stopping "
+                                        "with blocked=True (no DOM recovery)",
+                                    )
+                                    _exhaustion_log_emitted[0] = True
+                                _note(
+                                    "cursor_api_rate_limited: bounded "
+                                    "retries exhausted (0/0)",
                                 )
                             _note(
                                 "cursor_api_rate_limited: scroll continuation "
