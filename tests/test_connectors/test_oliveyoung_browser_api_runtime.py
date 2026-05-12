@@ -10246,3 +10246,579 @@ async def test_status_classifier_does_not_collapse_to_max_cap_reached(
     assert status == "anti_bot", status
     assert status != "max_cap_reached"
     assert status != "sort_control_unreachable"
+
+
+# ---------------------------------------------------------------------------
+# I-OY-CURSOR-RATE-LIMIT-PACING-POLICY
+#
+# Conservative cursor pacing + bounded 429 cooldown/retry. Builds on d0e7b21
+# — preserves classification + short-circuit invariants while adding:
+#   1. A small bounded inter-cycle sleep in the scroll-continuation loop.
+#   2. An optional one-shot post-429 cooldown sleep.
+#   3. An optional bounded retry budget (hard cap 2) before the existing
+#      blocked clean-stop fires.
+# Defaults: pacing 100ms, cooldown 0s (disabled), max_retries 0 (disabled).
+# Configurability via constructor kwargs OR env (OY_CURSOR_PACING_MS,
+# OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC, OY_CURSOR_RATE_LIMIT_MAX_RETRIES).
+# Tests pass kwargs directly and monkeypatch `asyncio.sleep` to keep
+# wall-clock at zero.
+# ---------------------------------------------------------------------------
+
+
+class _PacingRecorderSession(FakeBrowserReviewSession):
+    """FakeBrowserReviewSession that also reports `get_cursor_api_rate_limited`
+    as False (no throttle), so the pacing path runs cleanly through every
+    continuation cycle. Used for the no-429 pacing tests (1, 2, 7)."""
+
+    def get_cursor_api_rate_limited(self) -> bool:
+        return False
+
+
+class _RateLimitRetrySession(FakeBrowserReviewSession):
+    """Throttle-recovery fake. Combines:
+      - response-queue (Inherited from `FakeBrowserReviewSession`),
+      - configurable rate-limit getter: True after the first cursor wait
+        returns None UNTIL `reset_cursor_api_rate_limited()` is called,
+      - on `reset_cursor_api_rate_limited()` the flag clears; the NEXT
+        cursor wait may return either another None (persistent 429) or
+        a queued response (retry-succeeds) depending on the queue.
+
+    `has_reload_method=False` ensures the recovery primitive is NOT
+    exposed — the cascade-skip path's DOM recovery branch is therefore
+    unreachable and the test proves the 429 path stays out of it.
+    """
+
+    def __init__(self, responses, *, persistent: bool):
+        super().__init__(responses)
+        self._rl_active = False
+        self._persistent = bool(persistent)
+        self.reset_calls = 0
+        self.reload_calls = 0  # would only fire if the cascade ran reload
+
+    async def wait_for_next_response(self, *, timeout_s: float):
+        # First wait — if responses are queued, deliver them. Once the
+        # queue empties (None returned), flip the rate-limit getter so
+        # the cascade-skip gate fires on the next drain.
+        result = await super().wait_for_next_response(timeout_s=timeout_s)
+        if result is None:
+            self._rl_active = True
+        return result
+
+    def get_cursor_api_rate_limited(self) -> bool:
+        return self._rl_active
+
+    def reset_cursor_api_rate_limited(self) -> None:
+        self.reset_calls += 1
+        if self._persistent:
+            # Persistent throttle: the flag will flip True again on the
+            # very next wait_for_next_response (still returning None).
+            self._rl_active = False
+        else:
+            # Recoverable: clear the flag AND seed a successful cursor
+            # response so the next continuation cycle parses a page.
+            self._rl_active = False
+
+    # No reload_and_reopen_review_tab → cascade DOM path is unreachable.
+
+
+@pytest.mark.asyncio
+async def test_cursor_pacing_sleep_fires_between_cycles_when_enabled(
+    page1_body, page2_last, monkeypatch,
+):
+    """Pacing sleep MUST fire between cursor continuation cycles when
+    `cursor_pacing_ms > 0`. Use a monkeypatched `asyncio.sleep` that
+    records the (delay, call-site) tuples; the pacing call should appear
+    once per continuation iteration with the expected delay value.
+
+    Wall-clock guard: every sleep is forwarded to a near-zero real sleep
+    so the test stays sub-second.
+    """
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+    recorded: list[float] = []
+
+    async def _spy(delay, *args, **kwargs):
+        recorded.append(float(delay))
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    session = FakeBrowserReviewSession([(200, page1_body), (200, page2_last)])
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=250,  # explicit non-zero
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    # The pacing path uses asyncio.sleep(0.25). Exactly ONE pacing sleep
+    # fires before the single continuation fetch (page2). Other paths
+    # (heartbeat, false-empty backoff) do not run on this happy-path
+    # fixture pair.
+    pacing_calls = [d for d in recorded if abs(d - 0.25) < 1e-6]
+    assert len(pacing_calls) == 1, (
+        f"expected exactly 1 pacing sleep of 0.25s; recorded={recorded!r}"
+    )
+
+    s = c.last_run_summary
+    assert s.cursor_pacing_sleeps_count == 1
+    # Pre-429 happy path: no cooldown, no retries, no exhaustion.
+    assert s.cursor_rate_limit_cooldowns_count == 0
+    assert s.cursor_rate_limit_retries_count == 0
+    assert s.cursor_rate_limit_exhausted is False
+
+
+@pytest.mark.asyncio
+async def test_cursor_pacing_sleep_skipped_when_disabled(
+    page1_body, page2_last, monkeypatch,
+):
+    """When `cursor_pacing_ms=0` (the test default), the pacing branch
+    must NOT call `asyncio.sleep` at all. No accumulation on the
+    `cursor_pacing_sleeps_count` telemetry."""
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+    recorded: list[float] = []
+
+    async def _spy(delay, *args, **kwargs):
+        recorded.append(float(delay))
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    session = FakeBrowserReviewSession([(200, page1_body), (200, page2_last)])
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,  # disabled
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    # No sleep with positive delay. The connector's other paths
+    # (heartbeat / page-recreate) do not run on the happy fixture pair,
+    # so the recorded list MUST be empty for the pacing branch.
+    # Any zero-duration await on cooperation purposes is also absent —
+    # the pacing branch is gated by `> 0`.
+    positive_calls = [d for d in recorded if d > 0.0]
+    assert positive_calls == [], (
+        f"expected no positive-delay sleeps; recorded={recorded!r}"
+    )
+
+    s = c.last_run_summary
+    assert s.cursor_pacing_sleeps_count == 0
+
+
+@pytest.mark.asyncio
+async def test_first_429_with_cooldown_triggers_one_cooldown_sleep(
+    page1_body, monkeypatch,
+):
+    """When the first 429 fires AND cooldown is configured > 0 AND
+    `cursor_rate_limit_max_retries >= 1`, the connector MUST sleep
+    exactly once on the cooldown path before retry. The cooldown delay
+    value must match the configured value, and the telemetry counter
+    must increment to 1.
+    """
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+    recorded: list[float] = []
+
+    async def _spy(delay, *args, **kwargs):
+        recorded.append(float(delay))
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    # cold-start ok → continuation times out (None) → throttle observed
+    # → cooldown → retry → continuation still times out (None) →
+    # exhausted bounded retries (max_retries=1) → clean stop.
+    session = _RateLimitRetrySession(
+        [(200, page1_body), None],
+        persistent=True,  # retry still finds throttle
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,
+        cursor_rate_limit_cooldown_s=2,
+        cursor_rate_limit_max_retries=1,
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    s = c.last_run_summary
+    # Exactly one cooldown sleep of 2 seconds was attempted.
+    cooldown_calls = [d for d in recorded if abs(d - 2.0) < 1e-6]
+    assert len(cooldown_calls) == 1, (
+        f"expected exactly 1 cooldown sleep of 2.0s; recorded={recorded!r}"
+    )
+    assert s.cursor_rate_limit_cooldowns_count == 1
+    # 429 audit invariant preserved.
+    assert s.cursor_api_rate_limited is True
+    assert any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+    # DOM recovery NEVER ran.
+    assert session.reload_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_first_429_with_retry_recovers_and_continues(
+    page1_body, page2_last, monkeypatch,
+):
+    """When the first 429 fires AND `max_retries >= 1` AND a subsequent
+    cursor fetch succeeds, the connector MUST:
+      - clear the session's one-shot flag via `reset_cursor_api_rate_limited`,
+      - re-enter the inner scroll loop,
+      - parse the subsequent cursor response,
+      - finish the run with `cursor_api_rate_limited=True` STILL set on
+        the summary (the moment 429 was seen is auditable regardless of
+        whether the retry succeeded).
+    """
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+
+    async def _spy(delay, *args, **kwargs):
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    # cold-start ok (page1, hasNext=True) → 3 Nones exhaust the inner
+    # scroll budget (max_scroll_attempts_per_page=3) → cascade-skip
+    # gate observes throttle → cooldown 0 → reset session flag →
+    # continue → next continuation pops page2 (hasNext=False) →
+    # clean termination.
+    session = _RateLimitRetrySession(
+        [(200, page1_body), None, None, None, (200, page2_last)],
+        persistent=False,  # retry succeeds on next cursor fetch
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,
+        cursor_rate_limit_cooldown_s=0,  # no cooldown — just retry
+        cursor_rate_limit_max_retries=1,
+    )
+    raws = await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    s = c.last_run_summary
+    # 429 audit state remains True (auditable even after recovery).
+    assert s.cursor_api_rate_limited is True
+    assert any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+    # Retry telemetry — one retry was triggered.
+    assert s.cursor_rate_limit_retries_count == 1
+    # The retry SUCCEEDED on this scenario, so exhaustion is False.
+    assert s.cursor_rate_limit_exhausted is False
+    # The session-side reset was called exactly once.
+    assert session.reset_calls == 1
+    # Rows from both pages were collected — proof the retry continued.
+    # page1 yields 9 + page2 yields 9 (post goods-filter) = 18.
+    assert len(raws) == 18, len(raws)
+    # DOM recovery NEVER ran.
+    assert session.reload_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_persistent_429_exhausts_bounded_retries_and_stops(
+    page1_body, monkeypatch,
+):
+    """When EVERY post-429 retry attempt also fails (the cursor API
+    stays throttled), the bounded retry budget MUST exhaust cleanly:
+      - `cursor_rate_limit_exhausted=True` on the summary,
+      - `cursor_rate_limit_retries_count == max_retries`,
+      - `cursor_api_rate_limited=True` on the summary,
+      - exhausted sample reason appended (in addition to the canonical
+        429 reason),
+      - `blocked=True` and final_status routes through `anti_bot`,
+      - NO call to `reload_and_reopen_review_tab` (DOM recovery skipped
+        — the d0e7b21 invariant).
+    """
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+
+    async def _spy(delay, *args, **kwargs):
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    # cold-start ok → continuation times out (None) on every attempt.
+    # `persistent=True` means each `reset_cursor_api_rate_limited()` is
+    # immediately followed by another None on `wait_for_next_response`,
+    # which re-flips the session flag to True.
+    session = _RateLimitRetrySession(
+        [(200, page1_body)],  # only the cold-start; subsequent waits = None
+        persistent=True,
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,
+        cursor_rate_limit_cooldown_s=0,
+        cursor_rate_limit_max_retries=2,  # max budget
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+
+    s = c.last_run_summary
+
+    # Bounded retry budget fully consumed.
+    assert s.cursor_rate_limit_retries_count == 2
+    assert s.cursor_rate_limit_exhausted is True
+
+    # 429 audit state preserved.
+    assert s.cursor_api_rate_limited is True
+    assert s.blocked is True
+    assert any(
+        r == "cursor_api_rate_limited: 429 Too Many Requests"
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+    # Exhausted sample reason additionally appended.
+    assert any(
+        "bounded retries exhausted" in r
+        for r in s.sample_dropped_reasons
+    ), s.sample_dropped_reasons
+
+    # DOM recovery NEVER fired (the d0e7b21 invariant).
+    assert session.reload_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_non_429_scroll_failure_still_invokes_reload_recovery(
+    page1_body, caplog,
+):
+    """Regression guard for d0e7b21 test 5: a non-429 scroll failure
+    (the queue stays empty without `_cursor_api_rate_limited` flipping)
+    MUST still enter the existing recovery cascade — i.e.
+    `reload_and_reopen_review_tab` is invoked. The new pacing/cooldown
+    code path must NOT eat the non-429 case."""
+    # `_CursorRateLimitFakeSession` (from the earlier ticket's tests)
+    # exposes `reload_and_reopen_review_tab` when has_reload_method=True
+    # and reports rate-limit False when `rate_limit_after_pop=0`.
+    session = _CursorRateLimitFakeSession(
+        [(200, page1_body)],
+        rate_limit_after_pop=0,
+        has_reload_method=True,
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,
+        cursor_rate_limit_cooldown_s=5,  # configured but should not engage
+        cursor_rate_limit_max_retries=2,  # configured but should not engage
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+    s = c.last_run_summary
+
+    # Rate-limit branch UNUSED.
+    assert s.cursor_api_rate_limited is False
+    assert s.cursor_rate_limit_cooldowns_count == 0
+    assert s.cursor_rate_limit_retries_count == 0
+    assert s.cursor_rate_limit_exhausted is False
+
+    # Existing recovery cascade DID run (legacy invariant preserved).
+    assert session.reload_calls >= 1, (
+        f"non-429 scroll-failure path must still enter the recovery "
+        f"cascade; reload_calls={session.reload_calls}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_small_sku_complete_path_with_pacing_enabled(
+    page1_body, page2_last, monkeypatch,
+):
+    """Regression guard for the Tocobo-shape SKU: a clean, fully-paginated
+    run (no 429 anywhere) MUST complete cleanly with pacing enabled. No
+    cooldown / retry / exhausted markers may surface; the cursor stream
+    closes normally on `hasNext=False`."""
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+
+    async def _spy(delay, *args, **kwargs):
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    session = _PacingRecorderSession(
+        [(200, page1_body), (200, page2_last)],
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=300,
+        cursor_rate_limit_cooldown_s=10,  # configured but never engages
+        cursor_rate_limit_max_retries=1,
+    )
+    raws = await c.collect(keyword="x", params=CollectParams(max_results=100))
+    s = c.last_run_summary
+
+    # Clean termination — no 429 audit state.
+    assert s.cursor_api_rate_limited is False
+    assert s.blocked is False
+    assert s.cursor_rate_limit_cooldowns_count == 0
+    assert s.cursor_rate_limit_retries_count == 0
+    assert s.cursor_rate_limit_exhausted is False
+    # Pacing engaged once (between cold-start and the single continuation).
+    assert s.cursor_pacing_sleeps_count == 1
+    # All rows collected.
+    assert len(raws) == 18
+    # Clean stream close.
+    assert s.last_observed_has_next is False
+    assert s.pagination_exhausted is True
+
+
+@pytest.mark.asyncio
+async def test_exhausted_429_classifies_as_anti_bot(
+    page1_body, monkeypatch,
+):
+    """Exhausted-retry 429 path MUST route through `classify_status`
+    as `anti_bot` — NOT `max_cap_reached`, NOT `sort_control_unreachable`.
+    The presence of bounded-retry telemetry on the summary does not
+    change the classification."""
+    import asyncio as _asyncio
+    real_sleep = _asyncio.sleep
+
+    async def _spy(delay, *args, **kwargs):
+        return await real_sleep(0)
+
+    monkeypatch.setattr(_asyncio, "sleep", _spy)
+
+    session = _RateLimitRetrySession(
+        [(200, page1_body)],
+        persistent=True,
+    )
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        session_factory=lambda: session,
+        cursor_pacing_ms=0,
+        cursor_rate_limit_cooldown_s=0,
+        cursor_rate_limit_max_retries=1,
+    )
+    await c.collect(keyword="x", params=CollectParams(max_results=100))
+    s = c.last_run_summary
+
+    # Exhausted bounded retry on persistent 429.
+    assert s.cursor_rate_limit_exhausted is True
+    assert s.cursor_api_rate_limited is True
+    assert s.blocked is True
+
+    from src.voc.app.collection_batch import classify_status
+    status = classify_status({
+        "blocked": s.blocked,
+        "http_429_seen": s.http_429_seen,
+        "http_403_seen": s.http_403_seen,
+        "auth_error": s.auth_error,
+        "cursor_api_rate_limited": s.cursor_api_rate_limited,
+        "last_observed_has_next": s.last_observed_has_next,
+        "sort_control_unreachable": s.sort_control_unreachable,
+        "false_empty_state_detected": s.false_empty_state_detected,
+        "quality_status": "invalid",
+        "sample_dropped_reasons": s.sample_dropped_reasons,
+        "records_parsed": s.records_parsed,
+        "review_api_response_count": s.review_api_response_count,
+        "scrolled_to_review_area": s.scrolled_to_review_area,
+        "review_more_button_clicked": s.review_more_button_clicked,
+        "total_review_count_available": s.total_review_count_available,
+        "rows_filtered_by_goods_no": s.rows_filtered_by_goods_no,
+        "rows_dropped_unparseable": s.rows_dropped_unparseable,
+        "parse_warnings": s.parse_warnings,
+        "pagination_exhausted": s.pagination_exhausted,
+    })
+    assert status == "anti_bot", status
+    assert status != "max_cap_reached"
+    assert status != "sort_control_unreachable"
+
+
+def test_cursor_pacing_defaults_match_class_constants():
+    """Default constructor (no kwargs, no env overrides) wires to the
+    class-level defaults. Backward compatibility guard."""
+    import os
+    # Clear env so the class default takes effect.
+    for var in (
+        "OY_CURSOR_PACING_MS",
+        "OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC",
+        "OY_CURSOR_RATE_LIMIT_MAX_RETRIES",
+    ):
+        os.environ.pop(var, None)
+    c = OliveYoungBrowserAPIConnector(product_url=PRODUCT_URL)
+    # CURSOR_PACING_MS=100 → 0.1 s.
+    assert c._cursor_pacing_s == 0.1
+    # Cooldown disabled by default.
+    assert c._cursor_rate_limit_cooldown_s == 0
+    # Retries disabled by default.
+    assert c._cursor_rate_limit_max_retries == 0
+
+
+def test_cursor_pacing_clamps_out_of_range_values():
+    """Constructor kwargs are clamped to [0, MAX] (defensive against
+    operator typos). Hard cap on retries is 2."""
+    c = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        cursor_pacing_ms=99999,
+        cursor_rate_limit_cooldown_s=99999,
+        cursor_rate_limit_max_retries=99,
+    )
+    assert c._cursor_pacing_s == 5.0  # clamped to 5000ms
+    assert c._cursor_rate_limit_cooldown_s == 180  # clamped to 180s
+    assert c._cursor_rate_limit_max_retries == 2  # hard cap
+    # Negative inputs clamp to 0.
+    c2 = OliveYoungBrowserAPIConnector(
+        product_url=PRODUCT_URL,
+        cursor_pacing_ms=-50,
+        cursor_rate_limit_cooldown_s=-1,
+        cursor_rate_limit_max_retries=-1,
+    )
+    assert c2._cursor_pacing_s == 0.0
+    assert c2._cursor_rate_limit_cooldown_s == 0
+    assert c2._cursor_rate_limit_max_retries == 0
+
+
+def test_cursor_pacing_env_overrides_default(monkeypatch):
+    """When the constructor kwargs are None, env vars take precedence
+    over the class defaults. Garbage env values fall back to default
+    (do not raise)."""
+    monkeypatch.setenv("OY_CURSOR_PACING_MS", "400")
+    monkeypatch.setenv("OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC", "30")
+    monkeypatch.setenv("OY_CURSOR_RATE_LIMIT_MAX_RETRIES", "1")
+    c = OliveYoungBrowserAPIConnector(product_url=PRODUCT_URL)
+    assert c._cursor_pacing_s == 0.4
+    assert c._cursor_rate_limit_cooldown_s == 30
+    assert c._cursor_rate_limit_max_retries == 1
+
+    # Garbage env values fall back to class default — never raise.
+    monkeypatch.setenv("OY_CURSOR_PACING_MS", "not-a-number")
+    monkeypatch.setenv("OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC", "")
+    monkeypatch.setenv("OY_CURSOR_RATE_LIMIT_MAX_RETRIES", "garbage")
+    c2 = OliveYoungBrowserAPIConnector(product_url=PRODUCT_URL)
+    # 100ms default (garbage → fallback)
+    assert c2._cursor_pacing_s == 0.1
+    # Empty string also falls back.
+    assert c2._cursor_rate_limit_cooldown_s == 0
+    assert c2._cursor_rate_limit_max_retries == 0
+
+
+def test_session_exposes_reset_cursor_api_rate_limited():
+    """The Playwright session class MUST expose
+    `reset_cursor_api_rate_limited()` for the connector retry path to
+    function. Calling it on a fresh session is a no-op (flag was False
+    to begin with) but must not raise. Setting the flag True then
+    calling reset MUST clear it."""
+    from src.voc.connectors import oliveyoung_browser_api as mod
+    sess = object.__new__(mod._PlaywrightReviewSession)
+    sess.__init__(
+        headless=True,
+        api_path="/review/api/v2/reviews/cursor",
+        review_tab_locator="div.review-tab",
+        scroll_candidates=(),
+        user_agent="ua",
+        viewport={"width": 800, "height": 600},
+    )
+    # Fresh session: flag is False, reset is a no-op.
+    assert sess._cursor_api_rate_limited is False
+    sess.reset_cursor_api_rate_limited()
+    assert sess._cursor_api_rate_limited is False
+    # Flip True, then reset → clears.
+    sess._cursor_api_rate_limited = True
+    sess._cursor_api_rate_limited_logged = True
+    sess.reset_cursor_api_rate_limited()
+    assert sess._cursor_api_rate_limited is False
+    assert sess._cursor_api_rate_limited_logged is False

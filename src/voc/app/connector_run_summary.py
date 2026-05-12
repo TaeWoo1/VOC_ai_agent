@@ -149,6 +149,29 @@ class ConnectorRunSummary(BaseModel):
     # NOT routed through the auth-wall or human-check classifier paths.
     cursor_api_rate_limited: bool = False
 
+    # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY (additive) ----
+    # Pacing + bounded cooldown/retry telemetry. All counters are
+    # cumulative across the run. Defaults are zero / False so legacy
+    # callers (and pre-patch serialized summaries) deserialize unchanged.
+    #   `cursor_pacing_sleeps_count` — number of per-cycle pacing sleeps
+    #     executed in the cursor continuation loop. 0 when pacing is
+    #     disabled (`OY_CURSOR_PACING_MS=0` or `cursor_pacing_ms=0`).
+    #   `cursor_rate_limit_cooldowns_count` — number of times the
+    #     bounded post-429 cooldown sleep ran. 0 when cooldown is
+    #     disabled (default), 1 when the run hit a single 429 and the
+    #     operator opted in.
+    #   `cursor_rate_limit_retries_count` — number of post-429 retry
+    #     attempts that re-entered the scroll loop. Bounded by
+    #     `OY_CURSOR_RATE_LIMIT_MAX_RETRIES` (default 0, hard cap 2).
+    #   `cursor_rate_limit_exhausted` — True iff the connector exhausted
+    #     its bounded retry budget AND the cursor API was still 429.
+    #     Distinct from `cursor_api_rate_limited` (which is True whenever
+    #     429 was observed even once, regardless of retry outcome).
+    cursor_pacing_sleeps_count: int = 0
+    cursor_rate_limit_cooldowns_count: int = 0
+    cursor_rate_limit_retries_count: int = 0
+    cursor_rate_limit_exhausted: bool = False
+
     # ---- Connector-level retry + debug telemetry (PR-2, additive) ----
     # Default off / unused so any caller who doesn't opt into retry sees
     # PR-1-equivalent serialization.

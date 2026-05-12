@@ -59,6 +59,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import re
 import sys
@@ -805,6 +806,31 @@ class BrowserReviewSession(Protocol):
     # async def reload_and_reopen_review_tab(self) -> None: ...
 
 
+def _read_int_env(name: str, default: int, *, lo: int, hi: int) -> int:
+    """I-OY-CURSOR-RATE-LIMIT-PACING-POLICY — read an int env var, clamp to
+    `[lo, hi]`, fall back to `default` on missing/garbage. Defensive against
+    operator typos (e.g. `OY_CURSOR_PACING_MS=abc`) — never raises. Logged at
+    DEBUG only because it's read once per session construction and an
+    INFO-level line per env would clutter the per-sort stdout.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        logger.debug(
+            "OY connector: ignoring non-integer %s=%r; using default=%d",
+            name, raw, default,
+        )
+        return default
+    if val < lo:
+        return lo
+    if val > hi:
+        return hi
+    return val
+
+
 class OliveYoungBrowserAPIConnector:
     """Live OY connector — scrolls the product review tab and intercepts JSON.
 
@@ -1009,6 +1035,34 @@ class OliveYoungBrowserAPIConnector:
     # `_expected_sort_type`, so any visible empty marker is a transient
     # mid-render artifact and false-empty escalation is skipped.
     POST_SORT_SETTLE_S = 5.0
+    # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY ----
+    # Pacing + bounded cooldown/retry defaults. Live behavior:
+    #   `CURSOR_PACING_MS` — small bounded sleep between cursor/page
+    #     fetch cycles in the scroll-continuation loop. Default 100ms,
+    #     a gentle baseline that adds minimal wall-clock on small-SKU
+    #     runs while still breaking up back-to-back cursor calls when
+    #     a run is otherwise CPU-bound. Operators running deep-corpus
+    #     proofs (Ilso/Tocobo cite 600 and 792 successful cursor
+    #     cycles respectively before throttle) can raise the value via
+    #     `OY_CURSOR_PACING_MS` if a higher cadence is needed. 100ms
+    #     stays in the same order of magnitude as the natural inter-
+    #     scroll wait the JS UI already imposes, so it is unlikely to
+    #     change the page's own scroll behavior. Clamp range [0, 5000].
+    #   `CURSOR_RATE_LIMIT_COOLDOWN_SEC` — bounded post-429 cooldown
+    #     sleep. Default 0 = disabled (preserves d0e7b21 invariant: 429
+    #     means clean stop). When > 0, the connector sleeps once on the
+    #     first 429 BEFORE deciding whether to retry. Clamp [0, 180].
+    #   `CURSOR_RATE_LIMIT_MAX_RETRIES` — max post-429 retry attempts.
+    #     Default 0 = disabled. Hard-capped at 2. The connector resets
+    #     the session's one-shot rate-limit flag and re-enters the
+    #     scroll loop; on exhaustion it falls through to the existing
+    #     `blocked` clean-stop path.
+    CURSOR_PACING_MS = 100
+    CURSOR_PACING_MS_MAX = 5000
+    CURSOR_RATE_LIMIT_COOLDOWN_SEC = 0
+    CURSOR_RATE_LIMIT_COOLDOWN_SEC_MAX = 180
+    CURSOR_RATE_LIMIT_MAX_RETRIES = 0
+    CURSOR_RATE_LIMIT_MAX_RETRIES_HARD_CAP = 2
     # Opt-in knob for the (NOT YET IMPLEMENTED) full browser-restart
     # recovery layer. Plumbed as a constant so callers can flip it
     # via constructor without code changes once Phase 2 lands. Today
@@ -1094,6 +1148,24 @@ class OliveYoungBrowserAPIConnector:
         # operator re-logs in manually. Default False preserves the
         # existing reuse-default-context behavior.
         force_fresh_context: bool = False,
+        # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY (additive) ----
+        # `cursor_pacing_ms` — bounded per-cycle sleep in the cursor
+        #   continuation loop. None = read env `OY_CURSOR_PACING_MS` and
+        #   fall back to `CURSOR_PACING_MS` (100ms). Integer ms, clamped
+        #   to [0, 5000]. 0 disables pacing entirely (preserves
+        #   pre-patch sub-second cursor cadence). Tests pass 0 to
+        #   stay sub-second.
+        # `cursor_rate_limit_cooldown_s` — bounded post-429 cooldown
+        #   sleep, in seconds. None = read env
+        #   `OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC`. Default 0 = disabled
+        #   (preserves d0e7b21 invariant: 429 means clean stop). Clamp
+        #   [0, 180]. Tests inject a sleep recorder.
+        # `cursor_rate_limit_max_retries` — bounded post-429 retry
+        #   budget. None = read env `OY_CURSOR_RATE_LIMIT_MAX_RETRIES`.
+        #   Default 0 = disabled. Hard cap = 2.
+        cursor_pacing_ms: int | None = None,
+        cursor_rate_limit_cooldown_s: int | None = None,
+        cursor_rate_limit_max_retries: int | None = None,
     ):
         if not product_url:
             raise ValueError("OliveYoungBrowserAPIConnector requires a non-empty product_url")
@@ -1179,6 +1251,60 @@ class OliveYoungBrowserAPIConnector:
         self._human_check_poll_s: float = float(human_check_poll_s)
         self._fail_on_human_check_timeout: bool = bool(fail_on_human_check_timeout)
         self._force_fresh_context: bool = bool(force_fresh_context)
+        # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY ----
+        # Resolve cursor pacing (ms): explicit kwarg wins; otherwise
+        # env `OY_CURSOR_PACING_MS`; otherwise class default. Clamp to
+        # [0, CURSOR_PACING_MS_MAX]. 0 disables pacing — preserves
+        # pre-patch cursor cadence and is what tests pass.
+        if cursor_pacing_ms is None:
+            resolved_pacing_ms = _read_int_env(
+                "OY_CURSOR_PACING_MS",
+                self.CURSOR_PACING_MS,
+                lo=0,
+                hi=self.CURSOR_PACING_MS_MAX,
+            )
+        else:
+            resolved_pacing_ms = max(
+                0, min(int(cursor_pacing_ms), self.CURSOR_PACING_MS_MAX),
+            )
+        self._cursor_pacing_s: float = resolved_pacing_ms / 1000.0
+        # Resolve cooldown (sec): same precedence chain.
+        if cursor_rate_limit_cooldown_s is None:
+            resolved_cooldown_s = _read_int_env(
+                "OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC",
+                self.CURSOR_RATE_LIMIT_COOLDOWN_SEC,
+                lo=0,
+                hi=self.CURSOR_RATE_LIMIT_COOLDOWN_SEC_MAX,
+            )
+        else:
+            resolved_cooldown_s = max(
+                0,
+                min(
+                    int(cursor_rate_limit_cooldown_s),
+                    self.CURSOR_RATE_LIMIT_COOLDOWN_SEC_MAX,
+                ),
+            )
+        self._cursor_rate_limit_cooldown_s: int = int(resolved_cooldown_s)
+        # Resolve max retries: same precedence chain. Hard cap 2 — see
+        # CURSOR_RATE_LIMIT_MAX_RETRIES_HARD_CAP rationale: more than
+        # two bounded retries on a confirmed throttle is a wedge risk
+        # (each retry re-walks the page's existing cursor state).
+        if cursor_rate_limit_max_retries is None:
+            resolved_max_retries = _read_int_env(
+                "OY_CURSOR_RATE_LIMIT_MAX_RETRIES",
+                self.CURSOR_RATE_LIMIT_MAX_RETRIES,
+                lo=0,
+                hi=self.CURSOR_RATE_LIMIT_MAX_RETRIES_HARD_CAP,
+            )
+        else:
+            resolved_max_retries = max(
+                0,
+                min(
+                    int(cursor_rate_limit_max_retries),
+                    self.CURSOR_RATE_LIMIT_MAX_RETRIES_HARD_CAP,
+                ),
+            )
+        self._cursor_rate_limit_max_retries: int = int(resolved_max_retries)
         self.last_run_summary: ConnectorRunSummary | None = None
         # Per-run review_id list, populated at the end of `collect()` from the
         # successfully-parsed RawReview rows. Consumed by the multi-sort
@@ -1260,6 +1386,25 @@ class OliveYoungBrowserAPIConnector:
         # is the CORS-blocked 429 case that surfaces via `requestfailed`
         # WITHOUT an observable HTTP status.
         cursor_api_rate_limited = False
+
+        # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY telemetry ----
+        # Counters surfaced on ConnectorRunSummary at end-of-run. All
+        # cumulative across attempts; default zero / False so a run
+        # that does not engage any of the pacing/cooldown paths
+        # serializes identically to pre-patch.
+        cursor_pacing_sleeps_count = 0
+        cursor_rate_limit_cooldowns_count = 0
+        cursor_rate_limit_retries_count = 0
+        cursor_rate_limit_exhausted = False
+        # Log-once gate for the per-cycle pacing line: we emit it on the
+        # FIRST pacing sleep of each session and then every 32 cycles
+        # thereafter. Without this gate a Tocobo-shape ~792-cursor run
+        # would print ~792 pacing lines into the operator's tee log,
+        # which buries the heartbeat. 32 is a compromise: small enough
+        # that operators see proof pacing is engaged within seconds
+        # at 100ms cadence, large enough that the channel is not
+        # spammy on long runs.
+        _pacing_log_every = 32
 
         # ---- I-OY-OPEN-HANDSHAKE-TIMEOUT telemetry ----
         # `open_handshake_timed_out` fires when `await session.open(...)`
@@ -1802,6 +1947,39 @@ class OliveYoungBrowserAPIConnector:
                 while not _should_stop_pagination(
                     last_body, len(raws), params.max_results,
                 ):
+                    # I-OY-CURSOR-RATE-LIMIT-PACING-POLICY — conservative
+                    # per-cycle sleep BEFORE the next scroll+cursor fetch.
+                    # Defaults to 100ms (env/kwarg-overridable; clamped
+                    # [0, 5000]). When 0 (the test/sub-second path) no
+                    # sleep is awaited — `await asyncio.sleep(0)` would
+                    # still yield the loop, but we explicitly skip it to
+                    # keep test wall-clock at zero ms. The log-once gate
+                    # emits the first pacing line and then every 32
+                    # cycles thereafter so a deep crawl doesn't bury
+                    # the heartbeat. The cascade-skip gate below still
+                    # fires on observed 429 BEFORE the next scroll
+                    # consumes any cursor budget — pacing here cannot
+                    # mask a throttle.
+                    if self._cursor_pacing_s > 0:
+                        if (
+                            cursor_pacing_sleeps_count == 0
+                            or cursor_pacing_sleeps_count
+                            % _pacing_log_every == 0
+                        ):
+                            logger.info(
+                                "OY cursor pacing sleep: %dms "
+                                "(cycle=%d)",
+                                int(self._cursor_pacing_s * 1000),
+                                cursor_pacing_sleeps_count + 1,
+                            )
+                        try:
+                            await asyncio.sleep(self._cursor_pacing_s)
+                        except Exception:
+                            # Defensive: a cancelled task should not
+                            # leave the cumulative counter inconsistent
+                            # with the audit log.
+                            pass
+                        cursor_pacing_sleeps_count += 1
                     next_resp = None
                     for _ in range(self._max_scroll_attempts):
                         await session.scroll_for_next()
@@ -1831,6 +2009,114 @@ class OliveYoungBrowserAPIConnector:
                         # field so audit can tell whether the cursor stream
                         # was truncated.
                         if _drain_session_rate_limit_flag():
+                            # I-OY-CURSOR-RATE-LIMIT-PACING-POLICY —
+                            # bounded cooldown + retry. The drain above
+                            # has already (a) set
+                            # `cursor_api_rate_limited=True` on the run-
+                            # local var, (b) appended the canonical
+                            # sample reason exactly once. From here we
+                            # may EITHER clean-stop (legacy d0e7b21
+                            # behavior, default) OR sleep a bounded
+                            # cooldown and retry the cursor fetch once
+                            # or twice. The retry path:
+                            #   1. Optional one-shot cooldown sleep
+                            #      (`cursor_rate_limit_cooldown_s > 0`).
+                            #      Disabled by default — opt-in only.
+                            #   2. Reset the SESSION'S one-shot
+                            #      `_cursor_api_rate_limited` flag so
+                            #      the next drain sees a fresh state.
+                            #      The CONNECTOR'S audit state stays
+                            #      flagged — operators still see
+                            #      `cursor_api_rate_limited=True` on
+                            #      the summary regardless of whether
+                            #      the retry recovers.
+                            #   3. `continue` back to the inner scroll
+                            #      loop. Subsequent scroll attempts
+                            #      consume `_max_scroll_attempts`
+                            #      retries against `_page_n_timeout_s`;
+                            #      if the cursor API is still throttled
+                            #      they fail in identical fashion and
+                            #      we re-enter this gate. Bounded retry
+                            #      budget (`_cursor_rate_limit_max_retries`,
+                            #      hard cap 2) limits the total post-429
+                            #      work.
+                            # DOM recovery (reload / page-recreate) is
+                            # NEVER engaged on the 429 path — that
+                            # invariant from d0e7b21 is preserved by
+                            # the explicit `continue` (does NOT fall
+                            # into the `recovery_budget` branch below)
+                            # and by the exhaustion `break` (sets
+                            # `blocked=True`).
+                            if (
+                                self._cursor_rate_limit_max_retries > 0
+                                and cursor_rate_limit_retries_count
+                                < self._cursor_rate_limit_max_retries
+                            ):
+                                if self._cursor_rate_limit_cooldown_s > 0:
+                                    logger.info(
+                                        "OY cursor API rate limit cooldown: "
+                                        "sleeping %ds before retry "
+                                        "(attempt %d/%d)",
+                                        self._cursor_rate_limit_cooldown_s,
+                                        cursor_rate_limit_retries_count + 1,
+                                        self._cursor_rate_limit_max_retries,
+                                    )
+                                    try:
+                                        await asyncio.sleep(
+                                            self._cursor_rate_limit_cooldown_s,
+                                        )
+                                    except Exception:
+                                        pass
+                                    cursor_rate_limit_cooldowns_count += 1
+                                # Reset the session-side latch so the
+                                # next drain has a fresh observation.
+                                reset_fn = getattr(
+                                    session,
+                                    "reset_cursor_api_rate_limited",
+                                    None,
+                                )
+                                if reset_fn is not None:
+                                    try:
+                                        reset_fn()
+                                    except Exception as e:
+                                        logger.debug(
+                                            "OY cursor rate limit reset "
+                                            "failed: %s",
+                                            e,
+                                        )
+                                cursor_rate_limit_retries_count += 1
+                                logger.info(
+                                    "OY cursor API rate limit retry: "
+                                    "attempt %d/%d (cursor stream "
+                                    "re-entry; no DOM recovery)",
+                                    cursor_rate_limit_retries_count,
+                                    self._cursor_rate_limit_max_retries,
+                                )
+                                continue  # back to inner while
+                            # Retry budget exhausted (or disabled). The
+                            # exhausted-vs-disabled distinction is
+                            # auditable: `cursor_rate_limit_retries_count
+                            # > 0 AND == _cursor_rate_limit_max_retries`
+                            # is exhaustion; `== 0` is disabled.
+                            if (
+                                self._cursor_rate_limit_max_retries > 0
+                                and cursor_rate_limit_retries_count
+                                >= self._cursor_rate_limit_max_retries
+                            ):
+                                cursor_rate_limit_exhausted = True
+                                logger.info(
+                                    "OY cursor API rate limit exhausted: "
+                                    "%d/%d retries used; stopping with "
+                                    "blocked=True",
+                                    cursor_rate_limit_retries_count,
+                                    self._cursor_rate_limit_max_retries,
+                                )
+                                _note(
+                                    "cursor_api_rate_limited: bounded "
+                                    "retries exhausted "
+                                    f"({cursor_rate_limit_retries_count}/"
+                                    f"{self._cursor_rate_limit_max_retries})",
+                                )
                             _note(
                                 "cursor_api_rate_limited: scroll continuation "
                                 "skipped (cascade short-circuited; 429 "
@@ -2451,6 +2737,15 @@ class OliveYoungBrowserAPIConnector:
             last_observed_has_next=last_has_next,
             # ---- I-OY-CURSOR-API-RATE-LIMIT-HANDLING telemetry ----
             cursor_api_rate_limited=cursor_api_rate_limited,
+            # ---- I-OY-CURSOR-RATE-LIMIT-PACING-POLICY telemetry ----
+            cursor_pacing_sleeps_count=int(cursor_pacing_sleeps_count),
+            cursor_rate_limit_cooldowns_count=int(
+                cursor_rate_limit_cooldowns_count,
+            ),
+            cursor_rate_limit_retries_count=int(
+                cursor_rate_limit_retries_count,
+            ),
+            cursor_rate_limit_exhausted=bool(cursor_rate_limit_exhausted),
             # ---- PR-2 retry telemetry ----
             auth_retry_attempts_used=auth_retry_attempts_used,
             auth_retry_exhausted=auth_retry_exhausted,
@@ -3611,6 +3906,28 @@ class _PlaywrightReviewSession:
         and the cascade-skip gate degrades to its legacy behavior.
         """
         return bool(self._cursor_api_rate_limited)
+
+    def reset_cursor_api_rate_limited(self) -> None:
+        """I-OY-CURSOR-RATE-LIMIT-PACING-POLICY.
+
+        Clear the session-side one-shot rate-limit flag (and its log-
+        once companion) so the connector can re-enter the scroll loop
+        after a bounded post-429 cooldown. Without this, the connector's
+        next `_drain_session_rate_limit_flag()` would immediately fire
+        the cascade-skip gate again and the retry would be a no-op.
+
+        The connector's own audit state (`cursor_api_rate_limited=True`
+        on the run summary, canonical sample reason already appended)
+        is preserved — this reset is local to the session-level latch
+        and does NOT change the operator-visible audit trail.
+
+        Best-effort contract: connector calls this via
+        `getattr(session, "reset_cursor_api_rate_limited", None)` so
+        legacy test fakes without the method silently skip the reset
+        (and therefore can never observe the retry path).
+        """
+        self._cursor_api_rate_limited = False
+        self._cursor_api_rate_limited_logged = False
 
     def _attach_response_handler(self, page) -> None:
         """Attach the per-`/reviews/cursor` response interceptor to `page`.
