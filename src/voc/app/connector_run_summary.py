@@ -172,6 +172,46 @@ class ConnectorRunSummary(BaseModel):
     cursor_rate_limit_retries_count: int = 0
     cursor_rate_limit_exhausted: bool = False
 
+    # ---- I-OY-RETRY-INTENT-SUMMARY-FIELDS (Step 1 of multi-session resume) ----
+    # Operator-facing hint for whether and when to re-run a halted collection.
+    # ADDITIVE ONLY — no classifier or call site populates these in this
+    # ticket; both fields stay at their defaults until I-B wires
+    # `classify_status` to derive them from existing rate-limit / auth-wall
+    # signals. Pre-patch JSON summaries (without these keys) deserialize
+    # cleanly into the new schema at the documented defaults.
+    #
+    # `retry_intent` — string for forward compatibility (more intents may be
+    # added later); by-convention allowed values:
+    #   "none"                   — Clean exits and non-retryable terminal
+    #                              states (complete, duplicate_only,
+    #                              authenticated_ok, true max_cap_reached,
+    #                              DOM-shape failures like
+    #                              sort_control_unreachable /
+    #                              cdp_attach_failed / page_open_failed —
+    #                              these are NOT time-spacing-recoverable).
+    #   "retry_after_cooldown"   — Cursor-rate-limited: wall-clock spacing
+    #                              between sessions is expected to recover
+    #                              coverage. Companion field
+    #                              `retry_after_minutes` carries an
+    #                              operator-confidence cadence hint.
+    #   "manual_review_required" — Auth-wall / human-check / 403: operator
+    #                              must re-authenticate (or clear CAPTCHA)
+    #                              before any retry can help. No cadence
+    #                              hint is meaningful here.
+    # Strings other than the three above are tolerated by Pydantic for
+    # forward compatibility, but readers SHOULD treat unknown values as
+    # equivalent to "none" until the taxonomy is extended.
+    #
+    # `retry_after_minutes` — operator-confidence cadence hint, NOT a
+    # contract. Only meaningful when `retry_intent == "retry_after_cooldown"`;
+    # otherwise None. No connector or batch-driver code path performs an
+    # auto-retry based on this value — the multi-session resume policy
+    # (I-OY-RATE-LIMITED-MULTI-SESSION-RESUME-POLICY-PLAN §1) explicitly
+    # forbids auto-retry; the field exists to populate operator dashboards
+    # and the next-pass scheduling surface in I-C.
+    retry_intent: str = "none"
+    retry_after_minutes: int | None = None
+
     # ---- Connector-level retry + debug telemetry (PR-2, additive) ----
     # Default off / unused so any caller who doesn't opt into retry sees
     # PR-1-equivalent serialization.
