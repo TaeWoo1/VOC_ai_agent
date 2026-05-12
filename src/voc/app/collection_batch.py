@@ -682,6 +682,7 @@ class ProductResult:
     #     "final_status": str,                   # batch driver's classify_status
     #     "quality_status": str | None,          # pipeline gate output
     #     "cursor_api_rate_limited": bool,       # summary flag, verbatim
+    #     "cursor_api_silenced": bool,           # silenced cold-start gate
     #     "rows_inserted": int,                  # from top-level stdout JSON
     #     "raw_records_seen": int,               # mirrors stopped_at_records_seen
     #     "records_parsed": int,                 # connector counter
@@ -855,10 +856,24 @@ def _derive_resume_state(
     §2 / §7.
 
     `operator_hint` is a single human-readable string for the operator's
-    eyes:
-      * `retry_after_cooldown`   -> "retryable: re-run after {N} min cooldown"
-      * `manual_review_required` -> "manual: auth wall / human check —
-                                     operator intervention required"
+    eyes. Discriminator precedence (highest first):
+      * `cursor_api_rate_limited=True`  -> rate-limited hint:
+            "retryable: re-run after {N} min cooldown"
+      * `cursor_api_silenced=True`      -> silenced cold-start hint:
+            "retryable: cursor API silent after click — re-run after
+             {N} min cooldown"
+      * `retry_intent="manual_review_required"` -> manual hint:
+            "manual: auth wall / human check — operator intervention
+             required"
+    Both retryable hints carry the same cooldown cadence; the prefix
+    discriminator lets the operator distinguish "got throttled" from
+    "the page never even issued the XHR after the click landed". The
+    silenced hint is structurally exclusive with the rate-limited hint
+    because `derive_retry_intent()` only stamps `cursor_api_silenced`
+    when `cursor_api_rate_limited` is False — but the precedence is
+    coded defensively here so a future change to the AND-gate cannot
+    flip the operator surface to the wrong message.
+
     No `operator_hint` is emitted for `retry_intent="none"` (covered by
     the early-return that skips resume_state entirely for clean exits).
 
@@ -876,11 +891,28 @@ def _derive_resume_state(
     retry_after_minutes = summary.get("retry_after_minutes")
     # operator_hint mirrors the retry_intent mapping; the string format
     # matches the ticket spec exactly so operators can grep for the
-    # canonical phrases ("retryable", "manual").
+    # canonical phrases ("retryable", "manual", "silent").
     if retry_intent == "retry_after_cooldown":
-        operator_hint = (
-            f"retryable: re-run after {retry_after_minutes} min cooldown"
-        )
+        # Discriminate the two retryable cooldown shapes:
+        # rate-limited (cursor 429) vs silenced cold-start (cursor XHR
+        # never fired after a successful 'more' click). Rate-limited
+        # wins when both are stamped True so the operator sees the
+        # stronger signal first; in practice `derive_retry_intent`
+        # only stamps `cursor_api_silenced=True` when
+        # `cursor_api_rate_limited` is False, so this is also defensive.
+        if summary.get("cursor_api_rate_limited"):
+            operator_hint = (
+                f"retryable: re-run after {retry_after_minutes} min cooldown"
+            )
+        elif summary.get("cursor_api_silenced"):
+            operator_hint = (
+                "retryable: cursor API silent after click — "
+                f"re-run after {retry_after_minutes} min cooldown"
+            )
+        else:
+            operator_hint = (
+                f"retryable: re-run after {retry_after_minutes} min cooldown"
+            )
     elif retry_intent == "manual_review_required":
         operator_hint = (
             "manual: auth wall / human check — "
@@ -912,6 +944,13 @@ def _derive_resume_state(
         # present; the three kwargs above let the batch driver supply
         # values that live outside the summary dict.
         "cursor_api_rate_limited": bool(summary.get("cursor_api_rate_limited")),
+        # `cursor_api_silenced` surfaces the silenced-cold-start AND-gate
+        # decision the I-B classifier stamped on the summary. Mirrors
+        # `cursor_api_rate_limited` for symmetry — operators reading the
+        # batch_summary.json can distinguish the two retryable shapes
+        # without grepping `operator_hint`. False on legacy summaries
+        # (key absent / pre-patch JSON).
+        "cursor_api_silenced": bool(summary.get("cursor_api_silenced")),
         "raw_records_seen": int(summary.get("raw_records_seen") or 0),
         "records_parsed": int(summary.get("records_parsed") or 0),
         # `quality_status` from the connector summary (the pipeline's

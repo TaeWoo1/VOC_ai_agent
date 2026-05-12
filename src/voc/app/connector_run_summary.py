@@ -172,6 +172,26 @@ class ConnectorRunSummary(BaseModel):
     cursor_rate_limit_retries_count: int = 0
     cursor_rate_limit_exhausted: bool = False
 
+    # ---- I-OY-CURSOR-API-SILENCED-RETRY-INTENT (additive) ----
+    # True iff a cold-start timeout fired AFTER the lazy-load review
+    # ‘more’ button click had succeeded, the sort area was healthy
+    # (`sort_control_unreachable=False`), and the page issued ZERO
+    # cursor API requests AND received ZERO cursor API responses —
+    # i.e., the click landed but the underlying XHR was suppressed
+    # before a single body was emitted. Computed by
+    # ``derive_retry_intent()`` from existing connector fields; no
+    # connector code path stamps this directly. Used by the retry
+    # classifier to mark this failure shape as wall-clock-recoverable
+    # (`retry_after_cooldown`) and by `_derive_resume_state` to render
+    # an operator hint that distinguishes silenced-cursor from the
+    # explicit cursor-429 path.
+    #
+    # The AND-gate is conservative — a false positive would re-classify
+    # a genuine anti-bot block as retryable, masking real auth
+    # failures. See `derive_retry_intent` docstring for the exact
+    # predicate.
+    cursor_api_silenced: bool = False
+
     # ---- I-OY-RETRY-INTENT-SUMMARY-FIELDS (Step 1 of multi-session resume) ----
     # Operator-facing hint for whether and when to re-run a halted collection.
     # ADDITIVE ONLY — no classifier or call site populates these in this
@@ -514,18 +534,45 @@ class ConnectorRunSummary(BaseModel):
              trip condition: recovery succeeded, no operator action
              needed.
 
-          3. ELSE →
+          3. ELSE IF the cursor-silenced cold-start AND-gate holds
+             (I-OY-CURSOR-API-SILENCED-RETRY-INTENT) →
+             ``retry_intent="retry_after_cooldown"``,
+             ``retry_after_minutes=90``,
+             and ``cursor_api_silenced=True`` is stamped on the
+             summary. The AND-gate (all required) is:
+               - ``cold_start_timed_out``  (run gave up at cold-start)
+               - ``review_more_button_clicked``  (lazy-load click DID land —
+                 distinguishes this from generic cold-start failures
+                 where the click never fired)
+               - NOT ``sort_control_unreachable``  (sort area was healthy,
+                 i.e., the failure is on the XHR side, not the DOM side)
+               - ``review_api_request_count == 0``  (page never even
+                 issued a single cursor request)
+               - ``review_api_response_count == 0``  (and never got a
+                 single response back)
+             Rule 1 already short-circuits cursor-429 ahead of this
+             branch; rule 2 short-circuits auth-wall ahead. So the
+             AND-gate cannot fire concurrently with either of those —
+             the precedence is enforced structurally by the if/elif
+             ordering below.
+
+          4. ELSE →
              ``retry_intent="none"``, ``retry_after_minutes=None``.
 
-        Rule 4 (precedence): cursor-API 429 wins over auth-wall when
-        both are present. The 429 path is wall-clock-recoverable on its
-        own; mixing in ``auth_error`` does not change that the throttle
-        cooldown is the right next action.
+        Rule 5 (precedence): cursor-API 429 wins over auth-wall when
+        both are present; cursor-API 429 also wins over the silenced
+        AND-gate (a positive rate-limit signal is the stronger
+        evidence). Auth-wall wins over silenced — if any auth-wall
+        signal is present, that is the canonical operator action even
+        if the silenced AND-gate would also have held.
 
-        Rule 5 (out of scope): ``final_status`` classification is NOT
+        Rule 6 (out of scope): ``final_status`` classification is NOT
         modified by this method. ``retry_intent`` is an additive
         operator-facing column that lives alongside ``final_status``,
-        never replaces it.
+        never replaces it. The silenced AND-gate adds a third retry
+        intent SHAPE but does not introduce a new ``final_status``
+        value — the canonical anti-bot/cold-start ``final_status`` is
+        preserved.
 
         Idempotency: re-invoking the method on the same instance
         produces the same result (the method reads the flag fields,
@@ -543,13 +590,8 @@ class ConnectorRunSummary(BaseModel):
         ``summary.derive_retry_intent()`` at the end of ``collect()``
         without an extra statement.
         """
-        # Rule 1: cursor 429 path — precedence over auth-wall (rule 4).
-        if self.cursor_api_rate_limited:
-            self.retry_intent = "retry_after_cooldown"
-            self.retry_after_minutes = 90
-            return self
-
-        # Rule 2: auth-wall / human-check / hard-block. ``human_check_recovered``
+        # Auth-wall / human-check / hard-block predicate, shared between
+        # Rule 2 below and the silenced AND-gate. ``human_check_recovered``
         # is the load-bearing distinction: True means the operator's
         # CAPTCHA wait cleared the page and the session continued; False
         # paired with ``human_check_detected`` means the wait timed out
@@ -560,12 +602,56 @@ class ConnectorRunSummary(BaseModel):
             or self.http_403_seen
             or (self.human_check_detected and not self.human_check_recovered)
         )
+
+        # Silenced cold-start AND-gate. Computed once up-front so the
+        # field is always set deterministically from the current input
+        # flags (idempotent: a re-invocation with the same flags writes
+        # the same value). The gate REQUIRES:
+        #   - cold-start timed out
+        #   - lazy-load 'more' click actually landed
+        #   - sort area healthy (not a DOM-shape failure)
+        #   - ZERO cursor API requests AND ZERO cursor API responses
+        #   - no positive auth-wall signal (reused predicate above)
+        #   - no observed cursor 429 (rate-limited has its own branch)
+        # The auth/rate-limit clauses keep the field FALSE on runs that
+        # actually have a higher-precedence shape; the operator hint
+        # in `_derive_resume_state` then reads only one canonical
+        # discriminator per run.
+        self.cursor_api_silenced = (
+            self.cold_start_timed_out
+            and self.review_more_button_clicked
+            and not self.sort_control_unreachable
+            and self.review_api_request_count == 0
+            and self.review_api_response_count == 0
+            and not manual_review_required
+            and not self.cursor_api_rate_limited
+        )
+
+        # Rule 1: cursor 429 path — precedence over auth-wall and over
+        # the silenced AND-gate (rule 5).
+        if self.cursor_api_rate_limited:
+            self.retry_intent = "retry_after_cooldown"
+            self.retry_after_minutes = 90
+            return self
+
+        # Rule 2: auth-wall / human-check / hard-block.
         if manual_review_required:
             self.retry_intent = "manual_review_required"
             self.retry_after_minutes = None
             return self
 
-        # Rule 3: clean exit / non-retryable terminal / nothing to do.
+        # Rule 3: silenced cold-start. The AND-gate above already
+        # excluded rate-limited and auth-wall, so reaching this branch
+        # with cursor_api_silenced=True means the run was a pure
+        # silenced-cursor cold-start. A false positive here would
+        # re-classify a real anti-bot block as retryable, so each
+        # clause of the gate is required.
+        if self.cursor_api_silenced:
+            self.retry_intent = "retry_after_cooldown"
+            self.retry_after_minutes = 90
+            return self
+
+        # Rule 4: clean exit / non-retryable terminal / nothing to do.
         self.retry_intent = "none"
         self.retry_after_minutes = None
         return self

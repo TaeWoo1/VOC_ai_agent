@@ -1915,3 +1915,119 @@ def test_batch_summary_preserves_existing_fields_after_resume_state_addition(
     assert clean_result.rows_inserted == 200
     # Resume_state is None on clean entries (empty-when-clean).
     assert clean_result.resume_state is None
+
+
+# ---------------------------------------------------------------------------
+# I-OY-CURSOR-API-SILENCED-RETRY-INTENT — resume_state operator_hint
+# discriminator tests
+# ---------------------------------------------------------------------------
+# The I-C `_derive_resume_state` builder branches the `operator_hint`
+# string on whether the cooldown is driven by a cursor 429 or by a
+# silenced cold-start. Both shapes carry `retry_intent="retry_after_cooldown"`
+# but a discriminator is needed so operators can tell which shape they
+# hit (the silenced shape requires no special action — the next run
+# usually succeeds — while the 429 shape may need session pacing).
+#
+# Precedence (when both flags happen to be True): rate-limited wins.
+# `derive_retry_intent` only stamps `cursor_api_silenced=True` when
+# `cursor_api_rate_limited` is False, but the resume builder enforces
+# precedence defensively so a future change to the AND-gate cannot
+# flip the surface to the wrong message.
+
+
+def _silenced_summary_dict(**overrides) -> dict:
+    """Build a synthetic connector-summary dict for the silenced
+    cold-start shape. Matches what `derive_retry_intent` would have
+    written before `_build_product_result` reads it back."""
+    base = _ok_summary_stdout(rows_inserted=0)["summary"]
+    base["raw_records_seen"] = 0
+    base["records_parsed"] = 0
+    base["cold_start_timed_out"] = True
+    base["review_more_button_clicked"] = True
+    base["sort_control_unreachable"] = False
+    base["review_api_request_count"] = 0
+    base["review_api_response_count"] = 0
+    base["cursor_api_rate_limited"] = False
+    base["cursor_api_silenced"] = True
+    base["retry_intent"] = "retry_after_cooldown"
+    base["retry_after_minutes"] = 90
+    base.update(overrides)
+    return base
+
+
+def test_resume_state_carries_silenced_operator_hint():
+    """`cursor_api_silenced=True`-only summary → operator_hint contains
+    the silenced-specific substring AND the cooldown phrasing. The
+    `cursor_api_silenced` field is mirrored into the resume_state for
+    direct read."""
+    summary = _silenced_summary_dict()
+    rs = _derive_resume_state(summary, "2026-05-13T20:26:12")
+    assert rs is not None
+    assert rs["retry_intent"] == "retry_after_cooldown"
+    assert rs["retry_after_minutes"] == 90
+    assert rs["cursor_api_silenced"] is True
+    assert rs["cursor_api_rate_limited"] is False
+    hint = rs["operator_hint"]
+    assert "silent" in hint.lower()
+    assert "cooldown" in hint.lower()
+    assert "90" in hint  # the cadence number is part of the operator-facing string
+
+
+def test_resume_state_rate_limited_hint_wins_over_silenced():
+    """Both `cursor_api_rate_limited=True` AND `cursor_api_silenced=True`
+    on the same summary dict → hint resolves to the rate-limited shape,
+    NOT the silenced shape. Defensive precedence in the resume builder
+    so an out-of-band caller cannot stamp both flags and silently get
+    the silenced hint."""
+    summary = _silenced_summary_dict(cursor_api_rate_limited=True)
+    rs = _derive_resume_state(summary, "2026-05-13T20:26:12")
+    assert rs is not None
+    hint = rs["operator_hint"]
+    assert "silent" not in hint.lower()
+    # Pre-existing rate-limited shape — exact prefix the operator greps.
+    assert hint == "retryable: re-run after 90 min cooldown"
+
+
+def test_resume_state_silenced_shape_keys_are_stable():
+    """Silenced runs carry the same key set as rate-limited runs so
+    downstream consumers can read a uniform shape. `cursor_api_silenced`
+    is the only NEW key in the resume_state dict for this ticket."""
+    rs = _derive_resume_state(
+        _silenced_summary_dict(), "2026-05-13T20:26:12",
+    )
+    assert rs is not None
+    for key in (
+        "retryable", "reason", "exhausted", "stopped_at_records_seen",
+        "retry_after_minutes", "last_seen_at", "retry_intent",
+        "cursor_api_rate_limited", "cursor_api_silenced",
+        "raw_records_seen", "records_parsed", "quality_status",
+        "sort_type", "operator_hint",
+    ):
+        assert key in rs, f"missing key: {key}"
+
+
+def test_resume_state_silenced_via_build_product_result():
+    """End-to-end: a silenced summary fed through `_build_product_result`
+    yields a ProductResult whose `resume_state.operator_hint` is the
+    silenced-specific string. Mirrors the production code path from
+    ingest CLI stdout → batch driver."""
+    spec = ProductSpec(name="Ilso", oy_goods_no="A000000225736")
+    stdout_json = {
+        "run_id": "r_silenced",
+        "quality_status": "invalid",
+        "rows_inserted": 0,
+        "rows_skipped_by_normalize": 0,
+        "summary": _silenced_summary_dict(),
+    }
+    result = _build_product_result(
+        spec=spec,
+        started_at="2026-05-13T18:00:00",
+        finished_at="2026-05-13T18:26:12",
+        stdout_json=stdout_json,
+        error=None,
+    )
+    assert result.resume_state is not None
+    assert result.resume_state["retry_intent"] == "retry_after_cooldown"
+    assert result.resume_state["retry_after_minutes"] == 90
+    assert result.resume_state["cursor_api_silenced"] is True
+    assert "silent" in result.resume_state["operator_hint"].lower()

@@ -367,3 +367,176 @@ def test_retry_intent_derive_method_must_be_called_explicitly():
     summary.derive_retry_intent()
     assert summary.retry_intent == "retry_after_cooldown"
     assert summary.retry_after_minutes == 90
+
+
+# ----------------------------------------------------------------------
+# I-OY-CURSOR-API-SILENCED-RETRY-INTENT tests
+# ----------------------------------------------------------------------
+# Extend the I-B classifier with a third retryable shape: cold-start
+# timed out AFTER a successful 'more' click but the page never issued
+# a single cursor API request. This shape was previously bucketed as
+# `retry_intent="none"` (operator saw an ambiguous block); the
+# extension routes it to `retry_after_cooldown` so the I-C resume
+# surface presents it as retryable.
+#
+# The AND-gate is conservative — a false positive would mask real
+# anti-bot blocks. See `ConnectorRunSummary.derive_retry_intent`
+# docstring for the exact predicate.
+
+
+def _silenced_flags() -> dict:
+    """Build the field set that satisfies the silenced AND-gate.
+
+    Each key is the smallest-named field on ConnectorRunSummary that
+    the gate reads, in the polarity the gate requires. Tests that need
+    to break the gate (e.g. flip one clause to False) override one
+    key only — keeping the change surface narrow.
+    """
+    return {
+        "cold_start_timed_out": True,
+        "review_more_button_clicked": True,
+        "sort_control_unreachable": False,
+        "review_api_request_count": 0,
+        "review_api_response_count": 0,
+        # AND-gate also requires no auth/rate-limit signals — these
+        # are at their defaults, but spelled out so a future default
+        # change cannot silently flip this fixture.
+        "cursor_api_rate_limited": False,
+        "auth_error": False,
+        "mid_stream_auth_break": False,
+        "http_403_seen": False,
+        "human_check_detected": False,
+        "human_check_recovered": False,
+    }
+
+
+def test_cursor_api_silenced_derives_retry_after_cooldown_90():
+    """AND-gate fully satisfied → retry_after_cooldown / 90 + flag set."""
+    summary = _summary(**_silenced_flags())
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_silenced is True
+    assert summary.retry_intent == "retry_after_cooldown"
+    assert summary.retry_after_minutes == 90
+
+
+def test_cursor_api_silenced_precedence_below_rate_limited():
+    """Both cursor_api_rate_limited AND the silenced AND-gate satisfied →
+    rate-limited wins. `cursor_api_silenced` STAYS False because the
+    gate explicitly excludes the rate-limited path (the field is the
+    authoritative discriminator for the silenced shape — symmetric with
+    `cursor_api_rate_limited`)."""
+    flags = _silenced_flags()
+    flags["cursor_api_rate_limited"] = True
+    summary = _summary(**flags)
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_rate_limited is True
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "retry_after_cooldown"
+    assert summary.retry_after_minutes == 90
+
+
+def test_cursor_api_silenced_does_not_override_manual_review_required():
+    """AND-gate clauses present BUT an auth-wall signal is also True →
+    manual_review_required wins. The silenced flag STAYS False because
+    the auth-wall signal explicitly disqualifies the silenced shape."""
+    flags = _silenced_flags()
+    flags["auth_error"] = True
+    summary = _summary(**flags)
+    summary.derive_retry_intent()
+
+    assert summary.auth_error is True
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "manual_review_required"
+    assert summary.retry_after_minutes is None
+
+
+def test_cold_start_timeout_without_click_success_is_not_retryable():
+    """cold_start_timed_out=True but review_more_button_clicked=False →
+    AND-gate fails. Without the successful click, we can't be sure the
+    page would have issued an XHR; this is the generic cold-start
+    failure shape, NOT the silenced-cursor shape."""
+    flags = _silenced_flags()
+    flags["review_more_button_clicked"] = False
+    summary = _summary(**flags)
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+
+def test_cold_start_timeout_with_partial_api_calls_is_not_silenced():
+    """review_api_request_count=1, review_api_response_count=0 → the
+    page DID issue an XHR; the server just didn't respond. Different
+    shape (likely rate-limit or hang), not silence. AND-gate fails."""
+    flags = _silenced_flags()
+    flags["review_api_request_count"] = 1
+    flags["review_api_response_count"] = 0
+    summary = _summary(**flags)
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "none"
+
+
+def test_cursor_api_silenced_sort_control_unreachable_excludes():
+    """sort_control_unreachable=True → DOM-shape failure, not silenced
+    cursor. The AND-gate explicitly excludes this case so a sort-row
+    failure isn't reclassified as wall-clock-recoverable."""
+    flags = _silenced_flags()
+    flags["sort_control_unreachable"] = True
+    summary = _summary(**flags)
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "none"
+
+
+def test_legacy_summary_construction_still_default_none():
+    """Construct with NONE of the silenced/rate-limit/auth flags set →
+    AND-gate cannot fire, retry_intent stays 'none'. Pre-patch JSON
+    payloads (no new keys) deserialize into this exact shape."""
+    summary = _summary()
+    summary.derive_retry_intent()
+
+    assert summary.cursor_api_silenced is False
+    assert summary.retry_intent == "none"
+    assert summary.retry_after_minutes is None
+
+
+def test_cursor_api_silenced_field_default_is_false():
+    """Schema default for the new field is False — pre-patch JSON
+    summaries (no `cursor_api_silenced` key) deserialize cleanly."""
+    summary = _summary()
+    assert summary.cursor_api_silenced is False
+
+
+def test_cursor_api_silenced_serialization_round_trip():
+    """`.model_dump()` includes the new key; round-tripping preserves
+    a True value set via derive_retry_intent."""
+    summary = _summary(**_silenced_flags())
+    summary.derive_retry_intent()
+    dumped = summary.model_dump()
+
+    assert "cursor_api_silenced" in dumped
+    assert dumped["cursor_api_silenced"] is True
+
+    # Pydantic round-trip via dict.
+    rehydrated = ConnectorRunSummary(**dumped)
+    assert rehydrated.cursor_api_silenced is True
+    assert rehydrated.retry_intent == "retry_after_cooldown"
+    assert rehydrated.retry_after_minutes == 90
+
+
+def test_cursor_api_silenced_classifier_is_idempotent():
+    """Re-invocation produces the same result for the silenced path."""
+    summary = _summary(**_silenced_flags())
+    summary.derive_retry_intent()
+    first = (summary.cursor_api_silenced, summary.retry_intent, summary.retry_after_minutes)
+
+    summary.derive_retry_intent()
+    second = (summary.cursor_api_silenced, summary.retry_intent, summary.retry_after_minutes)
+
+    assert first == second == (True, "retry_after_cooldown", 90)
