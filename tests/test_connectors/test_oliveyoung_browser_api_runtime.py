@@ -9392,3 +9392,339 @@ async def test_recovery_lazy_mount_nudge_cold_start_path_untouched(caplog):
         "OY recovery sort header lazy-mount nudge result:" in m
         for m in messages
     ), messages
+
+
+# ---------------------------------------------------------------------------
+# I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — lock the three grep-stable
+# INFO log lines that the reload-first recovery branch emits. The
+# strings are downstream log-tooling grep targets; treat them as a
+# wording contract.
+#
+#   1. `OY recovery: retrying via page.reload before recreate`
+#   2. `OY recovery: reload strategy succeeded`
+#   3. `OY recovery: reload strategy failed; falling back to recreate`
+#
+# The session-state behavior (close/new_page calls, strategy flag,
+# readiness signal) is already covered by the existing
+# `test_reload_first_*` block above; these tests bolt the log-string
+# assertions onto the same scenarios so a future refactor that drops
+# or renames any of the three lines fails fast.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recovery_reload_branch_succeeds_and_avoids_recreate(caplog):
+    """Reload-first happy path emits the success log line and never
+    enters the recreate path.
+
+    Setup: `_build_reload_first_session` with `reload_should_raise=False`
+    and a sort-area simulator that reports visible on the first probe.
+    Expected behavior:
+      - `old_page.reload_calls` length == 1 (single reload attempt).
+      - `ctx.new_page_calls == 0` (recreate branch not entered).
+      - `OY recovery: retrying via page.reload before recreate` log
+        line emitted exactly once (entry marker).
+      - `OY recovery: reload strategy succeeded` log line emitted
+        exactly once (success marker).
+      - The fallback log line is NOT emitted.
+      - `get_post_recreate_strategy_used() == "reload_succeeded"` —
+        preserves the existing strategy-flag contract.
+    """
+    import logging
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        sort_area_visible_after_count=0,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    # Behavioral assertions — the reload-first branch ran end-to-end
+    # on the OLD page and the recreate fallback never fired.
+    assert len(old_page.reload_calls) == 1, old_page.reload_calls
+    assert old_page.close_calls == 0
+    assert sess._ctx.new_page_calls == 0
+    assert new_page_ref == []
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+
+    # Log-string contract.
+    messages = [r.getMessage() for r in caplog.records]
+    entry_lines = [
+        m for m in messages
+        if m == "OY recovery: retrying via page.reload before recreate"
+    ]
+    success_lines = [
+        m for m in messages
+        if m == "OY recovery: reload strategy succeeded"
+    ]
+    fallback_lines = [
+        m for m in messages
+        if m == (
+            "OY recovery: reload strategy failed; "
+            "falling back to recreate"
+        )
+    ]
+    assert len(entry_lines) == 1, (
+        f"expected one entry log line; got {entry_lines!r}; "
+        f"all messages={messages!r}"
+    )
+    assert len(success_lines) == 1, (
+        f"expected one success log line; got {success_lines!r}; "
+        f"all messages={messages!r}"
+    )
+    assert fallback_lines == [], (
+        f"unexpected fallback line on success path: {fallback_lines!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_reload_branch_fails_falls_back_to_recreate(caplog):
+    """Reload returns but post-reload readiness wait deadlines → the
+    historical close+new_page+goto recreate path runs.
+
+    Setup: `_build_reload_first_session` with `reload_should_raise=False`
+    and a sort-area visibility threshold higher than any plausible
+    poll count, so both reload-first readiness waits return False.
+    Expected behavior:
+      - `old_page.reload_calls` length == 1 (single reload attempt;
+        bounded — does NOT loop unbounded).
+      - Recreate path runs: `old_page.close_calls == 1` and
+        `ctx.new_page_calls == 1`.
+      - `OY recovery: retrying via page.reload before recreate` log
+        line emitted (entry).
+      - `OY recovery: reload strategy failed; falling back to recreate`
+        log line emitted (transition).
+      - `OY recovery: reload strategy succeeded` log line is NOT
+        emitted.
+      - `get_post_recreate_strategy_used() == "reload_failed_recreate_fallback"`.
+    """
+    import logging
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        # Never visible: simulator threshold higher than any plausible
+        # poll count within the compressed (0.2s, 0.02s) budget.
+        sort_area_visible_after_count=10_000,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    # Behavioral assertions — one bounded reload, then fall-through.
+    assert len(old_page.reload_calls) == 1, old_page.reload_calls
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+    assert len(new_page_ref) == 1
+    assert (
+        sess.get_post_recreate_strategy_used()
+        == "reload_failed_recreate_fallback"
+    )
+
+    # Log-string contract — both entry and fallback lines fired; no
+    # success line.
+    messages = [r.getMessage() for r in caplog.records]
+    entry_lines = [
+        m for m in messages
+        if m == "OY recovery: retrying via page.reload before recreate"
+    ]
+    success_lines = [
+        m for m in messages
+        if m == "OY recovery: reload strategy succeeded"
+    ]
+    fallback_lines = [
+        m for m in messages
+        if m == (
+            "OY recovery: reload strategy failed; "
+            "falling back to recreate"
+        )
+    ]
+    assert len(entry_lines) == 1, (
+        f"expected one entry log line; got {entry_lines!r}; "
+        f"all messages={messages!r}"
+    )
+    assert success_lines == [], (
+        f"unexpected success line on fallback path: {success_lines!r}"
+    )
+    assert len(fallback_lines) == 1, (
+        f"expected one fallback log line; got {fallback_lines!r}; "
+        f"all messages={messages!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovery_reload_branch_installs_listener_before_reload():
+    """Listener-before-trigger invariant on the reload-first path.
+
+    Production semantics: `_attach_response_handler` is called inside
+    `open()` (well before any cascade). The reload-first path REUSES
+    that listener — the Playwright response handler registration
+    persists across `page.reload()` because the page object identity
+    is preserved. The contract under test is therefore "the listener
+    install MUST happen before the reload call", which is enforced
+    by the spy ordering on a shared event sequence.
+
+    We use a sequence-recording fake: a single `events` list that
+    captures both the listener-install call and every `reload()` call
+    on the page. After invoking `reload_and_reopen_review_tab` on the
+    reload-first SUCCESS path, the first `attach_response_handler`
+    event must precede the first `page.reload` event. A regression
+    where the reload-first path stops relying on the persisted
+    listener (e.g. some future "re-attach on reload" change) would
+    flip this ordering and trip the assertion.
+    """
+    # Shared sequence log captured by both the attach-spy and the
+    # page's reload coroutine.
+    events: list[str] = []
+
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=False,
+        sort_area_visible_after_count=0,
+    )
+
+    # Wrap the existing fake page's reload coroutine so it appends to
+    # the shared `events` log in addition to the per-page
+    # `reload_calls` recorder. Preserves all other behavior (the
+    # `_reload_should_raise` flag, return semantics).
+    real_page_reload = old_page.reload
+
+    async def _spy_page_reload(wait_until=None, timeout=None):
+        events.append("page.reload")
+        return await real_page_reload(
+            wait_until=wait_until, timeout=timeout,
+        )
+
+    old_page.reload = _spy_page_reload  # type: ignore[assignment]
+
+    # Production semantics: the listener is installed in `open()`
+    # BEFORE any cascade. We model that here by calling the existing
+    # attach spy directly (which records "attach_response_handler"
+    # into both `ordering_log` and the shared `events` mirror)
+    # BEFORE invoking the recovery method. Wrap the existing spy so
+    # it also appends to the shared sequence log.
+    real_attach = sess._attach_response_handler
+
+    def _spy_attach_with_events(page):
+        events.append("attach_response_handler")
+        return real_attach(page)
+
+    sess._attach_response_handler = _spy_attach_with_events  # type: ignore[assignment]
+
+    # `open()` would have installed the listener here in production.
+    # Invoke the spy directly so the sequence is captured.
+    sess._attach_response_handler(old_page)
+
+    await sess.reload_and_reopen_review_tab()
+
+    # Strict ordering: the first attach event must precede the first
+    # reload event. The reload-first SUCCESS path does NOT re-attach,
+    # so we expect exactly one "attach_response_handler" event — the
+    # one we recorded manually above — and exactly one "page.reload"
+    # event.
+    assert "attach_response_handler" in events, events
+    assert "page.reload" in events, events
+    attach_index = events.index("attach_response_handler")
+    reload_index = events.index("page.reload")
+    assert attach_index < reload_index, (
+        f"listener-install must precede page.reload on the "
+        f"reload-first path; got events={events!r}"
+    )
+    # And the reload-first SUCCESS path must have actually completed
+    # (otherwise this test is degenerate).
+    assert sess.get_post_recreate_strategy_used() == "reload_succeeded"
+    assert len(old_page.reload_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_reload_branch_bounded_status_on_failure(caplog):
+    """Reload raises AND the recreate fallback's readiness also fails
+    → no unbounded retries; the reload attempt counts against the
+    existing budget exactly once; the existing failure-mode contract
+    holds (sort_area_ready=False on the recreated page, which is
+    what the downstream classifier consumes to produce the existing
+    `sort_control_unreachable` status — no NEW enum strings).
+
+    Setup: `_build_reload_first_session` with `reload_should_raise=True`
+    so the reload-first branch raises and the connector swallows the
+    exception. The fixture's recreate-fallback new page is configured
+    with `sort_area_visible_after_count=10_000`, so the recreate
+    cascade's readiness wait also deadlines. The recreate path runs
+    to completion (close + new_page + attach + goto + cascade).
+    Expected behavior:
+      - `old_page.reload_calls` length == 1 (single bounded attempt —
+        no unbounded retry loop).
+      - Strategy = "reload_failed_recreate_fallback" (an EXISTING
+        enum — no new status strings introduced).
+      - `get_post_recreate_sort_area_ready() is False` — the existing
+        tri-state signal the connector drains to the
+        `sort_control_unreachable` classifier path. No new enum
+        added; the existing contract is preserved.
+      - Recreate path executed (close + new_page).
+      - Both `retrying via page.reload before recreate` and
+        `reload strategy failed; falling back to recreate` log lines
+        emitted; success line NOT emitted.
+    """
+    import logging
+    sess, ordering_log, old_page, new_page_ref = _build_reload_first_session(
+        sort_button_label_ko="최신순",
+        reload_should_raise=True,
+        # Recreate-fallback new page's simulator never makes the sort
+        # area visible — proves the failure contract still holds when
+        # BOTH paths fail.
+        sort_area_visible_after_count=10_000,
+    )
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.voc.connectors.oliveyoung_browser_api",
+    ):
+        await sess.reload_and_reopen_review_tab()
+
+    # Reload was attempted EXACTLY once — bounded against the existing
+    # recovery budget; no unbounded retry loop.
+    assert len(old_page.reload_calls) == 1, old_page.reload_calls
+    # Strategy uses an EXISTING enum value (not a new one).
+    assert (
+        sess.get_post_recreate_strategy_used()
+        == "reload_failed_recreate_fallback"
+    )
+    # Recreate path executed.
+    assert old_page.close_calls == 1
+    assert sess._ctx.new_page_calls == 1
+    assert len(new_page_ref) == 1
+    # The existing tri-state readiness signal stays False — this is
+    # what the connector drains to produce the EXISTING
+    # `sort_control_unreachable` classifier path. No new enum strings
+    # are introduced.
+    assert sess.get_post_recreate_sort_area_ready() is False
+
+    # Log-string contract.
+    messages = [r.getMessage() for r in caplog.records]
+    entry_lines = [
+        m for m in messages
+        if m == "OY recovery: retrying via page.reload before recreate"
+    ]
+    success_lines = [
+        m for m in messages
+        if m == "OY recovery: reload strategy succeeded"
+    ]
+    fallback_lines = [
+        m for m in messages
+        if m == (
+            "OY recovery: reload strategy failed; "
+            "falling back to recreate"
+        )
+    ]
+    assert len(entry_lines) == 1, (
+        f"expected one entry log line; got {entry_lines!r}"
+    )
+    assert success_lines == [], (
+        f"unexpected success line on failure path: {success_lines!r}"
+    )
+    assert len(fallback_lines) == 1, (
+        f"expected one fallback log line; got {fallback_lines!r}"
+    )

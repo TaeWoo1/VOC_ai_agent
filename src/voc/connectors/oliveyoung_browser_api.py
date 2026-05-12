@@ -5964,6 +5964,16 @@ class _PlaywrightReviewSession:
         # Step 0 — Reload-first (Option A). Eligibility is conservative;
         # the recreate fallback is always available below.
         if self._reload_strategy_eligible():
+            # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — emit the
+            # grep-stable INFO line that anchors post-mortem scans on
+            # the reload-first ENTRY. This fires once per eligible
+            # invocation, before any session-state mutation, and uses
+            # the exact wording locked by the runtime-suite contract
+            # test (do NOT abbreviate or translate; downstream log
+            # tooling matches on the literal string).
+            logger.info(
+                "OY recovery: retrying via page.reload before recreate",
+            )
             # 0a. Drain queue + reset session-level accumulators in
             # place. The existing _on_response closure shares these
             # by reference (captured in `_attach_response_handler`),
@@ -6103,6 +6113,15 @@ class _PlaywrightReviewSession:
                     # selection (the same listener registered in
                     # `open()` persists across reload).
                     self._post_recreate_strategy_used = "reload_succeeded"
+                    # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — grep-
+                    # stable INFO line marking the success exit. Both
+                    # success branches (skip-cascade-when-healthy and
+                    # the cascade-True branch below) emit the SAME
+                    # literal string so post-mortem log scans see a
+                    # single uniform marker.
+                    logger.info(
+                        "OY recovery: reload strategy succeeded",
+                    )
                     return
                 # 0c. Shared post-navigation cascade on the reloaded
                 # page. Returns True iff the readiness wait observed
@@ -6112,6 +6131,13 @@ class _PlaywrightReviewSession:
                     # 0d. Reload-first succeeded — record the strategy
                     # and skip the recreate fallback entirely.
                     self._post_recreate_strategy_used = "reload_succeeded"
+                    # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — same
+                    # grep-stable INFO line as the skip-cascade-when-
+                    # healthy branch (identical wording is intentional
+                    # so downstream tooling can match on the literal).
+                    logger.info(
+                        "OY recovery: reload strategy succeeded",
+                    )
                     return
                 logger.info(
                     "OY reload-first strategy: post-reload review sort "
@@ -6120,6 +6146,15 @@ class _PlaywrightReviewSession:
             # Reload-first failed (raised or readiness False). Mark the
             # strategy and fall through to the historical recreate path.
             self._post_recreate_strategy_used = "reload_failed_recreate_fallback"
+            # I-OY-RECOVERY-RECREATE-STRATEGY-REVISION — grep-stable
+            # INFO line marking the fall-through. The preceding
+            # `logger.warning` (reload raised) and `logger.info`
+            # (post-reload readiness failed) lines still carry the
+            # diagnostic context; THIS line is the canonical
+            # transition marker downstream log tooling pivots on.
+            logger.info(
+                "OY recovery: reload strategy failed; falling back to recreate",
+            )
         else:
             # Reload-first was not eligible — go straight to recreate.
             self._post_recreate_strategy_used = "recreate_only"
