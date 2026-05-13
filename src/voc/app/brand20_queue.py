@@ -554,6 +554,12 @@ class DashboardView(BaseModel):
     counts: dict[str, int]  # one per status literal
 
     ready_now: list[QueueItem]
+    # `runnable_pending` is the operator-visible bucket of rows that
+    # have never been attempted but are eligible for first collection
+    # (status == "pending"). Kept distinct from `ready_now` so the
+    # renderer can mark "cold start" vs "advanced-to-ready" without
+    # ambiguity; both feed `suggestions` below.
+    runnable_pending: list[QueueItem] = Field(default_factory=list)
     waiting: list[QueueItem]
     manual: list[QueueItem]
     done: list[QueueItem]
@@ -573,6 +579,34 @@ def _sort_priority(item: QueueItem) -> tuple[int, str]:
     except ValueError:
         idx = 99
     return (1, f"{idx:02d}_{item.sort_type}")
+
+
+def _suggestion_priority(item: QueueItem) -> tuple[int, int, str]:
+    """Suggestion ordering key for the runnable pool.
+
+    Tuple components, ascending:
+      0. target_type: primary (DATETIME_DESC) before signal sorts.
+         Signal sorts are further ordered by their canonical position
+         in ALL_SORTS so the dashboard renders them in a stable,
+         operator-recognisable sequence.
+      1. cold-start preference: rows with no prior attempt
+         (attempts == 0 AND last_attempt_at is None) sort before
+         already-touched rows. This keeps the seed's never-tried
+         primaries at the head of the suggestion list.
+      2. goods_no ascending: stable tie-break so the same queue
+         produces the same suggestion list across runs.
+    """
+    if item.target_type == "primary":
+        target_bucket = 0
+    else:
+        try:
+            idx = ALL_SORTS.index(item.sort_type)
+        except ValueError:
+            idx = 99
+        # Reserve bucket 0 for primary, offset signals into bucket 1+.
+        target_bucket = 1 + idx
+    cold_start = 0 if (item.attempts == 0 and item.last_attempt_at is None) else 1
+    return (target_bucket, cold_start, item.goods_no)
 
 
 def dashboard_view(
@@ -601,10 +635,18 @@ def dashboard_view(
     for it in items:
         distinct_products.setdefault(it.goods_no, it.product_name)
 
-    # Ready Now: status==ready, primary first.
+    # Ready Now: status==ready, primary first. Rows that the operator
+    # (or `mark_checkpoint_certified`) has explicitly advanced.
     ready_now = sorted(
         (it for it in items if it.status == "ready"),
         key=_sort_priority,
+    )
+    # Runnable Pending: status==pending, never attempted, primary first.
+    # These are first-collection candidates — they're runnable without
+    # any operator intervention beyond live-collection authorization.
+    runnable_pending = sorted(
+        (it for it in items if it.status == "pending"),
+        key=_suggestion_priority,
     )
     # Waiting: status==retry_after_cooldown, ascending by next_run_after.
     waiting = sorted(
@@ -657,17 +699,22 @@ def dashboard_view(
         if nra is not None and nra <= now_dt:
             runnable_now_from_waiting.append(it)
 
-    # Suggestions: Ready Now (primary-first) then runnable cooldowns.
-    # Cap at 3 to match the ticket spec.
-    suggestions: list[QueueItem] = []
-    for it in ready_now:
-        if len(suggestions) >= 3:
-            break
-        suggestions.append(it)
-    for it in runnable_now_from_waiting:
-        if len(suggestions) >= 3:
-            break
-        suggestions.append(it)
+    # Suggestions: pool together every row whose blockers are not
+    # active — ready, pending (never-attempted), and cooldown rows
+    # whose `next_run_after` has elapsed. Apply `_suggestion_priority`
+    # so primary DATETIME_DESC rows lead, cold-starts come before
+    # already-touched rows, and `goods_no` provides a stable
+    # tie-break. Cap at 3 per the ticket spec.
+    #
+    # manual_checkpoint / running / done / inconclusive are NEVER
+    # suggested — those statuses gate themselves by requiring an
+    # explicit operator transition.
+    candidate_pool: list[QueueItem] = []
+    candidate_pool.extend(ready_now)
+    candidate_pool.extend(runnable_pending)
+    candidate_pool.extend(runnable_now_from_waiting)
+    candidate_pool.sort(key=_suggestion_priority)
+    suggestions = candidate_pool[:3]
 
     return DashboardView(
         generated_at=_now_iso(now_dt),
@@ -678,6 +725,7 @@ def dashboard_view(
         total_targets_ideal=20 * 5,
         counts=counts,
         ready_now=ready_now,
+        runnable_pending=runnable_pending,
         waiting=waiting,
         manual=manual,
         done=done_list,

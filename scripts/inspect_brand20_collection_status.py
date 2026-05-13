@@ -170,6 +170,30 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
             )
     lines.append("")
 
+    # Runnable / Pending — first-collection candidates (status=pending,
+    # never attempted). These feed SUGGESTED NEXT RUNS alongside
+    # READY NOW; surfacing them here makes the dashboard usable to
+    # operators who didn't read the dispatching turn.
+    lines.append("RUNNABLE / PENDING (never attempted)")
+    lines.append("-" * 78)
+    if not view.runnable_pending:
+        lines.append("  (none)")
+    else:
+        # Cap the display to keep the dashboard scannable; the full set
+        # is still available via the queue JSON and PER-SORT counts.
+        display_cap = 10
+        for it in view.runnable_pending[:display_cap]:
+            lines.append(
+                f"  {it.goods_no}  {it.sort_type:<16} "
+                f"target={it.target_type}  product={it.product_name}"
+            )
+        remaining = len(view.runnable_pending) - display_cap
+        if remaining > 0:
+            lines.append(
+                f"  ... (+{remaining} more pending — see PER-SORT counts)"
+            )
+    lines.append("")
+
     # Waiting
     lines.append("WAITING (retry_after_cooldown)")
     lines.append("-" * 78)
@@ -207,7 +231,13 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
     lines.append("SUGGESTED NEXT RUNS (up to 3)")
     lines.append("-" * 78)
     if not view.suggestions:
-        lines.append("  (none — all rows pending, in cooldown, or in manual_checkpoint)")
+        # Reaching this branch means every row is in a blocked state
+        # (manual_checkpoint, running, done, inconclusive) or in a
+        # cooldown whose next_run_after is still in the future.
+        lines.append(
+            "  (none — every row is blocked: manual_checkpoint / "
+            "running / done / inconclusive / cooldown not yet elapsed)"
+        )
     else:
         for it in view.suggestions:
             lines.append("")

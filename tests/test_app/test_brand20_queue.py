@@ -490,3 +490,212 @@ def test_full_queue_seed_cardinality() -> None:
 
     # (6) _meta.seed_complete is True.
     assert queue.meta.seed_complete is True, queue.meta.seed_complete
+
+
+# ---------------------------------------------------------------------------
+# 14. Pending rows are runnable suggestion candidates
+# ---------------------------------------------------------------------------
+# These tests pin the I-OY-BRAND20-PENDING-AS-RUNNABLE-DASHBOARD contract:
+# a freshly-seeded queue (all rows pending, nothing yet attempted) must
+# produce a non-empty SUGGESTED NEXT RUNS list — otherwise the dashboard
+# is useless to an operator on the first run of a campaign.
+
+
+def test_dashboard_pending_only_queue_yields_suggestions() -> None:
+    """A queue with ONLY pending rows must produce non-empty
+    suggestions (size <= 3). This is the "fresh seed" baseline: nothing
+    has been attempted, nothing is in cooldown, no manual checkpoint —
+    the operator needs a starting list, not silence."""
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    queue = _two_sku_queue()  # 10 pending rows
+    view = dashboard_view(queue, now=now)
+
+    assert view.counts["pending"] == 10
+    assert view.counts["ready"] == 0
+    assert 0 < len(view.suggestions) <= 3, len(view.suggestions)
+    # runnable_pending should hold every pending row (10), ordered by
+    # _suggestion_priority — primary rows first.
+    assert len(view.runnable_pending) == 10
+    assert view.runnable_pending[0].target_type == "primary"
+
+
+def test_dashboard_suggestions_prefer_primary_over_signal_pending() -> None:
+    """When both pending primary (DATETIME_DESC) and pending signal-sort
+    rows exist, the primary rows must lead the suggestion list."""
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    # Construct a queue where signal-sort rows come FIRST in queue order
+    # so we know ordering is driven by _suggestion_priority, not by
+    # insertion order.
+    items: list[QueueItem] = [
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="RATING_ASC",
+            target_type="signal",
+            status="pending",
+        ),
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="USEFUL_SCORE_DESC",
+            target_type="signal",
+            status="pending",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="pending",
+        ),
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="pending",
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now)
+
+    assert len(view.suggestions) == 3
+    # First two suggestions must be the two primary DATETIME_DESC rows;
+    # signal-sort pending rows must not displace them.
+    assert view.suggestions[0].target_type == "primary"
+    assert view.suggestions[0].sort_type == "DATETIME_DESC"
+    assert view.suggestions[1].target_type == "primary"
+    assert view.suggestions[1].sort_type == "DATETIME_DESC"
+    # And within the primaries, goods_no ascending breaks the tie
+    # stably (both are cold starts).
+    assert view.suggestions[0].goods_no == "A000000111111"
+    assert view.suggestions[1].goods_no == "A000000222222"
+    # Third suggestion is the first signal-sort row by canonical order
+    # (RATING_ASC precedes USEFUL_SCORE_DESC in ALL_SORTS).
+    assert view.suggestions[2].target_type == "signal"
+    assert view.suggestions[2].sort_type == "RATING_ASC"
+
+
+def test_dashboard_cooldown_future_excluded_past_included() -> None:
+    """Cooldown rows whose `next_run_after` is in the future must NOT
+    be suggested; cooldown rows whose `next_run_after` has elapsed MUST
+    be suggested (they are runnable again)."""
+    now = datetime(2026, 5, 13, 18, 0, 0, tzinfo=timezone.utc)
+    items: list[QueueItem] = [
+        # Cooldown still in the future — must be excluded.
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="retry_after_cooldown",
+            last_attempt_at="2026-05-13T17:00:00Z",
+            next_run_after="2026-05-13T18:30:00Z",
+            retry_intent="retry_after_cooldown",
+            retry_after_minutes=90,
+            attempts=1,
+        ),
+        # Cooldown elapsed — must be included as runnable.
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="retry_after_cooldown",
+            last_attempt_at="2026-05-13T15:00:00Z",
+            next_run_after="2026-05-13T16:30:00Z",
+            retry_intent="retry_after_cooldown",
+            retry_after_minutes=90,
+            attempts=1,
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now)
+
+    # Both rows are in `waiting` (the status==retry_after_cooldown
+    # bucket). The future-cooldown row must not surface in suggestions;
+    # the elapsed-cooldown row must.
+    assert len(view.waiting) == 2
+    suggested_goods = [it.goods_no for it in view.suggestions]
+    assert "A000000222222" in suggested_goods
+    assert "A000000111111" not in suggested_goods
+
+
+def test_dashboard_never_suggests_manual_done_inconclusive_running() -> None:
+    """manual_checkpoint / done / inconclusive / running rows must
+    never appear in suggestions, regardless of how many such rows exist
+    and regardless of target_type."""
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    items: list[QueueItem] = [
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="manual_checkpoint",
+            checkpoint_reason="auth_or_human_check",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="done",
+        ),
+        QueueItem(
+            goods_no="A000000333333",
+            product_name="Brand-C",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="inconclusive",
+        ),
+        QueueItem(
+            goods_no="A000000444444",
+            product_name="Brand-D",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="running",
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now)
+
+    # Every row is in a blocked status — suggestions must be empty.
+    assert view.suggestions == []
+    # And none of the blocked goods_nos may appear in runnable_pending
+    # either (defensive: pending bucket must not absorb any of them).
+    pending_goods = {it.goods_no for it in view.runnable_pending}
+    for blocked_goods in (
+        "A000000111111", "A000000222222",
+        "A000000333333", "A000000444444",
+    ):
+        assert blocked_goods not in pending_goods
+
+
+def test_dashboard_real_seed_pending_count_preserved() -> None:
+    """The pending-as-runnable change must NOT mutate state:
+    constructing a view against the on-disk Brand-20 seed at HEAD must
+    still report total_targets=100 and pending=96 (16 DATETIME_DESC +
+    4 cooldown + 80 signal-sort rows). The suggestion list, by
+    contrast, must now be non-empty (was previously empty)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    queue_path = repo_root / "ops" / "brand20_collection_queue.json"
+    queue = load_queue(queue_path)
+
+    # Pin a `now` so the test is independent of wall-clock — choose a
+    # timestamp at which the seed's 4 cooldown rows are still in the
+    # future (the seed's cooldowns expire 2026-05-13T14:25:40Z onward).
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    view = dashboard_view(queue, now=now)
+
+    assert view.total_targets_seeded == 100
+    assert view.counts["pending"] == 96
+    assert view.counts["retry_after_cooldown"] == 4
+    assert view.counts["done"] == 0
+    # SUGGESTED NEXT RUNS must now surface real candidates for the
+    # operator — the original bug was an empty list here.
+    assert 0 < len(view.suggestions) <= 3
+    # Suggestions on a freshly-seeded queue must lead with primary
+    # DATETIME_DESC rows.
+    assert view.suggestions[0].target_type == "primary"
+    assert view.suggestions[0].sort_type == "DATETIME_DESC"
