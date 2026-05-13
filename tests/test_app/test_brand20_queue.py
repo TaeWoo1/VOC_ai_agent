@@ -168,6 +168,26 @@ def test_apply_batch_summary_cursor_silenced_routes_to_ready_with_silenced_note(
     assert "cursor_api_silenced" in item.operator_note
 
 
+def test_apply_batch_summary_retry_intent_alone_does_not_call_note_429() -> None:
+    queue = _two_sku_queue()
+    batch = _load_fixture("brand20_batch_retry_after_cooldown.json")
+    batch["products"][0]["oy_goods_no"] = "A000000111111"
+    batch["products"][0]["resume_state"]["goods_no"] = "A000000111111"
+    batch["products"][0]["summary"]["cursor_api_rate_limited"] = False
+    batch["products"][0]["summary"]["cursor_api_silenced"] = False
+    batch["products"][0]["resume_state"]["cursor_api_rate_limited"] = False
+    batch["products"][0]["resume_state"]["cursor_api_silenced"] = False
+
+    item = apply_batch_summary(queue, batch)
+
+    assert item.status == "ready"
+    assert item.retry_intent == "retry_after_cooldown"
+    assert item.operator_note is not None
+    assert "retry_after_cooldown observed" in item.operator_note
+    assert "cursor 429" not in item.operator_note
+    assert "cursor_api_rate_limited" not in item.operator_note
+
+
 def test_apply_batch_summary_cursor_429_row_is_picked_by_runnable_selection() -> None:
     """After a cursor-429 batch_summary lands, the row IS selected by
     `pick_next_runnable` on the very next call — no wall-clock wait.

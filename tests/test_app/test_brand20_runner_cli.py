@@ -783,6 +783,7 @@ def test_cursor_api_rate_limited_stops_loop(
     queue_path: Path,
     patch_cdp_happy: dict[str, Any],
     tmp_path: Path,
+    capsys: pytest.CaptureFixture,
 ) -> None:
     """A batch_summary with `cursor_api_rate_limited=True` (but no
     retry_intent override) still stops the loop on the first call."""
@@ -812,6 +813,10 @@ def test_cursor_api_rate_limited_stops_loop(
     )
     assert exit_code == 1
     assert seq.state["i"] == 1
+    out = capsys.readouterr().out
+    assert "STOP: cursor 429 / rate limited observed" in out
+    assert "OY cursor 429 / rate limit observed" in out
+    assert "cursor API silenced / cold-start timeout" not in out
 
 
 def test_cursor_api_silenced_stops_loop(
@@ -846,7 +851,10 @@ def test_cursor_api_silenced_stops_loop(
     assert exit_code == 1
     assert seq.state["i"] == 1
     out = capsys.readouterr().out
-    assert "STOP" in out
+    assert "STOP: cursor API silenced / cold-start timeout observed" in out
+    assert "OY cursor API silenced / cold-start timeout observed" in out
+    assert "OY cursor 429 observed" not in out
+    assert "STOP: cursor 429" not in out
 
 
 def test_manual_checkpoint_stops_loop(

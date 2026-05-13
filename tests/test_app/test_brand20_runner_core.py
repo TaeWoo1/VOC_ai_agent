@@ -378,18 +378,47 @@ def test_stop_policy_retry_after_cooldown_stops() -> None:
     assert decision.stop is True
     assert decision.reason == "retry_after_cooldown"
     assert decision.operator_message is not None
+    assert "cursor 429" not in decision.operator_message
+    assert "retry_after_cooldown observed" in decision.operator_message
 
 
 def test_stop_policy_cursor_api_rate_limited_stops() -> None:
     decision = should_stop_loop({"cursor_api_rate_limited": True})
     assert decision.stop is True
     assert decision.reason == "cursor_api_rate_limited"
+    assert decision.operator_message is not None
+    assert "cursor 429 / rate limited" in decision.operator_message
+
+
+def test_stop_policy_http_429_seen_uses_rate_limited_wording() -> None:
+    decision = should_stop_loop({"http_429_seen": True})
+    assert decision.stop is True
+    assert decision.reason == "cursor_api_rate_limited"
+    assert decision.operator_message is not None
+    assert "cursor 429 / rate limited" in decision.operator_message
 
 
 def test_stop_policy_cursor_api_silenced_stops() -> None:
     decision = should_stop_loop({"cursor_api_silenced": True})
     assert decision.stop is True
     assert decision.reason == "cursor_api_silenced"
+    assert decision.operator_message is not None
+    assert "cursor API silenced / cold-start timeout" in decision.operator_message
+    assert "cursor 429" not in decision.operator_message
+
+
+def test_stop_policy_cold_start_without_cursor_requests_uses_silenced_wording() -> None:
+    decision = should_stop_loop({
+        "cold_start_timed_out": True,
+        "review_api_request_count": 0,
+        "cursor_api_rate_limited": False,
+        "http_429_seen": False,
+    })
+    assert decision.stop is True
+    assert decision.reason == "cursor_api_silenced"
+    assert decision.operator_message is not None
+    assert "cursor API silenced / cold-start timeout" in decision.operator_message
+    assert "cursor 429" not in decision.operator_message
 
 
 def test_stop_policy_manual_checkpoint_status_stops() -> None:

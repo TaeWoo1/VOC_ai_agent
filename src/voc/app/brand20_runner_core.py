@@ -373,6 +373,35 @@ def _get_attr_or_key(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _get_stop_signal(obj: Any, key: str, default: Any = None) -> Any:
+    """Read stop-policy signals from raw batch summaries or QueueItems."""
+    value = _get_attr_or_key(obj, key, None)
+    if value is not None:
+        return value
+    if not isinstance(obj, dict):
+        return default
+    products = obj.get("products") or []
+    if not products or not isinstance(products, list):
+        return default
+    first = products[0]
+    if not isinstance(first, dict):
+        return default
+    value = first.get(key)
+    if value is not None:
+        return value
+    summary = first.get("summary")
+    if isinstance(summary, dict):
+        value = summary.get(key)
+        if value is not None:
+            return value
+    resume_state = first.get("resume_state")
+    if isinstance(resume_state, dict):
+        value = resume_state.get(key)
+        if value is not None:
+            return value
+    return default
+
+
 def should_stop_loop(batch_summary_or_item: Any) -> StopDecision:
     """Return whether the runner loop should stop after this attempt.
 
@@ -381,9 +410,11 @@ def should_stop_loop(batch_summary_or_item: Any) -> StopDecision:
     attempt to decide whether to advance to the next runnable item.
 
     Stop conditions (any True → stop):
-      - `retry_intent == "retry_after_cooldown"`
       - `cursor_api_rate_limited is True`
+      - `http_429_seen is True`
       - `cursor_api_silenced is True`
+      - `cold_start_timed_out is True` with no cursor review API requests
+      - `retry_intent == "retry_after_cooldown"`
       - resulting QueueItem `status == "manual_checkpoint"`
       - resulting QueueItem `status == "retry_after_cooldown"`
 
@@ -394,36 +425,44 @@ def should_stop_loop(batch_summary_or_item: Any) -> StopDecision:
     """
     obj = batch_summary_or_item
 
-    retry_intent = _get_attr_or_key(obj, "retry_intent")
-    cursor_api_rate_limited = bool(_get_attr_or_key(obj, "cursor_api_rate_limited", False))
-    cursor_api_silenced = bool(_get_attr_or_key(obj, "cursor_api_silenced", False))
-    status = _get_attr_or_key(obj, "status")
+    retry_intent = _get_stop_signal(obj, "retry_intent")
+    cursor_api_rate_limited = bool(_get_stop_signal(
+        obj, "cursor_api_rate_limited", False,
+    ))
+    http_429_seen = bool(_get_stop_signal(obj, "http_429_seen", False))
+    cursor_api_silenced = bool(_get_stop_signal(obj, "cursor_api_silenced", False))
+    cold_start_timed_out = bool(_get_stop_signal(obj, "cold_start_timed_out", False))
+    review_api_request_count = int(_get_stop_signal(
+        obj, "review_api_request_count", 0,
+    ) or 0)
+    status = _get_stop_signal(obj, "status")
 
+    if cursor_api_rate_limited or http_429_seen:
+        return StopDecision(
+            stop=True,
+            reason="cursor_api_rate_limited",
+            operator_message=(
+                "STOP: cursor 429 / rate limited observed. "
+                "Session-global throttle in effect."
+            ),
+        )
+    if cursor_api_silenced or (cold_start_timed_out and review_api_request_count == 0):
+        return StopDecision(
+            stop=True,
+            reason="cursor_api_silenced",
+            operator_message=(
+                "STOP: cursor API silenced / cold-start timeout observed. "
+                "No cursor review API requests fired; session-global "
+                "retry pause in effect."
+            ),
+        )
     if retry_intent == "retry_after_cooldown":
         return StopDecision(
             stop=True,
             reason="retry_after_cooldown",
             operator_message=(
-                "STOP: cursor 429 / retry_after_cooldown observed. "
-                "Session-global throttle in effect."
-            ),
-        )
-    if cursor_api_rate_limited:
-        return StopDecision(
-            stop=True,
-            reason="cursor_api_rate_limited",
-            operator_message=(
-                "STOP: cursor_api_rate_limited=True observed. "
-                "Session-global throttle in effect."
-            ),
-        )
-    if cursor_api_silenced:
-        return StopDecision(
-            stop=True,
-            reason="cursor_api_silenced",
-            operator_message=(
-                "STOP: cursor_api_silenced=True observed "
-                "(cold-start AND-gate). Session-global throttle."
+                "STOP: retry_after_cooldown observed. Session-global "
+                "retry pause in effect."
             ),
         )
     if status == "manual_checkpoint":

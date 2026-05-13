@@ -352,6 +352,25 @@ def _format_resume_after_cursor_429(item: Any) -> str:
 _format_resume_after_cooldown = _format_resume_after_cursor_429
 
 
+def _operator_retry_hint(reason: str | None) -> str:
+    if reason == "cursor_api_rate_limited":
+        return (
+            "OY cursor 429 / rate limit observed. Refresh the product tab "
+            "in Chrome and re-run when reviews load again "
+            "(typically a few minutes)."
+        )
+    if reason == "cursor_api_silenced":
+        return (
+            "OY cursor API silenced / cold-start timeout observed. Refresh "
+            "the product tab in Chrome and re-run when reviews load again "
+            "(typically a few minutes)."
+        )
+    return (
+        "OY retry_after_cooldown observed. Refresh the product tab in "
+        "Chrome and re-run when reviews load again (typically a few minutes)."
+    )
+
+
 def _format_certify_command(item: Any) -> str:
     """Render the verbatim certify command for a row that landed in
     manual_checkpoint."""
@@ -663,7 +682,7 @@ def _run_loop(
             f"last_attempted_at={updated_item.last_attempt_at!r}"
         )
 
-        # Stop policy first: ANY 429-class signal halts the session
+        # Stop policy first: ANY retry-class signal halts the session
         # immediately, regardless of `max_items` remaining.
         decision = should_stop_loop(summary)
         if not decision.stop:
@@ -690,11 +709,7 @@ def _run_loop(
                 )
                 if updated_item.operator_note:
                     print(f"operator_note: {updated_item.operator_note}")
-                print(
-                    "OY cursor 429 observed. Refresh the product tab "
-                    "in Chrome and re-run when reviews load again "
-                    "(typically a few minutes)."
-                )
+                print(_operator_retry_hint(decision.reason))
                 print("operator-retry command (no wall-clock wait):")
                 print(_format_resume_after_cursor_429(updated_item))
             elif decision.reason == "manual_checkpoint":

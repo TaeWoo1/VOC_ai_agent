@@ -454,6 +454,11 @@ OPERATOR_RETRY_NOTE_SILENCED: str = (
     "product tab in Chrome and re-run when reviews load again "
     "(typically a few minutes). retry_intent preserved for audit."
 )
+OPERATOR_RETRY_NOTE_RETRY_INTENT: str = (
+    "retry_after_cooldown observed without a raw cursor rate-limit signal. "
+    "Refresh the product tab in Chrome and re-run when reviews load again "
+    "(typically a few minutes). retry_intent preserved for audit."
+)
 
 
 def _decide_status(
@@ -518,8 +523,10 @@ def _decide_status(
         # phrasing is more informative for the operator, so it wins.
         if cursor_api_silenced:
             note = OPERATOR_RETRY_NOTE_SILENCED
-        else:
+        elif cursor_api_rate_limited:
             note = OPERATOR_RETRY_NOTE_RATE_LIMITED
+        else:
+            note = OPERATOR_RETRY_NOTE_RETRY_INTENT
         return "ready", None, note
     if retry_intent == "manual_review_required":
         return "manual_checkpoint", "auth_or_human_check", None
