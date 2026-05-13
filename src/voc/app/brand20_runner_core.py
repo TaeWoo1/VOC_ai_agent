@@ -1,11 +1,14 @@
 """Pure core for the Brand-20 queue runner.
 
 This module composes the existing `Brand20Queue` data layer with the
-runner CLI. It is intentionally I/O-free: no subprocess, no HTTP, no
-clock reads (callers pass `now` in). Everything in here is unit-
-testable without mocking.
+runner CLI. Phase B adds two thin disk helpers
+(`build_temporary_manifest`, `resolve_batch_summary_path`) but every
+other entry point remains I/O-free (no subprocess, no HTTP, no clock
+reads — callers pass `now` in). The disk helpers are wrapped in tiny,
+test-substitutable surfaces so phase-B's CLI loop can be exercised
+end-to-end without ever running a real collection child.
 
-Phase A scope:
+Phase A scope (unchanged):
   - `pick_next_runnable` — select the next runnable QueueItem given a
     snapshot and an optional operator override.
   - `build_product_url` — canonical OliveYoung product-detail URL with
@@ -13,18 +16,26 @@ Phase A scope:
   - `format_plan_block` — operator-facing plan block printed before
     any subprocess call would be made.
   - `should_stop_loop` — pure decision function for the session-global
-    throttle policy. Phase A ships this for tests; phase B calls it.
+    throttle policy.
 
-Phase B will add:
-  - `build_temporary_manifest` (manifest writer)
-  - `load_batch_summary_from_artifact_root` (subprocess result reader)
-
-These are deferred per the planning handoff §12.
+Phase B adds:
+  - `build_temporary_manifest(item, *, artifact_root, sort_type)` —
+    writes a one-shot manifest JSON the collection child consumes.
+    Returns `(manifest_path, batch_id)` so the caller can resolve the
+    eventual `batch_summary.json` path. Callers MUST `os.unlink` the
+    manifest after the child exits.
+  - `resolve_batch_summary_path(artifact_root, batch_id)` — returns
+    the deterministic `<artifact_root>/<batch_id>/batch_summary.json`
+    location written by `scripts/run_oy_collection_batch.py`. Returns
+    None when the file is absent (e.g. child crashed before writing).
 """
 from __future__ import annotations
 
+import json
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from src.voc.app.brand20_queue import (
@@ -370,3 +381,112 @@ def should_stop_loop(batch_summary_or_item: Any) -> StopDecision:
             ),
         )
     return StopDecision(stop=False, reason=None, operator_message=None)
+
+
+# ---------------------------------------------------------------------------
+# Phase-B helpers: temporary manifest + batch_summary.json resolution
+# ---------------------------------------------------------------------------
+
+
+def _build_batch_id(item: QueueItem, *, now: datetime) -> str:
+    """Return a deterministic-but-collision-resistant `batch_id`.
+
+    The collection child writes
+    `<artifact_root>/<batch_id>/batch_summary.json`, so the runner must
+    know the value up-front to resolve the result. Pattern:
+    `brand20_runner_<goods_no>_<sort_type>_<UTC-stamp>`. The stamp uses
+    second resolution which is sufficient for one-batch-per-second
+    runs; collisions on the same SKU/sort within a single second are
+    not a real concern given the cursor pacing knobs.
+    """
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    stamp = now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"brand20_runner_{item.goods_no}_{item.sort_type}_{stamp}"
+
+
+def build_temporary_manifest(
+    item: QueueItem,
+    *,
+    now: datetime,
+    tmp_dir: Path | str | None = None,
+) -> tuple[Path, str]:
+    """Write a one-product manifest JSON suitable for
+    `scripts/run_oy_collection_batch.py` and return its path plus the
+    `batch_id` the child will use.
+
+    The manifest contract is the one in `collection_batch.load_manifest`:
+    `{"batch_id": ..., "defaults": {"sort_type": ...}, "products":
+    [{"name": ..., "oy_goods_no": ...}]}`. `sort_type` is placed in
+    `defaults` so the connector's `_resolve` picks it up without any
+    per-product override.
+
+    Callers MUST `os.unlink` the returned path after the child exits
+    (the function deliberately does NOT use `delete=True` so the child
+    process can read the file). The caller is also expected to clean
+    up the `<artifact_root>/<batch_id>/` directory if it so chooses;
+    this helper does not touch it.
+    """
+    batch_id = _build_batch_id(item, now=now)
+    payload: dict[str, Any] = {
+        "batch_id": batch_id,
+        "defaults": {
+            # The connector treats `sort_type=None` as "page-default,
+            # no oy_sort_type stamp". The Brand-20 runner ALWAYS pins
+            # the sort to the queue row's `sort_type` so the
+            # batch_summary the connector emits matches the queue row
+            # we're about to update. See CLAUDE.md OY collection rules:
+            # DATETIME_DESC is primary, signal sorts are metadata-only.
+            "sort_type": item.sort_type,
+        },
+        "products": [
+            {
+                "name": item.product_name,
+                "oy_goods_no": item.goods_no,
+            },
+        ],
+    }
+    tmp = tempfile.NamedTemporaryFile(  # noqa: SIM115 — explicit close, see below
+        mode="w",
+        encoding="utf-8",
+        suffix=".manifest.json",
+        prefix=f"brand20_runner_{item.goods_no}_",
+        dir=str(tmp_dir) if tmp_dir is not None else None,
+        delete=False,
+    )
+    try:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.write("\n")
+    finally:
+        tmp.close()
+    return Path(tmp.name), batch_id
+
+
+def resolve_batch_summary_path(
+    artifact_root: Path | str,
+    batch_id: str,
+) -> Path | None:
+    """Return the path the collection child writes
+    `batch_summary.json` to, or None if the file is absent.
+
+    Pattern reproduced from `collection_batch.run_batch`:
+        `<artifact_root>/<batch_id>/batch_summary.json`
+
+    Returning None lets the CLI loop distinguish "child crashed before
+    writing summary" (None) from "summary present, may or may not be a
+    clean exit" (Path), which determines whether we apply the summary
+    to the queue or surface a hard error to the operator.
+    """
+    p = Path(artifact_root) / batch_id / "batch_summary.json"
+    if not p.is_file():
+        return None
+    return p
+
+
+def load_batch_summary(path: Path | str) -> dict[str, Any]:
+    """Read and parse a `batch_summary.json` file. Trusts the
+    on-disk schema (the connector owns it) — no defensive
+    re-validation here; `apply_batch_summary` raises if the shape is
+    wrong, which is the correct surface for an operator-facing
+    error."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))

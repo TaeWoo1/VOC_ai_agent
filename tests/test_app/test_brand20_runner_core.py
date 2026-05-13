@@ -408,3 +408,104 @@ def test_stop_policy_returns_stop_decision_dataclass() -> None:
     """Smoke: the return type is the documented dataclass."""
     decision = should_stop_loop({"retry_intent": "none"})
     assert isinstance(decision, StopDecision)
+
+
+# ---------------------------------------------------------------------------
+# Phase-B helpers: build_temporary_manifest + resolve_batch_summary_path
+# ---------------------------------------------------------------------------
+
+
+def test_build_temporary_manifest_writes_minimal_valid_manifest(tmp_path) -> None:
+    """The manifest is a single-product, single-sort JSON whose shape
+    matches `collection_batch.load_manifest`'s contract: `batch_id`,
+    `defaults.sort_type`, `products[*].name` + `oy_goods_no`."""
+    import json
+    from datetime import datetime, timezone
+
+    from src.voc.app.brand20_runner_core import build_temporary_manifest
+
+    item = QueueItem(
+        goods_no="A000000111111",
+        product_name="Brand-A",
+        sort_type="DATETIME_DESC",
+        target_type="primary",
+    )
+    now = datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+    manifest_path, batch_id = build_temporary_manifest(
+        item, now=now, tmp_dir=tmp_path,
+    )
+    try:
+        assert manifest_path.is_file()
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert payload["batch_id"] == batch_id
+        assert "brand20_runner" in batch_id
+        assert "A000000111111" in batch_id
+        assert "DATETIME_DESC" in batch_id
+        assert payload["defaults"]["sort_type"] == "DATETIME_DESC"
+        assert len(payload["products"]) == 1
+        assert payload["products"][0]["oy_goods_no"] == "A000000111111"
+        assert payload["products"][0]["name"] == "Brand-A"
+    finally:
+        manifest_path.unlink(missing_ok=True)
+
+
+def test_build_temporary_manifest_loads_via_real_loader(tmp_path) -> None:
+    """The manifest the runner writes must round-trip through the
+    actual `collection_batch.load_manifest` without raising. This is
+    the binding contract between the runner and the connector child."""
+    from datetime import datetime, timezone
+
+    from src.voc.app.brand20_runner_core import build_temporary_manifest
+    from src.voc.app.collection_batch import load_manifest
+
+    item = QueueItem(
+        goods_no="A000000222222",
+        product_name="Brand-B",
+        sort_type="RATING_ASC",
+        target_type="signal",
+    )
+    now = datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+    manifest_path, _batch_id = build_temporary_manifest(
+        item, now=now, tmp_dir=tmp_path,
+    )
+    try:
+        manifest = load_manifest(manifest_path)
+        assert manifest.batch_id  # non-empty
+        assert manifest.defaults.sort_type == "RATING_ASC"
+        assert len(manifest.products) == 1
+        assert manifest.products[0].oy_goods_no == "A000000222222"
+    finally:
+        manifest_path.unlink(missing_ok=True)
+
+
+def test_resolve_batch_summary_path_returns_none_when_absent(tmp_path) -> None:
+    from src.voc.app.brand20_runner_core import resolve_batch_summary_path
+
+    result = resolve_batch_summary_path(tmp_path, "nonexistent_batch_id")
+    assert result is None
+
+
+def test_resolve_batch_summary_path_finds_file(tmp_path) -> None:
+    """When the file is present at `<artifact_root>/<batch_id>/
+    batch_summary.json`, the resolver returns the absolute path."""
+    from src.voc.app.brand20_runner_core import resolve_batch_summary_path
+
+    batch_id = "brand20_runner_test_batch"
+    batch_dir = tmp_path / batch_id
+    batch_dir.mkdir()
+    summary_path = batch_dir / "batch_summary.json"
+    summary_path.write_text('{"batch_id": "test"}', encoding="utf-8")
+
+    resolved = resolve_batch_summary_path(tmp_path, batch_id)
+    assert resolved == summary_path
+
+
+def test_load_batch_summary_round_trips(tmp_path) -> None:
+    """`load_batch_summary` reads JSON and returns the parsed dict."""
+    from src.voc.app.brand20_runner_core import load_batch_summary
+
+    p = tmp_path / "summary.json"
+    p.write_text('{"k": 1, "products": [{"name": "x"}]}', encoding="utf-8")
+    payload = load_batch_summary(p)
+    assert payload["k"] == 1
+    assert payload["products"][0]["name"] == "x"

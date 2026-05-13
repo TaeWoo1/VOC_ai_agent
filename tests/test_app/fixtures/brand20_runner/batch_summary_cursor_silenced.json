@@ -1,0 +1,46 @@
+{
+  "batch_id": "brand20_runner_A000000111111_DATETIME_DESC_20260513T120000Z",
+  "started_at": "2026-05-13T12:00:00",
+  "finished_at": "2026-05-13T12:02:00",
+  "halted": true,
+  "halt_reason": "cursor_api_silenced on cold start",
+  "manifest_audit": {
+    "sort_type_in_defaults": "DATETIME_DESC"
+  },
+  "products": [
+    {
+      "name": "Brand-A",
+      "oy_goods_no": "A000000111111",
+      "status": "anti_bot",
+      "quality_status": "invalid",
+      "rows_inserted": 0,
+      "raw_records_seen": 0,
+      "records_parsed": 0,
+      "run_id": "run_20260513_120000_silenced01",
+      "summary": {
+        "run_id": "run_20260513_120000_silenced01",
+        "cursor_api_rate_limited": false,
+        "cursor_api_silenced": true,
+        "retry_intent": "retry_after_cooldown",
+        "retry_after_minutes": 90,
+        "requested_sort_type": "DATETIME_DESC"
+      },
+      "resume_state": {
+        "retryable": true,
+        "reason": "cursor_api_silenced",
+        "exhausted": false,
+        "stopped_at_records_seen": 0,
+        "retry_after_minutes": 90,
+        "retry_intent": "retry_after_cooldown",
+        "cursor_api_rate_limited": false,
+        "cursor_api_silenced": true,
+        "raw_records_seen": 0,
+        "records_parsed": 0,
+        "sort_type": "DATETIME_DESC",
+        "goods_no": "A000000111111",
+        "final_status": "anti_bot",
+        "rows_inserted": 0
+      }
+    }
+  ]
+}

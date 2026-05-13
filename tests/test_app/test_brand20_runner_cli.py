@@ -1,14 +1,14 @@
-"""Tests for the phase-A CLI script `run_brand20_queue_runner.py`.
+"""Tests for the CLI script `run_brand20_queue_runner.py`.
 
-All tests call `main([...])` directly — no test forks a subprocess.
-All tests patch `cdp_tab_probe` so no test contacts 127.0.0.1:9222.
-All tests patch the `_default_pgrep` runner so no test forks `pgrep`.
+All tests call `main([...])` directly — no test forks a real
+subprocess. All tests patch `cdp_tab_probe` so no test contacts
+127.0.0.1:9222. All tests patch the `_default_pgrep` runner so no
+test forks `pgrep`.
 
-The CLI in phase A never invokes `subprocess.run` on the collection
-script; tests assert this property by patching `subprocess.run` at the
-script's import scope (only the precondition gate's _default_*
-helpers use subprocess) and asserting it is not called against the
-collection entrypoint.
+The CLI never invokes a real `subprocess.run` of the collection
+script in tests: every phase-B test passes a `subprocess_runner` stub
+that writes a fixture `batch_summary.json` at the deterministic
+artifact-root location the runner expects.
 """
 from __future__ import annotations
 
@@ -250,37 +250,39 @@ def test_dry_run_does_not_invoke_collection_subprocess(
 
 
 # ---------------------------------------------------------------------------
-# --i-authorize-live-collection (phase A short-circuit)
+# --i-authorize-live-collection — without flag, no subprocess
 # ---------------------------------------------------------------------------
 
 
-def test_authorize_live_collection_short_circuits_in_phase_a(
+def test_no_auth_flag_never_invokes_subprocess(
     queue_path: Path,
     patch_cdp_happy: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """Phase A: --i-authorize-live-collection prints the 'not yet
-    implemented' notice and exits 0. subprocess.run is NEVER called
-    on the collection script."""
-    def _fake_run(*args: Any, **kwargs: Any) -> Any:
-        cmd = args[0] if args else kwargs.get("args")
-        joined = " ".join(str(x) for x in cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
-        assert "run_oy_collection_batch" not in joined, (
-            f"phase A must not invoke collection: {joined!r}"
-        )
-        from subprocess import CompletedProcess
-        return CompletedProcess(args=cmd or [], returncode=0, stdout="", stderr="")
+    """Without --i-authorize-live-collection, the runner MUST NOT call
+    `subprocess.run` on the collection script. Pin the phase-A
+    guarantee that authorization is required for any live launch."""
+    calls: list[tuple[tuple, dict]] = []
 
-    monkeypatch.setattr("subprocess.run", _fake_run)
-    exit_code = cli.main([
-        "--queue", str(queue_path),
-        "--i-authorize-live-collection",
-    ])
+    def _stub(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        raise AssertionError(
+            f"subprocess.run unexpectedly invoked without --i-authorize-"
+            f"live-collection: args={args!r}"
+        )
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", "/tmp/should-not-be-created",
+        ],
+        subprocess_runner=_stub,
+    )
     assert exit_code == 0
+    assert calls == []
     out = capsys.readouterr().out
-    assert "phase A: collection invocation not yet implemented" in out
     assert "Brand-20 runner — phase A plan block" in out
+    assert "no live collection" in out.lower()
     assert patch_cdp_happy["open_tab_calls"] == []
 
 
@@ -388,3 +390,645 @@ def test_no_runnable_items_exits_three(
         "--queue", str(path),
     ])
     assert exit_code == 3
+
+
+# ===========================================================================
+# Phase B: subprocess invocation, queue update, loop, stop policy
+# ===========================================================================
+
+import json  # noqa: E402
+import shutil  # noqa: E402
+from subprocess import CompletedProcess  # noqa: E402
+
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "brand20_runner"
+
+
+def _stub_subprocess_runner_writing_fixture(
+    fixture_name: str,
+    *,
+    artifact_root: Path,
+    goods_no: str,
+    sort_type: str,
+    returncode: int = 0,
+):
+    """Build a `subprocess.run`-compatible stub that, when invoked,
+    locates the `--artifact-root` and `--manifest` args in argv,
+    reads the manifest to discover the `batch_id`, then copies the
+    fixture into `<artifact_root>/<batch_id>/batch_summary.json`.
+
+    The fixture is rewritten on the way out so its `goods_no` /
+    `sort_type` match the queue row the runner just picked — this
+    keeps fixtures small while still letting the runner apply them
+    against arbitrary test queues.
+    """
+    fixture_path = FIXTURE_DIR / fixture_name
+    assert fixture_path.is_file(), (
+        f"fixture missing: {fixture_path}"
+    )
+
+    def _runner(argv, *_args, **kwargs):
+        # Find manifest + artifact-root from argv. The runner always
+        # passes them as `--manifest <path>` / `--artifact-root <path>`.
+        manifest_path: Path | None = None
+        actual_artifact_root: Path | None = None
+        for i, tok in enumerate(argv):
+            if tok == "--manifest" and i + 1 < len(argv):
+                manifest_path = Path(argv[i + 1])
+            elif tok == "--artifact-root" and i + 1 < len(argv):
+                actual_artifact_root = Path(argv[i + 1])
+        assert manifest_path is not None, f"no --manifest in argv: {argv!r}"
+        assert actual_artifact_root is not None, (
+            f"no --artifact-root in argv: {argv!r}"
+        )
+        assert manifest_path.is_file(), (
+            f"runner did not write manifest before invoking subprocess: "
+            f"{manifest_path}"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        batch_id = manifest["batch_id"]
+        batch_dir = actual_artifact_root / batch_id
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        # Rewrite the fixture's goods_no / sort_type so apply_batch_summary
+        # finds the right queue row.
+        payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+        for p in payload.get("products", []):
+            p["oy_goods_no"] = goods_no
+            if isinstance(p.get("summary"), dict):
+                p["summary"]["requested_sort_type"] = sort_type
+            if isinstance(p.get("resume_state"), dict):
+                p["resume_state"]["goods_no"] = goods_no
+                p["resume_state"]["sort_type"] = sort_type
+        if isinstance(payload.get("manifest_audit"), dict):
+            payload["manifest_audit"]["sort_type_in_defaults"] = sort_type
+        (batch_dir / "batch_summary.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return CompletedProcess(args=argv, returncode=returncode, stdout=None, stderr=None)
+
+    return _runner
+
+
+def _stub_subprocess_runner_sequence(stubs):
+    """Compose a sequence of stubs, calling them in order for each
+    successive `subprocess.run` call. Each stub is a callable as
+    produced by `_stub_subprocess_runner_writing_fixture`."""
+    state = {"i": 0, "calls": []}
+
+    def _runner(argv, *args, **kwargs):
+        state["calls"].append(argv)
+        idx = state["i"]
+        if idx >= len(stubs):
+            raise AssertionError(
+                f"subprocess.run called {idx + 1} times but only "
+                f"{len(stubs)} stubs configured"
+            )
+        state["i"] += 1
+        return stubs[idx](argv, *args, **kwargs)
+
+    _runner.state = state  # type: ignore[attr-defined]
+    return _runner
+
+
+def test_auth_flag_invokes_mock_subprocess_once(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """With --i-authorize-live-collection AND a stubbed subprocess
+    that writes a clean-`complete` fixture, the runner invokes the
+    subprocess exactly once with the expected argv (interpreter,
+    script, --manifest, --artifact-root) and the expected env
+    overrides."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    captured: dict[str, Any] = {"calls": []}
+
+    base_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+
+    def _wrapper(argv, *args, **kwargs):
+        captured["calls"].append({"argv": argv, "kwargs": dict(kwargs)})
+        return base_stub(argv, *args, **kwargs)
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=_wrapper,
+    )
+    assert exit_code == 0
+    assert len(captured["calls"]) == 1
+    call = captured["calls"][0]
+    argv = call["argv"]
+    assert argv[0] == cli.DEFAULT_INTERPRETER
+    assert argv[1].endswith("scripts/run_oy_collection_batch.py")
+    assert "--manifest" in argv
+    assert "--artifact-root" in argv
+    assert str(artifact_root) in argv
+    # Env overrides: PINNED_ENV present in the kwargs `env` dict.
+    env = call["kwargs"]["env"]
+    for k, v in cli.PINNED_ENV.items():
+        assert env.get(k) == v
+    # check=False is the contract — the runner inspects batch_summary
+    # itself rather than trusting exit code.
+    assert call["kwargs"].get("check") is False
+    out = capsys.readouterr().out
+    assert "applied batch_summary" in out
+    assert "status=done" in out
+    assert "DONE: Brand-A/DATETIME_DESC" in out
+    assert "rows=1250" in out
+
+
+def test_auth_flag_with_dry_run_does_not_invoke_subprocess(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+) -> None:
+    """--dry-run wins over --i-authorize-live-collection: plan only,
+    no subprocess, no queue mutation."""
+    calls: list = []
+
+    def _stub(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        raise AssertionError("subprocess must not be called under --dry-run")
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--dry-run",
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=_stub,
+    )
+    assert exit_code == 0
+    assert calls == []
+
+
+def test_allow_open_tab_calls_cdp_only_when_auth_present(
+    queue_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`--allow-open-tab` may call cdp_tab_probe.open_tab ONLY when
+    `--i-authorize-live-collection` is ALSO passed. Without auth, the
+    runner refuses to open a tab (preserves phase-A guarantee)."""
+    open_calls: list[str] = []
+
+    def _list_tabs_no_target() -> list[dict]:
+        return [{"id": "x", "url": "https://www.google.com/"}]
+
+    monkeypatch.setattr(cdp_probe, "get_version", lambda: {"Browser": "Chrome/123"})
+    monkeypatch.setattr(cdp_probe, "list_tabs", _list_tabs_no_target)
+    monkeypatch.setattr(precond, "_default_pgrep", lambda _cmd: [])
+
+    def _open_tab(target_url: str, *_a, **_kw) -> dict:
+        open_calls.append(target_url)
+        return {"id": "new", "url": target_url}
+
+    monkeypatch.setattr(cdp_probe, "open_tab", _open_tab)
+
+    # Case 1: --allow-open-tab WITHOUT auth → never opens tab.
+    exit_code = cli.main([
+        "--queue", str(queue_path),
+        "--allow-open-tab",
+    ])
+    assert exit_code == 2
+    assert open_calls == [], (
+        f"open_tab must NOT be called without --i-authorize-"
+        f"live-collection; saw: {open_calls!r}"
+    )
+
+
+def test_allow_open_tab_re_checks_target_tab(
+    queue_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When both `--allow-open-tab` AND `--i-authorize-live-collection`
+    are passed, the gate calls `open_tab` once and the post-open
+    re-list now contains the target tab → runner proceeds."""
+    open_calls: list[str] = []
+    list_calls = {"count": 0}
+
+    def _list_tabs() -> list[dict]:
+        list_calls["count"] += 1
+        if list_calls["count"] == 1:
+            return [{"id": "x", "url": "https://www.google.com/"}]
+        return [{
+            "id": "new",
+            "url": (
+                "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?"
+                "goodsNo=A000000111111&tab=review"
+            ),
+        }]
+
+    def _open_tab(target_url: str, *_a, **_kw) -> dict:
+        open_calls.append(target_url)
+        return {"id": "new", "url": target_url}
+
+    monkeypatch.setattr(cdp_probe, "get_version", lambda: {"Browser": "Chrome/123"})
+    monkeypatch.setattr(cdp_probe, "list_tabs", _list_tabs)
+    monkeypatch.setattr(cdp_probe, "open_tab", _open_tab)
+    monkeypatch.setattr(precond, "_default_pgrep", lambda _cmd: [])
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--allow-open-tab",
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=stub,
+    )
+    assert exit_code == 0, "runner should proceed after open_tab resolves"
+    assert len(open_calls) == 1
+    assert "goodsNo=A000000111111" in open_calls[0]
+    assert list_calls["count"] >= 2
+
+
+def test_post_run_batch_summary_updates_queue(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """After a stubbed subprocess writes a clean-`complete` fixture,
+    the queue file on disk shows the target row as `status=done` with
+    `last_attempted_at` populated."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=stub,
+    )
+    assert exit_code == 0
+    # Re-load the queue and verify mutation.
+    from src.voc.app.brand20_queue import load_queue
+    queue = load_queue(queue_path)
+    item = queue.require("A000000111111", "DATETIME_DESC")
+    assert item.status == "done"
+    assert item.last_attempt_at is not None
+    assert item.attempts == 1
+
+
+def test_retry_after_cooldown_stops_loop_even_with_max_items_3(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """With --max-items-per-session 3 and a stubbed subprocess that
+    writes a retry_after_cooldown fixture on the FIRST call, the
+    subprocess is called EXACTLY ONCE (session-global stop)."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    # The "first call" stub returns retry_after_cooldown; later stubs
+    # would fail loudly if invoked. The runner must not advance.
+    first_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_retry_after_cooldown.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+
+    def _trip(*_a, **_kw):
+        raise AssertionError(
+            "subprocess.run must not be called after a stop signal"
+        )
+
+    seq = _stub_subprocess_runner_sequence([first_stub, _trip, _trip])
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+            "--max-items-per-session", "3",
+        ],
+        subprocess_runner=seq,
+    )
+    assert exit_code == 1, "stop signal must produce exit code 1"
+    assert seq.state["i"] == 1, (
+        f"subprocess invoked {seq.state['i']} times; expected 1"
+    )
+    out = capsys.readouterr().out
+    assert "STOP" in out
+    assert "retry_after_cooldown" in out or "throttle" in out
+    # Resume command printed verbatim.
+    assert "scripts/run_brand20_queue_runner.py" in out
+    assert "--i-authorize-live-collection" in out
+
+
+def test_cursor_api_rate_limited_stops_loop(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A batch_summary with `cursor_api_rate_limited=True` (but no
+    retry_intent override) still stops the loop on the first call."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    # The retry_after_cooldown fixture carries cursor_api_rate_limited=True;
+    # we reuse it here — both signals must stop the loop.
+    first_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_retry_after_cooldown.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    seq = _stub_subprocess_runner_sequence([
+        first_stub,
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("must stop after rate-limit signal")),
+    ])
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+            "--max-items-per-session", "2",
+        ],
+        subprocess_runner=seq,
+    )
+    assert exit_code == 1
+    assert seq.state["i"] == 1
+
+
+def test_cursor_api_silenced_stops_loop(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`cursor_api_silenced=True` (cold-start AND-gate) stops the loop."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    first_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_cursor_silenced.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    seq = _stub_subprocess_runner_sequence([
+        first_stub,
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("must stop after cursor_api_silenced")),
+    ])
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+            "--max-items-per-session", "2",
+        ],
+        subprocess_runner=seq,
+    )
+    assert exit_code == 1
+    assert seq.state["i"] == 1
+    out = capsys.readouterr().out
+    assert "STOP" in out
+
+
+def test_manual_checkpoint_stops_loop(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`retry_intent=manual_review_required` lands as
+    `manual_checkpoint`; runner stops and prints the certify command
+    verbatim."""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    first_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_manual_checkpoint.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    seq = _stub_subprocess_runner_sequence([
+        first_stub,
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("must stop after manual_checkpoint")),
+    ])
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+            "--max-items-per-session", "3",
+        ],
+        subprocess_runner=seq,
+    )
+    assert exit_code == 1
+    assert seq.state["i"] == 1
+    out = capsys.readouterr().out
+    assert "mark_brand20_checkpoint_certified.py" in out
+    assert "manual_checkpoint" in out.lower() or "STOP" in out
+
+
+def test_complete_continues_when_max_items_gt_1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Three clean-`complete` fixtures in sequence: with
+    --max-items-per-session 3, the stubbed subprocess is called
+    exactly 3 times when the queue has 3 distinct runnable rows."""
+    # Build a 3-SKU queue.
+    rows: list[QueueItem] = []
+    rows.extend(make_full_sort_set(goods_no="A000000111111", product_name="Brand-A"))
+    rows.extend(make_full_sort_set(goods_no="A000000222222", product_name="Brand-B"))
+    rows.extend(make_full_sort_set(goods_no="A000000333333", product_name="Brand-C"))
+    queue = Brand20Queue(meta=QueueMeta(schema_version=1), items=rows)
+    queue_p = tmp_path / "queue.json"
+    save_queue(queue_p, queue)
+
+    # CDP fixture: tabs for all three SKUs.
+    def _list_tabs() -> list[dict]:
+        return [
+            {"id": s, "url": (
+                "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?"
+                f"goodsNo={s}&tab=review"
+            )}
+            for s in ("A000000111111", "A000000222222", "A000000333333")
+        ]
+    monkeypatch.setattr(cdp_probe, "get_version", lambda: {"Browser": "Chrome/123"})
+    monkeypatch.setattr(cdp_probe, "list_tabs", _list_tabs)
+
+    def _open_tab(*_a, **_kw) -> dict:
+        raise AssertionError("open_tab must not be called when tabs are present")
+
+    monkeypatch.setattr(cdp_probe, "open_tab", _open_tab)
+    monkeypatch.setattr(precond, "_default_pgrep", lambda _cmd: [])
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    # Each call picks the lowest-goods_no still-runnable primary; the
+    # stub writes a `complete` fixture rewritten to match the runner's
+    # picked target. The stub re-derives the target from the
+    # manifest's `products[0]`.
+    def _make_dynamic_stub():
+        def _runner(argv, *args, **kwargs):
+            manifest_path = None
+            artifact_root_arg = None
+            for i, tok in enumerate(argv):
+                if tok == "--manifest":
+                    manifest_path = Path(argv[i + 1])
+                elif tok == "--artifact-root":
+                    artifact_root_arg = Path(argv[i + 1])
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            batch_id = manifest["batch_id"]
+            target_goods_no = manifest["products"][0]["oy_goods_no"]
+            target_sort = manifest["defaults"]["sort_type"]
+            batch_dir = artifact_root_arg / batch_id
+            batch_dir.mkdir(parents=True, exist_ok=True)
+            payload = json.loads(
+                (FIXTURE_DIR / "batch_summary_complete.json").read_text(
+                    encoding="utf-8"),
+            )
+            for p in payload["products"]:
+                p["oy_goods_no"] = target_goods_no
+                p["summary"]["requested_sort_type"] = target_sort
+                p["resume_state"]["goods_no"] = target_goods_no
+                p["resume_state"]["sort_type"] = target_sort
+            payload["manifest_audit"]["sort_type_in_defaults"] = target_sort
+            (batch_dir / "batch_summary.json").write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return CompletedProcess(args=argv, returncode=0, stdout=None, stderr=None)
+        return _runner
+
+    state = {"calls": 0}
+    dyn = _make_dynamic_stub()
+
+    def _counting(argv, *args, **kwargs):
+        state["calls"] += 1
+        return dyn(argv, *args, **kwargs)
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_p),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+            "--max-items-per-session", "3",
+        ],
+        subprocess_runner=_counting,
+    )
+    assert exit_code == 0
+    assert state["calls"] == 3, (
+        f"expected 3 subprocess calls, got {state['calls']}"
+    )
+
+
+def test_max_items_per_session_above_3_raises(
+    queue_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """argparse rejects --max-items-per-session 4 (cap=3)."""
+    with pytest.raises(SystemExit) as ei:
+        cli.main([
+            "--queue", str(queue_path),
+            "--max-items-per-session", "4",
+        ])
+    # argparse exits with code 2 on argument errors.
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "capped at 3" in err or "max-items-per-session" in err
+
+
+def test_max_items_per_session_zero_or_negative_raises(
+    queue_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """argparse rejects --max-items-per-session 0 and -1."""
+    with pytest.raises(SystemExit):
+        cli.main([
+            "--queue", str(queue_path),
+            "--max-items-per-session", "0",
+        ])
+    with pytest.raises(SystemExit):
+        cli.main([
+            "--queue", str(queue_path),
+            "--max-items-per-session", "-1",
+        ])
+
+
+def test_dry_run_no_mutation_no_subprocess_no_open_tab(
+    queue_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Triple guard for the --dry-run contract: no subprocess call,
+    no queue mutation, no /json/new call (even with --allow-open-tab
+    AND --i-authorize-live-collection AND a missing target tab)."""
+    open_calls: list[str] = []
+
+    def _list_tabs_no_target() -> list[dict]:
+        return [{"id": "x", "url": "https://www.google.com/"}]
+
+    monkeypatch.setattr(cdp_probe, "get_version", lambda: {"Browser": "Chrome/123"})
+    monkeypatch.setattr(cdp_probe, "list_tabs", _list_tabs_no_target)
+
+    def _open_tab(target_url: str, *_a, **_kw) -> dict:
+        open_calls.append(target_url)
+        return {"id": "new", "url": target_url}
+
+    monkeypatch.setattr(cdp_probe, "open_tab", _open_tab)
+    monkeypatch.setattr(precond, "_default_pgrep", lambda _cmd: [])
+
+    queue_bytes_before = queue_path.read_bytes()
+
+    def _stub_subprocess(*_a, **_kw):
+        raise AssertionError("subprocess must not be called under --dry-run")
+
+    # --dry-run is the dominant flag — even with auth + allow-open-tab,
+    # nothing should fire.
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--dry-run",
+            "--i-authorize-live-collection",
+            "--allow-open-tab",
+        ],
+        subprocess_runner=_stub_subprocess,
+    )
+    # gate will still fail (target tab missing without effective auth)
+    # but the test cares about the triple-no contract:
+    assert open_calls == [], (
+        f"open_tab must NOT be called under --dry-run; saw {open_calls!r}"
+    )
+    # Queue file unchanged.
+    assert queue_path.read_bytes() == queue_bytes_before
+    # exit code: gate will fail because dry-run suppresses the open
+    # action and no target tab matches → exit 2 (precondition failure).
+    # If the gate passes (e.g. operator passed a queue with a matching
+    # tab already), --dry-run exits 0. Both are acceptable; the
+    # triple-no contract is the actual assertion.
+    assert exit_code in (0, 2)
+    _ = shutil  # silence linter when shutil unused

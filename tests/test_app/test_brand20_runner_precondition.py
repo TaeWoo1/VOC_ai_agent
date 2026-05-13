@@ -229,10 +229,12 @@ def test_gate_target_tab_missing_without_allow_open_tab_fails() -> None:
     assert probe.open_tab_calls == []  # phase A never opens
 
 
-def test_gate_target_tab_missing_with_allow_open_tab_still_fails_in_phase_a() -> None:
-    """Phase A NEVER calls /json/new even when --allow-open-tab is
-    passed. The failed_check token differs so the operator sees that
-    the flag was parsed but the action was suppressed."""
+def test_gate_target_tab_missing_with_allow_open_tab_without_auth_fails() -> None:
+    """`--allow-open-tab` alone does NOT authorize a /json/new call.
+    The gate refuses to open the tab without
+    `--i-authorize-live-collection` and reports
+    `target_tab_missing_without_authorization`. This preserves the
+    phase-A guarantee that the runner never opens a tab silently."""
     queue = _two_sku_queue()
     probe = _FakeCdpProbe(tabs=[
         {"id": "x", "url": "https://www.google.com/", "title": "Google"},
@@ -243,12 +245,98 @@ def test_gate_target_tab_missing_with_allow_open_tab_still_fails_in_phase_a() ->
         sort_type="DATETIME_DESC",
         now=_now(),
         allow_open_tab=True,
+        authorize_live=False,
         cdp_probe=probe,
         pgrep_runner=_no_pgrep,
     )
     assert result.ok is False
-    assert result.failed_check == "target_tab_missing_phase_a_will_not_open"
+    assert result.failed_check == "target_tab_missing_without_authorization"
     assert probe.open_tab_calls == []
+
+
+def test_gate_target_tab_missing_with_allow_open_tab_and_auth_opens_then_passes(
+    monkeypatch,
+) -> None:
+    """When BOTH `--allow-open-tab` AND `--i-authorize-live-collection`
+    are passed and the target tab is missing, the gate calls
+    `cdp_probe.open_tab` exactly once and then re-lists tabs. On the
+    second list the matching tab is present, so the gate passes."""
+    queue = _two_sku_queue()
+
+    list_calls = {"count": 0}
+    open_calls: list[str] = []
+
+    class _ProbeWithOpen:
+        CdpUnreachableError = real_cdp_probe.CdpUnreachableError
+
+        def get_version(self) -> dict:
+            return {"Browser": "Chrome/123"}
+
+        def list_tabs(self) -> list[dict]:
+            list_calls["count"] += 1
+            if list_calls["count"] == 1:
+                return [{"id": "x", "url": "https://www.google.com/"}]
+            return [_tab_on_product("A000000111111")]
+
+        def open_tab(self, target_url: str) -> dict:
+            open_calls.append(target_url)
+            return {"id": "new-tab", "url": target_url}
+
+    probe = _ProbeWithOpen()
+    result = evaluate_preconditions(
+        queue,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+        now=_now(),
+        allow_open_tab=True,
+        authorize_live=True,
+        cdp_probe=probe,
+        pgrep_runner=_no_pgrep,
+    )
+    assert result.ok is True, (
+        f"expected gate to pass after open_tab; got {result!r}"
+    )
+    assert len(open_calls) == 1
+    assert "goodsNo=A000000111111" in open_calls[0]
+    assert "&tab=review" in open_calls[0]
+    assert list_calls["count"] == 2  # one before open, one after
+    assert any("open_tab invoked" in n for n in result.notes)
+
+
+def test_gate_target_tab_open_did_not_resolve_fails() -> None:
+    """If open_tab succeeds but the post-open /json/list still does
+    not contain a matching tab, the gate fails with
+    `target_tab_open_did_not_resolve`."""
+    queue = _two_sku_queue()
+    open_calls: list[str] = []
+
+    class _StubbornProbe:
+        CdpUnreachableError = real_cdp_probe.CdpUnreachableError
+
+        def get_version(self) -> dict:
+            return {"Browser": "Chrome/123"}
+
+        def list_tabs(self) -> list[dict]:
+            return [{"id": "x", "url": "https://www.google.com/"}]
+
+        def open_tab(self, target_url: str) -> dict:
+            open_calls.append(target_url)
+            return {"id": "new-tab", "url": target_url}
+
+    probe = _StubbornProbe()
+    result = evaluate_preconditions(
+        queue,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+        now=_now(),
+        allow_open_tab=True,
+        authorize_live=True,
+        cdp_probe=probe,
+        pgrep_runner=_no_pgrep,
+    )
+    assert result.ok is False
+    assert result.failed_check == "target_tab_open_did_not_resolve"
+    assert len(open_calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -357,9 +445,10 @@ def test_gate_other_row_in_cooldown_is_informational_only() -> None:
 
 
 def test_gate_allow_open_tab_note_when_passing() -> None:
-    """When the tab IS open and --allow-open-tab is passed, the gate
-    passes but emits an informational note so the operator knows the
-    flag was parsed but never acted on."""
+    """When the tab IS already open and --allow-open-tab is passed,
+    the gate passes WITHOUT calling /json/new and emits an
+    informational note so the operator knows the flag was respected
+    but no action was taken."""
     queue = _two_sku_queue()
     probe = _FakeCdpProbe(tabs=[_tab_on_product("A000000111111")])
     result = evaluate_preconditions(
@@ -372,7 +461,11 @@ def test_gate_allow_open_tab_note_when_passing() -> None:
         pgrep_runner=_no_pgrep,
     )
     assert result.ok is True
-    assert any("never acted on" in n for n in result.notes)
+    assert any(
+        "no /json/new call made" in n or "already present" in n
+        for n in result.notes
+    )
+    assert probe.open_tab_calls == []
 
 
 def test_gate_returns_precondition_result_type() -> None:

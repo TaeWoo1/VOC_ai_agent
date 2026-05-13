@@ -10,13 +10,19 @@ typed value.
 Design boundaries
 -----------------
 - Pure aside from the four well-bounded I/O calls: `subprocess.run`
-  for `git rev-parse` and `pgrep`, and two HTTP GETs via
-  `cdp_tab_probe` (`get_version` + `list_tabs`).
-- All four I/O calls are pluggable so tests can replace them without
+  for `git rev-parse` and `pgrep`, and two-or-three HTTP GETs / PUT
+  via `cdp_tab_probe` (`get_version` + `list_tabs`, plus a single
+  `open_tab` + re-`list_tabs` when phase B's
+  `allow_open_tab=True` AND `authorize_live=True` AND the target
+  tab is missing).
+- All I/O calls are pluggable so tests can replace them without
   forking processes or contacting the network.
-- This module never opens tabs. The `cdp_tab_probe.open_tab` helper
-  exists for phase B; phase A's gate explicitly refuses to call it
-  even when `allow_open_tab=True` (see check 4 below).
+- The gate only opens a tab when BOTH `allow_open_tab=True` AND
+  `authorize_live=True` are passed. Without authorization the gate
+  refuses to call `/json/new` and returns
+  `target_tab_missing_without_authorization` so the operator sees
+  that the flag was parsed but the action was suppressed (preserves
+  phase A's "never open without auth" guarantee).
 """
 from __future__ import annotations
 
@@ -149,12 +155,13 @@ def evaluate_preconditions(
     sort_type: str,
     now: datetime,
     allow_open_tab: bool,
+    authorize_live: bool = False,
     head_baseline: str | None = None,
     cdp_probe: Any = None,
     pgrep_runner: Callable[[str], list[int]] | None = None,
     git_head_runner: Callable[[], str] | None = None,
 ) -> PreconditionResult:
-    """Run the phase-A precondition checks for `(goods_no, sort_type)`.
+    """Run the precondition checks for `(goods_no, sort_type)`.
 
     Checks run in order; the first failure short-circuits and the
     informational notes accumulated up to that point are preserved on
@@ -173,9 +180,17 @@ def evaluate_preconditions(
         Timezone-aware UTC datetime. The CLI passes
         `datetime.now(timezone.utc)`; tests pass a fixed instant.
     allow_open_tab:
-        Forwarded from the CLI's `--allow-open-tab` flag. In phase A
-        this is parsed and surfaced in `notes` but NEVER acted upon —
-        the gate still fails if the tab is missing.
+        Forwarded from the CLI's `--allow-open-tab` flag. The gate
+        calls `cdp_probe.open_tab` exactly once when this is True AND
+        `authorize_live=True` AND the target tab is missing; without
+        authorization the gate refuses to call `/json/new` and
+        reports `target_tab_missing_without_authorization`.
+    authorize_live:
+        Forwarded from the CLI's `--i-authorize-live-collection`
+        flag. Required (alongside `allow_open_tab=True`) for the
+        gate to actually open a missing tab. Defaults to False so
+        every existing test that omits this kwarg keeps the
+        "never opens without auth" guarantee.
     head_baseline:
         When non-None, the result of `git rev-parse --short HEAD` must
         equal this value.
@@ -278,32 +293,93 @@ def evaluate_preconditions(
             break
 
     if target_tab is None:
-        if allow_open_tab:
-            # Phase A NEVER calls /json/new. Flag this explicitly so
-            # the operator-facing message names the phase boundary.
+        target_url = (
+            f"https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
+            f"?goodsNo={goods_no}&tab=review"
+        )
+        if allow_open_tab and not authorize_live:
+            # Phase-B path A: operator passed --allow-open-tab but
+            # withheld --i-authorize-live-collection. The gate refuses
+            # to call /json/new because tab opening is a side effect
+            # the operator may not want without an authorized run.
+            # This preserves phase A's "never opens without explicit
+            # operator authorization" guarantee.
             return PreconditionResult(
                 ok=False,
-                failed_check="target_tab_missing_phase_a_will_not_open",
+                failed_check="target_tab_missing_without_authorization",
                 required_action=(
                     f"target tab for goods_no={goods_no!r} is not open. "
-                    f"--allow-open-tab is accepted but phase A does NOT "
-                    f"call /json/new. Open the product URL manually in "
-                    f"the attached Chrome window OR wait for phase B."
+                    f"--allow-open-tab is set but "
+                    f"--i-authorize-live-collection is NOT. The gate "
+                    f"refuses to call /json/new without explicit live-"
+                    f"collection authorization. Pass both flags, or "
+                    f"open the URL manually: {target_url}"
                 ),
                 notes=notes,
             )
-        return PreconditionResult(
-            ok=False,
-            failed_check="target_tab_missing",
-            required_action=(
-                f"target tab for goods_no={goods_no!r} is not open. "
-                f"Open the URL in the attached Chrome window before "
-                f"re-running. URL: "
-                f"https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do"
-                f"?goodsNo={goods_no}&tab=review"
-            ),
-            notes=notes,
-        )
+        if allow_open_tab and authorize_live:
+            # Phase-B path B: operator authorized BOTH the open and
+            # the live run. Open the tab once, then re-list to confirm
+            # the new tab matches the target. NEVER eval JS, NEVER
+            # interact with login / captcha / Cloudflare — this is
+            # /json/new + /json/list only.
+            try:
+                cdp_probe.open_tab(target_url)
+            except default_cdp_probe.CdpUnreachableError as exc:
+                return PreconditionResult(
+                    ok=False,
+                    failed_check="cdp_unreachable",
+                    required_action=(
+                        f"CDP /json/new failed at 127.0.0.1:9222 "
+                        f"({exc})."
+                    ),
+                    notes=notes,
+                )
+            try:
+                tabs_after = cdp_probe.list_tabs()
+            except default_cdp_probe.CdpUnreachableError as exc:
+                return PreconditionResult(
+                    ok=False,
+                    failed_check="cdp_unreachable",
+                    required_action=(
+                        f"CDP /json/list unreachable after open_tab "
+                        f"({exc})."
+                    ),
+                    notes=notes,
+                )
+            for tab in tabs_after:
+                url = str(tab.get("url") or "")
+                if _matches_target(url, goods_no):
+                    target_tab = tab
+                    break
+            if target_tab is None:
+                return PreconditionResult(
+                    ok=False,
+                    failed_check="target_tab_open_did_not_resolve",
+                    required_action=(
+                        f"cdp_tab_probe.open_tab was invoked for "
+                        f"goods_no={goods_no!r} but a matching tab was "
+                        f"not found in the post-open /json/list response. "
+                        f"Verify the attached Chrome session is responsive "
+                        f"and re-run. URL: {target_url}"
+                    ),
+                    notes=notes,
+                )
+            notes.append(
+                "phase B: cdp_tab_probe.open_tab invoked once; matching "
+                "tab confirmed in post-open /json/list."
+            )
+        else:
+            return PreconditionResult(
+                ok=False,
+                failed_check="target_tab_missing",
+                required_action=(
+                    f"target tab for goods_no={goods_no!r} is not open. "
+                    f"Open the URL in the attached Chrome window before "
+                    f"re-running. URL: {target_url}"
+                ),
+                notes=notes,
+            )
 
     # ---- Check 5: target tab is on a product page --------------------
     matched_url = str(target_tab.get("url") or "")
@@ -362,10 +438,14 @@ def evaluate_preconditions(
                 notes=notes,
             )
 
-    if allow_open_tab:
+    if allow_open_tab and not any("open_tab invoked" in n for n in notes):
+        # The tab was already present at check 4 — open_tab was not
+        # called. Surface the flag-was-parsed signal so the operator
+        # sees the gate respected `--allow-open-tab` without needing
+        # to act on it.
         notes.append(
-            "phase A: --allow-open-tab is accepted but never acted on "
-            "(no /json/new call made)."
+            "--allow-open-tab is accepted; target tab was already "
+            "present, no /json/new call made."
         )
 
     return PreconditionResult(ok=True, failed_check=None, required_action=None, notes=notes)
