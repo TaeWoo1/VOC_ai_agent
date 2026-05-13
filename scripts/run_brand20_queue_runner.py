@@ -325,18 +325,31 @@ def _format_command_line(
     )
 
 
-def _format_resume_after_cooldown(item: Any) -> str:
-    """Render the verbatim resume command for a row that landed in
-    retry_after_cooldown. Matches the planning handoff §7 contract so
-    the operator can copy-paste."""
+def _format_resume_after_cursor_429(item: Any) -> str:
+    """Render the verbatim operator-retry command for a row whose
+    session stopped on a cursor-429 signal.
+
+    I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: the queue layer no
+    longer wall-clock-gates 429-routed rows — they are left at
+    ``status=ready`` with ``next_run_after=None`` and an
+    ``operator_note`` that records the prior 429 cause. The runner's
+    session still stops (the in-flight session can't usefully retry
+    the same SKU back-to-back), but the operator may re-select the row
+    as soon as the OY product tab recovers in Chrome.
+    """
     return (
-        f"  python3 scripts/run_brand20_queue_runner.py \\\n"
+        f"  PYTHONPATH=. /Users/taewookang/.pyenv/shims/python3 \\\n"
+        f"    scripts/run_brand20_queue_runner.py \\\n"
         f"    --goods-no {item.goods_no} \\\n"
         f"    --sort-type {item.sort_type} \\\n"
-        f"    --allow-open-tab \\\n"
-        f"    --i-authorize-live-collection\n"
-        f"  (next_run_after={item.next_run_after})"
+        f"    --i-authorize-live-collection"
     )
+
+
+# Backwards-compat alias: tests and any older callers that imported
+# the legacy name continue to resolve. The name change is the
+# operator-facing one; the function body is the same shape.
+_format_resume_after_cooldown = _format_resume_after_cursor_429
 
 
 def _format_certify_command(item: Any) -> str:
@@ -663,8 +676,27 @@ def _run_loop(
                 "retry_after_cooldown", "cursor_api_rate_limited",
                 "cursor_api_silenced",
             ):
-                print("resume command (after cooldown elapses):")
-                print(_format_resume_after_cooldown(updated_item))
+                # I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: the
+                # queue row is now `status=ready` with
+                # `next_run_after=None`. Surface the audit context
+                # (retry_intent + operator_note) plus the
+                # operator-retry command line so the operator can
+                # re-select the row as soon as the product tab
+                # recovers.
+                print(
+                    f"queue row: status={updated_item.status}, "
+                    f"retry_intent={updated_item.retry_intent!r}, "
+                    f"next_run_after={updated_item.next_run_after!r}"
+                )
+                if updated_item.operator_note:
+                    print(f"operator_note: {updated_item.operator_note}")
+                print(
+                    "OY cursor 429 observed. Refresh the product tab "
+                    "in Chrome and re-run when reviews load again "
+                    "(typically a few minutes)."
+                )
+                print("operator-retry command (no wall-clock wait):")
+                print(_format_resume_after_cursor_429(updated_item))
             elif decision.reason == "manual_checkpoint":
                 print("certify command:")
                 print(_format_certify_command(updated_item))

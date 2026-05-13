@@ -158,6 +158,12 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
     lines.append("")
 
     # Ready Now
+    #
+    # I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: rows whose previous
+    # attempt observed a cursor-429 signal now land here (status=ready)
+    # instead of WAITING. Surface the `retry_intent` audit signal and
+    # the `operator_note` audit hint so the operator sees WHY the row
+    # is in `ready` and not the older retry_after_cooldown.
     lines.append("READY NOW")
     lines.append("-" * 78)
     if not view.ready_now:
@@ -168,6 +174,22 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
                 f"  {it.goods_no}  {it.sort_type:<16} "
                 f"target={it.target_type}  product={it.product_name}"
             )
+            # Operator-retry context: 429-routed rows carry
+            # `retry_intent="retry_after_cooldown"` plus an
+            # `operator_note`. Render a single sub-line so the operator
+            # can see the prior 429 cause without scrolling.
+            if it.retry_intent == "retry_after_cooldown":
+                lines.append(
+                    f"      [operator retry ready: prior "
+                    f"retry_intent={it.retry_intent}; "
+                    f"last_attempt={it.last_attempt_at}]"
+                )
+                if it.operator_note:
+                    lines.append(f"      note: {it.operator_note}")
+            elif it.operator_note:
+                # Non-429 ready row that still carries a note (e.g. a
+                # certified manual_checkpoint). Show it verbatim.
+                lines.append(f"      note: {it.operator_note}")
     lines.append("")
 
     # Runnable / Pending — first-collection candidates (status=pending,
@@ -195,11 +217,25 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
     lines.append("")
 
     # Waiting
-    lines.append("WAITING (retry_after_cooldown)")
+    #
+    # I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: new 429 outcomes no
+    # longer land here — they route to READY NOW with an audit note.
+    # This block now only contains LEGACY rows that were seeded at
+    # `retry_after_cooldown` before the change. The advisory hint
+    # tells the operator that `next_run_after` is no longer a hard wall:
+    # if the product page recovers earlier, the operator may run
+    # `mark_brand20_checkpoint_certified.py` or simply edit the row
+    # back to `ready` (no live-collection authorization required for
+    # the queue edit itself).
+    lines.append("WAITING (retry_after_cooldown — legacy)")
     lines.append("-" * 78)
     if not view.waiting:
         lines.append("  (none)")
     else:
+        lines.append(
+            "  hint: next_run_after is advisory for cursor-429 rows; "
+            "operator may retry once the page recovers"
+        )
         for it in view.waiting:
             rel = _fmt_relative(now_dt, it.next_run_after)
             lines.append(

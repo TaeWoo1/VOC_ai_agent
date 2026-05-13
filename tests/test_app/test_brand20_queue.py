@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -96,11 +96,25 @@ def test_queue_initialization_from_fixture(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2. retry_after_cooldown ingestion
+# 2. cursor-429 ingestion (operator-retry no-cooldown-gate)
 # ---------------------------------------------------------------------------
+#
+# I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE repurposes this test
+# (formerly `test_apply_batch_summary_retry_after_cooldown` which
+# asserted `status="retry_after_cooldown"` + `next_run_after = now+90m`).
+# A 429-class batch_summary now routes the row to `ready` with
+# `next_run_after=None`; the upstream `retry_intent` / `retry_after_minutes`
+# audit fields are preserved verbatim so the audit trail still names
+# the cause. The runner session-stop policy is tested separately in
+# `test_brand20_runner_core.py`.
 
 
-def test_apply_batch_summary_retry_after_cooldown() -> None:
+def test_apply_batch_summary_cursor_429_routes_to_ready_no_time_gate() -> None:
+    """A cursor-429 batch_summary (retry_intent=retry_after_cooldown,
+    cursor_api_rate_limited=True) leaves the queue row at
+    `status="ready"` with `next_run_after=None`. The operator may
+    immediately re-select; the runner's session stop is enforced
+    elsewhere (`should_stop_loop`)."""
     queue = _two_sku_queue()
     # Re-target the fixture's goods_no onto a row that exists in the
     # test queue so the lookup succeeds.
@@ -111,17 +125,74 @@ def test_apply_batch_summary_retry_after_cooldown() -> None:
     now = datetime(2026, 5, 13, 13, 52, 22, tzinfo=timezone.utc)
     item = apply_batch_summary(queue, batch, now=now)
 
-    assert item.status == "retry_after_cooldown"
+    # Routed to `ready` (was `retry_after_cooldown` pre-change).
+    assert item.status == "ready"
+    # No wall-clock gate (was last_attempt_at + 90min pre-change).
+    assert item.next_run_after is None
+    # Audit trail preserved: connector's retry_intent +
+    # retry_after_minutes pass through verbatim.
     assert item.retry_intent == "retry_after_cooldown"
     assert item.retry_after_minutes == 90
+    # last_attempt_at written by apply_batch_summary's clock pass.
     assert item.last_attempt_at == "2026-05-13T13:52:22Z"
-    # next_run_after = last_attempt_at + 90 min
-    expected_next = (now + timedelta(minutes=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert item.next_run_after == expected_next
     assert item.checkpoint_reason is None
+    # operator_note records the audit hint so the inspector / CLI can
+    # surface why the row is `ready` rather than fresh-pending.
+    assert item.operator_note is not None
+    assert "cursor_api_rate_limited" in item.operator_note
+    # Run-history bookkeeping carries through.
     assert item.attempts == 1
     assert item.raw_records_seen_last == 630
     assert item.last_run_id == "run_20260513_134328_a1e307"
+
+
+def test_apply_batch_summary_cursor_silenced_routes_to_ready_with_silenced_note() -> None:
+    """`cursor_api_silenced=True` (cold-start AND-gate) is also a
+    429-class signal and likewise routes the row to `ready` with
+    `next_run_after=None`. The `operator_note` carries the silenced
+    phrasing so the operator can distinguish the two surfaces."""
+    queue = _two_sku_queue()
+    batch = _load_fixture("brand20_batch_retry_after_cooldown.json")
+    batch["products"][0]["oy_goods_no"] = "A000000111111"
+    batch["products"][0]["resume_state"]["goods_no"] = "A000000111111"
+    # Flip the surface signal: silenced instead of rate_limited. The
+    # silenced phrasing is more specific (cold-start AND-gate).
+    batch["products"][0]["summary"]["cursor_api_rate_limited"] = True
+    batch["products"][0]["summary"]["cursor_api_silenced"] = True
+    batch["products"][0]["resume_state"]["cursor_api_silenced"] = True
+
+    item = apply_batch_summary(queue, batch)
+    assert item.status == "ready"
+    assert item.next_run_after is None
+    assert item.operator_note is not None
+    assert "cursor_api_silenced" in item.operator_note
+
+
+def test_apply_batch_summary_cursor_429_row_is_picked_by_runnable_selection() -> None:
+    """After a cursor-429 batch_summary lands, the row IS selected by
+    `pick_next_runnable` on the very next call — no wall-clock wait.
+    The operator may immediately re-select the row.
+
+    This test pins the operator-retry-no-cooldown-gate user contract
+    via the public runner-core API. The runner's session-stop is
+    tested separately (`should_stop_loop`)."""
+    from src.voc.app.brand20_runner_core import pick_next_runnable
+
+    queue = _two_sku_queue()
+    batch = _load_fixture("brand20_batch_retry_after_cooldown.json")
+    batch["products"][0]["oy_goods_no"] = "A000000111111"
+    batch["products"][0]["resume_state"]["goods_no"] = "A000000111111"
+
+    now = datetime(2026, 5, 13, 13, 52, 22, tzinfo=timezone.utc)
+    apply_batch_summary(queue, batch, now=now)
+
+    # Pick the next runnable from the SAME `now` — no time-gate.
+    picked = pick_next_runnable(queue, now=now,
+                                goods_no_override="A000000111111",
+                                sort_type_override="DATETIME_DESC")
+    assert picked.goods_no == "A000000111111"
+    assert picked.sort_type == "DATETIME_DESC"
+    assert picked.status == "ready"
 
 
 # ---------------------------------------------------------------------------
@@ -393,23 +464,38 @@ def test_apply_batch_summary_missing_target_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 11. Precedence: rate_limited beats final_status=complete
+# 11. Precedence: cursor-429 beats final_status=complete (but no time gate)
 # ---------------------------------------------------------------------------
+#
+# I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: cursor-throttle still
+# beats clean-complete (`done` would mislead the operator into thinking
+# the corpus is full when the rate-limit truncated it), but the row no
+# longer wall-clock-gates — it routes to `ready` with an audit note.
 
 
-def test_precedence_rate_limited_over_complete() -> None:
+def test_precedence_cursor_429_over_complete_routes_to_ready() -> None:
     """final_status='complete' + retry_intent='retry_after_cooldown'
-    → retry_after_cooldown wins (CLAUDE.md OY rate-limit policy)."""
+    → row lands on `ready` (NOT `done`, NOT `retry_after_cooldown`).
+    The cursor-throttle signal beats clean-complete because the
+    completion happened under throttling, but the row is operator-retry
+    ready immediately, not 90-minute gated."""
     queue = _two_sku_queue()
     batch = _load_fixture("brand20_batch_precedence_complete_and_rate_limited.json")
     batch["products"][0]["oy_goods_no"] = "A000000111111"
     batch["products"][0]["resume_state"]["goods_no"] = "A000000111111"
 
     item = apply_batch_summary(queue, batch)
-    assert item.status == "retry_after_cooldown"
-    assert item.retry_intent == "retry_after_cooldown"
-    # Even though final_status was "complete", the row is NOT done.
+    # Cursor-throttle wins over `done`.
     assert item.status != "done"
+    # New routing: `ready` (operator-retry no-cooldown-gate). Not
+    # `retry_after_cooldown` — that was the pre-ticket behaviour.
+    assert item.status == "ready"
+    assert item.next_run_after is None
+    # retry_intent audit preserved.
+    assert item.retry_intent == "retry_after_cooldown"
+    # operator_note carries the audit hint.
+    assert item.operator_note is not None
+    assert "cursor_api_rate_limited" in item.operator_note
 
 
 # ---------------------------------------------------------------------------
@@ -786,13 +872,20 @@ def test_apply_batch_summary_max_cap_reached_primary_vs_signal_routing() -> None
     assert item_signal.status == "inconclusive"
 
 
-def test_apply_batch_summary_max_cap_reached_precedence_preserved() -> None:
+def test_apply_batch_summary_max_cap_reached_precedence_cursor_429_wins() -> None:
     """Pinning the precedence chain: a max_cap_reached batch_summary
-    that ALSO carries `retry_intent=retry_after_cooldown` (an
-    unlikely-but-possible combination if the connector emits the
-    rate-limit signal during a max-cap-bound run) must still land
-    on `retry_after_cooldown`. Cursor-throttle wins per CLAUDE.md
-    OY rate-limit policy."""
+    that ALSO carries `retry_intent=retry_after_cooldown` /
+    `cursor_api_rate_limited=True` (an unlikely-but-possible
+    combination if the connector emits the rate-limit signal during a
+    max-cap-bound run) still routes via the cursor-429 branch — but
+    after I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE the cursor-429
+    branch terminates at `ready` (not `retry_after_cooldown`).
+
+    Repurposes the prior precedence test
+    (`test_apply_batch_summary_max_cap_reached_precedence_preserved`)
+    which asserted `status == "retry_after_cooldown"`. The precedence
+    is preserved (cursor-throttle beats max_cap_reached); only the
+    terminal status of the cursor-throttle branch changes."""
     queue = _two_sku_queue()
     batch = _max_cap_reached_batch_summary(
         goods_no="A000000111111", sort_type="DATETIME_DESC",
@@ -805,52 +898,189 @@ def test_apply_batch_summary_max_cap_reached_precedence_preserved() -> None:
     batch["products"][0]["resume_state"]["retry_after_minutes"] = 90
 
     item = apply_batch_summary(queue, batch)
-    # Retry_after_cooldown beats max_cap_reached — precedence
-    # preserved.
-    assert item.status == "retry_after_cooldown"
+    # The cursor-429 branch wins over max_cap_reached, and after this
+    # ticket terminates at `ready` (operator-retry no-cooldown-gate).
+    # Pre-ticket this was `retry_after_cooldown`.
+    assert item.status == "ready"
+    assert item.next_run_after is None
+    # retry_intent preserved as the audit-trail signal.
     assert item.retry_intent == "retry_after_cooldown"
+    # operator_note carries the audit hint.
+    assert item.operator_note is not None
+    assert "cursor_api_rate_limited" in item.operator_note
+
+
+def test_dashboard_surfaces_cursor_429_routed_row_in_ready_now() -> None:
+    """I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: a row that
+    previously observed cursor-429 now lands at `status="ready"` and
+    must surface in the dashboard's READY NOW bucket (not WAITING).
+    The 429-routed row also appears in `suggestions` so the operator
+    sees it on the SUGGESTED NEXT RUNS list."""
+    now = datetime(2026, 5, 13, 14, 0, 0, tzinfo=timezone.utc)
+    items: list[QueueItem] = [
+        # The 429-routed row: previous attempt hit cursor 429, now
+        # ready with retry_intent + operator_note as audit hints.
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            retry_intent="retry_after_cooldown",
+            retry_after_minutes=90,
+            operator_note=(
+                "cursor_api_rate_limited observed (OY cursor 429). "
+                "Refresh the product tab in Chrome and re-run when "
+                "reviews load again (typically a few minutes). "
+                "retry_intent preserved for audit."
+            ),
+            attempts=1,
+            last_attempt_at="2026-05-13T13:52:22Z",
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now)
+
+    # The 429-routed row is in READY NOW, NOT WAITING.
+    assert len(view.ready_now) == 1
+    assert view.ready_now[0].goods_no == "A000000111111"
+    assert view.waiting == []
+    # It is on the SUGGESTED NEXT RUNS list (runnable pool).
+    assert len(view.suggestions) == 1
+    assert view.suggestions[0].goods_no == "A000000111111"
+    # The audit signals are preserved on the dashboard payload so the
+    # inspector renderer can surface them.
+    surfaced = view.ready_now[0]
+    assert surfaced.retry_intent == "retry_after_cooldown"
+    assert surfaced.operator_note is not None
+    assert "cursor_api_rate_limited" in surfaced.operator_note
+
+
+def test_inspector_render_surfaces_cursor_429_audit_under_ready_now() -> None:
+    """I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: the inspector
+    script's `_render` function must surface 429-routed `ready` rows
+    under READY NOW with the audit context (retry_intent + operator
+    note). Pure substring assertion against the rendered text —
+    cheaper than spawning the CLI.
+
+    Imports the script module directly. No subprocess; no disk I/O
+    beyond `dashboard_view` which is pure."""
+    # Import the script module by file path. The script lives under
+    # `scripts/` which is added to sys.path inside the script itself.
+    import importlib.util
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "inspect_brand20_collection_status.py"
+    spec = importlib.util.spec_from_file_location(
+        "inspect_brand20_collection_status", script_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    now = datetime(2026, 5, 13, 14, 0, 0, tzinfo=timezone.utc)
+    items: list[QueueItem] = [
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            retry_intent="retry_after_cooldown",
+            retry_after_minutes=90,
+            operator_note=(
+                "cursor_api_rate_limited observed (OY cursor 429). "
+                "Refresh the product tab in Chrome and re-run when "
+                "reviews load again (typically a few minutes). "
+                "retry_intent preserved for audit."
+            ),
+            attempts=1,
+            last_attempt_at="2026-05-13T13:52:22Z",
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now, queue_path="ops/queue.json")
+    text = module._render(view, head_short="abc1234",
+                          queue_path=Path("ops/queue.json"))
+
+    # READY NOW section is present and contains the 429-routed row.
+    assert "READY NOW" in text
+    assert "A000000111111" in text
+    # The "operator retry ready" audit sub-line.
+    assert "operator retry ready" in text
+    assert "retry_after_cooldown" in text  # retry_intent name
+    # operator_note rendered verbatim (substring is enough).
+    assert "cursor_api_rate_limited" in text
+    # Hint for legacy WAITING block is present even when no waiting
+    # rows exist — but here we have no waiting rows so the (none)
+    # branch fires. Either branch is acceptable; assert the section
+    # header exists.
+    assert "WAITING" in text
+
+
+def test_inspector_render_legacy_waiting_block_carries_advisory_hint() -> None:
+    """When the queue DOES contain legacy `retry_after_cooldown` rows
+    (seeded before this ticket), the WAITING block surfaces the
+    advisory hint informing the operator that `next_run_after` is no
+    longer a hard wall. Header wording also flagged as 'legacy'."""
+    import importlib.util
+    repo_root = Path(__file__).resolve().parents[2]
+    script_path = repo_root / "scripts" / "inspect_brand20_collection_status.py"
+    spec = importlib.util.spec_from_file_location(
+        "inspect_brand20_collection_status", script_path,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    now = datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+    items: list[QueueItem] = [
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Legacy-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="retry_after_cooldown",
+            last_attempt_at="2026-05-13T11:00:00Z",
+            next_run_after="2026-05-13T12:30:00Z",
+            retry_intent="retry_after_cooldown",
+            retry_after_minutes=90,
+            attempts=1,
+        ),
+    ]
+    queue = Brand20Queue(items=items)
+    view = dashboard_view(queue, now=now, queue_path="ops/queue.json")
+    text = module._render(view, head_short="abc1234",
+                          queue_path=Path("ops/queue.json"))
+
+    # Header now flags the bucket as legacy and surfaces the advisory.
+    assert "WAITING (retry_after_cooldown — legacy)" in text
+    assert "advisory" in text
+    assert "operator may retry once the page recovers" in text
 
 
 def test_dashboard_real_seed_runnable_pool_invariant() -> None:
     """The real ops/brand20_collection_queue.json is operational state
     that mutates as live runs apply batch_summary results. This test
-    asserts invariants that survive those mutations, NOT exact
-    per-status counts:
+    asserts only durable invariants — NOT exact per-status counts —
+    so it survives operator-driven queue drift:
 
     - total seeded = 100 (20 SKUs × 5 sorts)
-    - retry_after_cooldown = 4 (the 4 SKUs known cooled at seed time;
-      this is the only count pinned because the cooldown-bound rows
-      are not re-attempted in routine operation)
-    - the runnable non-cooldown pool (pending + ready) totals 96 —
-      every attempt either keeps the row pending, advances it to
-      ready, or terminates it (done / inconclusive / manual). Once
-      attempts land terminal states this invariant relaxes; for now
-      the seed has zero done rows.
-    - SUGGESTED NEXT RUNS must be non-empty and lead with a
-      DATETIME_DESC primary candidate (the original bug was an empty
-      list)."""
+    - the sum of all known status counts equals 100 (no rows lost)
+    - SUGGESTED NEXT RUNS is non-empty and leads with a DATETIME_DESC
+      primary candidate (the original bug this test was added for)."""
     repo_root = Path(__file__).resolve().parents[2]
     queue_path = repo_root / "ops" / "brand20_collection_queue.json"
     queue = load_queue(queue_path)
 
-    # Pin a `now` so the test is independent of wall-clock — choose a
-    # timestamp at which the seed's 4 cooldown rows are still in the
-    # future (the seed's cooldowns expire 2026-05-13T14:25:40Z onward).
+    # Pin a `now` so the test is independent of wall-clock.
     now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
     view = dashboard_view(queue, now=now)
 
     assert view.total_targets_seeded == 100
-    assert view.counts["retry_after_cooldown"] == 4
-    # Runnable non-cooldown pool invariant: pending + ready + any
-    # terminal state for not-yet-cooled rows == 96.
-    pending = view.counts.get("pending", 0)
-    ready = view.counts.get("ready", 0)
-    done = view.counts.get("done", 0)
-    inconclusive = view.counts.get("inconclusive", 0)
-    manual = view.counts.get("manual_checkpoint", 0)
-    assert pending + ready + done + inconclusive + manual == 96
-    # In routine operation we expect at least one runnable candidate.
-    assert pending + ready >= 1
+    # No rows lost across any status bucket.
+    assert sum(view.counts.values()) == 100
     # SUGGESTED NEXT RUNS must be non-empty and lead with primary.
     assert 0 < len(view.suggestions) <= 3
     assert view.suggestions[0].target_type == "primary"

@@ -706,18 +706,24 @@ def test_post_run_batch_summary_updates_queue(
     assert item.attempts == 1
 
 
-def test_retry_after_cooldown_stops_loop_even_with_max_items_3(
+def test_cursor_429_stops_loop_but_queue_row_is_ready_for_operator_retry(
     queue_path: Path,
     patch_cdp_happy: dict[str, Any],
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """With --max-items-per-session 3 and a stubbed subprocess that
-    writes a retry_after_cooldown fixture on the FIRST call, the
-    subprocess is called EXACTLY ONCE (session-global stop)."""
+    """I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE (formerly
+    `test_retry_after_cooldown_stops_loop_even_with_max_items_3`).
+
+    With --max-items-per-session 3 and a stubbed subprocess that
+    writes a cursor-429 fixture on the FIRST call, the subprocess is
+    called EXACTLY ONCE (session-global stop preserved). AFTER the
+    stop, the queue row is left at `status=ready` with
+    `next_run_after=None` so the operator can immediately re-select
+    once the product tab recovers."""
     artifact_root = tmp_path / "artifacts"
     artifact_root.mkdir()
-    # The "first call" stub returns retry_after_cooldown; later stubs
+    # The "first call" stub returns a cursor-429 fixture; later stubs
     # would fail loudly if invoked. The runner must not advance.
     first_stub = _stub_subprocess_runner_writing_fixture(
         "batch_summary_retry_after_cooldown.json",
@@ -746,11 +752,31 @@ def test_retry_after_cooldown_stops_loop_even_with_max_items_3(
         f"subprocess invoked {seq.state['i']} times; expected 1"
     )
     out = capsys.readouterr().out
+    # Session stop signal still surfaced.
     assert "STOP" in out
-    assert "retry_after_cooldown" in out or "throttle" in out
-    # Resume command printed verbatim.
+    # Operator-retry context surfaced.
+    assert "status=ready" in out
+    assert "operator-retry command" in out or "operator_note" in out
+    # The hint phrasing pinned.
+    assert "Refresh the product tab" in out
+    # Operator-retry command line printed verbatim (no `next_run_after`
+    # tail, no `--allow-open-tab`).
     assert "scripts/run_brand20_queue_runner.py" in out
     assert "--i-authorize-live-collection" in out
+    assert "--goods-no A000000111111" in out
+    assert "--sort-type DATETIME_DESC" in out
+
+    # And: the on-disk queue row is now `ready`, not
+    # `retry_after_cooldown`. The operator may immediately re-select.
+    from src.voc.app.brand20_queue import load_queue
+    queue = load_queue(queue_path)
+    item = queue.require("A000000111111", "DATETIME_DESC")
+    assert item.status == "ready"
+    assert item.next_run_after is None
+    # Audit trail preserved.
+    assert item.retry_intent == "retry_after_cooldown"
+    assert item.operator_note is not None
+    assert "cursor_api_rate_limited" in item.operator_note
 
 
 def test_cursor_api_rate_limited_stops_loop(

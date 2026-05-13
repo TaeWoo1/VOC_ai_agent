@@ -33,14 +33,23 @@ Status taxonomy
 ---------------
 - "pending"               — not yet attempted.
 - "ready"                 — eligible for the next operator-authorized
-                            run (manual checkpoint cleared, or cooldown
-                            elapsed and operator chose to refresh).
+                            run. Sources include (a) a manual checkpoint
+                            cleared by the operator, (b) a primary that
+                            hit `max_cap_reached`, and (c) a row whose
+                            previous attempt observed cursor 429 — see
+                            "Operator-retry semantics" below.
 - "running"               — currently being collected (operator-set;
                             this module does not flip into running on
                             its own).
-- "retry_after_cooldown"  — cursor API was rate-limited; wall-clock
-                            spacing is the recovery. `next_run_after`
-                            carries the cooldown-elapsed timestamp.
+- "retry_after_cooldown"  — LEGACY: a row whose previous attempt was
+                            wall-clock-gated by a 90-minute cooldown.
+                            New 429 outcomes no longer route here (see
+                            I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE);
+                            this status remains as a literal so existing
+                            seed-file rows pinned at it before this
+                            change are preserved. The runner-selection
+                            path still treats this status as cooldown-
+                            gated (`next_run_after` must elapse).
 - "manual_checkpoint"     — auth wall / human-check / 403 observed;
                             operator must re-authenticate in CDP
                             Chrome before any retry can help.
@@ -50,11 +59,42 @@ Status taxonomy
                             (e.g. quality_status=inconclusive); operator
                             must triage before next attempt.
 
+Operator-retry semantics for cursor 429
+---------------------------------------
+The Brand-20 runner is operator-launched, not a daemon. When OY's
+cursor API rate-limits a session (`cursor_api_rate_limited=True`
+or `cursor_api_silenced=True`, or `retry_intent="retry_after_cooldown"`),
+the running session stops (the runner's stop-policy still treats
+that as a session-global halt — see `brand20_runner_core.should_stop_loop`).
+The queue-status translation, however, no longer applies a 90-minute
+wall-clock gate to the row itself. The operator typically observes
+that refreshing the product tab in Chrome restores review access
+within a few minutes, and a queue-level cooldown forces them to
+wait 90 minutes for no operational reason.
+
+After a 429-class outcome we therefore route the row to:
+  - `status = "ready"`              (operator may immediately re-select)
+  - `next_run_after = None`         (no time gate)
+  - `retry_intent`                  (preserved verbatim from connector
+                                     output, e.g. `"retry_after_cooldown"`,
+                                     so the audit trail names the cause)
+  - `operator_note`                 (human-readable audit hint, e.g.
+                                     `"cursor 429 observed at <ts>; refresh
+                                      the product tab in Chrome and re-run"`).
+The `retry_intent` field is informational — it is NOT used to gate
+runner selection. The runner's selection logic treats a row as
+runnable based on `status="ready"` alone.
+
+`manual_review_required` (auth wall / captcha / 403) is unchanged:
+those rows still land at `status="manual_checkpoint"` and remain
+gated until the operator runs `mark_brand20_checkpoint_certified.py`.
+
 Status transition precedence (CLAUDE.md OY rate-limit policy I-A→I-D
-chain): retry_after_cooldown > manual_checkpoint > done > inconclusive.
+chain): cursor-429 > manual_review_required > done > inconclusive.
 A batch_summary that simultaneously carries final_status="complete"
-AND retry_intent="retry_after_cooldown" lands as retry_after_cooldown
-— the cursor-throttle signal wins.
+AND retry_intent="retry_after_cooldown" lands as `ready` (the cursor-
+throttle signal still beats the clean-complete signal, but the row
+is no longer wall-clock-gated — it's operator-retry-ready).
 """
 from __future__ import annotations
 
@@ -392,17 +432,46 @@ def _extract_product_fields(batch_summary: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Operator-retry note literals. Module-level constants so tests can
+# substring-match without grepping inline f-strings, and so the
+# inspector/CLI can render the same phrasing without re-templating.
+#
+# I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE: a cursor-429 outcome
+# routes the row to `status=ready` with a human-readable audit hint in
+# `operator_note`. The hint names the underlying signal so the operator
+# (and any later inspector render) sees which 429 surface fired.
+OPERATOR_RETRY_NOTE_RATE_LIMITED: str = (
+    "cursor_api_rate_limited observed (OY cursor 429). Refresh the "
+    "product tab in Chrome and re-run when reviews load again "
+    "(typically a few minutes). retry_intent preserved for audit."
+)
+OPERATOR_RETRY_NOTE_SILENCED: str = (
+    "cursor_api_silenced observed (cold-start AND-gate). Refresh the "
+    "product tab in Chrome and re-run when reviews load again "
+    "(typically a few minutes). retry_intent preserved for audit."
+)
+
+
 def _decide_status(
     *,
     retry_intent: str | None,
     final_status: str | None,
     quality_status: str | None,
+    cursor_api_rate_limited: bool = False,
+    cursor_api_silenced: bool = False,
     target_type: str | None = None,
-) -> tuple[QueueStatus, str | None]:
-    """Return (new_status, checkpoint_reason).
+) -> tuple[QueueStatus, str | None, str | None]:
+    """Return ``(new_status, checkpoint_reason, operator_note)``.
 
-    Precedence (CLAUDE.md OY rate-limit policy):
-        1. retry_intent == "retry_after_cooldown"   → retry_after_cooldown
+    Precedence (CLAUDE.md OY rate-limit policy; the cursor-429 branch
+    no longer applies a wall-clock gate per
+    I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE):
+
+        1. retry_intent == "retry_after_cooldown"
+           OR cursor_api_rate_limited == True
+           OR cursor_api_silenced == True       → ready (operator retry
+                                                  ready; operator_note
+                                                  records the cause)
         2. retry_intent == "manual_review_required" → manual_checkpoint
         3. final_status in {complete, ok}           → done
         4. final_status == "max_cap_reached":
@@ -412,33 +481,55 @@ def _decide_status(
         5. quality_status == "inconclusive"
            OR final_status not recognized           → inconclusive
 
+    Step 1 is the operator-retry-no-cooldown-gate change. Previously a
+    429 outcome routed to ``retry_after_cooldown`` with
+    ``next_run_after = now + 90min``. The runner's session-stop policy
+    is unchanged (the in-flight session still halts on the 429 signal),
+    but the QUEUE STATE no longer wall-clock-gates the row. Operator
+    experience: refreshing the OY product page typically restores
+    review access within a few minutes; a 90-minute queue wall just
+    forces the operator to wait for no operational reason.
+
     Step 4 is the I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX
-    addition. The connector's `max_cap_reached` status means the
-    collection child successfully ingested up to the local cap and
-    the server still advertised more rows; this is a partial success,
-    not an error. Routing primary rows to "ready" preserves the
-    existing precedence chain (retry_after_cooldown still wins, and a
-    truly indeterminate run still lands in "inconclusive") while
-    surfacing the row as eligible for an operator-authorized re-run.
-    Signal sorts stay on the legacy "inconclusive" path because they
-    are metadata-only and re-running them costs another session-429
-    budget without expanding the analyzable corpus.
+    addition; behaviour preserved verbatim. Signal sorts stay on the
+    legacy "inconclusive" path because they are metadata-only.
+
+    ``cursor_api_rate_limited`` / ``cursor_api_silenced`` are passed in
+    explicitly so the operator_note can name the actual signal
+    surface; ``retry_intent`` alone collapses both into the same
+    string. Callers can pass both as ``False`` if they only have the
+    derived ``retry_intent`` (the function still routes correctly on
+    that alone).
     """
-    if retry_intent == "retry_after_cooldown":
-        return "retry_after_cooldown", None
+    cursor_429 = (
+        retry_intent == "retry_after_cooldown"
+        or cursor_api_rate_limited
+        or cursor_api_silenced
+    )
+    if cursor_429:
+        # Prefer the more specific signal when both surfaces are
+        # available. `cursor_api_silenced` is the cold-start AND-gate
+        # signal and only fires when `cursor_api_rate_limited` is
+        # also True for the same observation window; the silenced
+        # phrasing is more informative for the operator, so it wins.
+        if cursor_api_silenced:
+            note = OPERATOR_RETRY_NOTE_SILENCED
+        else:
+            note = OPERATOR_RETRY_NOTE_RATE_LIMITED
+        return "ready", None, note
     if retry_intent == "manual_review_required":
-        return "manual_checkpoint", "auth_or_human_check"
+        return "manual_checkpoint", "auth_or_human_check", None
     if final_status in ("complete", "ok"):
-        return "done", None
+        return "done", None, None
     if final_status == "max_cap_reached" or quality_status == "max_cap_reached":
         if target_type == "primary":
-            return "ready", None
-        return "inconclusive", None
+            return "ready", None, None
+        return "inconclusive", None, None
     if quality_status == "inconclusive":
-        return "inconclusive", None
+        return "inconclusive", None, None
     # Unknown / unrecognized terminal: classify as inconclusive so the
     # operator triages explicitly rather than silently advancing.
-    return "inconclusive", None
+    return "inconclusive", None, None
 
 
 def apply_batch_summary(
@@ -477,26 +568,46 @@ def apply_batch_summary(
     if retry_after_minutes is not None:
         item.retry_after_minutes = int(retry_after_minutes)
 
-    new_status, checkpoint_reason = _decide_status(
+    # Pull the raw 429 surface signals so `_decide_status` can name the
+    # exact source in the operator_note. Either signal alone (or the
+    # derived `retry_intent`) is sufficient to trigger the ready/audit
+    # path; passing all three keeps the routing decision in one place.
+    cursor_rate_limited_raw = bool(fields.get("cursor_api_rate_limited") or False)
+    cursor_silenced_raw = bool(fields.get("cursor_api_silenced") or False)
+
+    new_status, checkpoint_reason, operator_note = _decide_status(
         retry_intent=item.retry_intent,
         final_status=fields.get("final_status"),
         quality_status=fields.get("quality_status"),
+        cursor_api_rate_limited=cursor_rate_limited_raw,
+        cursor_api_silenced=cursor_silenced_raw,
         target_type=item.target_type,
     )
     item.status = new_status
     item.checkpoint_reason = checkpoint_reason
+    # Only overwrite `operator_note` on transitions that carry an
+    # audit hint. For other transitions we preserve any prior note —
+    # e.g. a `mark_checkpoint_certified` note that recorded the
+    # operator's prior triage action.
+    if operator_note is not None:
+        item.operator_note = operator_note
 
+    # `next_run_after` is now reserved for legacy `retry_after_cooldown`
+    # rows seeded before I-OY-BRAND20-OPERATOR-RETRY-NO-COOLDOWN-GATE.
+    # New 429 outcomes route to `status=ready` with `next_run_after=None`
+    # — operator decides when to retry, not a wall clock.
     if new_status == "retry_after_cooldown":
-        # next_run_after = last_attempt_at + retry_after_minutes.
-        # Default to 90 min if the connector didn't report a cadence
-        # (matches CLAUDE.md's recommended cooldown).
+        # Defensive: this branch is unreachable from `_decide_status`
+        # in current code (cursor-429 now routes to `ready`). Kept so a
+        # future ticket that re-introduces a cooldown route can plug
+        # in without re-deriving the anchor math.
         minutes = item.retry_after_minutes or 90
         anchor = _parse_iso(item.last_attempt_at) or (now or datetime.now(timezone.utc))
         item.next_run_after = _now_iso(anchor + timedelta(minutes=minutes))
     else:
-        # Other transitions clear the cooldown anchor — done /
-        # inconclusive / manual_checkpoint don't have a time-based
-        # gate.
+        # Every other transition clears the cooldown anchor — ready /
+        # done / inconclusive / manual_checkpoint don't have a
+        # time-based gate.
         item.next_run_after = None
 
     return item
