@@ -126,9 +126,28 @@ class Phase1Pipeline:
         summary = summary.model_copy(update={"run_id": run_id})
         quality_status = evaluate_quality_gates(summary)
 
+        # ---------- normalize → strip-and-promote → enrich → row dict ----------
+        rows: list[dict] = []
+        skipped = 0
+        if quality_status != "invalid" or self._can_persist_invalid_partial(
+            summary,
+            raws,
+        ):
+            rows, skipped = self._build_rows(
+                raws=raws,
+                channel_meta_class=channel_meta_class,
+                promoted_keys=promoted_keys,
+                source_method=source_method,
+                run_id=run_id,
+                enrich_fn=enrich_fn,
+            )
+
         # ---------- quality gate ----------
-        if quality_status == "invalid":
+        if quality_status == "invalid" and not rows:
             finished = datetime.now(timezone.utc)
+            summary = summary.model_copy(
+                update={"pipeline_normalize_rejections": skipped},
+            )
             self._save_run(
                 run_id=run_id,
                 channel=connector.channel_name,
@@ -139,27 +158,7 @@ class Phase1Pipeline:
                 quality_status=quality_status,
             )
             return Phase1RunResult(run_id=run_id, quality_status=quality_status,
-                                   rows_inserted=0, rows_skipped=0)
-
-        # ---------- normalize → strip-and-promote → enrich → row dict ----------
-        rows: list[dict] = []
-        skipped = 0
-        for raw in raws:
-            try:
-                row = self._build_row(
-                    raw=raw,
-                    channel_meta_class=channel_meta_class,
-                    promoted_keys=promoted_keys,
-                    source_method=source_method,
-                    run_id=run_id,
-                    enrich_fn=enrich_fn,
-                )
-            except ValueError as e:
-                # normalize() rejected the row (e.g., 10-char text floor)
-                skipped += 1
-                logger.debug("normalize rejected row in run %s: %s", run_id, e)
-                continue
-            rows.append(row)
+                                   rows_inserted=0, rows_skipped=skipped)
 
         # ---------- persist ----------
         inserted = self._reviews.save_many(rows)
@@ -186,6 +185,62 @@ class Phase1Pipeline:
         )
 
     # -----------------------------------------------------------------
+
+    @staticmethod
+    def _can_persist_invalid_partial(
+        summary: ConnectorRunSummary,
+        raws: list[RawReview],
+    ) -> bool:
+        """Allow durable rows for retryable OY cursor partials only."""
+        if not raws or summary.records_parsed <= 0:
+            return False
+        retryable_cursor_partial = (
+            summary.cursor_api_rate_limited
+            or summary.cursor_api_silenced
+            or summary.incomplete_collection
+        )
+        if not retryable_cursor_partial:
+            return False
+        unsafe_manual_or_auth = (
+            summary.auth_error
+            or summary.http_403_seen
+            or (
+                summary.human_check_detected
+                and not summary.human_check_recovered
+            )
+        )
+        return not unsafe_manual_or_auth
+
+    @classmethod
+    def _build_rows(
+        cls,
+        *,
+        raws: list[RawReview],
+        channel_meta_class: type[BaseModel],
+        promoted_keys: set[str],
+        source_method: str,
+        run_id: str,
+        enrich_fn: EnrichFn | None,
+    ) -> tuple[list[dict], int]:
+        rows: list[dict] = []
+        skipped = 0
+        for raw in raws:
+            try:
+                row = cls._build_row(
+                    raw=raw,
+                    channel_meta_class=channel_meta_class,
+                    promoted_keys=promoted_keys,
+                    source_method=source_method,
+                    run_id=run_id,
+                    enrich_fn=enrich_fn,
+                )
+            except ValueError as e:
+                # normalize() rejected the row (e.g., 10-char text floor)
+                skipped += 1
+                logger.debug("normalize rejected row in run %s: %s", run_id, e)
+                continue
+            rows.append(row)
+        return rows, skipped
 
     @staticmethod
     def _build_row(

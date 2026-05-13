@@ -224,6 +224,98 @@ async def test_auth_error_blocks_persistence(pipeline, review_repo, run_repo):
 
 
 @pytest.mark.asyncio
+async def test_cursor_429_invalid_partial_persists_valid_rows(
+    pipeline, review_repo, run_repo,
+):
+    summary = _summary(
+        raw_records_seen=2,
+        records_parsed=2,
+        blocked=True,
+        http_429_seen=True,
+        cursor_api_rate_limited=True,
+    )
+    raws = [
+        _raw(source_channel="oliveyoung", source_id="oy::1"),
+        _raw(source_channel="oliveyoung", source_id="oy::2"),
+    ]
+    connector = FakeConnector(raws, summary, channel_name="oliveyoung")
+
+    result = await pipeline.run(
+        connector=connector,
+        target="fixture",
+        channel_meta_class=CoupangMeta,
+        promoted_keys=COUPANG_PROMOTED_KEYS,
+    )
+
+    assert result.quality_status == "invalid"
+    assert result.rows_inserted == 2
+    assert review_repo.count_by_channel() == {"oliveyoung": 2}
+    run_row = run_repo.get(result.run_id)
+    assert run_row["quality_status"] == "invalid"
+    assert run_row["summary"]["cursor_api_rate_limited"] is True
+
+
+@pytest.mark.asyncio
+async def test_cursor_partial_insert_is_idempotent(pipeline, review_repo):
+    summary = _summary(
+        raw_records_seen=1,
+        records_parsed=1,
+        blocked=True,
+        http_429_seen=True,
+        cursor_api_rate_limited=True,
+    )
+    raws = [_raw(source_channel="oliveyoung", source_id="oy::same")]
+
+    result1 = await pipeline.run(
+        connector=FakeConnector(raws, summary, channel_name="oliveyoung"),
+        target="fixture",
+        channel_meta_class=CoupangMeta,
+        promoted_keys=COUPANG_PROMOTED_KEYS,
+    )
+    result2 = await pipeline.run(
+        connector=FakeConnector(raws, summary, channel_name="oliveyoung"),
+        target="fixture",
+        channel_meta_class=CoupangMeta,
+        promoted_keys=COUPANG_PROMOTED_KEYS,
+    )
+
+    assert result1.rows_inserted == 1
+    assert result2.rows_inserted == 0
+    assert review_repo.count_by_channel() == {"oliveyoung": 1}
+
+
+@pytest.mark.asyncio
+async def test_human_check_invalid_partial_does_not_persist(
+    pipeline, review_repo,
+):
+    summary = _summary(
+        raw_records_seen=1,
+        records_parsed=1,
+        blocked=True,
+        http_429_seen=True,
+        cursor_api_rate_limited=True,
+        human_check_detected=True,
+        human_check_recovered=False,
+    )
+    connector = FakeConnector(
+        [_raw(source_channel="oliveyoung", source_id="oy::captcha")],
+        summary,
+        channel_name="oliveyoung",
+    )
+
+    result = await pipeline.run(
+        connector=connector,
+        target="fixture",
+        channel_meta_class=CoupangMeta,
+        promoted_keys=COUPANG_PROMOTED_KEYS,
+    )
+
+    assert result.quality_status == "invalid"
+    assert result.rows_inserted == 0
+    assert review_repo.count_by_channel() == {}
+
+
+@pytest.mark.asyncio
 async def test_degraded_run_still_persists(pipeline, review_repo, run_repo):
     # 11 warnings / 100 parsed = 0.11 > 0.1 → degraded but rows persist
     summary = _summary(raw_records_seen=100, records_parsed=100, parse_warnings=11)

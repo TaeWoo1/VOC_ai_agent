@@ -183,6 +183,7 @@ class QueueItem(BaseModel):
     raw_records_seen_last: int | None = None
     records_parsed_last: int | None = None
     rows_inserted_last: int | None = None
+    rows_filtered_by_goods_no_last: int | None = None
 
     # Coverage-tracking placeholders. The queue itself does NOT inspect
     # voc_data.db; these are populated externally (e.g. by a future
@@ -382,6 +383,7 @@ def _extract_product_fields(batch_summary: dict[str, Any]) -> dict[str, Any]:
     keys_top = [
         "final_status", "quality_status", "status",
         "raw_records_seen", "records_parsed", "rows_inserted",
+        "rows_filtered_by_goods_no",
         "cursor_api_rate_limited", "cursor_api_silenced",
         "retry_intent", "retry_after_minutes",
         "run_id",
@@ -397,6 +399,7 @@ def _extract_product_fields(batch_summary: dict[str, Any]) -> dict[str, Any]:
             for k in [
                 "status", "quality_status",
                 "raw_records_seen", "records_parsed", "rows_inserted",
+                "rows_filtered_by_goods_no",
                 "run_id",
             ]:
                 if out.get(k) is None:
@@ -406,6 +409,7 @@ def _extract_product_fields(batch_summary: dict[str, Any]) -> dict[str, Any]:
                 for k in [
                     "cursor_api_rate_limited", "cursor_api_silenced",
                     "retry_intent", "retry_after_minutes",
+                    "rows_filtered_by_goods_no",
                     "run_id",
                 ]:
                     if out.get(k) is None:
@@ -560,6 +564,10 @@ def apply_batch_summary(
         item.records_parsed_last = int(fields["records_parsed"])
     if fields.get("rows_inserted") is not None:
         item.rows_inserted_last = int(fields["rows_inserted"])
+    if fields.get("rows_filtered_by_goods_no") is not None:
+        item.rows_filtered_by_goods_no_last = int(
+            fields["rows_filtered_by_goods_no"],
+        )
 
     retry_intent = fields.get("retry_intent")
     if retry_intent is not None:
@@ -714,7 +722,7 @@ def _sort_priority(item: QueueItem) -> tuple[int, str]:
     return (1, f"{idx:02d}_{item.sort_type}")
 
 
-def _suggestion_priority(item: QueueItem) -> tuple[int, int, str]:
+def _suggestion_priority(item: QueueItem) -> tuple[int, int, int, str, int, int, str]:
     """Suggestion ordering key for the runnable pool.
 
     Tuple components, ascending:
@@ -722,11 +730,18 @@ def _suggestion_priority(item: QueueItem) -> tuple[int, int, str]:
          Signal sorts are further ordered by their canonical position
          in ALL_SORTS so the dashboard renders them in a stable,
          operator-recognisable sequence.
-      1. cold-start preference: rows with no prior attempt
+      1. status: ready rows before pending / elapsed legacy-cooldown
+         rows.
+      2. cold-start preference: rows with no prior attempt
          (attempts == 0 AND last_attempt_at is None) sort before
-         already-touched rows. This keeps the seed's never-tried
-         primaries at the head of the suggestion list.
-      2. goods_no ascending: stable tie-break so the same queue
+         already-touched rows. This keeps never-tried candidates ahead
+         of recently retried rows.
+      3. last_attempt_at: older attempts before newer attempts.
+      4. retry_intent: "none" / absent before retry_after_cooldown.
+      5. zero-row cursor partial penalty: rows whose last run inserted
+         zero rows with cursor-rate-limit audit context sort behind
+         other ready candidates.
+      6. goods_no ascending: stable tie-break so the same queue
          produces the same suggestion list across runs.
     """
     if item.target_type == "primary":
@@ -738,8 +753,30 @@ def _suggestion_priority(item: QueueItem) -> tuple[int, int, str]:
             idx = 99
         # Reserve bucket 0 for primary, offset signals into bucket 1+.
         target_bucket = 1 + idx
+    status_bucket = 0 if item.status == "ready" else (
+        1 if item.status == "pending" else 2
+    )
     cold_start = 0 if (item.attempts == 0 and item.last_attempt_at is None) else 1
-    return (target_bucket, cold_start, item.goods_no)
+    last_attempt = item.last_attempt_at or ""
+    retry_intent_bucket = 0 if item.retry_intent in (None, "", "none") else 1
+    zero_row_cursor_penalty = 1 if (
+        (
+            item.rows_inserted_last == 0
+            and (item.attempts > 0 or item.last_attempt_at is not None)
+        )
+        or item.retry_intent == "retry_after_cooldown"
+        or "cursor_api_rate_limited" in (item.operator_note or "")
+        or "cursor_api_silenced" in (item.operator_note or "")
+    ) else 0
+    return (
+        target_bucket,
+        status_bucket,
+        cold_start,
+        last_attempt,
+        retry_intent_bucket,
+        zero_row_cursor_penalty,
+        item.goods_no,
+    )
 
 
 def dashboard_view(

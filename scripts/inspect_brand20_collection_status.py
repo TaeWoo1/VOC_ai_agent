@@ -41,6 +41,17 @@ from src.voc.app.brand20_queue import (  # noqa: E402
 DEFAULT_QUEUE_PATH = REPO / "ops" / "brand20_collection_queue.json"
 
 
+def _attempt_detail_line(it: object) -> str:
+    return (
+        f"      last_records_parsed={getattr(it, 'records_parsed_last', None)}  "
+        f"last_rows_inserted={getattr(it, 'rows_inserted_last', None)}  "
+        f"last_raw_records_seen={getattr(it, 'raw_records_seen_last', None)}  "
+        f"rows_filtered_by_goods_no="
+        f"{getattr(it, 'rows_filtered_by_goods_no_last', None)}  "
+        f"retry_intent={getattr(it, 'retry_intent', None) or 'none'}"
+    )
+
+
 def _git_head_short() -> str:
     """Best-effort `git rev-parse --short HEAD`. Returns '?' on any
     failure (missing git, detached worktree, etc.)."""
@@ -174,6 +185,7 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
                 f"  {it.goods_no}  {it.sort_type:<16} "
                 f"target={it.target_type}  product={it.product_name}"
             )
+            lines.append(_attempt_detail_line(it))
             # Operator-retry context: 429-routed rows carry
             # `retry_intent="retry_after_cooldown"` plus an
             # `operator_note`. Render a single sub-line so the operator
@@ -209,6 +221,8 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
                 f"  {it.goods_no}  {it.sort_type:<16} "
                 f"target={it.target_type}  product={it.product_name}"
             )
+            if it.attempts or it.last_attempt_at:
+                lines.append(_attempt_detail_line(it))
         remaining = len(view.runnable_pending) - display_cap
         if remaining > 0:
             lines.append(
@@ -246,6 +260,7 @@ def _render(view: DashboardView, *, head_short: str, queue_path: Path) -> str:
                 f"      product={it.product_name}  attempts={it.attempts}  "
                 f"raw_last={it.raw_records_seen_last}"
             )
+            lines.append(_attempt_detail_line(it))
     lines.append("")
 
     # Manual Action Needed

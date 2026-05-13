@@ -662,6 +662,138 @@ def test_dashboard_suggestions_prefer_primary_over_signal_pending() -> None:
     assert view.suggestions[2].sort_type == "RATING_ASC"
 
 
+def test_dashboard_suggestions_rank_recent_cursor_429_below_never_attempted_ready() -> None:
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    queue = Brand20Queue(items=[
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            attempts=1,
+            last_attempt_at="2026-05-13T06:55:00Z",
+            rows_inserted_last=0,
+            retry_intent="retry_after_cooldown",
+            operator_note="cursor_api_rate_limited observed",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+        ),
+    ])
+
+    view = dashboard_view(queue, now=now)
+
+    assert [it.goods_no for it in view.suggestions[:2]] == [
+        "A000000222222",
+        "A000000111111",
+    ]
+
+
+def test_dashboard_suggestions_rank_retry_intent_none_above_cooldown() -> None:
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    queue = Brand20Queue(items=[
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            attempts=1,
+            last_attempt_at="2026-05-13T06:00:00Z",
+            rows_inserted_last=10,
+            retry_intent="retry_after_cooldown",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            attempts=1,
+            last_attempt_at="2026-05-13T06:00:00Z",
+            rows_inserted_last=10,
+            retry_intent="none",
+        ),
+    ])
+
+    view = dashboard_view(queue, now=now)
+
+    assert [it.goods_no for it in view.suggestions[:2]] == [
+        "A000000222222",
+        "A000000111111",
+    ]
+
+
+def test_dashboard_suggestions_keep_datetime_desc_above_signal_sorts() -> None:
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    queue = Brand20Queue(items=[
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="RATING_ASC",
+            target_type="signal",
+            status="ready",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+            attempts=1,
+            last_attempt_at="2026-05-13T06:00:00Z",
+            rows_inserted_last=0,
+            retry_intent="retry_after_cooldown",
+        ),
+    ])
+
+    view = dashboard_view(queue, now=now)
+
+    assert view.suggestions[0].sort_type == "DATETIME_DESC"
+    assert view.suggestions[0].target_type == "primary"
+
+
+def test_dashboard_suggestions_are_stable_and_deterministic() -> None:
+    now = datetime(2026, 5, 13, 7, 0, 0, tzinfo=timezone.utc)
+    queue = Brand20Queue(items=[
+        QueueItem(
+            goods_no="A000000333333",
+            product_name="Brand-C",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+        ),
+        QueueItem(
+            goods_no="A000000111111",
+            product_name="Brand-A",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+        ),
+        QueueItem(
+            goods_no="A000000222222",
+            product_name="Brand-B",
+            sort_type="DATETIME_DESC",
+            target_type="primary",
+            status="ready",
+        ),
+    ])
+
+    first = [it.goods_no for it in dashboard_view(queue, now=now).suggestions]
+    second = [it.goods_no for it in dashboard_view(queue, now=now).suggestions]
+
+    assert first == second == [
+        "A000000111111",
+        "A000000222222",
+        "A000000333333",
+    ]
+
+
 def test_dashboard_cooldown_future_excluded_past_included() -> None:
     """Cooldown rows whose `next_run_after` is in the future must NOT
     be suggested; cooldown rows whose `next_run_after` has elapsed MUST
