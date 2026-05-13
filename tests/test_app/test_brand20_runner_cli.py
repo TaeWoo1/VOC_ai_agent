@@ -147,16 +147,21 @@ def test_default_mode_prints_plan_block_and_exits_zero(
     patch_cdp_happy: dict[str, Any],
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """Default mode (no flags beyond --queue): plan block printed, no
-    subprocess call, exit 0 because the gate is OK."""
+    """Default mode (no flags beyond --queue): plan-only block printed,
+    no subprocess call, exit 0 because the gate is OK. The header /
+    trailing note are the mode-aware "plan-only" labels (the runner is
+    no longer phase A; see
+    I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX §1)."""
     exit_code = cli.main([
         "--queue", str(queue_path),
         "--artifact-root", "/tmp/test-artifacts",
     ])
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "Brand-20 runner — phase A plan block" in out
-    assert "phase A. No live collection launched." in out
+    assert "Brand-20 runner — plan-only block" in out
+    # Forbidden literals from the prior phase-A scaffold.
+    assert "phase A" not in out
+    assert "No live collection launched" not in out
     assert "goods_no:        A000000111111" in out
     assert "target_url:      https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000111111&tab=review" in out
     # Confirm open_tab was never invoked.
@@ -174,7 +179,8 @@ def test_default_mode_exits_two_on_gate_failure(
     assert exit_code == 2
     out = capsys.readouterr().out
     # Plan block is still printed (so the operator sees the target).
-    assert "Brand-20 runner — phase A plan block" in out
+    assert "Brand-20 runner — plan-only block" in out
+    assert "phase A" not in out
     assert "cdp_unreachable" in out
 
 
@@ -281,7 +287,11 @@ def test_no_auth_flag_never_invokes_subprocess(
     assert exit_code == 0
     assert calls == []
     out = capsys.readouterr().out
-    assert "Brand-20 runner — phase A plan block" in out
+    assert "Brand-20 runner — plan-only block" in out
+    assert "phase A" not in out
+    assert "No live collection launched" not in out
+    # Operator-facing "no live collection invoked" hint must still
+    # appear — just not via the old phase-A literal.
     assert "no live collection" in out.lower()
     assert patch_cdp_happy["open_tab_calls"] == []
 
@@ -1032,3 +1042,275 @@ def test_dry_run_no_mutation_no_subprocess_no_open_tab(
     # triple-no contract is the actual assertion.
     assert exit_code in (0, 2)
     _ = shutil  # silence linter when shutil unused
+
+
+# ===========================================================================
+# I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX
+# ===========================================================================
+#
+# Three regressions surfaced by the operator's live smoke against
+# A000000107679 / DATETIME_DESC:
+#   (1) CLI printed phase-A literals even when live collection ran.
+#   (2) Primary DATETIME_DESC was capped at 200 by the connector's
+#       BatchDefaults default, producing artificial max_cap_reached.
+#   (3) max_cap_reached + final_status=ok was routed to inconclusive.
+#
+# Each regression has at least one CLI-level test below; the queue-
+# layer mapping fix has its own tests in test_brand20_queue.py.
+
+
+def test_live_mode_does_not_print_phase_a_label(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """With --i-authorize-live-collection AND a patched subprocess
+    returning a clean-`complete` fixture, the runner's stdout MUST
+    NOT contain the literal 'phase A' or 'No live collection
+    launched'. The plan-block header reads "live collection plan"
+    instead. (Req §1)"""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=stub,
+    )
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    # Forbidden literals — the runner is no longer phase A.
+    assert "phase A" not in out
+    assert "No live collection launched" not in out
+    # Required live-mode header.
+    assert "Brand-20 runner — live collection plan" in out
+
+
+def test_dry_run_does_not_print_phase_a_label(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """The dry-run / no-auth path also drops the phase-A literal.
+    The header reads "plan-only block" and the trailing note refers
+    to a plan-only invocation, not a phase. (Req §1)"""
+    # No --i-authorize-live-collection — default plan-only path.
+    exit_code = cli.main([
+        "--queue", str(queue_path),
+    ])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "phase A" not in out
+    assert "No live collection launched" not in out
+    assert "Brand-20 runner — plan-only block" in out
+
+
+def test_primary_datetime_desc_command_max_is_not_200(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """With --i-authorize-live-collection and a patched subprocess,
+    capture the argv passed to the collection child. For a
+    DATETIME_DESC primary row, the manifest the runner writes must
+    pin `defaults.max_reviews` to BRAND20_PRIMARY_MAX (>= 5000), NOT
+    the connector's tuned-for-sampling default of 200. (Req §2)
+
+    We assert on the on-disk manifest the subprocess stub reads,
+    because the child argv itself only carries `--manifest <path>`
+    and `--artifact-root <path>` — the cap lives in the manifest
+    body."""
+    from src.voc.app.brand20_runner_core import (
+        BRAND20_PRIMARY_MAX,
+    )
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    captured: dict[str, Any] = {"manifest": None}
+
+    base_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+
+    def _wrapper(argv, *args, **kwargs):
+        for i, tok in enumerate(argv):
+            if tok == "--manifest" and i + 1 < len(argv):
+                captured["manifest"] = json.loads(
+                    Path(argv[i + 1]).read_text(encoding="utf-8"),
+                )
+        return base_stub(argv, *args, **kwargs)
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=_wrapper,
+    )
+    assert exit_code == 0
+    assert captured["manifest"] is not None
+    max_reviews = captured["manifest"]["defaults"].get("max_reviews")
+    assert max_reviews == BRAND20_PRIMARY_MAX
+    assert max_reviews >= 5000, (
+        f"primary DATETIME_DESC max_reviews={max_reviews} is too small; "
+        f"the prior 200 cap produced artificial max_cap_reached."
+    )
+    assert max_reviews != 200, (
+        "primary DATETIME_DESC max_reviews must NOT inherit the "
+        "200-row sampling default"
+    )
+
+
+def test_signal_sort_command_max_is_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signal-sort queue row (RATING_ASC) carries
+    BRAND20_SIGNAL_MAX in the manifest defaults — a small cap that
+    keeps the session-429 budget intact across the four signal
+    passes. (Req §3)
+
+    To force the runner to pick a signal-sort row, we mark the SKU's
+    primary as `done` so `pick_next_runnable` advances to RATING_ASC.
+    """
+    from src.voc.app.brand20_runner_core import (
+        BRAND20_SIGNAL_MAX,
+    )
+
+    rows: list[QueueItem] = []
+    rows.extend(make_full_sort_set(goods_no="A000000111111", product_name="Brand-A"))
+    # Mark the primary done so the picker advances to the signal sort.
+    for it in rows:
+        if it.sort_type == "DATETIME_DESC":
+            it.status = "done"
+    queue = Brand20Queue(meta=QueueMeta(schema_version=1), items=rows)
+    queue_p = tmp_path / "queue.json"
+    save_queue(queue_p, queue)
+
+    monkeypatch.setattr(cdp_probe, "get_version", lambda: {"Browser": "Chrome/123"})
+    monkeypatch.setattr(
+        cdp_probe, "list_tabs", lambda: [{
+            "id": "a",
+            "url": (
+                "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?"
+                "goodsNo=A000000111111&tab=review"
+            ),
+        }],
+    )
+    monkeypatch.setattr(cdp_probe, "open_tab", lambda *a, **kw: (_ for _ in ()).throw(
+        AssertionError("must not open tab")))
+    monkeypatch.setattr(precond, "_default_pgrep", lambda _cmd: [])
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    captured: dict[str, Any] = {"manifest": None}
+
+    base_stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_complete.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="RATING_ASC",
+    )
+
+    def _wrapper(argv, *args, **kwargs):
+        for i, tok in enumerate(argv):
+            if tok == "--manifest" and i + 1 < len(argv):
+                captured["manifest"] = json.loads(
+                    Path(argv[i + 1]).read_text(encoding="utf-8"),
+                )
+        return base_stub(argv, *args, **kwargs)
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_p),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=_wrapper,
+    )
+    assert exit_code == 0
+    assert captured["manifest"] is not None
+    assert captured["manifest"]["defaults"]["sort_type"] == "RATING_ASC"
+    assert captured["manifest"]["defaults"]["max_reviews"] == BRAND20_SIGNAL_MAX
+
+
+def test_dry_run_remains_no_subprocess_no_mutation(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+) -> None:
+    """Regression guard: the phase-B --dry-run contract (no
+    subprocess, no queue mutation) is preserved across this ticket's
+    edits. (Req §6 keep)"""
+    queue_bytes_before = queue_path.read_bytes()
+
+    def _stub(*_a, **_kw):
+        raise AssertionError("subprocess must not run under --dry-run")
+
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--dry-run",
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=_stub,
+    )
+    assert exit_code == 0
+    assert queue_path.read_bytes() == queue_bytes_before
+
+
+def test_primary_max_cap_reached_prints_partial_message(
+    queue_path: Path,
+    patch_cdp_happy: dict[str, Any],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """A primary DATETIME_DESC batch_summary with `status=max_cap_reached`
+    AND `quality_status=ok` must surface a PARTIAL line plus the
+    resume command verbatim, and the runner must exit 0 (not 1). The
+    queue row lands on `ready` (NOT `inconclusive`). (Req §4 + §5)"""
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    stub = _stub_subprocess_runner_writing_fixture(
+        "batch_summary_max_cap_reached.json",
+        artifact_root=artifact_root,
+        goods_no="A000000111111",
+        sort_type="DATETIME_DESC",
+    )
+    exit_code = cli.main(
+        [
+            "--queue", str(queue_path),
+            "--artifact-root", str(artifact_root),
+            "--i-authorize-live-collection",
+        ],
+        subprocess_runner=stub,
+    )
+    # NOT an error; the operator chose to extend coverage by re-running.
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    # PARTIAL line is the contract literal.
+    assert "PARTIAL:" in out
+    # Resume command line printed verbatim with same (goods_no, sort_type).
+    assert "scripts/run_brand20_queue_runner.py" in out
+    assert "--goods-no A000000111111" in out
+    assert "--sort-type DATETIME_DESC" in out
+    assert "--i-authorize-live-collection" in out
+    # The queue row is NOT inconclusive (it is `ready`, per
+    # brand20_queue._decide_status fix).
+    from src.voc.app.brand20_queue import load_queue
+    queue = load_queue(queue_path)
+    item = queue.require("A000000111111", "DATETIME_DESC")
+    assert item.status == "ready"
+    assert item.status != "inconclusive"

@@ -397,6 +397,7 @@ def _decide_status(
     retry_intent: str | None,
     final_status: str | None,
     quality_status: str | None,
+    target_type: str | None = None,
 ) -> tuple[QueueStatus, str | None]:
     """Return (new_status, checkpoint_reason).
 
@@ -404,8 +405,24 @@ def _decide_status(
         1. retry_intent == "retry_after_cooldown"   → retry_after_cooldown
         2. retry_intent == "manual_review_required" → manual_checkpoint
         3. final_status in {complete, ok}           → done
-        4. quality_status == "inconclusive"
+        4. final_status == "max_cap_reached":
+             primary  → ready  (operator may re-run to extend coverage)
+             signal   → inconclusive (metadata-only, no benefit from
+                                       extending the cap)
+        5. quality_status == "inconclusive"
            OR final_status not recognized           → inconclusive
+
+    Step 4 is the I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX
+    addition. The connector's `max_cap_reached` status means the
+    collection child successfully ingested up to the local cap and
+    the server still advertised more rows; this is a partial success,
+    not an error. Routing primary rows to "ready" preserves the
+    existing precedence chain (retry_after_cooldown still wins, and a
+    truly indeterminate run still lands in "inconclusive") while
+    surfacing the row as eligible for an operator-authorized re-run.
+    Signal sorts stay on the legacy "inconclusive" path because they
+    are metadata-only and re-running them costs another session-429
+    budget without expanding the analyzable corpus.
     """
     if retry_intent == "retry_after_cooldown":
         return "retry_after_cooldown", None
@@ -413,6 +430,10 @@ def _decide_status(
         return "manual_checkpoint", "auth_or_human_check"
     if final_status in ("complete", "ok"):
         return "done", None
+    if final_status == "max_cap_reached" or quality_status == "max_cap_reached":
+        if target_type == "primary":
+            return "ready", None
+        return "inconclusive", None
     if quality_status == "inconclusive":
         return "inconclusive", None
     # Unknown / unrecognized terminal: classify as inconclusive so the
@@ -460,6 +481,7 @@ def apply_batch_summary(
         retry_intent=item.retry_intent,
         final_status=fields.get("final_status"),
         quality_status=fields.get("quality_status"),
+        target_type=item.target_type,
     )
     item.status = new_status
     item.checkpoint_reason = checkpoint_reason

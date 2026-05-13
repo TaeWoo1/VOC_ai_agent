@@ -40,10 +40,43 @@ from typing import Any
 
 from src.voc.app.brand20_queue import (
     ALL_SORTS,
+    PRIMARY_SORT,
     Brand20Queue,
     QueueItem,
     _parse_iso,
 )
+
+
+# ---------------------------------------------------------------------------
+# Brand-20 per-sort max_reviews caps (manifest defaults)
+# ---------------------------------------------------------------------------
+#
+# I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX:
+# The prior phase-B wiring inherited the
+# `collection_batch.BatchDefaults.max_reviews` default of 200, which
+# silently capped DATETIME_DESC primary collection at 200 rows long
+# before OY's own cursor-API session 429 fires. The 200 default was
+# tuned for cross-product sampling (phase 3 NAMING-style probes), not
+# for single-product full-history collection, which is the Brand-20
+# operator workflow.
+#
+# Primary (DATETIME_DESC) is the full corpus: pin a generous cap of
+# 5000 so even the largest SKUs we currently track (review counts in
+# the low thousands) collect to completion under one operator
+# session. The ingest CLI requires a positive int, so we cannot omit
+# the cap entirely; 5000 is well above any single-product run we have
+# evidence for in docs/ (cf. phase2_naming_oy_cdp_collection_summary
+# which references --max 1000 as the deep-collection option, and
+# phase3_oy_20_product_manifest_plan which documents 200 as the
+# sampling default).
+#
+# Signal sorts (RATING_ASC, RATING_DESC, USEFUL_SCORE_DESC,
+# RECOMMENDED_DESC) are metadata-only: their job is to surface
+# ranking-bound exemplars, not to enumerate every row. A 500-row cap
+# is enough to surface the top-of-rank reviews for analysis without
+# triggering OY's session 429 across the four signal passes.
+BRAND20_PRIMARY_MAX: int = 5000
+BRAND20_SIGNAL_MAX: int = 500
 
 
 # ---------------------------------------------------------------------------
@@ -226,11 +259,24 @@ def pick_next_runnable(
 # ---------------------------------------------------------------------------
 
 
-# Operator-facing literal kept as a module-level constant so the CLI
-# test can grep for it without depending on render ordering.
-PHASE_A_PLAN_NOTE: str = (
-    "NOTE: phase A. No live collection launched. Pass --i-authorize-live-collection\n"
-    "      AFTER phase B lands to actually invoke the child process."
+# Operator-facing literals kept as module-level constants so CLI tests
+# can grep for them without depending on render ordering.
+#
+# I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX: the previous
+# constant (`PHASE_A_PLAN_NOTE`, header `"phase A plan block"`) was
+# left over from the phase-A scaffold and was still printed even after
+# the phase-B live-collection wiring landed, which made the live-mode
+# stdout misleading ("phase A. No live collection launched." even when
+# collection had just succeeded). The plan block is now rendered with
+# a `mode` parameter that swaps the header and the trailing note.
+PLAN_NOTE_PLAN_ONLY: str = (
+    "NOTE: plan-only block. No live collection invoked. Pass\n"
+    "      --i-authorize-live-collection to actually launch the child."
+)
+PLAN_NOTE_LIVE: str = (
+    "NOTE: live collection will be invoked next. The child subprocess\n"
+    "      runs against the manifest above; status is applied to the\n"
+    "      queue after it returns."
 )
 
 
@@ -242,23 +288,41 @@ def format_plan_block(
     env_vars: dict[str, str],
     command_line: str,
     precondition_result: Any,
+    mode: str = "plan_only",
 ) -> str:
-    """Render the phase-A plan block.
+    """Render the runner plan block.
 
     `precondition_result` is duck-typed (matches
     `brand20_runner_precondition.PreconditionResult`) so this module
     has no import-time dependency on the precondition module. Tests
     pass in a tiny stand-in dataclass.
+
+    `mode` is either `"plan_only"` (no auth flag, or `--dry-run`) or
+    `"live"` (auth flag set, collection about to be invoked). The
+    header line and the trailing note change accordingly; the body —
+    target row, preconditions, env, command — is identical so the
+    operator gets the same plan view in both modes.
     """
     ok = bool(getattr(precondition_result, "ok", False))
     notes = list(getattr(precondition_result, "notes", []) or [])
     failed_check = getattr(precondition_result, "failed_check", None)
     required_action = getattr(precondition_result, "required_action", None)
 
+    if mode == "live":
+        header = "Brand-20 runner — live collection plan"
+        trailing_note = PLAN_NOTE_LIVE
+        env_label = "env that WILL be used:"
+        cmd_label = "command that WILL be run:"
+    else:
+        header = "Brand-20 runner — plan-only block"
+        trailing_note = PLAN_NOTE_PLAN_ONLY
+        env_label = "env that WOULD be used:"
+        cmd_label = "command that WOULD be run:"
+
     lines: list[str] = []
     sep = "=" * 78
     lines.append(sep)
-    lines.append("Brand-20 runner — phase A plan block")
+    lines.append(header)
     lines.append(sep)
     lines.append(f"goods_no:        {item.goods_no}")
     lines.append(f"product_name:    {item.product_name}")
@@ -280,15 +344,15 @@ def format_plan_block(
     else:
         lines.append("  notes: (none)")
     lines.append("")
-    lines.append("env that WOULD be used (phase B):")
+    lines.append(env_label)
     # Sorted for determinism so tests can pin exact text.
     for k in sorted(env_vars.keys()):
         lines.append(f"  {k}={env_vars[k]}")
     lines.append("")
-    lines.append("command that WOULD be run (phase B):")
+    lines.append(cmd_label)
     lines.append(f"  {command_line}")
     lines.append("")
-    lines.append(PHASE_A_PLAN_NOTE)
+    lines.append(trailing_note)
     lines.append(sep)
     return "\n".join(lines)
 
@@ -428,6 +492,16 @@ def build_temporary_manifest(
     this helper does not touch it.
     """
     batch_id = _build_batch_id(item, now=now)
+    # I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX: pick the
+    # per-sort cap. Primary rows collect the full corpus
+    # (BRAND20_PRIMARY_MAX); signal sorts are metadata-only and use a
+    # smaller cap (BRAND20_SIGNAL_MAX). Without this the runner inherited
+    # the connector's tuned-for-sampling default of 200, which produced
+    # artificial `max_cap_reached` on the very first DATETIME_DESC pass.
+    max_reviews = (
+        BRAND20_PRIMARY_MAX if item.sort_type == PRIMARY_SORT
+        else BRAND20_SIGNAL_MAX
+    )
     payload: dict[str, Any] = {
         "batch_id": batch_id,
         "defaults": {
@@ -438,6 +512,7 @@ def build_temporary_manifest(
             # we're about to update. See CLAUDE.md OY collection rules:
             # DATETIME_DESC is primary, signal sorts are metadata-only.
             "sort_type": item.sort_type,
+            "max_reviews": max_reviews,
         },
         "products": [
             {

@@ -350,6 +350,54 @@ def _format_certify_command(item: Any) -> str:
     )
 
 
+def _format_resume_max_cap_reached(item: Any) -> str:
+    """Render the verbatim resume command for a primary row that
+    landed on local cap (`max_cap_reached`).
+
+    I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX §5: when the
+    DATETIME_DESC primary hits the local cap (BRAND20_PRIMARY_MAX),
+    surface a clear PARTIAL line plus the exact re-run command. The
+    operator can re-invoke the runner against the same row to extend
+    coverage; the row has been left in `status=ready` by the queue
+    layer so a default-mode run picks it up directly.
+    """
+    return (
+        f"  PYTHONPATH=. /Users/taewookang/.pyenv/shims/python3 \\\n"
+        f"    scripts/run_brand20_queue_runner.py \\\n"
+        f"    --goods-no {item.goods_no} \\\n"
+        f"    --sort-type {item.sort_type} \\\n"
+        f"    --i-authorize-live-collection"
+    )
+
+
+def _is_max_cap_reached(summary: dict[str, Any]) -> bool:
+    """Return True iff this batch_summary records a primary's local
+    `max_cap_reached` exhaustion (and is otherwise a clean run).
+
+    Two surfaces carry the marker — the connector classifier sets
+    `products[0].status = "max_cap_reached"`, and the resume-state
+    block mirrors it onto `final_status`. Either is sufficient to
+    surface the PARTIAL message; we tolerate both shapes the same way
+    `apply_batch_summary` does.
+    """
+    products = summary.get("products") or []
+    if products and isinstance(products, list):
+        first = products[0]
+        if isinstance(first, dict):
+            if first.get("status") == "max_cap_reached":
+                return True
+            resume = first.get("resume_state")
+            if isinstance(resume, dict) and resume.get("final_status") == "max_cap_reached":
+                return True
+    # Top-level fallback (the batch driver currently nests; future-
+    # proof against a flatter surface).
+    if summary.get("final_status") == "max_cap_reached":
+        return True
+    if summary.get("status") == "max_cap_reached":
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
@@ -452,6 +500,11 @@ def main(
         head_baseline=args.head_baseline,
     )
 
+    # I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX: pick the plan-
+    # block mode up-front so the header/trailing-note matches what the
+    # runner is actually about to do. "live" iff the auth flag is set
+    # AND --dry-run is NOT (the same predicate the loop driver uses).
+    plan_mode = "live" if (args.authorize_live and not args.dry_run) else "plan_only"
     plan_block = format_plan_block(
         item,
         queue_path=str(queue_path),
@@ -462,6 +515,7 @@ def main(
             artifact_root=args.artifact_root,
         ),
         precondition_result=pre_result,
+        mode=plan_mode,
     )
     print(plan_block)
 
@@ -478,9 +532,9 @@ def main(
     if args.dry_run or not args.authorize_live:
         if not args.authorize_live:
             print(
-                "no live collection: --i-authorize-live-collection "
-                "was NOT passed. Re-run with the flag to actually "
-                "launch collection."
+                "plan-only: --i-authorize-live-collection was NOT "
+                "passed. No live collection invoked. Re-run with the "
+                "flag to actually launch collection."
             )
         else:
             print(
@@ -624,6 +678,25 @@ def _run_loop(
                 f"(rows={updated_item.rows_inserted_last}). "
                 f"{completed_count}/{max_items} targets done."
             )
+        elif updated_item.status == "ready" and _is_max_cap_reached(summary):
+            # I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX §5:
+            # primary DATETIME_DESC hit the local cap. The queue layer
+            # has routed this to `status=ready` (NOT `inconclusive`)
+            # because re-running extends coverage. Surface a PARTIAL
+            # line + the exact resume command and exit cleanly. The
+            # loop deliberately does NOT advance to another SKU here
+            # — the operator should decide whether to keep going on
+            # this row or accept the partial coverage.
+            print(
+                f"PARTIAL: {updated_item.product_name}/"
+                f"{updated_item.sort_type} "
+                f"(rows={updated_item.rows_inserted_last}, "
+                f"local cap reached). This is NOT an error — re-run "
+                f"to extend coverage."
+            )
+            print("resume command (to extend coverage):")
+            print(_format_resume_max_cap_reached(updated_item))
+            return 0
         else:
             # Non-stop, non-done (e.g. inconclusive): surface and stop
             # — the operator should triage explicitly rather than the

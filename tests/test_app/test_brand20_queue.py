@@ -672,12 +672,163 @@ def test_dashboard_never_suggests_manual_done_inconclusive_running() -> None:
         assert blocked_goods not in pending_goods
 
 
-def test_dashboard_real_seed_pending_count_preserved() -> None:
-    """The pending-as-runnable change must NOT mutate state:
-    constructing a view against the on-disk Brand-20 seed at HEAD must
-    still report total_targets=100 and pending=96 (16 DATETIME_DESC +
-    4 cooldown + 80 signal-sort rows). The suggestion list, by
-    contrast, must now be non-empty (was previously empty)."""
+# ---------------------------------------------------------------------------
+# 14b. max_cap_reached status mapping
+# (I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX Req §4)
+# ---------------------------------------------------------------------------
+# The connector's `max_cap_reached` status means the run successfully
+# ingested up to the local cap and the server still advertised more
+# rows. This is a PARTIAL success, not an indeterminate outcome:
+#   - primary (DATETIME_DESC) rows route to `ready` so the operator
+#     can re-run to extend coverage,
+#   - signal sorts route to `inconclusive` (metadata-only; no benefit
+#     from re-running, and the operator should triage if it shows up).
+# The pre-existing precedence chain (retry_after_cooldown >
+# manual_checkpoint > done > inconclusive) is untouched.
+
+
+def _max_cap_reached_batch_summary(
+    *, goods_no: str, sort_type: str,
+) -> dict:
+    """Build a synthetic batch_summary for a clean max_cap_reached
+    run. Mirrors the shape `_extract_target` / `_extract_product_fields`
+    actually parse (top-level + nested `products[0]` + `resume_state`)."""
+    return {
+        "batch_id": "test_batch_max_cap_reached",
+        "halted": False,
+        "manifest_audit": {"sort_type_in_defaults": sort_type},
+        "products": [{
+            "name": "Test-A",
+            "oy_goods_no": goods_no,
+            "status": "max_cap_reached",
+            "quality_status": "ok",
+            "rows_inserted": 5000,
+            "raw_records_seen": 5000,
+            "records_parsed": 5000,
+            "run_id": "run_test_maxcap_01",
+            "summary": {
+                "run_id": "run_test_maxcap_01",
+                "cursor_api_rate_limited": False,
+                "cursor_api_silenced": False,
+                "retry_intent": "none",
+                "retry_after_minutes": None,
+                "requested_sort_type": sort_type,
+                "last_observed_has_next": True,
+                "pagination_exhausted": False,
+            },
+            "resume_state": {
+                "retryable": False,
+                "reason": "max_cap_reached",
+                "retry_intent": "none",
+                "cursor_api_rate_limited": False,
+                "cursor_api_silenced": False,
+                "raw_records_seen": 5000,
+                "records_parsed": 5000,
+                "quality_status": "ok",
+                "sort_type": sort_type,
+                "goods_no": goods_no,
+                "final_status": "max_cap_reached",
+                "rows_inserted": 5000,
+            },
+        }],
+    }
+
+
+def test_apply_batch_summary_max_cap_reached_ok_does_not_become_inconclusive() -> None:
+    """A DATETIME_DESC primary row receiving a `max_cap_reached`
+    batch_summary with `quality_status=ok` must NOT land on
+    `inconclusive`. It must land on `ready` so the operator can
+    re-run to extend coverage. The pre-existing precedence chain
+    (retry_after_cooldown > manual_checkpoint > done) is unchanged."""
+    queue = _two_sku_queue()
+    batch = _max_cap_reached_batch_summary(
+        goods_no="A000000111111", sort_type="DATETIME_DESC",
+    )
+    item = apply_batch_summary(queue, batch)
+    # NOT inconclusive (this is the bug we fixed).
+    assert item.status != "inconclusive"
+    # Routed to `ready` so the next default-mode runner invocation
+    # picks it up.
+    assert item.status == "ready"
+    assert item.checkpoint_reason is None
+    assert item.next_run_after is None
+    # Run-history fields still applied.
+    assert item.rows_inserted_last == 5000
+    assert item.last_run_id == "run_test_maxcap_01"
+    assert item.attempts == 1
+
+
+def test_apply_batch_summary_max_cap_reached_primary_vs_signal_routing() -> None:
+    """Same max_cap_reached input → different terminal status depending
+    on `target_type`:
+      - primary (DATETIME_DESC) → `ready` (operator may re-run)
+      - signal (RATING_ASC)     → `inconclusive` (metadata-only; the
+                                   operator should triage rather than
+                                   silently re-running the cap)
+    The asymmetry is documented behaviour: signal sorts gain nothing
+    from extended coverage."""
+    # Primary: routes to ready.
+    queue_primary = _two_sku_queue()
+    batch_primary = _max_cap_reached_batch_summary(
+        goods_no="A000000111111", sort_type="DATETIME_DESC",
+    )
+    item_primary = apply_batch_summary(queue_primary, batch_primary)
+    assert item_primary.target_type == "primary"
+    assert item_primary.status == "ready"
+
+    # Signal: routes to inconclusive.
+    queue_signal = _two_sku_queue()
+    batch_signal = _max_cap_reached_batch_summary(
+        goods_no="A000000111111", sort_type="RATING_ASC",
+    )
+    item_signal = apply_batch_summary(queue_signal, batch_signal)
+    assert item_signal.target_type == "signal"
+    assert item_signal.status == "inconclusive"
+
+
+def test_apply_batch_summary_max_cap_reached_precedence_preserved() -> None:
+    """Pinning the precedence chain: a max_cap_reached batch_summary
+    that ALSO carries `retry_intent=retry_after_cooldown` (an
+    unlikely-but-possible combination if the connector emits the
+    rate-limit signal during a max-cap-bound run) must still land
+    on `retry_after_cooldown`. Cursor-throttle wins per CLAUDE.md
+    OY rate-limit policy."""
+    queue = _two_sku_queue()
+    batch = _max_cap_reached_batch_summary(
+        goods_no="A000000111111", sort_type="DATETIME_DESC",
+    )
+    # Inject the rate-limit signal on the same summary.
+    batch["products"][0]["summary"]["cursor_api_rate_limited"] = True
+    batch["products"][0]["summary"]["retry_intent"] = "retry_after_cooldown"
+    batch["products"][0]["summary"]["retry_after_minutes"] = 90
+    batch["products"][0]["resume_state"]["retry_intent"] = "retry_after_cooldown"
+    batch["products"][0]["resume_state"]["retry_after_minutes"] = 90
+
+    item = apply_batch_summary(queue, batch)
+    # Retry_after_cooldown beats max_cap_reached — precedence
+    # preserved.
+    assert item.status == "retry_after_cooldown"
+    assert item.retry_intent == "retry_after_cooldown"
+
+
+def test_dashboard_real_seed_runnable_pool_invariant() -> None:
+    """The real ops/brand20_collection_queue.json is operational state
+    that mutates as live runs apply batch_summary results. This test
+    asserts invariants that survive those mutations, NOT exact
+    per-status counts:
+
+    - total seeded = 100 (20 SKUs × 5 sorts)
+    - retry_after_cooldown = 4 (the 4 SKUs known cooled at seed time;
+      this is the only count pinned because the cooldown-bound rows
+      are not re-attempted in routine operation)
+    - the runnable non-cooldown pool (pending + ready) totals 96 —
+      every attempt either keeps the row pending, advances it to
+      ready, or terminates it (done / inconclusive / manual). Once
+      attempts land terminal states this invariant relaxes; for now
+      the seed has zero done rows.
+    - SUGGESTED NEXT RUNS must be non-empty and lead with a
+      DATETIME_DESC primary candidate (the original bug was an empty
+      list)."""
     repo_root = Path(__file__).resolve().parents[2]
     queue_path = repo_root / "ops" / "brand20_collection_queue.json"
     queue = load_queue(queue_path)
@@ -689,13 +840,18 @@ def test_dashboard_real_seed_pending_count_preserved() -> None:
     view = dashboard_view(queue, now=now)
 
     assert view.total_targets_seeded == 100
-    assert view.counts["pending"] == 96
     assert view.counts["retry_after_cooldown"] == 4
-    assert view.counts["done"] == 0
-    # SUGGESTED NEXT RUNS must now surface real candidates for the
-    # operator — the original bug was an empty list here.
+    # Runnable non-cooldown pool invariant: pending + ready + any
+    # terminal state for not-yet-cooled rows == 96.
+    pending = view.counts.get("pending", 0)
+    ready = view.counts.get("ready", 0)
+    done = view.counts.get("done", 0)
+    inconclusive = view.counts.get("inconclusive", 0)
+    manual = view.counts.get("manual_checkpoint", 0)
+    assert pending + ready + done + inconclusive + manual == 96
+    # In routine operation we expect at least one runnable candidate.
+    assert pending + ready >= 1
+    # SUGGESTED NEXT RUNS must be non-empty and lead with primary.
     assert 0 < len(view.suggestions) <= 3
-    # Suggestions on a freshly-seeded queue must lead with primary
-    # DATETIME_DESC rows.
     assert view.suggestions[0].target_type == "primary"
     assert view.suggestions[0].sort_type == "DATETIME_DESC"

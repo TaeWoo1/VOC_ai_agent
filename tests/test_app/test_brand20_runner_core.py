@@ -1,4 +1,4 @@
-"""Tests for `src.voc.app.brand20_runner_core` (phase A).
+"""Tests for `src.voc.app.brand20_runner_core`.
 
 Covers `pick_next_runnable`, `build_product_url`, `format_plan_block`,
 and `should_stop_loop`. Pure-logic only — no subprocess, no CDP, no
@@ -18,11 +18,15 @@ from src.voc.app.brand20_queue import (
     make_full_sort_set,
 )
 from src.voc.app.brand20_runner_core import (
-    PHASE_A_PLAN_NOTE,
+    BRAND20_PRIMARY_MAX,
+    BRAND20_SIGNAL_MAX,
+    PLAN_NOTE_LIVE,
+    PLAN_NOTE_PLAN_ONLY,
     NoRunnableItemError,
     RowNotRunnableError,
     StopDecision,
     build_product_url,
+    build_temporary_manifest,
     format_plan_block,
     pick_next_runnable,
     should_stop_loop,
@@ -283,9 +287,13 @@ def test_pick_next_runnable_operator_override_active_cooldown_raises() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_format_plan_block_contains_phase_a_note_and_target_url() -> None:
-    """The plan block must contain (a) the verbatim phase-A note,
-    (b) the target_url with `&tab=review`, (c) the env vars."""
+def test_format_plan_block_plan_only_mode_contains_note_and_target_url() -> None:
+    """The plan block in plan-only mode must contain (a) the
+    plan-only note, (b) the target_url with `&tab=review`, (c) the
+    env vars. Also: no "phase A" literal — the runner is no longer
+    in phase A and the plan-block stdout must not mislead operators
+    into thinking the live wiring is inert
+    (I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX §1)."""
     queue = _two_sku_queue()
     item = queue.items[0]
     pre = _FakePre(
@@ -303,14 +311,38 @@ def test_format_plan_block_contains_phase_a_note_and_target_url() -> None:
         },
         command_line="/Users/taewookang/.pyenv/shims/python3 scripts/run_oy_collection_batch.py --manifest <tmp>",
         precondition_result=pre,
+        mode="plan_only",
     )
-    assert "phase A. No live collection launched." in block
-    assert PHASE_A_PLAN_NOTE in block
+    assert PLAN_NOTE_PLAN_ONLY in block
+    assert "Brand-20 runner — plan-only block" in block
+    # Forbidden literal — the runner is no longer phase A.
+    assert "phase A" not in block
     assert build_product_url(item.goods_no) in block
     assert "OY_CURSOR_PACING_MS=500" in block
     assert "OY_CURSOR_RATE_LIMIT_COOLDOWN_SEC=120" in block
     assert "OY_CURSOR_RATE_LIMIT_MAX_RETRIES=1" in block
     assert "queue-wide cooldown: 0 row(s)" in block
+
+
+def test_format_plan_block_live_mode_uses_live_header_and_note() -> None:
+    """When mode='live', the header reads "live collection plan" and
+    the trailing note announces the impending child invocation. Also:
+    no "phase A" literal anywhere in the live-mode block."""
+    queue = _two_sku_queue()
+    item = queue.items[0]
+    pre = _FakePre(ok=True, notes=[])
+    block = format_plan_block(
+        item,
+        queue_path="ops/brand20_collection_queue.json",
+        artifact_root="data/collection_artifacts",
+        env_vars={"OY_CURSOR_PACING_MS": "500"},
+        command_line="(cmd)",
+        precondition_result=pre,
+        mode="live",
+    )
+    assert "Brand-20 runner — live collection plan" in block
+    assert PLAN_NOTE_LIVE in block
+    assert "phase A" not in block
 
 
 def test_format_plan_block_surfaces_precondition_failure() -> None:
@@ -509,3 +541,90 @@ def test_load_batch_summary_round_trips(tmp_path) -> None:
     payload = load_batch_summary(p)
     assert payload["k"] == 1
     assert payload["products"][0]["name"] == "x"
+
+
+# ---------------------------------------------------------------------------
+# Manifest max_reviews caps
+# (I-OY-BRAND20-RUNNER-MAX-CAP-AND-STATUS-MAPPING-FIX §2 / §3)
+# ---------------------------------------------------------------------------
+#
+# The runner used to inherit the connector's BatchDefaults default of
+# 200, which silently capped DATETIME_DESC primary collection at 200
+# rows. Primary rows now carry BRAND20_PRIMARY_MAX (large; full
+# corpus); signal sorts carry BRAND20_SIGNAL_MAX (metadata-only).
+
+
+def test_build_temporary_manifest_primary_uses_large_max_reviews(tmp_path) -> None:
+    """A DATETIME_DESC primary row must pin
+    `defaults.max_reviews == BRAND20_PRIMARY_MAX` so the runner does
+    NOT inherit the connector's tuned-for-sampling default of 200."""
+    import json
+
+    item = QueueItem(
+        goods_no="A000000111111",
+        product_name="Brand-A",
+        sort_type="DATETIME_DESC",
+        target_type="primary",
+    )
+    manifest_path, _batch_id = build_temporary_manifest(
+        item, now=_now(), tmp_dir=tmp_path,
+    )
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # The primary cap is a generous integer well above the 200
+        # default. We compare against the constant so a future tune
+        # surfaces here directly.
+        assert payload["defaults"]["max_reviews"] == BRAND20_PRIMARY_MAX
+        assert BRAND20_PRIMARY_MAX >= 1000, (
+            f"BRAND20_PRIMARY_MAX={BRAND20_PRIMARY_MAX} is suspiciously "
+            f"small for a full-history primary run"
+        )
+    finally:
+        manifest_path.unlink(missing_ok=True)
+
+
+def test_build_temporary_manifest_signal_uses_smaller_max_reviews(tmp_path) -> None:
+    """A signal-sort row (e.g. RATING_ASC) carries BRAND20_SIGNAL_MAX,
+    not the primary cap. Signal sorts are metadata-only: a smaller cap
+    is enough to surface the top-of-rank exemplars and keeps the
+    session-429 budget intact."""
+    import json
+
+    item = QueueItem(
+        goods_no="A000000111111",
+        product_name="Brand-A",
+        sort_type="RATING_ASC",
+        target_type="signal",
+    )
+    manifest_path, _batch_id = build_temporary_manifest(
+        item, now=_now(), tmp_dir=tmp_path,
+    )
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert payload["defaults"]["max_reviews"] == BRAND20_SIGNAL_MAX
+        assert BRAND20_SIGNAL_MAX < BRAND20_PRIMARY_MAX
+    finally:
+        manifest_path.unlink(missing_ok=True)
+
+
+def test_build_temporary_manifest_caps_round_trip_via_real_loader(tmp_path) -> None:
+    """The `max_reviews` we set on the manifest defaults must survive
+    the round-trip through `collection_batch.load_manifest` (which
+    rebuilds `BatchDefaults`). Pins the binding contract between the
+    runner and the connector."""
+    from src.voc.app.collection_batch import load_manifest
+
+    item = QueueItem(
+        goods_no="A000000111111",
+        product_name="Brand-A",
+        sort_type="DATETIME_DESC",
+        target_type="primary",
+    )
+    manifest_path, _batch_id = build_temporary_manifest(
+        item, now=_now(), tmp_dir=tmp_path,
+    )
+    try:
+        manifest = load_manifest(manifest_path)
+        assert manifest.defaults.max_reviews == BRAND20_PRIMARY_MAX
+    finally:
+        manifest_path.unlink(missing_ok=True)
