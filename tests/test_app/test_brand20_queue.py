@@ -466,10 +466,11 @@ def test_full_queue_seed_cardinality() -> None:
     goods_set = {it.goods_no for it in queue.items}
     assert len(goods_set) == 20, sorted(goods_set)
 
-    # Canonical signal-sort taxonomy for this campaign (see ticket
-    # I-OY-BRAND20-FULL-QUEUE-SEED). Note this is the operator-canonical
-    # set for the seed file, distinct from the module-level SIGNAL_SORTS
-    # constant which carries the legacy taxonomy.
+    # Canonical signal-sort taxonomy for this campaign (see tickets
+    # I-OY-BRAND20-FULL-QUEUE-SEED and I-OY-BRAND20-SIGNAL-SORT-CONSTANT-ALIGN).
+    # Pinned literally so this test stays green even if SIGNAL_SORTS is
+    # ever re-shuffled or extended; the seed file invariant is the
+    # operator-facing contract.
     canonical_signals = {
         "RATING_ASC", "RATING_DESC", "USEFUL_SCORE_DESC", "RECOMMENDED_DESC",
     }

@@ -25,7 +25,7 @@ Design boundaries
   scope and a stray batch run must not silently extend it.
 - Each (goods_no, sort_type) row is independent. Per CLAUDE.md OY
   collection rules, DATETIME_DESC is the primary corpus; signal sorts
-  (RANKING_DESC, RECOMMEND_DESC, RATING_DESC, RATING_ASC) are
+  (RATING_ASC, RATING_DESC, USEFUL_SCORE_DESC, RECOMMENDED_DESC) are
   metadata-only and never auto-advanced. The operator decides when to
   enqueue signal sorts after primary coverage is achieved.
 
@@ -85,13 +85,17 @@ QueueStatus = Literal[
 ]
 
 # Per CLAUDE.md: DATETIME_DESC is the only primary corpus on OY; the
-# other four sorts are signal/metadata corpora.
+# other four sorts are signal/metadata corpora. The signal-sort names
+# below are the canonical OliveYoung sortType identifiers used by the
+# Brand-20 seed file (ops/brand20_collection_queue.json) and by the
+# connector batch_summary contracts; ordering matches the seed so the
+# dashboard PER-SORT table renders signals in their natural sequence.
 PRIMARY_SORT: str = "DATETIME_DESC"
 SIGNAL_SORTS: tuple[str, ...] = (
-    "RANKING_DESC",
-    "RECOMMEND_DESC",
-    "RATING_DESC",
     "RATING_ASC",
+    "RATING_DESC",
+    "USEFUL_SCORE_DESC",
+    "RECOMMENDED_DESC",
 )
 ALL_SORTS: tuple[str, ...] = (PRIMARY_SORT, *SIGNAL_SORTS)
 
