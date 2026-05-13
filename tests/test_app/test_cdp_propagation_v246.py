@@ -20,14 +20,9 @@ and the early-failure path (raise → preserved cdp diagnostic).
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime
 from pathlib import Path
 
 import pytest
-
-from src.voc.app.connector_run_summary import ConnectorRunSummary
-
 
 # ---------------------------------------------------------------------------
 # Synthetic summary preserves cdp diagnostic on early failure

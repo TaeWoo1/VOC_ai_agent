@@ -23,7 +23,6 @@ import pytest
 
 from src.voc.app.collection_summary import (
     ANALYSIS_STATUS_COMPLETED,
-    ANALYSIS_STATUS_FAILED,
     ANALYSIS_STATUS_PENDING,
     BLOCKING_STATUSES,
     COLLECTION_SUMMARY_SCHEMA_VERSION,

@@ -11,8 +11,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from src.voc.app.sort_membership import (
     PRIMARY_SORT_TYPE,
     SORT_ROLE_BY_SORT_TYPE,

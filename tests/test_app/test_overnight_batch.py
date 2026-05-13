@@ -23,8 +23,6 @@ from src.voc.app import overnight_batch as ob
 from src.voc.app.overnight_batch import (
     AUTH_BUCKET_STATUSES,
     EXIT_NOT_RUN,
-    FINAL_SAMPLE_READY_FLOOR,
-    INSUFFICIENT_CORPUS_FLOOR,
     RESUMABLE_STATUSES,
     STATUS_ANTI_BOT_PAUSE_REQUIRED,
     STATUS_AUTH_REQUIRED,
@@ -345,7 +343,10 @@ class TestAggregateSummaryJson:
         )
         summary = aggregate_summary_json(outcomes, batch_id="X", requested_max_reviews_per_sort=200)
         # tsv row count (excluding header) must match summary total
-        tsv_rows = [l for l in tsv.read_text().splitlines() if l and not l.startswith("rank\t")]
+        tsv_rows = [
+            line for line in tsv.read_text().splitlines()
+            if line and not line.startswith("rank\t")
+        ]
         assert len(tsv_rows) == summary["counts"]["total"] == 7
 
 
@@ -459,7 +460,7 @@ class TestCli:
 
         # progress.tsv exists with header + one row.
         progress = (batch_dir / "progress.tsv").read_text(encoding="utf-8")
-        rows = [l for l in progress.splitlines() if l]
+        rows = [line for line in progress.splitlines() if line]
         assert rows[0] == TSV_HEADER
         assert rows[1].split("\t")[-1] == STATUS_PUBLISHABLE
         assert rows[1].count("\t") == 8

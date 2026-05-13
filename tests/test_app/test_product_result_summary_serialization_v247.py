@@ -22,9 +22,6 @@ These tests verify:
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import pytest
 
 from src.voc.app.collection_batch import (
     BatchDefaults,

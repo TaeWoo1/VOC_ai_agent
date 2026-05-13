@@ -40,8 +40,6 @@ import sys
 import threading
 import time
 
-import pytest
-
 from src.voc.app import collection_batch as cb
 from src.voc.app.collection_batch import (
     _default_subprocess_runner,

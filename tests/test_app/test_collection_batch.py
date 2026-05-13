@@ -18,7 +18,6 @@ from src.voc.app.collection_batch import (
     ALL_STATUSES,
     HALT_STATUSES,
     BatchDefaults,
-    BatchManifest,
     ProductResult,
     ProductSpec,
     _build_ingest_command,

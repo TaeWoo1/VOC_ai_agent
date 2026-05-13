@@ -39,7 +39,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, IO, Iterable
+from typing import Any, Callable, IO
 
 logger = logging.getLogger(__name__)
 
