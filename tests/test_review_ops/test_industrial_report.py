@@ -115,6 +115,22 @@ def test_diagnostics_surface_in_html_when_present():
     assert "평점 확인 필요: 1건" in html
 
 
+def test_positive_policy_review_stays_out_of_worklist():
+    # a recent 5★ review that merely mentions return policy must not become work
+    rows = [
+        {"channel": "네이버",
+         "text": "반품 정책이 자세히 안내되어 있어서 안심됐어요. 설치도 쉬웠고 만족합니다",
+         "rating": "5", "date": "2026-05-27"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    from src.voc.review_ops.industrial.classify import classify
+    assert "cs_exchange_return_issue" not in classify(reviews[0])
+
+    report = build_report(reviews, today=TODAY)
+    assert report.worklist == []                       # not surfaced as work
+    assert any("반품 정책" in r.text for r in report.appendix)  # still preserved
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")

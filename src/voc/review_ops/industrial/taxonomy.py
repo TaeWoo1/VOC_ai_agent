@@ -53,8 +53,12 @@ CATEGORIES: tuple[Category, ...] = (
         id="delivery_packaging_damage",
         label_ko="배송/포장 파손",
         kind="risk",
-        keywords=("파손", "깨졌", "깨져", "찌그", "손상", "터졌", "터져", "구겨", "젖었",
-                  "휘었", "긁힘", "damaged", "broken"),
+        # Complaint-specific forms only. Bare "손상"/"긁힘" matched positive
+        # "without damage" reviews ("손상 없이 잘 왔어요", "긁힘 하나 없이 깔끔합니다"),
+        # and bare "구겨"/"터져" matched negated/positive forms — all qualified.
+        keywords=("파손", "깨졌", "깨져", "찌그러", "박스가 터", "박스 터", "포장이 터", "포장 터",
+                  "박스 손상", "제품 손상", "포장 손상", "손상돼", "손상된", "긁혀", "긁힌 자국",
+                  "구겨져", "휘었", "젖었", "damaged", "broken"),
         reason="배송 중 파손·포장 손상을 언급한 리뷰입니다.",
         suggested_action="주문·배송 상태를 확인하고, 답글로 교환 절차를 안내하세요.",
     ),
@@ -111,11 +115,18 @@ CATEGORIES: tuple[Category, ...] = (
         id="cs_exchange_return_issue",
         label_ko="교환/반품/CS",
         kind="risk",
-        # Verb/request forms only — bare "교환" matched neutral mentions like
-        # "교환 정책이 잘 안내되어 있어요", which is not a CS issue.
-        keywords=("교환 가능", "교환하", "교환해", "교환 요청", "교환 문의", "교환문의",
-                  "반품", "환불", "as 요청", "a/s", "고객센터", "처리 안",
-                  "연락이 안", "exchange", "return", "refund"),
+        # Request/complaint forms only. Bare nouns (반품/환불/고객센터/a/s/return/
+        # refund) matched satisfied policy reviews ("반품 정책이 잘 안내되어 있어요",
+        # "고객센터 응대가 좋았어요", "a/s가 빨라요"). "환불 안" is intentionally NOT a
+        # keyword — it would match "환불 안내".
+        keywords=("교환 가능", "교환하고", "교환했", "교환해", "교환 요청", "교환 문의", "교환문의",
+                  "반품하고", "반품했", "반품 요청", "반품 문의", "반품 가능한가", "반품 신청",
+                  "환불해", "환불 요청", "환불 안돼", "환불 안 돼", "환불 안됨", "환불이 안",
+                  "환불 가능한가", "환불 신청",
+                  "고객센터 문의", "고객센터 연락 안", "고객센터 연락이 안", "고객센터 처리 안",
+                  "a/s 요청", "as 요청", "a/s 안돼", "as 안돼", "a/s가 안", "as가 안",
+                  "처리가 안", "처리 안돼", "처리 안 돼", "연락이 안",
+                  "want to return", "want to exchange", "request refund"),
         reason="교환·반품·CS 처리를 요청한 리뷰입니다.",
         suggested_action="답글로 교환·반품 절차를 안내하세요.",
     ),

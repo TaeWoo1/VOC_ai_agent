@@ -98,6 +98,41 @@ def test_qualified_risk_keywords_still_fire():
         assert "spec_size_confusion" in classify(_review(text)), text
 
 
+_RISK_KINDS = {"risk"}
+
+
+def _risk_tags(text: str) -> list[str]:
+    from src.voc.review_ops.industrial.taxonomy import CATEGORY_BY_ID
+    return [t for t in classify(_review(text)) if CATEGORY_BY_ID[t].kind in _RISK_KINDS]
+
+
+def test_cs_and_delivery_bare_nouns_do_not_fire_on_positive_reviews():
+    positives = [
+        "반품 정책이 자세히 안내되어 있어서 안심됐어요. 설치도 쉬웠고 만족합니다",
+        "환불 안내가 명확해서 믿고 구매했어요",
+        "고객센터 응대가 좋았어요",
+        "a/s가 빨라서 만족합니다",
+        "손상 없이 잘 왔어요",
+        "긁힘 하나 없이 깔끔합니다",
+        "문제 없어요. 튼튼하고 만족합니다",
+        "작고 튼튼해서 만족합니다",
+    ]
+    for text in positives:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_cs_and_delivery_complaints_still_fire():
+    assert "cs_exchange_return_issue" in classify(_review("반품하고 싶어요"))
+    assert "cs_exchange_return_issue" in classify(_review("환불 요청드립니다"))
+    assert "cs_exchange_return_issue" in classify(_review("고객센터 연락이 안 됩니다"))
+    assert "cs_exchange_return_issue" in classify(_review("a/s 요청합니다"))
+    assert "delivery_packaging_damage" in classify(_review("박스가 파손되어 왔어요"))
+    assert "delivery_packaging_damage" in classify(_review("제품이 손상된 상태로 왔어요"))
+    assert "delivery_packaging_damage" in classify(_review("긁힌 자국이 있어요"))
+    assert "missing_or_wrong_components" in classify(_review("구성품이 누락됐어요"))
+    assert "spec_size_confusion" in classify(_review("사이즈가 안맞아요"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))
