@@ -59,6 +59,21 @@ def test_parse_rating_accepts_only_1_to_5():
     assert _parse_rating("3.0") == 3.0
 
 
+def test_parse_rating_scale_aware_compound():
+    # denominator-5 forms are accepted
+    assert _parse_rating("4/5") == 4.0
+    assert _parse_rating("2/5") == 2.0
+    assert _parse_rating("5점 만점에 4점") == 4.0
+    assert _parse_rating("4 out of 5") == 4.0
+    assert _parse_rating("평점 3") == 3.0
+    # non-5 denominators / ambiguous compounds → unknown, never a fabricated 5
+    assert _parse_rating("5/10") is None
+    assert _parse_rating("5/100") is None
+    assert _parse_rating("80/100") is None
+    assert _parse_rating("score 5 of 100") is None
+    assert _parse_rating("10점 만점에 8점") is None
+
+
 def test_parse_rating_rejects_out_of_scale_and_malformed():
     # out-of-scale / other scales → unknown, never coerced to 5
     assert _parse_rating("0") is None

@@ -39,8 +39,13 @@ CATEGORIES: tuple[Category, ...] = (
         id="missing_or_wrong_components",
         label_ko="구성품 누락/오배송",
         kind="risk",
-        keywords=("누락", "안왔", "안 왔", "안옴", "빠졌", "빠져", "없어요", "없네", "안들어",
-                  "안 들어", "잘못 왔", "다른게", "다른 게", "오배송", "잘못 배송", "missing", "wrong item"),
+        # Complaint-specific phrasings only. Bare "없어요"/"없네" matched positive
+        # reviews like "문제 없어요" / "불편 없어요", so they were removed in favor of
+        # qualified "구성품이 없" / "안 들어있" / "빠져 있" forms.
+        keywords=("누락", "안왔", "안 왔", "안옴", "빠졌", "빠져 있", "빠져있", "빠져서",
+                  "안 들어있", "안들어있", "안 들어 있", "들어있지 않", "들어 있지 않",
+                  "구성품이 없", "부품이 없", "구성이 없", "잘못 왔", "다른 게 왔", "다른게 왔",
+                  "오배송", "잘못 배송", "missing", "wrong item"),
         reason="구성품 누락·오배송을 언급한 리뷰입니다.",
         suggested_action="구성품 발송 여부를 확인하고, 답글로 처리 방법을 안내하세요.",
     ),
@@ -57,8 +62,13 @@ CATEGORIES: tuple[Category, ...] = (
         id="spec_size_confusion",
         label_ko="규격/사이즈 혼동",
         kind="risk",
-        keywords=("안맞", "안 맞", "맞지 않", "작아", "작네", "작고", "커요", "커서", "큽니",
-                  "사이즈가 달", "규격이 달", "치수 확인", "사이즈 확인", "표기랑", "표기와 다",
+        # Mismatch-specific phrasings only. Bare size adjectives ("작고", "작네",
+        # "커서", "커요") matched positive reviews like "작고 튼튼해서 만족합니다",
+        # so they were qualified to complaint forms. "안 맞" already covers
+        # "작아서 안 맞아요".
+        keywords=("안맞", "안 맞", "맞지 않", "너무 작", "너무 커", "커서 안", "사이즈가 작",
+                  "사이즈가 커", "사이즈가 달", "규격이 달", "치수가 달", "치수랑 다",
+                  "치수 확인", "사이즈 확인", "표기랑 다", "표기와 다", "표기된 치수",
                   "too small", "too big", "wrong size"),
         reason="표기된 규격·사이즈와 다르다는 리뷰입니다.",
         suggested_action="상세페이지 치수 표기와 옵션명을 다시 확인하세요.",

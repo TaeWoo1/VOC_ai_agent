@@ -17,7 +17,6 @@ from src.voc.review_ops.industrial.schema import IndustrialReview
 
 _HANGUL_RE = re.compile(r"[가-힣]")
 _LATIN_RE = re.compile(r"[a-zA-Z]")
-_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 _DATE_PATTERNS: list[re.Pattern] = [
     re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일"),
@@ -49,28 +48,54 @@ def _parse_date(raw: str | None) -> date | None:
     return None
 
 
-def _parse_rating(raw: str | None) -> float | None:
-    """Accept only an explicit 1–5 rating (decimals like 4.5 allowed).
+_SLASH_RE = re.compile(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)")
+# "5점 만점에 4점", "5 만점에 4" — \w* absorbs the Korean particle after 만점.
+_OUT_OF_KO_RE = re.compile(r"(\d+(?:\.\d+)?)\s*점?\s*만점\w*\s*(\d+(?:\.\d+)?)")
+# "5 out of 5", "score 5 of 100"
+_OUT_OF_EN_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:out\s+of|of)\s*(\d+(?:\.\d+)?)")
+_ALL_NUMBERS_RE = re.compile(r"\d+(?:\.\d+)?")
 
-    Anything outside that scale is returned as None rather than coerced — a
-    100-point ``80`` or a percent ``85%`` is a scale mismatch, not a 5-star
-    review. Silently clamping such values would hide low-rated reviews from the
-    worklist and corrupt the rating distribution.
+
+def _in_scale(value: float) -> float | None:
+    return value if 1.0 <= value <= 5.0 else None
+
+
+def _parse_rating(raw: str | None) -> float | None:
+    """Scale-aware 1–5 rating parse. Unknown (None) unless clearly on a 5-scale.
+
+    Does NOT just take the first numeric token — a 100-point ``80`` or a
+    compound ``5/100`` must not be coerced into a 5-star review. Coercing
+    out-of-scale values would hide low-rated reviews and corrupt the
+    distribution.
+
+    Accepts: ``5``, ``4.5``, ``별점 4점``, ``평점 3``, denominator-5 forms
+    (``4/5``, ``5점 만점에 4점``, ``4 out of 5``).
+    Rejects: non-5 denominators (``5/10``, ``80/100``, ``10점 만점에 8점``,
+    ``score 5 of 100``), percents (``85%``), and ambiguous multi-number strings.
     """
     if not raw:
         return None
-    if "%" in raw:  # percent-like values are not on the 1–5 scale
+    s = raw.strip()
+    if not s or "%" in s:  # percents are not on the 1–5 scale
         return None
-    m = _NUMBER_RE.search(raw)
-    if not m:
+
+    # Explicit "value / scale" or "value out of scale" forms: only a scale of 5 is valid.
+    m = _SLASH_RE.search(s)
+    if m:
+        return _in_scale(float(m.group(1))) if float(m.group(2)) == 5 else None
+    m = _OUT_OF_KO_RE.search(s)
+    if m:
+        return _in_scale(float(m.group(2))) if float(m.group(1)) == 5 else None
+    m = _OUT_OF_EN_RE.search(s)
+    if m:
+        return _in_scale(float(m.group(1))) if float(m.group(2)) == 5 else None
+
+    # Plain rating: exactly one numeric token, on the 1–5 scale. Multiple tokens
+    # (e.g. "score 5 of 100" minus the matched forms above) are ambiguous → None.
+    nums = _ALL_NUMBERS_RE.findall(s)
+    if len(nums) != 1:
         return None
-    try:
-        value = float(m.group())
-    except ValueError:
-        return None
-    if 1.0 <= value <= 5.0:
-        return value
-    return None  # out of the expected 1–5 scale → unknown
+    return _in_scale(float(nums[0]))
 
 
 def _assign_language(text: str) -> str:

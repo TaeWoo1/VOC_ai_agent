@@ -81,6 +81,23 @@ def test_true_positive_complaints_still_fire():
     assert "spec_size_confusion" in classify(_review("사이즈 안맞음"))
 
 
+def test_broad_risk_keywords_do_not_fire_on_positive_reviews():
+    # missing_or_wrong_components must not fire on positive/neutral "없어요" forms
+    for text in ("문제 없어요. 튼튼하고 만족합니다", "불편 없어요", "빠짐없이 잘 왔어요"):
+        assert "missing_or_wrong_components" not in classify(_review(text)), text
+    # spec_size_confusion must not fire on positive size adjectives
+    for text in ("작고 튼튼해서 만족합니다", "작은 공간에 딱 맞아요"):
+        assert "spec_size_confusion" not in classify(_review(text)), text
+
+
+def test_qualified_risk_keywords_still_fire():
+    for text in ("구성품이 누락됐어요", "브라켓이 안 들어있어요", "나사가 빠져 있어요"):
+        assert "missing_or_wrong_components" in classify(_review(text)), text
+    for text in ("사이즈가 안맞아요", "작아서 안 맞아요", "너무 커서 설치가 안 돼요",
+                 "표기된 치수랑 달라요"):
+        assert "spec_size_confusion" in classify(_review(text)), text
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))
