@@ -133,6 +133,32 @@ def test_cs_and_delivery_complaints_still_fire():
     assert "spec_size_confusion" in classify(_review("사이즈가 안맞아요"))
 
 
+def test_negated_positive_reviews_do_not_produce_risk_tags():
+    negated_positives = [
+        "파손 없이 잘 왔어요",
+        "손상 없이 잘 왔어요",
+        "긁힘 하나 없이 깔끔합니다",
+        "안 떨어져요 튼튼합니다",
+        "헐거움 없이 딱 맞아요",
+        "문제 없어요. 튼튼하고 만족합니다",
+        "불편 없어요",
+        "교환 처리가 안내되어 있어 안심했습니다",
+    ]
+    for text in negated_positives:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_negated_true_positive_complaints_still_fire():
+    assert "delivery_packaging_damage" in classify(_review("박스가 파손되어 왔어요"))
+    assert "delivery_packaging_damage" in classify(_review("제품이 손상된 상태로 왔어요"))
+    assert "delivery_packaging_damage" in classify(_review("긁힌 자국이 있어요"))
+    assert "durability_adhesion_finish" in classify(_review("접착이 약해서 떨어져요"))
+    assert "durability_adhesion_finish" in classify(_review("헐거워서 고정이 안 돼요"))
+    assert "cs_exchange_return_issue" in classify(_review("교환 처리가 안 됩니다"))
+    assert "cs_exchange_return_issue" in classify(_review("반품하고 싶어요"))
+    assert "cs_exchange_return_issue" in classify(_review("환불 요청드립니다"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))

@@ -131,6 +131,19 @@ def test_positive_policy_review_stays_out_of_worklist():
     assert any("반품 정책" in r.text for r in report.appendix)  # still preserved
 
 
+def test_recent_negated_positives_stay_out_of_worklist():
+    # recent 5★ reviews that merely negate a problem must not become work
+    rows = [
+        {"channel": "네이버", "text": "파손 없이 잘 왔어요. 만족합니다", "rating": "5", "date": "2026-05-27"},
+        {"channel": "쿠팡", "text": "헐거움 없이 딱 맞아요", "rating": "5", "date": "2026-05-27"},
+        {"channel": "자사몰", "text": "교환 처리가 안내되어 있어 안심했습니다", "rating": "5", "date": "2026-05-27"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    report = build_report(reviews, today=TODAY)
+    assert report.worklist == []                  # none surfaced as work
+    assert len(report.appendix) == 3              # all preserved
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")
