@@ -159,6 +159,28 @@ def test_negated_true_positive_complaints_still_fire():
     assert "cs_exchange_return_issue" in classify(_review("환불 요청드립니다"))
 
 
+def test_distant_term_negation_does_not_produce_risk_tags():
+    distant_negated = [
+        "파손은 전혀 없고 잘 왔어요",
+        "파손 없이 잘 왔어요",
+        "긁힘은 전혀 없습니다",
+        "헐거움 없이 딱 맞아요",
+        "파손되지 않았어요",
+    ]
+    for text in distant_negated:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_distant_negation_does_not_suppress_real_complaints():
+    # "없" here does NOT negate the risk term — these must still fire
+    assert "delivery_packaging_damage" in classify(_review("파손돼서 쓸 수 없어요"))
+    assert "delivery_packaging_damage" in classify(_review("박스가 파손되어 왔어요"))
+    assert "delivery_packaging_damage" in classify(_review("제품이 손상된 상태로 왔어요"))
+    assert "durability_adhesion_finish" in classify(_review("접착이 약해서 떨어져요"))
+    assert "durability_adhesion_finish" in classify(_review("헐거워서 고정이 안 돼요"))
+    assert "cs_exchange_return_issue" in classify(_review("교환 처리가 안 됩니다"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))

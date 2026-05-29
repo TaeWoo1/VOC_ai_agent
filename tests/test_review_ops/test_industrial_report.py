@@ -144,6 +144,19 @@ def test_recent_negated_positives_stay_out_of_worklist():
     assert len(report.appendix) == 3              # all preserved
 
 
+def test_recent_distant_negated_positive_stays_out_of_worklist():
+    rows = [
+        {"channel": "네이버", "text": "파손은 전혀 없고 잘 왔어요", "rating": "5", "date": "2026-05-27"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    from src.voc.review_ops.industrial.classify import classify
+    assert "delivery_packaging_damage" not in classify(reviews[0])
+
+    report = build_report(reviews, today=TODAY)
+    assert report.worklist == []                       # not surfaced as work
+    assert any("파손은 전혀 없고" in r.text for r in report.appendix)  # preserved
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")

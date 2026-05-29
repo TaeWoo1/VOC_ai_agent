@@ -7,9 +7,10 @@ Two small, deterministic guards keep positive/neutral reviews off the problem
 worklist (this is NOT a general NLP engine — just bounded checks):
 
 1. Negation guard (risk categories only): a matched risk keyword is ignored if
-   a negation cue sits immediately around it — "없이"/"없어"/"없네"/"없습니다"
-   just after ("파손 없이 잘 왔어요"), or a standalone "안" just before
-   ("안 떨어져요"). Positive and signal tags are never suppressed.
+   a negation cue sits around it — a bounded particle/adverb chain ending in
+   "없"/"~지 않" just after ("파손은 전혀 없고", "파손되지 않았어요"), a 없/않 within
+   3 chars ("헐거움 없이"), or a standalone "안" just before ("안 떨어져요").
+   Positive and signal tags are never suppressed.
 2. ``needs_reply`` only fires when the review has no existing brand reply.
 """
 
@@ -20,16 +21,28 @@ import re
 from src.voc.review_ops.industrial.schema import IndustrialReview
 from src.voc.review_ops.industrial.taxonomy import CATEGORIES
 
-# Negation cue just AFTER a risk keyword: 없이 / 없어 / 없네 / 없습니다 / 없음 / 없다.
-_NEG_AFTER_CUE = "없"
-_NEG_AFTER_WINDOW = 5
+# Negation just AFTER the risk term — two bounded checks:
+#  (a) anchored particle/adverb chain ending in 없 (or ~지 않) — catches
+#      distant-but-attached negation: "파손은 전혀 없고", "파손되지 않았어요".
+#  (b) 3-char proximity for 없/않 — catches mid-noun matches like the keyword
+#      "헐거" inside "헐거움 없이". The narrow window prevents an unrelated distant
+#      없 ("파손돼서 쓸 수 없어요", offset ~7) from suppressing a real complaint.
+_NEG_AFTER_RE = re.compile(
+    r"^(?:[은는이가을를도]\s*)?(?:전혀|별로|하나도|거의|그다지|딱히)?\s*"
+    r"(?:없|(?:되지|하지|지)\s*않)"
+)
+_NEG_PROX_WINDOW = 3
 # Standalone "안" just BEFORE a risk keyword (negation), e.g. "안 떨어져요".
 _NEG_BEFORE_RE = re.compile(r"(?:^|\s)안\s*$")
 
 
 def _negated(text_lower: str, start: int, end: int) -> bool:
     """True if a negation cue sits just after or just before the matched span."""
-    if _NEG_AFTER_CUE in text_lower[end : end + _NEG_AFTER_WINDOW]:
+    after = text_lower[end:]
+    if _NEG_AFTER_RE.match(after):
+        return True
+    window = after[:_NEG_PROX_WINDOW]
+    if "없" in window or "않" in window:
         return True
     return bool(_NEG_BEFORE_RE.search(text_lower[:start]))
 
