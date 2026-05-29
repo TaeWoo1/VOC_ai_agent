@@ -189,3 +189,9 @@ def generate_review_id(
     content_fingerprint: str = "",
 ) -> str:
     return _generate_review_id(source_channel, source_id, content_fingerprint)
+
+
+# Public alias — CLAUDE.md §10 mandates a single content-fingerprint path. The
+# industrial review-ops pilot (src/voc/review_ops/industrial/) reuses this exact
+# function instead of re-implementing it.
+compute_content_fingerprint = _compute_content_fingerprint
