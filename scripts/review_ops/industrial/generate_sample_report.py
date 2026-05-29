@@ -38,6 +38,8 @@ def main() -> None:
     print(f"Worklist items    : {len(report.worklist)}")
     print(f"  오늘 먼저 볼 리뷰 : {today}")
     print(f"  이번 주 안에 볼 리뷰: {week}")
+    print(f"date_unknown_count : {report.header.date_unknown_count}")
+    print(f"rating_unknown_count: {report.header.rating_unknown_count}")
     print(f"HTML written to   : {OUTPUT_HTML}")
 
 

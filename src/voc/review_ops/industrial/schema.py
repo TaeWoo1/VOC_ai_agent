@@ -62,6 +62,8 @@ class HeaderStats:
     total_reviews: int = 0
     by_channel: dict[str, int] = field(default_factory=dict)
     rating_distribution: dict[str, int] = field(default_factory=dict)  # "5".."1", "미상"
+    date_unknown_count: int = 0    # reviews whose date could not be parsed
+    rating_unknown_count: int = 0  # reviews with no valid 1–5 rating
 
 
 @dataclass

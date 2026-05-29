@@ -50,11 +50,25 @@ def test_parse_date_variants():
     assert _parse_date(None) is None
 
 
-def test_parse_rating_clamps_and_extracts():
+def test_parse_rating_accepts_only_1_to_5():
+    # valid 1–5 scale, decimals allowed
     assert _parse_rating("5") == 5.0
+    assert _parse_rating("1") == 1.0
+    assert _parse_rating("4.5") == 4.5
     assert _parse_rating("별점 4점") == 4.0
-    assert _parse_rating("9") == 5.0  # clamped
+    assert _parse_rating("3.0") == 3.0
+
+
+def test_parse_rating_rejects_out_of_scale_and_malformed():
+    # out-of-scale / other scales → unknown, never coerced to 5
+    assert _parse_rating("0") is None
+    assert _parse_rating("20") is None
+    assert _parse_rating("80") is None
+    assert _parse_rating("100") is None
+    assert _parse_rating("85%") is None
     assert _parse_rating("없음") is None
+    assert _parse_rating("??") is None
+    assert _parse_rating(None) is None
 
 
 def test_to_review_sets_language_and_reply():

@@ -50,8 +50,16 @@ def _parse_date(raw: str | None) -> date | None:
 
 
 def _parse_rating(raw: str | None) -> float | None:
-    """First numeric token, clamped to 0–5. None if absent/unparseable."""
+    """Accept only an explicit 1–5 rating (decimals like 4.5 allowed).
+
+    Anything outside that scale is returned as None rather than coerced — a
+    100-point ``80`` or a percent ``85%`` is a scale mismatch, not a 5-star
+    review. Silently clamping such values would hide low-rated reviews from the
+    worklist and corrupt the rating distribution.
+    """
     if not raw:
+        return None
+    if "%" in raw:  # percent-like values are not on the 1–5 scale
         return None
     m = _NUMBER_RE.search(raw)
     if not m:
@@ -60,7 +68,9 @@ def _parse_rating(raw: str | None) -> float | None:
         value = float(m.group())
     except ValueError:
         return None
-    return max(0.0, min(5.0, value))
+    if 1.0 <= value <= 5.0:
+        return value
+    return None  # out of the expected 1–5 scale → unknown
 
 
 def _assign_language(text: str) -> str:

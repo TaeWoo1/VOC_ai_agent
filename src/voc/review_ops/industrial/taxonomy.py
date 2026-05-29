@@ -77,8 +77,12 @@ CATEGORIES: tuple[Category, ...] = (
         id="installation_difficulty",
         label_ko="설치/조립 어려움",
         kind="risk",
-        keywords=("설치가 어렵", "조립이 어렵", "설치 어렵", "조립 어렵", "장착이 어렵",
-                  "시공이 어렵", "다는 게 힘", "고정이 안", "설치 방법", "조립 방법",
+        # Difficulty-paired phrasings only. Neutral help-topic terms like
+        # "설치 방법"/"조립 방법" were removed — a praising review ("설치 방법이
+        # 잘 나와 있어서 쉬웠어요") must not be flagged as a difficulty complaint.
+        keywords=("설치가 어렵", "조립이 어렵", "설치 어렵", "조립 어렵", "설치하기 어렵",
+                  "조립하기 어렵", "설치가 힘들", "설치하기 힘들", "설치가 까다",
+                  "장착이 어렵", "시공이 어렵", "다는 게 힘", "고정이 안",
                   "어떻게 설치", "어떻게 조립", "hard to install"),
         reason="설치·조립이 어렵다는 리뷰입니다.",
         suggested_action="상세페이지나 FAQ에 설치 방법 문구를 추가할 후보로 봐주세요.",
@@ -97,7 +101,10 @@ CATEGORIES: tuple[Category, ...] = (
         id="cs_exchange_return_issue",
         label_ko="교환/반품/CS",
         kind="risk",
-        keywords=("교환", "반품", "환불", "as 요청", "a/s", "고객센터", "처리 안",
+        # Verb/request forms only — bare "교환" matched neutral mentions like
+        # "교환 정책이 잘 안내되어 있어요", which is not a CS issue.
+        keywords=("교환 가능", "교환하", "교환해", "교환 요청", "교환 문의", "교환문의",
+                  "반품", "환불", "as 요청", "a/s", "고객센터", "처리 안",
                   "연락이 안", "exchange", "return", "refund"),
         reason="교환·반품·CS 처리를 요청한 리뷰입니다.",
         suggested_action="답글로 교환·반품 절차를 안내하세요.",
@@ -115,8 +122,10 @@ CATEGORIES: tuple[Category, ...] = (
         id="detail_page_faq_candidate",
         label_ko="상세페이지/FAQ 후보",
         kind="operational",
-        keywords=("상세페이지", "상세 페이지", "설명이 없", "설명이 부족", "안내가 없",
-                  "표기가 없", "정보가 없", "안 나와", "안나와", "몰랐", "모르고 샀", "나와있지 않"),
+        # "Missing/insufficient info" phrasings only. Bare "상세페이지" matched
+        # positive mentions ("상세페이지에 치수가 잘 나와 있어서 딱 맞게 샀어요").
+        keywords=("설명이 없", "설명이 부족", "안내가 없", "표기가 없", "정보가 없",
+                  "안 나와", "안나와", "나와있지 않", "몰랐", "모르고 샀"),
         reason="상세페이지 설명이 부족하다는 리뷰입니다.",
         suggested_action="상세페이지나 FAQ에 설명 문구를 추가할 후보로 봐주세요.",
     ),

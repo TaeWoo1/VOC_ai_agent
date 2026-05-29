@@ -62,13 +62,18 @@ def _header_stats(reviews: list[IndustrialReview]) -> HeaderStats:
         total_reviews=len(reviews),
         by_channel=ordered_channels,
         rating_distribution=ordered_dist,
+        date_unknown_count=sum(1 for r in reviews if r.review_date is None),
+        rating_unknown_count=sum(1 for r in reviews if r.rating is None),
     )
 
 
 def _is_recent(review_date: date | None, today: date) -> bool:
-    # Unknown dates are kept (not silently dropped) so the operator still sees them.
+    # Unknown dates are NOT treated as recent: a review whose date could not be
+    # parsed must not be presented as this-week work just because it carries a
+    # risk/operational tag. It stays in the appendix and is counted in the
+    # date_unknown diagnostic instead.
     if review_date is None:
-        return True
+        return False
     return 0 <= (today - review_date).days <= RECENT_DAYS
 
 

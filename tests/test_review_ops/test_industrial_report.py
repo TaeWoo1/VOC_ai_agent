@@ -75,6 +75,46 @@ def test_reason_includes_rating_context_for_low_rating():
     assert "1점" in top.reason
 
 
+DIAG_ROWS = [
+    # unknown date + risk + low rating → must NOT enter today/week, but kept in appendix
+    {"channel": "11번가", "text": "박스가 찌그러져서 왔어요", "rating": "2", "date": "어제"},
+    # out-of-scale rating (100-scale) + missing risk + recent → rating unknown, still surfaced
+    {"channel": "쿠팡", "text": "구성품이 하나 빠졌어요", "rating": "80", "date": "2026-05-27"},
+]
+
+
+def _diag_report():
+    reviews = dedup(normalize_rows(DIAG_ROWS))
+    return build_report(reviews, today=TODAY)
+
+
+def test_unknown_date_review_excluded_from_tiers_but_in_appendix():
+    report = _diag_report()
+    worklist_texts = [r.text for r in report.worklist]
+    assert not any("찌그러져서" in t for t in worklist_texts)  # unknown date → not this-week work
+    assert any("찌그러져서" in r.text for r in report.appendix)  # still preserved
+
+
+def test_date_unknown_count_diagnostic():
+    report = _diag_report()
+    assert report.header.date_unknown_count == 1
+
+
+def test_out_of_scale_rating_is_unknown_not_five_star():
+    report = _diag_report()
+    assert report.header.rating_unknown_count == 1
+    # the 80→unknown review is not hidden: it still surfaces via its risk tag
+    assert any("빠졌" in r.text for r in report.worklist)
+    # and it is not counted as a 5-star review
+    assert report.header.rating_distribution.get("5", 0) == 0
+
+
+def test_diagnostics_surface_in_html_when_present():
+    html = render_report_html(_diag_report())
+    assert "날짜 확인 필요: 1건" in html
+    assert "평점 확인 필요: 1건" in html
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")

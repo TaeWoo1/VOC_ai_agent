@@ -33,6 +33,7 @@ h1 { font-size: 22px; margin: 0 0 4px; }
          color: #3a424c; margin: 0 0 24px; padding: 12px 14px; background: #fff;
          border: 1px solid #e6e8eb; border-radius: 8px; }
 .stats b { color: #1c2024; }
+.stats .diag { color: #7a5a12; }
 h2 { font-size: 18px; margin: 28px 0 12px; }
 .count { color: #8b939c; font-weight: normal; font-size: 14px; }
 .card { background: #fff; border: 1px solid #e6e8eb; border-radius: 10px;
@@ -69,13 +70,17 @@ def _stats_html(header: HeaderStats) -> str:
     channels = ", ".join(f"{escape(ch)} {n}" for ch, n in header.by_channel.items()) or "-"
     ratings = ", ".join(f"{escape(b)}점 {n}" if b != "미상" else f"미상 {n}"
                         for b, n in header.rating_distribution.items()) or "-"
-    return (
-        '<div class="stats">'
-        f"<span><b>전체 리뷰</b> {header.total_reviews}건</span>"
-        f"<span><b>채널별</b> {channels}</span>"
-        f"<span><b>평점 분포</b> {ratings}</span>"
-        "</div>"
-    )
+    spans = [
+        f"<span><b>전체 리뷰</b> {header.total_reviews}건</span>",
+        f"<span><b>채널별</b> {channels}</span>",
+        f"<span><b>평점 분포</b> {ratings}</span>",
+    ]
+    # Lightweight, non-alarming import diagnostics — shown only when relevant.
+    if header.date_unknown_count:
+        spans.append(f'<span class="diag">날짜 확인 필요: {header.date_unknown_count}건</span>')
+    if header.rating_unknown_count:
+        spans.append(f'<span class="diag">평점 확인 필요: {header.rating_unknown_count}건</span>')
+    return '<div class="stats">' + "".join(spans) + "</div>"
 
 
 def _worklist_card(row: WorklistRow) -> str:

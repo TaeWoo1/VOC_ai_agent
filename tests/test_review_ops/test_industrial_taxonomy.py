@@ -60,6 +60,27 @@ def test_clean_positive_review_has_no_risk_tag():
     assert risk_tags == [], f"clean positive review wrongly flagged as risk: {risk_tags}"
 
 
+def test_positive_neutral_reviews_avoid_risk_tags():
+    # neutral help-topic mentions must not trip risk categories (Codex finding #3)
+    t1 = classify(_review("설치 방법이 잘 나와 있어서 쉽게 했어요. 만족합니다"))
+    assert "installation_difficulty" not in t1
+
+    t2 = classify(_review("교환 정책이 자세히 안내되어 있어서 안심됐어요"))
+    assert "cs_exchange_return_issue" not in t2
+    assert "needs_reply" not in t2
+
+    t3 = classify(_review("상세페이지에 치수가 잘 나와 있어서 딱 맞게 샀어요"))
+    assert "detail_page_faq_candidate" not in t3
+    assert "spec_size_confusion" not in t3
+
+
+def test_true_positive_complaints_still_fire():
+    assert "installation_difficulty" in classify(_review("설치가 어렵네요"))
+    assert "cs_exchange_return_issue" in classify(_review("교환 가능한가요?"))
+    assert "detail_page_faq_candidate" in classify(_review("상세페이지 설명이 부족해요"))
+    assert "spec_size_confusion" in classify(_review("사이즈 안맞음"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))
