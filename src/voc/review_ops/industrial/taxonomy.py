@@ -70,7 +70,8 @@ CATEGORIES: tuple[Category, ...] = (
         # "커서", "커요") matched positive reviews like "작고 튼튼해서 만족합니다",
         # so they were qualified to complaint forms. "안 맞" already covers
         # "작아서 안 맞아요".
-        keywords=("안맞", "안 맞", "맞지 않", "너무 작", "너무 커", "커서 안", "사이즈가 작",
+        keywords=("안맞", "안 맞", "맞지 않", "너무 작아서 안", "너무 작아서 설치", "너무 작아서 못",
+                  "너무 커서 안", "너무 커서 설치", "너무 커서 못", "커서 안", "사이즈가 작",
                   "사이즈가 커", "사이즈가 달", "규격이 달", "치수가 달", "치수랑 다",
                   "치수 확인이 필요", "사이즈 확인이 필요", "표기랑 다", "표기와 다", "표기된 치수",
                   "too small", "too big", "wrong size"),
@@ -83,7 +84,7 @@ CATEGORIES: tuple[Category, ...] = (
         kind="risk",
         keywords=("사진이랑 달", "사진과 달", "사진이랑 다르", "사진과 다르", "색이 사진",
                   "이미지랑 달", "화면이랑", "색이 달라", "색상이 달라", "컬러가 달라",
-                  "실물이 달라", "생각보다 어둡", "생각보다 밝", "color different"),
+                  "실물이 달라", "color different"),
         reason="실물 색상이 사진과 다르다는 리뷰입니다.",
         suggested_action="상세페이지 색상·실물 안내 문구를 보완할 후보로 봐주세요.",
     ),
@@ -128,8 +129,10 @@ CATEGORIES: tuple[Category, ...] = (
                   # negative-completion forms only — bare "연락이 안"/"처리 안 해" matched
                   # the positive "even without contacting" construction ("연락 안 해도 …
                   # 만족"). Keeps "고객센터 연락이 안 됩니다" / "교환 처리가 안 됩니다".
+                  "연락 안 됩니다", "연락 안 돼", "연락 안돼", "연락 안 와", "연락 안 옴",
                   "연락이 안 됩니다", "연락이 안 돼", "연락이 안돼", "연락이 안 와", "연락이 안 옴",
-                  "처리가 안 됩니다", "처리가 안 돼", "처리 안 돼", "처리 안돼", "처리 안됨",
+                  "처리 안 됩니다", "처리 안 돼", "처리 안돼", "처리 안됨",
+                  "처리도 안 됩니다", "처리도 안 돼", "처리가 안 됩니다", "처리가 안 돼",
                   "want to return", "want to exchange", "request refund"),
         reason="교환·반품·CS 처리를 요청한 리뷰입니다.",
         suggested_action="답글로 교환·반품 절차를 안내하세요.",

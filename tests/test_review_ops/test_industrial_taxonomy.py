@@ -210,6 +210,28 @@ def test_cs_contact_failure_complaints_still_fire():
     assert "cs_exchange_return_issue" in classify(_review("교환 처리가 안 됩니다"))
 
 
+def test_final_pass_size_color_cs_false_positives():
+    for text in [
+        "너무 작아서 보관하기 좋아요. 만족합니다",
+        "생각보다 밝아서 잘 어울려요. 만족합니다",
+        "고객센터 연락 안 해도 바로 처리되어 만족합니다",
+        "처리 안 해도 바로 됐어요. 만족합니다",
+    ]:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_final_pass_size_color_cs_true_positives():
+    assert "cs_exchange_return_issue" in classify(_review("고객센터 연락 안 됩니다"))
+    assert "cs_exchange_return_issue" in classify(_review("교환 처리도 안 돼요"))
+    # size complaint may also tag installation; require at least one risk tag incl. spec
+    assert "spec_size_confusion" in classify(_review("너무 작아서 안 맞아요"))
+    assert {"spec_size_confusion", "installation_difficulty"} & set(
+        classify(_review("너무 커서 설치가 안 돼요"))
+    )
+    assert "color_appearance_mismatch" in classify(_review("사진과 달라요"))
+    assert "color_appearance_mismatch" in classify(_review("색이 달라요"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))

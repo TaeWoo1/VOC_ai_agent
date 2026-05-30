@@ -182,6 +182,31 @@ def test_short_year_recent_complaint_enters_worklist():
     assert any("박스가 터져" in r.text for r in report.worklist)
 
 
+def test_final_pass_recent_positives_stay_out_of_worklist():
+    rows = [
+        {"channel": "네이버", "text": "너무 작아서 보관하기 좋아요. 만족합니다", "rating": "5", "date": "2026-05-27"},
+        {"channel": "쿠팡", "text": "생각보다 밝아서 잘 어울려요. 만족합니다", "rating": "5", "date": "2026-05-27"},
+        {"channel": "자사몰", "text": "고객센터 연락 안 해도 바로 처리되어 만족합니다", "rating": "5", "date": "2026-05-27"},
+    ]
+    report = build_report(dedup(normalize_rows(rows)), today=TODAY)
+    assert report.worklist == []
+    assert len(report.appendix) == 3
+
+
+def test_final_pass_high_rating_cs_complaints_enter_worklist():
+    from src.voc.review_ops.industrial.classify import classify
+    rows = [
+        {"channel": "네이버", "text": "고객센터 연락 안 됩니다", "rating": "5", "date": "2026-05-27"},
+        {"channel": "쿠팡", "text": "교환 처리도 안 돼요", "rating": "5", "date": "2026-05-27"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    for r in reviews:
+        assert "cs_exchange_return_issue" in classify(r)
+    report = build_report(reviews, today=TODAY)
+    assert len(report.worklist) == 2
+    assert all("cs_exchange_return_issue" in row.tags for row in report.worklist)
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")
