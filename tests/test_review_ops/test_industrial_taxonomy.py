@@ -181,6 +181,21 @@ def test_distant_negation_does_not_suppress_real_complaints():
     assert "cs_exchange_return_issue" in classify(_review("교환 처리가 안 됩니다"))
 
 
+def test_affirmative_positive_phrases_do_not_produce_risk_tags():
+    # affirmative (non-negated) uses of risk terms in satisfied reviews
+    for text in [
+        "상세페이지 치수 확인 후 구매했더니 딱 맞아요. 만족합니다",
+        "교환 가능해서 안심하고 구매했어요. 만족합니다",
+    ]:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_request_and_complaint_forms_still_fire():
+    assert "cs_exchange_return_issue" in classify(_review("교환 가능한가요?"))
+    assert "spec_size_confusion" in classify(_review("치수 확인이 필요해요"))
+    assert "spec_size_confusion" in classify(_review("사이즈가 안맞아요"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))

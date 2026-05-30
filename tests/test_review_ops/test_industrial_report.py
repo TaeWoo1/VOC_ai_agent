@@ -157,6 +157,19 @@ def test_recent_distant_negated_positive_stays_out_of_worklist():
     assert any("파손은 전혀 없고" in r.text for r in report.appendix)  # preserved
 
 
+def test_recent_affirmative_positives_stay_out_of_worklist():
+    rows = [
+        {"channel": "네이버", "text": "상세페이지 치수 확인 후 구매했더니 딱 맞아요. 만족합니다",
+         "rating": "5", "date": "2026-05-27"},
+        {"channel": "쿠팡", "text": "교환 가능해서 안심하고 구매했어요. 만족합니다",
+         "rating": "5", "date": "2026-05-27"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    report = build_report(reviews, today=TODAY)
+    assert report.worklist == []        # none surfaced as work
+    assert len(report.appendix) == 2    # both preserved
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")
