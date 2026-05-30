@@ -18,11 +18,14 @@ from src.voc.review_ops.industrial.schema import IndustrialReview
 _HANGUL_RE = re.compile(r"[가-힣]")
 _LATIN_RE = re.compile(r"[a-zA-Z]")
 
-_DATE_PATTERNS: list[re.Pattern] = [
-    re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일"),
-    re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})"),
-    re.compile(r"(\d{4})\.(\d{1,2})\.(\d{1,2})"),
-    re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})"),
+# (pattern, is_short_year). Four-digit-year patterns are tried first so
+# "2026.05.29" matches them before the YY.MM.DD fallback ("26.05.29" -> 2026).
+_DATE_PATTERNS: list[tuple[re.Pattern, bool]] = [
+    (re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일"), False),
+    (re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})"), False),
+    (re.compile(r"(\d{4})\.(\d{1,2})\.(\d{1,2})"), False),
+    (re.compile(r"(\d{4})/(\d{1,2})/(\d{1,2})"), False),
+    (re.compile(r"(\d{2})\.(\d{1,2})\.(\d{1,2})"), True),  # YY.MM.DD (Korean export)
 ]
 
 # Reply-column values that mean "no reply yet".
@@ -38,11 +41,12 @@ def _clean_text(raw_text: str) -> str:
 def _parse_date(raw: str | None) -> date | None:
     if not raw:
         return None
-    for pattern in _DATE_PATTERNS:
+    for pattern, is_short_year in _DATE_PATTERNS:
         m = pattern.search(raw)
         if m:
             try:
-                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                year = int(m.group(1)) + (2000 if is_short_year else 0)
+                return date(year, int(m.group(2)), int(m.group(3)))
             except ValueError:
                 continue
     return None

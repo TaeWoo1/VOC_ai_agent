@@ -196,6 +196,20 @@ def test_request_and_complaint_forms_still_fire():
     assert "spec_size_confusion" in classify(_review("사이즈가 안맞아요"))
 
 
+def test_positive_cs_contact_phrasing_not_flagged():
+    # "안 해도" = "even without …" — a positive completion, not a CS complaint
+    for text in [
+        "고객센터 연락 안 해도 바로 처리되어 만족합니다",
+        "처리 안 해도 바로 됐어요. 만족합니다",
+    ]:
+        assert _risk_tags(text) == [], f"{text!r} wrongly flagged risk: {_risk_tags(text)}"
+
+
+def test_cs_contact_failure_complaints_still_fire():
+    assert "cs_exchange_return_issue" in classify(_review("고객센터 연락이 안 됩니다"))
+    assert "cs_exchange_return_issue" in classify(_review("교환 처리가 안 됩니다"))
+
+
 def test_needs_reply_suppressed_when_already_replied():
     text = "재고 있나요? 문의드려요"
     assert "needs_reply" in classify(_review(text, has_reply=False))

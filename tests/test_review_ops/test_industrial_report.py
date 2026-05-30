@@ -170,6 +170,18 @@ def test_recent_affirmative_positives_stay_out_of_worklist():
     assert len(report.appendix) == 2    # both preserved
 
 
+def test_short_year_recent_complaint_enters_worklist():
+    # YY.MM.DD export must not silently hide a true recent complaint
+    rows = [
+        {"channel": "쿠팡", "text": "박스가 터져서 왔어요. 교환 가능한가요?", "rating": "1", "date": "26.05.29"},
+    ]
+    reviews = dedup(normalize_rows(rows))
+    assert reviews[0].review_date == date(2026, 5, 29)
+    report = build_report(reviews, today=date(2026, 5, 29))
+    assert report.header.date_unknown_count == 0
+    assert any("박스가 터져" in r.text for r in report.worklist)
+
+
 def test_density_note_renders_only_when_set():
     reviews = dedup(normalize_rows(ROWS))
     report = build_report(reviews, today=TODAY, density_note="문제 리뷰를 일부러 많이 담았습니다.")

@@ -50,6 +50,14 @@ def test_parse_date_variants():
     assert _parse_date(None) is None
 
 
+def test_parse_date_short_year():
+    # common Korean export YY.MM.DD -> 20YY
+    assert _parse_date("26.05.29") == date(2026, 5, 29)
+    assert _parse_date("26.5.3") == date(2026, 5, 3)
+    # four-digit year still wins (not parsed as short-year substring)
+    assert _parse_date("2026.05.29") == date(2026, 5, 29)
+
+
 def test_parse_rating_accepts_only_1_to_5():
     # valid 1–5 scale, decimals allowed
     assert _parse_rating("5") == 5.0
