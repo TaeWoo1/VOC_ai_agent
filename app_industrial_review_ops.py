@@ -28,7 +28,7 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-from src.voc.review_ops.industrial import rag, refine
+from src.voc.review_ops.industrial import cluster, rag, refine
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -235,6 +235,10 @@ def generate(
     recent_days: int,
     do_refine: bool = False,
     refine_top_n: int = refine.DEFAULT_TOP_N,
+    do_cluster: bool = False,
+    cluster_max_clusters: int = cluster.DEFAULT_MAX_CLUSTERS,
+    cluster_max_reps: int = cluster.DEFAULT_MAX_REPRESENTATIVES,
+    reuse_embeddings: dict | None = None,
 ) -> dict:
     reviews = dedup(normalize_rows(rows))
     active = [r for r in reviews if not r.is_duplicate]
@@ -258,6 +262,30 @@ def generate(
             except Exception as e:  # whole-feature fallback
                 refine_summary = {"status": "error", "error": str(e)}
 
+    # Optional repeated-issue clustering (2C). Runs AFTER refinement and only adds
+    # issue_clusters — it never modifies worklist rows. Any failure renders the
+    # report without the issue section.
+    cluster_summary: dict | None = None
+    if do_cluster:
+        api_key = rag.resolve_api_key()
+        if not api_key:
+            cluster_summary = {"status": "no_key"}
+        else:
+            try:
+                report, csum = cluster.cluster_issues(
+                    report,
+                    reviews,
+                    api_key=api_key,
+                    embeddings=reuse_embeddings,
+                    today=today,
+                    recent_days=recent_days,
+                    max_clusters=cluster_max_clusters,
+                    max_representatives=cluster_max_reps,
+                )
+                cluster_summary = {"status": "ok", **csum}
+            except Exception as e:  # whole-feature fallback
+                cluster_summary = {"status": "error", "error": str(e)}
+
     html = render_report_html(report, recent_days=recent_days)
     tagged = [(r, classify(r)) for r in active]
     today_count = sum(1 for w in report.worklist if w.tier == "today")
@@ -273,6 +301,8 @@ def generate(
         "channels": sorted({r.channel for r in active}),
         "recent_days": recent_days,
         "refine_summary": refine_summary,
+        "cluster_summary": cluster_summary,
+        "issue_count": len(report.issue_clusters),
     }
 
 
@@ -318,6 +348,25 @@ def _render_generate_tab() -> None:
                     "OPENAI_API_KEY를 찾을 수 없습니다. 다듬기를 켜도 규칙 기반 결과로 표시됩니다."
                 )
 
+    with st.expander("반복 이슈 묶어보기 (선택 · 기본 꺼짐)", expanded=False):
+        do_cluster = st.checkbox("비슷한 리뷰를 묶어 반복 이슈로 보기", value=False)
+        cluster_max = st.number_input(
+            "최대 반복 이슈 개수",
+            min_value=1, max_value=20, value=int(cluster.DEFAULT_MAX_CLUSTERS), step=1,
+            disabled=not do_cluster,
+        )
+        if do_cluster:
+            if rag.resolve_api_key():
+                reuse = "rag_index" in st.session_state
+                st.caption(
+                    f"예상 LLM 호출: 최대 {int(cluster_max)}회 (이슈 묶음마다 1회). "
+                    + ("기존 임베딩 재사용." if reuse else "후보 리뷰만 임베딩합니다.")
+                )
+            else:
+                st.warning(
+                    "OPENAI_API_KEY를 찾을 수 없습니다. 반복 이슈 묶기는 키가 필요합니다."
+                )
+
     if st.button("리포트 생성", type="primary", disabled=uploaded is None):
         try:
             rows, had_channel = load_upload(
@@ -336,7 +385,17 @@ def _render_generate_tab() -> None:
         if not had_channel and not channel_override.strip():
             st.info("파일에 채널 열이 없어 채널이 '미상'으로 표시됩니다. 선택 입력에서 채널 이름을 지정할 수 있습니다.")
 
-        with st.spinner("리포트 생성 중..." + (" (LLM 다듬기 포함)" if do_refine else "")):
+        reuse_emb = None
+        if do_cluster and "rag_index" in st.session_state:
+            reuse_emb = st.session_state["rag_index"].vectors_by_review_id()
+
+        extras = []
+        if do_refine:
+            extras.append("LLM 다듬기")
+        if do_cluster:
+            extras.append("반복 이슈")
+        spinner_msg = "리포트 생성 중..." + (f" ({' · '.join(extras)} 포함)" if extras else "")
+        with st.spinner(spinner_msg):
             result = generate(
                 rows,
                 title=title.strip() or "산업자재 리뷰 운영 점검",
@@ -344,6 +403,9 @@ def _render_generate_tab() -> None:
                 recent_days=int(recent_days),
                 do_refine=do_refine,
                 refine_top_n=int(refine_top_n),
+                do_cluster=do_cluster,
+                cluster_max_clusters=int(cluster_max),
+                reuse_embeddings=reuse_emb,
             )
         st.session_state["result"] = result
         st.session_state["report_title"] = title.strip() or "report"
@@ -380,6 +442,20 @@ def _render_generate_tab() -> None:
             st.warning("OPENAI_API_KEY가 없어 규칙 기반 결과로 표시했습니다.")
         elif status == "error":
             st.warning(f"LLM 다듬기에 실패해 규칙 기반 결과로 표시했습니다: {summary.get('error', '')}")
+
+    cluster_summary = result.get("cluster_summary")
+    if cluster_summary:
+        cstatus = cluster_summary.get("status")
+        if cstatus == "ok":
+            st.success(
+                f"반복 이슈: 후보 {cluster_summary['candidates']}건 → "
+                f"묶음 {cluster_summary['clusters']}개 → "
+                f"최종 반복 이슈 {cluster_summary['issues']}건"
+            )
+        elif cstatus == "no_key":
+            st.warning("OPENAI_API_KEY가 없어 반복 이슈 묶기를 건너뛰었습니다.")
+        elif cstatus == "error":
+            st.warning(f"반복 이슈 묶기에 실패해 건너뛰었습니다: {cluster_summary.get('error', '')}")
 
     st.download_button(
         "HTML 리포트 다운로드",

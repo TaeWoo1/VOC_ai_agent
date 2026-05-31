@@ -14,8 +14,19 @@ from src.voc.review_ops.industrial.schema import (
     HeaderStats,
     IndustrialReport,
     IndustrialReview,
+    IssueCluster,
     WorklistRow,
 )
+
+_ISSUE_TYPE_LABELS: dict[str, str] = {
+    "product": "제품",
+    "detail_page": "상세페이지",
+    "cs": "CS/교환",
+    "shipping": "배송/포장",
+    "positive_signal": "긍정 신호",
+    "ignore": "기타",
+}
+_SEVERITY_LABELS: dict[str, str] = {"high": "높음", "medium": "보통", "low": "낮음"}
 
 _CSS = """
 :root { color-scheme: light; }
@@ -48,6 +59,17 @@ h2 { font-size: 18px; margin: 28px 0 12px; }
 .reason { color: #b5491f; }
 .suggest { color: #1f6f3f; }
 .refnote { color: #8b939c; font-size: 12px; margin-top: 6px; }
+.card.issue { border-left: 3px solid #1971c2; }
+.issuehead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.issuetitle { font-size: 15px; font-weight: 600; color: #1c2024; }
+.chip.sev-high { background: #ffe3e3; color: #c92a2a; }
+.chip.sev-medium { background: #fff3bf; color: #8a6d00; }
+.chip.sev-low { background: #e9ecef; color: #495057; }
+.reps { margin-top: 8px; border-top: 1px solid #eef1f4; padding-top: 8px; }
+.reps .repslabel { color: #8b939c; font-size: 12px; margin-bottom: 4px; }
+.rep { margin: 0 0 6px; }
+.rep .meta { font-size: 12px; color: #6b747e; }
+.rep .repquote { font-size: 13px; white-space: pre-wrap; }
 table { width: 100%; border-collapse: collapse; background: #fff;
         border: 1px solid #e6e8eb; border-radius: 8px; overflow: hidden; font-size: 13px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
@@ -139,6 +161,58 @@ def _appendix_row(r: IndustrialReview) -> str:
     )
 
 
+def _issue_rep(rep: WorklistRow) -> str:
+    meta_bits = [_fmt_date(rep.review_date), escape(rep.channel), _fmt_rating(rep.rating)]
+    if rep.product_name:
+        meta_bits.append(escape(rep.product_name))
+    meta = " · ".join(meta_bits)
+    return (
+        '<div class="rep">'
+        f'<div class="meta">{meta}</div>'
+        f'<div class="repquote">{escape(rep.text)}</div>'
+        "</div>"
+    )
+
+
+def _issue_card(cluster: IssueCluster) -> str:
+    sev_label = _SEVERITY_LABELS.get(cluster.severity, cluster.severity)
+    type_label = _ISSUE_TYPE_LABELS.get(cluster.issue_type, cluster.issue_type)
+    chips = (
+        f'<span class="chip sev-{escape(cluster.severity)}">심각도 {escape(sev_label)}</span>'
+        f'<span class="chip">{escape(type_label)}</span>'
+        f'<span class="chip">{escape(cluster.tag_label)}</span>'
+    )
+    # Up to 3 representative original reviews (verbatim).
+    reps = "".join(_issue_rep(r) for r in cluster.representatives[:3])
+    reps_html = (
+        f'<div class="reps"><div class="repslabel">대표 리뷰</div>{reps}</div>' if reps else ""
+    )
+    return (
+        '<div class="card issue">'
+        '<div class="issuehead">'
+        f'<span class="issuetitle">{escape(cluster.issue_title)}</span>'
+        f'<span class="count">관련 리뷰 {cluster.review_count}건</span>'
+        "</div>"
+        f'<div class="chips">{chips}</div>'
+        f'<div class="action reason"><span class="label">요약:</span> {escape(cluster.summary)}</div>'
+        f'<div class="action suggest"><span class="label">추천 조치:</span> {escape(cluster.recommended_action)}</div>'
+        f"{reps_html}"
+        "</div>"
+    )
+
+
+def _issues_section(clusters: list[IssueCluster]) -> str:
+    """Repeated-issue section. Rendered only when clusters exist (callers pass an
+    empty list otherwise, which omits the section entirely)."""
+    if not clusters:
+        return ""
+    body = "".join(_issue_card(c) for c in clusters)
+    return (
+        f'<h2>🔁 반복 이슈 <span class="count">({len(clusters)}건)</span></h2>'
+        f"{body}"
+    )
+
+
 def render_report_html(report: IndustrialReport, recent_days: int | None = None) -> str:
     today_rows = [r for r in report.worklist if r.tier == "today"]
     week_rows = [r for r in report.worklist if r.tier != "today"]
@@ -158,6 +232,8 @@ def render_report_html(report: IndustrialReport, recent_days: int | None = None)
         if report.density_note
         else ""
     )
+    # Repeated-issue rollup above the worklist; empty -> section omitted.
+    issues_section = _issues_section(report.issue_clusters)
 
     appendix_rows = "".join(_appendix_row(r) for r in report.appendix)
 
@@ -177,6 +253,8 @@ def render_report_html(report: IndustrialReport, recent_days: int | None = None)
   {note_html}
 
   {_stats_html(report.header)}
+
+  {issues_section}
 
   {today_section}
 

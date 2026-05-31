@@ -58,6 +58,33 @@ class WorklistRow:
 
 
 @dataclass
+class IssueCluster:
+    """One repeated-issue group ("반복 이슈") — similar candidate reviews rolled up.
+
+    Built by the optional cluster stage (Slice 2C). ``review_ids`` /
+    ``representatives`` are the cluster members; the LLM-judged fields
+    (``issue_title`` / ``summary`` / ``recommended_action`` / ``issue_type`` /
+    ``severity``) fall back to rule-based values when no LLM judgement applies.
+    """
+
+    cluster_id: str
+    tag: str                    # primary taxonomy category id
+    tag_label: str              # Korean label for the chip
+    issue_title: str
+    issue_type: str             # product|detail_page|cs|shipping|positive_signal|ignore
+    severity: str               # high|medium|low
+    summary: str
+    recommended_action: str
+    review_ids: list[str] = field(default_factory=list)
+    representatives: list[WorklistRow] = field(default_factory=list)
+    judged: bool = False        # True when an LLM judgement was applied
+
+    @property
+    def review_count(self) -> int:
+        return len(self.review_ids)
+
+
+@dataclass
 class HeaderStats:
     """Short header stats — kept intentionally minimal (worklist comes first)."""
 
@@ -80,3 +107,4 @@ class IndustrialReport:
     density_note: str | None = None  # sample-only framing; None for real data
     worklist: list[WorklistRow] = field(default_factory=list)
     appendix: list[IndustrialReview] = field(default_factory=list)
+    issue_clusters: list[IssueCluster] = field(default_factory=list)

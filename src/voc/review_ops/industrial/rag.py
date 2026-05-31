@@ -233,6 +233,21 @@ class RagIndex:
     def __len__(self) -> int:
         return len(self.documents)
 
+    def vectors_by_review_id(self) -> dict[str, list[float]]:
+        """Map review_id -> its stored embedding (as a plain list).
+
+        Read-only accessor so other in-memory stages (e.g. issue clustering) can
+        reuse already-built embeddings instead of re-embedding. No network.
+        """
+        out: dict[str, list[float]] = {}
+        for i, doc in enumerate(self.documents):
+            rid = doc.metadata.get("review_id")
+            if rid is None:
+                continue
+            row = self._matrix[i]
+            out[rid] = [float(x) for x in (row.tolist() if _HAS_NUMPY else row)]
+        return out
+
     def tag_match_count(self, query_text: str) -> int:
         """How many indexed docs carry a tag the query clearly maps to.
 
