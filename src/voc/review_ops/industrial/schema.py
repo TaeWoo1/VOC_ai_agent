@@ -52,6 +52,8 @@ class WorklistRow:
     reason: str = ""            # 왜 봐야 하나요
     suggested_action: str = ""  # 다음 조치
     tier: str = "week"          # "today" | "week"
+    confidence: str = ""        # LLM refinement confidence (high|medium|low); "" if rule-based
+    refined: bool = False       # True when an LLM refinement was applied to this row
     _severity: int = 0          # internal ranking key
 
 

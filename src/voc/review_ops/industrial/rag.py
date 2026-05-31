@@ -233,6 +233,17 @@ class RagIndex:
     def __len__(self) -> int:
         return len(self.documents)
 
+    def tag_match_count(self, query_text: str) -> int:
+        """How many indexed docs carry a tag the query clearly maps to.
+
+        Returns 0 when the query maps to no tag (so callers can distinguish
+        "no tag in query" from "tag in query but no matching reviews").
+        """
+        boosted = boosted_ids_for_query(query_text)
+        if not boosted:
+            return 0
+        return sum(1 for doc in self.documents if boosted & set(doc.tags))
+
     def rank(
         self,
         query_embedding: list[float],
@@ -240,6 +251,7 @@ class RagIndex:
         query_text: str = "",
         top_k: int = DEFAULT_TOP_K,
         boost_weight: float = DEFAULT_BOOST_WEIGHT,
+        strict_tags: bool = False,
     ) -> list[SearchResult]:
         sims = _cosine_all(self._matrix, query_embedding)
         boosted = boosted_ids_for_query(query_text)
@@ -247,7 +259,14 @@ class RagIndex:
         for doc, sim in zip(self.documents, sims):
             boost = boost_weight if (boosted & set(doc.tags)) else 0.0
             results.append(SearchResult(doc=doc, similarity=sim, score=sim + boost))
-        results.sort(key=lambda r: r.score, reverse=True)
+        if strict_tags and boosted:
+            # Hard priority: any tag-matching review outranks any non-matching
+            # one, then by score within each group.
+            results.sort(
+                key=lambda r: (bool(boosted & set(r.doc.tags)), r.score), reverse=True
+            )
+        else:
+            results.sort(key=lambda r: r.score, reverse=True)
         return results[:top_k]
 
 

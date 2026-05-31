@@ -28,7 +28,7 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-from src.voc.review_ops.industrial import rag
+from src.voc.review_ops.industrial import rag, refine
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -233,13 +233,32 @@ def generate(
     title: str,
     today: date | None,
     recent_days: int,
+    do_refine: bool = False,
+    refine_top_n: int = refine.DEFAULT_TOP_N,
 ) -> dict:
     reviews = dedup(normalize_rows(rows))
     active = [r for r in reviews if not r.is_duplicate]
     report = build_report(
         reviews, today=today, recent_days=recent_days, title=title, density_note=None
     )
-    html = render_report_html(report)
+
+    # Optional LLM refinement of the top-N worklist candidates only. Any failure
+    # (no key, bad JSON, network) falls back to the rule-based report.
+    refine_summary: dict | None = None
+    if do_refine:
+        api_key = rag.resolve_api_key()
+        if not api_key:
+            refine_summary = {"status": "no_key"}
+        else:
+            try:
+                report, summary = refine.refine_worklist(
+                    report, api_key=api_key, top_n=refine_top_n
+                )
+                refine_summary = {"status": "ok", **summary}
+            except Exception as e:  # whole-feature fallback
+                refine_summary = {"status": "error", "error": str(e)}
+
+    html = render_report_html(report, recent_days=recent_days)
     tagged = [(r, classify(r)) for r in active]
     today_count = sum(1 for w in report.worklist if w.tier == "today")
     return {
@@ -252,6 +271,8 @@ def generate(
         "date_unknown": report.header.date_unknown_count,
         "rating_unknown": report.header.rating_unknown_count,
         "channels": sorted({r.channel for r in active}),
+        "recent_days": recent_days,
+        "refine_summary": refine_summary,
     }
 
 
@@ -279,6 +300,24 @@ def _render_generate_tab() -> None:
             placeholder="예: 네이버",
         )
 
+    with st.expander("LLM 문구 다듬기 (선택 · 기본 꺼짐)", expanded=False):
+        do_refine = st.checkbox("LLM으로 worklist 문구 다듬기", value=False)
+        refine_top_n = st.number_input(
+            "다듬을 상위 후보 수 (top-N)",
+            min_value=1, max_value=100, value=int(refine.DEFAULT_TOP_N), step=5,
+            disabled=not do_refine,
+        )
+        if do_refine:
+            if rag.resolve_api_key():
+                st.caption(
+                    f"예상 LLM 호출: 최대 {int(refine_top_n)}회 "
+                    "(worklist 상위 후보에만 적용, 전체 리뷰 아님)."
+                )
+            else:
+                st.warning(
+                    "OPENAI_API_KEY를 찾을 수 없습니다. 다듬기를 켜도 규칙 기반 결과로 표시됩니다."
+                )
+
     if st.button("리포트 생성", type="primary", disabled=uploaded is None):
         try:
             rows, had_channel = load_upload(
@@ -297,12 +336,15 @@ def _render_generate_tab() -> None:
         if not had_channel and not channel_override.strip():
             st.info("파일에 채널 열이 없어 채널이 '미상'으로 표시됩니다. 선택 입력에서 채널 이름을 지정할 수 있습니다.")
 
-        result = generate(
-            rows,
-            title=title.strip() or "산업자재 리뷰 운영 점검",
-            today=None if auto_today else today_input,
-            recent_days=int(recent_days),
-        )
+        with st.spinner("리포트 생성 중..." + (" (LLM 다듬기 포함)" if do_refine else "")):
+            result = generate(
+                rows,
+                title=title.strip() or "산업자재 리뷰 운영 점검",
+                today=None if auto_today else today_input,
+                recent_days=int(recent_days),
+                do_refine=do_refine,
+                refine_top_n=int(refine_top_n),
+            )
         st.session_state["result"] = result
         st.session_state["report_title"] = title.strip() or "report"
         # New corpus -> drop any stale RAG index/chat from a previous file.
@@ -321,9 +363,23 @@ def _render_generate_tab() -> None:
     c3.metric("채널 수", f"{len(result['channels'])}개")
     c4, c5, c6, c7 = st.columns(4)
     c4.metric("오늘 먼저 볼 리뷰", f"{result['today_count']}건")
-    c5.metric("이번 주 안에 볼 리뷰", f"{result['week_count']}건")
+    c5.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일 내 확인", f"{result['week_count']}건")
     c6.metric("날짜 확인 필요", f"{result['date_unknown']}건")
     c7.metric("평점 확인 필요", f"{result['rating_unknown']}건")
+
+    summary = result.get("refine_summary")
+    if summary:
+        status = summary.get("status")
+        if status == "ok":
+            st.success(
+                f"LLM 다듬기: 후보 {summary['candidates']}건 중 "
+                f"{summary['refined']}건 보정 · {summary['excluded']}건 제외 · "
+                f"{summary['failed']}건 규칙기반 유지"
+            )
+        elif status == "no_key":
+            st.warning("OPENAI_API_KEY가 없어 규칙 기반 결과로 표시했습니다.")
+        elif status == "error":
+            st.warning(f"LLM 다듬기에 실패해 규칙 기반 결과로 표시했습니다: {summary.get('error', '')}")
 
     st.download_button(
         "HTML 리포트 다운로드",
@@ -427,8 +483,15 @@ def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
         st.error(f"질문 임베딩 실패: {e}")
         return
 
-    results = index.rank(query_emb, query_text=query, top_k=8)
+    results = index.rank(query_emb, query_text=query, top_k=8, strict_tags=True)
     st.session_state["rag_last_results"] = results
+
+    # Strict-tag note: query clearly maps to a tag, but no review carries it.
+    tag_note = ""
+    if rag.boosted_ids_for_query(query) and index.tag_match_count(query) == 0:
+        tag_note = (
+            "해당 태그로 분류된 리뷰는 거의 없습니다. 의미상 가까운 리뷰를 대신 보여드립니다."
+        )
 
     answer = rag.generate_answer(query, results, api_key=api_key, model=rag.chat_model())
     if answer is None:
@@ -436,6 +499,8 @@ def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
             f"검색된 리뷰 {len(results)}건을 오른쪽에서 확인하세요. "
             "(AI 요약을 사용할 수 없어 검색 결과만 표시합니다.)"
         )
+    if tag_note:
+        answer = f"{tag_note}\n\n{answer}"
     messages = st.session_state.setdefault("rag_messages", [])
     messages.append({"role": "user", "content": query})
     messages.append({"role": "assistant", "content": answer})

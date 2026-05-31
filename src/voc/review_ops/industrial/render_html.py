@@ -47,6 +47,7 @@ h2 { font-size: 18px; margin: 28px 0 12px; }
 .action .label { color: #8b939c; }
 .reason { color: #b5491f; }
 .suggest { color: #1f6f3f; }
+.refnote { color: #8b939c; font-size: 12px; margin-top: 6px; }
 table { width: 100%; border-collapse: collapse; background: #fff;
         border: 1px solid #e6e8eb; border-radius: 8px; overflow: hidden; font-size: 13px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
@@ -95,6 +96,13 @@ def _worklist_card(row: WorklistRow) -> str:
     chips_html = f'<div class="chips">{chips}</div>' if chips else ""
     card_class = "card today" if row.tier == "today" else "card"
 
+    # Subtle, non-promotional note for LLM-refined rows — the report should not
+    # read as an "AI product".
+    refnote_html = ""
+    if row.refined:
+        conf = f" · 신뢰도 {escape(row.confidence)}" if row.confidence else ""
+        refnote_html = f'<div class="refnote">문구 다듬음{conf}</div>'
+
     return (
         f'<div class="{card_class}">'
         f'<div class="meta">{meta}</div>'
@@ -102,6 +110,7 @@ def _worklist_card(row: WorklistRow) -> str:
         f"{chips_html}"
         f'<div class="action reason"><span class="label">왜 봐야 하나요:</span> {escape(row.reason)}</div>'
         f'<div class="action suggest"><span class="label">다음 조치:</span> {escape(row.suggested_action)}</div>'
+        f"{refnote_html}"
         "</div>"
     )
 
@@ -130,14 +139,19 @@ def _appendix_row(r: IndustrialReview) -> str:
     )
 
 
-def render_report_html(report: IndustrialReport) -> str:
+def render_report_html(report: IndustrialReport, recent_days: int | None = None) -> str:
     today_rows = [r for r in report.worklist if r.tier == "today"]
     week_rows = [r for r in report.worklist if r.tier != "today"]
+    # The period-tier heading is dynamic: with recent_days it reflects the chosen
+    # window ("최근 30일 ..."); without it, the original wording is preserved.
+    period_heading = (
+        f"최근 {recent_days}일 내 확인할 리뷰" if recent_days else "이번 주 안에 볼 리뷰"
+    )
     today_section = _tier_section(
         "오늘 먼저 볼 리뷰", today_rows, "오늘 먼저 볼 리뷰가 없습니다."
     )
     week_section = _tier_section(
-        "이번 주 안에 볼 리뷰", week_rows, "이번 주 안에 볼 리뷰가 없습니다."
+        period_heading, week_rows, f"{period_heading}가 없습니다."
     )
     note_html = (
         f'<div class="note">{escape(report.density_note)}</div>'

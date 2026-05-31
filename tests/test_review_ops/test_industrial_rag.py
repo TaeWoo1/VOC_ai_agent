@@ -121,6 +121,33 @@ def test_generate_answer_returns_none_without_key_or_results():
     assert rag.generate_answer("질문", dummy, api_key=None) is None
 
 
+def test_strict_tags_prioritizes_tag_matching_over_similarity():
+    # untagged doc is MORE similar to the query; with strict_tags the delivery-
+    # tagged doc must still come first because the query maps to that tag.
+    untagged = rag.RagDocument(text="좋아요", metadata={"text": "좋아요"}, tags=[])
+    damage = rag.RagDocument(
+        text="박스 파손", metadata={"text": "박스 파손"}, tags=["delivery_packaging_damage"]
+    )
+    # untagged aligned with [1,0]; damage less aligned.
+    index = rag.RagIndex([untagged, damage], [[1.0, 0.0], [0.6, 0.8]])
+
+    default = index.rank([1.0, 0.0], query_text="배송 파손 보여줘", top_k=2)
+    assert default[0].doc is untagged  # boost alone can't overcome the sim gap
+
+    strict = index.rank([1.0, 0.0], query_text="배송 파손 보여줘", top_k=2, strict_tags=True)
+    assert strict[0].doc is damage  # hard tag priority
+
+
+def test_tag_match_count():
+    plain = rag.RagDocument(text="좋아요", metadata={}, tags=[])
+    damage = rag.RagDocument(text="박스 파손", metadata={}, tags=["delivery_packaging_damage"])
+    index = rag.RagIndex([plain, damage], [[1.0, 0.0], [1.0, 0.0]])
+
+    assert index.tag_match_count("배송 파손 보여줘") == 1
+    assert index.tag_match_count("사이즈 불만") == 0   # tag in query, no matching doc
+    assert index.tag_match_count("그냥 좋은 리뷰") == 0  # no tag in query
+
+
 def test_rag_index_length_guard():
     docs = [rag.RagDocument(text="a", metadata={}, tags=[])]
     try:

@@ -239,3 +239,12 @@ def test_html_is_worklist_first_with_caveat():
     assert html.index("이번 주 안에 볼 리뷰") < html.index("전체 리뷰 (원문)")
     # subtitle frames it as a sample, not a finished product
     assert "샘플" in html
+
+
+def test_html_dynamic_period_heading_uses_recent_days():
+    report = _report()
+    html = render_report_html(report, recent_days=30)
+    assert "최근 30일 내 확인할 리뷰" in html
+    assert "이번 주 안에 볼 리뷰" not in html  # replaced when recent_days given
+    # default (no recent_days) keeps the original wording
+    assert "이번 주 안에 볼 리뷰" in render_report_html(report)
