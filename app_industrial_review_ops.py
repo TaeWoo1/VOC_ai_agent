@@ -28,6 +28,7 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
+from src.voc.review_ops.industrial import rag
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -304,6 +305,9 @@ def _render_generate_tab() -> None:
         )
         st.session_state["result"] = result
         st.session_state["report_title"] = title.strip() or "report"
+        # New corpus -> drop any stale RAG index/chat from a previous file.
+        for key in ("rag_index", "rag_messages", "rag_last_results"):
+            st.session_state.pop(key, None)
 
     result = st.session_state.get("result")
     if not result:
@@ -389,6 +393,123 @@ def _render_search_tab() -> None:
     st.caption("자연어 질의/LLM 요약은 실제 데이터 검증 후 추가 예정.")
 
 
+RAG_EXAMPLES = [
+    "배송 파손 리뷰 보여줘",
+    "사이즈 관련 불만 있어?",
+    "답글 필요한 리뷰 찾아줘",
+    "재구매 언급 리뷰 보여줘",
+    "상세페이지에 추가할 만한 내용 있어?",
+]
+
+
+def _rag_result_card(result: rag.SearchResult) -> None:
+    m = result.doc.metadata
+    rating = f"{m['rating']:g}점" if m.get("rating") is not None else "평점미상"
+    bits = [m.get("date") or "날짜미상", str(m.get("channel") or "-"), rating]
+    if m.get("product_name"):
+        bits.append(str(m["product_name"]))
+    if m.get("option_name"):
+        bits.append(f"옵션: {m['option_name']}")
+    st.markdown(f"**{' · '.join(bits)}**  ·  유사도 {result.similarity:.3f}")
+    if m.get("tag_labels"):
+        st.caption("태그: " + ", ".join(m["tag_labels"]))
+    st.write(m.get("text", ""))
+    st.divider()
+
+
+def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> None:
+    query = (query or "").strip()
+    if not query:
+        return
+    try:
+        query_emb = rag.embed_texts([query], api_key=api_key, model=rag.embedding_model())[0]
+    except Exception as e:  # embedding the question failed -> tell the user, no crash
+        st.error(f"질문 임베딩 실패: {e}")
+        return
+
+    results = index.rank(query_emb, query_text=query, top_k=8)
+    st.session_state["rag_last_results"] = results
+
+    answer = rag.generate_answer(query, results, api_key=api_key, model=rag.chat_model())
+    if answer is None:
+        answer = (
+            f"검색된 리뷰 {len(results)}건을 오른쪽에서 확인하세요. "
+            "(AI 요약을 사용할 수 없어 검색 결과만 표시합니다.)"
+        )
+    messages = st.session_state.setdefault("rag_messages", [])
+    messages.append({"role": "user", "content": query})
+    messages.append({"role": "assistant", "content": answer})
+
+
+def _render_rag_tab() -> None:
+    st.subheader("리뷰에게 물어보기 (로컬 RAG 데모)")
+    st.caption("업로드한 리뷰를 임베딩해 자연어로 검색·질문합니다. 외부 저장 없이 메모리에서만 동작합니다.")
+
+    result = st.session_state.get("result")
+    if not result:
+        st.info("먼저 '리포트 생성' 탭에서 파일을 올려 리포트를 생성하세요.")
+        return
+
+    api_key = rag.resolve_api_key()
+
+    # --- Indexing gate: embed the corpus once, on demand ---
+    if "rag_index" not in st.session_state:
+        st.write(f"리뷰 **{len(result['tagged'])}건**을 임베딩하면 질문할 수 있습니다.")
+        if not api_key:
+            st.warning(
+                "OPENAI_API_KEY를 찾을 수 없어 임베딩을 만들 수 없습니다. "
+                ".env에 키를 추가하세요. ('간단 검색' 탭은 키 없이도 동작합니다.)"
+            )
+        if st.button("리뷰 인덱싱 시작 (임베딩)", type="primary", disabled=not api_key):
+            with st.spinner("리뷰 임베딩 중... (건수에 따라 시간이 걸릴 수 있습니다)"):
+                try:
+                    index = rag.build_index(
+                        result["tagged"], api_key=api_key, model=rag.embedding_model()
+                    )
+                    st.session_state["rag_index"] = index
+                    st.session_state.setdefault("rag_messages", [])
+                    st.success(f"{len(index)}건 인덱싱 완료")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"임베딩 실패: {e}")
+        return
+
+    index: rag.RagIndex = st.session_state["rag_index"]
+    st.caption(f"인덱싱된 리뷰: {len(index)}건")
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("#### 질문")
+        st.write("예시 질문:")
+        for i, example in enumerate(RAG_EXAMPLES):
+            if st.button(example, key=f"rag_ex_{i}"):
+                st.session_state["rag_pending"] = example
+        with st.form("rag_form", clear_on_submit=True):
+            typed = st.text_input("질문을 입력하세요", value="")
+            submitted = st.form_submit_button("질문하기", type="primary")
+        if submitted and typed.strip():
+            st.session_state["rag_pending"] = typed
+
+        pending = st.session_state.pop("rag_pending", None)
+        if pending:
+            with st.spinner("검색 중..."):
+                _process_rag_query(pending, index, api_key)
+
+        st.markdown("#### 대화")
+        for message in st.session_state.get("rag_messages", []):
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+
+    with right:
+        st.markdown("#### 검색된 리뷰")
+        results = st.session_state.get("rag_last_results", [])
+        if not results:
+            st.caption("질문하면 관련 원문 리뷰가 여기에 표시됩니다.")
+        for res in results:
+            _rag_result_card(res)
+
+
 def main() -> None:
     st.set_page_config(page_title="산업자재 리뷰 운영 점검", layout="wide")
     st.title("산업자재 리뷰 운영 점검 (로컬 데모)")
@@ -397,11 +518,15 @@ def main() -> None:
         "키워드 기반 우선 분류이며, 확인용으로 봐주세요."
     )
 
-    tab_report, tab_search = st.tabs(["리포트 생성", "간단 검색 (리뷰 찾기)"])
+    tab_report, tab_search, tab_rag = st.tabs(
+        ["리포트 생성", "간단 검색 (리뷰 찾기)", "리뷰에게 물어보기 (RAG)"]
+    )
     with tab_report:
         _render_generate_tab()
     with tab_search:
         _render_search_tab()
+    with tab_rag:
+        _render_rag_tab()
 
 
 if __name__ == "__main__":
