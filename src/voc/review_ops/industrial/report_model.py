@@ -67,14 +67,14 @@ def _header_stats(reviews: list[IndustrialReview]) -> HeaderStats:
     )
 
 
-def _is_recent(review_date: date | None, today: date) -> bool:
+def _is_recent(review_date: date | None, today: date, recent_days: int = RECENT_DAYS) -> bool:
     # Unknown dates are NOT treated as recent: a review whose date could not be
     # parsed must not be presented as this-week work just because it carries a
     # risk/operational tag. It stays in the appendix and is counted in the
     # date_unknown diagnostic instead.
     if review_date is None:
         return False
-    return 0 <= (today - review_date).days <= RECENT_DAYS
+    return 0 <= (today - review_date).days <= recent_days
 
 
 def _is_low_rating(rating: float | None) -> bool:
@@ -140,6 +140,7 @@ def build_report(
     reviews: list[IndustrialReview],
     *,
     today: date | None = None,
+    recent_days: int = RECENT_DAYS,
     title: str = DEFAULT_TITLE,
     subtitle: str = DEFAULT_SUBTITLE,
     caveat: str = DEFAULT_CAVEAT,
@@ -151,6 +152,8 @@ def build_report(
     Duplicates (``is_duplicate``) are excluded from stats, worklist, and
     appendix. ``today`` defaults to the latest review date in the corpus so a
     sample renders a stable worklist regardless of the wall-clock run date.
+    ``recent_days`` controls the worklist recency window (default ``RECENT_DAYS``
+    keeps existing behavior); a larger value surfaces older reviews as work.
     """
     active = [r for r in reviews if not r.is_duplicate]
 
@@ -162,7 +165,9 @@ def build_report(
     for review in active:
         tags = classify(review)
         forced = any(CATEGORY_BY_ID[t].kind in WORKLIST_FORCING_KINDS for t in tags)
-        if _is_recent(review.review_date, today) and (forced or _is_low_rating(review.rating)):
+        if _is_recent(review.review_date, today, recent_days) and (
+            forced or _is_low_rating(review.rating)
+        ):
             worklist.append(_build_row(review, tags))
 
     # Rank: severity desc, then lower rating first, then most recent first.

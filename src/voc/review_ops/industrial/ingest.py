@@ -13,19 +13,25 @@ import csv
 from pathlib import Path
 
 # canonical field -> accepted header names (compared lowercased + stripped)
+# Naver SmartStore export headers (리뷰상세내용 / 구매자평점 / 리뷰등록일 / 답글여부 /
+# 리뷰글번호 / 등록자) are included so a real, unedited SmartStore download maps
+# without manual renaming.
 COLUMN_ALIASES: dict[str, set[str]] = {
     "channel": {"channel", "marketplace", "mall", "채널", "판매처", "쇼핑몰", "마켓"},
     "product_name": {"product", "product_name", "item", "상품명", "제품명", "상품", "품명"},
     "option_name": {"option", "option_name", "variant", "옵션", "옵션명", "선택옵션"},
-    "rating": {"rating", "score", "star", "stars", "평점", "별점", "점수"},
-    "date": {"date", "review_date", "created_at", "작성일", "날짜", "등록일", "리뷰일"},
-    "author": {"author", "name", "user", "작성자", "구매자", "닉네임", "이름"},
+    "rating": {"rating", "score", "star", "stars", "평점", "별점", "점수", "구매자평점"},
+    "date": {"date", "review_date", "created_at", "작성일", "날짜", "등록일", "리뷰일", "리뷰등록일"},
+    "author": {"author", "name", "user", "작성자", "구매자", "닉네임", "이름", "등록자"},
     "text": {
         "review", "text", "body", "content", "comment", "리뷰", "내용",
-        "리뷰내용", "후기", "본문",
+        "리뷰내용", "리뷰상세내용", "후기", "본문",
     },
-    "reply": {"reply", "answer", "response", "has_reply", "답글", "답변", "사장님답글", "판매자답변"},
-    "source_id": {"id", "source_id", "review_id", "리뷰id", "번호", "no"},
+    "reply": {
+        "reply", "answer", "response", "has_reply", "답글", "답변",
+        "사장님답글", "판매자답변", "답글여부",
+    },
+    "source_id": {"id", "source_id", "review_id", "리뷰id", "번호", "no", "리뷰글번호"},
 }
 
 
