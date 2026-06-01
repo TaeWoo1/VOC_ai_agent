@@ -247,6 +247,123 @@ def test_apply_issue_clusters_empty_leaves_report_unchanged():
     assert out.issue_clusters == []
 
 
+# --- Step A: evidence_review_ids control displayed representatives -----------
+
+
+def test_apply_evidence_ids_select_and_order_representatives():
+    raw = [_raw("A", "delivery_packaging_damage",
+                [_cand("a1", text="박스 터짐"), _cand("a2", text="포장 손상"),
+                 _cand("a3", text="다목적 가위로 자르니 일부 깨지는 부분이 있어요")])]
+    # judge cites only a2 then a1, NOT the off-topic cutting/breakage review a3.
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "포장 파손 반복", "shipping", "high",
+                                    "요약", "포장 점검", ["a2", "a1"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    reps = out.issue_clusters[0].representatives
+    assert [r.review_id for r in reps] == ["a2", "a1"]   # evidence order honored
+    assert "a3" not in {r.review_id for r in reps}       # off-topic rep dropped
+    # related count stays full cluster membership
+    assert out.issue_clusters[0].review_ids == ["a1", "a2", "a3"]
+    assert out.issue_clusters[0].review_count == 3
+
+
+def test_apply_empty_evidence_falls_back_to_all_reps():
+    raw = [_raw("A", "delivery_packaging_damage", [_cand("a1"), _cand("a2")])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "포장 파손", "shipping", "high",
+                                    "요약", "점검", []),  # no evidence ids
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    assert [r.review_id for r in out.issue_clusters[0].representatives] == ["a1", "a2"]
+
+
+# --- Step B: conservative near-duplicate merge ------------------------------
+
+
+def _issue(cid, *, issue_type, severity, title, review_ids, reps=None,
+           summary="요약", action="조치", tag="durability_failure") -> IssueCluster:
+    return IssueCluster(
+        cluster_id=cid, tag=tag, tag_label=cluster._tag_label(tag),
+        issue_title=title, issue_type=issue_type, severity=severity,
+        summary=summary, recommended_action=action,
+        review_ids=list(review_ids),
+        representatives=reps or [], judged=True,
+    )
+
+
+def _rep(review_id) -> WorklistRow:
+    return WorklistRow(
+        review_id=review_id, review_date=date(2026, 1, 20), channel="네이버",
+        product_name=None, option_name=None, rating=2.0, text=f"리뷰 {review_id}",
+    )
+
+
+def test_merge_same_type_shared_keyword_merges():
+    clusters = [
+        _issue("A", issue_type="product", severity="high", title="접착력 부족",
+               review_ids=["a1", "a2"]),
+        _issue("B", issue_type="product", severity="medium", title="접착력 문제",
+               review_ids=["b1"]),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 1
+    assert set(out[0].review_ids) == {"a1", "a2", "b1"}
+
+
+def test_merge_different_type_does_not_merge_even_if_keyword_overlaps():
+    clusters = [
+        _issue("A", issue_type="product", severity="high", title="포장 파손",
+               review_ids=["a1"]),
+        _issue("B", issue_type="shipping", severity="medium", title="포장 파손",
+               review_ids=["b1"]),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 2
+
+
+def test_merge_no_shared_allowlist_keyword_does_not_merge():
+    clusters = [
+        _issue("A", issue_type="product", severity="high", title="색상이 달라요",
+               review_ids=["a1"]),
+        _issue("B", issue_type="product", severity="medium", title="냄새가 나요",
+               review_ids=["b1"]),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 2
+
+
+def test_merge_dedupes_review_ids_and_representatives():
+    clusters = [
+        _issue("A", issue_type="product", severity="medium", title="접착력 부족",
+               review_ids=["x", "y"], reps=[_rep("x"), _rep("y")]),
+        _issue("B", issue_type="product", severity="medium", title="접착 약함",
+               review_ids=["y", "z"], reps=[_rep("y"), _rep("z")]),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 1
+    assert out[0].review_ids == ["x", "y", "z"]                 # union, order-preserving, deduped
+    assert [r.review_id for r in out[0].representatives] == ["x", "y", "z"]  # reps deduped
+
+
+def test_merge_preserves_higher_severity_and_clearer_text():
+    clusters = [
+        _issue("A", issue_type="product", severity="medium", title="접착", summary="짧음",
+               review_ids=["a1"]),
+        _issue("B", issue_type="product", severity="high", title="접착력이 약합니다",
+               summary="여러 건에서 접착력이 약하다는 의견이 반복됩니다", review_ids=["b1"]),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 1
+    assert out[0].severity == "high"                       # higher severity kept
+    assert out[0].issue_title == "접착력이 약합니다"        # longer/clearer title kept
+    assert "반복됩니다" in out[0].summary                   # longer/clearer summary kept
+
+
+def test_merge_empty_list():
+    assert cluster.merge_issue_clusters([]) == []
+
+
 # --- render_html ------------------------------------------------------------
 
 

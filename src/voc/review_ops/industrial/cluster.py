@@ -441,6 +441,15 @@ def apply_issue_clusters(
             continue
         if not j.is_real_issue or j.issue_type == "ignore":
             continue
+        # Show the reviews the judge actually cited as evidence, in the order it
+        # cited them — this drops cluster members the LLM did not treat as part
+        # of the issue (e.g. an off-topic breakage review that clustered into an
+        # adhesion group by similarity). Evidence ids are already constrained to
+        # the shown rep ids; fall back to all reps when the judge cited none.
+        rep_by_id = {c.review.review_id: c for c in rc.representatives}
+        chosen = [rep_by_id[rid] for rid in j.evidence_review_ids if rid in rep_by_id]
+        if not chosen:
+            chosen = list(rc.representatives)
         clusters.append(
             IssueCluster(
                 cluster_id=rc.cluster_id,
@@ -452,7 +461,7 @@ def apply_issue_clusters(
                 summary=j.summary,
                 recommended_action=j.recommended_action,
                 review_ids=[m.review.review_id for m in rc.members],
-                representatives=[_rep_row(c) for c in rc.representatives],
+                representatives=[_rep_row(c) for c in chosen],
                 judged=True,
             )
         )
@@ -461,6 +470,87 @@ def apply_issue_clusters(
         key=lambda c: (-_SEVERITY_RANK.get(c.severity, 0), -c.review_count, c.cluster_id)
     )
     return replace(report, issue_clusters=clusters)
+
+
+# ---------------------------------------------------------------------------
+# Near-duplicate cluster merge (pure, conservative)
+# ---------------------------------------------------------------------------
+
+# Only these tightly-scoped Korean keywords trigger a merge, and only between
+# clusters of the SAME issue_type. Intentionally narrow: no broad semantic merge,
+# no embedding/LLM re-judging. 접착 is a prefix of 접착력, so a "접착력 …" title
+# matches both keys — that is fine, we only need one shared key to merge.
+_MERGE_KEYWORDS = ("접착력", "접착", "포장", "구성품", "누락", "물샘", "파손", "헐거", "자석")
+
+
+def _title_keywords(title: str) -> set[str]:
+    return {k for k in _MERGE_KEYWORDS if k in (title or "")}
+
+
+def _can_merge(a: IssueCluster, b: IssueCluster) -> bool:
+    """Same issue_type AND a shared allow-listed title keyword."""
+    if a.issue_type != b.issue_type:
+        return False
+    return bool(_title_keywords(a.issue_title) & _title_keywords(b.issue_title))
+
+
+def _clearer(a: str, b: str) -> str:
+    """Keep the longer (more informative) non-empty string; tie keeps ``a``."""
+    a, b = a or "", b or ""
+    return b if len(b.strip()) > len(a.strip()) else a
+
+
+def _merge_pair(base: IssueCluster, other: IssueCluster) -> IssueCluster:
+    """Fold ``other`` into ``base``: union review_ids, dedup reps by review_id,
+    keep the higher severity and the clearer/longer text fields. ``cluster_id`` /
+    ``tag`` / ``issue_type`` stay from ``base`` (the earlier, more-severe one)."""
+    review_ids = list(base.review_ids)
+    seen = set(review_ids)
+    for rid in other.review_ids:
+        if rid not in seen:
+            review_ids.append(rid)
+            seen.add(rid)
+
+    reps: list[WorklistRow] = []
+    rep_seen: set[str] = set()
+    for rep in (*base.representatives, *other.representatives):
+        if rep.review_id not in rep_seen:
+            reps.append(rep)
+            rep_seen.add(rep.review_id)
+
+    higher = (
+        base.severity
+        if _SEVERITY_RANK.get(base.severity, 0) >= _SEVERITY_RANK.get(other.severity, 0)
+        else other.severity
+    )
+    return replace(
+        base,
+        issue_title=_clearer(base.issue_title, other.issue_title),
+        summary=_clearer(base.summary, other.summary),
+        recommended_action=_clearer(base.recommended_action, other.recommended_action),
+        severity=higher,
+        review_ids=review_ids,
+        representatives=reps,
+        judged=base.judged or other.judged,
+    )
+
+
+def merge_issue_clusters(clusters: list[IssueCluster]) -> list[IssueCluster]:
+    """Collapse near-duplicate clusters (same issue_type + shared allow-listed
+    title keyword). Greedy and deterministic: each cluster folds into the first
+    earlier cluster it can merge with, else stays. Re-sorted by severity then
+    size after merging (review counts change). No network, no re-judging."""
+    merged: list[IssueCluster] = []
+    for c in clusters:
+        target_idx = next((i for i, m in enumerate(merged) if _can_merge(m, c)), None)
+        if target_idx is None:
+            merged.append(c)
+        else:
+            merged[target_idx] = _merge_pair(merged[target_idx], c)
+    merged.sort(
+        key=lambda c: (-_SEVERITY_RANK.get(c.severity, 0), -c.review_count, c.cluster_id)
+    )
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +664,11 @@ def cluster_issues(
         if judgement is not None:
             judgements[cluster_id] = judgement
 
-    new_report = apply_issue_clusters(report, raw_clusters, judgements)
+    judged_report = apply_issue_clusters(report, raw_clusters, judgements)
+    # Conservative post-judge merge of near-duplicate issue cards (e.g. split
+    # adhesion clusters). Pure, no extra LLM calls.
+    merged = merge_issue_clusters(judged_report.issue_clusters)
+    new_report = replace(judged_report, issue_clusters=merged)
     return new_report, {
         "candidates": len(candidates),
         "clusters": len(raw_clusters),
