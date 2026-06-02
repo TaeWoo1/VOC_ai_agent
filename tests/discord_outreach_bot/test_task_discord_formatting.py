@@ -98,3 +98,122 @@ def test_format_approval_and_cancel():
     assert "nope" in bad
     c = fmt.format_cancel_result(_t("outreach:packet_revision", status="cancelled"))
     assert "Cancelled" in c and "No packet files touched" in c
+
+
+# --- pipeline display ordering (M-UX: formatting only) ---------------------
+
+_PIPELINE = [
+    "outreach:candidate_check",
+    "outreach:candidate_shortlist_pick",
+    "outreach:collect_plan",
+    "outreach:collect_execute",
+    "outreach:corpus_review",
+    "outreach:angle_select",
+    "outreach:draft_packet",
+    "outreach:copy_qa",
+    "outreach:render_pdf",
+    "outreach:prepare_send",
+]
+
+
+def _scrambled_pipeline(parent="P1"):
+    # Deliberately NOT in pipeline order (store/hash order).
+    scrambled = [
+        "outreach:copy_qa", "outreach:collect_plan", "outreach:candidate_check",
+        "outreach:draft_packet", "outreach:collect_execute", "outreach:angle_select",
+        "outreach:prepare_send", "outreach:render_pdf", "outreach:corpus_review",
+        "outreach:candidate_shortlist_pick",
+    ]
+    return [_t(s, status="blocked", parent_task_id=parent) for s in scrambled]
+
+
+def test_stage_sort_key_orders_cold_email_pipeline():
+    tasks = _scrambled_pipeline()
+    ordered = [t.intended_stage for t in fmt.order_tasks(tasks)]
+    assert ordered == _PIPELINE
+
+
+def test_create_result_renders_children_in_pipeline_order_and_numbered():
+    tasks = _scrambled_pipeline("P1")
+    summary = {"counts": {"blocked": 10}, "needs_approval": [], "blocked": [],
+               "done": [], "artifacts": []}
+    out = fmt.format_task_create_result("P1", tasks, summary)
+    # numbering is present and in pipeline order
+    assert "01 " in out and "10 " in out
+    positions = [out.index(s) for s in _PIPELINE]
+    assert positions == sorted(positions)
+    assert out.index("01 ") < out.index("candidate_check")
+
+
+def test_task_status_child_list_sorted_by_pipeline_stage():
+    parent = _t(None, agent="OpsLoggerAgent", workflow="outreach")
+    children = _scrambled_pipeline(parent.task_id)
+    summary = {"counts": {}, "needs_approval": [], "blocked": [], "done": [],
+               "artifacts": []}
+    out = fmt.format_task_status(parent.task_id, [parent, *children], summary)
+    positions = [out.index(s) for s in _PIPELINE]
+    assert positions == sorted(positions)
+    assert "01 " in out  # numbered child list
+
+
+def test_unknown_stage_sorts_after_known_but_still_shown():
+    parent = "P2"
+    known = _t("outreach:draft_packet", status="blocked", parent_task_id=parent)
+    unknown = _t("outreach:some_future_stage", status="blocked", parent_task_id=parent)
+    ordered = fmt.order_tasks([unknown, known])
+    assert ordered[0] is known and ordered[1] is unknown
+    summary = {"counts": {}, "needs_approval": [], "blocked": [], "done": [],
+               "artifacts": []}
+    out = fmt.format_task_create_result(parent, [known, unknown], summary)
+    assert "outreach:some_future_stage" in out  # never dropped
+    assert out.index("draft_packet") < out.index("some_future_stage")
+
+
+def test_clarification_floats_to_top_only_when_sole_active_blocker():
+    parent = "P3"
+    # sole active blocker -> clarification first
+    clar = _t("ops:clarification", agent="RecipientAgent", status="blocked",
+              parent_task_id=parent, inputs={"reason": "ambiguous"})
+    done_stage = _t("outreach:candidate_check", status="done", parent_task_id=parent)
+    ordered = fmt.order_tasks([done_stage, clar])
+    assert ordered[0] is clar
+    # but with other active work, clarification sits after workflow stages
+    active_stage = _t("outreach:draft_packet", status="blocked", parent_task_id=parent)
+    ordered2 = fmt.order_tasks([clar, active_stage])
+    assert ordered2[0] is active_stage and ordered2[1] is clar
+
+
+def test_instagram_pipeline_order():
+    parent = "P4"
+    stages = ["instagram:render", "instagram:collection", "instagram:manuscript",
+              "instagram:product_detail_context", "instagram:cardnews_content_packet",
+              "instagram:cardnews_plan"]
+    tasks = [_t(s, agent="InstagramCardnewsAgent", workflow="instagram",
+                status="blocked", parent_task_id=parent) for s in stages]
+    ordered = [t.intended_stage for t in fmt.order_tasks(tasks)]
+    assert ordered == [
+        "instagram:collection", "instagram:product_detail_context",
+        "instagram:cardnews_content_packet", "instagram:manuscript",
+        "instagram:render", "instagram:cardnews_plan",
+    ]
+
+
+def _tg(stage, goal, parent):
+    return Task(goal=goal, assigned_agent="FollowupAgent", intended_stage=stage,
+                status="blocked", parent_task_id=parent)
+
+
+def test_format_tasks_groups_by_graph_then_pipeline_stage():
+    # /tasks shows the goal (not the stage); use distinct goals as the observable
+    # signal. Two graphs interleaved in store order must come out grouped +
+    # pipeline-ordered within each graph.
+    rows = [
+        _tg("outreach:copy_qa", "G1 copy qa", "G1"),
+        _tg("outreach:draft_packet", "G2 draft", "G2"),
+        _tg("outreach:candidate_check", "G1 candidate", "G1"),
+        _tg("outreach:collect_plan", "G2 collect", "G2"),
+    ]
+    out = fmt.format_tasks(rows)
+    # each graph stays contiguous (G1 rows before any G2 row, since G1<G2)
+    assert out.index("G1 candidate") < out.index("G1 copy qa") < out.index("G2 collect")
+    assert out.index("G2 collect") < out.index("G2 draft")
