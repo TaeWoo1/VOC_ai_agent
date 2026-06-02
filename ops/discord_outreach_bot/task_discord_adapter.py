@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import conversational_orchestrator as _conv
 import nl_router as _router
 import orchestrator as _orch
 import task_formatting as _fmt
@@ -92,9 +93,25 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
                       reviews_path: Optional[Path] = None,
                       targets_dir: Optional[Path] = None,
                       operator_display_name: Optional[str] = None) -> dict[str, Any]:
-    """M4-A/M4-B: try the operational NL router first (set_candidate / approve_one /
-    dry-run / run+review / rollback / dangerous refusal / clarification). If it does
-    not handle the message, fall through to the UNCHANGED graph-creation path."""
+    """M4-A/M4-B/M5-A message dispatch.
+
+    Order is load-bearing:
+      1. M5-A question gate: a question-like message ("왜 승인?", "다음 후보군이
+         뭐지?", "지금 어디까지 됐어?") is answered READ-ONLY from existing state.
+         It must NEVER be treated as an operational command (so "왜 승인?" cannot
+         trip the approve router) or as a new-task request — no writes, no graph.
+      2. operational NL router (UNCHANGED): set_candidate / approve_one / dry-run /
+         run+review / rollback / dangerous refusal / clarification.
+      3. on fall-through, classify the (non-question) message: a genuine new-task
+         command creates the graph (UNCHANGED); anything else gets a read-only
+         clarification instead of the old over-eager graph creation."""
+    # 1. read-only conversational answer for question-like messages (zero writes).
+    if _conv.is_question_like(text):
+        ans = _conv.answer(text, store_path=store_path, events_path=events_path,
+                           targets_dir=targets_dir)
+        return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
+
+    # 2. operational router (M4-A/M4-B) — behavior unchanged.
     routed = _router.route(
         text, operator_discord_id=operator_discord_id,
         operator_display_name=operator_display_name, store_path=store_path,
@@ -103,6 +120,14 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     if routed.get("handled"):
         return {"intent": routed["intent"], "handled": True, "reply": routed["reply"]}
 
+    # 3. non-question fall-through: new-task command vs read-only clarification.
+    category = _conv.classify_conversation(text)
+    if category != _conv.NEW_TASK:
+        ans = _conv.answer(text, store_path=store_path, events_path=events_path,
+                           targets_dir=targets_dir)
+        return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
+
+    # genuine new-task request -> UNCHANGED graph-creation path (handled=False).
     req = request_from_nl(text, requested_by=operator_discord_id, targets_dir=targets_dir)
     pid, reply = _create_and_advance(req, store_path, events_path, targets_dir)
     return {"parent_task_id": pid, "plan_kind": req.slots["plan_kind"], "reply": reply,
