@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import nl_router as _router
 import orchestrator as _orch
 import task_formatting as _fmt
 import task_inputs as _ti
@@ -86,11 +87,23 @@ def cmd_task_create(*, workflow: str, goal: str, requested_by: str,
 
 
 def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
-                      events_path: Path,
-                      targets_dir: Optional[Path] = None) -> dict[str, Any]:
+                      events_path: Path, approvals_path: Optional[Path] = None,
+                      targets_dir: Optional[Path] = None,
+                      operator_display_name: Optional[str] = None) -> dict[str, Any]:
+    """M4-A: try the operational NL router first (set_candidate / approve_one /
+    dangerous refusal / clarification). If it does not handle the message, fall
+    through to the UNCHANGED graph-creation path."""
+    routed = _router.route(
+        text, operator_discord_id=operator_discord_id,
+        operator_display_name=operator_display_name, store_path=store_path,
+        events_path=events_path, approvals_path=approvals_path, targets_dir=targets_dir)
+    if routed.get("handled"):
+        return {"intent": routed["intent"], "handled": True, "reply": routed["reply"]}
+
     req = request_from_nl(text, requested_by=operator_discord_id, targets_dir=targets_dir)
     pid, reply = _create_and_advance(req, store_path, events_path, targets_dir)
-    return {"parent_task_id": pid, "plan_kind": req.slots["plan_kind"], "reply": reply}
+    return {"parent_task_id": pid, "plan_kind": req.slots["plan_kind"], "reply": reply,
+            "intent": _router.CREATE_GRAPH, "handled": False}
 
 
 def cmd_task_approve(*, task_id: str, operator_discord_id: str, store_path: Path,

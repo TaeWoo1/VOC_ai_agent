@@ -397,8 +397,9 @@ def build_bot(config: dict):  # pragma: no cover - requires discord.py
                 return
             out = _tasks.handle_nl_message(
                 message.content, operator_discord_id=str(message.author.id),
+                operator_display_name=getattr(message.author, "display_name", None),
                 store_path=store_path, events_path=events_path,
-                targets_dir=targets_dir)
+                approvals_path=_log_path(config), targets_dir=targets_dir)
             await message.channel.send(out["reply"])
 
     async def _sync():

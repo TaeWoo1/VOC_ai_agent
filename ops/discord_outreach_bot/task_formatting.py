@@ -242,6 +242,58 @@ def format_set_candidate_result(result: dict[str, Any]) -> str:
     return _clip("\n".join(lines))
 
 
+# --- M4-A natural-language router replies ------------------------------------
+def format_nl_set_candidate_result(result: dict[str, Any]) -> str:
+    """Conversational set_candidate reply (records-only; no execution)."""
+    if not result.get("ok"):
+        return f"⚠ {result.get('reason', 'error')}: {result.get('message', '')}".strip()
+    c = result["candidate"]
+    lines = [
+        f"✅ 후보 정보를 붙였습니다 → `{c['slug']}` ({c['brand']} · {c['goods_no']})",
+        f"   제품: {c['product_name']}",
+        f"   task: `{result['task_id']}` · status: `{result['status']}`",
+    ]
+    if result.get("approval_invalidated"):
+        lines.append("⚠ 이전 승인은 무효화되었습니다 (후보가 바뀌어 재승인 필요).")
+    lines.append("(records-only — 폴더/파일 생성 없음, 실행 없음)")
+    lines.append('이제 승인할까요?  →  "승인해"')
+    return _clip("\n".join(lines))
+
+
+def format_nl_approval_result(result: dict[str, Any]) -> str:
+    """Conversational approve_one reply (intent only — never executes)."""
+    if not result.get("ok"):
+        return f"⚠ {result.get('message', '승인을 기록하지 못했습니다.')}"
+    return ("✅ 승인 기록 완료 (intent only — 실행 아님).\n"
+            f"   task: `{result['task_id']}`\n"
+            f"   approval_ref: `{result['approval_ref']}`\n"
+            "⛔ 이 승인은 단계를 실행하거나 🔴 게이트를 통과시키지 않습니다.\n"
+            "dry-run은 아직 실행하지 않았습니다. 다음 단계는 권한 있는 "
+            "Claude Code 턴 / CLI에서 진행하세요.")
+
+
+def format_nl_dangerous_refusal() -> str:
+    """Refuse a send/collect/PDF/publish request made in natural language."""
+    return ("⛔ 이 작업은 자연어로 실행하지 않습니다.\n"
+            "   발송 / 수집 / PDF / 퍼블리시는 🔴 외부 액션이며 자연어 트리거 대상이 아닙니다.\n"
+            "   - 라이브 수집: 권한 있는 Claude Code 턴에서 명시적 1회 인가 필요\n"
+            "   - 이메일 발송 / PDF 렌더 / 인스타 게시: 기존 수동 워크플로우로만\n"
+            "지금 자연어로 가능한 것: 후보 입력 → 승인 (M4-A).")
+
+
+def format_nl_clarification(message: str, tasks: Optional[list[Task]] = None) -> str:
+    """Ask the operator to disambiguate; lists candidate task_ids. Zero writes."""
+    lines = [f"❓ {message}"]
+    for t in (tasks or []):
+        tgt = (t.target_slug
+               or ((t.inputs or {}).get("candidate") or {}).get("slug")
+               or "-")
+        lines.append(f"   • `{t.task_id}` {t.intended_stage or '-'} ({tgt})")
+    if tasks:
+        lines.append('   → 예: "<task_id> 승인"')
+    return _clip("\n".join(lines))
+
+
 def format_agent_status() -> str:
     lines = [f"**Registered agents ({len(AGENTS)})**"]
     for name, spec in AGENTS.items():
