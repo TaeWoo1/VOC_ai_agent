@@ -96,3 +96,10 @@ Thumbs.db
 .Rhistory
 # Added by code-review-graph
 .code-review-graph/
+
+# Discord outreach bot — local config + runtime artifacts (never commit)
+ops/discord_outreach_bot/config.yaml
+ops/discord_outreach_bot/*.jsonl
+ops/discord_outreach_bot/generated_prompts/
+ops/discord_outreach_bot/__pycache__/
+tests/discord_outreach_bot/__pycache__/
