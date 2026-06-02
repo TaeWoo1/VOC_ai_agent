@@ -19,9 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import agent_report_formatting as _arf
+import claude_orchestrator as _planner
 import conversational_orchestrator as _conv
 import nl_router as _router
 import orchestrator as _orch
+import plan_validator as _pv
 import task_formatting as _fmt
 import task_inputs as _ti
 import task_store as _store
@@ -87,13 +90,55 @@ def cmd_task_create(*, workflow: str, goal: str, requested_by: str,
     return {"parent_task_id": pid, "plan_kind": plan_kind, "reply": reply}
 
 
+def _planner_eligible(text: str) -> bool:
+    """Whether a message may fall through to the M6-A Claude semantic planner.
+
+    Eligibility is INTENTIONALLY narrow so deterministic M4/M5 routes are never
+    bypassed. A message is eligible ONLY when:
+      - the planner is active (env-enabled + ANTHROPIC_API_KEY present), AND
+      - it is not a bare confirmation ("응"/"닫아") — those belong to the M5-A.5
+        cancel handshake, AND
+      - it is not a cancel verb / new-task command (M5-A.5 / graph creation), AND
+      - it is not an operational M4 intent (set_candidate/approve/dry-run/
+        rollback/scaffold/dangerous) — i.e. classify_action falls through.
+    The leftover is the genuinely conversational/ambiguous bucket. The planner is
+    OFF by default, so this returns False and behavior is exactly M5-A.5."""
+    if not _planner.is_active():
+        return False
+    if _conv.is_confirmation(text):
+        return False
+    if _conv.classify_conversation(text) in (
+            _conv.CANCEL_REQUEST, _conv.CANCEL_CAPABILITY, _conv.NEW_TASK):
+        return False
+    intent, _ = _router.classify_action(text)
+    return intent == _router.CREATE_GRAPH
+
+
+def _m6a_dispatch(text: str, *, store_path: Path, events_path: Path,
+                  runs_path: Optional[Path], reviews_path: Optional[Path],
+                  generated_prompts_dir: Optional[Path]) -> Optional[dict[str, Any]]:
+    """Run the M6-A propose→validate→format pipeline. Returns an adapter reply
+    dict, or None to signal 'fall back to the deterministic read-only answer'
+    (planner unavailable / API error). Writes nothing; creates no graph."""
+    res = _planner.plan(text, store_path=store_path, events_path=events_path,
+                        runs_path=runs_path, reviews_path=reviews_path,
+                        generated_prompts_dir=generated_prompts_dir)
+    if not res.get("available"):
+        return None  # disabled / unconfigured / network error -> deterministic fallback
+    tasks = _store.load_tasks(store_path)
+    vres = _pv.validate(res.get("plan"), tasks=tasks)
+    return {"intent": vres["intent"], "handled": True,
+            "reply": _arf.format_result(vres), "m6a": True}
+
+
 def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
                       events_path: Path, approvals_path: Optional[Path] = None,
                       runs_path: Optional[Path] = None,
                       reviews_path: Optional[Path] = None,
+                      generated_prompts_dir: Optional[Path] = None,
                       targets_dir: Optional[Path] = None,
                       operator_display_name: Optional[str] = None) -> dict[str, Any]:
-    """M4-A/M4-B/M5-A message dispatch.
+    """M4-A/M4-B/M5-A/M5-A.5 + M6-A message dispatch.
 
     Order is load-bearing:
       1. M5-A question gate: a question-like message ("왜 승인?", "다음 후보군이
@@ -103,10 +148,21 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
       2. operational NL router (UNCHANGED): set_candidate / approve_one / dry-run /
          run+review / rollback / dangerous refusal / clarification.
       3. on fall-through, classify the (non-question) message: a genuine new-task
-         command creates the graph (UNCHANGED); anything else gets a read-only
-         clarification instead of the old over-eager graph creation."""
-    # 1. read-only conversational answer for question-like messages (zero writes).
+         command creates the graph (UNCHANGED); anything else is read-only/cancel.
+      4. M6-A Claude semantic planner: for the ambiguous/conversational leftover,
+         and ONLY when the planner is active and the message is eligible, Claude
+         PROPOSES a read-only plan that Python validates before any reply. It never
+         executes, creates a graph, approves, cancels, or runs the runner.
+      5. deterministic read-only fallback when the planner is disabled/unavailable
+         (also the default): the existing M5-A/M5-A.5 conversational answer."""
+    # 1. question-like: M6-A planner (if eligible) else read-only answer. Zero writes.
     if _conv.is_question_like(text):
+        if _planner_eligible(text):
+            out = _m6a_dispatch(text, store_path=store_path, events_path=events_path,
+                                runs_path=runs_path, reviews_path=reviews_path,
+                                generated_prompts_dir=generated_prompts_dir)
+            if out is not None:
+                return out
         ans = _conv.answer(text, store_path=store_path, events_path=events_path,
                            targets_dir=targets_dir, operator_id=operator_discord_id)
         return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
@@ -123,6 +179,14 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     # 3. non-question fall-through: new-task command vs read-only/cancel handling.
     category = _conv.classify_conversation(text)
     if category != _conv.NEW_TASK:
+        # 4. ambiguous/conversational leftover -> M6-A planner if eligible.
+        if _planner_eligible(text):
+            out = _m6a_dispatch(text, store_path=store_path, events_path=events_path,
+                                runs_path=runs_path, reviews_path=reviews_path,
+                                generated_prompts_dir=generated_prompts_dir)
+            if out is not None:
+                return out
+        # 5. deterministic read-only / cancel answer (default path).
         ans = _conv.answer(text, store_path=store_path, events_path=events_path,
                            targets_dir=targets_dir, operator_id=operator_discord_id)
         return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
