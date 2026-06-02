@@ -108,7 +108,7 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     # 1. read-only conversational answer for question-like messages (zero writes).
     if _conv.is_question_like(text):
         ans = _conv.answer(text, store_path=store_path, events_path=events_path,
-                           targets_dir=targets_dir)
+                           targets_dir=targets_dir, operator_id=operator_discord_id)
         return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
 
     # 2. operational router (M4-A/M4-B) — behavior unchanged.
@@ -120,11 +120,11 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     if routed.get("handled"):
         return {"intent": routed["intent"], "handled": True, "reply": routed["reply"]}
 
-    # 3. non-question fall-through: new-task command vs read-only clarification.
+    # 3. non-question fall-through: new-task command vs read-only/cancel handling.
     category = _conv.classify_conversation(text)
     if category != _conv.NEW_TASK:
         ans = _conv.answer(text, store_path=store_path, events_path=events_path,
-                           targets_dir=targets_dir)
+                           targets_dir=targets_dir, operator_id=operator_discord_id)
         return {"intent": ans["intent"], "handled": True, "reply": ans["reply"]}
 
     # genuine new-task request -> UNCHANGED graph-creation path (handled=False).

@@ -10,15 +10,28 @@ asks `classify_conversation()` whether the message is a question. Question-like
 messages are answered here from EXISTING state — read-only — instead of creating
 anything. Only genuine new-task commands still fall through to graph creation.
 
+M5-A.5 adds ONE narrow, deterministic write path: an operator-confirmed
+cancel/archive of a task graph. "삭제" from the operator NEVER physically deletes
+records — it maps to marking the root + its non-terminal children `cancelled`
+via the existing audited `orchestrator.cancel_task` (append-only snapshots +
+event; never touches packet files). The write is a two-message handshake:
+  1. "task_<id> 삭제/취소/닫아/정리"  -> ask to confirm (NO write; pending recorded
+     in-memory, keyed by operator_id) — explicit id is NOT re-asked for ambiguity.
+  2. a bare confirmation ("응" / "닫아" / "yes") -> the cancel write fires, ONLY if
+     a matching pending request exists for that operator. A bare confirmation with
+     no pending request writes nothing.
+Runner scaffold rollback stays in M4-B; this path never calls task_runner.
+
 Hard guarantees (enforced structurally + by tests):
-  - READ-ONLY. The only modules it touches are read paths:
-      task_store.load_tasks, orchestrator.task_status, orchestration_events.read_events,
-      agent_registry.AGENTS, and read_text() on generated_prompts/ artifacts.
+  - Read-only for all QUERIES. The only write is the operator-confirmed cancel
+    above (orchestrator.cancel_task only). Read paths: task_store.load_tasks,
+    orchestrator.task_status, orchestration_events.read_events, agent_registry.AGENTS,
+    and read_text() on generated_prompts/ artifacts.
   - It does NOT import task_runner / task_inputs, does NOT call
-    create_task_graph_for_request / advance / record_task_approval, and writes
-    NOTHING — no task store, no events, no approvals, no runs, no reviews, no
-    packet files. It never runs collection / send / PDF / publish / Claude Code,
-    opens no browser/CDP, makes no network call, and shells out to nothing.
+    create_task_graph_for_request / advance / record_task_approval / append_task_snapshot,
+    physically deletes nothing, and never mutates packet status.json / send_log.md.
+    It never runs collection / send / PDF / publish / Claude Code, opens no
+    browser/CDP, makes no network call, and shells out to nothing.
 Pure (no discord.py); unit-testable with tmp stores.
 """
 
@@ -26,12 +39,14 @@ from __future__ import annotations
 
 import glob
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 import task_store as _store
 from agent_registry import AGENTS as _AGENTS  # noqa: F401  (read-only registry; future use)
 from orchestration_events import read_events as _read_events  # read-only
+from orchestrator import cancel_task as _cancel_task          # M5-A.5: confirmed cancel write
 from orchestrator import task_status as _task_status          # read-only summary
 from task_model import Task
 
@@ -42,6 +57,10 @@ CANDIDATE_QUERY = "candidate_query"
 FOLLOWUP_QUESTION = "followup_question"
 NEW_TASK = "new_task_request"
 CLARIFICATION = "clarification_needed"
+# M5-A.5 deterministic explicit-cancel handshake
+CANCEL_CAPABILITY = "cancel_capability"   # "삭제 가능?"          -> explain + list roots (read-only)
+CANCEL_REQUEST = "cancel_request"         # "task_<id> 삭제"       -> ask to confirm (no write)
+CANCEL_CONFIRM = "cancel_confirm"         # "응" after a request  -> the cancel WRITE fires
 
 _TERMINAL = {"done", "failed", "cancelled"}
 _PICK_STAGE = "outreach:candidate_shortlist_pick"
@@ -72,6 +91,17 @@ _APPROVE_RE = re.compile(r"승인|\bapprove\b", re.I)
 _NEXT_RE = re.compile(r"다음|뭐\s*해야|뭘\s*해|해야|\bnext\b", re.I)
 _STATUS_RE = re.compile(r"어디까지|상태|진행|\bstatus\b|\bprogress\b", re.I)
 
+# M5-A.5 cancel/archive recognition (deterministic).
+# A cancel VERB means "close the graph" — "삭제" maps to cancel/archive, NOT a
+# physical delete. An explicit task id present => no ambiguity question is asked.
+_CANCEL_VERB = re.compile(
+    r"삭제|취소|닫아|닫기|정리|없애|지워|\bclose\b|\bcancel\b|\barchive\b", re.I)
+_TASKID_RE = re.compile(r"task_[0-9a-f]{6,}", re.I)
+# A STANDALONE short affirmative — only meaningful when a pending cancel exists.
+# Anchored so "task_x 취소해" (has an id) is a fresh request, not a confirmation.
+_CONFIRM_RE = re.compile(
+    r"^\s*(?:응|네|예|그래|좋아|진행해?|닫아|취소해|확인|ok(?:ay)?|yes|y)\s*[.!~]*\s*$", re.I)
+
 
 def is_question_like(text: str) -> bool:
     return bool(_QUESTION_MARKERS.search(text or ""))
@@ -81,6 +111,10 @@ def classify_conversation(text: str) -> str:
     """Deterministic conversation classifier (question-first, then command).
 
     Order is load-bearing:
+      0. cancel verb (삭제/취소/닫아/정리/...) — BEFORE question/new-task so
+         "삭제도 가능한가?" is a cancel intent, not a status question:
+           a. + explicit task id  -> cancel_request   (confirm, no write)
+           b. no task id          -> cancel_capability (explain + list roots)
       1. question-like  -> sub-classify into a read-only query category
            a. candidate (후보, no result/summary word)  -> candidate_query
            b. result / summary word                     -> artifact_query
@@ -92,6 +126,8 @@ def classify_conversation(text: str) -> str:
       3. neither                                         -> clarification_needed
     """
     t = text or ""
+    if _CANCEL_VERB.search(t):
+        return CANCEL_REQUEST if _TASKID_RE.search(t) else CANCEL_CAPABILITY
     if is_question_like(t):
         if _CANDIDATE_RE.search(t) and not _ARTIFACT_RE.search(t):
             return CANDIDATE_QUERY
@@ -276,6 +312,125 @@ def _followup_reply(text: str, root: Task, tasks: list[Task]) -> str:
     return _next_action(tasks, root)
 
 
+# --- M5-A.5 cancel/archive: in-memory confirmation handshake -----------------
+# Pending cancels are deliberately NOT persisted (no runtime file): they are a
+# 2-message handshake keyed by operator_id, intentionally lost on bot restart.
+_PENDING: dict[str, dict[str, Any]] = {}
+_PENDING_TTL_SECONDS = 600  # 10 min; a stale pending is dropped, never auto-acted
+
+
+def reset_pending() -> None:
+    """Clear all in-memory pending confirmations (test hygiene / restart)."""
+    _PENDING.clear()
+
+
+def _op_key(operator_id: Optional[str]) -> str:
+    return str(operator_id) if operator_id is not None else "_anon"
+
+
+def _set_pending(operator_id: Optional[str], root_task_id: str) -> None:
+    _PENDING[_op_key(operator_id)] = {
+        "root_task_id": root_task_id,
+        "requested_at": time.time(),
+        "requested_by": _op_key(operator_id),
+    }
+
+
+def _get_pending(operator_id: Optional[str]) -> Optional[dict[str, Any]]:
+    key = _op_key(operator_id)
+    pend = _PENDING.get(key)
+    if not pend:
+        return None
+    if time.time() - pend.get("requested_at", 0) > _PENDING_TTL_SECONDS:
+        _PENDING.pop(key, None)  # expired -> drop; never auto-cancel
+        return None
+    return pend
+
+
+def _clear_pending(operator_id: Optional[str]) -> None:
+    _PENDING.pop(_op_key(operator_id), None)
+
+
+def is_confirmation(text: str) -> bool:
+    return bool(_CONFIRM_RE.match(text or ""))
+
+
+def _resolve_root(task: Task, by_id: dict[str, Task]) -> Task:
+    """Climb parent links to the root graph (handles a child id)."""
+    cur = task
+    seen: set[str] = set()
+    while cur.parent_task_id and cur.parent_task_id in by_id and cur.task_id not in seen:
+        seen.add(cur.task_id)
+        cur = by_id[cur.parent_task_id]
+    return cur
+
+
+def _cancel_capability(tasks: list[Task]) -> dict[str, Any]:
+    """Answer the 'can I delete?' capability question — read-only, no write."""
+    roots = _active_roots(tasks)
+    if not roots:
+        return _reply(CANCEL_CAPABILITY,
+                      "물리 삭제는 하지 않습니다. 다만 지금 cancel/archive로 닫을 진행 중인 "
+                      "그래프가 없습니다.")
+    listing = "\n".join(f"- `{r.task_id}` ({(r.goal or '')[:40]})" for r in roots)
+    return _reply(CANCEL_CAPABILITY,
+                  "가능합니다. 단, 물리 삭제가 아니라 graph를 cancelled/archived 상태로 닫는 "
+                  "방식입니다 (기록은 append-only로 보존). 어떤 root task_id를 닫을까요?\n"
+                  + listing)
+
+
+def _request_cancel(task_id: str, tasks: list[Task], operator_id: Optional[str]
+                    ) -> dict[str, Any]:
+    """Explicit 'task_<id> 삭제' -> ask to confirm. NO write; records pending."""
+    by_id = {t.task_id: t for t in tasks}
+    task = by_id.get(task_id)
+    if task is None:
+        return _reply(CANCEL_REQUEST,
+                      f"`{task_id}` 작업을 찾을 수 없습니다. 진행 중인 그래프 목록은 "
+                      "'진행 중인 작업 삭제 가능한가?'로 확인할 수 있습니다.")
+    root = _resolve_root(task, by_id)
+    kids = _children(tasks, root.task_id)
+    open_kids = [c for c in kids if not _is_terminal(c)]
+    total = (0 if _is_terminal(root) else 1) + len(open_kids)
+    _set_pending(operator_id, root.task_id)
+    return _reply(CANCEL_REQUEST,
+                  f"물리 삭제는 하지 않습니다. graph `{root.task_id}` (root + 하위 "
+                  f"{len(kids)}개) 를 cancelled 상태로 닫을 수 있습니다 — 닫을 대상 {total}개, "
+                  "기록은 보존됩니다. 진행할까요? (\"응\" 또는 \"닫아\"로 확인)")
+
+
+def _confirm_cancel(pend: dict[str, Any], tasks: list[Task], store_path: Path,
+                    events_path: Optional[Path], operator_id: Optional[str]
+                    ) -> dict[str, Any]:
+    """A confirmation matched a pending request -> the cancel WRITE (root +
+    non-terminal children) via the audited orchestrator.cancel_task. Append-only;
+    no physical delete; never touches packet files."""
+    _clear_pending(operator_id)
+    root_id = pend["root_task_id"]
+    by_id = {t.task_id: t for t in tasks}
+    root = by_id.get(root_id)
+    if root is None:
+        return _reply(CANCEL_CONFIRM,
+                      f"`{root_id}` 그래프가 더 이상 없어 취소할 작업이 없습니다.")
+    if events_path is None:
+        return _reply(CANCEL_CONFIRM,
+                      "이벤트 로그 경로가 없어 취소를 기록할 수 없습니다. 취소하지 않았습니다.")
+    targets = [root] + _children(tasks, root.task_id)
+    cancelled: list[str] = []
+    for tk in targets:
+        if _is_terminal(tk):
+            continue  # already terminal (done/failed/cancelled) -> leave history intact
+        _cancel_task(tk.task_id, store_path=store_path, events_path=events_path,
+                     reason=f"cancelled via conversational confirm by {_op_key(operator_id)}")
+        cancelled.append(tk.task_id)
+    if not cancelled:
+        return _reply(CANCEL_CONFIRM,
+                      f"graph `{root.task_id}` 의 모든 작업이 이미 종료 상태입니다 (취소할 것 없음).")
+    return _reply(CANCEL_CONFIRM,
+                  f"graph `{root.task_id}` 를 cancelled로 닫았습니다 — 총 {len(cancelled)}개 작업 "
+                  "(물리 삭제 없음, append-only 기록 보존).")
+
+
 def _reply(intent: str, text: str) -> dict[str, Any]:
     return {"intent": intent, "handled": True, "reply": text}
 
@@ -283,16 +438,32 @@ def _reply(intent: str, text: str) -> dict[str, Any]:
 # --- public entrypoint -------------------------------------------------------
 def answer(text: str, *, store_path: Path, events_path: Optional[Path] = None,
            generated_prompts_dir: Optional[Path] = None,
-           targets_dir: Optional[Path] = None) -> dict[str, Any]:
-    """Answer a question-like message from EXISTING state. READ-ONLY: never
-    creates a graph, approves, runs, or writes anything. Returns
+           targets_dir: Optional[Path] = None,
+           operator_id: Optional[str] = None) -> dict[str, Any]:
+    """Answer a conversational message from EXISTING state. All QUERIES are
+    read-only — never create a graph, approve, or run anything. The ONE write is
+    an operator-confirmed cancel/archive (M5-A.5). Returns
     {"intent", "handled": True, "reply"}.
 
     `targets_dir` is accepted for signature symmetry with the operational
     router/adapter; it is not used for any write and may be ignored.
     """
-    category = classify_conversation(text)
+    t = text or ""
     tasks = _store.load_tasks(store_path)
+
+    # --- M5-A.5 explicit-cancel handshake (precedes active-root ambiguity) ----
+    # (a) a bare confirmation acts ONLY against a matching pending request.
+    pend = _get_pending(operator_id)
+    if pend and is_confirmation(t):
+        return _confirm_cancel(pend, tasks, store_path, events_path, operator_id)
+    # (b) a cancel verb: explicit id -> confirm (no write); else -> capability.
+    if _CANCEL_VERB.search(t):
+        m = _TASKID_RE.search(t)
+        if m:
+            return _request_cancel(m.group(0), tasks, operator_id)
+        return _cancel_capability(tasks)
+
+    category = classify_conversation(t)
     active = _active_roots(tasks)
 
     if not active:
