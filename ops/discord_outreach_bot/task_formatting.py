@@ -273,12 +273,11 @@ def format_nl_approval_result(result: dict[str, Any]) -> str:
 
 
 def format_nl_dangerous_refusal() -> str:
-    """Refuse a send/collect/PDF/publish request made in natural language."""
-    return ("⛔ 이 작업은 자연어로 실행하지 않습니다.\n"
-            "   발송 / 수집 / PDF / 퍼블리시는 🔴 외부 액션이며 자연어 트리거 대상이 아닙니다.\n"
-            "   - 라이브 수집: 권한 있는 Claude Code 턴에서 명시적 1회 인가 필요\n"
-            "   - 이메일 발송 / PDF 렌더 / 인스타 게시: 기존 수동 워크플로우로만\n"
-            "지금 자연어로 가능한 것: 후보 입력 → 승인 (M4-A).")
+    """Refuse a send/collect/PDF/publish/Claude-Code request made in natural language."""
+    return ("⛔ 이 작업은 자연어로 실행하지 않습니다 (발송 / 수집 / PDF / 퍼블리시 / Claude Code).\n"
+            "   M4-B 자연어로 가능한 것: scaffold dry-run → run+review → rollback.\n"
+            "   - 라이브 수집 / 이메일 발송 / PDF 렌더 / 인스타 게시: 기존 수동 워크플로우·권한 턴에서만\n"
+            "   - Claude Code 실행도 자연어 트리거 대상이 아닙니다.")
 
 
 def format_nl_clarification(message: str, tasks: Optional[list[Task]] = None) -> str:
@@ -291,6 +290,84 @@ def format_nl_clarification(message: str, tasks: Optional[list[Task]] = None) ->
         lines.append(f"   • `{t.task_id}` {t.intended_stage or '-'} ({tgt})")
     if tasks:
         lines.append('   → 예: "<task_id> 승인"')
+    return _clip("\n".join(lines))
+
+
+# --- M4-B natural-language scaffold runner replies ---------------------------
+def _reapprove_hint(reason: Optional[str]) -> str:
+    return ('\n→ 후보가 바뀌었습니다. 다시 "승인해".'
+            if reason == "prompt_hash_mismatch" else "")
+
+
+def format_nl_dry_run_result(result: dict[str, Any]) -> str:
+    """dry-run reply: pass shows would-create paths; fail shows the reason."""
+    if not result.get("ok"):
+        reason = result.get("reason", "error")
+        return (f"⚠ dry-run 불가 [{reason}]: {result.get('message', '')}".strip()
+                + _reapprove_hint(reason))
+    lines = [f"🔎 dry-run 통과 (run_id=`{result['run_id']}`) — 파일 생성 없음.",
+             "   would create:"]
+    lines.extend(f"     {w}" for w in result.get("would_create", []))
+    sp = result.get("status_preview") or {}
+    if sp:
+        corpus = sp.get("corpus") or {}
+        lines.append(f"   status.json: state={sp.get('state')} · "
+                     f"corpus.collection_run={corpus.get('collection_run')} · "
+                     f"send={sp.get('send')}")
+    lines.append('실제 scaffold 생성+review까지 진행할까요? 수집은 하지 않습니다.  →  '
+                 '"scaffold 생성하고 review까지 진행해"')
+    return _clip("\n".join(lines))
+
+
+def format_nl_run_review_result(info: dict[str, Any]) -> str:
+    """run + deterministic review reply, keyed by `phase`. Never auto-rolls back."""
+    phase = info.get("phase")
+    if phase == "verify":
+        reason = info.get("reason", "error")
+        return (f"⚠ scaffold 불가 [{reason}]: {info.get('message', '')}".strip()
+                + _reapprove_hint(reason))
+    if phase == "no_dry_run":
+        return ('⛔ 깨끗한 dry-run이 없어 scaffold를 만들지 않았습니다. '
+                '먼저 "dry-run까지 해봐".')
+    if phase == "run":
+        return (f"⚠ scaffold run 실패 [{info.get('reason', 'error')}]: "
+                f"{info.get('message', '')}").strip()
+    if phase == "review_pass":
+        lines = ["✅ scaffold 생성 + review pass.",
+                 f"   run_id=`{info['run_id']}` · review_id=`{info.get('review_id')}` · "
+                 "task → done"]
+        lines.extend(f"   created: {f}" for f in (info.get("files_created") or []))
+        lines.append("다음 단계 collect_plan 은 권한 있는 Claude Code 턴에서만 진행합니다.")
+        return _clip("\n".join(lines))
+    # review_fail
+    lines = [f"⚠ review FAIL — recommended_action={info.get('recommended_action')} "
+             f"(review_id=`{info.get('review_id')}`)"]
+    lines.extend(f"   - {f.get('check')}: {f.get('detail')}"
+                 for f in (info.get("findings") or [])[:5])
+    lines.append("task → blocked. 파일은 남겨뒀습니다 (자동 삭제 안 함).")
+    lines.append('되돌리려면 "방금 만든 scaffold rollback해".')
+    return _clip("\n".join(lines))
+
+
+def format_nl_rollback_result(result: dict[str, Any]) -> str:
+    """rollback reply: success lists removed files; fail shows the reason."""
+    if not result.get("ok"):
+        return (f"⚠ rollback 불가 [{result.get('reason', 'error')}]: "
+                f"{result.get('message', '')}").strip()
+    lines = [f"↩ rollback 완료 (`{result['run_id']}`) — removed:"]
+    lines.extend(f"     {f}" for f in (result.get("removed") or []))
+    lines.append("task → queued (재실행 가능).")
+    return _clip("\n".join(lines))
+
+
+def format_nl_run_clarification(message: str, runs: list[dict[str, Any]]) -> str:
+    """Ask which run_id to roll back; lists candidate runs. Zero writes."""
+    lines = [f"❓ {message}"]
+    for r in runs:
+        slug = next((p.rstrip("/").rsplit("/", 1)[-1]
+                     for p in (r.get("files_created") or []) if p.endswith("/")), "-")
+        lines.append(f"   • `{r.get('run_id')}` task=`{r.get('task_id')}` ({slug})")
+    lines.append('   → 예: "<run_id> 되돌려"')
     return _clip("\n".join(lines))
 
 

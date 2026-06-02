@@ -33,11 +33,13 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import approval_log as _alog          # noqa: E402
+import codex_reviews as _crl           # noqa: E402
 import discord_formatting as _fmt      # noqa: E402
 import orchestration_events as _oev     # noqa: E402
 import prompt_builder as _pb           # noqa: E402
 import status_reader as _sr            # noqa: E402
 import task_discord_adapter as _tasks   # noqa: E402
+import task_runs as _truns             # noqa: E402
 import task_store as _tstore            # noqa: E402
 
 try:  # discord.py is optional; the module must import without it.
@@ -86,6 +88,12 @@ def load_config(config_path: Optional[Path] = None) -> dict:
         "events": {
             "log_path": None,  # None -> orchestration_events.default_events_path()
         },
+        "runs": {
+            "log_path": None,  # None -> task_runs.default_runs_path()
+        },
+        "reviews": {
+            "log_path": None,  # None -> codex_reviews.default_reviews_path()
+        },
         "nl": {
             # The natural-language on_message handler is OFF by default: it needs
             # the privileged Message Content Intent. v0.2 needed no privileged
@@ -124,6 +132,16 @@ def _store_path(config: dict) -> Path:
 def _events_path(config: dict) -> Path:
     ep = (config.get("events") or {}).get("log_path")
     return Path(ep) if ep else _oev.default_events_path()
+
+
+def _runs_path(config: dict) -> Path:
+    rp = (config.get("runs") or {}).get("log_path")
+    return Path(rp) if rp else _truns.default_runs_path()
+
+
+def _reviews_path(config: dict) -> Path:
+    rp = (config.get("reviews") or {}).get("log_path")
+    return Path(rp) if rp else _crl.default_reviews_path()
 
 
 def _nl_enabled(config: dict) -> bool:
@@ -226,6 +244,8 @@ def build_bot(config: dict):  # pragma: no cover - requires discord.py
     targets_dir = _targets_dir(config)
     store_path = _store_path(config)
     events_path = _events_path(config)
+    runs_path = _runs_path(config)
+    reviews_path = _reviews_path(config)
 
     async def _guard(interaction) -> bool:
         if not _allowed(config, interaction.user.id):
@@ -399,7 +419,8 @@ def build_bot(config: dict):  # pragma: no cover - requires discord.py
                 message.content, operator_discord_id=str(message.author.id),
                 operator_display_name=getattr(message.author, "display_name", None),
                 store_path=store_path, events_path=events_path,
-                approvals_path=_log_path(config), targets_dir=targets_dir)
+                approvals_path=_log_path(config), runs_path=runs_path,
+                reviews_path=reviews_path, targets_dir=targets_dir)
             await message.channel.send(out["reply"])
 
     async def _sync():
