@@ -220,10 +220,161 @@ def test_module_import_boundary():
     # the runner / inputs modules must not be imported at all
     assert "task_runner" not in imported_modules
     assert "task_inputs" not in imported_modules
-    # write-capable orchestrator functions must not be pulled in
+    # write-capable orchestrator functions must not be pulled in. The ONLY write
+    # path M5-A.5 allows is orchestrator.cancel_task (confirmed cancel); the
+    # broad graph-creation / advance / approval / raw-snapshot writers stay out.
     banned = {"create_task_graph_for_request", "advance", "record_task_approval",
               "append_task_snapshot", "append_event"}
     assert not any(name in banned for _mod, name in from_imports)
-    # and no escape hatches
-    for mod in ("subprocess", "socket", "webbrowser", "urllib", "requests", "http"):
+    # no escape hatches, and no Claude/LLM client (the planner is M6, not here)
+    for mod in ("subprocess", "socket", "webbrowser", "urllib", "requests", "http",
+                "anthropic"):
         assert mod not in imported_modules
+
+
+# === M5-A.5: deterministic explicit-cancel handshake =========================
+def _seed_graph(tmp_path, *, root_status="running",
+                child_statuses=("queued", "needs_approval")):
+    """Seed root + N children with explicit (non-terminal by default) statuses,
+    so 'cancel the graph' has unambiguous expected targets."""
+    p = _paths(tmp_path)
+    root = Task(goal="cold email pipeline", assigned_agent="OpsLoggerAgent",
+                status=root_status, gate="green")
+    children = []
+    for i, st in enumerate(child_statuses):
+        c = Task(goal=f"child {i}", assigned_agent="CandidateResearchAgent",
+                 parent_task_id=root.task_id,
+                 intended_stage="outreach:candidate_check", status=st, gate="green")
+        children.append(c)
+    for t in (root, *children):
+        ts.append_task_snapshot(t, p["store_path"])
+    return p, root, children
+
+
+# --- 1. "진행 중인 작업 삭제도 가능한가?" -> capability + active root list, zero write
+def test_cancel_capability_lists_roots_zero_write(tmp_path):
+    co.reset_pending()
+    p, root, _ = _seed_graph(tmp_path)
+    before = p["store_path"].read_bytes()
+    out = adapter.handle_nl_message("진행 중인 작업 삭제도 가능한가?",
+                                    operator_discord_id="606", **p)
+    assert out["handled"] is True and out["intent"] == co.CANCEL_CAPABILITY
+    assert "물리 삭제" in out["reply"] and root.task_id in out["reply"]
+    assert "parent_task_id" not in out                       # no graph created
+    assert p["store_path"].read_bytes() == before            # zero write
+    assert not p["events_path"].exists()
+
+
+# --- 2. "task_<root_id> 삭제" -> confirmation prompt, NOT ambiguity, zero write
+def test_cancel_request_explicit_id_asks_confirm_zero_write(tmp_path):
+    co.reset_pending()
+    p, root, _ = _seed_graph(tmp_path)
+    before = p["store_path"].read_bytes()
+    out = adapter.handle_nl_message(f"{root.task_id} 삭제",
+                                    operator_discord_id="606", **p)
+    assert out["intent"] == co.CANCEL_REQUEST
+    assert "진행할까요" in out["reply"]
+    assert "여러 개" not in out["reply"]                      # did NOT re-ask ambiguity
+    assert p["store_path"].read_bytes() == before            # no write yet
+    assert not p["events_path"].exists()
+
+
+# --- 3. "task_<child_id> 삭제" resolves to the ROOT graph ----------------------
+def test_cancel_request_child_id_resolves_root(tmp_path):
+    co.reset_pending()
+    p, root, children = _seed_graph(tmp_path)
+    out = adapter.handle_nl_message(f"{children[0].task_id} 삭제",
+                                    operator_discord_id="606", **p)
+    assert out["intent"] == co.CANCEL_REQUEST
+    assert root.task_id in out["reply"]                      # resolved up to root
+
+
+# --- 4. confirm after pending -> root + children cancelled via append-only ----
+def test_confirm_cancels_root_and_children(tmp_path):
+    co.reset_pending()
+    p, root, children = _seed_graph(tmp_path)
+    adapter.handle_nl_message(f"{root.task_id} 삭제", operator_discord_id="606", **p)
+    out = adapter.handle_nl_message("응", operator_discord_id="606", **p)
+    assert out["intent"] == co.CANCEL_CONFIRM
+    by_id = {t.task_id: t for t in ts.load_tasks(p["store_path"])}
+    assert by_id[root.task_id].status == "cancelled"
+    for c in children:
+        assert by_id[c.task_id].status == "cancelled"
+    assert p["events_path"].exists()                         # audit event written
+
+
+# --- 5. cancel never physically deletes records; no packet files touched ------
+def test_cancel_no_physical_delete(tmp_path):
+    co.reset_pending()
+    p, root, children = _seed_graph(tmp_path)
+    n_before = len(ts.load_tasks(p["store_path"]))
+    adapter.handle_nl_message(f"{root.task_id} 삭제", operator_discord_id="606", **p)
+    adapter.handle_nl_message("응", operator_discord_id="606", **p)
+    after = ts.load_tasks(p["store_path"])
+    assert len(after) == n_before                            # records still present
+    ids = {t.task_id for t in after}
+    assert root.task_id in ids and all(c.task_id in ids for c in children)
+    assert not (tmp_path / "status.json").exists()           # no packet mutation
+    assert not (tmp_path / "send_log.md").exists()
+
+
+# --- 6. bare "응" with NO pending cancel writes nothing ------------------------
+def test_bare_confirm_no_pending_writes_nothing(tmp_path):
+    co.reset_pending()
+    p, _root, _ = _seed_graph(tmp_path)
+    before = p["store_path"].read_bytes()
+    out = adapter.handle_nl_message("응", operator_discord_id="606", **p)
+    assert out["handled"] is True
+    assert "parent_task_id" not in out
+    assert p["store_path"].read_bytes() == before
+    assert not p["events_path"].exists()
+    assert all(t.status != "cancelled" for t in ts.load_tasks(p["store_path"]))
+
+
+# --- 7. unknown task id -> not-found, zero write, no pending armed -------------
+def test_cancel_unknown_id_not_found(tmp_path):
+    co.reset_pending()
+    p, _root, _ = _seed_graph(tmp_path)
+    before = p["store_path"].read_bytes()
+    out = adapter.handle_nl_message("task_deadbeef00 삭제",
+                                    operator_discord_id="606", **p)
+    assert out["intent"] == co.CANCEL_REQUEST
+    assert "찾을 수 없습니다" in out["reply"]
+    assert p["store_path"].read_bytes() == before
+    # a nonexistent id must NOT arm a pending cancel -> a later "응" does nothing
+    adapter.handle_nl_message("응", operator_discord_id="606", **p)
+    assert all(t.status != "cancelled" for t in ts.load_tasks(p["store_path"]))
+
+
+# --- 8. cancel verb without an explicit id -> ask which root, zero write -------
+def test_cancel_ambiguous_no_id_asks_which(tmp_path):
+    co.reset_pending()
+    p = _paths(tmp_path)
+    a = Task(goal="cold email A", assigned_agent="OpsLoggerAgent", status="running")
+    b = Task(goal="cold email B", assigned_agent="OpsLoggerAgent", status="running")
+    ts.append_task_snapshot(a, p["store_path"])
+    ts.append_task_snapshot(b, p["store_path"])
+    before = p["store_path"].read_bytes()
+    out = adapter.handle_nl_message("작업 삭제해줘", operator_discord_id="606", **p)
+    assert out["intent"] == co.CANCEL_CAPABILITY
+    assert "어떤 root task_id" in out["reply"]
+    assert a.task_id in out["reply"] and b.task_id in out["reply"]
+    assert p["store_path"].read_bytes() == before
+
+
+# --- 9. classifier: cancel intents + status query still distinct --------------
+def test_classify_cancel_intents():
+    assert co.classify_conversation("task_abc123 삭제") == co.CANCEL_REQUEST
+    assert co.classify_conversation("진행 중인 작업 삭제도 가능한가?") == co.CANCEL_CAPABILITY
+    assert co.classify_conversation("다음 후보군이 뭐지?") == co.CANDIDATE_QUERY  # unchanged
+    assert co.classify_conversation("지금 어디까지 됐어?") == co.STATUS_QUERY      # unchanged
+
+
+# --- 10. pending cancel is per-operator (a different operator can't confirm) ---
+def test_pending_is_per_operator(tmp_path):
+    co.reset_pending()
+    p, root, _ = _seed_graph(tmp_path)
+    adapter.handle_nl_message(f"{root.task_id} 삭제", operator_discord_id="606", **p)
+    # a DIFFERENT operator's "응" must not act on operator 606's pending cancel
+    adapter.handle_nl_message("응", operator_discord_id="999", **p)
+    assert all(t.status != "cancelled" for t in ts.load_tasks(p["store_path"]))
