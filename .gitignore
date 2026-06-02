@@ -101,5 +101,6 @@ Thumbs.db
 ops/discord_outreach_bot/config.yaml
 ops/discord_outreach_bot/*.jsonl
 ops/discord_outreach_bot/generated_prompts/
+ops/discord_outreach_bot/agent_runs/
 ops/discord_outreach_bot/__pycache__/
 tests/discord_outreach_bot/__pycache__/
