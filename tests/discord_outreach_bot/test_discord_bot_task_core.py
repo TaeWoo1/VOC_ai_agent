@@ -80,18 +80,20 @@ def test_nl_followup_needs_approval(tmp_path):
     assert t.artifact_paths and "/task_approve" in out["reply"]
 
 
-# --- 5: NL "그거 그냥 보내" => clarification/blocked, NO send -----------------
-def test_nl_ambiguous_send_clarifies_no_send(tmp_path):
+# --- 5: NL "그거 그냥 보내" => M4-A router refuses BEFORE any graph (zero writes) -
+# Behavior change (M4-A): the NL router now intercepts an affirmative-send message
+# as a dangerous-action refusal, with NO task graph created. The send_ambiguous
+# planner path itself is unchanged and still reachable via /task_create (covered in
+# test_orchestrator.py); only the natural-language entrypoint short-circuits it.
+def test_nl_ambiguous_send_refused_no_graph(tmp_path):
     p = _paths(tmp_path)
     out = adapter.handle_nl_message("그거 그냥 보내.", operator_discord_id="606", **p)
-    assert out["plan_kind"] == "send_ambiguous"
-    t = ts.get_task(out["parent_task_id"], p["store_path"])
-    assert t.intended_stage == "ops:clarification" and t.status == "blocked"
-    assert t.gate == "red"
-    assert "Clarification needed" in out["reply"] and "never auto-executed" in out["reply"]
-    # no send/prepare_send task anywhere
-    stages = [x.intended_stage for x in ts.load_tasks(p["store_path"])]
-    assert "outreach:mark_sent" not in stages and "outreach:prepare_send" not in stages
+    assert out["handled"] is True and out["intent"] == "dangerous_external_action"
+    assert "자연어로 실행하지 않습니다" in out["reply"]
+    assert "parent_task_id" not in out                      # no graph created
+    # zero store/event writes: the dangerous path mutates nothing
+    assert ts.load_tasks(p["store_path"]) == []
+    assert not p["events_path"].exists()
 
 
 # --- 6: /task_approve records approval_ref, mutates NO packet files -----------
