@@ -1,0 +1,41 @@
+{
+  "batch_id": "brand20_test_A000000225736_DATETIME_DESC_authwall",
+  "started_at": "2026-05-13T15:00:00",
+  "finished_at": "2026-05-13T15:05:00",
+  "halted": true,
+  "manifest_audit": {
+    "sort_type_in_defaults": "DATETIME_DESC"
+  },
+  "products": [
+    {
+      "oy_goods_no": "A000000225736",
+      "status": "auth_required",
+      "quality_status": "invalid",
+      "rows_inserted": 0,
+      "raw_records_seen": 0,
+      "records_parsed": 0,
+      "run_id": "run_20260513_150000_authw01",
+      "summary": {
+        "run_id": "run_20260513_150000_authw01",
+        "cursor_api_rate_limited": false,
+        "cursor_api_silenced": false,
+        "retry_intent": "manual_review_required",
+        "retry_after_minutes": null,
+        "requested_sort_type": "DATETIME_DESC"
+      },
+      "resume_state": {
+        "retryable": false,
+        "reason": "auth_required",
+        "retry_intent": "manual_review_required",
+        "cursor_api_rate_limited": false,
+        "cursor_api_silenced": false,
+        "raw_records_seen": 0,
+        "records_parsed": 0,
+        "sort_type": "DATETIME_DESC",
+        "goods_no": "A000000225736",
+        "final_status": "auth_required",
+        "rows_inserted": 0
+      }
+    }
+  ]
+}

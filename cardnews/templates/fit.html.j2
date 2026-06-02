@@ -1,0 +1,29 @@
+{% extends "base.html.j2" %}
+{% block page %}
+<div class="page page--fit">
+  <div class="fit-chip">{{ page.chip }}</div>
+  <h1 class="fit-title">{{ page.title }}</h1>
+  {% if page.subtitle and page.subtitle != page.title %}<div class="fit-subtitle">{{ page.subtitle }}</div>{% endif %}
+
+  {% if page['items'] %}
+  <div class="fit-list">
+    {% for it in page['items'] %}
+    <div class="fit-card">
+      <div class="fit-card-label">{{ it.label }}</div>
+      {% if it.signal_hint %}<div class="fit-card-hint">{{ it.signal_hint }}</div>{% endif %}
+      <div class="fit-card-note">{{ it.note }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if page.aux_block %}
+  <div class="aux-block">
+    <div class="aux-block-title">{{ page.aux_block.title }}</div>
+    <div class="aux-block-text">{{ page.aux_block.text }}</div>
+  </div>
+  {% endif %}
+
+  <div class="page-index">— {{ page.index }} / {{ total_pages }} —</div>
+</div>
+{% endblock %}

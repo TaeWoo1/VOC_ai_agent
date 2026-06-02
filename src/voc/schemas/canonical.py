@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from src.voc.schemas.channel_meta import ChannelMeta, DerivedAttributes
+
 
 class CanonicalReview(BaseModel):
 
@@ -42,3 +44,8 @@ class CanonicalReview(BaseModel):
     collected_at: datetime  # From RawReview
     ingested_at: datetime  # Set by normalizer
     metadata: dict[str, Any] = Field(default_factory=dict)  # Pass-through, debugging only
+
+    # --- Phase 1 additive fields ---
+    source_method: Literal["scrape", "api", "csv_upload", "apify", "manual"] = "csv_upload"
+    channel_meta: ChannelMeta | None = None
+    derived: DerivedAttributes | None = None

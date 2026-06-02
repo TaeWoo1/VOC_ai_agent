@@ -35,6 +35,28 @@ saas = [
     "prometheus-client>=0.19",
     "playwright>=1.40",
 ]
+# Optional dependencies for the one-shot Coupang scraper
+# (scripts/scrape_coupang_reviews.py). Heavy browser-automation stack kept out
+# of default/dev so pytest and ruff runs don't need a Chrome install.
+scraping = [
+    "selenium>=4.0",
+    "undetected-chromedriver>=3.5",
+]
+# Optional dependencies for the final-stage 1-page bait-report generator
+# (scripts/generate_phase1_bait.py). python-pptx is only needed to produce
+# the outbound PPTX artifact; the main report pipeline (JSON + Markdown)
+# does not need it. Install with: pip install -e '.[bait]'
+bait = [
+    "python-pptx>=0.6",
+]
+# Optional dependencies for in-report static charts (rating distribution
+# bar, later segment/shade concentration bars). matplotlib only needed to
+# produce PNG embeds; main report pipeline runs without it. The CLI
+# renders charts only when --include-charts is passed, so default users
+# skip this extra.  Install with: pip install -e '.[charts]'
+charts = [
+    "matplotlib>=3.8",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]

@@ -17,6 +17,7 @@ from src.voc.api.routes.upload import router as upload_router
 from src.voc.api.store import RunStore
 from src.voc.app.monitoring import MonitoringService
 from src.voc.app.orchestrator import VOCPipeline
+from src.voc.app.phase1_pipeline import Phase1Pipeline
 from src.voc.app.sync_service import SyncService
 from src.voc.config import get_settings
 from src.voc.connectors.csv import CSVConnector
@@ -26,6 +27,8 @@ from src.voc.connectors.mock import MockConnector
 from src.voc.generation.insight_gen import InsightGenerator
 from src.voc.logging import setup_logging
 from src.voc.persistence.migrations import init_db
+from src.voc.persistence.phase1_review_repository import Phase1ReviewRepository
+from src.voc.persistence.phase1_run_repository import Phase1RunRepository
 from src.voc.persistence.repository import (
     EntityRepository,
     SnapshotRepository,
@@ -61,6 +64,11 @@ async def lifespan(app: FastAPI):
     job_repo = SyncJobRepository(db)
     snapshot_repo = SnapshotRepository(db)
     source_repo = SourceConnectionRepository(db)
+    phase1_review_repo = Phase1ReviewRepository(db)
+    phase1_run_repo = Phase1RunRepository(db)
+    phase1_pipeline = Phase1Pipeline(
+        review_repo=phase1_review_repo, run_repo=phase1_run_repo
+    )
 
     # Services
     monitoring = MonitoringService(pipeline=pipeline, entity_store=entity_repo, indexer=indexer)
@@ -82,6 +90,9 @@ async def lifespan(app: FastAPI):
     app.state.source_repo = source_repo
     app.state.monitoring = monitoring
     app.state.sync_service = sync_service
+    app.state.phase1_review_repo = phase1_review_repo
+    app.state.phase1_run_repo = phase1_run_repo
+    app.state.phase1_pipeline = phase1_pipeline
 
     yield
 

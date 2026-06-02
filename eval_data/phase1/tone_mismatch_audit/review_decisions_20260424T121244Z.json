@@ -1,0 +1,161 @@
+{
+  "schema_version": "review_decisions_v1",
+  "paired_proposals_file": "eval_data/phase1/tone_mismatch_audit/proposals_20260424T121244Z.json",
+  "paired_proposals_metadata": {
+    "prompt_version": "tone_mismatch_v4",
+    "rubric_sha256": "f16075fc922271675d652da77bde3cc8238785716aba70467b569f0a0e8253c3",
+    "model_id": "gpt-4o-mini"
+  },
+  "rubric_authority": "docs/phase2_tone_mismatch_rubric.md §A.3 action vocabulary",
+  "reviewed_at_utc": "2026-04-24",
+  "reviewer_note": "Manual review pass over the 12-row v4 calibration batch. No golden edits, no lexicon changes, no merges. This artifact documents reviewer-level adjudication of the LLM proposals and is the input to any future silver→golden promotion decision (which remains a separate, human-gated step).",
+  "promote_to_golden_policy": "All rows in this batch have promote_to_golden=false. The FN/TP anchor rows already carry tone_mismatch in the golden; the control rows correctly do NOT carry it. No new label flows from this pass. Promotion is an explicitly separate, batched session.",
+  "summary": {
+    "n_rows": 12,
+    "action_counts": {
+      "agree": 10,
+      "disagree_label": 2,
+      "agree_label_disagree_rationale": 0,
+      "hold": 0,
+      "upgrade_to_yes": 0
+    },
+    "reviewer_verdict_counts": {
+      "yes": 5,
+      "borderline_yes": 2,
+      "ambiguous": 0,
+      "no": 5
+    },
+    "disagreement_review_ids": [
+      "9665eaca8c3d9904",
+      "d1fbaf6c2c5bfd95"
+    ],
+    "notable_observations": [
+      "v4 hallucination count is zero (Rule 9 resolved the v3 placeholder patterns).",
+      "Anchor 1 (0c7e6768c6) moved from v3 ambiguous to v4 borderline_yes — matches manual.",
+      "d1fbaf6c2c is a model non-determinism regression from v3. Text explicitly contains '웜톤이지만' and the rubric's §2 체크 1 would fire YES/high. Reviewer corrects to yes.",
+      "9665eaca8c remains a rubric-strictness friction case. LLM's no reading is faithful to §2 체크 1's 'no inferring from context' rule; manual verdict of borderline_yes is a slight loosening. Reviewer preserves the borderline_yes stance for this row, without promoting."
+    ]
+  },
+  "rows": [
+    {
+      "review_id": "0c7e6768c6c5f424",
+      "bucket": "FN_anchor",
+      "llm_verdict": "borderline_yes",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "borderline_yes",
+      "reviewer_reason_ko": "체크 1 YES (여쿨라 명시). 체크 2는 '너무 존재감 빡 핑크빛이다'로 본인 톤 대비 제품 톤 어긋남을 함축적으로 드러냄 (confidence=low). 체크 3은 우회 사용. §9의 borderline_yes 조건(Q1 high + Q2 또는 Q3 low + 충돌 없음)을 정확히 충족함.",
+      "promote_to_golden": false,
+      "notes": "borderline_yes는 §A.3에 따라 upgrade_to_yes가 없으면 골든에 반영되지 않음. 이 패스는 업그레이드하지 않음. 골든은 현재 상태 유지."
+    },
+    {
+      "review_id": "344ec6f2dec4d266",
+      "bucket": "FN_anchor",
+      "llm_verdict": "yes",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "yes",
+      "reviewer_reason_ko": "체크 1 YES (웜톤인 저는), 체크 2 YES (톤에 상관없다고 했는데 쿨한 핑크), 체크 3 우회 (연하게 바르면 딱 좋네요). 세 체크 모두 명확.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "b90a1c49102025e4",
+      "bucket": "FN_anchor",
+      "llm_verdict": "yes",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "yes",
+      "reviewer_reason_ko": "체크 1 YES (웜톤인데), 체크 2 YES (핑크끼돌아서), 체크 3 직접적 불만 (아쉬워요). 교과서적 tone_mismatch 구조.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "e30e541c008163d0",
+      "bucket": "FN_anchor",
+      "llm_verdict": "yes",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "yes",
+      "reviewer_reason_ko": "체크 1 YES (가을 웜인 저에게는), 체크 2 YES (색상이 밝은 편), 체크 3 직접 부적합 + 다른 톤군 추천. 듀얼 라벨(pigment_complaint)은 별개 신호로 독립 처리.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "2604f12baf2b2bbb",
+      "bucket": "TP_anchor",
+      "llm_verdict": "yes",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "yes",
+      "reviewer_reason_ko": "체크 1 YES (노란 웜톤인 제 피부), 체크 2 YES (흰기가 많이 도는 편이라 잘 어울린다는 느낌은 없었습니다), 체크 3 직접적 불만 (비추). 현재 렉시콘 패턴 '웜톤 베스트 비추'에도 부합.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "9665eaca8c3d9904",
+      "bucket": "TP_anchor",
+      "llm_verdict": "no",
+      "reviewer_action": "disagree_label",
+      "reviewer_verdict": "borderline_yes",
+      "reviewer_reason_ko": "LLM은 §2 체크 1의 '명시적 톤 단서 없으면 기본 NO' 규칙을 엄격히 적용했으며 이는 rubric 문구에 충실함. 그러나 본인 톤은 '라이트톤에게는 비추 + 저는 섞어 발라요'의 병치로 함축됨 — 명시적 선언은 아니지만 맥락상 명확. 수작업 판단을 유지하여 borderline_yes로 기록하되, upgrade_to_yes는 사용하지 않음.",
+      "promote_to_golden": false,
+      "notes": "Rubric-strictness friction case. 반복적으로 동일 방향의 LLM '엄격 NO'가 나오면 rubric의 체크 1 표현을 함축 자가-톤까지 수용하도록 완화할 것인지 결정해야 함. 현재 패스에서는 규칙을 바꾸지 않음."
+    },
+    {
+      "review_id": "d1fbaf6c2c5bfd95",
+      "bucket": "TP_anchor",
+      "llm_verdict": "no",
+      "reviewer_action": "disagree_label",
+      "reviewer_verdict": "yes",
+      "reviewer_reason_ko": "본문 '웜톤이지만 레이지는 너무 극웜이라 더워보이더라고요'에 명시적 자가-톤(웜톤)과 명시적 제품-톤 어긋남(극웜이라 더워보이더라)이 모두 존재. 체크 1/2/3 모두 명확 YES. LLM이 Q1을 no/absent로 잘못 판정한 것은 prompt 문구 문제가 아니라 temperature=0의 비결정적 샘플링 아티팩트 (v3에서는 동일 조건에서 올바르게 yes 답변).",
+      "promote_to_golden": false,
+      "notes": "Model non-determinism regression. Not a prompt/validator defect. 반복 샘플링(예: 동일 prompt로 3회 호출 후 다수결)으로 완화 가능하지만 현재 단계에서는 수작업 검토가 이미 이 실패 모드를 잡고 있으므로 별도 엔지니어링 없이 진행."
+    },
+    {
+      "review_id": "03e27646a14d0a17",
+      "bucket": "control_positive_fit",
+      "llm_verdict": "no",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "no",
+      "reviewer_reason_ko": "체크 1 YES (여쿨), 체크 2 NO (여쿨필수템 — 긍정적 적합). §7.1 positive_fit에 해당, tone_mismatch 아님.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "98fd309c25fb9d1e",
+      "bucket": "control_positive_fit",
+      "llm_verdict": "no",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "no",
+      "reviewer_reason_ko": "체크 1 YES (쿨톤인 나한테도), 체크 2 NO (너무 착붙). §7.1 positive_fit. Rule 9 준수된 gate_trace로 v3의 evidence_hallucination 플래그 해소됨.",
+      "promote_to_golden": false,
+      "notes": "v3→v4 개선의 대표 케이스 — Rule 9가 의도대로 동작함을 확인."
+    },
+    {
+      "review_id": "910076d664d4b78a",
+      "bucket": "control_pigment_only",
+      "llm_verdict": "no",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "no",
+      "reviewer_reason_ko": "체크 1 NO — 자가-톤 언급 없음. '혈기가도는게 아니라 이상함'은 §7.2 pigment_complaint 인접. tone_mismatch 아님.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "1bbf833319fd3a3c",
+      "bucket": "control_shade_only",
+      "llm_verdict": "no",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "no",
+      "reviewer_reason_ko": "체크 1 NO — 자가-톤 언급 없음 ('제 볼'은 부위 언급일 뿐). '베이지 라기 보다는 코랄'은 §7.3 shade_mismatch 영역. tone_mismatch 아님.",
+      "promote_to_golden": false,
+      "notes": null
+    },
+    {
+      "review_id": "4b958dd193650531",
+      "bucket": "control_self_tone_no_mismatch",
+      "llm_verdict": "no",
+      "reviewer_action": "agree",
+      "reviewer_verdict": "no",
+      "reviewer_reason_ko": "체크 1 YES (평소 여쿨인 30대후반 여성) 이지만 체크 2 NO — 본문 중심은 포장/발림/가치 불만이며 톤-미스매치 증거 없음. 자가-톤 존재가 자동으로 tone_mismatch를 의미하지 않는다는 판별 케이스.",
+      "promote_to_golden": false,
+      "notes": "체크 1의 긍정 + 체크 2의 부정이 정확히 분리되는 판별 예시. 규칙이 제 역할을 한 것을 확인."
+    }
+  ]
+}

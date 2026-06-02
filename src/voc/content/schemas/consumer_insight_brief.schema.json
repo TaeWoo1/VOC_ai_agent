@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voc-intelligence.local/schemas/consumer_insight_brief.schema.json",
+  "title": "Consumer Insight Brief",
+  "description": "Buyer-facing crystallization of analysis_report.json. The brief is the single source the LLM polish layer (Phase D+) reads when shaping channel-specific copy. Information-first by contract: hook angles must be evidence-led, never sensational. Visual concept and image prompts are deterministic in v1; LLM-augmented variation is Phase D2.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "product",
+    "confidence_level",
+    "core_verdict",
+    "angle_candidates",
+    "channel_angle_recommendations",
+    "best_for",
+    "not_for",
+    "watch_outs",
+    "evidence_boundaries",
+    "visual_concept",
+    "cover_image_prompt",
+    "background_image_prompts"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+    },
+    "generated_at": {"type": "string", "format": "date-time"},
+    "source_analysis_report_sha256": {
+      "type": "string",
+      "description": "Hex sha256 of the source analysis_report.json. Recorded so downstream artifacts can detect drift."
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["slug"],
+      "properties": {
+        "slug": {"type": "string"},
+        "name_ko": {"type": ["string", "null"]},
+        "name_en": {"type": ["string", "null"]},
+        "category": {"type": ["string", "null"]},
+        "source_url": {"type": ["string", "null"]}
+      }
+    },
+    "confidence_level": {"type": "string", "enum": ["weak", "moderate", "strong"]},
+    "core_verdict": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ko"],
+      "properties": {
+        "ko": {"type": "string", "minLength": 1},
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "basis": {"type": "string"},
+            "n": {"type": ["integer", "null"], "minimum": 0}
+          }
+        }
+      }
+    },
+    "main_tradeoff": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "ko": {"type": "string"},
+        "for_attribute": {"type": "string"},
+        "against_attribute": {"type": "string"},
+        "n_pos_for": {"type": "integer", "minimum": 0},
+        "n_neg_against": {"type": "integer", "minimum": 0}
+      }
+    },
+    "angle_candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "description": "Diverse, evidence-backed candidate angles. Phase C does NOT lock one angle as primary — `channel_angle_recommendations` carries an ordered suggestion only. Phase D's editorial layer picks the final angle per channel from this pool. Sensational/clickbait language is forbidden by the brief validator (절대 사지 마/난리/무조건/역대급/충격/찐템/대박/인생템/미쳤/원픽). Candidates are sorted by `priority_score` descending; ids `h1..hN` follow that order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["angle_id", "type", "priority_score", "evidence_n", "ko"],
+        "properties": {
+          "angle_id": {"type": "string", "pattern": "^h[0-9]+$"},
+          "type": {
+            "type": "string",
+            "enum": ["strength", "tradeoff", "risk", "segment"]
+          },
+          "priority_score": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidence_n": {"type": "integer", "minimum": 0},
+          "ko": {"type": "string", "minLength": 1},
+          "channel_fit": {
+            "type": "array",
+            "items": {"type": "string", "enum": ["instagram", "threads", "x"]}
+          }
+        }
+      }
+    },
+    "best_for": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["label_ko"],
+        "properties": {
+          "label_ko": {"type": "string"},
+          "evidence_n": {"type": "integer", "minimum": 0},
+          "confidence": {"type": "string", "enum": ["weak", "moderate", "strong"]},
+          "source_segment_kind": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "not_for": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["label_ko"],
+        "properties": {
+          "label_ko": {"type": "string"},
+          "evidence_n": {"type": "integer", "minimum": 0},
+          "source_concern": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "watch_outs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["concern_label_ko"],
+        "properties": {
+          "concern_label_ko": {"type": "string"},
+          "n_negative": {"type": "integer", "minimum": 0},
+          "context_ko": {"type": ["string", "null"]},
+          "source_attribute": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "channel_angle_recommendations": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "instagram": {"$ref": "#/$defs/channel_recommendation"},
+        "threads": {"$ref": "#/$defs/channel_recommendation"},
+        "x": {"$ref": "#/$defs/channel_recommendation"}
+      }
+    },
+    "evidence_boundaries": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["what_we_can_say", "what_we_cannot_say"],
+      "properties": {
+        "n_reviews_total": {"type": "integer", "minimum": 0},
+        "observation_window": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "start": {"type": ["string", "null"]},
+            "end": {"type": ["string", "null"]}
+          }
+        },
+        "primary_sort": {"type": "string"},
+        "what_we_can_say": {"type": "array", "items": {"type": "string"}},
+        "what_we_cannot_say": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "visual_concept": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["mood_ko", "palette_keywords", "composition_keywords", "anti_patterns"],
+      "properties": {
+        "mood_ko": {"type": "string"},
+        "palette_keywords": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "composition_keywords": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "anti_patterns": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Locked anti-pattern tokens — must include face/logo/trademark/skin_disease_imagery."
+        }
+      }
+    },
+    "cover_image_prompt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["en", "negative_prompts"],
+      "properties": {
+        "ko": {"type": ["string", "null"]},
+        "en": {"type": "string", "minLength": 1},
+        "negative_prompts": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Mandatory denylist for image generators."
+        }
+      }
+    },
+    "background_image_prompts": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "description": "One prompt per cardnews slide section (hook/loved/divides/fit/watch_outs/best_for/method).",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["section", "en", "negative_prompts"],
+        "properties": {
+          "section": {
+            "type": "string",
+            "enum": ["hook", "loved", "divides", "fit", "watch_outs", "best_for", "method"]
+          },
+          "en": {"type": "string", "minLength": 1},
+          "negative_prompts": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "channel_recommendation": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["suggested_angle_ids", "tone_directive"],
+      "description": "Ordered suggestion derived deterministically from `angle_candidates`. Phase C does NOT lock the primary angle here. Phase D may override.",
+      "properties": {
+        "suggested_angle_ids": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^h[0-9]+$"},
+          "description": "Top candidates whose `type` matches this channel's preferred types, in priority_score order."
+        },
+        "tone_directive": {"type": "string"}
+      }
+    }
+  }
+}

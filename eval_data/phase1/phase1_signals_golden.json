@@ -1,0 +1,637 @@
+{
+  "version": "0.6-draft",
+  "status": "draft",
+  "generated_at": "2026-04-22",
+  "generated_by": "bootstrap — requires human review before use",
+  "notes": [
+    "Every label below is a STRAWMAN drafted from pattern-observation, not human adjudication.",
+    "Scope for this pass: cautionary + gap concerns only. Positives deferred.",
+    "Reviews not present in 'labels' are implicitly 'no cautionary concern'.",
+    "See eval_data/phase1/README.md for the labeling guide.",
+    "v0.3: merged 5 reviewed rows from phase1_labeling_batch_01.json (broader Coupang corpus). Prior version was 0.2-draft.",
+    "v0.4: merged phase1_labeling_batch_01 in full — 21 new rows added, 4 existing rows updated. Dismissed entries (18) kept out of the golden per design.",
+    "2026-04-24: expanded labels by 7 rows (all application_difficulty) to address baseline precision drop on application_issue post-v1.10 lexicon expansion. See docs/performance_validation_v1.md for rationale.",
+    "v0.6: Step 2 golden-labeling gap review — 5 new reviewed entries + 7 draft→reviewed promotions for the 5 target signals (persistence_reservation, pigment_complaint, value_complaint, skin_irritation_concern, coupang_authenticity_concern). 2 DEFER rows (52dfdb044c, 47a9009b2c) and 3 LEAVE rows (15c56921d4, 177fdbc776, a775a234c2) intentionally not merged. See docs/phase2_golden_labeling_gap_review.md."
+  ],
+  "coverage": {
+    "oliveyoung_fixture": "tests/fixtures/phase1_reports/oy_browser_20rows.json",
+    "coupang_matched": {
+      "source_channel": "coupang",
+      "product_external_id": "7156638510",
+      "note": "디어달리아 페탈 드롭 리퀴드 블러쉬 matched slice, 67 rows"
+    }
+  },
+  "labels": {
+    "bd9225a6719ea281": {
+      "channel": "oliveyoung",
+      "rating": 5.0,
+      "text_excerpt": "디어달리아 색깔 이쁘고 발색력 좋은건 말하면 입아픈건 다들 아시죠? 손으로 막 발라도 베이스 전혀 안까지구요 리퀴드라서 그런지 지속력이 긴 편은 아니지만 그래도 데일리템으로",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "5★ overall-positive review with explicit 지속력이 긴 편은 아니 reservation. Mixed-polarity but cautionary clause is the one we want captured. Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "6708e93dd69647a3": {
+      "channel": "oliveyoung",
+      "rating": 5.0,
+      "text_excerpt": "여뮽이긴 하지만 항상 복숭아 느낌에 목말라잇었는데 본품으로 산것보다 기획으로 같이 온 소프티 컬러가 더 잘 맞긴하네요! 제품은 전체적으로 만족합니다 냄새도 내 취향이고.. 색도 이뿌고.. 떡지는 느낌도 없구 지속력도",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "Conditional durability reservation ('파우더처리 한번만 더 해주면'). Kept as durability_concern for now, but this is a judgment-call review. Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "9665eaca8c3d9904": {
+      "channel": "oliveyoung",
+      "rating": 4.0,
+      "text_excerpt": "얇게 바를수록 주홍빛이 돌아서 옅게 바를 수가 없어요. 단독으로 쓸 거라면 라이트톤에게는 비추해요. 저는 퓨리티 같은 밝은 색이랑 섞어 발라요.",
+      "concerns": [
+        "tone_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "Better treated as tone suitability mismatch than shade mismatch. The issue is '라이트톤에게는 비추', not that the delivered shade itself is wrong.",
+      "status": "reviewed"
+    },
+    "d1fbaf6c2c5bfd95": {
+      "channel": "oliveyoung",
+      "rating": 5.0,
+      "text_excerpt": "오프라인 매장가서 발색해보니 웜톤이지만 레이지는 너무 극웜이라 더워보이더라고요 샤이가 적당히 생기있고 예쁘게 올라와서 골랐어요!",
+      "concerns": [
+        "tone_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "Tone/undertone suitability warning ('너무 극웜') rather than a generic shade mismatch.",
+      "status": "reviewed"
+    },
+    "29a978f2f9218482": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "발색이 별로네요 돈 아까워요 다른거 사세요",
+      "concerns": [
+        "pigment_complaint",
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "79debf929212102b": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "왜 비싼지 1도 모르겠음 제가 피부가 하얀편인데 덕지덕지 발라도 티가 안남",
+      "concerns": [
+        "pigment_complaint",
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "ab81d094b6fdc188": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "광고에 속아서 샀다. 최악의 발색 … 사지 마세요. 싸고 좋은거 많이요.",
+      "concerns": [
+        "marketing_deception",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "f2e41a0800ab3e90": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "[정품이 아닌거같아요] 디어달리아 베리어 몇개째 사용하고 있는데 올영 세일기간 놓쳐서 쿠팡에서 저렴하게 나온거 찾아서 구매했어요 처음 사용할때 평소보다 색이 진하다 싶어서 이상하다했는데 블러셔 사용한 피부도 이상하게",
+      "concerns": [
+        "authenticity_doubt",
+        "skin_irritation"
+      ],
+      "positive_signals": [],
+      "curator_note": "The canonical authenticity review — explicit OY-vs-Coupang color comparison, counterfeit suspicion, and skin reaction. High-severity. Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "fe2fe09823734d88": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "판매자 무섭네요 ㅋ",
+      "concerns": [
+        "seller_trust_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "Very short — may still be dismissed later if judged too vague, but currently kept as seller trust concern.",
+      "status": "draft"
+    },
+    "3ba45d8c16fc013a": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[이거 어떻게 쓰는거예요?] 전에 리퀴드타입 블러셔 써봤어요 넘 잘썼는데 단종이라 이거 후기보고 좋아보여서 샀어요 근데 어떻게 바르시는거예요..? 아무리 가볍게 발라도 피부화장이 밀리고 지워지는데.. 맨얼굴에 하는건",
+      "concerns": [
+        "application_difficulty",
+        "base_makeup_disruption"
+      ],
+      "positive_signals": [],
+      "curator_note": "Core issue is not generic durability over time but application difficulty plus disruption of base makeup during application.",
+      "status": "reviewed"
+    },
+    "7572f7d9b5f31de9": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[발색이 진해서 환불예정...] 전 웜톤인데 이 색상을 완전 추천하길래 거금을 주고 샀는데... 제가 생각한 색상이 아니었어요. 저는 수채화처럼 물들인 연한 핑크를 생각했는데 왠 홍당무처럼 되고... 아주 살짝 발라",
+      "concerns": [
+        "shade_mismatch",
+        "pigment_complaint",
+        "return_intent"
+      ],
+      "positive_signals": [],
+      "curator_note": "Composite: wrong color expectation/outcome + explicit refund intent. Promoted draft→reviewed via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C).",
+      "status": "reviewed"
+    },
+    "910076d664d4b78a": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "이거바름 혈기가도는게.아니라 이상함.ㅡㅡ",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Short, but still specific enough to treat as delivered-color / pigment-result complaint rather than generic_negative.",
+      "status": "reviewed"
+    },
+    "c08f583ab2401928": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[바르기 어려움] 파데위에 톡톡찍어 펴바르는데 밑화장까지 벗겨지고 색이 피부위에 잘 얹어지지 않아요. 제가 똥손은 아닌데.. 쓰기 어렵네용 제형이 생각보다 매트해서 그런듯.. 발색도 좀 연한 느낌입니다. 다른거랑 섞",
+      "concerns": [
+        "application_difficulty",
+        "base_makeup_disruption",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Three distinct complaints: hard to apply, disrupts base makeup, and pigment result is weak / does not sit well on skin.",
+      "status": "reviewed"
+    },
+    "d46a4c61b028a5fc": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[볼터치로 바르고 나가면 어느순간 사라져 있어요..] 유지력이 아쉬워요. 가격대비 실망",
+      "concerns": [
+        "durability_concern",
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "Explicit durability complaint plus value complaint. General disappointment is redundant here.",
+      "status": "reviewed"
+    },
+    "4b958dd193650531": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[추천을 할순 없을거 같아요] 평소 여쿨인 30대후반 여성입니다 핑크 핫핑크 아주 사랑하고요 기대감을 가지고 개봉하였고 발라보았는데요 일단 뚜껑 여는데 아주큰 실망입니다 여는 개봉감이 상당히 구립니다 딸깍딸깍 소리부",
+      "concerns": [
+        "packaging_complaint",
+        "application_difficulty",
+        "pigment_complaint",
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "More specific tags are better than a broad disappointment tag here: packaging quality, application/handling issue, delivered color/pigment dissatisfaction, and value doubt.",
+      "status": "reviewed"
+    },
+    "e30e541c008163d0": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[W03 애프리콧 밀크 흰 끼 돌아요] 어릴 적부터 미용에 관심이 많아 학교도 미용 고등학교로 진학을 했습니다 헤어디자이너의 꿈을 가지고 정말 열심히 하였는데 일을 하다가 메이크업에 관심을 가지게 되어 메이크업 공부를 시작하고 메이크업 수업을 하기도 했어요 수업에 도움이 될까 해서 퍼스널 컨설턴트 자격증도 취득했지요 하지만 이후 결혼을 하고 경력단절이 되어 아이들을 케어하며 꿈을 접었습니다",
+      "concerns": [
+        "tone_mismatch",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "가을 웜 본인에게는 너무 밝고 흰끼가 돈다고 서술해 tone suitability 이슈가 있고, 동시에 발색이 약하다고 명시하므로 pigment_complaint도 포함하는 편이 타당",
+      "status": "reviewed"
+    },
+    "03e27646a14d0a17": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[아주 이쁜 흰끼낭낭 베이비 핑크 컬러 입니당] ⠀⠀ [릴리바이레드 러브빔 치크밤 블러셔 순수빔] #여쿨필수템 맑은 시스루 광선! 청순 뿜뿜 러브빔 치크밤 ▶ 사용자 정보 - 30대 여성 - 여쿨 - 파워지성 - 세로모공 수백개 ▶ 제품 정보 - 2번 순수빔 - 밀키 핑크 - 3.5g ▶ 선택 사유 저는 퍼스널컬러란 단어가 처음 유행돌때부터 지금까지 봄웜인줄 알고 살았어요.... 봄웜 추천",
+      "concerns": [
+        "packaging_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "본문에 '뚜껑 여는게 여간 힘든게 아니다', '잘 안열리고 손톱에 무리'가 명시되어 있어 packaging_complaint로 보는 편이 타당",
+      "status": "reviewed"
+    },
+    "d97a125094754090": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[Oh, nice 오디 밀크, 스트로 베리 So So] 이 세상 모든 쿨톤을 위하여 이 리뷰를 바칩니다. (추천이 70이 되자 사명감이 생기기 시작하여 영혼을 담아 찍은 사진으로 교체하였숩니당.....) 저의 여름라이트 리스트입니다 사용감 봐주세요 몇달 쓰다보니 다른건 손에 잘 안가네요 < 나는야 찐쿨톤 김땡땡 > 쿨톤 라이트를 위한 치크라 해서 구입했어요 저는 퍼스널 컬러에서 여름쿨톤 뮤트",
+      "concerns": [
+        "packaging_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "반품 intent 자체는 없지만 '비닐로 달랑 보낸다', '뽁뽁이 정도는' 등 배송/포장 방식 불만은 명시적이라 packaging_complaint로 유지하는 편이 맞음",
+      "status": "reviewed"
+    },
+    "0c7e6768c6c5f424": {
+      "channel": "coupang",
+      "rating": 4.0,
+      "text_excerpt": "[쨍한 핑크] 피부타입 - 완전 악건성 주근깨가 있는 피부에요 퍼스널컬러는 여쿨라 피부가 완전 하얗다 못해 창백합니다 메이크업시 무조건 연한게 해야지만 어울려서 간단한 메이크업만 하고 다녀요 겨울이라 그런지 파우더타입이 너무 건조하고 각질이뜨고해서 크림블러셔를 찾아보다 릴바레 제품을 보게되었어요 밤타입이다 보니 립제품으로 사용가능하고 섀도우 로 사용가능 해요 섀도우 대용으로 사용할땐 양조절",
+      "concerns": [
+        "application_difficulty",
+        "packaging_complaint",
+        "tone_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "양조절 필수/손으로 바르면 뭉침으로 application_difficulty, '뚜껑이 열 때 손톱 나가는줄'로 packaging_complaint, 여쿨라인 본인에게 너무 존재감 강한 핑크로 올라온다는 점은 tone suitability complaint로 볼 수 있음",
+      "status": "reviewed"
+    },
+    "98fd309c25fb9d1e": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[뽀얗고 밀키한 딸기 우유 컬러 발색감] 롬앤 베러 댄 치크 블러셔 W2 스트로베리 밀크를 내 볼에 올려봤잖아? 와, 진짜 이름 그대로 뽀얗고 밀키한 딸기 우유 컬러가 그대로 발색되는데, 보자마자 감탄사 튀어나왔지 뭐야! '이거지, 바로 이거!' 싶었어. 쿨톤인 나한테도 너무 착붙이고, 특히 홍조가 살짝 있는 편인데 맑게 그 홍조를 덮어주면서 자연스럽게 생기만 샥! 올려주더라. 일단 제형 자",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "전반적으로 긍정이지만 '오후쯤 되면 ... 생기가 살짝 흐릿'이 명시적 지속력 reservation이므로 durability_concern은 유지하는 편이 일관적",
+      "status": "reviewed"
+    },
+    "30d3448c03dd430c": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "[사지마셈] 1점도 아까움 이거 짭퉁인듯 발색도 안나옴 지금은 끍어서 갖고 노는중 .. 애기들용 화장품 이라고 해고 손색 없을듯 발색이 1도 안되서.",
+      "concerns": [
+        "authenticity_doubt",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "짭퉁 의심 + 발색 안 남",
+      "status": "reviewed"
+    },
+    "c79bf5b8aa146f9b": {
+      "channel": "coupang",
+      "rating": 1.0,
+      "text_excerpt": "[최악 오브 최악] 손가락에 묻혀서 볼에 콕콕 찍으면 콕콕 찌른 부분에 동그랗게 베이스 벗겨져있음 1회로는 발색 기대하기 힘듦 21호다 밝은 피부색인데 그냥 세럼같음 손등에 여러번 바르면 색은 예쁘고 발림성도 좋아서 볼에도 여러번 덧발라도 상관없긴한데 부분적으로 베이스가 벗겨지는게 가장 큰 문제라서 도저히 사용할수가 없음 참고로 지성이고 더블웨어 파데 쓰고 있음 매트한 피부화장하는 사람은 참",
+      "concerns": [
+        "base_makeup_disruption",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스 벗겨짐 + 1회로는 발색 기대 어려움",
+      "status": "reviewed"
+    },
+    "0719f010e754d695": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[양조절 너무 힘드네요] 처음 받아보고 아담하니 가지고 다니며 바르기 괟찮을거라 생각해서 오픈했는데... 한번 누르니 왈칵 많은양이 나와버리더라구요. 적은양을 바르면 티도안나고 좀 발랐다싶음 너무 불타는고구마같고 ㅜㅜ 양조절 너무.어려운데 ...발림성은좋고 촉촉하니 밀림도없고 .. 전 똥손이라.... 스펀지로 발라야하나 연구응 해봐야할것같습니다 사진상에 고구마가 안찍히네오 ㅜ 쿠팡체험단 이벤",
+      "concerns": [
+        "application_difficulty",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "양조절이 어렵고 적게 바르면 티가 안 남",
+      "status": "reviewed"
+    },
+    "0ffaeefbd5306ef6": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "여름에는 글로시한 제품을 사용하는게 좋더라구요 ! 생각보다 용량은 작지만, 리퀴드 제품은 지속력이 떨어져서 계속 덧발라줘야 하잖아요 ! 그래서 들고 다니기엔 편할 것 같아요 ~ 저는 기존에 삐아 다우니 치크 사용했는데, 다른 제품들도 써보고싶어서 구매했어요. 자기 톤에 맞는 색상 구매하면 자연스럽게 홍조 올라온 것처럼 연출 할 수 있어요 ! 발색은 상세페이지 색상보다 한 채도 낮다고 생각하면",
+      "concerns": [
+        "skin_irritation"
+      ],
+      "positive_signals": [],
+      "curator_note": "excerpt에는 잘렸지만 원문 전체에 피부 가려움/따가움 언급이 있음",
+      "status": "reviewed"
+    },
+    "2604f12baf2b2bbb": {
+      "channel": "coupang",
+      "rating": 2.0,
+      "text_excerpt": "[어두운 노란 웜톤에게 웜톤 베스트 비추…] 모든 살림을 쿠팡에서 해결하는 직장인의 내돈내산 리뷰입니다. 여러분의 돈과 시간은 소중하니까 이 리뷰가 조금이라도 도움 되길 바랍니다. ⸻ 상품 리뷰 ✅ 릴리바이레드 하트 블러셔 (크림 밤 타입) 메이크업샵에서 많이 쓰는 제품으로 알려져 있어서 한번쯤은 써보고 싶어 구매하게 된 블러셔입니다. 유명템이라 기대가 컸던 것도 사실이에요. 제형은 크림 밤",
+      "concerns": [
+        "application_difficulty",
+        "tone_mismatch",
+        "base_makeup_disruption"
+      ],
+      "positive_signals": [],
+      "curator_note": "바르기 어렵고 웜톤에게 색이 애매하며 베이스가 약간 뭉개짐",
+      "status": "reviewed"
+    },
+    "11e545da80e86fc2": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "생각보다 색이 강해요 요즘 물광이 도는 화장법을 선호하는데 얼굴은 물광이 도는데 매번 볼터치를 매트한 걸 사용하니 뭔가 위화감이 들더라구요 속볼터치 느낌 내보고 싶어서 이 제품 구매했어요 우선 제품은 워터리한 타입의 볼터치라서 사용하기 조금 난이도가 있어요 미니 퍼프 같은 것으로 두들겨 주시거나 저는 손에 조금 짜놓고 얼굴에 손으로 펴발라줘요 다만 양조절이 조금 어려워서 한번에 많이 짜질 가",
+      "concerns": [
+        "application_difficulty",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "사용 난이도/양조절 이슈 + 생각보다 색이 강함",
+      "status": "reviewed"
+    },
+    "1bbf833319fd3a3c": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "제 볼에 얹었을땐 베이지 라기 보다는 코랄이 조금 섞인 분홍색 같네요. 데일리용으로 무난합니다.",
+      "concerns": [
+        "shade_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "기대한 베이지보다 코랄 섞인 분홍으로 올라옴",
+      "status": "reviewed"
+    },
+    "344ec6f2dec4d266": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "발색이 굉장히 잘되서 양 조절 잘하면서 발라야해요. 양조절하며 약간씩 덧바르면 딱 이쁜 핑크예요. 톤에 상관없는 핑크라고 했는데 바르면 생각보다 쿨한 핑크라 웜톤인 저는 연하게 바르면 딱 좋네요. 확실히 이쁜 핑크이긴해요",
+      "concerns": [
+        "tone_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "톤에 상관없는 핑크라 했지만 웜톤 본인에게는 쿨하게 올라옴",
+      "status": "reviewed"
+    },
+    "34acb8336268c3d6": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "저는 베이지 색일줄 알았는데 생각보다 코랄? 느낌의 붉은기가 많이 올라오네요. 그래도 이쁩니다 :)",
+      "concerns": [
+        "shade_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이지 기대와 달리 코랄/붉은기가 많이 올라옴",
+      "status": "reviewed"
+    },
+    "3ec16d47f8c4bc16": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[인스타보고 구매한 치크..] ✨찐 내돈내산후기✨ 매번 가루 치크만 구매하다가 우연히 본 릴스에서 어느분이 이 제품을 추천하더라구여! 영상상으로 발림도 좋아보이고 촉촉한 마무리감이 좋아보여서 구매하게되었습니다!! 우선 역시 저는 똥손인건지 아무리 발라도 발린다는 느낌이 없어서 치덕치덕 바르게 되고 바르고 난뒤 바른부분만 번들거려서.. 파우더 처리를 하게되더라구여... 밖에 나가서도 티가 별로",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "아무리 발라도 티가 별로 안 나고 치덕치덕 바르게 됨",
+      "status": "reviewed"
+    },
+    "7154a7aaf36d4b71": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[매우 촉촉한 제형이에요] 쿠팡체험단 이벤트로 상품을 무료 제공받아 작성한 리뷰입니다. 향은 무향에 가깝습니다. 발림이 매우 좋아요~뭉침없이 샤악 펴발라집니다. 근데 제 피부에 칼라가 약해서인지 블러셔 같은 느낌은 아니었요;; 아주 수채수채한 약한 칼라라 바르고 바르고 잔득 발라도 티는 안나는데 피부가 뽀야네보이잖습니까...?? 응!?!?!마치 메이크업 베이스같이... 그래서 얼굴에 칙칙한",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "색이 약해 블러셔 느낌이 잘 안 나고 많이 발라도 티가 약함",
+      "status": "reviewed"
+    },
+    "834d92100759a9fd": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "2주걸려 받았는데 색을 잘못주문. 촉촉한듯 발림성은 좋지만 금방 픽스되서 바르는즉시 펴발라야댐. 시간지나면 촉촉한지모름. 색은 발색이 사진과 전혀다름. 그냥 다크써클 있는사람은 다크용으로 사용하는게 좋겠음 손가락으로 톡톡은 금물. 베이스화장밀림. 퍼프로 두드리며 바르길추천. 양은 아주 조금 들어있고 나중에 긴 꼬챙이로 퍼서 사용해야할듯.",
+      "concerns": [
+        "shade_mismatch",
+        "application_difficulty",
+        "base_makeup_disruption"
+      ],
+      "positive_signals": [],
+      "curator_note": "사진과 색이 전혀 다르고 즉시 펴발라야 하며 베이스 화장 밀림",
+      "status": "reviewed"
+    },
+    "acb79899d17994fc": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[뜯어보자마자 분해됨] 와... 열었는데... 젤리같은게 통통 떨어짐.. 먼가... 젤리감이 녹으면서 되는건가?? 하지만 모르겠고... 아까우니 주워 담아 다시 꼈더니 손가락에 물듬.. ㅠㅠ 꾸역꾸역 껴서 사용하고있는데.. 틴트역활인데.. 좋은지 모르겠음.. 작고 뚱뚱한데 귀엽고 돈아까워 사용중.. 엄청 좋아서 다른 색상 사고싶다?? 그런생각이 안듬. 엄청 좋으면 색상별로 사고싶은게 여자마음",
+      "concerns": [
+        "packaging_complaint",
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "뜯자마자 분해됨 + 돈 아까워 계속 쓰는 중",
+      "status": "reviewed"
+    },
+    "b5d61417bc63de76": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "색 자체는 이쁜데 이거보다 더 밝은 핑크색이에요 피부가 어두운 분들은 안 어울려요 이거 꼭 인터넷에 사진 찾아보고 구매하세요 진짜 쿠팡은 사진이 진짜 이상해요 지속력 괜찮은 편이고 가루 날림 적어요 케이스는 존예",
+      "concerns": [
+        "shade_mismatch",
+        "marketing_deception"
+      ],
+      "positive_signals": [],
+      "curator_note": "실물 색이 기대와 다르고 쿠팡 사진/표현이 이상하다고 명시",
+      "status": "reviewed"
+    },
+    "b90a1c49102025e4": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[쿨톤인 분들께 더 맞는 것 같아요.] 웜톤인데 생각했던것보다 핑크끼돌아서 아쉬워요",
+      "concerns": [
+        "tone_mismatch"
+      ],
+      "positive_signals": [],
+      "curator_note": "웜톤인데 생각보다 핑크기가 돌아 아쉬움",
+      "status": "reviewed"
+    },
+    "c38a81464b475426": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[자연스럽고 예쁜 색이지만 발색은 너무 약해요ㅠㅠ] 피브 컬러 세럼 블러셔는 자연스러운 메이크업을 추구하시는 분들에게는 딱 좋은 컬러예요. 제가 선택한 색상은 ‘노메이크업’이라는 이름답게 은은하고 혈색만 살짝 올려주는 느낌이라 요즘처럼 파운데이션 없이 톤업 선크림만으로 가볍게 베이스를 할 때 잘 어울리는 색이에요. 꾸안꾸 메이크업 좋아하시는 분들에겐 취향저격일지도 몰라요. 튜브 타입이라 위생",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "자연스럽고 예쁘지만 발색이 너무 약하다고 명시",
+      "status": "reviewed"
+    },
+    "e61539a4844aa019": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "색깔은 맘에 드는데... 롬앤 치크 오디밀크 후기 (깨져서 와서 별 3개 ㅠㅠ) 제가 드디어 롬앤 치크 오디밀크를 샀거든요! 워낙 유명템이라 전부터 궁금하긴 했는데, 이번에 마음먹고 질렀지 뭐예요. 색깔은 진짜 맘에 드는데, 딱 하나 결정적인 문제 때문에 지금 후기를 쓰면서도 기분이 좀 그렇거든요. ㅠㅠ 오묘한 컬러! 라벤더와 핑크 그 사이! 일단 컬러 얘기부터 하자면, 이 오디밀크 색깔이",
+      "concerns": [
+        "packaging_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "깨져서 도착한 포장/파손 complaint",
+      "status": "reviewed"
+    },
+    "eeef0f99842a1db7": {
+      "channel": "coupang",
+      "rating": 3.0,
+      "text_excerpt": "[발색이 너무 연 해요…] 저는 기본적으로 쿨톤이라 핑크 블러셔를 더 자주 쓰긴 하지만 쿨톤 이라고 맨날 쿨톤 화장만 하고 싶은 거 아니잖아요 ㅎㅎㅎ 그래서 저도 코랄 메이크업 하고 싶을 때마다 사용하기 위해서 이 코랄 컬러도 1번 주문해 봤는데요 발생력이 안 좋은 건지 ㅜㅜ 색상 자체가 너무 연한 건지 거의 티가 안나요 ㅜㅜ 진짜 몇 번이나 겹겹이 얹어서 발색을 해 봐도 좀 약해서 되게 답",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "여러 번 얹어도 거의 티가 안 남",
+      "status": "reviewed"
+    },
+    "e2b16df7f65bdbeb": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[내돈 내산 리뷰( 진짜로 )] 발색력 : 아무래도 크림 타입이라 가루 타입이나 스틱보단 연해요 제형 : 크림보단 더 묽은 로션정도의 묽기에요! 총 평 : 풀 메이크업으로 피부 화장 두껍게 하시는 분들은 파운데이션 올리고 이 블러셔 올리면 피부 지워져요 ㅋㅋㅋㅋ 제가 퍼프,손,브러쉬로 다 올려 봤는데 뭘로 하든 베이스가 두껍거나 매트하게 하시면 지워집니다! 생얼 메이크업에 최적화 된 블러셔",
+      "concerns": [
+        "base_makeup_disruption",
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "두꺼운 베이스 위에서 지워진다는 base_makeup_disruption이 핵심이고, '발색이 연해요'도 명시되어 pigment_complaint를 함께 두는 게 더 정확",
+      "status": "reviewed"
+    },
+    "fd5d85f143253901": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "-봄웜~여름쿨 추천 -은은한 발색 -> 포인트보다는 베이스로 추천 -베이스 벗겨짐 but 퍼프로 뚜둘뚜둘해주면 괜찮아짐 -매트보다는 글로우 베이스 추천 -퍼프보다는 손으로 바르는걸 추천 -세럼같은 촉촉한 제형+은은한 광 - 착색이 없어서 지속력 약함 쿠팡체험단으로 제품을 무료로 제공받아 직접 사용후 작성하였습니다. 쿠팡체험단 이벤트로 상품을 무료로 제공 받아 작성한 구매 후기입니다.",
+      "concerns": [
+        "base_makeup_disruption",
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스 벗겨짐 + 착색 없어 지속력 약함",
+      "status": "reviewed"
+    },
+    "7b41cc7adcad535c": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[모노핑크 vs 청순빔 비교] 21호 핑잘봄 • 봄웜라 발색 모노핑크> 청순빔 가격 모노핑크> 청순빔 지속력 모노핑크> 청순빔 내구성 모노핑크> 청순빔 (모노핑크: 펄 X 청순빔: 펄 O) 두개 모두 봄웜라라면 한 번쯤 구매 고민해보셨을 블러셔인데요 한마디로 청순빔 상위호환 버전이라고 생각하시면 될 거 같아요 청순빔을 포함한 대부분의 블러셔들이 외출했을 때 색이 금방 날라가서 수정화장할 때",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "외출 시 색이 금방 날아간다고 명시",
+      "status": "reviewed"
+    },
+    "0f016f2da25ef2cc": {
+      "channel": "oliveyoung",
+      "rating": 1.0,
+      "text_excerpt": "아니 발림성이 개별로에요 지속력 좋거든요? 발색도 겁나 마음에 드는데 베이스가 까져요 제발 개선해주세요 촉촉하고 발색도 너무 이쁘고 지속력도 좋은데 발림성이 영..ㅠㅠ",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스가 까져요 제발 개선해주세요 — unambiguous base-crumbling complaint at 1★. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "6b54ec730eb6e6a4": {
+      "channel": "oliveyoung",
+      "rating": 2.0,
+      "text_excerpt": "색ㄱ상 뽀용하니 예뻐서 좋은데 어찌 발라도 베이스가 까짐 어케해야하죠",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "어찌 발라도 베이스가 까짐 — application-method frustration. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "6e407a4a3f25463b": {
+      "channel": "oliveyoung",
+      "rating": 4.0,
+      "text_excerpt": "인스타에서 베어리 색상 보고 너무 이뻐서 세일할때 샀는데 생각보다 막 특별히 이쁘지는 않은거 같아요 뉴트럴톤이라서 색은 마음에 들긴 하는데 베이스 까짐이 너무 심함..",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스 까짐이 너무 심함 — 4★ mixed-polarity with explicit application complaint. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "6efa128fa1fb7102": {
+      "channel": "oliveyoung",
+      "rating": 2.0,
+      "text_excerpt": "다들 어케 바르길래 베이스가 안까지고 촉촉하게 발린다는지 모르겠음. 손에 덜어서 바르건 볼에 바로 올리건 베이스가 다 벗겨져요. 그래서 볼만 꺼매짐..",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스가 다 벗겨져요 — application-method failure narrative. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "7d0eb075b09692b0": {
+      "channel": "oliveyoung",
+      "rating": 4.0,
+      "text_excerpt": "색은 진짜 너!무!! 이뻐요.. 진짜 너무 이쁜데... 베이스가 잘 까져서 너무 아쉽.. 손이 잘 가는 제품은 아니에여ㅠ 미니퍼프에 덜어서 올려보기도하고 콕콕찍어서 펴보기도 햇는데 콕 콕 찍으면 찍은부붕 베이스가 까져서 수습하기 까다로워요..",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스가 잘 까져서 너무 아쉽 — 4★ mixed-polarity love/complaint split. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "8c788a7e22c38dc2": {
+      "channel": "oliveyoung",
+      "rating": 3.0,
+      "text_excerpt": "베이스 안 까지게 바르는 법,, 모르겠어요ㅜㅜ 퍼프에 묻혀서도 해봤는데 색은 너무 예쁜데 베이스가 너무 잘 까져요ㅜ",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스가 너무 잘 까져요 — tool-trial frustration. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "cb889976fa860f17": {
+      "channel": "oliveyoung",
+      "rating": 1.0,
+      "text_excerpt": "이거 진짜 말도 안되여 낮은 평점 보고 살껄 ㅜ 2개나 사서 더 열받음 베이스 다 밀려여 살살 바르먼 괜찮은게 아니고 콕콕 찍으면 딱 그 부분 다 벗겨져요 무슨 클린징오일 들어갔나...",
+      "concerns": [
+        "application_difficulty"
+      ],
+      "positive_signals": [],
+      "curator_note": "베이스 다 밀려여 · 다 벗겨져요 — 1★ dual-pattern match. Added 2026-04-24 as part of application_issue label-coverage expansion alongside cautionary.json v1.10. Rule-based detection correctly surfaces base-crumbling complaint here; golden expanded to restore baseline precision accounting. Concerns scoped narrowly to application_difficulty to keep other signals' baseline numbers frozen.",
+      "status": "reviewed"
+    },
+    "157bb279ee383d42": {
+      "channel": "oliveyoung",
+      "rating": 3.0,
+      "text_excerpt": "제가 화장을 잘 못 해서 그런 걸까요 제품의 문제일까요 저 볼에는 발색이 안 올라옵니다 여러 번 하면 올라오는데 유지력이 약한 느낌! 그냥 나도 이제 화장을 했다라는 느낌을 내보고 싶어서 사용 중이예요!",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "3★ OY review with explicit '유지력이 약한 느낌' + '재구매는 안 할 것 같은데'. Mid-rating + explicit non-repurchase claim. Added via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C.1).",
+      "status": "reviewed"
+    },
+    "89c12a8149c1c42f": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[보이는 색과 동일한 발색] ... 아쉬웠던 점 ✔️ 파우더리한 블러셔라 가루날림이 좀 있음 ✔️ 눈가 근처에 바르게 되면 주름이 부각되는 느낌이 있음 ✔️ 퇴근 후 아침보다 날라간 느낌이 있음 (지속력 약함)",
+      "concerns": [
+        "durability_concern"
+      ],
+      "positive_signals": [],
+      "curator_note": "5★ Coupang review with structured '아쉬웠던 점' section and self-applied parenthetical sub-label '(지속력 약함)'. Clean 5★ ADD — structurally explicit drawback, no reliance on precedent. Retained as ADD after focused curator review per docs/phase2_golden_labeling_gap_review.md §D.3.",
+      "status": "reviewed"
+    },
+    "ad56e23953a1a463": {
+      "channel": "coupang",
+      "rating": 4.0,
+      "text_excerpt": "[정말 연해요] ... 단점은 용량이 립밤 립글로스 작은 크기에 발색이 약합니다 톡톡 두드릴수록 색이 날가가요 ㅠㅠ 거의 생얼급으로 약하구요",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "4★ Coupang with explicit 단점 section: '발색이 약합니다' + '생얼급으로 약하구요'. Polarity-mixed but structurally explicit. Added via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C.2).",
+      "status": "reviewed"
+    },
+    "bf6d481209f36168": {
+      "channel": "coupang",
+      "rating": 4.0,
+      "text_excerpt": "[음 생각보다 봄라이트한티 안어울림] 생각보다 발색이 별로여서 ㅠㅠㅠ 아까뷔옹 .. 그냥 무난해요 막 이쁘다 정돈 아님 ㅜ",
+      "concerns": [
+        "pigment_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "4★ Coupang title + body open with explicit pigment complaint ('발색이 별로여서'). Mild rating-text mismatch; label follows text. Added via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C.2).",
+      "status": "reviewed"
+    },
+    "a89bdf62478c8474": {
+      "channel": "coupang",
+      "rating": 5.0,
+      "text_excerpt": "[별로에요 ㅋㅋ] 솔직하게 쓸게요 여러분 돈낭비 마세요 제가 블러셔 덕후인데 색 이뻐서 샀거든요 일단 발색 엄청 약하고요 제형도 너무 묽어요 ... 솔직히 돈 아까워요",
+      "concerns": [
+        "value_complaint"
+      ],
+      "positive_signals": [],
+      "curator_note": "5★ rating-text mismatch — title '[별로에요 ㅋㅋ]', opening '돈낭비 마세요', match '솔직히 돈 아까워요'. Unambiguous value complaint; label follows text. Added via Step 2 golden-labeling gap review (see docs/phase2_golden_labeling_gap_review.md §C.3).",
+      "status": "reviewed"
+    }
+  }
+}

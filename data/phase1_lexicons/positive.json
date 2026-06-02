@@ -1,0 +1,29 @@
+{
+  "version": "1.1",
+  "entries": [
+    {
+      "id": "moist_finish",
+      "display_label": "촉촉한 마무리감",
+      "patterns": ["촉촉"],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "no_base_crumbling",
+      "display_label": "베이스 까짐 없음",
+      "patterns": ["까짐없", "까짐 없", "까지지", "까지도 않", "안까지", "까짐 하나", "벗겨지지", "안 벗겨지"],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "gift_item_positive",
+      "display_label": "증정품·사은품 만족",
+      "patterns": ["증정", "사은품", "기획으로 같이", "같이 온"],
+      "min_doc_freq": 2
+    },
+    {
+      "id": "good_applicability",
+      "display_label": "발림성 좋음",
+      "patterns": ["발림성"],
+      "min_doc_freq": 2
+    }
+  ]
+}
