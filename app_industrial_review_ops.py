@@ -1311,7 +1311,9 @@ def _render_product_status(result: dict) -> None:
     summaries = result.get("product_summaries") or []
     if not summaries:
         return
-    with st.expander(f"상품별 리뷰 상태 ({len(summaries)}개 상품)", expanded=False):
+    with st.expander(
+        f"상품별 리뷰 상태 (전체 파일 기준 · {len(summaries)}개 상품)", expanded=False
+    ):
         st.caption("상품을 좁혀 보려면 왼쪽 '분석 범위'에서 상품을 고르고 '분석 시작'을 다시 누르세요.")
         st.dataframe(
             product_status_rows(summaries), use_container_width=True, hide_index=True
@@ -1327,6 +1329,7 @@ def _render_summary_tab() -> None:
     ns = result.get("new_summary")
 
     st.subheader("이번 업로드 요약")
+    st.caption(scope_caption_text(result))
     m1, m2, m3 = st.columns(3)
     m1.metric("전체 리뷰", f"{result['total']}건")
     if ns:
