@@ -28,7 +28,7 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-from src.voc.review_ops.industrial import cluster, rag, refine
+from src.voc.review_ops.industrial import cluster, rag, refine, store
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -223,6 +223,59 @@ def _rating_bucket(rating: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# New-review detection summary (pure; no Streamlit, no OpenAI, no DB)
+# ---------------------------------------------------------------------------
+
+
+def compute_new_review_summary(
+    tagged: list[tuple[IndustrialReview, list[str]]],
+    new_review_ids: set[str],
+    worklist_review_ids: set[str],
+    *,
+    max_rows: int = 20,
+) -> dict:
+    """Summarize how this upload's active reviews compare to prior uploads.
+
+    Pure data in, pure dict out — the Streamlit layer only renders this. Counts
+    are computed against ``tagged`` (this upload's active, deduped reviews) so a
+    review_id reported new by the store but absent from this batch never inflates
+    a count. ``new_rows`` is capped at ``max_rows``, newest first.
+    """
+    new_set = set(new_review_ids)
+    total_active = len(tagged)
+    new_count = sum(1 for r, _ in tagged if r.review_id in new_set)
+    seen_count = total_active - new_count
+    first_upload = total_active > 0 and new_count == total_active
+    priority_new_count = len(new_set & set(worklist_review_ids))
+    needs_reply_new_count = sum(
+        1 for r, tags in tagged if r.review_id in new_set and "needs_reply" in tags
+    )
+
+    new_tagged = [(r, tags) for r, tags in tagged if r.review_id in new_set]
+    new_tagged.sort(key=lambda rt: (rt[0].review_date or date.min), reverse=True)
+    new_rows = [
+        {
+            "작성일": r.review_date.isoformat() if r.review_date else "미상",
+            "채널": r.channel,
+            "상품명": r.product_name or "-",
+            "평점": _rating_bucket(r.rating),
+            "태그": ", ".join(CATEGORY_BY_ID[t].label_ko for t in tags) or "-",
+            "리뷰": r.text,
+        }
+        for r, tags in new_tagged[:max_rows]
+    ]
+    return {
+        "total_active": total_active,
+        "new_count": new_count,
+        "seen_count": seen_count,
+        "first_upload": first_upload,
+        "priority_new_count": priority_new_count,
+        "needs_reply_new_count": needs_reply_new_count,
+        "new_rows": new_rows,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pipeline driver
 # ---------------------------------------------------------------------------
 
@@ -233,6 +286,8 @@ def generate(
     title: str,
     today: date | None,
     recent_days: int,
+    filename: str = "upload",
+    store_path: str | None = None,
     do_refine: bool = False,
     refine_top_n: int = refine.DEFAULT_TOP_N,
     do_cluster: bool = False,
@@ -289,6 +344,27 @@ def generate(
     html = render_report_html(report, recent_days=recent_days)
     tagged = [(r, classify(r)) for r in active]
     today_count = sum(1 for w in report.worklist if w.tier == "today")
+
+    # Persist this upload to the local store and detect which reviews are new
+    # vs. previous uploads. Fail-soft: any store error leaves the report intact
+    # and simply skips the new-review comparison.
+    new_summary: dict | None = None
+    store_status: dict | None = None
+    try:
+        conn = store.open_store(store_path)
+        try:
+            upload_id = store.create_upload(conn, filename, len(active))
+            upsert = store.upsert_reviews(conn, upload_id, active)
+        finally:
+            conn.close()
+        worklist_ids = {w.review_id for w in report.worklist}
+        new_summary = compute_new_review_summary(
+            tagged, set(upsert["new_review_ids"]), worklist_ids
+        )
+        store_status = {"status": "ok"}
+    except Exception as e:  # whole-feature fallback; report still renders
+        store_status = {"status": "error", "error": str(e)}
+
     return {
         "html": html,
         "tagged": tagged,
@@ -303,12 +379,48 @@ def generate(
         "refine_summary": refine_summary,
         "cluster_summary": cluster_summary,
         "issue_count": len(report.issue_clusters),
+        "new_summary": new_summary,
+        "store_status": store_status,
     }
 
 
 # ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
+
+
+def _render_new_reviews(result: dict) -> None:
+    """Render the '이번 업로드' comparison and the '새로 들어온 리뷰' list."""
+    new_summary = result.get("new_summary")
+    if not new_summary:
+        if (result.get("store_status") or {}).get("status") == "error":
+            st.caption("로컬 저장소를 열지 못해 새 리뷰 비교를 건너뛰었습니다. (리포트는 정상입니다.)")
+        return
+
+    st.divider()
+    st.subheader("이번 업로드")
+    n1, n2, n3 = st.columns(3)
+    n1.metric("이번 업로드 리뷰", f"{new_summary['total_active']}건")
+    n2.metric("새로 들어온 리뷰", f"{new_summary['new_count']}건")
+    n3.metric("이미 등록된 리뷰", f"{new_summary['seen_count']}건")
+
+    if new_summary["first_upload"]:
+        st.info("첫 업로드라 전체 리뷰를 등록했습니다.")
+
+    p1, p2 = st.columns(2)
+    p1.metric("새 리뷰 중 우선 확인", f"{new_summary['priority_new_count']}건")
+    p2.metric("새 리뷰 중 답글 필요", f"{new_summary['needs_reply_new_count']}건")
+
+    st.markdown("#### 새로 들어온 리뷰")
+    new_rows = new_summary["new_rows"]
+    if not new_rows:
+        st.caption("이번 업로드에서 새로 들어온 리뷰가 없습니다. (모두 이미 등록된 리뷰입니다.)")
+        return
+    st.dataframe(new_rows, use_container_width=True, hide_index=True)
+    if new_summary["new_count"] > len(new_rows):
+        st.caption(
+            f"새로 들어온 리뷰 {new_summary['new_count']}건 중 {len(new_rows)}건만 표시했습니다."
+        )
 
 
 def _render_generate_tab() -> None:
@@ -401,6 +513,7 @@ def _render_generate_tab() -> None:
                 title=title.strip() or "산업자재 리뷰 운영 점검",
                 today=None if auto_today else today_input,
                 recent_days=int(recent_days),
+                filename=uploaded.name,
                 do_refine=do_refine,
                 refine_top_n=int(refine_top_n),
                 do_cluster=do_cluster,
@@ -428,6 +541,8 @@ def _render_generate_tab() -> None:
     c5.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일 내 확인", f"{result['week_count']}건")
     c6.metric("날짜 확인 필요", f"{result['date_unknown']}건")
     c7.metric("평점 확인 필요", f"{result['rating_unknown']}건")
+
+    _render_new_reviews(result)
 
     summary = result.get("refine_summary")
     if summary:
