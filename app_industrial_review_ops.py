@@ -570,6 +570,112 @@ def truncate_product_label(name: str, width: int = 28) -> str:
     return name[: max(0, width - 1)].rstrip() + "…"
 
 
+# ---------------------------------------------------------------------------
+# Product-group scope presets (reviewable, conservative)
+# ---------------------------------------------------------------------------
+# Each raw product name maps to exactly ONE group via first-match-wins over this
+# ordered rule list, so selecting two groups can never double-count a SKU.
+# Unmatched names fall into 기타 — never force-merged into a real line. This is
+# plain data, not a model: the keyword lists are meant to be read/edited in one
+# screen, and the resolved membership is shown to the operator (그룹 구성 보기)
+# before they trust a preset.
+#
+# Ordering matters. Hardware (dispensers/holders/collectors) is matched BEFORE
+# the consumable cup so combo SKUs ("...생수컵 + 하향식 디스펜서") land in hardware,
+# whose dispenser is the durable distinguishing item. Molding is first because
+# 선바로/연결캡 are unambiguous.
+PRODUCT_GROUP_OTHER_ID = "기타"
+PRODUCT_GROUP_OTHER_LABEL = "기타"
+
+PRODUCT_GROUP_RULES: list[tuple[str, str, list[str]]] = [
+    (
+        "wire_molding",
+        "전선몰딩·선바로 계열",
+        ["전선몰딩", "전선몰드", "선바로", "연결캡"],
+    ),
+    (
+        "cup_hardware",
+        "디스펜서·보관함·수거함 계열",
+        [
+            "디스펜서", "보관함", "수거함", "수거기", "홀더", "당겨바",
+            "케이스", "배출기", "분리수거함", "돌리미",
+        ],
+    ),
+    (
+        "paper_cup",
+        "세모금컵·생수컵 계열",
+        ["세모금컵", "세모금생수컵", "생수컵", "종이컵", "꼬깔컵"],
+    ),
+]
+
+PRODUCT_GROUP_LABELS: dict[str, str] = {
+    gid: label for gid, label, _ in PRODUCT_GROUP_RULES
+}
+PRODUCT_GROUP_LABELS[PRODUCT_GROUP_OTHER_ID] = PRODUCT_GROUP_OTHER_LABEL
+
+
+def assign_product_group(name: str | None) -> str:
+    """Map one raw product name to exactly one group id (first-match-wins). Pure.
+
+    Blank/None and any name matching no rule -> PRODUCT_GROUP_OTHER_ID.
+    """
+    text = name or ""
+    for group_id, _label, keywords in PRODUCT_GROUP_RULES:
+        if any(kw in text for kw in keywords):
+            return group_id
+    return PRODUCT_GROUP_OTHER_ID
+
+
+def compute_product_groups(product_summaries: list[dict]) -> list[dict]:
+    """Bucket the last result's product_summaries into reviewable groups. Pure.
+
+    Returns one dict per non-empty group, in PRODUCT_GROUP_RULES order with 기타
+    last: ``{group_id, label, products:[raw names present], review_count,
+    low_rating_count, recent_review_count}``. Only SKUs actually present are
+    included; empty groups (and 기타 when nothing is unmatched) are dropped.
+    Members preserve the incoming summary order (review_count desc).
+    """
+    buckets: dict[str, dict] = {}
+    for s in product_summaries:
+        gid = assign_product_group(s["product_name"])
+        b = buckets.setdefault(
+            gid,
+            {
+                "group_id": gid,
+                "label": PRODUCT_GROUP_LABELS.get(gid, gid),
+                "products": [],
+                "review_count": 0,
+                "low_rating_count": 0,
+                "recent_review_count": 0,
+            },
+        )
+        b["products"].append(s["product_name"])
+        b["review_count"] += s["review_count"]
+        b["low_rating_count"] += s["low_rating_count"]
+        b["recent_review_count"] += s["recent_review_count"]
+
+    order = [gid for gid, _, _ in PRODUCT_GROUP_RULES] + [PRODUCT_GROUP_OTHER_ID]
+    return [buckets[gid] for gid in order if gid in buckets]
+
+
+def expand_group_selection(
+    selected_group_ids: list[str] | set[str],
+    selected_individual_names: list[str] | set[str],
+    product_groups: list[dict],
+) -> set[str]:
+    """Resolve group + individual selections into a raw-product-name filter. Pure.
+
+    Group ids expand to their member raw names, unioned with any individually
+    selected names. Empty result -> empty set (caller treats as 전체 상품).
+    """
+    gids = set(selected_group_ids or [])
+    names: set[str] = set(selected_individual_names or [])
+    for g in product_groups:
+        if g["group_id"] in gids:
+            names.update(g["products"])
+    return names
+
+
 def _resolve_scope(
     product_filter: set[str] | None,
     product_summaries: list[dict],
@@ -990,20 +1096,53 @@ def _render_sidebar() -> None:
         prev_summaries = (prev_result or {}).get("product_summaries") or []
         if prev_summaries:
             scope_options = [s["product_name"] for s in prev_summaries]
-            # Drop any retained selection no longer present (e.g. after a new file)
-            # so the multiselect never errors on a stale default.
-            retained = st.session_state.get("scope_select")
-            if retained:
-                pruned = [v for v in retained if v in scope_options]
-                if pruned != retained:
-                    st.session_state["scope_select"] = pruned
-            st.multiselect(
-                "분석 범위 (상품 선택 · 비우면 전체 상품)",
-                options=scope_options,
-                format_func=truncate_product_label,
-                key="scope_select",
-            )
-            st.caption("상품을 고른 뒤 '분석 시작'을 다시 누르면 선택 상품만 분석합니다.")
+            product_groups = compute_product_groups(prev_summaries)
+
+            # Group presets (primary, reviewable). Conservative first-match-wins
+            # buckets; membership shown below so the operator audits before trust.
+            if product_groups:
+                group_ids = [g["group_id"] for g in product_groups]
+                group_label_by_id = {
+                    g["group_id"]: (
+                        f"{g['label']} ({len(g['products'])}개 상품 · "
+                        f"{g['review_count']:,}건)"
+                    )
+                    for g in product_groups
+                }
+                # Prune a retained group selection no longer present (new file).
+                retained_g = st.session_state.get("scope_group_select")
+                if retained_g:
+                    pruned_g = [v for v in retained_g if v in group_ids]
+                    if pruned_g != retained_g:
+                        st.session_state["scope_group_select"] = pruned_g
+                st.multiselect(
+                    "분석 범위 · 상품 그룹 (비우면 전체 상품)",
+                    options=group_ids,
+                    format_func=lambda gid: group_label_by_id.get(gid, gid),
+                    key="scope_group_select",
+                )
+                with st.expander("그룹 구성 보기", expanded=False):
+                    for g in product_groups:
+                        st.markdown(f"**{g['label']}** · {len(g['products'])}개 상품")
+                        for product_name in g["products"]:
+                            st.caption(f"· {product_name}")
+
+            # Individual SKU selection (preserved). Unioned with any group pick.
+            with st.expander("개별 상품 선택", expanded=False):
+                # Drop any retained selection no longer present (e.g. after a new
+                # file) so the multiselect never errors on a stale default.
+                retained = st.session_state.get("scope_select")
+                if retained:
+                    pruned = [v for v in retained if v in scope_options]
+                    if pruned != retained:
+                        st.session_state["scope_select"] = pruned
+                st.multiselect(
+                    "개별 상품 (그룹과 함께 선택하면 합쳐집니다)",
+                    options=scope_options,
+                    format_func=truncate_product_label,
+                    key="scope_select",
+                )
+            st.caption("상품/그룹을 고른 뒤 '분석 시작'을 다시 누르면 선택 범위만 분석합니다.")
 
         run = st.button("분석 시작", type="primary", disabled=uploaded is None)
 
@@ -1028,9 +1167,18 @@ def _render_sidebar() -> None:
             if do_cluster and "rag_index" in st.session_state:
                 reuse_emb = st.session_state["rag_index"].vectors_by_review_id()
 
-            # Empty selection (or none yet) -> 전체 상품; generate() also guards
-            # absent names by falling back to the full corpus.
-            scope_selected = set(st.session_state.get("scope_select") or [])
+            # Effective scope = selected groups (expanded to member SKUs) unioned
+            # with individually selected SKUs. Empty (or none yet) -> 전체 상품;
+            # generate() also guards absent names by falling back to full corpus.
+            prev_summaries_now = (
+                (st.session_state.get("result") or {}).get("product_summaries") or []
+            )
+            groups_for_expand = compute_product_groups(prev_summaries_now)
+            scope_selected = expand_group_selection(
+                st.session_state.get("scope_group_select") or [],
+                st.session_state.get("scope_select") or [],
+                groups_for_expand,
+            )
 
             with st.spinner("분석 중..."):
                 result = generate(
