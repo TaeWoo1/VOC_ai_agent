@@ -296,16 +296,21 @@ def test_format_proposal_is_pre_run_no_execution():
     assert "진행할까요" in msg and "수집/발송/PDF" in msg
 
 
-# === claude_code_local stub ==================================================
-def test_claude_code_local_unavailable_and_not_implemented(tmp_path):
+# === claude_code_local (M6-C: implemented, availability reflects PATH) =======
+def test_claude_code_local_availability_and_unavailable_runs(monkeypatch, tmp_path):
+    # M6-C: the adapter is implemented; run/dry_run no longer raise. With the
+    # `claude` binary absent it resolves to `unavailable` (no exception, no spawn).
+    import agent_adapters.claude_code_local as ccl
     a = ClaudeCodeLocalAdapter()
-    assert a.is_available() is False
     assert isinstance(a.availability_note(), str)
-    with pytest.raises(NotImplementedError):
-        a.run(tmp_path / "p.md", cwd=tmp_path, timeout_s=60, mode="plan",
-              run_dir=tmp_path)
-    with pytest.raises(NotImplementedError):
-        a.dry_run(tmp_path / "p.md", cwd=tmp_path, timeout_s=60, run_dir=tmp_path)
+    monkeypatch.setattr(ccl, "which", lambda _b: None)
+    assert a.is_available() is False
+    run_res = a.run(tmp_path / "p.md", cwd=tmp_path / ".agent_worktrees" / "r",
+                    timeout_s=60, mode="bounded_edit", run_dir=tmp_path / "rd1")
+    assert run_res.status == "unavailable"
+    dry_res = a.dry_run(tmp_path / "p.md", cwd=tmp_path, timeout_s=60,
+                        run_dir=tmp_path / "rd2")
+    assert dry_res.status == "unavailable"
 
 
 # === no ANTHROPIC_API_KEY required ===========================================
@@ -346,10 +351,13 @@ def test_validator_import_boundary():
         assert banned not in imported, banned
 
 
-def test_adapters_no_subprocess_against_claude():
-    # claude_code_local must not call subprocess at all in M6-B (stub).
+def test_adapters_safety_invariants():
+    # M6-C: claude_code_local now drives subprocess, but MUST stay safe — never
+    # shell=True, never `--bare` (which would force ANTHROPIC_API_KEY), never the
+    # anthropic SDK.
     path = Path(val.__file__).parent / "agent_adapters" / "claude_code_local.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
     imported = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -357,5 +365,8 @@ def test_adapters_no_subprocess_against_claude():
                 imported.add(a.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported.add(node.module.split(".")[0])
-    assert "subprocess" not in imported
+        if isinstance(node, ast.keyword) and node.arg == "shell":
+            assert not (isinstance(node.value, ast.Constant)
+                        and node.value.value is True)
     assert "anthropic" not in imported
+    assert '"--bare"' not in src and "'--bare'" not in src
