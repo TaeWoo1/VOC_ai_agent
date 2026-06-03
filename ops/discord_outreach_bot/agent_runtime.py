@@ -44,6 +44,26 @@ RUNTIME_STATUSES = (
 # closed mode vocabulary — never free text from the model/operator
 RUN_MODES = ("plan", "bounded_edit")
 
+# M6-D lifecycle vocabulary: a SUPERSET of RUNTIME_STATUSES used by the
+# append-only agent_runs spine to record the whole propose -> approve -> run
+# lifecycle. RUNTIME_STATUSES (what an adapter result may carry) stays narrower:
+# "proposed"/"approved"/"cancelled" are orchestration states, never adapter
+# outputs. AgentRunResult.status still validates against RUNTIME_STATUSES only.
+LIFECYCLE_STATUSES = (
+    "proposed",     # validated proposal recorded; awaiting operator confirmation
+    "approved",     # operator confirmed; prompt_hash re-verified
+    "running",      # worktree created, adapter invoked (transient)
+    "dry_run",      # plan-mode preview completed
+    "done",         # bounded run completed clean
+    "failed",       # adapter error / nonzero exit
+    "timed_out",    # killed at the Python-enforced timeout
+    "blocked",      # pre/post validation refused (incl. prompt_hash_mismatch)
+    "unavailable",  # runtime/adapter not usable
+    "cancelled",    # operator aborted before execution
+)
+# invariant: RUNTIME_STATUSES ⊆ LIFECYCLE_STATUSES (lifecycle adds the
+# orchestration-only states proposed/approved/cancelled).
+
 
 @dataclass(frozen=True)
 class AgentRunResult:
@@ -174,8 +194,9 @@ def dispatch_agent_run(*, agent_name: str, stage: str, task_id: str,
         7. append AgentRunResult to the agent_runs.jsonl spine
         8. return a formatter-ready result dict
 
-    M6-B intentionally does not execute this — calling it raises so no caller can
-    accidentally trigger a (not-yet-safe) run path."""
+    M6-D moved the real lifecycle into `agent_dispatch` (propose_agent_run /
+    confirm_agent_run / dispatch_agent_run). This shim stays only to fail loudly
+    if an old caller invokes the scaffold signature."""
     raise NotImplementedError(
-        "dispatch_agent_run is wired in M6-C (validate -> approve -> dry_run -> "
-        "run-in-worktree -> post-validate -> report). M6-B is scaffold only.")
+        "dispatch_agent_run moved to agent_dispatch.dispatch_agent_run (M6-D): "
+        "use agent_dispatch.propose_agent_run + confirm_agent_run.")

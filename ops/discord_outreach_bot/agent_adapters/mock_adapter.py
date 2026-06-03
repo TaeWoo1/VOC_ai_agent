@@ -46,6 +46,7 @@ class MockAdapter:
                  summary: str = "후보군 요약 초안을 작성했습니다 (실행 아님).",
                  stdout: str = "[mock] agent reasoning...\n",
                  stderr: str = "",
+                 dry_run_changed_files: tuple[str, ...] = (),
                  available: bool = True) -> None:
         if outcome not in _VALID_OUTCOMES:
             raise ValueError(f"outcome must be one of {_VALID_OUTCOMES}")
@@ -53,6 +54,9 @@ class MockAdapter:
         self._outcome = outcome
         self._sim_duration_s = sim_duration_s
         self._changed_files = tuple(changed_files)
+        # normally a plan-mode dry_run touches nothing; this lets a test simulate
+        # a MISBEHAVING runtime so the post-run validator's defense can be checked.
+        self._dry_run_changed_files = tuple(dry_run_changed_files)
         self._summary = summary
         self._stdout = stdout
         self._stderr = stderr
@@ -92,6 +96,7 @@ class MockAdapter:
             run_id=run_dir.name, adapter_name=self.name, status="dry_run",
             prompt_path=str(prompt_path), cwd=str(cwd), started_at=started,
             ended_at=_stamp(), stdout_path=str(stdout_path), exit_code=0,
+            changed_files=self._dry_run_changed_files,
             safety_notes=("dry_run: plan-mode, no edits",))
 
     def run(self, prompt_path: Path, *, cwd: Path, timeout_s: int, mode: str,

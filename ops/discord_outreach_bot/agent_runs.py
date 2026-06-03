@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent_runtime import RUNTIME_STATUSES
+from agent_runtime import LIFECYCLE_STATUSES
 
 _DEFAULT_SPINE_NAME = "agent_runs.jsonl"
 _DEFAULT_RUNS_DIRNAME = "agent_runs"
@@ -74,13 +74,22 @@ def make_run_record(
     changed_files: Optional[list[str]] = None,
     exit_code: Optional[int] = None,
     safety_notes: Optional[list[str]] = None,
+    prompt_hash: Optional[str] = None,
+    timeout_s: Optional[int] = None,
+    operator_id: Optional[str] = None,
+    reason: Optional[str] = None,
     started_at: Optional[str] = None,
     ended_at: Optional[str] = None,
     now: Optional[Callable[[], _dt.datetime]] = None,
 ) -> dict[str, Any]:
-    """Build one agent-run record (does not write it). Schema is fixed."""
-    if status not in RUNTIME_STATUSES:
-        raise ValueError(f"status must be one of {RUNTIME_STATUSES}, got {status!r}")
+    """Build one agent-run record (does not write it). Schema is fixed.
+
+    Accepts the full M6-D LIFECYCLE_STATUSES (proposed/approved/.../cancelled),
+    a superset of the adapter-only RUNTIME_STATUSES.
+    """
+    if status not in LIFECYCLE_STATUSES:
+        raise ValueError(
+            f"status must be one of {LIFECYCLE_STATUSES}, got {status!r}")
     stamp = _utc_stamp(now)
     return {
         "run_id": run_id,
@@ -98,6 +107,10 @@ def make_run_record(
         "changed_files": changed_files or [],
         "exit_code": exit_code,
         "safety_notes": safety_notes or [],
+        "prompt_hash": prompt_hash,
+        "timeout_s": timeout_s,
+        "operator_id": operator_id,
+        "reason": reason,
         "started_at": started_at,
         "ended_at": ended_at,
         "recorded_at": stamp,
