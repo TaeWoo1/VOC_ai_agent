@@ -51,6 +51,9 @@ DEFAULT_SIM_THRESHOLD = 0.5
 MIN_CLUSTER_SIZE = 2
 DEFAULT_MAX_CLUSTERS = 10
 DEFAULT_MAX_REPRESENTATIVES = 5
+# An issue card needs at least this many representative reviews that the judge
+# cited as directly supporting the final issue — otherwise the card is dropped.
+MIN_EVIDENCE = 2
 MAX_WORKERS = 8
 
 # Candidates with no risk/operational tag (low-rating only) share this pseudo
@@ -290,9 +293,19 @@ _RULES = (
     "교환 안내 대신 포장 상태 점검을 제안하세요.\n"
     "- positive_signal은 마케팅·상세페이지에 활용할 만한 반복 긍정 이유일 때만 is_real_issue=true로 두고, "
     "그 외 단순 칭찬이면 ignore로 분류하세요.\n"
-    "- recommended_action: 운영자가 할 다음 조치를 가설·검토 어조로 적고, 원인을 단정하지 마세요.\n"
+    "- 하나의 이슈는 하나의 문제만 가리켜야 합니다. 한 묶음에 서로 다른 문제가 섞여 있으면(예: 접착·벽면 "
+    "부착 문제와 절단 시 깨짐·내구성 문제), 가장 많이 반복되는 하나의 문제만 이슈로 잡고 나머지는 제외하세요. "
+    "'내구성 및 접착 문제'처럼 서로 다른 두 문제를 한 제목에 합치지 마세요.\n"
+    "- evidence_review_ids: 위 대표 리뷰의 review_id 중에서, 최종 issue_title·summary가 가리키는 그 문제를 "
+    "직접 뒷받침하는 리뷰만 고르세요. 다른 문제를 말하는 리뷰(예: 포장/배송 이슈에 섞인 제품 절단·파손 리뷰, "
+    "또는 접착 이슈에 섞인 절단·깨짐 리뷰)는 evidence에서 제외하세요.\n"
+    "- 그 문제를 직접 뒷받침하는 대표 리뷰가 2건 미만이면 반복 이슈로 보지 말고 is_real_issue=false로 두세요.\n"
+    "- recommended_action: 운영자가 바로 실행할 수 있게 구체적으로 적되, 원인을 단정하지 말고 가설·검토 어조를 "
+    "유지하세요. 예) '상세페이지에 실크벽지 사용 시 추가 양면테이프/피스 고정 안내를 추가할 후보입니다.' / "
+    "'포장재 보강 또는 출고 전 박스 상태 확인을 점검하세요.' / '절단 시 사용하는 도구와 작업 방법 안내를 "
+    "상세페이지·동봉 안내에 추가할 후보입니다.' '점검하고 개선 방안을 검토해야 합니다'처럼 막연한 문구는 "
+    "피하고, 후보입니다/확인해볼 수 있습니다/검토하세요/점검하세요 같은 담백한 어조로 쓰세요.\n"
     "- summary·recommended_action에 대표 리뷰에 없는 내용을 넣지 마세요.\n"
-    "- evidence_review_ids: 위 대표 리뷰의 review_id 중에서만 고르세요.\n"
 )
 
 _SCHEMA_HINT = (
@@ -406,6 +419,21 @@ def parse_issue_judgement(
 # Apply judgements to the report (pure)
 # ---------------------------------------------------------------------------
 
+# Shipping evidence guard (display-only, NOT taxonomy): a "배송/포장" issue must
+# not cite product cutting/breakage/use-time durability reviews as evidence. A
+# review is dropped from shipping evidence only when it carries a cut/break
+# marker AND no genuine packaging/shipping marker (so "박스가 깨져서" stays).
+_SHIPPING_DROP_MARKERS = ("잘라", "절단", "가위", "깨져", "깨짐", "작업")
+_SHIPPING_KEEP_MARKERS = ("박스", "포장", "배송", "상자", "택배", "찢어", "찌그러", "파손", "분실")
+
+
+def _shipping_evidence_ok(text: str) -> bool:
+    """True if ``text`` is acceptable as shipping/packaging evidence."""
+    t = text or ""
+    if any(k in t for k in _SHIPPING_KEEP_MARKERS):
+        return True
+    return not any(k in t for k in _SHIPPING_DROP_MARKERS)
+
 
 def _rep_row(cand: ClusterCandidate) -> WorklistRow:
     r = cand.review
@@ -426,13 +454,26 @@ def apply_issue_clusters(
     report: IndustrialReport,
     raw_clusters: list[RawCluster],
     judgements: dict[str, IssueJudgement],
+    *,
+    min_evidence: int = MIN_EVIDENCE,
+    max_evidence: int = DEFAULT_MAX_REPRESENTATIVES,
 ) -> IndustrialReport:
     """Return a new report whose ``issue_clusters`` reflect the judgements.
 
     A cluster is included only when it has a judgement with ``is_real_issue`` and
     ``issue_type`` != "ignore". Clusters with no judgement (failed/absent call)
     are dropped — the section shows only LLM-confirmed issues, never fabricated
-    fallbacks. Ordered by severity then size.
+    fallbacks.
+
+    Evidence guardrails (deterministic, demo-defensible):
+    - display ONLY the reps the judge cited as supporting the final issue, in the
+      cited order — never fall back to all cluster members. An off-topic review
+      that clustered in by similarity but was not cited never appears.
+    - if fewer than ``min_evidence`` valid reps are cited, drop the whole card.
+    - cap displayed evidence at ``max_evidence``.
+    - ``review_ids`` / ``review_count`` reflect the SUPPORTED evidence (the valid
+      cited reps), not the full raw cosine-cluster membership, so the visible
+      "관련 리뷰 N건" matches the evidence actually shown.
     """
     clusters: list[IssueCluster] = []
     for rc in raw_clusters:
@@ -441,15 +482,17 @@ def apply_issue_clusters(
             continue
         if not j.is_real_issue or j.issue_type == "ignore":
             continue
-        # Show the reviews the judge actually cited as evidence, in the order it
-        # cited them — this drops cluster members the LLM did not treat as part
-        # of the issue (e.g. an off-topic breakage review that clustered into an
-        # adhesion group by similarity). Evidence ids are already constrained to
-        # the shown rep ids; fall back to all reps when the judge cited none.
         rep_by_id = {c.review.review_id: c for c in rc.representatives}
-        chosen = [rep_by_id[rid] for rid in j.evidence_review_ids if rid in rep_by_id]
-        if not chosen:
-            chosen = list(rc.representatives)
+        supported_ids = [rid for rid in j.evidence_review_ids if rid in rep_by_id]
+        # Shipping issues must not cite product cutting/breakage reviews as evidence.
+        if j.issue_type == "shipping":
+            supported_ids = [
+                rid for rid in supported_ids
+                if _shipping_evidence_ok(rep_by_id[rid].review.text)
+            ]
+        if len(supported_ids) < min_evidence:
+            continue  # not enough reps truly support the issue -> drop the card
+        shown_ids = supported_ids[:max_evidence]
         clusters.append(
             IssueCluster(
                 cluster_id=rc.cluster_id,
@@ -460,8 +503,8 @@ def apply_issue_clusters(
                 severity=j.severity,
                 summary=j.summary,
                 recommended_action=j.recommended_action,
-                review_ids=[m.review.review_id for m in rc.members],
-                representatives=[_rep_row(c) for c in chosen],
+                review_ids=list(supported_ids),
+                representatives=[_rep_row(rep_by_id[rid]) for rid in shown_ids],
                 judged=True,
             )
         )
@@ -488,8 +531,16 @@ def _title_keywords(title: str) -> set[str]:
 
 
 def _can_merge(a: IssueCluster, b: IssueCluster) -> bool:
-    """Same issue_type AND a shared allow-listed title keyword."""
+    """Same issue_type AND same tag_label AND a shared allow-listed title keyword.
+
+    The tag_label gate prevents fusing different signal groups that merely share a
+    title keyword — e.g. a ``_low_rating`` adhesion card and a
+    ``durability_adhesion_finish`` card both containing 접착 must NOT collapse into
+    one broad "내구성 및 접착" card.
+    """
     if a.issue_type != b.issue_type:
+        return False
+    if a.tag_label != b.tag_label:
         return False
     return bool(_title_keywords(a.issue_title) & _title_keywords(b.issue_title))
 
@@ -535,11 +586,15 @@ def _merge_pair(base: IssueCluster, other: IssueCluster) -> IssueCluster:
     )
 
 
-def merge_issue_clusters(clusters: list[IssueCluster]) -> list[IssueCluster]:
-    """Collapse near-duplicate clusters (same issue_type + shared allow-listed
-    title keyword). Greedy and deterministic: each cluster folds into the first
-    earlier cluster it can merge with, else stays. Re-sorted by severity then
-    size after merging (review counts change). No network, no re-judging."""
+def merge_issue_clusters(
+    clusters: list[IssueCluster], *, max_evidence: int = DEFAULT_MAX_REPRESENTATIVES
+) -> list[IssueCluster]:
+    """Collapse near-duplicate clusters (same issue_type + same tag_label + shared
+    allow-listed title keyword). Greedy and deterministic: each cluster folds into
+    the first earlier cluster it can merge with, else stays. After merging, the
+    displayed representatives are re-capped at ``max_evidence`` (the union can
+    exceed it); ``review_ids`` / ``review_count`` keep the full supported-evidence
+    union. Re-sorted by severity then size. No network, no re-judging."""
     merged: list[IssueCluster] = []
     for c in clusters:
         target_idx = next((i for i, m in enumerate(merged) if _can_merge(m, c)), None)
@@ -547,6 +602,7 @@ def merge_issue_clusters(clusters: list[IssueCluster]) -> list[IssueCluster]:
             merged.append(c)
         else:
             merged[target_idx] = _merge_pair(merged[target_idx], c)
+    merged = [replace(c, representatives=c.representatives[:max_evidence]) for c in merged]
     merged.sort(
         key=lambda c: (-_SEVERITY_RANK.get(c.severity, 0), -c.review_count, c.cluster_id)
     )
@@ -617,13 +673,16 @@ def cluster_issues(
     min_cluster_size: int = MIN_CLUSTER_SIZE,
     max_clusters: int = DEFAULT_MAX_CLUSTERS,
     max_representatives: int = DEFAULT_MAX_REPRESENTATIVES,
+    max_evidence: int = DEFAULT_MAX_REPRESENTATIVES,
 ) -> tuple[IndustrialReport, dict]:
     """Build repeated-issue clusters and judge them. Adds ``issue_clusters``.
 
     With no API key (or no candidates) the report is returned unchanged.
     ``embeddings`` (review_id -> vector) is reused when provided; missing
-    candidates are embedded on demand. ``summary`` carries counts for the UI:
-    ``candidates / clusters / issues``.
+    candidates are embedded on demand. The judge sees up to ``max_representatives``
+    reps for context; ``max_evidence`` caps how many supporting reps are displayed
+    per card. ``summary`` carries counts for the UI: ``candidates / clusters /
+    issues``.
     """
     api_key = api_key or resolve_api_key()
     candidates = select_cluster_candidates(reviews, today=today, recent_days=recent_days)
@@ -664,10 +723,12 @@ def cluster_issues(
         if judgement is not None:
             judgements[cluster_id] = judgement
 
-    judged_report = apply_issue_clusters(report, raw_clusters, judgements)
+    judged_report = apply_issue_clusters(
+        report, raw_clusters, judgements, max_evidence=max_evidence
+    )
     # Conservative post-judge merge of near-duplicate issue cards (e.g. split
     # adhesion clusters). Pure, no extra LLM calls.
-    merged = merge_issue_clusters(judged_report.issue_clusters)
+    merged = merge_issue_clusters(judged_report.issue_clusters, max_evidence=max_evidence)
     new_report = replace(judged_report, issue_clusters=merged)
     return new_report, {
         "candidates": len(candidates),

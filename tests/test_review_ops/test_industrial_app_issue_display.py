@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from app_industrial_review_ops import issue_display_item, severity_label
+from app_industrial_review_ops import (
+    issue_display_item,
+    issue_display_mode_params,
+    severity_label,
+)
 from src.voc.review_ops.industrial.schema import IssueCluster, WorklistRow
 
 
@@ -63,3 +67,14 @@ def test_issue_display_item_type_label_fallback():
     item = issue_display_item(_cluster("low", issue_type="product"))
     assert item["type_label"] == "제품"
     assert item["severity_label"] == "참고"
+
+
+def test_issue_display_mode_params_known_modes():
+    assert issue_display_mode_params("자동 추천") == (5, 3)
+    assert issue_display_mode_params("적게 보기") == (3, 3)
+    assert issue_display_mode_params("많이 보기") == (8, 5)
+
+
+def test_issue_display_mode_params_unknown_falls_back_to_auto():
+    assert issue_display_mode_params("아무거나") == (5, 3)
+    assert issue_display_mode_params("") == (5, 3)

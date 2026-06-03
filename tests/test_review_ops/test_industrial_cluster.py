@@ -224,10 +224,10 @@ def test_apply_issue_clusters_keeps_only_real_non_ignore():
     ]
     judgements = {
         "A": cluster.IssueJudgement("A", True, "포장 파손 반복", "shipping", "high",
-                                    "요약", "포장 점검", ["a1"]),
+                                    "요약", "포장 점검", ["a1", "a2"]),
         "B": cluster.IssueJudgement("B", False, "", "ignore", "low", "", "", []),
         "C": cluster.IssueJudgement("C", True, "교환 문의 반복", "cs", "medium",
-                                    "요약", "답글 안내", ["c1"]),
+                                    "요약", "답글 안내", ["c1", "c2"]),
         # D: no judgement -> dropped (no fabricated fallback)
     }
     out = cluster.apply_issue_clusters(_report(), raw, judgements)
@@ -237,7 +237,7 @@ def test_apply_issue_clusters_keeps_only_real_non_ignore():
     assert out.issue_clusters[0].severity == "high"
     a = out.issue_clusters[0]
     assert a.judged is True
-    assert a.review_ids == ["a1", "a2"]
+    assert a.review_ids == ["a1", "a2"]   # supported evidence (cited), in order
     assert a.review_count == 2
     assert all(isinstance(r, WorklistRow) for r in a.representatives)
 
@@ -263,19 +263,131 @@ def test_apply_evidence_ids_select_and_order_representatives():
     reps = out.issue_clusters[0].representatives
     assert [r.review_id for r in reps] == ["a2", "a1"]   # evidence order honored
     assert "a3" not in {r.review_id for r in reps}       # off-topic rep dropped
-    # related count stays full cluster membership
-    assert out.issue_clusters[0].review_ids == ["a1", "a2", "a3"]
-    assert out.issue_clusters[0].review_count == 3
+    # review_count reflects SUPPORTED evidence, not full cosine-cluster membership
+    assert out.issue_clusters[0].review_ids == ["a2", "a1"]
+    assert out.issue_clusters[0].review_count == 2
 
 
-def test_apply_empty_evidence_falls_back_to_all_reps():
+def test_apply_insufficient_evidence_drops_card():
+    # judge cites no valid evidence -> below MIN_EVIDENCE -> card dropped (no
+    # fallback to all representatives).
     raw = [_raw("A", "delivery_packaging_damage", [_cand("a1"), _cand("a2")])]
     judgements = {
         "A": cluster.IssueJudgement("A", True, "포장 파손", "shipping", "high",
                                     "요약", "점검", []),  # no evidence ids
     }
     out = cluster.apply_issue_clusters(_report(), raw, judgements)
-    assert [r.review_id for r in out.issue_clusters[0].representatives] == ["a1", "a2"]
+    assert out.issue_clusters == []
+
+
+def test_apply_single_evidence_drops_card():
+    # exactly one supporting rep is still below the 2-evidence floor.
+    raw = [_raw("A", "delivery_packaging_damage", [_cand("a1"), _cand("a2")])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "포장 파손", "shipping", "high",
+                                    "요약", "점검", ["a1"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    assert out.issue_clusters == []
+
+
+def test_apply_caps_displayed_evidence_by_max_evidence():
+    raw = [_raw("A", "delivery_packaging_damage",
+                [_cand("a1"), _cand("a2"), _cand("a3"), _cand("a4")])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "포장 파손", "shipping", "high",
+                                    "요약", "점검", ["a1", "a2", "a3", "a4"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements, max_evidence=2)
+    c = out.issue_clusters[0]
+    assert [r.review_id for r in c.representatives] == ["a1", "a2"]  # display capped
+    # supported count reflects all valid cited evidence, not just the displayed cap
+    assert c.review_ids == ["a1", "a2", "a3", "a4"]
+    assert c.review_count == 4
+
+
+def test_apply_off_topic_rep_never_appears():
+    raw = [_raw("A", "delivery_packaging_damage",
+                [_cand("a1", text="박스 터짐"), _cand("a2", text="포장 손상"),
+                 _cand("off", text="실내서 작업하는데도 잘라내는데 잘 깨져요")])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "포장 파손 반복", "shipping", "high",
+                                    "요약", "포장 점검", ["a1", "a2"]),  # 'off' not cited
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    c = out.issue_clusters[0]
+    assert "off" not in {r.review_id for r in c.representatives}
+    assert "off" not in c.review_ids
+
+
+def test_judge_prompt_contains_evidence_fit_and_single_topic_rules():
+    rc = _raw("A", "delivery_packaging_damage", [_cand("a1"), _cand("a2")])
+    user = cluster.build_judge_messages(rc)[-1]["content"]
+    assert "evidence_review_ids" in user
+    assert "직접 뒷받침" in user      # evidence-fit instruction
+    assert "하나의 문제만" in user     # single-topic instruction
+    assert "2건 미만" in user          # min-2 rule
+
+
+# --- Fix 2: shipping evidence guard -----------------------------------------
+
+
+def test_shipping_guard_drops_cutting_breakage_only_evidence():
+    raw = [_raw("A", "delivery_packaging_damage", [
+        _cand("box1", text="박스가 다 뚫려서 도착했어요"),
+        _cand("box2", text="택배 상자가 찌그러져 왔습니다"),
+        _cand("cut", text="실내서 작업하는데도 잘라내는데 잘 깨져요"),
+    ])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "배송 포장 상태", "shipping", "medium",
+                                    "요약", "포장 점검", ["box1", "box2", "cut"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    c = out.issue_clusters[0]
+    ids = {r.review_id for r in c.representatives}
+    assert "cut" not in ids and "cut" not in c.review_ids  # cutting/breakage dropped
+    assert ids == {"box1", "box2"}
+
+
+def test_shipping_guard_keeps_packaging_evidence_with_break_words():
+    # contains 파손/찢어/박스/상자 (keep markers) even alongside 깨 -> kept.
+    raw = [_raw("A", "delivery_packaging_damage", [
+        _cand("p1", text="박스가 파손되어 도착, 상자가 깨져 있었어요"),
+        _cand("p2", text="포장이 찢어져서 왔어요"),
+    ])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "배송 포장 상태", "shipping", "medium",
+                                    "요약", "포장 점검", ["p1", "p2"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    assert {r.review_id for r in out.issue_clusters[0].representatives} == {"p1", "p2"}
+
+
+def test_shipping_card_drops_when_guard_leaves_under_two():
+    raw = [_raw("A", "delivery_packaging_damage", [
+        _cand("box", text="상자가 다 뚫려서 왔어요"),
+        _cand("cut", text="자르니까 깨짐이 있어요"),
+    ])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "배송 포장 상태", "shipping", "medium",
+                                    "요약", "포장 점검", ["box", "cut"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    assert out.issue_clusters == []  # only 1 valid shipping evidence left -> dropped
+
+
+def test_shipping_guard_does_not_affect_non_shipping_issue():
+    # a product issue keeps cutting/breakage evidence (guard is shipping-only).
+    raw = [_raw("A", "durability_adhesion_finish", [
+        _cand("c1", text="자르니까 잘 깨져요", primary_tag="durability_adhesion_finish"),
+        _cand("c2", text="절단 시 부서집니다", primary_tag="durability_adhesion_finish"),
+    ])]
+    judgements = {
+        "A": cluster.IssueJudgement("A", True, "절단 시 깨짐", "product", "high",
+                                    "요약", "안내 추가 후보", ["c1", "c2"]),
+    }
+    out = cluster.apply_issue_clusters(_report(), raw, judgements)
+    assert {r.review_id for r in out.issue_clusters[0].representatives} == {"c1", "c2"}
 
 
 # --- Step B: conservative near-duplicate merge ------------------------------
@@ -320,6 +432,35 @@ def test_merge_different_type_does_not_merge_even_if_keyword_overlaps():
     ]
     out = cluster.merge_issue_clusters(clusters)
     assert len(out) == 2
+
+
+def test_merge_different_tag_label_does_not_merge_even_if_type_and_keyword_overlap():
+    # same issue_type (product) and shared keyword (접착), but different tag_label
+    # -> must NOT merge (prevents the broad "내구성 및 접착" fusion).
+    clusters = [
+        _issue("A", issue_type="product", severity="high", title="접착력 부족",
+               review_ids=["a1", "a2"], tag="_low_rating"),
+        _issue("B", issue_type="product", severity="high", title="접착 및 내구성 문제",
+               review_ids=["b1", "b2"], tag="durability_adhesion_finish"),
+    ]
+    out = cluster.merge_issue_clusters(clusters)
+    assert len(out) == 2
+
+
+def test_merge_caps_displayed_evidence_after_merge():
+    # two mergeable cards (same type + tag_label + 접착) with 2 reps each ->
+    # union of 4 reps, but display capped at max_evidence=3; count keeps union.
+    clusters = [
+        _issue("A", issue_type="product", severity="high", title="접착력 부족",
+               review_ids=["a1", "a2"], reps=[_rep("a1"), _rep("a2")]),
+        _issue("B", issue_type="product", severity="medium", title="접착력 문제",
+               review_ids=["b1", "b2"], reps=[_rep("b1"), _rep("b2")]),
+    ]
+    out = cluster.merge_issue_clusters(clusters, max_evidence=3)
+    assert len(out) == 1
+    assert len(out[0].representatives) == 3                 # displayed reps capped
+    assert set(out[0].review_ids) == {"a1", "a2", "b1", "b2"}  # union kept for count
+    assert out[0].review_count == 4
 
 
 def test_merge_no_shared_allowlist_keyword_does_not_merge():

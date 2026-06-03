@@ -257,6 +257,22 @@ def severity_label(severity: str) -> str:
     return SEVERITY_LABELS.get(severity, severity)
 
 
+# Operator-facing repeated-issue display modes -> (max_issue_cards, max_evidence).
+# Replaces raw cluster-count / evidence-count knobs so the operator never has to
+# reason about cluster internals. 자동 추천 is the demo default.
+ISSUE_DISPLAY_MODES: dict[str, tuple[int, int]] = {
+    "자동 추천": (5, 3),
+    "적게 보기": (3, 3),
+    "많이 보기": (8, 5),
+}
+ISSUE_DISPLAY_MODE_DEFAULT = "자동 추천"
+
+
+def issue_display_mode_params(mode: str) -> tuple[int, int]:
+    """Map a display mode to (max_issue_cards, max_evidence); unknown -> 자동 추천."""
+    return ISSUE_DISPLAY_MODES.get(mode, ISSUE_DISPLAY_MODES[ISSUE_DISPLAY_MODE_DEFAULT])
+
+
 def issue_display_item(cluster, max_reps: int = 5) -> dict:
     """One repeated-issue cluster as a display dict for the native issue card.
 
@@ -370,6 +386,7 @@ def generate(
     do_cluster: bool = False,
     cluster_max_clusters: int = cluster.DEFAULT_MAX_CLUSTERS,
     cluster_max_reps: int = cluster.DEFAULT_MAX_REPRESENTATIVES,
+    cluster_max_evidence: int = cluster.DEFAULT_MAX_REPRESENTATIVES,
     reuse_embeddings: dict | None = None,
 ) -> dict:
     reviews = dedup(normalize_rows(rows))
@@ -413,6 +430,7 @@ def generate(
                     recent_days=recent_days,
                     max_clusters=cluster_max_clusters,
                     max_representatives=cluster_max_reps,
+                    max_evidence=cluster_max_evidence,
                 )
                 cluster_summary = {"status": "ok", **csum}
             except Exception as e:  # whole-feature fallback
@@ -558,14 +576,12 @@ def _render_sidebar() -> None:
                 disabled=not do_refine,
             )
             do_cluster = st.checkbox("반복 이슈 묶기", value=True)
-            cluster_max = st.number_input(
-                "최대 반복 이슈 수", min_value=1, max_value=20, value=5, step=1,
+            issue_mode = st.selectbox(
+                "반복 이슈 표시 방식",
+                list(ISSUE_DISPLAY_MODES.keys()), index=0,
                 disabled=not do_cluster,
             )
-            cluster_reps = st.number_input(
-                "이슈별 원문 근거 수", min_value=1, max_value=10, value=5, step=1,
-                disabled=not do_cluster,
-            )
+            max_issue_cards, max_evidence = issue_display_mode_params(issue_mode)
 
         run = st.button("분석 시작", type="primary", disabled=uploaded is None)
 
@@ -600,8 +616,8 @@ def _render_sidebar() -> None:
                     do_refine=do_refine,
                     refine_top_n=int(refine_top_n),
                     do_cluster=do_cluster,
-                    cluster_max_clusters=int(cluster_max),
-                    cluster_max_reps=int(cluster_reps),
+                    cluster_max_clusters=int(max_issue_cards),
+                    cluster_max_evidence=int(max_evidence),
                     reuse_embeddings=reuse_emb,
                 )
             st.session_state["result"] = result
