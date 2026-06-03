@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import agent_discord_adapter as _agent_discord
 import agent_report_formatting as _arf
 import claude_orchestrator as _planner
 import conversational_orchestrator as _conv
@@ -155,6 +156,16 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
          executes, creates a graph, approves, cancels, or runs the runner.
       5. deterministic read-only fallback when the planner is disabled/unavailable
          (also the default): the existing M5-A/M5-A.5 conversational answer."""
+    # 0. M6-D4 agent-lifecycle phrases (에이전트 제안 / 진행해 / 편집 진행해 / 취소 /
+    #    cleanup / 에이전트 상태). Deterministic + pending-state-gated: it claims
+    #    "진행해"/"취소" ONLY when an agent run/edit is pending, otherwise returns
+    #    None so the existing M5-A.5 / M4 flows below run unchanged.
+    agent_out = _agent_discord.try_handle(
+        text, operator_discord_id=operator_discord_id, store_path=store_path,
+        approval_log_path=approvals_path, generated_prompts_dir=generated_prompts_dir)
+    if agent_out is not None:
+        return agent_out
+
     # 1. question-like: M6-A planner (if eligible) else read-only answer. Zero writes.
     if _conv.is_question_like(text):
         if _planner_eligible(text):
