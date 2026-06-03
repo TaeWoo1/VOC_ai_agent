@@ -28,7 +28,14 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-from src.voc.review_ops.industrial import cluster, issue_discovery, rag, refine, store
+from src.voc.review_ops.industrial import (
+    cluster,
+    issue_discovery,
+    notion_export,
+    rag,
+    refine,
+    store,
+)
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -1235,10 +1242,37 @@ def _render_sidebar() -> None:
                     file_name=f"{st.session_state.get('report_title', 'report')}.html",
                     mime="text/html",
                 )
+                _render_notion_export(result)
                 st.caption(f"날짜 확인 필요: {result['date_unknown']}건")
                 st.caption(f"평점 확인 필요: {result['rating_unknown']}건")
                 st.caption(f"중복 제외: {result['duplicates']}건")
                 _render_advanced_notes(result)
+
+
+def _render_notion_export(result: dict) -> None:
+    """Notion으로 내보내기 button. Builds the I1 payload and posts one page.
+
+    Fail-soft: disabled with a caption when env settings are missing; on a
+    failed export it warns and the app keeps working. No secret is shown."""
+    api_key, parent_page_id = notion_export.resolve_notion_config()
+    if not api_key or not parent_page_id:
+        st.button("Notion으로 내보내기", disabled=True, key="notion_export_btn")
+        st.caption(
+            "Notion 설정(NOTION_API_KEY, NOTION_PARENT_PAGE_ID)이 없어 내보내기를 건너뜁니다."
+        )
+        return
+    if st.button("Notion으로 내보내기", key="notion_export_btn"):
+        with st.spinner("Notion 페이지를 만드는 중…"):
+            payload = notion_export.build_notion_payload(
+                result, parent_page_id, date.today()
+            )
+            export = notion_export.export_to_notion(payload, api_key=api_key)
+        if export.ok:
+            st.success("Notion 페이지를 만들었습니다.")
+            if export.url:
+                st.markdown(f"[Notion에서 열기]({export.url})")
+        else:
+            st.warning(f"Notion 내보내기에 실패했습니다: {export.error}")
 
 
 def _render_advanced_notes(result: dict) -> None:

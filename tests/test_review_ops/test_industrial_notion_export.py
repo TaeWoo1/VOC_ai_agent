@@ -9,14 +9,18 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
+from src.voc.review_ops.industrial import notion_export as nx
 from src.voc.review_ops.industrial.notion_export import (
     APPLICABILITY_ORDER,
     MAX_WORKLIST,
     NO_NEEDS_REPLY_TEXT,
+    NOTION_API_VERSION,
     SECTION_TITLES,
     build_notion_blocks,
     build_notion_payload,
+    export_to_notion,
     notion_page_title,
+    resolve_notion_config,
 )
 
 TODAY = date(2026, 1, 21)
@@ -271,3 +275,120 @@ def test_valid_block_objects():
     for b in build_notion_blocks(_full_result()):
         assert b.get("object") == "block" or b["type"] == "divider"
         assert b["type"] in b  # the type-keyed payload exists
+
+
+# --- I2 client: resolve_notion_config ---------------------------------------
+
+
+def test_resolve_config_missing_is_safe(monkeypatch, tmp_path):
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_PARENT_PAGE_ID", raising=False)
+    # force a fresh load against an empty cwd so no real .env interferes
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    key, parent = resolve_notion_config()
+    assert key is None
+    assert parent is None
+
+
+def test_resolve_config_reads_env(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "secret-abc")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "parent-xyz")
+    key, parent = resolve_notion_config()
+    assert key == "secret-abc"
+    assert parent == "parent-xyz"
+
+
+# --- I2 client: export_to_notion (fake transport, no network) ---------------
+
+
+def test_export_ok_returns_url():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/created-page-123"}
+
+    payload = build_notion_payload(_full_result(), "parent-1", TODAY)
+    res = export_to_notion(payload, api_key="secret-key", transport=fake_transport)
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/created-page-123"
+    assert res.error is None
+
+
+def test_export_failure_returns_error_not_ok():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("network down")
+
+    res = export_to_notion({}, api_key="secret-key", transport=raising_transport)
+    assert res.ok is False
+    assert res.url is None
+    assert "network down" in (res.error or "")
+
+
+def test_export_sends_method_headers_and_json():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/p"}
+
+    payload = build_notion_payload(_full_result(), "parent-9", TODAY)
+    export_to_notion(payload, api_key="secret-key", transport=fake_transport)
+    assert captured["url"] == nx.NOTION_PAGES_URL
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert captured["headers"]["Content-Type"] == "application/json"
+    assert captured["headers"]["Notion-Version"] == NOTION_API_VERSION
+    # the JSON payload is the I1 page-create body
+    assert captured["payload"]["parent"]["page_id"] == "parent-9"
+    assert "children" in captured["payload"]
+
+
+def test_api_key_not_in_result_repr():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("boom")
+
+    res = export_to_notion({}, api_key="super-secret-key", transport=raising_transport)
+    assert "super-secret-key" not in repr(res)
+    assert "super-secret-key" not in (res.error or "")
+
+
+def test_default_transport_builds_post_request(monkeypatch):
+    """Exercises the real _default_transport without any network: monkeypatch
+    urllib.request.urlopen to capture the Request and return a fake body."""
+    seen = {}
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"url": "https://www.notion.so/real"}'
+
+    def fake_urlopen(req, timeout=None):
+        seen["method"] = req.get_method()
+        seen["url"] = req.full_url
+        seen["body"] = req.data
+        seen["auth"] = req.headers.get("Authorization")
+        return _FakeResp()
+
+    monkeypatch.setattr(nx.urllib.request, "urlopen", fake_urlopen)
+    payload = build_notion_payload(_full_result(), "parent-real", TODAY)
+    res = export_to_notion(payload, api_key="k-123")
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/real"
+    assert seen["method"] == "POST"
+    assert seen["url"] == nx.NOTION_PAGES_URL
+    assert seen["auth"] == "Bearer k-123"
+    # body is valid JSON carrying the page-create payload
+    import json
+
+    decoded = json.loads(seen["body"].decode("utf-8"))
+    assert decoded["parent"]["page_id"] == "parent-real"

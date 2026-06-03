@@ -21,7 +21,12 @@ Design constraints baked in:
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.request
+from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 # --- caps (keep total blocks < 100; surfaced, never silent) -----------------
 
@@ -351,3 +356,93 @@ def build_notion_payload(result: dict, parent_page_id: str, today: date) -> dict
         "properties": {"title": {"title": _rich_text(title)}},
         "children": build_notion_blocks(result),
     }
+
+
+# --- thin Notion client (I2) -------------------------------------------------
+#
+# Single POST to the Notion pages endpoint via stdlib urllib (no dependency).
+# Fully isolated IO: env resolution, the HTTP call, and a transport seam for
+# tests. The API key never enters NotionExportResult, logs, or error strings.
+
+NOTION_PAGES_URL = "https://api.notion.com/v1/pages"
+NOTION_API_VERSION = "2022-06-28"
+
+_NOTION_ENV_KEYS = ("NOTION_API_KEY", "NOTION_PARENT_PAGE_ID")
+_notion_env_loaded = False
+
+
+@dataclass
+class NotionExportResult:
+    """Outcome of an export attempt. Deliberately carries no API key."""
+
+    ok: bool
+    url: str | None = None
+    error: str | None = None
+
+
+def _notion_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_API_VERSION,
+    }
+
+
+def _tiny_load_notion_env(path: str = ".env") -> None:
+    """Minimal .env loader for the two NOTION keys only. Isolated from rag's
+    OpenAI allow-list; never overrides an already-set environment value."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key in _NOTION_ENV_KEYS and not os.getenv(key):
+            os.environ[key] = value
+
+
+def resolve_notion_config() -> tuple[str | None, str | None]:
+    """(NOTION_API_KEY, NOTION_PARENT_PAGE_ID) from env, with a one-time .env
+    fallback. Either value is None when absent — the caller decides what to do
+    (the Streamlit button disables itself when either is missing)."""
+    global _notion_env_loaded
+    if not _notion_env_loaded:
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv()
+        except ImportError:  # pragma: no cover - dotenv is installed here
+            _tiny_load_notion_env()
+        _notion_env_loaded = True
+    return os.getenv("NOTION_API_KEY") or None, os.getenv("NOTION_PARENT_PAGE_ID") or None
+
+
+def _default_transport(url: str, payload: dict, headers: dict[str, str]) -> dict:
+    """Real POST via urllib. Returns the parsed JSON response body."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 (https only)
+        body = resp.read().decode("utf-8")
+    return json.loads(body) if body else {}
+
+
+def export_to_notion(
+    payload: dict, *, api_key: str, transport=None
+) -> NotionExportResult:
+    """POST a page-create ``payload`` to Notion. ``transport`` is an injectable
+    ``(url, payload, headers) -> dict`` seam so tests never touch the network.
+
+    Any failure is caught and returned as ``ok=False`` with the error string —
+    the caller (Streamlit) shows a warning and keeps working. The API key is
+    never placed in the result or the error message."""
+    send = transport or _default_transport
+    try:
+        response = send(NOTION_PAGES_URL, payload, _notion_headers(api_key))
+    except Exception as exc:  # network / HTTP / decode — all fail-soft
+        return NotionExportResult(ok=False, url=None, error=str(exc))
+    url = response.get("url") if isinstance(response, dict) else None
+    return NotionExportResult(ok=True, url=url, error=None)
