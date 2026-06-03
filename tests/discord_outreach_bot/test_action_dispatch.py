@@ -201,3 +201,81 @@ def test_render_report_only_without_packets_root(ctx, mock_render):
     v = ai.validate({"intent": "render_report", "targets": {"task_id": TASK}})
     res = idp.dispatch_intent(v, operator_discord_id=OP, repo_root=ctx.root)
     assert res["executed"] is False and mock_render["n"] == 0
+
+
+# === D4-3a-fix: live renderer wiring ========================================
+def test_renderer_importable_checks_symbol(monkeypatch, tmp_path):
+    # real repo: the standalone PDF script defines the symbol -> True
+    assert ad._renderer_importable() is True
+    # script defines no such symbol -> False (stricter than module-spec check)
+    bad = tmp_path / "no_symbol.py"
+    bad.write_text("def something_else():\n    pass\n", encoding="utf-8")
+    monkeypatch.setattr(ad, "_renderer_script_path", lambda: bad)
+    assert ad._renderer_importable() is False
+    # script missing entirely -> False
+    monkeypatch.setattr(ad, "_renderer_script_path", lambda: tmp_path / "nope.py")
+    assert ad._renderer_importable() is False
+
+
+def _spy_renderer(monkeypatch):
+    """Replace the standalone-script loader with a spy that records HOW it was
+    called and writes a stub artifact to out_path. No real PDF / reportlab."""
+    rec = {}
+
+    def fake_renderer(*args, **kwargs):
+        rec["args"] = args
+        rec["kwargs"] = kwargs
+        out = kwargs["out_path"]
+        out.write_text("%PDF-stub\n", encoding="utf-8")
+        return out
+
+    monkeypatch.setattr(ad, "_load_renderer", lambda: fake_renderer)
+    monkeypatch.setattr(ad, "_render_authorized", lambda: True)
+    return rec
+
+
+def test_live_render_loads_report_and_calls_keyword_only(ctx, monkeypatch):
+    (ctx.packet_dir / "collection_summary.json").write_text(
+        '{"review_count_analyzed": 12}', encoding="utf-8")
+    rec = _spy_renderer(monkeypatch)
+    artifacts = ad._live_render(ctx.packet_dir, ctx.staging)
+    # called keyword-only: NO positional args
+    assert rec["args"] == ()
+    kw = rec["kwargs"]
+    assert kw["analysis_report"] == {"ok": True}          # parsed from file
+    assert kw["collection_summary"] == {"review_count_analyzed": 12}
+    assert kw["out_path"] == ctx.staging / "seller_business_report_v3.pdf"
+    assert kw["run_id"] == ctx.packet_dir.name
+    # artifact landed in staging only
+    assert artifacts == [str(ctx.staging / "seller_business_report_v3.pdf")]
+    assert (ctx.staging / "seller_business_report_v3.pdf").exists()
+
+
+def test_live_render_missing_collection_summary_defaults_empty(ctx, monkeypatch):
+    rec = _spy_renderer(monkeypatch)  # no collection_summary.json present
+    ad._live_render(ctx.packet_dir, ctx.staging)
+    assert rec["kwargs"]["collection_summary"] == {}      # safe default
+
+
+def test_live_render_bad_collection_summary_action_failed(ctx, monkeypatch):
+    (ctx.packet_dir / "collection_summary.json").write_text(
+        "not json", encoding="utf-8")
+    monkeypatch.setattr(ad, "_load_renderer",
+                        lambda: (_ for _ in ()).throw(AssertionError("unreached")))
+    monkeypatch.setattr(ad, "_render_authorized", lambda: True)
+    # propose -> confirm: malformed summary raises in _live_render -> action_failed
+    ctx.render_intent()
+    out = ctx.confirm()
+    assert out["intent"] == "action_failed" and out["executed"] is False
+    # packet + control files untouched by the failed render
+    assert (ctx.packet_dir / "status.json").read_text(encoding="utf-8") == '{"s":1}'
+    assert not ctx.staging.exists()
+
+
+def test_live_render_not_authorized_raises(ctx, monkeypatch):
+    monkeypatch.delenv("AGENT_RENDER_ENABLED", raising=False)
+    monkeypatch.setattr(ad, "_load_renderer",
+                        lambda: (_ for _ in ()).throw(AssertionError("unreached")))
+    with pytest.raises(ad.RenderNotAuthorized):
+        ad._live_render(ctx.packet_dir, ctx.staging)
+    assert not ctx.staging.exists()
