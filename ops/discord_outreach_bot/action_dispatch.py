@@ -20,6 +20,8 @@ Live render additionally requires AGENT_RENDER_ENABLED (default off).
 
 from __future__ import annotations
 
+import ast
+import json
 import os
 import time
 from pathlib import Path
@@ -32,8 +34,14 @@ _PENDING_TTL_SECONDS = 600
 
 _RENDER_ENV_FLAG = "AGENT_RENDER_ENABLED"
 _REPORT_FILENAME = "analysis_report.json"
+_COLLECTION_SUMMARY_FILENAME = "collection_summary.json"
 _BLOCKED_MARKER = "render.blocked"
 _DENY_BASENAMES = ("status.json", "send_log.md")
+
+# The active seller renderer is the standalone PDF script (NOT seller_dashboard).
+# Loaded by file path, mirroring src/voc/reporting/outbound/package.py.
+_RENDERER_FUNC = "render_seller_business_report_v3"
+_RENDERER_SCRIPT_REL = ("scripts", "generate_phase2e_pdf_v2.py")
 
 
 class RenderNotAuthorized(RuntimeError):
@@ -74,18 +82,67 @@ def _render_authorized() -> bool:
         "1", "true", "yes", "on")
 
 
+def _renderer_script_path() -> Path:
+    """Absolute path to the standalone PDF script (repo_root/scripts/...)."""
+    return Path(__file__).resolve().parents[2].joinpath(*_RENDERER_SCRIPT_REL)
+
+
+def _load_json(path: Path) -> dict[str, Any]:
+    """Read a JSON object. Raises ValueError if it is not a dict."""
+    obj = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(obj, dict):
+        raise ValueError(f"{Path(path).name} is not a JSON object")
+    return obj
+
+
+def _load_collection_summary(packet_dir: Path) -> dict[str, Any]:
+    """collection_summary.json beside analysis_report.json (or under shared/)
+    if present; else {}. The renderer reads every field via `.get(...) or
+    default`, so {} renders a 'no collection metadata' report. A present-but-
+    malformed file raises (deterministic action_failed downstream)."""
+    for cand in (packet_dir / _COLLECTION_SUMMARY_FILENAME,
+                 packet_dir / "shared" / _COLLECTION_SUMMARY_FILENAME):
+        if cand.is_file():
+            return _load_json(cand)
+    return {}
+
+
+def _load_renderer() -> Callable[..., Any]:
+    """Load render_seller_business_report_v3 from the standalone PDF script by
+    file path (mirrors package.py:_load_pdf_renderer). The real exec_module —
+    and its heavy reporting deps — happens HERE, at confirm/render time only."""
+    import importlib.util
+    import sys
+
+    src = _renderer_script_path()
+    spec = importlib.util.spec_from_file_location("_pdf_v2_for_agent_render", src)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load renderer spec from {src}")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_pdf_v2_for_agent_render"] = mod
+    spec.loader.exec_module(mod)
+    fn = getattr(mod, _RENDERER_FUNC, None)
+    if fn is None:
+        raise ImportError(f"{_RENDERER_FUNC} not found in {src}")
+    return fn
+
+
 def _live_render(packet_dir: Path, staging_dir: Path) -> list[str]:
-    """Default renderer: env-gated; lazily calls the existing seller report
-    renderer, writing ONLY into staging_dir. Tests replace this seam."""
+    """Default renderer: env-gated; calls the real seller report renderer
+    keyword-only, writing ONLY into staging_dir. Tests replace this seam."""
     if not _render_authorized():
         raise RenderNotAuthorized("AGENT_RENDER_ENABLED is not set")
-    # Lazy import keeps module load light and avoids pulling reporting deps in
-    # the common (no-render) path. The real renderer is called here in prod.
-    from src.voc.reporting.phase2e.seller_dashboard import (  # noqa: F401
-        render_seller_business_report_v3 as _renderer)
+    analysis_report = _load_json(packet_dir / _REPORT_FILENAME)
+    collection_summary = _load_collection_summary(packet_dir)
+    renderer = _load_renderer()
     staging_dir.mkdir(parents=True, exist_ok=True)
     out = staging_dir / "seller_business_report_v3.pdf"
-    _renderer(packet_dir / _REPORT_FILENAME, out)  # writes into staging only
+    renderer(  # keyword-only contract; writes into staging only
+        analysis_report=analysis_report,
+        collection_summary=collection_summary,
+        out_path=out,
+        run_id=packet_dir.name,
+    )
     return [str(out)]
 
 
@@ -139,9 +196,17 @@ def check_render_preconditions(
 
 
 def _renderer_importable() -> bool:
-    import importlib.util
-    return importlib.util.find_spec(
-        "src.voc.reporting.phase2e.seller_dashboard") is not None
+    """True iff the standalone PDF script exists AND defines the renderer
+    symbol. Verified by AST scan (not a module-spec check, not a full import):
+    stricter than spec-only, yet cheap and side-effect-free so the propose-time
+    precondition gate never execs the heavy PDF module."""
+    script = _renderer_script_path()
+    try:
+        tree = ast.parse(script.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return False
+    return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and n.name == _RENDERER_FUNC for n in tree.body)
 
 
 # === propose / confirm =======================================================
