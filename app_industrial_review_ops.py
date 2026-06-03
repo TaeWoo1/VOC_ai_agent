@@ -277,11 +277,39 @@ def issue_display_mode_params(mode: str) -> tuple[int, int]:
     return ISSUE_DISPLAY_MODES.get(mode, ISSUE_DISPLAY_MODES[ISSUE_DISPLAY_MODE_DEFAULT])
 
 
-def issue_display_item(cluster, max_reps: int = 5) -> dict:
+def issue_product_summary(
+    issue_review_ids: list[str], product_by_id: dict[str, str]
+) -> str:
+    """Compact product-context line for a repeated-issue card. Pure.
+
+    Maps the issue's evidence review_ids to product names (via ``product_by_id``)
+    and summarizes which product(s) the evidence came from — important because an
+    upload can mix products. Products are ordered by evidence count desc, then
+    name. Returns "" when no evidence id resolves to a product.
+    """
+    counts: dict[str, int] = {}
+    for rid in issue_review_ids:
+        name = product_by_id.get(rid)
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return ""
+    ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(ordered) == 1:
+        return f"상품: {ordered[0][0]}"
+    if len(ordered) == 2:
+        return f"주요 상품: {ordered[0][0]}, {ordered[1][0]}"
+    return f"주요 상품: {ordered[0][0]} 외 {len(ordered) - 1}개"
+
+
+def issue_display_item(
+    cluster, max_reps: int = 5, *, product_by_id: dict[str, str] | None = None
+) -> dict:
     """One repeated-issue cluster as a display dict for the native issue card.
 
     Pure: no Streamlit/OpenAI. ``reps`` are the verbatim representative reviews
-    (원문 근거), capped at ``max_reps``.
+    (원문 근거), capped at ``max_reps``. ``product_summary`` names the product(s)
+    the evidence came from (blank if ``product_by_id`` is not provided).
     """
     reps = [
         {
@@ -302,6 +330,7 @@ def issue_display_item(cluster, max_reps: int = 5) -> dict:
         "review_count": cluster.review_count,
         "summary": cluster.summary,
         "recommended_action": cluster.recommended_action,
+        "product_summary": issue_product_summary(cluster.review_ids, product_by_id or {}),
         "reps": reps,
     }
 
@@ -457,6 +486,24 @@ def compute_rating_summary(
         "recent_count": recent_count,
         "interpretation": interpretation,
     }
+
+
+def rating_distribution_bars(rating_summary: dict) -> list[dict]:
+    """Rating distribution as visual-bar rows (5..1) for 전체 리뷰 상태. Pure.
+
+    Each row is ``{label, count, fraction}`` where ``fraction`` is the share of
+    total active reviews (0..1), used to size a horizontal bar. The numbers stay
+    visible alongside the bar.
+    """
+    dist = rating_summary.get("distribution") or {}
+    total = rating_summary.get("total") or 0
+    rows: list[dict] = []
+    for b in ("5", "4", "3", "2", "1"):
+        n = dist.get(b, 0)
+        rows.append(
+            {"label": f"{b}점", "count": n, "fraction": (n / total) if total else 0.0}
+        )
+    return rows
 
 
 # Bucket label for reviews with no product name (none in the current sample, but
@@ -787,6 +834,10 @@ def generate(
     for c in report.issue_clusters:
         issue_review_ids.update(c.review_ids)
 
+    # review_id -> product, for the per-card product-context line. Built from the
+    # (scoped) active reviews; evidence ids are always drawn from this set.
+    product_by_id = {r.review_id: _product_key(r) for r in active}
+
     # Rating context for the (scoped) 전체 리뷰 상태 section. resolved_today is
     # the full-corpus value so the recent window matches across scopes.
     rating_summary = compute_rating_summary(active, recent_days, resolved_today)
@@ -826,7 +877,10 @@ def generate(
         "refine_summary": refine_summary,
         "cluster_summary": cluster_summary,
         "issue_count": len(report.issue_clusters),
-        "issue_items": [issue_display_item(c) for c in report.issue_clusters],
+        "issue_items": [
+            issue_display_item(c, product_by_id=product_by_id)
+            for c in report.issue_clusters
+        ],
         "new_summary": new_summary,
         "store_status": store_status,
         "store_path": store_path,
@@ -998,6 +1052,11 @@ def _render_sidebar() -> None:
             # New corpus -> drop any stale analysis index/chat from a previous file.
             for key in ("rag_index", "rag_messages", "rag_last_results"):
                 st.session_state.pop(key, None)
+            # Rerun once so the sidebar (rendered top-to-bottom, above this block)
+            # sees the new result and shows the 분석 범위 selector immediately. This
+            # fires only on a 분석 시작 click; the rerun has run=False so it cannot
+            # loop. Scope selection still requires a manual 분석 시작 (no auto-LLM).
+            st.rerun()
 
         # Result-dependent advanced controls (download + diagnostics) live with
         # the other settings, shown only once a result exists.
@@ -1052,6 +1111,8 @@ def _render_issue_card(item: dict) -> None:
         st.caption(
             f"{item['severity_label']} · {item['type_label']} · {item['tag_label']}"
         )
+        if item.get("product_summary"):
+            st.caption(item["product_summary"])
         st.write(f"요약: {item['summary']}")
         st.write(f"추천 조치: {item['recommended_action']}")
         if item["reps"]:
@@ -1085,18 +1146,13 @@ def _render_overall_status(result: dict) -> None:
     c5.metric("우선 확인 리뷰", f"{worklist_total}건")
     c6.metric("반복 이슈", f"{result.get('issue_count', 0)}건")
 
-    dist = rs["distribution"]
     st.caption("평점 분포")
-    st.dataframe(
-        [
-            {
-                "5점": dist["5"], "4점": dist["4"], "3점": dist["3"],
-                "2점": dist["2"], "1점": dist["1"], "미상": rs["unknown_rating"],
-            }
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
+    for bar in rating_distribution_bars(rs):
+        c_label, c_bar = st.columns([1, 5])
+        c_label.write(f"{bar['label']} · {bar['count']}건")
+        c_bar.progress(min(1.0, bar["fraction"]))
+    if rs["unknown_rating"]:
+        st.caption(f"평점 미상: {rs['unknown_rating']}건")
     st.caption(rs["interpretation"])
 
 
