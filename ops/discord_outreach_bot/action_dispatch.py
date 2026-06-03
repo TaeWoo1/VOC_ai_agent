@@ -24,6 +24,8 @@ import ast
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -58,6 +60,15 @@ _COLLECT_BLOCKED_STATUSES = ("manual_checkpoint", "running", "done", "inconclusi
 _GOODS_NO_RE = re.compile(r"^A\d{5,}$")
 _URL_GOODS_RE = re.compile(r"goodsNo=([A-Za-z0-9]+)")
 _NEXT_TOKENS = ("next", "다음", "다음거", "다음 거", "다음것")
+
+# D4-3b2: live collect shells out to the EXISTING orchestrator (re-gates, builds
+# the manifest, runs the collection child, INSERT OR IGNORE, applies batch_summary
+# to the queue). D4-3b2 reimplements none of that — it only launches + maps.
+_RUNNER_SCRIPT_REL = ("scripts", "run_brand20_queue_runner.py")
+_COLLECT_TIMEOUT_S = 1800
+_COLLECT_RUNS_REL = ("outputs", "agent_collect_runs")
+_RUNNER_STDOUT_LOG = "runner_stdout.log"
+_BATCH_SUMMARY_GLOB = "*/batch_summary.json"
 
 
 class RenderNotAuthorized(RuntimeError):
@@ -429,12 +440,156 @@ def check_collect_preconditions(
     return (None, None)
 
 
+def _parse_runner_failed_check(stdout: str) -> tuple[Optional[str], Optional[str]]:
+    """Pull the runner's two-line failed_check / required_action block."""
+    fc = ra = None
+    for line in (stdout or "").splitlines():
+        s = line.strip()
+        if s.startswith("failed_check:") and fc is None:
+            fc = s.split(":", 1)[1].strip() or None
+        elif s.startswith("required_action:") and ra is None:
+            ra = s.split(":", 1)[1].strip() or None
+    return fc, ra
+
+
+def _map_collect_outcome(
+    batch_summary: Optional[dict[str, Any]], *, exit_code: Optional[int], stdout: str,
+) -> dict[str, Any]:
+    """PURE: classify a runner result into one operator-facing outcome.
+
+    Precedence: manual_review -> rate_limited -> partial -> done -> blocked
+    (exit 2 + failed_check, only when NO summary) -> failed. The exit code is
+    NEVER trusted over a present batch_summary (auth-wall halts exit 1 but still
+    write a summary). cursor 429 is FIRST-CLASS rate_limited, not failure."""
+    if batch_summary is None:
+        if exit_code == 2 and "failed_check:" in (stdout or ""):
+            fc, ra = _parse_runner_failed_check(stdout)
+            return {"outcome": "collect_blocked", "executed": False,
+                    "failed_check": fc or "runner_precondition_failed",
+                    "required_action": ra}
+        return {"outcome": "collect_failed", "executed": False,
+                "detail": f"no batch_summary (exit={exit_code})"}
+
+    products = batch_summary.get("products") or []
+    p0 = products[0] if products else {}
+    summary = p0.get("summary") or {}
+    status = str(p0.get("status") or "").lower()
+    retry_intent = summary.get("retry_intent") or p0.get("retry_intent")
+    rows = p0.get("rows_inserted")
+    review_count = (summary.get("review_count_analyzed")
+                    or p0.get("records_parsed"))
+
+    # 1) manual review (auth wall / human check)
+    if retry_intent == "manual_review_required" or status in (
+            "anti_bot", "auth_expired_mid_batch"):
+        return {"outcome": "collect_manual_review", "executed": True,
+                "rows_inserted": rows, "status": status}
+    # 2) rate limited (cursor 429 / silenced) — first-class, no DOM recovery
+    if (summary.get("cursor_api_rate_limited") or summary.get("http_429_seen")
+            or summary.get("cursor_api_silenced")
+            or retry_intent == "retry_after_cooldown"):
+        return {"outcome": "collect_rate_limited", "executed": True,
+                "retry_intent": "retry_after_cooldown", "retry_after_minutes": 90,
+                "rows_inserted": rows}
+    # 3) partial
+    if (batch_summary.get("partial_success") or summary.get("partial_success")
+            or (status == "max_cap_reached"
+                and not p0.get("pagination_exhausted", False))):
+        return {"outcome": "collect_partial", "executed": True,
+                "rows_inserted": rows, "status": status}
+    # 4) done
+    if status in ("complete", "ok"):
+        return {"outcome": "collect_done", "executed": True,
+                "rows_inserted": rows, "review_count": review_count,
+                "duplicate_count": p0.get("duplicate_count")}
+    # 5) anything else
+    return {"outcome": "collect_failed", "executed": False,
+            "detail": f"status={status!r} exit={exit_code}"}
+
+
+def _collect_interpreter() -> str:
+    return sys.executable
+
+
+def _locate_batch_summary(artifact_root: Path) -> Optional[Path]:
+    """The runner writes exactly one <batch_id>/batch_summary.json under a fresh
+    artifact_root. Return it (newest if several), else None."""
+    hits = sorted(Path(artifact_root).glob(_BATCH_SUMMARY_GLOB),
+                  key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    return hits[-1] if hits else None
+
+
+def _killpg(proc: Any) -> None:
+    import signal
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        proc.kill()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# narrow subprocess seam (tests monkeypatch _COLLECT_POPEN)
+_COLLECT_POPEN = subprocess.Popen
+
+
 def _live_collect(goods_no: str, sort_type: str, authorize_live: bool) -> dict[str, Any]:
-    """D4-3b1 seam: NO live collection capability exists yet — always raises.
-    D4-3b2 replaces this with a guarded subprocess to run_brand20_queue_runner
-    (`--i-authorize-live-collection`) that maps batch_summary.json to first-class
-    outcomes (collect_done / collect_rate_limited / collect_manual_review / ...)."""
-    raise CollectNotAuthorized("live collect is not implemented until D4-3b2")
+    """D4-3b2: launch the EXISTING runner (re-gates + collects + routes the queue),
+    capture stdout, locate batch_summary.json, map the outcome. The caller has
+    already verified the two-key gate. Writes ONLY into a fresh artifact_root;
+    queue/DB mutations happen inside the runner and are acknowledged in the card.
+
+    NEVER passes --allow-open-tab / --dry-run / --check. shell=False, group-kill
+    on timeout, DATETIME_DESC-or-given primary sort, --max-items-per-session 1."""
+    repo_root = _repo_root()
+    run_tag = (f"{goods_no}__{sort_type}__"
+               f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}_{os.getpid()}")
+    artifact_root = repo_root.joinpath(*_COLLECT_RUNS_REL) / run_tag
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    argv = [
+        _collect_interpreter(),
+        str(repo_root.joinpath(*_RUNNER_SCRIPT_REL)),
+        "--goods-no", goods_no,
+        "--sort-type", sort_type,
+        "--i-authorize-live-collection",
+        "--artifact-root", str(artifact_root),
+        "--max-items-per-session", "1",
+    ]
+    log_path = artifact_root / _RUNNER_STDOUT_LOG
+    proc = _COLLECT_POPEN(
+        argv, cwd=str(repo_root), shell=False,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        start_new_session=True, text=True, env=dict(os.environ))
+    try:
+        out, _err = proc.communicate(timeout=_COLLECT_TIMEOUT_S)
+        exit_code = proc.returncode
+    except subprocess.TimeoutExpired:
+        _killpg(proc)
+        try:
+            out, _err = proc.communicate(timeout=10)
+        except Exception:  # noqa: BLE001
+            out = ""
+        log_path.write_text((out or "") + "\n[timeout: group-killed]\n",
+                            encoding="utf-8")
+        return {"outcome": "collect_failed", "executed": False,
+                "detail": f"timeout {_COLLECT_TIMEOUT_S}s (group-killed)",
+                "artifact_root": str(artifact_root)}
+
+    log_path.write_text(out or "", encoding="utf-8")
+    bs_path = _locate_batch_summary(artifact_root)
+    summary: Optional[dict[str, Any]] = None
+    if bs_path is not None:
+        try:
+            summary = json.loads(bs_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            summary = None
+    result = _map_collect_outcome(summary, exit_code=exit_code, stdout=out or "")
+    result["artifact_root"] = str(artifact_root)
+    if bs_path is not None:
+        result["batch_summary_path"] = str(bs_path)
+    return result
 
 
 _collect_fn: Callable[[str, str, bool], dict[str, Any]] = _live_collect
@@ -555,20 +710,94 @@ def confirm_collect(
 
     _clear_pending_action(operator_id)  # single-use BEFORE any execution attempt
 
-    # Two-key gate. In D4-3b1 this is the only place authorize_live is read; the
-    # planner NL path never sets it, so confirm via chat always lands here.
+    goods_no, sort_t = pend["goods_no"], pend["sort_type"]
+
+    # Two-key gate. `authorize_live` is set ONLY by the distinct deterministic
+    # phrase "라이브 수집 승인"; the planner / generic "진행해" path passes False, so
+    # broad NL can never live-collect.
     if not (_collect_live_enabled() and authorize_live):
         return _reply("action_blocked",
                       "⛔ 라이브 수집이 승인되지 않았습니다 "
                       f"({_COLLECT_ENV_FLAG} + 명시 per-turn 승인 필요).",
                       executed=False, failed_check="collect_not_authorized")
 
-    # Even when authorized, D4-3b1 has no live path: the seam raises.
+    # Audit BEFORE launch. Queue/DB mutations are runner-owned (acknowledged below).
+    _approval.append_record(
+        _approval.make_record(
+            target_slug=goods_no, current_state="collect_reviews",
+            approved_stage="live_collect",
+            prompt=(f"run_brand20_queue_runner --goods-no {goods_no} "
+                    f"--sort-type {sort_t} --i-authorize-live-collection"),
+            operator_discord_id=_op_key(operator_id),
+            execution_mode="local_run",
+            notes="live OY collect via runner subprocess; queue/DB owned by runner"),
+        approval_log_path)
+
     try:
-        _collect_fn(pend["goods_no"], pend["sort_type"], authorize_live)
+        res = _collect_fn(goods_no, sort_t, authorize_live)
     except CollectNotAuthorized:
+        # defensive: a seam that declines (e.g. capability removed) is not a run.
         return _reply("action_blocked",
-                      "⛔ 라이브 수집은 아직 구현되지 않았습니다 (D4-3b2 예정).",
+                      "⛔ 라이브 수집 경로가 구성되지 않았습니다.",
                       executed=False, failed_check="collect_live_not_enabled")
-    # Unreachable in D4-3b1 (seam always raises); defensive.
-    return _reply("action_confirm", "수집 경로가 구성되지 않았습니다.", executed=False)
+    except Exception as exc:  # noqa: BLE001 - report any launch/parse failure
+        return _reply("action_failed",
+                      f"⚠ 수집 실패: {exc.__class__.__name__}", executed=False)
+
+    return _format_collect_card(res, goods_no=goods_no, sort_type=sort_t)
+
+
+def _collect_artifacts(res: dict[str, Any]) -> dict[str, Any]:
+    extra = {}
+    for k in ("artifact_root", "batch_summary_path"):
+        if res.get(k):
+            extra[k] = res[k]
+    return extra
+
+
+def _format_collect_card(
+    res: dict[str, Any], *, goods_no: str, sort_type: str,
+) -> dict[str, Any]:
+    """Map a `_map_collect_outcome` result to a Discord card. No auto-render,
+    no send/publish — a done card explicitly defers the next step."""
+    outcome = res.get("outcome")
+    tail = _collect_artifacts(res)
+    g, s = goods_no, sort_type
+    if outcome == "collect_done":
+        return _reply("collect_done",
+                      f"✅ 수집 완료 (collect_done)\n- {g} / {s} · rows_inserted: "
+                      f"{res.get('rows_inserted')} · 분석가능: {res.get('review_count')}"
+                      f" · 중복: {res.get('duplicate_count')}\n"
+                      "- 큐/DB는 러너가 갱신 (acknowledged). 분석/렌더는 자동 실행 안 함.",
+                      executed=True, **tail)
+    if outcome == "collect_rate_limited":
+        return _reply("collect_rate_limited",
+                      "🟠 레이트리밋 (collect_rate_limited) — 실패 아님\n"
+                      f"- cursor 429 관측. 부분 수집 보존 (rows_inserted: "
+                      f"{res.get('rows_inserted')}).\n- retry_intent: "
+                      f"{res.get('retry_intent')} · retry_after_minutes: "
+                      f"{res.get('retry_after_minutes')} · DOM 복구 안 함.\n"
+                      '- ~90분 뒤 다시 제안 + "라이브 수집 승인"으로 재개 (INSERT OR IGNORE).',
+                      executed=True, retry_intent=res.get("retry_intent"),
+                      retry_after_minutes=res.get("retry_after_minutes"), **tail)
+    if outcome == "collect_manual_review":
+        return _reply("collect_manual_review",
+                      "🔵 수동 확인 필요 (collect_manual_review)\n"
+                      "- auth wall / 403 → manual_review_required. 큐: manual_checkpoint.\n"
+                      "- Chrome에서 로그인/휴먼체크 후 mark_brand20_checkpoint_certified로 해제.",
+                      executed=True, **tail)
+    if outcome == "collect_partial":
+        return _reply("collect_partial",
+                      f"🟡 부분 수집 (collect_partial)\n- {g} / {s} · rows_inserted: "
+                      f"{res.get('rows_inserted')}\n- 재실행 시 이어서 수집됩니다 (idempotent).",
+                      executed=True, **tail)
+    if outcome == "collect_blocked":
+        return _reply("action_blocked",
+                      f"⛔ 차단됨 (collect_blocked)\n- failed_check: "
+                      f"{res.get('failed_check')}\n- required_action: "
+                      f"{res.get('required_action')}\n- (수집 미완료)",
+                      executed=False, failed_check=res.get("failed_check"), **tail)
+    # collect_failed / unknown
+    return _reply("action_failed",
+                  f"⚠ 수집 실패 (collect_failed)\n- {res.get('detail')}",
+                  executed=False, **tail)
