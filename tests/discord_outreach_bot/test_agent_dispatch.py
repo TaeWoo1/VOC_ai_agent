@@ -73,11 +73,11 @@ class _Ctx:
             timeout_s=timeout_s, repo_root=self.repo, known_task_ids={TASK},
             agent_runs_path=self.spine)
 
-    def confirm(self, *, adapter=None, operator_id=OP):
+    def confirm(self, *, adapter=None, operator_id=OP, do_run=False):
         return disp.confirm_agent_run(
             operator_id, repo_root=self.repo, agent_runs_path=self.spine,
             agent_runs_dir=self.runs_dir, approval_log_path=self.approval,
-            adapter=adapter)
+            adapter=adapter, do_run=do_run)
 
     def statuses(self, run_id=None):
         recs = aruns.read_runs(self.spine)
@@ -232,16 +232,103 @@ def test_dispatch_maps_adapter_failure_status(ctx, status):
     assert out["report"].startswith("⚠ Agent run blocked/failed")
 
 
-# === claude_code_local rejected in dispatch ==================================
-def test_claude_code_local_rejected_in_dispatch(ctx):
-    p = ctx.propose(adapter_name="claude_code_local")
-    assert p["ok"]  # pre-run allows it (registered adapter)
+# === M6-D2: claude_code_local dry_run allowed (plan), edits rejected =========
+import agent_adapters.claude_code_local as ccl  # noqa: E402
+
+
+def _fake_claude_popen(*, stdout='{"result": "plan ok"}', returncode=0):
+    """A FakePopen for the real ClaudeCodeLocalAdapter, capturing argv/stdin."""
+    rec: dict = {"called": False}
+
+    class _FP:
+        def __init__(self, argv, **kwargs):
+            rec["called"] = True
+            rec["argv"] = argv
+            rec["kwargs"] = kwargs
+            self.pid = 4242
+            self.returncode = None
+
+        def communicate(self, input=None, timeout=None):
+            rec["input"] = input
+            self.returncode = returncode
+            return stdout, ""
+
+        def kill(self):
+            rec["killed"] = True
+
+    return _FP, rec
+
+
+def test_claude_code_local_dry_run_allowed_plan_mode(ctx, monkeypatch):
+    # real ClaudeCodeLocalAdapter via the registry, but FAKE subprocess (no claude)
+    monkeypatch.setattr(ccl, "which", lambda _b: "/bin/claude")
+    fp, rec = _fake_claude_popen()
+    monkeypatch.setattr(ccl, "_Popen", fp)
+
+    p = ctx.propose(adapter_name="claude_code_local", mode="plan")
+    out = ctx.confirm()  # no injected adapter -> registry claude_code_local
+    assert out["outcome"] == "dry_run" and out["ok"]
+    assert ctx.statuses(p["run_id"]) == [
+        "proposed", "approved", "running", "dry_run"]
+    # exact dry_run argv shape, via the dispatch path
+    argv = rec["argv"]
+    assert argv[0] == "claude" and "-p" in argv
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert "--add-dir" in argv
+    assert "--no-session-persistence" in argv and "--disable-slash-commands" in argv
+    assert "--bare" not in argv
+    assert "acceptEdits" not in argv          # never the edit mode
+    assert rec["input"] == ctx.prompt.read_text(encoding="utf-8")  # prompt via stdin
+    assert rec["kwargs"]["stdin"] is __import__("subprocess").PIPE
+    assert rec["kwargs"].get("shell", False) is False
+    assert rec["kwargs"]["start_new_session"] is True
+    # artifacts captured, worktree preserved
+    assert (ctx.runs_dir / p["run_id"] / "stdout.log").exists()
+    assert (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).is_dir()
+
+
+def test_claude_code_local_bounded_edit_rejected(ctx, monkeypatch):
+    # guard against any accidental real claude invocation
+    fp, rec = _fake_claude_popen()
+    monkeypatch.setattr(ccl, "_Popen", fp)
+    monkeypatch.setattr(ccl, "which", lambda _b: "/bin/claude")
+    p = ctx.propose(adapter_name="claude_code_local", mode="bounded_edit")
+    assert p["ok"]  # pre-run allows bounded_edit as a valid mode
     out = ctx.confirm()
     assert out["outcome"] == "blocked"
-    assert out["reason"].startswith("adapter_not_allowed_in_m6d1")
+    assert out["reason"].startswith("dry_run_only_in_m6d2")
     assert ctx.statuses(p["run_id"]) == ["proposed", "approved", "blocked"]
-    # never created a worktree or run_dir
+    assert rec["called"] is False  # adapter never invoked
     assert not (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).exists()
+
+
+def test_claude_code_local_do_run_rejected(ctx, monkeypatch):
+    fp, rec = _fake_claude_popen()
+    monkeypatch.setattr(ccl, "_Popen", fp)
+    monkeypatch.setattr(ccl, "which", lambda _b: "/bin/claude")
+    p = ctx.propose(adapter_name="claude_code_local", mode="plan")
+    out = ctx.confirm(do_run=True)  # do_run requested -> refused even in plan
+    assert out["outcome"] == "blocked"
+    assert out["reason"].startswith("dry_run_only_in_m6d2")
+    assert rec["called"] is False
+    assert not (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).exists()
+
+
+def test_dispatch_never_calls_run_for_claude(ctx, monkeypatch):
+    # if dispatch ever called adapter.run() it would raise here.
+    monkeypatch.setattr(ccl, "which", lambda _b: "/bin/claude")
+    fp, _ = _fake_claude_popen()
+    monkeypatch.setattr(ccl, "_Popen", fp)
+    real = ccl.ClaudeCodeLocalAdapter()
+
+    def _boom(*a, **k):
+        raise AssertionError("adapter.run() must not be called in M6-D2")
+
+    monkeypatch.setattr(real, "run", _boom)
+    ctx.propose(adapter_name="claude_code_local", mode="plan")
+    out = ctx.confirm(adapter=real)
+    assert out["outcome"] == "dry_run"
 
 
 # === spine / no copy-back ====================================================
@@ -271,6 +358,31 @@ def test_no_api_key_required(monkeypatch, ctx):
     ctx.propose()
     out = ctx.confirm()
     assert out["ok"] and out["outcome"] == "dry_run"
+
+
+# === optional gated live dry_run smoke (skipped by default) ==================
+@pytest.mark.skipif(
+    __import__("os").environ.get("RUN_LIVE_CLAUDE_CODE_DRY_RUN_TEST") != "1",
+    reason="live Claude Code dry_run smoke disabled "
+           "(set RUN_LIVE_CLAUDE_CODE_DRY_RUN_TEST=1)")
+def test_live_claude_dry_run_smoke(ctx):
+    """Trivial, plan-mode, short-timeout live dry_run through the lifecycle.
+
+    Temp worktree only; no project task; no repo mutation expected. NOT run by
+    default and never invoked during M6-D2 implementation/CI.
+    """
+    ctx.prompt.write_text("Return only the word OK.", encoding="utf-8")
+    if not ccl.ClaudeCodeLocalAdapter().is_available():
+        pytest.skip("claude binary not available")
+    p = disp.propose_agent_run(
+        operator_id=OP, agent_name=AGENT, stage=STAGE, task_id=TASK,
+        adapter_name="claude_code_local", prompt_path=ctx.prompt, mode="plan",
+        timeout_s=60, repo_root=ctx.repo, known_task_ids={TASK},
+        agent_runs_path=ctx.spine)
+    out = ctx.confirm()
+    assert out["outcome"] in ("dry_run", "failed", "timed_out")
+    # plan mode must not have changed repo files in the worktree
+    assert wt.list_changed_files(ctx.repo / wt.WORKTREE_BASE / p["run_id"]) == ()
 
 
 def test_dispatch_module_no_subprocess_or_anthropic():
