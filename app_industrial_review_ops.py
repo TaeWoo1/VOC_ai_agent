@@ -542,6 +542,28 @@ def _resolve_scope(
     return set(selected), selected, f"선택 상품 {len(selected)}개"
 
 
+def scope_caption_text(result: dict) -> str:
+    """Operator-facing scope line for the summary / review tabs. Pure."""
+    products = result.get("scope_products") or []
+    if not products:
+        return "전체 상품 기준"
+    return f"선택 상품 기준: {len(products)}개 상품"
+
+
+def product_status_rows(product_summaries: list[dict]) -> list[dict]:
+    """Format product_summaries into 상품별 리뷰 상태 table rows. Pure."""
+    return [
+        {
+            "상품명": s["product_name"],
+            "리뷰 수": s["review_count"],
+            "평균 평점": s["average_rating"] if s["average_rating"] is not None else "-",
+            "저평점 수": s["low_rating_count"],
+            "최근 리뷰 수": s["recent_review_count"],
+        }
+        for s in product_summaries
+    ]
+
+
 def _review_matches_filter(
     review: IndustrialReview,
     tags: list[str],
@@ -907,6 +929,28 @@ def _render_sidebar() -> None:
             )
             max_issue_cards, max_evidence = issue_display_mode_params(issue_mode)
 
+        # 분석 범위 (product scope) — available after the first analysis, sourced
+        # from the last result's product_summaries. Empty = 전체 상품. Applied only
+        # on the next 분석 시작 click (no auto-rerun -> no surprise LLM cost).
+        prev_result = st.session_state.get("result")
+        prev_summaries = (prev_result or {}).get("product_summaries") or []
+        if prev_summaries:
+            scope_options = [s["product_name"] for s in prev_summaries]
+            # Drop any retained selection no longer present (e.g. after a new file)
+            # so the multiselect never errors on a stale default.
+            retained = st.session_state.get("scope_select")
+            if retained:
+                pruned = [v for v in retained if v in scope_options]
+                if pruned != retained:
+                    st.session_state["scope_select"] = pruned
+            st.multiselect(
+                "분석 범위 (상품 선택 · 비우면 전체 상품)",
+                options=scope_options,
+                format_func=truncate_product_label,
+                key="scope_select",
+            )
+            st.caption("상품을 고른 뒤 '분석 시작'을 다시 누르면 선택 상품만 분석합니다.")
+
         run = st.button("분석 시작", type="primary", disabled=uploaded is None)
 
         if run:
@@ -930,6 +974,10 @@ def _render_sidebar() -> None:
             if do_cluster and "rag_index" in st.session_state:
                 reuse_emb = st.session_state["rag_index"].vectors_by_review_id()
 
+            # Empty selection (or none yet) -> 전체 상품; generate() also guards
+            # absent names by falling back to the full corpus.
+            scope_selected = set(st.session_state.get("scope_select") or [])
+
             with st.spinner("분석 중..."):
                 result = generate(
                     rows,
@@ -943,6 +991,7 @@ def _render_sidebar() -> None:
                     cluster_max_clusters=int(max_issue_cards),
                     cluster_max_evidence=int(max_evidence),
                     reuse_embeddings=reuse_emb,
+                    product_filter=scope_selected or None,
                 )
             st.session_state["result"] = result
             st.session_state["report_title"] = title.strip() or "report"
@@ -1023,6 +1072,7 @@ def _render_overall_status(result: dict) -> None:
     if not rs:
         return
     st.subheader("전체 리뷰 상태")
+    st.caption(scope_caption_text(result))
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("분석 대상 리뷰", f"{rs['total']}건")
@@ -1048,6 +1098,20 @@ def _render_overall_status(result: dict) -> None:
         hide_index=True,
     )
     st.caption(rs["interpretation"])
+
+
+def _render_product_status(result: dict) -> None:
+    """상품별 리뷰 상태 table (full corpus), so the operator can pick a product to
+    narrow to via the sidebar 분석 범위. Collapsed by default to keep the summary
+    compact when there are many products."""
+    summaries = result.get("product_summaries") or []
+    if not summaries:
+        return
+    with st.expander(f"상품별 리뷰 상태 ({len(summaries)}개 상품)", expanded=False):
+        st.caption("상품을 좁혀 보려면 왼쪽 '분석 범위'에서 상품을 고르고 '분석 시작'을 다시 누르세요.")
+        st.dataframe(
+            product_status_rows(summaries), use_container_width=True, hide_index=True
+        )
 
 
 def _render_summary_tab() -> None:
@@ -1076,6 +1140,7 @@ def _render_summary_tab() -> None:
 
     st.divider()
     _render_overall_status(result)
+    _render_product_status(result)
 
     st.divider()
     st.subheader("반복 이슈")
@@ -1187,6 +1252,7 @@ def _render_review_check_tab() -> None:
         return
 
     store_path = result.get("store_path")
+    st.caption(scope_caption_text(result))
 
     st.subheader("신규 리뷰")
     ns = result.get("new_summary")
