@@ -34,7 +34,11 @@ from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
 from src.voc.review_ops.industrial.normalize import normalize_rows
 from src.voc.review_ops.industrial.render_html import render_report_html
-from src.voc.review_ops.industrial.report_model import RECENT_DAYS, build_report
+from src.voc.review_ops.industrial.report_model import (
+    LOW_RATING_THRESHOLD,
+    RECENT_DAYS,
+    build_report,
+)
 from src.voc.review_ops.industrial.schema import IndustrialReview
 from src.voc.review_ops.industrial.taxonomy import CATEGORIES, CATEGORY_BY_ID
 
@@ -369,6 +373,160 @@ def compute_new_review_summary(
 
 
 # ---------------------------------------------------------------------------
+# Overall review context (전체 리뷰 상태) + review filters (pure; no Streamlit)
+# ---------------------------------------------------------------------------
+
+# Operator-facing quick filters for the 리뷰 확인 tab: (label, key). These are
+# pure membership filters over the already-classified active reviews — no new
+# classification, scoring, or thresholds. "우선 확인" reuses the worklist ids;
+# "반복 이슈 관련 리뷰" reuses the verified repeated-issue evidence ids; "신규 리뷰"
+# reuses the store's new-review ids. Counts/views degrade to 0 when a feature
+# (store / repeated issues) did not run.
+REVIEW_FILTERS: list[tuple[str, str]] = [
+    ("전체", "all"),
+    ("신규 리뷰", "new"),
+    ("우선 확인", "priority"),
+    ("1~3점", "low_rating"),
+    ("답글 필요", "needs_reply"),
+    ("상세페이지 후보", "detail_page"),
+    ("반복 이슈 관련 리뷰", "repeated_issue"),
+]
+
+# Display-only interpretation threshold (NOT a scoring/cluster threshold): once
+# the low-rating share among rated reviews reaches this, the summary nudges the
+# operator toward the worklist first instead of the "mostly positive" framing.
+LOW_RATING_SHARE_HIGH = 0.2
+POSITIVE_INTERPRETATION = (
+    "전체적으로는 고평점 리뷰가 많지만, 우선 확인 리뷰 안에서는 아래 이슈가 반복됩니다."
+)
+LOW_RATING_INTERPRETATION = (
+    "저평점 리뷰 비중이 있어 우선 확인 리뷰를 먼저 보는 것이 좋습니다."
+)
+
+
+def compute_rating_summary(
+    active_reviews: list[IndustrialReview],
+    recent_days: int,
+    today: date,
+) -> dict:
+    """Overall rating context for the 전체 리뷰 상태 section (pure; no Streamlit).
+
+    Counts are over active (deduped) reviews. ``distribution`` covers 5..1;
+    reviews with no rating are counted in ``unknown_rating`` only. ``low_count``
+    is ratings <= ``LOW_RATING_THRESHOLD`` (1~3점). ``recent_count`` is reviews
+    dated within ``recent_days`` of ``today`` (unknown dates excluded).
+    ``interpretation`` is display copy selected by the low-rating share — it is
+    NOT a scoring decision.
+    """
+    total = len(active_reviews)
+    dist = {b: 0 for b in ("5", "4", "3", "2", "1")}
+    rated = 0
+    rating_sum = 0.0
+    unknown_rating = 0
+    low_count = 0
+    recent_count = 0
+    for r in active_reviews:
+        if r.rating is None:
+            unknown_rating += 1
+        else:
+            bucket = str(int(round(r.rating)))
+            if bucket in dist:
+                dist[bucket] += 1
+            rated += 1
+            rating_sum += r.rating
+            if r.rating <= LOW_RATING_THRESHOLD:
+                low_count += 1
+        if r.review_date is not None and 0 <= (today - r.review_date).days <= recent_days:
+            recent_count += 1
+
+    average = round(rating_sum / rated, 1) if rated else None
+    low_share = (low_count / rated) if rated else 0.0
+    interpretation = (
+        LOW_RATING_INTERPRETATION
+        if low_share >= LOW_RATING_SHARE_HIGH
+        else POSITIVE_INTERPRETATION
+    )
+    return {
+        "total": total,
+        "rated_count": rated,
+        "average": average,
+        "distribution": dist,
+        "unknown_rating": unknown_rating,
+        "low_count": low_count,
+        "low_share": low_share,
+        "recent_count": recent_count,
+        "interpretation": interpretation,
+    }
+
+
+def _review_matches_filter(
+    review: IndustrialReview,
+    tags: list[str],
+    filter_key: str,
+    *,
+    new_ids: set[str],
+    worklist_ids: set[str],
+    issue_ids: set[str],
+) -> bool:
+    """Whether one classified review matches a REVIEW_FILTERS key. Pure."""
+    if filter_key == "new":
+        return review.review_id in new_ids
+    if filter_key == "priority":
+        return review.review_id in worklist_ids
+    if filter_key == "low_rating":
+        return review.rating is not None and review.rating <= LOW_RATING_THRESHOLD
+    if filter_key == "needs_reply":
+        return "needs_reply" in tags
+    if filter_key == "detail_page":
+        return "detail_page_faq_candidate" in tags
+    if filter_key == "repeated_issue":
+        return review.review_id in issue_ids
+    return True  # "all" / unknown key -> no filtering
+
+
+def compute_filter_counts(
+    tagged: list[tuple[IndustrialReview, list[str]]],
+    *,
+    new_ids: set[str],
+    worklist_ids: set[str],
+    issue_ids: set[str],
+) -> dict[str, int]:
+    """Count active reviews matching each REVIEW_FILTERS key (pure)."""
+    counts: dict[str, int] = {}
+    for _label, key in REVIEW_FILTERS:
+        counts[key] = sum(
+            1
+            for review, tags in tagged
+            if _review_matches_filter(
+                review, tags, key,
+                new_ids=new_ids, worklist_ids=worklist_ids, issue_ids=issue_ids,
+            )
+        )
+    return counts
+
+
+def filter_review_items(
+    tagged: list[tuple[IndustrialReview, list[str]]],
+    filter_key: str,
+    *,
+    new_ids: set[str],
+    worklist_ids: set[str],
+    issue_ids: set[str],
+) -> list[dict]:
+    """Active reviews matching ``filter_key`` as display dicts, newest first. Pure."""
+    matched = [
+        (review, tags)
+        for review, tags in tagged
+        if _review_matches_filter(
+            review, tags, filter_key,
+            new_ids=new_ids, worklist_ids=worklist_ids, issue_ids=issue_ids,
+        )
+    ]
+    matched.sort(key=lambda rt: (rt[0].review_date or date.min), reverse=True)
+    return [_display_item(r, tags) for r, tags in matched]
+
+
+# ---------------------------------------------------------------------------
 # Repeated-issue engine selection (discovery primary, legacy fallback)
 # ---------------------------------------------------------------------------
 
@@ -492,11 +650,28 @@ def generate(
         for w in report.worklist[:20]
     ]
 
+    # Review-id sets reused by the 전체 리뷰 상태 stats and the 리뷰 확인 filters.
+    # Pure derivations from the report — computed before the (fail-soft) store
+    # block so the filters work even if the store cannot be opened.
+    worklist_review_ids = {w.review_id for w in report.worklist}
+    issue_review_ids: set[str] = set()
+    for c in report.issue_clusters:
+        issue_review_ids.update(c.review_ids)
+
+    # Resolve the same "today" build_report uses (latest known review date for a
+    # sample), so the recent-window count matches the worklist window.
+    resolved_today = today
+    if resolved_today is None:
+        known_dates = [r.review_date for r in active if r.review_date is not None]
+        resolved_today = max(known_dates) if known_dates else date.today()
+    rating_summary = compute_rating_summary(active, recent_days, resolved_today)
+
     # Persist this upload to the local store and detect which reviews are new
     # vs. previous uploads. Fail-soft: any store error leaves the report intact
     # and simply skips the new-review comparison.
     new_summary: dict | None = None
     store_status: dict | None = None
+    new_ids: set[str] = set()
     try:
         conn = store.open_store(store_path)
         try:
@@ -504,10 +679,8 @@ def generate(
             upsert = store.upsert_reviews(conn, upload_id, active)
         finally:
             conn.close()
-        worklist_ids = {w.review_id for w in report.worklist}
-        new_summary = compute_new_review_summary(
-            tagged, set(upsert["new_review_ids"]), worklist_ids
-        )
+        new_ids = set(upsert["new_review_ids"])
+        new_summary = compute_new_review_summary(tagged, new_ids, worklist_review_ids)
         store_status = {"status": "ok"}
     except Exception as e:  # whole-feature fallback; report still renders
         store_status = {"status": "error", "error": str(e)}
@@ -531,6 +704,10 @@ def generate(
         "store_status": store_status,
         "store_path": store_path,
         "worklist_items": worklist_items,
+        "rating_summary": rating_summary,
+        "worklist_review_ids": worklist_review_ids,
+        "issue_review_ids": issue_review_ids,
+        "new_review_ids": new_ids,
     }
 
 
@@ -725,6 +902,44 @@ def _render_issue_card(item: dict) -> None:
                     st.write(rep["리뷰"])
 
 
+def _render_overall_status(result: dict) -> None:
+    """Compact 전체 리뷰 상태: corpus-level rating context, above repeated issues.
+
+    Gives the full picture (how many reviews, average rating, how many are
+    low-rating, how much is recent) so a repeated issue of N건 reads as a signal
+    within the whole corpus rather than "the only problem".
+    """
+    rs = result.get("rating_summary")
+    if not rs:
+        return
+    st.subheader("전체 리뷰 상태")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("분석 대상 리뷰", f"{rs['total']}건")
+    c2.metric("평균 평점", f"{rs['average']:.1f}점" if rs["average"] is not None else "미상")
+    c3.metric("저평점(1~3점)", f"{rs['low_count']}건")
+    c4.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일", f"{rs['recent_count']}건")
+
+    c5, c6 = st.columns(2)
+    worklist_total = result.get("today_count", 0) + result.get("week_count", 0)
+    c5.metric("우선 확인 리뷰", f"{worklist_total}건")
+    c6.metric("반복 이슈", f"{result.get('issue_count', 0)}건")
+
+    dist = rs["distribution"]
+    st.caption("평점 분포")
+    st.dataframe(
+        [
+            {
+                "5점": dist["5"], "4점": dist["4"], "3점": dist["3"],
+                "2점": dist["2"], "1점": dist["1"], "미상": rs["unknown_rating"],
+            }
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption(rs["interpretation"])
+
+
 def _render_summary_tab() -> None:
     result = st.session_state.get("result")
     if not result:
@@ -749,12 +964,13 @@ def _render_summary_tab() -> None:
         m3.metric("채널 수", f"{len(result['channels'])}개")
         st.caption("저장소를 열지 못해 신규/기존 비교를 건너뛰었습니다. (분석은 정상입니다.)")
 
-    p1, p2 = st.columns(2)
-    p1.metric("우선 확인 (전체)", f"{result['today_count']}건")
-    p2.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일 내 확인", f"{result['week_count']}건")
+    st.divider()
+    _render_overall_status(result)
 
     st.divider()
     st.subheader("반복 이슈")
+    st.caption("반복 이슈는 같은 문제가 2건 이상 확인된 묶음입니다.")
+    st.caption("한 건짜리 이슈는 우선 확인 리뷰에서 확인할 수 있습니다.")
     issue_items = result.get("issue_items") or []
     if issue_items:
         for item in issue_items:
@@ -782,6 +998,33 @@ def _render_summary_tab() -> None:
 # ---------------------------------------------------------------------------
 # Tab 2 — 리뷰 확인
 # ---------------------------------------------------------------------------
+
+
+def _render_review_filter_views(result: dict) -> None:
+    """Quick filtered views over active reviews (reuses tags/worklist/issue ids).
+
+    The selectbox shows each filter's count so the operator sees, e.g., how many
+    1~3점 or 반복 이슈 관련 reviews exist before drilling in. No new classification.
+    """
+    tagged = result["tagged"]
+    new_ids = result.get("new_review_ids") or set()
+    worklist_ids = result.get("worklist_review_ids") or set()
+    issue_ids = result.get("issue_review_ids") or set()
+
+    counts = compute_filter_counts(
+        tagged, new_ids=new_ids, worklist_ids=worklist_ids, issue_ids=issue_ids
+    )
+    labels = [f"{label} ({counts[key]}건)" for label, key in REVIEW_FILTERS]
+    choice = st.selectbox("리뷰 보기", labels, index=0)
+    chosen_key = REVIEW_FILTERS[labels.index(choice)][1]
+
+    items = filter_review_items(
+        tagged, chosen_key, new_ids=new_ids, worklist_ids=worklist_ids, issue_ids=issue_ids
+    )
+    st.write(f"해당 리뷰: {len(items)}건")
+    if items:
+        preview = [{k: v for k, v in it.items() if k != "review_id"} for it in items]
+        st.dataframe(preview, use_container_width=True, hide_index=True)
 
 
 def _render_review_filter(result: dict) -> None:
@@ -853,6 +1096,10 @@ def _render_review_check_tab() -> None:
         _render_review_editors(worklist_items, store_path, key_prefix="wl")
     else:
         st.caption("우선 확인할 리뷰가 없습니다.")
+
+    st.divider()
+    st.subheader("리뷰 모아보기")
+    _render_review_filter_views(result)
 
     st.divider()
     st.subheader("리뷰 찾기")
