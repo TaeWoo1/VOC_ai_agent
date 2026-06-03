@@ -157,12 +157,17 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
          executes, creates a graph, approves, cancels, or runs the runner.
       5. deterministic read-only fallback when the planner is disabled/unavailable
          (also the default): the existing M5-A/M5-A.5 conversational answer."""
-    # 0a. D4-1 intent planner (REPORT-ONLY, above the deterministic shortcut).
-    #     Inert in production (no live backend yet -> returns None), so behavior
-    #     is unchanged by default; when active it reports the parsed intent +
-    #     category + confirmation policy WITHOUT executing anything, and on
-    #     unavailable/ambiguous output it falls through to the shortcut below.
-    planned = _intent.report_only(text, operator_discord_id=operator_discord_id)
+    # 0a. D4-2 intent planner -> dispatcher (above the deterministic shortcut).
+    #     Inert in production (no live backend until D4-2b -> returns None), so
+    #     behavior is unchanged by default. When a backend is wired, it parses NL
+    #     into a validated intent and routes ONLY the D4-2 allowlist (read-only +
+    #     propose/confirm-dry_run/cancel/cleanup) to the existing dispatch
+    #     functions; collect/render/send/publish stay report-only, and
+    #     bounded_edit is never reachable here. Ambiguous/unavailable -> None ->
+    #     falls through to the deterministic shortcut below.
+    planned = _intent.plan_and_act(
+        text, operator_discord_id=operator_discord_id,
+        approval_log_path=approvals_path, generated_prompts_dir=generated_prompts_dir)
     if planned is not None:
         return planned
 

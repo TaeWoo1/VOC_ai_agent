@@ -93,3 +93,43 @@ def report_only(
         "validated": v,
         "executed": False,
     }
+
+
+def plan_and_act(
+    text: str, *,
+    operator_discord_id: Optional[str] = None,
+    repo_root: Optional[Any] = None,
+    agent_runs_path: Optional[Any] = None,
+    agent_runs_dir: Optional[Any] = None,
+    approval_log_path: Optional[Any] = None,
+    generated_prompts_dir: Optional[Any] = None,
+    known_task_ids: Optional[Any] = None,
+    adapter: Any = None,
+    responder: Optional[Callable[[list[dict[str, str]]], str]] = None,
+) -> Optional[dict[str, Any]]:
+    """D4-2: plan -> validate -> DISPATCH (execute allowlist) or report-only card.
+
+    Same inert-by-default contract as report_only: with no responder (D4-2 has no
+    live backend; that is D4-2b) this returns None so the deterministic shortcut
+    + existing pipeline run unchanged. Tests inject a `responder`. Execution is
+    delegated to intent_dispatcher, which only runs the D4-2 allowlist and never
+    reaches bounded_edit / collect / render / send / publish.
+    """
+    if responder is None:
+        return None
+    try:
+        raw = responder(build_messages(text))
+    except Exception:
+        return None
+    obj = parse_intent(raw)
+    if obj is None:
+        return None
+
+    import intent_dispatcher as _dispatch
+    v = _intents.validate(obj)
+    return _dispatch.dispatch_intent(
+        v, operator_discord_id=operator_discord_id, repo_root=repo_root,
+        agent_runs_path=agent_runs_path, agent_runs_dir=agent_runs_dir,
+        approval_log_path=approval_log_path,
+        generated_prompts_dir=generated_prompts_dir,
+        known_task_ids=known_task_ids, adapter=adapter)
