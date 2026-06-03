@@ -47,6 +47,27 @@ def is_enabled() -> bool:
     return os.environ.get(_ENV_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _resolve_responder(
+    responder: Optional[Callable[[list[dict[str, str]]], str]],
+) -> Optional[Callable[[list[dict[str, str]]], str]]:
+    """Pick the planner backend (D4-2b).
+
+    - An injected `responder` (tests) always wins.
+    - Else, ONLY if AGENT_INTENT_PLANNER_ENABLED is set AND the local `claude`
+      binary is present, use the live local-Claude backend.
+    - Otherwise None -> plan_and_act returns None -> deterministic fallback.
+    Default (flag unset) stays inert: no live Claude, no behavior change.
+    """
+    if responder is not None:
+        return responder
+    if not is_enabled():
+        return None
+    import intent_planner_backend as _backend
+    if not _backend.is_available():
+        return None
+    return _backend.local_claude_responder
+
+
 def build_messages(text: str) -> list[dict[str, str]]:
     return [{"role": "user", "content": text}]
 
@@ -115,6 +136,7 @@ def plan_and_act(
     delegated to intent_dispatcher, which only runs the D4-2 allowlist and never
     reaches bounded_edit / collect / render / send / publish.
     """
+    responder = _resolve_responder(responder)
     if responder is None:
         return None
     try:
