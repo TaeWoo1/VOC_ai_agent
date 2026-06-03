@@ -6,7 +6,7 @@ The actual API client + Streamlit button land in I2 and are not tested here.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 
 from src.voc.review_ops.industrial import notion_export as nx
@@ -16,9 +16,12 @@ from src.voc.review_ops.industrial.notion_export import (
     NO_NEEDS_REPLY_TEXT,
     NOTION_API_VERSION,
     SECTION_TITLES,
+    build_database_properties,
     build_notion_blocks,
+    build_notion_database_payload,
     build_notion_payload,
     export_to_notion,
+    notion_database_row_title,
     notion_page_title,
     resolve_notion_config,
 )
@@ -514,3 +517,167 @@ def test_default_transport_builds_post_request(monkeypatch):
 
     decoded = json.loads(seen["body"].decode("utf-8"))
     assert decoded["parent"]["page_id"] == "parent-real"
+
+
+# --- J1: database row payload builder (pure, no network) --------------------
+
+NOW = datetime(2026, 1, 21, 20, 33, 46)
+
+
+def _db_result(scope_products, **overrides):
+    """A result tailored for DB-property tests: control scope + counts."""
+    result = _full_result()
+    result["scope_products"] = list(scope_products)
+    result["worklist_review_ids"] = set(overrides.pop("worklist_review_ids", []))
+    result.update(overrides)
+    return result
+
+
+def test_db_title_includes_time_scope_and_issue_count():
+    result = _db_result(["a", "b", "c", "d", "e", "f"], issue_count=4)
+    title = notion_database_row_title(result, NOW)
+    assert "리뷰 점검" in title
+    assert "01/21 20:33" in title       # MM/DD HH:mm
+    assert "선택 6개" in title           # scope_short
+    assert "이슈 4건" in title           # issue count
+
+
+def test_db_title_scope_short_full():
+    title = notion_database_row_title(_db_result([], issue_count=0), NOW)
+    assert "전체" in title
+
+
+def test_db_payload_parent_is_database_and_id_echoed():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert payload["parent"] == {"type": "database_id", "database_id": "db-123"}
+
+
+def test_db_payload_children_equals_blocks():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert payload["children"] == build_notion_blocks(_full_result())
+
+
+def test_db_payload_block_count_under_100():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert len(payload["children"]) < 100
+
+
+def test_db_properties_have_expected_type_wrappers():
+    props = build_database_properties(
+        _db_result(["전선몰딩"], worklist_review_ids=["w1", "w2"]), NOW
+    )
+    assert "title" in props["이름"]
+    assert "start" in props["분석일시"]["date"]
+    assert "rich_text" in props["분석 범위"]
+    assert "name" in props["범위 유형"]["select"]
+    assert isinstance(props["리뷰 수"]["number"], int)
+    assert isinstance(props["전체 리뷰 수"]["number"], int)
+    assert isinstance(props["저평점 수"]["number"], int)
+    assert isinstance(props["우선 확인 수"]["number"], int)
+    assert isinstance(props["반복 이슈 수"]["number"], int)
+    assert "rich_text" in props["주요 이슈"]
+    assert "name" in props["우선도"]["select"]
+
+
+def test_db_properties_map_values():
+    result = _db_result(["전선몰딩"], worklist_review_ids=["w1", "w2", "w3"])
+    props = build_database_properties(result, NOW)
+    assert props["분석 범위"]["rich_text"][0]["text"]["content"] == "선택 상품 6개"
+    assert props["리뷰 수"]["number"] == 1141
+    assert props["전체 리뷰 수"]["number"] == 2962
+    assert props["저평점 수"]["number"] == 210
+    assert props["우선 확인 수"]["number"] == 3
+    assert props["반복 이슈 수"]["number"] == 2
+
+
+def test_db_status_never_set():
+    props = build_database_properties(_full_result(), NOW)
+    assert "상태" not in props
+
+
+def test_db_priority_always_set():
+    props = build_database_properties(_full_result(), NOW)
+    assert "우선도" in props
+
+
+def test_db_new_review_count_omitted_when_missing():
+    result = _full_result()
+    result.pop("new_summary", None)
+    props = build_database_properties(result, NOW)
+    assert "신규 리뷰 수" not in props
+
+
+def test_db_new_review_count_present_when_available():
+    result = _full_result()
+    result["new_summary"] = {"new_count": 17}
+    props = build_database_properties(result, NOW)
+    assert props["신규 리뷰 수"]["number"] == 17
+
+
+def test_db_average_omitted_when_none():
+    result = _full_result()
+    result["rating_summary"] = {"average": None, "low_count": 0, "total": 0}
+    props = build_database_properties(result, NOW)
+    assert "평균 평점" not in props
+
+
+def test_db_average_present_when_available():
+    props = build_database_properties(_full_result(), NOW)
+    assert props["평균 평점"]["number"] == 3.1
+
+
+def test_db_scope_kind_full():
+    assert nx._scope_kind(_db_result([])) == "전체 상품"
+
+
+def test_db_scope_kind_single():
+    assert nx._scope_kind(_db_result(["전선몰딩"])) == "개별 상품"
+
+
+def test_db_scope_kind_multiple():
+    assert nx._scope_kind(_db_result(["a", "b"])) == "선택 상품"
+
+
+def test_db_priority_high_on_two_issues():
+    result = _db_result([], issue_count=2, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 10}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_high_on_low_rating_count():
+    result = _db_result([], issue_count=0, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 2.0, "low_count": 10, "total": 50}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_high_on_priority_count():
+    result = _db_result(
+        [], issue_count=0, worklist_review_ids=[f"w{i}" for i in range(10)]
+    )
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_medium_on_some_signal():
+    result = _db_result([], issue_count=1, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "보통"
+
+
+def test_db_priority_low_when_quiet():
+    result = _db_result([], issue_count=0, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.8, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "낮음"
+
+
+def test_db_key_issues_is_rich_text_and_preserves_commas():
+    result = _full_result()
+    result["issue_items"] = [
+        _issue("접착력 문제, 절단 시 깨짐"),
+        _issue("표면 자국, 변색 우려"),
+    ]
+    props = build_database_properties(result, NOW)
+    content = props["주요 이슈"]["rich_text"][0]["text"]["content"]
+    assert "접착력 문제, 절단 시 깨짐" in content      # comma-bearing title intact
+    assert "표면 자국, 변색 우려" in content
+    assert " · " in content                          # titles joined

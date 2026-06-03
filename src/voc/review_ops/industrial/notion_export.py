@@ -25,7 +25,7 @@ import json
 import os
 import urllib.request
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 # --- caps (keep total blocks < 100; surfaced, never silent) -----------------
@@ -37,6 +37,7 @@ MAX_NEEDS_REPLY = 5
 MAX_DETAIL_CANDIDATES = 6
 MAX_ACTION_ITEMS = 6
 MAX_CEO_ISSUES = 3  # key issues named in the CEO summary / action list
+MAX_DB_KEY_ISSUES = 5  # issue titles named in the DB row's 주요 이슈 column
 QUOTE_MAXLEN = 160  # quotes are kept short in this layout
 PRODUCT_LABEL_MAXLEN = 22  # Notion-only short product label
 _RICH_TEXT_MAXLEN = 1900  # Notion hard limit is 2000 per rich_text content
@@ -473,6 +474,116 @@ def build_notion_payload(result: dict, parent_page_id: str, today: date) -> dict
     return {
         "parent": {"type": "page_id", "page_id": parent_page_id},
         "properties": {"title": {"title": _rich_text(title)}},
+        "children": build_notion_blocks(result),
+    }
+
+
+# --- database row payload builder (J1) --------------------------------------
+#
+# A DB-row export is the same POST /v1/pages call as the page export, but the
+# parent is a database and the page carries comparison/sort metrics as Notion
+# properties. The body (children) is the SAME build_notion_blocks(result), so
+# both surfaces stay in sync. Pure assembly only — no client, no env, no time
+# source: the caller injects ``now`` so the builder is deterministic/testable.
+
+
+def _scope_short(result: dict) -> str:
+    """Compact scope token for the DB row title: 전체 / 선택 N개."""
+    n = len(result.get("scope_products") or [])
+    if n == 0:
+        return "전체"
+    return f"선택 {n}개"
+
+
+def _scope_kind(result: dict) -> str:
+    """Range type for the 범위 유형 Select. Derived from product count only —
+    the result does not carry preset-group identity, so a 2+ pick is reported
+    as 선택 상품, never claimed as a named 상품군."""
+    n = len(result.get("scope_products") or [])
+    if n == 0:
+        return "전체 상품"
+    if n == 1:
+        return "개별 상품"
+    return "선택 상품"
+
+
+def _compute_priority(result: dict) -> str:
+    """Deterministic 우선도 for the row's Select. No causal claim — purely a
+    triage label off counts the operator can see elsewhere in the report."""
+    issue_count = result.get("issue_count") or 0
+    low = (result.get("rating_summary") or {}).get("low_count") or 0
+    priority = len(result.get("worklist_review_ids") or [])
+    if issue_count >= 2 or low >= 10 or priority >= 10:
+        return "높음"
+    if issue_count >= 1 or priority >= 1:
+        return "보통"
+    return "낮음"
+
+
+def _top_issue_titles(result: dict, limit: int = MAX_DB_KEY_ISSUES) -> str:
+    """Top issue titles joined by ' · ' for the 주요 이슈 rich-text column.
+    Titles are kept verbatim (comma-bearing titles survive)."""
+    titles = [
+        (i.get("issue_title") or "").strip()
+        for i in (result.get("issue_items") or [])[:limit]
+    ]
+    return " · ".join(t for t in titles if t)
+
+
+def notion_database_row_title(result: dict, now: datetime) -> str:
+    """리뷰 점검 · MM/DD HH:mm · {scope_short} · 이슈 {issue_count}건.
+
+    Includes HH:mm so repeated same-day exports are distinguishable in the
+    Notion sidebar/list."""
+    issue_count = result.get("issue_count") or 0
+    return (
+        f"리뷰 점검 · {now.strftime('%m/%d %H:%M')} · "
+        f"{_scope_short(result)} · 이슈 {issue_count}건"
+    )
+
+
+def build_database_properties(result: dict, now: datetime) -> dict:
+    """Notion property-values for one analysis-run row.
+
+    Title (이름) is always present. Numbers/selects are always present.
+    Optional metrics are OMITTED (not sent as null) when their source is
+    missing: 신규 리뷰 수 when there is no store summary, 평균 평점 when no
+    reviews are rated. 상태 is never set — it is a human-owned workflow column
+    left at the database default. 주요 이슈 is rich text (not multi-select) so
+    comma-bearing titles are not lost and no stray options are auto-created."""
+    rs = result.get("rating_summary") or {}
+    props: dict = {
+        "이름": {"title": _rich_text(notion_database_row_title(result, now))},
+        "분석일시": {"date": {"start": now.isoformat()}},
+        "분석 범위": {"rich_text": _rich_text(result.get("scope_label") or "전체 상품")},
+        "범위 유형": {"select": {"name": _scope_kind(result)}},
+        "리뷰 수": {"number": result.get("scoped_active_count") or 0},
+        "전체 리뷰 수": {"number": result.get("full_active_count") or 0},
+        "저평점 수": {"number": rs.get("low_count") or 0},
+        "우선 확인 수": {"number": len(result.get("worklist_review_ids") or [])},
+        "반복 이슈 수": {"number": result.get("issue_count") or 0},
+        "주요 이슈": {"rich_text": _rich_text(_top_issue_titles(result))},
+        "우선도": {"select": {"name": _compute_priority(result)}},
+    }
+    new_summary = result.get("new_summary") or {}
+    new_count = new_summary.get("new_count")
+    if new_count is not None:
+        props["신규 리뷰 수"] = {"number": new_count}
+    avg = rs.get("average")
+    if avg is not None:
+        props["평균 평점"] = {"number": avg}
+    return props
+
+
+def build_notion_database_payload(result: dict, database_id: str, now: datetime) -> dict:
+    """A Notion ``POST /v1/pages`` payload parented to a database.
+
+    Same endpoint and same body blocks as the page export; only the parent type
+    and the ``properties`` differ. Pure assembly — the HTTP call lands in J2.
+    """
+    return {
+        "parent": {"type": "database_id", "database_id": database_id},
+        "properties": build_database_properties(result, now),
         "children": build_notion_blocks(result),
     }
 
