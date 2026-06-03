@@ -941,6 +941,11 @@ def generate(
             "평점": _rating_bucket(w.rating),
             "태그": ", ".join(w.tag_labels) or "-",
             "리뷰": w.text,
+            # reason / suggested_action are already on the worklist entry
+            # (report_model). Carried through for export surfaces (Notion); the
+            # inline editor ignores them. Additive only — no scoring change.
+            "reason": w.reason,
+            "suggested_action": w.suggested_action,
         }
         for w in report.worklist[:20]
     ]
