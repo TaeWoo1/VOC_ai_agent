@@ -22,6 +22,7 @@ from typing import Any, Optional
 import agent_discord_adapter as _agent_discord
 import agent_report_formatting as _arf
 import claude_orchestrator as _planner
+import intent_planner as _intent
 import conversational_orchestrator as _conv
 import nl_router as _router
 import orchestrator as _orch
@@ -156,7 +157,16 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
          executes, creates a graph, approves, cancels, or runs the runner.
       5. deterministic read-only fallback when the planner is disabled/unavailable
          (also the default): the existing M5-A/M5-A.5 conversational answer."""
-    # 0. M6-D4 agent-lifecycle phrases (에이전트 제안 / 진행해 / 편집 진행해 / 취소 /
+    # 0a. D4-1 intent planner (REPORT-ONLY, above the deterministic shortcut).
+    #     Inert in production (no live backend yet -> returns None), so behavior
+    #     is unchanged by default; when active it reports the parsed intent +
+    #     category + confirmation policy WITHOUT executing anything, and on
+    #     unavailable/ambiguous output it falls through to the shortcut below.
+    planned = _intent.report_only(text, operator_discord_id=operator_discord_id)
+    if planned is not None:
+        return planned
+
+    # 0b. M6-D4 agent-lifecycle phrases (에이전트 제안 / 진행해 / 편집 진행해 / 취소 /
     #    cleanup / 에이전트 상태). Deterministic + pending-state-gated: it claims
     #    "진행해"/"취소" ONLY when an agent run/edit is pending, otherwise returns
     #    None so the existing M5-A.5 / M4 flows below run unchanged.
