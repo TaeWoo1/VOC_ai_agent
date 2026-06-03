@@ -60,6 +60,9 @@ def dispatch_intent(
     adapter: Any = None,
     packets_root: Optional[Path] = None,
     staging_root: Optional[Path] = None,
+    collect_queue_path: Optional[Path] = None,
+    collect_staging_root: Optional[Path] = None,
+    head_baseline: Optional[str] = None,
 ) -> dict[str, Any]:
     """Route a validated intent. Returns a handler dict ({intent, handled, reply,
     executed}). Executes only the D4-2 allowlist + D4-3a render; else report-only."""
@@ -82,8 +85,22 @@ def dispatch_intent(
             op, task_id=(v.get("targets") or {}).get("task_id"),
             packets_root=Path(packets_root), staging_root=staging_root)
 
+    # D4-3b1: collect_reviews is a guarded yellow PIPELINE action (plan/dry-run).
+    # propose-only here (target resolution + precondition gate + staging plan);
+    # confirm runs via confirm_pending -> action-pending(kind=collect), which in
+    # D4-3b1 hard-blocks (collect_live_not_enabled). Requires a queue path.
+    if intent == "collect_reviews":
+        if collect_queue_path is None:
+            return _card(v)  # no queue configured -> stay report-only
+        staging = collect_staging_root or (root / "outputs" / "agent_collect_plan")
+        # return the action result verbatim (preserves failed_check).
+        return _action.propose_collect(
+            op, target=(v.get("targets") or {}).get("target"),
+            queue_path=Path(collect_queue_path), staging_root=Path(staging),
+            repo_root=root, head_baseline=head_baseline)
+
     # report outcome but not in the D4-2 executable allowlist -> report-only.
-    # (collect_reviews, send_outreach, publish_post remain report-only here.)
+    # (send_outreach, publish_post remain report-only here.)
     if intent not in D4_2_EXECUTABLE_INTENTS:
         return _card(v)
 
@@ -125,8 +142,13 @@ def dispatch_intent(
                 approval_log_path=approval_log_path, adapter=adapter)
             return _reply("intent_confirm", res["report"],
                           executed=res.get("outcome") == "dry_run")
-        if _action.get_pending_action(op) is not None:
-            # return verbatim (preserves failed_check / artifacts)
+        pend_action = _action.get_pending_action(op)
+        if pend_action is not None:
+            # dispatch by kind (render -> confirm_action; collect -> confirm_collect).
+            # return verbatim (preserves failed_check / artifacts). Planner NL never
+            # sets authorize_live, so confirm_collect lands on its auth/D4-3b1 block.
+            if pend_action.get("kind") == "collect":
+                return _action.confirm_collect(op, approval_log_path=approval_log_path)
             return _action.confirm_action(op, approval_log_path=approval_log_path)
         if _disp._get_pending_edit(op) is not None:
             # an edit is pending, but planner NL must NOT apply it.
