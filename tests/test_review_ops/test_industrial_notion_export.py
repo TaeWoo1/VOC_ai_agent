@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from src.voc.review_ops.industrial import notion_export as nx
 from src.voc.review_ops.industrial.notion_export import (
     APPLICABILITY_ORDER,
-    MAX_WORKLIST,
+    MAX_PRIORITY_REVIEWS,
     NO_NEEDS_REPLY_TEXT,
     NOTION_API_VERSION,
     SECTION_TITLES,
@@ -22,6 +22,10 @@ from src.voc.review_ops.industrial.notion_export import (
     notion_page_title,
     resolve_notion_config,
 )
+
+# Wording that would overpromise automation or assert causality — must never
+# appear in the page text built from a clean fixture.
+BANNED_WORDING = ["반드시", "원인", "매출 영향", "자동 처리 완료", "개선해야"]
 
 TODAY = date(2026, 1, 21)
 
@@ -154,19 +158,39 @@ def test_scoped_vs_full_title_differs():
 # --- sections present --------------------------------------------------------
 
 
-def test_all_seven_section_headings_exist():
+def test_all_section_headings_exist():
     headings = _headings(build_notion_blocks(_full_result()))
     for title in SECTION_TITLES:
         assert title in headings, title
 
 
-def test_analysis_summary_includes_key_counts():
-    text = _all_text(build_notion_blocks(_full_result()))
+def test_old_worklist_heading_gone():
+    headings = _headings(build_notion_blocks(_full_result()))
+    assert "오늘/이번 주 확인할 리뷰" not in headings
+    assert "우선 확인 리뷰" in headings
+
+
+def test_ceo_summary_includes_key_counts_and_scope():
+    blocks = build_notion_blocks(_full_result())
+    # 대표님 요약 is the first section
+    assert _headings(blocks)[0] == "대표님 요약"
+    text = _all_text(blocks)
     assert "선택 상품 6개" in text
     assert "1,141" in text  # scoped count
     assert "2,962" in text  # full count
     assert "3.1점" in text   # average rating
-    assert "210" in text     # low_count
+    assert "이번에 먼저 볼 것" in text  # the lead-in sentence + section
+
+
+def test_action_list_precedes_evidence_quotes():
+    blocks = build_notion_blocks(_full_result())
+    action_idx = next(
+        i for i, b in enumerate(blocks)
+        if b["type"] == "heading_2"
+        and b["heading_2"]["rich_text"][0]["text"]["content"] == "이번에 먼저 볼 것"
+    )
+    first_quote_idx = next(i for i, b in enumerate(blocks) if b["type"] == "quote")
+    assert action_idx < first_quote_idx
 
 
 # --- issues ------------------------------------------------------------------
@@ -190,6 +214,43 @@ def test_issue_evidence_is_capped():
     assert quotes  # some evidence rendered
 
 
+def test_issue_block_includes_capped_evidence_note():
+    text = _all_text(build_notion_blocks(_full_result()))
+    # the issue has 3 reps but only 2 are shown
+    assert "관련 8건 중 2건 표시" in text
+
+
+def test_issue_heading_has_no_long_product_name():
+    long_name = "(벌크) 신개념 일체형 전선몰딩 선바로 1P 열고 닫기 편한 전선몰드 추가구성 세트"
+    issue = _issue("접착력 부족", count=5)
+    for rep in issue["reps"]:
+        rep["상품명"] = long_name
+    result = _full_result()
+    result["issue_items"] = [issue]
+    blocks = build_notion_blocks(result)
+    issue_headings = [
+        b["heading_3"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "heading_3"
+    ]
+    # the issue heading is exactly 'title · 관련 리뷰 N건' — no product name
+    assert "접착력 부족 · 관련 리뷰 5건" in issue_headings
+    assert not any(long_name in h for h in issue_headings)
+
+
+def test_issue_product_context_is_shortened():
+    long_name = "(벌크) 신개념 일체형 전선몰딩 선바로 1P 열고 닫기 편한 전선몰드 추가구성 세트"
+    issue = _issue("접착력 부족")
+    for rep in issue["reps"]:
+        rep["상품명"] = long_name
+    result = _full_result()
+    result["issue_items"] = [issue]
+    text = _all_text(build_notion_blocks(result))
+    assert "대표 상품:" in text
+    assert long_name not in text  # full long name never rendered
+    assert "…" in text  # shortened
+
+
 # --- worklist ----------------------------------------------------------------
 
 
@@ -202,11 +263,12 @@ def test_worklist_includes_reason_and_action():
 
 def test_worklist_cap_respected():
     result = _full_result()
+    # quotes carry the 긴목록 marker; the action list uses suggested_action, so
+    # the marker only appears for priority-review quotes (capped).
     result["worklist_items"] = [_worklist_item(f"긴목록 {i}") for i in range(20)]
     text = _all_text(build_notion_blocks(result))
-    # only MAX_WORKLIST reviews rendered
-    assert f"긴목록 {MAX_WORKLIST - 1}" in text
-    assert f"긴목록 {MAX_WORKLIST}" not in text
+    assert f"긴목록 {MAX_PRIORITY_REVIEWS - 1}" in text
+    assert f"긴목록 {MAX_PRIORITY_REVIEWS}" not in text
 
 
 # --- needs reply -------------------------------------------------------------
@@ -244,8 +306,45 @@ def test_applicability_does_not_overclaim():
 # --- block budget / safety ---------------------------------------------------
 
 
+def test_detail_candidates_are_action_first_and_deduped():
+    result = _full_result()
+    # two issues that share the same title+action must collapse to one candidate
+    dup = _issue("접착력 부족", action="추가 고정 안내 추가 검토")
+    result["issue_items"] = [dup, dup, _issue("절단 시 깨짐", action="절단 도구/작업 방법 안내 검토")]
+    blocks = build_notion_blocks(result)
+    bullets = [
+        b["bulleted_list_item"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "bulleted_list_item"
+    ]
+    cand = [b for b in bullets if "보완 후보" in b]
+    # action-first phrasing, no duplicate 추가 wording
+    assert any(b.startswith("추가 고정 안내 추가 검토 (접착력 부족 관련 보완 후보)") for b in cand)
+    assert not any("추가 후보" in b for b in cand)  # old suffix gone
+    # deduped: the shared candidate appears once
+    assert sum(1 for b in cand if "추가 고정 안내 추가 검토" in b) == 1
+
+
+def test_no_overpromise_wording():
+    text = _all_text(build_notion_blocks(_full_result()))
+    # 운영 적용 가능성 intentionally names "원인/매출 영향 단정" as a thing NOT to do —
+    # that caution is allowed; strip it before scanning the report's own voice.
+    text = text.replace("원인/매출 영향 단정", "")
+    for banned in BANNED_WORDING:
+        assert banned not in text, banned
+
+
 def test_block_count_under_100():
     assert len(build_notion_blocks(_full_result())) < 100
+
+
+def test_block_count_under_100_at_caps():
+    # max everything: 5 issues (3 reps each), 20 worklist, 5 needs-reply
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [_review(f"답글 {i}", tags=("needs_reply",)) for i in range(8)]
+    assert len(build_notion_blocks(result)) < 100
 
 
 def test_empty_result_builds_safely():

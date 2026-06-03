@@ -32,23 +32,28 @@ from pathlib import Path
 
 MAX_ISSUES = 5
 MAX_EVIDENCE_PER_ISSUE = 2
-MAX_WORKLIST = 6
+MAX_PRIORITY_REVIEWS = 5
 MAX_NEEDS_REPLY = 5
 MAX_DETAIL_CANDIDATES = 6
-QUOTE_MAXLEN = 280
+MAX_ACTION_ITEMS = 6
+MAX_CEO_ISSUES = 3  # key issues named in the CEO summary / action list
+QUOTE_MAXLEN = 160  # quotes are kept short in this layout
+PRODUCT_LABEL_MAXLEN = 22  # Notion-only short product label
 _RICH_TEXT_MAXLEN = 1900  # Notion hard limit is 2000 per rich_text content
 
 NO_NEEDS_REPLY_TEXT = "이번 범위에서는 명확한 답글 필요 리뷰가 많지 않습니다."
 
-# Section headings, in order. Tests assert these all appear.
+# Section headings, in order. Tests assert these all appear. Lead with the
+# CEO summary + action list ("what to do next"), push raw evidence lower.
 SECTION_TITLES = [
-    "분석 요약",
+    "대표님 요약",
+    "이번에 먼저 볼 것",
     "반복 이슈",
-    "오늘/이번 주 확인할 리뷰",
+    "우선 확인 리뷰",
     "답글 필요 리뷰",
-    "상세페이지 보완 후보",
+    "상세페이지/안내 보완 후보",
     "운영 적용 가능성",
-    "다음 주 운영 제안",
+    "다음 업로드 때 비교할 것",
 ]
 
 # Static "운영 적용 가능성" content — three fixed categories. Verbatim copy; do
@@ -170,6 +175,54 @@ def _needs_reply_reviews(result: dict) -> list:
     return out
 
 
+def _short_product_label(name: str | None, limit: int = PRODUCT_LABEL_MAXLEN) -> str:
+    """Notion-only short product label. Trims merchandising boilerplate
+    (leading bracket/paren promo tags) then ellipsizes. Does NOT touch the
+    product grouping rules or the canonical product name — display only."""
+    text = (name or "").strip()
+    if not text:
+        return "-"
+    # drop a single leading [..] / (..) promo/bulk tag if more text follows
+    for opener, closer in (("[", "]"), ("(", ")")):
+        if text.startswith(opener) and closer in text:
+            tail = text[text.index(closer) + 1 :].strip()
+            if tail:
+                text = tail
+            break
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _issue_context_label(item: dict) -> str:
+    """Short product context for an issue card, e.g. '대표 상품: 선바로 전선몰딩 외 2개'.
+
+    Derived from the issue's own representative reviews (verbatim product names
+    already in the result), shortened for Notion. The product-group label is an
+    app-level concept not carried in ``result``, so we name a representative
+    product instead of a group — no grouping-rule dependency."""
+    seen: list[str] = []
+    for rep in item.get("reps") or []:
+        name = (rep.get("상품명") or "").strip()
+        if name and name != "-" and name not in seen:
+            seen.append(name)
+    if not seen:
+        return ""
+    lead = _short_product_label(seen[0])
+    if len(seen) == 1:
+        return f"대표 상품: {lead}"
+    return f"대표 상품: {lead} 외 {len(seen) - 1}개"
+
+
+def _rating_context_phrase(result: dict) -> str:
+    """One humble sentence on the overall rating picture. No causal claim."""
+    rs = result.get("rating_summary") or {}
+    share = rs.get("low_share") or 0.0
+    if share >= 0.3:
+        return "저평점 리뷰 비중이 다소 높은 편입니다"
+    return "전체적으로는 고평점 리뷰가 많습니다"
+
+
 # --- section builders --------------------------------------------------------
 
 
@@ -178,24 +231,71 @@ def notion_page_title(result: dict, today: date) -> str:
     return f"리뷰 운영 점검 · {_scope_label(result)} · {today.isoformat()}"
 
 
-def _section_summary(result: dict) -> list[dict]:
-    rs = result.get("rating_summary") or {}
-    avg = rs.get("average")
-    avg_text = f"{avg}점" if avg is not None else "-"
+def _count_text(result: dict) -> str:
     full = result.get("full_active_count")
     scoped = result.get("scoped_active_count")
     if full is not None and scoped is not None and scoped != full:
-        count_text = f"선택 {scoped:,}건 / 전체 {full:,}건"
+        return f"선택 {scoped:,}건 / 전체 {full:,}건"
+    return f"{result.get('total', scoped or 0):,}건"
+
+
+def _section_ceo_summary(result: dict) -> list[dict]:
+    """대표님 요약 — 3~5 humble bullets leading with scope + what to look at."""
+    rs = result.get("rating_summary") or {}
+    avg = rs.get("average")
+    avg_text = f"평균 평점 {avg}점" if avg is not None else "평균 평점 미상"
+    issues = result.get("issue_items") or []
+    key_titles = [i.get("issue_title") or "" for i in issues[:MAX_CEO_ISSUES]]
+    key_titles = [t for t in key_titles if t]
+
+    blocks = [_heading_2("대표님 요약")]
+    blocks.append(_bullet(f"분석 범위: {_scope_label(result)} · 리뷰 {_count_text(result)}"))
+    blocks.append(_bullet(f"{_rating_context_phrase(result)} ({avg_text})."))
+    if key_titles:
+        blocks.append(_bullet("반복 확인 신호: " + " / ".join(key_titles)))
+        first = key_titles[0]
+        blocks.append(
+            _bullet(
+                f"이번에 먼저 볼 것: {_scope_label(result)}에서 '{first}' 관련 "
+                "확인 신호부터 점검하는 것을 권장합니다."
+            )
+        )
     else:
-        count_text = f"{result.get('total', scoped or 0):,}건"
-    worklist_total = (result.get("today_count", 0) or 0) + (result.get("week_count", 0) or 0)
-    blocks = [_heading_2("분석 요약")]
-    blocks.append(_bullet(f"분석 범위: {_scope_label(result)}"))
-    blocks.append(_bullet(f"분석 대상 리뷰: {count_text}"))
-    blocks.append(_bullet(f"평균 평점: {avg_text}"))
-    blocks.append(_bullet(f"저평점 리뷰: {rs.get('low_count', 0):,}건"))
-    blocks.append(_bullet(f"우선 확인 리뷰: {worklist_total:,}건"))
-    blocks.append(_bullet(f"반복 이슈: {result.get('issue_count', 0):,}건"))
+        blocks.append(_bullet("반복 확인 신호: 이번 범위에서는 뚜렷한 반복 이슈가 적습니다."))
+        blocks.append(
+            _bullet("이번에 먼저 볼 것: 우선 확인 리뷰부터 가볍게 점검하는 것을 권장합니다.")
+        )
+    return blocks
+
+
+def _section_action_list(result: dict) -> list[dict]:
+    """이번에 먼저 볼 것 — compact action digest, no long quotes.
+
+    Combines repeated-issue actions (severity-labelled) with the top worklist
+    items (확인-labelled). This is the 'what to do next' lead-in; detail lives
+    in the 반복 이슈 / 우선 확인 리뷰 sections below."""
+    blocks = [_heading_2("이번에 먼저 볼 것")]
+    items: list[str] = []
+    for issue in (result.get("issue_items") or [])[:MAX_CEO_ISSUES]:
+        action = issue.get("recommended_action") or issue.get("issue_title") or ""
+        if not action:
+            continue
+        label = issue.get("severity_label") or "확인"
+        count = issue.get("review_count", 0)
+        ctx = _issue_context_label(issue)
+        line = f"[{label}] {action} · 관련 리뷰 {count}건"
+        if ctx:
+            line += f" · {ctx}"
+        items.append(line)
+    remaining = MAX_ACTION_ITEMS - len(items)
+    for it in (result.get("worklist_items") or [])[:max(0, remaining)]:
+        action = it.get("suggested_action") or it.get("reason") or "내용 확인"
+        product = _short_product_label(it.get("상품명"))
+        items.append(f"[확인] {action} · {product} · {it.get('작성일', '미상')}")
+    if not items:
+        blocks.append(_paragraph("이번 범위에서는 먼저 처리할 항목이 많지 않습니다."))
+        return blocks
+    blocks.extend(_bullet(line) for line in items[:MAX_ACTION_ITEMS])
     return blocks
 
 
@@ -208,29 +308,39 @@ def _section_issues(result: dict) -> list[dict]:
     for item in issues[:MAX_ISSUES]:
         title = item.get("issue_title") or "(제목 없음)"
         count = item.get("review_count", 0)
-        ctx = item.get("product_summary") or ""
-        head = f"{title} · 관련 리뷰 {count}건"
+        # heading stays short: title + count only (no long product names)
+        blocks.append(_heading_3(f"{title} · 관련 리뷰 {count}건"))
+        ctx = _issue_context_label(item)
         if ctx:
-            head += f" · {ctx}"
-        blocks.append(_heading_3(head))
+            blocks.append(_paragraph(ctx))
+        body = []
         if item.get("summary"):
-            blocks.append(_paragraph(f"요약: {item['summary']}"))
+            body.append(f"요약: {item['summary']}")
         if item.get("recommended_action"):
-            blocks.append(_bullet(f"추천 조치: {item['recommended_action']}"))
-        for rep in (item.get("reps") or [])[:MAX_EVIDENCE_PER_ISSUE]:
-            meta = f"{rep.get('작성일', '미상')} · {rep.get('평점', '-')}점"
-            blocks.append(_quote(f"{meta} — {_quote_text(rep.get('리뷰', ''))}"))
+            body.append(f"추천 조치: {item['recommended_action']}")
+        if body:
+            blocks.append(_paragraph("\n".join(body)))
+        reps = item.get("reps") or []
+        shown = min(MAX_EVIDENCE_PER_ISSUE, len(reps))
+        if shown:
+            blocks.append(_paragraph(f"원문 근거: 관련 {count}건 중 {shown}건 표시"))
+            for rep in reps[:shown]:
+                meta = f"{rep.get('작성일', '미상')} · {rep.get('평점', '-')}점"
+                blocks.append(_quote(f"{meta} — {_quote_text(rep.get('리뷰', ''))}"))
     return blocks
 
 
-def _section_worklist(result: dict) -> list[dict]:
-    blocks = [_heading_2("오늘/이번 주 확인할 리뷰")]
+def _section_priority_reviews(result: dict) -> list[dict]:
+    # Renamed from "오늘/이번 주 확인할 리뷰": review dates can be old, so a
+    # day/week framing misleads. "우선 확인 리뷰" reads correctly regardless.
+    blocks = [_heading_2("우선 확인 리뷰")]
     items = result.get("worklist_items") or []
     if not items:
         blocks.append(_paragraph("이번 범위에서 우선 확인할 리뷰가 많지 않습니다."))
         return blocks
-    for it in items[:MAX_WORKLIST]:
-        meta = f"{it.get('작성일', '미상')} · {it.get('상품명', '-')} · {it.get('평점', '-')}점"
+    for it in items[:MAX_PRIORITY_REVIEWS]:
+        product = _short_product_label(it.get("상품명"))
+        meta = f"{it.get('작성일', '미상')} · {product} · {it.get('평점', '-')}점"
         reason = it.get("reason") or ""
         action = it.get("suggested_action") or ""
         line = meta
@@ -253,7 +363,7 @@ def _section_needs_reply(result: dict) -> list[dict]:
     for r in reviews[:MAX_NEEDS_REPLY]:
         review_date = getattr(r, "review_date", None)
         d = review_date.isoformat() if review_date else "미상"
-        product = getattr(r, "product_name", None) or "-"
+        product = _short_product_label(getattr(r, "product_name", None))
         meta = f"{d} · {product} · {_fmt_rating(getattr(r, 'rating', None))}"
         blocks.append(_paragraph(meta))
         blocks.append(_quote(_quote_text(getattr(r, "text", "") or "")))
@@ -261,58 +371,63 @@ def _section_needs_reply(result: dict) -> list[dict]:
 
 
 def _section_detail_candidates(result: dict) -> list[dict]:
-    """상세페이지 보완 후보 — derived from repeated-issue recommended actions.
+    """상세페이지/안내 보완 후보 — derived from repeated-issue recommended actions.
 
-    Hypothesis-framed: each line ties an observed issue to a humble page-update
-    candidate. Never directive, never a claimed cause.
+    Action-first and deduplicated by (issue title, action). Hypothesis-framed:
+    each line is a humble page/guidance-update candidate, never directive,
+    never a claimed cause.
     """
-    blocks = [_heading_2("상세페이지 보완 후보")]
+    blocks = [_heading_2("상세페이지/안내 보완 후보")]
     issues = result.get("issue_items") or []
     candidates: list[str] = []
-    for item in issues[:MAX_DETAIL_CANDIDATES]:
+    seen: set[str] = set()
+    for item in issues:
         title = item.get("issue_title") or item.get("tag_label") or ""
         action = item.get("recommended_action") or ""
-        if not title and not action:
+        key = f"{title}|{action}"
+        if (not title and not action) or key in seen:
             continue
+        seen.add(key)
         if action:
-            candidates.append(f"{title} → 상세페이지 안내 보완 검토: {action}")
+            candidates.append(f"{action} ({title} 관련 보완 후보)")
         else:
-            candidates.append(f"{title} 관련 상세페이지 안내 보완 후보")
+            candidates.append(f"{title} 관련 안내 보완 후보")
+        if len(candidates) >= MAX_DETAIL_CANDIDATES:
+            break
     if not candidates:
-        blocks.append(_paragraph("이번 범위에서는 상세페이지 보완 후보를 도출할 반복 이슈가 적습니다."))
+        blocks.append(_paragraph("이번 범위에서는 상세페이지/안내 보완 후보를 도출할 반복 이슈가 적습니다."))
         return blocks
     blocks.extend(_bullet(c) for c in candidates)
     return blocks
 
 
 def _section_applicability() -> list[dict]:
-    """운영 적용 가능성 — static three-category framing (verbatim)."""
+    """운영 적용 가능성 — static three-category framing (verbatim items).
+
+    Compact: each category is one heading plus a single paragraph joining its
+    items, instead of a bullet per item. The caution against auto-posting /
+    auto-editing / causal claims stays in the third category."""
     blocks = [_heading_2("운영 적용 가능성")]
     for category in APPLICABILITY_ORDER:
         blocks.append(_heading_3(category))
-        blocks.extend(_bullet(item) for item in APPLICABILITY[category])
+        blocks.append(_paragraph(" · ".join(APPLICABILITY[category])))
     return blocks
 
 
-def _section_next_week(result: dict) -> list[dict]:
-    blocks = [_heading_2("다음 주 운영 제안")]
-    issues = result.get("issue_items") or []
-    blocks.append(_heading_3("이번 주 확인할 것"))
-    if issues:
-        for item in issues[:3]:
-            blocks.append(_bullet(item.get("issue_title") or "(제목 없음)"))
-    else:
-        blocks.append(_bullet("우선 확인 리뷰부터 점검"))
-    blocks.append(_heading_3("다음 업로드 때 비교할 것"))
+def _section_comparison(result: dict) -> list[dict]:
+    # Renamed from "다음 주 운영 제안" — the value is what to compare on the next
+    # upload, not a weekly schedule we can't enforce.
+    blocks = [_heading_2("다음 업로드 때 비교할 것")]
     for line in (
         "신규 리뷰 수 변화",
         "반복 이슈 건수 변화",
         "저평점 리뷰 비율 변화",
+        "접착력/절단 관련 표현이 새로 늘었는지",
     ):
         blocks.append(_bullet(line))
-    blocks.append(_heading_3("대표님에게 물어볼 의사결정 질문"))
+    blocks.append(_heading_3("대표님에게 물어볼 질문"))
     for line in (
-        "어떤 이슈를 먼저 상세페이지에 반영할지",
+        "어떤 이슈를 먼저 상세페이지/안내에 반영할지",
         "다음에 집중 점검할 상품군은 어디인지",
     ):
         blocks.append(_bullet(line))
@@ -329,13 +444,14 @@ def build_notion_blocks(result: dict) -> list[dict]:
     caps above.
     """
     sections = [
-        _section_summary(result),
+        _section_ceo_summary(result),
+        _section_action_list(result),
         _section_issues(result),
-        _section_worklist(result),
+        _section_priority_reviews(result),
         _section_needs_reply(result),
         _section_detail_candidates(result),
         _section_applicability(),
-        _section_next_week(result),
+        _section_comparison(result),
     ]
     blocks: list[dict] = []
     for i, section in enumerate(sections):
