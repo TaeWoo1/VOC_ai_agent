@@ -862,7 +862,7 @@ def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
 
 def _render_ask_tab() -> None:
     st.subheader("리뷰에게 물어보기")
-    st.caption("외부 전송 없이 이 컴퓨터에서만 리뷰를 분석해 답합니다.")
+    st.caption("이 로컬 데모에서는 업로드한 리뷰를 기준으로 답변하고, 원문 근거를 함께 표시합니다.")
 
     result = st.session_state.get("result")
     if not result:
