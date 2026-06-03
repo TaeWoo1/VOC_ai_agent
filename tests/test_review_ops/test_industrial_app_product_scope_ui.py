@@ -6,7 +6,11 @@ table render, scope caption placement) is exercised by the manual smoke.
 
 from __future__ import annotations
 
-from app_industrial_review_ops import product_status_rows, scope_caption_text
+from app_industrial_review_ops import (
+    product_status_rows,
+    scope_caption_text,
+    scoped_product_status_summaries,
+)
 
 
 def test_scope_caption_full_corpus():
@@ -51,3 +55,38 @@ def test_product_status_rows_none_average_shows_dash():
 
 def test_product_status_rows_empty():
     assert product_status_rows([]) == []
+
+
+# --- scoped_product_status_summaries ----------------------------------------
+
+
+def _summaries():
+    return [
+        {"product_name": "전선몰딩", "review_count": 100, "average_rating": 4.0,
+         "low_rating_count": 5, "recent_review_count": 10},
+        {"product_name": "컵디스펜서", "review_count": 50, "average_rating": 3.5,
+         "low_rating_count": 8, "recent_review_count": 4},
+        {"product_name": "생수컵", "review_count": 20, "average_rating": 4.5,
+         "low_rating_count": 1, "recent_review_count": 2},
+    ]
+
+
+def test_scoped_summaries_empty_scope_returns_empty():
+    assert scoped_product_status_summaries(_summaries(), []) == []
+    assert scoped_product_status_summaries(_summaries(), None) == []
+
+
+def test_scoped_summaries_filters_to_scope():
+    out = scoped_product_status_summaries(_summaries(), ["전선몰딩"])
+    assert [s["product_name"] for s in out] == ["전선몰딩"]
+
+
+def test_scoped_summaries_preserves_count_desc_order():
+    # scope order is irrelevant; output follows the incoming (count-desc) order.
+    out = scoped_product_status_summaries(_summaries(), ["생수컵", "전선몰딩"])
+    assert [s["product_name"] for s in out] == ["전선몰딩", "생수컵"]
+
+
+def test_scoped_summaries_ignores_unknown_scope_names():
+    out = scoped_product_status_summaries(_summaries(), ["없는상품", "컵디스펜서"])
+    assert [s["product_name"] for s in out] == ["컵디스펜서"]

@@ -703,6 +703,19 @@ def scope_caption_text(result: dict) -> str:
     return f"선택 상품 기준: {len(products)}개 상품"
 
 
+def scoped_product_status_summaries(
+    product_summaries: list[dict], scope_products: list[str] | None
+) -> list[dict]:
+    """Subset of product_summaries limited to the selected scope, preserving the
+    incoming (count-desc) order. Pure. Empty/absent scope -> [] (caller then
+    falls back to the full-file table). product_summaries always span the full
+    corpus; this only narrows what the summary tab surfaces first."""
+    scope = set(scope_products or [])
+    if not scope:
+        return []
+    return [s for s in product_summaries if s.get("product_name") in scope]
+
+
 def product_status_rows(product_summaries: list[dict]) -> list[dict]:
     """Format product_summaries into 상품별 리뷰 상태 table rows. Pure."""
     return [
@@ -1306,10 +1319,25 @@ def _render_overall_status(result: dict) -> None:
 
 def _render_product_status(result: dict) -> None:
     """상품별 리뷰 상태 table (full corpus), so the operator can pick a product to
-    narrow to via the sidebar 분석 범위. Collapsed by default to keep the summary
-    compact when there are many products."""
+    narrow to via the sidebar 분석 범위. When a scope is selected, the selected-
+    scope products are shown first and the full-file table is moved below,
+    collapsed; with no scope, the full-file table stays as before."""
     summaries = result.get("product_summaries") or []
     if not summaries:
+        return
+    scoped = scoped_product_status_summaries(summaries, result.get("scope_products"))
+    if scoped:
+        st.caption(f"선택 범위 상품 상태 ({len(scoped)}개 상품)")
+        st.dataframe(
+            product_status_rows(scoped), use_container_width=True, hide_index=True
+        )
+        with st.expander(
+            f"전체 파일 상품 상태 ({len(summaries)}개 상품)", expanded=False
+        ):
+            st.caption("상품을 좁혀 보려면 왼쪽 '분석 범위'에서 상품을 고르고 '분석 시작'을 다시 누르세요.")
+            st.dataframe(
+                product_status_rows(summaries), use_container_width=True, hide_index=True
+            )
         return
     with st.expander(
         f"상품별 리뷰 상태 (전체 파일 기준 · {len(summaries)}개 상품)", expanded=False
