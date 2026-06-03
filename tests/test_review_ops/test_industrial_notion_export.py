@@ -15,15 +15,18 @@ from src.voc.review_ops.industrial.notion_export import (
     MAX_PRIORITY_REVIEWS,
     NO_NEEDS_REPLY_TEXT,
     NOTION_API_VERSION,
+    NOTION_DB_SCHEMA_MISMATCH_NOTE,
     SECTION_TITLES,
     build_database_properties,
     build_notion_blocks,
     build_notion_database_payload,
     build_notion_payload,
     export_to_notion,
+    export_to_notion_database,
     notion_database_row_title,
     notion_page_title,
     resolve_notion_config,
+    resolve_notion_database_config,
 )
 
 # Wording that would overpromise automation or assert causality — must never
@@ -681,3 +684,117 @@ def test_db_key_issues_is_rich_text_and_preserves_commas():
     assert "접착력 문제, 절단 시 깨짐" in content      # comma-bearing title intact
     assert "표면 자국, 변색 우려" in content
     assert " · " in content                          # titles joined
+
+
+# --- J2 client: resolve_notion_database_config ------------------------------
+
+
+def test_resolve_db_config_missing_is_safe(monkeypatch):
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    key, db = resolve_notion_database_config()
+    assert key is None
+    assert db is None
+
+
+def test_resolve_db_config_reads_env(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "secret-abc")
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-xyz")
+    key, db = resolve_notion_database_config()
+    assert key == "secret-abc"
+    assert db == "db-xyz"
+
+
+# --- J2 client: export_to_notion_database (fake transport, no network) ------
+
+
+def test_db_export_ok_returns_url():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/db-row-123"}
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=fake_transport)
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/db-row-123"
+    assert res.error is None
+    assert res.note is None
+
+
+def test_db_export_sends_post_headers_and_db_payload():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/r"}
+
+    payload = build_notion_database_payload(_full_result(), "db-9", NOW)
+    export_to_notion_database(payload, api_key="secret-key", transport=fake_transport)
+    assert captured["url"] == nx.NOTION_PAGES_URL
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert captured["headers"]["Content-Type"] == "application/json"
+    assert captured["headers"]["Notion-Version"] == NOTION_API_VERSION
+    assert captured["payload"]["parent"]["type"] == "database_id"
+    assert captured["payload"]["parent"]["database_id"] == "db-9"
+    assert "children" in captured["payload"]
+
+
+def test_db_export_failure_returns_error_not_ok():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("network down")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=raising_transport)
+    assert res.ok is False
+    assert res.url is None
+    assert "network down" in (res.error or "")
+
+
+def test_db_export_title_only_retry_on_schema_mismatch():
+    calls = {"n": 0}
+
+    def flaky_transport(url, payload, headers):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # full create rejected (e.g. property name/type mismatch)
+            raise RuntimeError("body failed validation: 평균 평점 is not a property")
+        # retry payload must be title-only + body
+        assert list(payload["properties"].keys()) == ["이름"]
+        assert "children" in payload
+        return {"url": "https://www.notion.so/retry-row"}
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=flaky_transport)
+    assert calls["n"] == 2
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/retry-row"
+    assert res.note == NOTION_DB_SCHEMA_MISMATCH_NOTE
+
+
+def test_db_export_retry_failure_is_fail_soft():
+    def always_raising(url, payload, headers):
+        raise RuntimeError("auth invalid")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=always_raising)
+    assert res.ok is False
+    assert "auth invalid" in (res.error or "")
+    assert res.note is None
+
+
+def test_db_export_api_key_not_in_result_repr():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("boom")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="super-secret-key", transport=raising_transport)
+    assert "super-secret-key" not in repr(res)
+    assert "super-secret-key" not in (res.error or "")

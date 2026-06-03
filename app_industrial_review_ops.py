@@ -23,7 +23,7 @@ from __future__ import annotations
 import csv
 import io
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from xml.etree import ElementTree as ET
 
 import streamlit as st
@@ -1243,6 +1243,7 @@ def _render_sidebar() -> None:
                     mime="text/html",
                 )
                 _render_notion_export(result)
+                _render_notion_db_export(result)
                 st.caption(f"날짜 확인 필요: {result['date_unknown']}건")
                 st.caption(f"평점 확인 필요: {result['rating_unknown']}건")
                 st.caption(f"중복 제외: {result['duplicates']}건")
@@ -1250,18 +1251,19 @@ def _render_sidebar() -> None:
 
 
 def _render_notion_export(result: dict) -> None:
-    """Notion으로 내보내기 button. Builds the I1 payload and posts one page.
+    """Notion 페이지로 내보내기 button. Builds the I1 payload and posts one page
+    under NOTION_PARENT_PAGE_ID.
 
     Fail-soft: disabled with a caption when env settings are missing; on a
     failed export it warns and the app keeps working. No secret is shown."""
     api_key, parent_page_id = notion_export.resolve_notion_config()
     if not api_key or not parent_page_id:
-        st.button("Notion으로 내보내기", disabled=True, key="notion_export_btn")
+        st.button("Notion 페이지로 내보내기", disabled=True, key="notion_export_btn")
         st.caption(
             "Notion 설정(NOTION_API_KEY, NOTION_PARENT_PAGE_ID)이 없어 내보내기를 건너뜁니다."
         )
         return
-    if st.button("Notion으로 내보내기", key="notion_export_btn"):
+    if st.button("Notion 페이지로 내보내기", key="notion_export_btn"):
         with st.spinner("Notion 페이지를 만드는 중…"):
             payload = notion_export.build_notion_payload(
                 result, parent_page_id, date.today()
@@ -1273,6 +1275,38 @@ def _render_notion_export(result: dict) -> None:
                 st.markdown(f"[Notion에서 열기]({export.url})")
         else:
             st.warning(f"Notion 내보내기에 실패했습니다: {export.error}")
+
+
+def _render_notion_db_export(result: dict) -> None:
+    """Notion DB에 기록하기 button. Appends one row per analysis run to
+    NOTION_DATABASE_ID, carrying comparison metrics as properties and the same
+    report body as the page export.
+
+    Fail-soft: disabled with a caption when env settings are missing; on a
+    failed export it warns and the app keeps working. The client retries once
+    with title + body only on a schema mismatch and surfaces a note. No secret
+    is shown."""
+    api_key, database_id = notion_export.resolve_notion_database_config()
+    if not api_key or not database_id:
+        st.button("Notion DB에 기록하기", disabled=True, key="notion_db_export_btn")
+        st.caption(
+            "Notion DB 설정(NOTION_API_KEY, NOTION_DATABASE_ID)이 없어 기록을 건너뜁니다."
+        )
+        return
+    if st.button("Notion DB에 기록하기", key="notion_db_export_btn"):
+        with st.spinner("Notion DB에 기록하는 중…"):
+            payload = notion_export.build_notion_database_payload(
+                result, database_id, datetime.now()
+            )
+            export = notion_export.export_to_notion_database(payload, api_key=api_key)
+        if export.ok:
+            st.success("Notion DB에 기록했습니다.")
+            if export.note:
+                st.info(export.note)
+            if export.url:
+                st.markdown(f"[Notion에서 열기]({export.url})")
+        else:
+            st.warning(f"Notion DB 기록에 실패했습니다: {export.error}")
 
 
 def _render_advanced_notes(result: dict) -> None:

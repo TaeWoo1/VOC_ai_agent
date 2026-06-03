@@ -597,8 +597,16 @@ def build_notion_database_payload(result: dict, database_id: str, now: datetime)
 NOTION_PAGES_URL = "https://api.notion.com/v1/pages"
 NOTION_API_VERSION = "2022-06-28"
 
-_NOTION_ENV_KEYS = ("NOTION_API_KEY", "NOTION_PARENT_PAGE_ID")
+_NOTION_ENV_KEYS = ("NOTION_API_KEY", "NOTION_PARENT_PAGE_ID", "NOTION_DATABASE_ID")
 _notion_env_loaded = False
+
+# Shown when the full DB-row create is rejected (most likely a property
+# name/type mismatch against the operator-created database) but the title-only
+# retry succeeds, so the run is recorded with body intact but metrics dropped.
+NOTION_DB_SCHEMA_MISMATCH_NOTE = (
+    "DB 속성 일부가 일치하지 않아 제목/본문만 기록했습니다. "
+    "속성 이름·유형 확인이 필요합니다."
+)
 
 
 @dataclass
@@ -608,6 +616,7 @@ class NotionExportResult:
     ok: bool
     url: str | None = None
     error: str | None = None
+    note: str | None = None
 
 
 def _notion_headers(api_key: str) -> dict[str, str]:
@@ -635,20 +644,35 @@ def _tiny_load_notion_env(path: str = ".env") -> None:
             os.environ[key] = value
 
 
+def _ensure_notion_env_loaded() -> None:
+    """One-time .env load for the NOTION_* keys (dotenv if available, else the
+    isolated tiny loader). Idempotent; never overrides already-set env."""
+    global _notion_env_loaded
+    if _notion_env_loaded:
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:  # pragma: no cover - dotenv is installed here
+        _tiny_load_notion_env()
+    _notion_env_loaded = True
+
+
 def resolve_notion_config() -> tuple[str | None, str | None]:
     """(NOTION_API_KEY, NOTION_PARENT_PAGE_ID) from env, with a one-time .env
     fallback. Either value is None when absent — the caller decides what to do
     (the Streamlit button disables itself when either is missing)."""
-    global _notion_env_loaded
-    if not _notion_env_loaded:
-        try:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-        except ImportError:  # pragma: no cover - dotenv is installed here
-            _tiny_load_notion_env()
-        _notion_env_loaded = True
+    _ensure_notion_env_loaded()
     return os.getenv("NOTION_API_KEY") or None, os.getenv("NOTION_PARENT_PAGE_ID") or None
+
+
+def resolve_notion_database_config() -> tuple[str | None, str | None]:
+    """(NOTION_API_KEY, NOTION_DATABASE_ID) from env, with the same one-time
+    .env fallback. Either value is None when absent — the DB-export button
+    disables itself when either is missing."""
+    _ensure_notion_env_loaded()
+    return os.getenv("NOTION_API_KEY") or None, os.getenv("NOTION_DATABASE_ID") or None
 
 
 def _default_transport(url: str, payload: dict, headers: dict[str, str]) -> dict:
@@ -674,5 +698,49 @@ def export_to_notion(
         response = send(NOTION_PAGES_URL, payload, _notion_headers(api_key))
     except Exception as exc:  # network / HTTP / decode — all fail-soft
         return NotionExportResult(ok=False, url=None, error=str(exc))
+    url = response.get("url") if isinstance(response, dict) else None
+    return NotionExportResult(ok=True, url=url, error=None)
+
+
+def _title_only_properties(properties: dict) -> dict:
+    """Keep only the title property (the one carrying a ``title`` value), so a
+    create can still succeed when the other columns don't match the DB schema.
+    Title-key-agnostic: works regardless of the title property's name."""
+    return {
+        k: v
+        for k, v in (properties or {}).items()
+        if isinstance(v, dict) and "title" in v
+    }
+
+
+def export_to_notion_database(
+    payload: dict, *, api_key: str, transport=None
+) -> NotionExportResult:
+    """POST a database-row create ``payload`` to Notion (same endpoint as the
+    page export). ``transport`` is the same injectable seam used by tests.
+
+    On any failure of the full create — most commonly a property name/type
+    mismatch against the operator-created database — retry **once** with the
+    title property + body blocks only, so the run is still recorded. A
+    successful retry returns ``ok=True`` with ``note`` set so the operator
+    knows the metric columns were dropped and should check their DB schema.
+    The API key never enters the result or any error string."""
+    send = transport or _default_transport
+    headers = _notion_headers(api_key)
+    try:
+        response = send(NOTION_PAGES_URL, payload, headers)
+    except Exception:  # full create failed — fall back to title + body only
+        retry_payload = {
+            **payload,
+            "properties": _title_only_properties(payload.get("properties") or {}),
+        }
+        try:
+            response = send(NOTION_PAGES_URL, retry_payload, headers)
+        except Exception as exc:  # retry also failed — fail-soft, no key leak
+            return NotionExportResult(ok=False, url=None, error=str(exc))
+        url = response.get("url") if isinstance(response, dict) else None
+        return NotionExportResult(
+            ok=True, url=url, error=None, note=NOTION_DB_SCHEMA_MISMATCH_NOTE
+        )
     url = response.get("url") if isinstance(response, dict) else None
     return NotionExportResult(ok=True, url=url, error=None)
