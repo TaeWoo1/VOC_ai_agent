@@ -26,6 +26,7 @@ from typing import Any, Iterable, Optional
 import agent_dispatch as _disp
 import agent_discord_adapter as _ad   # reuse _agent_for_stage / _resolve_paths / _format_status
 import agent_intents as _ai
+import action_dispatch as _action   # D4-3a: render_report guarded pipeline action
 
 # the ONLY intents D4-2 will execute; anything else is report-only.
 D4_2_EXECUTABLE_INTENTS = frozenset({
@@ -57,9 +58,11 @@ def dispatch_intent(
     generated_prompts_dir: Optional[Path] = None,
     known_task_ids: Optional[Iterable[str]] = None,
     adapter: Any = None,
+    packets_root: Optional[Path] = None,
+    staging_root: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Route a validated intent. Returns a handler dict ({intent, handled, reply,
-    executed}). Executes only the D4-2 allowlist; else report-only."""
+    executed}). Executes only the D4-2 allowlist + D4-3a render; else report-only."""
     op = operator_discord_id
     root, arp, ard = _ad._resolve_paths(repo_root, agent_runs_path, agent_runs_dir)
     intent = v.get("intent")
@@ -67,7 +70,20 @@ def dispatch_intent(
     # clarify / refuse / non-report -> report card, no execution.
     if v.get("outcome") != _ai.REPORT:
         return _card(v)
+
+    # D4-3a: render_report is a guarded yellow PIPELINE action (not agent_dispatch).
+    # propose-only here (precondition gate + arm pending); confirm runs via
+    # confirm_pending -> action-pending. Requires a packets_root to resolve.
+    if intent == "render_report":
+        if packets_root is None:
+            return _card(v)  # no packet root configured -> stay report-only
+        # return the action result verbatim (preserves failed_check/artifacts).
+        return _action.propose_render(
+            op, task_id=(v.get("targets") or {}).get("task_id"),
+            packets_root=Path(packets_root), staging_root=staging_root)
+
     # report outcome but not in the D4-2 executable allowlist -> report-only.
+    # (collect_reviews, send_outreach, publish_post remain report-only here.)
     if intent not in D4_2_EXECUTABLE_INTENTS:
         return _card(v)
 
@@ -100,22 +116,26 @@ def dispatch_intent(
             known_task_ids=known_task_ids, agent_runs_path=arp)
         return _reply("intent_propose", res["report"], executed=res.get("ok", False))
 
-    # --- yellow: confirm -> dry_run ONLY (never bounded_edit) ----------------
+    # --- yellow: confirm. Precedence: agent run-pending -> action-pending ----
+    #     (render, D4-3a) -> edit-pending guidance -> clarify. NEVER bounded_edit.
     if intent == "confirm_pending":
-        if _disp._get_pending(op) is None:
-            if _disp._get_pending_edit(op) is not None:
-                # an edit is pending, but planner NL must NOT apply it.
-                return _reply("intent_confirm",
-                              '편집 적용은 평문이 아니라 "편집 진행해"로 명시해 주세요.',
-                              executed=False)
+        if _disp._get_pending(op) is not None:
+            res = _disp.confirm_agent_run(
+                op, repo_root=root, agent_runs_path=arp, agent_runs_dir=ard,
+                approval_log_path=approval_log_path, adapter=adapter)
+            return _reply("intent_confirm", res["report"],
+                          executed=res.get("outcome") == "dry_run")
+        if _action.get_pending_action(op) is not None:
+            # return verbatim (preserves failed_check / artifacts)
+            return _action.confirm_action(op, approval_log_path=approval_log_path)
+        if _disp._get_pending_edit(op) is not None:
+            # an edit is pending, but planner NL must NOT apply it.
             return _reply("intent_confirm",
-                          "대기 중인 실행 제안이 없습니다. 먼저 제안해 주세요.",
+                          '편집 적용은 평문이 아니라 "편집 진행해"로 명시해 주세요.',
                           executed=False)
-        res = _disp.confirm_agent_run(
-            op, repo_root=root, agent_runs_path=arp, agent_runs_dir=ard,
-            approval_log_path=approval_log_path, adapter=adapter)
-        return _reply("intent_confirm", res["report"],
-                      executed=res.get("outcome") == "dry_run")
+        return _reply("intent_confirm",
+                      "대기 중인 실행 제안이 없습니다. 먼저 제안해 주세요.",
+                      executed=False)
 
     # --- yellow: cancel ------------------------------------------------------
     if intent == "cancel_pending":

@@ -126,6 +126,8 @@ def plan_and_act(
     generated_prompts_dir: Optional[Any] = None,
     known_task_ids: Optional[Any] = None,
     adapter: Any = None,
+    packets_root: Optional[Any] = None,
+    staging_root: Optional[Any] = None,
     responder: Optional[Callable[[list[dict[str, str]]], str]] = None,
 ) -> Optional[dict[str, Any]]:
     """D4-2: plan -> validate -> DISPATCH (execute allowlist) or report-only card.
@@ -154,4 +156,5 @@ def plan_and_act(
         agent_runs_path=agent_runs_path, agent_runs_dir=agent_runs_dir,
         approval_log_path=approval_log_path,
         generated_prompts_dir=generated_prompts_dir,
-        known_task_ids=known_task_ids, adapter=adapter)
+        known_task_ids=known_task_ids, adapter=adapter,
+        packets_root=packets_root, staging_root=staging_root)
