@@ -226,6 +226,45 @@ def _rating_bucket(rating: float | None) -> str:
 # New-review detection summary (pure; no Streamlit, no OpenAI, no DB)
 # ---------------------------------------------------------------------------
 
+# Operator status options. First entry is the default "untouched" state.
+STATUS_OPTIONS: list[str] = [
+    "확인 안 함",
+    "확인함",
+    "답글 필요",
+    "답글 완료",
+    "상세페이지 후보",
+    "CS 확인 필요",
+    "보류",
+]
+
+
+def _display_item(review: IndustrialReview, tags: list[str]) -> dict:
+    """One review as a compact display dict carrying its ``review_id``."""
+    return {
+        "review_id": review.review_id,
+        "작성일": review.review_date.isoformat() if review.review_date else "미상",
+        "채널": review.channel,
+        "상품명": review.product_name or "-",
+        "평점": _rating_bucket(review.rating),
+        "태그": ", ".join(CATEGORY_BY_ID[t].label_ko for t in tags) or "-",
+        "리뷰": review.text,
+    }
+
+
+def load_review_statuses(conn, review_ids: list[str]) -> dict[str, dict]:
+    """Load saved status/memo for the given review_ids via the store.
+
+    Thin wrapper over ``store.get_review_status`` (one read per id). Returns a
+    ``{review_id: {status, memo, updated_at}}`` map containing only ids that
+    have a saved status. Pure of Streamlit/OpenAI; testable with a tmp store.
+    """
+    out: dict[str, dict] = {}
+    for rid in review_ids:
+        saved = store.get_review_status(conn, rid)
+        if saved:
+            out[rid] = saved
+    return out
+
 
 def compute_new_review_summary(
     tagged: list[tuple[IndustrialReview, list[str]]],
@@ -253,17 +292,7 @@ def compute_new_review_summary(
 
     new_tagged = [(r, tags) for r, tags in tagged if r.review_id in new_set]
     new_tagged.sort(key=lambda rt: (rt[0].review_date or date.min), reverse=True)
-    new_rows = [
-        {
-            "작성일": r.review_date.isoformat() if r.review_date else "미상",
-            "채널": r.channel,
-            "상품명": r.product_name or "-",
-            "평점": _rating_bucket(r.rating),
-            "태그": ", ".join(CATEGORY_BY_ID[t].label_ko for t in tags) or "-",
-            "리뷰": r.text,
-        }
-        for r, tags in new_tagged[:max_rows]
-    ]
+    new_items = [_display_item(r, tags) for r, tags in new_tagged[:max_rows]]
     return {
         "total_active": total_active,
         "new_count": new_count,
@@ -271,7 +300,7 @@ def compute_new_review_summary(
         "first_upload": first_upload,
         "priority_new_count": priority_new_count,
         "needs_reply_new_count": needs_reply_new_count,
-        "new_rows": new_rows,
+        "new_items": new_items,
     }
 
 
@@ -345,6 +374,21 @@ def generate(
     tagged = [(r, classify(r)) for r in active]
     today_count = sum(1 for w in report.worklist if w.tier == "today")
 
+    # Compact worklist rows for the inline status/memo editor (top 20 only — the
+    # full worklist stays in the HTML preview/download for scanning & printing).
+    worklist_items = [
+        {
+            "review_id": w.review_id,
+            "작성일": w.review_date.isoformat() if w.review_date else "미상",
+            "채널": w.channel,
+            "상품명": w.product_name or "-",
+            "평점": _rating_bucket(w.rating),
+            "태그": ", ".join(w.tag_labels) or "-",
+            "리뷰": w.text,
+        }
+        for w in report.worklist[:20]
+    ]
+
     # Persist this upload to the local store and detect which reviews are new
     # vs. previous uploads. Fail-soft: any store error leaves the report intact
     # and simply skips the new-review comparison.
@@ -381,6 +425,8 @@ def generate(
         "issue_count": len(report.issue_clusters),
         "new_summary": new_summary,
         "store_status": store_status,
+        "store_path": store_path,
+        "worklist_items": worklist_items,
     }
 
 
@@ -389,8 +435,57 @@ def generate(
 # ---------------------------------------------------------------------------
 
 
+def _render_review_editors(items: list[dict], store_path: str | None, key_prefix: str) -> None:
+    """Compact per-review status/memo editor: one collapsed expander per review.
+
+    Opens the local store fail-soft. If it cannot open, the reviews still render
+    read-only with a small caption. Saved status appears in each expander title
+    so handled reviews are scannable without expanding.
+    """
+    conn = None
+    try:
+        conn = store.open_store(store_path)
+    except Exception:
+        st.caption("로컬 저장소를 열지 못해 상태 저장을 건너뛰었습니다. (리포트는 정상입니다.)")
+
+    status_by_id = (
+        load_review_statuses(conn, [it["review_id"] for it in items]) if conn else {}
+    )
+
+    try:
+        for item in items:
+            rid = item["review_id"]
+            saved = status_by_id.get(rid, {})
+            cur_status = saved.get("status") or STATUS_OPTIONS[0]
+            cur_memo = saved.get("memo") or ""
+            handled = "" if cur_status == STATUS_OPTIONS[0] else f"  ·  [{cur_status}]"
+            title = f"{item['작성일']} · {item['채널']} · {item['평점']}점{handled}"
+            with st.expander(title):
+                st.write(item["리뷰"])
+                if item["태그"] != "-":
+                    st.caption(f"태그: {item['태그']}")
+                idx = STATUS_OPTIONS.index(cur_status) if cur_status in STATUS_OPTIONS else 0
+                new_status = st.selectbox(
+                    "처리 상태", STATUS_OPTIONS, index=idx,
+                    key=f"{key_prefix}_status_{rid}", disabled=conn is None,
+                )
+                new_memo = st.text_area(
+                    "메모", value=cur_memo, key=f"{key_prefix}_memo_{rid}",
+                    disabled=conn is None, height=80,
+                )
+                if st.button("저장", key=f"{key_prefix}_save_{rid}", disabled=conn is None):
+                    try:
+                        store.set_review_status(conn, rid, new_status, new_memo)
+                        st.success("저장했습니다.")
+                    except Exception as e:
+                        st.error(f"저장하지 못했습니다: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _render_new_reviews(result: dict) -> None:
-    """Render the '이번 업로드' comparison and the '새로 들어온 리뷰' list."""
+    """Render the '이번 업로드' comparison and the '새로 들어온 리뷰' editor list."""
     new_summary = result.get("new_summary")
     if not new_summary:
         if (result.get("store_status") or {}).get("status") == "error":
@@ -412,15 +507,22 @@ def _render_new_reviews(result: dict) -> None:
     p2.metric("새 리뷰 중 답글 필요", f"{new_summary['needs_reply_new_count']}건")
 
     st.markdown("#### 새로 들어온 리뷰")
-    new_rows = new_summary["new_rows"]
-    if not new_rows:
+    new_items = new_summary["new_items"]
+    if not new_items:
         st.caption("이번 업로드에서 새로 들어온 리뷰가 없습니다. (모두 이미 등록된 리뷰입니다.)")
-        return
-    st.dataframe(new_rows, use_container_width=True, hide_index=True)
-    if new_summary["new_count"] > len(new_rows):
-        st.caption(
-            f"새로 들어온 리뷰 {new_summary['new_count']}건 중 {len(new_rows)}건만 표시했습니다."
-        )
+    else:
+        st.caption("리뷰를 펼쳐 처리 상태와 메모를 저장할 수 있습니다. 저장한 내용은 다음 업로드에도 유지됩니다.")
+        _render_review_editors(new_items, result.get("store_path"), key_prefix="new")
+        if new_summary["new_count"] > len(new_items):
+            st.caption(
+                f"새로 들어온 리뷰 {new_summary['new_count']}건 중 {len(new_items)}건만 표시했습니다."
+            )
+
+    worklist_items = result.get("worklist_items") or []
+    if worklist_items:
+        st.markdown("#### 우선 확인 리뷰 (처리 상태·메모)")
+        st.caption("이번 주 먼저 볼 리뷰입니다. 상태와 메모는 리뷰 단위로 저장됩니다.")
+        _render_review_editors(worklist_items, result.get("store_path"), key_prefix="wl")
 
 
 def _render_generate_tab() -> None:

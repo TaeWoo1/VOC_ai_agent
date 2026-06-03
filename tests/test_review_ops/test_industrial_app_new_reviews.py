@@ -48,7 +48,7 @@ def test_zero_new_when_all_seen():
     assert s["new_count"] == 0
     assert s["seen_count"] == 2
     assert s["first_upload"] is False
-    assert s["new_rows"] == []
+    assert s["new_items"] == []
 
 
 def test_priority_new_count_intersects_worklist():
@@ -68,28 +68,29 @@ def test_needs_reply_new_count_uses_tags():
     assert s["needs_reply_new_count"] == 1  # only 'a' is both new and needs_reply
 
 
-def test_new_rows_capped_and_sorted_newest_first():
+def test_new_items_capped_and_sorted_newest_first():
     tagged = [(_review(str(i), day=i), []) for i in range(1, 26)]  # 25 reviews
     new_ids = {str(i) for i in range(1, 26)}
     s = compute_new_review_summary(tagged, new_ids, worklist_review_ids=set(), max_rows=20)
     assert s["new_count"] == 25
-    assert len(s["new_rows"]) == 20  # capped
+    assert len(s["new_items"]) == 20  # capped
     # newest first: day 25 then day 24 ...
-    assert s["new_rows"][0]["작성일"] == "2026-05-25"
-    assert s["new_rows"][1]["작성일"] == "2026-05-24"
+    assert s["new_items"][0]["작성일"] == "2026-05-25"
+    assert s["new_items"][1]["작성일"] == "2026-05-24"
 
 
-def test_new_rows_contain_expected_columns():
+def test_new_items_contain_expected_keys_including_review_id():
     tagged = [(_review("a"), ["needs_reply"])]
     s = compute_new_review_summary(tagged, {"a"}, worklist_review_ids=set())
-    row = s["new_rows"][0]
-    assert set(row.keys()) == {"작성일", "채널", "상품명", "평점", "태그", "리뷰"}
-    assert row["채널"] == "네이버"
-    assert row["평점"] == "2"
+    item = s["new_items"][0]
+    assert set(item.keys()) == {"review_id", "작성일", "채널", "상품명", "평점", "태그", "리뷰"}
+    assert item["review_id"] == "a"
+    assert item["채널"] == "네이버"
+    assert item["평점"] == "2"
 
 
 def test_empty_corpus():
     s = compute_new_review_summary([], set(), worklist_review_ids=set())
     assert s["total_active"] == 0
     assert s["first_upload"] is False
-    assert s["new_rows"] == []
+    assert s["new_items"] == []
