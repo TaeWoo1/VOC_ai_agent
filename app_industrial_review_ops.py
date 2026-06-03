@@ -28,7 +28,7 @@ from xml.etree import ElementTree as ET
 
 import streamlit as st
 
-from src.voc.review_ops.industrial import cluster, rag, refine, store
+from src.voc.review_ops.industrial import cluster, issue_discovery, rag, refine, store
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.ingest import _build_header_map
@@ -369,6 +369,47 @@ def compute_new_review_summary(
 
 
 # ---------------------------------------------------------------------------
+# Repeated-issue engine selection (discovery primary, legacy fallback)
+# ---------------------------------------------------------------------------
+
+
+def _run_repeated_issues(
+    report,
+    reviews,
+    *,
+    api_key: str,
+    today,
+    recent_days: int,
+    max_issues: int,
+    max_evidence: int,
+    max_reps: int,
+    reuse_embeddings: dict | None,
+):
+    """LLM issue discovery first; fall back to the legacy cluster engine only on
+    a hard failure (call error / unparseable JSON / unexpected exception). A valid
+    zero-issue discovery result is respected (no fallback)."""
+    try:
+        report2, dsum = issue_discovery.discover_issues(
+            report, reviews, api_key=api_key, today=today, recent_days=recent_days,
+            max_issues=max_issues, max_evidence=max_evidence,
+        )
+        if dsum.get("status") != "hard_failure":
+            return report2, dsum
+    except Exception:
+        pass  # treat unexpected discovery errors as a hard failure -> fallback
+
+    try:
+        report3, csum = cluster.cluster_issues(
+            report, reviews, api_key=api_key, embeddings=reuse_embeddings, today=today,
+            recent_days=recent_days, max_clusters=max_issues,
+            max_representatives=max_reps, max_evidence=max_evidence,
+        )
+        return report3, {"status": "ok", "engine": "fallback", **csum}
+    except Exception as e:
+        return report, {"status": "error", "engine": "fallback", "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Pipeline driver
 # ---------------------------------------------------------------------------
 
@@ -411,30 +452,26 @@ def generate(
             except Exception as e:  # whole-feature fallback
                 refine_summary = {"status": "error", "error": str(e)}
 
-    # Optional repeated-issue clustering (2C). Runs AFTER refinement and only adds
-    # issue_clusters — it never modifies worklist rows. Any failure renders the
-    # report without the issue section.
+    # Optional repeated issues (Slice G). LLM issue discovery is the primary
+    # engine; the legacy tag-first cluster engine is the fallback on hard failure.
+    # Either way only issue_clusters is added — worklist rows are never modified.
     cluster_summary: dict | None = None
     if do_cluster:
         api_key = rag.resolve_api_key()
         if not api_key:
             cluster_summary = {"status": "no_key"}
         else:
-            try:
-                report, csum = cluster.cluster_issues(
-                    report,
-                    reviews,
-                    api_key=api_key,
-                    embeddings=reuse_embeddings,
-                    today=today,
-                    recent_days=recent_days,
-                    max_clusters=cluster_max_clusters,
-                    max_representatives=cluster_max_reps,
-                    max_evidence=cluster_max_evidence,
-                )
-                cluster_summary = {"status": "ok", **csum}
-            except Exception as e:  # whole-feature fallback
-                cluster_summary = {"status": "error", "error": str(e)}
+            report, cluster_summary = _run_repeated_issues(
+                report,
+                reviews,
+                api_key=api_key,
+                today=today,
+                recent_days=recent_days,
+                max_issues=cluster_max_clusters,
+                max_evidence=cluster_max_evidence,
+                max_reps=cluster_max_reps,
+                reuse_embeddings=reuse_embeddings,
+            )
 
     html = render_report_html(report, recent_days=recent_days)
     tagged = [(r, classify(r)) for r in active]
@@ -655,9 +692,14 @@ def _render_advanced_notes(result: dict) -> None:
 
     csum = result.get("cluster_summary") or {}
     if csum.get("status") == "ok":
-        st.caption(
-            f"반복 이슈: 후보 {csum['candidates']}건 → 최종 {csum['issues']}건"
-        )
+        cand = csum.get("used_candidate_count", csum.get("candidates", 0))
+        engine = {"discovery": "자동 발견", "fallback": "기존 방식"}.get(csum.get("engine"), "")
+        line = f"반복 이슈: 후보 {cand}건 → 최종 {csum.get('issues', 0)}건"
+        if engine:
+            line += f" · {engine}"
+        if csum.get("evidence_rejected"):
+            line += f" · 근거 검증 제외 {csum['evidence_rejected']}건"
+        st.caption(line)
     elif csum.get("status") in ("no_key", "error"):
         st.caption("반복 이슈 묶기는 사용할 수 없어 건너뛰었습니다.")
 
