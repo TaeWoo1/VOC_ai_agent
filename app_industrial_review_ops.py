@@ -459,6 +459,89 @@ def compute_rating_summary(
     }
 
 
+# Bucket label for reviews with no product name (none in the current sample, but
+# the grouping must be total so scoping is well-defined). Selecting this label
+# scopes to the blank-product reviews.
+UNKNOWN_PRODUCT_LABEL = "상품명 미상"
+
+
+def _product_key(review: IndustrialReview) -> str:
+    """Group key for a review's product (blank/None -> 상품명 미상)."""
+    return review.product_name or UNKNOWN_PRODUCT_LABEL
+
+
+def compute_product_summaries(
+    active_reviews: list[IndustrialReview],
+    recent_days: int,
+    today: date,
+) -> list[dict]:
+    """Per-product review context for the 분석 범위 selector (pure; no Streamlit).
+
+    Groups active (deduped) reviews by product name and returns one dict per
+    product (``product_name``, ``review_count``, ``average_rating``,
+    ``low_rating_count``, ``recent_review_count``), sorted by ``review_count``
+    desc then name. Reuses the same low-rating / recent-window definitions as
+    ``compute_rating_summary``. ``today`` should be resolved once from the full
+    corpus so the recent window is stable across scopes.
+    """
+    groups: dict[str, list[IndustrialReview]] = {}
+    for r in active_reviews:
+        groups.setdefault(_product_key(r), []).append(r)
+
+    out: list[dict] = []
+    for name, revs in groups.items():
+        ratings = [r.rating for r in revs if r.rating is not None]
+        average = round(sum(ratings) / len(ratings), 1) if ratings else None
+        low = sum(1 for r in revs if r.rating is not None and r.rating <= LOW_RATING_THRESHOLD)
+        recent = sum(
+            1
+            for r in revs
+            if r.review_date is not None and 0 <= (today - r.review_date).days <= recent_days
+        )
+        out.append(
+            {
+                "product_name": name,
+                "review_count": len(revs),
+                "average_rating": average,
+                "low_rating_count": low,
+                "recent_review_count": recent,
+            }
+        )
+    out.sort(key=lambda d: (-d["review_count"], d["product_name"]))
+    return out
+
+
+def truncate_product_label(name: str, width: int = 28) -> str:
+    """Shorten a long product name for a compact selector label (display only).
+
+    Short names pass through unchanged; long names are cut to ``width`` with a
+    trailing ellipsis. The full name remains the selection value elsewhere.
+    """
+    name = name or ""
+    if len(name) <= width:
+        return name
+    return name[: max(0, width - 1)].rstrip() + "…"
+
+
+def _resolve_scope(
+    product_filter: set[str] | None,
+    product_summaries: list[dict],
+) -> tuple[set[str] | None, list[str], str]:
+    """Resolve the analysis scope against the products actually present.
+
+    Returns ``(scope_set, scope_products, scope_label)``. ``scope_set`` is None
+    for 전체 상품 (no filter, empty filter, or all selected names absent — the
+    last case falls back to full corpus rather than silently returning 0).
+    """
+    if not product_filter:
+        return None, [], "전체 상품"
+    valid = {s["product_name"] for s in product_summaries}
+    selected = sorted(name for name in product_filter if name in valid)
+    if not selected:
+        return None, [], "전체 상품"
+    return set(selected), selected, f"선택 상품 {len(selected)}개"
+
+
 def _review_matches_filter(
     review: IndustrialReview,
     tags: list[str],
@@ -587,11 +670,35 @@ def generate(
     cluster_max_reps: int = cluster.DEFAULT_MAX_REPRESENTATIVES,
     cluster_max_evidence: int = cluster.DEFAULT_MAX_REPRESENTATIVES,
     reuse_embeddings: dict | None = None,
+    product_filter: set[str] | None = None,
 ) -> dict:
     reviews = dedup(normalize_rows(rows))
-    active = [r for r in reviews if not r.is_duplicate]
+    full_active = [r for r in reviews if not r.is_duplicate]
+
+    # Resolve "today" once from the FULL corpus so the recent window is stable
+    # regardless of the selected product scope (matches build_report when None).
+    resolved_today = today
+    if resolved_today is None:
+        known_dates = [r.review_date for r in full_active if r.review_date is not None]
+        resolved_today = max(known_dates) if known_dates else date.today()
+
+    # Per-product summary is always over the FULL corpus so the operator can
+    # widen/narrow scope from any result. LLM-free.
+    product_summaries = compute_product_summaries(full_active, recent_days, resolved_today)
+
+    # Resolve the analysis scope. Empty/all-absent selections -> 전체 상품. The
+    # scope is applied here, before build_report/discovery, so repeated-issue
+    # discovery never mixes unrelated products' issues.
+    scope_set, scope_products, scope_label = _resolve_scope(product_filter, product_summaries)
+    reviews_in_scope = (
+        reviews if scope_set is None
+        else [r for r in reviews if _product_key(r) in scope_set]
+    )
+    active = [r for r in reviews_in_scope if not r.is_duplicate]
+
     report = build_report(
-        reviews, today=today, recent_days=recent_days, title=title, density_note=None
+        reviews_in_scope, today=resolved_today, recent_days=recent_days,
+        title=title, density_note=None,
     )
 
     # Optional LLM refinement of the top-N worklist candidates only. Any failure
@@ -621,7 +728,7 @@ def generate(
         else:
             report, cluster_summary = _run_repeated_issues(
                 report,
-                reviews,
+                reviews_in_scope,
                 api_key=api_key,
                 today=today,
                 recent_days=recent_days,
@@ -658,25 +765,23 @@ def generate(
     for c in report.issue_clusters:
         issue_review_ids.update(c.review_ids)
 
-    # Resolve the same "today" build_report uses (latest known review date for a
-    # sample), so the recent-window count matches the worklist window.
-    resolved_today = today
-    if resolved_today is None:
-        known_dates = [r.review_date for r in active if r.review_date is not None]
-        resolved_today = max(known_dates) if known_dates else date.today()
+    # Rating context for the (scoped) 전체 리뷰 상태 section. resolved_today is
+    # the full-corpus value so the recent window matches across scopes.
     rating_summary = compute_rating_summary(active, recent_days, resolved_today)
 
     # Persist this upload to the local store and detect which reviews are new
-    # vs. previous uploads. Fail-soft: any store error leaves the report intact
-    # and simply skips the new-review comparison.
+    # vs. previous uploads. This runs on the FULL corpus (new-review detection is
+    # a corpus fact, independent of the selected scope); the surfaced new counts
+    # still scope because compute_new_review_summary works over the scoped tagged
+    # list. Fail-soft: any store error leaves the report intact.
     new_summary: dict | None = None
     store_status: dict | None = None
     new_ids: set[str] = set()
     try:
         conn = store.open_store(store_path)
         try:
-            upload_id = store.create_upload(conn, filename, len(active))
-            upsert = store.upsert_reviews(conn, upload_id, active)
+            upload_id = store.create_upload(conn, filename, len(full_active))
+            upsert = store.upsert_reviews(conn, upload_id, full_active)
         finally:
             conn.close()
         new_ids = set(upsert["new_review_ids"])
@@ -689,7 +794,7 @@ def generate(
         "html": html,
         "tagged": tagged,
         "total": report.header.total_reviews,
-        "duplicates": len(reviews) - len(active),
+        "duplicates": len(reviews_in_scope) - len(active),
         "today_count": today_count,
         "week_count": len(report.worklist) - today_count,
         "date_unknown": report.header.date_unknown_count,
@@ -708,6 +813,11 @@ def generate(
         "worklist_review_ids": worklist_review_ids,
         "issue_review_ids": issue_review_ids,
         "new_review_ids": new_ids,
+        "product_summaries": product_summaries,
+        "scope_products": scope_products,
+        "scope_label": scope_label,
+        "scoped_active_count": len(active),
+        "full_active_count": len(full_active),
     }
 
 
