@@ -387,8 +387,10 @@ def test_render_html_with_issue_clusters():
     assert "반복 이슈" in html
     assert "포장 파손이 반복됩니다" in html
     assert "관련 리뷰 2건" in html
-    assert "심각도 높음" in html       # severity label
+    assert "우선 확인" in html          # operator severity label (high)
+    assert "심각도 높음" not in html    # engine wording removed
     assert "배송/포장" in html          # issue-type label
+    assert "원문 근거" in html          # representative-reviews label
     assert "여러 건에서 박스 파손" in html  # summary
     assert "포장 상태를 점검할 후보" in html  # action
     assert "박스가 터져서 왔어요" in html      # representative original text

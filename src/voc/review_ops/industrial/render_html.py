@@ -26,7 +26,8 @@ _ISSUE_TYPE_LABELS: dict[str, str] = {
     "positive_signal": "긍정 신호",
     "ignore": "기타",
 }
-_SEVERITY_LABELS: dict[str, str] = {"high": "높음", "medium": "보통", "low": "낮음"}
+# Operator-friendly severity wording (not engine "높음/보통/낮음").
+_SEVERITY_LABELS: dict[str, str] = {"high": "우선 확인", "medium": "확인 필요", "low": "참고"}
 
 _CSS = """
 :root { color-scheme: light; }
@@ -178,14 +179,14 @@ def _issue_card(cluster: IssueCluster) -> str:
     sev_label = _SEVERITY_LABELS.get(cluster.severity, cluster.severity)
     type_label = _ISSUE_TYPE_LABELS.get(cluster.issue_type, cluster.issue_type)
     chips = (
-        f'<span class="chip sev-{escape(cluster.severity)}">심각도 {escape(sev_label)}</span>'
+        f'<span class="chip sev-{escape(cluster.severity)}">{escape(sev_label)}</span>'
         f'<span class="chip">{escape(type_label)}</span>'
         f'<span class="chip">{escape(cluster.tag_label)}</span>'
     )
     # Up to 3 representative original reviews (verbatim).
     reps = "".join(_issue_rep(r) for r in cluster.representatives[:3])
     reps_html = (
-        f'<div class="reps"><div class="repslabel">대표 리뷰</div>{reps}</div>' if reps else ""
+        f'<div class="reps"><div class="repslabel">원문 근거</div>{reps}</div>' if reps else ""
     )
     return (
         '<div class="card issue">'

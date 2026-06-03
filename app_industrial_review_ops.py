@@ -238,6 +238,54 @@ STATUS_OPTIONS: list[str] = [
 ]
 
 
+# Operator-friendly labels for the native repeated-issue cards. Severity wording
+# matches render_html (우선 확인 / 확인 필요 / 참고). Display-only — these do not
+# touch taxonomy, scoring, or cluster thresholds.
+SEVERITY_LABELS: dict[str, str] = {"high": "우선 확인", "medium": "확인 필요", "low": "참고"}
+ISSUE_TYPE_LABELS: dict[str, str] = {
+    "product": "제품",
+    "detail_page": "상세페이지",
+    "cs": "CS/교환",
+    "shipping": "배송/포장",
+    "positive_signal": "긍정 신호",
+    "ignore": "기타",
+}
+
+
+def severity_label(severity: str) -> str:
+    """Map an engine severity (high/medium/low) to operator wording."""
+    return SEVERITY_LABELS.get(severity, severity)
+
+
+def issue_display_item(cluster, max_reps: int = 5) -> dict:
+    """One repeated-issue cluster as a display dict for the native issue card.
+
+    Pure: no Streamlit/OpenAI. ``reps`` are the verbatim representative reviews
+    (원문 근거), capped at ``max_reps``.
+    """
+    reps = [
+        {
+            "작성일": r.review_date.isoformat() if r.review_date else "미상",
+            "채널": r.channel,
+            "평점": _rating_bucket(r.rating),
+            "상품명": r.product_name or "-",
+            "리뷰": r.text,
+        }
+        for r in cluster.representatives[:max_reps]
+    ]
+    return {
+        "issue_title": cluster.issue_title,
+        "severity": cluster.severity,
+        "severity_label": severity_label(cluster.severity),
+        "type_label": ISSUE_TYPE_LABELS.get(cluster.issue_type, cluster.issue_type),
+        "tag_label": cluster.tag_label,
+        "review_count": cluster.review_count,
+        "summary": cluster.summary,
+        "recommended_action": cluster.recommended_action,
+        "reps": reps,
+    }
+
+
 def _display_item(review: IndustrialReview, tags: list[str]) -> dict:
     """One review as a compact display dict carrying its ``review_id``."""
     return {
@@ -423,6 +471,7 @@ def generate(
         "refine_summary": refine_summary,
         "cluster_summary": cluster_summary,
         "issue_count": len(report.issue_clusters),
+        "issue_items": [issue_display_item(c) for c in report.issue_clusters],
         "new_summary": new_summary,
         "store_status": store_status,
         "store_path": store_path,
@@ -484,241 +533,222 @@ def _render_review_editors(items: list[dict], store_path: str | None, key_prefix
             conn.close()
 
 
-def _render_new_reviews(result: dict) -> None:
-    """Render the '이번 업로드' comparison and the '새로 들어온 리뷰' editor list."""
-    new_summary = result.get("new_summary")
-    if not new_summary:
-        if (result.get("store_status") or {}).get("status") == "error":
-            st.caption("로컬 저장소를 열지 못해 새 리뷰 비교를 건너뛰었습니다. (리포트는 정상입니다.)")
-        return
-
-    st.divider()
-    st.subheader("이번 업로드")
-    n1, n2, n3 = st.columns(3)
-    n1.metric("이번 업로드 리뷰", f"{new_summary['total_active']}건")
-    n2.metric("새로 들어온 리뷰", f"{new_summary['new_count']}건")
-    n3.metric("이미 등록된 리뷰", f"{new_summary['seen_count']}건")
-
-    if new_summary["first_upload"]:
-        st.info("첫 업로드라 전체 리뷰를 등록했습니다.")
-
-    p1, p2 = st.columns(2)
-    p1.metric("새 리뷰 중 우선 확인", f"{new_summary['priority_new_count']}건")
-    p2.metric("새 리뷰 중 답글 필요", f"{new_summary['needs_reply_new_count']}건")
-
-    st.markdown("#### 새로 들어온 리뷰")
-    new_items = new_summary["new_items"]
-    if not new_items:
-        st.caption("이번 업로드에서 새로 들어온 리뷰가 없습니다. (모두 이미 등록된 리뷰입니다.)")
-    else:
-        st.caption("리뷰를 펼쳐 처리 상태와 메모를 저장할 수 있습니다. 저장한 내용은 다음 업로드에도 유지됩니다.")
-        _render_review_editors(new_items, result.get("store_path"), key_prefix="new")
-        if new_summary["new_count"] > len(new_items):
-            st.caption(
-                f"새로 들어온 리뷰 {new_summary['new_count']}건 중 {len(new_items)}건만 표시했습니다."
-            )
-
-    worklist_items = result.get("worklist_items") or []
-    if worklist_items:
-        st.markdown("#### 우선 확인 리뷰 (처리 상태·메모)")
-        st.caption("이번 주 먼저 볼 리뷰입니다. 상태와 메모는 리뷰 단위로 저장됩니다.")
-        _render_review_editors(worklist_items, result.get("store_path"), key_prefix="wl")
-
-
-def _render_generate_tab() -> None:
-    st.subheader("리뷰 파일 업로드")
-    uploaded = st.file_uploader(
-        "CSV 또는 XLSX 파일을 올려주세요", type=["csv", "xlsx"], accept_multiple_files=False
-    )
-
-    with st.expander("선택 입력 (제목 · 기준 날짜 · 기간 · 채널)", expanded=False):
-        title = st.text_input("리포트 제목", value="산업자재 리뷰 운영 점검")
-        auto_today = st.checkbox("기준 날짜 자동 (가장 최근 리뷰 날짜)", value=True)
-        today_input = st.date_input("기준 날짜 (today)", value=date.today(), disabled=auto_today)
-        recent_days = st.number_input(
-            "최근 며칠 이내를 '이번 주에 볼 리뷰'로 볼까요?",
-            min_value=1, max_value=120, value=int(RECENT_DAYS), step=1,
+def _render_sidebar() -> None:
+    """Upload + run + collapsed 고급 설정. Sets st.session_state['result']."""
+    with st.sidebar:
+        st.header("리뷰 파일 올리기")
+        uploaded = st.file_uploader(
+            "CSV 또는 XLSX 파일", type=["csv", "xlsx"], accept_multiple_files=False
         )
         channel_override = st.text_input(
-            "채널 이름 (파일에 채널 열이 없을 때만 사용)", value="",
-            placeholder="예: 네이버",
+            "채널 이름 (선택)", value="", placeholder="예: 네이버"
         )
 
-    with st.expander("LLM 문구 다듬기 (선택 · 기본 꺼짐)", expanded=False):
-        do_refine = st.checkbox("LLM으로 worklist 문구 다듬기", value=False)
-        refine_top_n = st.number_input(
-            "다듬을 상위 후보 수 (top-N)",
-            min_value=1, max_value=100, value=int(refine.DEFAULT_TOP_N), step=5,
-            disabled=not do_refine,
-        )
-        if do_refine:
-            if rag.resolve_api_key():
-                st.caption(
-                    f"예상 LLM 호출: 최대 {int(refine_top_n)}회 "
-                    "(worklist 상위 후보에만 적용, 전체 리뷰 아님)."
-                )
-            else:
-                st.warning(
-                    "OPENAI_API_KEY를 찾을 수 없습니다. 다듬기를 켜도 규칙 기반 결과로 표시됩니다."
-                )
-
-    with st.expander("반복 이슈 묶어보기 (선택 · 기본 꺼짐)", expanded=False):
-        do_cluster = st.checkbox("비슷한 리뷰를 묶어 반복 이슈로 보기", value=False)
-        cluster_max = st.number_input(
-            "최대 반복 이슈 개수",
-            min_value=1, max_value=20, value=int(cluster.DEFAULT_MAX_CLUSTERS), step=1,
-            disabled=not do_cluster,
-        )
-        if do_cluster:
-            if rag.resolve_api_key():
-                reuse = "rag_index" in st.session_state
-                st.caption(
-                    f"예상 LLM 호출: 최대 {int(cluster_max)}회 (이슈 묶음마다 1회). "
-                    + ("기존 임베딩 재사용." if reuse else "후보 리뷰만 임베딩합니다.")
-                )
-            else:
-                st.warning(
-                    "OPENAI_API_KEY를 찾을 수 없습니다. 반복 이슈 묶기는 키가 필요합니다."
-                )
-
-    if st.button("리포트 생성", type="primary", disabled=uploaded is None):
-        try:
-            rows, had_channel = load_upload(
-                uploaded.name, uploaded.getvalue(), channel_override
+        with st.expander("고급 설정", expanded=False):
+            title = st.text_input("리포트 제목", value="산업자재 리뷰 운영 점검")
+            auto_today = st.checkbox("기준 날짜 자동", value=True)
+            today_input = st.date_input("기준 날짜", value=date.today(), disabled=auto_today)
+            recent_days = st.number_input(
+                "최근 며칠 이내를 우선 확인 기간으로 볼까요?",
+                min_value=1, max_value=365, value=90, step=1,
             )
-        except ValueError as e:
-            st.error(str(e))
-            return
-        except Exception as e:  # malformed file -> friendly message, no crash
-            st.error(f"파일을 읽지 못했습니다: {e}")
-            return
-
-        if not rows:
-            st.warning("리뷰 내용이 있는 행을 찾지 못했습니다.")
-            return
-        if not had_channel and not channel_override.strip():
-            st.info("파일에 채널 열이 없어 채널이 '미상'으로 표시됩니다. 선택 입력에서 채널 이름을 지정할 수 있습니다.")
-
-        reuse_emb = None
-        if do_cluster and "rag_index" in st.session_state:
-            reuse_emb = st.session_state["rag_index"].vectors_by_review_id()
-
-        extras = []
-        if do_refine:
-            extras.append("LLM 다듬기")
-        if do_cluster:
-            extras.append("반복 이슈")
-        spinner_msg = "리포트 생성 중..." + (f" ({' · '.join(extras)} 포함)" if extras else "")
-        with st.spinner(spinner_msg):
-            result = generate(
-                rows,
-                title=title.strip() or "산업자재 리뷰 운영 점검",
-                today=None if auto_today else today_input,
-                recent_days=int(recent_days),
-                filename=uploaded.name,
-                do_refine=do_refine,
-                refine_top_n=int(refine_top_n),
-                do_cluster=do_cluster,
-                cluster_max_clusters=int(cluster_max),
-                reuse_embeddings=reuse_emb,
+            do_refine = st.checkbox("문구 자동 정리", value=True)
+            refine_top_n = st.number_input(
+                "정리할 상위 건수", min_value=1, max_value=100, value=10, step=5,
+                disabled=not do_refine,
             )
-        st.session_state["result"] = result
-        st.session_state["report_title"] = title.strip() or "report"
-        # New corpus -> drop any stale RAG index/chat from a previous file.
-        for key in ("rag_index", "rag_messages", "rag_last_results"):
-            st.session_state.pop(key, None)
+            do_cluster = st.checkbox("반복 이슈 묶기", value=True)
+            cluster_max = st.number_input(
+                "최대 반복 이슈 수", min_value=1, max_value=20, value=5, step=1,
+                disabled=not do_cluster,
+            )
+            cluster_reps = st.number_input(
+                "이슈별 원문 근거 수", min_value=1, max_value=10, value=5, step=1,
+                disabled=not do_cluster,
+            )
 
+        run = st.button("분석 시작", type="primary", disabled=uploaded is None)
+
+        if run:
+            try:
+                rows, had_channel = load_upload(
+                    uploaded.name, uploaded.getvalue(), channel_override
+                )
+            except ValueError as e:
+                st.error(str(e))
+                return
+            except Exception as e:  # malformed file -> friendly message, no crash
+                st.error(f"파일을 읽지 못했습니다: {e}")
+                return
+            if not rows:
+                st.warning("리뷰 내용이 있는 행을 찾지 못했습니다.")
+                return
+            if not had_channel and not channel_override.strip():
+                st.info("채널 열이 없어 '미상'으로 표시됩니다. 채널 이름을 입력할 수 있습니다.")
+
+            reuse_emb = None
+            if do_cluster and "rag_index" in st.session_state:
+                reuse_emb = st.session_state["rag_index"].vectors_by_review_id()
+
+            with st.spinner("분석 중..."):
+                result = generate(
+                    rows,
+                    title=title.strip() or "산업자재 리뷰 운영 점검",
+                    today=None if auto_today else today_input,
+                    recent_days=int(recent_days),
+                    filename=uploaded.name,
+                    do_refine=do_refine,
+                    refine_top_n=int(refine_top_n),
+                    do_cluster=do_cluster,
+                    cluster_max_clusters=int(cluster_max),
+                    cluster_max_reps=int(cluster_reps),
+                    reuse_embeddings=reuse_emb,
+                )
+            st.session_state["result"] = result
+            st.session_state["report_title"] = title.strip() or "report"
+            # New corpus -> drop any stale analysis index/chat from a previous file.
+            for key in ("rag_index", "rag_messages", "rag_last_results"):
+                st.session_state.pop(key, None)
+
+        # Result-dependent advanced controls (download + diagnostics) live with
+        # the other settings, shown only once a result exists.
+        result = st.session_state.get("result")
+        if result:
+            with st.expander("리포트 내보내기 · 진단", expanded=False):
+                st.download_button(
+                    "HTML 리포트 다운로드",
+                    data=result["html"].encode("utf-8"),
+                    file_name=f"{st.session_state.get('report_title', 'report')}.html",
+                    mime="text/html",
+                )
+                st.caption(f"날짜 확인 필요: {result['date_unknown']}건")
+                st.caption(f"평점 확인 필요: {result['rating_unknown']}건")
+                st.caption(f"중복 제외: {result['duplicates']}건")
+                _render_advanced_notes(result)
+
+
+def _render_advanced_notes(result: dict) -> None:
+    """Muted processing notes (kept out of the main flow)."""
+    summary = result.get("refine_summary") or {}
+    if summary.get("status") == "ok":
+        st.caption(
+            f"문구 자동 정리: {summary['refined']}건 보정 · {summary['excluded']}건 제외"
+        )
+    elif summary.get("status") in ("no_key", "error"):
+        st.caption("문구 자동 정리는 사용할 수 없어 기본 문구로 표시했습니다.")
+
+    csum = result.get("cluster_summary") or {}
+    if csum.get("status") == "ok":
+        st.caption(
+            f"반복 이슈: 후보 {csum['candidates']}건 → 최종 {csum['issues']}건"
+        )
+    elif csum.get("status") in ("no_key", "error"):
+        st.caption("반복 이슈 묶기는 사용할 수 없어 건너뛰었습니다.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 1 — 운영 요약
+# ---------------------------------------------------------------------------
+
+
+def _render_issue_card(item: dict) -> None:
+    """One native repeated-issue card (operator severity + 원문 근거)."""
+    with st.container(border=True):
+        st.markdown(f"**{item['issue_title']}**　·　관련 리뷰 {item['review_count']}건")
+        st.caption(
+            f"{item['severity_label']} · {item['type_label']} · {item['tag_label']}"
+        )
+        st.write(f"요약: {item['summary']}")
+        st.write(f"추천 조치: {item['recommended_action']}")
+        if item["reps"]:
+            with st.expander(f"원문 근거 {len(item['reps'])}건", expanded=False):
+                for rep in item["reps"]:
+                    st.caption(f"{rep['작성일']} · {rep['채널']} · {rep['평점']}점")
+                    st.write(rep["리뷰"])
+
+
+def _render_summary_tab() -> None:
     result = st.session_state.get("result")
     if not result:
-        st.caption("파일을 올리고 '리포트 생성'을 누르면 결과가 여기에 표시됩니다.")
+        st.info("왼쪽에서 리뷰 파일을 올리고 '분석 시작'을 누르세요.")
         return
+
+    ns = result.get("new_summary")
+
+    st.subheader("이번 업로드 요약")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("전체 리뷰", f"{result['total']}건")
+    if ns:
+        m2.metric("신규 리뷰", f"{ns['new_count']}건")
+        m3.metric("이미 등록된 리뷰", f"{ns['seen_count']}건")
+        if ns["first_upload"]:
+            st.info("첫 업로드라 전체 리뷰를 등록했습니다.")
+        k1, k2 = st.columns(2)
+        k1.metric("신규 중 우선 확인", f"{ns['priority_new_count']}건")
+        k2.metric("신규 중 답글 필요", f"{ns['needs_reply_new_count']}건")
+    else:
+        m2.metric("중복", f"{result['duplicates']}건")
+        m3.metric("채널 수", f"{len(result['channels'])}개")
+        st.caption("저장소를 열지 못해 신규/기존 비교를 건너뛰었습니다. (분석은 정상입니다.)")
+
+    p1, p2 = st.columns(2)
+    p1.metric("우선 확인 (전체)", f"{result['today_count']}건")
+    p2.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일 내 확인", f"{result['week_count']}건")
 
     st.divider()
-    c1, c2, c3 = st.columns(3)
-    c1.metric("전체 리뷰", f"{result['total']}건")
-    c2.metric("중복", f"{result['duplicates']}건")
-    c3.metric("채널 수", f"{len(result['channels'])}개")
-    c4, c5, c6, c7 = st.columns(4)
-    c4.metric("오늘 먼저 볼 리뷰", f"{result['today_count']}건")
-    c5.metric(f"최근 {result.get('recent_days', RECENT_DAYS)}일 내 확인", f"{result['week_count']}건")
-    c6.metric("날짜 확인 필요", f"{result['date_unknown']}건")
-    c7.metric("평점 확인 필요", f"{result['rating_unknown']}건")
-
-    _render_new_reviews(result)
-
-    summary = result.get("refine_summary")
-    if summary:
-        status = summary.get("status")
-        if status == "ok":
-            st.success(
-                f"LLM 다듬기: 후보 {summary['candidates']}건 중 "
-                f"{summary['refined']}건 보정 · {summary['excluded']}건 제외 · "
-                f"{summary['failed']}건 규칙기반 유지"
-            )
-        elif status == "no_key":
-            st.warning("OPENAI_API_KEY가 없어 규칙 기반 결과로 표시했습니다.")
-        elif status == "error":
-            st.warning(f"LLM 다듬기에 실패해 규칙 기반 결과로 표시했습니다: {summary.get('error', '')}")
-
-    cluster_summary = result.get("cluster_summary")
-    if cluster_summary:
-        cstatus = cluster_summary.get("status")
+    st.subheader("반복 이슈")
+    issue_items = result.get("issue_items") or []
+    if issue_items:
+        for item in issue_items:
+            _render_issue_card(item)
+    else:
+        csum = result.get("cluster_summary") or {}
+        cstatus = csum.get("status")
         if cstatus == "ok":
-            st.success(
-                f"반복 이슈: 후보 {cluster_summary['candidates']}건 → "
-                f"묶음 {cluster_summary['clusters']}개 → "
-                f"최종 반복 이슈 {cluster_summary['issues']}건"
-            )
-        elif cstatus == "no_key":
-            st.warning("OPENAI_API_KEY가 없어 반복 이슈 묶기를 건너뛰었습니다.")
-        elif cstatus == "error":
-            st.warning(f"반복 이슈 묶기에 실패해 건너뛰었습니다: {cluster_summary.get('error', '')}")
+            st.caption("이번 업로드에서 묶인 반복 이슈가 없습니다.")
+        elif cstatus in ("no_key", "error"):
+            st.caption("반복 이슈 묶기를 사용할 수 없어 건너뛰었습니다. (고급 설정에서 끌 수 있습니다.)")
+        else:
+            st.caption("반복 이슈 묶기가 꺼져 있습니다. (고급 설정에서 켤 수 있습니다.)")
 
-    st.download_button(
-        "HTML 리포트 다운로드",
-        data=result["html"].encode("utf-8"),
-        file_name=f"{st.session_state.get('report_title', 'report')}.html",
-        mime="text/html",
-    )
-
-    st.subheader("리포트 미리보기")
-    st.components.v1.html(result["html"], height=820, scrolling=True)
+    if ns and ns["new_items"]:
+        st.divider()
+        st.subheader("신규 리뷰 미리보기")
+        preview = [
+            {k: v for k, v in it.items() if k != "review_id"} for it in ns["new_items"][:5]
+        ]
+        st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.caption("처리 상태·메모는 '리뷰 확인' 탭에서 입력할 수 있습니다.")
 
 
-def _render_search_tab() -> None:
-    st.subheader("간단 검색 (리뷰 찾기)")
-    st.caption("키워드·태그로 원문 리뷰를 찾는 기능입니다. AI/RAG가 아닌 단순 검색입니다.")
+# ---------------------------------------------------------------------------
+# Tab 2 — 리뷰 확인
+# ---------------------------------------------------------------------------
 
-    result = st.session_state.get("result")
-    if not result:
-        st.info("먼저 '리포트 생성' 탭에서 파일을 올려 리포트를 생성하세요.")
-        return
 
+def _render_review_filter(result: dict) -> None:
+    """Folded-in keyword/tag/channel/rating filter over original reviews."""
     tagged: list[tuple[IndustrialReview, list[str]]] = result["tagged"]
 
-    selected_labels = st.multiselect("태그 필터", options=list(LABEL_TO_ID.keys()))
+    selected_labels = st.multiselect("태그", options=list(LABEL_TO_ID.keys()))
     selected_tag_ids = {LABEL_TO_ID[label] for label in selected_labels}
-
-    keyword = st.text_input("키워드 검색 (원문 리뷰)", value="", placeholder="예: 파손, 교환, 설치 ...")
-
+    keyword = st.text_input("키워드", value="", placeholder="예: 파손, 교환, 설치 ...")
     col_a, col_b = st.columns(2)
     channel_filter = col_a.multiselect("채널", options=result["channels"])
     rating_filter = col_b.multiselect("평점", options=["5", "4", "3", "2", "1", "미상"])
 
-    # Query shortcuts: a matched term also pulls in reviews carrying its tag.
     kw = keyword.strip().lower()
     shortcut_ids = {tag for term, tag in QUERY_SHORTCUTS.items() if term in kw} if kw else set()
     if shortcut_ids:
         labels = ", ".join(sorted(CATEGORY_BY_ID[t].label_ko for t in shortcut_ids))
-        st.caption(f"'{keyword.strip()}' → 태그로도 검색: {labels}")
+        st.caption(f"'{keyword.strip()}' → 태그로도 찾기: {labels}")
 
     results: list[dict[str, str]] = []
     for review, tags in tagged:
         if selected_tag_ids and not (selected_tag_ids & set(tags)):
             continue
-        if kw:
-            if kw not in review.text.lower() and not (shortcut_ids & set(tags)):
-                continue
+        if kw and kw not in review.text.lower() and not (shortcut_ids & set(tags)):
+            continue
         if channel_filter and review.channel not in channel_filter:
             continue
         if rating_filter and _rating_bucket(review.rating) not in rating_filter:
@@ -734,15 +764,48 @@ def _render_search_tab() -> None:
             }
         )
 
-    st.write(f"검색 결과: {len(results)}건")
+    st.write(f"찾은 리뷰: {len(results)}건")
     if results:
         st.dataframe(results, use_container_width=True, hide_index=True)
 
+
+def _render_review_check_tab() -> None:
+    result = st.session_state.get("result")
+    if not result:
+        st.info("왼쪽에서 리뷰 파일을 올리고 '분석 시작'을 누르세요.")
+        return
+
+    store_path = result.get("store_path")
+
+    st.subheader("신규 리뷰")
+    ns = result.get("new_summary")
+    if ns and ns["new_items"]:
+        st.caption("리뷰를 펼쳐 처리 상태와 메모를 저장하세요. 저장한 내용은 다음 업로드에도 유지됩니다.")
+        _render_review_editors(ns["new_items"], store_path, key_prefix="new")
+        if ns["new_count"] > len(ns["new_items"]):
+            st.caption(f"신규 리뷰 {ns['new_count']}건 중 {len(ns['new_items'])}건만 표시했습니다.")
+    else:
+        st.caption("이번 업로드에 신규 리뷰가 없습니다.")
+
     st.divider()
-    st.caption("자연어 질의/LLM 요약은 실제 데이터 검증 후 추가 예정.")
+    st.subheader("우선 확인 리뷰")
+    worklist_items = result.get("worklist_items") or []
+    if worklist_items:
+        st.caption("먼저 볼 리뷰입니다. 상태와 메모는 리뷰 단위로 저장됩니다.")
+        _render_review_editors(worklist_items, store_path, key_prefix="wl")
+    else:
+        st.caption("우선 확인할 리뷰가 없습니다.")
+
+    st.divider()
+    st.subheader("리뷰 찾기")
+    _render_review_filter(result)
 
 
-RAG_EXAMPLES = [
+# ---------------------------------------------------------------------------
+# Tab 3 — 리뷰에게 물어보기
+# ---------------------------------------------------------------------------
+
+ASK_EXAMPLES = [
     "배송 파손 리뷰 보여줘",
     "사이즈 관련 불만 있어?",
     "답글 필요한 리뷰 찾아줘",
@@ -751,7 +814,7 @@ RAG_EXAMPLES = [
 ]
 
 
-def _rag_result_card(result: rag.SearchResult) -> None:
+def _ask_result_card(result: rag.SearchResult) -> None:
     m = result.doc.metadata
     rating = f"{m['rating']:g}점" if m.get("rating") is not None else "평점미상"
     bits = [m.get("date") or "날짜미상", str(m.get("channel") or "-"), rating]
@@ -759,21 +822,21 @@ def _rag_result_card(result: rag.SearchResult) -> None:
         bits.append(str(m["product_name"]))
     if m.get("option_name"):
         bits.append(f"옵션: {m['option_name']}")
-    st.markdown(f"**{' · '.join(bits)}**  ·  유사도 {result.similarity:.3f}")
+    st.markdown(f"**{' · '.join(bits)}**")
     if m.get("tag_labels"):
         st.caption("태그: " + ", ".join(m["tag_labels"]))
     st.write(m.get("text", ""))
     st.divider()
 
 
-def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> None:
+def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> None:
     query = (query or "").strip()
     if not query:
         return
     try:
         query_emb = rag.embed_texts([query], api_key=api_key, model=rag.embedding_model())[0]
-    except Exception as e:  # embedding the question failed -> tell the user, no crash
-        st.error(f"질문 임베딩 실패: {e}")
+    except Exception as e:  # processing the question failed -> tell the user, no crash
+        st.error(f"질문을 처리하지 못했습니다: {e}")
         return
 
     results = index.rank(query_emb, query_text=query, top_k=8, strict_tags=True)
@@ -782,15 +845,13 @@ def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
     # Strict-tag note: query clearly maps to a tag, but no review carries it.
     tag_note = ""
     if rag.boosted_ids_for_query(query) and index.tag_match_count(query) == 0:
-        tag_note = (
-            "해당 태그로 분류된 리뷰는 거의 없습니다. 의미상 가까운 리뷰를 대신 보여드립니다."
-        )
+        tag_note = "해당 분류의 리뷰는 거의 없습니다. 의미상 가까운 리뷰를 대신 보여드립니다."
 
     answer = rag.generate_answer(query, results, api_key=api_key, model=rag.chat_model())
     if answer is None:
         answer = (
-            f"검색된 리뷰 {len(results)}건을 오른쪽에서 확인하세요. "
-            "(AI 요약을 사용할 수 없어 검색 결과만 표시합니다.)"
+            f"관련 리뷰 {len(results)}건을 오른쪽 원문 근거에서 확인하세요. "
+            "(요약을 사용할 수 없어 원문 근거만 표시합니다.)"
         )
     if tag_note:
         answer = f"{tag_note}\n\n{answer}"
@@ -799,51 +860,48 @@ def _process_rag_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
     messages.append({"role": "assistant", "content": answer})
 
 
-def _render_rag_tab() -> None:
-    st.subheader("리뷰에게 물어보기 (로컬 RAG 데모)")
-    st.caption("업로드한 리뷰를 임베딩해 자연어로 검색·질문합니다. 외부 저장 없이 메모리에서만 동작합니다.")
+def _render_ask_tab() -> None:
+    st.subheader("리뷰에게 물어보기")
+    st.caption("외부 전송 없이 이 컴퓨터에서만 리뷰를 분석해 답합니다.")
 
     result = st.session_state.get("result")
     if not result:
-        st.info("먼저 '리포트 생성' 탭에서 파일을 올려 리포트를 생성하세요.")
+        st.info("왼쪽에서 리뷰 파일을 올리고 '분석 시작'을 누르세요.")
         return
 
     api_key = rag.resolve_api_key()
 
-    # --- Indexing gate: embed the corpus once, on demand ---
+    # --- Preparation gate: prepare the corpus once, on demand ---
     if "rag_index" not in st.session_state:
-        st.write(f"리뷰 **{len(result['tagged'])}건**을 임베딩하면 질문할 수 있습니다.")
+        st.write(f"리뷰 **{len(result['tagged'])}건**을 준비하면 질문할 수 있습니다.")
         if not api_key:
-            st.warning(
-                "OPENAI_API_KEY를 찾을 수 없어 임베딩을 만들 수 없습니다. "
-                ".env에 키를 추가하세요. ('간단 검색' 탭은 키 없이도 동작합니다.)"
-            )
-        if st.button("리뷰 인덱싱 시작 (임베딩)", type="primary", disabled=not api_key):
-            with st.spinner("리뷰 임베딩 중... (건수에 따라 시간이 걸릴 수 있습니다)"):
+            st.caption("리뷰 분석 기능을 사용할 수 없습니다. (설정을 확인해주세요.)")
+        if st.button("리뷰 분석 준비하기", type="primary", disabled=not api_key):
+            with st.spinner("리뷰 분석 준비 중... (건수에 따라 시간이 걸릴 수 있습니다)"):
                 try:
                     index = rag.build_index(
                         result["tagged"], api_key=api_key, model=rag.embedding_model()
                     )
                     st.session_state["rag_index"] = index
                     st.session_state.setdefault("rag_messages", [])
-                    st.success(f"{len(index)}건 인덱싱 완료")
+                    st.success(f"{len(index)}건 준비 완료")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"임베딩 실패: {e}")
+                    st.error(f"준비하지 못했습니다: {e}")
         return
 
     index: rag.RagIndex = st.session_state["rag_index"]
-    st.caption(f"인덱싱된 리뷰: {len(index)}건")
+    st.caption(f"분석 준비된 리뷰: {len(index)}건")
 
     left, right = st.columns(2)
 
     with left:
         st.markdown("#### 질문")
         st.write("예시 질문:")
-        for i, example in enumerate(RAG_EXAMPLES):
-            if st.button(example, key=f"rag_ex_{i}"):
+        for i, example in enumerate(ASK_EXAMPLES):
+            if st.button(example, key=f"ask_ex_{i}"):
                 st.session_state["rag_pending"] = example
-        with st.form("rag_form", clear_on_submit=True):
+        with st.form("ask_form", clear_on_submit=True):
             typed = st.text_input("질문을 입력하세요", value="")
             submitted = st.form_submit_button("질문하기", type="primary")
         if submitted and typed.strip():
@@ -851,8 +909,8 @@ def _render_rag_tab() -> None:
 
         pending = st.session_state.pop("rag_pending", None)
         if pending:
-            with st.spinner("검색 중..."):
-                _process_rag_query(pending, index, api_key)
+            with st.spinner("찾는 중..."):
+                _process_ask_query(pending, index, api_key)
 
         st.markdown("#### 대화")
         for message in st.session_state.get("rag_messages", []):
@@ -860,31 +918,29 @@ def _render_rag_tab() -> None:
                 st.write(message["content"])
 
     with right:
-        st.markdown("#### 검색된 리뷰")
+        st.markdown("#### 원문 근거")
         results = st.session_state.get("rag_last_results", [])
         if not results:
             st.caption("질문하면 관련 원문 리뷰가 여기에 표시됩니다.")
         for res in results:
-            _rag_result_card(res)
+            _ask_result_card(res)
 
 
 def main() -> None:
-    st.set_page_config(page_title="산업자재 리뷰 운영 점검", layout="wide")
-    st.title("산업자재 리뷰 운영 점검 (로컬 데모)")
-    st.caption(
-        "여러 채널 리뷰를 한곳에 모아, 운영자가 먼저 확인할 리뷰를 정리합니다. "
-        "키워드 기반 우선 분류이며, 확인용으로 봐주세요."
-    )
+    st.set_page_config(page_title="산업자재 리뷰 운영 워크스페이스", layout="wide")
+    _render_sidebar()
+    st.title("산업자재 리뷰 운영 워크스페이스")
+    st.caption("여러 채널 리뷰를 한곳에 모아, 먼저 확인할 리뷰와 반복 이슈를 정리합니다.")
 
-    tab_report, tab_search, tab_rag = st.tabs(
-        ["리포트 생성", "간단 검색 (리뷰 찾기)", "리뷰에게 물어보기 (RAG)"]
+    tab_summary, tab_check, tab_ask = st.tabs(
+        ["운영 요약", "리뷰 확인", "리뷰에게 물어보기"]
     )
-    with tab_report:
-        _render_generate_tab()
-    with tab_search:
-        _render_search_tab()
-    with tab_rag:
-        _render_rag_tab()
+    with tab_summary:
+        _render_summary_tab()
+    with tab_check:
+        _render_review_check_tab()
+    with tab_ask:
+        _render_ask_tab()
 
 
 if __name__ == "__main__":
