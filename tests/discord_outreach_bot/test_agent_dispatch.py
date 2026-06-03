@@ -9,6 +9,7 @@ non-deletion / no copy-back.
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -78,6 +79,12 @@ class _Ctx:
             operator_id, repo_root=self.repo, agent_runs_path=self.spine,
             agent_runs_dir=self.runs_dir, approval_log_path=self.approval,
             adapter=adapter, do_run=do_run)
+
+    def confirm_edit(self, *, adapter=None, operator_id=OP):
+        return disp.confirm_bounded_edit_run(
+            operator_id, repo_root=self.repo, agent_runs_path=self.spine,
+            agent_runs_dir=self.runs_dir, approval_log_path=self.approval,
+            adapter=adapter)
 
     def statuses(self, run_id=None):
         recs = aruns.read_runs(self.spine)
@@ -297,7 +304,8 @@ def test_claude_code_local_bounded_edit_rejected(ctx, monkeypatch):
     assert p["ok"]  # pre-run allows bounded_edit as a valid mode
     out = ctx.confirm()
     assert out["outcome"] == "blocked"
-    assert out["reason"].startswith("dry_run_only_in_m6d2")
+    # first-phase bounded_edit (no edit path) is refused
+    assert out["reason"].startswith("bounded_edit_requires_edit_path")
     assert ctx.statuses(p["run_id"]) == ["proposed", "approved", "blocked"]
     assert rec["called"] is False  # adapter never invoked
     assert not (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).exists()
@@ -310,7 +318,7 @@ def test_claude_code_local_do_run_rejected(ctx, monkeypatch):
     p = ctx.propose(adapter_name="claude_code_local", mode="plan")
     out = ctx.confirm(do_run=True)  # do_run requested -> refused even in plan
     assert out["outcome"] == "blocked"
-    assert out["reason"].startswith("dry_run_only_in_m6d2")
+    assert out["reason"].startswith("dry_run_only")
     assert rec["called"] is False
     assert not (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).exists()
 
@@ -358,6 +366,223 @@ def test_no_api_key_required(monkeypatch, ctx):
     ctx.propose()
     out = ctx.confirm()
     assert out["ok"] and out["outcome"] == "dry_run"
+
+
+# === M6-D3: bounded_edit after clean dry_run + second confirmation ===========
+ALLOWED_DRAFT = "ops/discord_outreach_bot/generated_prompts/draft.md"
+
+
+class _TrackMock(MockAdapter):
+    """MockAdapter that counts dry_run vs run calls (same instance reused)."""
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.dry_calls = 0
+        self.run_calls = 0
+
+    def dry_run(self, *a, **k):
+        self.dry_calls += 1
+        return super().dry_run(*a, **k)
+
+    def run(self, *a, **k):
+        self.run_calls += 1
+        return super().run(*a, **k)
+
+
+def test_clean_dry_run_arms_edit_pending(ctx):
+    p = ctx.propose()  # stage candidate_shortlist_summary_prompt (edit-eligible)
+    out = ctx.confirm()
+    assert out["outcome"] == "dry_run"
+    assert out.get("edit_pending") is True
+    assert "편집 진행해" in out["report"]
+    assert disp._get_pending_edit(OP)["run_id"] == p["run_id"]
+
+
+def test_non_eligible_stage_no_edit_pending(ctx, tmp_path):
+    # CorpusReviewAgent/corpus_review_prompt is a valid runtime stage but NOT
+    # in ALLOWED_BOUNDED_EDIT_STAGES.
+    pdir = ctx.repo / "ops" / "discord_outreach_bot" / "generated_prompts"
+    pr = pdir / "corpus.md"
+    pr.write_text("# corpus prompt\n", encoding="utf-8")
+    out = disp.propose_agent_run(
+        operator_id=OP, agent_name="CorpusReviewAgent", stage="corpus_review_prompt",
+        task_id=TASK, adapter_name="mock_adapter", prompt_path=pr, mode="plan",
+        timeout_s=60, repo_root=ctx.repo, known_task_ids={TASK},
+        agent_runs_path=ctx.spine)
+    assert out["ok"]
+    res = ctx.confirm()
+    assert res["outcome"] == "dry_run"
+    assert res.get("edit_pending") is not True
+    assert "편집 진행해" not in res["report"]
+    assert disp._get_pending_edit(OP) is None
+
+
+def test_edit_no_pending_is_noop(ctx):
+    out = ctx.confirm_edit()
+    assert out["outcome"] == "no_pending"
+    assert aruns.read_runs(ctx.spine) == []
+
+
+def test_edit_prompt_hash_mismatch_blocks(ctx):
+    p = ctx.propose()
+    track = _TrackMock()
+    ctx.confirm(adapter=track)            # dry_run arms edit-pending
+    ctx.prompt.write_text("# TAMPERED\n", encoding="utf-8")
+    out = ctx.confirm_edit(adapter=track)
+    assert out["outcome"] == "blocked" and out["reason"] == "prompt_hash_mismatch"
+    assert track.run_calls == 0           # never executed an edit
+    assert ctx.statuses(p["run_id"]) == ["proposed", "approved", "running",
+                                         "dry_run", "blocked"]
+
+
+def test_bounded_edit_happy_allowed_path(ctx):
+    track = _TrackMock(changed_files=(ALLOWED_DRAFT,))
+    p = ctx.propose()
+    ctx.confirm(adapter=track)
+    assert track.dry_calls == 1 and track.run_calls == 0  # run not called yet
+    out = ctx.confirm_edit(adapter=track)
+    assert out["outcome"] == "done" and out["ok"]
+    assert track.run_calls == 1                            # run only in edit path
+    assert ctx.statuses(p["run_id"]) == [
+        "proposed", "approved", "running", "dry_run",
+        "approved", "running", "done"]
+    # reused the dry_run worktree (would raise worktree_exists if recreated)
+    assert out["worktree"].endswith(p["run_id"])
+    assert (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).is_dir()
+
+
+def test_duplicate_second_confirm_is_noop(ctx):
+    track = _TrackMock(changed_files=(ALLOWED_DRAFT,))
+    ctx.propose()
+    ctx.confirm(adapter=track)
+    first = ctx.confirm_edit(adapter=track)
+    assert first["outcome"] == "done"
+    before = len(aruns.read_runs(ctx.spine))
+    second = ctx.confirm_edit(adapter=track)
+    assert second["outcome"] == "no_pending"
+    assert len(aruns.read_runs(ctx.spine)) == before  # nothing new
+
+
+def test_bounded_edit_unsafe_src_blocked(ctx):
+    track = _TrackMock(changed_files=("src/voc/secret.py",))
+    p = ctx.propose()
+    ctx.confirm(adapter=track)
+    out = ctx.confirm_edit(adapter=track)
+    assert out["outcome"] == "blocked"
+    assert out["reason"].startswith("changed_file_outside_allowed_paths")
+    assert (ctx.repo / wt.WORKTREE_BASE / p["run_id"]).is_dir()  # preserved
+
+
+def test_bounded_edit_packet_file_blocked(ctx):
+    track = _TrackMock(changed_files=("outputs/outreach/x/status.json",))
+    ctx.propose()
+    ctx.confirm(adapter=track)
+    out = ctx.confirm_edit(adapter=track)
+    assert out["outcome"] == "blocked"
+    assert out["reason"].startswith("packet_file_mutation")
+
+
+def test_no_copy_back_after_edit(ctx):
+    track = _TrackMock(changed_files=(ALLOWED_DRAFT,))
+    ctx.propose()
+    ctx.confirm(adapter=track)
+    ctx.confirm_edit(adapter=track)
+    # the draft exists only as a declared change; nothing copied to repo root
+    assert not (ctx.repo / "draft.md").exists()
+    assert not (ctx.repo / ALLOWED_DRAFT).exists()  # not promoted to live repo
+
+
+def test_cleanup_run_removes_worktree(ctx):
+    p = ctx.propose()
+    ctx.confirm()
+    wtp = ctx.repo / wt.WORKTREE_BASE / p["run_id"]
+    assert wtp.is_dir()
+    out = disp.cleanup_run(p["run_id"], repo_root=ctx.repo)
+    assert out["worktree_removed"] is True
+    assert not wtp.exists()
+
+
+def test_stage_not_edit_eligible_refused_in_dispatch(ctx):
+    # directly invoke the edit dispatch path with a non-eligible stage
+    wtp = wt.create_worktree(ctx.repo, "run_x")
+    out = disp.dispatch_agent_run(
+        run_id="run_x", agent_name="CorpusReviewAgent", stage="corpus_review_prompt",
+        task_id=TASK, adapter_name="mock_adapter", prompt_path=ctx.prompt,
+        mode="bounded_edit", timeout_s=60, repo_root=ctx.repo,
+        agent_runs_path=ctx.spine, agent_runs_dir=ctx.runs_dir,
+        adapter=MockAdapter(), do_run=True, existing_worktree=wtp)
+    assert out["outcome"] == "blocked"
+    assert out["reason"].startswith("stage_not_edit_eligible")
+
+
+# === cost_usd capture ========================================================
+def test_read_cost_usd_helper(tmp_path):
+    rd = tmp_path / "rd"
+    rd.mkdir()
+    assert disp._read_cost_usd(rd) is None  # absent
+    (rd / "claude_output.json").write_text(
+        '{"total_cost_usd": 0.0215, "result": "OK"}', encoding="utf-8")
+    assert disp._read_cost_usd(rd) == 0.0215
+
+
+def test_cost_usd_recorded_when_present(ctx, monkeypatch):
+    # claude_code_local edit path with a FakePopen that writes claude_output.json
+    # (with cost) AND an allowed-prefix file in the worktree.
+    monkeypatch.setattr(ccl, "which", lambda _b: "/bin/claude")
+    cost_json = '{"type":"result","result":"done","total_cost_usd":0.0312}'
+
+    def make_writer():
+        rec = {}
+
+        class _FP:
+            def __init__(self, argv, **kw):
+                rec["argv"] = argv
+                rec["kw"] = kw
+                self.pid = 1
+                self.returncode = None
+
+            def communicate(self, input=None, timeout=None):
+                cwd = Path(rec["kw"]["cwd"])
+                # only the edit (acceptEdits) run writes a file
+                if "acceptEdits" in rec["argv"]:
+                    fp = cwd / "ops" / "discord_outreach_bot" / "generated_prompts"
+                    fp.mkdir(parents=True, exist_ok=True)
+                    (fp / "draft.md").write_text("draft\n", encoding="utf-8")
+                self.returncode = 0
+                return cost_json, ""
+
+            def kill(self):
+                pass
+        return _FP
+    monkeypatch.setattr(ccl, "_Popen", make_writer())
+
+    p = ctx.propose(adapter_name="claude_code_local", mode="plan")
+    ctx.confirm()                       # claude dry_run (plan) -> arms edit pending
+    out = ctx.confirm_edit()            # claude bounded_edit (acceptEdits)
+    assert out["outcome"] == "done"
+    assert out["cost_usd"] == 0.0312
+    assert "ops/discord_outreach_bot/generated_prompts/draft.md" in out["result"].changed_files
+    # recorded on the spine terminal record
+    term = [r for r in aruns.read_runs(ctx.spine)
+            if r["run_id"] == p["run_id"]][-1]
+    assert term["cost_usd"] == 0.0312 and term["status"] == "done"
+
+
+# === optional gated live bounded_edit smoke (skipped by default) =============
+@pytest.mark.skipif(
+    __import__("os").environ.get("RUN_LIVE_CLAUDE_CODE_EDIT_TEST") != "1",
+    reason="live Claude Code bounded_edit smoke disabled "
+           "(set RUN_LIVE_CLAUDE_CODE_EDIT_TEST=1)")
+def test_live_claude_bounded_edit_smoke(ctx):
+    """Live: dry_run then a single bounded_edit in a temp worktree. NOT default."""
+    ctx.prompt.write_text(
+        "Create a file ops/discord_outreach_bot/generated_prompts/ok.md "
+        "containing the word OK.", encoding="utf-8")
+    if not ccl.ClaudeCodeLocalAdapter().is_available():
+        pytest.skip("claude binary not available")
+    ctx.propose(adapter_name="claude_code_local", mode="plan")
+    ctx.confirm()
+    out = ctx.confirm_edit()
+    assert out["outcome"] in ("done", "blocked", "failed", "timed_out")
 
 
 # === optional gated live dry_run smoke (skipped by default) ==================
