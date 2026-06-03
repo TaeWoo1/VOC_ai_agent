@@ -45,8 +45,10 @@ import agent_worktree as _wt
 import approval_log as _approval
 from agent_runtime import get_adapter
 
-# M6-D1: only this adapter may execute. claude_code_local is gated off until D2.
-_ALLOWED_DISPATCH_ADAPTERS = ("mock_adapter",)
+# M6-D2: mock_adapter + claude_code_local may execute, but ONLY plan-mode
+# dry_run. bounded_edit / acceptEdits / do_run remain globally disabled until
+# M6-D3 — enforced by the dry_run-only gate in dispatch_agent_run below.
+_ALLOWED_DISPATCH_ADAPTERS = ("mock_adapter", "claude_code_local")
 
 # in-memory, per-operator confirmation handshake (same pattern as M5-A.5 cancel):
 # deliberately NOT persisted — a 2-message handshake, lost on restart, never
@@ -253,9 +255,10 @@ def dispatch_agent_run(
     agent_runs_dir: Optional[Path] = None,
     adapter: Any = None, do_run: bool = False,
 ) -> dict[str, Any]:
-    """Worktree -> running -> mock dry_run -> post-validate -> terminal record.
+    """Worktree -> running -> dry_run -> post-validate -> terminal record.
 
-    M6-D1: mock_adapter only; dry_run only. Never copies changes back, never
+    M6-D2: mock_adapter + claude_code_local, dry_run (plan) ONLY. Never runs
+    bounded_edit, never uses acceptEdits, never copies changes back, never
     auto-deletes the worktree.
     """
     import dataclasses
@@ -265,16 +268,28 @@ def dispatch_agent_run(
                 stage=stage, task_id=task_id, mode=mode,
                 prompt_path=str(prompt_path), operator_id=_op_key(operator_id))
 
-    # M6-D1 adapter gate: claude_code_local (and anything else) is rejected.
+    # adapter allowlist gate.
     if adapter_name not in _ALLOWED_DISPATCH_ADAPTERS:
-        reason = f"adapter_not_allowed_in_m6d1:{adapter_name}"
+        reason = f"adapter_not_allowed:{adapter_name}"
         _append({**base, "status": "blocked", "reason": reason}, agent_runs_path)
         return {"ok": False, "outcome": "blocked", "run_id": run_id,
                 "reason": reason,
                 "report": _fmt.format_unavailable(
                     adapter_name=adapter_name,
-                    note="M6-D1은 mock_adapter만 실행합니다 (claude_code_local은 "
-                         "M6-D2 이후).")}
+                    note="이 어댑터는 dispatch에서 허용되지 않습니다.")}
+
+    # M6-D2 dry-run-only gate: only plan mode is permitted, and do_run must be
+    # False. bounded_edit / acceptEdits are deferred to M6-D3 — refuse BEFORE the
+    # adapter is touched, so no worktree is created and no runtime is invoked.
+    if mode != "plan" or do_run:
+        reason = f"dry_run_only_in_m6d2:mode={mode},do_run={do_run}"
+        _append({**base, "status": "blocked", "reason": reason}, agent_runs_path)
+        return {"ok": False, "outcome": "blocked", "run_id": run_id,
+                "reason": reason,
+                "report": _fmt.format_unavailable(
+                    adapter_name=adapter_name,
+                    note="M6-D2는 plan(dry_run)만 허용합니다. bounded_edit는 "
+                         "M6-D3 이후.")}
 
     adapter = adapter or get_adapter(adapter_name)
     if adapter is None or not adapter.is_available():
@@ -300,7 +315,8 @@ def dispatch_agent_run(
              "timeout_s": timeout_s}, agent_runs_path)
 
     run_dir = _runs.run_dir_for(run_id, agent_runs_dir)
-    # M6-D1: dry_run ONLY. bounded_edit is deferred to M6-D3 (do_run ignored).
+    # M6-D2: dry_run ONLY (the gate above guarantees mode == "plan", do_run False).
+    # adapter.run()/acceptEdits is NEVER called here — bounded_edit lands in M6-D3.
     result = adapter.dry_run(prompt_path, cwd=worktree, timeout_s=timeout_s,
                              run_dir=run_dir)
 
