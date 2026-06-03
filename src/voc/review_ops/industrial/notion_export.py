@@ -44,30 +44,31 @@ _RICH_TEXT_MAXLEN = 1900  # Notion hard limit is 2000 per rich_text content
 NO_NEEDS_REPLY_TEXT = "이번 범위에서는 명확한 답글 필요 리뷰가 많지 않습니다."
 
 # Section headings, in order. Tests assert these all appear. Lead with the
-# CEO summary + action list ("what to do next"), push raw evidence lower.
+# operations summary + priority list ("what to do next"), push raw evidence
+# lower. Professional dashboard tone — no direct address.
 SECTION_TITLES = [
-    "대표님 요약",
-    "이번에 먼저 볼 것",
+    "운영 요약",
+    "우선 점검 항목",
     "반복 이슈",
     "우선 확인 리뷰",
-    "답글 필요 리뷰",
+    "답글 검토 리뷰",
     "상세페이지/안내 보완 후보",
-    "운영 적용 가능성",
-    "다음 업로드 때 비교할 것",
+    "적용 범위",
+    "다음 업로드 비교 항목",
 ]
 
 # Static "운영 적용 가능성" content — three fixed categories. Verbatim copy; do
 # not derive or rephrase. Humble + operational, no causality/automation claims.
 APPLICABILITY = {
-    "지금 바로 가능한 것": [
+    "현재 적용 가능": [
         "CSV/엑셀 리뷰 업로드 기반 상품군별 리뷰 점검",
         "신규 리뷰 구분",
         "반복 이슈 확인",
-        "저평점/답글 필요 리뷰 분리",
+        "저평점/답글 검토 리뷰 분리",
         "상세페이지 보완 후보 정리",
         "원문 근거 기반 질의",
     ],
-    "추가 데이터가 있으면 가능한 것": [
+    "추가 데이터 필요": [
         "쿠팡/스마트스토어/자사몰 리뷰 통합",
         "주간 신규 리뷰 변화 추적",
         "상품별 이슈 변화 추적",
@@ -75,7 +76,7 @@ APPLICABILITY = {
         "상세페이지 문구/이미지와 실제 리뷰 불일치 확인",
         "FAQ/상세페이지 문구 후보 생성",
     ],
-    "아직 자동화하지 않는 게 좋은 것": [
+    "보류 권장": [
         "답글 자동 게시",
         "상세페이지 자동 수정",
         "원인/매출 영향 단정",
@@ -85,9 +86,9 @@ APPLICABILITY = {
 }
 # Order matters: tests assert all three appear and the export reads top-to-bottom.
 APPLICABILITY_ORDER = [
-    "지금 바로 가능한 것",
-    "추가 데이터가 있으면 가능한 것",
-    "아직 자동화하지 않는 게 좋은 것",
+    "현재 적용 가능",
+    "추가 데이터 필요",
+    "보류 권장",
 ]
 
 
@@ -240,7 +241,9 @@ def _count_text(result: dict) -> str:
 
 
 def _section_ceo_summary(result: dict) -> list[dict]:
-    """대표님 요약 — 3~5 humble bullets leading with scope + what to look at."""
+    """운영 요약 — 3~5 humble bullets leading with scope + what to look at.
+
+    Professional dashboard tone: no direct address."""
     rs = result.get("rating_summary") or {}
     avg = rs.get("average")
     avg_text = f"평균 평점 {avg}점" if avg is not None else "평균 평점 미상"
@@ -248,7 +251,7 @@ def _section_ceo_summary(result: dict) -> list[dict]:
     key_titles = [i.get("issue_title") or "" for i in issues[:MAX_CEO_ISSUES]]
     key_titles = [t for t in key_titles if t]
 
-    blocks = [_heading_2("대표님 요약")]
+    blocks = [_heading_2("운영 요약")]
     blocks.append(_bullet(f"분석 범위: {_scope_label(result)} · 리뷰 {_count_text(result)}"))
     blocks.append(_bullet(f"{_rating_context_phrase(result)} ({avg_text})."))
     if key_titles:
@@ -256,25 +259,25 @@ def _section_ceo_summary(result: dict) -> list[dict]:
         first = key_titles[0]
         blocks.append(
             _bullet(
-                f"이번에 먼저 볼 것: {_scope_label(result)}에서 '{first}' 관련 "
+                f"우선 점검 항목: {_scope_label(result)}에서 '{first}' 관련 "
                 "확인 신호부터 점검하는 것을 권장합니다."
             )
         )
     else:
         blocks.append(_bullet("반복 확인 신호: 이번 범위에서는 뚜렷한 반복 이슈가 적습니다."))
         blocks.append(
-            _bullet("이번에 먼저 볼 것: 우선 확인 리뷰부터 가볍게 점검하는 것을 권장합니다.")
+            _bullet("우선 점검 항목: 우선 확인 리뷰부터 가볍게 점검하는 것을 권장합니다.")
         )
     return blocks
 
 
 def _section_action_list(result: dict) -> list[dict]:
-    """이번에 먼저 볼 것 — compact action digest, no long quotes.
+    """우선 점검 항목 — compact action digest, no long quotes.
 
     Combines repeated-issue actions (severity-labelled) with the top worklist
     items (확인-labelled). This is the 'what to do next' lead-in; detail lives
     in the 반복 이슈 / 우선 확인 리뷰 sections below."""
-    blocks = [_heading_2("이번에 먼저 볼 것")]
+    blocks = [_heading_2("우선 점검 항목")]
     items: list[str] = []
     for issue in (result.get("issue_items") or [])[:MAX_CEO_ISSUES]:
         action = issue.get("recommended_action") or issue.get("issue_title") or ""
@@ -355,7 +358,7 @@ def _section_priority_reviews(result: dict) -> list[dict]:
 
 
 def _section_needs_reply(result: dict) -> list[dict]:
-    blocks = [_heading_2("답글 필요 리뷰")]
+    blocks = [_heading_2("답글 검토 리뷰")]
     reviews = _needs_reply_reviews(result)
     if not reviews:
         blocks.append(_paragraph(NO_NEEDS_REPLY_TEXT))
@@ -406,8 +409,8 @@ def _section_applicability() -> list[dict]:
 
     Compact: each category is one heading plus a single paragraph joining its
     items, instead of a bullet per item. The caution against auto-posting /
-    auto-editing / causal claims stays in the third category."""
-    blocks = [_heading_2("운영 적용 가능성")]
+    auto-editing / causal claims stays in the third category (보류 권장)."""
+    blocks = [_heading_2("적용 범위")]
     for category in APPLICABILITY_ORDER:
         blocks.append(_heading_3(category))
         blocks.append(_paragraph(" · ".join(APPLICABILITY[category])))
@@ -415,9 +418,9 @@ def _section_applicability() -> list[dict]:
 
 
 def _section_comparison(result: dict) -> list[dict]:
-    # Renamed from "다음 주 운영 제안" — the value is what to compare on the next
-    # upload, not a weekly schedule we can't enforce.
-    blocks = [_heading_2("다음 업로드 때 비교할 것")]
+    # The value is what to compare on the next upload, not a weekly schedule we
+    # can't enforce. Professional dashboard tone — no direct address.
+    blocks = [_heading_2("다음 업로드 비교 항목")]
     for line in (
         "신규 리뷰 수 변화",
         "반복 이슈 건수 변화",
@@ -425,7 +428,7 @@ def _section_comparison(result: dict) -> list[dict]:
         "접착력/절단 관련 표현이 새로 늘었는지",
     ):
         blocks.append(_bullet(line))
-    blocks.append(_heading_3("대표님에게 물어볼 질문"))
+    blocks.append(_heading_3("확인할 의사결정"))
     for line in (
         "어떤 이슈를 먼저 상세페이지/안내에 반영할지",
         "다음에 집중 점검할 상품군은 어디인지",

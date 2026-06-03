@@ -172,14 +172,37 @@ def test_old_worklist_heading_gone():
 
 def test_ceo_summary_includes_key_counts_and_scope():
     blocks = build_notion_blocks(_full_result())
-    # 대표님 요약 is the first section
-    assert _headings(blocks)[0] == "대표님 요약"
+    # 운영 요약 is the first section
+    assert _headings(blocks)[0] == "운영 요약"
     text = _all_text(blocks)
     assert "선택 상품 6개" in text
     assert "1,141" in text  # scoped count
     assert "2,962" in text  # full count
     assert "3.1점" in text   # average rating
-    assert "이번에 먼저 볼 것" in text  # the lead-in sentence + section
+    assert "우선 점검 항목" in text  # the lead-in sentence + section
+
+
+def test_old_headings_absent():
+    text = _all_text(build_notion_blocks(_full_result()))
+    for old in (
+        "대표님 요약",
+        "이번에 먼저 볼 것",
+        "운영 적용 가능성",
+        "다음 업로드 때 비교할 것",
+        "대표님에게 물어볼 질문",
+    ):
+        assert old not in text, old
+
+
+def test_no_direct_address():
+    text = _all_text(build_notion_blocks(_full_result()))
+    assert "대표님" not in text
+
+
+def test_new_applicability_labels_exist():
+    headings = _headings(build_notion_blocks(_full_result()))
+    for label in ("현재 적용 가능", "추가 데이터 필요", "보류 권장"):
+        assert label in headings, label
 
 
 def test_action_list_precedes_evidence_quotes():
@@ -187,7 +210,7 @@ def test_action_list_precedes_evidence_quotes():
     action_idx = next(
         i for i, b in enumerate(blocks)
         if b["type"] == "heading_2"
-        and b["heading_2"]["rich_text"][0]["text"]["content"] == "이번에 먼저 볼 것"
+        and b["heading_2"]["rich_text"][0]["text"]["content"] == "우선 점검 항목"
     )
     first_quote_idx = next(i for i, b in enumerate(blocks) if b["type"] == "quote")
     assert action_idx < first_quote_idx
