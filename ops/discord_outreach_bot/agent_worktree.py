@@ -136,7 +136,13 @@ def list_changed_files(worktree: Path) -> tuple[str, ...]:
 
 
 def capture_diff(worktree: Path) -> str:
-    """Best-effort unified diff vs HEAD for audit. Empty string on failure."""
+    """Best-effort unified diff vs HEAD for audit. Empty string on failure.
+
+    `git add -N -- .` (intent-to-add) first, so NEW untracked files appear in the
+    diff. Intent-to-add stages no content (the worktree is throwaway anyway) and
+    never touches the live repo; `changed_files` still comes from `git status`.
+    """
     worktree = Path(worktree)
+    _run_git(["add", "-N", "--", "."], cwd=worktree)  # surface untracked files
     proc = _run_git(["diff", "HEAD"], cwd=worktree)
     return proc.stdout if proc.returncode == 0 else ""
