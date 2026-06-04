@@ -162,19 +162,20 @@ def test_no_packet_mutation_after_propose(ctx):
     assert before == after
 
 
-# === artifact-hash binding ===================================================
+# === artifact-hash binding (re-verified against staged send_preview.json) ====
 def test_artifact_hash_mismatch_blocks(ctx):
     ctx.propose()
-    # tamper a previewed input (recipient) after the preview was armed
-    (ctx.packet_dir / "recipient.json").write_text(
-        '{"email": "other@brand.co.kr"}', encoding="utf-8")
+    # tamper the STAGED preview bytes (the source of truth for the outgoing msg)
+    (ctx.staging / "send_preview.json").write_text(
+        '{"task_id":"x","recipient_email":"z@z.co","subject":"s","body":"b",'
+        '"attachments":[],"content_hash":"sha256:deadbeef"}', encoding="utf-8")
     out = ctx.confirm()
     assert out["intent"] == "action_blocked" and out["executed"] is False
     assert out.get("failed_check") == "artifact_hash_mismatch"
     assert ad.get_pending_action(OP) is None  # cleared
 
 
-# === confirm hard-blocks (no send capability in D4-4a) =======================
+# === confirm clarify / planner-never-sends (D4-4b) ===========================
 def test_confirm_no_pending_clarifies(ctx):
     # no agent run, no action pending -> dispatcher's own confirm clarify
     out = ctx.confirm()
@@ -188,39 +189,34 @@ def test_confirm_send_final_no_pending_direct(ctx):
     assert out["executed"] is False and out["intent"] == "action_confirm"
 
 
-def test_confirm_send_pending_hard_blocks(ctx):
+def test_planner_confirm_not_authorized_preserves_pending(ctx):
+    # confirm_pending (planner NL) reaches confirm_send_final with
+    # authorize_send=False -> send_not_authorized, never a send, pending PRESERVED.
     ctx.propose()
     out = ctx.confirm()
     assert out["intent"] == "action_blocked" and out["executed"] is False
-    assert out.get("failed_check") == "send_not_enabled"
-    # nothing sent: no send_log, no status mutation
+    assert out.get("failed_check") == "send_not_authorized"
+    assert ad.get_pending_action(OP) is not None  # preserved for the phrase
     assert not (ctx.packet_dir / "send_log.md").exists()
     assert (ctx.packet_dir / "status.json").read_text(encoding="utf-8") == '{"s":1}'
 
 
-def test_confirm_even_with_authorize_send_true_blocks(ctx, monkeypatch):
-    # even if AGENT_SEND_ENABLED + authorize_send=True, D4-4a has no capability
-    monkeypatch.setenv("AGENT_SEND_ENABLED", "1")
+def test_authorize_send_true_env_off_not_authorized(ctx, monkeypatch):
+    # authorize_send=True but env off -> send_not_authorized, pending preserved
+    monkeypatch.delenv("AGENT_SEND_ENABLED", raising=False)
     ctx.propose()
     out = ad.confirm_send_final(OP, authorize_send=True,
                                 approval_log_path=ctx.approvals)
-    assert out["intent"] == "action_blocked"
-    assert out.get("failed_check") == "send_not_enabled"
+    assert out.get("failed_check") == "send_not_authorized"
+    assert ad.get_pending_action(OP) is not None
     assert not (ctx.packet_dir / "send_log.md").exists()
 
 
-def test_send_fn_seam_always_raises(ctx):
-    with pytest.raises(ad.SendNotAuthorized):
-        ad._send_fn({"task_id": TASK})
-
-
-# === planner / generic confirm never sends ===================================
-def test_planner_confirm_routes_send_pending_to_hard_block(ctx):
-    # confirm_pending (planner NL) must reach confirm_send_final with
-    # authorize_send=False -> send_not_enabled, never a send.
-    ctx.propose()
-    out = ctx.confirm()
-    assert out.get("failed_check") == "send_not_enabled"
+def test_fake_send_returns_sent(ctx):
+    # the D4-4b default seam is a fake provider: returns result=sent, no network
+    res = ad._send_fn({"content_hash": "sha256:abc123def456"})
+    assert res["result"] == "sent" and res["provider"] == "fake"
+    assert res["message_id"].startswith("fake-")
 
 
 # === send_outreach report-only without packets_root =========================
