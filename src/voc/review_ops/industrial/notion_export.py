@@ -38,6 +38,8 @@ MAX_DETAIL_CANDIDATES = 6
 MAX_ACTION_ITEMS = 6
 MAX_CEO_ISSUES = 3  # key issues named in the CEO summary / action list
 MAX_DB_KEY_ISSUES = 5  # issue titles named in the DB row's 주요 이슈 column
+MAX_COMPACT_NEEDS_REPLY = 3  # compact DB body lists at most this many 답글 검토 리뷰
+COMPACT_POSITIVE_RATING_FLOOR = 4.0  # rating ≥ this is "obviously positive" → skipped
 QUOTE_MAXLEN = 160  # quotes are kept short in this layout
 PRODUCT_LABEL_MAXLEN = 22  # Notion-only short product label
 _RICH_TEXT_MAXLEN = 1900  # Notion hard limit is 2000 per rich_text content
@@ -374,6 +376,36 @@ def _section_needs_reply(result: dict) -> list[dict]:
     return blocks
 
 
+def _non_positive_needs_reply(result: dict) -> list:
+    """needs_reply reviews that are NOT obviously positive (rating below the
+    floor, or rating unknown). Used to gate the compact body's 답글 검토 리뷰
+    section: high-rating reviews don't need an operator reply nudge."""
+    out = []
+    for r in _needs_reply_reviews(result):
+        rating = getattr(r, "rating", None)
+        try:
+            if rating is not None and float(rating) >= COMPACT_POSITIVE_RATING_FLOOR:
+                continue
+        except (TypeError, ValueError):
+            pass  # unparseable rating → keep (can't prove it's positive)
+        out.append(r)
+    return out
+
+
+def _section_needs_reply_compact(reviews: list) -> list[dict]:
+    """Compact 답글 검토 리뷰: pre-filtered reviews only, capped tighter than the
+    full body. Same meta + verbatim quote formatting as _section_needs_reply."""
+    blocks = [_heading_2("답글 검토 리뷰")]
+    for r in reviews[:MAX_COMPACT_NEEDS_REPLY]:
+        review_date = getattr(r, "review_date", None)
+        d = review_date.isoformat() if review_date else "미상"
+        product = _short_product_label(getattr(r, "product_name", None))
+        meta = f"{d} · {product} · {_fmt_rating(getattr(r, 'rating', None))}"
+        blocks.append(_paragraph(meta))
+        blocks.append(_quote(_quote_text(getattr(r, "text", "") or "")))
+    return blocks
+
+
 def _section_detail_candidates(result: dict) -> list[dict]:
     """상세페이지/안내 보완 후보 — derived from repeated-issue recommended actions.
 
@@ -441,22 +473,45 @@ def _section_comparison(result: dict) -> list[dict]:
 # --- top-level builders ------------------------------------------------------
 
 
-def build_notion_blocks(result: dict) -> list[dict]:
-    """All sections as a flat list of Notion block objects (dividers between).
-
-    Order follows SECTION_TITLES. Total stays under 100 via the per-section
-    caps above.
-    """
+def _compact_db_sections(result: dict) -> list[list[dict]]:
+    """Compact body for the DB row, where the row's properties already carry the
+    headline metrics. Keeps the decision-useful sections (운영 요약 / 우선 점검
+    항목 / 반복 이슈 / 상세페이지·안내 보완 후보 / 적용 범위); drops the long
+    리스트 sections (우선 확인 리뷰, 다음 업로드 비교 항목). 답글 검토 리뷰 is
+    included only when there are non-positive reviews actually worth a reply."""
     sections = [
         _section_ceo_summary(result),
         _section_action_list(result),
         _section_issues(result),
-        _section_priority_reviews(result),
-        _section_needs_reply(result),
-        _section_detail_candidates(result),
-        _section_applicability(),
-        _section_comparison(result),
     ]
+    non_positive = _non_positive_needs_reply(result)
+    if non_positive:
+        sections.append(_section_needs_reply_compact(non_positive))
+    sections.append(_section_detail_candidates(result))
+    sections.append(_section_applicability())
+    return sections
+
+
+def build_notion_blocks(result: dict, *, compact: bool = False) -> list[dict]:
+    """All sections as a flat list of Notion block objects (dividers between).
+
+    ``compact=True`` builds the shorter DB-row body (see _compact_db_sections);
+    the default full body follows SECTION_TITLES. Both stay under Notion's
+    100-children-per-create limit via the per-section caps above.
+    """
+    if compact:
+        sections = _compact_db_sections(result)
+    else:
+        sections = [
+            _section_ceo_summary(result),
+            _section_action_list(result),
+            _section_issues(result),
+            _section_priority_reviews(result),
+            _section_needs_reply(result),
+            _section_detail_candidates(result),
+            _section_applicability(),
+            _section_comparison(result),
+        ]
     blocks: list[dict] = []
     for i, section in enumerate(sections):
         if i:
@@ -578,13 +633,15 @@ def build_database_properties(result: dict, now: datetime) -> dict:
 def build_notion_database_payload(result: dict, database_id: str, now: datetime) -> dict:
     """A Notion ``POST /v1/pages`` payload parented to a database.
 
-    Same endpoint and same body blocks as the page export; only the parent type
-    and the ``properties`` differ. Pure assembly — the HTTP call lands in J2.
+    Same endpoint as the page export; the parent is a database, the row carries
+    metrics as ``properties``, and the body uses the **compact** block set since
+    those metrics already live in the row's columns. Pure assembly — the HTTP
+    call lands in J2.
     """
     return {
         "parent": {"type": "database_id", "database_id": database_id},
         "properties": build_database_properties(result, now),
-        "children": build_notion_blocks(result),
+        "children": build_notion_blocks(result, compact=True),
     }
 
 
@@ -673,6 +730,26 @@ def resolve_notion_database_config() -> tuple[str | None, str | None]:
     disables itself when either is missing."""
     _ensure_notion_env_loaded()
     return os.getenv("NOTION_API_KEY") or None, os.getenv("NOTION_DATABASE_ID") or None
+
+
+def resolve_notion_export_mode() -> tuple[str, str | None, str | None]:
+    """Pick the single export button's target. Returns ``(mode, api_key, id)``:
+
+    - ``("database", key, database_id)`` when the API key + a database id are set
+      — the DB row is the default surface (richer for iterative comparison);
+    - ``("page", key, parent_page_id)`` when no database id but a parent page is;
+    - ``("none", None, None)`` when the API key or both targets are missing.
+
+    Backend owns the routing so the Streamlit button stays a thin shell."""
+    _ensure_notion_env_loaded()
+    api_key = os.getenv("NOTION_API_KEY") or None
+    database_id = os.getenv("NOTION_DATABASE_ID") or None
+    parent_page_id = os.getenv("NOTION_PARENT_PAGE_ID") or None
+    if api_key and database_id:
+        return "database", api_key, database_id
+    if api_key and parent_page_id:
+        return "page", api_key, parent_page_id
+    return "none", None, None
 
 
 def _default_transport(url: str, payload: dict, headers: dict[str, str]) -> dict:

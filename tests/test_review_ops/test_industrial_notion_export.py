@@ -555,9 +555,9 @@ def test_db_payload_parent_is_database_and_id_echoed():
     assert payload["parent"] == {"type": "database_id", "database_id": "db-123"}
 
 
-def test_db_payload_children_equals_blocks():
+def test_db_payload_children_equals_compact_blocks():
     payload = build_notion_database_payload(_full_result(), "db-123", NOW)
-    assert payload["children"] == build_notion_blocks(_full_result())
+    assert payload["children"] == build_notion_blocks(_full_result(), compact=True)
 
 
 def test_db_payload_block_count_under_100():
@@ -798,3 +798,130 @@ def test_db_export_api_key_not_in_result_repr():
     res = export_to_notion_database(payload, api_key="super-secret-key", transport=raising_transport)
     assert "super-secret-key" not in repr(res)
     assert "super-secret-key" not in (res.error or "")
+
+
+# --- compact DB body (UX polish) --------------------------------------------
+
+_COMPACT_REQUIRED = (
+    "운영 요약",
+    "우선 점검 항목",
+    "반복 이슈",
+    "상세페이지/안내 보완 후보",
+    "적용 범위",
+)
+
+
+def test_compact_blocks_include_required_sections():
+    headings = _headings(build_notion_blocks(_full_result(), compact=True))
+    for title in _COMPACT_REQUIRED:
+        assert title in headings, title
+
+
+def test_compact_blocks_omit_long_list_sections():
+    headings = _headings(build_notion_blocks(_full_result(), compact=True))
+    assert "우선 확인 리뷰" not in headings
+    assert "다음 업로드 비교 항목" not in headings
+
+
+def test_compact_blocks_fewer_than_full():
+    full = build_notion_blocks(_full_result())
+    compact = build_notion_blocks(_full_result(), compact=True)
+    assert len(compact) < len(full)
+
+
+def test_compact_blocks_under_60():
+    assert len(build_notion_blocks(_full_result(), compact=True)) < 60
+
+
+def test_compact_evidence_capped_at_two():
+    # the issue fixture carries a 3rd rep marked "캡 초과되어야 함"
+    text = _all_text(build_notion_blocks(_full_result(), compact=True))
+    assert "세 번째 근거" not in text
+
+
+def test_compact_needs_reply_included_when_non_positive():
+    # _full_result has one needs_reply review at rating 2.0 → worth a reply
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert "답글 검토 리뷰" in _headings(blocks)
+    assert "답글이 필요한 리뷰입니다." in _all_text(blocks)
+
+
+def test_compact_needs_reply_omitted_when_only_positive():
+    result = _full_result()
+    result["tagged"] = [
+        _review("잘 쓰고 있어요 만족합니다.", rating=5.0, tags=("needs_reply",))
+    ]
+    headings = _headings(build_notion_blocks(result, compact=True))
+    assert "답글 검토 리뷰" not in headings
+
+
+def test_compact_needs_reply_capped():
+    result = _full_result()
+    result["tagged"] = [
+        _review(f"답글 대상 {i}", rating=2.0, tags=("needs_reply",)) for i in range(10)
+    ]
+    text = _all_text(build_notion_blocks(result, compact=True))
+    assert f"답글 대상 {nx.MAX_COMPACT_NEEDS_REPLY - 1}" in text
+    assert f"답글 대상 {nx.MAX_COMPACT_NEEDS_REPLY}" not in text
+
+
+def test_compact_no_overpromise_wording():
+    text = _all_text(build_notion_blocks(_full_result(), compact=True))
+    text = text.replace("원인/매출 영향 단정", "")  # the 보류 권장 caution is allowed
+    for banned in BANNED_WORDING:
+        assert banned not in text, banned
+
+
+def test_compact_empty_result_builds_safely():
+    blocks = build_notion_blocks(_empty_result(), compact=True)
+    assert len(blocks) < 60
+    headings = _headings(blocks)
+    for title in _COMPACT_REQUIRED:
+        assert title in headings, title
+
+
+# --- single-button routing: resolve_notion_export_mode ----------------------
+
+
+def test_export_mode_database_when_db_id_present(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "k")
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-1")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "database"
+    assert key == "k"
+    assert target == "db-1"  # DB wins over page when both are set
+
+
+def test_export_mode_page_when_only_parent_present(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "k")
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "page"
+    assert key == "k"
+    assert target == "page-1"
+
+
+def test_export_mode_none_when_all_missing(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.delenv("NOTION_PARENT_PAGE_ID", raising=False)
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "none"
+    assert key is None
+    assert target is None
+
+
+def test_export_mode_none_when_key_missing(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-1")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "none"
+    assert key is None
+    assert target is None
