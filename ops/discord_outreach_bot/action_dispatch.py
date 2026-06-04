@@ -83,6 +83,37 @@ _RECIPIENT_FILENAME = "recipient.json"
 _REPORT_LINK_FILENAME = "report_artifact.json"
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# D4-4c: publish_post preview/draft (RED, preview-only). Final publish (D4-4d) is
+# gated by AGENT_PUBLISH_ENABLED (infra) + a rights cert + an explicit per-turn
+# "최종 게시 승인" phrase. In D4-4c there is NO publish capability: the `_publish_fn`
+# seam ALWAYS raises PublishNotAuthorized and confirm_publish_final hard-blocks
+# publish_not_enabled. Target is an explicit instagram_package id only.
+_PUBLISH_ENV_FLAG = "AGENT_PUBLISH_ENABLED"
+_PUBLISH_PREVIEW_FILENAME = "publish_preview.json"
+_PUBLISH_PREVIEW_MD_FILENAME = "publish_preview.md"
+_PUBLISH_LOG_FILENAME = "publish_log.md"
+_PUBLISH_BLOCKED_MARKER = "publish.blocked"
+_CAPTION_MD_FILENAME = "caption.md"
+_CAPTION_TXT_FILENAME = "caption.txt"
+_ASSET_MANIFEST_FILENAME = "asset_manifest.json"
+_RIGHTS_REVIEW_FILENAME = "rights_review.json"
+_SAFETY_CHECK_FILENAME = "safety_check.json"
+# Eligible per-asset rights stances (from instagram_package_planner's taxonomy).
+# workflow_demo_only / workflow_test_only / missing / unknown are NOT eligible.
+_ELIGIBLE_RIGHTS = (
+    "publish_candidate", "publish_pass_with_rights_review", "rights_cleared_source_image")
+_CLEARED_RIGHTS_STATUSES = ("cleared", "pass")
+# Conservative, deterministic banned-framing re-check for publish captions
+# (defense-in-depth on top of safety_check.json). Read-only; does NOT touch
+# english_copy_validator. These lists are the source of truth.
+_BANNED_FRAMING_PATTERNS: dict[str, tuple[str, ...]] = {
+    "brand_attack": (r"최악", r"쓰레기", r"사기\b", r"\bscam\b", r"\bworst\b"),
+    "clickbait": (r"충격", r"미쳤다", r"\bshocking\b", r"안\s*보면\s*후회", r"단\s*하나의"),
+    "consumer_as_ignorant": (r"속지\s*마", r"모르면\s*손해", r"호구", r"\byou'?re wrong\b"),
+    "medical_efficacy": (r"치료", r"완치", r"부작용\s*없", r"\bcure[sd]?\b",
+                         r"\bclinically proven\b", r"100\s*%\s*효과"),
+}
+
 
 class RenderNotAuthorized(RuntimeError):
     """Raised when a live render is attempted without AGENT_RENDER_ENABLED."""
@@ -107,6 +138,14 @@ class SendNotAuthorized(RuntimeError):
 class ProviderUnavailable(RuntimeError):
     """Raised by the send seam for a transient/connection failure. Mapped to
     provider_unavailable — fail-closed, no ledger line, safe to retry."""
+
+
+class PublishNotAuthorized(RuntimeError):
+    """Raised by the publish seam when the capability is unavailable / not allowed.
+
+    In D4-4c the `_publish_fn` seam ALWAYS raises this — there is no publish path
+    yet. D4-4d will replace the seam behind AGENT_PUBLISH_ENABLED + a rights cert
+    + the explicit per-turn "최종 게시 승인" phrase + publish_log idempotency."""
 
 
 # === pending handshake =======================================================
@@ -1183,3 +1222,339 @@ def _format_send_card(
     return _reply("action_failed",
                   f"⚠ 발송 실패 (send_failed): unexpected result={result!r} — 기록 없음.",
                   executed=False, failed_check="send_failed")
+
+
+# === D4-4c: publish_post preview / draft (RED, preview-only) =================
+def _publish_authorized() -> bool:
+    return os.environ.get(_PUBLISH_ENV_FLAG, "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _resolve_publish_target(
+    target: Optional[str], *, packages_root: Path,
+) -> Optional[str]:
+    """Resolve an explicit instagram_package id (or a path to such a dir under
+    packages_root) to a package_id. NEVER infers from 'latest' / random images /
+    free text. Returns None (-> target_unresolved) when unresolvable."""
+    if not isinstance(target, str) or not target.strip():
+        return None
+    t = target.strip()
+    packages_root = Path(packages_root)
+    if (packages_root / t).is_dir():
+        return t
+    p = Path(t)
+    if p.is_dir() and p.parent.resolve() == packages_root.resolve():
+        return p.name
+    return None
+
+
+def _caption_hash(caption: str) -> str:
+    return _approval.prompt_hash(caption)
+
+
+def _load_caption(package_dir: Path) -> Optional[str]:
+    """caption.md (preferred) then caption.txt (fallback). Returns the text, or
+    None when neither exists or both are empty. NEVER auto-generates a caption."""
+    for fn in (_CAPTION_MD_FILENAME, _CAPTION_TXT_FILENAME):
+        cand = package_dir / fn
+        if cand.is_file():
+            try:
+                text = cand.read_text(encoding="utf-8").strip()
+            except OSError:
+                return None
+            if text:
+                return text
+    return None
+
+
+def _load_asset_manifest(package_dir: Path) -> Optional[list[dict[str, Any]]]:
+    """asset_manifest.json -> a non-empty list of dict entries, else None. NEVER
+    infers assets from loose images."""
+    cand = package_dir / _ASSET_MANIFEST_FILENAME
+    if not cand.is_file():
+        return None
+    try:
+        obj = json.loads(cand.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(obj, list) or not obj:
+        return None
+    return [e for e in obj if isinstance(e, dict)] or None
+
+
+def _check_rights_cleared(
+    package_dir: Path, asset_files: list[str],
+) -> Optional[str]:
+    """rights_review.json must be explicit, top-level status cleared/pass, and
+    every asset must carry an eligible per-asset stance. Returns a failed_check
+    token or None. NEVER infers rights from filenames."""
+    cand = package_dir / _RIGHTS_REVIEW_FILENAME
+    if not cand.is_file():
+        return "rights_review_missing"
+    try:
+        rr = _load_json(cand)
+    except (OSError, ValueError):
+        return "rights_review_missing"
+    status = str(rr.get("status") or "").lower()
+    assets = rr.get("assets")
+    if status not in _CLEARED_RIGHTS_STATUSES or not isinstance(assets, dict):
+        return "rights_review_not_cleared"
+    for f in asset_files:
+        if assets.get(f) not in _ELIGIBLE_RIGHTS:
+            return "rights_review_not_cleared"
+    return None
+
+
+def _scan_banned_framing(caption: str) -> Optional[str]:
+    """Deterministic conservative banned-framing scan. Returns the offending
+    category or None. Read-only; does NOT modify english_copy_validator."""
+    for category, patterns in _BANNED_FRAMING_PATTERNS.items():
+        for pat in patterns:
+            if re.search(pat, caption, flags=re.IGNORECASE):
+                return category
+    return None
+
+
+def _check_safety(package_dir: Path, caption: str) -> Optional[str]:
+    """safety_check.json must be explicit, status=pass, caption_hash current,
+    AND the deterministic banned-framing re-check must pass. Returns a
+    failed_check token or None."""
+    cand = package_dir / _SAFETY_CHECK_FILENAME
+    if not cand.is_file():
+        return "safety_check_missing"
+    try:
+        sc = _load_json(cand)
+    except (OSError, ValueError):
+        return "safety_check_missing"
+    if str(sc.get("status") or "").lower() != "pass":
+        return "prohibited_claims_detected"
+    if sc.get("caption_hash") != _caption_hash(caption):
+        return "safety_check_stale"
+    if _scan_banned_framing(caption) is not None:
+        return "prohibited_claims_detected"
+    return None
+
+
+def check_publish_preconditions(
+    *, package_id: str, package_dir: Path, staging_dir: Path,
+) -> tuple[Optional[str], Optional[str]]:
+    """D4-4c publish-preview gates. Returns (failed_check, required_action) or
+    (None, None) on pass. Rights + safety are explicit; nothing is inferred."""
+    package_dir = Path(package_dir)
+    if not package_id or not package_dir.is_dir():
+        return ("target_unresolved", "게시할 instagram_package 디렉터리를 찾지 못했습니다.")
+    caption = _load_caption(package_dir)
+    if not caption:
+        return ("caption_missing",
+                "caption.md(또는 caption.txt)가 없거나 비어 있습니다 (자동 생성 안 함).")
+    manifest = _load_asset_manifest(package_dir)
+    if not manifest:
+        return ("assets_missing",
+                "asset_manifest.json이 없거나 비어 있습니다 (자산 추론 안 함).")
+    asset_files = [str(e.get("file")) for e in manifest if e.get("file")]
+    if len(asset_files) != len(manifest):
+        return ("assets_missing", "asset_manifest.json 항목에 file이 없습니다.")
+    for f in asset_files:
+        if not (package_dir / f).is_file():
+            return ("asset_file_missing", f"자산 파일이 없습니다: {f}")
+    rfail = _check_rights_cleared(package_dir, asset_files)
+    if rfail:
+        return (rfail, "rights_review.json에서 모든 자산의 권리 클리어가 필요합니다.")
+    sfail = _check_safety(package_dir, caption)
+    if sfail:
+        return (sfail, "safety_check.json(status=pass, caption_hash 일치) + 금지표현 없음 필요.")
+    if (package_dir / _PUBLISH_BLOCKED_MARKER).exists():
+        return ("package_blocked", "패키지가 blocked 상태입니다 (publish.blocked).")
+    if _is_denied_output(staging_dir, package_dir):
+        return ("output_path_denied",
+                "출력 경로가 패키지/금지 경로입니다 (스테이징만 허용).")
+    return (None, None)
+
+
+def _publish_core(preview: dict[str, Any]) -> dict[str, Any]:
+    """The exact previewed content bound by the artifact hash: package_id +
+    caption + ordered (file, rights) + rights status + safety status."""
+    return {
+        "package_id": preview.get("package_id"),
+        "caption": preview.get("caption"),
+        "assets": [{"file": a.get("file"), "rights": a.get("rights")}
+                   for a in (preview.get("assets") or [])],
+        "rights_status": (preview.get("rights_review") or {}).get("status"),
+        "safety_status": (preview.get("safety_check") or {}).get("status"),
+    }
+
+
+def _publish_artifact_hash(preview: dict[str, Any]) -> str:
+    return _approval.prompt_hash(
+        json.dumps(_publish_core(preview), ensure_ascii=False, sort_keys=True))
+
+
+def _build_publish_preview(package_dir: Path) -> dict[str, Any]:
+    """Assemble the inert publish preview + content hash. Pure read; writes
+    nothing. Assumes preconditions already passed."""
+    caption = _load_caption(package_dir) or ""
+    manifest = _load_asset_manifest(package_dir) or []
+    try:
+        rr = _load_json(package_dir / _RIGHTS_REVIEW_FILENAME)
+    except (OSError, ValueError):
+        rr = {}
+    try:
+        sc = _load_json(package_dir / _SAFETY_CHECK_FILENAME)
+    except (OSError, ValueError):
+        sc = {}
+    rr_assets = rr.get("assets") or {}
+    assets = [{"file": e.get("file"), "strategy": e.get("strategy"),
+               "rights": rr_assets.get(e.get("file"))}
+              for e in manifest if isinstance(e, dict)]
+    preview: dict[str, Any] = {
+        "kind": "publish_preview", "mode": "draft",
+        "package_id": package_dir.name, "caption": caption, "assets": assets,
+        "rights_review": {
+            "status": rr.get("status"), "reviewer": rr.get("reviewer"),
+            "all_assets_cleared": bool(assets) and all(
+                a["rights"] in _ELIGIBLE_RIGHTS for a in assets)},
+        "safety_check": {
+            "status": sc.get("status"),
+            "validator_version": sc.get("validator_version"),
+            "caption_hash": sc.get("caption_hash")},
+        "note": ("preview/draft only — no publish performed. Final publish is "
+                 "D4-4d and requires AGENT_PUBLISH_ENABLED + rights cert + "
+                 "per-turn '최종 게시 승인'."),
+    }
+    preview["content_hash"] = _publish_artifact_hash(preview)
+    return preview
+
+
+def _publish_preview_md(preview: dict[str, Any]) -> str:
+    lines = [f"# Publish preview — {preview.get('package_id')}  (NOT PUBLISHED)",
+             "", "Caption:", f"  {preview.get('caption')}", "", "Assets (ordered):"]
+    for i, a in enumerate(preview.get("assets") or [], 1):
+        lines.append(f"  {i}. {a.get('file')}  [rights: {a.get('rights')} / "
+                     f"strategy: {a.get('strategy')}]")
+    rr = preview.get("rights_review") or {}
+    sc = preview.get("safety_check") or {}
+    lines += ["",
+              f"Rights review: status={rr.get('status')} · all_assets_cleared="
+              f"{rr.get('all_assets_cleared')} · reviewer={rr.get('reviewer')}",
+              f"Safety check:  status={sc.get('status')} · "
+              f"validator={sc.get('validator_version')} · "
+              f"caption_hash={sc.get('caption_hash')}",
+              f"content_hash: {preview.get('content_hash')}", "",
+              '⚠ Draft only. Final publish requires "최종 게시 승인" (D4-4d).']
+    return "\n".join(lines) + "\n"
+
+
+def _live_publish(preview: dict[str, Any]) -> dict[str, Any]:
+    """D4-4c: NO publish capability. Always raises so confirm_publish_final
+    reports publish_not_enabled. D4-4d replaces this seam behind the gate."""
+    raise PublishNotAuthorized("publish capability is not enabled (D4-4c preview-only)")
+
+
+_publish_fn: Callable[[dict[str, Any]], dict[str, Any]] = _live_publish
+
+
+def propose_publish_preview(
+    operator_id: Optional[str], *, target: Optional[str],
+    packages_root: Path, staging_root: Optional[Path] = None,
+    approval_log_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Resolve + gate a publish package; assemble an inert publish preview into
+    staging; arm a single-use pending(kind="publish"). NO publish, NO
+    publish_log write, NO status.json / package mutation."""
+    packages_root = Path(packages_root)
+    package_id = _resolve_publish_target(target, packages_root=packages_root)
+    if package_id is None:
+        return _reply("action_blocked",
+                      "⛔ 차단됨 (blocked)\n- failed_check: target_unresolved\n"
+                      "- required_action: 게시할 instagram_package id를 명시하세요.\n"
+                      "- (게시 안 함)",
+                      executed=False, failed_check="target_unresolved")
+    package_dir = packages_root / package_id
+    staging_dir = Path(staging_root) if staging_root else (
+        packages_root.parent / "agent_publish" / package_id)
+
+    failed, action = check_publish_preconditions(
+        package_id=package_id, package_dir=package_dir, staging_dir=staging_dir)
+    if failed:
+        return _reply("action_blocked",
+                      f"⛔ 차단됨 (blocked)\n- failed_check: {failed}\n"
+                      f"- required_action: {action}\n- (게시 안 함)",
+                      executed=False, failed_check=failed)
+
+    preview = _build_publish_preview(package_dir)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    (staging_dir / _PUBLISH_PREVIEW_FILENAME).write_text(
+        json.dumps(preview, ensure_ascii=False, indent=2), encoding="utf-8")
+    (staging_dir / _PUBLISH_PREVIEW_MD_FILENAME).write_text(
+        _publish_preview_md(preview), encoding="utf-8")
+
+    _approval.append_record(
+        _approval.make_record(
+            target_slug=package_id, current_state="publish_post",
+            approved_stage="prepare_publish", prompt=str(package_dir),
+            operator_discord_id=_op_key(operator_id),
+            execution_mode="manual_record",
+            notes=f"publish preview to staging {staging_dir} (no publish, no log)"),
+        approval_log_path)
+
+    _PENDING_ACTIONS[_op_key(operator_id)] = {
+        "kind": "publish", "package_id": package_id,
+        "package_dir": str(package_dir), "staging_dir": str(staging_dir),
+        "artifact_hash": preview["content_hash"], "created_at": time.time(),
+    }
+    n_assets = len(preview["assets"])
+    return _reply("action_propose",
+                  f"🔴 publish_post 미리보기 (package `{package_id}`)\n"
+                  f"- assets: {n_assets}개 (권리 클리어) · safety: "
+                  f"{(preview['safety_check'] or {}).get('status')}\n"
+                  f"- 미리보기: `{_PUBLISH_PREVIEW_FILENAME}` (게시 안 함)\n"
+                  '최종 게시는 "최종 게시 승인" 필요 (D4-4d 예정).',
+                  executed=False)
+
+
+def confirm_publish_final(
+    operator_id: Optional[str], *, authorize_publish: bool = False,
+    approval_log_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """D4-4c: consume a publish pending, re-verify the staged preview artifact
+    hash, then HARD-BLOCK publish_not_enabled.
+
+    No publish capability: even with authorize_publish=True the `_publish_fn`
+    seam raises. NO publish_log write, NO status.json write, NO package mutation.
+    D4-4d inserts the two-key gate (AGENT_PUBLISH_ENABLED + '최종 게시 승인')."""
+    pend = _get_pending_action(operator_id)
+    if not pend or pend.get("kind") != "publish":
+        return _reply("action_confirm",
+                      "대기 중인 게시 미리보기가 없습니다.", executed=False)
+
+    staging_dir = Path(pend.get("staging_dir", ""))
+    preview: Optional[dict[str, Any]] = None
+    try:
+        preview = _load_json(staging_dir / _PUBLISH_PREVIEW_FILENAME)
+        current = _publish_artifact_hash(preview)
+    except (OSError, ValueError):
+        current = None
+    if preview is None or current != pend.get("artifact_hash"):
+        _clear_pending_action(operator_id)
+        return _reply("action_blocked",
+                      "⛔ 미리보기가 없거나 변경되었습니다. 다시 미리보기를 생성하세요 "
+                      "(stale preview blocked).", executed=False,
+                      failed_check="artifact_hash_mismatch")
+
+    _clear_pending_action(operator_id)  # single-use BEFORE the publish attempt
+
+    # D4-4c hard block: publish is NOT enabled regardless of authorize_publish /
+    # AGENT_PUBLISH_ENABLED. The seam always raises; NO log / status / package write.
+    try:
+        _publish_fn(preview)
+    except PublishNotAuthorized:
+        return _reply("action_blocked",
+                      "⛔ 게시 미구성: 최종 게시는 D4-4d에서 활성화됩니다 "
+                      f"({_PUBLISH_ENV_FLAG} + 최종 게시 승인 필요).",
+                      executed=False, failed_check="publish_not_enabled")
+    except Exception as exc:  # noqa: BLE001 - report any unexpected failure
+        return _reply("action_failed",
+                      f"⚠ 게시 실패: {exc.__class__.__name__}", executed=False)
+
+    # Unreachable in D4-4c (seam always raises). Defensive only.
+    return _reply("action_failed", "⚠ 예기치 않은 게시 경로", executed=False)
