@@ -352,6 +352,67 @@ def test_map_outcome_manual_review():
     assert r["outcome"] == "collect_manual_review" and r["executed"] is True
 
 
+def test_map_outcome_anti_bot_halt_but_cursor_429_is_rate_limited():
+    """D4-3b2-fix regression — built from the real A000000107679 smoke batch_summary:
+    the runner stamps product status='anti_bot' as a coarse halt label, but the
+    true reason is a cursor 429 (retry_intent=retry_after_cooldown,
+    cursor_api_rate_limited / cursor_rate_limit_exhausted). It must map to
+    collect_rate_limited (90-min cooldown), NOT collect_manual_review."""
+    bs = {"products": [{"status": "anti_bot", "rows_inserted": 196,
+                        "records_parsed": 490, "duplicate_count": 294,
+                        "summary": {"retry_intent": "retry_after_cooldown",
+                                    "cursor_api_rate_limited": True,
+                                    "cursor_rate_limit_exhausted": True,
+                                    "http_403_seen": False,
+                                    "auth_error": False,
+                                    "login_state_observed": "logged_in"}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_rate_limited" and r["executed"] is True
+    assert r["retry_after_minutes"] == 90
+    assert r["retry_intent"] == "retry_after_cooldown"
+    assert r["rows_inserted"] == 196
+    assert "DOM" not in str(r)  # no DOM-recovery marker
+
+
+def test_map_outcome_rate_limit_only_via_exhausted_flag():
+    """cursor_rate_limit_exhausted alone (no explicit retry_intent / 429 flag)
+    still classifies as rate_limited — covers the new signal added to the gate."""
+    bs = {"products": [{"status": "anti_bot", "rows_inserted": 5,
+                        "summary": {"cursor_rate_limit_exhausted": True}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_rate_limited" and r["executed"] is True
+    assert r["retry_after_minutes"] == 90
+
+
+def test_map_outcome_auth_expired_still_manual_review():
+    """auth_expired_mid_batch with NO rate-limit signal stays manual_review."""
+    bs = {"products": [{"status": "auth_expired_mid_batch",
+                        "summary": {"retry_intent": "manual_review_required"}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_manual_review" and r["executed"] is True
+
+
+def test_map_outcome_auth_expired_with_rate_limit_is_rate_limited():
+    """If rate-limit signals are present, they win even over an
+    auth_expired_mid_batch halt label (rate_limited precedes manual_review)."""
+    bs = {"products": [{"status": "auth_expired_mid_batch", "rows_inserted": 10,
+                        "summary": {"retry_intent": "retry_after_cooldown",
+                                    "cursor_api_rate_limited": True}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_rate_limited" and r["executed"] is True
+
+
+def test_map_outcome_manual_review_via_403_and_human_check():
+    """Explicit auth-wall signals (403 / human check) map to manual_review even
+    when the coarse status is anti_bot, as long as NO rate-limit signal exists."""
+    for sig in ("http_403_seen", "http_401_or_login_required_seen",
+                "auth_error", "human_check_detected"):
+        bs = {"products": [{"status": "anti_bot", "summary": {sig: True}}]}
+        r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+        assert r["outcome"] == "collect_manual_review", sig
+        assert r["executed"] is True
+
+
 def test_map_outcome_partial():
     bs = {"partial_success": True,
           "products": [{"status": "max_cap_reached", "rows_inserted": 540,
