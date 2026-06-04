@@ -48,6 +48,9 @@ _RE_LIVE_COLLECT = re.compile(r"^\s*라이브\s*수집\s*승인\s*[.!~]*\s*$")
 # D4-4b: the ONLY phrase that sets authorize_send=True for a final send.
 # Deliberately distinct from "진행해" / "라이브 수집 승인" so neither can ever send.
 _RE_FINAL_SEND = re.compile(r"^\s*최종\s*발송\s*승인\s*[.!~]*\s*$")
+# D4-4d: the ONLY phrase that sets authorize_publish=True for a final publish.
+# Distinct from 진행해 / 라이브 수집 승인 / 최종 발송 승인 so none of them can publish.
+_RE_FINAL_PUBLISH = re.compile(r"^\s*최종\s*게시\s*승인\s*[.!~]*\s*$")
 _RE_RUN_CONFIRM = re.compile(r"^\s*(?:실행\s*)?진행\s*해?\s*[.!~]*\s*$")
 _RE_CANCEL = re.compile(r"^\s*(?:실행\s*)?(?:취소|취소해)\s*[.!~]*\s*$")
 _RE_CLEANUP = re.compile(
@@ -133,6 +136,19 @@ def try_handle(
         # return verbatim (preserves outcome intent / failed_check / artifacts).
         return _action.confirm_send_final(
             op, authorize_send=True, approval_log_path=approval_log_path)
+
+    # 1.7 "최종 게시 승인" — the ONLY per-turn final-publish authorization. Claimed
+    #     only when a publish pending exists; sets authorize_publish=True. Generic
+    #     "진행해" / "라이브 수집 승인" / "최종 발송 승인" / planner NL never reach this
+    #     and stay publish_not_authorized.
+    if _RE_FINAL_PUBLISH.match(text):
+        pend = _action.get_pending_action(op)
+        if pend is None or pend.get("kind") != "publish":
+            return _reply("publish_no_pending",
+                          "대기 중인 게시 제안이 없습니다. 먼저 게시 미리보기를 생성하세요.")
+        # return verbatim (preserves outcome intent / failed_check / artifacts).
+        return _action.confirm_publish_final(
+            op, authorize_publish=True, approval_log_path=approval_log_path)
 
     # 2. explicit structured propose.
     m = _RE_PROPOSE.match(text)
