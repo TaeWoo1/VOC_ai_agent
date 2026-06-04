@@ -70,6 +70,19 @@ _COLLECT_RUNS_REL = ("outputs", "agent_collect_runs")
 _RUNNER_STDOUT_LOG = "runner_stdout.log"
 _BATCH_SUMMARY_GLOB = "*/batch_summary.json"
 
+# D4-4a: send_outreach preview/draft (RED, preview-only). Final send (D4-4b) is
+# double-gated by AGENT_SEND_ENABLED (infra) + an explicit per-turn "최종 발송
+# 승인" phrase. In D4-4a there is NO send capability: the `_send_fn` seam ALWAYS
+# raises SendNotAuthorized and confirm_send_final hard-blocks send_not_enabled.
+_SEND_ENV_FLAG = "AGENT_SEND_ENABLED"
+_SEND_PREVIEW_FILENAME = "send_preview.json"
+_SEND_PREVIEW_TEXT_FILENAME = "send_preview.txt"
+_SEND_LOG_FILENAME = "send_log.md"
+_SEND_BLOCKED_MARKER = "send.blocked"
+_RECIPIENT_FILENAME = "recipient.json"
+_REPORT_LINK_FILENAME = "report_artifact.json"
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 class RenderNotAuthorized(RuntimeError):
     """Raised when a live render is attempted without AGENT_RENDER_ENABLED."""
@@ -81,6 +94,14 @@ class CollectNotAuthorized(RuntimeError):
     In D4-3b1 the `_collect_fn` seam ALWAYS raises this — there is no live
     collection path yet; D4-3b2 replaces the seam with a guarded subprocess to
     the brand-20 runner."""
+
+
+class SendNotAuthorized(RuntimeError):
+    """Raised when a final send is attempted but the capability is unavailable.
+
+    In D4-4a the `_send_fn` seam ALWAYS raises this — there is no send path yet.
+    D4-4b will replace the seam behind AGENT_SEND_ENABLED + the explicit per-turn
+    "최종 발송 승인" phrase + artifact-hash re-verify + send_log idempotency."""
 
 
 # === pending handshake =======================================================
@@ -821,3 +842,239 @@ def _format_collect_card(
     return _reply("action_failed",
                   f"⚠ 수집 실패 (collect_failed)\n- {res.get('detail')}",
                   executed=False, **tail)
+
+
+# === D4-4a: send_outreach preview / draft (RED, preview-only) ================
+def _send_authorized() -> bool:
+    return os.environ.get(_SEND_ENV_FLAG, "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _load_recipient(packet_dir: Path) -> Optional[dict[str, Any]]:
+    """packet/recipient.json ONLY (no NL, no free-typed email, no task_store).
+    Valid = a JSON object carrying a well-formed `email`. Returns the dict, or
+    None when the file is missing / malformed / lacks a valid email -> the caller
+    reports recipient_unresolved."""
+    cand = packet_dir / _RECIPIENT_FILENAME
+    if not cand.is_file():
+        return None
+    try:
+        obj = _load_json(cand)
+    except (OSError, ValueError):
+        return None
+    email = obj.get("email")
+    if not isinstance(email, str) or not _EMAIL_RE.match(email.strip()):
+        return None
+    return obj
+
+
+def _resolve_report_artifact(packet_dir: Path) -> Optional[Path]:
+    """The rendered seller PDF: a *.pdf in the packet dir, or a linked existing
+    path in report_artifact.json ({"pdf_path": ...}). Read-only ('exists or
+    linked')."""
+    pdfs = sorted(packet_dir.glob("*.pdf"))
+    if pdfs:
+        return pdfs[0]
+    link = packet_dir / _REPORT_LINK_FILENAME
+    if link.is_file():
+        try:
+            p = Path(_load_json(link).get("pdf_path", ""))
+        except (OSError, ValueError):
+            return None
+        if p.is_file():
+            return p
+    return None
+
+
+def check_send_preconditions(
+    *, task_id: str, packet_dir: Path, staging_dir: Path,
+) -> tuple[Optional[str], Optional[str]]:
+    """D4-4a send-preview gates (cheap, content-hash-independent). Returns
+    (failed_check, required_action) or (None, None) on pass."""
+    packet_dir = Path(packet_dir)
+    if not task_id or not packet_dir.is_dir():
+        return ("target_unresolved", "대상 task의 패킷 디렉터리를 찾지 못했습니다.")
+    if not (packet_dir / _REPORT_FILENAME).is_file():
+        return ("analysis_report_missing",
+                "analysis_report.json이 없습니다. 먼저 분석 리포트를 생성/배치하세요.")
+    if _resolve_report_artifact(packet_dir) is None:
+        return ("report_artifact_missing",
+                "렌더된 셀러 리포트 PDF가 없습니다 (먼저 render_report 실행).")
+    if _load_recipient(packet_dir) is None:
+        return ("recipient_unresolved",
+                "packet/recipient.json이 없거나 유효한 email이 없습니다.")
+    if (packet_dir / _SEND_BLOCKED_MARKER).exists():
+        return ("packet_blocked", "패킷이 blocked 상태입니다 (send.blocked).")
+    if _is_denied_output(staging_dir, packet_dir):
+        return ("output_path_denied",
+                "출력 경로가 패킷/금지 경로입니다 (스테이징만 허용).")
+    return (None, None)
+
+
+def _send_artifact_hash(preview: dict[str, Any]) -> str:
+    """Bind the EXACT previewed content: subject + body + recipient email +
+    ordered attachment manifest. Excludes advisory/volatile fields so the same
+    bytes always hash the same (stronger than render's input-plan hash)."""
+    core = {
+        "task_id": preview.get("task_id"),
+        "recipient_email": preview.get("recipient_email"),
+        "subject": preview.get("subject"),
+        "body": preview.get("body"),
+        "attachments": list(preview.get("attachments") or []),
+    }
+    return _approval.prompt_hash(
+        json.dumps(core, ensure_ascii=False, sort_keys=True))
+
+
+def _build_send_preview(packet_dir: Path) -> dict[str, Any]:
+    """Assemble the inert preview (subject/body/recipient/attachments) + the
+    content/artifact hash. Pure read of the packet; writes nothing."""
+    report = _load_json(packet_dir / _REPORT_FILENAME)
+    recipient = _load_recipient(packet_dir) or {}
+    pdf = _resolve_report_artifact(packet_dir)
+    label = (report.get("goods_no") or report.get("product_name")
+             or packet_dir.name)
+    name = recipient.get("name")
+    subject = f"[VOC] {label} 리뷰 분석 리포트"
+    body = (
+        f"안녕하세요{(' ' + name) if name else ''},\n\n"
+        f"{label} 리뷰 분석 셀러 리포트를 첨부드립니다.\n"
+        "검토 후 회신 부탁드립니다.\n")
+    preview: dict[str, Any] = {
+        "kind": "send_preview", "mode": "draft", "task_id": packet_dir.name,
+        "recipient_email": recipient.get("email"),
+        "recipient_name": name,
+        "subject": subject, "body": body,
+        "attachments": [pdf.name] if pdf is not None else [],
+        "note": ("preview/draft only — no send performed. Final send is D4-4b "
+                 "and requires AGENT_SEND_ENABLED + per-turn '최종 발송 승인'."),
+    }
+    preview["content_hash"] = _send_artifact_hash(preview)
+    return preview
+
+
+def _already_sent(packet_dir: Path, content_hash: str) -> bool:
+    """True iff send_log.md already records this content_hash (idempotency).
+    Read-only — D4-4a never writes the ledger."""
+    log = packet_dir / _SEND_LOG_FILENAME
+    if not log.is_file():
+        return False
+    try:
+        return content_hash in log.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _live_send(preview: dict[str, Any]) -> dict[str, Any]:
+    """D4-4a: NO send capability. Always raises so confirm_send_final reports
+    send_not_enabled. D4-4b replaces this seam behind the send gate."""
+    raise SendNotAuthorized("send capability is not enabled (D4-4a preview-only)")
+
+
+_send_fn: Callable[[dict[str, Any]], dict[str, Any]] = _live_send
+
+
+def propose_send_preview(
+    operator_id: Optional[str], *, task_id: str,
+    packets_root: Path, staging_root: Optional[Path] = None,
+    approval_log_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Gate + assemble an inert send preview into staging; arm a single-use
+    pending(kind="send"). NO send, NO send_log write, NO status.json / packet
+    mutation. Recipient is resolved from packet/recipient.json ONLY."""
+    packets_root = Path(packets_root)
+    packet_dir = packets_root / task_id
+    staging_dir = Path(staging_root) if staging_root else (
+        packets_root.parent / "agent_send" / task_id)
+
+    failed, action = check_send_preconditions(
+        task_id=task_id, packet_dir=packet_dir, staging_dir=staging_dir)
+    if failed:
+        return _reply("action_blocked",
+                      f"⛔ 차단됨 (blocked)\n- failed_check: {failed}\n"
+                      f"- required_action: {action}\n- (발송 안 함)",
+                      executed=False, failed_check=failed)
+
+    preview = _build_send_preview(packet_dir)
+    if _already_sent(packet_dir, preview["content_hash"]):
+        return _reply("action_blocked",
+                      "⛔ 동일 내용이 이미 발송됨 (already_sent).",
+                      executed=False, failed_check="already_sent")
+
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    (staging_dir / _SEND_PREVIEW_FILENAME).write_text(
+        json.dumps(preview, ensure_ascii=False, indent=2), encoding="utf-8")
+    (staging_dir / _SEND_PREVIEW_TEXT_FILENAME).write_text(
+        f"To: {preview['recipient_email']}\nSubject: {preview['subject']}\n\n"
+        f"{preview['body']}\n"
+        f"Attachments: {', '.join(preview['attachments']) or '(none)'}\n",
+        encoding="utf-8")
+
+    _approval.append_record(
+        _approval.make_record(
+            target_slug=task_id, current_state="send_outreach",
+            approved_stage="prepare_send", prompt=str(packet_dir),
+            operator_discord_id=_op_key(operator_id),
+            execution_mode="manual_record",
+            notes=f"send preview to staging {staging_dir} (no send, no ledger)"),
+        approval_log_path)
+
+    _PENDING_ACTIONS[_op_key(operator_id)] = {
+        "kind": "send", "task_id": task_id, "packet_dir": str(packet_dir),
+        "staging_dir": str(staging_dir),
+        "artifact_hash": preview["content_hash"], "created_at": time.time(),
+    }
+    return _reply("action_propose",
+                  f"🔴 send_outreach 미리보기 (task `{task_id}`)\n"
+                  f"- 수신자: `{preview['recipient_email']}` · 첨부: "
+                  f"{', '.join(preview['attachments']) or '(없음)'}\n"
+                  f"- 제목: {preview['subject']}\n"
+                  f"- 미리보기: `{_SEND_PREVIEW_FILENAME}` (발송 안 함)\n"
+                  "최종 발송은 별도 명시 승인 필요 (D4-4b 예정).",
+                  executed=False)
+
+
+def confirm_send_final(
+    operator_id: Optional[str], *, authorize_send: bool = False,
+    approval_log_path: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Consume a send pending, re-verify the artifact hash, then HARD-BLOCK.
+
+    D4-4a has no send capability: even with authorize_send=True the `_send_fn`
+    seam raises -> send_not_enabled. NO send_log write, NO status.json write,
+    NO packet mutation."""
+    pend = _get_pending_action(operator_id)
+    if not pend or pend.get("kind") != "send":
+        return _reply("action_confirm",
+                      "대기 중인 발송 미리보기가 없습니다.", executed=False)
+
+    packet_dir = Path(pend["packet_dir"])
+    try:
+        current = _build_send_preview(packet_dir)["content_hash"]
+    except (OSError, ValueError):
+        current = None
+    if current != pend["artifact_hash"]:
+        _clear_pending_action(operator_id)
+        return _reply("action_blocked",
+                      "⛔ 미리보기 이후 내용이 변경되었습니다. 다시 미리보기를 생성하세요 "
+                      "(stale preview blocked).", executed=False,
+                      failed_check="artifact_hash_mismatch")
+
+    _clear_pending_action(operator_id)  # single-use BEFORE any execution attempt
+
+    # D4-4a hard block: send is NOT enabled regardless of authorize_send /
+    # AGENT_SEND_ENABLED. The seam always raises; we report send_not_enabled and
+    # write NO ledger / status / packet file.
+    try:
+        _send_fn(pend)  # always raises in D4-4a
+    except SendNotAuthorized:
+        return _reply("action_blocked",
+                      "⛔ 발송 미구성: 최종 발송은 D4-4b에서 활성화됩니다 "
+                      f"({_SEND_ENV_FLAG} + 최종 발송 승인 필요).",
+                      executed=False, failed_check="send_not_enabled")
+    except Exception as exc:  # noqa: BLE001 - report any unexpected failure
+        return _reply("action_failed",
+                      f"⚠ 발송 실패: {exc.__class__.__name__}", executed=False)
+
+    # Unreachable in D4-4a (seam always raises). Defensive only.
+    return _reply("action_failed", "⚠ 예기치 않은 발송 경로", executed=False)
