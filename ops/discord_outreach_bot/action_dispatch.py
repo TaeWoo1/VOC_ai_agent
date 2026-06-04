@@ -457,10 +457,20 @@ def _map_collect_outcome(
 ) -> dict[str, Any]:
     """PURE: classify a runner result into one operator-facing outcome.
 
-    Precedence: manual_review -> rate_limited -> partial -> done -> blocked
+    Precedence: rate_limited -> manual_review -> partial -> done -> blocked
     (exit 2 + failed_check, only when NO summary) -> failed. The exit code is
     NEVER trusted over a present batch_summary (auth-wall halts exit 1 but still
-    write a summary). cursor 429 is FIRST-CLASS rate_limited, not failure."""
+    write a summary).
+
+    cursor 429 is FIRST-CLASS rate_limited and WINS over the runner's coarse
+    product status="anti_bot"/"auth_expired_mid_batch" HALT LABELS: the runner
+    stamps a generic halt status even for a cursor-429 stop, but the true reason
+    lives in the summary signals (retry_intent / cursor_api_rate_limited /
+    cursor_rate_limit_exhausted / http_429_seen / cursor_api_silenced). Per
+    CLAUDE.md OY rate-limit policy a cursor 429 maps to retry_after_cooldown
+    (retry_after_minutes=90), never manual_review and never DOM recovery.
+    manual_review fires ONLY on explicit auth/human-check signals — a bare
+    anti_bot label is NOT sufficient (it was the D4-3b2 mis-map, fixed here)."""
     if batch_summary is None:
         if exit_code == 2 and "failed_check:" in (stdout or ""):
             fc, ra = _parse_runner_failed_check(stdout)
@@ -479,18 +489,28 @@ def _map_collect_outcome(
     review_count = (summary.get("review_count_analyzed")
                     or p0.get("records_parsed"))
 
-    # 1) manual review (auth wall / human check)
-    if retry_intent == "manual_review_required" or status in (
-            "anti_bot", "auth_expired_mid_batch"):
-        return {"outcome": "collect_manual_review", "executed": True,
-                "rows_inserted": rows, "status": status}
-    # 2) rate limited (cursor 429 / silenced) — first-class, no DOM recovery
-    if (summary.get("cursor_api_rate_limited") or summary.get("http_429_seen")
+    # 1) rate limited (cursor 429 / silenced) — FIRST-CLASS; wins over the
+    #    runner's anti_bot/auth halt LABELS. The runner stamps a coarse halt
+    #    status even for a cursor-429 stop, so the summary signals decide. No
+    #    DOM recovery (CLAUDE.md OY rate-limit policy).
+    if (retry_intent == "retry_after_cooldown"
+            or summary.get("cursor_api_rate_limited")
+            or summary.get("http_429_seen")
             or summary.get("cursor_api_silenced")
-            or retry_intent == "retry_after_cooldown"):
+            or summary.get("cursor_rate_limit_exhausted")):
         return {"outcome": "collect_rate_limited", "executed": True,
                 "retry_intent": "retry_after_cooldown", "retry_after_minutes": 90,
                 "rows_inserted": rows}
+    # 2) manual review (true auth wall / human check) — explicit auth signals
+    #    ONLY, NOT a bare anti_bot halt label (a cursor 429 also produces it).
+    if (retry_intent == "manual_review_required"
+            or status == "auth_expired_mid_batch"
+            or summary.get("http_403_seen")
+            or summary.get("http_401_or_login_required_seen")
+            or summary.get("auth_error")
+            or summary.get("human_check_detected")):
+        return {"outcome": "collect_manual_review", "executed": True,
+                "rows_inserted": rows, "status": status}
     # 3) partial
     if (batch_summary.get("partial_success") or summary.get("partial_success")
             or (status == "max_cap_reached"
