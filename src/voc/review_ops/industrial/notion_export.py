@@ -58,7 +58,7 @@ SECTION_TITLES = [
     "반복 이슈",
     "우선 확인 리뷰",
     "답글 검토 리뷰",
-    "상세페이지/안내 보완 후보",
+    "상세페이지/안내 점검 후보",
     "적용 범위",
     "다음 업로드 비교 항목",
 ]
@@ -432,33 +432,43 @@ def _section_needs_reply_compact(reviews: list) -> list[dict]:
     return blocks
 
 
-def _section_detail_candidates(result: dict) -> list[dict]:
-    """상세페이지/안내 보완 후보 — derived from repeated-issue recommended actions.
+# Honest framing for the detail-page section. We only ever see reviews, never
+# the live detail page, so we must not imply the page is missing the guidance.
+# Every line is a "check whether it's already there, and only then consider
+# adding" candidate, prefaced by a caption stating we have no page snapshot.
+DETAIL_REVIEW_ONLY_CAUTION = "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다."
+DETAIL_CHECK_SUFFIX = "상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다."
 
-    Action-first and deduplicated by (issue title, action). Hypothesis-framed:
-    each line is a humble page/guidance-update candidate, never directive,
-    never a claimed cause.
+
+def _section_detail_candidates(result: dict) -> list[dict]:
+    """상세페이지/안내 점검 후보 — derived from repeated-issue recommended actions.
+
+    Action-first and deduplicated by (issue title, action). Honest-framed: we
+    have no detail-page snapshot, so each line asks the operator to first check
+    whether the guidance is already present and only then consider adding it —
+    never a directive, never a claim that the page lacks it.
     """
-    blocks = [_heading_2("상세페이지/안내 보완 후보")]
+    blocks = [_heading_2("상세페이지/안내 점검 후보")]
     issues = result.get("issue_items") or []
     candidates: list[str] = []
     seen: set[str] = set()
     for item in issues:
-        title = item.get("issue_title") or item.get("tag_label") or ""
+        title = sanitize_issue_text(item.get("issue_title") or item.get("tag_label") or "")
         action = sanitize_issue_text(item.get("recommended_action") or "")
         key = f"{title}|{action}"
         if (not title and not action) or key in seen:
             continue
         seen.add(key)
         if action:
-            candidates.append(f"{action} ({title} 관련 보완 후보)")
+            candidates.append(f"{action} — {DETAIL_CHECK_SUFFIX}")
         else:
-            candidates.append(f"{title} 관련 안내 보완 후보")
+            candidates.append(f"{title}: {DETAIL_CHECK_SUFFIX}")
         if len(candidates) >= MAX_DETAIL_CANDIDATES:
             break
     if not candidates:
-        blocks.append(_paragraph("이번 범위에서는 상세페이지/안내 보완 후보를 도출할 반복 이슈가 적습니다."))
+        blocks.append(_paragraph("이번 범위에서는 상세페이지/안내 점검 후보를 도출할 반복 이슈가 적습니다."))
         return blocks
+    blocks.append(_paragraph(DETAIL_REVIEW_ONLY_CAUTION))
     blocks.extend(_bullet(c) for c in candidates)
     return blocks
 
@@ -661,7 +671,7 @@ def _compact_db_sections(result: dict) -> list[list[dict]]:
     """Compact body for the DB row, where the row's properties already carry the
     headline metrics. Notion-native layout: 운영 요약 as a callout, 반복 이슈 as
     per-issue toggles, 운영 판단 as a per-issue decision checklist, 적용 범위
-    folded into a toggle. Keeps 우선 점검 항목 and 상세페이지·안내 보완 후보
+    folded into a toggle. Keeps 우선 점검 항목 and 상세페이지·안내 점검 후보
     visible; drops the long list sections (우선 확인 리뷰, 다음 업로드 비교 항목).
     답글 검토 리뷰 is included only when there are non-positive reviews actually
     worth a reply."""

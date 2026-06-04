@@ -347,12 +347,81 @@ def test_detail_candidates_are_action_first_and_deduped():
         for b in blocks
         if b["type"] == "bulleted_list_item"
     ]
-    cand = [b for b in bullets if "보완 후보" in b]
-    # action-first phrasing, no duplicate 추가 wording
-    assert any(b.startswith("추가 고정 안내 추가 검토 (접착력 부족 관련 보완 후보)") for b in cand)
-    assert not any("추가 후보" in b for b in cand)  # old suffix gone
+    cand = [b for b in bullets if "보강할 후보" in b]
+    # action-first phrasing, framed as a check (not a claim the page lacks it)
+    assert any(
+        b.startswith("추가 고정 안내 추가 검토 — 상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다.")
+        for b in cand
+    )
+    assert not any("관련 보완 후보" in b for b in cand)  # old suffix gone
     # deduped: the shared candidate appears once
     assert sum(1 for b in cand if "추가 고정 안내 추가 검토" in b) == 1
+
+
+# --- 상세페이지/안내 점검 후보 (review-only, honest framing) ------------------
+
+# Banned wording for this section: directive/causal phrasing and any verb that
+# implies we know the page is missing the guidance.
+_DETAIL_BANNED = ["추가하세요", "개선해야", "원인 분석", "반드시", "자동 처리", "즉시 반영"]
+# Phrasings that would imply we already inspected the live detail page.
+_DETAIL_PRESUMPTION = ["상세페이지에 없는", "상세페이지에 누락", "상세페이지에 미반영",
+                       "이미 안내되어 있습니다", "안내되어 있지 않"]
+
+
+def _detail_section(result, *, compact):
+    return _section_blocks(build_notion_blocks(result, compact=compact), "상세페이지/안내 점검 후보")
+
+
+def test_detail_section_heading_renamed_compact_and_full():
+    for compact in (True, False):
+        headings = _headings(build_notion_blocks(_full_result(), compact=compact))
+        assert "상세페이지/안내 점검 후보" in headings
+        assert "상세페이지/안내 보완 후보" not in headings
+
+
+def test_detail_section_compact_includes_review_only_caution():
+    paras = _para_texts(_detail_section(_full_result(), compact=True))
+    assert "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다." in paras
+
+
+def test_detail_candidate_wording_is_a_check_not_a_claim():
+    bullets = _bullets(_detail_section(_full_result(), compact=True))
+    texts = [b["bulleted_list_item"]["rich_text"][0]["text"]["content"] for b in bullets]
+    assert texts  # the fixture has issues → candidates render
+    for t in texts:
+        assert "이미 안내되어 있는지 확인" in t
+        assert "없다면 보강할 후보" in t
+
+
+def test_detail_candidate_does_not_presume_page_contents():
+    # full + compact: never assert what the live detail page does or does not have
+    for compact in (True, False):
+        section = _detail_section(_full_result(), compact=compact)
+        text = "\n".join(
+            b[b["type"]]["rich_text"][0]["text"]["content"]
+            for b in section
+            if b.get(b["type"], {}).get("rich_text")
+        )
+        for bad in _DETAIL_PRESUMPTION:
+            assert bad not in text, bad
+
+
+def test_detail_section_no_banned_wording():
+    # even when the engine hands us directive action text, the section stays clean
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "recommended_action": "원인 분석 및 개선 방안을 검토하세요"}
+    ]
+    section = _detail_section(result, compact=True)
+    text = "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+    for bad in _DETAIL_BANNED:
+        assert bad not in text, bad
+    assert "검토을" not in text
+    assert "검토이" not in text
 
 
 def test_no_overpromise_wording():
@@ -853,7 +922,7 @@ _COMPACT_HEADING_SECTIONS = (
     "우선 점검 항목",
     "반복 이슈",
     "운영 판단",
-    "상세페이지/안내 보완 후보",
+    "상세페이지/안내 점검 후보",
 )
 
 
@@ -1010,7 +1079,7 @@ def test_operator_decision_after_issues_before_detail():
         if b["type"] == "heading_2"
     ]
     assert order.index("반복 이슈") < order.index("운영 판단")
-    assert order.index("운영 판단") < order.index("상세페이지/안내 보완 후보")
+    assert order.index("운영 판단") < order.index("상세페이지/안내 점검 후보")
 
 
 def test_operator_decision_one_todo_per_issue():
