@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import zipfile
 from datetime import date, datetime
 from xml.etree import ElementTree as ET
@@ -30,6 +31,7 @@ import streamlit as st
 
 from src.voc.review_ops.industrial import (
     cluster,
+    issue_cache,
     issue_discovery,
     notion_export,
     rag,
@@ -710,6 +712,17 @@ def scope_caption_text(result: dict) -> str:
     return f"선택 상품 기준: {len(products)}개 상품"
 
 
+def _reused_issue_caption(cluster_summary: dict) -> str:
+    """Quiet caption shown when a repeated-issue result was reused from cache.
+
+    Pure. Appends the cached timestamp when available; never exposes the cache
+    key.
+    """
+    cached_at = (cluster_summary or {}).get("cached_at")
+    base = "반복 이슈 결과 재사용됨"
+    return f"{base} · {cached_at}" if cached_at else base
+
+
 def scoped_product_status_summaries(
     product_summaries: list[dict], scope_products: list[str] | None
 ) -> list[dict]:
@@ -845,6 +858,127 @@ def _run_repeated_issues(
         return report, {"status": "error", "engine": "fallback", "error": str(e)}
 
 
+def _resolve_repeated_issues(
+    report,
+    reviews_in_scope,
+    *,
+    api_key: str,
+    store_path: str | None,
+    today,
+    resolved_today,
+    recent_days: int,
+    scope_products: list[str],
+    max_issues: int,
+    max_evidence: int,
+    max_reps: int,
+    reuse_embeddings: dict | None,
+):
+    """Cache-aware repeated-issue resolution (S1d).
+
+    Reuses a cached, sanitized issue result when the cache key (corpus + scope +
+    settings + models + prompt versions) matches, so the same file + scope +
+    settings render identical repeated issues. A cache HIT needs no API key.
+
+    On a miss we run :func:`_run_repeated_issues` unchanged, sanitize + persist
+    the result, then render from the sanitized payload (so risky wording never
+    reaches the UI/Notion). Any store/cache failure falls back to direct
+    discovery; on a miss without a key the prior ``no_key`` behavior is kept.
+    """
+    corpus_by_id = {r.review_id: r for r in reviews_in_scope}
+    skey = issue_cache.scope_key(scope_products)
+    chash = issue_cache.corpus_hash(corpus_by_id.keys())
+    disc_model = issue_discovery.discovery_model()
+    ver_model = issue_discovery.verifier_model()
+    cache_key = issue_cache.compute_issue_cache_key(
+        corpus_hash=chash,
+        scope_key=skey,
+        recent_days=recent_days,
+        resolved_today=resolved_today,
+        discovery_model=disc_model,
+        verifier_model=ver_model,
+        max_issues=max_issues,
+        max_evidence=max_evidence,
+    )
+
+    conn = None
+    try:
+        conn = store.open_store(store_path)
+    except Exception:
+        conn = None
+
+    # 1) Cache hit — reuse the sanitized result; no API key required.
+    if conn is not None:
+        try:
+            row = store.get_cached_issues(conn, cache_key)
+        except Exception:
+            row = None
+        if row is not None:
+            try:
+                payload = json.loads(row["payload_json"])
+                report.issue_clusters = issue_cache.deserialize_issues(
+                    payload, corpus_by_id=corpus_by_id
+                )
+                conn.close()
+                return report, {
+                    "status": "ok",
+                    "engine": "cache",
+                    "cache_hit": True,
+                    "cached_at": row.get("created_at"),
+                    "issues": len(report.issue_clusters),
+                }
+            except Exception:
+                pass  # corrupt cache row -> fall through and recompute
+
+    # 2) Cache miss — discovery keeps the existing key requirement.
+    if not api_key:
+        if conn is not None:
+            conn.close()
+        return report, {"status": "no_key"}
+
+    report, summary = _run_repeated_issues(
+        report,
+        reviews_in_scope,
+        api_key=api_key,
+        today=today,
+        recent_days=recent_days,
+        max_issues=max_issues,
+        max_evidence=max_evidence,
+        max_reps=max_reps,
+        reuse_embeddings=reuse_embeddings,
+    )
+    summary = {**summary, "cache_hit": False}
+
+    # 3) Sanitize for display (always) + persist the result (when the store is
+    #    available). Render from the sanitized payload so hit/miss are identical.
+    if summary.get("status") != "error":
+        try:
+            payload = issue_cache.serialize_issues(report.issue_clusters)
+            if conn is not None:
+                store.put_cached_issues(
+                    conn,
+                    cache_key,
+                    {
+                        "scope_key": skey,
+                        "corpus_hash": chash,
+                        "recent_days": recent_days,
+                        "discovery_model": disc_model,
+                        "verifier_model": ver_model,
+                        "discovery_version": issue_cache.DISCOVERY_PROMPT_VERSION,
+                        "verifier_version": issue_cache.VERIFIER_PROMPT_VERSION,
+                    },
+                    json.dumps(payload, ensure_ascii=False),
+                )
+            report.issue_clusters = issue_cache.deserialize_issues(
+                payload, corpus_by_id=corpus_by_id
+            )
+        except Exception:
+            pass  # cache write / render-normalize failure -> keep raw clusters
+
+    if conn is not None:
+        conn.close()
+    return report, summary
+
+
 # ---------------------------------------------------------------------------
 # Pipeline driver
 # ---------------------------------------------------------------------------
@@ -917,21 +1051,23 @@ def generate(
     # Either way only issue_clusters is added — worklist rows are never modified.
     cluster_summary: dict | None = None
     if do_cluster:
+        # Cache-aware: a cache hit reuses the sanitized result with no API key;
+        # a miss still requires a key (preserving the prior no_key behavior).
         api_key = rag.resolve_api_key()
-        if not api_key:
-            cluster_summary = {"status": "no_key"}
-        else:
-            report, cluster_summary = _run_repeated_issues(
-                report,
-                reviews_in_scope,
-                api_key=api_key,
-                today=today,
-                recent_days=recent_days,
-                max_issues=cluster_max_clusters,
-                max_evidence=cluster_max_evidence,
-                max_reps=cluster_max_reps,
-                reuse_embeddings=reuse_embeddings,
-            )
+        report, cluster_summary = _resolve_repeated_issues(
+            report,
+            reviews_in_scope,
+            api_key=api_key,
+            store_path=store_path,
+            today=today,
+            resolved_today=resolved_today,
+            recent_days=recent_days,
+            scope_products=scope_products,
+            max_issues=cluster_max_clusters,
+            max_evidence=cluster_max_evidence,
+            max_reps=cluster_max_reps,
+            reuse_embeddings=reuse_embeddings,
+        )
 
     html = render_report_html(report, recent_days=recent_days)
     tagged = [(r, classify(r)) for r in active]
@@ -1303,7 +1439,9 @@ def _render_advanced_notes(result: dict) -> None:
         st.caption("문구 자동 정리는 사용할 수 없어 기본 문구로 표시했습니다.")
 
     csum = result.get("cluster_summary") or {}
-    if csum.get("status") == "ok":
+    if csum.get("cache_hit"):
+        st.caption(_reused_issue_caption(csum))
+    elif csum.get("status") == "ok":
         cand = csum.get("used_candidate_count", csum.get("candidates", 0))
         engine = {"discovery": "자동 발견", "fallback": "기존 방식"}.get(csum.get("engine"), "")
         line = f"반복 이슈: 후보 {cand}건 → 최종 {csum.get('issues', 0)}건"
@@ -1437,12 +1575,14 @@ def _render_summary_tab() -> None:
     st.subheader("반복 이슈")
     st.caption("반복 이슈는 같은 문제가 2건 이상 확인된 묶음입니다.")
     st.caption("한 건짜리 이슈는 우선 확인 리뷰에서 확인할 수 있습니다.")
+    csum = result.get("cluster_summary") or {}
+    if csum.get("cache_hit"):
+        st.caption(_reused_issue_caption(csum))
     issue_items = result.get("issue_items") or []
     if issue_items:
         for item in issue_items:
             _render_issue_card(item)
     else:
-        csum = result.get("cluster_summary") or {}
         cstatus = csum.get("status")
         if cstatus == "ok":
             st.caption("이번 업로드에서 묶인 반복 이슈가 없습니다.")
