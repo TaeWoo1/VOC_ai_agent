@@ -64,6 +64,8 @@ def dispatch_intent(
     collect_staging_root: Optional[Path] = None,
     head_baseline: Optional[str] = None,
     send_staging_root: Optional[Path] = None,
+    publish_packages_root: Optional[Path] = None,
+    publish_staging_root: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Route a validated intent. Returns a handler dict ({intent, handled, reply,
     executed}). Executes only the D4-2 allowlist + D4-3a render; else report-only."""
@@ -115,8 +117,22 @@ def dispatch_intent(
             staging_root=Path(staging) if staging else None,
             approval_log_path=approval_log_path)
 
+    # D4-4c: publish_post is a guarded RED PIPELINE action (preview/draft only).
+    # propose-only here (precondition gate incl. rights + safety + inert staging
+    # preview); confirm runs via confirm_pending -> action-pending(kind=publish),
+    # which in D4-4c hard-blocks (publish_not_enabled). Requires a packages_root.
+    if intent == "publish_post":
+        if publish_packages_root is None:
+            return _card(v)  # no publish packages root configured -> report-only
+        staging = publish_staging_root  # per-package default computed downstream
+        # return the action result verbatim (preserves failed_check / artifacts).
+        return _action.propose_publish_preview(
+            op, target=(v.get("targets") or {}).get("target"),
+            packages_root=Path(publish_packages_root),
+            staging_root=Path(staging) if staging else None,
+            approval_log_path=approval_log_path)
+
     # report outcome but not in the D4-2 executable allowlist -> report-only.
-    # (publish_post remains report-only here.)
     if intent not in D4_2_EXECUTABLE_INTENTS:
         return _card(v)
 
@@ -166,10 +182,14 @@ def dispatch_intent(
             if pend_action.get("kind") == "collect":
                 return _action.confirm_collect(op, approval_log_path=approval_log_path)
             if pend_action.get("kind") == "send":
-                # RED: planner NL / generic confirm NEVER set authorize_send. In
-                # D4-4a this hard-blocks send_not_enabled regardless.
+                # RED: planner NL / generic confirm NEVER set authorize_send.
                 return _action.confirm_send_final(
                     op, authorize_send=False, approval_log_path=approval_log_path)
+            if pend_action.get("kind") == "publish":
+                # RED: planner NL / generic confirm NEVER set authorize_publish.
+                # In D4-4c this hard-blocks publish_not_enabled regardless.
+                return _action.confirm_publish_final(
+                    op, authorize_publish=False, approval_log_path=approval_log_path)
             return _action.confirm_action(op, approval_log_path=approval_log_path)
         if _disp._get_pending_edit(op) is not None:
             # an edit is pending, but planner NL must NOT apply it.

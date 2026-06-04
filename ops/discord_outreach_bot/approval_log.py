@@ -23,7 +23,8 @@ from typing import Any, Callable, Optional
 
 # Stages that are 🔴 gates in the outreach workflow. Approval may be recorded
 # for any stage, but these are the ones that genuinely need a fresh record.
-GATED_STAGES = ("collect_execute", "render_pdf", "prepare_send", "send_final", "follow_up")
+GATED_STAGES = ("collect_execute", "render_pdf", "prepare_send", "send_final",
+                "prepare_publish", "follow_up")
 
 # Recognized execution modes (the Discord /outreach_approve command fixes this
 # to "prompt_only"; the others are reserved for a future local runner).
