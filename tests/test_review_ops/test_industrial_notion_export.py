@@ -800,27 +800,104 @@ def test_db_export_api_key_not_in_result_repr():
     assert "super-secret-key" not in (res.error or "")
 
 
-# --- compact DB body (UX polish) --------------------------------------------
+# --- compact DB body (Notion-native layout) ---------------------------------
 
-_COMPACT_REQUIRED = (
+# Sections that stay top-level headings in the compact body. 운영 요약 keeps its
+# heading + a callout; 적용 범위 is folded into a toggle (checked separately).
+_COMPACT_HEADING_SECTIONS = (
     "운영 요약",
     "우선 점검 항목",
     "반복 이슈",
     "상세페이지/안내 보완 후보",
-    "적용 범위",
 )
 
 
+def _walk(blocks):
+    """Yield every block, descending into toggle/callout children."""
+    for b in blocks:
+        yield b
+        children = b.get(b["type"], {}).get("children")
+        if children:
+            yield from _walk(children)
+
+
+def _all_text_deep(blocks):
+    out = []
+    for b in _walk(blocks):
+        rt = b.get(b["type"], {}).get("rich_text")
+        if rt:
+            out.append(rt[0]["text"]["content"])
+    return "\n".join(out)
+
+
+def _toggle_titles(blocks):
+    return [
+        b["toggle"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "toggle"
+    ]
+
+
+def _issue_toggles(blocks):
+    return [
+        b for b in blocks
+        if b["type"] == "toggle"
+        and "관련 리뷰" in b["toggle"]["rich_text"][0]["text"]["content"]
+    ]
+
+
 def test_compact_blocks_include_required_sections():
-    headings = _headings(build_notion_blocks(_full_result(), compact=True))
-    for title in _COMPACT_REQUIRED:
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    headings = _headings(blocks)
+    for title in _COMPACT_HEADING_SECTIONS:
         assert title in headings, title
+    # 적용 범위 is folded into a toggle rather than a heading
+    assert "적용 범위 보기" in _toggle_titles(blocks)
 
 
 def test_compact_blocks_omit_long_list_sections():
-    headings = _headings(build_notion_blocks(_full_result(), compact=True))
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    headings = _headings(blocks)
+    titles = _toggle_titles(blocks)
     assert "우선 확인 리뷰" not in headings
     assert "다음 업로드 비교 항목" not in headings
+    assert all("우선 확인 리뷰" not in t and "다음 업로드 비교" not in t for t in titles)
+
+
+def test_compact_ceo_summary_is_callout():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    callouts = [b for b in blocks if b["type"] == "callout"]
+    assert len(callouts) == 1
+    callout = callouts[0]
+    assert callout["callout"]["icon"]["type"] == "emoji"
+    text = callout["callout"]["rich_text"][0]["text"]["content"]
+    assert "선택 상품 6개" in text   # scope
+    assert "1,141" in text          # scoped review count
+    assert "우선 점검:" in text       # executive lead-in
+
+
+def test_compact_issues_are_toggles():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    titles = _toggle_titles(blocks)
+    assert "접착력 부족 · 관련 리뷰 8건" in titles
+    assert "절단 시 깨짐 · 관련 리뷰 8건" in titles
+
+
+def test_compact_issue_toggle_has_child_evidence():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    toggles = _issue_toggles(blocks)
+    assert toggles
+    children = toggles[0]["toggle"]["children"]
+    child_text = "\n".join(
+        c[c["type"]]["rich_text"][0]["text"]["content"]
+        for c in children
+        if c.get(c["type"], {}).get("rich_text")
+    )
+    assert "요약:" in child_text
+    assert "추천 조치:" in child_text
+    # verbatim evidence is a child quote block inside the toggle
+    assert any(c["type"] == "quote" for c in children)
+    assert "접착력이 약해서 떨어졌어요" in child_text
 
 
 def test_compact_blocks_fewer_than_full():
@@ -834,9 +911,26 @@ def test_compact_blocks_under_60():
 
 
 def test_compact_evidence_capped_at_two():
-    # the issue fixture carries a 3rd rep marked "캡 초과되어야 함"
-    text = _all_text(build_notion_blocks(_full_result(), compact=True))
+    # the issue fixture carries a 3rd rep marked "세 번째 근거 (캡 초과되어야 함)"
+    text = _all_text_deep(build_notion_blocks(_full_result(), compact=True))
     assert "세 번째 근거" not in text
+    # each issue toggle holds at most 2 evidence quote children
+    for toggle in _issue_toggles(build_notion_blocks(_full_result(), compact=True)):
+        quotes = [c for c in toggle["toggle"]["children"] if c["type"] == "quote"]
+        assert len(quotes) <= 2
+
+
+def test_compact_applicability_is_toggle():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    toggles = [
+        b for b in blocks
+        if b["type"] == "toggle"
+        and b["toggle"]["rich_text"][0]["text"]["content"] == "적용 범위 보기"
+    ]
+    assert len(toggles) == 1
+    child_text = _all_text_deep(toggles)
+    for category in APPLICABILITY_ORDER:
+        assert category in child_text, category
 
 
 def test_compact_needs_reply_included_when_non_positive():
@@ -866,7 +960,8 @@ def test_compact_needs_reply_capped():
 
 
 def test_compact_no_overpromise_wording():
-    text = _all_text(build_notion_blocks(_full_result(), compact=True))
+    # scan deep so toggle children (incl. 적용 범위) are covered too
+    text = _all_text_deep(build_notion_blocks(_full_result(), compact=True))
     text = text.replace("원인/매출 영향 단정", "")  # the 보류 권장 caution is allowed
     for banned in BANNED_WORDING:
         assert banned not in text, banned
@@ -876,7 +971,20 @@ def test_compact_empty_result_builds_safely():
     blocks = build_notion_blocks(_empty_result(), compact=True)
     assert len(blocks) < 60
     headings = _headings(blocks)
-    for title in _COMPACT_REQUIRED:
+    for title in _COMPACT_HEADING_SECTIONS:
+        assert title in headings, title
+    assert "적용 범위 보기" in _toggle_titles(blocks)
+
+
+def test_full_body_layout_unchanged():
+    # full page export stays a flat document: no toggle/callout, all sections
+    # rendered as headings.
+    blocks = build_notion_blocks(_full_result())
+    types = {b["type"] for b in blocks}
+    assert "toggle" not in types
+    assert "callout" not in types
+    headings = _headings(blocks)
+    for title in SECTION_TITLES:
         assert title in headings, title
 
 

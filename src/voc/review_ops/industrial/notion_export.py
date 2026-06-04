@@ -138,6 +138,22 @@ def _divider() -> dict:
     return {"object": "block", "type": "divider", "divider": {}}
 
 
+def _callout(text: str, emoji: str = "📌") -> dict:
+    """A single callout block (icon + rich text). Newlines in ``text`` render as
+    line breaks, so a 2–3 line executive summary fits one block."""
+    return {"object": "block", "type": "callout",
+            "callout": {"rich_text": _rich_text(text),
+                        "icon": {"type": "emoji", "emoji": emoji}}}
+
+
+def _toggle(title: str, children: list[dict]) -> dict:
+    """A collapsible toggle whose ``children`` are nested (one level) inside it.
+    Children do not count toward the top-level block budget, so folding detail
+    into toggles both shortens the page and keeps the detail one click away."""
+    return {"object": "block", "type": "toggle",
+            "toggle": {"rich_text": _rich_text(title), "children": children}}
+
+
 # --- formatting helpers ------------------------------------------------------
 
 
@@ -473,22 +489,109 @@ def _section_comparison(result: dict) -> list[dict]:
 # --- top-level builders ------------------------------------------------------
 
 
+# --- compact-body section builders (Notion-native layout) -------------------
+#
+# These power the DB-row body only. They reuse the same data the full sections
+# read but lay it out with callout/toggle blocks so the row reads like a
+# dashboard, not a long document. The full page export keeps its flat layout.
+
+
+def _section_ceo_summary_compact(result: dict) -> list[dict]:
+    """운영 요약 as a labelled callout: 2–3 short executive lines in one block."""
+    rs = result.get("rating_summary") or {}
+    avg = rs.get("average")
+    avg_text = f"평균 평점 {avg}점" if avg is not None else "평균 평점 미상"
+    issues = result.get("issue_items") or []
+    key_titles = [i.get("issue_title") or "" for i in issues[:MAX_CEO_ISSUES]]
+    key_titles = [t for t in key_titles if t]
+    lines = [
+        f"분석 범위: {_scope_label(result)} · 리뷰 {_count_text(result)}",
+        f"{_rating_context_phrase(result)} ({avg_text}).",
+    ]
+    if key_titles:
+        lines.append("우선 점검: " + " / ".join(key_titles))
+    else:
+        lines.append("우선 점검: 이번 범위에서는 뚜렷한 반복 이슈가 적습니다.")
+    return [_heading_2("운영 요약"), _callout("\n".join(lines))]
+
+
+def _section_action_list_compact(result: dict) -> list[dict]:
+    """우선 점검 항목 — one short bullet per item: label · action · 관련 리뷰 N건.
+    Drops the product-context tail entirely so lines stay compact."""
+    blocks = [_heading_2("우선 점검 항목")]
+    items: list[str] = []
+    for issue in (result.get("issue_items") or [])[:MAX_CEO_ISSUES]:
+        action = issue.get("recommended_action") or issue.get("issue_title") or ""
+        if not action:
+            continue
+        label = issue.get("severity_label") or "확인"
+        count = issue.get("review_count", 0)
+        items.append(f"[{label}] {action} · 관련 리뷰 {count}건")
+    remaining = MAX_ACTION_ITEMS - len(items)
+    for it in (result.get("worklist_items") or [])[: max(0, remaining)]:
+        action = it.get("suggested_action") or it.get("reason") or "내용 확인"
+        items.append(f"[확인] {action} · {it.get('작성일', '미상')}")
+    if not items:
+        blocks.append(_paragraph("이번 범위에서는 먼저 처리할 항목이 많지 않습니다."))
+        return blocks
+    blocks.extend(_bullet(line) for line in items[:MAX_ACTION_ITEMS])
+    return blocks
+
+
+def _section_issues_compact(result: dict) -> list[dict]:
+    """반복 이슈 — one toggle per issue. Title is '{이슈} · 관련 리뷰 N건'; the
+    summary / action / verbatim evidence (capped at 2) live as toggle children."""
+    blocks = [_heading_2("반복 이슈")]
+    issues = result.get("issue_items") or []
+    if not issues:
+        blocks.append(_paragraph("이번 범위에서 묶인 반복 이슈가 없습니다."))
+        return blocks
+    for item in issues[:MAX_ISSUES]:
+        title = item.get("issue_title") or "(제목 없음)"
+        count = item.get("review_count", 0)
+        children: list[dict] = []
+        if item.get("summary"):
+            children.append(_paragraph(f"요약: {item['summary']}"))
+        if item.get("recommended_action"):
+            children.append(_paragraph(f"추천 조치: {item['recommended_action']}"))
+        reps = item.get("reps") or []
+        shown = min(MAX_EVIDENCE_PER_ISSUE, len(reps))
+        if shown:
+            children.append(_paragraph(f"원문 근거: 관련 {count}건 중 {shown}건 표시"))
+            for rep in reps[:shown]:
+                meta = f"{rep.get('작성일', '미상')} · {rep.get('평점', '-')}점"
+                children.append(_quote(f"{meta} — {_quote_text(rep.get('리뷰', ''))}"))
+        blocks.append(_toggle(f"{title} · 관련 리뷰 {count}건", children))
+    return blocks
+
+
+def _section_applicability_compact() -> list[dict]:
+    """적용 범위 folded into a single '적용 범위 보기' toggle. The three categories
+    (incl. the 보류 권장 cautions) live as toggle children, verbatim."""
+    children: list[dict] = []
+    for category in APPLICABILITY_ORDER:
+        children.append(_heading_3(category))
+        children.append(_paragraph(" · ".join(APPLICABILITY[category])))
+    return [_toggle("적용 범위 보기", children)]
+
+
 def _compact_db_sections(result: dict) -> list[list[dict]]:
     """Compact body for the DB row, where the row's properties already carry the
-    headline metrics. Keeps the decision-useful sections (운영 요약 / 우선 점검
-    항목 / 반복 이슈 / 상세페이지·안내 보완 후보 / 적용 범위); drops the long
-    리스트 sections (우선 확인 리뷰, 다음 업로드 비교 항목). 답글 검토 리뷰 is
-    included only when there are non-positive reviews actually worth a reply."""
+    headline metrics. Notion-native layout: 운영 요약 as a callout, 반복 이슈 as
+    per-issue toggles, 적용 범위 folded into a toggle. Keeps 우선 점검 항목 and
+    상세페이지·안내 보완 후보 visible; drops the long list sections (우선 확인
+    리뷰, 다음 업로드 비교 항목). 답글 검토 리뷰 is included only when there are
+    non-positive reviews actually worth a reply."""
     sections = [
-        _section_ceo_summary(result),
-        _section_action_list(result),
-        _section_issues(result),
+        _section_ceo_summary_compact(result),
+        _section_action_list_compact(result),
+        _section_issues_compact(result),
     ]
     non_positive = _non_positive_needs_reply(result)
     if non_positive:
         sections.append(_section_needs_reply_compact(non_positive))
     sections.append(_section_detail_candidates(result))
-    sections.append(_section_applicability())
+    sections.append(_section_applicability_compact())
     return sections
 
 
