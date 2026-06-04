@@ -34,6 +34,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+import action_dispatch as _action   # D4-3b2: live-collect confirmation (kind=collect)
 import agent_dispatch as _disp
 import agent_run_validator as _val
 import agent_runs as _runs
@@ -41,6 +42,9 @@ from agent_registry import AGENTS as _AGENTS
 
 # anchored, exact phrases — never broad NL.
 _RE_EDIT_CONFIRM = re.compile(r"^\s*편집\s*진행\s*해?\s*[.!~]*\s*$")
+# D4-3b2: the ONLY phrase that sets authorize_live=True for a live OY collect.
+# Deliberately distinct from "진행해" so generic confirm can NEVER live-collect.
+_RE_LIVE_COLLECT = re.compile(r"^\s*라이브\s*수집\s*승인\s*[.!~]*\s*$")
 _RE_RUN_CONFIRM = re.compile(r"^\s*(?:실행\s*)?진행\s*해?\s*[.!~]*\s*$")
 _RE_CANCEL = re.compile(r"^\s*(?:실행\s*)?(?:취소|취소해)\s*[.!~]*\s*$")
 _RE_CLEANUP = re.compile(
@@ -101,6 +105,18 @@ def try_handle(
             op, repo_root=root, agent_runs_path=arp, agent_runs_dir=ard,
             approval_log_path=approval_log_path, adapter=adapter)
         return _reply("agent_bounded_edit", res["report"])
+
+    # 1.5 "라이브 수집 승인" — the ONLY per-turn live-collect authorization. Claimed
+    #     only when a collect pending exists; sets authorize_live=True. Generic
+    #     "진행해" / planner NL never reach this and stay collect_not_authorized.
+    if _RE_LIVE_COLLECT.match(text):
+        pend = _action.get_pending_action(op)
+        if pend is None or pend.get("kind") != "collect":
+            return _reply("collect_no_pending",
+                          "대기 중인 수집 제안이 없습니다. 먼저 수집을 제안하세요.")
+        # return verbatim (preserves outcome intent / failed_check / artifacts).
+        return _action.confirm_collect(
+            op, authorize_live=True, approval_log_path=approval_log_path)
 
     # 2. explicit structured propose.
     m = _RE_PROPOSE.match(text)

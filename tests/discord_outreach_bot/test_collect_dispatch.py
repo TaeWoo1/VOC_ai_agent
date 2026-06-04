@@ -10,11 +10,15 @@ confirm.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
 import action_dispatch as ad
+import agent_discord_adapter as ada
 import agent_dispatch as disp
 import agent_intents as ai
 import intent_dispatcher as idp
@@ -75,6 +79,7 @@ class _Ctx:
             pgrep_runner=lambda _c: [], git_head_runner=lambda: "deadbee", **kw)
 
     def confirm(self, **kw):
+        kw.setdefault("approval_log_path", self.root / "approvals.jsonl")
         return ad.confirm_collect(OP, **kw)
 
 
@@ -236,20 +241,34 @@ def test_confirm_requires_per_turn_auth(ctx, monkeypatch):
     assert out["failed_check"] == "collect_not_authorized"
 
 
-def test_confirm_collect_live_not_enabled(ctx, monkeypatch):
-    # both keys satisfied -> reaches the seam -> D4-3b1 has no live path
+def test_confirm_reaches_seam_when_authorized(ctx, monkeypatch):
+    # D4-3b2: both keys satisfied -> reaches the (faked) live seam.
     monkeypatch.setenv("AGENT_COLLECT_LIVE_ENABLED", "1")
+    called = {}
+
+    def fake(g, s, a):
+        called.update(g=g, s=s, a=a)
+        return {"outcome": "collect_done", "rows_inserted": 10,
+                "review_count": 900, "duplicate_count": 0}
+    monkeypatch.setattr(ad, "_collect_fn", fake)
+    ctx.propose(target=GOODS)
+    out = ctx.confirm(authorize_live=True)
+    assert out["intent"] == "collect_done" and out["executed"] is True
+    assert called == {"g": GOODS, "s": SORT, "a": True}
+    assert ad.get_pending_action(OP) is None  # single-use cleared
+
+
+def test_confirm_collect_live_not_enabled_defensive(ctx, monkeypatch):
+    # a seam that declines (CollectNotAuthorized) is reported, not a run.
+    monkeypatch.setenv("AGENT_COLLECT_LIVE_ENABLED", "1")
+
+    def fake(g, s, a):
+        raise ad.CollectNotAuthorized("capability removed")
+    monkeypatch.setattr(ad, "_collect_fn", fake)
     ctx.propose(target=GOODS)
     out = ctx.confirm(authorize_live=True)
     assert out["intent"] == "action_blocked"
     assert out["failed_check"] == "collect_live_not_enabled"
-    assert ad.get_pending_action(OP) is None  # single-use cleared
-
-
-def test_seam_default_raises():
-    # the live seam itself must refuse in D4-3b1
-    with pytest.raises(ad.CollectNotAuthorized):
-        ad._collect_fn(GOODS, SORT, True)
 
 
 def test_plan_hash_mismatch_blocks(ctx):
@@ -302,3 +321,179 @@ def test_send_publish_report_only(ctx, intent, targets):
         collect_queue_path=ctx.queue)
     assert out["executed"] is False
     assert ad.get_pending_action(OP) is None
+
+
+# === D4-3b2: _map_collect_outcome (pure) =====================================
+def test_map_outcome_done():
+    bs = {"products": [{"status": "complete", "rows_inserted": 100,
+                        "duplicate_count": 3,
+                        "summary": {"review_count_analyzed": 900}}]}
+    r = ad._map_collect_outcome(bs, exit_code=0, stdout="")
+    assert r["outcome"] == "collect_done" and r["executed"] is True
+    assert r["rows_inserted"] == 100 and r["review_count"] == 900
+
+
+def test_map_outcome_rate_limited_429():
+    bs = {"products": [{"status": "max_cap_reached", "rows_inserted": 15,
+                        "summary": {"cursor_api_rate_limited": True,
+                                    "http_429_seen": True,
+                                    "retry_intent": "retry_after_cooldown"}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_rate_limited" and r["executed"] is True
+    assert r["retry_after_minutes"] == 90
+    assert r["retry_intent"] == "retry_after_cooldown"
+    assert "DOM" not in str(r)  # no DOM-recovery marker
+
+
+def test_map_outcome_manual_review():
+    bs = {"products": [{"status": "auth_expired_mid_batch",
+                        "summary": {"retry_intent": "manual_review_required"}}]}
+    r = ad._map_collect_outcome(bs, exit_code=1, stdout="")
+    assert r["outcome"] == "collect_manual_review" and r["executed"] is True
+
+
+def test_map_outcome_partial():
+    bs = {"partial_success": True,
+          "products": [{"status": "max_cap_reached", "rows_inserted": 540,
+                        "pagination_exhausted": False, "summary": {}}]}
+    r = ad._map_collect_outcome(bs, exit_code=0, stdout="")
+    assert r["outcome"] == "collect_partial" and r["executed"] is True
+
+
+def test_map_outcome_blocked_no_summary():
+    r = ad._map_collect_outcome(
+        None, exit_code=2,
+        stdout="failed_check: cdp_unreachable\nrequired_action: start chrome\n")
+    assert r["outcome"] == "collect_blocked" and r["executed"] is False
+    assert r["failed_check"] == "cdp_unreachable"
+
+
+def test_map_outcome_failed_no_summary():
+    r = ad._map_collect_outcome(None, exit_code=1, stdout="boom")
+    assert r["outcome"] == "collect_failed" and r["executed"] is False
+
+
+# === D4-3b2: _live_collect with a FAKE subprocess (no real OY) ===============
+def _fake_popen(*, batch_summary=None, stdout="ok\n", returncode=0, timeout=False):
+    rec = {}
+
+    class _FP:
+        _timeout = timeout
+
+        def __init__(self, argv, **kw):
+            rec["argv"] = argv
+            rec["kw"] = kw
+            self.pid = 4321
+            self.returncode = None
+            if batch_summary is not None:
+                i = argv.index("--artifact-root")
+                d = Path(argv[i + 1]) / "batch_xyz"
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "batch_summary.json").write_text(
+                    json.dumps(batch_summary), encoding="utf-8")
+
+        def communicate(self, timeout=None):
+            if _FP._timeout and not rec.get("_raised"):
+                rec["_raised"] = True
+                raise subprocess.TimeoutExpired(cmd="runner", timeout=timeout)
+            self.returncode = returncode
+            return stdout, ""
+
+        def kill(self):
+            rec["killed"] = True
+    return _FP, rec
+
+
+def test_live_collect_argv_shell_and_mapping(tmp_path, monkeypatch):
+    monkeypatch.setattr(ad, "_repo_root", lambda: tmp_path)
+    bs = {"products": [{"status": "complete", "rows_inserted": 12,
+                        "summary": {"review_count_analyzed": 900}}]}
+    fp, rec = _fake_popen(batch_summary=bs, stdout="done\n", returncode=0)
+    monkeypatch.setattr(ad, "_COLLECT_POPEN", fp)
+    res = ad._live_collect(GOODS, SORT, True)
+    argv = rec["argv"]
+    assert argv[argv.index("--goods-no") + 1] == GOODS
+    assert argv[argv.index("--sort-type") + 1] == SORT
+    assert "--i-authorize-live-collection" in argv
+    assert argv[argv.index("--max-items-per-session") + 1] == "1"
+    assert not ({"--allow-open-tab", "--dry-run", "--check"} & set(argv))
+    assert rec["kw"]["shell"] is False and rec["kw"]["start_new_session"] is True
+    assert res["outcome"] == "collect_done" and res["rows_inserted"] == 12
+    log = Path(res["artifact_root"]) / "runner_stdout.log"
+    assert log.is_file() and "done" in log.read_text(encoding="utf-8")
+    assert "batch_summary_path" in res
+
+
+def test_live_collect_timeout_group_kill(tmp_path, monkeypatch):
+    monkeypatch.setattr(ad, "_repo_root", lambda: tmp_path)
+    fp, rec = _fake_popen(timeout=True)
+    monkeypatch.setattr(ad, "_COLLECT_POPEN", fp)
+    killed = {}
+    monkeypatch.setattr(ad.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(ad.os, "killpg", lambda pg, sig: killed.update(pg=pg))
+    res = ad._live_collect(GOODS, SORT, True)
+    assert res["outcome"] == "collect_failed" and "timeout" in res["detail"]
+    assert killed.get("pg") == 4321
+
+
+def test_live_collect_no_summary_failed(tmp_path, monkeypatch):
+    monkeypatch.setattr(ad, "_repo_root", lambda: tmp_path)
+    fp, rec = _fake_popen(batch_summary=None, stdout="crash\n", returncode=1)
+    monkeypatch.setattr(ad, "_COLLECT_POPEN", fp)
+    res = ad._live_collect(GOODS, SORT, True)
+    assert res["outcome"] == "collect_failed"
+
+
+# === D4-3b2: phrase routing (라이브 수집 승인 is the ONLY authorize_live path) ====
+def test_phrase_live_collect_sets_authorize_live(ctx, monkeypatch):
+    monkeypatch.setenv("AGENT_COLLECT_LIVE_ENABLED", "1")
+    seen = {}
+
+    def fake(g, s, a):
+        seen.update(a=a)
+        return {"outcome": "collect_done", "rows_inserted": 1,
+                "review_count": 1, "duplicate_count": 0}
+    monkeypatch.setattr(ad, "_collect_fn", fake)
+    ctx.propose(target=GOODS)
+    out = ada.try_handle("라이브 수집 승인", operator_discord_id=OP, repo_root=ctx.root)
+    assert out is not None and out["intent"] == "collect_done"
+    assert seen["a"] is True
+
+
+def test_phrase_progress_does_not_live_collect(ctx, monkeypatch):
+    # "진행해" must NOT set authorize_live; with no agent run pending the adapter
+    # does not claim it (falls through), so no live collect happens.
+    monkeypatch.setenv("AGENT_COLLECT_LIVE_ENABLED", "1")
+    called = {"n": 0}
+
+    def fake(*a):
+        called["n"] += 1
+        return {"outcome": "collect_done"}
+    monkeypatch.setattr(ad, "_collect_fn", fake)
+    ctx.propose(target=GOODS)
+    out = ada.try_handle("진행해", operator_discord_id=OP, repo_root=ctx.root)
+    assert out is None and called["n"] == 0
+
+
+def test_phrase_live_collect_no_pending(ctx):
+    out = ada.try_handle("라이브 수집 승인", operator_discord_id=OP, repo_root=ctx.root)
+    assert out["intent"] == "collect_no_pending"
+
+
+def test_phrase_live_collect_env_off_not_authorized(ctx, monkeypatch):
+    monkeypatch.delenv("AGENT_COLLECT_LIVE_ENABLED", raising=False)
+    sentinel = {"n": 0}
+    monkeypatch.setattr(ad, "_collect_fn",
+                        lambda *a: sentinel.__setitem__("n", sentinel["n"] + 1))
+    ctx.propose(target=GOODS)
+    out = ada.try_handle("라이브 수집 승인", operator_discord_id=OP, repo_root=ctx.root)
+    assert out["failed_check"] == "collect_not_authorized" and sentinel["n"] == 0
+
+
+# === D4-3b2: gated live smoke (skipped by default) ===========================
+@pytest.mark.skipif(
+    os.environ.get("RUN_LIVE_COLLECT_TEST") != "1",
+    reason="live collect smoke disabled (set RUN_LIVE_COLLECT_TEST=1)")
+def test_live_collect_smoke():
+    # real runner path; per-turn authorized only. Default-skipped.
+    assert ad._collect_fn is ad._live_collect
