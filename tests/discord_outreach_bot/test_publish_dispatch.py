@@ -12,7 +12,6 @@ package mutation, artifact-hash binding, and that the final tier hard-blocks.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -205,27 +204,33 @@ def test_confirm_publish_final_no_pending_direct(ctx):
     assert out["executed"] is False and out["intent"] == "action_confirm"
 
 
-def test_confirm_publish_pending_hard_blocks(ctx):
+def test_planner_confirm_not_authorized_preserves_pending(ctx):
+    # D4-4d: planner confirm_pending -> publish_not_authorized, pending PRESERVED.
     ctx.propose()
     out = ctx.confirm()
     assert out["intent"] == "action_blocked" and out["executed"] is False
-    assert out.get("failed_check") == "publish_not_enabled"
+    assert out.get("failed_check") == "publish_not_authorized"
+    assert ad.get_pending_action(OP) is not None  # preserved for the phrase
     assert not (ctx.pkg_dir / "publish_log.md").exists()
     assert not (ctx.pkg_dir / "status.json").exists()
 
 
-def test_authorize_publish_true_still_blocks(ctx, monkeypatch):
-    monkeypatch.setenv("AGENT_PUBLISH_ENABLED", "1")
+def test_authorize_publish_true_env_off_not_authorized(ctx, monkeypatch):
+    # authorize_publish=True but env off -> publish_not_authorized, preserved
+    monkeypatch.delenv("AGENT_PUBLISH_ENABLED", raising=False)
     ctx.propose()
     out = ad.confirm_publish_final(OP, authorize_publish=True,
                                    approval_log_path=ctx.approvals)
-    assert out.get("failed_check") == "publish_not_enabled"
+    assert out.get("failed_check") == "publish_not_authorized"
+    assert ad.get_pending_action(OP) is not None
     assert not (ctx.pkg_dir / "publish_log.md").exists()
 
 
-def test_publish_fn_seam_always_raises(ctx):
-    with pytest.raises(ad.PublishNotAuthorized):
-        ad._publish_fn({"package_id": PKG})
+def test_fake_publish_returns_published(ctx):
+    # the D4-4d default seam is a fake provider: returns result=published, no network
+    res = ad._publish_fn({"content_hash": "sha256:abc123def456"})
+    assert res["result"] == "published" and res["provider"] == "fake"
+    assert res["post_id"].startswith("fake-")
 
 
 def test_artifact_hash_mismatch_clears_pending(ctx):
@@ -249,18 +254,20 @@ def test_publish_report_only_without_packages_root(ctx):
 
 def test_planner_confirm_does_not_publish(ctx):
     ctx.propose()
-    out = ctx.confirm()  # planner confirm_pending -> publish_not_enabled, never publishes
-    assert out.get("failed_check") == "publish_not_enabled"
+    out = ctx.confirm()  # planner confirm_pending -> publish_not_authorized, never publishes
+    assert out.get("failed_check") == "publish_not_authorized"
+    assert not (ctx.pkg_dir / "publish_log.md").exists()
 
 
 def test_publish_post_not_in_executable_allowlist():
     assert "publish_post" not in idp.D4_2_EXECUTABLE_INTENTS
 
 
-def test_no_final_publish_phrase_wiring():
-    src = (Path(__file__).resolve().parents[2] / "ops" / "discord_outreach_bot"
-           / "agent_discord_adapter.py").read_text(encoding="utf-8")
-    assert "최종 게시 승인" not in src
+def test_final_publish_phrase_wired_d44d():
+    # D4-4d wires the publish phrase; D4-4c's "not wired" assertion is now obsolete.
+    import agent_discord_adapter as ada
+    assert hasattr(ada, "_RE_FINAL_PUBLISH")
+    assert ada._RE_FINAL_PUBLISH.match("최종 게시 승인") is not None
 
 
 def test_gated_stages_contains_prepare_publish():

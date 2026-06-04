@@ -1444,13 +1444,50 @@ def _publish_preview_md(preview: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _live_publish(preview: dict[str, Any]) -> dict[str, Any]:
-    """D4-4c: NO publish capability. Always raises so confirm_publish_final
-    reports publish_not_enabled. D4-4d replaces this seam behind the gate."""
-    raise PublishNotAuthorized("publish capability is not enabled (D4-4c preview-only)")
+def _already_published(package_dir: Path, content_hash: str) -> bool:
+    """True iff publish_log.md records a SUCCESSFUL publish of this content_hash.
+    Only `result=published` lines count, so a failed/rejected attempt never
+    blocks a retry. Read-only."""
+    log = package_dir / _PUBLISH_LOG_FILENAME
+    if not log.is_file():
+        return False
+    try:
+        for line in log.read_text(encoding="utf-8").splitlines():
+            if "result=published" in line and content_hash in line:
+                return True
+    except OSError:
+        return False
+    return False
 
 
-_publish_fn: Callable[[dict[str, Any]], dict[str, Any]] = _live_publish
+def _append_publish_log(
+    package_dir: Path, preview: dict[str, Any], *, operator: str, post_id: Any,
+) -> None:
+    """Append one success line to <package>/publish_log.md — the ONLY package
+    mutation in D4-4d. Success-only ledger: failures never write here, so a
+    failed attempt never blocks a retry. Carries content_hash for idempotency."""
+    log = package_dir / _PUBLISH_LOG_FILENAME
+    new = not log.is_file()
+    ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    line = (f"- {ts} | result=published | content_hash={preview['content_hash']} | "
+            f"package={preview.get('package_id')} | post_id={post_id} | "
+            f"operator={operator} | stage=publish_final\n")
+    with log.open("a", encoding="utf-8") as fh:
+        if new:
+            fh.write("# publish_log — successful publishes (append-only idempotency ledger)\n")
+        fh.write(line)
+
+
+def _fake_publish(preview: dict[str, Any]) -> dict[str, Any]:
+    """D4-4d default publish seam: a FAKE provider. NO network, NO account, NO
+    asset upload, NO Instagram/API/browser. Deterministic post_id from the
+    content hash. Tests and a future REAL provider replace this seam; real
+    Instagram integration is a later, separately authorized step."""
+    digest = str(preview.get("content_hash", "")).split(":")[-1][:12]
+    return {"result": "published", "provider": "fake", "post_id": f"fake-{digest}"}
+
+
+_publish_fn: Callable[[dict[str, Any]], dict[str, Any]] = _fake_publish
 
 
 def propose_publish_preview(
@@ -1508,7 +1545,7 @@ def propose_publish_preview(
                   f"- assets: {n_assets}개 (권리 클리어) · safety: "
                   f"{(preview['safety_check'] or {}).get('status')}\n"
                   f"- 미리보기: `{_PUBLISH_PREVIEW_FILENAME}` (게시 안 함)\n"
-                  '최종 게시는 "최종 게시 승인" 필요 (D4-4d 예정).',
+                  '최종 게시는 "최종 게시 승인" 필요 (일반 "진행해"로는 게시 안 됨).',
                   executed=False)
 
 
@@ -1516,18 +1553,24 @@ def confirm_publish_final(
     operator_id: Optional[str], *, authorize_publish: bool = False,
     approval_log_path: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """D4-4c: consume a publish pending, re-verify the staged preview artifact
-    hash, then HARD-BLOCK publish_not_enabled.
+    """D4-4d: consume a publish pending, re-verify the staged preview artifact
+    hash, re-assert rights/safety from the staged preview, gate
+    (AGENT_PUBLISH_ENABLED + per-turn authorize_publish via "최종 게시 승인"), then
+    publish via the FAKE provider seam. On fake success append publish_log.md
+    (the ONLY package mutation). NO status.json write, NO real publish.
 
-    No publish capability: even with authorize_publish=True the `_publish_fn`
-    seam raises. NO publish_log write, NO status.json write, NO package mutation.
-    D4-4d inserts the two-key gate (AGENT_PUBLISH_ENABLED + '최종 게시 승인')."""
+    Pending lifecycle: cleared on artifact_hash_mismatch / rights/safety re-assert
+    failure / already_published / a gate-passed publish attempt; PRESERVED on
+    publish_not_authorized so a planner / generic "진행해" never burns the preview."""
     pend = _get_pending_action(operator_id)
     if not pend or pend.get("kind") != "publish":
         return _reply("action_confirm",
                       "대기 중인 게시 미리보기가 없습니다.", executed=False)
 
+    package_dir = Path(pend.get("package_dir", ""))
     staging_dir = Path(pend.get("staging_dir", ""))
+
+    # 1) re-verify the EXACT staged bytes that would be published.
     preview: Optional[dict[str, Any]] = None
     try:
         preview = _load_json(staging_dir / _PUBLISH_PREVIEW_FILENAME)
@@ -1541,20 +1584,96 @@ def confirm_publish_final(
                       "(stale preview blocked).", executed=False,
                       failed_check="artifact_hash_mismatch")
 
+    # 2) re-assert rights/safety from the staged preview (defense-in-depth).
+    if not (preview.get("rights_review") or {}).get("all_assets_cleared"):
+        _clear_pending_action(operator_id)
+        return _reply("action_blocked",
+                      "⛔ 권리 미클리어 (rights_review_not_cleared) — 게시 안 함.",
+                      executed=False, failed_check="rights_review_not_cleared")
+    if str((preview.get("safety_check") or {}).get("status") or "").lower() != "pass":
+        _clear_pending_action(operator_id)
+        return _reply("action_blocked",
+                      "⛔ 세이프티 미통과 (prohibited_claims_detected) — 게시 안 함.",
+                      executed=False, failed_check="prohibited_claims_detected")
+
+    # 3) idempotency: identical content already published successfully?
+    if _already_published(package_dir, preview["content_hash"]):
+        _clear_pending_action(operator_id)
+        return _reply("action_blocked",
+                      "⛔ 동일 내용이 이미 게시됨 (already_published).",
+                      executed=False, failed_check="already_published")
+
+    # 4) two-key gate. `authorize_publish` is set ONLY by the distinct phrase
+    #    "최종 게시 승인"; planner / "진행해" / "최종 발송 승인" / "라이브 수집 승인" pass
+    #    False. On failure the pending is PRESERVED so a generic attempt does not
+    #    consume the operator's preview.
+    if not (_publish_authorized() and authorize_publish):
+        return _reply("action_blocked",
+                      "⛔ 게시 미승인 (publish_not_authorized): "
+                      f"{_PUBLISH_ENV_FLAG} + '최종 게시 승인' 필요. (미리보기 유지)",
+                      executed=False, failed_check="publish_not_authorized")
+
     _clear_pending_action(operator_id)  # single-use BEFORE the publish attempt
 
-    # D4-4c hard block: publish is NOT enabled regardless of authorize_publish /
-    # AGENT_PUBLISH_ENABLED. The seam always raises; NO log / status / package write.
+    # 5) audit BEFORE publish (prompt_hash binds the exact previewed content).
+    _approval.append_record(
+        _approval.make_record(
+            target_slug=pend["package_id"], current_state="publish_post",
+            approved_stage="publish_final",
+            prompt=json.dumps(_publish_core(preview), ensure_ascii=False,
+                              sort_keys=True),
+            operator_discord_id=_op_key(operator_id),
+            execution_mode="local_run",
+            notes="fake-provider publish; ledger=publish_log.md (no status.json)"),
+        approval_log_path)
+
+    # 6) fake provider publish. Fail-closed: only result=="published" writes ledger.
     try:
-        _publish_fn(preview)
+        res = _publish_fn(preview)
     except PublishNotAuthorized:
         return _reply("action_blocked",
-                      "⛔ 게시 미구성: 최종 게시는 D4-4d에서 활성화됩니다 "
-                      f"({_PUBLISH_ENV_FLAG} + 최종 게시 승인 필요).",
-                      executed=False, failed_check="publish_not_enabled")
-    except Exception as exc:  # noqa: BLE001 - report any unexpected failure
+                      "⛔ 게시 미승인 (publish_not_authorized).",
+                      executed=False, failed_check="publish_not_authorized")
+    except ProviderUnavailable as exc:
         return _reply("action_failed",
-                      f"⚠ 게시 실패: {exc.__class__.__name__}", executed=False)
+                      "🟠 게시 제공자 일시 불가 (provider_unavailable) — 게시 기록 없음. "
+                      "원인 해소 후 다시 미리보기+승인.",
+                      executed=False, failed_check="provider_unavailable",
+                      detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - any other failure, fail-closed
+        return _reply("action_failed",
+                      f"⚠ 게시 실패 (publish_failed): {exc.__class__.__name__} — 게시 기록 없음.",
+                      executed=False, failed_check="publish_failed")
 
-    # Unreachable in D4-4c (seam always raises). Defensive only.
-    return _reply("action_failed", "⚠ 예기치 않은 게시 경로", executed=False)
+    return _format_publish_card(res, preview, package_dir, operator_id=operator_id)
+
+
+def _format_publish_card(
+    res: dict[str, Any], preview: dict[str, Any], package_dir: Path, *,
+    operator_id: Optional[str],
+) -> dict[str, Any]:
+    """Map a fake-provider result to a Discord card. Only result=="published"
+    appends publish_log.md; every other shape is fail-closed (no ledger, no
+    status)."""
+    result = (res or {}).get("result")
+    if result == "published":
+        post_id = res.get("post_id")
+        _append_publish_log(package_dir, preview,
+                            operator=_op_key(operator_id), post_id=post_id)
+        return _reply("publish_done",
+                      f"✅ 게시 완료 (publish_done)\n- package: "
+                      f"{preview.get('package_id')} · post_id: {post_id} · "
+                      f"provider: {res.get('provider')}\n"
+                      "- publish_log 기록 (idempotent). status.json 미변경. 자동 후속 없음.",
+                      executed=True, post_id=post_id,
+                      content_hash=preview.get("content_hash"))
+    if result == "rejected":
+        return _reply("action_blocked",
+                      "⛔ 제공자 거부 (publish_rejected) — 게시 안 됨, 기록 없음.\n"
+                      f"- detail: {res.get('detail')}",
+                      executed=False, failed_check="publish_rejected",
+                      detail=res.get("detail"))
+    # unknown result shape -> failed, no ledger
+    return _reply("action_failed",
+                  f"⚠ 게시 실패 (publish_failed): unexpected result={result!r} — 기록 없음.",
+                  executed=False, failed_check="publish_failed")
