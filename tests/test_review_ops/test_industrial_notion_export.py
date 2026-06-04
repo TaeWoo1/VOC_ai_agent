@@ -6,7 +6,7 @@ The actual API client + Streamlit button land in I2 and are not tested here.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from src.voc.review_ops.industrial import notion_export as nx
@@ -629,6 +629,49 @@ def test_db_average_present_when_available():
     assert props["평균 평점"]["number"] == 3.1
 
 
+# --- 분석일시 timezone-aware Date value (no +9h shift) -----------------------
+
+KST = timezone(timedelta(hours=9))
+
+
+def test_db_date_value_offset_preserved_for_aware():
+    now = datetime(2026, 6, 4, 17, 44, 0, tzinfo=KST)
+    props = build_database_properties(_full_result(), now)
+    assert props["분석일시"]["date"]["start"] == "2026-06-04T17:44:00+09:00"
+
+
+def test_db_date_value_has_offset_for_naive():
+    # a naive datetime must not be emitted offset-less (Notion would read it as
+    # UTC and shift it forward); the wall clock must be preserved, not converted
+    now = datetime(2026, 6, 4, 17, 44, 0)
+    start = build_database_properties(_full_result(), now)["분석일시"]["date"]["start"]
+    parsed = datetime.fromisoformat(start)
+    assert parsed.utcoffset() is not None          # an offset is attached
+    assert start.startswith("2026-06-04T17:44")     # same wall clock, no shift
+
+
+def test_db_date_matches_row_title_local_time():
+    now = datetime(2026, 6, 4, 17, 44, 0, tzinfo=KST)
+    result = _full_result()
+    title = notion_database_row_title(result, now)
+    parsed = datetime.fromisoformat(
+        build_database_properties(result, now)["분석일시"]["date"]["start"]
+    )
+    assert "06/04 17:44" in title                          # title local time
+    assert parsed.strftime("%m/%d %H:%M") == "06/04 17:44"  # property local time
+
+
+def test_db_date_no_plus_nine_shift():
+    # KST 02:44 on 06-05 must stay 02:44/06-05, not roll back to 17:44/06-04
+    now = datetime(2026, 6, 5, 2, 44, 0, tzinfo=KST)
+    parsed = datetime.fromisoformat(
+        build_database_properties(_full_result(), now)["분석일시"]["date"]["start"]
+    )
+    assert parsed.hour == 2
+    assert parsed.date().isoformat() == "2026-06-05"
+    assert parsed.utcoffset() == timedelta(hours=9)
+
+
 def test_db_scope_kind_full():
     assert nx._scope_kind(_db_result([])) == "전체 상품"
 
@@ -945,6 +988,14 @@ def _todo_text(blocks):
     )
 
 
+def _paragraph_text(blocks):
+    return "\n".join(
+        b["paragraph"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "paragraph" and b["paragraph"]["rich_text"]
+    )
+
+
 def test_compact_includes_operator_decision():
     headings = _headings(build_notion_blocks(_full_result(), compact=True))
     assert "운영 판단" in headings
@@ -952,47 +1003,74 @@ def test_compact_includes_operator_decision():
 
 def test_operator_decision_after_issues_before_detail():
     blocks = build_notion_blocks(_full_result(), compact=True)
-    h2 = [
-        (i, b["heading_2"]["rich_text"][0]["text"]["content"])
-        for i, b in enumerate(blocks)
+    order = [
+        b["heading_2"]["rich_text"][0]["text"]["content"]
+        for b in blocks
         if b["type"] == "heading_2"
     ]
-    order = [name for _, name in h2]
     assert order.index("반복 이슈") < order.index("운영 판단")
     assert order.index("운영 판단") < order.index("상세페이지/안내 보완 후보")
 
 
-def test_operator_decision_lists_each_issue_title():
-    blocks = build_notion_blocks(_full_result(), compact=True)
-    todo_text = _todo_text(blocks)
-    assert "처리 여부 결정: 접착력 부족" in todo_text
-    assert "처리 여부 결정: 절단 시 깨짐" in todo_text
-
-
-def test_operator_decision_has_decision_options():
-    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
-    for option in ("상세페이지 보완", "제품 확인", "포장 확인", "답글 검토", "보류"):
-        assert option in todo_text, option
-
-
-def test_operator_decision_uses_todo_blocks():
+def test_operator_decision_one_todo_per_issue():
     blocks = build_notion_blocks(_full_result(), compact=True)
     todos = [b for b in blocks if b["type"] == "to_do"]
-    # 2 issues × (처리 여부 / 조치 방향 / 메모) = 6 unchecked to-do blocks
-    assert len(todos) == 6
+    # _full_result has 2 issues → exactly 2 unchecked to-do blocks (was 6)
+    assert len(todos) == 2
     assert all(b["to_do"]["checked"] is False for b in todos)
 
 
-def test_operator_decision_includes_memo_and_intro():
-    blocks = build_notion_blocks(_full_result(), compact=True)
-    assert nx.OPERATOR_DECISION_INTRO in _all_text(blocks)
-    assert "메모:" in _todo_text(blocks)
+def test_operator_decision_todo_count_capped_at_max_issues():
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(nx.MAX_ISSUES + 3)]
+    todos = [
+        b for b in build_notion_blocks(result, compact=True) if b["type"] == "to_do"
+    ]
+    assert len(todos) == nx.MAX_ISSUES
 
 
-def test_operator_decision_no_action_imperative_wording():
+def test_operator_decision_lists_each_issue_title():
     todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    assert "접착력 부족" in todo_text
+    assert "절단 시 깨짐" in todo_text
+
+
+def test_operator_decision_no_legacy_subtodos():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    assert "조치 방향 선택:" not in todo_text
+    assert "처리 여부 결정:" not in todo_text
+    # 메모 is a paragraph now — never a checkbox
+    assert "메모:" not in todo_text
+    assert not any(line.strip().startswith("메모") for line in todo_text.split("\n"))
+
+
+def test_operator_decision_memo_is_paragraph():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert "메모:" in _paragraph_text(blocks)
+
+
+def test_operator_decision_keeps_intro():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert nx.OPERATOR_DECISION_INTRO == "처리할 항목만 체크하고, 필요하면 아래에 메모를 남기세요."
+    assert nx.OPERATOR_DECISION_INTRO in _paragraph_text(blocks)
+
+
+def test_operator_decision_wording_is_cautious():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    # recommended actions are hedged candidates → end in 검토
+    assert "검토" in todo_text
     for banned in ("자동 처리", "즉시 반영", "반드시"):
         assert banned not in todo_text, banned
+
+
+def test_operator_decision_fallback_when_no_action():
+    result = _full_result()
+    result["issue_items"] = [_issue("포장 손상", action="")]  # no recommended action
+    todo_text = _todo_text(build_notion_blocks(result, compact=True))
+    assert "포장 손상" in todo_text
+    assert "확인" in todo_text
+    assert "보류" in todo_text
+    assert "검토" in todo_text
 
 
 def test_operator_decision_empty_result_safe():

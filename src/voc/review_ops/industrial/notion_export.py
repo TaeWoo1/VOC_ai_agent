@@ -572,27 +572,32 @@ def _section_issues_compact(result: dict) -> list[dict]:
     return blocks
 
 
-# 운영 판단 decision directions (human-owned; no automatic action implied).
-DECISION_DIRECTIONS = ["상세페이지 보완", "제품 확인", "포장 확인", "답글 검토", "보류"]
-OPERATOR_DECISION_INTRO = (
-    "처리 여부를 남기는 공간입니다. 필요 없으면 보류로 두고, 반영할 항목만 메모하세요."
-)
+OPERATOR_DECISION_INTRO = "처리할 항목만 체크하고, 필요하면 아래에 메모를 남기세요."
+
+
+def _decision_todo_text(item: dict) -> str:
+    """One cautious decision line per issue: '{이슈} — {조치 후보}'. Uses the
+    issue's recommended action (already hedged, ends in 검토/확인/…); falls back
+    to a 확인/보류 검토 prompt when no action is available."""
+    title = item.get("issue_title") or item.get("tag_label") or "(제목 없음)"
+    action = (item.get("recommended_action") or "").strip()
+    if action:
+        return f"{title} — {action}"
+    return f"{title} — 확인 또는 보류 검토"
 
 
 def _section_operator_decision(result: dict) -> list[dict]:
-    """운영 판단 — a human decision workspace, one checklist group per repeated
-    issue. to_do (checkbox) blocks the operator ticks; nothing is acted on
-    automatically. Wording stays cautious (결정 / 선택 / 보류 / 메모)."""
+    """운영 판단 — a human decision workspace: one to-do (checkbox) per repeated
+    issue, then a plain 메모 line for free notes. The operator ticks what to act
+    on; nothing happens automatically. Wording stays cautious (검토/확인/보류)."""
     blocks = [_heading_2("운영 판단"), _paragraph(OPERATOR_DECISION_INTRO)]
     issues = result.get("issue_items") or []
     if not issues:
         blocks.append(_paragraph("이번 범위에서는 판단할 반복 이슈가 적습니다."))
         return blocks
     for item in issues[:MAX_ISSUES]:
-        title = item.get("issue_title") or "(제목 없음)"
-        blocks.append(_todo(f"처리 여부 결정: {title}"))
-        blocks.append(_todo("조치 방향 선택: " + " / ".join(DECISION_DIRECTIONS)))
-        blocks.append(_todo("메모: "))
+        blocks.append(_todo(_decision_todo_text(item)))
+    blocks.append(_paragraph("메모:"))  # plain note line, never a checkbox
     return blocks
 
 
@@ -733,6 +738,16 @@ def notion_database_row_title(result: dict, now: datetime) -> str:
     )
 
 
+def _aware_iso(now: datetime) -> str:
+    """ISO 8601 with a timezone offset. A naive datetime is presumed to be local
+    time and gets the system offset attached, so Notion's Date property is not
+    misread as UTC and shifted forward; an already-aware datetime is preserved
+    as-is (no conversion, so its wall clock keeps matching the row title)."""
+    if now.tzinfo is None:
+        now = now.astimezone()
+    return now.isoformat()
+
+
 def build_database_properties(result: dict, now: datetime) -> dict:
     """Notion property-values for one analysis-run row.
 
@@ -745,7 +760,7 @@ def build_database_properties(result: dict, now: datetime) -> dict:
     rs = result.get("rating_summary") or {}
     props: dict = {
         "이름": {"title": _rich_text(notion_database_row_title(result, now))},
-        "분석일시": {"date": {"start": now.isoformat()}},
+        "분석일시": {"date": {"start": _aware_iso(now)}},
         "분석 범위": {"rich_text": _rich_text(result.get("scope_label") or "전체 상품")},
         "범위 유형": {"select": {"name": _scope_kind(result)}},
         "리뷰 수": {"number": result.get("scoped_active_count") or 0},
