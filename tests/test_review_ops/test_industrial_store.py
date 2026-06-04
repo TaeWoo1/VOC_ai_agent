@@ -6,9 +6,12 @@ from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.normalize import normalize_rows
 from src.voc.review_ops.industrial.store import (
     create_upload,
+    get_cached_issues,
     get_review_status,
+    init_db,
     list_recent_uploads,
     open_store,
+    put_cached_issues,
     set_review_status,
     upsert_reviews,
 )
@@ -43,6 +46,7 @@ def test_init_creates_tables(tmp_path):
         "review_status",
         "issue_status",
         "chat_messages",
+        "issue_cache",
     } <= names
 
 
@@ -128,3 +132,83 @@ def get_upload_summary_count(conn, upload_id: int) -> int:
     assert summary is not None
     assert summary["upload_id"] == upload_id
     return summary["new_count"]
+
+
+# --- issue_cache (S1c) ------------------------------------------------------
+
+
+def _cache_meta() -> dict:
+    return {
+        "scope_key": "전선몰딩|선바로",
+        "corpus_hash": "abc123",
+        "recent_days": 180,
+        "discovery_model": "gpt-4o-mini",
+        "verifier_model": "gpt-4o",
+        "discovery_version": "v1",
+        "verifier_version": "v1",
+        "created_at": "2026-01-21T20:33:46",
+    }
+
+
+def test_issue_cache_init_idempotent(tmp_path):
+    # Opening twice (init_db runs each time) must not error or drop data.
+    db = str(tmp_path / "s.db")
+    conn = open_store(db)
+    put_cached_issues(conn, "k1", _cache_meta(), '[{"issue_title": "접착력"}]')
+    conn.close()
+
+    conn2 = open_store(db)  # init_db runs again on the existing file
+    init_db(conn2)  # explicit extra call — still idempotent
+    row = get_cached_issues(conn2, "k1")
+    assert row is not None
+    assert row["payload_json"] == '[{"issue_title": "접착력"}]'
+
+
+def test_get_cached_issues_miss_returns_none(tmp_path):
+    conn = open_store(str(tmp_path / "s.db"))
+    assert get_cached_issues(conn, "nope") is None
+
+
+def test_put_then_get_roundtrip(tmp_path):
+    conn = open_store(str(tmp_path / "s.db"))
+    payload = '[{"issue_title": "접착력", "evidence_review_ids": ["r1"]}]'
+    put_cached_issues(conn, "k1", _cache_meta(), payload)
+
+    row = get_cached_issues(conn, "k1")
+    assert row is not None
+    assert row["cache_key"] == "k1"
+    assert row["scope_key"] == "전선몰딩|선바로"
+    assert row["corpus_hash"] == "abc123"
+    assert row["recent_days"] == 180
+    assert row["discovery_model"] == "gpt-4o-mini"
+    assert row["verifier_model"] == "gpt-4o"
+    assert row["discovery_version"] == "v1"
+    assert row["verifier_version"] == "v1"
+    assert row["payload_json"] == payload
+    assert row["created_at"] == "2026-01-21T20:33:46"
+
+
+def test_put_replaces_existing_row(tmp_path):
+    conn = open_store(str(tmp_path / "s.db"))
+    put_cached_issues(conn, "k1", _cache_meta(), '[{"v": 1}]')
+    meta2 = {**_cache_meta(), "corpus_hash": "def456", "created_at": "2026-02-01T00:00:00"}
+    put_cached_issues(conn, "k1", meta2, '[{"v": 2}]')
+
+    row = get_cached_issues(conn, "k1")
+    assert row["payload_json"] == '[{"v": 2}]'
+    assert row["corpus_hash"] == "def456"
+    assert row["created_at"] == "2026-02-01T00:00:00"
+    # still a single row for this key
+    count = conn.execute(
+        "SELECT COUNT(*) FROM issue_cache WHERE cache_key = ?", ("k1",)
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_put_created_at_defaults_when_absent(tmp_path):
+    conn = open_store(str(tmp_path / "s.db"))
+    meta = {k: v for k, v in _cache_meta().items() if k != "created_at"}
+    put_cached_issues(conn, "k1", meta, "[]")
+    row = get_cached_issues(conn, "k1")
+    assert row["created_at"]  # auto-filled, non-empty
+    assert row["scope_key"] == "전선몰딩|선바로"

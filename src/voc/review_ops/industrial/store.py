@@ -12,6 +12,10 @@ What it stores:
 - ``review_status`` — operator status/memo per review, keyed by ``review_id`` so
                       it survives re-uploads (the key is content/source-stable).
 - ``issue_status``  — best-effort status/memo per repeated issue (wired later).
+- ``issue_cache``   — cached repeated-issue discovery output keyed by a
+                      deterministic cache key (see ``issue_cache.py``), so the
+                      same file + scope + settings reuse the same result.
+                      ``payload_json`` is opaque to this layer.
 - ``chat_messages`` — one rolling local chat transcript (no embeddings here;
                       embeddings stay in memory per CLAUDE.md / approved plan).
 
@@ -76,6 +80,19 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     role       TEXT,
     content    TEXT,
     created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS issue_cache (
+    cache_key         TEXT PRIMARY KEY,
+    scope_key         TEXT,
+    corpus_hash       TEXT,
+    recent_days       INTEGER,
+    discovery_model   TEXT,
+    verifier_model    TEXT,
+    discovery_version TEXT,
+    verifier_version  TEXT,
+    payload_json      TEXT NOT NULL,
+    created_at        TEXT NOT NULL
 );
 """
 
@@ -237,3 +254,54 @@ def list_recent_uploads(conn: sqlite3.Connection, limit: int = 10) -> list[dict]
         (int(limit),),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_cached_issues(conn: sqlite3.Connection, cache_key: str) -> dict | None:
+    """Return the cached issue row as a dict, or None on miss.
+
+    ``payload_json`` is returned verbatim — this layer does not parse it;
+    deserialization is the caller's job (see ``issue_cache.deserialize_issues``).
+    """
+    row = conn.execute(
+        "SELECT cache_key, scope_key, corpus_hash, recent_days, discovery_model, "
+        "verifier_model, discovery_version, verifier_version, payload_json, "
+        "created_at FROM issue_cache WHERE cache_key = ?",
+        (cache_key,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def put_cached_issues(
+    conn: sqlite3.Connection,
+    cache_key: str,
+    metadata: dict,
+    payload_json: str,
+) -> None:
+    """Insert or replace a cached issue result, keyed by ``cache_key``.
+
+    ``metadata`` supplies the (optional) descriptive columns: ``scope_key`` /
+    ``corpus_hash`` / ``recent_days`` / ``discovery_model`` / ``verifier_model``
+    / ``discovery_version`` / ``verifier_version``. ``created_at`` is taken from
+    ``metadata`` when provided (injectable for tests), else ``_now_iso()``.
+    ``payload_json`` is stored opaquely — not parsed here.
+    """
+    meta = metadata or {}
+    conn.execute(
+        "INSERT OR REPLACE INTO issue_cache ("
+        "cache_key, scope_key, corpus_hash, recent_days, discovery_model, "
+        "verifier_model, discovery_version, verifier_version, payload_json, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            cache_key,
+            meta.get("scope_key"),
+            meta.get("corpus_hash"),
+            meta.get("recent_days"),
+            meta.get("discovery_model"),
+            meta.get("verifier_model"),
+            meta.get("discovery_version"),
+            meta.get("verifier_version"),
+            payload_json,
+            meta.get("created_at") or _now_iso(),
+        ),
+    )
+    conn.commit()
