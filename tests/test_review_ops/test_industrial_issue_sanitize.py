@@ -20,8 +20,8 @@ from src.voc.review_ops.industrial.issue_sanitize import (
 
 _REWRITE_CASES = [
     ("원인 분석 및 개선 방안", "확인 및 보완 방향 검토"),
-    ("원인 분석", "원인 가설 검토"),
-    ("개선 방안", "보완 방향 검토"),
+    ("원인 분석", "발생 여부 확인"),
+    ("개선 방안", "보완 방향"),
     ("개선해야", "보완을 검토"),
     ("매출 영향", "재구매·신뢰 영향 가능성"),
     ("자동 처리", "수동 확인"),
@@ -45,9 +45,9 @@ def test_longest_match_precedence_for_compound():
     # Must rewrite the whole compound, not 원인 분석 + 개선 방안 separately.
     out = sanitize_issue_text("원인 분석 및 개선 방안")
     assert out == "확인 및 보완 방향 검토"
-    # If the constituents had fired separately we'd see 원인 가설 검토 (the
+    # If the constituents had fired separately we'd see 발생 여부 확인 (the
     # standalone 원인 분석 rewrite); the compound rule must win instead.
-    assert "원인 가설 검토" not in out
+    assert "발생 여부 확인" not in out
 
 
 @pytest.mark.parametrize("phrase", BANNED_PHRASES)
@@ -92,6 +92,51 @@ def test_real_examples_sanitized():
 
     assert sanitize_issue_text("상세페이지에 즉시 반영 필요") == "상세페이지에 반영 검토 필요"
     assert sanitize_issue_text("답글 자동 처리 필요") == "답글 수동 확인 필요"
+
+
+# --- natural-Korean wording polish ------------------------------------------
+
+
+def test_worklist_action_phrase_reads_naturally():
+    out = sanitize_issue_text("제품의 내구성 및 품질을 점검하고, 필요시 개선 방안을 마련하세요.")
+    assert out == "제품의 내구성 및 품질을 점검하고, 필요하면 보완 여부를 검토하세요."
+    assert "개선 방안" not in out
+    assert "검토을" not in out
+
+
+def test_improvement_plan_action_variants_natural():
+    assert sanitize_issue_text("개선 방안을 마련하세요") == "보완 여부를 검토하세요"
+    assert sanitize_issue_text("필요하면 개선 방안을 마련하세요") == "필요하면 보완 여부를 검토하세요"
+    assert sanitize_issue_text("필요시 개선 방안을 마련하세요") == "필요하면 보완 여부를 검토하세요"
+
+
+def test_compound_action_verb_clean():
+    out = sanitize_issue_text("원인 분석 및 개선 방안을 검토하세요")
+    assert "원인 분석" not in out
+    assert "개선 방안" not in out
+    assert "검토을" not in out
+    assert out == "확인 및 보완 방향을 검토하세요"
+
+
+def test_standalone_wonin_bunseok_natural():
+    out = sanitize_issue_text("원인 분석")
+    assert out == "발생 여부 확인"
+    assert "원인 분석" not in out
+
+
+def test_no_geomto_eul_artifact_anywhere():
+    for raw in (
+        "제품의 내구성 및 품질을 점검하고, 필요시 개선 방안을 마련하세요.",
+        "원인 분석 및 개선 방안을 검토하세요",
+        "개선 방안을 마련하세요",
+        "원인 분석 및 개선 방안을 세우세요",  # arbitrary trailing verb
+        "접착력에 대한 원인 분석 및 개선 방안이 필요합니다.",  # subject particle
+    ):
+        out = sanitize_issue_text(raw)
+        assert "검토을" not in out, raw
+        assert "검토이" not in out, raw
+        assert has_banned_wording(out) is False, raw
+        assert sanitize_issue_text(out) == out, raw  # idempotent
 
 
 # --- sanitize_issue_fields --------------------------------------------------

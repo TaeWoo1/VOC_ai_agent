@@ -38,19 +38,35 @@ BANNED_PHRASES: tuple[str, ...] = (
     "즉시 반영",
 )
 
-# Ordered (longest-match-first) rewrite table. Order is load-bearing: the
-# compound phrase MUST precede its constituents so that
-# "원인 분석 및 개선 방안" is rewritten as a unit. An empty replacement removes
-# the phrase; surrounding whitespace is normalized afterwards.
+# Ordered (longest-match-first) rewrite table. Order is load-bearing: full
+# action phrases come first (so "개선 방안을 마련하세요" reads naturally rather
+# than leaving a dangling "보완 방향 ...을 마련하세요"), then the compound noun
+# phrase, then its constituents. An empty replacement removes the phrase;
+# whitespace is normalized afterwards.
 PHRASE_REWRITES: tuple[tuple[str, str], ...] = (
+    ("필요시 개선 방안을 마련하세요", "필요하면 보완 여부를 검토하세요"),
+    ("필요하면 개선 방안을 마련하세요", "필요하면 보완 여부를 검토하세요"),
     ("원인 분석 및 개선 방안", "확인 및 보완 방향 검토"),
-    ("매출 영향", "재구매·신뢰 영향 가능성"),
-    ("원인 분석", "원인 가설 검토"),
-    ("개선 방안", "보완 방향 검토"),
+    ("개선 방안을 마련하세요", "보완 여부를 검토하세요"),
+    ("원인 분석", "발생 여부 확인"),
+    ("개선 방안", "보완 방향"),
     ("개선해야", "보완을 검토"),
     ("자동 처리", "수동 확인"),
     ("즉시 반영", "반영 검토"),
+    ("매출 영향", "재구매·신뢰 영향 가능성"),
     ("반드시", ""),
+)
+
+# Cleanup pass applied AFTER the main rewrites (longest-first). When the compound
+# rewrite ("확인 및 보완 방향 검토") is followed by a particle + verb it leaves an
+# awkward "검토을 …" / "검토이 …"; these collapse it back to natural Korean. The
+# final generic rules fix any remaining wrong particle — 검토 ends in a vowel, so
+# it takes 를 (object) and 가 (subject), never 을 / 이 — for arbitrary trailers.
+_CLEANUP_REWRITES: tuple[tuple[str, str], ...] = (
+    ("보완 방향 검토을 마련하세요", "보완 여부를 검토하세요"),
+    ("보완 방향 검토을 검토하세요", "보완 방향을 검토하세요"),
+    ("검토을", "검토를"),
+    ("검토이", "검토가"),
 )
 
 # Issue dict keys whose text is operator-facing and therefore sanitized. All
@@ -66,16 +82,19 @@ _MULTISPACE_RE = re.compile(r" {2,}")
 
 
 def sanitize_issue_text(text: str) -> str:
-    """Rewrite risky phrasing to hedged operator-safe wording.
+    """Rewrite risky phrasing to hedged, natural operator-safe Korean.
 
-    Applies :data:`PHRASE_REWRITES` in order (longest-match-first), then
-    collapses any double spacing introduced by removals and strips the result.
-    Idempotent and deterministic. Non-string input is returned unchanged.
+    Applies :data:`PHRASE_REWRITES` (longest-match-first), then
+    :data:`_CLEANUP_REWRITES` to smooth particle artifacts, then collapses any
+    double spacing introduced by removals and strips the result. Idempotent and
+    deterministic. Non-string input is returned unchanged.
     """
     if not isinstance(text, str):
         return text
     out = text
     for phrase, replacement in PHRASE_REWRITES:
+        out = out.replace(phrase, replacement)
+    for phrase, replacement in _CLEANUP_REWRITES:
         out = out.replace(phrase, replacement)
     # Removals (e.g. 반드시 → "") can leave doubled or edge whitespace.
     out = _MULTISPACE_RE.sub(" ", out).strip()

@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+from src.voc.review_ops.industrial.issue_sanitize import sanitize_issue_text
+
 # --- caps (keep total blocks < 100; surfaced, never silent) -----------------
 
 MAX_ISSUES = 5
@@ -39,6 +41,7 @@ MAX_ACTION_ITEMS = 6
 MAX_CEO_ISSUES = 3  # key issues named in the CEO summary / action list
 MAX_DB_KEY_ISSUES = 5  # issue titles named in the DB row's 주요 이슈 column
 MAX_COMPACT_NEEDS_REPLY = 3  # compact DB body lists at most this many 답글 검토 리뷰
+MAX_COMPACT_ACTION_ITEMS = 4  # compact 우선 점검 항목: keep to 3–4 scannable lines
 COMPACT_POSITIVE_RATING_FLOOR = 4.0  # rating ≥ this is "obviously positive" → skipped
 QUOTE_MAXLEN = 160  # quotes are kept short in this layout
 PRODUCT_LABEL_MAXLEN = 22  # Notion-only short product label
@@ -442,7 +445,7 @@ def _section_detail_candidates(result: dict) -> list[dict]:
     seen: set[str] = set()
     for item in issues:
         title = item.get("issue_title") or item.get("tag_label") or ""
-        action = item.get("recommended_action") or ""
+        action = sanitize_issue_text(item.get("recommended_action") or "")
         key = f"{title}|{action}"
         if (not title and not action) or key in seen:
             continue
@@ -509,7 +512,7 @@ def _section_ceo_summary_compact(result: dict) -> list[dict]:
     avg = rs.get("average")
     avg_text = f"평균 평점 {avg}점" if avg is not None else "평균 평점 미상"
     issues = result.get("issue_items") or []
-    key_titles = [i.get("issue_title") or "" for i in issues[:MAX_CEO_ISSUES]]
+    key_titles = [sanitize_issue_text(i.get("issue_title") or "") for i in issues[:MAX_CEO_ISSUES]]
     key_titles = [t for t in key_titles if t]
     lines = [
         f"분석 범위: {_scope_label(result)} · 리뷰 {_count_text(result)}",
@@ -522,26 +525,67 @@ def _section_ceo_summary_compact(result: dict) -> list[dict]:
     return [_heading_2("운영 요약"), _callout("\n".join(lines))]
 
 
+# Decision-level grouping for the compact 우선 점검 항목. The display severity
+# label maps to a scannable, decision-oriented bucket; worklist items fall under
+# 모니터링. Order is fixed (red → yellow → white); only non-empty groups render.
+DECISION_GROUP_RED = "🔴 이번 주 반영 검토"
+DECISION_GROUP_YELLOW = "🟡 내부 확인"
+DECISION_GROUP_WHITE = "⚪ 모니터링"
+DECISION_GROUP_ORDER = (DECISION_GROUP_RED, DECISION_GROUP_YELLOW, DECISION_GROUP_WHITE)
+
+
+def _decision_group(severity_label: str) -> str:
+    """Map a display severity label to a compact decision bucket.
+
+    우선 확인 → 🔴 이번 주 반영 검토; 확인 필요 → 🟡 내부 확인; everything else
+    (참고 / worklist 확인 / unknown) → ⚪ 모니터링."""
+    if severity_label == "우선 확인":
+        return DECISION_GROUP_RED
+    if severity_label == "확인 필요":
+        return DECISION_GROUP_YELLOW
+    return DECISION_GROUP_WHITE
+
+
 def _section_action_list_compact(result: dict) -> list[dict]:
-    """우선 점검 항목 — one short bullet per item: label · action · 관련 리뷰 N건.
-    Drops the product-context tail entirely so lines stay compact."""
+    """우선 점검 항목 — grouped by decision level (🔴/🟡/⚪), 3–4 scannable lines.
+
+    Issue actions group by severity; worklist items fall under ⚪ 모니터링. All
+    action/reason text is run through the S1a sanitizer (worklist action/reason
+    never passed through it upstream); evidence quotes are not touched. Lines are
+    deduped by action so a repeated issue does not fill the list, and the total
+    is capped at MAX_COMPACT_ACTION_ITEMS."""
     blocks = [_heading_2("우선 점검 항목")]
-    items: list[str] = []
+    grouped: dict[str, list[str]] = {g: [] for g in DECISION_GROUP_ORDER}
+    seen: set[str] = set()
+    total = 0
+
+    def _add(group: str, raw_action: str, suffix: str) -> None:
+        nonlocal total
+        action = sanitize_issue_text(raw_action or "").strip()
+        if not action or action in seen or total >= MAX_COMPACT_ACTION_ITEMS:
+            return
+        seen.add(action)
+        grouped[group].append(f"{action} · {suffix}")
+        total += 1
+
     for issue in (result.get("issue_items") or [])[:MAX_CEO_ISSUES]:
-        action = issue.get("recommended_action") or issue.get("issue_title") or ""
-        if not action:
-            continue
-        label = issue.get("severity_label") or "확인"
-        count = issue.get("review_count", 0)
-        items.append(f"[{label}] {action} · 관련 리뷰 {count}건")
-    remaining = MAX_ACTION_ITEMS - len(items)
-    for it in (result.get("worklist_items") or [])[: max(0, remaining)]:
-        action = it.get("suggested_action") or it.get("reason") or "내용 확인"
-        items.append(f"[확인] {action} · {it.get('작성일', '미상')}")
-    if not items:
+        raw = issue.get("recommended_action") or issue.get("issue_title") or ""
+        group = _decision_group(issue.get("severity_label") or "확인")
+        _add(group, raw, f"관련 리뷰 {issue.get('review_count', 0)}건")
+    for it in result.get("worklist_items") or []:
+        if total >= MAX_COMPACT_ACTION_ITEMS:
+            break
+        raw = it.get("suggested_action") or it.get("reason") or "내용 확인"
+        _add(DECISION_GROUP_WHITE, raw, it.get("작성일", "미상"))
+
+    if total == 0:
         blocks.append(_paragraph("이번 범위에서는 먼저 처리할 항목이 많지 않습니다."))
         return blocks
-    blocks.extend(_bullet(line) for line in items[:MAX_ACTION_ITEMS])
+    for group in DECISION_GROUP_ORDER:
+        if not grouped[group]:
+            continue
+        blocks.append(_paragraph(group))
+        blocks.extend(_bullet(line) for line in grouped[group])
     return blocks
 
 
@@ -554,13 +598,15 @@ def _section_issues_compact(result: dict) -> list[dict]:
         blocks.append(_paragraph("이번 범위에서 묶인 반복 이슈가 없습니다."))
         return blocks
     for item in issues[:MAX_ISSUES]:
-        title = item.get("issue_title") or "(제목 없음)"
+        title = sanitize_issue_text(item.get("issue_title") or "(제목 없음)")
         count = item.get("review_count", 0)
         children: list[dict] = []
         if item.get("summary"):
-            children.append(_paragraph(f"요약: {item['summary']}"))
+            children.append(_paragraph(f"요약: {sanitize_issue_text(item['summary'])}"))
         if item.get("recommended_action"):
-            children.append(_paragraph(f"추천 조치: {item['recommended_action']}"))
+            children.append(
+                _paragraph(f"추천 조치: {sanitize_issue_text(item['recommended_action'])}")
+            )
         reps = item.get("reps") or []
         shown = min(MAX_EVIDENCE_PER_ISSUE, len(reps))
         if shown:
@@ -579,8 +625,8 @@ def _decision_todo_text(item: dict) -> str:
     """One cautious decision line per issue: '{이슈} — {조치 후보}'. Uses the
     issue's recommended action (already hedged, ends in 검토/확인/…); falls back
     to a 확인/보류 검토 prompt when no action is available."""
-    title = item.get("issue_title") or item.get("tag_label") or "(제목 없음)"
-    action = (item.get("recommended_action") or "").strip()
+    title = sanitize_issue_text(item.get("issue_title") or item.get("tag_label") or "(제목 없음)")
+    action = sanitize_issue_text(item.get("recommended_action") or "")
     if action:
         return f"{title} — {action}"
     return f"{title} — 확인 또는 보류 검토"

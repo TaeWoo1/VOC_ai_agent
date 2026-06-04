@@ -6,6 +6,7 @@ The actual API client + Streamlit button land in I2 and are not tested here.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -1192,3 +1193,164 @@ def test_export_mode_none_when_key_missing(monkeypatch):
     assert mode == "none"
     assert key is None
     assert target is None
+
+
+# --- compact 우선 점검 항목: decision-level grouping + sanitization -----------
+
+# The 7 phrases this slice must keep out of the compact DB body (S1a list).
+S1D_BANNED = [
+    "원인 분석", "개선 방안", "개선해야", "반드시", "매출 영향", "자동 처리", "즉시 반영",
+]
+
+
+def _graded_issue(title, *, severity_label, action, count=3):
+    return {**_issue(title, count=count), "severity_label": severity_label,
+            "recommended_action": action}
+
+
+def _section_blocks(blocks, heading):
+    """Top-level blocks between a heading_2 == heading and the next heading_2."""
+    out, capture = [], False
+    for b in blocks:
+        if b["type"] == "heading_2":
+            content = b["heading_2"]["rich_text"][0]["text"]["content"]
+            if content == heading:
+                capture = True
+                continue
+            if capture:
+                break
+        elif capture:
+            out.append(b)
+    return out
+
+
+def _bullets(section):
+    return [b for b in section if b["type"] == "bulleted_list_item"]
+
+
+def _para_texts(section):
+    return [b["paragraph"]["rich_text"][0]["text"]["content"]
+            for b in section
+            if b["type"] == "paragraph" and b["paragraph"]["rich_text"]]
+
+
+def test_compact_action_list_grouped_by_decision_level():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력 부족", severity_label="우선 확인",
+                      action="실크벽지 사용 시 추가 고정 안내 검토"),
+        _graded_issue("절단 깨짐", severity_label="확인 필요",
+                      action="절단 도구/작업 방법 안내 검토", count=2),
+    ]
+    result["worklist_items"] = [
+        _worklist_item("구성품 누락", day=24, action="구성품 누락 표현 확인")
+    ]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    paras = _para_texts(section)
+    assert nx.DECISION_GROUP_RED in paras
+    assert nx.DECISION_GROUP_YELLOW in paras
+    assert nx.DECISION_GROUP_WHITE in paras
+    # fixed order: 🔴 → 🟡 → ⚪
+    assert paras.index(nx.DECISION_GROUP_RED) < paras.index(nx.DECISION_GROUP_YELLOW)
+    assert paras.index(nx.DECISION_GROUP_YELLOW) < paras.index(nx.DECISION_GROUP_WHITE)
+
+
+def test_compact_action_list_capped_to_max():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue(f"이슈 {i}", severity_label="우선 확인", action=f"조치 {i} 검토")
+        for i in range(3)
+    ]
+    result["worklist_items"] = [
+        _worklist_item(f"리뷰 {i}", action=f"확인 {i} 검토") for i in range(10)
+    ]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    assert len(_bullets(section)) <= nx.MAX_COMPACT_ACTION_ITEMS
+
+
+def test_compact_action_list_dedups_repeated_action():
+    result = _full_result()
+    dup = "동일 조치 검토"
+    result["issue_items"] = [
+        _graded_issue("A", severity_label="우선 확인", action=dup),
+        _graded_issue("B", severity_label="우선 확인", action=dup),
+    ]
+    result["worklist_items"] = []
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    assert len(_bullets(section)) == 1
+
+
+def test_compact_action_list_only_present_groups_render():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력", severity_label="우선 확인", action="고정 안내 검토")
+    ]
+    result["worklist_items"] = []
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    paras = _para_texts(section)
+    assert nx.DECISION_GROUP_RED in paras
+    assert nx.DECISION_GROUP_YELLOW not in paras  # empty group hidden
+    assert nx.DECISION_GROUP_WHITE not in paras
+
+
+def test_compact_no_banned_wording_anywhere():
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "recommended_action": "원인 분석 및 개선 방안을 검토하세요",
+         "summary": "매출 영향이 큽니다"}
+    ]
+    result["worklist_items"] = [
+        _worklist_item("리뷰", action="제품의 내구성 및 품질을 점검하고, 필요시 개선 방안을 마련하세요.")
+    ]
+    text = _all_text_deep(build_notion_blocks(result, compact=True))
+    text = text.replace("원인/매출 영향 단정", "")  # the 보류 권장 caution is allowed
+    for bad in S1D_BANNED:
+        assert bad not in text, bad
+    # no awkward particle artifacts reach the compact body
+    assert "검토을" not in text
+    assert "검토이" not in text
+
+
+def test_compact_worklist_improvement_phrase_sanitized():
+    result = _full_result()
+    result["issue_items"] = []  # force worklist into the action list
+    result["worklist_items"] = [_worklist_item("리뷰", action="필요시 개선 방안을 마련하세요")]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    text = "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+    assert "개선 방안" not in text
+    assert "검토을" not in text
+    # natural Korean: the full action phrase is rewritten, not a dangling token
+    assert "필요하면 보완 여부를 검토하세요" in text
+
+
+def test_compact_issue_toggle_summary_sanitized():
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "summary": "원인 분석 및 개선 방안 필요", "recommended_action": "즉시 반영"}
+    ]
+    text = _all_text_deep(build_notion_blocks(result, compact=True))
+    for bad in ("원인 분석", "개선 방안", "즉시 반영"):
+        assert bad not in text, bad
+
+
+def test_full_page_action_list_format_unchanged():
+    # full body keeps the bracket-label digest; decision emojis are compact-only
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력", severity_label="우선 확인", action="고정 안내 검토")
+    ]
+    text = _all_text(build_notion_blocks(result))  # full body
+    assert "[우선 확인]" in text
+    for emoji in ("🔴", "🟡", "⚪"):
+        assert emoji not in text
+
+
+def test_db_properties_have_no_decision_emojis():
+    props = build_database_properties(_full_result(), datetime(2026, 1, 21, 17, 44))
+    blob = json.dumps(props, ensure_ascii=False)
+    for emoji in ("🔴", "🟡", "⚪"):
+        assert emoji not in blob
