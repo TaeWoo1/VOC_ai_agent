@@ -14,6 +14,9 @@ import; :mod:`parse` is pure and offline-testable.
 
 from __future__ import annotations
 
+from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
+    ingest_local_images,
+)
 from src.voc.review_ops.industrial.detail_snapshot.parse import (
     extract_from_html,
     is_valid_coupang_product_url,
@@ -22,6 +25,7 @@ from src.voc.review_ops.industrial.detail_snapshot.parse import (
 
 __all__ = [
     "extract_from_html",
+    "ingest_local_images",
     "is_valid_coupang_product_url",
     "validate_coupang_product_url",
 ]

@@ -9,12 +9,24 @@ This is NOT a scraper: one URL, one read-only page load, no login/captcha/
 anti-bot bypass, no crawling, no scheduling, no OCR, no multimodal, no OpenAI.
 Run only against a URL the operator explicitly provides and authorizes.
 
+Two modes (mutually exclusive):
+- URL capture (--url): live read-only Coupang detail-page snapshot.
+- Local ingest (--image-dir): ingest an operator-saved folder of detail images
+  (consumer-visible page content) with no network at all.
+
 Usage:
+    # URL capture
     PYTHONPATH=. python3 scripts/review_ops_detail_snapshot_spike.py \
         --url "https://www.coupang.com/vp/products/<id>?..." \
         [--out-dir .review_ops_data/detail_snapshots] \
         [--download-sample-images] \
         [--timeout-ms 30000]
+
+    # Local detail-image ingest (no network)
+    PYTHONPATH=. python3 scripts/review_ops_detail_snapshot_spike.py \
+        --image-dir "/path/to/detail/images" \
+        --product-name "<product name>" \
+        [--out-dir .review_ops_data/detail_snapshots]
 """
 
 from __future__ import annotations
@@ -29,6 +41,9 @@ from src.voc.review_ops.industrial.detail_snapshot.capture import (
     SnapshotDependencyError,
     capture_snapshot,
 )
+from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
+    ingest_local_images,
+)
 from src.voc.review_ops.industrial.detail_snapshot.parse import (
     validate_coupang_product_url,
 )
@@ -38,7 +53,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Coupang detail-page snapshot feasibility spike (capture-only).",
     )
-    p.add_argument("--url", required=True, help="One Coupang product detail URL.")
+    p.add_argument("--url", help="One Coupang product detail URL (URL capture mode).")
+    p.add_argument(
+        "--image-dir",
+        help="Local folder of operator-saved detail images (local ingest mode, no network).",
+    )
+    p.add_argument(
+        "--product-name", default="", help="Product name (local ingest mode)."
+    )
     p.add_argument(
         "--out-dir",
         default=DEFAULT_ARTIFACT_ROOT,
@@ -55,8 +77,35 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _run_local_ingest(args) -> int:
+    result = ingest_local_images(
+        args.image_dir, product_name=args.product_name, out_root=args.out_dir
+    )
+    meta = result.get("metadata", {})
+    print("mode        : local_detail_images")
+    print(f"status      : {result['status']}")
+    print(f"snapshot_dir: {result['snapshot_dir']}")
+    if meta.get("notes"):
+        print(f"notes       : {meta['notes']}")
+    print(f"product_name: {meta.get('product_name', '')}")
+    print(f"visibility  : {meta.get('visibility', '')}")
+    print(f"image_count : {meta.get('image_count', 0)}")
+    print(f"copied      : {meta.get('copied_image_count', 0)}")
+    print("note        : local ingest — no network, no OCR, no multimodal, no OpenAI.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.image_dir and args.url:
+        print("[reject] --url 와 --image-dir 는 함께 사용할 수 없습니다.", file=sys.stderr)
+        return 2
+    if args.image_dir:
+        return _run_local_ingest(args)
+    if not args.url:
+        print("[reject] --url 또는 --image-dir 중 하나가 필요합니다.", file=sys.stderr)
+        return 2
 
     ok, reason = validate_coupang_product_url(args.url)
     if not ok:

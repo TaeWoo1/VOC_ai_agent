@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
+from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
 from src.voc.review_ops.industrial.detail_snapshot import parse as ps
 
 FIXTURE = (
@@ -238,3 +239,150 @@ def test_snapshot_module_not_referenced_by_protected_surfaces():
     ):
         text = (root / rel).read_text(encoding="utf-8")
         assert "detail_snapshot" not in text, rel
+
+
+# --- S2x.2-local: local detail-image ingest ---------------------------------
+
+
+def _make_images(dirpath: Path) -> list[Path]:
+    """Create 3 tiny local fixture images (deterministic, no network)."""
+    from PIL import Image
+
+    dirpath.mkdir(parents=True, exist_ok=True)
+    specs = [
+        ("01_first.png", "PNG", (12, 8)),
+        ("02_second.jpg", "JPEG", (20, 10)),
+        ("03_third.png", "PNG", (16, 16)),
+    ]
+    made = []
+    for name, fmt, size in specs:
+        p = dirpath / name
+        Image.new("RGB", size, (180, 180, 180)).save(p, format=fmt)
+        made.append(p)
+    return made
+
+
+def test_local_ingest_creates_metadata_and_manifest(tmp_path):
+    _make_images(tmp_path / "src")
+    result = il.ingest_local_images(
+        tmp_path / "src", product_name="선바로 전선 몰딩 1호", out_root=tmp_path / "out"
+    )
+    assert result["status"] == "ok"
+    meta = json.loads(Path(result["paths"]["metadata"]).read_text(encoding="utf-8"))
+    assert meta["source_type"] == "local_detail_images"
+    assert meta["visibility"] == "consumer_visible"
+    assert meta["product_name"] == "선바로 전선 몰딩 1호"
+    assert meta["image_count"] == 3
+    assert meta["copied_image_count"] == 3
+    assert meta["text_length"] == 0
+    assert meta["extraction_mode"] == "none"
+    assert meta["ocr"] is False and meta["multimodal"] is False
+
+    manifest = json.loads(Path(result["paths"]["image_manifest"]).read_text(encoding="utf-8"))
+    assert manifest["image_source_region"] == "operator_local_detail_images"
+    assert len(manifest["images"]) == 3
+
+
+def test_local_ingest_copies_images_deterministically_without_mutating_source(tmp_path):
+    src = tmp_path / "src"
+    originals = _make_images(src)
+    before = sorted(p.name for p in src.iterdir())
+
+    result = il.ingest_local_images(src, product_name="p", out_root=tmp_path / "out")
+    manifest = json.loads(Path(result["paths"]["image_manifest"]).read_text(encoding="utf-8"))
+    imgs = manifest["images"]
+
+    # deterministic order by source filename; sequential order_index + names
+    assert [r["order_index"] for r in imgs] == [0, 1, 2]
+    assert [r["local_filename"] for r in imgs] == [
+        "image_000.png", "image_001.jpg", "image_002.png"
+    ]
+    assert [Path(r["original_path"]).name for r in imgs] == [p.name for p in originals]
+
+    images_dir = Path(result["snapshot_dir"]) / "images"
+    for r in imgs:
+        assert (images_dir / r["local_filename"]).exists()
+    # source folder untouched
+    assert sorted(p.name for p in src.iterdir()) == before
+
+
+def test_local_ingest_records_dimensions_format_and_size(tmp_path):
+    _make_images(tmp_path / "src")
+    result = il.ingest_local_images(tmp_path / "src", product_name="p", out_root=tmp_path / "out")
+    imgs = json.loads(Path(result["paths"]["image_manifest"]).read_text(encoding="utf-8"))["images"]
+    first = imgs[0]
+    assert first["width"] == 12 and first["height"] == 8
+    assert first["format"] == "PNG"
+    assert first["file_size_bytes"] > 0
+    assert imgs[1]["format"] == "JPEG" and imgs[1]["width"] == 20
+
+
+def test_local_ingest_extracted_text_note_present_and_no_ocr(tmp_path):
+    _make_images(tmp_path / "src")
+    result = il.ingest_local_images(tmp_path / "src", product_name="p", out_root=tmp_path / "out")
+    text = Path(result["paths"]["text"]).read_text(encoding="utf-8")
+    assert "텍스트 추출은 아직" in text
+    assert "소비자에게 노출되는" in text
+    # no draft / multimodal artifact ever written
+    assert not (Path(result["snapshot_dir"]) / "product_guidance_draft.json").exists()
+
+
+def test_local_ingest_no_images_fail_soft(tmp_path):
+    (tmp_path / "empty").mkdir()
+    result = il.ingest_local_images(tmp_path / "empty", product_name="p", out_root=tmp_path / "out")
+    assert result["status"] == "error"
+    meta = json.loads(Path(result["paths"]["metadata"]).read_text(encoding="utf-8"))
+    assert meta["image_count"] == 0
+    assert meta["notes"]
+
+
+def test_local_ingest_missing_dir_fail_soft(tmp_path):
+    result = il.ingest_local_images(tmp_path / "nope", product_name="p", out_root=tmp_path / "out")
+    assert result["status"] == "error"
+    assert Path(result["paths"]["metadata"]).exists()  # no half-state
+
+
+def test_local_ingest_partial_on_unreadable_image(tmp_path):
+    src = tmp_path / "src"
+    _make_images(src)
+    (src / "00_broken.png").write_bytes(b"not a real image")  # sorts first
+    result = il.ingest_local_images(src, product_name="p", out_root=tmp_path / "out")
+    assert result["status"] == "partial"
+    imgs = json.loads(Path(result["paths"]["image_manifest"]).read_text(encoding="utf-8"))["images"]
+    broken = [r for r in imgs if Path(r["original_path"]).name == "00_broken.png"][0]
+    assert broken["copied"] is False
+    assert "error" in broken
+    good = [r for r in imgs if r.get("copied")]
+    assert len(good) == 3
+
+
+def test_ingest_local_module_has_no_network_or_openai_import():
+    src = (Path(il.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket",
+                "urllib.request", "import openai", "from openai",
+                "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_cli_modes_and_url_capture_path_unchanged(tmp_path):
+    import importlib.util
+
+    root = Path(cap.__file__).parents[5]
+    spec = importlib.util.spec_from_file_location(
+        "snap_spike_cli", root / "scripts" / "review_ops_detail_snapshot_spike.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # neither mode → reject
+    assert mod.main([]) == 2
+    # both modes → reject
+    assert mod.main(["--url", "https://www.coupang.com/vp/products/1",
+                     "--image-dir", str(tmp_path)]) == 2
+    # URL mode still validates (offline reject, existing behavior unchanged)
+    assert mod.main(["--url", "https://www.example.com/vp/products/1"]) == 2
+    # local mode runs offline end-to-end
+    _make_images(tmp_path / "src")
+    assert mod.main(["--image-dir", str(tmp_path / "src"),
+                     "--product-name", "p", "--out-dir", str(tmp_path / "out")]) == 0
