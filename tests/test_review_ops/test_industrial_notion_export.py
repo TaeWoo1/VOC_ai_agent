@@ -808,6 +808,7 @@ _COMPACT_HEADING_SECTIONS = (
     "운영 요약",
     "우선 점검 항목",
     "반복 이슈",
+    "운영 판단",
     "상세페이지/안내 보완 후보",
 )
 
@@ -933,6 +934,84 @@ def test_compact_applicability_is_toggle():
         assert category in child_text, category
 
 
+# --- 운영 판단 (operator decision workspace) --------------------------------
+
+
+def _todo_text(blocks):
+    return "\n".join(
+        b["to_do"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "to_do"
+    )
+
+
+def test_compact_includes_operator_decision():
+    headings = _headings(build_notion_blocks(_full_result(), compact=True))
+    assert "운영 판단" in headings
+
+
+def test_operator_decision_after_issues_before_detail():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    h2 = [
+        (i, b["heading_2"]["rich_text"][0]["text"]["content"])
+        for i, b in enumerate(blocks)
+        if b["type"] == "heading_2"
+    ]
+    order = [name for _, name in h2]
+    assert order.index("반복 이슈") < order.index("운영 판단")
+    assert order.index("운영 판단") < order.index("상세페이지/안내 보완 후보")
+
+
+def test_operator_decision_lists_each_issue_title():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    todo_text = _todo_text(blocks)
+    assert "처리 여부 결정: 접착력 부족" in todo_text
+    assert "처리 여부 결정: 절단 시 깨짐" in todo_text
+
+
+def test_operator_decision_has_decision_options():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    for option in ("상세페이지 보완", "제품 확인", "포장 확인", "답글 검토", "보류"):
+        assert option in todo_text, option
+
+
+def test_operator_decision_uses_todo_blocks():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    todos = [b for b in blocks if b["type"] == "to_do"]
+    # 2 issues × (처리 여부 / 조치 방향 / 메모) = 6 unchecked to-do blocks
+    assert len(todos) == 6
+    assert all(b["to_do"]["checked"] is False for b in todos)
+
+
+def test_operator_decision_includes_memo_and_intro():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert nx.OPERATOR_DECISION_INTRO in _all_text(blocks)
+    assert "메모:" in _todo_text(blocks)
+
+
+def test_operator_decision_no_action_imperative_wording():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    for banned in ("자동 처리", "즉시 반영", "반드시"):
+        assert banned not in todo_text, banned
+
+
+def test_operator_decision_empty_result_safe():
+    blocks = build_notion_blocks(_empty_result(), compact=True)
+    assert "운영 판단" in _headings(blocks)
+    assert [b for b in blocks if b["type"] == "to_do"] == []
+
+
+def test_compact_under_60_at_caps():
+    # 5 issues drive the largest 운영 판단 / 반복 이슈 footprint
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [
+        _review(f"답글 {i}", rating=2.0, tags=("needs_reply",)) for i in range(8)
+    ]
+    assert len(build_notion_blocks(result, compact=True)) < 60
+
+
 def test_compact_needs_reply_included_when_non_positive():
     # _full_result has one needs_reply review at rating 2.0 → worth a reply
     blocks = build_notion_blocks(_full_result(), compact=True)
@@ -983,7 +1062,9 @@ def test_full_body_layout_unchanged():
     types = {b["type"] for b in blocks}
     assert "toggle" not in types
     assert "callout" not in types
+    assert "to_do" not in types  # 운영 판단 checklist is compact-only
     headings = _headings(blocks)
+    assert "운영 판단" not in headings  # decision workspace is compact-only
     for title in SECTION_TITLES:
         assert title in headings, title
 

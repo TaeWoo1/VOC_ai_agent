@@ -154,6 +154,13 @@ def _toggle(title: str, children: list[dict]) -> dict:
             "toggle": {"rich_text": _rich_text(title), "children": children}}
 
 
+def _todo(text: str, checked: bool = False) -> dict:
+    """An unchecked to-do (checkbox) block. Used for the human-owned 운영 판단
+    checklist — the operator ticks these, nothing is acted on automatically."""
+    return {"object": "block", "type": "to_do",
+            "to_do": {"rich_text": _rich_text(text), "checked": checked}}
+
+
 # --- formatting helpers ------------------------------------------------------
 
 
@@ -565,6 +572,30 @@ def _section_issues_compact(result: dict) -> list[dict]:
     return blocks
 
 
+# 운영 판단 decision directions (human-owned; no automatic action implied).
+DECISION_DIRECTIONS = ["상세페이지 보완", "제품 확인", "포장 확인", "답글 검토", "보류"]
+OPERATOR_DECISION_INTRO = (
+    "처리 여부를 남기는 공간입니다. 필요 없으면 보류로 두고, 반영할 항목만 메모하세요."
+)
+
+
+def _section_operator_decision(result: dict) -> list[dict]:
+    """운영 판단 — a human decision workspace, one checklist group per repeated
+    issue. to_do (checkbox) blocks the operator ticks; nothing is acted on
+    automatically. Wording stays cautious (결정 / 선택 / 보류 / 메모)."""
+    blocks = [_heading_2("운영 판단"), _paragraph(OPERATOR_DECISION_INTRO)]
+    issues = result.get("issue_items") or []
+    if not issues:
+        blocks.append(_paragraph("이번 범위에서는 판단할 반복 이슈가 적습니다."))
+        return blocks
+    for item in issues[:MAX_ISSUES]:
+        title = item.get("issue_title") or "(제목 없음)"
+        blocks.append(_todo(f"처리 여부 결정: {title}"))
+        blocks.append(_todo("조치 방향 선택: " + " / ".join(DECISION_DIRECTIONS)))
+        blocks.append(_todo("메모: "))
+    return blocks
+
+
 def _section_applicability_compact() -> list[dict]:
     """적용 범위 folded into a single '적용 범위 보기' toggle. The three categories
     (incl. the 보류 권장 cautions) live as toggle children, verbatim."""
@@ -578,14 +609,16 @@ def _section_applicability_compact() -> list[dict]:
 def _compact_db_sections(result: dict) -> list[list[dict]]:
     """Compact body for the DB row, where the row's properties already carry the
     headline metrics. Notion-native layout: 운영 요약 as a callout, 반복 이슈 as
-    per-issue toggles, 적용 범위 folded into a toggle. Keeps 우선 점검 항목 and
-    상세페이지·안내 보완 후보 visible; drops the long list sections (우선 확인
-    리뷰, 다음 업로드 비교 항목). 답글 검토 리뷰 is included only when there are
-    non-positive reviews actually worth a reply."""
+    per-issue toggles, 운영 판단 as a per-issue decision checklist, 적용 범위
+    folded into a toggle. Keeps 우선 점검 항목 and 상세페이지·안내 보완 후보
+    visible; drops the long list sections (우선 확인 리뷰, 다음 업로드 비교 항목).
+    답글 검토 리뷰 is included only when there are non-positive reviews actually
+    worth a reply."""
     sections = [
         _section_ceo_summary_compact(result),
         _section_action_list_compact(result),
         _section_issues_compact(result),
+        _section_operator_decision(result),
     ]
     non_positive = _non_positive_needs_reply(result)
     if non_positive:
