@@ -22,10 +22,16 @@ from src.voc.review_ops.industrial.detail_snapshot.parse import (
     is_valid_coupang_product_url,
     validate_coupang_product_url,
 )
+from src.voc.review_ops.industrial.detail_snapshot.tiling import (
+    compute_tile_bounds,
+    make_tiles,
+)
 
 __all__ = [
+    "compute_tile_bounds",
     "extract_from_html",
     "ingest_local_images",
     "is_valid_coupang_product_url",
+    "make_tiles",
     "validate_coupang_product_url",
 ]

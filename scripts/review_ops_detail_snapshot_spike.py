@@ -47,6 +47,11 @@ from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
 from src.voc.review_ops.industrial.detail_snapshot.parse import (
     validate_coupang_product_url,
 )
+from src.voc.review_ops.industrial.detail_snapshot.tiling import (
+    DEFAULT_OVERLAP_PX,
+    DEFAULT_TILE_HEIGHT,
+    make_tiles,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -74,6 +79,23 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--timeout-ms", type=int, default=DEFAULT_TIMEOUT_MS, help="Per-load timeout (ms)."
     )
+    p.add_argument(
+        "--make-tiles",
+        action="store_true",
+        help="Tile mode: split an existing snapshot's images into vertical tiles (no network).",
+    )
+    p.add_argument(
+        "--snapshot-dir",
+        help="Existing snapshot artifact folder to tile (tile mode).",
+    )
+    p.add_argument(
+        "--tile-height", type=int, default=DEFAULT_TILE_HEIGHT,
+        help=f"Tile height in px (tile mode). Default: {DEFAULT_TILE_HEIGHT}",
+    )
+    p.add_argument(
+        "--overlap-px", type=int, default=DEFAULT_OVERLAP_PX,
+        help=f"Vertical overlap in px (tile mode). Default: {DEFAULT_OVERLAP_PX}",
+    )
     return p
 
 
@@ -95,8 +117,33 @@ def _run_local_ingest(args) -> int:
     return 0
 
 
+def _run_make_tiles(args) -> int:
+    result = make_tiles(
+        args.snapshot_dir, tile_height=args.tile_height, overlap_px=args.overlap_px
+    )
+    print("mode        : make_tiles")
+    print(f"status      : {result['status']}")
+    print(f"snapshot_dir: {result['snapshot_dir']}")
+    if result.get("reason"):
+        print(f"reason      : {result['reason']}")
+    print(f"manifest    : {result.get('manifest_path')}")
+    print(f"tile_count  : {result.get('tile_count', 0)}")
+    print("note        : tiling only — no network, no OCR, no multimodal, no OpenAI.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.make_tiles:
+        if args.url or args.image_dir:
+            print("[reject] --make-tiles 는 --url/--image-dir 와 함께 사용할 수 없습니다.",
+                  file=sys.stderr)
+            return 2
+        if not args.snapshot_dir:
+            print("[reject] --make-tiles 에는 --snapshot-dir 가 필요합니다.", file=sys.stderr)
+            return 2
+        return _run_make_tiles(args)
 
     if args.image_dir and args.url:
         print("[reject] --url 와 --image-dir 는 함께 사용할 수 없습니다.", file=sys.stderr)

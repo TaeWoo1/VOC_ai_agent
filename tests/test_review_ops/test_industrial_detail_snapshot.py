@@ -18,6 +18,7 @@ import pytest
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
 from src.voc.review_ops.industrial.detail_snapshot import parse as ps
+from src.voc.review_ops.industrial.detail_snapshot import tiling as tl
 
 FIXTURE = (
     Path(__file__).parent.parent
@@ -386,3 +387,160 @@ def test_cli_modes_and_url_capture_path_unchanged(tmp_path):
     _make_images(tmp_path / "src")
     assert mod.main(["--image-dir", str(tmp_path / "src"),
                      "--product-name", "p", "--out-dir", str(tmp_path / "out")]) == 0
+
+
+# --- S2x.3a: vertical tiling -------------------------------------------------
+
+
+def _snapshot_with_tall_image(root: Path, *, width=1000, height=4300) -> Path:
+    """Build a minimal snapshot folder (images/ + image_manifest.json)."""
+    from PIL import Image
+
+    snap = root / "local-test"
+    images = snap / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (width, height), (170, 170, 170)).save(images / "image_000.jpg", "JPEG")
+    manifest = {
+        "image_source_region": "operator_local_detail_images",
+        "images": [{"original_path": "/x/a.jpg", "order_index": 0,
+                    "local_filename": "image_000.jpg", "width": width, "height": height,
+                    "format": "JPEG", "file_size_bytes": 1, "copied": True}],
+    }
+    (snap / "image_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return snap
+
+
+def test_compute_tile_bounds_tall_image():
+    bounds = tl.compute_tile_bounds(18333, tile_height=2000, overlap_px=150)
+    assert len(bounds) == 10
+    assert bounds[0] == (0, 2000)
+    assert bounds[-1][1] == 18333          # last tile clamped to bottom
+    # monotonic starts; constant 150px overlap between consecutive tiles
+    for (a0, a1), (b0, b1) in zip(bounds, bounds[1:]):
+        assert b0 > a0
+        assert a1 - b0 == 150
+
+
+def test_compute_tile_bounds_short_image_single_tile():
+    assert tl.compute_tile_bounds(1500, tile_height=2000, overlap_px=150) == [(0, 1500)]
+    assert tl.compute_tile_bounds(2000, tile_height=2000, overlap_px=150) == [(0, 2000)]
+
+
+def test_compute_tile_bounds_rejects_bad_overlap():
+    with pytest.raises(ValueError):
+        tl.compute_tile_bounds(5000, tile_height=2000, overlap_px=2000)
+
+
+def test_make_tiles_creates_tiles_and_manifest(tmp_path):
+    snap = _snapshot_with_tall_image(tmp_path, height=4300)
+    result = tl.make_tiles(snap, tile_height=2000, overlap_px=150)
+    assert result["status"] == "ok"
+    # (4300-2000)/1850 -> 2 + 1 = 3 tiles
+    assert result["tile_count"] == 3
+
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["status"] == "ok"
+    assert manifest["tiling_params"] == {
+        "tile_height": 2000, "overlap_px": 150, "source_image_count": 1, "tile_count": 3
+    }
+    tiles = manifest["tiles"]
+    assert [t["local_filename"] for t in tiles] == [
+        "tile_000_000.jpg", "tile_000_001.jpg", "tile_000_002.jpg"
+    ]
+    assert [t["order_index"] for t in tiles] == [0, 1, 2]
+    assert all(t["source_image"] == "images/image_000.jpg" for t in tiles)
+    assert all(t["width"] == 1000 for t in tiles)
+    assert tiles[-1]["y1"] == 4300
+    for t in tiles:
+        assert (snap / "tiles" / t["local_filename"]).exists()
+        assert t["file_size_bytes"] > 0
+        assert t["height"] == t["y1"] - t["y0"]
+
+
+def test_make_tiles_short_image_single_tile(tmp_path):
+    snap = _snapshot_with_tall_image(tmp_path, height=1200)
+    result = tl.make_tiles(snap, tile_height=2000, overlap_px=150)
+    assert result["status"] == "ok"
+    assert result["tile_count"] == 1
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["tiles"][0]["y0"] == 0 and manifest["tiles"][0]["y1"] == 1200
+
+
+def test_make_tiles_replaces_stale_tiles(tmp_path):
+    snap = _snapshot_with_tall_image(tmp_path, height=4300)
+    tl.make_tiles(snap, tile_height=2000, overlap_px=150)          # 3 tiles
+    (snap / "tiles" / "ORPHAN.jpg").write_bytes(b"stale")
+    result = tl.make_tiles(snap, tile_height=4300, overlap_px=150)  # single tile now
+    assert result["tile_count"] == 1
+    assert not (snap / "tiles" / "ORPHAN.jpg").exists()
+    assert not (snap / "tiles" / "tile_000_001.jpg").exists()
+
+
+def test_make_tiles_missing_snapshot_dir(tmp_path):
+    result = tl.make_tiles(tmp_path / "nope", tile_height=2000, overlap_px=150)
+    assert result["status"] == "error"
+    assert result["tile_count"] == 0
+
+
+def test_make_tiles_missing_manifest_fail_soft(tmp_path):
+    snap = tmp_path / "empty-snap"
+    snap.mkdir()
+    result = tl.make_tiles(snap, tile_height=2000, overlap_px=150)
+    assert result["status"] == "error"
+    # a tiles_manifest record is still written when the folder exists
+    assert (snap / "tiles_manifest.json").exists()
+
+
+def test_make_tiles_no_images_fail_soft(tmp_path):
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    (snap / "image_manifest.json").write_text(json.dumps({"images": []}), encoding="utf-8")
+    result = tl.make_tiles(snap, tile_height=2000, overlap_px=150)
+    assert result["status"] == "error"
+    assert "이미지" in json.loads(
+        (snap / "tiles_manifest.json").read_text(encoding="utf-8")
+    )["reason"]
+
+
+def test_tiling_module_has_no_network_or_openai_import():
+    src = (Path(tl.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket",
+                "urllib.request", "import openai", "from openai",
+                "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_tiling():
+    root = Path(tl.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/rag.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        assert "tiling" not in (root / rel).read_text(encoding="utf-8"), rel
+
+
+def test_cli_make_tiles_modes(tmp_path):
+    import importlib.util
+
+    root = Path(cap.__file__).parents[5]
+    spec = importlib.util.spec_from_file_location(
+        "snap_spike_cli_tiles", root / "scripts" / "review_ops_detail_snapshot_spike.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # invalid combinations rejected
+    assert mod.main(["--make-tiles"]) == 2  # no --snapshot-dir
+    assert mod.main(["--make-tiles", "--snapshot-dir", str(tmp_path),
+                     "--url", "https://www.coupang.com/vp/products/1"]) == 2
+    assert mod.main(["--make-tiles", "--snapshot-dir", str(tmp_path),
+                     "--image-dir", str(tmp_path)]) == 2
+    # happy path: tile an offline snapshot
+    snap = _snapshot_with_tall_image(tmp_path, height=4300)
+    assert mod.main(["--make-tiles", "--snapshot-dir", str(snap)]) == 0
+    assert (snap / "tiles_manifest.json").exists()
