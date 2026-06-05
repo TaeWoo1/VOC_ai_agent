@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
+from src.voc.review_ops.industrial.detail_snapshot import guidance_gap as gg
 from src.voc.review_ops.industrial.detail_snapshot import guidance_postprocess as gp
 from src.voc.review_ops.industrial.detail_snapshot import guidance_schema as gs
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
@@ -928,3 +929,140 @@ def test_cli_review_guidance_modes(tmp_path):
     )
     assert mod.main(["--review-guidance-draft", "--snapshot-dir", str(snap)]) == 0
     assert (snap / "product_guidance_review.json").exists()
+
+
+# --- S2x.4a: review issue × detail guidance gap analysis ---------------------
+
+
+def _guidance_review() -> dict:
+    """Synthetic product_guidance_review mirroring the S2x.3c output shape."""
+    return {
+        "confirmed_guidance": {
+            "surface_preparation": [{"value": "부착할 위치의 물기/먼지 제거", "confidence": "high"}],
+            "fixation_guidance": [{"value": "피스/실리콘 고정", "confidence": "high"}],
+            "cutting_guidance": [{"value": "다용도 가위로 재단", "confidence": "high"}],
+            "component_guidance": [
+                {"value": "마감캡", "confidence": "high"},
+                {"value": "연결캡", "confidence": "high"},
+            ],
+            "size_spec_guidance": [],
+        },
+        "not_found_guidance": [
+            {"topic": "실크벽지", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+            {"topic": "추가 양면테이프", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+            {"topic": "거친 벽면", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+            {"topic": "습기", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+            {"topic": "깨짐 방지", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+            {"topic": "권장 절단 도구", "reason": "draft fields/verbatim에서 관련 표현을 찾지 못함"},
+        ],
+        "review_gap_ready_signals": [
+            {
+                "topic": "접착력 부족",
+                "detail_page_status": "partial_guidance",
+                "found": ["부착 전 물기/먼지 제거", "피스/실리콘 고정"],
+                "not_found": ["실크벽지 조건", "추가 양면테이프", "거친 벽면/습기 조건"],
+                "operator_note": "리뷰의 실크벽지/접착력 불만과 상세페이지 안내 사이의 gap 점검 후보",
+            },
+            {
+                "topic": "절단 시 깨짐",
+                "detail_page_status": "partial_guidance",
+                "found": ["재단 안내", "다용도 가위 등 도구 언급"],
+                "not_found": ["깨짐 방지 주의", "권장 절단 도구의 명확한 안내"],
+                "operator_note": "절단 방법 안내의 구체성 및 깨짐 방지 안내 gap 점검 후보",
+            },
+        ],
+    }
+
+
+def test_gap_adhesion_issue_partial_guidance():
+    issue = {"title": "접착력 부족", "canonical_label": "durability_adhesion_finish"}
+    result = gg.analyze_issue_guidance_gap(issue, _guidance_review())
+    assert result["detail_page_status"] == "partial_guidance"
+    assert any("물기/먼지" in f for f in result["found_guidance"])
+    assert any("피스/실리콘" in f for f in result["found_guidance"])
+    assert any("실크벽지" in n for n in result["not_found_guidance"])
+    assert any("추가 양면테이프" in n for n in result["not_found_guidance"])
+    # cautious wording, no absolute "없습니다" claim
+    assert "추출 결과 기준" in result["operator_check"]
+    assert "없습니다" not in result["operator_check"]
+    assert "찾지 못했습니다" in result["operator_check"]
+
+
+def test_gap_cutting_issue_partial_guidance():
+    issue = {"title": "절단 시 깨짐", "canonical_label": "cutting_breakage"}
+    result = gg.analyze_issue_guidance_gap(issue, _guidance_review())
+    assert result["detail_page_status"] == "partial_guidance"
+    assert any("재단 안내" in f for f in result["found_guidance"])
+    assert any("깨짐 방지" in n for n in result["not_found_guidance"])
+    assert "추출 결과 기준" in result["operator_check"]
+
+
+def test_gap_component_issue_does_not_infer_fulfillment():
+    issue = {"title": "구성품 누락", "canonical_label": "missing_components"}
+    result = gg.analyze_issue_guidance_gap(issue, _guidance_review())
+    assert result["detail_page_status"] == "guidance_present"
+    assert "마감캡" in result["found_guidance"]
+    assert "연결캡" in result["found_guidance"]
+    # never infer a fulfillment cause
+    assert "원인" not in result["operator_check"]
+    assert "출고" not in result["operator_check"]
+    assert "반드시" not in result["operator_check"]
+
+
+def test_gap_unknown_issue_no_mapped_guidance():
+    issue = {"title": "향이 별로예요", "canonical_label": "scent_dislike"}
+    result = gg.analyze_issue_guidance_gap(issue, _guidance_review())
+    assert result["detail_page_status"] == "no_mapped_guidance"
+    assert result["found_guidance"] == []
+    assert result["not_found_guidance"] == []
+
+
+def test_gap_missing_guidance_review():
+    for empty in (None, {}):
+        result = gg.analyze_issue_guidance_gap({"title": "접착력 부족"}, empty)
+        assert result["detail_page_status"] == "no_guidance_review"
+        assert result["found_guidance"] == []
+
+
+def test_gap_output_keeps_basis_and_review_flag():
+    for issue in (
+        {"title": "접착력 부족"},
+        {"title": "구성품 누락"},
+        {"title": "알 수 없는 이슈"},
+    ):
+        result = gg.analyze_issue_guidance_gap(issue, _guidance_review())
+        assert result["needs_operator_review"] is True
+        assert result["basis"] == "consumer_visible_detail_image_draft"
+        assert result["confidence"] == "review_needed"
+        assert "추출 draft에서 찾지 못했다" in result["caution"]
+
+
+def test_gap_adhesion_fallback_without_precomputed_signal():
+    # review with NO review_gap_ready_signals → fallback from confirmed/not_found
+    review = _guidance_review()
+    review["review_gap_ready_signals"] = []
+    result = gg.analyze_issue_guidance_gap({"title": "접착력 부족"}, review)
+    assert result["detail_page_status"] == "partial_guidance"
+    assert "부착 전 물기/먼지 제거" in result["found_guidance"]
+    assert "실크벽지 조건" in result["not_found_guidance"]
+
+
+def test_gap_module_has_no_network_or_openai_import():
+    src = (Path(gg.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket", "urllib.request",
+                "import openai", "from openai", "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_guidance_gap():
+    root = Path(gg.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/rag.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        assert "guidance_gap" not in (root / rel).read_text(encoding="utf-8"), rel
