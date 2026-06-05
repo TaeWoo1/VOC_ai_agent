@@ -47,6 +47,9 @@ from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
 from src.voc.review_ops.industrial.detail_snapshot.parse import (
     validate_coupang_product_url,
 )
+from src.voc.review_ops.industrial.detail_snapshot.multimodal_extract import (
+    extract_guidance,
+)
 from src.voc.review_ops.industrial.detail_snapshot.tiling import (
     DEFAULT_OVERLAP_PX,
     DEFAULT_TILE_HEIGHT,
@@ -96,6 +99,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--overlap-px", type=int, default=DEFAULT_OVERLAP_PX,
         help=f"Vertical overlap in px (tile mode). Default: {DEFAULT_OVERLAP_PX}",
     )
+    p.add_argument(
+        "--extract-guidance",
+        action="store_true",
+        help="Guidance mode: multimodal extraction from an existing snapshot's tiles.",
+    )
+    p.add_argument(
+        "--enable-multimodal",
+        action="store_true",
+        help="Explicit opt-in to send tile images to the vision model (required for extraction).",
+    )
     return p
 
 
@@ -132,8 +145,37 @@ def _run_make_tiles(args) -> int:
     return 0
 
 
+def _run_extract_guidance(args) -> int:
+    result = extract_guidance(args.snapshot_dir, enable_multimodal=True)
+    print("mode        : extract_guidance")
+    print(f"status      : {result['status']}")
+    print(f"snapshot_dir: {result['snapshot_dir']}")
+    if result.get("reason"):
+        print(f"reason      : {result['reason']}")
+    if result.get("draft_path"):
+        print(f"draft       : {result['draft_path']}")
+        print(f"tiles       : {result.get('success_count', 0)}/{result.get('tile_count', 0)}")
+        print(f"confidence  : {result.get('confidence', '')}")
+    print("note        : multimodal DRAFT — needs operator review; not auto-applied anywhere.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.extract_guidance:
+        if args.url or args.image_dir or args.make_tiles:
+            print("[reject] --extract-guidance 는 다른 모드와 함께 사용할 수 없습니다.",
+                  file=sys.stderr)
+            return 2
+        if not args.snapshot_dir:
+            print("[reject] --extract-guidance 에는 --snapshot-dir 가 필요합니다.", file=sys.stderr)
+            return 2
+        if not args.enable_multimodal:
+            print("[reject] --extract-guidance 에는 --enable-multimodal 가 필요합니다.",
+                  file=sys.stderr)
+            return 2
+        return _run_extract_guidance(args)
 
     if args.make_tiles:
         if args.url or args.image_dir:

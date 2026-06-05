@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
+from src.voc.review_ops.industrial.detail_snapshot import guidance_schema as gs
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
+from src.voc.review_ops.industrial.detail_snapshot import multimodal_extract as me
 from src.voc.review_ops.industrial.detail_snapshot import parse as ps
 from src.voc.review_ops.industrial.detail_snapshot import tiling as tl
 
@@ -544,3 +546,183 @@ def test_cli_make_tiles_modes(tmp_path):
     snap = _snapshot_with_tall_image(tmp_path, height=4300)
     assert mod.main(["--make-tiles", "--snapshot-dir", str(snap)]) == 0
     assert (snap / "tiles_manifest.json").exists()
+
+
+# --- S2x.3b: multimodal guidance extraction (mock client only) ---------------
+
+
+def _snapshot_with_tiles_manifest(root: Path, tile_names: list[str]) -> Path:
+    snap = root / "local-extract"
+    snap.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "status": "ok",
+        "tiling_params": {"tile_count": len(tile_names)},
+        "tiles": [{"local_filename": n, "order_index": i}
+                  for i, n in enumerate(tile_names)],
+    }
+    (snap / "tiles_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return snap
+
+
+def test_extract_guidance_merges_two_tiles_and_dedups(tmp_path):
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["tile_000_000.jpg", "tile_000_001.jpg"])
+
+    def mock_extractor(path, *, model):
+        # both tiles report the SAME usage step (overlap duplicate); tile 1 adds a component
+        if path.name == "tile_000_000.jpg":
+            return {
+                "product_identity": {
+                    "product_name": {"value": "선바로 전선 몰딩", "verbatim": "선바로", "confidence": "high"},
+                    "package_composition": [],
+                },
+                "usage_installation": [
+                    {"value": "부착 전 먼지 제거", "verbatim": "먼지 제거", "confidence": "medium"}
+                ],
+                "surface_adhesion": [{"value": "실크벽지 주의", "confidence": "low"}],
+            }
+        return {
+            "usage_installation": [
+                {"value": "부착 전 먼지 제거", "confidence": "high"}  # dup, higher conf
+            ],
+            "included_components": [{"value": "마감캡", "confidence": "medium"}],
+        }
+
+    result = me.extract_guidance(
+        snap, enable_multimodal=True, model="mock-model", tile_extractor=mock_extractor
+    )
+    assert result["status"] == "ok"
+    draft = json.loads(Path(result["draft_path"]).read_text(encoding="utf-8"))
+
+    usage = draft["fields"]["usage_installation"]
+    assert len(usage) == 1                       # deduped across overlapping tiles
+    assert sorted(usage[0]["source_tiles"]) == ["tile_000_000.jpg", "tile_000_001.jpg"]
+    assert usage[0]["confidence"] == "high"      # max of medium/high
+    assert draft["fields"]["product_identity"]["product_name"]["value"] == "선바로 전선 몰딩"
+    assert draft["fields"]["included_components"][0]["value"] == "마감캡"
+    assert draft["model"] == "mock-model"
+    assert draft["generated_from_tiles"] == ["tile_000_000.jpg", "tile_000_001.jpg"]
+
+
+def test_extract_guidance_draft_flags(tmp_path):
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["tile_000_000.jpg"])
+    result = me.extract_guidance(
+        snap, enable_multimodal=True, tile_extractor=lambda p, *, model: {
+            "size_spec": [{"value": "1호 / 1m", "confidence": "high"}]
+        }
+    )
+    draft = json.loads(Path(result["draft_path"]).read_text(encoding="utf-8"))
+    assert draft["extraction_mode"] == "multimodal_draft"
+    assert draft["needs_operator_review"] is True
+    assert draft["visibility"] == "consumer_visible"
+    assert draft["source_type"] == "local_detail_images"
+    assert "운영자 확인" in draft["extraction_notes"]
+
+
+def test_extract_guidance_disabled_is_skipped(tmp_path):
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["t.jpg"])
+    result = me.extract_guidance(snap, enable_multimodal=False)
+    assert result["status"] == "skipped"
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_guidance_missing_key_fails_soft(tmp_path, monkeypatch):
+    # no injected extractor + no key → skip, no draft, no OpenAI
+    monkeypatch.setattr(me, "resolve_api_key", lambda: None)
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["t.jpg"])
+    result = me.extract_guidance(snap, enable_multimodal=True)
+    assert result["status"] == "skipped_no_key"
+    assert result["draft_path"] is None
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_guidance_missing_tiles_manifest_asks_to_tile(tmp_path):
+    snap = tmp_path / "no-tiles"
+    snap.mkdir()
+    result = me.extract_guidance(
+        snap, enable_multimodal=True, tile_extractor=lambda p, *, model: {}
+    )
+    assert result["status"] == "error"
+    assert "make-tiles" in result["reason"]
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_guidance_malformed_tile_recorded_partial(tmp_path):
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["good.jpg", "bad.jpg"])
+
+    def extractor(path, *, model):
+        if path.name == "bad.jpg":
+            raise ValueError("not valid json")
+        return {"warnings_faq": [{"value": "설치 전 표면 확인", "confidence": "medium"}]}
+
+    result = me.extract_guidance(
+        snap, enable_multimodal=True, tile_extractor=extractor
+    )
+    assert result["status"] == "partial"
+    draft = json.loads(Path(result["draft_path"]).read_text(encoding="utf-8"))
+    assert any(e["tile"] == "bad.jpg" for e in draft["errors"])
+    assert draft["fields"]["warnings_faq"][0]["value"] == "설치 전 표면 확인"
+
+
+def test_extract_guidance_all_tiles_fail_no_draft(tmp_path):
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["a.jpg", "b.jpg"])
+
+    def boom(path, *, model):
+        raise RuntimeError("fail")
+
+    result = me.extract_guidance(snap, enable_multimodal=True, tile_extractor=boom)
+    assert result["status"] == "error"
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_overall_confidence_is_conservative():
+    fields = gs.empty_fields()
+    fields["usage_installation"] = [
+        {"value": "a", "confidence": "high"}, {"value": "b", "confidence": "low"}
+    ]
+    assert gs.overall_confidence(fields) == "low"  # min, not max
+
+
+def test_multimodal_module_has_no_toplevel_openai_or_network_import():
+    src = (Path(me.__file__)).read_text(encoding="utf-8")
+    # OpenAI must be imported lazily (inside a function), never at module top level
+    assert "\nfrom openai" not in src
+    assert "\nimport openai" not in src
+    assert not src.startswith(("from openai", "import openai"))
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket", "urllib.request",
+                "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_multimodal_extract():
+    root = Path(me.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        text = (root / rel).read_text(encoding="utf-8")
+        assert "multimodal_extract" not in text, rel
+        assert "guidance_schema" not in text, rel
+
+
+def test_cli_extract_guidance_modes(tmp_path):
+    import importlib.util
+
+    root = Path(cap.__file__).parents[5]
+    spec = importlib.util.spec_from_file_location(
+        "snap_spike_cli_extract", root / "scripts" / "review_ops_detail_snapshot_spike.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    snap = _snapshot_with_tiles_manifest(tmp_path, ["t.jpg"])
+    # requires --snapshot-dir
+    assert mod.main(["--extract-guidance", "--enable-multimodal"]) == 2
+    # requires --enable-multimodal (the explicit opt-in)
+    assert mod.main(["--extract-guidance", "--snapshot-dir", str(snap)]) == 2
+    # cannot combine with other modes
+    assert mod.main(["--extract-guidance", "--enable-multimodal",
+                     "--snapshot-dir", str(snap), "--make-tiles"]) == 2
