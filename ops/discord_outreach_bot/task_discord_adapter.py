@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import agent_discord_adapter as _agent_discord
+import status_discord_adapter as _status_discord
 import agent_report_formatting as _arf
 import claude_orchestrator as _planner
 import intent_planner as _intent
@@ -180,6 +181,16 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
         approval_log_path=approvals_path, generated_prompts_dir=generated_prompts_dir)
     if agent_out is not None:
         return agent_out
+
+    # 0c. D5-2 read-only operator status. Anchored full-message phrases only
+    #    (상태 / 상태 알려줘 / 오늘 작업 보여줘 / operator status / status, plus an
+    #    optional smoke modifier). Returns a card string to display, or None so
+    #    every flow below runs unchanged. It only reads the existing D5-1 indexer:
+    #    no writes, no mutation, no collect/render/send/publish, and it never
+    #    claims 진행해/취소/final-approval phrases (those are owned at 0a/0b above).
+    status_reply = _status_discord.try_handle_status_message(text)
+    if status_reply is not None:
+        return {"intent": "operator_status", "handled": True, "reply": status_reply}
 
     # 1. question-like: M6-A planner (if eligible) else read-only answer. Zero writes.
     if _conv.is_question_like(text):
