@@ -47,6 +47,9 @@ from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
 from src.voc.review_ops.industrial.detail_snapshot.parse import (
     validate_coupang_product_url,
 )
+from src.voc.review_ops.industrial.detail_snapshot.guidance_postprocess import (
+    review_guidance_draft,
+)
 from src.voc.review_ops.industrial.detail_snapshot.multimodal_extract import (
     extract_guidance,
 )
@@ -109,6 +112,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Explicit opt-in to send tile images to the vision model (required for extraction).",
     )
+    p.add_argument(
+        "--review-guidance-draft",
+        action="store_true",
+        help="Review mode: deterministic post-process of an existing guidance draft (no network).",
+    )
     return p
 
 
@@ -160,8 +168,35 @@ def _run_extract_guidance(args) -> int:
     return 0
 
 
+def _run_review_guidance(args) -> int:
+    result = review_guidance_draft(args.snapshot_dir)
+    print("mode        : review_guidance_draft")
+    print(f"status      : {result['status']}")
+    print(f"snapshot_dir: {result['snapshot_dir']}")
+    if result.get("reason"):
+        print(f"reason      : {result['reason']}")
+    if result.get("review_path"):
+        print(f"review      : {result['review_path']}")
+        print(f"not_found   : {result.get('not_found_count', 0)}")
+        print(f"gap_signals : {result.get('gap_signal_count', 0)}")
+        print(f"flags       : {result.get('quality_flag_count', 0)}")
+    print("note        : deterministic post-process — review/check candidates; no OpenAI, no network.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.review_guidance_draft:
+        if args.url or args.image_dir or args.make_tiles or args.extract_guidance:
+            print("[reject] --review-guidance-draft 는 다른 모드와 함께 사용할 수 없습니다.",
+                  file=sys.stderr)
+            return 2
+        if not args.snapshot_dir:
+            print("[reject] --review-guidance-draft 에는 --snapshot-dir 가 필요합니다.",
+                  file=sys.stderr)
+            return 2
+        return _run_review_guidance(args)
 
     if args.extract_guidance:
         if args.url or args.image_dir or args.make_tiles:

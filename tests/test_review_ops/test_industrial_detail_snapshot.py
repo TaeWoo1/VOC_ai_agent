@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
+from src.voc.review_ops.industrial.detail_snapshot import guidance_postprocess as gp
 from src.voc.review_ops.industrial.detail_snapshot import guidance_schema as gs
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
 from src.voc.review_ops.industrial.detail_snapshot import multimodal_extract as me
@@ -726,3 +727,204 @@ def test_cli_extract_guidance_modes(tmp_path):
     # cannot combine with other modes
     assert mod.main(["--extract-guidance", "--enable-multimodal",
                      "--snapshot-dir", str(snap), "--make-tiles"]) == 2
+
+
+# --- S2x.3c: deterministic guidance-draft post-process -----------------------
+
+
+def _draft_with_fields(**field_overrides) -> dict:
+    """Synthetic draft dict: empty fields with the given list-field overrides."""
+    fields = gs.empty_fields()
+    fields.update(field_overrides)
+    return {
+        "source_type": "local_detail_images",
+        "visibility": "consumer_visible",
+        "extraction_mode": "multimodal_draft",
+        "needs_operator_review": True,
+        "confidence": "high",
+        "model": "mock",
+        "fields": fields,
+    }
+
+
+def test_postprocess_routes_usage_items_into_buckets():
+    draft = _draft_with_fields(
+        usage_installation=[
+            {"value": "부착 전 먼지 제거", "verbatim": "물기나 먼지를 닦아내", "confidence": "high",
+             "source_tiles": ["tile_000_005.jpg"]},
+            {"value": "피스로 고정", "verbatim": "피스나 실리콘을 이용", "confidence": "high",
+             "source_tiles": ["tile_000_006.jpg"]},
+            {"value": "가위로 재단", "verbatim": "다용도 가위로 재단", "confidence": "high",
+             "source_tiles": ["tile_000_005.jpg"]},
+        ]
+    )
+    cg = gp.build_review(draft)["confirmed_guidance"]
+    assert any("먼지" in i["value"] for i in cg["surface_preparation"])
+    assert any("피스" in i["value"] for i in cg["fixation_guidance"])
+    assert any("재단" in i["value"] for i in cg["cutting_guidance"])
+    # audit fields preserved on routed items
+    routed = cg["surface_preparation"][0]
+    assert routed["source_tiles"] == ["tile_000_005.jpg"]
+    assert routed["confidence"] == "high"
+
+
+def test_postprocess_routes_components_and_size():
+    draft = _draft_with_fields(
+        included_components=[
+            {"value": "마감캡", "confidence": "high"},
+            {"value": "연결캡", "confidence": "high"},
+            {"value": "곡선 엘보캡", "confidence": "high"},
+        ],
+        size_spec=[
+            {"value": "모든 제품의 길이는 1M", "confidence": "high"},
+            {"value": "색상 화이트, 그레이, 블랙, 우드", "confidence": "high"},
+        ],
+    )
+    cg = gp.build_review(draft)["confirmed_guidance"]
+    comp_vals = [i["value"] for i in cg["component_guidance"]]
+    assert "마감캡" in comp_vals and "연결캡" in comp_vals and "곡선 엘보캡" in comp_vals
+    size_vals = [i["value"] for i in cg["size_spec_guidance"]]
+    assert any("1M" in v for v in size_vals)
+    assert any("색상" in v for v in size_vals)
+
+
+def test_postprocess_not_found_when_topics_absent():
+    draft = _draft_with_fields(
+        usage_installation=[{"value": "부착 전 먼지 제거", "confidence": "high"}]
+    )
+    not_found = gp.build_review(draft)["not_found_guidance"]
+    topics = {n["topic"] for n in not_found}
+    assert "실크벽지" in topics
+    assert "깨짐 방지" in topics
+    assert "추가 양면테이프" in topics
+    for n in not_found:
+        assert "찾지 못함" in n["reason"]
+
+
+def test_postprocess_quality_flags_detect_misread_conflict_and_confidence():
+    draft = _draft_with_fields(
+        usage_installation=[
+            {"value": "다용도 가위나 식품 등의 도구를 이용하여 재단", "confidence": "high"},
+        ],
+        size_spec=[
+            {"value": "사이즈는 외경 기준", "confidence": "high"},
+            {"value": "사이즈는 외곽 기준", "confidence": "high"},
+        ],
+    )
+    flags = gp.build_review(draft)["quality_flags"]
+    types = {f["type"] for f in flags}
+    assert "possible_vision_misread" in types
+    assert "near_duplicate_or_conflict" in types
+    assert "confidence_review" in types
+    misread = [f for f in flags if f["type"] == "possible_vision_misread"][0]
+    assert "식품" in misread["text"]
+    conflict = [f for f in flags if f["type"] == "near_duplicate_or_conflict"][0]
+    assert "외경" in conflict["text"] and "외곽" in conflict["text"]
+
+
+def test_postprocess_gap_signal_partial_status():
+    draft = _draft_with_fields(
+        usage_installation=[
+            {"value": "부착 전 먼지 제거", "confidence": "high"},
+            {"value": "피스로 고정", "confidence": "high"},
+            {"value": "가위로 재단", "confidence": "high"},
+        ]
+    )
+    signals = {s["topic"]: s for s in gp.build_review(draft)["review_gap_ready_signals"]}
+    adhesion = signals["접착력 부족"]
+    assert adhesion["detail_page_status"] == "partial_guidance"
+    assert "부착 전 물기/먼지 제거" in adhesion["found"]
+    assert "실크벽지 조건" in adhesion["not_found"]
+    cutting = signals["절단 시 깨짐"]
+    assert "재단 안내" in cutting["found"]
+    assert "깨짐 방지 주의" in cutting["not_found"]
+
+
+def test_postprocess_keeps_review_invariants():
+    review = gp.build_review(_draft_with_fields())
+    assert review["needs_operator_review"] is True
+    assert review["consumer_visible_only"] is True
+    assert review["postprocess_mode"] == "deterministic_review"
+    assert review["source_draft"] == "product_guidance_draft.json"
+    assert set(review["confirmed_guidance"]) == set(gp.CONFIRMED_BUCKETS)
+
+
+def test_review_guidance_writes_review_artifact(tmp_path):
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    draft = _draft_with_fields(
+        included_components=[{"value": "마감캡", "confidence": "high"}]
+    )
+    (snap / "product_guidance_draft.json").write_text(
+        json.dumps(draft, ensure_ascii=False), encoding="utf-8"
+    )
+    result = gp.review_guidance_draft(snap)
+    assert result["status"] == "ok"
+    review = json.loads((snap / "product_guidance_review.json").read_text(encoding="utf-8"))
+    assert review["source_draft"] == "product_guidance_draft.json"
+    assert review["confirmed_guidance"]["component_guidance"][0]["value"] == "마감캡"
+
+
+def test_review_guidance_missing_draft_fail_soft(tmp_path):
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    result = gp.review_guidance_draft(snap)
+    assert result["status"] == "error"
+    assert result["review_path"] is None
+    assert "product_guidance_draft.json" in result["reason"]
+    assert not (snap / "product_guidance_review.json").exists()
+
+
+def test_review_guidance_missing_dir_fail_soft(tmp_path):
+    result = gp.review_guidance_draft(tmp_path / "nope")
+    assert result["status"] == "error"
+    assert result["review_path"] is None
+
+
+def test_postprocess_module_has_no_network_or_openai_import():
+    src = (Path(gp.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket", "urllib.request",
+                "import openai", "from openai", "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_postprocess():
+    root = Path(gp.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/rag.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        assert "guidance_postprocess" not in (root / rel).read_text(encoding="utf-8"), rel
+
+
+def test_cli_review_guidance_modes(tmp_path):
+    import importlib.util
+
+    root = Path(cap.__file__).parents[5]
+    spec = importlib.util.spec_from_file_location(
+        "snap_spike_cli_review", root / "scripts" / "review_ops_detail_snapshot_spike.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # requires --snapshot-dir
+    assert mod.main(["--review-guidance-draft"]) == 2
+    # cannot combine with other modes
+    assert mod.main(["--review-guidance-draft", "--snapshot-dir", str(tmp_path),
+                     "--make-tiles"]) == 2
+    assert mod.main(["--review-guidance-draft", "--snapshot-dir", str(tmp_path),
+                     "--extract-guidance", "--enable-multimodal"]) == 2
+    # happy path: post-process an offline draft (exit 0 even via fail-soft)
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    draft = _draft_with_fields(included_components=[{"value": "마감캡", "confidence": "high"}])
+    (snap / "product_guidance_draft.json").write_text(
+        json.dumps(draft, ensure_ascii=False), encoding="utf-8"
+    )
+    assert mod.main(["--review-guidance-draft", "--snapshot-dir", str(snap)]) == 0
+    assert (snap / "product_guidance_review.json").exists()
