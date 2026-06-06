@@ -17,6 +17,7 @@ import pytest
 
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
 from src.voc.review_ops.industrial.detail_snapshot import guidance_gap as gg
+from src.voc.review_ops.industrial.detail_snapshot import guidance_gap_apply as gga
 from src.voc.review_ops.industrial.detail_snapshot import guidance_postprocess as gp
 from src.voc.review_ops.industrial.detail_snapshot import guidance_schema as gs
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
@@ -1066,3 +1067,122 @@ def test_protected_surfaces_do_not_reference_guidance_gap():
         "src/voc/review_ops/industrial/taxonomy.py",
     ):
         assert "guidance_gap" not in (root / rel).read_text(encoding="utf-8"), rel
+
+
+# --- S2x.4b: apply gap helper over a list of issues --------------------------
+
+
+def _issue_list() -> list[dict]:
+    return [
+        {
+            "issue_title": "접착력 부족",
+            "canonical_label": "durability_adhesion_finish",
+            "summary": "실크벽지에서 잘 떨어진다는 의견",
+            "recommended_action": "부착면 조건 안내 점검 후보",
+            "review_count": 12,
+            "severity": "high",
+        },
+        {
+            "title": "절단 시 깨짐",
+            "canonical_label": "cutting_breakage",
+            "recommended_action": "절단 방법 안내 점검 후보",
+            "review_count": 5,
+        },
+    ]
+
+
+def test_apply_gap_over_issue_list_preserves_order():
+    results = gga.analyze_issue_list_guidance_gaps(_issue_list(), _guidance_review())
+    assert [r["issue_title"] for r in results] == ["접착력 부족", "절단 시 깨짐"]
+
+
+def test_apply_gap_adhesion_result():
+    results = gga.analyze_issue_list_guidance_gaps(_issue_list(), _guidance_review())
+    adhesion = results[0]
+    assert adhesion["detail_page_status"] == "partial_guidance"
+    assert any("부착 전 물기/먼지 제거" in f for f in adhesion["found_guidance"])
+    assert any("실크벽지 조건" in n for n in adhesion["not_found_guidance"])
+
+
+def test_apply_gap_cutting_result():
+    results = gga.analyze_issue_list_guidance_gaps(_issue_list(), _guidance_review())
+    cutting = results[1]
+    assert cutting["detail_page_status"] == "partial_guidance"
+    assert any("재단 안내" in f for f in cutting["found_guidance"])
+    assert any("깨짐 방지" in n for n in cutting["not_found_guidance"])
+
+
+def test_apply_gap_preserves_issue_metadata():
+    results = gga.analyze_issue_list_guidance_gaps(_issue_list(), _guidance_review())
+    assert results[0]["review_count"] == 12
+    assert results[0]["severity"] == "high"
+    assert results[0]["recommended_action"] == "부착면 조건 안내 점검 후보"
+    assert results[1]["review_count"] == 5
+    # cutting item had no severity → not fabricated
+    assert "severity" not in results[1]
+
+
+def test_apply_gap_missing_guidance_review_per_issue():
+    for empty in (None, {}):
+        results = gga.analyze_issue_list_guidance_gaps(_issue_list(), empty)
+        assert len(results) == 2
+        assert all(r["detail_page_status"] == "no_guidance_review" for r in results)
+        # passthrough still attached even when no review
+        assert results[0]["review_count"] == 12
+
+
+def test_apply_gap_empty_issue_list():
+    assert gga.analyze_issue_list_guidance_gaps([], _guidance_review()) == []
+    assert gga.analyze_issue_list_guidance_gaps(None, _guidance_review()) == []
+
+
+def test_apply_gap_does_not_mutate_inputs():
+    issues = _issue_list()
+    review = _guidance_review()
+    import copy
+
+    issues_before = copy.deepcopy(issues)
+    review_before = copy.deepcopy(review)
+    gga.analyze_issue_list_guidance_gaps(issues, review)
+    assert issues == issues_before
+    assert review == review_before
+
+
+def test_load_guidance_review_present_missing_and_invalid(tmp_path):
+    # missing → None
+    assert gga.load_guidance_review(tmp_path / "nope") is None
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    assert gga.load_guidance_review(snap) is None
+    # present → dict
+    review = _guidance_review()
+    (snap / "product_guidance_review.json").write_text(
+        json.dumps(review, ensure_ascii=False), encoding="utf-8"
+    )
+    loaded = gga.load_guidance_review(snap)
+    assert isinstance(loaded, dict)
+    assert "review_gap_ready_signals" in loaded
+    # invalid JSON → None (fail-soft)
+    (snap / "product_guidance_review.json").write_text("{not json", encoding="utf-8")
+    assert gga.load_guidance_review(snap) is None
+
+
+def test_apply_gap_module_has_no_network_or_openai_import():
+    src = (Path(gga.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket", "urllib.request",
+                "import openai", "from openai", "import playwright", "from playwright"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_guidance_gap_apply():
+    root = Path(gga.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/rag.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        assert "guidance_gap_apply" not in (root / rel).read_text(encoding="utf-8"), rel
