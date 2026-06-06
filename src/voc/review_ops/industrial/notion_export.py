@@ -439,16 +439,71 @@ def _section_needs_reply_compact(reviews: list) -> list[dict]:
 DETAIL_REVIEW_ONLY_CAUTION = "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다."
 DETAIL_CHECK_SUFFIX = "상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다."
 
+# S2x.5a — when the result dict carries optional detail-guidance gap results
+# (built upstream from the consumer-visible detail-image extraction draft), the
+# section renders them instead of the review-only fallback. Same honest framing,
+# one level stronger basis: findings are "추출 결과 기준" — never a claim about
+# what the original detail page does or does not contain.
+DETAIL_GAP_CAUTION = (
+    "상세페이지 이미지 추출 결과를 함께 참고한 점검 후보입니다. "
+    "추출 결과 기준이며 운영자 확인이 필요합니다."
+)
+DETAIL_GAP_FOUND_PREFIX = "확인된 안내"
+DETAIL_GAP_NOT_FOUND_PREFIX = "추출 결과에서 찾지 못한 안내"
+# Block budget: the full page export at section caps sits ~94 top-level blocks,
+# and Notion rejects create requests over 100 — so this section gets at most
+# 3 gap items × 3 blocks (+ heading + caution = 11). Three covers the current
+# mapped issues (접착력 / 절단 / 구성품); the caller curates beyond that.
+MAX_DETAIL_GAP_ITEMS = 3
+
+
+def _detail_gap_item_blocks(gap: dict) -> list[dict]:
+    """Blocks for one detail-guidance gap result (3 max, to respect the Notion
+    block budget shared with the other sections): issue title as a heading, one
+    bullet joining the 확인된 안내 / 추출 결과에서 찾지 못한 안내 segments (each
+    omitted when empty), then the gap helper's operator_check sentence. All
+    operator-facing text passes through the sanitizer as a defensive layer —
+    the gap helper's wording is already cautious by contract ("추출 결과 기준",
+    "점검 후보")."""
+    blocks = [_heading_3(sanitize_issue_text(gap.get("issue_title") or "(제목 없음)"))]
+    found = [sanitize_issue_text(g) for g in (gap.get("found_guidance") or []) if g]
+    not_found = [sanitize_issue_text(g) for g in (gap.get("not_found_guidance") or []) if g]
+    segments = []
+    if found:
+        segments.append(f"{DETAIL_GAP_FOUND_PREFIX}: {', '.join(found)}")
+    if not_found:
+        segments.append(f"{DETAIL_GAP_NOT_FOUND_PREFIX}: {', '.join(not_found)}")
+    if segments:
+        blocks.append(_bullet(" / ".join(segments)))
+    check = sanitize_issue_text(gap.get("operator_check") or "")
+    if check:
+        blocks.append(_paragraph(check))
+    return blocks
+
 
 def _section_detail_candidates(result: dict) -> list[dict]:
-    """상세페이지/안내 점검 후보 — derived from repeated-issue recommended actions.
+    """상세페이지/안내 점검 후보 — gap-based when detail_guidance_gaps is present,
+    otherwise derived from repeated-issue recommended actions (review-only).
 
-    Action-first and deduplicated by (issue title, action). Honest-framed: we
-    have no detail-page snapshot, so each line asks the operator to first check
-    whether the guidance is already present and only then consider adding it —
-    never a directive, never a claim that the page lacks it.
+    Gap path (S2x.5a): renders ``result["detail_guidance_gaps"]`` items under a
+    caution stating the findings are extraction-based and need operator review.
+    Used by both the compact DB body and the full page export (this is the one
+    shared section builder), so the two surfaces stay consistent.
+
+    Review-only fallback: action-first and deduplicated by (issue title,
+    action). Honest-framed: we have no detail-page snapshot, so each line asks
+    the operator to first check whether the guidance is already present and
+    only then consider adding it — never a directive, never a claim that the
+    page lacks it.
     """
     blocks = [_heading_2("상세페이지/안내 점검 후보")]
+    gaps = result.get("detail_guidance_gaps") or []
+    if gaps:
+        blocks.append(_paragraph(DETAIL_GAP_CAUTION))
+        for gap in gaps[:MAX_DETAIL_GAP_ITEMS]:
+            if isinstance(gap, dict):
+                blocks.extend(_detail_gap_item_blocks(gap))
+        return blocks
     issues = result.get("issue_items") or []
     candidates: list[str] = []
     seen: set[str] = set()

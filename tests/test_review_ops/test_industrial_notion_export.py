@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from src.voc.review_ops.industrial import notion_export as nx
@@ -422,6 +423,134 @@ def test_detail_section_no_banned_wording():
         assert bad not in text, bad
     assert "검토을" not in text
     assert "검토이" not in text
+
+
+# --- 상세페이지/안내 점검 후보 (S2x.5a, optional detail-guidance gap results) --
+
+# The gap path must stay extraction-based ("추출 결과 기준") and never assert
+# what the original detail page contains, nor use directive/causal wording.
+_GAP_BANNED = ["상세페이지에 없습니다", "반드시", "원인", "개선해야"]
+
+
+def _gap_item(title="접착력 부족", *, found=None, not_found=None, check=None):
+    """One detail_guidance_gaps entry in the S2x.4a/4b output shape."""
+    if found is None:
+        found = ["부착 전 물기/먼지 제거", "피스/실리콘 고정"]
+    if not_found is None:
+        not_found = ["실크벽지 조건", "추가 양면테이프"]
+    return {
+        "issue_title": title,
+        "detail_page_status": "partial_guidance",
+        "found_guidance": found,
+        "not_found_guidance": not_found,
+        "operator_check": check or (
+            "상세페이지 추출 결과 기준으로 부착 전 물기/먼지 제거, 피스/실리콘 고정 안내는 "
+            "확인되지만, 실크벽지 조건, 추가 양면테이프 안내는 찾지 못했습니다. "
+            "안내 위치/표현을 점검할 후보입니다."
+        ),
+        "needs_operator_review": True,
+        "basis": "consumer_visible_detail_image_draft",
+        "caution": (
+            "not_found는 원본 상세페이지에 없다는 단정이 아니라, "
+            "추출 draft에서 찾지 못했다는 의미입니다."
+        ),
+    }
+
+
+def _gap_result():
+    result = _full_result()
+    result["detail_guidance_gaps"] = [_gap_item()]
+    return result
+
+
+def _section_text(section):
+    return "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+
+
+def test_detail_gap_section_renders_gap_items_compact_and_full():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        assert "상세페이지 이미지 추출 결과" in text
+        assert "추출 결과 기준이며 운영자 확인이 필요합니다." in text
+        assert "접착력 부족" in text
+        assert "확인된 안내: 부착 전 물기/먼지 제거, 피스/실리콘 고정" in text
+        assert "추출 결과에서 찾지 못한 안내: 실크벽지 조건, 추가 양면테이프" in text
+        # operator_check carried verbatim
+        assert "안내 위치/표현을 점검할 후보입니다." in text
+        assert "운영자 확인" in text
+
+
+def test_detail_gap_section_drops_review_only_caution():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        assert "현재는 상세페이지 스냅샷이 없어" not in text
+        assert "없다면 보강할 후보" not in text  # review-only suffix replaced
+
+
+def test_detail_gap_section_no_banned_wording():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        for bad in _GAP_BANNED:
+            assert bad not in text, bad
+        for bad in _DETAIL_PRESUMPTION:
+            assert bad not in text, bad
+
+
+def test_detail_gap_empty_lists_omit_their_bullets():
+    result = _full_result()
+    result["detail_guidance_gaps"] = [
+        _gap_item("구성품 누락", found=["구성품 안내 11건"], not_found=[],
+                  check="상세페이지 추출 결과 기준으로 구성품 안내가 확인됩니다. 운영자 확인 후보입니다."),
+    ]
+    text = _section_text(_detail_section(result, compact=True))
+    assert "확인된 안내: 구성품 안내 11건" in text
+    assert "추출 결과에서 찾지 못한 안내" not in text
+
+
+def test_detail_gap_missing_or_empty_falls_back_to_review_only():
+    # missing key entirely, and explicitly-empty list: both keep the old behavior
+    for result in (_full_result(), {**_full_result(), "detail_guidance_gaps": []}):
+        text = _section_text(_detail_section(result, compact=True))
+        assert "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다." in text
+        assert "상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다." in text
+        assert "상세페이지 이미지 추출 결과" not in text
+
+
+def test_detail_gap_db_properties_unchanged():
+    # the gap payload affects the body only — DB property mapping is identical
+    now = datetime(2026, 1, 21, 10, 0, 0)
+    assert build_database_properties(_gap_result(), now) == build_database_properties(
+        _full_result(), now
+    )
+
+
+def test_detail_gap_rendering_adds_no_module_imports():
+    # rendering support only: the result key may appear, but notion_export must
+    # not import the gap helpers, the multimodal extractor, or network clients
+    src = Path(nx.__file__).read_text(encoding="utf-8")
+    assert "detail_snapshot" not in src  # covers guidance_gap(_apply) / multimodal_extract
+    for banned in (
+        "import openai", "from openai",
+        "import requests", "from requests",
+        "import httpx", "from httpx",
+        "import playwright", "from playwright",
+    ):
+        assert banned not in src.lower(), banned
+
+
+def test_detail_gap_block_count_under_100_at_caps():
+    # max everything plus a full slate of gap items: both bodies stay under 100
+    result = _gap_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [_review(f"답글 {i}", tags=("needs_reply",)) for i in range(8)]
+    result["detail_guidance_gaps"] = [_gap_item(f"이슈 {i}") for i in range(6)]
+    assert len(build_notion_blocks(result)) < 100
+    assert len(build_notion_blocks(result, compact=True)) < 100
 
 
 def test_no_overpromise_wording():

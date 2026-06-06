@@ -1060,13 +1060,20 @@ def test_protected_surfaces_do_not_reference_guidance_gap():
     root = Path(gg.__file__).parents[5]
     for rel in (
         "app_industrial_review_ops.py",
-        "src/voc/review_ops/industrial/notion_export.py",
         "src/voc/review_ops/industrial/store.py",
         "src/voc/review_ops/industrial/rag.py",
         "src/voc/review_ops/industrial/issue_discovery.py",
         "src/voc/review_ops/industrial/taxonomy.py",
     ):
         assert "guidance_gap" not in (root / rel).read_text(encoding="utf-8"), rel
+    # S2x.5a: notion_export renders the optional result["detail_guidance_gaps"]
+    # payload, so the key name (which contains the substring) may appear — but
+    # it must never import from the detail_snapshot package.
+    notion_src = (root / "src/voc/review_ops/industrial/notion_export.py").read_text(
+        encoding="utf-8"
+    )
+    assert "detail_snapshot" not in notion_src
+    assert "import guidance_gap" not in notion_src
 
 
 # --- S2x.4b: apply gap helper over a list of issues --------------------------
