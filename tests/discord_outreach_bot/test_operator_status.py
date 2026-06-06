@@ -16,8 +16,12 @@ import operator_status as ops
 from operator_status import (
     CAT_BLOCKED,
     CAT_COMPLETED_FAKE,
+    CAT_COMPLETED_REAL,
+    CAT_LEGACY,
     CAT_NEEDS_ATTENTION,
     CAT_READY,
+    REASON_INCOMPLETE_DRAFT,
+    REASON_LEGACY_SEND_LOG_ONLY,
     build_operator_status,
     format_status_card,
 )
@@ -330,3 +334,154 @@ def test_module_has_no_write_operations():
     # `.replace(` appears for str (caption/text) sanitising, not Path moves;
     # assert no Path-move pattern `Path(...).replace(` or `path.replace(` on files.
     assert not offending, f"operator_status.py contains write-like calls: {offending}"
+
+
+# --------------------------------------------------------------------------- #
+# D5-3a: legacy-packet hygiene (outreach packets under new_targets/)
+# --------------------------------------------------------------------------- #
+
+
+def _outreach_packet(
+    repo: Path,
+    slug: str,
+    *,
+    status_state: str | None = None,
+    send_log: str | None = None,
+    authoring_files: bool = False,
+    corrupt_status: bool = False,
+) -> Path:
+    """Construct one outreach packet dir under outputs/outreach/new_targets/."""
+    pdir = repo / "outputs" / "outreach" / "new_targets" / slug
+    pdir.mkdir(parents=True, exist_ok=True)
+    if corrupt_status:
+        (pdir / "status.json").write_text("{ not valid json", encoding="utf-8")
+    elif status_state is not None:
+        (pdir / "status.json").write_text(
+            json.dumps({"brand": "테스트브랜드", "slug": slug, "state": status_state}),
+            encoding="utf-8",
+        )
+    if send_log is not None:
+        (pdir / "send_log.md").write_text(send_log, encoding="utf-8")
+    if authoring_files:
+        for f in ("email_subject.txt", "email_body.txt", "bait_report.md"):
+            (pdir / f).write_text("draft\n", encoding="utf-8")
+    return pdir
+
+
+_LEGACY_LOG_UPPER = (
+    "# Send Log — 테스트브랜드\n\n| 항목 | 값 |\n|------|-----|\n"
+    "| status | **SCHEDULED** (operator manual scheduled send) |\n"
+    "| follow_up_due | **2026-06-05** |\n"
+)
+_LEGACY_LOG_LOWER = (
+    "# Send Log — 테스트브랜드\n\n| 항목 | 값 |\n|------|-----|\n"
+    "| status | scheduled |\n| scheduled_at | 2026-05-28 10:20 KST |\n"
+)
+
+
+def test_send_log_only_uppercase_scheduled_is_legacy(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "legacy_upper_v1", send_log=_LEGACY_LOG_UPPER)
+    status = build_operator_status(repo_root=repo)
+    rec = _by_id(status, "legacy_upper_v1")
+    assert rec.category == CAT_LEGACY
+    assert rec.is_legacy
+    assert rec.reason == REASON_LEGACY_SEND_LOG_ONLY
+    assert rec.prerequisites_missing == ("status.json",)
+    assert rec.category != CAT_NEEDS_ATTENTION
+    assert rec not in status.attention
+
+
+def test_send_log_only_lowercase_scheduled_is_legacy(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "legacy_lower_v1", send_log=_LEGACY_LOG_LOWER)
+    status = build_operator_status(repo_root=repo)
+    rec = _by_id(status, "legacy_lower_v1")
+    assert rec.category == CAT_LEGACY
+    assert rec.reason == REASON_LEGACY_SEND_LOG_ONLY
+    assert rec not in status.attention
+
+
+def test_authoring_only_packet_is_incomplete_draft(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "draft_only_v1", authoring_files=True)
+    status = build_operator_status(repo_root=repo)
+    rec = _by_id(status, "draft_only_v1")
+    assert rec.category == CAT_LEGACY
+    assert rec.is_legacy
+    assert rec.reason == REASON_INCOMPLETE_DRAFT
+    assert rec.prerequisites_missing == ("status.json", "send_log.md")
+    assert rec not in status.attention
+
+
+def test_packet_with_status_json_unchanged(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "scheduled_v1", status_state="SCHEDULED")
+    _outreach_packet(repo, "sent_v1", status_state="SENT")
+    status = build_operator_status(repo_root=repo)
+    assert _by_id(status, "scheduled_v1").category == CAT_READY
+    sent = _by_id(status, "sent_v1")
+    assert sent.category == CAT_COMPLETED_REAL
+    assert not sent.is_legacy and sent.reason is None
+
+
+def test_counts_include_legacy_and_attention_excludes_it(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "legacy_a_v1", send_log=_LEGACY_LOG_UPPER)
+    _outreach_packet(repo, "draft_b_v1", authoring_files=True)
+    _outreach_packet(repo, "corrupt_v1", corrupt_status=True)  # genuine problem
+    status = build_operator_status(repo_root=repo)
+    assert status.counts[CAT_LEGACY] == 2
+    assert status.counts[CAT_NEEDS_ATTENTION] == 1  # only the corrupt one
+    attention_ids = {r.id for r in status.attention}
+    assert attention_ids == {"corrupt_v1"}
+    assert len(status.records) == 3  # legacy still counted in total
+
+
+def test_card_has_legacy_section_and_attention_omits_legacy(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "legacy_card_v1", send_log=_LEGACY_LOG_UPPER)
+    _outreach_packet(repo, "corrupt_card_v1", corrupt_status=True)
+    card = format_status_card(build_operator_status(repo_root=repo))
+    # dedicated legacy section, after needs-attention
+    assert "🗂 legacy / incomplete (1):" in card
+    assert "legacy_card_v1" in card
+    assert "legacy_send_log_only" in card
+    assert card.index("needs attention") < card.index("legacy / incomplete")
+    # the needs-attention block lists only the genuine problem
+    attention_block = card.split("legacy / incomplete")[0]
+    assert "corrupt_card_v1" in attention_block
+    assert "legacy_card_v1" not in attention_block
+    assert f"{CAT_LEGACY}=1" in card  # counts line includes legacy
+
+
+def test_corrupt_status_json_still_needs_attention(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "corrupt_only_v1", corrupt_status=True)
+    status = build_operator_status(repo_root=repo)
+    rec = _by_id(status, "corrupt_only_v1")
+    assert rec.category == CAT_NEEDS_ATTENTION
+    assert rec.last_outcome == "parse_error"
+    assert not rec.is_legacy
+
+
+def test_smoke_legacy_packet_quarantined_and_surfaced(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "smoke_packet_v1", send_log=_LEGACY_LOG_UPPER)
+    status = build_operator_status(repo_root=repo)
+    assert _by_id(status, "smoke_packet_v1") is None  # quarantined by default
+    assert status.smoke_excluded >= 1
+    status_smoke = build_operator_status(repo_root=repo, include_smoke=True)
+    rec = _by_id(status_smoke, "smoke_packet_v1")
+    assert rec is not None and rec.is_smoke and rec.category == CAT_LEGACY
+
+
+def test_legacy_read_only_invariant(tmp_path):
+    repo = _make_repo(tmp_path)
+    _outreach_packet(repo, "legacy_ro_v1", send_log=_LEGACY_LOG_LOWER)
+    _outreach_packet(repo, "draft_ro_v1", authoring_files=True)
+    before = _hash_tree(repo)
+    build_operator_status(repo_root=repo)
+    build_operator_status(repo_root=repo, include_smoke=True)
+    after = _hash_tree(repo)
+    assert before == after  # no status.json created, nothing mutated

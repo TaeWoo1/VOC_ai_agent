@@ -49,6 +49,10 @@ CAT_BLOCKED = "blocked"
 CAT_COMPLETED_FAKE = "completed_fake"
 CAT_COMPLETED_REAL = "completed_real"
 CAT_NEEDS_ATTENTION = "needs_attention"
+# D5-3a: visible-but-not-urgent hygiene bucket for outreach packets that lack
+# status.json. Split from needs_attention so the urgent list stays for genuine
+# problems (parse errors, orphan ledgers, collisions, blocked actions).
+CAT_LEGACY = "legacy"
 
 CATEGORIES = (
     CAT_READY,
@@ -57,7 +61,12 @@ CATEGORIES = (
     CAT_COMPLETED_FAKE,
     CAT_COMPLETED_REAL,
     CAT_NEEDS_ATTENTION,
+    CAT_LEGACY,
 )
+
+# D5-3a legacy reasons (record-level, machine-checkable).
+REASON_LEGACY_SEND_LOG_ONLY = "legacy_send_log_only"  # send_log.md, no status.json
+REASON_INCOMPLETE_DRAFT = "incomplete_draft"  # neither status.json nor send_log.md
 
 # Tokens marking a path as a smoke / superseded / transient artifact.
 _SMOKE_TOKENS = ("smoke", "_prev_", "_pre_", "_hung_", "_dryrun")
@@ -101,6 +110,8 @@ class ActionRecord:
     path: str  # repo-relative path to the record's primary artifact / dir
     category: str
     is_smoke: bool = False
+    is_legacy: bool = False  # D5-3a: legacy/incomplete outreach packet
+    reason: Optional[str] = None  # e.g. legacy_send_log_only / incomplete_draft
     blocked: bool = False
     blocked_reason: Optional[str] = None
     idempotency: Optional[str] = None  # content_hash or run id, if any
@@ -622,10 +633,26 @@ def _scan_outreach_packets(repo_root: Path) -> list[ActionRecord]:
         last_outcome: Optional[str] = None
         last_outcome_at: Optional[str] = None
         prereqs: tuple[str, ...] = ()
+        is_legacy = False
+        reason: Optional[str] = None
 
         if state == "STATUS_JSON_PARSE_ERROR":
             category = CAT_NEEDS_ATTENTION
             last_outcome = "parse_error"
+        elif not target.has_status_json:
+            # D5-3a: missing status.json is a hygiene state, not an urgent
+            # problem. Deliberately checked BEFORE any send_log-derived state:
+            # a legacy send_log's SENT/SCHEDULED words must NOT classify the
+            # packet as ready/completed in this slice — that inference (and any
+            # status.json backfill) is the separately authorized D5-3b.
+            category = CAT_LEGACY
+            is_legacy = True
+            if target.send_log_text is not None:
+                reason = REASON_LEGACY_SEND_LOG_ONLY
+                prereqs = ("status.json",)
+            else:
+                reason = REASON_INCOMPLETE_DRAFT
+                prereqs = ("status.json", "send_log.md")
         elif sent is not None:
             message_id = sent.get("message_id") or ""
             category = (
@@ -638,9 +665,8 @@ def _scan_outreach_packets(repo_root: Path) -> list[ActionRecord]:
             last_outcome = "sent"
         elif state in ("SCHEDULED", "FOLLOW_UP_DUE", "PARKED"):
             category = CAT_READY
-        else:  # UNKNOWN, or no status.json and no recognisable send_log state
+        else:  # status.json present but state unrecognised
             category = CAT_NEEDS_ATTENTION
-            prereqs = ("status.json",) if not target.has_status_json else ()
 
         records.append(
             ActionRecord(
@@ -649,6 +675,8 @@ def _scan_outreach_packets(repo_root: Path) -> list[ActionRecord]:
                 path=rel,
                 category=category,
                 is_smoke=is_smoke,
+                is_legacy=is_legacy,
+                reason=reason,
                 prerequisites_missing=prereqs,
                 last_outcome=last_outcome,
                 last_outcome_at=last_outcome_at,
@@ -807,6 +835,23 @@ def format_status_card(status: OperatorStatus) -> str:
             lines.append(f"  - [{r.lane}/{r.category}] {r.id} — {detail}{prereq}".rstrip())
     else:
         lines.append("⚠️ needs attention (0): none")
+    lines.append("")
+
+    # D5-3a: legacy / incomplete packets — visible but not urgent. Filtered
+    # from records (not a separate field) so any OperatorStatus renders
+    # consistently.
+    legacy_records = [r for r in status.records if r.category == CAT_LEGACY]
+    if legacy_records:
+        lines.append(f"🗂 legacy / incomplete ({len(legacy_records)}):")
+        for r in legacy_records:  # already deterministically sorted
+            prereq = (
+                f" missing={','.join(r.prerequisites_missing)}"
+                if r.prerequisites_missing
+                else ""
+            )
+            lines.append(f"  - [{r.lane}/legacy] {r.id} — {r.reason or ''}{prereq}".rstrip())
+    else:
+        lines.append("🗂 legacy / incomplete (0): none")
     lines.append("")
 
     # Per-lane roll-up of all visible records.
