@@ -25,6 +25,7 @@ import io
 import json
 import zipfile
 from datetime import date, datetime
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import streamlit as st
@@ -41,7 +42,9 @@ from src.voc.review_ops.industrial import (
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import (
+    REVIEW_FILENAME,
     attach_detail_guidance_gaps,
+    ingest_uploaded_images,
 )
 from src.voc.review_ops.industrial.ingest import _build_header_map
 from src.voc.review_ops.industrial.normalize import normalize_rows
@@ -1482,10 +1485,62 @@ def _render_detail_gap_preview(prepared: dict) -> None:
             st.caption(item["operator_check"])
 
 
+def _render_detail_image_upload(result: dict) -> None:
+    """상세페이지 이미지 업로드 → 로컬 스냅샷 생성 (S2x.6b).
+
+    Thin Streamlit wrapper: converts UploadedFile objects to (filename, bytes)
+    pairs and hands them to the offline wiring helper. Ingest only — no tile
+    cutting, no multimodal, no OpenAI, no network, no guidance draft/review
+    creation, no Notion call. On success the created snapshot path prefills the 상세페이지
+    스냅샷 경로 input below (both session keys are set before that widget
+    instantiates in the same rerun), so preview/export pick it up once an
+    extraction review exists. Fail-soft: no upload → info caption, nothing
+    written; unreadable images degrade inside the helper."""
+    uploads = st.file_uploader(
+        "상세페이지 이미지 업로드",
+        type=["jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True,
+        key="detail_image_upload",
+        help=(
+            "상세페이지 캡처 이미지(jpg/png/webp)를 올리면 로컬 스냅샷을 생성합니다. "
+            "제품당 한 번 준비하는 입력입니다."
+        ),
+    )
+    product_name = st.text_input(
+        "상세페이지 제품명",
+        value=str(result.get("scope_label") or ""),
+        key="detail_product_name",
+    )
+    if not st.button("상세페이지 스냅샷 생성", key="create_snapshot_btn"):
+        return
+    if not uploads:
+        st.info("업로드된 이미지가 없어 스냅샷을 만들지 않았습니다.")
+        return
+    ingest = ingest_uploaded_images(
+        [(f.name, f.getvalue()) for f in uploads],
+        product_name=(product_name or "").strip(),
+    )
+    snapshot_dir = ingest.get("snapshot_dir") or ""
+    if ingest.get("status") in ("ok", "partial") and snapshot_dir:
+        st.session_state["uploaded_snapshot_dir"] = snapshot_dir
+        st.session_state["notion_snapshot_dir"] = snapshot_dir
+        st.success("상세페이지 스냅샷을 생성했습니다.")
+        st.code(snapshot_dir)
+        if ingest.get("status") == "partial":
+            st.caption("일부 이미지는 처리하지 못해 제외했습니다.")
+    else:
+        notes = (ingest.get("metadata") or {}).get("notes") or ingest.get("notes") or ""
+        st.warning(f"스냅샷을 생성하지 못했습니다. {notes}".strip())
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
     NOTION_PARENT_PAGE_ID. Backend (resolve_notion_export_mode) owns the routing.
+
+    Optional image upload (S2x.6b): the operator can upload detail-page images
+    here to create a local snapshot artifact; the created path prefills the
+    snapshot input. Ingest only — extraction runs separately.
 
     Optional detail-snapshot input (S2x.5b-2): when the operator enters a
     snapshot path, the export payload is built from
@@ -1498,9 +1553,9 @@ def _render_notion_export(result: dict) -> None:
     Fail-soft: disabled with a caption when settings are missing; on a failed
     export it warns and the app keeps working. The DB path retries once with
     title + body only on a schema mismatch and surfaces a note. No secret shown."""
+    _render_detail_image_upload(result)
     snapshot_dir = st.text_input(
         "상세페이지 스냅샷 경로",
-        value="",
         placeholder=".review_ops_data/detail_snapshots/local-4a024b5a5a",
         help=(
             "product_guidance_review.json이 있는 "
@@ -1514,6 +1569,16 @@ def _render_notion_export(result: dict) -> None:
         if "detail_guidance_gaps" in result_for_notion:
             st.caption("상세페이지 이미지 추출 결과를 Notion 점검 후보에 함께 반영합니다.")
             _render_detail_gap_preview(result_for_notion)
+        elif (
+            Path((snapshot_dir or "").strip()).is_dir()
+            and not (Path((snapshot_dir or "").strip()) / REVIEW_FILENAME).exists()
+        ):
+            # S2x.6b: a freshly created upload snapshot has images but no
+            # extraction review yet — say so instead of "찾지 못해".
+            st.caption(
+                "상세페이지 스냅샷은 생성됐지만 안내 추출 결과가 아직 없어 "
+                "리뷰 기반 점검 후보로 진행됩니다."
+            )
         else:
             st.caption(
                 "상세페이지 스냅샷을 찾지 못해 화면에는 표시하지 않습니다. "
