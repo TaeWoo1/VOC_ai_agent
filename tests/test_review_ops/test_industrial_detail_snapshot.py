@@ -18,6 +18,7 @@ import pytest
 from src.voc.review_ops.industrial.detail_snapshot import capture as cap
 from src.voc.review_ops.industrial.detail_snapshot import guidance_gap as gg
 from src.voc.review_ops.industrial.detail_snapshot import guidance_gap_apply as gga
+from src.voc.review_ops.industrial.detail_snapshot import guidance_gap_wiring as ggw
 from src.voc.review_ops.industrial.detail_snapshot import guidance_postprocess as gp
 from src.voc.review_ops.industrial.detail_snapshot import guidance_schema as gs
 from src.voc.review_ops.industrial.detail_snapshot import ingest_local as il
@@ -1193,3 +1194,130 @@ def test_protected_surfaces_do_not_reference_guidance_gap_apply():
         "src/voc/review_ops/industrial/taxonomy.py",
     ):
         assert "guidance_gap_apply" not in (root / rel).read_text(encoding="utf-8"), rel
+
+
+# --- S2x.5b-1: attach gaps onto a report result dict --------------------------
+
+
+def _report_result() -> dict:
+    """Minimal report result dict in the shape the Notion export consumes."""
+    return {
+        "scope_label": "전체 상품",
+        "total": 100,
+        "issue_count": 2,
+        "issue_items": [
+            {"issue_title": "접착력 부족", "recommended_action": "부착면 조건 안내 점검 후보",
+             "review_count": 12, "severity": "high"},
+            {"title": "절단 시 깨짐", "recommended_action": "절단 방법 안내 점검 후보",
+             "review_count": 5},
+        ],
+    }
+
+
+def _snapshot_with_review(tmp_path) -> Path:
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    (snap / "product_guidance_review.json").write_text(
+        json.dumps(_guidance_review(), ensure_ascii=False), encoding="utf-8"
+    )
+    return snap
+
+
+def test_attach_missing_snapshot_dir_returns_unchanged_copy():
+    result = _report_result()
+    for empty in (None, ""):
+        out = ggw.attach_detail_guidance_gaps(result, empty)
+        assert out == result
+        assert out is not result
+        assert "detail_guidance_gaps" not in out
+        assert "detail_guidance_source" not in out
+
+
+def test_attach_missing_or_invalid_review_returns_unchanged(tmp_path):
+    result = _report_result()
+    # dir without the review file → unchanged, no diagnostic fields
+    snap = tmp_path / "empty"
+    snap.mkdir()
+    out = ggw.attach_detail_guidance_gaps(result, snap)
+    assert out == result
+    # invalid JSON → same fail-soft behavior
+    (snap / "product_guidance_review.json").write_text("{not json", encoding="utf-8")
+    out = ggw.attach_detail_guidance_gaps(result, snap)
+    assert out == result
+    assert "detail_guidance_gaps" not in out
+    assert "detail_guidance_source" not in out
+
+
+def test_attach_with_review_and_issues(tmp_path):
+    snap = _snapshot_with_review(tmp_path)
+    out = ggw.attach_detail_guidance_gaps(_report_result(), snap)
+    gaps = out["detail_guidance_gaps"]
+    assert [g["issue_title"] for g in gaps] == ["접착력 부족", "절단 시 깨짐"]
+    assert all(g["detail_page_status"] == "partial_guidance" for g in gaps)
+    # passthrough metadata preserved per item, never fabricated
+    assert gaps[0]["review_count"] == 12
+    assert gaps[0]["severity"] == "high"
+    assert gaps[1]["review_count"] == 5
+    assert "severity" not in gaps[1]
+
+
+def test_attach_source_provenance_attached_with_gaps(tmp_path):
+    snap = _snapshot_with_review(tmp_path)
+    out = ggw.attach_detail_guidance_gaps(_report_result(), snap)
+    assert out["detail_guidance_source"] == {
+        "snapshot_dir": str(snap),
+        "source": "product_guidance_review.json",
+        "basis": "consumer_visible_detail_image_draft",
+        "needs_operator_review": True,
+    }
+
+
+def test_attach_empty_issue_items_attaches_nothing(tmp_path):
+    snap = _snapshot_with_review(tmp_path)
+    for items in ([], None):
+        result = {**_report_result(), "issue_items": items}
+        out = ggw.attach_detail_guidance_gaps(result, snap)
+        assert "detail_guidance_gaps" not in out
+        assert "detail_guidance_source" not in out
+
+
+def test_attach_does_not_mutate_input(tmp_path):
+    import copy
+
+    snap = _snapshot_with_review(tmp_path)
+    result = _report_result()
+    before = copy.deepcopy(result)
+    out = ggw.attach_detail_guidance_gaps(result, snap)
+    assert result == before
+    assert "detail_guidance_gaps" in out  # gaps landed on the copy only
+
+
+def test_attach_preserves_existing_fields(tmp_path):
+    snap = _snapshot_with_review(tmp_path)
+    result = _report_result()
+    out = ggw.attach_detail_guidance_gaps(result, snap)
+    for key, value in result.items():
+        assert out[key] == value
+
+
+def test_wiring_module_has_no_network_or_openai_import():
+    src = (Path(ggw.__file__)).read_text(encoding="utf-8")
+    low = src.lower()
+    for bad in ("import requests", "import httpx", "import socket", "urllib.request",
+                "import openai", "from openai", "import playwright", "from playwright",
+                "import streamlit", "from streamlit", "import notion", "from notion",
+                "notion_export"):
+        assert bad not in low, bad
+
+
+def test_protected_surfaces_do_not_reference_guidance_gap_wiring():
+    root = Path(ggw.__file__).parents[5]
+    for rel in (
+        "app_industrial_review_ops.py",
+        "src/voc/review_ops/industrial/notion_export.py",
+        "src/voc/review_ops/industrial/store.py",
+        "src/voc/review_ops/industrial/rag.py",
+        "src/voc/review_ops/industrial/issue_discovery.py",
+        "src/voc/review_ops/industrial/taxonomy.py",
+    ):
+        assert "guidance_gap_wiring" not in (root / rel).read_text(encoding="utf-8"), rel
