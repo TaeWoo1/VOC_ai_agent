@@ -114,6 +114,99 @@ def test_unreadable_image_bytes_fail_soft(tmp_path):
     assert (Path(out["snapshot_dir"]) / "snapshot_metadata.json").exists()
 
 
+# --- S2x.6d: tiles -> guidance draft wrapper (mocks only, never OpenAI) ------
+
+
+def _tiled_snapshot(tmp_path) -> Path:
+    snap = _uploaded_snapshot(tmp_path, height=250)
+    out = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert out["status"] == "ok"
+    return snap
+
+
+def _raise_extractor(path, *, model):  # noqa: ARG001 - signature fixed by seam
+    raise AssertionError("extractor must not be called")
+
+
+def test_extract_disabled_is_skipped_and_calls_nothing(tmp_path):
+    snap = _tiled_snapshot(tmp_path)
+    out = ggw.extract_snapshot_guidance_draft(
+        snap, enable_multimodal=False, tile_extractor=_raise_extractor
+    )
+    assert out["status"] == "skipped"
+    assert out["draft_path"] is None
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_empty_path_fails_soft(tmp_path):
+    for empty in (None, "", "   "):
+        out = ggw.extract_snapshot_guidance_draft(empty, enable_multimodal=True)
+        assert out["status"] == "error"
+        assert out["draft_path"] is None
+    assert list(tmp_path.iterdir()) == []  # nothing written anywhere
+
+
+def test_extract_without_tiles_asks_to_create_tiles_first(tmp_path):
+    snap = _uploaded_snapshot(tmp_path)  # ingested, but no tiles generated
+    out = ggw.extract_snapshot_guidance_draft(
+        snap, enable_multimodal=True, tile_extractor=_raise_extractor
+    )
+    assert out["status"] == "error"
+    assert "타일을 생성하세요" in out["reason"]
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_missing_key_skips_without_draft(tmp_path, monkeypatch):
+    snap = _tiled_snapshot(tmp_path)
+    # no injected extractor -> key gate applies; force "no key" regardless of env
+    monkeypatch.setattr(
+        "src.voc.review_ops.industrial.detail_snapshot.multimodal_extract.resolve_api_key",
+        lambda: None,
+    )
+    out = ggw.extract_snapshot_guidance_draft(snap, enable_multimodal=True)
+    assert out["status"] == "skipped_no_key"
+    assert out["draft_path"] is None
+    assert not (snap / "product_guidance_draft.json").exists()
+
+
+def test_extract_with_mock_extractor_writes_draft(tmp_path):
+    snap = _tiled_snapshot(tmp_path)
+    calls: list[str] = []
+
+    def mock_extractor(path, *, model):
+        calls.append(path.name)
+        return {
+            "usage_installation": [
+                {"value": "부착 전 물기/먼지 제거", "confidence": "high"}
+            ],
+        }
+
+    out = ggw.extract_snapshot_guidance_draft(
+        snap, enable_multimodal=True, model="mock-model", tile_extractor=mock_extractor
+    )
+    assert out["status"] == "ok"
+    assert out["tile_count"] == 3
+    assert out["success_count"] == 3
+    assert out["confidence"]
+    assert calls == ["tile_000_000.jpg", "tile_000_001.jpg", "tile_000_002.jpg"]
+    draft_path = Path(out["draft_path"])
+    assert draft_path == snap / "product_guidance_draft.json"
+    draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    assert draft["extraction_mode"] == "multimodal_draft"
+    assert draft["needs_operator_review"] is True
+    assert draft["model"] == "mock-model"
+    # draft ONLY: no postprocess output, no review file
+    assert not (snap / ggw.REVIEW_FILENAME).exists()
+
+
+def test_app_reaches_extraction_only_via_wiring_helper():
+    root = Path(ggw.__file__).parents[5]
+    app_src = (root / "app_industrial_review_ops.py").read_text(encoding="utf-8")
+    assert "extract_snapshot_guidance_draft" in app_src
+    assert "multimodal_extract" not in app_src
+    assert "extract_guidance(" not in app_src  # engine entrypoint stays unimported
+
+
 # --- S2x.6c: snapshot -> tiles wrapper ---------------------------------------
 
 
@@ -195,7 +288,11 @@ def test_tiling_creates_no_guidance_files(tmp_path):
     assert not (snap / ggw.REVIEW_FILENAME).exists()
 
 
-def test_wiring_module_stays_ingest_only():
+def test_wiring_module_has_no_direct_network_ui_or_postprocess_import():
+    # S2x.6d note: the wiring module now intentionally imports
+    # multimodal_extract (the opt-in extraction seam), so that name is no
+    # longer banned here — the extractor itself owns the key gate and the
+    # only OpenAI use. Direct network/UI/postprocess imports stay banned.
     src = Path(ggw.__file__).read_text(encoding="utf-8")
     low = src.lower()
     for bad in (
@@ -205,7 +302,6 @@ def test_wiring_module_stays_ingest_only():
         "import httpx",
         "import socket",
         "urllib.request",
-        "multimodal_extract",
         "guidance_postprocess",
         "import streamlit",
         "from streamlit",

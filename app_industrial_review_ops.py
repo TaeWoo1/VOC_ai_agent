@@ -44,6 +44,7 @@ from src.voc.review_ops.industrial.dedup import dedup
 from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import (
     REVIEW_FILENAME,
     attach_detail_guidance_gaps,
+    extract_snapshot_guidance_draft,
     ingest_uploaded_images,
     make_snapshot_tiles,
 )
@@ -1563,6 +1564,52 @@ def _render_tile_generation(snapshot_dir: str | None) -> None:
             st.caption(tiles["reason"])
 
 
+def _render_guidance_extraction(snapshot_dir: str | None) -> None:
+    """상세페이지 안내 추출 button (S2x.6d).
+
+    The ONE place the app triggers multimodal guidance extraction — explicit
+    and click-only, never auto-run after upload/tile generation or on page
+    load. The caption above the button discloses that tile images are sent to
+    an external AI API. Calls the offline-by-default wiring helper with
+    ``enable_multimodal=True`` only on click; the extractor's key gate keeps a
+    missing key fail-soft (skipped, no draft, no secret shown). Draft only —
+    no postprocess, no review-file creation, no gap attach, no Notion call."""
+    st.caption(
+        "이 작업은 상세페이지 타일 이미지를 외부 AI API로 전송합니다. "
+        "제품당 한 번만 실행하면 됩니다. 결과는 초안이며 운영자 확인이 필요합니다."
+    )
+    if not st.button("상세페이지 안내 추출", key="extract_guidance_btn"):
+        return
+    cleaned = (snapshot_dir or "").strip()
+    if not cleaned:
+        st.info("상세페이지 스냅샷 경로를 먼저 입력하거나 이미지를 업로드해 주세요.")
+        return
+    with st.spinner("상세페이지 안내를 추출하는 중…"):
+        out = extract_snapshot_guidance_draft(cleaned, enable_multimodal=True)
+    status = out.get("status")
+    reason = out.get("reason") or ""
+    if status in ("ok", "partial"):
+        st.session_state["detail_guidance_draft_ready"] = True
+        st.session_state["detail_guidance_draft_snapshot_dir"] = cleaned
+        st.success("상세페이지 안내 추출 초안을 생성했습니다.")
+        if out.get("draft_path"):
+            st.code(out["draft_path"])
+        if out.get("tile_count") is not None and out.get("success_count") is not None:
+            st.caption(f"타일 {out['tile_count']}개 중 {out['success_count']}개 추출 성공")
+        if out.get("confidence"):
+            st.caption(f"추출 신뢰도: {out['confidence']}")
+        if status == "partial":
+            st.caption("일부 타일은 추출하지 못했습니다.")
+    elif status == "skipped_no_key":
+        st.warning("OpenAI API 키가 없어 안내 추출을 건너뜁니다.")
+    elif "타일을 생성하세요" in reason:
+        st.warning("상세페이지 타일을 먼저 생성해 주세요.")
+    else:
+        st.warning("상세페이지 안내 추출에 실패했습니다.")
+        if reason:
+            st.caption(reason)
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
@@ -1574,6 +1621,10 @@ def _render_notion_export(result: dict) -> None:
 
     Optional tile generation (S2x.6c): a button below the path input cuts the
     snapshot images into tiles for later opt-in extraction. Click-only.
+
+    Optional guidance extraction (S2x.6d): a further click-only button sends
+    the tiles to the external AI API (disclosed in a caption) and writes the
+    guidance draft. Never auto-runs.
 
     Optional detail-snapshot input (S2x.5b-2): when the operator enters a
     snapshot path, the export payload is built from
@@ -1598,6 +1649,7 @@ def _render_notion_export(result: dict) -> None:
         key="notion_snapshot_dir",
     )
     _render_tile_generation(snapshot_dir)
+    _render_guidance_extraction(snapshot_dir)
     result_for_notion = prepare_result_for_notion(result, snapshot_dir)
     if (snapshot_dir or "").strip():
         if "detail_guidance_gaps" in result_for_notion:

@@ -19,11 +19,21 @@ offline wiring helpers:
   vertical tiles via the S2x.3a tiling module (``tiles/`` +
   ``tiles_manifest.json``, deterministic overwrite). Tiles only — NO
   extraction, NO multimodal, NO guidance draft/review creation.
+- ``extract_snapshot_guidance_draft`` (S2x.6d): explicit, opt-in multimodal
+  guidance extraction from generated tiles via the S2x.3b extractor —
+  writes ``product_guidance_draft.json`` on success. The ONLY helper here
+  that can reach OpenAI, and only when the caller passes
+  ``enable_multimodal=True`` (a key gate and per-tile fail-soft live in the
+  extractor). NO postprocess, NO review-file creation, NO gap attach.
 
-Discipline: NO network, NO OpenAI, NO multimodal, NO ProductKnowledge, NO
-Notion / store / review-analysis integration. The only file writes are the
-gitignored snapshot artifacts produced by ``ingest_uploaded_images`` /
-``make_snapshot_tiles`` (the attach helper writes nothing). The input ``result`` is never mutated; every
+Discipline: NO ProductKnowledge, NO Notion / store / review-analysis
+integration. NO network and NO OpenAI anywhere EXCEPT inside
+``extract_snapshot_guidance_draft`` when explicitly called with
+``enable_multimodal=True`` (it returns ``skipped`` otherwise and
+``skipped_no_key`` without a resolvable key — never a silent live call). The
+only file writes are the gitignored snapshot artifacts produced by
+``ingest_uploaded_images`` / ``make_snapshot_tiles`` /
+``extract_snapshot_guidance_draft`` (the attach helper writes nothing). The input ``result`` is never mutated; every
 no-gap path (missing snapshot_dir, missing/invalid review, empty issue list)
 returns an unchanged copy so the Notion export falls back to its review-only
 section.
@@ -43,6 +53,9 @@ from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_apply import (
 from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
     DEFAULT_ARTIFACT_ROOT,
     ingest_local_images,
+)
+from src.voc.review_ops.industrial.detail_snapshot.multimodal_extract import (
+    extract_guidance,
 )
 from src.voc.review_ops.industrial.detail_snapshot.tiling import (
     DEFAULT_OVERLAP_PX,
@@ -170,3 +183,44 @@ def make_snapshot_tiles(
             "tiles_dir": None,
         }
     return make_tiles(cleaned, tile_height=tile_height, overlap_px=overlap_px)
+
+
+def extract_snapshot_guidance_draft(
+    snapshot_dir: str | Path | None,
+    *,
+    enable_multimodal: bool = False,
+    api_key: str | None = None,
+    model: str | None = None,
+    tile_extractor=None,
+) -> dict:
+    """Extract a guidance draft from a snapshot's generated tiles (S2x.6d).
+
+    Thin app-facing wrapper over the S2x.3b extractor: reads
+    ``tiles_manifest.json`` + ``tiles/`` and writes
+    ``product_guidance_draft.json`` when at least one tile extracts. Returns
+    the extractor's result (``status`` / ``reason`` / ``draft_path``, plus
+    ``tile_count`` / ``success_count`` / ``confidence`` on success).
+
+    Explicit opt-in chain, never silent: ``enable_multimodal=False`` (the
+    default) → ``status="skipped"`` with no extractor call and no file write;
+    no resolvable API key → ``status="skipped_no_key"`` with no draft; missing
+    tiles → ``status="error"`` asking the operator to create tiles first.
+    ``tile_extractor`` is a test seam — an injected extractor bypasses the key
+    gate so tests never call OpenAI. Draft ONLY: no postprocess, no
+    ``product_guidance_review.json``, no gap attach.
+    """
+    cleaned = str(snapshot_dir or "").strip()
+    if not cleaned:
+        return {
+            "status": "error",
+            "reason": "스냅샷 경로가 없습니다.",
+            "snapshot_dir": "",
+            "draft_path": None,
+        }
+    return extract_guidance(
+        cleaned,
+        enable_multimodal=enable_multimodal,
+        api_key=api_key,
+        model=model,
+        tile_extractor=tile_extractor,
+    )
