@@ -1,7 +1,8 @@
-"""App-level Notion snapshot wiring (S2x.5b-2): prepare_result_for_notion.
+"""App-level Notion snapshot wiring (S2x.5b-2): prepare_result_for_notion,
+plus the screen-preview formatter (S2x.6a): format_detail_gap_preview.
 
 Offline, no Streamlit E2E, no OpenAI, no network. Exercises only the pure
-helper the Notion export button consumes; the gap analysis itself is covered
+helpers the Notion export area consumes; the gap analysis itself is covered
 by the detail_snapshot tests.
 """
 
@@ -11,7 +12,7 @@ import copy
 import json
 from pathlib import Path
 
-from app_industrial_review_ops import prepare_result_for_notion
+from app_industrial_review_ops import format_detail_gap_preview, prepare_result_for_notion
 from src.voc.review_ops.industrial.notion_export import build_notion_blocks
 
 
@@ -115,6 +116,56 @@ def test_prepared_result_renders_gap_section_in_notion_body(tmp_path):
     assert "추출 결과에서 찾지 못한 안내" in body
     assert "실크벽지 조건" in body
     assert "현재는 상세페이지 스냅샷이 없어" not in body
+
+
+def test_preview_contains_expected_gap_content(tmp_path):
+    # S2x.6a: the screen preview mirrors what the Notion section will render.
+    out = prepare_result_for_notion(_result(), str(_snapshot(tmp_path)))
+    preview = format_detail_gap_preview(out)
+    assert preview["title"] == "상세페이지/안내 점검 후보"
+    assert "상세페이지 이미지 추출 결과" in preview["caution"]
+    assert "운영자 확인이 필요합니다" in preview["caution"]
+    text = "\n".join(
+        [preview["caution"]]
+        + [
+            "\n".join([i["issue_title"], i["status_label"], i["operator_check"]]
+                      + i["guidance_lines"])
+            for i in preview["items"]
+        ]
+    )
+    assert "접착력 부족" in text
+    assert "확인된 안내" in text
+    assert "부착 전 물기/먼지 제거" in text
+    assert "추출 결과에서 찾지 못한 안내" in text
+    assert "실크벽지 조건" in text
+    assert "절단 시 깨짐" in text
+    assert "재단 안내" in text
+    assert "깨짐 방지 주의" in text
+    # cautious-wording contract: candidates, not verdicts
+    for banned in ("상세페이지에 없습니다", "반드시", "원인", "개선해야"):
+        assert banned not in text
+    # status shown as an operator label, not engine-speak
+    assert all(i["status_label"] == "일부 안내 확인" for i in preview["items"])
+
+
+def test_preview_is_none_without_gaps(tmp_path):
+    # empty path → no gaps attached → no preview section
+    assert format_detail_gap_preview(prepare_result_for_notion(_result(), "")) is None
+    # invalid snapshot → unchanged copy → no preview section
+    out = prepare_result_for_notion(_result(), str(tmp_path / "nope"))
+    assert format_detail_gap_preview(out) is None
+    assert format_detail_gap_preview({}) is None
+    assert format_detail_gap_preview(None) is None
+
+
+def test_preview_caps_items_and_skips_non_dicts(tmp_path):
+    out = prepare_result_for_notion(_result(), str(_snapshot(tmp_path)))
+    gaps = out["detail_guidance_gaps"]
+    out["detail_guidance_gaps"] = ["junk"] + gaps * 3  # 7 entries, 1 non-dict
+    preview = format_detail_gap_preview(out)
+    # MAX_DETAIL_GAP_ITEMS (3) bounds the slice; the non-dict head is skipped
+    assert len(preview["items"]) == 2
+    assert preview["items"][0]["issue_title"] == "접착력 부족"
 
 
 def test_unprepared_result_keeps_review_only_section():

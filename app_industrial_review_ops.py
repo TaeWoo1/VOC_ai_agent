@@ -1404,6 +1404,84 @@ def prepare_result_for_notion(result: dict, snapshot_dir: str | None) -> dict:
     return attach_detail_guidance_gaps(result, cleaned)
 
 
+# Operator-facing labels for the gap helper's detail_page_status values
+# (S2x.6a). Cautious by design: never a claim about the original detail page,
+# only about what the extraction draft did or did not surface.
+DETAIL_GAP_STATUS_LABELS = {
+    "partial_guidance": "일부 안내 확인",
+    "guidance_present": "안내 확인",
+    "not_found": "추출 결과에서 찾지 못함",
+    "needs_operator_check": "운영자 확인 필요",
+}
+
+
+def format_detail_gap_preview(prepared: dict) -> dict | None:
+    """Screen-preview content for the 상세페이지/안내 점검 후보 section (S2x.6a).
+
+    Pure and offline: reads the gaps already attached by
+    ``prepare_result_for_notion`` and returns a display dict (title, the shared
+    extraction-based caution, and at most ``MAX_DETAIL_GAP_ITEMS`` item rows) —
+    or ``None`` when the prepared result carries no gaps, so callers render
+    nothing. Reuses the Notion export's wording constants and defensive
+    sanitizer so the screen preview and the exported section stay consistent;
+    the gap helper's wording is already cautious by contract ("추출 결과 기준",
+    "점검 후보" — never a claim that the detail page lacks something)."""
+    gaps = (prepared or {}).get("detail_guidance_gaps") or []
+    items = []
+    for gap in gaps[: notion_export.MAX_DETAIL_GAP_ITEMS]:
+        if not isinstance(gap, dict):
+            continue
+        title = notion_export.sanitize_issue_text(gap.get("issue_title") or "(제목 없음)")
+        status = gap.get("detail_page_status") or ""
+        lines = []
+        found = [notion_export.sanitize_issue_text(g) for g in (gap.get("found_guidance") or []) if g]
+        not_found = [
+            notion_export.sanitize_issue_text(g) for g in (gap.get("not_found_guidance") or []) if g
+        ]
+        if found:
+            lines.append(f"{notion_export.DETAIL_GAP_FOUND_PREFIX}: {', '.join(found)}")
+        if not_found:
+            lines.append(f"{notion_export.DETAIL_GAP_NOT_FOUND_PREFIX}: {', '.join(not_found)}")
+        items.append(
+            {
+                "issue_title": title,
+                "status": status,
+                "status_label": DETAIL_GAP_STATUS_LABELS.get(status, "운영자 확인 필요"),
+                "guidance_lines": lines,
+                "operator_check": notion_export.sanitize_issue_text(
+                    gap.get("operator_check") or ""
+                ),
+            }
+        )
+    if not items:
+        return None
+    return {
+        "title": "상세페이지/안내 점검 후보",
+        "caution": notion_export.DETAIL_GAP_CAUTION,
+        "items": items,
+    }
+
+
+def _render_detail_gap_preview(prepared: dict) -> None:
+    """Show the gap results on screen before export (S2x.6a).
+
+    Renders the same prepared dict the Notion payload builders receive, so the
+    operator previews exactly what will be exported. Plain markdown blocks (no
+    nested expander — this renders inside the 리포트 내보내기 · 진단 expander).
+    Fail-soft: no gaps → renders nothing."""
+    preview = format_detail_gap_preview(prepared)
+    if not preview:
+        return
+    st.markdown(f"**{preview['title']}**")
+    st.caption(preview["caution"])
+    for item in preview["items"]:
+        st.markdown(f"- **{item['issue_title']}** · {item['status_label']}")
+        for line in item["guidance_lines"]:
+            st.markdown(f"  - {line}")
+        if item["operator_check"]:
+            st.caption(item["operator_check"])
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
@@ -1412,9 +1490,10 @@ def _render_notion_export(result: dict) -> None:
     Optional detail-snapshot input (S2x.5b-2): when the operator enters a
     snapshot path, the export payload is built from
     ``prepare_result_for_notion`` so the Notion 상세페이지/안내 점검 후보
-    section can use extraction-based gap results. Empty path → identical to
-    the previous behavior; missing/invalid review → non-blocking caption and
-    the export proceeds review-only.
+    section can use extraction-based gap results, and the same prepared dict
+    is previewed on screen above the button (S2x.6a). Empty path → identical
+    to the previous behavior (no preview, no caption); missing/invalid review
+    → non-blocking caption and the export proceeds review-only.
 
     Fail-soft: disabled with a caption when settings are missing; on a failed
     export it warns and the app keeps working. The DB path retries once with
@@ -1434,8 +1513,12 @@ def _render_notion_export(result: dict) -> None:
     if (snapshot_dir or "").strip():
         if "detail_guidance_gaps" in result_for_notion:
             st.caption("상세페이지 이미지 추출 결과를 Notion 점검 후보에 함께 반영합니다.")
+            _render_detail_gap_preview(result_for_notion)
         else:
-            st.caption("상세페이지 스냅샷을 찾지 못해 리뷰 기반 점검 후보로 기록합니다.")
+            st.caption(
+                "상세페이지 스냅샷을 찾지 못해 화면에는 표시하지 않습니다. "
+                "Notion 기록은 리뷰 기반 점검 후보로 진행됩니다."
+            )
     mode, api_key, target_id = notion_export.resolve_notion_export_mode()
     if mode == "none":
         st.button("Notion에 기록하기", disabled=True, key="notion_export_btn")
