@@ -349,15 +349,21 @@ def test_no_write_like_calls():
 
 
 # --------------------------------------------------------------------------- #
-# 20. D6-2a stays unwired
+# 20. default wiring state (updated for D6-2b)
 # --------------------------------------------------------------------------- #
 
 
-def test_task_discord_adapter_remains_unwired():
+def test_task_discord_adapter_default_state_is_inert():
+    """D6-2a pinned 'no copilot_backend reference at all'; D6-2b deliberately
+    adds the env-gated resolver. The standing invariant is now: the test seam
+    defaults to None and the backend is reachable ONLY via the resolver."""
     import inspect
 
     import task_discord_adapter as adapter
 
     assert adapter._COPILOT_RESPONDER is None
     src = inspect.getsource(adapter)
-    assert "copilot_backend" not in src
+    # backend referenced exactly through the resolver, never called directly
+    assert "_copilot_backend.respond" in inspect.getsource(
+        adapter._resolve_copilot_responder)
+    assert "import subprocess" not in src

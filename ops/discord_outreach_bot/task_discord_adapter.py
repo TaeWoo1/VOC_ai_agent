@@ -16,10 +16,12 @@ the append-only approvals.log.jsonl (records intent; never executes).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import agent_discord_adapter as _agent_discord
+import copilot_backend as _copilot_backend
 import operator_copilot as _copilot
 import status_discord_adapter as _status_discord
 import agent_report_formatting as _arf
@@ -37,11 +39,35 @@ from task_model import TaskRequest
 # plan-kind → request workflow (the planners then set each task's own workflow)
 _KIND_WORKFLOW = {"cardnews": "instagram", "unknown": "ops"}
 
-# D6-1b: operator-copilot responder seam. None until D6-2 wires a real local
-# backend, so production stays INERT even when AGENT_OPERATOR_COPILOT_ENABLED
-# is on. Tests monkeypatch this with a fake; the copilot module itself remains
-# advisory-only / read-only regardless of what is injected here.
+# D6-1b: operator-copilot responder seam. Stays None in production; tests
+# monkeypatch this with a fake and it always OUTRANKS the env-selected backend
+# below. The copilot module itself remains advisory-only / read-only
+# regardless of what is injected here.
 _COPILOT_RESPONDER = None
+
+# D6-2b: env-selected backend. Production becomes live ONLY when BOTH gates
+# hold at message time: AGENT_OPERATOR_COPILOT_ENABLED (checked inside
+# operator_copilot.try_handle_copilot_message) AND
+# AGENT_OPERATOR_COPILOT_BACKEND=claude with the local `claude` binary present.
+_COPILOT_BACKEND_ENV = "AGENT_OPERATOR_COPILOT_BACKEND"
+
+
+def _resolve_copilot_responder() -> Optional[Callable[[str], str]]:
+    """Pick the copilot responder for this message, or None (hook inert).
+
+    Precedence:
+      1. test-injected `_COPILOT_RESPONDER` seam (never overridden by env),
+      2. hardened local backend (copilot_backend.respond) when the env selects
+         `claude` AND the binary is available — the backend itself runs in plan
+         mode with ALL tools disabled and returns "" on any failure,
+      3. None -> the 0d hook is skipped and every existing flow runs unchanged.
+    """
+    if _COPILOT_RESPONDER is not None:
+        return _COPILOT_RESPONDER
+    if (os.environ.get(_COPILOT_BACKEND_ENV, "").strip().lower() == "claude"
+            and _copilot_backend.is_available()):
+        return _copilot_backend.respond
+    return None
 
 
 def request_from_nl(text: str, *, requested_by: str,
@@ -208,9 +234,10 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     #    claimed here. Advisory-only and read-only: it executes nothing and
     #    writes nothing; on decline/failure it returns None so every flow below
     #    runs unchanged (also the default when the flag is off).
-    if _COPILOT_RESPONDER is not None:
+    responder = _resolve_copilot_responder()
+    if responder is not None:
         copilot_out = _copilot.try_handle_copilot_message(
-            text, responder=_COPILOT_RESPONDER, store_path=store_path,
+            text, responder=responder, store_path=store_path,
             events_path=events_path)
         if copilot_out is not None:
             return copilot_out

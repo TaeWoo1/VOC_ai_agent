@@ -15,6 +15,8 @@ no real Claude, no subprocess, no network.
 
 from __future__ import annotations
 
+import pytest
+
 import operator_copilot
 import task_discord_adapter as adapter
 
@@ -218,3 +220,163 @@ def test_copilot_module_unchanged_by_wiring():
     assert operator_copilot.is_enabled.__module__ == "operator_copilot"
     assert operator_copilot.is_copilot_eligible("진행된 내용 정리") is True
     assert operator_copilot.is_copilot_eligible("task_3fa2c1 정리") is False
+
+
+# --------------------------------------------------------------------------- #
+# D6-2b: env-selected backend resolver matrix
+# --------------------------------------------------------------------------- #
+
+_BACKEND = "AGENT_OPERATOR_COPILOT_BACKEND"
+
+
+def _patch_backend(monkeypatch, *, available: bool = True,
+                   reply: str = "백엔드 조언"):
+    """Patch the copilot_backend seen by the adapter. respond is ALWAYS faked
+    so no test can ever spawn a real subprocess / real Claude."""
+    monkeypatch.setattr(adapter._copilot_backend, "is_available",
+                        lambda: available)
+    calls = {"respond": 0}
+
+    def _fake_respond(prompt, **kwargs):
+        calls["respond"] += 1
+        return reply
+
+    monkeypatch.setattr(adapter._copilot_backend, "respond", _fake_respond)
+    return calls
+
+
+def test_resolver_matrix_unit(monkeypatch):
+    _patch_backend(monkeypatch, available=True)
+    # default: no seam, no env -> None
+    monkeypatch.delenv(_BACKEND, raising=False)
+    assert adapter._resolve_copilot_responder() is None
+    # BACKEND set to a non-claude value -> None
+    monkeypatch.setenv(_BACKEND, "gpt")
+    assert adapter._resolve_copilot_responder() is None
+    # BACKEND=claude + available -> backend respond (case-insensitive)
+    monkeypatch.setenv(_BACKEND, "Claude")
+    assert adapter._resolve_copilot_responder() is adapter._copilot_backend.respond
+    # BACKEND=claude + binary missing -> None
+    _patch_backend(monkeypatch, available=False)
+    monkeypatch.setenv(_BACKEND, "claude")
+    assert adapter._resolve_copilot_responder() is None
+    # seam outranks env backend
+    _patch_backend(monkeypatch, available=True)
+    seam = lambda prompt: "SEAM"  # noqa: E731
+    monkeypatch.setattr(adapter, "_COPILOT_RESPONDER", seam)
+    assert adapter._resolve_copilot_responder() is seam
+
+
+def test_backend_only_without_enabled_flag_is_inert(tmp_path, monkeypatch):
+    monkeypatch.delenv(_FLAG, raising=False)
+    monkeypatch.setenv(_BACKEND, "claude")
+    calls = _patch_backend(monkeypatch, available=True)
+    out = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] != "operator_copilot"
+    assert calls["respond"] == 0          # responder resolved but never invoked
+
+
+def test_enabled_only_without_backend_is_inert(tmp_path, monkeypatch):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.delenv(_BACKEND, raising=False)
+    _patch_backend(monkeypatch, available=True)   # defensive; must not resolve
+    out = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] != "operator_copilot"
+
+
+def test_enabled_and_backend_but_unavailable_is_inert(tmp_path, monkeypatch):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    calls = _patch_backend(monkeypatch, available=False)
+    out = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] != "operator_copilot"
+    assert calls["respond"] == 0
+
+
+def test_fully_enabled_env_backend_claims_safe_messages(tmp_path, monkeypatch):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    calls = _patch_backend(monkeypatch, available=True)
+    for msg in ("진행된 내용 정리", "지금 뭐부터 하면 돼?"):
+        out = adapter.handle_nl_message(
+            msg, operator_discord_id="606", **_paths(tmp_path))
+        assert out["intent"] == "operator_copilot"
+        assert out["reply"].startswith("🤖 copilot(조언 전용) · 실행 없음\n")
+        assert out["reply"].endswith("백엔드 조언")
+    assert calls["respond"] == 2
+
+
+def test_seam_wins_over_env_backend(tmp_path, monkeypatch):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    calls = _patch_backend(monkeypatch, available=True, reply="ENV")
+    monkeypatch.setattr(adapter, "_COPILOT_RESPONDER", lambda prompt: "SEAM")
+    out = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] == "operator_copilot"
+    assert out["reply"].endswith("SEAM")
+    assert calls["respond"] == 0
+
+
+def test_env_backend_empty_reply_falls_through(tmp_path, monkeypatch):
+    # Baseline with everything off…
+    monkeypatch.delenv(_FLAG, raising=False)
+    monkeypatch.delenv(_BACKEND, raising=False)
+    base = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    # …must equal the fully-enabled path when the backend returns "" (failure).
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    _patch_backend(monkeypatch, available=True, reply="")
+    out = adapter.handle_nl_message(
+        "진행된 내용 정리", operator_discord_id="606", **_paths(tmp_path))
+    assert out == base
+
+
+@pytest.mark.parametrize("msg, expect", [
+    ("상태 알려줘", "operator_status"),
+    ("status", "operator_status"),
+    ("진행해", None),
+    ("응", None),
+    ("취소", None),
+    ("최종 발송 승인", None),
+    ("최종 게시 승인", None),
+    ("라이브 수집 승인", None),
+    ("task_3fa2c1 정리", None),
+])
+def test_env_backend_preserves_deterministic_owners(tmp_path, monkeypatch,
+                                                    msg, expect):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    calls = _patch_backend(monkeypatch, available=True)
+    out = adapter.handle_nl_message(
+        msg, operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] != "operator_copilot"
+    if expect is not None:
+        assert out["intent"] == expect
+    assert calls["respond"] == 0
+
+
+def test_env_backend_new_task_still_creates_graph(tmp_path, monkeypatch):
+    monkeypatch.setenv(_FLAG, "1")
+    monkeypatch.setenv(_BACKEND, "claude")
+    _patch_backend(monkeypatch, available=True)
+    out = adapter.handle_nl_message(
+        "snature 카드뉴스 만들어줘", operator_discord_id="606", **_paths(tmp_path))
+    assert out["intent"] != "operator_copilot"
+    assert "parent_task_id" in out
+
+
+def test_resolver_adds_no_subprocess_or_write_calls():
+    import inspect
+
+    src = inspect.getsource(adapter)
+    assert "import copilot_backend" in src
+    assert "import subprocess" not in src
+    rsrc = inspect.getsource(adapter._resolve_copilot_responder)
+    for tok in ("write_text(", "write_bytes(", ".mkdir(", ".unlink(",
+                ".rename(", "os.remove", "shutil.", "Popen"):
+        assert tok not in rsrc, f"unexpected call in resolver: {tok}"
