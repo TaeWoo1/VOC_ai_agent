@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import agent_discord_adapter as _agent_discord
+import operator_copilot as _copilot
 import status_discord_adapter as _status_discord
 import agent_report_formatting as _arf
 import claude_orchestrator as _planner
@@ -35,6 +36,12 @@ from task_model import TaskRequest
 
 # plan-kind → request workflow (the planners then set each task's own workflow)
 _KIND_WORKFLOW = {"cardnews": "instagram", "unknown": "ops"}
+
+# D6-1b: operator-copilot responder seam. None until D6-2 wires a real local
+# backend, so production stays INERT even when AGENT_OPERATOR_COPILOT_ENABLED
+# is on. Tests monkeypatch this with a fake; the copilot module itself remains
+# advisory-only / read-only regardless of what is injected here.
+_COPILOT_RESPONDER = None
 
 
 def request_from_nl(text: str, *, requested_by: str,
@@ -191,6 +198,22 @@ def handle_nl_message(text: str, *, operator_discord_id: str, store_path: Path,
     status_reply = _status_discord.try_handle_status_message(text)
     if status_reply is not None:
         return {"intent": "operator_status", "handled": True, "reply": status_reply}
+
+    # 0d. D6-1b advisory operator copilot (flag-gated, default OFF; responder
+    #    seam empty until D6-2 -> inert in production). For the SAFE
+    #    conversational bucket only: the copilot module declines confirmations,
+    #    bare cancel verbs, final-approval phrases, operational intents,
+    #    NEW_TASK, and explicit-task-id cancels, so 진행해 / 취소 handshakes /
+    #    최종 발송·게시 승인 / 라이브 수집 승인 / graph creation are NEVER
+    #    claimed here. Advisory-only and read-only: it executes nothing and
+    #    writes nothing; on decline/failure it returns None so every flow below
+    #    runs unchanged (also the default when the flag is off).
+    if _COPILOT_RESPONDER is not None:
+        copilot_out = _copilot.try_handle_copilot_message(
+            text, responder=_COPILOT_RESPONDER, store_path=store_path,
+            events_path=events_path)
+        if copilot_out is not None:
+            return copilot_out
 
     # 1. question-like: M6-A planner (if eligible) else read-only answer. Zero writes.
     if _conv.is_question_like(text):
