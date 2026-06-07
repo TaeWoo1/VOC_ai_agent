@@ -25,6 +25,11 @@ offline wiring helpers:
   that can reach OpenAI, and only when the caller passes
   ``enable_multimodal=True`` (a key gate and per-tile fail-soft live in the
   extractor). NO postprocess, NO review-file creation, NO gap attach.
+- ``review_snapshot_guidance_draft`` (S2x.6e): deterministic, local-only
+  postprocess of the extraction draft via the S2x.3c module — writes
+  ``product_guidance_review.json`` (the file the attach helper and the
+  Notion gap surfaces consume). NO OpenAI, NO gap attach, NO draft
+  mutation.
 
 Discipline: NO ProductKnowledge, NO Notion / store / review-analysis
 integration. NO network and NO OpenAI anywhere EXCEPT inside
@@ -33,7 +38,8 @@ integration. NO network and NO OpenAI anywhere EXCEPT inside
 ``skipped_no_key`` without a resolvable key — never a silent live call). The
 only file writes are the gitignored snapshot artifacts produced by
 ``ingest_uploaded_images`` / ``make_snapshot_tiles`` /
-``extract_snapshot_guidance_draft`` (the attach helper writes nothing). The input ``result`` is never mutated; every
+``extract_snapshot_guidance_draft`` / ``review_snapshot_guidance_draft``
+(the attach helper writes nothing). The input ``result`` is never mutated; every
 no-gap path (missing snapshot_dir, missing/invalid review, empty issue list)
 returns an unchanged copy so the Notion export falls back to its review-only
 section.
@@ -42,6 +48,7 @@ section.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from src.voc.review_ops.industrial.detail_snapshot.guidance_gap import BASIS
@@ -49,6 +56,9 @@ from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_apply import (
     REVIEW_FILENAME,
     analyze_issue_list_guidance_gaps,
     load_guidance_review,
+)
+from src.voc.review_ops.industrial.detail_snapshot.guidance_postprocess import (
+    review_guidance_draft,
 )
 from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
     DEFAULT_ARTIFACT_ROOT,
@@ -224,3 +234,38 @@ def extract_snapshot_guidance_draft(
         model=model,
         tile_extractor=tile_extractor,
     )
+
+
+def review_snapshot_guidance_draft(snapshot_dir: str | Path | None) -> dict:
+    """Postprocess a snapshot's extraction draft into the review file (S2x.6e).
+
+    Thin app-facing wrapper over the S2x.3c deterministic postprocess: reads
+    ``product_guidance_draft.json`` and writes ``product_guidance_review.json``
+    — the exact file the attach helper / gap preview / Notion export already
+    consume, so those surfaces work naturally once this succeeds. Local-only:
+    NO OpenAI, NO multimodal, NO network; the draft is read, never modified.
+    Re-running is a deterministic overwrite of the review file.
+
+    Returns the postprocess result (``status`` / ``reason`` / ``review_path``
+    plus ``not_found_count`` / ``gap_signal_count`` / ``quality_flag_count``),
+    extended with ``confirmed_count`` (total confirmed-guidance items across
+    buckets) on success. Fail-soft: empty/blank path or a missing/unparseable
+    draft returns ``status="error"`` with no file writes.
+    """
+    cleaned = str(snapshot_dir or "").strip()
+    if not cleaned:
+        return {
+            "status": "error",
+            "reason": "스냅샷 경로가 없습니다.",
+            "snapshot_dir": "",
+            "review_path": None,
+        }
+    out = review_guidance_draft(cleaned)
+    if out.get("status") == "ok" and out.get("review_path"):
+        try:
+            review = json.loads(Path(out["review_path"]).read_text(encoding="utf-8"))
+            buckets = review.get("confirmed_guidance") or {}
+            out["confirmed_count"] = sum(len(v or []) for v in buckets.values())
+        except Exception:  # fail-soft: count is advisory display data
+            out["confirmed_count"] = None
+    return out

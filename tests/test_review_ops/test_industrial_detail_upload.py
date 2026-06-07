@@ -207,6 +207,110 @@ def test_app_reaches_extraction_only_via_wiring_helper():
     assert "extract_guidance(" not in app_src  # engine entrypoint stays unimported
 
 
+# --- S2x.6e: draft -> review postprocess wrapper (local-only) ----------------
+
+
+def _drafted_snapshot(tmp_path) -> Path:
+    """Snapshot with a real extraction draft, built via the mock seam."""
+    snap = _tiled_snapshot(tmp_path)
+    out = ggw.extract_snapshot_guidance_draft(
+        snap,
+        enable_multimodal=True,
+        model="mock-model",
+        tile_extractor=lambda p, *, model: {
+            "usage_installation": [
+                {"value": "부착 전 물기/먼지 제거",
+                 "verbatim": "부착할 위치의 물기나 먼지를 깨끗이 닦아내 주세요.",
+                 "confidence": "high"},
+                {"value": "피스/실리콘 고정",
+                 "verbatim": "피스나 실리콘을 이용하면 더욱 단단하게 고정이 가능합니다.",
+                 "confidence": "high"},
+            ],
+            "cutting_handling": [
+                {"value": "가위로 재단", "verbatim": "가위로 재단하세요.",
+                 "confidence": "high"},
+            ],
+        },
+    )
+    assert out["status"] == "ok"
+    return snap
+
+
+def test_review_empty_path_fails_soft(tmp_path):
+    for empty in (None, "", "   "):
+        out = ggw.review_snapshot_guidance_draft(empty)
+        assert out["status"] == "error"
+        assert out["review_path"] is None
+    assert list(tmp_path.iterdir()) == []  # nothing written anywhere
+
+
+def test_review_missing_draft_asks_to_extract_first(tmp_path):
+    snap = _tiled_snapshot(tmp_path)  # tiles exist, but no draft
+    out = ggw.review_snapshot_guidance_draft(snap)
+    assert out["status"] == "error"
+    assert "초안을 생성하세요" in out["reason"]
+    assert not (snap / ggw.REVIEW_FILENAME).exists()
+
+
+def test_review_written_from_existing_draft(tmp_path):
+    snap = _drafted_snapshot(tmp_path)
+    out = ggw.review_snapshot_guidance_draft(snap)
+    assert out["status"] == "ok"
+    review_path = Path(out["review_path"])
+    assert review_path == snap / ggw.REVIEW_FILENAME
+    review = json.loads(review_path.read_text(encoding="utf-8"))
+    # schema consumed by gap_apply / preview / Notion export
+    for key in ("confirmed_guidance", "not_found_guidance",
+                "review_gap_ready_signals", "quality_flags"):
+        assert key in review, key
+    assert review["needs_operator_review"] is True
+    assert review["consumer_visible_only"] is True
+    # summary counts surfaced for the UI
+    assert out["confirmed_count"] >= 1
+    assert isinstance(out["not_found_count"], int)
+    assert isinstance(out["gap_signal_count"], int)
+    assert isinstance(out["quality_flag_count"], int)
+
+
+def test_review_flows_into_existing_gap_attach(tmp_path):
+    # once the review exists, the S2x.5b attach path works naturally
+    snap = _drafted_snapshot(tmp_path)
+    assert ggw.review_snapshot_guidance_draft(snap)["status"] == "ok"
+    result = {"issue_items": [{"issue_title": "접착력 부족"},
+                              {"issue_title": "절단 시 깨짐"}]}
+    out = ggw.attach_detail_guidance_gaps(result, snap)
+    assert "detail_guidance_gaps" in out
+    assert [g["issue_title"] for g in out["detail_guidance_gaps"]] == [
+        "접착력 부족", "절단 시 깨짐"]
+
+
+def test_review_overwrite_is_deterministic_and_draft_untouched(tmp_path):
+    import hashlib
+
+    snap = _drafted_snapshot(tmp_path)
+    draft_path = snap / "product_guidance_draft.json"
+    draft_hash_before = hashlib.sha256(draft_path.read_bytes()).hexdigest()
+
+    first = ggw.review_snapshot_guidance_draft(snap)
+    r1 = json.loads(Path(first["review_path"]).read_text(encoding="utf-8"))
+    second = ggw.review_snapshot_guidance_draft(snap)
+    r2 = json.loads(Path(second["review_path"]).read_text(encoding="utf-8"))
+    # identical content modulo the run timestamp; nothing duplicated
+    r1.pop("generated_at"), r2.pop("generated_at")
+    assert r1 == r2
+    assert first["confirmed_count"] == second["confirmed_count"]
+    # the draft is read, never modified
+    assert hashlib.sha256(draft_path.read_bytes()).hexdigest() == draft_hash_before
+
+
+def test_app_reaches_postprocess_only_via_wiring_helper():
+    root = Path(ggw.__file__).parents[5]
+    app_src = (root / "app_industrial_review_ops.py").read_text(encoding="utf-8")
+    assert "review_snapshot_guidance_draft" in app_src
+    assert "guidance_postprocess" not in app_src
+    assert "review_guidance_draft(" not in app_src  # engine entrypoint stays unimported
+
+
 # --- S2x.6c: snapshot -> tiles wrapper ---------------------------------------
 
 
@@ -288,11 +392,11 @@ def test_tiling_creates_no_guidance_files(tmp_path):
     assert not (snap / ggw.REVIEW_FILENAME).exists()
 
 
-def test_wiring_module_has_no_direct_network_ui_or_postprocess_import():
-    # S2x.6d note: the wiring module now intentionally imports
-    # multimodal_extract (the opt-in extraction seam), so that name is no
-    # longer banned here — the extractor itself owns the key gate and the
-    # only OpenAI use. Direct network/UI/postprocess imports stay banned.
+def test_wiring_module_has_no_direct_network_or_ui_import():
+    # S2x.6d/6e note: the wiring module now intentionally imports
+    # multimodal_extract (the opt-in extraction seam — the extractor owns the
+    # key gate and the only OpenAI use) and guidance_postprocess (the
+    # deterministic local review seam). Direct network/UI imports stay banned.
     src = Path(ggw.__file__).read_text(encoding="utf-8")
     low = src.lower()
     for bad in (
@@ -302,7 +406,6 @@ def test_wiring_module_has_no_direct_network_ui_or_postprocess_import():
         "import httpx",
         "import socket",
         "urllib.request",
-        "guidance_postprocess",
         "import streamlit",
         "from streamlit",
     ):

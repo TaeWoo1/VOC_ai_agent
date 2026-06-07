@@ -47,6 +47,7 @@ from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import (
     extract_snapshot_guidance_draft,
     ingest_uploaded_images,
     make_snapshot_tiles,
+    review_snapshot_guidance_draft,
 )
 from src.voc.review_ops.industrial.ingest import _build_header_map
 from src.voc.review_ops.industrial.normalize import normalize_rows
@@ -1610,6 +1611,51 @@ def _render_guidance_extraction(snapshot_dir: str | None) -> None:
             st.caption(reason)
 
 
+def _render_guidance_review(snapshot_dir: str | None) -> None:
+    """상세페이지 안내 검토 결과 생성 button (S2x.6e).
+
+    Click-only deterministic postprocess: turns the extraction draft into
+    product_guidance_review.json via the offline wiring helper — the file the
+    existing gap preview / Notion export already consume, so those surfaces
+    work naturally afterwards. Local-only (no OpenAI, no multimodal, no
+    network, no Notion call); the draft is read, never modified; the main
+    analysis result/session result is untouched. Never auto-runs after
+    extraction. Fail-soft: empty path / missing draft → non-blocking
+    info/warning."""
+    st.caption(
+        "안내 추출 초안을 운영 점검용 결과로 정리합니다. "
+        "외부 AI 호출 없이 로컬에서 처리됩니다. 결과는 운영자 확인이 필요합니다."
+    )
+    if not st.button("상세페이지 안내 검토 결과 생성", key="review_guidance_btn"):
+        return
+    cleaned = (snapshot_dir or "").strip()
+    if not cleaned:
+        st.info("상세페이지 스냅샷 경로를 먼저 입력하거나 이미지를 업로드해 주세요.")
+        return
+    out = review_snapshot_guidance_draft(cleaned)
+    status = out.get("status")
+    reason = out.get("reason") or ""
+    if status == "ok":
+        st.session_state["detail_guidance_review_ready"] = True
+        st.session_state["detail_guidance_review_snapshot_dir"] = cleaned
+        st.success("상세페이지 안내 검토 결과를 생성했습니다.")
+        if out.get("review_path"):
+            st.code(out["review_path"])
+        if out.get("confirmed_count") is not None:
+            st.caption(f"확인된 안내 항목 {out['confirmed_count']}건")
+        st.caption(
+            f"찾지 못한 안내 주제 {out.get('not_found_count', 0)}건 · "
+            f"리뷰 gap 점검 신호 {out.get('gap_signal_count', 0)}건 · "
+            f"품질 확인 플래그 {out.get('quality_flag_count', 0)}건"
+        )
+    elif "초안을 생성하세요" in reason:
+        st.warning("상세페이지 안내 추출을 먼저 실행해 주세요.")
+    else:
+        st.warning("상세페이지 안내 검토 결과를 생성하지 못했습니다.")
+        if reason:
+            st.caption(reason)
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
@@ -1625,6 +1671,10 @@ def _render_notion_export(result: dict) -> None:
     Optional guidance extraction (S2x.6d): a further click-only button sends
     the tiles to the external AI API (disclosed in a caption) and writes the
     guidance draft. Never auto-runs.
+
+    Optional guidance review (S2x.6e): a final click-only button postprocesses
+    the draft into the review file (local-only, deterministic) — after which
+    the gap preview/export below pick it up naturally.
 
     Optional detail-snapshot input (S2x.5b-2): when the operator enters a
     snapshot path, the export payload is built from
@@ -1650,6 +1700,7 @@ def _render_notion_export(result: dict) -> None:
     )
     _render_tile_generation(snapshot_dir)
     _render_guidance_extraction(snapshot_dir)
+    _render_guidance_review(snapshot_dir)
     result_for_notion = prepare_result_for_notion(result, snapshot_dir)
     if (snapshot_dir or "").strip():
         if "detail_guidance_gaps" in result_for_notion:
