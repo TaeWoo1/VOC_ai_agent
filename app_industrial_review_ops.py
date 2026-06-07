@@ -40,6 +40,9 @@ from src.voc.review_ops.industrial import (
 )
 from src.voc.review_ops.industrial.classify import classify
 from src.voc.review_ops.industrial.dedup import dedup
+from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import (
+    attach_detail_guidance_gaps,
+)
 from src.voc.review_ops.industrial.ingest import _build_header_map
 from src.voc.review_ops.industrial.normalize import normalize_rows
 from src.voc.review_ops.industrial.render_html import render_report_html
@@ -1385,14 +1388,54 @@ def _render_sidebar() -> None:
                 _render_advanced_notes(result)
 
 
+def prepare_result_for_notion(result: dict, snapshot_dir: str | None) -> dict:
+    """Result dict to hand the Notion payload builders (S2x.5b-2).
+
+    Pure and fail-soft: a copy of ``result`` with detail-guidance gaps attached
+    when ``snapshot_dir`` (whitespace-stripped) points at a snapshot directory
+    whose ``product_guidance_review.json`` loads AND the result has issue
+    items; every other case returns an unchanged copy, so the Notion export
+    keeps its review-only 상세페이지/안내 점검 후보 section. The attached copy
+    is export-only — the session-state result is never mutated. No multimodal,
+    no network, no file writes; only a local JSON read inside the helper."""
+    cleaned = (snapshot_dir or "").strip()
+    if not cleaned:
+        return dict(result or {})
+    return attach_detail_guidance_gaps(result, cleaned)
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
     NOTION_PARENT_PAGE_ID. Backend (resolve_notion_export_mode) owns the routing.
 
+    Optional detail-snapshot input (S2x.5b-2): when the operator enters a
+    snapshot path, the export payload is built from
+    ``prepare_result_for_notion`` so the Notion 상세페이지/안내 점검 후보
+    section can use extraction-based gap results. Empty path → identical to
+    the previous behavior; missing/invalid review → non-blocking caption and
+    the export proceeds review-only.
+
     Fail-soft: disabled with a caption when settings are missing; on a failed
     export it warns and the app keeps working. The DB path retries once with
     title + body only on a schema mismatch and surfaces a note. No secret shown."""
+    snapshot_dir = st.text_input(
+        "상세페이지 스냅샷 경로",
+        value="",
+        placeholder=".review_ops_data/detail_snapshots/local-4a024b5a5a",
+        help=(
+            "product_guidance_review.json이 있는 "
+            ".review_ops_data/detail_snapshots/... 경로를 입력하면 Notion 기록 시 "
+            "상세페이지 이미지 추출 결과를 함께 참고합니다."
+        ),
+        key="notion_snapshot_dir",
+    )
+    result_for_notion = prepare_result_for_notion(result, snapshot_dir)
+    if (snapshot_dir or "").strip():
+        if "detail_guidance_gaps" in result_for_notion:
+            st.caption("상세페이지 이미지 추출 결과를 Notion 점검 후보에 함께 반영합니다.")
+        else:
+            st.caption("상세페이지 스냅샷을 찾지 못해 리뷰 기반 점검 후보로 기록합니다.")
     mode, api_key, target_id = notion_export.resolve_notion_export_mode()
     if mode == "none":
         st.button("Notion에 기록하기", disabled=True, key="notion_export_btn")
@@ -1405,14 +1448,14 @@ def _render_notion_export(result: dict) -> None:
         with st.spinner("Notion에 기록하는 중…"):
             if mode == "database":
                 payload = notion_export.build_notion_database_payload(
-                    result, target_id, datetime.now()
+                    result_for_notion, target_id, datetime.now()
                 )
                 export = notion_export.export_to_notion_database(
                     payload, api_key=api_key
                 )
             else:
                 payload = notion_export.build_notion_payload(
-                    result, target_id, date.today()
+                    result_for_notion, target_id, date.today()
                 )
                 export = notion_export.export_to_notion(payload, api_key=api_key)
         if export.ok:

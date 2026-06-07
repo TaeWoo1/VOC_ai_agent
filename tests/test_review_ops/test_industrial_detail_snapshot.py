@@ -237,7 +237,6 @@ def test_capture_module_has_no_toplevel_browser_or_openai_import():
 def test_snapshot_module_not_referenced_by_protected_surfaces():
     root = Path(cap.__file__).parents[5]  # repo root
     for rel in (
-        "app_industrial_review_ops.py",
         "src/voc/review_ops/industrial/notion_export.py",
         "src/voc/review_ops/industrial/store.py",
         "src/voc/review_ops/industrial/rag.py",
@@ -246,6 +245,15 @@ def test_snapshot_module_not_referenced_by_protected_surfaces():
     ):
         text = (root / rel).read_text(encoding="utf-8")
         assert "detail_snapshot" not in text, rel
+    # S2x.5b-2: the app's ONLY allowed contact with the package is the wiring
+    # helper import (plus the .review_ops_data/detail_snapshots placeholder
+    # path in the UI); capture/tiling/multimodal/etc. stay un-imported.
+    app_src = (root / "app_industrial_review_ops.py").read_text(encoding="utf-8")
+    residue = app_src.replace(
+        "from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import",
+        "",
+    ).replace(".review_ops_data/detail_snapshots/", "")
+    assert "detail_snapshot" not in residue
 
 
 # --- S2x.2-local: local detail-image ingest ---------------------------------
@@ -1060,7 +1068,6 @@ def test_gap_module_has_no_network_or_openai_import():
 def test_protected_surfaces_do_not_reference_guidance_gap():
     root = Path(gg.__file__).parents[5]
     for rel in (
-        "app_industrial_review_ops.py",
         "src/voc/review_ops/industrial/store.py",
         "src/voc/review_ops/industrial/rag.py",
         "src/voc/review_ops/industrial/issue_discovery.py",
@@ -1075,6 +1082,14 @@ def test_protected_surfaces_do_not_reference_guidance_gap():
     )
     assert "detail_snapshot" not in notion_src
     assert "import guidance_gap" not in notion_src
+    # S2x.5b-2: the app may reach gap analysis ONLY through the wiring helper
+    # (attach_detail_guidance_gaps); stripping those authorized names must
+    # leave no guidance_gap reference (no direct gg / gga import).
+    app_src = (root / "app_industrial_review_ops.py").read_text(encoding="utf-8")
+    residue = app_src.replace("guidance_gap_wiring", "").replace(
+        "attach_detail_guidance_gaps", ""
+    ).replace('"detail_guidance_gaps"', "")
+    assert "guidance_gap" not in residue
 
 
 # --- S2x.4b: apply gap helper over a list of issues --------------------------
@@ -1311,9 +1326,10 @@ def test_wiring_module_has_no_network_or_openai_import():
 
 
 def test_protected_surfaces_do_not_reference_guidance_gap_wiring():
+    # S2x.5b-2: app_industrial_review_ops.py is the one authorized caller of
+    # the wiring helper (Notion-export path only); engine surfaces stay clean.
     root = Path(ggw.__file__).parents[5]
     for rel in (
-        "app_industrial_review_ops.py",
         "src/voc/review_ops/industrial/notion_export.py",
         "src/voc/review_ops/industrial/store.py",
         "src/voc/review_ops/industrial/rag.py",
