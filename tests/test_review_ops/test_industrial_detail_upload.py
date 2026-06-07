@@ -1,9 +1,10 @@
-"""Uploaded-image ingest wiring (S2x.6b): ingest_uploaded_images.
+"""Uploaded-image ingest wiring (S2x.6b): ingest_uploaded_images,
+plus the tile-generation wrapper (S2x.6c): make_snapshot_tiles.
 
 Offline, no Streamlit E2E, no OpenAI, no network. Exercises the pure
-``(filename, bytes)`` helper the Streamlit uploader wraps; the directory
-ingest itself (artifact writing, per-image fail-soft) is covered by the
-S2x.2-local tests in test_industrial_detail_snapshot.py.
+helpers the Streamlit upload/tile buttons wrap; the directory ingest and the
+tiling engine themselves are covered by the S2x.2-local / S2x.3a tests in
+test_industrial_detail_snapshot.py.
 """
 
 from __future__ import annotations
@@ -111,6 +112,87 @@ def test_unreadable_image_bytes_fail_soft(tmp_path):
     assert out["status"] == "error"
     assert Path(out["snapshot_dir"]).is_dir()
     assert (Path(out["snapshot_dir"]) / "snapshot_metadata.json").exists()
+
+
+# --- S2x.6c: snapshot -> tiles wrapper ---------------------------------------
+
+
+def _uploaded_snapshot(tmp_path, *, height: int = 250) -> Path:
+    out = ggw.ingest_uploaded_images(
+        [("tall.png", _png_bytes(8, height))], product_name="p", out_root=tmp_path
+    )
+    assert out["status"] == "ok"
+    return Path(out["snapshot_dir"])
+
+
+def test_tiles_created_for_tall_image(tmp_path):
+    snap = _uploaded_snapshot(tmp_path, height=250)
+    # 250px tall at tile_height=100/overlap=10 -> bounds (0,100),(90,190),(180,250)
+    out = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert out["status"] == "ok"
+    assert out["tile_count"] == 3
+    tiles_dir = Path(out["tiles_dir"])
+    assert tiles_dir == snap / "tiles"
+    assert sorted(p.name for p in tiles_dir.iterdir()) == [
+        "tile_000_000.jpg",
+        "tile_000_001.jpg",
+        "tile_000_002.jpg",
+    ]
+    manifest = json.loads((snap / "tiles_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "ok"
+    assert manifest["tiling_params"]["tile_count"] == 3
+    assert manifest["tiling_params"]["source_image_count"] == 1
+
+
+def test_short_image_yields_single_tile(tmp_path):
+    snap = _uploaded_snapshot(tmp_path, height=50)
+    out = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert out["status"] == "ok"
+    assert out["tile_count"] == 1
+
+
+def test_missing_snapshot_fails_soft(tmp_path):
+    for bad in (None, "", "   "):
+        out = ggw.make_snapshot_tiles(bad)
+        assert out["status"] == "error"
+        assert out["tile_count"] == 0
+    assert list(tmp_path.iterdir()) == []  # blank inputs touch nothing
+    out = ggw.make_snapshot_tiles(tmp_path / "nope")
+    assert out["status"] == "error"
+    assert out["tile_count"] == 0
+
+
+def test_missing_images_fails_soft(tmp_path):
+    import shutil
+
+    snap = _uploaded_snapshot(tmp_path)
+    shutil.rmtree(snap / "images")
+    out = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert out["status"] == "error"
+    assert out["tile_count"] == 0
+    # failure is still recorded in the manifest, app keeps working
+    manifest = json.loads((snap / "tiles_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "error"
+
+
+def test_regeneration_is_deterministic_overwrite(tmp_path):
+    snap = _uploaded_snapshot(tmp_path, height=250)
+    first = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    second = ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert first["tile_count"] == second["tile_count"] == 3
+    # no duplicated/stale tiles linger
+    assert len(list((snap / "tiles").iterdir())) == 3
+    # smaller re-run replaces, never accumulates
+    third = ggw.make_snapshot_tiles(snap, tile_height=300, overlap_px=10)
+    assert third["tile_count"] == 1
+    assert len(list((snap / "tiles").iterdir())) == 1
+
+
+def test_tiling_creates_no_guidance_files(tmp_path):
+    snap = _uploaded_snapshot(tmp_path)
+    ggw.make_snapshot_tiles(snap, tile_height=100, overlap_px=10)
+    assert not (snap / "product_guidance_draft.json").exists()
+    assert not (snap / ggw.REVIEW_FILENAME).exists()
 
 
 def test_wiring_module_stays_ingest_only():

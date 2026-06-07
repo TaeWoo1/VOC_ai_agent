@@ -45,6 +45,7 @@ from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_wiring import (
     REVIEW_FILENAME,
     attach_detail_guidance_gaps,
     ingest_uploaded_images,
+    make_snapshot_tiles,
 )
 from src.voc.review_ops.industrial.ingest import _build_header_map
 from src.voc.review_ops.industrial.normalize import normalize_rows
@@ -1533,6 +1534,35 @@ def _render_detail_image_upload(result: dict) -> None:
         st.warning(f"스냅샷을 생성하지 못했습니다. {notes}".strip())
 
 
+def _render_tile_generation(snapshot_dir: str | None) -> None:
+    """상세페이지 타일 생성 button (S2x.6c).
+
+    Thin wrapper over the offline wiring helper: cuts the snapshot's ingested
+    images into vertical tiles (tiles/ + tiles_manifest.json, deterministic
+    overwrite — never duplicated). Tiles only — no extraction, no multimodal,
+    no OpenAI, no network, no guidance draft/review creation, no Notion call.
+    Runs only on click; never auto-runs after upload. Fail-soft: empty path /
+    missing images → non-blocking info/warning, app keeps working."""
+    if not st.button("상세페이지 타일 생성", key="create_tiles_btn"):
+        return
+    cleaned = (snapshot_dir or "").strip()
+    if not cleaned:
+        st.info("상세페이지 스냅샷 경로를 먼저 입력하거나 이미지를 업로드해 주세요.")
+        return
+    tiles = make_snapshot_tiles(cleaned)
+    if tiles.get("status") in ("ok", "partial") and tiles.get("tile_count"):
+        st.session_state["detail_tiles_ready"] = True
+        st.session_state["detail_tiles_snapshot_dir"] = cleaned
+        st.success("상세페이지 타일을 생성했습니다.")
+        st.caption(f"타일 {tiles['tile_count']}개 생성")
+        if tiles.get("status") == "partial":
+            st.caption("일부 이미지는 타일로 만들지 못했습니다.")
+    else:
+        st.warning("스냅샷 이미지가 없어 타일을 만들 수 없습니다.")
+        if tiles.get("reason"):
+            st.caption(tiles["reason"])
+
+
 def _render_notion_export(result: dict) -> None:
     """Single 'Notion에 기록하기' button. Routes to a DB row when
     NOTION_DATABASE_ID is set (the default surface), else to a plain page under
@@ -1541,6 +1571,9 @@ def _render_notion_export(result: dict) -> None:
     Optional image upload (S2x.6b): the operator can upload detail-page images
     here to create a local snapshot artifact; the created path prefills the
     snapshot input. Ingest only — extraction runs separately.
+
+    Optional tile generation (S2x.6c): a button below the path input cuts the
+    snapshot images into tiles for later opt-in extraction. Click-only.
 
     Optional detail-snapshot input (S2x.5b-2): when the operator enters a
     snapshot path, the export payload is built from
@@ -1564,6 +1597,7 @@ def _render_notion_export(result: dict) -> None:
         ),
         key="notion_snapshot_dir",
     )
+    _render_tile_generation(snapshot_dir)
     result_for_notion = prepare_result_for_notion(result, snapshot_dir)
     if (snapshot_dir or "").strip():
         if "detail_guidance_gaps" in result_for_notion:

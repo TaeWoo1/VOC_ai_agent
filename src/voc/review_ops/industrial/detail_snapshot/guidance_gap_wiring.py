@@ -15,11 +15,15 @@ offline wiring helpers:
   image bytes into the same gitignored local snapshot artifact shape via the
   S2x.2-local ingest. Ingest only — NO tiling, NO OCR, NO multimodal, NO
   guidance draft/review creation.
+- ``make_snapshot_tiles`` (S2x.6c): cut the ingested snapshot images into
+  vertical tiles via the S2x.3a tiling module (``tiles/`` +
+  ``tiles_manifest.json``, deterministic overwrite). Tiles only — NO
+  extraction, NO multimodal, NO guidance draft/review creation.
 
 Discipline: NO network, NO OpenAI, NO multimodal, NO ProductKnowledge, NO
 Notion / store / review-analysis integration. The only file writes are the
-gitignored snapshot artifacts produced by ``ingest_uploaded_images`` (the
-attach helper writes nothing). The input ``result`` is never mutated; every
+gitignored snapshot artifacts produced by ``ingest_uploaded_images`` /
+``make_snapshot_tiles`` (the attach helper writes nothing). The input ``result`` is never mutated; every
 no-gap path (missing snapshot_dir, missing/invalid review, empty issue list)
 returns an unchanged copy so the Notion export falls back to its review-only
 section.
@@ -39,6 +43,11 @@ from src.voc.review_ops.industrial.detail_snapshot.guidance_gap_apply import (
 from src.voc.review_ops.industrial.detail_snapshot.ingest_local import (
     DEFAULT_ARTIFACT_ROOT,
     ingest_local_images,
+)
+from src.voc.review_ops.industrial.detail_snapshot.tiling import (
+    DEFAULT_OVERLAP_PX,
+    DEFAULT_TILE_HEIGHT,
+    make_tiles,
 )
 
 
@@ -128,3 +137,36 @@ def ingest_uploaded_images(
         (staging / f"upload_{i:03d}{suffix}").write_bytes(bytes(data))
 
     return ingest_local_images(staging, product_name=product_name, out_root=out_root)
+
+
+def make_snapshot_tiles(
+    snapshot_dir: str | Path | None,
+    *,
+    tile_height: int = DEFAULT_TILE_HEIGHT,
+    overlap_px: int = DEFAULT_OVERLAP_PX,
+) -> dict:
+    """Cut a snapshot's ingested images into vertical tiles (S2x.6c).
+
+    Thin app-facing wrapper over the S2x.3a tiling module: writes
+    ``<snapshot_dir>/tiles/`` + ``<snapshot_dir>/tiles_manifest.json`` and
+    returns its ``{status, snapshot_dir, manifest_path, tile_count, tiles_dir}``
+    result. Re-running is a deterministic overwrite (the tiling module replaces
+    any prior ``tiles/``), so tiles are never duplicated.
+
+    Tiles ONLY: no OCR, no multimodal, no OpenAI, no network, no guidance
+    draft/review files. Fail-soft: an empty/blank ``snapshot_dir`` returns
+    ``status="error"`` without touching the filesystem; a missing folder /
+    manifest / images degrades inside the tiling module (error recorded in
+    ``tiles_manifest.json`` where possible).
+    """
+    cleaned = str(snapshot_dir or "").strip()
+    if not cleaned:
+        return {
+            "status": "error",
+            "reason": "스냅샷 경로가 없습니다.",
+            "snapshot_dir": "",
+            "manifest_path": None,
+            "tile_count": 0,
+            "tiles_dir": None,
+        }
+    return make_tiles(cleaned, tile_height=tile_height, overlap_px=overlap_px)
