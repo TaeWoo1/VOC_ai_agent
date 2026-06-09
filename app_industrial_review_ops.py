@@ -2053,6 +2053,20 @@ ASK_EXAMPLES = [
     "상세페이지에 추가할 만한 내용 있어?",
 ]
 
+# Q&A category scope: operator label -> taxonomy tag ids. "전체 리뷰" -> None keeps
+# the whole index in scope (unchanged behavior). Existing tags only; no taxonomy
+# change. Labels stay hedged ("후보") because tags can be imperfect.
+ASK_SCOPE_ALL = "전체 리뷰"
+ASK_SCOPE_TAGS: dict[str, set[str] | None] = {
+    ASK_SCOPE_ALL: None,
+    "배송/포장": {"delivery_packaging_damage"},
+    "접착/내구성": {"durability_adhesion_finish"},
+    "설치/시공": {"installation_difficulty"},
+    "구성품/옵션": {"missing_or_wrong_components", "component_option_confusion"},
+    "색상/외관": {"color_appearance_mismatch"},
+    "CS/교환/반품": {"cs_exchange_return_issue"},
+}
+
 
 def _ask_result_card(result: rag.SearchResult) -> None:
     m = result.doc.metadata
@@ -2069,7 +2083,12 @@ def _ask_result_card(result: rag.SearchResult) -> None:
     st.divider()
 
 
-def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> None:
+def _process_ask_query(
+    query: str,
+    index: rag.RagIndex,
+    api_key: str | None,
+    required_tags: set[str] | None = None,
+) -> None:
     query = (query or "").strip()
     if not query:
         return
@@ -2079,7 +2098,18 @@ def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
         st.error(f"질문을 처리하지 못했습니다: {e}")
         return
 
-    results = index.rank(query_emb, query_text=query, top_k=8, strict_tags=True)
+    results = index.rank(
+        query_emb, query_text=query, top_k=8, strict_tags=True, required_tags=required_tags
+    )
+
+    # Category scope yielded no candidate reviews: stop here with a clear note so
+    # the user isn't shown unrelated meaning-matches from outside the scope.
+    if required_tags is not None and not results:
+        st.session_state["rag_last_results"] = []
+        messages = st.session_state.setdefault("rag_messages", [])
+        messages.append({"role": "user", "content": query})
+        messages.append({"role": "assistant", "content": "선택한 카테고리 후보 리뷰가 없습니다."})
+        return
 
     # Negative-logistics post-filter: when the query asks for *negative*
     # packaging/shipping reviews, drop mis-tagged product-use breakage and
@@ -2154,6 +2184,9 @@ def _render_ask_tab() -> None:
 
     with left:
         st.markdown("#### 질문")
+        scope_label = st.selectbox("질문 대상 카테고리", list(ASK_SCOPE_TAGS.keys()), index=0)
+        st.caption("선택한 카테고리 후보 리뷰 안에서 답변합니다.")
+        required_tags = ASK_SCOPE_TAGS.get(scope_label)
         st.write("예시 질문:")
         for i, example in enumerate(ASK_EXAMPLES):
             if st.button(example, key=f"ask_ex_{i}"):
@@ -2167,7 +2200,7 @@ def _render_ask_tab() -> None:
         pending = st.session_state.pop("rag_pending", None)
         if pending:
             with st.spinner("찾는 중..."):
-                _process_ask_query(pending, index, api_key)
+                _process_ask_query(pending, index, api_key, required_tags=required_tags)
 
         st.markdown("#### 대화")
         for message in st.session_state.get("rag_messages", []):

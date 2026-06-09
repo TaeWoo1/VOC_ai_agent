@@ -359,11 +359,22 @@ class RagIndex:
         top_k: int = DEFAULT_TOP_K,
         boost_weight: float = DEFAULT_BOOST_WEIGHT,
         strict_tags: bool = False,
+        required_tags: set[str] | None = None,
     ) -> list[SearchResult]:
+        """Rank indexed docs against the query embedding.
+
+        ``required_tags`` (optional category scope) restricts the candidate set
+        at scoring time — only docs whose tags intersect ``required_tags`` are
+        considered, *before* ``top_k`` is applied. When ``None`` (the default),
+        every doc is a candidate and behavior is unchanged. An empty
+        ``required_tags`` set scopes to nothing and returns ``[]``.
+        """
         sims = _cosine_all(self._matrix, query_embedding)
         boosted = boosted_ids_for_query(query_text)
         results: list[SearchResult] = []
         for doc, sim in zip(self.documents, sims):
+            if required_tags is not None and not (required_tags & set(doc.tags)):
+                continue
             boost = boost_weight if (boosted & set(doc.tags)) else 0.0
             results.append(SearchResult(doc=doc, similarity=sim, score=sim + boost))
         if strict_tags and boosted:

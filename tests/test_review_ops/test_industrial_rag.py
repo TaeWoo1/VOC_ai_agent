@@ -255,3 +255,123 @@ def test_filter_does_not_affect_classify_or_issue_labels():
     # These issue-label queries never trigger the logistics filter.
     assert not rag.is_logistics_negative_query("접착력 부족")
     assert not rag.is_logistics_negative_query("절단 시 깨짐")
+
+
+# ---------------------------------------------------------------------------
+# Category scope (required_tags) — candidate restriction at scoring time
+# ---------------------------------------------------------------------------
+
+
+def _scoped_index():
+    """A 4-doc index with distinct tags and identical embeddings.
+
+    Document order puts the delivery doc LAST and an untagged doc FIRST, so a
+    correct scope restriction can't be faked by order or by similarity ties.
+    """
+    docs = [
+        rag.RagDocument(text="좋아요", metadata={"text": "좋아요"}, tags=[]),
+        rag.RagDocument(
+            text="접착이 약해요", metadata={"text": "접착이 약해요"},
+            tags=["durability_adhesion_finish"],
+        ),
+        rag.RagDocument(
+            text="구성품이 누락됐어요", metadata={"text": "구성품이 누락됐어요"},
+            tags=["missing_or_wrong_components"],
+        ),
+        rag.RagDocument(
+            text="박스 파손", metadata={"text": "박스 파손"},
+            tags=["delivery_packaging_damage"],
+        ),
+    ]
+    index = rag.RagIndex(docs, [[1.0, 0.0]] * 4)
+    return index, docs
+
+
+def test_required_tags_none_preserves_existing_behavior():
+    index, docs = _scoped_index()
+    default = index.rank([1.0, 0.0], query_text="리뷰 보여줘", top_k=8)
+    scoped_none = index.rank([1.0, 0.0], query_text="리뷰 보여줘", top_k=8, required_tags=None)
+    assert [r.doc.text for r in default] == [r.doc.text for r in scoped_none]
+    assert len(default) == len(docs)  # all docs in scope when unscoped
+
+
+def test_delivery_scope_returns_only_delivery_docs():
+    index, _ = _scoped_index()
+    # The untagged doc is equally similar and ordered first; scope must still
+    # restrict to the delivery-tagged doc only (candidate-level, not top-k post).
+    results = index.rank(
+        [1.0, 0.0], query_text="리뷰 보여줘", top_k=8,
+        required_tags={"delivery_packaging_damage"},
+    )
+    assert [r.doc.metadata["text"] for r in results] == ["박스 파손"]
+
+
+def test_adhesion_scope_returns_only_adhesion_docs():
+    index, _ = _scoped_index()
+    results = index.rank(
+        [1.0, 0.0], query_text="리뷰 보여줘", top_k=8,
+        required_tags={"durability_adhesion_finish"},
+    )
+    assert [r.doc.metadata["text"] for r in results] == ["접착이 약해요"]
+
+
+def test_components_scope_accepts_either_mapped_tag():
+    # 구성품/옵션 maps to a 2-tag set; a doc carrying EITHER tag is in scope.
+    docs = [
+        rag.RagDocument(
+            text="구성품 누락", metadata={"text": "구성품 누락"},
+            tags=["missing_or_wrong_components"],
+        ),
+        rag.RagDocument(
+            text="옵션이 헷갈려요", metadata={"text": "옵션이 헷갈려요"},
+            tags=["component_option_confusion"],
+        ),
+        rag.RagDocument(text="박스 파손", metadata={"text": "박스 파손"},
+                        tags=["delivery_packaging_damage"]),
+    ]
+    index = rag.RagIndex(docs, [[1.0, 0.0]] * 3)
+    results = index.rank(
+        [1.0, 0.0], query_text="리뷰 보여줘", top_k=8,
+        required_tags={"missing_or_wrong_components", "component_option_confusion"},
+    )
+    texts = {r.doc.metadata["text"] for r in results}
+    assert texts == {"구성품 누락", "옵션이 헷갈려요"}
+    assert "박스 파손" not in texts
+
+
+def test_empty_scope_match_returns_no_results():
+    index, _ = _scoped_index()
+    # A tag no indexed doc carries -> empty candidate set -> [].
+    results = index.rank(
+        [1.0, 0.0], query_text="리뷰 보여줘", top_k=8,
+        required_tags={"color_appearance_mismatch"},
+    )
+    assert results == []
+    # An empty required_tags set scopes to nothing.
+    assert index.rank([1.0, 0.0], query_text="리뷰 보여줘", required_tags=set()) == []
+
+
+def test_negative_logistics_filter_still_works_inside_delivery_scope():
+    # Delivery scope first (rank), then the negative-logistics post-filter.
+    docs = [
+        rag.RagDocument(
+            text=_BOX_PUNCTURED, metadata={"text": _BOX_PUNCTURED},
+            tags=["delivery_packaging_damage"],
+        ),
+        rag.RagDocument(
+            text=_CUTTING_BREAKAGE, metadata={"text": _CUTTING_BREAKAGE},
+            tags=["delivery_packaging_damage"],
+        ),
+        rag.RagDocument(text="좋아요", metadata={"text": "좋아요"}, tags=[]),
+    ]
+    index = rag.RagIndex(docs, [[1.0, 0.0]] * 3)
+    query = "포장이나 배송 관련 부정적인 이슈만 모아줘"
+    scoped = index.rank(
+        [1.0, 0.0], query_text=query, top_k=8,
+        required_tags={"delivery_packaging_damage"},
+    )
+    # Scope drops the untagged "좋아요"; both delivery-tagged docs remain.
+    assert {r.doc.metadata["text"] for r in scoped} == {_BOX_PUNCTURED, _CUTTING_BREAKAGE}
+    # Then the negative-logistics post-filter drops the mis-tagged cutting breakage.
+    kept = rag.filter_negative_logistics_results(scoped, query)
+    assert [r.doc.metadata["text"] for r in kept] == [_BOX_PUNCTURED]
