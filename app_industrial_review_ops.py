@@ -1380,7 +1380,7 @@ def _render_sidebar() -> None:
         # the other settings, shown only once a result exists.
         result = st.session_state.get("result")
         if result:
-            with st.expander("리포트 내보내기 · 진단", expanded=False):
+            with st.expander("상세페이지 점검 · Notion 기록", expanded=True):
                 st.download_button(
                     "HTML 리포트 다운로드",
                     data=result["html"].encode("utf-8"),
