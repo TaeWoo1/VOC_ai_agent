@@ -203,6 +203,98 @@ def boosted_ids_for_query(query: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# Negative-logistics post-filter (pure, deterministic, no network)
+#
+# classify() can mis-tag generic breakage ("잘라내는데 깨져요") as
+# delivery_packaging_damage because the packaging lexicon carries bare "깨져",
+# and strict_tags hard-prioritizes it. For queries that explicitly ask for
+# *negative* packaging/shipping reviews, we narrow the retrieved candidate set
+# with a rule-based guard. This touches only the Q&A layer — taxonomy, classify,
+# and ranking are unchanged.
+# ---------------------------------------------------------------------------
+
+# Logistics / shipping / packaging surface terms.
+_LOGISTICS_TERMS: tuple[str, ...] = (
+    "포장", "배송", "상자", "박스", "택배", "파손", "분실", "누락",
+    "찌그러", "뚫", "늦음", "늦게",
+)
+# Negative / problem cues.
+_NEGATIVE_CUES: tuple[str, ...] = (
+    "부정", "불만", "파손", "분실", "누락", "찌그러", "뚫", "늦",
+    "안 왔", "안왔", "문제", "당황", "아쉽", "별로",
+)
+# Hard logistics-damage tokens: their presence keeps a review even when a
+# positive logistics phrase ("배송은 빨랐어요") also appears in the same text.
+_HARD_NEG_LOGISTICS: tuple[str, ...] = (
+    "파손", "분실", "누락", "찌그러", "뚫", "늦",
+)
+# Positive-only logistics phrasings (satisfied shipping/packaging).
+_POSITIVE_LOGISTICS: tuple[str, ...] = (
+    "배송 빠름", "배송빠", "배송도 빨", "배송이 빨", "배송 빨", "배송 만족",
+    "포장 꼼꼼", "포장꼼꼼", "포장상태 좋", "포장 상태 좋", "포장 만족",
+    "잘 받았습니다", "잘 받았어요", "잘 받았",
+)
+# Cutting / handling / install work cues. When paired with breakage ("깨"),
+# the review is product-use breakage, NOT packaging/shipping damage.
+_WORK_CUES: tuple[str, ...] = ("잘라", "재단", "절단", "설치", "작업", "시공")
+
+
+def _has_any(text: str, terms: tuple[str, ...]) -> bool:
+    return any(term in text for term in terms)
+
+
+def is_logistics_negative_query(query: str) -> bool:
+    """True when the query explicitly asks for *negative* logistics reviews.
+
+    Requires both a logistics term and a negative cue. A neutral query like
+    "포장 관련 이슈만 모아줘" has no negative cue, so the filter stays off and
+    positive packaging/shipping mentions are still retrievable.
+    """
+    q = (query or "").lower()
+    return _has_any(q, _LOGISTICS_TERMS) and _has_any(q, _NEGATIVE_CUES)
+
+
+def is_product_use_breakage(text: str) -> bool:
+    """True for cutting/handling/install breakage (work cue + 깨).
+
+    "실내서 작업하는데도 잘라내는데 잘 깨져요" → product-use breakage, which must
+    not count as packaging/shipping damage.
+    """
+    t = (text or "").lower()
+    return _has_any(t, _WORK_CUES) and "깨" in t
+
+
+def is_negative_logistics_review(text: str) -> bool:
+    """True for a genuine negative packaging/shipping review.
+
+    Requires a logistics term AND a negative cue; excludes product-use breakage;
+    excludes positive-only logistics reviews (unless a hard damage token shows a
+    real problem in the same text).
+    """
+    t = (text or "").lower()
+    if not (_has_any(t, _LOGISTICS_TERMS) and _has_any(t, _NEGATIVE_CUES)):
+        return False
+    if is_product_use_breakage(t):
+        return False
+    if _has_any(t, _POSITIVE_LOGISTICS) and not _has_any(t, _HARD_NEG_LOGISTICS):
+        return False
+    return True
+
+
+def filter_negative_logistics_results(
+    results: list["SearchResult"], query: str
+) -> list["SearchResult"]:
+    """Keep only genuine negative-logistics reviews for negative-logistics queries.
+
+    No-op for any other query. May return an empty list — the caller decides the
+    fallback (e.g. keep unfiltered results with a note).
+    """
+    if not is_logistics_negative_query(query):
+        return results
+    return [r for r in results if is_negative_logistics_review(r.doc.metadata.get("text", ""))]
+
+
+# ---------------------------------------------------------------------------
 # Index + ranking
 # ---------------------------------------------------------------------------
 

@@ -156,3 +156,102 @@ def test_rag_index_length_guard():
         pass
     else:
         raise AssertionError("expected ValueError on length mismatch")
+
+
+# ---------------------------------------------------------------------------
+# Negative-logistics post-filter (pure, deterministic, no network)
+# ---------------------------------------------------------------------------
+
+# The exact example reviews from the diagnosis.
+_BOX_PUNCTURED = "상자가 다 뚫려서 와서 당황했지만 다행이 파손 및 분실된건 없었어요"
+_CUTTING_BREAKAGE = "실내서 작업하는데도 잘라내는데 잘 깨져요. 좀 당황!"
+
+
+def _sr(text: str, tags: list[str] | None = None) -> rag.SearchResult:
+    doc = rag.RagDocument(text=text, metadata={"text": text}, tags=tags or [])
+    return rag.SearchResult(doc=doc, similarity=0.5, score=0.5)
+
+
+def test_is_logistics_negative_query_activation():
+    # Negative-logistics queries activate the filter.
+    assert rag.is_logistics_negative_query("포장이나 배송 관련 부정적인 이슈만 모아줘")
+    assert rag.is_logistics_negative_query("배송 불만만 보여줘")
+    assert rag.is_logistics_negative_query("포장 파손 리뷰만 모아줘")
+    # Neutral packaging query has no negative cue -> filter stays OFF.
+    assert not rag.is_logistics_negative_query("포장 관련 이슈만 모아줘")
+    # Non-logistics queries never activate.
+    assert not rag.is_logistics_negative_query("접착력 부족 리뷰 보여줘")
+    assert not rag.is_logistics_negative_query("절단 시 깨짐 관련 알려줘")
+
+
+def test_is_product_use_breakage():
+    assert rag.is_product_use_breakage(_CUTTING_BREAKAGE)
+    assert rag.is_product_use_breakage("재단 중 깨짐이 있어요")
+    assert rag.is_product_use_breakage("절단 중 깨졌습니다")
+    assert rag.is_product_use_breakage("설치 중 깨짐 발생")
+    # Box-puncture (no work cue) is NOT product-use breakage.
+    assert not rag.is_product_use_breakage(_BOX_PUNCTURED)
+
+
+def test_is_negative_logistics_review():
+    # Genuine negative packaging/shipping review.
+    assert rag.is_negative_logistics_review(_BOX_PUNCTURED)
+    # Cutting breakage is excluded.
+    assert not rag.is_negative_logistics_review(_CUTTING_BREAKAGE)
+    # Positive-only logistics are excluded.
+    assert not rag.is_negative_logistics_review("포장 배송 만족하고 잘 썼습니다")
+    assert not rag.is_negative_logistics_review("포장꼼꼼하고 배송빠르고 좋네요")
+    assert not rag.is_negative_logistics_review("만족합니다. 배송이 빠릅니다.")
+    # A real damage token keeps the review even alongside positive shipping.
+    assert rag.is_negative_logistics_review("배송은 빨랐는데 박스 파손이 있었어요")
+
+
+def test_filter_keeps_box_puncture_drops_cutting_breakage():
+    query = "포장이나 배송 관련 부정적인 이슈만 모아줘"
+    results = [
+        _sr(_BOX_PUNCTURED, tags=["delivery_packaging_damage"]),
+        _sr(_CUTTING_BREAKAGE, tags=["delivery_packaging_damage"]),
+    ]
+    kept = rag.filter_negative_logistics_results(results, query)
+    texts = [r.doc.metadata["text"] for r in kept]
+    assert _BOX_PUNCTURED in texts
+    assert _CUTTING_BREAKAGE not in texts
+
+
+def test_filter_excludes_positive_only_logistics():
+    query = "배송 불만만 보여줘"
+    results = [
+        _sr("포장 배송 만족하고 잘 썼습니다"),
+        _sr("포장꼼꼼하고 배송빠르고 좋네요"),
+        _sr("만족합니다. 배송이 빠릅니다."),
+        _sr(_BOX_PUNCTURED),
+    ]
+    kept = rag.filter_negative_logistics_results(results, query)
+    texts = [r.doc.metadata["text"] for r in kept]
+    assert texts == [_BOX_PUNCTURED]
+
+
+def test_neutral_query_is_a_noop():
+    # Neutral packaging query does not activate the filter: positive packaging
+    # mentions survive unchanged.
+    query = "포장 관련 이슈만 모아줘"
+    results = [
+        _sr("포장 배송 만족하고 잘 썼습니다"),
+        _sr(_BOX_PUNCTURED),
+    ]
+    kept = rag.filter_negative_logistics_results(results, query)
+    assert kept == results  # identity passthrough (no-op)
+
+
+def test_filter_does_not_affect_classify_or_issue_labels():
+    # The post-filter is query-layer only; classify() / taxonomy are unchanged.
+    from src.voc.review_ops.industrial.classify import classify
+
+    adhesion = _review("접착력이 약해서 자꾸 떨어져요")
+    cutting = _review("절단할 때 잘 깨져요")
+    # classify behavior is independent of the new helpers.
+    assert "durability_adhesion_finish" in classify(adhesion)
+    assert classify(cutting)  # still produces its existing label(s)
+    # These issue-label queries never trigger the logistics filter.
+    assert not rag.is_logistics_negative_query("접착력 부족")
+    assert not rag.is_logistics_negative_query("절단 시 깨짐")

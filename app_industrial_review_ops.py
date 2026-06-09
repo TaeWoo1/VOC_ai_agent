@@ -2080,6 +2080,22 @@ def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
         return
 
     results = index.rank(query_emb, query_text=query, top_k=8, strict_tags=True)
+
+    # Negative-logistics post-filter: when the query asks for *negative*
+    # packaging/shipping reviews, drop mis-tagged product-use breakage and
+    # positive-only logistics. Safe fallback: if it removes everything, keep the
+    # unfiltered results with a note.
+    filter_note = ""
+    if rag.is_logistics_negative_query(query):
+        filtered = rag.filter_negative_logistics_results(results, query)
+        if filtered:
+            results = filtered
+        elif results:
+            filter_note = (
+                "부정적인 포장/배송 리뷰는 뚜렷하게 찾지 못했습니다. "
+                "의미상 가까운 리뷰를 대신 보여드립니다."
+            )
+
     st.session_state["rag_last_results"] = results
 
     # Strict-tag note: query clearly maps to a tag, but no review carries it.
@@ -2093,8 +2109,9 @@ def _process_ask_query(query: str, index: rag.RagIndex, api_key: str | None) -> 
             f"관련 리뷰 {len(results)}건을 오른쪽 원문 근거에서 확인하세요. "
             "(요약을 사용할 수 없어 원문 근거만 표시합니다.)"
         )
-    if tag_note:
-        answer = f"{tag_note}\n\n{answer}"
+    prefix = "\n\n".join(n for n in (filter_note, tag_note) if n)
+    if prefix:
+        answer = f"{prefix}\n\n{answer}"
     messages = st.session_state.setdefault("rag_messages", [])
     messages.append({"role": "user", "content": query})
     messages.append({"role": "assistant", "content": answer})
