@@ -103,3 +103,19 @@ Thumbs.db
 .Rhistory
 # Added by code-review-graph
 .code-review-graph/
+
+# ──────────────────────────────────────────────────────────────────────────
+# SellerOps AI (new primary product — Java/React monorepo at repo root)
+# ──────────────────────────────────────────────────────────────────────────
+# Backend (Spring Boot / Gradle)
+backend/.gradle/
+backend/build/
+backend/bin/
+backend/out/
+# Frontend (React / Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+# Local stack env (compose reads root .env; keep .env.example tracked)
+.env.sellerops
+docker-compose.override.yml

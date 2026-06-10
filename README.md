@@ -1,4 +1,36 @@
-# VOC Review Monitoring Service
+# SellerOps AI
+
+> **Primary product (in development).** A unified commerce **seller operations
+> dashboard** — one calm, Toss-like operations center that merges multiple
+> Korean seller centers (Coupang, Naver SmartStore, Gmarket/Auction, 11st,
+> LotteOn, SSG, 오늘의집, Cafe24/self-mall, file upload) so a manufacturing
+> CEO/operator sees inquiries, reviews, orders, sales, and urgent issues in one
+> place. Spring Boot 3 + React + PostgreSQL.
+
+This phase delivers the **product skeleton and UI foundation** with seeded/mock
+data — app shell, login, home dashboard, and a channel-connection page. Real
+channel APIs, AI/RAG, notifications, and reports are not implemented yet.
+
+- **Backend:** `backend/` — Spring Boot 3, Java 17, Gradle, JWT auth, Flyway/Postgres.
+- **Frontend:** `frontend/` — React + TypeScript + Tailwind (Vite).
+- **Local stack:** `docker-compose.yml` (Postgres + backend + frontend).
+- **Run:** `cp .env.example .env && docker compose up --build` → frontend at
+  http://localhost:5173, backend at http://localhost:8080.
+- **Details:** see [`docs/sellerops_phase1.md`](docs/sellerops_phase1.md),
+  [`backend/README.md`](backend/README.md), [`frontend/README.md`](frontend/README.md).
+
+A future bridge (not built this phase) will let the backend call the existing
+Python review-ops analysis engine (repeated-issue discovery + review Q&A) for the
+**상품 이슈** and **AI 검색** menus. The seam is the `analysis/ReviewAnalysisPort`
+interface, currently backed by a mock adapter.
+
+---
+
+## Legacy: VOC Review Monitoring Service (Python)
+
+The original Python review-ops backend remains in this repo, **unchanged**, under
+`src/`, `app_industrial_review_ops.py`, `app_demo.py`, `cardnews/`, etc. It powers
+the current operator demo. Everything below documents that system.
 
 Seller / store-owner-facing review monitoring backend with an operator console. Ingests customer reviews from multiple source types, indexes them into a vector store, and generates actionable monitoring reports — what to fix first, recurring issues, and flagged reviews.
 
