@@ -15,6 +15,27 @@ design only.
 > (§8 proposed this slice); file-upload connector in `docs/sellerops_phase2.md`;
 > frontend direction in `docs/sellerops_ui_reference.md`.
 
+> **Verification update (2026-06-11, official docs — Coupang & Naver Commerce).**
+> An official-doc pass against the Coupang WING Open API help center and the
+> Naver Commerce API Center + its official GitHub (`commerce-api-naver/commerce-api`)
+> refined the §5 capability seed, §3 rate-limit defaults, §3 auth shapes, and §11
+> sandbox assumption below. **Headline finding:** neither Coupang nor Naver exposes
+> **product reviews** via official seller API (Naver maintainer, 2024-08-30:
+> *"no plans to provide review-related APIs in the near future"*) — confirming the
+> Phase 3A §1 review-availability risk. This does **not** change the (mock-driven)
+> backbone design; it sharpens the capability-seed truth and the auth/rate-limit
+> config. Claims not directly verified against an endpoint spec stay marked
+> *needs verification*.
+
+> **Product note — review availability.** The P0 channels (Coupang, Naver) may
+> **not** provide reviews through official APIs (confirmed unavailable today;
+> Naver explicitly not planned). Reviews must therefore stay **capability-gated**:
+> a channel only collects reviews if its connector advertises that capability.
+> Review collection follows the Phase 3A sanctioned-source order — **(1) official
+> API if ever provided → (2) official export/report → (3) email/report attachment
+> → (4) manual file upload (the current fallback)**. **Browser automation remains
+> last resort only** (Phase 3A §7), never a default for reviews.
+
 ---
 
 ## Context
@@ -71,9 +92,9 @@ New package `com.sellerops.collect` (scheduling/execution), plus additions to `c
 - **`MockApiConnector implements PullConnector`** — deterministic, seeded generator that *behaves like a future real API*: returns pages of `Canonical*` records keyed off the cursor (e.g. an incrementing timestamp/offset), reports `hasMore`, occasionally returns a simulated `429`/rate-limit and a transient error (controlled by a fixed pseudo-random seed per account+type so tests are deterministic — **no `Math.random`**). Zero network, zero secrets.
 - **`SyncRunExecutor`** (`collect/`) — per claimed schedule: resolve connector via registry → (vault decrypt is a no-op for mock) → loop `fetch(cursor, limit)` → route batch to `IngestionService.ingest{Reviews,Inquiries,OrderSummaries}` → advance `sync_cursors` after each successful page (per-page persistence, so a mid-stream failure keeps earlier rows) → on `hasMore=false` finish the run `SUCCESS/PARTIAL`; on rate-limit/error apply §8 policy and finish `FAILED`/schedule retry. Updates `SellerAccount.lastSyncedAt` and `channel_connection_status`.
 - **`SyncScheduler`** (`collect/`) — `@Scheduled(fixedDelayString=…)` poller; see §7.
-- **`RateLimitGovernor`** — per-connector token bucket; honors a `Retry-After`-style hint from the `FetchPage`/exception; drives backoff. Mirrors the Python repo's "anti-bot signals escalate, not retry" discipline.
+- **`RateLimitGovernor`** — per-connector token bucket; honors a `Retry-After`-style hint from the `FetchPage`/exception; drives backoff. Mirrors the Python repo's "anti-bot signals escalate, not retry" discipline. **Limits are config-driven per connector, never a global constant** — observed official defaults to seed config: **Coupang ≈ 5 rps per vendorId** (429 on exceed; recovery in minutes) and **Naver ≈ 2 rps**, token-bucket style with a "Burst Max" borrow-from-next-second (429 on exceed; `GNCP-GW-RateLimit-Remaining` header), per Naver's official GitHub discussion. Exact per-endpoint limits *need verification* at 3C.
 - **`ConnectionHealthTracker`** — writes `channel_connection_status` (last success, consecutive failures, state CONNECTED/DEGRADED/EXPIRED/DISCONNECTED). After N consecutive failures → DEGRADED + a `connector_alerts` row.
-- **`CredentialVault`** (`credential/`) — sole reader/writer of `connector_credentials`; AES-256-GCM envelope encryption, local master key from env (never in source/DB), write-only intake, decrypt only in-memory at run time, masked-metadata reads. Not exercised by mock runs; present + unit-tested for the round-trip.
+- **`CredentialVault`** (`credential/`) — sole reader/writer of `connector_credentials`; AES-256-GCM envelope encryption, local master key from env (never in source/DB), write-only intake, decrypt only in-memory at run time, masked-metadata reads. Not exercised by mock runs; present + unit-tested for the round-trip. **Design stays multi-auth-type** — the two concrete real shapes confirmed at verification: **Coupang = HMAC** (long-lived access key + secret key; per-request signature over method+path+timestamp; `Authorization` HMAC header + `X-Requested-By` vendorId) and **Naver = OAuth2 client-credentials-style** (client id/secret → bcrypt-signed, short-lived access token minted on demand with `token_expires_at` refresh; **possible call-IP allowlist**). The vault stores long-lived material; per-request signing / token minting happens in the connector. Both fit the existing `auth_type (HMAC|OAUTH2|API_KEY|PASSWORD)` enum. Exact signature/refresh details *need verification* at 3C.
 - **`AlertService`** — records `connector_alerts` rows only (**no delivery** in 3B).
 
 ## 4. Frontend design
@@ -95,7 +116,22 @@ All org-scoped, UUID PK, `created_at`/`updated_at`, matching V1/V2.
 - **Extend `sync_jobs`:** `seller_account_id uuid`, `data_type varchar(40)`, `trigger varchar(20) not null default 'UPLOAD'`, `attempt int not null default 1`, `next_retry_at timestamptz`, `rate_limited boolean not null default false`. (Upload path keeps working via the default.)
 - **`sync_cursors`** *(new — not in current schema):* `id, org_id, seller_account_id, data_type, cursor_key, cursor_value, updated_at`; unique `(org_id, seller_account_id, data_type, cursor_key)`.
 - **`sync_schedules`:** `id, org_id, seller_account_id, data_type, cadence_kind (INTERVAL|CRON), interval_minutes, cron_expr, enabled bool, next_run_at, last_run_at, paused_reason`; index `(next_run_at) where enabled`.
-- **`connector_capabilities`** *(seed/reference):* `channel_code, connector_class, data_type, supported bool, verification_status (CONFIRMED|NEEDS_VERIFICATION|UNSUPPORTED), notes`. Seeded from Phase 3A §2 — most rows `NEEDS_VERIFICATION` so the UI tells the truth.
+- **`connector_capabilities`** *(seed/reference):* `channel_code, connector_class, data_type, supported bool, verification_status (CONFIRMED|NEEDS_VERIFICATION|UNSUPPORTED), notes`. Seeded from Phase 3A §2; most non-P0 rows stay `NEEDS_VERIFICATION` so the UI tells the truth. The 2026-06-11 official-doc pass pins the two P0 channels:
+
+  | Channel | Data type | supported | verification_status | Note |
+  |---|---|---|---|---|
+  | **COUPANG** | ORDER_SUMMARY (orders) | true | CONFIRMED | Purchase-order/ordersheet, returns/cancellation query. |
+  | **COUPANG** | PRODUCT | true | CONFIRMED | Product query / summary / range query. |
+  | **COUPANG** | SALES (settlement) | true | NEEDS_VERIFICATION | Settlement API exists; endpoint shape not directly verified. |
+  | **COUPANG** | INQUIRY | true (partial) | NEEDS_VERIFICATION | Call-center inquiry check/reply exists; some answering is WING-UI-only. |
+  | **COUPANG** | REVIEW | false | UNSUPPORTED | No review-retrieval endpoint in the official seller API. |
+  | **NAVER** | ORDER_SUMMARY (orders) | true | CONFIRMED | `/external/v1/pay-order/seller/orders`; real-time order/cancel/return. |
+  | **NAVER** | PRODUCT | true | CONFIRMED | Product APIs supported. |
+  | **NAVER** | SALES (settlement) | true | CONFIRMED | Settlement API explicitly provided. |
+  | **NAVER** | INQUIRY | false | NEEDS_VERIFICATION | TalkTalk (톡톡) consultations **not** covered by Commerce API; product-Q&A scope unverified. |
+  | **NAVER** | REVIEW | false | UNSUPPORTED | Official maintainer (2024-08-30): no review API, none planned near-term. |
+
+  `verification_status=UNSUPPORTED` rows are not collected by the API connector; reviews fall back to the file-upload connector per the product note above. `CONFIRMED` here means the capability is documented as existing — exact endpoint/parameter shapes are still confirmed against official docs at 3C kickoff before a real call is made.
 - **`channel_connection_status`:** `id, org_id, seller_account_id (unique), state, last_success_at, consecutive_failures int, last_error, updated_at`.
 - **`connector_alerts`:** `id, org_id, seller_account_id, sync_job_id, severity, type (AUTH_EXPIRED|REPEATED_FAILURE|RATE_LIMITED), message, acknowledged_at, created_at`.
 - **`connector_credentials`:** `id, org_id, seller_account_id (unique), connector_class, auth_type (HMAC|OAUTH2|API_KEY|PASSWORD), encrypted_payload bytea, encryption_key_id, iv, token_expires_at, refresh_token_enc bytea, last_rotated_at, created_by`. **No plaintext column ever.**
@@ -147,7 +183,8 @@ All org-scoped, UUID PK, `created_at`/`updated_at`, matching V1/V2.
 
 ## 11. Deferred to Phase 3C (and beyond)
 
-- **First real connector** (Coupang or Naver) — built only **after** the Phase 3A §2 verification items for that channel (review/inquiry/order/settlement endpoints, auth scheme, rate limits) are confirmed against official docs; behind a feature flag; against sandbox/test credentials.
+- **First real connector** (Coupang or Naver) — built only **after** the Phase 3A §2 verification items for that channel (inquiry/order/settlement endpoints — reviews already confirmed unavailable, auth scheme, rate limits) are confirmed against official docs; behind a feature flag.
+  - **No assumed sandbox.** Coupang has **no dedicated sandbox** (testing is Postman-against-production with your own key); Naver sandbox availability is **unclear/unverified**. So first-real-connector testing may require **production or a seller-owned test account** with tight rate limits and a throwaway credential — do **not** assume a sandbox exists. This must be settled at 3C kickoff.
 - Real credential intake/rotation UX and KMS-backed master key (3B uses a local throwaway key).
 - Quartz / durable queue (3B uses `@Scheduled` + in-process executor).
 - Export/email connectors (classes 2–3); browser automation (class 5, consent-gated, Phase 3A §7 policy).
