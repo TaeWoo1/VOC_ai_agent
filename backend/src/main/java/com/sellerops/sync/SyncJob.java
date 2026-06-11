@@ -22,6 +22,29 @@ public class SyncJob extends BaseEntity {
     @Column(name = "channel_id")
     private UUID channelId;
 
+    /** Seller account this run belongs to (null for legacy/channel-only upload jobs). */
+    @Column(name = "seller_account_id")
+    private UUID sellerAccountId;
+
+    /** REVIEW / INQUIRY / ORDER_SUMMARY (null on legacy rows). */
+    @Column(name = "data_type")
+    private String dataType;
+
+    /** How the run was triggered: UPLOAD / SCHEDULED / MANUAL / RETRY. Defaults to UPLOAD. */
+    @Column(name = "\"trigger\"", nullable = false)
+    private String trigger = "UPLOAD";
+
+    /** Attempt number for retry tracking (1 = first attempt). */
+    @Column(nullable = false)
+    private int attempt = 1;
+
+    @Column(name = "next_retry_at")
+    private Instant nextRetryAt;
+
+    /** Whether the run hit a rate limit. */
+    @Column(name = "rate_limited", nullable = false)
+    private boolean rateLimited = false;
+
     /** Connector kind, e.g. FILE_UPLOAD. */
     @Column(name = "job_type", nullable = false)
     private String jobType;
