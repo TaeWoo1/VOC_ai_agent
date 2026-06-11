@@ -4,21 +4,24 @@ import com.sellerops.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 
 /**
- * One operator-enabled collection schedule per (seller account x data type).
- * Cadence is either an interval (interval_minutes) or a cron expression
- * (cron_expr), selected by cadence_kind. No scheduling logic here — this slice
- * only persists the configuration; the poller arrives in a later slice.
+ * One operator-enabled collection schedule per (seller account x data type) —
+ * enforced by a unique constraint (V4) so the control API's upsert cannot
+ * duplicate rows under concurrent PUTs. Cadence is either an interval
+ * (interval_minutes) or a cron expression (cron_expr), selected by cadence_kind.
  */
 @Getter
 @Setter
 @Entity
-@Table(name = "sync_schedules")
+@Table(name = "sync_schedules", uniqueConstraints = @UniqueConstraint(
+        name = "uq_sync_schedules_account_data_type",
+        columnNames = {"org_id", "seller_account_id", "data_type"}))
 public class SyncSchedule extends BaseEntity {
 
     @Column(name = "org_id", nullable = false)

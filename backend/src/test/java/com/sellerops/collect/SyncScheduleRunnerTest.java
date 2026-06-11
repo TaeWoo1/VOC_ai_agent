@@ -303,6 +303,43 @@ class SyncScheduleRunnerTest {
     }
 
     @Test
+    void midRunOperatorDisableIsNotOverwrittenByRunner() {
+        SellerAccount acc = account("GMARKET");
+        SyncSchedule s = intervalSchedule(acc, DataType.INQUIRY, now, true);
+
+        // Connector that simulates an operator disabling the schedule while the
+        // run is in flight — the runner must not resurrect it with a stale write.
+        PullConnector editDuringRun = new PullConnector() {
+            @Override
+            public String kind() {
+                return "MOCK_API";
+            }
+
+            @Override
+            public ConnectorCapabilities capabilities(String channelCode) {
+                return mock.capabilities(channelCode);
+            }
+
+            @Override
+            public FetchPage fetch(FetchRequest request) {
+                SyncSchedule live = schedules.findById(s.getId()).orElseThrow();
+                live.setEnabled(false);
+                live.setNextRunAt(null);
+                schedules.save(live);
+                return mock.fetch(request);
+            }
+        };
+
+        runnerWith(editDuringRun).runDueSchedules(now, SyncScheduler.BATCH_LIMIT);
+
+        SyncSchedule after = reload(s);
+        assertThat(after.isEnabled()).isFalse(); // the operator's edit survives
+        assertThat(after.getNextRunAt()).isNull(); // not overwritten with a cadence slot
+        assertThat(after.getLastRunAt()).isEqualTo(now);
+        assertThat(inquiries.count()).isEqualTo(45); // the in-flight run still landed
+    }
+
+    @Test
     void cronScheduleIsDeferredSafelyWithoutExecution() {
         SellerAccount acc = account("GMARKET");
         SyncSchedule s = new SyncSchedule();

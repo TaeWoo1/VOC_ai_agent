@@ -2,6 +2,7 @@ package com.sellerops.sync;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -10,6 +11,9 @@ import org.springframework.data.repository.query.Param;
 public interface SyncScheduleRepository extends JpaRepository<SyncSchedule, UUID> {
 
     List<SyncSchedule> findByOrgIdAndSellerAccountId(UUID orgId, UUID sellerAccountId);
+
+    Optional<SyncSchedule> findByOrgIdAndSellerAccountIdAndDataType(
+            UUID orgId, UUID sellerAccountId, String dataType);
 
     /**
      * Lock a bounded batch of due, enabled schedules for claiming. {@code FOR

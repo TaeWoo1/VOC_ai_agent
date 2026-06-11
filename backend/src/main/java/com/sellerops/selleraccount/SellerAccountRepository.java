@@ -9,4 +9,7 @@ public interface SellerAccountRepository extends JpaRepository<SellerAccount, UU
     List<SellerAccount> findAllByOrgId(UUID orgId);
 
     Optional<SellerAccount> findByOrgIdAndChannelId(UUID orgId, UUID channelId);
+
+    /** Org-scoped lookup — a cross-org id reads as absent. */
+    Optional<SellerAccount> findByIdAndOrgId(UUID id, UUID orgId);
 }

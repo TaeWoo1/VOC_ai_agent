@@ -90,23 +90,31 @@ public class SyncScheduleRunner {
         return jobs;
     }
 
-    private SyncJob runOne(SyncSchedule schedule, Instant now) {
+    private SyncJob runOne(SyncSchedule claimed, Instant now) {
         SyncJob job = null;
         try {
-            DataType dataType = DataType.valueOf(schedule.getDataType());
-            job = executor.execute(schedule.getOrgId(), schedule.getSellerAccountId(), dataType, "SCHEDULED");
+            DataType dataType = DataType.valueOf(claimed.getDataType());
+            job = executor.execute(claimed.getOrgId(), claimed.getSellerAccountId(), dataType, "SCHEDULED");
         } catch (Exception e) {
             // One broken schedule (missing account, bad data_type) must not block the
             // rest of the batch. It keeps its provisional cadence-based next_run_at.
-            log.warn("Scheduled run failed before execution for schedule {}: {}", schedule.getId(), e.getMessage());
+            log.warn("Scheduled run failed before execution for schedule {}: {}", claimed.getId(), e.getMessage());
         }
 
-        schedule.setLastRunAt(now);
-        schedule.setNextRunAt(resolveNextRun(schedule, job, now));
-        schedules.save(schedule);
+        // Re-read instead of saving the claimed snapshot: the operator may have
+        // edited the schedule (disable, new interval) while the run was executing,
+        // and a stale write here would silently undo that edit.
+        SyncSchedule schedule = schedules.findById(claimed.getId()).orElse(null);
+        if (schedule != null) {
+            schedule.setLastRunAt(now);
+            if (schedule.isEnabled()) {
+                schedule.setNextRunAt(resolveNextRun(schedule, job, now));
+            }
+            schedules.save(schedule);
+        }
 
         if (job != null) {
-            escalate(schedule, job);
+            escalate(claimed, job);
         }
         return job;
     }
