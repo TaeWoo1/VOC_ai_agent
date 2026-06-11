@@ -42,9 +42,17 @@ export function UploadResult({ result }: { result: IngestResult }) {
         </div>
       ) : null}
 
-      <Link to="/" className="btn-primary inline-flex">
-        대시보드에서 확인하기
-      </Link>
+      <div className="flex flex-wrap gap-3">
+        <Link to="/" className="btn-primary inline-flex">
+          대시보드에서 확인하기
+        </Link>
+        <Link to="/inbox" className="btn-ghost inline-flex">
+          인박스에서 확인하기
+        </Link>
+        <Link to="/orders" className="btn-ghost inline-flex">
+          주문·매출 보기
+        </Link>
+      </div>
     </div>
   );
 }

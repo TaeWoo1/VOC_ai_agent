@@ -17,7 +17,8 @@ export function Channels() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">채널 연결</h1>
-        <p className="mt-1 text-lg text-muted">판매 채널을 연결하면 문의·리뷰·주문·매출을 한 곳에서 봅니다.</p>
+        <p className="mt-1 text-lg text-muted">판매 채널을 연결하면 문의·리뷰·주문·매출을 자동으로 한 곳에 모읍니다.</p>
+        <p className="mt-1 text-base text-muted">파일 업로드는 자동 연결 전 먼저 확인하거나 자동 수집이 어려울 때 쓰는 백업 방식입니다.</p>
       </div>
 
       {notice ? (

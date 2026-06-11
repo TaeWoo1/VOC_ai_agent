@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Section } from "../components/Section";
 import { UploadResult } from "../components/UploadResult";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { isAxiosError } from "axios";
-import type { IngestResult, UploadType } from "../lib/types";
+import { COLUMN_HELP, downloadCsv } from "../lib/sampleData";
+import { relativeTime } from "../lib/format";
+import type { IngestResult, SyncJobView, UploadType } from "../lib/types";
 
 /** Pull the backend's error message out of an Axios error, if present. */
 function backendMessage(e: unknown): string | null {
@@ -31,9 +33,18 @@ export function Upload() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResult | null>(null);
+  const [jobs, setJobs] = useState<SyncJobView[]>([]);
 
   const queryChannel = params.get("channelId");
   const channelList = useMemo(() => channels ?? [], [channels]);
+
+  const loadJobs = useCallback(() => {
+    api.getSyncJobs().then(setJobs).catch(() => setJobs([]));
+  }, []);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
 
   useEffect(() => {
     if (channelId) {
@@ -61,6 +72,7 @@ export function Upload() {
     try {
       const res = await api.uploadFile(channelId, uploadType, file);
       setResult(res);
+      loadJobs();
     } catch (e) {
       setError(backendMessage(e) ?? "업로드에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.");
     } finally {
@@ -71,8 +83,11 @@ export function Upload() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">파일 업로드</h1>
+        <h1 className="text-2xl font-bold">자동 수집 전, 파일로 먼저 확인하기</h1>
         <p className="mt-1 text-lg text-muted">리뷰·문의·주문/매출 파일을 올리면 대시보드에 반영됩니다.</p>
+        <p className="mt-2 rounded-xl bg-brand/5 px-4 py-3 text-base text-muted">
+          장기적으로는 판매자센터 API/자동 수집으로 연결되며, 파일 업로드는 초기 검증과 예외 상황을 위한 백업 방식입니다.
+        </p>
       </div>
 
       <Section title="업로드">
@@ -108,6 +123,26 @@ export function Upload() {
                 </button>
               ))}
             </div>
+            <div className="mt-3 rounded-xl bg-canvas px-4 py-3 text-base">
+              <p>
+                <span className="font-semibold text-ink">필수 열:</span>{" "}
+                <span className="text-muted">{COLUMN_HELP[uploadType].required}</span>
+              </p>
+              <p className="mt-1">
+                <span className="font-semibold text-ink">선택 열:</span>{" "}
+                <span className="text-muted">{COLUMN_HELP[uploadType].optional}</span>
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                머리글은 한글 또는 영문 모두 인식합니다. 같은 파일을 다시 올려도 중복은 자동으로 건너뜁니다.
+              </p>
+              <button
+                type="button"
+                onClick={() => downloadCsv(uploadType)}
+                className="btn-ghost mt-3 px-4 py-2 text-base"
+              >
+                샘플 CSV 다운로드
+              </button>
+            </div>
           </div>
 
           <div>
@@ -133,6 +168,68 @@ export function Upload() {
           <UploadResult result={result} />
         </Section>
       ) : null}
+
+      <Section title="최근 업로드 내역">
+        {jobs.length === 0 ? (
+          <p className="text-base text-muted">아직 업로드 내역이 없습니다.</p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {jobs.map((j) => (
+              <li key={j.id} className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  <span className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold">
+                    {jobLabel(j.uploadType)}
+                  </span>
+                  <span className={`text-sm font-semibold ${jobStatusColor(j.status)}`}>
+                    {jobStatusLabel(j.status)}
+                  </span>
+                </div>
+                <span className="text-sm text-muted">
+                  저장 {j.successRows} · 건너뜀 {j.skippedRows} · 실패 {j.failedRows} ·{" "}
+                  {relativeTime(j.finishedAt ?? j.startedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
     </div>
   );
+}
+
+function jobLabel(type: string | null): string {
+  switch (type) {
+    case "REVIEW":
+      return "리뷰";
+    case "INQUIRY":
+      return "문의";
+    case "ORDER_SUMMARY":
+      return "주문·매출";
+    default:
+      return type ?? "-";
+  }
+}
+
+function jobStatusLabel(status: string): string {
+  switch (status) {
+    case "SUCCESS":
+      return "성공";
+    case "PARTIAL":
+      return "일부 성공";
+    case "FAILED":
+      return "실패";
+    default:
+      return status;
+  }
+}
+
+function jobStatusColor(status: string): string {
+  switch (status) {
+    case "SUCCESS":
+      return "text-good";
+    case "PARTIAL":
+      return "text-warn";
+    default:
+      return "text-bad";
+  }
 }
