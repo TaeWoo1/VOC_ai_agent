@@ -13,4 +13,8 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     long countByOrgIdAndNegativeTrue(UUID orgId);
 
     List<Review> findAllByOrgId(UUID orgId);
+
+    boolean existsByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
+
+    boolean existsByOrgIdAndChannelIdAndContentHash(UUID orgId, UUID channelId, String contentHash);
 }

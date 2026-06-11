@@ -35,4 +35,12 @@ public class Inquiry extends BaseEntity {
 
     @Column(name = "received_at", nullable = false)
     private Instant receivedAt;
+
+    /** Source-provided id (when the upload carries one); first dedup key. */
+    @Column(name = "external_id")
+    private String externalId;
+
+    /** Fallback dedup key when no external id: hash of channel+product+date+body. */
+    @Column(name = "content_hash")
+    private String contentHash;
 }

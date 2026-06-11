@@ -40,6 +40,8 @@ summaries so every screen renders data. Disable with `sellerops.seed.enabled=fal
 | GET  | `/api/dashboard/channel-status` | bearer |
 | GET  | `/api/inbox` | bearer |
 | GET  | `/api/orders/summary` | bearer |
+| POST | `/api/uploads` (multipart: channelId, uploadType, file) | bearer |
+| GET  | `/api/sync-jobs` | bearer |
 | GET  | `/health` | public |
 
 ## Test

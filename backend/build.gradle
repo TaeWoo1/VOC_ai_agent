@@ -25,6 +25,10 @@ dependencies {
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.flywaydb:flyway-database-postgresql'
 
+    // File ingestion: CSV (Commons CSV) + XLSX (Apache POI)
+    implementation 'org.apache.commons:commons-csv:1.11.0'
+    implementation 'org.apache.poi:poi-ooxml:5.3.0'
+
     runtimeOnly 'org.postgresql:postgresql'
 
     // JWT (jjwt)
@@ -38,6 +42,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'com.h2database:h2'
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
 }

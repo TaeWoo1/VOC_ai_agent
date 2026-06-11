@@ -9,6 +9,7 @@ import type {
   OrderSummaryResponse,
   SalesTrendPoint,
   SellerAccountResponse,
+  SyncJobView,
   UserView,
 } from "./types";
 
@@ -164,4 +165,23 @@ export function mockOrders(): OrderSummaryResponse {
     trend: t,
     channelShare: mockDashboard().channelSalesShare,
   };
+}
+
+export function mockSyncJobs(): SyncJobView[] {
+  return [
+    {
+      id: "mock-job-1",
+      channelId: "mock-channel-0",
+      jobType: "FILE_UPLOAD",
+      uploadType: "REVIEW",
+      status: "SUCCESS",
+      totalRows: 44,
+      successRows: 42,
+      skippedRows: 2,
+      failedRows: 0,
+      errorMessage: null,
+      startedAt: hoursAgoISO(3),
+      finishedAt: hoursAgoISO(3),
+    },
+  ];
 }

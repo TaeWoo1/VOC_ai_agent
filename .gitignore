@@ -119,3 +119,7 @@ frontend/.vite/
 # Local stack env (compose reads root .env; keep .env.example tracked)
 .env.sellerops
 docker-compose.override.yml
+# Operator-provided data dumps / upload fixtures at repo root (never commit).
+# Scoped to root so test resources under src/test/** stay trackable.
+/*.xlsx
+/*.csv

@@ -3,9 +3,12 @@ import type {
   AuthResponse,
   ChannelResponse,
   DashboardSummaryResponse,
+  IngestResult,
   InboxResponse,
   OrderSummaryResponse,
   SellerAccountResponse,
+  SyncJobView,
+  UploadType,
   UserView,
 } from "./types";
 import {
@@ -16,6 +19,7 @@ import {
   mockMe,
   mockOrders,
   mockSellerAccounts,
+  mockSyncJobs,
 } from "./mocks";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
@@ -90,12 +94,23 @@ export const api = {
   getInbox: (): Promise<InboxResponse> => getOrMock("/api/inbox", mockInbox),
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>
     getOrMock("/api/orders/summary", mockOrders),
+  getSyncJobs: (): Promise<SyncJobView[]> => getOrMock("/api/sync-jobs", mockSyncJobs),
 
   async registerFileChannel(channelId: string, alias: string): Promise<SellerAccountResponse> {
     const { data } = await http.post<SellerAccountResponse>(
       "/api/seller-accounts/file-channel",
       { channelId, alias },
     );
+    return data;
+  },
+
+  // Mutating: no mock fallback. Requires a live backend; surfaces errors to the UI.
+  async uploadFile(channelId: string, uploadType: UploadType, file: File): Promise<IngestResult> {
+    const form = new FormData();
+    form.append("channelId", channelId);
+    form.append("uploadType", uploadType);
+    form.append("file", file);
+    const { data } = await http.post<IngestResult>("/api/uploads", form);
     return data;
   },
 };

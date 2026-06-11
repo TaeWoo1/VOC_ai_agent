@@ -11,4 +11,8 @@ public interface InquiryRepository extends JpaRepository<Inquiry, UUID> {
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 
     long countByOrgIdAndStatus(UUID orgId, String status);
+
+    boolean existsByOrgIdAndChannelIdAndExternalId(UUID orgId, UUID channelId, String externalId);
+
+    boolean existsByOrgIdAndChannelIdAndContentHash(UUID orgId, UUID channelId, String contentHash);
 }

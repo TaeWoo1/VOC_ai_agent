@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "../components/StatusBadge";
 import { DataBadge } from "../components/DataBadge";
 import { EmptyState } from "../components/EmptyState";
@@ -43,7 +44,19 @@ function ChannelCard({
   channel: ChannelResponse;
   onAction: (msg: string) => void;
 }) {
+  const navigate = useNavigate();
   const disabled = channel.status === "PREPARING";
+  const canUpload =
+    channel.status === "FILE_UPLOAD_SUPPORTED" || channel.actionLabel === "파일 업로드";
+
+  function handleAction() {
+    if (canUpload) {
+      navigate(`/upload?channelId=${channel.id}`);
+      return;
+    }
+    onAction(`'${channel.nameKo}' 채널의 [${channel.actionLabel}] 동작은 다음 단계에서 연결됩니다.`);
+  }
+
   return (
     <div className="card flex flex-col gap-4 p-5">
       <div className="flex items-start justify-between">
@@ -66,9 +79,7 @@ function ChannelCard({
         <button
           type="button"
           disabled={disabled}
-          onClick={() =>
-            onAction(`'${channel.nameKo}' 채널의 [${channel.actionLabel}] 동작은 다음 단계에서 연결됩니다.`)
-          }
+          onClick={handleAction}
           className={
             channel.status === "CONNECTED"
               ? "btn-ghost"

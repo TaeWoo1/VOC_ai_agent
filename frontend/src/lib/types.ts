@@ -100,3 +100,37 @@ export interface OrderSummaryResponse {
   trend: SalesTrendPoint[];
   channelShare: ChannelSalesShare[];
 }
+
+export type UploadType = "REVIEW" | "INQUIRY" | "ORDER_SUMMARY";
+
+export interface RowError {
+  rowNumber: number;
+  message: string;
+}
+
+export interface IngestResult {
+  syncJobId: string;
+  uploadType: UploadType;
+  status: string; // SUCCESS | PARTIAL | FAILED
+  totalRows: number;
+  successRows: number;
+  skippedRows: number;
+  failedRows: number;
+  errorMessage: string | null;
+  sampleErrors: RowError[];
+}
+
+export interface SyncJobView {
+  id: string;
+  channelId: string | null;
+  jobType: string;
+  uploadType: string | null;
+  status: string;
+  totalRows: number;
+  successRows: number;
+  skippedRows: number;
+  failedRows: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
