@@ -26,6 +26,12 @@ server:
   port: 8080
 
 sellerops:
+  vault:
+    # Credential vault master key: base64-encoded 32 bytes (AES-256). Local
+    # throwaway only — never commit a real key; KMS-backed keys are a later
+    # phase. Empty = vault fails closed (mock collection needs no credentials).
+    master-key-base64: ${SELLEROPS_VAULT_MASTER_KEY:}
+    key-id: ${SELLEROPS_VAULT_KEY_ID:local-dev-1}
   collect:
     # Scheduled collection poller (Phase 3B Slice 4). Off by default — nothing
     # polls until ops flips this; the file-upload path is unaffected either way.
