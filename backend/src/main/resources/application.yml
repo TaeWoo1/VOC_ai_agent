@@ -26,6 +26,11 @@ server:
   port: 8080
 
 sellerops:
+  collect:
+    # Scheduled collection poller (Phase 3B Slice 4). Off by default — nothing
+    # polls until ops flips this; the file-upload path is unaffected either way.
+    scheduler-enabled: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:false}
+    poll-interval-ms: ${SELLEROPS_COLLECT_POLL_INTERVAL_MS:60000}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}

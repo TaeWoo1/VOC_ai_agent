@@ -111,6 +111,7 @@ public class SyncRunExecutor {
         int skipped = 0;
         int failed = 0;
         boolean rateLimited = false;
+        Integer retryAfterSeconds = null;
         boolean errored = false;
         String firstError = null;
         boolean hasMore = true;
@@ -122,8 +123,10 @@ public class SyncRunExecutor {
                         orgId, account.getId(), channel.getCode(), dataType, cursorValue, PAGE_LIMIT));
 
                 if (page.rateLimited()) {
-                    // Slice 3 stops here; the rate-limit governor / backoff is Slice 4.
+                    // Stop paging and keep the connector's retry-after hint; the
+                    // scheduled runner (Slice 4) decides when to come back.
                     rateLimited = true;
+                    retryAfterSeconds = page.retryAfterSeconds();
                     break;
                 }
 
@@ -157,8 +160,12 @@ public class SyncRunExecutor {
         if (rateLimited && errorMessage == null) {
             errorMessage = "수집이 속도 제한으로 중단되었습니다.";
         }
+        if (rateLimited && retryAfterSeconds != null) {
+            // Record the hint as an earliest-retry timestamp for the scheduler.
+            job.setNextRetryAt(Instant.now().plusSeconds(retryAfterSeconds));
+        }
         finishJob(job, success, skipped, failed, status, errorMessage, rateLimited);
-        updateHealth(account, status, errorMessage);
+        updateHealth(account, status, errorMessage, rateLimited);
         return job;
     }
 
@@ -235,7 +242,7 @@ public class SyncRunExecutor {
     }
 
     /** Update connection health + last-synced. Success/partial → CONNECTED + reset failures. */
-    private void updateHealth(SellerAccount account, String status, String errorMessage) {
+    private void updateHealth(SellerAccount account, String status, String errorMessage, boolean rateLimited) {
         boolean collected = "SUCCESS".equals(status) || "PARTIAL".equals(status);
         Instant now = Instant.now();
 
@@ -255,10 +262,14 @@ public class SyncRunExecutor {
             health.setLastError(null);
             account.setLastSyncedAt(now);
             sellerAccounts.save(account);
+        } else if (rateLimited) {
+            // Throttling on a healthy connection, not a connectivity failure — it
+            // must never count toward DEGRADED escalation. Record the reason only.
+            health.setLastError(errorMessage);
         } else {
             health.setConsecutiveFailures(health.getConsecutiveFailures() + 1);
             health.setLastError(errorMessage);
-            // DEGRADED escalation + failure alerts are Slice 4 — not decided here.
+            // DEGRADED escalation + failure alerts are the scheduler's call (Slice 4).
         }
         connectionStatus.save(health);
     }

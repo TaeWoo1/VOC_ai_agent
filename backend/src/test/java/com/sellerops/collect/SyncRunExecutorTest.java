@@ -174,7 +174,7 @@ class SyncRunExecutorTest {
     }
 
     @Test
-    void rateLimitOnFirstFetchIsFailureAndIncrementsHealth() {
+    void rateLimitOnFirstFetchIsFailureWithoutHealthPenalty() {
         SellerAccount acc = account("GMARKET");
         mock.setRateLimitAtOffset(0); // throttled before any data
 
@@ -184,8 +184,12 @@ class SyncRunExecutorTest {
         assertThat(job.isRateLimited()).isTrue();
         assertThat(inquiries.count()).isZero();
         assertThat(sellerAccounts.findById(acc.getId()).orElseThrow().getLastSyncedAt()).isNull();
+        // Throttling is not a connectivity failure: the reason is recorded but the
+        // failure counter (which drives DEGRADED escalation) stays untouched.
         var health = connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow();
-        assertThat(health.getConsecutiveFailures()).isEqualTo(1);
+        assertThat(health.getConsecutiveFailures()).isZero();
+        assertThat(health.getState()).isEqualTo("CONNECTED");
+        assertThat(health.getLastError()).isNotNull();
     }
 
     @Test
