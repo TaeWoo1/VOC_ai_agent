@@ -39,3 +39,22 @@ export function shortDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
+
+/** Future counterpart of relativeTime — "다음 수집 5분 후" style. */
+export function untilTime(iso: string | null): string {
+  if (!iso) {
+    return "-";
+  }
+  const diffMin = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (diffMin < 1) {
+    return "곧";
+  }
+  if (diffMin < 60) {
+    return `${diffMin}분 후`;
+  }
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) {
+    return `${diffHr}시간 후`;
+  }
+  return `${Math.round(diffHr / 24)}일 후`;
+}

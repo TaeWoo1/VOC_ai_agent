@@ -7,6 +7,7 @@ import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
 import { Orders } from "./pages/Orders";
 import { Channels } from "./pages/Channels";
+import { ChannelDetail } from "./pages/ChannelDetail";
 import { Upload } from "./pages/Upload";
 import { ProductIssues } from "./pages/ProductIssues";
 import { AiSearch } from "./pages/AiSearch";
@@ -44,6 +45,7 @@ export function App() {
         <Route path="/search" element={<AiSearch />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/channels" element={<Channels />} />
+        <Route path="/channels/:accountId" element={<ChannelDetail />} />
         <Route path="/upload" element={<Upload />} />
         <Route path="/alerts" element={<AlertSettings />} />
       </Route>

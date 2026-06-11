@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "../components/StatusBadge";
 import { DataBadge } from "../components/DataBadge";
@@ -6,12 +6,24 @@ import { EmptyState } from "../components/EmptyState";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { relativeTime } from "../lib/format";
-import type { ChannelResponse } from "../lib/types";
+import type { ChannelResponse, SellerAccountResponse } from "../lib/types";
 
 export function Channels() {
   const { data } = useApiData(() => api.getChannels());
+  const { data: accounts } = useApiData(() => api.getSellerAccounts());
   const [notice, setNotice] = useState<string | null>(null);
   const channels = data ?? [];
+
+  // Channel → the org's seller account on it (drives the 자동 수집 관리 entry).
+  const accountByChannel = useMemo(() => {
+    const map = new Map<string, SellerAccountResponse>();
+    for (const acc of accounts ?? []) {
+      if (!acc.fileUpload) {
+        map.set(acc.channelId, acc);
+      }
+    }
+    return map;
+  }, [accounts]);
 
   return (
     <div className="space-y-6">
@@ -30,7 +42,12 @@ export function Channels() {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {channels.map((ch) => (
-            <ChannelCard key={ch.id} channel={ch} onAction={setNotice} />
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              account={accountByChannel.get(ch.id) ?? null}
+              onAction={setNotice}
+            />
           ))}
         </div>
       )}
@@ -40,9 +57,11 @@ export function Channels() {
 
 function ChannelCard({
   channel,
+  account,
   onAction,
 }: {
   channel: ChannelResponse;
+  account: SellerAccountResponse | null;
   onAction: (msg: string) => void;
 }) {
   const navigate = useNavigate();
@@ -51,6 +70,10 @@ function ChannelCard({
     channel.status === "FILE_UPLOAD_SUPPORTED" || channel.actionLabel === "파일 업로드";
 
   function handleAction() {
+    if (account) {
+      navigate(`/channels/${account.id}`);
+      return;
+    }
     if (canUpload) {
       navigate(`/upload?channelId=${channel.id}`);
       return;
@@ -89,7 +112,7 @@ function ChannelCard({
                 : "btn-primary px-4 py-2.5 text-base"
           }
         >
-          {channel.actionLabel}
+          {account ? "수집 관리" : channel.actionLabel}
         </button>
       </div>
     </div>

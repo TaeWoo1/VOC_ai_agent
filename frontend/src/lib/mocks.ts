@@ -2,14 +2,18 @@
 // the backend is unreachable — so the UI is never blank during a demo.
 import type {
   AuthResponse,
+  CapabilityView,
   ChannelResponse,
   ChannelStatus,
+  ConnectionStatusView,
   DashboardSummaryResponse,
   InboxResponse,
   OrderSummaryResponse,
   SalesTrendPoint,
+  ScheduleView,
   SellerAccountResponse,
   SyncJobView,
+  SyncRunView,
   UserView,
 } from "./types";
 
@@ -39,6 +43,12 @@ function daysAgoISO(d: number): string {
 function hoursAgoISO(h: number): string {
   const date = new Date();
   date.setHours(date.getHours() - h);
+  return date.toISOString();
+}
+
+function hoursAheadISO(h: number): string {
+  const date = new Date();
+  date.setHours(date.getHours() + h);
   return date.toISOString();
 }
 
@@ -165,6 +175,82 @@ export function mockOrders(): OrderSummaryResponse {
     trend: t,
     channelShare: mockDashboard().channelSalesShare,
   };
+}
+
+export function mockSchedules(): ScheduleView[] {
+  return [
+    {
+      id: "mock-schedule-1",
+      dataType: "INQUIRY",
+      cadenceKind: "INTERVAL",
+      intervalMinutes: 360,
+      enabled: true,
+      nextRunAt: hoursAheadISO(2),
+      lastRunAt: hoursAgoISO(4),
+      pausedReason: null,
+    },
+  ];
+}
+
+export function mockConnectionStatus(): ConnectionStatusView {
+  return {
+    sellerAccountId: "mock-acct",
+    state: "CONNECTED",
+    lastSuccessAt: hoursAgoISO(4),
+    consecutiveFailures: 0,
+    lastError: null,
+    lastSyncedAt: hoursAgoISO(4),
+    nextScheduledAt: hoursAheadISO(2),
+  };
+}
+
+export function mockCapabilities(): CapabilityView[] {
+  return [];
+}
+
+export function mockSyncRuns(): SyncRunView[] {
+  return [
+    {
+      id: "mock-run-1",
+      sellerAccountId: "mock-acct",
+      channelId: "mock-channel-0",
+      dataType: "INQUIRY",
+      trigger: "SCHEDULED",
+      attempt: 1,
+      rateLimited: false,
+      nextRetryAt: null,
+      jobType: "MOCK_API",
+      uploadType: null,
+      status: "SUCCESS",
+      totalRows: 45,
+      successRows: 45,
+      skippedRows: 0,
+      failedRows: 0,
+      errorMessage: null,
+      startedAt: hoursAgoISO(4),
+      finishedAt: hoursAgoISO(4),
+    },
+    {
+      id: "mock-run-2",
+      sellerAccountId: null,
+      channelId: "mock-channel-0",
+      dataType: null,
+      trigger: "UPLOAD",
+      attempt: 1,
+      rateLimited: false,
+      nextRetryAt: null,
+      jobType: "FILE_UPLOAD",
+      uploadType: "REVIEW",
+      status: "SUCCESS",
+      totalRows: 44,
+      successRows: 42,
+      skippedRows: 2,
+      failedRows: 0,
+      errorMessage: null,
+      startedAt: hoursAgoISO(8),
+      finishedAt: hoursAgoISO(8),
+    },
+  ];
 }
 
 export function mockSyncJobs(): SyncJobView[] {

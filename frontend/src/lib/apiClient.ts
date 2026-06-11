@@ -1,25 +1,34 @@
 import axios from "axios";
 import type {
   AuthResponse,
+  CapabilityView,
   ChannelResponse,
+  ConnectionStatusView,
   DashboardSummaryResponse,
   IngestResult,
   InboxResponse,
   OrderSummaryResponse,
+  ScheduleView,
   SellerAccountResponse,
   SyncJobView,
+  SyncRunFilters,
+  SyncRunView,
   UploadType,
   UserView,
 } from "./types";
 import {
   mockAuth,
+  mockCapabilities,
   mockChannels,
+  mockConnectionStatus,
   mockDashboard,
   mockInbox,
   mockMe,
   mockOrders,
+  mockSchedules,
   mockSellerAccounts,
   mockSyncJobs,
+  mockSyncRuns,
 } from "./mocks";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
@@ -111,6 +120,52 @@ export const api = {
     form.append("uploadType", uploadType);
     form.append("file", file);
     const { data } = await http.post<IngestResult>("/api/uploads", form);
+    return data;
+  },
+
+  // --- Scheduled collection (Phase 3B Slice 7) ---
+
+  getSchedules: (accountId: string): Promise<ScheduleView[]> =>
+    getOrMock(`/api/seller-accounts/${accountId}/schedule`, mockSchedules),
+  getConnectionStatus: (accountId: string): Promise<ConnectionStatusView> =>
+    getOrMock(`/api/seller-accounts/${accountId}/connection-status`, mockConnectionStatus),
+  // No silent mock fallback: an empty capability list means "default-allowed",
+  // so falling back to [] on a dead backend would invert the gating. Failures
+  // must surface so the page can fail closed instead.
+  async getChannelCapabilities(channelCode: string): Promise<CapabilityView[]> {
+    if (USE_MOCKS) {
+      return mockCapabilities();
+    }
+    const { data } = await http.get<CapabilityView[]>(`/api/channels/${channelCode}/capabilities`);
+    return data;
+  },
+  getSyncRuns: (filters: SyncRunFilters = {}): Promise<SyncRunView[]> => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    return getOrMock(`/api/sync-runs${query ? `?${query}` : ""}`, mockSyncRuns);
+  },
+
+  // Mutating collection controls: no mock fallback; errors surface to the UI.
+  async putSchedule(
+    accountId: string,
+    body: { dataType: string; intervalMinutes: number; enabled: boolean },
+  ): Promise<ScheduleView> {
+    const { data } = await http.put<ScheduleView>(`/api/seller-accounts/${accountId}/schedule`, body);
+    return data;
+  },
+
+  async manualSync(accountId: string, dataType: string): Promise<SyncRunView> {
+    const { data } = await http.post<SyncRunView>(`/api/seller-accounts/${accountId}/sync`, { dataType });
+    return data;
+  },
+
+  async retryRun(runId: string): Promise<SyncRunView> {
+    const { data } = await http.post<SyncRunView>(`/api/sync-runs/${runId}/retry`);
     return data;
   },
 };

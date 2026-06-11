@@ -134,3 +134,66 @@ export interface SyncJobView {
   startedAt: string | null;
   finishedAt: string | null;
 }
+
+// --- Scheduled collection (Phase 3B Slice 7) ---
+
+export type DataType = "REVIEW" | "INQUIRY" | "ORDER_SUMMARY" | "PRODUCT" | "SALES";
+
+export interface ScheduleView {
+  id: string;
+  dataType: string;
+  cadenceKind: string;
+  intervalMinutes: number | null;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  pausedReason: string | null;
+}
+
+export interface ConnectionStatusView {
+  sellerAccountId: string;
+  state: string; // CONNECTED | DEGRADED | ... | NOT_COLLECTED
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+  lastSyncedAt: string | null;
+  nextScheduledAt: string | null;
+}
+
+export interface SyncRunView {
+  id: string;
+  sellerAccountId: string | null;
+  channelId: string | null;
+  dataType: string | null;
+  trigger: string; // SCHEDULED | MANUAL | RETRY | UPLOAD
+  attempt: number;
+  rateLimited: boolean;
+  nextRetryAt: string | null;
+  jobType: string;
+  uploadType: string | null;
+  status: string;
+  totalRows: number;
+  successRows: number;
+  skippedRows: number;
+  failedRows: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface SyncRunFilters {
+  sellerAccountId?: string;
+  channelId?: string;
+  dataType?: string;
+  trigger?: string;
+  status?: string;
+}
+
+export interface CapabilityView {
+  channelCode: string;
+  connectorClass: string;
+  dataType: string;
+  supported: boolean;
+  verificationStatus: string; // CONFIRMED | NEEDS_VERIFICATION | UNSUPPORTED
+  notes: string | null;
+}
