@@ -141,6 +141,18 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
   recent 3-month revenue, timeline; "내부 사정으로 거절될 수 있음") +
   IP allowlisting. The auth scheme itself is public, so the skeleton is
   offline-buildable; live use is permission-gated.
+- **3D-4 implementation re-verification (2026-06-12, official guide):** JWT
+  header verbatim `{"alg":"HS256","typ":"JWT","kid":"{master id}"}`; payload
+  claims `iss` (token issuer — "보통 클라이언트 도메인 주소 사용", i.e. the
+  service domain registered at key issuance), `sub` = `"sell"` (fixed for
+  the Sell API), `aud` = `"sa.esmplus.com"` (fixed), `iat` (long type,
+  officially **"필수 정보 아님"** — optional; emitted as RFC 7519 epoch
+  seconds, unit to re-confirm at live smoke), `ssi` =
+  `"A:옥션판매자ID,G:지마켓판매자ID"`; signature
+  `HS256(base64UrlEncode(header) + "." + base64UrlEncode(payload), secret
+  key)`; sent as `Authorization: Bearer {token}`. No `exp`/`nbf` claims are
+  documented. Because `iss` is tied to the key application, it is stored as
+  a **credential secret (`issuer`)**, never in `application.yml`.
 
 ### 2.4 11st (11번가) — NEEDS_ACCOUNT_PERMISSION
 
@@ -387,6 +399,24 @@ fix MUST-FIX → hold for commit approval. One slice per approval.
   to later approved slices.
 - **Slice 3D-4 — ESM (Gmarket/Auction) skeleton.** `EsmJwtSigner` with the
   documented claims; one connector dedicated to `GMARKET`.
+  **Implemented 2026-06-12 — ESM JWT auth skeleton only**: feature-flagged
+  `EsmApiConnector` with an **empty capability set**; `EsmJwtSigner` builds
+  the verbatim official header/payload (HS256, Master-ID `kid`, fixed
+  `sub`/`aud`, site-prefixed `ssi`, optional `iat` as epoch seconds) with an
+  independently recomputed signature in tests. **One shared connector for
+  both marketplaces, dedicated to `GMARKET` only** — the channel catalog has
+  no `AUCTION` code; the shared credential and `ssi` claim already carry
+  both seller ids, so a future AUCTION channel (a catalog change needing its
+  own approval) only adds a code to `dedicatedChannels()`. Credential shape:
+  `master_id` / `secret_key` / `issuer` (the registered service domain —
+  credential-scoped by decision) / `gmarket_seller_id` (required: the
+  catalog channel is GMARKET) / `auction_seller_id` (optional, joins `ssi`
+  when present). ESM auth is a self-signed JWT — no token endpoint — so the
+  skeleton performs zero HTTP anywhere; the only published rate limit is an
+  interval (1 order query / 5 s / seller id), recorded as
+  `order-query-interval-seconds` rather than a misleading rps key.
+  Order/inquiry/product schemas, pagination, and any live call remain
+  deferred to later approved slices.
 - **Slice 3D-5 — 11st skeleton.** Static-key header client; fetch stays
   fully gated (schemas are login-walled — NEEDS_OFFICIAL_SCHEMA recorded).
 - **Slice 3D-6 — SSG skeleton.** Static-key header client; **no base-url

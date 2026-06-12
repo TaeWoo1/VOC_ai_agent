@@ -80,6 +80,22 @@ sellerops:
       # IP may be flagged abnormal (verified 2026-06-12). Reserved for request
       # pacing in later collection slices.
       rate-limit-rps: ${SELLEROPS_CONNECTOR_CAFE24_RATE_LIMIT_RPS:2}
+    esm:
+      # ESM Trading API connector for G마켓/옥션 (Phase 3D-4 auth skeleton).
+      # Off by default — beans absent, GMARKET keeps resolving to the mock
+      # connector. The skeleton exposes no collectable data type, so even
+      # flag-on cannot reach HTTP. Seller credentials (master_id/secret_key/
+      # issuer/seller ids) never live here: they enter via the credential
+      # intake API into the vault, per seller account.
+      enabled: ${SELLEROPS_CONNECTOR_ESM_ENABLED:false}
+      # Official Sell-API endpoint host (verified 2026-06-12 from the official
+      # order-API docs on etapi.gmarket.com). Unused until the order slice.
+      base-url: ${SELLEROPS_CONNECTOR_ESM_BASE_URL:https://sa2.esmplus.com}
+      # The only officially published limit is per order-query endpoint:
+      # 1 call per 5 seconds per seller id per token (notice, 2025-04-23) —
+      # an interval, not an rps figure. Reserved for request pacing in the
+      # order-collection slice.
+      order-query-interval-seconds: ${SELLEROPS_CONNECTOR_ESM_ORDER_QUERY_INTERVAL_SECONDS:5}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}
