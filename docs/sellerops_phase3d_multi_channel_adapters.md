@@ -62,6 +62,16 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
   edits ≤10/week)**; initial key activation can take 24+ hours; **keys
   expire after 180 days** (re-issue window opens T-14d) — an ops/rotation
   concern to design for, not a code blocker.
+- **3D-2 implementation re-verification (2026-06-12, official portal):**
+  signature encoding is **lowercase hex** (the official Python sample's
+  `hexdigest()` / C# `ToString("x2")`); the message is
+  `signedDate + method + path + query` with no separators and **no `?`**;
+  the gateway host is `https://api-gateway.coupang.com` (quoted verbatim in
+  the official PO-list endpoint doc); the official test guide additionally
+  requires an **`X-MARKET: KR`** header alongside `Authorization` and
+  `X-Requested-By`. The 5-minute signature-validity figure from the earlier
+  sweep was not restated in the HMAC article body — treat it as a live-smoke
+  observation item, not a coded constant.
 
 ### 2.2 Cafe24 — READY_FOR_AUTH_SKELETON
 
@@ -334,6 +344,13 @@ fix MUST-FIX → hold for commit approval. One slice per approval.
 - **Slice 3D-2 — Coupang auth skeleton** (first: P0 channel, fully public
   docs, offline-verifiable HMAC, capability seed already exists).
   `CoupangSigner` + connector + flag + registry/zero-HTTP/flag tests.
+  **Implemented 2026-06-12 — auth skeleton only**: CEA signer offline-verified
+  against the official recipe (incl. lowercase-hex encoding), feature-flagged
+  connector dedicated to COUPANG with an **empty capability set**, fail-closed
+  vault path (`access_key`/`secret_key`/`vendor_id` shape check), throwing-fake
+  HTTP boundary, and an executor-level capability-gate test. Ordersheet/
+  inquiry/product endpoint schemas, pagination, response parsing, and any
+  live call remain deferred to later approved slices.
 - **Slice 3D-3 — Cafe24 auth skeleton.** Refresh-token-based token client
   incl. the rotated-refresh-token write-back design through the vault;
   per-mall URL assembly from `mall_id`.

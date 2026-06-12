@@ -52,6 +52,20 @@ sellerops:
       # is unconfirmed — 300 is the commonly cited ceiling, so values above it
       # are rejected at startup; 100 is a conservative default.
       order-detail-batch-size: ${SELLEROPS_CONNECTOR_NAVER_ORDER_DETAIL_BATCH_SIZE:100}
+    coupang:
+      # Coupang WING Open API connector (Phase 3D-2 auth skeleton). Off by
+      # default — beans absent, COUPANG keeps resolving to the mock connector.
+      # The skeleton exposes no collectable data type, so even flag-on cannot
+      # reach HTTP. Seller credentials never live here: they enter via the
+      # credential intake API into the vault, per seller account.
+      enabled: ${SELLEROPS_CONNECTOR_COUPANG_ENABLED:false}
+      # Official gateway host (verified 2026-06-12 from the PO-list endpoint
+      # doc on developers.coupangcorp.com). Unused until the order slice.
+      base-url: ${SELLEROPS_CONNECTOR_COUPANG_BASE_URL:https://api-gateway.coupang.com}
+      # Official throttle threshold: >5 calls/second per vendorId triggers
+      # 429s, whole-API scope (verified 2026-06-12). Reserved for request
+      # pacing in the order-collection slice.
+      rate-limit-rps: ${SELLEROPS_CONNECTOR_COUPANG_RATE_LIMIT_RPS:5}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}
