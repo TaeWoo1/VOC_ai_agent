@@ -194,24 +194,40 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
 - **Portal:** `https://eapi.ssgadm.com/` — fully public per-endpoint docs
   (KO/EN, XML/JSON samples, ~130 endpoints).
 - **Auth (CONFIRMED):** REST with a per-request header
-  `Authorization: {업체 인증키}` — one static vendor auth key per company,
-  self-issued in 파트너오피스 (PO → API관리) after an 입점 contract;
+  `Authorization: {업체 인증키}` — one static vendor auth key per company
+  after an 입점 contract; **key creation is requested through the 담당 MD
+  부서** (corrected at 3D-6 — supersedes the 3D-1 "self-issued in PO"
+  reading; PO → API관리 → API계정정보 is the *management*/IP screen);
   activated via email link. **Registered access IP becomes mandatory per key
-  by 2026-06-30** (official notice).
-- **Credential shape (CONFIRMED):** `{auth_key}` (single static key).
+  by 2026-06-30** (official notice posted 2026-01-19; both 운영서버 and
+  테스트서버 IPs must be set).
+- **Credential shape (CONFIRMED):** `{auth_key}` (single static key; no
+  separate vendor/company id in header, query, or body — vendor identity is
+  implied by the key).
 - **Data (CONFIRMED):** orders/shipping/claims/settlement families; products
   (legacy + v2 "online/item", legacy being phased out per notices); 상품Q&A
-  **unanswered-only** retrieval (`/api/postng/qnaList.ssg` — answered history
-  not retrievable) + answer API; CS 쪽지 APIs. **Reviews: confirmed absent**
-  (zero review endpoints in the full catalog).
+  **unanswered-only** retrieval ("조회기간의 미답변 상품Q&A에 대해서만
+  리스트 조회가 가능") + answer API; CS 쪽지 APIs. **Reviews: confirmed
+  absent** (zero review endpoints in the full catalog — re-verified at 3D-6
+  across the complete live doc menu, KO and EN).
 - **Rate limit (PARTIAL):** product-update API 50,000 calls/hour (official
-  notice, 2025-07-09); other endpoints unpublished.
-- **Sandbox:** UNCONFIRMED (appears not to exist). Production API base host
-  is not printed in the public docs (paths are relative) — confirm at key
-  issuance; **never guess the host**.
+  notice posted 2025-07-07, effective 2025-07-09); other endpoints
+  unpublished.
+- **Sandbox — corrected at 3D-6 (supersedes the 3D-1 "appears not to
+  exist"):** a test environment **exists** officially ("SSG에서 제공하는
+  테스트 환경에 접근할 수 있습니다", 인증키 발급안내) — its host, like
+  production, is not publicly printed. Production API base host is not
+  printed in the public docs (every endpoint example is a relative path,
+  e.g. `/api/claim/v2/order/{orordNo}`) — confirm at key issuance; **never
+  guess the host**.
 - **Blockers:** 입점 (onboarding) contract — the open-market seller channel
   was closed per official notice, so entry is curated; one key per company;
-  IP registration.
+  MD-department key request; IP registration.
+- **Re-verified at 3D-6 implementation (2026-06-13, official eapi.ssgadm.com
+  pages only):** every endpoint's request-header table carries exactly one
+  auth row — `Authorization | string | Y | 업체 인증키` — with the official
+  sample showing the raw key as the value (no Bearer/Basic prefix);
+  `Accept`/`Content-Type` select `application/xml | application/json`.
 
 ### 2.6 Today's House (오늘의집 / OHOUSE) — PARTNER_ONLY_OR_BLOCKED
 
@@ -462,6 +478,31 @@ fix MUST-FIX → hold for commit approval. One slice per approval.
 - **Slice 3D-6 — SSG skeleton.** Static-key header client; **no base-url
   default** (host unconfirmed — flag-on without explicit base-url fails
   startup closed).
+  **Implemented 2026-06-13 — static-key auth skeleton only**: feature-flagged
+  `SsgApiConnector` dedicated to SSG with an **empty capability set**; no
+  signer and no token endpoint — the auth client is `authHeaders(auth_key)`
+  assembling the official raw-value `Authorization` header (no Bearer/Basic
+  prefix; blank key fails closed, no echo). Credential shape: the single
+  secret key `auth_key` (the official docs name the value only as the 업체
+  인증키 carried in `Authorization`; no separate vendor id exists — confirmed
+  absent from header/query/body across endpoint specs). **Base-url decision
+  (as planned in §4):** no default value — the production host is not
+  publicly printed (all official examples are relative paths), so flag-on
+  without an explicit `sellerops.connector.ssg.base-url` fails startup
+  closed with a message saying why, and a configured value must be https
+  (the static key travels in `Authorization`; plaintext is refused at
+  startup) — both rules test-locked. **No rate-limit config key**: the only
+  published limit (product-update 50,000/hour, effective 2025-07-09)
+  targets an API family this skeleton does not implement. Re-verification
+  corrected two 3D-1 findings (§2.5 updated first per §10): key issuance is
+  MD-department-requested, not PO-self-issued; an official test environment
+  exists (host equally unprinted). Reviews re-confirmed absent. Fail-closed
+  vault path, throwing-fake HTTP boundary (GET, Authorization masked in
+  test output), executor-level capability-gate test.
+  Order/shipping/claim/settlement/product/Q&A/쪽지 schemas, XML/JSON
+  response handling, pagination, the MD key request, IP registration (운영
+  + 테스트 servers, mandatory by 2026-06-30), host confirmation at key
+  issuance, and any live call remain deferred to later approved slices.
 - **Today's House:** no slice. Re-opens only on confirmed partner/API
   access; until then the channel stays file-upload-only.
 

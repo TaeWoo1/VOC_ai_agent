@@ -115,6 +115,27 @@ sellerops:
       # No rate-limit key on purpose: 11st publishes no call limit anywhere
       # on the official portal (re-verified 2026-06-12) — an rps figure here
       # would be invented. Pacing is decided at the order slice.
+    ssg:
+      # SSG.COM Open API connector (Phase 3D-6 auth skeleton). Off by default
+      # — beans absent, SSG keeps resolving to the mock connector. The
+      # skeleton exposes no collectable data type, so even flag-on cannot
+      # reach HTTP. Auth is a single static 업체 인증키 sent verbatim as the
+      # Authorization header; the key never lives here — it enters via the
+      # credential intake API into the vault, per seller account. Key
+      # issuance is an MD-department request after the 입점 contract; per-key
+      # access-IP registration becomes mandatory 2026-06-30 (official
+      # notice) — both operator setup duties.
+      enabled: ${SELLEROPS_CONNECTOR_SSG_ENABLED:false}
+      # Deliberately NO default value: the SSG production API host is not
+      # publicly printed in the official docs — every endpoint example on
+      # eapi.ssgadm.com is a relative path (re-verified 2026-06-13), so any
+      # default would be a guess. Flag-on without an explicit https value
+      # fails startup closed; the host is confirmed at key issuance.
+      base-url: ${SELLEROPS_CONNECTOR_SSG_BASE_URL:}
+      # No rate-limit key on purpose: the only officially published limit is
+      # product-update 50,000 calls/hour (notice effective 2025-07-09) — an
+      # API family this connector does not implement. Nothing applicable is
+      # published; pacing is decided at the first fetch slice.
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}
