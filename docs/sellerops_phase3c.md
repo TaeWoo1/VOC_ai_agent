@@ -237,3 +237,47 @@ Output: 1. files added/changed 2. test summary 3. flag-off regression proof
 4. what was confirmed from official docs vs still unverified 5. Codex result
 6. remaining Slice 2 candidates. Do not start Slice 2 yet.
 ```
+
+---
+
+## 12. Slice 1a / 1b split (recorded 2026-06-12, at Slice 1a implementation)
+
+The Slice 1 preflight verified auth/token/rate-limit/endpoint-path details
+against official sources (the Naver-operated `commerce-api-naver/commerce-api`
+repository; the docs portal is not fetchable from the implementation
+environment), but could **not** confirm the orders response schema. Slice 1 was
+therefore split at the safely confirmed boundary:
+
+**Slice 1a (implemented)** — auth/registry/rate-limit/fail-closed only:
+
+- Feature-flagged `NaverApiConnector` bean (`sellerops.connector.naver.enabled`,
+  default false — bean absent, NAVER keeps resolving to the mock).
+- Channel-aware `ConnectorRegistry` via `PullConnector.dedicatedChannels()`.
+- `NaverTokenClient` with the confirmed electronic signature
+  (`bcrypt(client_id + "_" + timestamp_ms, salt = client_secret)` → Base64 →
+  `client_secret_sign`), confirmed form fields
+  (`client_id / timestamp / client_secret_sign / grant_type=client_credentials
+  / type=SELF`), per-client token cache honoring the variable `expires_in`
+  minus a 60s skew.
+- `CredentialVault.open` as the only credential path, fail-closed **before any
+  HTTP**.
+- 429 → `FetchPage.rateLimited`; officially no `Retry-After` header exists
+  (confirmed), so a conservative 1s hint is used and the scheduled runner's
+  ≥1-minute clamp governs the actual wait.
+- Runtime capabilities advertise **no collectable data type yet**, so no
+  scheduler/manual path can reach the unimplemented orders call;
+  `fetch(ORDER_SUMMARY)` stops with a clear schema-pending error after proving
+  the credential → signature → token chain.
+
+**Slice 1b (blocked on official schema)** — ORDER_SUMMARY parsing, pagination
+cursor mapping, `CanonicalOrderSummary` mapping, and flipping capabilities to
+advertise ORDER_SUMMARY. Required official confirmations before 1b starts:
+
+1. The full `last-changed-statuses` response body schema (array field name and
+   per-item fields).
+2. The response-side pagination fields (the `more` block / `moreSequence`
+   semantics and per-page maximum).
+3. Whether any payment-amount field exists in that response.
+4. Whether the two-call flow (`POST …/product-orders/query`) is required for
+   amounts — if so, Slice 1b's "one endpoint" scope must be re-approved before
+   implementation.

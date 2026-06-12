@@ -12,6 +12,16 @@ package com.sellerops.connector;
 public interface PullConnector extends ChannelConnector {
 
     /**
+     * Channel codes this connector exclusively serves (e.g. the real Naver
+     * connector → {@code {"NAVER"}}), or empty for a generic connector that can
+     * serve any channel (the mock). The registry prefers a dedicated connector
+     * for its channel and never routes other channels to it.
+     */
+    default java.util.Set<String> dedicatedChannels() {
+        return java.util.Set.of();
+    }
+
+    /**
      * Capability descriptor for a specific channel: the priority class plus the
      * data types this connector can actually serve for {@code channelCode}. This
      * is channel-aware so it never disagrees with {@link #fetch} — e.g. a

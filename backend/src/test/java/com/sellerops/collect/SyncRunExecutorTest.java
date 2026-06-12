@@ -13,6 +13,9 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.MockApiConnector;
 import com.sellerops.connector.PullConnector;
+import com.sellerops.connector.naver.NaverApiConnector;
+import com.sellerops.connector.naver.NaverHttpClient;
+import com.sellerops.connector.naver.NaverTokenClient;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -228,6 +231,34 @@ class SyncRunExecutorTest {
         assertThat(cursor(acc.getId(), DataType.REVIEW).getCursorValue()).isEqualTo("50");
         assertThat(connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow().getState())
                 .isEqualTo("CONNECTED");
+    }
+
+    @Test
+    void naverSliceOneAStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
+        // Phase 3C Slice 1a safe state: the flag-on Naver connector advertises no
+        // collectable data type, so a manual ORDER_SUMMARY sync must be recorded
+        // as a config failure by the capability gate — fetch (and therefore any
+        // HTTP) is unreachable until Slice 1b flips capabilities.
+        SellerAccount acc = account("NAVER");
+        NaverHttpClient neverCalled = (uri, form) -> {
+            throw new AssertionError("Slice 1a must not reach the HTTP boundary via the executor");
+        };
+        NaverApiConnector naver = new NaverApiConnector(
+                new NaverTokenClient(neverCalled, java.time.Clock.systemUTC(), "https://fake.naver.test"),
+                null); // the vault is behind the capability gate and never reached
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(naver, mock));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        SyncRunExecutor naverExecutor = new SyncRunExecutor(
+                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+
+        SyncJob job = naverExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("지원되지");
+        assertThat(job.getJobType()).isEqualTo("NAVER_API"); // routed to the dedicated connector
+        assertThat(orders.count()).isZero();
+        // A config issue, not a connectivity failure → no health row touched.
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
     }
 
     @Test

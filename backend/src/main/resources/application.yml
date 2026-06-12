@@ -37,6 +37,17 @@ sellerops:
     # polls until ops flips this; the file-upload path is unaffected either way.
     scheduler-enabled: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:false}
     poll-interval-ms: ${SELLEROPS_COLLECT_POLL_INTERVAL_MS:60000}
+  connector:
+    naver:
+      # Real Naver Commerce API connector (Phase 3C Slice 1a). Off by default —
+      # the connector beans are not even created, and NAVER keeps resolving to
+      # the mock connector. Seller credentials never live here: they enter via
+      # the credential intake API into the vault, per seller account.
+      enabled: ${SELLEROPS_CONNECTOR_NAVER_ENABLED:false}
+      base-url: ${SELLEROPS_CONNECTOR_NAVER_BASE_URL:https://api.commerce.naver.com}
+      # Official default capacity: 2 requests/second per application, metered
+      # per API (verified 2026-06-12). Reserved for Slice 1b request pacing.
+      rate-limit-rps: ${SELLEROPS_CONNECTOR_NAVER_RATE_LIMIT_RPS:2}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}

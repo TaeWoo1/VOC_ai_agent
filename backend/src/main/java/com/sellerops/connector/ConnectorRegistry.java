@@ -9,10 +9,13 @@ import org.springframework.stereotype.Component;
  * {@link ChannelConnector} bean; the registry separates the pull connectors
  * (API-style, schedulable) from the operator-initiated file-upload connector.
  *
- * <p>Slice 2 mapping: the file-upload channel ({@code FILE_UPLOAD}) has no pull
- * connector (it is a manual fallback); every other channel resolves to the single
- * {@link MockApiConnector}. Keyed by connector class so real Coupang/Naver
- * connectors slot in later without changing callers.
+ * <p>Resolution is channel-aware (Phase 3C Slice 1a): a pull connector that
+ * {@linkplain PullConnector#dedicatedChannels() declares itself dedicated} to a
+ * channel wins for that channel; every other channel falls back to the generic
+ * connector (the mock, which declares no dedication). With no dedicated
+ * connector bean present — the real-connector feature flags are off by
+ * default — resolution is identical to the original single-mock mapping. The
+ * file-upload channel ({@code FILE_UPLOAD}) never resolves to a pull connector.
  */
 @Component
 public class ConnectorRegistry {
@@ -38,31 +41,35 @@ public class ConnectorRegistry {
     }
 
     /**
-     * The pull connector that serves this channel, if any. Empty for the
-     * file-upload channel (manual fallback only).
+     * The pull connector that serves this channel, if any: the connector
+     * dedicated to the channel when one exists, otherwise the generic fallback.
+     * Empty for the file-upload channel (manual fallback only).
      */
     public Optional<PullConnector> resolvePullConnector(String channelCode) {
         if (isFileChannel(channelCode)) {
             return Optional.empty();
         }
-        // Slice 2: a single mock pull connector serves all non-file channels.
-        return pullConnectors.stream().findFirst();
+        return pullConnectors.stream()
+                .filter(p -> p.dedicatedChannels().contains(channelCode))
+                .findFirst()
+                .or(() -> pullConnectors.stream()
+                        .filter(p -> p.dedicatedChannels().isEmpty())
+                        .findFirst());
     }
 
     /**
      * Resolve a connector by channel and connector class. The file channel maps to
      * the manual (file-upload) connector under class {@code MANUAL}; other channels
-     * map to a pull connector whose {@link ConnectorCapabilities#connectorClass()}
-     * matches.
+     * map to the channel's pull connector when its
+     * {@link ConnectorCapabilities#connectorClass()} matches.
      */
     public Optional<ChannelConnector> resolve(String channelCode, String connectorClass) {
         if (isFileChannel(channelCode)) {
             return MANUAL_CONNECTOR_CLASS.equals(connectorClass) ? fileConnector() : Optional.empty();
         }
-        return pullConnectors.stream()
+        return resolvePullConnector(channelCode)
                 .filter(p -> p.capabilities(channelCode).connectorClass().equals(connectorClass))
-                .map(p -> (ChannelConnector) p)
-                .findFirst();
+                .map(p -> (ChannelConnector) p);
     }
 
     private Optional<ChannelConnector> fileConnector() {
