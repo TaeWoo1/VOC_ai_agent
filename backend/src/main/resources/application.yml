@@ -96,6 +96,25 @@ sellerops:
       # an interval, not an rps figure. Reserved for request pacing in the
       # order-collection slice.
       order-query-interval-seconds: ${SELLEROPS_CONNECTOR_ESM_ORDER_QUERY_INTERVAL_SECONDS:5}
+    elevenst:
+      # 11st (11번가) Seller Open API connector (Phase 3D-5 auth skeleton).
+      # Off by default — beans absent, ELEVENST keeps resolving to the mock
+      # connector. The skeleton exposes no collectable data type, so even
+      # flag-on cannot reach HTTP. Auth is a single static key sent as the
+      # `openapikey` header; the key never lives here — it enters via the
+      # credential intake API into the vault, per seller account, and works
+      # only from IPs registered at the 11st Open API portal.
+      enabled: ${SELLEROPS_CONNECTOR_ELEVENST_ENABLED:false}
+      # Seller API host as publicly printed in the official FAQ (verified
+      # 2026-06-12: "http://api.11st.co.kr/rest/..."). The official example
+      # prints plain http, but TLS on this host was verified reachable the
+      # same day, so the default is https — credential-bearing calls must
+      # never downgrade to plaintext. Scheme re-confirmation is a live-smoke
+      # item. Unused until the order slice.
+      base-url: ${SELLEROPS_CONNECTOR_ELEVENST_BASE_URL:https://api.11st.co.kr}
+      # No rate-limit key on purpose: 11st publishes no call limit anywhere
+      # on the official portal (re-verified 2026-06-12) — an rps figure here
+      # would be invented. Pacing is decided at the order slice.
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}

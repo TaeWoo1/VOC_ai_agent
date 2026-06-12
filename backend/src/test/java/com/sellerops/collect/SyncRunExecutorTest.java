@@ -345,6 +345,30 @@ class SyncRunExecutorTest {
     }
 
     @Test
+    void elevenstSkeletonStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
+        // Phase 3D-5: same safe state as the other skeletons — empty
+        // capabilities kill a manual sync at the config gate before fetch.
+        SellerAccount acc = account("ELEVENST");
+        com.sellerops.connector.elevenst.ElevenstHttpClient neverCalled = (uri, headers) -> {
+            throw new AssertionError("must not reach the HTTP boundary");
+        };
+        com.sellerops.connector.elevenst.ElevenstApiConnector elevenst =
+                new com.sellerops.connector.elevenst.ElevenstApiConnector(neverCalled, null);
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(elevenst, mock));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        SyncRunExecutor elevenstExecutor = new SyncRunExecutor(
+                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+
+        SyncJob job = elevenstExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("지원되지");
+        assertThat(job.getJobType()).isEqualTo("ELEVENST_API"); // routed to the dedicated connector
+        assertThat(orders.count()).isZero();
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
+    }
+
+    @Test
     void naverOrderSummaryRunsEndToEndThroughExecutor() {
         // Slice 1b: ORDER_SUMMARY is now reachable — manual sync drives the full
         // chain (vault → token → two-call flow → ingestion → cursor → health).

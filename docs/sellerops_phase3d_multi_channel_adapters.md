@@ -166,11 +166,28 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
 - **Data:** orders + products officially exist (catalog level); their
   request/response schemas are login-gated ⇒ **NEEDS_OFFICIAL_SCHEMA on top
   of account permission** for any fetch slice. The public general-API spec
-  is XML (EUC-KR) — orders format UNCONFIRMED. **Reviews/Q&A: not listed in
-  the official catalog at all.**
-- **Rate limit / sandbox:** UNCONFIRMED (nothing public).
+  is XML (EUC-KR) — orders format UNCONFIRMED. **Reviews/Q&A — corrected at
+  3D-5 re-verification (supersedes the 3D-1 "not listed" finding):** the
+  official 상품 API catalog lists a 구매후기/Q&A retrieval+answer API
+  verbatim ("상품 Q&A 목록과 구매후기를 조회하고 답변을 등록할 수 있습니다",
+  `OpenApiServiceIntroduce.tmall?introduceType=PRODUCT`); its per-endpoint
+  spec is seller-login-walled like the rest, so REVIEW stays uncollectable
+  until a separately approved schema slice.
+- **Rate limit / sandbox:** UNCONFIRMED (nothing public; re-verified at 3D-5
+  across the usage guide, full FAQ, and notice board — no published limit).
 - **Blockers:** seller membership before key issuance (portal →
   서비스신청·확인); IP allowlist; schema access requires the seller login.
+- **Re-verified at 3D-5 implementation (2026-06-12, official portal pages
+  only):** header is literally lowercase `openapikey`
+  ("'openapikey:발급key값' 형태로 전송", OpenApiOperationGuide); single
+  static 32-char key, no OAuth/HMAC/secret on any public page; registered
+  IP mandatory and runtime-enforced ("IP주소 정보를 입력해야 셀러 API Key
+  승인이 가능"; error "인증된 IP가 아닙니다"); the seller API host is
+  **publicly printed in the official FAQ** —
+  `http://api.11st.co.kr/rest/...` — so `api.11st.co.kr` is CONFIRMED (the
+  example prints plain http; TLS on the host verified reachable the same
+  day, scheme re-confirmation is a live-smoke item; never call with a
+  credential over plaintext).
 
 ### 2.5 SSG.COM — NEEDS_ACCOUNT_PERMISSION
 
@@ -225,11 +242,14 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
 | SSG.COM | `SSG` | NEEDS_ACCOUNT_PERMISSION | static `Authorization` vendor key | 3D-6 |
 | Today's House | `OHOUSE` | PARTNER_ONLY_OR_BLOCKED | unknown (no public docs) | none — file upload only |
 
-Cross-channel finding that matters to this product: **no channel in this set
-has an official review-retrieval API** (Cafe24's generic boards API is the
-only indirect, per-mall-discovered candidate). The Phase 3C fallback order
-stands everywhere: official API → official export → file upload; reviews stay
-capability-gated.
+Cross-channel finding that matters to this product (corrected at 3D-5):
+**one channel in this set has an official review-retrieval API — 11st**
+(구매후기 조회+답변, catalog-confirmed, spec login-walled); Cafe24's generic
+boards API remains the only other indirect, per-mall-discovered candidate.
+Everywhere else the Phase 3C fallback order stands: official API → official
+export → file upload; reviews stay capability-gated on every channel,
+including ELEVENST, until an official schema is read and a fetch slice is
+separately approved.
 
 Note: the channel catalog (`MockDataSeeder.seedChannels`) models G마켓/옥션 as
 the single code `GMARKET`. The ESM connector therefore declares
@@ -315,7 +335,7 @@ needed for new values.
 | COUPANG | `HMAC` | `access_key`, `secret_key`, `vendor_id` | 180-day key expiry → ops rotation duty; `vendor_id` also sent as `X-Requested-By` |
 | CAFE24 | `OAUTH2` | `client_id`, `client_secret`, `mall_id`, `refresh_token` | initial `refresh_token` obtained via interactive mall-owner consent (operator step, out of connector scope); rotation must write back via vault |
 | GMARKET (ESM) | `JWT_HS256` | `master_id`, `secret_key`, `gmarket_seller_id`, `auction_seller_id` | one credential, both marketplaces (`ssi` claim) |
-| ELEVENST | `API_KEY` | `api_key` | works only from registered IPs |
+| ELEVENST | `API_KEY` | `openapikey` | named after the official header verbatim (3D-5 decision); works only from registered IPs |
 | SSG | `API_KEY` | `auth_key` | one key per company; registered IP mandatory by 2026-06-30 |
 
 ## 6. Capability policy per channel
@@ -328,8 +348,8 @@ needed for new values.
   order):** ORDER_SUMMARY everywhere (orders are the best-documented family
   on every channel); INQUIRY is plausible on COUPANG (CS API confirmed),
   ESM (bulletin-board API confirmed), SSG (unanswered-only caveat), CAFE24
-  (boards, per-mall discovery); REVIEW nowhere (no official API on any
-  channel).
+  (boards, per-mall discovery); REVIEW only on ELEVENST (구매후기 API
+  catalog-confirmed at 3D-5, spec login-walled) — nowhere else.
 - **`connector_capabilities` seed:** V3 seeds only COUPANG/NAVER. Updating
   the matrix for CAFE24/GMARKET/ELEVENST/SSG/OHOUSE to reflect §2 (so the
   UI tells the truth channel-wide) requires a **V5 migration — explicitly
@@ -419,6 +439,26 @@ fix MUST-FIX → hold for commit approval. One slice per approval.
   deferred to later approved slices.
 - **Slice 3D-5 — 11st skeleton.** Static-key header client; fetch stays
   fully gated (schemas are login-walled — NEEDS_OFFICIAL_SCHEMA recorded).
+  **Implemented 2026-06-12 — static-key auth skeleton only**: feature-flagged
+  `ElevenstApiConnector` dedicated to ELEVENST with an **empty capability
+  set**; no signer and no token endpoint — the auth client is
+  `authHeaders(openapikey)` assembling the official lowercase `openapikey`
+  header verbatim (blank key fails closed, no echo). Credential shape:
+  the single secret key `openapikey` (named after the official header —
+  supersedes the earlier `api_key` placeholder in §5). Fail-closed vault
+  path, throwing-fake HTTP boundary (GET, key header masked in test
+  output), executor-level capability-gate test. `base-url` defaults to
+  `https://api.11st.co.kr` (host publicly printed in the official FAQ;
+  the official example prints plain http — TLS verified reachable, scheme
+  re-confirmation is a live-smoke item); **no rate-limit config key on
+  purpose** — 11st publishes none, so any rps figure would be invented.
+  Re-verification reversed one 3D-1 finding: an official 구매후기/Q&A
+  retrieval API exists at catalog level (§2.4 corrected; spec
+  login-walled, so REVIEW stays uncollectable). Order/product/review/Q&A
+  schemas, EUC-KR/XML response handling, pagination, IP registration, and
+  any live call remain deferred to later approved slices — every
+  per-endpoint spec requires seller-login access (NEEDS_ACCOUNT_PERMISSION
+  stands).
 - **Slice 3D-6 — SSG skeleton.** Static-key header client; **no base-url
   default** (host unconfirmed — flag-on without explicit base-url fails
   startup closed).
