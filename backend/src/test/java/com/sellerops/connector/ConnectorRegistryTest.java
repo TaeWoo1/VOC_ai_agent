@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.connector.naver.NaverApiConnector;
 import com.sellerops.connector.naver.NaverHttpClient;
+import com.sellerops.connector.naver.NaverOrdersClient;
 import com.sellerops.connector.naver.NaverTokenClient;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -34,11 +35,25 @@ class ConnectorRegistryTest {
      * dependencies, so the HTTP boundary asserts-on-call and the vault is absent.
      */
     private static NaverApiConnector naverConnector() {
-        NaverHttpClient neverCalled = (uri, form) -> {
-            throw new AssertionError("Resolution tests must never make an HTTP call");
+        NaverHttpClient neverCalled = new NaverHttpClient() {
+            @Override
+            public Response postForm(java.net.URI uri, java.util.Map<String, String> form) {
+                throw new AssertionError("Resolution tests must never make an HTTP call");
+            }
+
+            @Override
+            public Response get(java.net.URI uri, String bearerToken) {
+                throw new AssertionError("Resolution tests must never make an HTTP call");
+            }
+
+            @Override
+            public Response postJson(java.net.URI uri, String bearerToken, String jsonBody) {
+                throw new AssertionError("Resolution tests must never make an HTTP call");
+            }
         };
         return new NaverApiConnector(
                 new NaverTokenClient(neverCalled, java.time.Clock.systemUTC(), "https://fake.naver.test"),
+                new NaverOrdersClient(neverCalled, java.time.Clock.systemUTC(), "https://fake.naver.test", 100),
                 null);
     }
 

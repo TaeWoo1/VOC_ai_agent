@@ -155,6 +155,15 @@ public class SyncRunExecutor {
             }
         }
 
+        if (hasMore && !rateLimited && !errored) {
+            // The page guard, not completion, ended the loop — a silently
+            // truncated collection must not read as a clean run.
+            errored = true;
+            if (firstError == null) {
+                firstError = "수집이 실행당 페이지 한도(" + MAX_PAGES + ")에 도달해 중단되었습니다.";
+            }
+        }
+
         String status = resolveStatus(success, skipped, failed, rateLimited, errored);
         String errorMessage = firstError;
         if (rateLimited && errorMessage == null) {

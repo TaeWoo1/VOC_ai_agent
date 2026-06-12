@@ -269,15 +269,46 @@ therefore split at the safely confirmed boundary:
   `fetch(ORDER_SUMMARY)` stops with a clear schema-pending error after proving
   the credential → signature → token chain.
 
-**Slice 1b (blocked on official schema)** — ORDER_SUMMARY parsing, pagination
-cursor mapping, `CanonicalOrderSummary` mapping, and flipping capabilities to
-advertise ORDER_SUMMARY. Required official confirmations before 1b starts:
+**Slice 1b (implemented — official two-call flow approved 2026-06-12)** — the
+schema preflight confirmed, from the Naver-operated official repo (FAQ #9,
+#2437, #1058, #587, #1875), that `last-changed-statuses` alone cannot produce a
+truthful `salesAmount`: its confirmed per-item fields (`productOrderId`,
+`orderId`, `productOrderStatus`, `lastChangedDate`, `lastChangedType`,
+`paymentDate`) carry no amounts. The officially recommended collection pattern
+is the two-call flow, which was approved in place of "one endpoint only":
 
-1. The full `last-changed-statuses` response body schema (array field name and
-   per-item fields).
-2. The response-side pagination fields (the `more` block / `moreSequence`
-   semantics and per-page maximum).
-3. Whether any payment-amount field exists in that response.
-4. Whether the two-call flow (`POST …/product-orders/query`) is required for
-   amounts — if so, Slice 1b's "one endpoint" scope must be re-approved before
-   implementation.
+1. `GET …/product-orders/last-changed-statuses` — ≤24h `lastChangedDate`
+   windows, `lastChangedType=PAYED`, `data.more` (`moreFrom`/`moreSequence`)
+   continuation.
+2. `POST …/product-orders/query` — batched `productOrderIds` (configurable
+   `order-detail-batch-size`, default 100, hard ceiling 300 because the
+   official maximum is unconfirmed); amounts joined by product order id.
+
+Mapping decisions of record:
+
+- **`summaryDate`** = KST (`Asia/Seoul`) calendar date of `paymentDate`
+  (`lastChangedDate` fallback).
+- **`orderCount`** counts paid **product-order rows** (상품주문 단위). The
+  upload parser's 주문수 is an operator-supplied column (no precedent), and
+  distinct-`orderId` counting would require unbounded id sets in the cursor.
+- **`salesAmount` = Σ `productOrder.initialPaymentAmount`** — the order-time,
+  post-discount amount. **`totalPaymentAmount` must not be used** (deprecated;
+  removal was announced for 2025). `remainPaymentAmount` (claim-adjusted net
+  sales) is a deliberate later refinement.
+- Emissions are **cumulative per date**, carried in the cursor's `dayTotals`,
+  because `IngestionService.ingestOrderSummaries` upserts by (channel, date)
+  and overwrites — successive overwrites converge to the true daily total.
+- **Boundary re-delivery is deduplicated**: adjacent windows share their
+  boundary instant (official gap-avoidance rule), so product orders stamped
+  exactly on the boundary are carried in the cursor (`edgeIds` → `dedupeIds`)
+  and skipped if the next window re-delivers them.
+- **Stragglers beyond the 2-day emission horizon are skipped, not emitted** —
+  their carried totals were pruned, and emitting would overwrite a final daily
+  total with a partial recount. For `PAYED` events `lastChangedDate ≈
+  paymentDate`, so this is a documented edge, not an expected data path.
+
+Still no live smoke in this slice: all verification is offline with fake HTTP
+and fixtures built from the confirmed field names. Live-smoke checklist:
+the exact `more`-continuation recipe, the per-page maximum, the
+`productOrderIds` per-request maximum, and `initialPaymentAmount` presence in
+real responses (post-`totalPaymentAmount` removal).

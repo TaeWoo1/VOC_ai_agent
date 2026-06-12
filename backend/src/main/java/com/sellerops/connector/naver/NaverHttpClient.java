@@ -11,8 +11,14 @@ import java.util.Optional;
  */
 public interface NaverHttpClient {
 
-    /** POST an {@code application/x-www-form-urlencoded} body. */
+    /** POST an {@code application/x-www-form-urlencoded} body (token endpoint). */
     Response postForm(URI uri, Map<String, String> form);
+
+    /** GET with a bearer access token (order queries). */
+    Response get(URI uri, String bearerToken);
+
+    /** POST a JSON body with a bearer access token (order detail queries). */
+    Response postJson(URI uri, String bearerToken, String jsonBody);
 
     /**
      * One HTTP response. {@code headers} are single-valued (first value wins);

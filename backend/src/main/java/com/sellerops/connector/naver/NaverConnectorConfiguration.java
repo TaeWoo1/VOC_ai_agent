@@ -31,7 +31,22 @@ public class NaverConnectorConfiguration {
     }
 
     @Bean
-    NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, CredentialVault vault) {
-        return new NaverApiConnector(tokenClient, vault);
+    NaverOrdersClient naverOrdersClient(
+            NaverHttpClient http,
+            @Value("${sellerops.connector.naver.base-url:https://api.commerce.naver.com}") String baseUrl,
+            @Value("${sellerops.connector.naver.order-detail-batch-size:100}") int orderDetailBatchSize) {
+        // The official productOrderIds-per-request maximum is unconfirmed; 300 is
+        // the commonly cited ceiling, so configuration must stay at or below it.
+        if (orderDetailBatchSize < 1 || orderDetailBatchSize > 300) {
+            throw new IllegalStateException(
+                    "네이버 주문 상세 조회 배치 크기는 1~300 사이여야 합니다 (설정값: " + orderDetailBatchSize + ").");
+        }
+        return new NaverOrdersClient(http, Clock.systemUTC(), baseUrl, orderDetailBatchSize);
+    }
+
+    @Bean
+    NaverApiConnector naverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
+                                        CredentialVault vault) {
+        return new NaverApiConnector(tokenClient, ordersClient, vault);
     }
 }

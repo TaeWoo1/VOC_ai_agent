@@ -4,6 +4,7 @@ import java.net.URI;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,14 +15,18 @@ import java.util.Map;
  */
 final class FakeNaverHttpClient implements NaverHttpClient {
 
-    record Sent(URI uri, Map<String, String> form) {
+    record Sent(String method, URI uri, Map<String, String> form, String bearer, String jsonBody) {
 
-        /** Failed-assertion output must not echo the signature value. */
+        /** Failed-assertion output must not echo signature or token material. */
         @Override
         public String toString() {
-            Map<String, String> masked = new java.util.LinkedHashMap<>(form);
-            masked.computeIfPresent("client_secret_sign", (k, v) -> "<masked>");
-            return "Sent[uri=" + uri + ", form=" + masked + "]";
+            Map<String, String> maskedForm = form == null ? null : new LinkedHashMap<>(form);
+            if (maskedForm != null) {
+                maskedForm.computeIfPresent("client_secret_sign", (k, v) -> "<masked>");
+            }
+            return "Sent[method=" + method + ", uri=" + uri + ", form=" + maskedForm
+                    + ", bearer=" + (bearer != null ? "<masked>" : "null")
+                    + ", jsonBody=" + jsonBody + "]";
         }
     }
 
@@ -39,6 +44,10 @@ final class FakeNaverHttpClient implements NaverHttpClient {
                 Map.of());
     }
 
+    static Response ok(String body) {
+        return new Response(200, body, Map.of());
+    }
+
     /** The officially documented 429 body; no Retry-After header (the norm). */
     static Response rateLimited429() {
         return new Response(429,
@@ -48,9 +57,23 @@ final class FakeNaverHttpClient implements NaverHttpClient {
 
     @Override
     public Response postForm(URI uri, Map<String, String> form) {
-        sent.add(new Sent(uri, form));
+        return record(new Sent("POST_FORM", uri, form, null, null));
+    }
+
+    @Override
+    public Response get(URI uri, String bearerToken) {
+        return record(new Sent("GET", uri, null, bearerToken, null));
+    }
+
+    @Override
+    public Response postJson(URI uri, String bearerToken, String jsonBody) {
+        return record(new Sent("POST_JSON", uri, null, bearerToken, jsonBody));
+    }
+
+    private Response record(Sent request) {
+        sent.add(request);
         if (responses.isEmpty()) {
-            throw new AssertionError("Unexpected HTTP call: " + uri);
+            throw new AssertionError("Unexpected HTTP call: " + request.method() + " " + request.uri());
         }
         return responses.pop();
     }

@@ -46,8 +46,26 @@ class NaverConnectorConfigurationTest {
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(NaverApiConnector.class);
                     assertThat(ctx).hasSingleBean(NaverTokenClient.class);
+                    assertThat(ctx).hasSingleBean(NaverOrdersClient.class);
                     assertThat(ctx.getBean(NaverHttpClient.class)).isInstanceOf(JdkNaverHttpClient.class);
                 });
+    }
+
+    @Test
+    void nonPositiveDetailBatchSizeFailsStartup() {
+        runner().withPropertyValues(
+                        "sellerops.connector.naver.enabled=true",
+                        "sellerops.connector.naver.order-detail-batch-size=0")
+                .run(ctx -> assertThat(ctx).hasFailed());
+    }
+
+    @Test
+    void detailBatchSizeAboveDefensiveCeilingFailsStartup() {
+        // The official per-request maximum is unconfirmed — 300 is the ceiling.
+        runner().withPropertyValues(
+                        "sellerops.connector.naver.enabled=true",
+                        "sellerops.connector.naver.order-detail-batch-size=301")
+                .run(ctx -> assertThat(ctx).hasFailed());
     }
 
     /** The production bean graph (registry + connectors), not a hand-built registry. */

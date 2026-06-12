@@ -11,9 +11,11 @@ import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Map;
@@ -52,8 +54,14 @@ class NaverApiConnectorTest {
     @BeforeEach
     void setUp() {
         vault = vaultWithKey(masterKey);
-        connector = new NaverApiConnector(
-                new NaverTokenClient(http, clock, "https://fake.naver.test"), vault);
+        connector = connectorWith(vault);
+    }
+
+    private NaverApiConnector connectorWith(CredentialVault vault) {
+        return new NaverApiConnector(
+                new NaverTokenClient(http, clock, "https://fake.naver.test"),
+                new NaverOrdersClient(http, clock, "https://fake.naver.test", 100),
+                vault);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -90,12 +98,14 @@ class NaverApiConnectorTest {
     }
 
     @Test
-    void capabilitiesAdvertiseNothingCollectableYet() {
+    void capabilitiesAdvertiseOrderSummaryOnly() {
         var capabilities = connector.capabilities("NAVER");
         assertThat(capabilities.connectorClass()).isEqualTo("API");
-        for (DataType dataType : DataType.values()) {
+        assertThat(capabilities.supports(DataType.ORDER_SUMMARY)).isTrue();
+        for (DataType dataType : new DataType[] {
+                DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT, DataType.SALES}) {
             assertThat(capabilities.supports(dataType))
-                    .as("Slice 1a must not expose %s to the scheduler", dataType)
+                    .as("%s must stay unsupported in Slice 1b", dataType)
                     .isFalse();
         }
         assertThat(connector.dedicatedChannels()).containsExactly("NAVER");
@@ -112,8 +122,7 @@ class NaverApiConnectorTest {
     @Test
     void closedVaultFailsClosedWithZeroHttp() {
         storeNaverCredential();
-        NaverApiConnector keylessConnector = new NaverApiConnector(
-                new NaverTokenClient(http, clock, "https://fake.naver.test"), vaultWithKey(""));
+        NaverApiConnector keylessConnector = connectorWith(vaultWithKey(""));
 
         assertThatThrownBy(() -> keylessConnector.fetch(request(DataType.ORDER_SUMMARY, null)))
                 .isInstanceOf(IllegalStateException.class)
@@ -148,15 +157,59 @@ class NaverApiConnectorTest {
     }
 
     @Test
-    void successfulTokenMintStopsAtSchemaPendingBoundary() {
+    void fetchRunsCredentialTokenAndTwoCallFlowEndToEnd() {
         storeNaverCredential();
         http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.ok(
+                "{\"data\":{\"lastChangeStatuses\":[{\"productOrderId\":\"PO1\",\"orderId\":\"O1\","
+                        + "\"productOrderStatus\":\"PAYED\",\"lastChangedType\":\"PAYED\","
+                        + "\"lastChangedDate\":\"2026-06-11T22:00:00+09:00\","
+                        + "\"paymentDate\":\"2026-06-11T22:00:00+09:00\"}]}}"));
+        http.enqueue(FakeNaverHttpClient.ok(
+                "{\"data\":[{\"productOrder\":{\"productOrderId\":\"PO1\",\"initialPaymentAmount\":12000}}]}"));
 
-        assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY, null)))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Slice 1b");
-        // The credential → signature → token chain ran end to end first.
-        assertThat(http.sent).hasSize(1);
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY, null));
+
+        // credential → signature → token → last-changed → detail, in order.
+        assertThat(http.sent).hasSize(3);
         assertThat(http.sent.get(0).form()).containsKey("client_secret_sign");
+        assertThat(http.sent.get(1).method()).isEqualTo("GET");
+        assertThat(http.sent.get(2).method()).isEqualTo("POST_JSON");
+        assertThat(page.records()).hasSize(1);
+        CanonicalOrderSummary summary = (CanonicalOrderSummary) page.records().get(0);
+        assertThat(summary.summaryDate()).isEqualTo(LocalDate.parse("2026-06-11"));
+        assertThat(summary.orderCount()).isEqualTo(1);
+        assertThat(summary.salesAmount()).isEqualTo(12000L);
+        assertThat(page.source()).isEqualTo(NaverApiConnector.KIND);
+        assertThat(page.nextCursorValue()).contains("windowFrom");
+    }
+
+    @Test
+    void rateLimitedOrdersCallMapsToRateLimitedPageWithCursorUnchanged() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.rateLimited429()); // the last-changed call
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY, null));
+
+        assertThat(page.rateLimited()).isTrue();
+        assertThat(page.records()).isEmpty();
+        // Cursor unchanged: the initial (null) cursor stays null for the retry.
+        assertThat(page.nextCursorValue()).isNull();
+        assertThat(page.retryAfterSeconds()).isEqualTo(NaverApiConnector.FALLBACK_RETRY_AFTER_SECONDS);
+    }
+
+    @Test
+    void rateLimitedMidStreamEchoesTheResumeCursorByteForByte() {
+        storeNaverCredential();
+        String resumeCursor = "{\"windowFrom\":\"2026-06-10T15:00+09:00\",\"windowTo\":\"2026-06-11T15:00+09:00\","
+                + "\"moreFrom\":null,\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.rateLimited429());
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY, resumeCursor));
+
+        assertThat(page.rateLimited()).isTrue();
+        assertThat(page.nextCursorValue()).isEqualTo(resumeCursor);
     }
 }

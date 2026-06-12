@@ -48,6 +48,10 @@ sellerops:
       # Official default capacity: 2 requests/second per application, metered
       # per API (verified 2026-06-12). Reserved for Slice 1b request pacing.
       rate-limit-rps: ${SELLEROPS_CONNECTOR_NAVER_RATE_LIMIT_RPS:2}
+      # productOrderIds per product-orders/query request. The official maximum
+      # is unconfirmed — 300 is the commonly cited ceiling, so values above it
+      # are rejected at startup; 100 is a conservative default.
+      order-detail-batch-size: ${SELLEROPS_CONNECTOR_NAVER_ORDER_DETAIL_BATCH_SIZE:100}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}

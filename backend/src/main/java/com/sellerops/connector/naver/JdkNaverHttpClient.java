@@ -33,12 +33,36 @@ public class JdkNaverHttpClient implements NaverHttpClient {
                 .map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8)
                         + "=" + URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
                 .collect(Collectors.joining("&"));
-        HttpRequest request = HttpRequest.newBuilder(uri)
+        return send(HttpRequest.newBuilder(uri)
                 .timeout(REQUEST_TIMEOUT)
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .header("Accept", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
+                .build());
+    }
+
+    @Override
+    public Response get(URI uri, String bearerToken) {
+        return send(HttpRequest.newBuilder(uri)
+                .timeout(REQUEST_TIMEOUT)
+                .header("Authorization", "Bearer " + bearerToken)
+                .header("Accept", "application/json")
+                .GET()
+                .build());
+    }
+
+    @Override
+    public Response postJson(URI uri, String bearerToken, String jsonBody) {
+        return send(HttpRequest.newBuilder(uri)
+                .timeout(REQUEST_TIMEOUT)
+                .header("Authorization", "Bearer " + bearerToken)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build());
+    }
+
+    private Response send(HttpRequest request) {
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             return new Response(response.statusCode(), response.body(), firstValueHeaders(response));

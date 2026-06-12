@@ -12,28 +12,19 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The real Naver Commerce API connector — Phase 3C Slice 1a: the safely
- * confirmed boundary only. The bean exists only behind
- * {@code sellerops.connector.naver.enabled=true} (see
- * {@link NaverConnectorConfiguration}); with the flag off, NAVER keeps
+ * The real Naver Commerce API connector. Phase 3C Slice 1b: ORDER_SUMMARY is
+ * collectable through the officially recommended two-call flow (see
+ * {@link NaverOrdersClient}); everything else stays unsupported — REVIEW has no
+ * official API at all, INQUIRY/PRODUCT/SALES are deferred pending their own
+ * schema verification. The bean exists only behind
+ * {@code sellerops.connector.naver.enabled=true}
+ * ({@link NaverConnectorConfiguration}); with the flag off, NAVER keeps
  * resolving to the mock connector and runtime behavior is unchanged.
- *
- * <p><b>Safe state until Slice 1b:</b> {@link #capabilities} advertises no
- * collectable data type, so schedule PUTs are rejected and the run executor
- * records a config failure before ever calling {@link #fetch} — no
- * scheduler/manual path can reach the unimplemented orders call. The
- * {@code fetch(ORDER_SUMMARY)} path below exists to prove the credential →
- * token chain end to end (and is exercised by tests): it distinguishes
- * "never supported here" ({@link UnsupportedDataTypeException} — REVIEW,
- * INQUIRY, PRODUCT, SALES) from "supported by Naver, parsing pending official
- * schema confirmation" (a clear schema-pending error after the token mint).
- * Slice 1b flips capabilities to ORDER_SUMMARY once the official
- * last-changed-statuses response schema is confirmed.
  *
  * <p>Fail-closed ordering inside {@code fetch}: data-type gate → vault open
  * (missing credential / missing master key throw here) → secret-shape check →
- * only then the first HTTP call (token mint). A credential problem can never
- * produce an outbound request.
+ * only then the first HTTP call (token mint, then the order queries). A
+ * credential problem can never produce an outbound request.
  */
 public class NaverApiConnector implements PullConnector {
 
@@ -49,10 +40,13 @@ public class NaverApiConnector implements PullConnector {
     static final int FALLBACK_RETRY_AFTER_SECONDS = 1;
 
     private final NaverTokenClient tokenClient;
+    private final NaverOrdersClient ordersClient;
     private final CredentialVault vault;
 
-    public NaverApiConnector(NaverTokenClient tokenClient, CredentialVault vault) {
+    public NaverApiConnector(NaverTokenClient tokenClient, NaverOrdersClient ordersClient,
+                             CredentialVault vault) {
         this.tokenClient = tokenClient;
+        this.ordersClient = ordersClient;
         this.vault = vault;
     }
 
@@ -68,15 +62,13 @@ public class NaverApiConnector implements PullConnector {
 
     @Override
     public ConnectorCapabilities capabilities(String channelCode) {
-        // Slice 1a: nothing is collectable yet — this is what keeps the scheduler
-        // and manual sync away from the unimplemented orders call. ORDER_SUMMARY
-        // is the confirmed first target; it turns on in Slice 1b.
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(),
-                Map.of(DataType.ORDER_SUMMARY, "NEEDS_VERIFICATION"),
-                "Slice 1a: auth/token path only. ORDER_SUMMARY collection lands in Slice 1b"
-                        + " once the official last-changed-statuses response schema is confirmed.");
+                Set.of(DataType.ORDER_SUMMARY),
+                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
+                "Slice 1b: ORDER_SUMMARY via the official two-call flow"
+                        + " (last-changed-statuses → product-orders/query)."
+                        + " REVIEW has no official API; INQUIRY/PRODUCT/SALES deferred.");
     }
 
     @Override
@@ -95,18 +87,13 @@ public class NaverApiConnector implements PullConnector {
         }
 
         try {
-            tokenClient.accessToken(clientId, clientSecret);
+            String accessToken = tokenClient.accessToken(clientId, clientSecret);
+            return ordersClient.fetchOrderSummaryPage(accessToken, request.cursorValue());
         } catch (NaverRateLimitedException e) {
             int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
             // Cursor unchanged — a throttled attempt must re-request the same position.
             return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
         }
-
-        // Token path proven. The orders call itself is Slice 1b: the official
-        // response schema (fields, pagination block, amount availability) is not
-        // yet confirmed, and guessing it is forbidden.
-        throw new IllegalStateException(
-                "네이버 주문 수집은 아직 사용할 수 없습니다 — 공식 응답 스키마 확정 후 Slice 1b에서 구현됩니다.");
     }
 
     private static boolean isBlank(String value) {

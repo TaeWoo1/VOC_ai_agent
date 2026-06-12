@@ -15,7 +15,10 @@ import com.sellerops.connector.MockApiConnector;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.naver.NaverApiConnector;
 import com.sellerops.connector.naver.NaverHttpClient;
+import com.sellerops.connector.naver.NaverOrdersClient;
 import com.sellerops.connector.naver.NaverTokenClient;
+import com.sellerops.credential.ConnectorCredentialRepository;
+import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
@@ -35,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -55,6 +59,7 @@ class SyncRunExecutorTest {
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
+    @Autowired ConnectorCredentialRepository credentials;
 
     private MockApiConnector mock;
     private SyncRunExecutor executor;
@@ -233,32 +238,186 @@ class SyncRunExecutorTest {
                 .isEqualTo("CONNECTED");
     }
 
-    @Test
-    void naverSliceOneAStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
-        // Phase 3C Slice 1a safe state: the flag-on Naver connector advertises no
-        // collectable data type, so a manual ORDER_SUMMARY sync must be recorded
-        // as a config failure by the capability gate — fetch (and therefore any
-        // HTTP) is unreachable until Slice 1b flips capabilities.
-        SellerAccount acc = account("NAVER");
-        NaverHttpClient neverCalled = (uri, form) -> {
-            throw new AssertionError("Slice 1a must not reach the HTTP boundary via the executor");
-        };
+    private SyncRunExecutor naverExecutor(NaverHttpClient http, CredentialVault vault) {
         NaverApiConnector naver = new NaverApiConnector(
-                new NaverTokenClient(neverCalled, java.time.Clock.systemUTC(), "https://fake.naver.test"),
-                null); // the vault is behind the capability gate and never reached
+                new NaverTokenClient(http, java.time.Clock.systemUTC(), "https://fake.naver.test"),
+                new NaverOrdersClient(http, java.time.Clock.systemUTC(), "https://fake.naver.test", 100),
+                vault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
-        SyncRunExecutor naverExecutor = new SyncRunExecutor(
+        return new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+    }
 
-        SyncJob job = naverExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+    @Test
+    void naverUnsupportedTypeStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
+        // INQUIRY stays unsupported in Slice 1b: the capability gate must record
+        // a config failure before fetch — no HTTP, no vault access.
+        SellerAccount acc = account("NAVER");
+        NaverHttpClient neverCalled = new ThrowingNaverHttpClient();
+
+        SyncJob job = naverExecutor(neverCalled, null)
+                .execute(org, acc.getId(), DataType.INQUIRY, "MANUAL");
 
         assertThat(job.getStatus()).isEqualTo("FAILED");
         assertThat(job.getErrorMessage()).contains("지원되지");
         assertThat(job.getJobType()).isEqualTo("NAVER_API"); // routed to the dedicated connector
-        assertThat(orders.count()).isZero();
+        assertThat(inquiries.count()).isZero();
         // A config issue, not a connectivity failure → no health row touched.
         assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
+    }
+
+    @Test
+    void naverOrderSummaryRunsEndToEndThroughExecutor() {
+        // Slice 1b: ORDER_SUMMARY is now reachable — manual sync drives the full
+        // chain (vault → token → two-call flow → ingestion → cursor → health).
+        SellerAccount acc = account("NAVER");
+        String masterKey = java.util.Base64.getEncoder().encodeToString(new byte[32]);
+        CredentialVault vault = new CredentialVault(
+                credentials, new com.fasterxml.jackson.databind.ObjectMapper(), masterKey, "test-key");
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                java.util.Map.of("client_id", "cid", "client_secret", BCrypt.gensalt()),
+                null, null, null);
+
+        QueueingNaverHttpClient http = new QueueingNaverHttpClient();
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"access_token\":\"tok-1\",\"expires_in\":3000,\"token_type\":\"Bearer\"}", java.util.Map.of()));
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"data\":{\"lastChangeStatuses\":[{\"productOrderId\":\"PO1\",\"orderId\":\"O1\","
+                        + "\"productOrderStatus\":\"PAYED\",\"lastChangedType\":\"PAYED\","
+                        + "\"lastChangedDate\":\"2026-06-11T22:00:00+09:00\","
+                        + "\"paymentDate\":\"2026-06-11T22:00:00+09:00\"}]}}", java.util.Map.of()));
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"data\":[{\"productOrder\":{\"productOrderId\":\"PO1\",\"initialPaymentAmount\":12000}}]}",
+                java.util.Map.of()));
+
+        SyncJob job = naverExecutor(http, vault).execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
+        assertThat(job.getJobType()).isEqualTo("NAVER_API");
+        assertThat(job.getSuccessRows()).isEqualTo(1);
+        assertThat(orders.count()).isEqualTo(1);
+        var summary = orders.findAll().get(0);
+        assertThat(summary.getSummaryDate()).isEqualTo(java.time.LocalDate.parse("2026-06-11"));
+        assertThat(summary.getOrderCount()).isEqualTo(1);
+        assertThat(summary.getSalesAmount()).isEqualTo(12000L);
+        assertThat(cursor(acc.getId(), DataType.ORDER_SUMMARY).getCursorValue()).contains("windowFrom");
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow().getState())
+                .isEqualTo("CONNECTED");
+    }
+
+    /** All methods refuse — proves a code path can never reach HTTP. */
+    private static final class ThrowingNaverHttpClient implements NaverHttpClient {
+        @Override
+        public Response postForm(java.net.URI uri, java.util.Map<String, String> form) {
+            throw new AssertionError("must not reach the HTTP boundary");
+        }
+
+        @Override
+        public Response get(java.net.URI uri, String bearerToken) {
+            throw new AssertionError("must not reach the HTTP boundary");
+        }
+
+        @Override
+        public Response postJson(java.net.URI uri, String bearerToken, String jsonBody) {
+            throw new AssertionError("must not reach the HTTP boundary");
+        }
+    }
+
+    /** Minimal in-order response queue (the naver test package's fake is package-private). */
+    private static final class QueueingNaverHttpClient implements NaverHttpClient {
+        final java.util.ArrayDeque<Response> responses = new java.util.ArrayDeque<>();
+
+        @Override
+        public Response postForm(java.net.URI uri, java.util.Map<String, String> form) {
+            return next();
+        }
+
+        @Override
+        public Response get(java.net.URI uri, String bearerToken) {
+            return next();
+        }
+
+        @Override
+        public Response postJson(java.net.URI uri, String bearerToken, String jsonBody) {
+            return next();
+        }
+
+        private Response next() {
+            if (responses.isEmpty()) {
+                throw new AssertionError("unexpected HTTP call");
+            }
+            return responses.pop();
+        }
+    }
+
+    @Test
+    void pageGuardExhaustionIsRecordedAsTruncationNotSuccess() {
+        SellerAccount acc = account("GMARKET");
+        // A connector that never finishes: hasMore stays true forever.
+        PullConnector endless = new PullConnector() {
+            @Override
+            public String kind() {
+                return "MOCK_API";
+            }
+
+            @Override
+            public ConnectorCapabilities capabilities(String channelCode) {
+                return mock.capabilities(channelCode);
+            }
+
+            @Override
+            public FetchPage fetch(FetchRequest request) {
+                return FetchPage.of(DataType.INQUIRY, List.of(), "0", true, "MOCK_API");
+            }
+        };
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(endless));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        SyncRunExecutor endlessExecutor = new SyncRunExecutor(
+                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+
+        SyncJob job = endlessExecutor.execute(org, acc.getId(), DataType.INQUIRY, "MANUAL");
+
+        // The guard ended the loop — that is a truncated run, never a clean SUCCESS.
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("한도");
+    }
+
+    @Test
+    void pageGuardExhaustionAfterLandedDataIsPartial() {
+        SellerAccount acc = account("GMARKET");
+        // First page lands 50 real reviews (mock REVIEW total is 60, so the page
+        // reports hasMore=true), then the connector never finishes.
+        PullConnector endlessAfterData = new PullConnector() {
+            @Override
+            public String kind() {
+                return "MOCK_API";
+            }
+
+            @Override
+            public ConnectorCapabilities capabilities(String channelCode) {
+                return mock.capabilities(channelCode);
+            }
+
+            @Override
+            public FetchPage fetch(FetchRequest request) {
+                if (request.cursorValue() == null) {
+                    return mock.fetch(request);
+                }
+                return FetchPage.of(DataType.REVIEW, List.of(), request.cursorValue(), true, "MOCK_API");
+            }
+        };
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(endlessAfterData));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        SyncRunExecutor endlessExecutor = new SyncRunExecutor(
+                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+
+        SyncJob job = endlessExecutor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL");
+
+        // Landed pages are kept: truncation with data is PARTIAL, not FAILED.
+        assertThat(job.getStatus()).isEqualTo("PARTIAL");
+        assertThat(job.getErrorMessage()).contains("한도");
+        assertThat(reviews.count()).isEqualTo(50);
     }
 
     @Test
