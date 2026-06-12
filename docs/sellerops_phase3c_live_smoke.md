@@ -44,9 +44,11 @@ exactly those dates.
   logs them by design; keep it that way on the operator side too.
 - Store secrets **only** through the credential intake API (below) — they land
   AES-256-GCM envelope-encrypted; the API answers with masked metadata only.
-- Shell hygiene for any manual `curl`: export secrets from a local env file
-  (`set -a; source ./naver.env; set +a`), never type them inline; the env file
-  lives outside the repo and is deleted after the smoke.
+- Shell hygiene for any manual `curl`: export secrets from the git-ignored
+  local env file `backend/.env.local`
+  (`set -a; source backend/.env.local; set +a`), never type them inline.
+  Setup walkthrough: `docs/sellerops_local_env_setup.md`. The Naver values are
+  removed from the file after the smoke.
 - Use **throwaway/revocable credentials**; rotate or revoke them in the API
   Center after the test regardless of outcome.
 
@@ -175,8 +177,9 @@ via the optional curl probe or DB evidence, never by pasting full bodies:
 4. The encrypted `connector_credentials` row may stay (it is ciphertext under
    a local key) or be removed with a direct dev-DB delete; there is no delete
    API by design. If the dev DB is disposable, dropping it covers everything.
-5. Delete the local `naver.env` secrets file; clear shell history if secrets
-   were ever typed inline (they should not have been).
+5. Delete the `NAVER_COMMERCE_*` values from `backend/.env.local` (or the
+   whole file); clear shell history if secrets were ever typed inline (they
+   should not have been).
 6. Record the §F findings in `docs/sellerops_phase3c.md` §12 (schema items
    confirmed/refuted) — findings only, never response bodies.
 

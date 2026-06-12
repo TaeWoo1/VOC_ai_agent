@@ -12,8 +12,10 @@ build/
 venv/
 env/
 
-# Environment
+# Environment (unanchored: matches at every level, e.g. backend/.env too).
+# Real local env files are never committed; only *.example templates are.
 .env
+.env.local
 
 # IDE
 .vscode/

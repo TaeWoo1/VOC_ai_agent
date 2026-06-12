@@ -14,10 +14,14 @@ Backend: http://localhost:8080 — health at `GET /health`.
 Requires JDK 17 + a local PostgreSQL and Gradle (or generate the wrapper with
 `gradle wrapper`).
 ```bash
-cp .env.example .env   # this directory's .env, points at localhost:5432
+cp .env.example .env.local        # this directory's git-ignored real env file
+# fill in .env.local, then load it — Spring Boot does not read .env files itself
+set -a; source .env.local; set +a
 # create the DB: createdb sellerops
-gradle bootRun         # or ./gradlew bootRun once the wrapper exists
+./gradlew bootRun
 ```
+Full walkthrough (vault key, connector flags, credential intake):
+[`docs/sellerops_local_env_setup.md`](../docs/sellerops_local_env_setup.md).
 
 ## Demo login (created by the seeder on an empty DB)
 - email: `demo@sellerops.ai`
