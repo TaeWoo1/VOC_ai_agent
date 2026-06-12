@@ -295,6 +295,32 @@ class SyncRunExecutorTest {
     }
 
     @Test
+    void cafe24SkeletonStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
+        // Phase 3D-3: same safe state as the Coupang skeleton — empty
+        // capabilities kill a manual sync at the config gate before fetch,
+        // so no vault access, no token refresh, no HTTP.
+        SellerAccount acc = account("CAFE24");
+        com.sellerops.connector.cafe24.Cafe24HttpClient neverCalled = (uri, headers, form) -> {
+            throw new AssertionError("must not reach the HTTP boundary");
+        };
+        com.sellerops.connector.cafe24.Cafe24ApiConnector cafe24 =
+                new com.sellerops.connector.cafe24.Cafe24ApiConnector(
+                        new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null);
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        SyncRunExecutor cafe24Executor = new SyncRunExecutor(
+                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+
+        SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("지원되지");
+        assertThat(job.getJobType()).isEqualTo("CAFE24_API"); // routed to the dedicated connector
+        assertThat(orders.count()).isZero();
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
+    }
+
+    @Test
     void naverOrderSummaryRunsEndToEndThroughExecutor() {
         // Slice 1b: ORDER_SUMMARY is now reachable — manual sync drives the full
         // chain (vault → token → two-call flow → ingestion → cursor → health).

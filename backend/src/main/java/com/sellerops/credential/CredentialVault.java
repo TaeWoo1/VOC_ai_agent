@@ -99,6 +99,31 @@ public class CredentialVault {
         return mask(credentials.save(row));
     }
 
+    /**
+     * Re-encrypt the secret payload of an existing credential in place,
+     * preserving connector class, auth type, creator, and the separate
+     * refresh-token slot. This is the connector-driven rotation path for
+     * providers whose tokens rotate server-side on use (e.g. Cafe24's
+     * single-use refresh token): once the provider has rotated, the old value
+     * is dead, so the new one must be persisted immediately. Fails closed
+     * exactly like {@link #open} — missing row (org-scoped) or missing master
+     * key throws, and on any failure the stored payload is untouched.
+     */
+    public CredentialMetadata rotateSecrets(UUID orgId, UUID sellerAccountId,
+                                            Map<String, String> secrets) {
+        if (secrets == null || secrets.isEmpty()) {
+            throw ApiException.badRequest("자격 증명 값이 비어 있습니다.");
+        }
+        ConnectorCredential row = load(orgId, sellerAccountId);
+        byte[] masterKey = masterKey();
+        byte[] envelope = EnvelopeCipher.seal(masterKey, toJsonBytes(secrets));
+        row.setEncryptedPayload(envelope);
+        row.setIv(EnvelopeCipher.payloadIv(envelope));
+        row.setEncryptionKeyId(keyId);
+        row.setLastRotatedAt(Instant.now());
+        return mask(credentials.save(row));
+    }
+
     /** Metadata only — what an API or UI may show about a stored credential. */
     public CredentialMetadata readMasked(UUID orgId, UUID sellerAccountId) {
         return mask(load(orgId, sellerAccountId));

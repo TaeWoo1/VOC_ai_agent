@@ -112,6 +112,60 @@ class CredentialVaultTest {
     }
 
     @Test
+    void rotateSecretsReplacesOnlyThePayload() {
+        // Phase 3D-3: connector-driven rotation for providers with single-use
+        // refresh tokens. Everything except the secret payload must survive.
+        Instant expiry = Instant.parse("2026-12-31T00:00:00Z");
+        UUID creator = UUID.randomUUID();
+        vault.store(org, account, "API", "OAUTH2", secrets, "refresh-token-789", expiry, creator);
+
+        Map<String, String> rotated = Map.of("accessKey", "AK-ROTATED", "secretKey", "SK-ROTATED");
+        vault.rotateSecrets(org, account, rotated);
+
+        assertThat(credentials.count()).isEqualTo(1);
+        ConnectorCredential row = credentials.findBySellerAccountId(account).orElseThrow();
+        assertThat(row.getConnectorClass()).isEqualTo("API");
+        assertThat(row.getAuthType()).isEqualTo("OAUTH2");
+        assertThat(row.getCreatedBy()).isEqualTo(creator);
+        assertThat(row.getLastRotatedAt()).isNotNull();
+        DecryptedCredential opened = vault.open(org, account);
+        assertThat(opened.secrets()).isEqualTo(rotated);
+        assertThat(opened.refreshToken()).isEqualTo("refresh-token-789"); // separate slot untouched
+        assertThat(opened.tokenExpiresAt()).isEqualTo(expiry);
+    }
+
+    @Test
+    void rotateSecretsFailsClosedWithoutAKeyLeavingTheRowUntouched() {
+        vault.store(org, account, "API", "OAUTH2", secrets, null, null, null);
+
+        assertThatThrownBy(() -> vaultWithKey("").rotateSecrets(
+                org, account, Map.of("accessKey", "AK-NEW")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("마스터 키");
+        assertThat(vault.open(org, account).secrets()).isEqualTo(secrets);
+    }
+
+    @Test
+    void rotateSecretsOnMissingOrCrossOrgRowReadsAsAbsent() {
+        assertThatThrownBy(() -> vault.rotateSecrets(org, account, Map.of("k", "v")))
+                .isInstanceOf(ApiException.class);
+
+        vault.store(org, account, "API", "OAUTH2", secrets, null, null, null);
+        assertThatThrownBy(() -> vault.rotateSecrets(UUID.randomUUID(), account, Map.of("k", "v")))
+                .isInstanceOf(ApiException.class);
+        assertThat(vault.open(org, account).secrets()).isEqualTo(secrets);
+    }
+
+    @Test
+    void rotateSecretsRejectsEmptySecrets() {
+        vault.store(org, account, "API", "OAUTH2", secrets, null, null, null);
+
+        assertThatThrownBy(() -> vault.rotateSecrets(org, account, Map.of()))
+                .isInstanceOf(ApiException.class);
+        assertThat(vault.open(org, account).secrets()).isEqualTo(secrets);
+    }
+
+    @Test
     void missingMasterKeyFailsClosedWithoutWriting() {
         CredentialVault keyless = vaultWithKey("");
 

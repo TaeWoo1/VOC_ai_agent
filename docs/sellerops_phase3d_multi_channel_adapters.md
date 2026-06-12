@@ -102,6 +102,19 @@ prior Coupang findings: `docs/sellerops_phase3c.md` §3, V3 capability seed.)
 - **Blockers:** developer registration + app creation (self-service); mall
   owner consent at install; app-store 심사 for distributed apps (private
   long-term install policy UNCONFIRMED); refresh-token rotation discipline.
+- **3D-3 implementation re-verification (2026-06-12, official sources):**
+  client auth on the token endpoint is `Authorization: Basic
+  base64(client_id:client_secret)` + `application/x-www-form-urlencoded`
+  (verbatim official curl sample, indexed from the official token guide);
+  refresh body is `grant_type=refresh_token&refresh_token={token}`; the
+  response carries **`expires_at` as an ISO-8601 datetime (not
+  `expires_in`)**, plus `refresh_token` / `refresh_token_expires_at` /
+  `token_type: Bearer` (verbatim sample from the official Admin API docs);
+  rotation re-confirmed ("You can not use the old refresh token after it has
+  expired"). The official `expires_at` sample carries **no timezone offset**
+  — zone interpretation is deliberately deferred (no client-side expiry
+  caching; recorded as a live-smoke item). On 429 the official
+  `X-Cafe24-Call-Remain` header carries seconds-until-resumption.
 
 ### 2.3 ESM (Gmarket + Auction) — NEEDS_ACCOUNT_PERMISSION
 
@@ -354,6 +367,24 @@ fix MUST-FIX → hold for commit approval. One slice per approval.
 - **Slice 3D-3 — Cafe24 auth skeleton.** Refresh-token-based token client
   incl. the rotated-refresh-token write-back design through the vault;
   per-mall URL assembly from `mall_id`.
+  **Implemented 2026-06-12 — refresh-token auth skeleton only**:
+  feature-flagged connector dedicated to CAFE24 with an **empty capability
+  set**; `Cafe24TokenClient` (per-mall token URL with mall_id hostname-shape
+  validation, Basic client auth, refresh grant); **rotation write-back** via
+  the new `CredentialVault.rotateSecrets` (payload-only re-encryption —
+  class/type/creator/refresh-token slot preserved), persisted immediately
+  after a successful refresh because the old token is single-use and already
+  dead server-side; a failed refresh never writes back (test-locked). The
+  initial authorization-code consent remains an operator/manual setup step —
+  the refresh token enters through the credential intake API. **Storage
+  invariant (review decision of record):** the vault `secrets` map is the
+  single authoritative location for the Cafe24 refresh token; the row's
+  separate refresh-token slot is neither read nor written by this connector —
+  a dual-path reader was deliberately rejected because a post-rotation stale
+  slot value could resurrect a dead token; a slot-only credential fails
+  closed naming the missing key (test-locked). Order/product/board schemas,
+  `expires_at` zone semantics, pagination, and any live call remain deferred
+  to later approved slices.
 - **Slice 3D-4 — ESM (Gmarket/Auction) skeleton.** `EsmJwtSigner` with the
   documented claims; one connector dedicated to `GMARKET`.
 - **Slice 3D-5 — 11st skeleton.** Static-key header client; fetch stays
