@@ -9,8 +9,11 @@ import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -78,6 +81,37 @@ class NaverOrdersClientTest {
         // Initial 24h backfill window ends at "now" — nothing further to drain.
         assertThat(page.hasMore()).isFalse();
         assertThat(page.nextCursorValue()).contains("windowFrom");
+    }
+
+    @Test
+    void datetimeParamsUseFixedThreeDigitMillisecondFormatEvenForSubMillisClock() {
+        // The live HTTP-400 case: a real wall-clock instant carries microseconds, which
+        // OffsetDateTime.toString() would emit as 6 fraction digits (and a zero-fraction
+        // instant as minute-only) — both rejected by Naver. The fixed formatter must
+        // always emit exactly 3 millisecond digits with a +09:00 offset.
+        Instant microNow = Instant.parse("2026-06-13T10:14:53.173737Z");
+        NaverOrdersClient liveClient =
+                new NaverOrdersClient(http, Clock.fixed(microNow, ZoneOffset.UTC), BASE_URL, 100);
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        FetchPage page = liveClient.fetchOrderSummaryPage(TOKEN, null);
+
+        String query = http.sent.get(0).uri().getQuery(); // decoded
+        String millisOffset = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\+09:00";
+        assertThat(query).containsPattern("lastChangedFrom=" + millisOffset);
+        assertThat(query).containsPattern("lastChangedTo=" + millisOffset);
+        // Never a 6-digit microsecond fraction, never a minute-only (no-seconds) stamp.
+        assertThat(query).doesNotContainPattern("\\.\\d{6}");
+        assertThat(query).doesNotContainPattern("T\\d{2}:\\d{2}\\+09:00");
+
+        // The emitted cursor's window bounds round-trip through OffsetDateTime.parse.
+        String cursor = page.nextCursorValue();
+        for (String key : new String[] {"windowFrom", "windowTo"}) {
+            Matcher m = Pattern.compile("\"" + key + "\":\"([^\"]+)\"").matcher(cursor);
+            assertThat(m.find()).as("cursor carries %s", key).isTrue();
+            assertThat(m.group(1)).matches(millisOffset);
+            OffsetDateTime.parse(m.group(1)); // must not throw
+        }
     }
 
     @Test
@@ -157,8 +191,9 @@ class NaverOrdersClientTest {
 
         FetchPage page = client.fetchOrderSummaryPage(TOKEN, cursor);
 
-        // Old windowTo becomes the new windowFrom (official gap-avoidance rule).
-        assertThat(page.nextCursorValue()).contains("\"windowFrom\":\"2026-06-11T15:00+09:00\"");
+        // Old windowTo becomes the new windowFrom (official gap-avoidance rule),
+        // re-emitted in the fixed 3-digit-millisecond ISO offset format.
+        assertThat(page.nextCursorValue()).contains("\"windowFrom\":\"2026-06-11T15:00:00.000+09:00\"");
         assertThat(page.hasMore()).isTrue(); // still behind "now" — more windows to drain
     }
 

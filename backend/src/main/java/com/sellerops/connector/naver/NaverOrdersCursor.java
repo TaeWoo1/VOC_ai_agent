@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,6 +61,17 @@ record NaverOrdersCursor(
     static final Duration INITIAL_BACKFILL = Duration.ofHours(24);
     /** Keep running totals for dates within this many days of the window start. */
     static final int DAY_TOTAL_RETENTION_DAYS = 2;
+    /**
+     * Fixed wire format for the window bounds: ISO-8601 with exactly 3 millisecond
+     * digits and an explicit offset, as Naver's order query params require (official
+     * example, commerce-api discussion #587: {@code 2023-04-05T15:34:29.826+09:00}).
+     * {@code OffsetDateTime.toString()} emits VARIABLE precision — minute-only when
+     * seconds/nanos are zero, 6-digit microseconds for a wall clock — which the
+     * gateway rejects with HTTP 400. {@code SSS} always renders 3 digits; {@code XXX}
+     * renders {@code +09:00}.
+     */
+    private static final DateTimeFormatter NAVER_DATETIME =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 
     NaverOrdersCursor {
         // Normalize JSON-missing collections so no later code path sees null.
@@ -151,6 +163,8 @@ record NaverOrdersCursor(
     }
 
     private static String iso(Instant instant, ZoneId zone) {
-        return instant.atZone(zone).toOffsetDateTime().toString();
+        // Fixed 3-digit-millisecond ISO offset format (see NAVER_DATETIME) — never
+        // OffsetDateTime.toString(), whose variable precision Naver rejects (HTTP 400).
+        return instant.atZone(zone).format(NAVER_DATETIME);
     }
 }
