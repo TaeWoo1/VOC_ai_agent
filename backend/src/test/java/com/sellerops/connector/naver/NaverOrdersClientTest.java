@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
@@ -449,5 +450,87 @@ class NaverOrdersClientTest {
                 .hasMessageContaining("커서")
                 .hasMessageNotContaining(TOKEN);
         assertThat(http.sent).isEmpty();
+    }
+
+    // --- non-2xx diagnostics (sanitized, non-PII) ---
+
+    @Test
+    void nonOkLastChangedAppendsSanitizedNaverCodeAndMessage() {
+        http.enqueue(new NaverHttpClient.Response(400,
+                "{\"code\":\"GW.INVALID_PARAM\",\"message\":\"lastChangedTo 형식 오류\"}", Map.of()));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("변경 주문 조회에 실패")
+                .hasMessageContaining("HTTP 400")
+                .hasMessageContaining("code=GW.INVALID_PARAM")
+                .hasMessageContaining("message=lastChangedTo 형식 오류")
+                .hasMessageNotContaining(TOKEN);
+    }
+
+    @Test
+    void nonOkDetailQueryAlsoAppendsSanitizedNaverError() {
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,
+                lcsItem("PO1", "O1", "2026-06-11T22:00:00+09:00"))));
+        http.enqueue(new NaverHttpClient.Response(403,
+                "{\"code\":\"GW.FORBIDDEN\",\"message\":\"권한이 없습니다\"}", Map.of()));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("주문 상세 조회에 실패")
+                .hasMessageContaining("HTTP 403")
+                .hasMessageContaining("code=GW.FORBIDDEN");
+    }
+
+    @Test
+    void longNaverErrorMessageIsTruncated() {
+        http.enqueue(new NaverHttpClient.Response(400,
+                "{\"message\":\"" + "x".repeat(500) + "\"}", Map.of()));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("HTTP 400")
+                .hasMessageContaining("…")                       // truncation marker
+                .hasMessageNotContaining("x".repeat(300));       // 500 x's capped at 200
+    }
+
+    @Test
+    void malformedErrorBodyFallsBackToBareStatusWithoutEchoingBytes() {
+        http.enqueue(new NaverHttpClient.Response(400, "not-json <html>boom</html>", Map.of()));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("HTTP 400")
+                .hasMessageNotContaining("[")        // no sanitized-detail block
+                .hasMessageNotContaining("not-json") // raw body never echoed
+                .hasMessageNotContaining("boom");
+    }
+
+    @Test
+    void nestedAndUnknownErrorFieldsAreNeverLeaked() {
+        // A body mixing a safe scalar with nested/array fields that could hold PII.
+        http.enqueue(new NaverHttpClient.Response(400,
+                "{\"code\":\"GW.X\",\"data\":{\"buyerName\":\"홍길동\",\"phone\":\"010-1234-5678\"},"
+                        + "\"orders\":[{\"productOrderId\":\"PO-SECRET\"}]}", Map.of()));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("code=GW.X")
+                .hasMessageNotContaining("홍길동")
+                .hasMessageNotContaining("010-1234-5678")
+                .hasMessageNotContaining("PO-SECRET")
+                .hasMessageNotContaining("buyerName");
+    }
+
+    @Test
+    void successfulResponseBodyIsNeverRoutedThroughErrorDiagnostics() {
+        // A 200 body carrying a "message" field is parsed as data, never surfaced as an
+        // error detail — httpErrorDetail runs only on the non-2xx path.
+        http.enqueue(FakeNaverHttpClient.ok(
+                "{\"data\":{\"lastChangeStatuses\":[],\"more\":null},\"message\":\"should-not-surface\"}"));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, null);
+
+        assertThat(page.records()).isEmpty(); // normal empty page, no throw, no leak
     }
 }

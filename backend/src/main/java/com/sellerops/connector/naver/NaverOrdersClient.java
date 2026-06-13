@@ -1,6 +1,7 @@
 package com.sellerops.connector.naver;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
@@ -19,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
  * The officially recommended two-call order collection flow (commerce-api FAQ #9,
@@ -61,6 +63,15 @@ public class NaverOrdersClient {
     static final String LAST_CHANGED_TYPE = "PAYED";
     /** Seller business timezone; Naver timestamps already carry +09:00. */
     static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /**
+     * Scalar fields a Naver error envelope may carry — safe to surface for
+     * diagnostics. Nested objects/arrays (which could hold order PII) are never
+     * read; see {@link #httpErrorDetail}.
+     */
+    private static final List<String> SAFE_ERROR_FIELDS =
+            List.of("code", "errorCode", "error", "message", "errorMessage");
+    /** Hard cap on the sanitized diagnostic appended to an HTTP-error message. */
+    private static final int MAX_ERROR_DETAIL = 200;
 
     private final NaverHttpClient http;
     private final Clock clock;
@@ -223,7 +234,8 @@ public class NaverOrdersClient {
         }
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
-                    "네이버 변경 주문 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
+                    "네이버 변경 주문 조회에 실패했습니다 (HTTP " + response.statusCode() + ")"
+                            + httpErrorDetail(response.body()) + ".");
         }
         LastChangedEnvelope envelope = read(response.body(), LastChangedEnvelope.class,
                 "네이버 변경 주문 응답을 해석할 수 없습니다.");
@@ -249,7 +261,8 @@ public class NaverOrdersClient {
             }
             if (response.statusCode() != 200) {
                 throw new IllegalStateException(
-                        "네이버 주문 상세 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
+                        "네이버 주문 상세 조회에 실패했습니다 (HTTP " + response.statusCode() + ")"
+                                + httpErrorDetail(response.body()) + ".");
             }
             DetailEnvelope envelope = read(response.body(), DetailEnvelope.class,
                     "네이버 주문 상세 응답을 해석할 수 없습니다.");
@@ -356,6 +369,48 @@ public class NaverOrdersClient {
         } catch (Exception e) {
             // Response bodies stay out of messages (could carry order PII).
             throw new IllegalStateException(failureMessage);
+        }
+    }
+
+    /**
+     * A sanitized, length-capped diagnostic for a non-2xx Naver order response —
+     * used only on the error path, never on a 200 body. Surfaces only the known
+     * scalar error fields (code/message and aliases, see {@link #SAFE_ERROR_FIELDS});
+     * nested objects/arrays, headers, tokens, and the raw body (which can carry
+     * order PII on these endpoints) are never included. Returns {@code ""} when no
+     * safe field is parseable, so the caller keeps the bare {@code (HTTP {status})}.
+     * Format when present: {@code " [code=..., message=...]"}.
+     */
+    private String httpErrorDetail(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode root = mapper.readTree(body);
+            if (root == null || !root.isObject()) {
+                return "";
+            }
+            LinkedHashMap<String, String> picked = new LinkedHashMap<>();
+            for (String field : SAFE_ERROR_FIELDS) {
+                JsonNode value = root.get(field);
+                // Scalars only — never a nested object/array that might hold PII.
+                if (value != null && value.isValueNode() && !value.asText().isBlank()) {
+                    picked.put(field, value.asText());
+                }
+            }
+            if (picked.isEmpty()) {
+                return "";
+            }
+            String detail = picked.entrySet().stream()
+                    .map(e -> e.getKey() + "=" + e.getValue())
+                    .collect(Collectors.joining(", "));
+            if (detail.length() > MAX_ERROR_DETAIL) {
+                detail = detail.substring(0, MAX_ERROR_DETAIL) + "…";
+            }
+            return " [" + detail + "]";
+        } catch (Exception e) {
+            // Unparseable body — keep the bare status, never echo raw bytes.
+            return "";
         }
     }
 
