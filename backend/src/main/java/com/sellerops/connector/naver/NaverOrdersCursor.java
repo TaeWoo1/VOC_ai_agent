@@ -129,6 +129,22 @@ record NaverOrdersCursor(
                 pruned, union(edgeIds, newEdgeIds), List.of());
     }
 
+    /**
+     * Re-extend a settled (non-continuation) window's upper bound to {@code now},
+     * capped at {@link #MAX_WINDOW}. After a window catches up, {@link #advanced}
+     * leaves {@code windowTo == windowFrom} (the next-window start has reached the
+     * collection instant). A later run must re-query {@code (windowFrom, now]}
+     * rather than the zero-width range {@code [from == to]}, which Naver rejects
+     * with HTTP 400. Callers apply this only when {@code windowFrom} is before
+     * {@code now} (i.e. not yet caught up) and not mid-continuation, so the result
+     * is always a non-empty window. A window already at the 24h cap is unchanged.
+     */
+    NaverOrdersCursor withWindowThrough(Instant now, ZoneId zone) {
+        Instant from = windowFromInstant();
+        return new NaverOrdersCursor(iso(from, zone), iso(windowEnd(from, now), zone),
+                moreFrom, moreSequence, dayTotals, dedupeIds, edgeIds);
+    }
+
     Instant windowFromInstant() {
         return OffsetDateTime.parse(windowFrom).toInstant();
     }

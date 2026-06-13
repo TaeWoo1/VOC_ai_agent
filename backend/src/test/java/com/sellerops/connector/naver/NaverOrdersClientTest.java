@@ -390,6 +390,47 @@ class NaverOrdersClientTest {
     }
 
     @Test
+    void zeroWidthSettledWindowReExtendsToNowInsteadOfQueryingZeroWidth() {
+        // After a backfill catches up, advanced() can leave windowTo == windowFrom at a
+        // PAST instant. A later run (now beyond it) must re-query (windowFrom, now], never
+        // a zero-width [from == to] range, which Naver rejects with HTTP 400.
+        // windowFrom == windowTo == 14:00 KST; NOW = 15:00 KST.
+        String cursor = "{\"windowFrom\":\"2026-06-12T14:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-06-12T14:00:00.000+09:00\","
+                + "\"moreFrom\":null,\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null)));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, cursor);
+
+        assertThat(http.sent).hasSize(1); // a real query was issued, not skipped
+        String query = http.sent.get(0).uri().getQuery(); // decoded
+        // from stays at 14:00; to is widened to now (15:00) — a non-empty window.
+        assertThat(query).contains("lastChangedFrom=2026-06-12T14:00:00.000+09:00");
+        assertThat(query).contains("lastChangedTo=2026-06-12T15:00:00.000+09:00");
+        Matcher from = Pattern.compile("lastChangedFrom=([^&]+)").matcher(query);
+        Matcher to = Pattern.compile("lastChangedTo=([^&]+)").matcher(query);
+        assertThat(from.find()).isTrue();
+        assertThat(to.find()).isTrue();
+        assertThat(from.group(1)).isNotEqualTo(to.group(1)); // never zero-width
+        assertThat(page.hasMore()).isFalse(); // [14:00,15:00] advances to caught-up
+    }
+
+    @Test
+    void caughtUpZeroWidthWindowAtNowStillMakesNoHttpCall() {
+        // windowFrom == windowTo == NOW (15:00 KST): genuinely caught up to the present,
+        // nothing to widen — no HTTP call, distinct from the past-instant case above.
+        String cursor = "{\"windowFrom\":\"2026-06-12T15:00:00.000+09:00\","
+                + "\"windowTo\":\"2026-06-12T15:00:00.000+09:00\","
+                + "\"moreFrom\":null,\"moreSequence\":null,\"dayTotals\":{}}";
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, cursor);
+
+        assertThat(http.sent).isEmpty();
+        assertThat(page.records()).isEmpty();
+        assertThat(page.hasMore()).isFalse();
+    }
+
+    @Test
     void caughtUpCursorReturnsEmptyPageWithoutAnyHttpCall() {
         String cursor = "{\"windowFrom\":\"2026-06-12T15:00+09:00\",\"windowTo\":\"2026-06-12T15:00+09:00\","
                 + "\"moreFrom\":null,\"moreSequence\":null,\"dayTotals\":{}}";

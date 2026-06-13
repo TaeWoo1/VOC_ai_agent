@@ -89,6 +89,13 @@ public class NaverOrdersClient {
             return FetchPage.of(DataType.ORDER_SUMMARY, List.of(), serialize(cursor), false,
                     NaverApiConnector.KIND);
         }
+        // A settled window can sit at windowTo == windowFrom after catching up to a
+        // past instant; widen its upper bound to "now" so we query (windowFrom, now]
+        // instead of a zero-width range (lastChangedFrom == lastChangedTo), which Naver
+        // rejects with HTTP 400. A continuation keeps its fixed window.
+        if (!cursor.isContinuation()) {
+            cursor = cursor.withWindowThrough(now, KST);
+        }
 
         LastChangedData page = lastChangedStatuses(accessToken, cursor);
         CountablePage countable = selectCountable(cursor, page.items(), page.more());
