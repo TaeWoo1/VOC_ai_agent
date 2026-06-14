@@ -238,10 +238,20 @@ class SyncRunExecutorTest {
                 .isEqualTo("CONNECTED");
     }
 
+    // Fixed instant so the order window is deterministic: with a real clock the
+    // catch-up loop never settles in one window (the advanced window start is
+    // serialized to millisecond precision while now() carries sub-millisecond
+    // nanos, so isCaughtUp() stays false and the executor fetches a second
+    // window — exhausting the queued responses). A whole-millisecond instant
+    // settles the loop in one window and keeps the order (2026-06-11) inside the
+    // 24h window and within the day-total retention horizon. See NaverOrdersCursor.
+    private static final java.time.Clock FIXED_CLOCK =
+            java.time.Clock.fixed(java.time.Instant.parse("2026-06-12T00:00:00Z"), java.time.ZoneOffset.UTC);
+
     private SyncRunExecutor naverExecutor(NaverHttpClient http, CredentialVault vault) {
         NaverApiConnector naver = new NaverApiConnector(
-                new NaverTokenClient(http, java.time.Clock.systemUTC(), "https://fake.naver.test"),
-                new NaverOrdersClient(http, java.time.Clock.systemUTC(), "https://fake.naver.test", 100),
+                new NaverTokenClient(http, FIXED_CLOCK, "https://fake.naver.test"),
+                new NaverOrdersClient(http, FIXED_CLOCK, "https://fake.naver.test", 100),
                 vault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
