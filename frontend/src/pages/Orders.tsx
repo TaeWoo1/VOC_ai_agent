@@ -6,9 +6,16 @@ import { api } from "../lib/apiClient";
 import { count, wonShort } from "../lib/format";
 
 export function Orders() {
-  const { data } = useApiData(() => api.getOrdersSummary());
-  if (!data) {
+  const { data, loading, error } = useApiData(() => api.getOrdersSummaryStrict());
+  if (loading) {
     return <p className="text-muted">불러오는 중…</p>;
+  }
+  if (error || !data) {
+    return (
+      <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
+        주문·매출 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+      </div>
+    );
   }
   return (
     <div className="space-y-6">

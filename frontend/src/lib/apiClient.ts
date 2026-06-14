@@ -144,6 +144,16 @@ export const api = {
   getInbox: (): Promise<InboxResponse> => getOrMock("/api/inbox", mockInbox),
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>
     getOrMock("/api/orders/summary", mockOrders),
+  // Strict variant for the order/sales dashboard (Orders page): no silent mock
+  // fallback, so a dead backend fails closed instead of rendering demo numbers.
+  // Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the other *Strict reads.
+  async getOrdersSummaryStrict(): Promise<OrderSummaryResponse> {
+    if (USE_MOCKS) {
+      return mockOrders();
+    }
+    const { data } = await http.get<OrderSummaryResponse>("/api/orders/summary");
+    return data;
+  },
   getSyncJobs: (): Promise<SyncJobView[]> => getOrMock("/api/sync-jobs", mockSyncJobs),
 
   async registerFileChannel(channelId: string, alias: string): Promise<SellerAccountResponse> {

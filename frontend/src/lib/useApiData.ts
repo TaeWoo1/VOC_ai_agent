@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 
-/** Loads data once on mount; pairs with the mock-fallback API client so a
- *  failed request still resolves to seeded data rather than throwing. */
-export function useApiData<T>(loader: () => Promise<T>): { data: T | null; loading: boolean } {
+/** Loads data once on mount. Mock-fallback loaders never throw, so `error`
+ *  stays null for them (behavior unchanged). Strict loaders (no silent mock)
+ *  reject on backend failure, which surfaces here as `error` so the page can
+ *  fail closed instead of showing stale/fake data. */
+export function useApiData<T>(
+  loader: () => Promise<T>,
+): { data: T | null; loading: boolean; error: boolean } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
+    setError(false);
     loader()
       .then((d) => {
         if (active) {
           setData(d);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setError(true);
         }
       })
       .finally(() => {
@@ -27,5 +38,5 @@ export function useApiData<T>(loader: () => Promise<T>): { data: T | null; loadi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { data, loading };
+  return { data, loading, error };
 }
