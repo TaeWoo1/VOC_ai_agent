@@ -2,6 +2,7 @@ package com.sellerops.inbox;
 
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.common.PiiMasker;
 import com.sellerops.inbox.dto.FeedItem;
 import com.sellerops.inbox.dto.InboxResponse;
 import com.sellerops.inquiry.Inquiry;
@@ -66,11 +67,15 @@ public class InboxService {
         return items.size() > limit ? items.subList(0, limit) : items;
     }
 
+    /**
+     * Build the customer-facing snippet: mask obvious PII (phone/email) BEFORE
+     * truncating so a token is never split. The raw body stays untouched in the DB.
+     */
     private String snippet(String body) {
         if (body == null) {
             return "";
         }
-        String trimmed = body.strip();
-        return trimmed.length() <= 60 ? trimmed : trimmed.substring(0, 60) + "…";
+        String masked = PiiMasker.maskText(body).strip();
+        return masked.length() <= 60 ? masked : masked.substring(0, 60) + "…";
     }
 }
