@@ -18,18 +18,42 @@ function backendMessage(e: unknown): string | null {
   return null;
 }
 
+// 문의 first, then 리뷰, then 주문·매출 — matches the step-1 wording the operator
+// reads top to bottom. ORDER_SUMMARY stays: it feeds the Orders dashboard.
 const TYPES: Array<{ value: UploadType; label: string }> = [
-  { value: "REVIEW", label: "리뷰" },
   { value: "INQUIRY", label: "문의" },
+  { value: "REVIEW", label: "리뷰" },
   { value: "ORDER_SUMMARY", label: "주문·매출" },
 ];
+
+const ACCEPT = ".csv,.xlsx";
+
+/** True when a dropped/selected file has a CSV or XLSX extension. */
+function hasAllowedExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".csv") || lower.endsWith(".xlsx");
+}
+
+/** A small numbered step header, so the page reads as ① 종류 ② 채널 ③ 파일 ④ 결과. */
+function StepLabel({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand/10 text-sm font-bold text-brand-700">
+        {n}
+      </span>
+      <span className="text-base font-semibold text-ink">{children}</span>
+    </div>
+  );
+}
 
 export function Upload() {
   const [params] = useSearchParams();
   const { data: channels } = useApiData(() => api.getChannels());
   const [channelId, setChannelId] = useState("");
-  const [uploadType, setUploadType] = useState<UploadType>("REVIEW");
+  const [uploadType, setUploadType] = useState<UploadType>("INQUIRY");
   const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResult | null>(null);
@@ -68,6 +92,25 @@ export function Upload() {
     }
   }, [queryChannel, channelList, channelId]);
 
+  function pickFile(f: File | null) {
+    if (!f) {
+      setFile(null);
+      return;
+    }
+    if (!hasAllowedExtension(f.name)) {
+      setError("CSV 또는 XLSX 파일만 올릴 수 있습니다.");
+      return;
+    }
+    setError(null);
+    setFile(f);
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragging(false);
+    pickFile(e.dataTransfer.files?.[0] ?? null);
+  }
+
   async function onUpload() {
     if (!channelId) {
       setError("채널을 선택해 주세요.");
@@ -94,33 +137,17 @@ export function Upload() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">자동 수집 전, 파일로 먼저 확인하기</h1>
-        <p className="mt-1 text-lg text-muted">리뷰·문의·주문/매출 파일을 올리면 대시보드에 반영됩니다.</p>
-        <p className="mt-2 rounded-xl bg-brand/5 px-4 py-3 text-base text-muted">
-          장기적으로는 판매자센터 API/자동 수집으로 연결되며, 파일 업로드는 초기 검증과 예외 상황을 위한 백업 방식입니다.
+        <h1 className="text-2xl font-bold">자료 업로드</h1>
+        <p className="mt-1 text-lg text-muted">
+          리뷰·문의·주문/매출 파일을 올리면 대시보드와 인박스에 반영됩니다.
         </p>
       </div>
 
       <Section title="업로드">
-        <div className="space-y-5">
+        <div className="space-y-6">
           <div>
-            <label className="mb-2 block text-base font-semibold">채널</label>
-            <select
-              value={channelId}
-              onChange={(e) => setChannelId(e.target.value)}
-              className="w-full rounded-xl border border-line px-4 py-3 text-lg focus:border-brand focus:outline-none"
-            >
-              {channelList.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nameKo}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-base font-semibold">데이터 종류</label>
-            <div className="flex gap-2">
+            <StepLabel n={1}>무엇을 업로드하나요?</StepLabel>
+            <div className="flex flex-wrap gap-2">
               {TYPES.map((t) => (
                 <button
                   key={t.value}
@@ -134,36 +161,87 @@ export function Upload() {
                 </button>
               ))}
             </div>
-            <div className="mt-3 rounded-xl bg-canvas px-4 py-3 text-base">
-              <p>
-                <span className="font-semibold text-ink">필수 열:</span>{" "}
-                <span className="text-muted">{COLUMN_HELP[uploadType].required}</span>
-              </p>
-              <p className="mt-1">
-                <span className="font-semibold text-ink">선택 열:</span>{" "}
-                <span className="text-muted">{COLUMN_HELP[uploadType].optional}</span>
-              </p>
-              <p className="mt-1 text-sm text-muted">
-                머리글은 한글 또는 영문 모두 인식합니다. 같은 파일을 다시 올려도 중복은 자동으로 건너뜁니다.
-              </p>
-              <button
-                type="button"
-                onClick={() => downloadCsv(uploadType)}
-                className="btn-ghost mt-3 px-4 py-2 text-base"
-              >
-                샘플 CSV 다운로드
-              </button>
+          </div>
+
+          <div>
+            <StepLabel n={2}>어느 채널 자료인가요?</StepLabel>
+            <div className="flex flex-wrap gap-2">
+              {channelList.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setChannelId(c.id)}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                    channelId === c.id ? "bg-ink text-white" : "bg-canvas text-muted"
+                  }`}
+                >
+                  {c.nameKo}
+                </button>
+              ))}
             </div>
           </div>
 
           <div>
-            <label className="mb-2 block text-base font-semibold">파일 (CSV 또는 XLSX)</label>
-            <input
-              type="file"
-              accept=".csv,.xlsx"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="block w-full text-base file:mr-4 file:rounded-xl file:border-0 file:bg-brand/10 file:px-4 file:py-2.5 file:font-semibold file:text-brand-700"
-            />
+            <StepLabel n={3}>파일 선택 / 드래그 앤 드롭</StepLabel>
+            <label
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${
+                dragging ? "border-brand bg-brand/5" : "border-line bg-canvas"
+              }`}
+            >
+              <input
+                type="file"
+                accept={ACCEPT}
+                onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+                className="hidden"
+              />
+              {file ? (
+                <p className="text-base font-semibold text-ink">{file.name}</p>
+              ) : (
+                <>
+                  <p className="text-base font-medium text-ink">
+                    여기로 파일을 끌어다 놓거나 클릭해서 선택하세요
+                  </p>
+                  <p className="mt-1 text-sm text-muted">CSV 또는 XLSX</p>
+                </>
+              )}
+            </label>
+
+            <button
+              type="button"
+              onClick={() => setGuideOpen((v) => !v)}
+              aria-expanded={guideOpen}
+              className="mt-3 text-sm text-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              {guideOpen ? "업로드 양식 안내 접기 ▴" : "업로드 양식 안내 ▾"}
+            </button>
+            {guideOpen ? (
+              <div className="mt-2 rounded-xl bg-canvas px-4 py-3 text-base">
+                <p>
+                  <span className="font-semibold text-ink">필수 열:</span>{" "}
+                  <span className="text-muted">{COLUMN_HELP[uploadType].required}</span>
+                </p>
+                <p className="mt-1">
+                  <span className="font-semibold text-ink">선택 열:</span>{" "}
+                  <span className="text-muted">{COLUMN_HELP[uploadType].optional}</span>
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  머리글은 한글 또는 영문 모두 인식합니다. 같은 파일을 다시 올려도 중복은 자동으로 건너뜁니다.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => downloadCsv(uploadType)}
+                  className="mt-3 text-sm text-brand-700 underline-offset-2 hover:underline"
+                >
+                  샘플 CSV 다운로드
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {error ? <p className="text-base text-bad">{error}</p> : null}
@@ -175,7 +253,7 @@ export function Upload() {
       </Section>
 
       {result ? (
-        <Section title="결과">
+        <Section title="업로드 결과">
           <UploadResult result={result} />
         </Section>
       ) : null}

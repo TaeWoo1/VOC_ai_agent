@@ -9,20 +9,23 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 
 export function UploadResult({ result }: { result: IngestResult }) {
   const status = STATUS[result.status] ?? STATUS.FAILED;
+  // 주문·매출 has no inbox surface, so its primary CTA is the Orders dashboard;
+  // 문의/리뷰 land on the inbox work surface.
+  const toOrders = result.uploadType === "ORDER_SUMMARY";
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <span className="text-xl font-bold">업로드 결과</span>
+      <div className="flex flex-wrap items-center gap-3">
         <span className={`rounded-full px-3 py-1 text-sm font-semibold ${status.cls}`}>
           {status.label}
         </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Tally label="전체" value={result.totalRows} />
-        <Tally label="저장됨" value={result.successRows} tone="good" />
-        <Tally label="중복 건너뜀" value={result.skippedRows} tone="muted" />
-        <Tally label="실패" value={result.failedRows} tone={result.failedRows > 0 ? "bad" : "muted"} />
+        <span className="text-base">
+          <span className="font-semibold text-good">저장 {result.successRows}건</span>
+          <span className="text-muted"> · 중복 {result.skippedRows}건 · </span>
+          <span className={result.failedRows > 0 ? "font-semibold text-bad" : "text-muted"}>
+            실패 {result.failedRows}건
+          </span>
+        </span>
       </div>
 
       {result.errorMessage ? (
@@ -43,35 +46,26 @@ export function UploadResult({ result }: { result: IngestResult }) {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Link to="/" className="btn-primary inline-flex">
-          대시보드에서 확인하기
-        </Link>
-        <Link to="/inbox" className="btn-ghost inline-flex">
-          인박스에서 확인하기
-        </Link>
-        <Link to="/orders" className="btn-ghost inline-flex">
-          주문·매출 보기
-        </Link>
+        {toOrders ? (
+          <>
+            <Link to="/orders" className="btn-primary inline-flex">
+              주문·매출 보기
+            </Link>
+            <Link to="/" className="btn-ghost inline-flex">
+              대시보드에서 확인하기
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link to="/inbox" className="btn-primary inline-flex">
+              인박스에서 확인하기
+            </Link>
+            <Link to="/" className="btn-ghost inline-flex">
+              대시보드에서 확인하기
+            </Link>
+          </>
+        )}
       </div>
-    </div>
-  );
-}
-
-function Tally({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: number;
-  tone?: "default" | "good" | "bad" | "muted";
-}) {
-  const cls =
-    tone === "good" ? "text-good" : tone === "bad" ? "text-bad" : tone === "muted" ? "text-muted" : "text-ink";
-  return (
-    <div className="rounded-xl bg-canvas px-4 py-3 text-center">
-      <p className="text-sm text-muted">{label}</p>
-      <p className={`text-2xl font-bold ${cls}`}>{value.toLocaleString("ko-KR")}</p>
     </div>
   );
 }
