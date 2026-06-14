@@ -94,6 +94,47 @@ export const api = {
 
   getMe: (): Promise<UserView> => getOrMock("/api/users/me", mockMe),
   getChannels: (): Promise<ChannelResponse[]> => getOrMock("/api/channels", mockChannels),
+  // Strict variants for the Naver collection workflow (ChannelDetail): no silent
+  // mock fallback, so a dead/wrong backend fails closed instead of rendering a
+  // fake "CONNECTED" page. The global VITE_USE_MOCKS demo escape hatch is still
+  // honored. Mirrors the getChannelCapabilities fail-closed pattern below.
+  async getChannelsStrict(): Promise<ChannelResponse[]> {
+    if (USE_MOCKS) {
+      return mockChannels();
+    }
+    const { data } = await http.get<ChannelResponse[]>("/api/channels");
+    return data;
+  },
+  async getSellerAccountsStrict(): Promise<SellerAccountResponse[]> {
+    if (USE_MOCKS) {
+      return mockSellerAccounts();
+    }
+    const { data } = await http.get<SellerAccountResponse[]>("/api/seller-accounts");
+    return data;
+  },
+  async getConnectionStatusStrict(accountId: string): Promise<ConnectionStatusView> {
+    if (USE_MOCKS) {
+      return mockConnectionStatus();
+    }
+    const { data } = await http.get<ConnectionStatusView>(
+      `/api/seller-accounts/${accountId}/connection-status`,
+    );
+    return data;
+  },
+  async getSyncRunsStrict(filters: SyncRunFilters = {}): Promise<SyncRunView[]> {
+    if (USE_MOCKS) {
+      return mockSyncRuns();
+    }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filters)) {
+      if (value) {
+        params.set(key, value);
+      }
+    }
+    const query = params.toString();
+    const { data } = await http.get<SyncRunView[]>(`/api/sync-runs${query ? `?${query}` : ""}`);
+    return data;
+  },
   getChannelStatus: (): Promise<ChannelResponse[]> =>
     getOrMock("/api/dashboard/channel-status", mockChannels),
   getSellerAccounts: (): Promise<SellerAccountResponse[]> =>

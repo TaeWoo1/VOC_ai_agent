@@ -3,13 +3,14 @@ import { Link, useParams } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { Section } from "../components/Section";
 import { EmptyState } from "../components/EmptyState";
-import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { relativeTime, untilTime } from "../lib/format";
 import type {
   CapabilityView,
+  ChannelResponse,
   ConnectionStatusView,
   ScheduleView,
+  SellerAccountResponse,
   SyncRunView,
 } from "../lib/types";
 
@@ -37,8 +38,11 @@ const INTERVALS: Array<{ minutes: number; label: string }> = [
 /** 자동 수집 관리 — connection panel for one seller account. */
 export function ChannelDetail() {
   const { accountId = "" } = useParams();
-  const { data: accounts } = useApiData(() => api.getSellerAccounts());
-  const { data: channels } = useApiData(() => api.getChannels());
+
+  // null = still loading; [] with metaError = load failed (fail closed).
+  const [accounts, setAccounts] = useState<SellerAccountResponse[] | null>(null);
+  const [channels, setChannels] = useState<ChannelResponse[] | null>(null);
+  const [metaError, setMetaError] = useState(false);
 
   const account = useMemo(
     () => (accounts ?? []).find((a) => a.id === accountId) ?? null,
@@ -55,28 +59,75 @@ export function ChannelDetail() {
   // because an absent capability row means "allowed" and we must not guess.
   const [capabilities, setCapabilities] = useState<CapabilityView[] | null>(null);
   const [runs, setRuns] = useState<SyncRunView[]>([]);
+  // Loading vs error vs empty kept distinct so a dead backend never renders as
+  // "connected" or "no history yet".
+  const [loadingCollection, setLoadingCollection] = useState(true);
+  const [collectionError, setCollectionError] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  // Account-scoped data. The active flag drops stale responses after the
-  // account changes or the page unmounts.
+  // Account + channel metadata via strict reads: no silent mock fallback, so a
+  // dead/wrong backend fails closed instead of resolving a fake account.
+  useEffect(() => {
+    let active = true;
+    setMetaError(false);
+    Promise.all([api.getSellerAccountsStrict(), api.getChannelsStrict()])
+      .then(([accs, chs]) => {
+        if (active) {
+          setAccounts(accs);
+          setChannels(chs);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAccounts([]);
+          setChannels([]);
+          setMetaError(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
+
+  // Account-scoped collection data (connection status + run history) via strict
+  // reads. The active flag drops stale responses after the account changes or
+  // the page unmounts. Schedules keep the seeded fallback (out of slice scope).
   useEffect(() => {
     if (!accountId) {
       return;
     }
     let active = true;
-    api.getConnectionStatus(accountId)
-      .then((s) => active && setStatus(s))
-      .catch(() => active && setStatus(null));
+    setLoadingCollection(true);
+    setCollectionError(false);
+    Promise.all([
+      api.getConnectionStatusStrict(accountId),
+      api.getSyncRunsStrict({ sellerAccountId: accountId }),
+    ])
+      .then(([s, r]) => {
+        if (active) {
+          setStatus(s);
+          setRuns(r);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setStatus(null);
+          setRuns([]);
+          setCollectionError(true);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingCollection(false);
+        }
+      });
     api.getSchedules(accountId)
       .then((s) => active && setSchedules(s))
       .catch(() => active && setSchedules([]));
-    api.getSyncRuns({ sellerAccountId: accountId })
-      .then((r) => active && setRuns(r))
-      .catch(() => active && setRuns([]));
     return () => {
       active = false;
     };
@@ -107,6 +158,11 @@ export function ChannelDetail() {
     setNotice(isError ? null : message);
   }
 
+  if (metaError) {
+    return (
+      <EmptyState message="채널 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요." />
+    );
+  }
   if (accounts && !account) {
     return <EmptyState message="판매 계정을 찾을 수 없습니다." />;
   }
@@ -130,29 +186,39 @@ export function ChannelDetail() {
       {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
 
       <Section title="연결 상태">
-        <div className="grid grid-cols-1 gap-4 text-base md:grid-cols-3">
-          <div>
-            <p className="text-sm text-muted">마지막 수집</p>
-            <p className="mt-1 font-semibold">
-              {status?.lastSyncedAt ? relativeTime(status.lastSyncedAt) : "수집 이력 없음"}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-muted">다음 자동 수집</p>
-            <p className="mt-1 font-semibold">
-              {status?.nextScheduledAt ? untilTime(status.nextScheduledAt) : "예약 없음"}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-muted">연속 실패</p>
-            <p className={`mt-1 font-semibold ${status && status.consecutiveFailures > 0 ? "text-warn" : ""}`}>
-              {status ? `${status.consecutiveFailures}회` : "-"}
-            </p>
-          </div>
-        </div>
-        {status?.lastError ? (
-          <p className="mt-4 rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">{status.lastError}</p>
-        ) : null}
+        {loadingCollection ? (
+          <p className="text-base text-muted">불러오는 중…</p>
+        ) : collectionError ? (
+          <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
+            연결 상태를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 gap-4 text-base md:grid-cols-3">
+              <div>
+                <p className="text-sm text-muted">마지막 수집</p>
+                <p className="mt-1 font-semibold">
+                  {status?.lastSyncedAt ? relativeTime(status.lastSyncedAt) : "수집 이력 없음"}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted">다음 자동 수집</p>
+                <p className="mt-1 font-semibold">
+                  {status?.nextScheduledAt ? untilTime(status.nextScheduledAt) : "예약 없음"}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted">연속 실패</p>
+                <p className={`mt-1 font-semibold ${status && status.consecutiveFailures > 0 ? "text-warn" : ""}`}>
+                  {status ? `${status.consecutiveFailures}회` : "-"}
+                </p>
+              </div>
+            </div>
+            {status?.lastError ? (
+              <p className="mt-4 rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">{status.lastError}</p>
+            ) : null}
+          </>
+        )}
       </Section>
 
       <Section title="자동 수집 설정">
@@ -174,7 +240,13 @@ export function ChannelDetail() {
       </Section>
 
       <Section title="최근 수집 내역">
-        {runs.length === 0 ? (
+        {loadingCollection ? (
+          <p className="text-base text-muted">불러오는 중…</p>
+        ) : collectionError ? (
+          <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
+            수집 내역을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          </p>
+        ) : runs.length === 0 ? (
           <p className="text-base text-muted">아직 수집 내역이 없습니다.</p>
         ) : (
           <ul className="divide-y divide-line">
@@ -378,29 +450,39 @@ function RunRow({
   }
 
   return (
-    <li className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
-      <div className="flex flex-wrap items-center gap-3">
-        <TriggerChip trigger={run.trigger} />
-        <span className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold">
-          {dataTypeLabel(run.dataType ?? run.uploadType)}
-        </span>
-        <span className={`text-sm font-semibold ${statusColor(run.status)}`}>
-          {statusLabel(run.status)}
-          {run.rateLimited ? " (속도 제한)" : ""}
-        </span>
-        {run.attempt > 1 ? <span className="text-sm text-muted">{run.attempt}차 시도</span> : null}
+    <li className="flex flex-col gap-2 py-3">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <TriggerChip trigger={run.trigger} />
+          <span className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold">
+            {dataTypeLabel(run.dataType ?? run.uploadType)}
+          </span>
+          <span className={`text-sm font-semibold ${statusColor(run.status)}`}>
+            {statusLabel(run.status)}
+            {run.rateLimited ? " (속도 제한)" : ""}
+          </span>
+          {run.attempt > 1 ? <span className="text-sm text-muted">{run.attempt}차 시도</span> : null}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted">
+            저장 {run.successRows} · 건너뜀 {run.skippedRows} · 실패 {run.failedRows} ·{" "}
+            {relativeTime(run.finishedAt ?? run.startedAt)}
+          </span>
+          {retryable ? (
+            <button type="button" disabled={retrying} onClick={retry} className="btn-ghost px-3 py-1.5 text-sm">
+              {retrying ? "재시도 중…" : "다시 시도"}
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="text-sm text-muted">
-          저장 {run.successRows} · 건너뜀 {run.skippedRows} · 실패 {run.failedRows} ·{" "}
-          {relativeTime(run.finishedAt ?? run.startedAt)}
-        </span>
-        {retryable ? (
-          <button type="button" disabled={retrying} onClick={retry} className="btn-ghost px-3 py-1.5 text-sm">
-            {retrying ? "재시도 중…" : "다시 시도"}
-          </button>
-        ) : null}
-      </div>
+      {run.errorMessage || run.nextRetryAt ? (
+        <div className="flex flex-col gap-1 text-sm">
+          {run.errorMessage ? <span className="text-bad">{run.errorMessage}</span> : null}
+          {run.nextRetryAt ? (
+            <span className="text-muted">다음 재시도 가능: {untilTime(run.nextRetryAt)}</span>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
 }
