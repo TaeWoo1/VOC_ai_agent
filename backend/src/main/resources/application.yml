@@ -143,6 +143,11 @@ sellerops:
     origin: ${SELLEROPS_CORS_ORIGIN:http://localhost:5173}
   seed:
     enabled: true
+    # Demo content (products/reviews/inquiries/order-summaries) is opt-in and OFF
+    # by default so a real DB shows an honest empty inbox/orders. Baseline org +
+    # login user + channels still seed under `enabled`. Set true on a clean DB for
+    # the full demo.
+    demo-content: ${SELLEROPS_SEED_DEMO_CONTENT:false}
 
 logging:
   level:

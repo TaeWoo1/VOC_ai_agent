@@ -30,9 +30,22 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Seeds a demo org + user + the 13-channel catalog + sample
- * products/inquiries/reviews/order-summaries on an empty database, so every UI
- * surface renders rich data. Idempotent: runs only when no organizations exist.
+ * Seeds demo data on an empty database, in two groups:
+ *
+ * <ul>
+ *   <li><b>Baseline</b> (always, when {@code sellerops.seed.enabled=true}, default
+ *       true): the demo org + login user + 13-channel catalog + seller accounts.
+ *       Required so the dev app is usable (login) and uploads have channels to map
+ *       to.</li>
+ *   <li><b>Demo content</b> (opt-in, only when {@code sellerops.seed.demo-content
+ *       =true}, default false): sample products/reviews/inquiries/order-summaries.
+ *       OFF by default so a real/default DB shows an honest empty inbox and orders
+ *       dashboard instead of fake operational rows.</li>
+ * </ul>
+ *
+ * Idempotent: runs only when no organizations exist, so demo content seeds only on
+ * a clean DB — enable {@code sellerops.seed.demo-content} before the first startup
+ * of an empty database to get the full demo. Existing rows are never deleted here.
  *
  * Demo login — email: demo@sellerops.ai  password: demo1234
  */
@@ -40,6 +53,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class MockDataSeeder implements ApplicationRunner {
 
     private final boolean enabled;
+    private final boolean seedDemoContent;
     private final OrganizationRepository organizations;
     private final UserRepository users;
     private final ChannelRepository channels;
@@ -52,12 +66,14 @@ public class MockDataSeeder implements ApplicationRunner {
 
     public MockDataSeeder(
             @Value("${sellerops.seed.enabled:true}") boolean enabled,
+            @Value("${sellerops.seed.demo-content:false}") boolean seedDemoContent,
             OrganizationRepository organizations, UserRepository users,
             ChannelRepository channels, SellerAccountRepository sellerAccounts,
             ProductRepository products, InquiryRepository inquiries,
             ReviewRepository reviews, OrderDailySummaryRepository orderSummaries,
             PasswordEncoder passwordEncoder) {
         this.enabled = enabled;
+        this.seedDemoContent = seedDemoContent;
         this.organizations = organizations;
         this.users = users;
         this.channels = channels;
@@ -95,10 +111,15 @@ public class MockDataSeeder implements ApplicationRunner {
         seedAccount(org.getId(), coupang, Instant.now().minus(Duration.ofHours(1)));
         seedAccount(org.getId(), naver, Instant.now().minus(Duration.ofHours(3)));
 
-        List<Product> productList = seedProducts(org.getId());
-        seedReviews(org.getId(), productList, List.of(coupang, naver));
-        seedInquiries(org.getId(), productList, List.of(coupang, naver));
-        seedOrderSummaries(org.getId(), List.of(coupang, naver));
+        // Demo content (products/reviews/inquiries/order-summaries) is opt-in. When
+        // off, the inbox and orders dashboard stay honestly empty until real data
+        // arrives; baseline org/user/channels above are still seeded for login.
+        if (seedDemoContent) {
+            List<Product> productList = seedProducts(org.getId());
+            seedReviews(org.getId(), productList, List.of(coupang, naver));
+            seedInquiries(org.getId(), productList, List.of(coupang, naver));
+            seedOrderSummaries(org.getId(), List.of(coupang, naver));
+        }
     }
 
     private List<Channel> seedChannels() {
