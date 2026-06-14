@@ -7,7 +7,7 @@ import { api } from "../lib/apiClient";
 type Filter = "ALL" | "INQUIRY" | "REVIEW";
 
 export function Inbox() {
-  const { data } = useApiData(() => api.getInbox());
+  const { data, loading, error } = useApiData(() => api.getInboxStrict());
   const [filter, setFilter] = useState<Filter>("ALL");
   const [channel, setChannel] = useState<string>("ALL");
 
@@ -25,6 +25,13 @@ export function Inbox() {
       <h1 className="text-2xl font-bold">인박스</h1>
       <p className="text-lg text-muted">문의와 리뷰를 한 곳에서 봅니다.</p>
 
+      {loading ? (
+        <p className="text-muted">불러오는 중…</p>
+      ) : error || !data ? (
+        <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
+          인박스 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+        </div>
+      ) : (
       <Section
         title={`통합 피드 (${filtered.length}건)`}
         action={
@@ -69,6 +76,7 @@ export function Inbox() {
         </div>
         <FeedList items={filtered} />
       </Section>
+      )}
     </div>
   );
 }

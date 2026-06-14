@@ -34,12 +34,23 @@ export function Upload() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<IngestResult | null>(null);
   const [jobs, setJobs] = useState<SyncJobView[]>([]);
+  const [jobsError, setJobsError] = useState(false);
 
   const queryChannel = params.get("channelId");
   const channelList = useMemo(() => channels ?? [], [channels]);
 
+  // Strict read: on backend failure show an explicit error, never a fake history.
   const loadJobs = useCallback(() => {
-    api.getSyncJobs().then(setJobs).catch(() => setJobs([]));
+    api
+      .getSyncJobsStrict()
+      .then((j) => {
+        setJobs(j);
+        setJobsError(false);
+      })
+      .catch(() => {
+        setJobs([]);
+        setJobsError(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -170,7 +181,11 @@ export function Upload() {
       ) : null}
 
       <Section title="최근 업로드 내역">
-        {jobs.length === 0 ? (
+        {jobsError ? (
+          <p className="text-base text-bad">
+            업로드 내역을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          </p>
+        ) : jobs.length === 0 ? (
           <p className="text-base text-muted">아직 업로드 내역이 없습니다.</p>
         ) : (
           <ul className="divide-y divide-line">

@@ -142,6 +142,17 @@ export const api = {
   getDashboardSummary: (): Promise<DashboardSummaryResponse> =>
     getOrMock("/api/dashboard/summary", mockDashboard),
   getInbox: (): Promise<InboxResponse> => getOrMock("/api/inbox", mockInbox),
+  // Strict variant for the integrated inbox (Inbox page): no silent mock
+  // fallback, so a dead backend fails closed instead of rendering a fake feed of
+  // inquiries/reviews. Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the
+  // other *Strict reads.
+  async getInboxStrict(): Promise<InboxResponse> {
+    if (USE_MOCKS) {
+      return mockInbox();
+    }
+    const { data } = await http.get<InboxResponse>("/api/inbox");
+    return data;
+  },
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>
     getOrMock("/api/orders/summary", mockOrders),
   // Strict variant for the order/sales dashboard (Orders page): no silent mock
@@ -168,6 +179,17 @@ export const api = {
     return data;
   },
   getSyncJobs: (): Promise<SyncJobView[]> => getOrMock("/api/sync-jobs", mockSyncJobs),
+  // Strict variant for the upload-history list (Upload page): no silent mock
+  // fallback, so a dead backend fails closed instead of showing fake "최근 업로드
+  // 내역". Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the other *Strict
+  // reads.
+  async getSyncJobsStrict(): Promise<SyncJobView[]> {
+    if (USE_MOCKS) {
+      return mockSyncJobs();
+    }
+    const { data } = await http.get<SyncJobView[]>("/api/sync-jobs");
+    return data;
+  },
 
   async registerFileChannel(channelId: string, alias: string): Promise<SellerAccountResponse> {
     const { data } = await http.post<SellerAccountResponse>(
