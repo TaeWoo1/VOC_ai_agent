@@ -1,86 +1,80 @@
+import { Link } from "react-router-dom";
 import { StatCard } from "../components/StatCard";
 import { Section } from "../components/Section";
-import { StatusBadge } from "../components/StatusBadge";
 import { EmptyState } from "../components/EmptyState";
 import { ShareBars, TrendBars } from "../components/Charts";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { count, relativeTime, wonShort } from "../lib/format";
-import type { ChannelResponse, FeedItem, TopProductIssue } from "../lib/types";
+import { buildHomeOperatingItems, todayOrders, todaySales } from "../lib/homeActions";
+import type { FeedItem } from "../lib/types";
 
+/** Home is the online-seller operating cockpit. It shows ONLY real order/sales
+ *  data (strict read, fail-closed) plus order-derived operating items, and
+ *  routes to the real surfaces (/orders, /channels). Inquiry/review/product
+ *  counts are intentionally absent — they have no live source in the current
+ *  MVP, so seeded values must not be presented here as live. */
 export function Home() {
-  const { data: summary } = useApiData(() => api.getDashboardSummary());
-  const { data: channels } = useApiData(() => api.getChannelStatus());
+  const { data, loading, error } = useApiData(() => api.getOrdersSummaryStrict());
 
-  if (!summary) {
-    return <p className="text-muted">불러오는 중…</p>;
-  }
-
-  const c = summary.cards;
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">오늘의 운영 현황</h1>
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="오늘 주문" value={count(c.todayOrders)} unit="건" />
-        <StatCard label="오늘 매출" value={wonShort(c.todaySales)} unit="원" />
-        <StatCard label="신규 문의" value={count(c.newInquiries)} unit="건" />
-        <StatCard label="미답변 문의" value={count(c.unansweredInquiries)} unit="건" tone="warn" />
-        <StatCard label="신규 리뷰" value={count(c.newReviews)} unit="건" />
-        <StatCard label="부정 리뷰" value={count(c.negativeReviews)} unit="건" tone="bad" />
-        <StatCard label="긴급 확인" value={count(c.urgentCount)} unit="건" tone="bad" />
-        <StatCard label="미처리 건" value={count(c.unhandledCount)} unit="건" tone="warn" />
+      <div>
+        <h1 className="text-2xl font-bold">오늘의 운영 현황</h1>
+        {!loading && !error && data ? (
+          <p className="mt-1 text-base text-muted">네이버 주문·매출이 연결되어 있습니다.</p>
+        ) : null}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Section title="오늘 확인할 일">
-          <ul className="space-y-3">
-            {summary.todoItems.map((t, i) => (
-              <li key={i} className="flex items-center gap-3 rounded-xl bg-canvas px-4 py-3 text-lg">
-                <span className="text-brand">✓</span>
-                {t}
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <Section title="채널별 현황">
-          <ChannelStatusGrid channels={channels ?? []} />
-        </Section>
-      </div>
-
-      <Section title="최근 문의 / 리뷰">
-        <FeedList items={summary.recentFeed} />
-      </Section>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Section title="상품별 이슈 TOP">
-          <TopIssues items={summary.topProductIssues} />
-        </Section>
-        <Section title="채널별 매출 비중">
-          <ShareBars items={summary.channelSalesShare} />
-        </Section>
-      </div>
-
-      <Section title="최근 7일 주문 / 매출 추이">
-        <TrendBars points={summary.salesTrend} />
-      </Section>
-    </div>
-  );
-}
-
-function ChannelStatusGrid({ channels }: { channels: ChannelResponse[] }) {
-  if (channels.length === 0) {
-    return <EmptyState message="연결된 채널이 없습니다." />;
-  }
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {channels.slice(0, 6).map((ch) => (
-        <div key={ch.id} className="flex items-center justify-between rounded-xl bg-canvas px-4 py-3">
-          <span className="font-semibold">{ch.nameKo}</span>
-          <StatusBadge status={ch.status} />
+      {loading ? (
+        <p className="text-muted">불러오는 중…</p>
+      ) : error || !data ? (
+        <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
+          운영 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
         </div>
-      ))}
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <StatCard label="오늘 주문" value={count(todayOrders(data))} unit="건" />
+            <StatCard label="오늘 매출" value={wonShort(todaySales(data))} unit="원" />
+          </div>
+
+          <Section title="확인 필요한 운영 항목">
+            <ul className="space-y-3">
+              {buildHomeOperatingItems(data).map((item) => (
+                <li
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 rounded-xl bg-canvas px-4 py-3"
+                >
+                  <span className="text-lg">{item.text}</span>
+                  {item.to && item.actionLabel ? (
+                    <Link to={item.to} className="btn-ghost shrink-0">
+                      {item.actionLabel} →
+                    </Link>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </Section>
+
+          <Section title="최근 7일 주문·매출 추이">
+            <TrendBars points={data.trend} />
+          </Section>
+
+          <Section title="최근 7일 매출 발생 채널">
+            <ShareBars items={data.channelShare} />
+          </Section>
+
+          <div className="flex flex-wrap gap-3">
+            <Link to="/orders" className="btn-primary">
+              주문·매출 자세히 보기 →
+            </Link>
+            <Link to="/channels" className="btn-ghost">
+              다른 판매 채널 연결/관리 →
+            </Link>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -115,24 +109,6 @@ export function FeedList({ items }: { items: FeedItem[] }) {
             <p className="truncate text-lg">{it.snippet}</p>
           </div>
           <span className="shrink-0 text-sm text-muted">{relativeTime(it.receivedAt)}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function TopIssues({ items }: { items: TopProductIssue[] }) {
-  if (items.length === 0) {
-    return <EmptyState message="반복 이슈가 아직 없습니다." />;
-  }
-  return (
-    <ul className="space-y-3">
-      {items.map((it, i) => (
-        <li key={i} className="flex items-center justify-between rounded-xl bg-canvas px-4 py-3">
-          <span className="truncate font-semibold">{it.productName}</span>
-          <span className="shrink-0 text-base text-muted">
-            {it.issueLabel} <span className="font-bold text-bad">{it.count}</span>건
-          </span>
         </li>
       ))}
     </ul>
