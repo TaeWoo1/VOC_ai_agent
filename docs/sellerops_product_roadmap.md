@@ -315,3 +315,73 @@ dashboard wiring (Phase 3) follows once the sync surface is real.
 
 > Do not start coding from this document. The next coding turn requires its own
 > scoped slice plan + approval, consistent with the phase-doc discipline.
+
+---
+
+## 9. Deferred backlog — Inbox / item-analysis line (recorded 2026-06-15, not started)
+
+These items came out of the rule-based item-analysis + Inbox-UI slices
+(`item_analyses` table, `InboxItemAnalyzer`, the action-first Inbox card). They
+are **recorded only** — none is implemented, and each needs its own scoped slice
+plan + approval. They are kept out of the current Inbox-polish slice on purpose:
+that slice stays read-only display with no AI/RAG/reply/status-mutation/provider
+sync.
+
+### 9.1 — Inquiry / review received-datetime collection
+- **Goal:** collect and store the source-side received datetime per inquiry/review
+  from API / CSV / XLSX, so cards/details show *when it actually arrived* rather
+  than only ingestion time.
+- **Scope when picked up:** normalize channel-specific timestamp formats and
+  timezones to a single canonical instant; show **relative time on cards**
+  (already present) and **absolute datetime in the expanded detail**.
+- **Constraints:** ingestion-priority order still applies (official API > CSV/XLSX
+  export > manual upload bridge); no new scraping. **Do not implement now.**
+
+### 9.2 — AI reply draft + confirm-before-posting
+- **Goal:** generate a reply draft for an inquiry/review; operator edits and
+  confirms; store the approved draft + approval history; *later* send through an
+  official channel reply API where one exists.
+- **Hard rule:** **never auto-post without explicit operator confirmation.** No
+  draft generation, no posting path in any current slice.
+- **Constraints:** this is the first place a live LLM would enter — separately
+  authorized, gated behind its own provider flag (mirrors
+  `sellerops.analysis.item.provider`). Until then the UI must not imply drafting
+  exists. **Do not implement now.**
+
+### 9.3 — Repeated product-issue status
+- **Goal:** later extract repeated-issue candidates from `item_analyses` (cluster
+  by product + category/summary) and attach a lifecycle status:
+  `OPEN / IN_PROGRESS / RESOLVED / HIDDEN`.
+- **Behavior when picked up:** `RESOLVED` / `HIDDEN` issues are **excluded from the
+  default issue list**; status changes are an explicit operator action (this is
+  the first status-mutation surface in this line — out of the read-only slices).
+- **Constraints:** depends on stored analyses accumulating first; no detector or
+  aggregation change without explicit instruction. **Do not implement now.**
+
+### 9.4 — RAG / operator-assistant drawer (운영 도우미)
+- **Direction:** do **not** keep `AiSearch` ("AI 검색") as a weak standalone
+  sidebar page long-term. Replace it with a contextual sliding **"운영 도우미"**
+  panel, accessible from the relevant pages, that states up front what it can
+  answer.
+- **Future context examples:** Inbox → unanswered inquiries, attention reviews,
+  repeated complaints; Product issues → product-level issue clusters; Orders →
+  channel/period/order-trend questions.
+- **Constraints:** backend RAG retrieval + the drawer are both deferred; consistent
+  with §6 ("No LLM/RAG report generation in MVP"). No "AI 분석" overclaim before a
+  real retrieval/LLM path exists. **Do not implement now.**
+
+### 9.5 — Locate original inquiry/review in the seller center
+- **Goal:** from an Inbox card, let the operator jump to the original
+  inquiry/review in the source seller center, or to its source upload row.
+- **Possible labels:** 원문 보기 / 판매자센터에서 보기 / 해당 문의로 이동 /
+  해당 리뷰 위치 찾기.
+- **Future data requirements:** `source_external_id`, `source_url` /
+  `seller_center_url` (when available), `source_received_at`, channel/provider,
+  product/channel identifiers. (Overlaps 9.1 for `source_received_at`.)
+- **Behavior:** if the official provider API returns a detail URL or stable
+  external id, use it; if a CSV/XLSX upload includes a URL or external id, store
+  and expose it; **if there is no source URL/id, do not fake locate behavior** —
+  fall back to copying channel / product / date / external id for manual search.
+- **Constraints:** **no scraping, no unofficial seller-center automation.** Prefer
+  official provider APIs or uploaded source metadata. Also supports the later
+  confirm-before-posting reply workflow (9.2). **Do not implement now.**
