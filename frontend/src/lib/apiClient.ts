@@ -146,12 +146,25 @@ export const api = {
     getOrMock("/api/orders/summary", mockOrders),
   // Strict variant for the order/sales dashboard (Orders page): no silent mock
   // fallback, so a dead backend fails closed instead of rendering demo numbers.
-  // Honors the VITE_USE_MOCKS demo escape hatch. Mirrors the other *Strict reads.
-  async getOrdersSummaryStrict(): Promise<OrderSummaryResponse> {
+  // Honors the VITE_USE_MOCKS demo escape hatch (filters are ignored in demo
+  // mode). Optional from/to (ISO date) + channelId filter; defaults server-side
+  // to the last 7 days / all channels. Mirrors the other *Strict reads.
+  async getOrdersSummaryStrict(
+    params: { from?: string; to?: string; channelId?: string } = {},
+  ): Promise<OrderSummaryResponse> {
     if (USE_MOCKS) {
       return mockOrders();
     }
-    const { data } = await http.get<OrderSummaryResponse>("/api/orders/summary");
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value) {
+        search.set(key, value);
+      }
+    }
+    const query = search.toString();
+    const { data } = await http.get<OrderSummaryResponse>(
+      `/api/orders/summary${query ? `?${query}` : ""}`,
+    );
     return data;
   },
   getSyncJobs: (): Promise<SyncJobView[]> => getOrMock("/api/sync-jobs", mockSyncJobs),

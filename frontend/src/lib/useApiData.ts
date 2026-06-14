@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
  *  fail closed instead of showing stale/fake data. */
 export function useApiData<T>(
   loader: () => Promise<T>,
+  deps: unknown[] = [],
 ): { data: T | null; loading: boolean; error: boolean } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,9 +35,10 @@ export function useApiData<T>(
     return () => {
       active = false;
     };
-    // Loaders are stable module methods; intentionally run once on mount.
+    // Re-runs when `deps` change; callers that omit `deps` keep the once-on-mount
+    // behavior. The loader itself is recreated each render, so it isn't a dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, deps);
 
   return { data, loading, error };
 }

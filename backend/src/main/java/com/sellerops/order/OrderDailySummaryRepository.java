@@ -7,8 +7,11 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OrderDailySummaryRepository extends JpaRepository<OrderDailySummary, UUID> {
-    List<OrderDailySummary> findAllByOrgIdAndSummaryDateGreaterThanEqualOrderBySummaryDateAsc(
-            UUID orgId, LocalDate from);
+    List<OrderDailySummary> findAllByOrgIdAndSummaryDateBetweenOrderBySummaryDateAsc(
+            UUID orgId, LocalDate from, LocalDate to);
+
+    List<OrderDailySummary> findAllByOrgIdAndChannelIdAndSummaryDateBetweenOrderBySummaryDateAsc(
+            UUID orgId, UUID channelId, LocalDate from, LocalDate to);
 
     List<OrderDailySummary> findAllByOrgIdAndSummaryDate(UUID orgId, LocalDate date);
 

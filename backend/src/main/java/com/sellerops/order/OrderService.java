@@ -2,10 +2,12 @@ package com.sellerops.order;
 
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.common.ApiException;
 import com.sellerops.order.dto.ChannelSalesShare;
 import com.sellerops.order.dto.OrderSummaryResponse;
 import com.sellerops.order.dto.SalesTrendPoint;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class OrderService {
 
     private static final int WINDOW_DAYS = 7;
+    /** Guard against pathological scans; the largest inclusive window we serve. */
+    static final long MAX_RANGE_DAYS = 366;
 
     private final OrderDailySummaryRepository orders;
     private final ChannelRepository channels;
@@ -28,14 +32,32 @@ public class OrderService {
         this.channels = channels;
     }
 
+    /** Default view used by the dashboard and the no-filter Orders page:
+     *  last {@code WINDOW_DAYS} days, all channels. */
     @Transactional(readOnly = true)
     public OrderSummaryResponse summary(UUID orgId) {
-        LocalDate today = LocalDate.now();
-        LocalDate from = today.minusDays(WINDOW_DAYS - 1L);
-        List<OrderDailySummary> rows =
-                orders.findAllByOrgIdAndSummaryDateGreaterThanEqualOrderBySummaryDateAsc(orgId, from);
+        return summary(orgId, null, null, null);
+    }
 
-        List<SalesTrendPoint> trend = buildTrend(rows, from, today);
+    /** Filtered view. {@code from}/{@code to} default to the last {@code WINDOW_DAYS}
+     *  days; {@code channelId} null means all channels. */
+    @Transactional(readOnly = true)
+    public OrderSummaryResponse summary(UUID orgId, LocalDate from, LocalDate to, UUID channelId) {
+        LocalDate toDate = (to != null) ? to : LocalDate.now();
+        LocalDate fromDate = (from != null) ? from : toDate.minusDays(WINDOW_DAYS - 1L);
+        if (fromDate.isAfter(toDate)) {
+            throw ApiException.badRequest("from must not be after to");
+        }
+        if (ChronoUnit.DAYS.between(fromDate, toDate) > MAX_RANGE_DAYS) {
+            throw ApiException.badRequest("range must not exceed " + MAX_RANGE_DAYS + " days");
+        }
+
+        List<OrderDailySummary> rows = (channelId != null)
+                ? orders.findAllByOrgIdAndChannelIdAndSummaryDateBetweenOrderBySummaryDateAsc(
+                        orgId, channelId, fromDate, toDate)
+                : orders.findAllByOrgIdAndSummaryDateBetweenOrderBySummaryDateAsc(orgId, fromDate, toDate);
+
+        List<SalesTrendPoint> trend = buildTrend(rows, fromDate, toDate);
         List<ChannelSalesShare> share = buildChannelShare(rows);
 
         long totalOrders = trend.stream().mapToLong(SalesTrendPoint::orderCount).sum();
