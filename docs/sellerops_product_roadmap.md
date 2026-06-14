@@ -204,6 +204,37 @@ new data type or channel before the prior surface is proven against real data.
   most-public next candidate), each schema-verified, each feeding the same
   canonical dashboard. *Deliverable:* multi-channel collection.
 
+### Deferred — Cafe24 provider onboarding (separate phase, not started)
+
+**Decision (2026-06-14):** Cafe24 is a Phase-6 candidate but its real
+integration is a **separate provider-onboarding phase**, not a code slice that
+can be mixed into the current Naver-MVP flow. The Cafe24 skeleton in tree
+(auth chain only, off by default — Phase 3D) is **not live-supported** and must
+not be treated as such.
+
+Real Cafe24 integration requires, before any connector fetch code:
+
+- Cafe24 developer app creation.
+- API scope / permission setup.
+- Redirect URI / OAuth configuration.
+- Mall operator approval / app installation.
+- Authorization-code flow exchange.
+- Access / refresh token storage in the credential vault.
+- Connection-status + sync-run integration on the canonical path.
+- Provider-specific live smoke (its own runbook, like the Naver one).
+
+Until that phase is explicitly started:
+
+- **Do not** run the Cafe24 live API.
+- **Do not** enable the Cafe24 scheduler.
+- **Do not** treat the Cafe24 skeleton as live-supported.
+- **Keep Cafe24 out of the current Naver-MVP acceptance criteria** (§5).
+
+Sequencing: this onboarding phase only begins after Naver is fully internalized
+(Phases 1–3) and on explicit operator kickoff — the OAuth/installation steps
+above are an onboarding project in their own right, distinct from wiring an
+HMAC-keyed order fetch.
+
 ---
 
 ## 5. MVP scope (the cut line)
@@ -226,7 +257,7 @@ explicitly **single-channel (Naver), order-only, no scheduler, no LLM.**
 
 ## 6. Non-goals (for now)
 
-- **No additional commerce provider goes live yet** — skeletons stay off; Coupang etc. are Phase 6.
+- **No additional commerce provider goes live yet** — skeletons stay off; Coupang etc. are Phase 6. **Cafe24 specifically requires a separate provider-onboarding phase** (developer app, OAuth, mall-operator install, its own live smoke) — see the deferred note under §4; its skeleton is not live-supported.
 - **No scheduler-on live polling yet** — manual sync only until Phase 4 deliberately enables it.
 - **No review analysis until a review data source is confirmed** — most channels have no official review API; reviews stay on the upload/report path.
 - **No expanding data types before UI internalization** — PRODUCT/CLAIM wait until the ORDER_SUMMARY surface is real (Phase 2/3 done).
