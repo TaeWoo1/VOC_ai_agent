@@ -55,6 +55,15 @@ final class FakeNaverHttpClient implements NaverHttpClient {
                 Map.of("GNCP-GW-RateLimit-Remaining", "0"));
     }
 
+    /** The per-period quota 429 (GW.QUOTA_LIMIT) with its quota headers. */
+    static Response quotaLimited429() {
+        return new Response(429,
+                "{\"code\":\"GW.QUOTA_LIMIT\",\"message\":\"할당된 시간당 요청량을 초과하였습니다.\"}",
+                Map.of("GNCP-GW-Quota-Period", "SECONDS",
+                        "GNCP-GW-Quota-Limit", "1000",
+                        "GNCP-GW-Quota-Remaining", "0"));
+    }
+
     @Override
     public Response postForm(URI uri, Map<String, String> form) {
         return record(new Sent("POST_FORM", uri, form, null, null));

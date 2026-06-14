@@ -39,6 +39,13 @@ public class NaverApiConnector implements PullConnector {
      */
     static final int FALLBACK_RETRY_AFTER_SECONDS = 1;
 
+    /**
+     * A quota breach ({@code GW.QUOTA_LIMIT}) is per-period, not per-second, so a
+     * one-second hint would just re-trip it. Without an explicit header, hint a
+     * full minute as the conservative earliest retry.
+     */
+    static final int QUOTA_FALLBACK_RETRY_AFTER_SECONDS = 60;
+
     private final NaverTokenClient tokenClient;
     private final NaverOrdersClient ordersClient;
     private final CredentialVault vault;
@@ -90,10 +97,23 @@ public class NaverApiConnector implements PullConnector {
             String accessToken = tokenClient.accessToken(clientId, clientSecret);
             return ordersClient.fetchOrderSummaryPage(accessToken, request.cursorValue());
         } catch (NaverRateLimitedException e) {
-            int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
             // Cursor unchanged — a throttled attempt must re-request the same position.
-            return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
+            return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfterFor(e), KIND);
         }
+    }
+
+    /**
+     * The earliest-retry hint: the server's {@code Retry-After} if it ever sends
+     * one, else a per-cause default — a full minute for a quota breach (per-period),
+     * one second for a rate breach (per-second bucket).
+     */
+    private static int retryAfterFor(NaverRateLimitedException e) {
+        if (e.retryAfterSeconds() != null) {
+            return e.retryAfterSeconds();
+        }
+        return e.limitType() == NaverRateLimitedException.LimitType.QUOTA_LIMIT
+                ? QUOTA_FALLBACK_RETRY_AFTER_SECONDS
+                : FALLBACK_RETRY_AFTER_SECONDS;
     }
 
     private static boolean isBlank(String value) {

@@ -47,8 +47,18 @@ class NaverConnectorConfigurationTest {
                     assertThat(ctx).hasSingleBean(NaverApiConnector.class);
                     assertThat(ctx).hasSingleBean(NaverTokenClient.class);
                     assertThat(ctx).hasSingleBean(NaverOrdersClient.class);
-                    assertThat(ctx.getBean(NaverHttpClient.class)).isInstanceOf(JdkNaverHttpClient.class);
+                    // The boundary bean is now the pacing decorator (wrapping the
+                    // real JDK client), shared by the token and order clients.
+                    assertThat(ctx.getBean(NaverHttpClient.class)).isInstanceOf(PacingNaverHttpClient.class);
                 });
+    }
+
+    @Test
+    void negativeRequestIntervalFailsStartup() {
+        runner().withPropertyValues(
+                        "sellerops.connector.naver.enabled=true",
+                        "sellerops.connector.naver.min-request-interval-millis=-1")
+                .run(ctx -> assertThat(ctx).hasFailed());
     }
 
     @Test

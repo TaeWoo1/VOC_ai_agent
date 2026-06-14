@@ -2,6 +2,7 @@ package com.sellerops.connector.naver;
 
 import com.sellerops.credential.CredentialVault;
 import java.time.Clock;
+import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -18,9 +19,30 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(name = "sellerops.connector.naver.enabled", havingValue = "true")
 public class NaverConnectorConfiguration {
 
+    /**
+     * The single HTTP boundary shared by the token and order clients, wrapped in
+     * a pacing decorator so all Naver calls — token mint, last-changed, detail,
+     * pagination — are spaced under Naver's per-second meter by one process-wide
+     * pacer. {@code min-request-interval-millis=0} disables pacing.
+     */
     @Bean
-    NaverHttpClient naverHttpClient() {
-        return new JdkNaverHttpClient();
+    NaverHttpClient naverHttpClient(
+            @Value("${sellerops.connector.naver.min-request-interval-millis:1000}") long minRequestIntervalMillis,
+            @Value("${sellerops.connector.naver.exhaustion-backoff-millis:1000}") long exhaustionBackoffMillis) {
+        if (minRequestIntervalMillis < 0) {
+            throw new IllegalStateException(
+                    "네이버 요청 최소 간격(min-request-interval-millis)은 0 이상이어야 합니다 (설정값: "
+                            + minRequestIntervalMillis + ").");
+        }
+        if (exhaustionBackoffMillis < 0) {
+            throw new IllegalStateException(
+                    "네이버 요청량 소진 백오프(exhaustion-backoff-millis)는 0 이상이어야 합니다 (설정값: "
+                            + exhaustionBackoffMillis + ").");
+        }
+        NaverRequestPacer pacer = new NaverRequestPacer(
+                Clock.systemUTC(), new ThreadSleeper(),
+                Duration.ofMillis(minRequestIntervalMillis), Duration.ofMillis(exhaustionBackoffMillis));
+        return new PacingNaverHttpClient(new JdkNaverHttpClient(), pacer);
     }
 
     @Bean

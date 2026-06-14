@@ -64,6 +64,22 @@ class NaverApiConnectorTest {
                 vault);
     }
 
+    /**
+     * A connector whose single HTTP boundary is wrapped in the pacing decorator,
+     * sharing one pacer across token + order calls. The recording sleeper never
+     * really blocks; its {@code waits} prove pacing happened.
+     */
+    private NaverApiConnector pacedConnectorWith(CredentialVault vault, RecordingSleeper sleeper,
+                                                 MutableTestClock pacerClock) {
+        NaverHttpClient paced = new PacingNaverHttpClient(
+                http, new NaverRequestPacer(pacerClock, sleeper,
+                        java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(1)));
+        return new NaverApiConnector(
+                new NaverTokenClient(paced, clock, "https://fake.naver.test"),
+                new NaverOrdersClient(paced, clock, "https://fake.naver.test", 100),
+                vault);
+    }
+
     private CredentialVault vaultWithKey(String masterKeyBase64) {
         return new CredentialVault(credentials, new ObjectMapper(), masterKeyBase64, "local-test-1");
     }
@@ -197,6 +213,71 @@ class NaverApiConnectorTest {
         // Cursor unchanged: the initial (null) cursor stays null for the retry.
         assertThat(page.nextCursorValue()).isNull();
         assertThat(page.retryAfterSeconds()).isEqualTo(NaverApiConnector.FALLBACK_RETRY_AFTER_SECONDS);
+    }
+
+    @Test
+    void pacedTwoCallFlowSpacesEveryRequestWithoutChangingResults() {
+        storeNaverCredential();
+        MutableTestClock pacerClock = new MutableTestClock(Instant.parse("2026-06-12T00:00:00Z"));
+        RecordingSleeper sleeper = new RecordingSleeper(pacerClock);
+        NaverApiConnector paced = pacedConnectorWith(vault, sleeper, pacerClock);
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.ok(
+                "{\"data\":{\"lastChangeStatuses\":[{\"productOrderId\":\"PO1\",\"orderId\":\"O1\","
+                        + "\"productOrderStatus\":\"PAYED\",\"lastChangedType\":\"PAYED\","
+                        + "\"lastChangedDate\":\"2026-06-11T22:00:00+09:00\","
+                        + "\"paymentDate\":\"2026-06-11T22:00:00+09:00\"}]}}"));
+        http.enqueue(FakeNaverHttpClient.ok(
+                "{\"data\":[{\"productOrder\":{\"productOrderId\":\"PO1\",\"initialPaymentAmount\":12000}}]}"));
+
+        FetchPage page = paced.fetch(request(DataType.ORDER_SUMMARY, null));
+
+        // token mint + last-changed + detail = 3 calls → first free, next two paced.
+        assertThat(http.sent).hasSize(3);
+        assertThat(sleeper.waits).containsExactly(java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(1));
+        // Pacing changes timing only — the page is identical to the unpaced flow.
+        assertThat(page.records()).hasSize(1);
+        assertThat(((CanonicalOrderSummary) page.records().get(0)).salesAmount()).isEqualTo(12000L);
+    }
+
+    @Test
+    void pacedRateLimitedOrdersCallStillMapsToRateLimitedPageWithCursorUnchanged() {
+        storeNaverCredential();
+        MutableTestClock pacerClock = new MutableTestClock(Instant.parse("2026-06-12T00:00:00Z"));
+        RecordingSleeper sleeper = new RecordingSleeper(pacerClock);
+        NaverApiConnector paced = pacedConnectorWith(vault, sleeper, pacerClock);
+        // Valid resume cursor so token mint succeeds and the 429 lands on the
+        // order call (cursor parses before the last-changed request fires).
+        String resumeCursor = "{\"windowFrom\":\"2026-06-10T15:00+09:00\",\"windowTo\":\"2026-06-11T15:00+09:00\","
+                + "\"moreFrom\":null,\"moreSequence\":null,\"dayTotals\":{}}";
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.rateLimited429()); // the last-changed call
+
+        FetchPage page = paced.fetch(request(DataType.ORDER_SUMMARY, resumeCursor));
+
+        // The pacing layer spaced the order call after the token mint...
+        assertThat(sleeper.waits).containsExactly(java.time.Duration.ofSeconds(1));
+        // ...but the 429 contract is unchanged: rate-limited page, cursor preserved.
+        assertThat(page.rateLimited()).isTrue();
+        assertThat(page.records()).isEmpty();
+        assertThat(page.nextCursorValue()).isEqualTo(resumeCursor);
+        assertThat(page.retryAfterSeconds()).isEqualTo(NaverApiConnector.FALLBACK_RETRY_AFTER_SECONDS);
+    }
+
+    @Test
+    void quotaLimited429MapsToRateLimitedPageWithLongerRetryHintAndCursorUnchanged() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.quotaLimited429()); // the last-changed call
+
+        FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY, null));
+
+        assertThat(page.rateLimited()).isTrue();
+        assertThat(page.records()).isEmpty();
+        // A quota breach is per-period, so the hint is the longer quota fallback,
+        // not the one-second rate fallback — cursor still preserved.
+        assertThat(page.retryAfterSeconds()).isEqualTo(NaverApiConnector.QUOTA_FALLBACK_RETRY_AFTER_SECONDS);
+        assertThat(page.nextCursorValue()).isNull();
     }
 
     @Test
