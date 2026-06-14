@@ -1,9 +1,110 @@
 # SellerOps Phase 3C — Naver ORDER_SUMMARY Live-Smoke Runbook
 
-Written at HEAD `78098d8` (Slice 1b committed). **This document is preparation
-only — running the smoke requires separate explicit operator authorization.**
-Target environment: a local/dev stack (local Postgres, seeded demo org). Never
-a production or shared DB.
+Originally written at HEAD `78098d8` (Slice 1b) as preparation. **The smoke has
+since been executed successfully** (see §0). Re-running it still requires
+separate explicit operator authorization. Target environment: a local/dev stack
+(local Postgres, seeded demo org). Never a production or shared DB.
+
+Sections §A–§J below remain the operator procedure for any future run; §0
+records the first successful execution and the operational cautions learned from
+it.
+
+---
+
+## 0. Executed result — first successful live smoke
+
+**Run date:** 2026-06-14. **Backend HEAD:** `790b10f` (Slice-4 pacing/backoff,
+connector flag on, scheduler off). **Seller account:** the seeded demo NAVER
+account. Exactly one manual `ORDER_SUMMARY` sync was run; no automatic retry.
+
+### Result
+
+| field | value |
+|---|---|
+| `jobType` | `NAVER_API` |
+| `status` | **SUCCESS** |
+| `rateLimited` | `false` |
+| `failedRows` | 0 |
+| `errorMessage` | (none) |
+| `totalRows` | 0 |
+
+`totalRows=0` is **success, not failure**: no orders had changed since the
+previous successful cursor position, so there was nothing new to upsert. The run
+walked its window range under pacing and converged cleanly.
+
+### Relevant commits
+
+| commit | role |
+|---|---|
+| `b61e3b8` | surface sanitized Naver order API error details (readable `errorMessage`, no secret/PII leakage) |
+| `4ae06c8` | vendor the Naver Commerce API LLM reference docs (`docs/vendor/naver-commerce-api/`) |
+| `790b10f` | pace Naver API calls using rate-limit headers (per-process floor + header-aware backoff + 429 classification) — the fix that turned the earlier 429 PARTIAL into this clean SUCCESS |
+
+### What was validated end-to-end
+
+- **Credential vault decrypt** — `CredentialVault.open` produced usable
+  `client_id`/`client_secret` (no `마스터 키`/`자격 증명` failure).
+- **Token mint** — signed-timestamp token exchange succeeded (run proceeded
+  past the always-first token call).
+- **`last-changed-statuses`** — change-status query returned and parsed across
+  the window (no `변경 주문 응답을 해석할 수 없습니다`).
+- **Detail / amount lookup path** — `product-orders/query` detail/amount path
+  executed without `결제 금액(initialPaymentAmount)이 없습니다` or missing-id
+  errors. **Caveat:** because the delta was empty (`totalRows=0`), no order rows
+  were parsed, so the §F amount-field *shape* (`initialPaymentAmount`,
+  `data.more` pagination, batch limits) is **still unconfirmed against live
+  data** — it remains open in `docs/sellerops_phase3c.md` §12 and needs a smoke
+  against an account with a recent paid order.
+- **Cursor preservation** — `sync_cursors` row is valid Naver JSON with the
+  expected keys (`windowFrom`, `windowTo`, `moreFrom`, `moreSequence`,
+  `dayTotals`, `dedupeIds`, `edgeIds`); cursor was not reset.
+- **`order_daily_summaries` upsert / preservation** — table intact (43 rows,
+  2026-05-03 → 2026-06-14); with `totalRows=0` nothing was upserted and prior
+  totals were preserved (upsert-by-`(channel, date)` semantics confirmed
+  non-destructive on an empty delta).
+- **`connection-status` = CONNECTED** — `lastSuccessAt` advanced to the run's
+  finish, `consecutiveFailures=0`, `lastError=null`.
+- **`rateLimited=false` after pacing** — the pacer (thread dump confirmed the
+  worker sleeping in `NaverRequestPacer.acquire` between calls) kept the run
+  inside the per-second budget; no 429 occurred.
+
+### Operational cautions (learned / reaffirmed)
+
+- **Do not reset the cursor** unless a stale *mock* cursor is proven. The live
+  cursor is valid Naver JSON; deleting it forces a fresh full backfill. Only the
+  `커서를 해석할 수 없습니다` corruption case (§G) justifies deletion.
+- **Scheduler must stay disabled** (`sellerops.collect.scheduler-enabled=false`)
+  during any manual smoke — manual sync only, never background polling.
+- **Do not repeatedly retry on 429.** A 429 ends the run with the cursor
+  preserved; retry at most once after a wait (§G/§H). The pacer exists precisely
+  so a healthy run never reaches that path.
+- **Keep the backend process alive** across a sequence of test syncs so the
+  in-memory access-token cache is reused — restarting re-mints a token and adds
+  avoidable token-endpoint load.
+- **Never expose secrets, tokens, or raw order payloads** — no credentials,
+  bearer tokens, or full response bodies in logs, errors, docs, or chat. Verify
+  via aggregate fields (`SyncRunView`, connection-status) and DB counts/keys
+  only.
+- **A caught-up sync is not instant.** This run took ~13.5 min wall-clock for
+  `totalRows=0` because the pacer adds the floor interval (~1s) to every
+  `last-changed-statuses` call across the window range. That is expected with
+  the current 1s floor; if smoke turnaround matters, lower
+  `sellerops.connector.naver.min-request-interval-millis` for the test (it never
+  hit a 429 at 1s) rather than removing pacing.
+
+### Next development options
+
+- **UI/API status internalization** — surface connection-status / run history /
+  `rateLimited` in the operator UI so smokes don't require raw API/DB probing.
+- **Product / order detail expansion** — extend beyond ORDER_SUMMARY to
+  PRODUCT (and the richer order-detail fields catalogued in §F).
+- **Claim connector** — claim/cancellation (`remainPaymentAmount`-adjusted)
+  data path.
+- **Review connector** — currently UNSUPPORTED on Naver (no public review API);
+  revisit only if Naver ships one.
+- **Scheduler / pacing hardening** — promote live-confirmed limits into config,
+  add executor-level 429 coverage against real behavior, and define
+  scheduled-collection enablement criteria (Slice 1c).
 
 ---
 
