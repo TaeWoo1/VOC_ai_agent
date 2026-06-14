@@ -4,6 +4,7 @@ import { Section } from "../components/Section";
 import { ShareBars, TrendBars } from "../components/Charts";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
+import { buildOrderInsights } from "../lib/insights";
 import { count, wonShort } from "../lib/format";
 
 const PRESETS = [7, 14, 30] as const;
@@ -87,6 +88,24 @@ export function Orders() {
             <StatCard label={`최근 ${range}일 주문`} value={count(data.totalOrders7d)} unit="건" />
             <StatCard label={`최근 ${range}일 매출`} value={wonShort(data.totalSales7d)} unit="원" />
           </div>
+
+          <Section title="운영 인사이트">
+            <ul className="space-y-2">
+              {buildOrderInsights(data, {
+                range,
+                channelName: channelId
+                  ? (channels?.find((c) => c.id === channelId)?.nameKo ?? "선택한 채널")
+                  : null,
+              }).map((insight) => (
+                <li
+                  key={insight.id}
+                  className={`text-base ${insight.tone === "warn" ? "text-warn" : "text-ink"}`}
+                >
+                  {insight.text}
+                </li>
+              ))}
+            </ul>
+          </Section>
 
           <Section title={`최근 ${range}일 주문 / 매출 추이`}>
             <TrendBars points={data.trend} />
