@@ -1,13 +1,11 @@
 import { Link } from "react-router-dom";
 import { StatCard } from "../components/StatCard";
 import { Section } from "../components/Section";
-import { EmptyState } from "../components/EmptyState";
 import { ShareBars, TrendBars } from "../components/Charts";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
-import { count, relativeTime, wonShort } from "../lib/format";
+import { count, wonShort } from "../lib/format";
 import { buildHomeOperatingItems, todayOrders, todaySales } from "../lib/homeActions";
-import type { FeedItem } from "../lib/types";
 
 /** Home is the online-seller operating cockpit. It shows ONLY real order/sales
  *  data (strict read, fail-closed) plus order-derived operating items, and
@@ -76,42 +74,6 @@ export function Home() {
         </>
       )}
     </div>
-  );
-}
-
-export function FeedList({ items }: { items: FeedItem[] }) {
-  if (items.length === 0) {
-    return <EmptyState message="표시할 문의나 리뷰가 없습니다." />;
-  }
-  return (
-    <ul className="divide-y divide-line">
-      {items.map((it, i) => (
-        <li key={i} className="flex items-start gap-3 py-3">
-          <span
-            className={`mt-1 rounded-lg px-2 py-0.5 text-sm font-semibold ${
-              it.type === "INQUIRY" ? "bg-brand/10 text-brand-700" : "bg-ink/5 text-ink"
-            }`}
-          >
-            {it.type === "INQUIRY" ? "문의" : "리뷰"}
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-sm text-muted">
-              <span>{it.channelNameKo}</span>
-              <span>·</span>
-              <span className="truncate">{it.productName}</span>
-              {it.status === "NEGATIVE" ? (
-                <span className="rounded bg-bad/10 px-1.5 text-bad">부정</span>
-              ) : null}
-              {it.status === "UNANSWERED" ? (
-                <span className="rounded bg-warn/10 px-1.5 text-warn">미답변</span>
-              ) : null}
-            </div>
-            <p className="truncate text-lg">{it.snippet}</p>
-          </div>
-          <span className="shrink-0 text-sm text-muted">{relativeTime(it.receivedAt)}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 
