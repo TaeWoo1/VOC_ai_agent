@@ -7,6 +7,7 @@ import type {
   DashboardSummaryResponse,
   IngestResult,
   InboxResponse,
+  ItemAnalysis,
   OrderSummaryResponse,
   ScheduleView,
   SellerAccountResponse,
@@ -23,6 +24,7 @@ import {
   mockConnectionStatus,
   mockDashboard,
   mockInbox,
+  mockItemAnalysis,
   mockMe,
   mockOrders,
   mockSchedules,
@@ -151,6 +153,19 @@ export const api = {
       return mockInbox();
     }
     const { data } = await http.get<InboxResponse>("/api/inbox");
+    return data;
+  },
+  // Stored rule-based per-item analysis (read-only) for the org. Enrichment over
+  // the inbox feed, not an essential read: the Inbox page treats a failure here
+  // as fail-soft (renders the feed with no analysis areas), while the inbox feed
+  // itself stays fail-closed via getInboxStrict. Honors the VITE_USE_MOCKS escape
+  // hatch. There is no run trigger in the UI this slice — rows appear only after
+  // POST /api/item-analysis/run is invoked out-of-band.
+  async getItemAnalysisStrict(): Promise<ItemAnalysis[]> {
+    if (USE_MOCKS) {
+      return mockItemAnalysis();
+    }
+    const { data } = await http.get<ItemAnalysis[]>("/api/item-analysis");
     return data;
   },
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>

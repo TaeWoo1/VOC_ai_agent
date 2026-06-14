@@ -51,13 +51,13 @@ public class InboxService {
 
         List<FeedItem> items = new ArrayList<>();
         for (Inquiry q : inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
-            items.add(new FeedItem("INQUIRY",
+            items.add(new FeedItem(q.getId().toString(), "INQUIRY",
                     channelNames.getOrDefault(q.getChannelId(), "기타"),
                     productNames.getOrDefault(q.getProductId(), "-"),
                     snippet(q.getBody()), null, q.getStatus(), q.getReceivedAt()));
         }
         for (Review r : reviews.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
-            items.add(new FeedItem("REVIEW",
+            items.add(new FeedItem(r.getId().toString(), "REVIEW",
                     channelNames.getOrDefault(r.getChannelId(), "기타"),
                     productNames.getOrDefault(r.getProductId(), "-"),
                     snippet(r.getBody()), r.getRating(),

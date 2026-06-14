@@ -4,6 +4,7 @@ import java.time.Instant;
 
 /** A unified inbox row — either an inquiry or a review. */
 public record FeedItem(
+        String id,            // source row UUID (inquiry/review); join key for item-analysis
         String type,          // INQUIRY | REVIEW
         String channelNameKo,
         String productName,

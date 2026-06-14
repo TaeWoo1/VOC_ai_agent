@@ -86,6 +86,26 @@ class InboxServiceTest {
     }
 
     @Test
+    void feedItemCarriesSourceId() {
+        // The source row UUID is the join key to item-analysis. Every row must
+        // carry it, and it must equal the underlying inquiry/review id.
+        String inquiryId = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0)
+                .getId().toString();
+        String reviewId = reviews.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0)
+                .getId().toString();
+
+        for (FeedItem item : service.inbox(org).items()) {
+            assertThat(item.id()).isNotBlank();
+        }
+        FeedItem inquiry = service.inbox(org).items().stream()
+                .filter(i -> i.type().equals("INQUIRY")).findFirst().orElseThrow();
+        FeedItem review = service.inbox(org).items().stream()
+                .filter(i -> i.type().equals("REVIEW")).findFirst().orElseThrow();
+        assertThat(inquiry.id()).isEqualTo(inquiryId);
+        assertThat(review.id()).isEqualTo(reviewId);
+    }
+
+    @Test
     void feedItemDoesNotExposeAuthor() {
         // Structural guarantee: the DTO has no author component...
         boolean hasAuthorComponent = Arrays.stream(FeedItem.class.getRecordComponents())

@@ -59,6 +59,7 @@ export interface TopProductIssue {
 }
 
 export interface FeedItem {
+  id: string; // source row UUID (inquiry/review); join key for item-analysis
   type: "INQUIRY" | "REVIEW";
   channelNameKo: string;
   productName: string;
@@ -66,6 +67,23 @@ export interface FeedItem {
   rating: number | null;
   status: string;
   receivedAt: string;
+}
+
+// Mirrors com.sellerops.itemanalysis.dto.ItemAnalysisView. Derived metadata only
+// (no raw inquiry/review body). The current analyzer is rule-based, so
+// analyzerKind is "RULE_BASED" and there is no model_name/prompt_version field.
+export interface ItemAnalysis {
+  sourceType: "INQUIRY" | "REVIEW";
+  sourceId: string;
+  summary: string;
+  category: string;
+  sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE";
+  urgency: "LOW" | "NORMAL" | "HIGH";
+  recommendedAction: string;
+  analyzerKind: string; // RULE_BASED
+  analyzerName: string; // rule-based
+  analyzerVersion: string; // rules-v1
+  createdAt: string;
 }
 
 export interface SalesTrendPoint {

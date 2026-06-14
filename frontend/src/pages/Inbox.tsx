@@ -4,20 +4,57 @@ import { Section } from "../components/Section";
 import { InboxFeed } from "../components/InboxFeed";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
-import { INBOX_TABS, matchesTab, tabCount, type InboxTabKey } from "../lib/inboxView";
+import {
+  INBOX_TABS,
+  analysisKey,
+  buildAnalysisIndex,
+  matchesTab,
+  tabCount,
+  workItemMatches,
+  workloadSummary,
+  type ChipTone,
+  type InboxTabKey,
+} from "../lib/inboxView";
+
+const STRIP_TONE: Record<ChipTone, string> = {
+  good: "bg-good/10 text-good",
+  warn: "bg-warn/10 text-warn",
+  bad: "bg-bad/10 text-bad",
+  neutral: "bg-ink/5 text-ink",
+};
 
 export function Inbox() {
   const { data, loading, error } = useApiData(() => api.getInboxStrict());
+  // Analysis is enrichment, not an essential read: fetched separately so a failure
+  // here never blocks the inbox. On error we fall back to an empty index and the
+  // cards simply render without an analysis area (fail-soft).
+  const { data: analysisData } = useApiData(() => api.getItemAnalysisStrict());
   const [tab, setTab] = useState<InboxTabKey>("ALL");
   const [channel, setChannel] = useState<string>("ALL");
+  // Optional action/status filter set from the workload strip; composes with the
+  // tab + channel filters. null = 전체 작업 (no action filter).
+  const [action, setAction] = useState<string | null>(null);
 
   const items = data?.items ?? [];
+  const analysisIndex = useMemo(
+    () => buildAnalysisIndex(analysisData ?? []),
+    [analysisData],
+  );
   const channels = useMemo(
     () => Array.from(new Set(items.map((i) => i.channelNameKo))),
     [items],
   );
+  // Strip counts reflect the whole loaded inbox, so the operator sees total
+  // workload regardless of the active tab/channel/action narrowing below.
+  const workload = useMemo(
+    () => workloadSummary(items, analysisIndex),
+    [items, analysisIndex],
+  );
   const filtered = items.filter(
-    (i) => matchesTab(i, tab) && (channel === "ALL" || i.channelNameKo === channel),
+    (i) =>
+      matchesTab(i, tab) &&
+      (channel === "ALL" || i.channelNameKo === channel) &&
+      workItemMatches(i, analysisIndex.get(analysisKey(i.type, i.id)), action),
   );
 
   return (
@@ -45,6 +82,37 @@ export function Inbox() {
         </Section>
       ) : (
         <Section title={`통합 피드 (${filtered.length}건)`}>
+          {workload.length > 0 ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted">처리할 작업</span>
+              {workload.map((w) => {
+                const active = action === w.label;
+                return (
+                  <button
+                    key={w.label}
+                    type="button"
+                    onClick={() => setAction(active ? null : w.label)}
+                    aria-pressed={active}
+                    className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${STRIP_TONE[w.tone]} ${
+                      active ? "ring-2 ring-ink/40" : ""
+                    }`}
+                  >
+                    {w.label} {w.count}
+                  </button>
+                );
+              })}
+              {action ? (
+                <button
+                  type="button"
+                  onClick={() => setAction(null)}
+                  className="rounded-lg px-2.5 py-1 text-sm text-muted hover:bg-ink/5"
+                >
+                  전체 작업 ✕
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="mb-4 flex flex-wrap gap-2">
             {INBOX_TABS.map((t) => (
               <button
@@ -84,7 +152,7 @@ export function Inbox() {
             ))}
           </div>
 
-          <InboxFeed items={filtered} />
+          <InboxFeed items={filtered} analysisIndex={analysisIndex} />
         </Section>
       )}
     </div>
