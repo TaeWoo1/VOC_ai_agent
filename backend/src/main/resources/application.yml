@@ -148,6 +148,13 @@ sellerops:
     # login user + channels still seed under `enabled`. Set true on a clean DB for
     # the full demo.
     demo-content: ${SELLEROPS_SEED_DEMO_CONTENT:false}
+  analysis:
+    item:
+      # Per-item inbox analysis (inquiries + reviews). The shipped analyzer is
+      # rule-based: deterministic, local, no external call — safe on by default.
+      # `ai`/`openai` is a reserved, unimplemented value; wiring a real provider is
+      # a later slice that would gate its bean behind this flag.
+      provider: ${SELLEROPS_ANALYSIS_ITEM_PROVIDER:rule_based}
 
 logging:
   level:
