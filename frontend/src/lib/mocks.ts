@@ -6,6 +6,7 @@ import type {
   ChannelResponse,
   ChannelStatus,
   ConnectionStatusView,
+  ConnectorAlertView,
   DashboardSummaryResponse,
   InboxResponse,
   ItemAnalysis,
@@ -234,6 +235,40 @@ export function mockConnectionStatus(accountId?: string): ConnectionStatusView {
     lastSyncedAt: hoursAgoISO(4),
     nextScheduledAt: hoursAheadISO(2),
   };
+}
+
+export function mockConnectorAlerts(): ConnectorAlertView[] {
+  // Mock mode only: tie alerts to the failing 쿠팡 account (mock-acct-mock-channel-0)
+  // so the /alerts page demonstrates a realistic 재연결 필요 + 수집 지연 state,
+  // consistent with the failing row in mockConnectionStatus. Real mode never uses
+  // this — it reads the recorded connector_alerts via the live API. All open
+  // (acknowledgedAt: null); acknowledgement is a future slice.
+  return [
+    {
+      id: "mock-alert-1",
+      sellerAccountId: "mock-acct-mock-channel-0",
+      channelId: "mock-channel-0",
+      channelNameKo: "쿠팡",
+      accountAlias: "쿠팡 본계정",
+      type: "AUTH_EXPIRED",
+      severity: "WARNING",
+      message: "인증 토큰이 만료되어 자동 수집이 중단되었습니다. 채널에서 재연결해 주세요.",
+      createdAt: hoursAgoISO(30),
+      acknowledgedAt: null,
+    },
+    {
+      id: "mock-alert-2",
+      sellerAccountId: "mock-acct-mock-channel-0",
+      channelId: "mock-channel-0",
+      channelNameKo: "쿠팡",
+      accountAlias: "쿠팡 본계정",
+      type: "RATE_LIMITED",
+      severity: "WARNING",
+      message: "채널 속도 제한으로 수집이 지연되고 있습니다. 잠시 후 예약된 시각에 자동으로 다시 시도합니다.",
+      createdAt: hoursAgoISO(6),
+      acknowledgedAt: null,
+    },
+  ];
 }
 
 export function mockCapabilities(): CapabilityView[] {

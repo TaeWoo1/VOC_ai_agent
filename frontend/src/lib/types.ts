@@ -178,6 +178,19 @@ export interface ConnectionStatusView {
   nextScheduledAt: string | null;
 }
 
+export interface ConnectorAlertView {
+  id: string;
+  sellerAccountId: string;
+  channelId: string | null;
+  channelNameKo: string | null;
+  accountAlias: string | null;
+  type: string; // AUTH_EXPIRED | REPEATED_FAILURE | RATE_LIMITED
+  severity: string; // INFO | WARNING | CRITICAL
+  message: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+}
+
 export interface SyncRunView {
   id: string;
   sellerAccountId: string | null;

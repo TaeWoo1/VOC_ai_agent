@@ -9,7 +9,7 @@ const MENUS: Array<{ to: string; label: string; icon: string }> = [
   { to: "/search", label: "AI 검색", icon: "🔎" },
   { to: "/reports", label: "리포트", icon: "📄" },
   { to: "/channels", label: "채널 연결", icon: "🔗" },
-  { to: "/alerts", label: "알림 설정", icon: "🔔" },
+  { to: "/alerts", label: "연결 알림", icon: "🔔" },
 ];
 
 export function Sidebar() {

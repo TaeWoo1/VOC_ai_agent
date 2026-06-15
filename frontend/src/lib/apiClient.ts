@@ -4,6 +4,7 @@ import type {
   CapabilityView,
   ChannelResponse,
   ConnectionStatusView,
+  ConnectorAlertView,
   DashboardSummaryResponse,
   IngestResult,
   InboxResponse,
@@ -22,6 +23,7 @@ import {
   mockCapabilities,
   mockChannels,
   mockConnectionStatus,
+  mockConnectorAlerts,
   mockDashboard,
   mockInbox,
   mockItemAnalysis,
@@ -121,6 +123,17 @@ export const api = {
     const { data } = await http.get<ConnectionStatusView>(
       `/api/seller-accounts/${accountId}/connection-status`,
     );
+    return data;
+  },
+  // Strict variant for the connection-alert list (Alerts page): no silent mock
+  // fallback, so a dead backend fails closed instead of rendering fake alerts.
+  // Honors the VITE_USE_MOCKS demo escape hatch. Read-only; mirrors the other
+  // *Strict reads.
+  async getConnectorAlertsStrict(): Promise<ConnectorAlertView[]> {
+    if (USE_MOCKS) {
+      return mockConnectorAlerts();
+    }
+    const { data } = await http.get<ConnectorAlertView[]>("/api/connector-alerts");
     return data;
   },
   async getSyncRunsStrict(filters: SyncRunFilters = {}): Promise<SyncRunView[]> {
