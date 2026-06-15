@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { Section } from "../components/Section";
@@ -36,6 +36,87 @@ const INTERVALS: Array<{ minutes: number; label: string }> = [
   { minutes: 1440, label: "매일" },
 ];
 
+type Tone = "good" | "warn" | "bad" | "muted";
+
+const TITLE_CLS: Record<Tone, string> = {
+  good: "text-good",
+  warn: "text-warn",
+  bad: "text-bad",
+  muted: "text-ink",
+};
+
+interface NextAction {
+  tone: Tone;
+  title: string;
+  guidance: string;
+  detail?: string;
+  cta?: { label: string; target: "collect" | "runs" };
+}
+
+// "다음 조치" copy keyed by ConnectionStatusView.state (the 6 connection states
+// from ChannelConnectionStatus — NOT the connector-alert types). Every CTA points
+// at an action that already exists on this page: 수집 테스트 = 지금 수집하기 in the
+// 자동 수집 설정 section; 수집 내역 보기 scrolls to 최근 수집 내역 (where 다시 시도
+// lives). Re-auth/disconnected states explain that 연결 정보 갱신 is needed but
+// render no reconnect button (that flow is not built) and no roadmap copy.
+const NEXT_ACTION: Record<string, NextAction> = {
+  CONNECTED: {
+    tone: "good",
+    title: "정상 수집 중입니다",
+    guidance: "연결에 문제가 없습니다. 필요하면 지금 수집을 한 번 테스트할 수 있습니다.",
+    cta: { label: "수집 테스트", target: "collect" },
+  },
+  NOT_COLLECTED: {
+    tone: "muted",
+    title: "아직 수집 이력이 없습니다",
+    guidance: "수집을 한 번 테스트해 연결이 정상인지 확인해 보세요.",
+    cta: { label: "수집 테스트", target: "collect" },
+  },
+  DEGRADED: {
+    tone: "warn",
+    title: "최근 수집에 실패했습니다",
+    guidance: "수집 내역에서 오류를 확인하고 다시 시도해 보세요.",
+    cta: { label: "수집 내역 보기", target: "runs" },
+  },
+  EXPIRED: {
+    tone: "bad",
+    title: "재연결이 필요합니다",
+    guidance: "인증이 만료되어 자동 수집이 멈췄습니다. 자동 수집을 다시 사용하려면 연결 정보를 갱신해야 합니다.",
+    detail: "현재는 아래 수집 내역과 오류 메시지를 먼저 확인해 주세요.",
+    cta: { label: "수집 내역 보기", target: "runs" },
+  },
+  NEEDS_REAUTH: {
+    tone: "bad",
+    title: "재연결이 필요합니다",
+    guidance: "인증이 만료되어 자동 수집이 멈췄습니다. 자동 수집을 다시 사용하려면 연결 정보를 갱신해야 합니다.",
+    detail: "현재는 아래 수집 내역과 오류 메시지를 먼저 확인해 주세요.",
+    cta: { label: "수집 내역 보기", target: "runs" },
+  },
+  DISCONNECTED: {
+    tone: "bad",
+    title: "연결 정보 확인이 필요합니다",
+    guidance: "채널 연결이 끊겼습니다. 연결 정보와 최근 수집 내역을 확인해 주세요.",
+    cta: { label: "수집 내역 보기", target: "runs" },
+  },
+};
+
+function nextActionFor(status: ConnectionStatusView): NextAction {
+  const base: NextAction = NEXT_ACTION[status.state] ?? {
+    tone: "muted",
+    title: "연결 상태를 확인해 주세요",
+    guidance: "아래 수집 내역과 오류 메시지에서 자세한 상태를 확인할 수 있습니다.",
+    cta: { label: "수집 내역 보기", target: "runs" },
+  };
+  // For a degraded connection, lead with the consecutive-failure count.
+  if (base.tone === "warn" && status.consecutiveFailures > 0) {
+    return {
+      ...base,
+      guidance: `최근 수집이 연속 ${status.consecutiveFailures}회 실패했습니다. ${base.guidance}`,
+    };
+  }
+  return base;
+}
+
 /** 자동 수집 관리 — connection panel for one seller account. */
 export function ChannelDetail() {
   const { accountId = "" } = useParams();
@@ -69,6 +150,15 @@ export function ChannelDetail() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
+
+  // Smooth-scroll targets for the 다음 조치 CTAs — both point at sections that
+  // already exist on this page (수집 테스트 / 다시 시도 live there).
+  const collectSettingsRef = useRef<HTMLDivElement>(null);
+  const runsRef = useRef<HTMLDivElement>(null);
+  const scrollToSection = useCallback((target: "collect" | "runs") => {
+    const ref = target === "collect" ? collectSettingsRef : runsRef;
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   // Account + channel metadata via strict reads: no silent mock fallback, so a
   // dead/wrong backend fails closed instead of resolving a fake account.
@@ -183,6 +273,12 @@ export function ChannelDetail() {
         </p>
       </div>
 
+      {/* State-aware next action. Only when status is loaded and the read
+          succeeded — a dead backend must not fabricate a "다음 조치". */}
+      {!loadingCollection && !collectionError && status ? (
+        <NextActionPanel action={nextActionFor(status)} onCta={scrollToSection} />
+      ) : null}
+
       {notice ? <div className="rounded-xl bg-brand/10 px-4 py-3 text-brand-700">{notice}</div> : null}
       {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
 
@@ -222,24 +318,27 @@ export function ChannelDetail() {
         )}
       </Section>
 
-      <Section title="자동 수집 설정">
-        <ul className="divide-y divide-line">
-          {DATA_TYPES.map((t) => (
-            <ScheduleRow
-              key={t.value}
-              accountId={accountId}
-              dataType={t.value}
-              label={t.label}
-              schedule={schedules.find((s) => s.dataType === t.value) ?? null}
-              capability={capabilities?.find((c) => c.dataType === t.value) ?? null}
-              capabilitiesReady={capabilities !== null}
-              onChanged={reload}
-              onReport={report}
-            />
-          ))}
-        </ul>
-      </Section>
+      <div ref={collectSettingsRef}>
+        <Section title="자동 수집 설정">
+          <ul className="divide-y divide-line">
+            {DATA_TYPES.map((t) => (
+              <ScheduleRow
+                key={t.value}
+                accountId={accountId}
+                dataType={t.value}
+                label={t.label}
+                schedule={schedules.find((s) => s.dataType === t.value) ?? null}
+                capability={capabilities?.find((c) => c.dataType === t.value) ?? null}
+                capabilitiesReady={capabilities !== null}
+                onChanged={reload}
+                onReport={report}
+              />
+            ))}
+          </ul>
+        </Section>
+      </div>
 
+      <div ref={runsRef}>
       <Section title="최근 수집 내역">
         {loadingCollection ? (
           <p className="text-base text-muted">불러오는 중…</p>
@@ -257,6 +356,7 @@ export function ChannelDetail() {
           </ul>
         )}
       </Section>
+      </div>
 
       <div className="rounded-xl bg-canvas px-4 py-3 text-base text-muted">
         자동 수집이 어려운 데이터는{" "}
@@ -266,6 +366,37 @@ export function ChannelDetail() {
         로 채울 수 있습니다. 같은 데이터를 다시 올려도 중복은 자동으로 건너뜁니다.
       </div>
     </div>
+  );
+}
+
+function NextActionPanel({
+  action,
+  onCta,
+}: {
+  action: NextAction;
+  onCta: (target: "collect" | "runs") => void;
+}) {
+  const { tone, title, guidance, detail, cta } = action;
+  return (
+    <section className="card">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-2">
+          <p className="text-sm font-semibold text-muted">다음 조치</p>
+          <p className={`text-xl font-bold ${TITLE_CLS[tone]}`}>{title}</p>
+          <p className="text-base text-ink">{guidance}</p>
+          {detail ? <p className="text-sm text-muted">{detail}</p> : null}
+        </div>
+        {cta ? (
+          <button
+            type="button"
+            onClick={() => onCta(cta.target)}
+            className="btn-ghost shrink-0"
+          >
+            {cta.label}
+          </button>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
