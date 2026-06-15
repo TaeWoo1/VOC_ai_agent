@@ -11,6 +11,8 @@ import type {
   ChannelResponse,
   ConnectionInfoView,
   ConnectionStatusView,
+  CredentialFieldView,
+  CredentialTemplateView,
   ScheduleView,
   SellerAccountResponse,
   SyncRunView,
@@ -186,6 +188,12 @@ export function ChannelDetail() {
   const [connectionInfo, setConnectionInfo] = useState<ConnectionInfoView | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(true);
   const [infoError, setInfoError] = useState(false);
+  // Backend-owned credential field shape (연결에 필요한 정보). null = channel needs no
+  // API template (manual / file-upload → 404) OR still loading → block is omitted;
+  // templateError = a non-404 read failure (fail closed, calm line). Reference data,
+  // never a secret.
+  const [credentialTemplate, setCredentialTemplate] = useState<CredentialTemplateView | null>(null);
+  const [templateError, setTemplateError] = useState(false);
   const [schedules, setSchedules] = useState<ScheduleView[]>([]);
   // null = not loaded (loading or failed) → schedule controls stay disabled,
   // because an absent capability row means "allowed" and we must not guess.
@@ -305,6 +313,19 @@ export function ChannelDetail() {
           setError("수집 지원 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.");
         }
       });
+    // Credential field shape (연결에 필요한 정보), loaded independently and fail-soft.
+    // 404 → null (channel needs no API template → block omitted); any other failure
+    // → templateError (calm line), never a crash. Read-only; no secret is read.
+    setCredentialTemplate(null);
+    setTemplateError(false);
+    api.getCredentialTemplateStrict(channel.code)
+      .then((tpl) => active && setCredentialTemplate(tpl))
+      .catch(() => {
+        if (active) {
+          setCredentialTemplate(null);
+          setTemplateError(true);
+        }
+      });
     return () => {
       active = false;
     };
@@ -390,6 +411,8 @@ export function ChannelDetail() {
           loading={loadingInfo}
           error={infoError}
           channelCode={channel?.code}
+          template={credentialTemplate}
+          templateError={templateError}
           onViewRuns={() => scrollToSection("runs")}
         />
       </div>
@@ -484,12 +507,16 @@ function ConnectionInfoSection({
   loading,
   error,
   channelCode,
+  template,
+  templateError,
   onViewRuns,
 }: {
   info: ConnectionInfoView | null;
   loading: boolean;
   error: boolean;
   channelCode: string | undefined;
+  template: CredentialTemplateView | null;
+  templateError: boolean;
   onViewRuns: () => void;
 }) {
   const guidance = (channelCode && CHANNEL_GUIDANCE[channelCode]) ?? GENERIC_GUIDANCE;
@@ -510,7 +537,69 @@ function ConnectionInfoSection({
       ) : (
         <ConnectionInfoDetail info={info} guidance={guidance} onViewRuns={onViewRuns} />
       )}
+      <CredentialTemplateBlock template={template} error={templateError} />
     </Section>
+  );
+}
+
+// Read-only 연결에 필요한 정보 block: the backend-owned credential field shape for
+// this channel. Reference only — labels/helpText/required/secret indicators, never
+// an input, a value, or a submit. Omitted entirely when the channel needs no API
+// template (404 → null), shown as one calm line on a non-404 read failure.
+function CredentialTemplateBlock({
+  template,
+  error,
+}: {
+  template: CredentialTemplateView | null;
+  error: boolean;
+}) {
+  if (error) {
+    return (
+      <div className="mt-6 border-t border-line pt-6">
+        <h3 className="text-base font-bold text-ink">연결에 필요한 정보</h3>
+        <p className="mt-2 rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
+          연결에 필요한 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+        </p>
+      </div>
+    );
+  }
+  if (template === null || template.fields.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-6 border-t border-line pt-6">
+      <h3 className="text-base font-bold text-ink">연결에 필요한 정보</h3>
+      <ul className="mt-3 space-y-3">
+        {template.fields.map((field) => (
+          <CredentialFieldRow key={field.key} field={field} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CredentialFieldRow({ field }: { field: CredentialFieldView }) {
+  return (
+    <li className="rounded-xl border border-line/60 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-base font-semibold text-ink">{field.label}</span>
+        <span
+          className={`rounded-lg px-2.5 py-1 text-sm font-medium ${
+            field.required ? "bg-ink/5 text-ink" : "bg-canvas text-muted"
+          }`}
+        >
+          {field.required ? "필수" : "선택"}
+        </span>
+        {field.secret ? (
+          <span className="rounded-lg bg-warn/10 px-2.5 py-1 text-sm font-medium text-warn">
+            민감 정보
+          </span>
+        ) : null}
+      </div>
+      {field.helpText ? (
+        <p className="mt-1.5 text-sm text-muted">{field.helpText}</p>
+      ) : null}
+    </li>
   );
 }
 

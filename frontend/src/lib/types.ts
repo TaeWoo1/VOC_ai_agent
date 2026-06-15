@@ -190,6 +190,27 @@ export interface ConnectionInfoView {
   hasRefreshToken: boolean;
 }
 
+// CredentialTemplateView (com.sellerops.collect.dto.CredentialTemplateView) —
+// the backend-owned credential FIELD SHAPE a channel requires. Metadata only:
+// NEVER carries a value/ciphertext/IV/encryptionKeyId. `secret` marks fields the
+// UI must treat as a secret (mask) versus showable identifiers. The endpoint
+// 404s for channels with no API template (manual / file-upload) → null here.
+export interface CredentialFieldView {
+  key: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+  helpText: string;
+}
+
+export interface CredentialTemplateView {
+  channelCode: string;
+  connectorClass: string;
+  authType: string;
+  fields: CredentialFieldView[];
+  notes: string;
+}
+
 export interface ConnectorAlertView {
   id: string;
   sellerAccountId: string;

@@ -6,6 +6,7 @@ import type {
   ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
+  CredentialTemplateView,
   DashboardSummaryResponse,
   IngestResult,
   InboxResponse,
@@ -26,6 +27,7 @@ import {
   mockConnectionInfo,
   mockConnectionStatus,
   mockConnectorAlerts,
+  mockCredentialTemplate,
   mockDashboard,
   mockInbox,
   mockItemAnalysis,
@@ -140,6 +142,28 @@ export const api = {
     try {
       const { data } = await http.get<ConnectionInfoView>(
         `/api/seller-accounts/${accountId}/credentials`,
+      );
+      return data;
+    } catch (e) {
+      if (isAxiosError(e) && e.response?.status === 404) {
+        return null;
+      }
+      throw e;
+    }
+  },
+  // Read-only credential FIELD SHAPE for a channel (ChannelDetail's 연결에 필요한
+  // 정보 block): channel-scoped reference data, NEVER a value/secret. A 404 means
+  // the channel needs no API template (manual / file-upload / not-yet-integrated)
+  // — an expected state, so it resolves to null and the block is simply omitted;
+  // any other failure fails closed (throws) so the page can show a calm error.
+  // Honors the VITE_USE_MOCKS demo escape hatch; mirrors getConnectionInfoStrict.
+  async getCredentialTemplateStrict(channelCode: string): Promise<CredentialTemplateView | null> {
+    if (USE_MOCKS) {
+      return mockCredentialTemplate(channelCode);
+    }
+    try {
+      const { data } = await http.get<CredentialTemplateView>(
+        `/api/channels/${channelCode}/credential-template`,
       );
       return data;
     } catch (e) {

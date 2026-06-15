@@ -8,6 +8,7 @@ import type {
   ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
+  CredentialTemplateView,
   DashboardSummaryResponse,
   InboxResponse,
   ItemAnalysis,
@@ -260,6 +261,180 @@ export function mockConnectionInfo(accountId?: string): ConnectionInfoView {
     lastRotatedAt: hoursAgoISO(72),
     hasRefreshToken: false,
   };
+}
+
+// Credential-field shape per channel, copied verbatim from the backend source of
+// truth (com.sellerops.credential.CredentialTemplates). Metadata only — never a
+// value. null mirrors the endpoint's 404 for channels with no API template
+// (file-upload / not-yet-integrated), so mock mode reproduces the real contract.
+const MOCK_CREDENTIAL_TEMPLATES: Record<string, CredentialTemplateView> = {
+  NAVER: {
+    channelCode: "NAVER",
+    connectorClass: "API",
+    authType: "API_KEY",
+    fields: [
+      {
+        key: "client_id",
+        label: "애플리케이션 ID",
+        required: true,
+        secret: false,
+        helpText: "네이버 커머스 API 센터에서 발급한 애플리케이션 ID입니다.",
+      },
+      {
+        key: "client_secret",
+        label: "애플리케이션 시크릿",
+        required: true,
+        secret: true,
+        helpText: "애플리케이션 ID와 함께 발급되는 시크릿 키입니다.",
+      },
+    ],
+    notes: "네이버 커머스 API 센터에서 발급한 애플리케이션 키로 연결합니다.",
+  },
+  COUPANG: {
+    channelCode: "COUPANG",
+    connectorClass: "API",
+    authType: "HMAC",
+    fields: [
+      {
+        key: "access_key",
+        label: "액세스 키",
+        required: true,
+        secret: true,
+        helpText: "쿠팡 윙 OPEN API에서 발급한 액세스 키입니다.",
+      },
+      {
+        key: "secret_key",
+        label: "시크릿 키",
+        required: true,
+        secret: true,
+        helpText: "액세스 키와 함께 발급되는 시크릿 키입니다.",
+      },
+      {
+        key: "vendor_id",
+        label: "판매자(벤더) ID",
+        required: true,
+        secret: false,
+        helpText: "쿠팡 윙에서 확인할 수 있는 판매자 코드입니다.",
+      },
+    ],
+    notes: "쿠팡 윙(판매자센터) OPEN API에서 발급한 API 인증 키로 연결합니다.",
+  },
+  CAFE24: {
+    channelCode: "CAFE24",
+    connectorClass: "API",
+    authType: "OAUTH2",
+    fields: [
+      {
+        key: "mall_id",
+        label: "몰 ID",
+        required: true,
+        secret: false,
+        helpText: "카페24 자사몰의 상점 아이디입니다.",
+      },
+      {
+        key: "client_id",
+        label: "앱 클라이언트 ID",
+        required: true,
+        secret: false,
+        helpText: "카페24 개발자센터 앱의 클라이언트 ID입니다.",
+      },
+      {
+        key: "client_secret",
+        label: "앱 클라이언트 시크릿",
+        required: true,
+        secret: true,
+        helpText: "앱 클라이언트 ID와 함께 발급되는 시크릿 키입니다.",
+      },
+      {
+        key: "refresh_token",
+        label: "리프레시 토큰",
+        required: true,
+        secret: true,
+        helpText: "앱 연동(OAuth) 과정에서 발급된 리프레시 토큰입니다.",
+      },
+    ],
+    notes: "카페24 자사몰 관리자에서 앱 연동(OAuth)으로 연결합니다.",
+  },
+  ELEVENST: {
+    channelCode: "ELEVENST",
+    connectorClass: "API",
+    authType: "API_KEY",
+    fields: [
+      {
+        key: "openapikey",
+        label: "오픈 API 키",
+        required: true,
+        secret: true,
+        helpText: "11번가 셀러오피스에서 발급한 오픈 API 키입니다.",
+      },
+    ],
+    notes: "11번가 셀러오피스에서 발급한 오픈 API 키로 연결합니다.",
+  },
+  GMARKET: {
+    channelCode: "GMARKET",
+    connectorClass: "API",
+    authType: "JWT_HS256",
+    fields: [
+      {
+        key: "master_id",
+        label: "마스터 ID",
+        required: true,
+        secret: false,
+        helpText: "ESM 판매자센터의 마스터 계정 ID입니다.",
+      },
+      {
+        key: "secret_key",
+        label: "시크릿 키",
+        required: true,
+        secret: true,
+        helpText: "ESM에서 발급한 API 시크릿 키입니다.",
+      },
+      {
+        key: "issuer",
+        label: "발급 도메인(issuer)",
+        required: true,
+        secret: false,
+        helpText: "API 키 발급 시 등록한 서비스 도메인입니다.",
+      },
+      {
+        key: "gmarket_seller_id",
+        label: "G마켓 판매자 ID",
+        required: true,
+        secret: false,
+        helpText: "G마켓 판매자 계정 ID입니다.",
+      },
+      {
+        key: "auction_seller_id",
+        label: "옥션 판매자 ID",
+        required: false,
+        secret: false,
+        helpText: "옥션도 함께 수집할 때만 입력합니다.",
+      },
+    ],
+    notes: "ESM 판매자센터에서 발급한 API 인증 정보로 연결합니다. (G마켓·옥션 공통)",
+  },
+  SSG: {
+    channelCode: "SSG",
+    connectorClass: "API",
+    authType: "API_KEY",
+    fields: [
+      {
+        key: "auth_key",
+        label: "업체 인증키",
+        required: true,
+        secret: true,
+        helpText: "SSG 파트너에서 발급한 업체 인증키입니다.",
+      },
+    ],
+    notes: "SSG 파트너에서 발급한 API 인증키로 연결합니다.",
+  },
+};
+
+export function mockCredentialTemplate(channelCode?: string): CredentialTemplateView | null {
+  if (!channelCode) {
+    return null;
+  }
+  return MOCK_CREDENTIAL_TEMPLATES[channelCode] ?? null;
 }
 
 export function mockConnectorAlerts(): ConnectorAlertView[] {
