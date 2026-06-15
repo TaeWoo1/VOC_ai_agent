@@ -57,6 +57,31 @@ vault decrypt → token mint → orders query → cursor-preserving sync →
 pacing proven (no 429 after the Slice-4 pacing/backoff patch). This is the one
 end-to-end-real path the rest of the product is built outward from.
 
+### 1.1 — Integration direction (correction, recorded 2026-06-15)
+
+**The product ideal is maximum automatic commerce-platform connection — not
+manual upload, and not manual API-key entry.** The aspirational experience: the
+operator connects/logs into a commerce platform from inside SellerOps, grants
+access, and inquiry/review/order data begins syncing automatically. Manual upload
+and manual API-key entry are MVP/interim bridges, **not** the destination — do not
+let either calcify into the product promise.
+
+Priority ladder (order of preference):
+
+1. **Official automatic / OAuth-style platform connection** where the platform
+   supports it — connect-from-within-SellerOps, grant access, auto-sync.
+2. **Guided connection setup inside SellerOps** when clean one-click connection is
+   not available — after the operator picks a platform, an in-product
+   guide/overlay/hover-style assistant walks them through issuing the API key,
+   where to paste it, and how to test the connection. It must feel like *guided
+   connection*, not a separate developer setup task.
+3. **CSV / XLSX / manual upload** — pilot bridge and fallback only.
+4. **Scraping / unofficial login automation** — last resort; not part of the core
+   promise; requires platform-policy + security review before any work.
+
+Not implemented in any current slice — recorded so the roadmap (and F1/F2 below)
+does not drift toward treating upload or raw key-entry as the destination.
+
 ---
 
 ## 2. Feature lineup
