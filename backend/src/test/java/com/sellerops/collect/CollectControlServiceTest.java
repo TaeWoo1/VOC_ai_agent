@@ -375,34 +375,61 @@ class CollectControlServiceTest {
         UUID user = UUID.randomUUID();
 
         CredentialMetadata masked = service.storeCredential(org, acc.getId(),
-                new CredentialIntakeRequest("API", "HMAC",
-                        Map.of("accessKey", "AK-123", "secretKey", "SK-456"), null, null), user);
+                new CredentialIntakeRequest("API", "JWT_HS256",
+                        Map.of("master_id", "M-1", "secret_key", "SK-456",
+                                "issuer", "iss.example.com", "gmarket_seller_id", "G-1"),
+                        null, null), user);
 
         assertThat(masked.sellerAccountId()).isEqualTo(acc.getId());
-        assertThat(masked.toString()).doesNotContain("AK-123", "SK-456");
+        assertThat(masked.toString()).doesNotContain("SK-456");
         var row = credentials.findBySellerAccountId(acc.getId()).orElseThrow();
         assertThat(row.getEncryptedPayload()).isNotEmpty();
         assertThat(row.getCreatedBy()).isEqualTo(user);
     }
 
     @Test
+    void storeCredentialRejectsChannelWithoutApiTemplate() {
+        SellerAccount acc = account(ConnectorRegistry.FILE_CHANNEL_CODE);
+
+        assertThatThrownBy(() -> service.storeCredential(org, acc.getId(),
+                new CredentialIntakeRequest("API", "API_KEY", Map.of("k", "v"), null, null), null))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("지원하지 않습니다");
+        assertThat(credentials.count()).isZero();
+    }
+
+    @Test
+    void storeCredentialRejectsPayloadViolatingChannelTemplate() {
+        SellerAccount acc = account("GMARKET");
+
+        // Missing GMARKET required keys (issuer, gmarket_seller_id) → rejected, nothing stored.
+        assertThatThrownBy(() -> service.storeCredential(org, acc.getId(),
+                new CredentialIntakeRequest("API", "JWT_HS256",
+                        Map.of("master_id", "M-1", "secret_key", "SK-456"), null, null), null))
+                .isInstanceOf(ApiException.class);
+        assertThat(credentials.count()).isZero();
+    }
+
+    @Test
     void credentialGetReturnsMetadataWithoutAnySecretMaterial() throws Exception {
         SellerAccount acc = account("GMARKET");
         service.storeCredential(org, acc.getId(),
-                new CredentialIntakeRequest("API", "OAUTH2",
-                        Map.of("accessKey", "AK-123", "secretKey", "SK-456"), "refresh-token-789", null),
+                new CredentialIntakeRequest("API", "JWT_HS256",
+                        Map.of("master_id", "M-1", "secret_key", "SK-456",
+                                "issuer", "iss.example.com", "gmarket_seller_id", "G-1"),
+                        "refresh-token-789", null),
                 null);
 
         CredentialMetadata read = service.readCredential(org, acc.getId());
 
         assertThat(read.sellerAccountId()).isEqualTo(acc.getId());
         assertThat(read.connectorClass()).isEqualTo("API");
-        assertThat(read.authType()).isEqualTo("OAUTH2");
+        assertThat(read.authType()).isEqualTo("JWT_HS256");
         assertThat(read.encryptionKeyId()).isEqualTo("local-test-1");
         assertThat(read.hasRefreshToken()).isTrue();
         // The API-shaped rendering carries no plaintext, ciphertext, IV, or token.
         String json = new ObjectMapper().writeValueAsString(read);
-        assertThat(json).doesNotContain("AK-123", "SK-456", "refresh-token-789",
+        assertThat(json).doesNotContain("SK-456", "refresh-token-789",
                 "\"iv\"", "\"encryptedPayload\"", "\"refreshTokenEnc\"", "\"refreshToken\"");
     }
 
@@ -410,13 +437,16 @@ class CollectControlServiceTest {
     void credentialGetWorksWithoutMasterKey() {
         SellerAccount acc = account("GMARKET");
         service.storeCredential(org, acc.getId(),
-                new CredentialIntakeRequest("API", "HMAC", Map.of("accessKey", "AK-123"), null, null), null);
+                new CredentialIntakeRequest("API", "JWT_HS256",
+                        Map.of("master_id", "M-1", "secret_key", "SK-456",
+                                "issuer", "iss.example.com", "gmarket_seller_id", "G-1"),
+                        null, null), null);
 
         // Metadata reads never decrypt — a keyless deployment can still show status.
         CollectControlService keyless = serviceWith(vaultWithKey(""));
         CredentialMetadata read = keyless.readCredential(org, acc.getId());
 
-        assertThat(read.authType()).isEqualTo("HMAC");
+        assertThat(read.authType()).isEqualTo("JWT_HS256");
         assertThat(read.hasRefreshToken()).isFalse();
     }
 
@@ -424,7 +454,10 @@ class CollectControlServiceTest {
     void credentialGetCrossOrgReadsAsAbsent() {
         SellerAccount acc = account("GMARKET");
         service.storeCredential(org, acc.getId(),
-                new CredentialIntakeRequest("API", "HMAC", Map.of("accessKey", "AK-123"), null, null), null);
+                new CredentialIntakeRequest("API", "JWT_HS256",
+                        Map.of("master_id", "M-1", "secret_key", "SK-456",
+                                "issuer", "iss.example.com", "gmarket_seller_id", "G-1"),
+                        null, null), null);
 
         assertThatThrownBy(() -> service.readCredential(UUID.randomUUID(), acc.getId()))
                 .isInstanceOf(ApiException.class);

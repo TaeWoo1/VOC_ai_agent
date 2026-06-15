@@ -15,7 +15,11 @@ import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
+import com.sellerops.credential.CredentialIntakeValidator;
+import com.sellerops.credential.CredentialIntakeValidator.ValidatedCredential;
 import com.sellerops.credential.CredentialMetadata;
+import com.sellerops.credential.CredentialTemplates;
+import com.sellerops.credential.CredentialTemplates.CredentialTemplate;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -180,12 +184,24 @@ public class CollectControlService {
                 .toList();
     }
 
-    /** Write-only intake: store via the vault, answer with masked metadata only. */
+    /**
+     * Write-only intake: validate the payload against the channel's
+     * {@link CredentialTemplates} contract, then store via the vault and answer with
+     * masked metadata only. connectorClass/authType are server-derived from the
+     * template, not trusted from the client.
+     */
     public CredentialMetadata storeCredential(UUID orgId, UUID sellerAccountId,
                                               CredentialIntakeRequest request, UUID createdBy) {
-        requireAccount(orgId, sellerAccountId);
-        return vault.store(orgId, sellerAccountId, request.connectorClass(), request.authType(),
-                request.secrets(), request.refreshToken(), request.tokenExpiresAt(), createdBy);
+        // Org scoping first — a cross-org id must read as 404, before any validation.
+        SellerAccount account = requireAccount(orgId, sellerAccountId);
+        Channel channel = channels.findById(account.getChannelId())
+                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+        CredentialTemplate template = CredentialTemplates.find(channel.getCode())
+                .orElseThrow(() -> ApiException.badRequest(
+                        "이 채널은 API 연결 정보 저장을 지원하지 않습니다. 파일 업로드를 이용해 주세요."));
+        ValidatedCredential valid = CredentialIntakeValidator.validate(template, request);
+        return vault.store(orgId, sellerAccountId, valid.connectorClass(), valid.authType(),
+                valid.secrets(), request.refreshToken(), request.tokenExpiresAt(), createdBy);
     }
 
     /**
