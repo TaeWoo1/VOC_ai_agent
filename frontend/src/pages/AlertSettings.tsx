@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
 import { useApiData } from "../lib/useApiData";
+import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
 import { relativeTime } from "../lib/format";
 import type { ConnectorAlertView } from "../lib/types";
@@ -60,39 +61,53 @@ function sortOpenFirst(list: ConnectorAlertView[]): ConnectorAlertView[] {
 
 export function AlertSettings() {
   const { data, loading, error } = useApiData(() => api.getConnectorAlertsStrict());
+  const { refresh, syncOpenCount } = useOpenAlerts();
   // Local working copy so an acknowledge can update a card in place. Real mode
   // reconciles against the returned view; mock mode (no backend) keeps the local
-  // mark. Both roll back on failure.
+  // mark. Both roll back on failure. The shared open-alert count (sidebar badge /
+  // channels banner) is kept in step with this list on every transition.
   const [list, setList] = useState<ConnectorAlertView[]>([]);
   const [ackBusyId, setAckBusyId] = useState<string | null>(null);
   const [ackError, setAckError] = useState<string | null>(null);
 
   useEffect(() => {
     if (data) {
-      setList(sortOpenFirst(data));
+      const sorted = sortOpenFirst(data);
+      setList(sorted);
+      syncOpenCount(sorted);
     }
-  }, [data]);
+  }, [data, syncOpenCount]);
 
   async function acknowledge(alert: ConnectorAlertView) {
     setAckBusyId(alert.id);
     setAckError(null);
     const prev = list;
-    // Optimistic: mark as acknowledged now and re-sort to the bottom.
-    setList((cur) =>
-      sortOpenFirst(
-        cur.map((a) =>
-          a.id === alert.id ? { ...a, acknowledgedAt: new Date().toISOString() } : a,
-        ),
+    // Optimistic: mark as acknowledged now and re-sort to the bottom; drop the
+    // shared open count immediately (works in mock mode too — no fetch).
+    const optimistic = sortOpenFirst(
+      list.map((a) =>
+        a.id === alert.id ? { ...a, acknowledgedAt: new Date().toISOString() } : a,
       ),
     );
+    setList(optimistic);
+    syncOpenCount(optimistic);
     try {
       const updated = await api.acknowledgeConnectorAlert(alert.id);
       if (updated) {
-        // Real mode: reconcile against the authoritative server view.
-        setList((cur) => sortOpenFirst(cur.map((a) => (a.id === updated.id ? updated : a))));
+        // Real mode: reconcile against the authoritative server view, then
+        // confirm the shared count against backend truth via a re-fetch.
+        const reconciled = sortOpenFirst(
+          optimistic.map((a) => (a.id === updated.id ? updated : a)),
+        );
+        setList(reconciled);
+        syncOpenCount(reconciled);
+        void refresh();
       }
+      // Mock mode (updated == null): the optimistic decrement stands — refreshing
+      // would re-read the static seed and restore the count.
     } catch {
       setList(prev); // roll back the optimistic mark
+      syncOpenCount(prev);
       setAckError("확인 처리에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.");
     } finally {
       setAckBusyId(null);

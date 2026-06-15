@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { useAuth } from "./lib/auth";
+import { OpenAlertsProvider } from "./lib/openAlerts";
 import { getToken } from "./lib/apiClient";
 import { Login } from "./pages/Login";
 import { Home } from "./pages/Home";
@@ -34,7 +35,9 @@ export function App() {
       <Route
         element={
           <Protected>
-            <AppShell />
+            <OpenAlertsProvider>
+              <AppShell />
+            </OpenAlertsProvider>
           </Protected>
         }
       >

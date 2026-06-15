@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useOpenAlerts } from "../lib/openAlerts";
 
 const MENUS: Array<{ to: string; label: string; icon: string }> = [
   { to: "/", label: "홈", icon: "🏠" },
@@ -13,6 +14,7 @@ const MENUS: Array<{ to: string; label: string; icon: string }> = [
 ];
 
 export function Sidebar() {
+  const { openCount } = useOpenAlerts();
   return (
     <aside className="hidden w-60 shrink-0 border-r border-line bg-surface px-3 py-6 md:block">
       <div className="px-3 pb-6">
@@ -33,6 +35,13 @@ export function Sidebar() {
           >
             <span className="text-xl">{m.icon}</span>
             {m.label}
+            {/* Open connector-alert count: action-needed, so only on /alerts and
+                only when > 0. A bare numeric pill (no word) — never "장애". */}
+            {m.to === "/alerts" && openCount > 0 ? (
+              <span className="ml-auto inline-flex items-center rounded-full bg-bad/10 px-2 py-0.5 text-xs font-bold text-bad">
+                {openCount}
+              </span>
+            ) : null}
           </NavLink>
         ))}
       </nav>
