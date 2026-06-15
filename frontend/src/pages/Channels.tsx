@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { StatusBadge } from "../components/StatusBadge";
 import { HealthBadge } from "../components/HealthBadge";
 import { DataBadge } from "../components/DataBadge";
 import { EmptyState } from "../components/EmptyState";
 import { useApiData } from "../lib/useApiData";
+import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
 import { relativeTime } from "../lib/format";
 import type {
@@ -16,6 +17,7 @@ import type {
 export function Channels() {
   const { data } = useApiData(() => api.getChannels());
   const { data: accounts } = useApiData(() => api.getSellerAccounts());
+  const { openCount } = useOpenAlerts();
   const [notice, setNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<Map<string, ConnectionStatusView>>(new Map());
   const channels = data ?? [];
@@ -74,6 +76,15 @@ export function Channels() {
           파일 업로드는 자동 연결이 어려울 때 쓰는 백업 방식입니다.
         </p>
       </div>
+
+      {openCount > 0 ? (
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-warn/10 px-4 py-3 text-warn">
+          <span className="font-semibold">확인 필요한 연결 알림 {openCount}건</span>
+          <Link to="/alerts" className="btn-ghost shrink-0">
+            확인하기 →
+          </Link>
+        </div>
+      ) : null}
 
       {notice ? (
         <div className="rounded-xl bg-brand/10 px-4 py-3 text-brand-700">{notice}</div>
