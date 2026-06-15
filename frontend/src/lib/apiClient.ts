@@ -136,6 +136,19 @@ export const api = {
     const { data } = await http.get<ConnectorAlertView[]>("/api/connector-alerts");
     return data;
   },
+  // Mutating: mark a connector alert as 확인 처리 (seen). No mock network call —
+  // in demo mode there is no backend, so it resolves with null and the page
+  // updates local state. In real mode it POSTs and returns the updated (now
+  // acknowledged) view so the page can reconcile against the server timestamp.
+  // Acknowledging only records that the operator saw the alert; it does not
+  // resolve the underlying connection issue.
+  async acknowledgeConnectorAlert(id: string): Promise<ConnectorAlertView | null> {
+    if (USE_MOCKS) {
+      return null;
+    }
+    const { data } = await http.post<ConnectorAlertView>(`/api/connector-alerts/${id}/acknowledge`);
+    return data;
+  },
   async getSyncRunsStrict(filters: SyncRunFilters = {}): Promise<SyncRunView[]> {
     if (USE_MOCKS) {
       return mockSyncRuns();

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "../components/EmptyState";
 import { useApiData } from "../lib/useApiData";
@@ -44,9 +45,59 @@ function metaFor(alert: ConnectorAlertView): { label: string; tone: Tone; action
   return alert.severity === "CRITICAL" ? { ...base, tone: "bad" } : base;
 }
 
+// Open (unacknowledged) first, then newest. Mirrors the backend list ordering so
+// a locally-acknowledged card moves to the bottom without a refetch.
+function sortOpenFirst(list: ConnectorAlertView[]): ConnectorAlertView[] {
+  return [...list].sort((a, b) => {
+    const ackA = a.acknowledgedAt != null;
+    const ackB = b.acknowledgedAt != null;
+    if (ackA !== ackB) {
+      return ackA ? 1 : -1;
+    }
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
 export function AlertSettings() {
   const { data, loading, error } = useApiData(() => api.getConnectorAlertsStrict());
-  const alerts = data ?? [];
+  // Local working copy so an acknowledge can update a card in place. Real mode
+  // reconciles against the returned view; mock mode (no backend) keeps the local
+  // mark. Both roll back on failure.
+  const [list, setList] = useState<ConnectorAlertView[]>([]);
+  const [ackBusyId, setAckBusyId] = useState<string | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (data) {
+      setList(sortOpenFirst(data));
+    }
+  }, [data]);
+
+  async function acknowledge(alert: ConnectorAlertView) {
+    setAckBusyId(alert.id);
+    setAckError(null);
+    const prev = list;
+    // Optimistic: mark as acknowledged now and re-sort to the bottom.
+    setList((cur) =>
+      sortOpenFirst(
+        cur.map((a) =>
+          a.id === alert.id ? { ...a, acknowledgedAt: new Date().toISOString() } : a,
+        ),
+      ),
+    );
+    try {
+      const updated = await api.acknowledgeConnectorAlert(alert.id);
+      if (updated) {
+        // Real mode: reconcile against the authoritative server view.
+        setList((cur) => sortOpenFirst(cur.map((a) => (a.id === updated.id ? updated : a))));
+      }
+    } catch {
+      setList(prev); // roll back the optimistic mark
+      setAckError("확인 처리에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.");
+    } finally {
+      setAckBusyId(null);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -56,7 +107,14 @@ export function AlertSettings() {
           채널 연결·수집에서 발생한 알림입니다. 점검이 필요한 항목은 채널에서 재연결하거나 테스트할
           수 있습니다.
         </p>
+        <p className="mt-1 text-sm text-muted">
+          확인 처리는 알림을 봤다는 표시이며, 연결 문제 해결을 의미하지 않습니다.
+        </p>
       </div>
+
+      {ackError ? (
+        <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{ackError}</div>
+      ) : null}
 
       {loading ? (
         <p className="text-muted">불러오는 중…</p>
@@ -64,12 +122,17 @@ export function AlertSettings() {
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
           연결 알림을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
         </div>
-      ) : alerts.length === 0 ? (
+      ) : list.length === 0 ? (
         <EmptyState message="현재 확인할 연결 알림이 없습니다." />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {alerts.map((alert) => (
-            <AlertCard key={alert.id} alert={alert} />
+          {list.map((alert) => (
+            <AlertCard
+              key={alert.id}
+              alert={alert}
+              busy={ackBusyId === alert.id}
+              onAcknowledge={() => acknowledge(alert)}
+            />
           ))}
         </div>
       )}
@@ -77,14 +140,23 @@ export function AlertSettings() {
   );
 }
 
-function AlertCard({ alert }: { alert: ConnectorAlertView }) {
+function AlertCard({
+  alert,
+  busy,
+  onAcknowledge,
+}: {
+  alert: ConnectorAlertView;
+  busy: boolean;
+  onAcknowledge: () => void;
+}) {
   const navigate = useNavigate();
   const meta = metaFor(alert);
   const channel = alert.channelNameKo ?? "채널";
   const where = alert.accountAlias ? `${channel} · ${alert.accountAlias}` : channel;
+  const acknowledged = alert.acknowledgedAt != null;
 
   return (
-    <div className="card flex flex-col gap-3 p-5">
+    <div className={`card flex flex-col gap-3 p-5 ${acknowledged ? "opacity-70" : ""}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <span
@@ -92,6 +164,11 @@ function AlertCard({ alert }: { alert: ConnectorAlertView }) {
           >
             {meta.label}
           </span>
+          {acknowledged ? (
+            <span className="ml-2 inline-flex items-center rounded-full bg-ink/5 px-3 py-1 text-sm font-semibold text-muted">
+              확인됨 · {relativeTime(alert.acknowledgedAt!)}
+            </span>
+          ) : null}
           <p className="mt-2 text-lg font-bold text-ink">{where}</p>
         </div>
         <span className="shrink-0 text-sm text-muted">{relativeTime(alert.createdAt)}</span>
@@ -100,7 +177,12 @@ function AlertCard({ alert }: { alert: ConnectorAlertView }) {
       <p className="text-base text-ink">{alert.message}</p>
       <p className="text-sm text-muted">{meta.action}</p>
 
-      <div className="mt-auto flex justify-end">
+      <div className="mt-auto flex justify-end gap-2">
+        {!acknowledged ? (
+          <button type="button" disabled={busy} onClick={onAcknowledge} className="btn-ghost">
+            {busy ? "확인 중…" : "확인"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => navigate(`/channels/${alert.sellerAccountId}`)}
