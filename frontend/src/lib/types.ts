@@ -178,6 +178,18 @@ export interface ConnectionStatusView {
   nextScheduledAt: string | null;
 }
 
+// Masked, read-only view of a stored connection credential. Mirrors the backend
+// CredentialMetadata (com.sellerops.credential.CredentialMetadata) — operator
+// subset only. NEVER carries a secret/ciphertext/IV: the GET /credentials
+// endpoint cannot return one. `null` from the API means no credential on file.
+export interface ConnectionInfoView {
+  connectorClass: string;
+  authType: string;
+  tokenExpiresAt: string | null;
+  lastRotatedAt: string | null;
+  hasRefreshToken: boolean;
+}
+
 export interface ConnectorAlertView {
   id: string;
   sellerAccountId: string;

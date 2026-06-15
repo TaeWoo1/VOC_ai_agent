@@ -5,6 +5,7 @@ import type {
   CapabilityView,
   ChannelResponse,
   ChannelStatus,
+  ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
   DashboardSummaryResponse,
@@ -234,6 +235,30 @@ export function mockConnectionStatus(accountId?: string): ConnectionStatusView {
     lastError: null,
     lastSyncedAt: hoursAgoISO(4),
     nextScheduledAt: hoursAheadISO(2),
+  };
+}
+
+export function mockConnectionInfo(accountId?: string): ConnectionInfoView {
+  // Account-aware demo (mock mode only), consistent with mockConnectionStatus:
+  // the failing 쿠팡 account (mock-channel-0) has connection info on file but an
+  // expired token (재등록 필요); every other account has valid, non-expiring info.
+  // Masked metadata only — no secret is ever present here or in the real response.
+  const expired = accountId != null && accountId.endsWith("channel-0");
+  if (expired) {
+    return {
+      connectorClass: "API",
+      authType: "API_KEY",
+      tokenExpiresAt: hoursAgoISO(30),
+      lastRotatedAt: hoursAgoISO(72),
+      hasRefreshToken: false,
+    };
+  }
+  return {
+    connectorClass: "API",
+    authType: "API_KEY",
+    tokenExpiresAt: null,
+    lastRotatedAt: hoursAgoISO(72),
+    hasRefreshToken: false,
   };
 }
 

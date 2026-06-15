@@ -1,8 +1,9 @@
-import axios from "axios";
+import axios, { isAxiosError } from "axios";
 import type {
   AuthResponse,
   CapabilityView,
   ChannelResponse,
+  ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
   DashboardSummaryResponse,
@@ -22,6 +23,7 @@ import {
   mockAuth,
   mockCapabilities,
   mockChannels,
+  mockConnectionInfo,
   mockConnectionStatus,
   mockConnectorAlerts,
   mockDashboard,
@@ -124,6 +126,28 @@ export const api = {
       `/api/seller-accounts/${accountId}/connection-status`,
     );
     return data;
+  },
+  // Read-only masked connection-info (credential metadata) for one seller account
+  // (ChannelDetail). Returns NEVER a secret — only the masked CredentialMetadata.
+  // A 404 means "no credential on file" (an expected state), so it resolves to
+  // null rather than throwing; any other failure fails closed (throws) so the page
+  // can show "불러오지 못했습니다" distinct from "등록된 연결 정보 없음". Honors the
+  // VITE_USE_MOCKS demo escape hatch.
+  async getConnectionInfoStrict(accountId: string): Promise<ConnectionInfoView | null> {
+    if (USE_MOCKS) {
+      return mockConnectionInfo(accountId);
+    }
+    try {
+      const { data } = await http.get<ConnectionInfoView>(
+        `/api/seller-accounts/${accountId}/credentials`,
+      );
+      return data;
+    } catch (e) {
+      if (isAxiosError(e) && e.response?.status === 404) {
+        return null;
+      }
+      throw e;
+    }
   },
   // Strict variant for the connection-alert list (Alerts page): no silent mock
   // fallback, so a dead backend fails closed instead of rendering fake alerts.

@@ -9,11 +9,14 @@ import { relativeTime, untilTime } from "../lib/format";
 import type {
   CapabilityView,
   ChannelResponse,
+  ConnectionInfoView,
   ConnectionStatusView,
   ScheduleView,
   SellerAccountResponse,
   SyncRunView,
 } from "../lib/types";
+
+type ScrollTarget = "collect" | "runs" | "info";
 
 /** Pull the backend's error message out of an Axios error, if present. */
 function backendMessage(e: unknown): string | null {
@@ -50,8 +53,50 @@ interface NextAction {
   title: string;
   guidance: string;
   detail?: string;
-  cta?: { label: string; target: "collect" | "runs" };
+  cta?: { label: string; target: ScrollTarget };
 }
+
+// Humanize the masked credential authType for operators. Kept high-level — the
+// exact secret-key shape is the connector's concern (and a Slice 2 backend
+// template), never surfaced here.
+function authTypeLabel(authType: string): string {
+  switch (authType) {
+    case "API_KEY":
+    case "HMAC":
+    case "JWT_HS256":
+      return "API 키";
+    case "OAUTH2":
+      return "앱 연동(OAuth)";
+    default:
+      return authType;
+  }
+}
+
+// Expiry label for tokenExpiresAt: future → "n일 후", past/now → 재등록 안내,
+// missing → 정보 없음.
+function expiryLabel(iso: string | null): { text: string; expired: boolean } {
+  if (!iso) {
+    return { text: "만료 정보 없음", expired: false };
+  }
+  if (new Date(iso).getTime() <= Date.now()) {
+    return { text: "만료됨 (재등록 필요)", expired: true };
+  }
+  return { text: untilTime(iso), expired: false };
+}
+
+// Calm, high-level per-channel guidance on what kind of connection info the
+// channel needs — keyed by ChannelResponse.code. Describes the *kind* of info,
+// never the connector's exact secret-key names, never a password-casual ask.
+// Falls back to a generic line for channels without a specific note.
+const CHANNEL_GUIDANCE: Record<string, string> = {
+  COUPANG: "쿠팡 판매자센터(쿠팡 윙)에서 발급한 API 키로 연결합니다.",
+  NAVER: "네이버 커머스 API 센터에서 발급한 애플리케이션 키로 연결합니다.",
+  GMARKET: "ESM 판매자센터에서 발급한 API 인증 정보로 연결합니다.",
+  ELEVENST: "11번가 셀러오피스에서 발급한 오픈 API 키로 연결합니다.",
+  CAFE24: "자사몰 관리자에서 앱 연동(OAuth)으로 연결합니다.",
+};
+const GENERIC_GUIDANCE =
+  "채널 판매자센터에서 발급한 연결 정보(API 키 등)로 연결합니다.";
 
 // "다음 조치" copy keyed by ConnectionStatusView.state (the 6 connection states
 // from ChannelConnectionStatus — NOT the connector-alert types). Every CTA points
@@ -82,21 +127,21 @@ const NEXT_ACTION: Record<string, NextAction> = {
     tone: "bad",
     title: "재연결이 필요합니다",
     guidance: "인증이 만료되어 자동 수집이 멈췄습니다. 자동 수집을 다시 사용하려면 연결 정보를 갱신해야 합니다.",
-    detail: "현재는 아래 수집 내역과 오류 메시지를 먼저 확인해 주세요.",
-    cta: { label: "수집 내역 보기", target: "runs" },
+    detail: "아래 연결 정보에서 만료 상태를 확인할 수 있습니다.",
+    cta: { label: "연결 정보 보기", target: "info" },
   },
   NEEDS_REAUTH: {
     tone: "bad",
     title: "재연결이 필요합니다",
     guidance: "인증이 만료되어 자동 수집이 멈췄습니다. 자동 수집을 다시 사용하려면 연결 정보를 갱신해야 합니다.",
-    detail: "현재는 아래 수집 내역과 오류 메시지를 먼저 확인해 주세요.",
-    cta: { label: "수집 내역 보기", target: "runs" },
+    detail: "아래 연결 정보에서 만료 상태를 확인할 수 있습니다.",
+    cta: { label: "연결 정보 보기", target: "info" },
   },
   DISCONNECTED: {
     tone: "bad",
     title: "연결 정보 확인이 필요합니다",
     guidance: "채널 연결이 끊겼습니다. 연결 정보와 최근 수집 내역을 확인해 주세요.",
-    cta: { label: "수집 내역 보기", target: "runs" },
+    cta: { label: "연결 정보 보기", target: "info" },
   },
 };
 
@@ -136,6 +181,11 @@ export function ChannelDetail() {
   );
 
   const [status, setStatus] = useState<ConnectionStatusView | null>(null);
+  // Masked connection info (credential metadata). null = no credential on file
+  // (an expected state, not an error); infoError = the read failed (fail closed).
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionInfoView | null>(null);
+  const [loadingInfo, setLoadingInfo] = useState(true);
+  const [infoError, setInfoError] = useState(false);
   const [schedules, setSchedules] = useState<ScheduleView[]>([]);
   // null = not loaded (loading or failed) → schedule controls stay disabled,
   // because an absent capability row means "allowed" and we must not guess.
@@ -151,12 +201,14 @@ export function ChannelDetail() {
 
   const reload = useCallback(() => setRefreshKey((k) => k + 1), []);
 
-  // Smooth-scroll targets for the 다음 조치 CTAs — both point at sections that
-  // already exist on this page (수집 테스트 / 다시 시도 live there).
+  // Smooth-scroll targets for the 다음 조치 CTAs — all point at sections that
+  // already exist on this page (연결 정보 / 수집 테스트 / 다시 시도 live there).
   const collectSettingsRef = useRef<HTMLDivElement>(null);
   const runsRef = useRef<HTMLDivElement>(null);
-  const scrollToSection = useCallback((target: "collect" | "runs") => {
-    const ref = target === "collect" ? collectSettingsRef : runsRef;
+  const credentialRef = useRef<HTMLDivElement>(null);
+  const scrollToSection = useCallback((target: ScrollTarget) => {
+    const ref =
+      target === "collect" ? collectSettingsRef : target === "info" ? credentialRef : runsRef;
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
@@ -216,6 +268,20 @@ export function ChannelDetail() {
           setLoadingCollection(false);
         }
       });
+    // Masked connection info, loaded independently so its failure (or absence)
+    // never fails-closed the whole collection block. 404 → null ("등록된 연결 정보
+    // 없음"); any other failure → infoError (불러오지 못했습니다). No secret read.
+    setLoadingInfo(true);
+    setInfoError(false);
+    api.getConnectionInfoStrict(accountId)
+      .then((info) => active && setConnectionInfo(info))
+      .catch(() => {
+        if (active) {
+          setConnectionInfo(null);
+          setInfoError(true);
+        }
+      })
+      .finally(() => active && setLoadingInfo(false));
     api.getSchedules(accountId)
       .then((s) => active && setSchedules(s))
       .catch(() => active && setSchedules([]));
@@ -318,6 +384,16 @@ export function ChannelDetail() {
         )}
       </Section>
 
+      <div ref={credentialRef}>
+        <ConnectionInfoSection
+          info={connectionInfo}
+          loading={loadingInfo}
+          error={infoError}
+          channelCode={channel?.code}
+          onViewRuns={() => scrollToSection("runs")}
+        />
+      </div>
+
       <div ref={collectSettingsRef}>
         <Section title="자동 수집 설정">
           <ul className="divide-y divide-line">
@@ -374,7 +450,7 @@ function NextActionPanel({
   onCta,
 }: {
   action: NextAction;
-  onCta: (target: "collect" | "runs") => void;
+  onCta: (target: ScrollTarget) => void;
 }) {
   const { tone, title, guidance, detail, cta } = action;
   return (
@@ -397,6 +473,83 @@ function NextActionPanel({
         ) : null}
       </div>
     </section>
+  );
+}
+
+// Read-only 연결 정보 panel: shows whether masked credential metadata is on file
+// and its 갱신/만료, plus calm per-channel guidance. No secret is read or shown,
+// no write action, no reconnect form — that flow (연결 정보 갱신) is a later slice.
+function ConnectionInfoSection({
+  info,
+  loading,
+  error,
+  channelCode,
+  onViewRuns,
+}: {
+  info: ConnectionInfoView | null;
+  loading: boolean;
+  error: boolean;
+  channelCode: string | undefined;
+  onViewRuns: () => void;
+}) {
+  const guidance = (channelCode && CHANNEL_GUIDANCE[channelCode]) ?? GENERIC_GUIDANCE;
+
+  return (
+    <Section title="연결 정보">
+      {loading ? (
+        <p className="text-base text-muted">불러오는 중…</p>
+      ) : error ? (
+        <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
+          연결 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+        </p>
+      ) : info === null ? (
+        <div className="space-y-2">
+          <p className="text-base font-semibold text-ink">등록된 연결 정보가 없습니다.</p>
+          <p className="text-base text-muted">{guidance}</p>
+        </div>
+      ) : (
+        <ConnectionInfoDetail info={info} guidance={guidance} onViewRuns={onViewRuns} />
+      )}
+    </Section>
+  );
+}
+
+function ConnectionInfoDetail({
+  info,
+  guidance,
+  onViewRuns,
+}: {
+  info: ConnectionInfoView;
+  guidance: string;
+  onViewRuns: () => void;
+}) {
+  const expiry = expiryLabel(info.tokenExpiresAt);
+  return (
+    <div className="space-y-4">
+      <p className="text-base font-semibold text-good">✓ 연결 정보가 등록되어 있습니다.</p>
+      <div className="grid grid-cols-1 gap-4 text-base md:grid-cols-3">
+        <div>
+          <p className="text-sm text-muted">인증 방식</p>
+          <p className="mt-1 font-semibold">{authTypeLabel(info.authType)}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted">마지막 갱신</p>
+          <p className="mt-1 font-semibold">
+            {info.lastRotatedAt ? relativeTime(info.lastRotatedAt) : "갱신 이력 없음"}
+          </p>
+        </div>
+        <div>
+          <p className="text-sm text-muted">인증 만료</p>
+          <p className={`mt-1 font-semibold ${expiry.expired ? "text-bad" : ""}`}>{expiry.text}</p>
+        </div>
+      </div>
+      <p className="text-base text-muted">{guidance}</p>
+      <div className="flex">
+        <button type="button" onClick={onViewRuns} className="btn-ghost">
+          수집 내역 보기
+        </button>
+      </div>
+    </div>
   );
 }
 
