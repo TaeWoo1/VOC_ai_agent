@@ -208,9 +208,25 @@ export function mockSchedules(): ScheduleView[] {
   ];
 }
 
-export function mockConnectionStatus(): ConnectionStatusView {
+export function mockConnectionStatus(accountId?: string): ConnectionStatusView {
+  // Account-aware demo (mock mode only): the first connected account
+  // (mock-channel-0 = 쿠팡) shows a failing/expired connection so the /channels
+  // overview demonstrates both a healthy and a degraded row; everything else is
+  // healthy. Real mode never uses this — it hits the live connection-status API.
+  const failing = accountId != null && accountId.endsWith("channel-0");
+  if (failing) {
+    return {
+      sellerAccountId: accountId,
+      state: "EXPIRED",
+      lastSuccessAt: hoursAgoISO(30),
+      consecutiveFailures: 3,
+      lastError: "인증 토큰이 만료되었습니다. 재연결이 필요합니다.",
+      lastSyncedAt: hoursAgoISO(30),
+      nextScheduledAt: null,
+    };
+  }
   return {
-    sellerAccountId: "mock-acct",
+    sellerAccountId: accountId ?? "mock-acct",
     state: "CONNECTED",
     lastSuccessAt: hoursAgoISO(4),
     consecutiveFailures: 0,

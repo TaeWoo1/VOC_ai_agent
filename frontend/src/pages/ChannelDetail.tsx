@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { Section } from "../components/Section";
 import { EmptyState } from "../components/EmptyState";
+import { HealthBadge } from "../components/HealthBadge";
 import { api } from "../lib/apiClient";
 import { relativeTime, untilTime } from "../lib/format";
 import type {
@@ -265,22 +266,6 @@ export function ChannelDetail() {
         로 채울 수 있습니다. 같은 데이터를 다시 올려도 중복은 자동으로 건너뜁니다.
       </div>
     </div>
-  );
-}
-
-function HealthBadge({ state }: { state: string }) {
-  const map: Record<string, { label: string; cls: string }> = {
-    CONNECTED: { label: "정상 수집 중", cls: "bg-good/10 text-good" },
-    DEGRADED: { label: "점검 필요", cls: "bg-warn/10 text-warn" },
-    EXPIRED: { label: "인증 만료", cls: "bg-bad/10 text-bad" },
-    DISCONNECTED: { label: "연결 끊김", cls: "bg-bad/10 text-bad" },
-    NOT_COLLECTED: { label: "수집 이력 없음", cls: "bg-ink/5 text-muted" },
-  };
-  const { label, cls } = map[state] ?? { label: state, cls: "bg-ink/5 text-muted" };
-  return (
-    <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${cls}`}>
-      {label}
-    </span>
   );
 }
 

@@ -116,7 +116,7 @@ export const api = {
   },
   async getConnectionStatusStrict(accountId: string): Promise<ConnectionStatusView> {
     if (USE_MOCKS) {
-      return mockConnectionStatus();
+      return mockConnectionStatus(accountId);
     }
     const { data } = await http.get<ConnectionStatusView>(
       `/api/seller-accounts/${accountId}/connection-status`,
