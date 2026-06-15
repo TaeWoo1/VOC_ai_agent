@@ -33,6 +33,23 @@ public class FileParser {
         ZipSecureFile.setMinInflateRatio(0.01);
     }
 
+    /** Normalize a header cell: drop a leading UTF-8 BOM, then strip and lowercase.
+     *  CSV/XLSX exported for Excel often prefixes the first header with a BOM
+     *  (U+FEFF) — our own sample download does — and {@code String.strip()} does
+     *  NOT remove it (U+FEFF is not whitespace), leaving a BOM-prefixed "상품명" to
+     *  silently miss the "상품명" alias. Applied at every header site so headers and
+     *  row keys agree. Header normalization only; ingestion semantics are unchanged. */
+    static String normalizeHeader(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String h = raw;
+        if (!h.isEmpty() && h.charAt(0) == '\uFEFF') {
+            h = h.substring(1);
+        }
+        return h.strip().toLowerCase();
+    }
+
     public ParsedTable parse(String filename, InputStream data) {
         String name = filename == null ? "" : filename.toLowerCase();
         try (InputStream in = new BufferedInputStream(data)) {
@@ -57,13 +74,13 @@ public class FileParser {
                 .build();
         try (CSVParser parser = format.parse(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             List<String> headers = parser.getHeaderNames().stream()
-                    .map(h -> h.strip().toLowerCase())
+                    .map(FileParser::normalizeHeader)
                     .toList();
             List<Map<String, String>> rows = new ArrayList<>();
             for (CSVRecord record : parser) {
                 Map<String, String> row = new LinkedHashMap<>();
                 record.toMap().forEach((header, value) ->
-                        row.put(header.strip().toLowerCase(), value == null ? "" : value.strip()));
+                        row.put(normalizeHeader(header), value == null ? "" : value.strip()));
                 rows.add(row);
             }
             return new ParsedTable(headers, rows);
@@ -81,7 +98,7 @@ public class FileParser {
             List<String> headers = new ArrayList<>();
             for (int c = 0; c < headerRow.getLastCellNum(); c++) {
                 Cell cell = headerRow.getCell(c);
-                headers.add(formatter.formatCellValue(cell).strip().toLowerCase());
+                headers.add(normalizeHeader(formatter.formatCellValue(cell)));
             }
             List<Map<String, String>> rows = new ArrayList<>();
             for (int r = sheet.getFirstRowNum() + 1; r <= sheet.getLastRowNum(); r++) {

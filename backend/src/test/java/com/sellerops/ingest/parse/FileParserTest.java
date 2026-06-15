@@ -29,6 +29,20 @@ class FileParserTest {
     }
 
     @Test
+    void stripsLeadingBomFromFirstCsvHeader() {
+        // Excel-compatible exports (our own sample download included) prefix the
+        // first header with a UTF-8 BOM. It must not turn 상품명 into a key that
+        // misses the "상품명" alias and collapses every product to "(미지정 상품)".
+        String csv = "\uFEFF상품명,평점,내용\n전선몰딩,5,좋아요\n";
+        ParsedTable table = parser.parse("reviews.csv",
+                new ByteArrayInputStream(csv.getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(table.headers()).containsExactly("상품명", "평점", "내용");
+        assertThat(table.headers().get(0)).doesNotContain("\uFEFF");
+        assertThat(table.rows().get(0).get("상품명")).isEqualTo("전선몰딩");
+    }
+
+    @Test
     void parsesXlsxFirstSheet() throws Exception {
         byte[] bytes = buildXlsx();
         ParsedTable table = parser.parse("orders.xlsx", new ByteArrayInputStream(bytes));
