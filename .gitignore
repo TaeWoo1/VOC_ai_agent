@@ -125,3 +125,7 @@ docker-compose.override.yml
 # Scoped to root so test resources under src/test/** stay trackable.
 /*.xlsx
 /*.csv
+
+# Operator-provided seller-center review export samples (raw; may contain
+# reviewer / order PII) — used locally for schema analysis, never committed.
+naver/

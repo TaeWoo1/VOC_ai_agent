@@ -45,7 +45,7 @@ walkthrough/sample requirement) is itemized in **Section B**.
 | **Inquiry / Q&A / CS API** (not reviews) | Not via Commerce API; 톡톡 is a separate partner system — unknown, verify [vendor-support] (see B2) | **Yes** — official CS API for customer-center & per-product *inquiries* (B4). **Inquiries, not reviews.** |
 | **Seller-center review export** | **Yes — user-walkthrough confirmed (2026-06-16)** — 리뷰 관리 → **엑셀다운** produces `review_YYYYMMDD_HHMMSS.xlsx` [walkthrough] (see W, B5) | **Unknown** — no official export confirmed; "리뷰 엑셀" results are third-party **scrapers**, not a WING feature → [walkthrough-required] (B6) |
 | **NaverPay / 네이버쇼핑 구매평 coverage** | **Pending verification** — user must confirm whether NaverPay/쇼핑 reviews are included or excluded in the export → [walkthrough-required] (gates the direction) | n/a — Coupang reviews deferred |
-| **Parser compatibility (export → ingestion)** | **Pending** — columns observed (see W); compatibility unproven until an anonymized sample is analyzed → [sample-required] | n/a |
+| **Parser compatibility (export → ingestion)** | **Reads OK; review-mapping hardening required** — `FileParser` (POI) reads the `.xlsx`, but `ReviewRowMapper` aliases miss NAVER headers; the **body** alias miss makes **every row fail** today. Additive aliases + a date-format check needed (see S) | n/a |
 | **Scheduled report / email** | Unknown — no public evidence → [walkthrough-required] (B7) | Unknown — no public evidence → [walkthrough-required] (B7) |
 | **Browser-automation feasibility** | Medium — contingent on an official export existing; NAVER login may present 2FA/captcha → user-attended only | Unknown — contingent on an official export existing at all |
 | **Risk** | Medium | Medium–High (no confirmed official review source) |
@@ -120,6 +120,93 @@ final, and the canonical review schema must be confirmed):
 3. **NaverPay / 네이버쇼핑 구매평 inclusion** — still needs an explicit yes/no.
 4. **Export repeatability** and **date / row limits** — still need confirmation.
 5. Whether a **scheduled / emailed** review report exists — still unknown.
+
+---
+
+## S. Sample-file schema analysis (2026-06-16)
+
+Source: the seller's raw export `naver/review_20260616_200638.xlsx`, inspected **locally,
+read-only**. The file is **git-ignored and never committed**; the inspection emitted only
+aggregates/typed summaries — **no raw review text, reviewer ids, order numbers, or other row
+values were printed or logged**.
+
+**Opens successfully** — valid `.xlsx` (OOXML zip); a single worksheet was found and read.
+**Shape:** 1 sheet (`Sheet0`), **3,695 data rows × 25 columns**.
+**Headers:** match the walkthrough list **exactly — 25/25, in order** (no missing, no extra).
+
+**Type inference (buckets only, no raw values):**
+
+| Column | Type / nullability | Notes |
+|---|---|---|
+| 상품번호 | number-like string, len 9–11, no blanks | product id; keep as **string** (avoid int coercion) |
+| 상품명 | text, len 13–41, no blanks | product name |
+| 리뷰구분 | text, len 2–4, no blanks | review-**type** enum: 일반 / 한달사용 — type, not source; does **not** indicate NaverPay |
+| 구매자평점 | number, **1–5** (distinct 1,2,3,4,5), no blanks | rating, integer |
+| 포토/영상 | text 1,973 / blank 1,722 | non-blank len 79–136 → likely **media URL(s)**, not a mere flag |
+| 리뷰상세내용 | text, len **10–1,059**, no blanks | the review body (free text) |
+| 등록자 | text, len 6–18, no blanks | reviewer display id (masked-style) |
+| 리뷰등록일 | text, **fixed len 20**, no blanks | timestamp; did **not** match ISO `YYYY-MM-DD HH:MM:SS` → non-ISO format (confirm) |
+| 최종수정일 | text len 20, **17 set / 3,678 blank** | edit timestamp (mostly blank) |
+| 리뷰글번호 | number, len 10, no blanks | **review id** |
+| 상품주문번호 | number-like string, **fixed len 16**, no blanks | **order id (sensitive)** |
+| 답글여부 | enum/flag text, len 1 | reply yes/no |
+| 답글등록일시 | text len 20, **132 set / 3,563 blank** | reply timestamp |
+
+**Dedupe key:** `리뷰글번호` is present for **every** row (3,695/3,695) and **fully unique**
+(3,695 distinct) → a reliable **externalId / dedupe key**. Fallback if ever absent: a content
+hash of (상품번호 + 리뷰등록일 + hash(리뷰상세내용)) — values hashed, never exposed.
+
+**Parser compatibility — reads OK, but review mapping needs hardening:**
+- `FileParser` (Apache POI, first sheet) reads this `.xlsx` and normalizes headers (BOM-strip +
+  lowercase) — file format is fine.
+- `ReviewRowMapper` maps via `HeaderAliases.pick` (**exact** lowercased-header lookup). Its alias
+  lists do **not** include NAVER's headers. Gap:
+
+  | Field | Current aliases | NAVER header | Status |
+  |---|---|---|---|
+  | body (required) | 내용 / 리뷰 / 리뷰내용 / review / body / content | **리뷰상세내용** | **MISS → every row fails** ("리뷰 내용이 비어 있습니다.") |
+  | product | 상품명 / 상품 / product / product_name | 상품명 | match ✓ |
+  | rating | 평점 / 별점 / rating / score / star | 구매자평점 | MISS (rating lost; non-fatal) |
+  | date | 작성일 / 날짜 / date / received_at / reg_date | 리뷰등록일 | MISS (date lost; non-fatal) |
+  | externalId | 리뷰id / 리뷰아이디 / review_id / external_id / id | 리뷰글번호 | MISS (unique key lost — important) |
+  | sku / product id | sku / 상품코드 / 품번 | 상품번호 | MISS (no productExternalId captured) |
+
+**Smallest parser-hardening plan (proposed, NOT implemented):**
+1. Add NAVER aliases to `ReviewRowMapper` (additive only): body += `리뷰상세내용`; rating +=
+   `구매자평점`; date += `리뷰등록일`; externalId += `리뷰글번호`. This alone makes the file ingest.
+2. Date handling: `리뷰등록일` is a fixed-width 20-char non-ISO timestamp — confirm its exact
+   format and ensure `DateParse` accepts it; consider preserving time (current
+   `instantAtStartOfDay` drops it).
+3. (Optional, schema decision) capture `상품번호` as a product external id — `CanonicalReview`
+   has `sku` but no dedicated `productExternalId`; reuse `sku` or extend the schema (defer).
+No new parser, no format change — alias additions + a date-format check.
+
+**Privacy classification (what must be handled carefully):**
+
+| Column | Sensitivity | Handling |
+|---|---|---|
+| 상품주문번호 | **High** — links a review to a specific order/purchase | do **not** expose in UI; do **not** persist plaintext; if a key is needed, store hashed/opaque |
+| 등록자 | Medium — reviewer display id | operator surfaces only; never a join key; not in consumer-facing output |
+| 유저정보 등록 항목 | Unknown/potentially PII | inspect cautiously; **do not persist** unless a need is justified |
+| 리뷰상세내용 | Medium — free-text review content | operator surfaces only; consumer surfaces use sanitized cluster phrases (per consumer-safety policy) |
+| 포토/영상 | Low–Medium — likely media URLs | prefer deriving a `hasMedia` boolean; persisting raw URLs is optional and may embed identifiers |
+| 리뷰글번호 / 상품번호 | Low — opaque ids | safe as external ids / keys |
+
+**`리뷰구분` enum-label check (2026-06-16, bounded — labels + counts only):** two distinct labels,
+no blanks — **일반 (2,116)** and **한달사용 (1,579)**. This is a review **type** taxonomy
+(regular vs one-month-use review), **not** a review **source/channel** taxonomy — so it does
+**not** indicate whether reviews originate from NaverPay/네이버쇼핑. It does **not** help resolve
+coverage. (No parser impact: clean 2-value enum.)
+
+**Still unresolved by the file alone:**
+- **NaverPay / 네이버쇼핑 구매평 coverage — still PENDING (inconclusive).** The sample has 3,695
+  reviews, but neither the row count nor the `리뷰구분` enum (type, not source) reveals whether
+  NaverPay/쇼핑 reviews are included or excluded. **Seller total-count confirmation is still
+  required** (does 3,695 for that date range/filter match the seller's total review count
+  including NaverPay?). Do not claim coverage either way until confirmed.
+- Export **repeatability** and **date / row limits** (this export pulled 3,695 rows for the
+  chosen filter — limit behavior unknown).
+- Whether a **scheduled / emailed** report exists.
 
 ---
 
@@ -206,15 +293,19 @@ The walkthrough (#5) **partially landed**: the NAVER export's *existence* is con
 report/email availability are still open. **Still no RPA, no parser change, no browser
 automation.**
 
+**Progress:** a real sample was inspected and the schema is now known (Section S) —
+headers match exactly, `리뷰글번호` is a complete & unique dedupe key, and the concrete
+parser-hardening need is identified (NAVER aliases; body miss = 100% fail today).
+
 **Updated next steps (each separately approved):**
-1. **Obtain an anonymized sample export file** (`.xlsx`/`.csv`) **and the NaverPay/쇼핑
-   coverage yes/no.** These two unblock everything and are the immediate ask (Section F).
-2. **Parser compatibility analysis → parser-hardening plan** — map the real columns
-   (Section W candidates) to the canonical review schema against the actual sample; decide what
-   hardening is needed (candidate **#4**). No session automation.
+1. **Resolve the NaverPay/쇼핑 coverage yes/no** (still the gating unknown — the file alone can't
+   answer it; a `리뷰구분` enum-label check + the seller's total-count confirmation can). Section F.
+2. **Parser hardening (candidate #4)** — additive NAVER aliases in `ReviewRowMapper` + a
+   `리뷰등록일` date-format check; optionally capture `상품번호`. Smallest change; no new parser,
+   no format change, no session automation. (Plan in Section S; not yet implemented.)
 3. **NAVER seller-center export-automation spike** (candidate **#1**, opt-in, user-attended,
-   Section-E guardrails) — only after the sample + coverage confirm a repeatable,
-   sufficiently-complete export.
+   Section-E guardrails) — only after coverage is confirmed sufficient and a committable
+   **anonymized** fixture exists for tests.
 4. **If a scheduled/emailed report exists, prefer email-attachment ingestion** (candidate **#3**)
    over browser automation (lower risk, no brittle UI driving).
 
