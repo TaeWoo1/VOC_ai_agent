@@ -4,6 +4,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.collect.dto.CapabilityView;
 import com.sellerops.collect.dto.ConnectionStatusView;
+import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
@@ -11,10 +12,13 @@ import com.sellerops.collect.dto.SyncRunView;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
+import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.PullConnector;
+import com.sellerops.connector.VerifyContext;
+import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.CredentialIntakeValidator;
 import com.sellerops.credential.CredentialIntakeValidator.ValidatedCredential;
 import com.sellerops.credential.CredentialMetadata;
@@ -45,6 +49,15 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class CollectControlService {
+
+    // Test-connection result statuses and safe reason codes (see ConnectionTestResultView).
+    static final String TEST_STATUS_SUCCESS = "SUCCESS";
+    static final String TEST_STATUS_FAILED = "FAILED";
+    static final String TEST_STATUS_UNSUPPORTED = "UNSUPPORTED";
+    static final String TEST_STATUS_NOT_CONFIGURED = "NOT_CONFIGURED";
+    static final String TEST_REASON_UNSUPPORTED_CHANNEL = "UNSUPPORTED_CHANNEL";
+    static final String TEST_REASON_VERIFY_NOT_IMPLEMENTED = "VERIFY_NOT_IMPLEMENTED";
+    static final String TEST_REASON_NOT_CONFIGURED = "NOT_CONFIGURED";
 
     /** Floor for operator-set cadence — protects channels from accidental hammering. */
     static final int MIN_INTERVAL_MINUTES = 15;
@@ -212,6 +225,76 @@ public class CollectControlService {
     public CredentialMetadata readCredential(UUID orgId, UUID sellerAccountId) {
         requireAccount(orgId, sellerAccountId);
         return vault.readMasked(orgId, sellerAccountId);
+    }
+
+    /**
+     * Manual, explicit auth/connectivity check for a stored credential — never
+     * collection. Ordered so nothing privileged happens before org scoping, and
+     * structured so only a connector that opts into {@link ConnectionVerifier}
+     * (none yet) can produce a real SUCCESS/FAILED; every other path resolves to
+     * a safe UNSUPPORTED/NOT_CONFIGURED result. Issues no provider HTTP, runs no
+     * sync, creates no job, persists nothing, and returns no secret/provider
+     * detail.
+     */
+    public ConnectionTestResultView testConnection(UUID orgId, UUID sellerAccountId) {
+        // 1. Org scoping first — a cross-org id reads as 404, before any vault/connector touch.
+        SellerAccount account = requireAccount(orgId, sellerAccountId);
+        Channel channel = channels.findById(account.getChannelId())
+                .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
+
+        // 2. File-upload/manual accounts have no provider connection to verify.
+        if (account.isFileUpload() || registry.isFileChannel(channel.getCode())) {
+            return testResult(sellerAccountId, TEST_STATUS_UNSUPPORTED, TEST_REASON_UNSUPPORTED_CHANNEL,
+                    "이 채널은 연결 확인을 지원하지 않습니다.");
+        }
+
+        // 3. No credential on file — nothing to verify; no provider call, no vault open.
+        if (!vault.hasCredential(orgId, sellerAccountId)) {
+            return testResult(sellerAccountId, TEST_STATUS_NOT_CONFIGURED, TEST_REASON_NOT_CONFIGURED,
+                    "저장된 연결 정보가 없습니다.");
+        }
+
+        // 4. Only a connector that opts into ConnectionVerifier can run a real auth check.
+        //    The generic mock fallback does not implement it, so it can never report a
+        //    verified success — it falls here as UNSUPPORTED.
+        ConnectionVerifier verifier = registry.resolvePullConnector(channel.getCode())
+                .filter(ConnectionVerifier.class::isInstance)
+                .map(ConnectionVerifier.class::cast)
+                .orElse(null);
+        if (verifier == null) {
+            return testResult(sellerAccountId, TEST_STATUS_UNSUPPORTED, TEST_REASON_VERIFY_NOT_IMPLEMENTED,
+                    "이 채널의 연결 확인은 아직 제공되지 않습니다.");
+        }
+
+        // 5. Real verification (no connector implements this yet → unreachable this slice).
+        //    The verifier opens the vault itself; secrets never pass through here.
+        VerifyOutcome outcome = verifier.verifyConnection(
+                new VerifyContext(orgId, sellerAccountId, channel.getCode()));
+        if (outcome.status() == VerifyOutcome.Status.SUCCESS) {
+            return testResult(sellerAccountId, TEST_STATUS_SUCCESS, null, "연결 정보가 확인되었습니다.");
+        }
+        return testResult(sellerAccountId, TEST_STATUS_FAILED, outcome.reasonCode(),
+                failureMessage(outcome.reasonCode()));
+    }
+
+    private static ConnectionTestResultView testResult(UUID sellerAccountId, String status,
+                                                       String reasonCode, String message) {
+        return new ConnectionTestResultView(sellerAccountId, status, Instant.now(), message, reasonCode);
+    }
+
+    /**
+     * Fixed operator-safe failure text, keyed by the verifier's safe reason code.
+     * The verifier never supplies free-text, so no raw provider message can reach
+     * the response; an unknown code falls back to the generic safe message.
+     */
+    private static String failureMessage(String reasonCode) {
+        if (VerifyOutcome.REASON_INVALID_CREDENTIAL.equals(reasonCode)) {
+            return "연결 정보가 유효하지 않습니다.";
+        }
+        if (VerifyOutcome.REASON_TEMPORARY.equals(reasonCode)) {
+            return "일시적인 채널 응답 오류입니다.";
+        }
+        return "채널 API 연결 확인에 실패했습니다.";
     }
 
     private SellerAccount requireAccount(UUID orgId, UUID sellerAccountId) {

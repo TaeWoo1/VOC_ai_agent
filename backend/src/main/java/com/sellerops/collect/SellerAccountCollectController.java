@@ -2,6 +2,7 @@ package com.sellerops.collect;
 
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.collect.dto.ConnectionStatusView;
+import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.collect.dto.ManualSyncRequest;
 import com.sellerops.collect.dto.SchedulePutRequest;
@@ -55,6 +56,18 @@ public class SellerAccountCollectController {
     public ConnectionStatusView connectionStatus(@AuthenticationPrincipal AuthPrincipal principal,
                                                  @PathVariable UUID accountId) {
         return service.connectionStatus(principal.orgId(), accountId);
+    }
+
+    /**
+     * Manual, explicit auth/connectivity check for the stored credential. Never
+     * runs collection/sync; returns a safe result only (no secrets, no provider
+     * body). UNSUPPORTED for file-upload/unverifiable channels, NOT_CONFIGURED
+     * when no credential is on file.
+     */
+    @PostMapping("/test-connection")
+    public ConnectionTestResultView testConnection(@AuthenticationPrincipal AuthPrincipal principal,
+                                                   @PathVariable UUID accountId) {
+        return service.testConnection(principal.orgId(), accountId);
     }
 
     /** Write-only credential intake — responds with masked metadata, never secrets. */

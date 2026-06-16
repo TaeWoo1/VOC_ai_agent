@@ -9,16 +9,24 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.collect.dto.CapabilityView;
 import com.sellerops.collect.dto.ConnectionStatusView;
+import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
 import com.sellerops.collect.dto.SchedulePutRequest;
 import com.sellerops.collect.dto.ScheduleView;
 import com.sellerops.collect.dto.SyncRunView;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
+import com.sellerops.connector.ConnectionVerifier;
+import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.ConnectorCapability;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
+import com.sellerops.connector.FetchPage;
+import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.MockApiConnector;
+import com.sellerops.connector.PullConnector;
+import com.sellerops.connector.VerifyContext;
+import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialMetadata;
 import com.sellerops.credential.CredentialVault;
@@ -39,6 +47,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -461,5 +470,163 @@ class CollectControlServiceTest {
 
         assertThatThrownBy(() -> service.readCredential(UUID.randomUUID(), acc.getId()))
                 .isInstanceOf(ApiException.class);
+    }
+
+    // --- test-connection (auth/connectivity only, no collection) ---
+
+    @Test
+    void testConnectionCrossOrgReadsAsAbsent() {
+        SellerAccount acc = account("COUPANG");
+
+        // Org scoping is enforced before any vault/connector touch.
+        assertThatThrownBy(() -> service.testConnection(UUID.randomUUID(), acc.getId()))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void testConnectionUnsupportedForFileUploadChannel() {
+        SellerAccount acc = account(ConnectorRegistry.FILE_CHANNEL_CODE);
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("UNSUPPORTED");
+        assertThat(result.reasonCode()).isEqualTo("UNSUPPORTED_CHANNEL");
+        assertThat(result.checkedAt()).isNotNull();
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    @Test
+    void testConnectionUnsupportedForFileUploadAccount() {
+        SellerAccount acc = account("COUPANG");
+        acc.setFileUpload(true);
+        sellerAccounts.save(acc);
+
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("UNSUPPORTED");
+        assertThat(result.reasonCode()).isEqualTo("UNSUPPORTED_CHANNEL");
+    }
+
+    @Test
+    void testConnectionNotConfiguredWhenNoCredentialAndOpensNoVault() {
+        SellerAccount acc = account("COUPANG"); // API channel, no credential stored
+
+        // A keyless vault proves NOT_CONFIGURED short-circuits before any decrypt:
+        // hasCredential needs no master key, and no provider call is made.
+        CollectControlService keyless = serviceWith(vaultWithKey(""));
+        ConnectionTestResultView result = keyless.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("NOT_CONFIGURED");
+        assertThat(result.reasonCode()).isEqualTo("NOT_CONFIGURED");
+        assertThat(result.message()).isEqualTo("저장된 연결 정보가 없습니다.");
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    @Test
+    void testConnectionUnsupportedWhenConnectorHasNoVerifier() {
+        SellerAccount acc = account("COUPANG");
+        service.storeCredential(org, acc.getId(),
+                new CredentialIntakeRequest("API", "HMAC",
+                        Map.of("access_key", "AK", "secret_key", "SK", "vendor_id", "V1"), null, null),
+                null);
+
+        // Connectors OFF → the generic mock resolves; it is not a ConnectionVerifier,
+        // so it can never report a verified success — the path is UNSUPPORTED.
+        ConnectionTestResultView result = service.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("UNSUPPORTED");
+        assertThat(result.reasonCode()).isEqualTo("VERIFY_NOT_IMPLEMENTED");
+        assertThat(result.message()).isEqualTo("이 채널의 연결 확인은 아직 제공되지 않습니다.");
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    @Test
+    void testConnectionVerifierSuccessMapsToSafeResult() {
+        CredentialVault vault = vaultWithKey(randomKeyBase64());
+        SellerAccount acc = account("COUPANG");
+        serviceWith(vault).storeCredential(org, acc.getId(),
+                new CredentialIntakeRequest("API", "HMAC",
+                        Map.of("access_key", "AK", "secret_key", "SK", "vendor_id", "V1"), null, null),
+                null);
+        CollectControlService svc = serviceWith(
+                new ConnectorRegistry(List.of(
+                        new FakeVerifyingConnector("COUPANG", VerifyOutcome.success()))),
+                vault);
+
+        ConnectionTestResultView result = svc.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.reasonCode()).isNull();
+        assertThat(result.message()).isEqualTo("연결 정보가 확인되었습니다.");
+        assertThat(result.checkedAt()).isNotNull();
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    @Test
+    void testConnectionVerifierFailureMapsToFixedSafeMessage() {
+        CredentialVault vault = vaultWithKey(randomKeyBase64());
+        SellerAccount acc = account("COUPANG");
+        serviceWith(vault).storeCredential(org, acc.getId(),
+                new CredentialIntakeRequest("API", "HMAC",
+                        Map.of("access_key", "AK", "secret_key", "SK", "vendor_id", "V1"), null, null),
+                null);
+        CollectControlService svc = serviceWith(
+                new ConnectorRegistry(List.of(new FakeVerifyingConnector("COUPANG",
+                        VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL)))),
+                vault);
+
+        ConnectionTestResultView result = svc.testConnection(org, acc.getId());
+
+        assertThat(result.status()).isEqualTo("FAILED");
+        assertThat(result.reasonCode()).isEqualTo("INVALID_CREDENTIAL");
+        // Fixed operator-safe message — never a raw provider string, never a secret.
+        assertThat(result.message()).isEqualTo("연결 정보가 유효하지 않습니다.");
+        assertThat(result.message()).doesNotContain("SK", "AK", "V1");
+        assertThat(syncJobs.count()).isZero();
+    }
+
+    private CollectControlService serviceWith(ConnectorRegistry reg, CredentialVault vault) {
+        return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
+                connectionStatus, capabilities, reg, executor, vault);
+    }
+
+    /**
+     * Test-only connector that opts into {@link ConnectionVerifier} for one channel
+     * and returns a canned outcome with zero network — proves the verify seam maps
+     * to a safe result without shipping a real verifier or touching a provider.
+     */
+    private static final class FakeVerifyingConnector implements PullConnector, ConnectionVerifier {
+        private final String channelCode;
+        private final VerifyOutcome outcome;
+
+        FakeVerifyingConnector(String channelCode, VerifyOutcome outcome) {
+            this.channelCode = channelCode;
+            this.outcome = outcome;
+        }
+
+        @Override
+        public String kind() {
+            return "FAKE_VERIFY";
+        }
+
+        @Override
+        public Set<String> dedicatedChannels() {
+            return Set.of(channelCode);
+        }
+
+        @Override
+        public ConnectorCapabilities capabilities(String code) {
+            return new ConnectorCapabilities("API", Set.of(), Map.of(), "");
+        }
+
+        @Override
+        public FetchPage fetch(FetchRequest request) {
+            throw new UnsupportedOperationException("test-connection must never collect");
+        }
+
+        @Override
+        public VerifyOutcome verifyConnection(VerifyContext context) {
+            return outcome;
+        }
     }
 }

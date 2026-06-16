@@ -130,6 +130,16 @@ public class CredentialVault {
     }
 
     /**
+     * Whether a credential is on file for this account. Org-scoped at the query
+     * boundary (a cross-org id reads as absent) and needs no master key — it
+     * touches no secret material. Lets callers branch on "no credential" without
+     * the {@link #load} 404.
+     */
+    public boolean hasCredential(UUID orgId, UUID sellerAccountId) {
+        return credentials.findByOrgIdAndSellerAccountId(orgId, sellerAccountId).isPresent();
+    }
+
+    /**
      * Decrypt for run-time connector use only. The result lives in memory for
      * the duration of a run — callers must not persist, log, or serialize it.
      */
