@@ -24,6 +24,12 @@ public final class DateParse {
         }
         // Trim a trailing time component if present ("2026-06-01 13:00" / "2026-06-01T..").
         String token = raw.strip().split("[ T]")[0];
+        // NAVER seller-center exports dates as "yyyy.MM.dd." (trailing dot after the day);
+        // strip it so the existing yyyy.MM.dd formatter matches. No currently valid format
+        // ends in a dot, so this is backward-compatible.
+        if (token.endsWith(".")) {
+            token = token.substring(0, token.length() - 1);
+        }
         for (DateTimeFormatter fmt : FORMATS) {
             try {
                 return LocalDate.parse(token, fmt);
