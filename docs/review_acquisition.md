@@ -27,6 +27,8 @@ A platform offering an *inquiry* or *CS* API is **not** evidence of review suppo
 - **[codebase]** — status of *our connector* in this repo (connector javadoc, note dated
   2026-06-12). This reflects what we implemented, **not** an authoritative statement about the
   platform.
+- **[walkthrough]** — confirmed by a user's logged-in seller-center walkthrough (date noted; see
+  Section W).
 - **[walkthrough-required]** / **[sample-required]** — behind seller-center login; only a user
   walkthrough / screenshot / sample export can confirm (see Section F).
 
@@ -41,7 +43,9 @@ walkthrough/sample requirement) is itemized in **Section B**.
 |---|---|---|
 | **Product review API** | **Not provided by the Commerce API** [vendor-support] (see B1) | **None found** — no verified official product-review retrieval API in the reviewed Open API docs [official] (see B3) |
 | **Inquiry / Q&A / CS API** (not reviews) | Not via Commerce API; 톡톡 is a separate partner system — unknown, verify [vendor-support] (see B2) | **Yes** — official CS API for customer-center & per-product *inquiries* (B4). **Inquiries, not reviews.** |
-| **Seller-center review export** | **Likely yes, unconfirmed** — 리뷰 관리 → 구매평 엑셀 다운로드 [third-party]; NaverPay/쇼핑 구매평 may be excluded → [walkthrough-required] + [sample-required] (B5) | **Unknown** — no official export confirmed; "리뷰 엑셀" results are third-party **scrapers**, not a WING feature → [walkthrough-required] (B6) |
+| **Seller-center review export** | **Yes — user-walkthrough confirmed (2026-06-16)** — 리뷰 관리 → **엑셀다운** produces `review_YYYYMMDD_HHMMSS.xlsx` [walkthrough] (see W, B5) | **Unknown** — no official export confirmed; "리뷰 엑셀" results are third-party **scrapers**, not a WING feature → [walkthrough-required] (B6) |
+| **NaverPay / 네이버쇼핑 구매평 coverage** | **Pending verification** — user must confirm whether NaverPay/쇼핑 reviews are included or excluded in the export → [walkthrough-required] (gates the direction) | n/a — Coupang reviews deferred |
+| **Parser compatibility (export → ingestion)** | **Pending** — columns observed (see W); compatibility unproven until an anonymized sample is analyzed → [sample-required] | n/a |
 | **Scheduled report / email** | Unknown — no public evidence → [walkthrough-required] (B7) | Unknown — no public evidence → [walkthrough-required] (B7) |
 | **Browser-automation feasibility** | Medium — contingent on an official export existing; NAVER login may present 2FA/captcha → user-attended only | Unknown — contingent on an official export existing at all |
 | **Risk** | Medium | Medium–High (no confirmed official review source) |
@@ -52,8 +56,70 @@ walkthrough/sample requirement) is itemized in **Section B**.
   the vendor's explicit statement, for Coupang via its *absence* in the reviewed official docs
   (not an official "unavailable" statement). So official API integration cannot be the
   review-ingestion path; reviews must come from a seller-center **export** or an emailed report.
-- Open (gates everything actionable): whether an **official** seller-center review **export**
-  exists on each channel, and its shape/coverage. These are unconfirmed and need user evidence.
+- Established (NAVER): a **seller-center review export exists** — confirmed by a user walkthrough
+  on 2026-06-16 (리뷰 관리 → 엑셀다운 → `.xlsx`); column names observed (Section W).
+- Open (still gates a build): NaverPay/쇼핑 구매평 **coverage** (include/exclude), **parser
+  compatibility** against a real anonymized sample, export **repeatability / date & row limits**,
+  and whether a **scheduled/emailed** report exists. The export's *existence* is confirmed; its
+  *sufficiency for routine automation* is not.
+- Coupang: whether an **official** review export exists is still unknown → reviews **deferred**.
+
+---
+
+## W. User walkthrough evidence — NAVER SmartStore (2026-06-16, seller-provided)
+
+A seller logged into the NAVER SmartStore Center and walked the review-export path. This is
+first-hand evidence behind the login, superseding the earlier third-party-only inference.
+
+**Observed UI path:**
+- Main dashboard shows a **문의 · 리뷰 현황** area with a **리뷰 현황** card.
+- Left navigation: **문의/리뷰관리 → 리뷰 관리**.
+- The **리뷰 관리** page exists behind login, with review **filters** visible; the user can adjust
+  the **date range** and other filters and press **검색**.
+- The review-list area has an **엑셀다운** button; clicking it downloads a file named like
+  **`review_20260616_200638.xlsx`** (`review_YYYYMMDD_HHMMSS.xlsx`).
+
+**What this confirms:** a seller-center **review export exists** for the logged-in workflow
+(immediate `.xlsx` download observed). **[walkthrough]**
+
+**What this does NOT yet confirm (do not overstate):**
+- It does **not** prove full automation is viable.
+- It does **not** confirm **NaverPay / 네이버쇼핑 구매평** are included in the export (still
+  pending a user yes/no).
+- It does **not** confirm parser compatibility — no actual `.xlsx`/`.csv` sample has been
+  analyzed yet.
+
+**Observed export columns (header names, as reported — not yet validated against a file):**
+상품번호 · 상품명 · 리뷰구분 · 구매자평점 · 포토/영상 · 리뷰상세내용 · 리뷰도움수 · 등록자 ·
+리뷰등록일 · 최종수정일 · 리뷰글번호 · 관련리뷰글번호 · 관련리뷰상세내용 · 전시상태 · 답글여부 ·
+답글등록일시 · 베스트리뷰 · 베스트리뷰선정일시 · 이벤트번호 · 혜택지급 · 혜택지급일시 ·
+유저정보 등록 항목 · 상품주문번호 · 풀필먼트사 · 리뷰이동일
+
+**Likely ingestion mapping candidates** (hypotheses to validate against a real sample — not
+final, and the canonical review schema must be confirmed):
+
+| Canonical field (candidate) | NAVER column (candidate) |
+|---|---|
+| externalId (review id) | 리뷰글번호 |
+| productExternalId | 상품번호 |
+| productName | 상품명 |
+| rating | 구매자평점 |
+| reviewBody | 리뷰상세내용 |
+| author / displayName | 등록자 |
+| createdAt | 리뷰등록일 |
+| updatedAt | 최종수정일 |
+| orderExternalId | 상품주문번호 |
+| reply status | 답글여부 / 답글등록일시 |
+| media flag | 포토/영상 |
+| display status | 전시상태 |
+
+**Remaining blockers (before any automation or parser change):**
+1. An actual **anonymized `.xlsx`/`.csv` sample** is still needed (mask reviewer names/IDs/
+   order identifiers; keep headers + structure).
+2. **Encoding / date-format / data-type validation** against that sample.
+3. **NaverPay / 네이버쇼핑 구매평 inclusion** — still needs an explicit yes/no.
+4. **Export repeatability** and **date / row limits** — still need confirmation.
+5. Whether a **scheduled / emailed** review report exists — still unknown.
 
 ---
 
@@ -92,13 +158,14 @@ walkthrough/sample requirement) is itemized in **Section B**.
   - https://developers.coupangcorp.com/hc/en-us/articles/360033643314-CS-API-Workflow [official]
 - **These are inquiries, not reviews.** Do not present as review support.
 
-**B5 — NAVER, seller-center review export: likely yes, unconfirmed.**
-- Third-party guides describe 스마트스토어센터 → **리뷰 관리 → 구매평 엑셀 다운로드** (used to
-  migrate reviews elsewhere).
-  - https://imweb.me/blog?idx=402 ; https://www.cre.ma/blog/link-smartstore [third-party]
-- Same sources flag that **NaverPay/네이버쇼핑 구매평 may not be exportable** → the export could
-  be incomplete. **Third-party blogs are not proof of an official export.** Confirm the button,
-  filters, format, coverage, and limits via screenshots + a real sample. [walkthrough-required] + [sample-required]
+**B5 — NAVER, seller-center review export: confirmed by user walkthrough (2026-06-16); coverage/sample pending.**
+- **Primary evidence:** a seller's logged-in walkthrough confirmed 리뷰 관리 → **엑셀다운** →
+  `review_YYYYMMDD_HHMMSS.xlsx`, with column names observed. See **Section W**. [walkthrough]
+- Corroborating (pre-walkthrough): third-party guides described the same 리뷰 관리 → 구매평 엑셀
+  다운로드 path. https://imweb.me/blog?idx=402 ; https://www.cre.ma/blog/link-smartstore [third-party]
+- **Still pending:** **NaverPay/네이버쇼핑 구매평** inclusion (a third-party source flagged it may
+  be excluded — needs a user yes/no), an **anonymized sample** for schema/encoding/date-format
+  validation, and **repeatability / date & row limits**. [walkthrough-required] + [sample-required]
 
 **B6 — Coupang, seller-center review export: unknown.**
 - Searches for "쿠팡 상품평 엑셀 다운로드" return **third-party scraping services** (paste a product
@@ -113,14 +180,14 @@ walkthrough/sample requirement) is itemized in **Section B**.
 
 ## C. First discovery target — NAVER SmartStore (a target to verify, not a build decision)
 
-**NAVER is the first discovery target because a seller-center review export appears plausible
-([B5], third-party-documented) and must be verified — not because it is proven ready for
-automation.** No automation should be built until a walkthrough + real sample confirm an
-official, repeatable, sufficiently-complete export.
+**NAVER is the first target because its seller-center review export is now confirmed to exist
+(user walkthrough 2026-06-16, Section W) — not because review automation is proven viable.** No
+automation should be built until a real anonymized sample + the NaverPay-coverage answer confirm
+a repeatable, sufficiently-complete export.
 
 Why NAVER over Coupang for the *next evidence step*:
-- NAVER has at least third-party-documented evidence of an *official* export (구매평 엑셀
-  다운로드); Coupang's "export" hits are third-party scrapers, with no official export confirmed.
+- NAVER's export is **walkthrough-confirmed** (리뷰 관리 → 엑셀다운 → `.xlsx`); Coupang's "export"
+  hits are third-party scrapers, with no official export confirmed.
 - Both have no usable review API, so an export is the only candidate route for either.
 
 **Gating risk (must be resolved before any build):** if the NAVER export omits NaverPay/쇼핑
@@ -132,30 +199,28 @@ API is a separate track and is **not** reviews.
 
 ---
 
-## D. Decision: do not build automation yet — collect evidence first
+## D. Decision: do not build automation yet — finish evidence first
 
-**Chosen next step: candidate #5 — manual seller-center walkthrough + sample-file collection.**
-Not production RPA, not a parser change, not browser-automation code. Every downstream choice
-(parser schema, automation steps, scheduling, coverage) depends on facts we do not yet have.
+The walkthrough (#5) **partially landed**: the NAVER export's *existence* is confirmed
+(Section W). It is **not** yet enough to build on — coverage, schema, repeatability, and
+report/email availability are still open. **Still no RPA, no parser change, no browser
+automation.**
 
-Evidence-collection step (#5) must produce:
-- seller-center walkthrough (NAVER first; Coupang to confirm defer-vs-proceed),
-- screenshots of the review-management page and any export button/dialog,
-- a real **anonymized** sample export (CSV/XLSX),
-- the export **column schema**,
-- **repeatability** and **date-range/row limits**,
-- whether a **scheduled/emailed** report exists.
-
-Only after #5 confirms an official, repeatable, sufficiently-complete export do we proceed —
-in this order, each separately approved:
-1. **#4 — Parser hardening** against the *real* export schema (no session automation; pays off
-   under every route).
-2. **#1 — NAVER seller-center export automation spike** (opt-in, user-attended, Section-E guardrails).
-   - **#3 — Email-attachment ingestion** is *preferred over #1* if the walkthrough reveals a
-     scheduled/emailed report (lower risk, no brittle UI automation).
+**Updated next steps (each separately approved):**
+1. **Obtain an anonymized sample export file** (`.xlsx`/`.csv`) **and the NaverPay/쇼핑
+   coverage yes/no.** These two unblock everything and are the immediate ask (Section F).
+2. **Parser compatibility analysis → parser-hardening plan** — map the real columns
+   (Section W candidates) to the canonical review schema against the actual sample; decide what
+   hardening is needed (candidate **#4**). No session automation.
+3. **NAVER seller-center export-automation spike** (candidate **#1**, opt-in, user-attended,
+   Section-E guardrails) — only after the sample + coverage confirm a repeatable,
+   sufficiently-complete export.
+4. **If a scheduled/emailed report exists, prefer email-attachment ingestion** (candidate **#3**)
+   over browser automation (lower risk, no brittle UI driving).
 
 Manual CSV/XLSX upload remains the **pilot fallback** (already built), explicitly not the
-product destination.
+product destination. **Viability of NAVER review automation is not claimed** until the sample
+file and NaverPay coverage are verified.
 
 ---
 
@@ -209,6 +274,8 @@ exists — this could unlock the lower-risk email-ingestion route (#3).
 ## Status / next step
 
 Discovery document only — **no code, no RPA/browser automation, no COUPANG verifier work.**
-Hold for approval. On approval and once the Section-F evidence (especially a real NAVER export
-sample + the NaverPay-coverage answer) is in hand, proceed with **#4 parser hardening**, then the
-**#1 NAVER export-automation spike** (or **#3 email ingestion** if a report turns out to be emailable).
+NAVER export *existence* is walkthrough-confirmed (Section W); its *sufficiency for automation*
+is not. Hold for approval. Immediate ask: an **anonymized NAVER export sample** + the
+**NaverPay-coverage yes/no** (Section F). Then proceed with parser-compatibility analysis →
+**#4 parser hardening**, then the **#1 NAVER export-automation spike** (or **#3 email ingestion**
+if a scheduled/emailed report turns out to exist).
