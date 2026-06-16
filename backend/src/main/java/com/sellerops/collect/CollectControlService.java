@@ -291,9 +291,10 @@ public class CollectControlService {
         if (VerifyOutcome.REASON_INVALID_CREDENTIAL.equals(reasonCode)) {
             return "연결 정보가 유효하지 않습니다.";
         }
-        if (VerifyOutcome.REASON_TEMPORARY.equals(reasonCode)) {
+        if (VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR.equals(reasonCode)) {
             return "일시적인 채널 응답 오류입니다.";
         }
+        // PROVIDER_UNAVAILABLE and any unknown code → generic safe failure.
         return "채널 API 연결 확인에 실패했습니다.";
     }
 

@@ -73,6 +73,74 @@ class NaverTokenClientTest {
         assertThat(BCrypt.checkpw(CLIENT_ID + "_" + timestamp, hashed)).isTrue();
     }
 
+    // --- verify(): live, no-cache, status-aware auth check (test-connection) ---
+
+    @Test
+    void verifyReturnsOkWhenTokenMints() {
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET)).isEqualTo(NaverTokenClient.AuthCheck.OK);
+    }
+
+    @Test
+    void verifyReturnsInvalidOnFourXxOtherThan429() {
+        for (int status : new int[] {400, 401, 403}) {
+            FakeNaverHttpClient h = new FakeNaverHttpClient();
+            NaverTokenClient c = new NaverTokenClient(h, clock, BASE_URL);
+            h.enqueue(new NaverHttpClient.Response(status, "{\"code\":\"X\"}", Map.of()));
+            assertThat(c.verify(CLIENT_ID, CLIENT_SECRET))
+                    .as("HTTP %d → INVALID", status)
+                    .isEqualTo(NaverTokenClient.AuthCheck.INVALID);
+        }
+    }
+
+    @Test
+    void verifyReturnsRateLimitedOn429() {
+        http.enqueue(FakeNaverHttpClient.rateLimited429());
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.RATE_LIMITED);
+    }
+
+    @Test
+    void verifyReturnsUnavailableOn5xx() {
+        http.enqueue(new NaverHttpClient.Response(500, "{}", Map.of()));
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.UNAVAILABLE);
+    }
+
+    @Test
+    void verifyReturnsUnavailableOnNetworkError() {
+        http.enqueueNetworkFailure();
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.UNAVAILABLE);
+    }
+
+    @Test
+    void verifyReturnsUnavailableOnUnreadable200Body() {
+        http.enqueue(FakeNaverHttpClient.ok("{\"not\":\"a token\"}"));
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET))
+                .isEqualTo(NaverTokenClient.AuthCheck.UNAVAILABLE);
+    }
+
+    @Test
+    void verifyDoesNotCacheAndMintsEveryCall() {
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-2", 3000));
+
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET)).isEqualTo(NaverTokenClient.AuthCheck.OK);
+        assertThat(client.verify(CLIENT_ID, CLIENT_SECRET)).isEqualTo(NaverTokenClient.AuthCheck.OK);
+
+        // Unlike accessToken(), verify never reads or writes the cache — a live check each time.
+        assertThat(http.sent).hasSize(2);
+    }
+
+    @Test
+    void verifyReturnsInvalidOnBadSaltWithoutHttp() {
+        assertThat(client.verify(CLIENT_ID, "not-a-bcrypt-salt"))
+                .isEqualTo(NaverTokenClient.AuthCheck.INVALID);
+        // The signature fails before any request — fail closed, zero HTTP.
+        assertThat(http.sent).isEmpty();
+    }
+
     @Test
     void tokenRequestUsesConfirmedEndpointAndFormShape() {
         http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));

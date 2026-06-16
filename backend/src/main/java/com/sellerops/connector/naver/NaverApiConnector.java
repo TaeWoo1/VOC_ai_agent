@@ -1,11 +1,14 @@
 package com.sellerops.connector.naver;
 
+import com.sellerops.connector.ConnectionVerifier;
 import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedDataTypeException;
+import com.sellerops.connector.VerifyContext;
+import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
 import java.util.Map;
@@ -26,7 +29,7 @@ import java.util.Set;
  * only then the first HTTP call (token mint, then the order queries). A
  * credential problem can never produce an outbound request.
  */
-public class NaverApiConnector implements PullConnector {
+public class NaverApiConnector implements PullConnector, ConnectionVerifier {
 
     public static final String KIND = "NAVER_API";
     public static final String CONNECTOR_CLASS = "API";
@@ -100,6 +103,31 @@ public class NaverApiConnector implements PullConnector {
             // Cursor unchanged — a throttled attempt must re-request the same position.
             return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfterFor(e), KIND);
         }
+    }
+
+    /**
+     * Auth/connectivity-only check for the stored credential — never collects.
+     * Fail-closed ordering mirrors {@code fetch}: vault open → secret-shape check
+     * (no HTTP if a field is missing) → a single live token mint (no orders, no
+     * cache). The provider's HTTP status is mapped to a safe outcome; no token,
+     * secret, or provider body is ever returned.
+     */
+    @Override
+    public VerifyOutcome verifyConnection(VerifyContext context) {
+        // The service already confirmed a credential is on file; a missing master
+        // key (deploy misconfig) propagates as a 500, not a fabricated FAILED.
+        DecryptedCredential credential = vault.open(context.orgId(), context.sellerAccountId());
+        String clientId = credential.secrets().get("client_id");
+        String clientSecret = credential.secrets().get("client_secret");
+        if (isBlank(clientId) || isBlank(clientSecret)) {
+            return VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+        }
+        return switch (tokenClient.verify(clientId, clientSecret)) {
+            case OK -> VerifyOutcome.success();
+            case INVALID -> VerifyOutcome.failed(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+            case RATE_LIMITED -> VerifyOutcome.failed(VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR);
+            case UNAVAILABLE -> VerifyOutcome.failed(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+        };
     }
 
     /**

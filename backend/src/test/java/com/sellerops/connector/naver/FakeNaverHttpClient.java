@@ -32,9 +32,20 @@ final class FakeNaverHttpClient implements NaverHttpClient {
 
     final List<Sent> sent = new ArrayList<>();
     private final Deque<Response> responses = new ArrayDeque<>();
+    private final Deque<RuntimeException> failures = new ArrayDeque<>();
 
     void enqueue(Response response) {
         responses.add(response);
+    }
+
+    /**
+     * Simulate the {@link JdkNaverHttpClient} network/interrupt wrap (an
+     * {@link IllegalStateException}) on the next call — used to exercise the
+     * provider-unavailable path without real I/O. Popped before any enqueued
+     * response, so a test that queues only a failure makes the next call throw.
+     */
+    void enqueueNetworkFailure() {
+        failures.add(new IllegalStateException("네이버 API 호출에 실패했습니다 (네트워크 오류)."));
     }
 
     static Response tokenOk(String accessToken, long expiresIn) {
@@ -81,6 +92,9 @@ final class FakeNaverHttpClient implements NaverHttpClient {
 
     private Response record(Sent request) {
         sent.add(request);
+        if (!failures.isEmpty()) {
+            throw failures.pop();
+        }
         if (responses.isEmpty()) {
             throw new AssertionError("Unexpected HTTP call: " + request.method() + " " + request.uri());
         }

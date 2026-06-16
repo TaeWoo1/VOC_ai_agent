@@ -9,6 +9,8 @@ import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.UnsupportedDataTypeException;
+import com.sellerops.connector.VerifyContext;
+import com.sellerops.connector.VerifyOutcome;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
@@ -97,6 +99,72 @@ class NaverApiConnectorTest {
 
     private FetchRequest request(DataType dataType, String cursor) {
         return new FetchRequest(org, account, "NAVER", dataType, cursor, 50);
+    }
+
+    private VerifyContext verifyContext() {
+        return new VerifyContext(org, account, "NAVER");
+    }
+
+    // --- test-connection: auth-only verifyConnection (no orders, no collection) ---
+
+    @Test
+    void verifyConnectionSucceedsWhenTokenMintSucceeds() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.tokenOk("token-1", 3000));
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.SUCCESS);
+        assertThat(outcome.reasonCode()).isNull();
+        // Auth-only: a single token mint, no order calls.
+        assertThat(http.sent).hasSize(1);
+        assertThat(http.sent.get(0).method()).isEqualTo("POST_FORM");
+    }
+
+    @Test
+    void verifyConnectionInvalidCredentialOn401() {
+        storeNaverCredential();
+        http.enqueue(new NaverHttpClient.Response(401, "{\"code\":\"UNAUTHORIZED\"}", Map.of()));
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+    }
+
+    @Test
+    void verifyConnectionTemporaryOn429() {
+        storeNaverCredential();
+        http.enqueue(FakeNaverHttpClient.rateLimited429());
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_TEMPORARY_PROVIDER_ERROR);
+    }
+
+    @Test
+    void verifyConnectionUnavailableOnNetworkError() {
+        storeNaverCredential();
+        http.enqueueNetworkFailure();
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_PROVIDER_UNAVAILABLE);
+    }
+
+    @Test
+    void verifyConnectionMissingClientKeysIsInvalidWithZeroHttp() {
+        // A credential row exists but lacks the Naver keys → fail closed, no HTTP.
+        vault.store(org, account, "API", "OAUTH2",
+                Map.of("accessKey", "AK-1", "secretKey", "SK-1"), null, null, null);
+
+        VerifyOutcome outcome = connector.verifyConnection(verifyContext());
+
+        assertThat(outcome.status()).isEqualTo(VerifyOutcome.Status.FAILED);
+        assertThat(outcome.reasonCode()).isEqualTo(VerifyOutcome.REASON_INVALID_CREDENTIAL);
+        assertThat(http.sent).isEmpty();
     }
 
     @Test

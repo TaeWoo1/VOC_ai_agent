@@ -19,10 +19,10 @@ public record VerifyOutcome(Status status, String reasonCode) {
 
     /** Stored credential was rejected by the provider (authentication failure). */
     public static final String REASON_INVALID_CREDENTIAL = "INVALID_CREDENTIAL";
-    /** Transient provider/network error — the check may succeed if retried later. */
-    public static final String REASON_TEMPORARY = "TEMPORARY";
-    /** Other non-transient provider failure. */
-    public static final String REASON_PROVIDER_ERROR = "PROVIDER_ERROR";
+    /** Transient throttling/rate-limit — the check may succeed if retried later. */
+    public static final String REASON_TEMPORARY_PROVIDER_ERROR = "TEMPORARY_PROVIDER_ERROR";
+    /** Provider unreachable or 5xx/network failure — non-credential, may be transient. */
+    public static final String REASON_PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE";
 
     public VerifyOutcome {
         Objects.requireNonNull(status, "status");

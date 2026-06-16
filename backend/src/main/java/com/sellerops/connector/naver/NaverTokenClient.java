@@ -111,6 +111,69 @@ public class NaverTokenClient {
         return Base64.getEncoder().encodeToString(hashed.getBytes(StandardCharsets.UTF_8));
     }
 
+    /** Status-aware result of an auth-only credential check (test-connection). */
+    public enum AuthCheck {
+        /** Token minted — the credential is accepted by the provider. */
+        OK,
+        /** Credential/signature rejected (bad salt or 4xx other than 429). */
+        INVALID,
+        /** Throttled (HTTP 429) — transient, may succeed if retried. */
+        RATE_LIMITED,
+        /** Provider 5xx, network error, or an unreadable token body. */
+        UNAVAILABLE
+    }
+
+    /**
+     * Live, no-cache auth check for the test-connection verifier: mint a fresh
+     * token to prove the provider accepts the credential, then discard it (the
+     * token is never cached or returned). Status-aware so the caller can tell a
+     * rejected credential from a transient provider problem. Never logs or
+     * returns secret/token material; provider error bodies are never surfaced.
+     */
+    public AuthCheck verify(String clientId, String clientSecret) {
+        long timestamp = clock.instant().toEpochMilli();
+        String sign;
+        try {
+            sign = signature(clientId, clientSecret, timestamp);
+        } catch (IllegalStateException e) {
+            // client_secret is not a valid signature salt — a credential problem, pre-HTTP.
+            return AuthCheck.INVALID;
+        }
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("client_id", clientId);
+        form.put("timestamp", String.valueOf(timestamp));
+        form.put("client_secret_sign", sign);
+        form.put("grant_type", "client_credentials");
+        form.put("type", "SELF");
+
+        NaverHttpClient.Response response;
+        try {
+            response = http.postForm(tokenUri, form);
+        } catch (IllegalStateException e) {
+            // JdkNaverHttpClient wraps network/interrupt failures as IllegalStateException.
+            return AuthCheck.UNAVAILABLE;
+        }
+
+        int status = response.statusCode();
+        if (status == 200) {
+            try {
+                NaverTokenResponse token = parse(response.body());
+                boolean valid = token.accessToken() != null && !token.accessToken().isBlank();
+                return valid ? AuthCheck.OK : AuthCheck.UNAVAILABLE;
+            } catch (IllegalStateException e) {
+                return AuthCheck.UNAVAILABLE;
+            }
+        }
+        if (status == 429) {
+            return AuthCheck.RATE_LIMITED;
+        }
+        if (status >= 500) {
+            return AuthCheck.UNAVAILABLE;
+        }
+        // Other 4xx (400/401/403/…) — credential or signature rejected.
+        return AuthCheck.INVALID;
+    }
+
     private String mint(String clientId, String clientSecret, String cacheKey, Instant now) {
         long timestamp = now.toEpochMilli();
         Map<String, String> form = new LinkedHashMap<>();
