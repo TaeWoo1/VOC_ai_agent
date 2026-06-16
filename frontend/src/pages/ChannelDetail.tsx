@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { Section } from "../components/Section";
@@ -407,6 +407,7 @@ export function ChannelDetail() {
 
       <div ref={credentialRef}>
         <ConnectionInfoSection
+          accountId={accountId}
           info={connectionInfo}
           loading={loadingInfo}
           error={infoError}
@@ -414,6 +415,8 @@ export function ChannelDetail() {
           template={credentialTemplate}
           templateError={templateError}
           onViewRuns={() => scrollToSection("runs")}
+          onReport={report}
+          onChanged={reload}
         />
       </div>
 
@@ -503,6 +506,7 @@ function NextActionPanel({
 // and its 갱신/만료, plus calm per-channel guidance. No secret is read or shown,
 // no write action, no reconnect form — that flow (연결 정보 갱신) is a later slice.
 function ConnectionInfoSection({
+  accountId,
   info,
   loading,
   error,
@@ -510,7 +514,10 @@ function ConnectionInfoSection({
   template,
   templateError,
   onViewRuns,
+  onReport,
+  onChanged,
 }: {
+  accountId: string;
   info: ConnectionInfoView | null;
   loading: boolean;
   error: boolean;
@@ -518,8 +525,13 @@ function ConnectionInfoSection({
   template: CredentialTemplateView | null;
   templateError: boolean;
   onViewRuns: () => void;
+  onReport: (message: string, isError: boolean) => void;
+  onChanged: () => void;
 }) {
   const guidance = (channelCode && CHANNEL_GUIDANCE[channelCode]) ?? GENERIC_GUIDANCE;
+  // The entry form needs an API template; manual / file-upload channels (404 →
+  // null) get the guidance text only, never a form.
+  const canEnter = template !== null && template.fields.length > 0;
 
   return (
     <Section title="연결 정보">
@@ -530,12 +542,30 @@ function ConnectionInfoSection({
           연결 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
         </p>
       ) : info === null ? (
-        <div className="space-y-2">
-          <p className="text-base font-semibold text-ink">등록된 연결 정보가 없습니다.</p>
-          <p className="text-base text-muted">{guidance}</p>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-base font-semibold text-ink">등록된 연결 정보가 없습니다.</p>
+            <p className="text-base text-muted">{guidance}</p>
+          </div>
+          {canEnter ? (
+            <CredentialEntryForm
+              accountId={accountId}
+              template={template}
+              onReport={onReport}
+              onChanged={onChanged}
+            />
+          ) : null}
         </div>
       ) : (
-        <ConnectionInfoDetail info={info} guidance={guidance} onViewRuns={onViewRuns} />
+        <ConnectionInfoDetail
+          info={info}
+          guidance={guidance}
+          onViewRuns={onViewRuns}
+          accountId={accountId}
+          template={template}
+          onReport={onReport}
+          onChanged={onChanged}
+        />
       )}
       <CredentialTemplateBlock template={template} error={templateError} />
     </Section>
@@ -607,12 +637,24 @@ function ConnectionInfoDetail({
   info,
   guidance,
   onViewRuns,
+  accountId,
+  template,
+  onReport,
+  onChanged,
 }: {
   info: ConnectionInfoView;
   guidance: string;
   onViewRuns: () => void;
+  accountId: string;
+  template: CredentialTemplateView | null;
+  onReport: (message: string, isError: boolean) => void;
+  onChanged: () => void;
 }) {
   const expiry = expiryLabel(info.tokenExpiresAt);
+  // Re-entry: connection info already exists (incl. expired), so let the operator
+  // submit fresh info through the same validated path. Collapsed by default.
+  const [reentering, setReentering] = useState(false);
+  const canEnter = template !== null && template.fields.length > 0;
   return (
     <div className="space-y-4">
       <p className="text-base font-semibold text-good">✓ 연결 정보가 등록되어 있습니다.</p>
@@ -633,12 +675,126 @@ function ConnectionInfoDetail({
         </div>
       </div>
       <p className="text-base text-muted">{guidance}</p>
-      <div className="flex">
+      <div className="flex flex-wrap gap-3">
         <button type="button" onClick={onViewRuns} className="btn-ghost">
           수집 내역 보기
         </button>
+        {canEnter ? (
+          <button type="button" onClick={() => setReentering((v) => !v)} className="btn-ghost">
+            연결 정보 다시 입력
+          </button>
+        ) : null}
       </div>
+      {reentering && canEnter ? (
+        <CredentialEntryForm
+          accountId={accountId}
+          template={template}
+          onReport={onReport}
+          onChanged={onChanged}
+          onDone={() => setReentering(false)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+// 연결 정보 입력 form: renders one input per backend credential-template field
+// (label as primary UI, helpText as helper, secret → masked password input), and
+// submits to the validated POST /credentials path. Server-derives
+// connectorClass/authType from the template; sends only the fields the operator
+// typed (trimmed, blank optionals omitted). On success it reports a save-only
+// message ("연결 정보가 저장되었습니다" — NOT a connection-success claim, no
+// test-connection exists), clears every field, and triggers a masked-metadata
+// re-read. Secret values live only in local state, are never logged, stored, or
+// echoed; a backend 400 surfaces the calm (secret-safe) backend message and keeps
+// the typed fields so the operator can correct and resubmit.
+function CredentialEntryForm({
+  accountId,
+  template,
+  onReport,
+  onChanged,
+  onDone,
+}: {
+  accountId: string;
+  template: CredentialTemplateView;
+  onReport: (message: string, isError: boolean) => void;
+  onChanged: () => void;
+  onDone?: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  // UX-only gate (backend validation is the source of truth): every required
+  // field non-blank after trim.
+  const requiredFilled = template.fields
+    .filter((f) => f.required)
+    .every((f) => (values[f.key] ?? "").trim().length > 0);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (saving) {
+      return;
+    }
+    setSaving(true);
+    // Build secrets keyed by field.key: trim every value, omit blank optionals so
+    // the payload is exactly the connector's expected shape.
+    const secrets: Record<string, string> = {};
+    for (const field of template.fields) {
+      const value = (values[field.key] ?? "").trim();
+      if (value.length > 0) {
+        secrets[field.key] = value;
+      }
+    }
+    try {
+      await api.storeCredential(accountId, {
+        connectorClass: template.connectorClass,
+        authType: template.authType,
+        secrets,
+      });
+      setValues({});
+      onReport("연결 정보가 저장되었습니다.", false);
+      onChanged();
+      onDone?.();
+    } catch (err) {
+      onReport(
+        backendMessage(err) ?? "연결 정보 저장에 실패했습니다. 입력 정보를 확인해 주세요.",
+        true,
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="space-y-4 rounded-xl border border-line bg-canvas/40 p-4" onSubmit={submit}>
+      <h3 className="text-base font-bold text-ink">연결 정보 입력</h3>
+      {template.fields.map((field) => (
+        <div key={field.key}>
+          <label htmlFor={`cred-${field.key}`} className="mb-1.5 block text-base font-semibold text-ink">
+            {field.label}
+            {field.required ? null : (
+              <span className="ml-2 text-sm font-normal text-muted">(선택)</span>
+            )}
+          </label>
+          <input
+            id={`cred-${field.key}`}
+            type={field.secret ? "password" : "text"}
+            value={values[field.key] ?? ""}
+            onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+            required={field.required}
+            autoComplete="off"
+            className="w-full rounded-xl border border-line px-4 py-2.5 text-base focus:border-brand focus:outline-none"
+          />
+          {field.helpText ? <p className="mt-1 text-sm text-muted">{field.helpText}</p> : null}
+        </div>
+      ))}
+      <p className="text-sm text-muted">
+        입력한 정보는 암호화되어 저장됩니다. 저장 후 수집 테스트는 별도 단계에서 확인합니다.
+      </p>
+      <button type="submit" disabled={saving || !requiredFilled} className="btn-primary">
+        {saving ? "저장 중…" : "연결 정보 저장"}
+      </button>
+    </form>
   );
 }
 

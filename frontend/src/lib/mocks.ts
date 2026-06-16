@@ -8,6 +8,7 @@ import type {
   ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
+  CredentialIntakeRequest,
   CredentialTemplateView,
   DashboardSummaryResponse,
   InboxResponse,
@@ -239,7 +240,35 @@ export function mockConnectionStatus(accountId?: string): ConnectionStatusView {
   };
 }
 
+// Mock-mode optimistic store: when the secret-entry form saves in demo mode there
+// is no backend, so we record a MASKED ConnectionInfoView (never the typed
+// secrets) keyed by accountId. mockConnectionInfo consults this first, so a save →
+// reload reflects the entered connection instead of falling back to the static
+// seed (and a re-entry overwrites it). Module-level on purpose: it must survive
+// across the form's save and the subsequent strict re-read.
+const savedCredentials = new Map<string, ConnectionInfoView>();
+
+export function mockStoreCredential(accountId: string, request: CredentialIntakeRequest): void {
+  // Mirror the real masked response: derived connectorClass/authType, freshly
+  // rotated, no expiry. The typed secret values in `request.secrets` are never
+  // persisted here.
+  savedCredentials.set(accountId, {
+    connectorClass: request.connectorClass,
+    authType: request.authType,
+    tokenExpiresAt: null,
+    lastRotatedAt: new Date().toISOString(),
+    hasRefreshToken: false,
+  });
+}
+
 export function mockConnectionInfo(accountId?: string): ConnectionInfoView {
+  // A demo-mode save wins over the seeded view, so the masked detail reflects it.
+  if (accountId != null) {
+    const saved = savedCredentials.get(accountId);
+    if (saved) {
+      return saved;
+    }
+  }
   // Account-aware demo (mock mode only), consistent with mockConnectionStatus:
   // the failing 쿠팡 account (mock-channel-0) has connection info on file but an
   // expired token (재등록 필요); every other account has valid, non-expiring info.

@@ -211,6 +211,21 @@ export interface CredentialTemplateView {
   notes: string;
 }
 
+// Write payload for POST /api/seller-accounts/{accountId}/credentials, mirroring
+// the backend CredentialIntakeRequest (com.sellerops.collect.dto). The backend
+// validates this against the channel's CredentialTemplate, server-derives the
+// stored connectorClass/authType, and returns masked metadata only. `secrets` is
+// keyed by CredentialFieldView.key. refreshToken/tokenExpiresAt are unused by the
+// secret-entry form (CAFE24's refresh_token rides in `secrets` as a template
+// field); kept optional to match the backend record.
+export interface CredentialIntakeRequest {
+  connectorClass: string;
+  authType: string;
+  secrets: Record<string, string>;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+}
+
 export interface ConnectorAlertView {
   id: string;
   sellerAccountId: string;

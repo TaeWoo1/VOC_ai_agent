@@ -6,6 +6,7 @@ import type {
   ConnectionInfoView,
   ConnectionStatusView,
   ConnectorAlertView,
+  CredentialIntakeRequest,
   CredentialTemplateView,
   DashboardSummaryResponse,
   IngestResult,
@@ -28,6 +29,7 @@ import {
   mockConnectionStatus,
   mockConnectorAlerts,
   mockCredentialTemplate,
+  mockStoreCredential,
   mockDashboard,
   mockInbox,
   mockItemAnalysis,
@@ -172,6 +174,21 @@ export const api = {
       }
       throw e;
     }
+  },
+  // Mutating: write-only credential intake (ChannelDetail's 연결 정보 입력 form).
+  // POSTs the operator's typed connection info to the backend, which validates it
+  // against the channel template, encrypts it, and answers with masked metadata.
+  // The response body (masked metadata incl. encryptionKeyId) is deliberately NOT
+  // consumed — success is re-established by the caller re-reading
+  // getConnectionInfoStrict. In demo mode there is no backend, so it records a
+  // masked optimistic view locally (never the typed secrets) so the subsequent
+  // re-read reflects the save. Resolves void in both modes.
+  async storeCredential(accountId: string, request: CredentialIntakeRequest): Promise<void> {
+    if (USE_MOCKS) {
+      mockStoreCredential(accountId, request);
+      return;
+    }
+    await http.post(`/api/seller-accounts/${accountId}/credentials`, request);
   },
   // Strict variant for the connection-alert list (Alerts page): no silent mock
   // fallback, so a dead backend fails closed instead of rendering fake alerts.
