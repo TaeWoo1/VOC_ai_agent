@@ -226,6 +226,22 @@ export interface CredentialIntakeRequest {
   tokenExpiresAt?: string;
 }
 
+// Result of a manual, explicit test-connection (POST .../test-connection),
+// mirroring the backend ConnectionTestResultView. Auth/connectivity only — it
+// never implies collection. Safe fields only: NEVER a token, secret, ciphertext,
+// IV, provider response body, header, or signed URL. `message` is a fixed,
+// operator-safe backend string; `reasonCode` is a safe machine code (or null)
+// and is not rendered raw.
+export type ConnectionTestStatus = "SUCCESS" | "FAILED" | "UNSUPPORTED" | "NOT_CONFIGURED";
+
+export interface ConnectionTestResultView {
+  sellerAccountId: string;
+  status: ConnectionTestStatus;
+  checkedAt: string;
+  message: string;
+  reasonCode: string | null;
+}
+
 export interface ConnectorAlertView {
   id: string;
   sellerAccountId: string;

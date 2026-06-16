@@ -7,6 +7,7 @@ import type {
   ChannelStatus,
   ConnectionInfoView,
   ConnectionStatusView,
+  ConnectionTestResultView,
   ConnectorAlertView,
   CredentialIntakeRequest,
   CredentialTemplateView,
@@ -259,6 +260,44 @@ export function mockStoreCredential(accountId: string, request: CredentialIntake
     lastRotatedAt: new Date().toISOString(),
     hasRefreshToken: false,
   });
+}
+
+// The channel code behind a demo account id (`mock-acct-mock-channel-{i}`), or
+// null if it can't be derived — used to keep the demo test-connection honest.
+function mockChannelCodeForAccount(accountId?: string): string | null {
+  if (accountId == null) {
+    return null;
+  }
+  const match = accountId.match(/mock-channel-(\d+)$/);
+  if (match == null) {
+    return null;
+  }
+  return CHANNELS[Number(match[1])]?.code ?? null;
+}
+
+// Demo test-connection. Mirrors the real backend's truth per channel so the demo
+// never teaches that an unsupported channel is verified: only NAVER has a real
+// auth verifier, so only the NAVER demo account returns SUCCESS; every other
+// channel returns UNSUPPORTED. Safe DTO shape only — no token/secret/provider
+// body ever appears here or in the real response.
+export function mockTestConnection(accountId: string): ConnectionTestResultView {
+  const checkedAt = new Date().toISOString();
+  if (mockChannelCodeForAccount(accountId) === "NAVER") {
+    return {
+      sellerAccountId: accountId,
+      status: "SUCCESS",
+      checkedAt,
+      message: "연결 정보가 확인되었습니다.",
+      reasonCode: null,
+    };
+  }
+  return {
+    sellerAccountId: accountId,
+    status: "UNSUPPORTED",
+    checkedAt,
+    message: "이 채널의 연결 확인은 아직 제공되지 않습니다.",
+    reasonCode: "VERIFY_NOT_IMPLEMENTED",
+  };
 }
 
 export function mockConnectionInfo(accountId?: string): ConnectionInfoView {

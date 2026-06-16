@@ -11,6 +11,7 @@ import type {
   ChannelResponse,
   ConnectionInfoView,
   ConnectionStatusView,
+  ConnectionTestResultView,
   CredentialFieldView,
   CredentialTemplateView,
   ScheduleView,
@@ -655,6 +656,30 @@ function ConnectionInfoDetail({
   // submit fresh info through the same validated path. Collapsed by default.
   const [reentering, setReentering] = useState(false);
   const canEnter = template !== null && template.fields.length > 0;
+
+  // Manual connection check — auth/connectivity only, click-only (no effect, no
+  // auto-run). The result lives in component state for this page session only:
+  // never persisted, never logged, and it never mutates the displayed connection
+  // status (no onChanged/reload), since a check verifies auth, not collection.
+  const [checking, setChecking] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResultView | null>(null);
+  const [testErrored, setTestErrored] = useState(false);
+  async function runConnectionCheck() {
+    if (checking) {
+      return;
+    }
+    setChecking(true);
+    setTestErrored(false);
+    try {
+      setTestResult(await api.testConnection(accountId));
+    } catch {
+      // Do not log the error/response body — it may carry provider detail.
+      setTestResult(null);
+      setTestErrored(true);
+    } finally {
+      setChecking(false);
+    }
+  }
   return (
     <div className="space-y-4">
       <p className="text-base font-semibold text-good">✓ 연결 정보가 등록되어 있습니다.</p>
@@ -684,7 +709,24 @@ function ConnectionInfoDetail({
             연결 정보 다시 입력
           </button>
         ) : null}
+        {canEnter ? (
+          <button
+            type="button"
+            onClick={runConnectionCheck}
+            disabled={checking}
+            className="btn-ghost"
+          >
+            {checking ? "연결 확인 중…" : "연결 확인"}
+          </button>
+        ) : null}
       </div>
+      {testErrored ? (
+        <div className="rounded-xl bg-bad/5 px-4 py-3">
+          <p className="text-base font-semibold text-bad">연결 확인에 실패했습니다.</p>
+        </div>
+      ) : testResult ? (
+        <ConnectionCheckResult result={testResult} />
+      ) : null}
       {reentering && canEnter ? (
         <CredentialEntryForm
           accountId={accountId}
@@ -696,6 +738,31 @@ function ConnectionInfoDetail({
       ) : null}
     </div>
   );
+}
+
+// Renders a connection-check result from the safe DTO. Auth/connectivity only —
+// never implies collection. Copy is frontend-fixed per status (so no raw provider
+// string or banned wording can surface); the backend `message` is shown ONLY for
+// FAILED, as a muted secondary line (it is a fixed, secret-free, hedged string).
+// `reasonCode` is never rendered raw; tokens/secrets/provider bodies are never
+// present in this DTO.
+function ConnectionCheckResult({ result }: { result: ConnectionTestResultView }) {
+  if (result.status === "SUCCESS") {
+    return <p className="text-base font-semibold text-good">✓ 연결 정보가 확인되었습니다.</p>;
+  }
+  if (result.status === "FAILED") {
+    return (
+      <div className="rounded-xl bg-bad/5 px-4 py-3">
+        <p className="text-base font-semibold text-bad">연결 확인에 실패했습니다.</p>
+        {result.message ? <p className="mt-1 text-sm text-muted">{result.message}</p> : null}
+      </div>
+    );
+  }
+  if (result.status === "NOT_CONFIGURED") {
+    return <p className="text-base text-muted">저장된 연결 정보가 없습니다.</p>;
+  }
+  // UNSUPPORTED (and any unexpected status) — not-yet-supported, fixed copy.
+  return <p className="text-base text-muted">이 채널의 연결 확인은 아직 제공되지 않습니다.</p>;
 }
 
 // 연결 정보 입력 form: renders one input per backend credential-template field

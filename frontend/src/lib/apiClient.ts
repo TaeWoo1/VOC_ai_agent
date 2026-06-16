@@ -5,6 +5,7 @@ import type {
   ChannelResponse,
   ConnectionInfoView,
   ConnectionStatusView,
+  ConnectionTestResultView,
   ConnectorAlertView,
   CredentialIntakeRequest,
   CredentialTemplateView,
@@ -30,6 +31,7 @@ import {
   mockConnectorAlerts,
   mockCredentialTemplate,
   mockStoreCredential,
+  mockTestConnection,
   mockDashboard,
   mockInbox,
   mockItemAnalysis,
@@ -189,6 +191,22 @@ export const api = {
       return;
     }
     await http.post(`/api/seller-accounts/${accountId}/credentials`, request);
+  },
+  // Mutating-intent: a manual, explicit auth/connectivity check for the stored
+  // credential (ChannelDetail's "연결 확인" button). POSTs to the backend, which
+  // runs an auth-only provider check (no collection/sync/ingestion) and answers
+  // with a safe result DTO — status/checkedAt/message/reasonCode only, never a
+  // token, secret, or provider body. The body IS the result here (unlike
+  // storeCredential, which discards its masked-metadata body), so it is consumed
+  // and returned. Demo mode returns a channel-truthful canned result.
+  async testConnection(accountId: string): Promise<ConnectionTestResultView> {
+    if (USE_MOCKS) {
+      return mockTestConnection(accountId);
+    }
+    const { data } = await http.post<ConnectionTestResultView>(
+      `/api/seller-accounts/${accountId}/test-connection`,
+    );
+    return data;
   },
   // Strict variant for the connection-alert list (Alerts page): no silent mock
   // fallback, so a dead backend fails closed instead of rendering fake alerts.
