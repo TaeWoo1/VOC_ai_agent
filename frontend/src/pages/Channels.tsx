@@ -7,6 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { useApiData } from "../lib/useApiData";
 import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
+import { channelSupportDisplay } from "../lib/channelSupport";
 import { relativeTime } from "../lib/format";
 import type {
   ChannelResponse,
@@ -127,6 +128,7 @@ function ChannelCard({
   const disabled = channel.status === "PREPARING";
   const canUpload =
     channel.status === "FILE_UPLOAD_SUPPORTED" || channel.actionLabel === "파일 업로드";
+  const support = channelSupportDisplay(channel);
 
   // Prefer live connection health when we have it; the failure block surfaces the
   // last failure reason + consecutive-failure count for a connected account.
@@ -142,7 +144,11 @@ function ChannelCard({
       navigate(`/upload?channelId=${channel.id}`);
       return;
     }
-    onAction(`'${channel.nameKo}' 채널의 [${channel.actionLabel}] 동작은 다음 단계에서 연결됩니다.`);
+    onAction(
+      channel.support.credentialSetupSupported
+        ? `'${channel.nameKo}' 채널은 연결 정보를 등록하면 연결할 수 있습니다.`
+        : `'${channel.nameKo}' 채널은 현재 엑셀 업로드로 수집할 수 있습니다.`,
+    );
   }
 
   return (
@@ -152,12 +158,18 @@ function ChannelCard({
         {health ? <HealthBadge state={health.state} /> : <StatusBadge status={channel.status} />}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {channel.dataBadges.length > 0 ? (
-          channel.dataBadges.map((b) => <DataBadge key={b} label={b} />)
-        ) : (
-          <span className="text-sm text-muted">수집 항목 정보 없음</span>
-        )}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center rounded-lg bg-brand/10 px-2.5 py-1 text-sm font-semibold text-brand-700">
+            {support.primaryLabel}
+          </span>
+          {support.chips.map((c) => (
+            <DataBadge key={c} label={c} />
+          ))}
+        </div>
+        {support.uploadQualifier ? (
+          <p className="text-sm text-muted">{support.uploadQualifier}</p>
+        ) : null}
       </div>
 
       {failing ? (

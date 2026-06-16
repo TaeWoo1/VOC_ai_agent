@@ -12,5 +12,6 @@ public record ChannelResponse(
         ChannelStatus status,
         List<String> dataBadges,
         Instant lastSyncedAt,
-        String actionLabel) {
+        String actionLabel,
+        ChannelSupport support) {
 }

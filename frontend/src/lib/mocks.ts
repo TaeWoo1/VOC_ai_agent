@@ -5,6 +5,7 @@ import type {
   CapabilityView,
   ChannelResponse,
   ChannelStatus,
+  ChannelSupport,
   ConnectionInfoView,
   ConnectionStatusView,
   ConnectionTestResultView,
@@ -103,6 +104,25 @@ function actionLabel(status: ChannelStatus): string {
   }
 }
 
+// Channels with a backend credential template (→ "연결 정보 저장 가능").
+const TEMPLATED_CHANNELS = new Set(["NAVER", "COUPANG", "CAFE24", "ELEVENST", "GMARKET", "SSG"]);
+
+// Honest, internally-consistent support facts mirroring the backend's flag-aware contract.
+// NAVER is the only channel shown as auto-collecting (order) + connection-checkable, matching
+// the existing NAVER-connected demo (mockTestConnection returns SUCCESS only for NAVER).
+function mockSupport(code: string): ChannelSupport {
+  const fileUploadSupported = code !== "FILE_UPLOAD";
+  const autoCollect = code === "NAVER";
+  return {
+    fileUploadSupported,
+    fileUploadDataTypes: fileUploadSupported ? ["리뷰", "문의", "주문"] : [],
+    autoCollectSupported: autoCollect,
+    autoCollectDataTypes: autoCollect ? ["주문"] : [],
+    connectionCheckSupported: autoCollect,
+    credentialSetupSupported: TEMPLATED_CHANNELS.has(code),
+  };
+}
+
 export function mockChannels(): ChannelResponse[] {
   return CHANNELS.map((c, i) => ({
     id: `mock-channel-${i}`,
@@ -112,6 +132,7 @@ export function mockChannels(): ChannelResponse[] {
     dataBadges: c.dataBadges,
     lastSyncedAt: c.status === "CONNECTED" ? hoursAgoISO(i + 1) : null,
     actionLabel: actionLabel(c.status),
+    support: mockSupport(c.code),
   }));
 }
 

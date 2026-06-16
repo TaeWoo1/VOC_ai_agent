@@ -21,6 +21,17 @@ export interface AuthResponse {
   user: UserView;
 }
 
+/** Honest, flag-aware support facts for a channel (mirrors backend ChannelSupport).
+ *  These are FACTS; the operator-facing Korean wording lives in lib/channelSupport.ts. */
+export interface ChannelSupport {
+  fileUploadSupported: boolean;
+  fileUploadDataTypes: string[];
+  autoCollectSupported: boolean;
+  autoCollectDataTypes: string[];
+  connectionCheckSupported: boolean;
+  credentialSetupSupported: boolean;
+}
+
 export interface ChannelResponse {
   id: string;
   code: string;
@@ -29,6 +40,7 @@ export interface ChannelResponse {
   dataBadges: string[];
   lastSyncedAt: string | null;
   actionLabel: string;
+  support: ChannelSupport;
 }
 
 export interface SellerAccountResponse {
