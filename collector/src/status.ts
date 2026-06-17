@@ -12,12 +12,18 @@ export type CollectorState =
   | "SESSION_EXPIRED"
   | "ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA"
   | "EXPORT_LAYOUT_CHANGED"
+  | "EXPORT_ASYNC_JOB_DETECTED"
   | "DOWNLOAD_FAILED"
   | "UPLOAD_FAILED"
   | "DISCONNECTED";
 
 export type SessionState = "LOGGED_IN" | "LOGGED_OUT" | "AUTH_CHALLENGE";
-export type ExportOutcome = "CAPTURED" | "LAYOUT_UNRECOGNIZED" | "DOWNLOAD_FAILED" | "NOT_ATTEMPTED";
+export type ExportOutcome =
+  | "CAPTURED"
+  | "ASYNC_JOB_DETECTED"
+  | "LAYOUT_UNRECOGNIZED"
+  | "DOWNLOAD_FAILED"
+  | "NOT_ATTEMPTED";
 export type UploadOutcome = "OK" | "FAILED" | "NOT_ATTEMPTED";
 
 export interface RunSignals {
@@ -44,6 +50,10 @@ export function decideState(s: RunSignals): CollectorState {
 
   const exportOutcome = s.exportOutcome ?? "NOT_ATTEMPTED";
   if (exportOutcome === "LAYOUT_UNRECOGNIZED") return "EXPORT_LAYOUT_CHANGED";
+  // Export is a job, not an immediate download — a discovery/halt state for
+  // milestone 1, classified before CAPTURED so an async export is never mistaken
+  // for a captured file.
+  if (exportOutcome === "ASYNC_JOB_DETECTED") return "EXPORT_ASYNC_JOB_DETECTED";
   if (exportOutcome === "DOWNLOAD_FAILED") return "DOWNLOAD_FAILED";
   if (exportOutcome === "NOT_ATTEMPTED") return "CONNECTED";
 

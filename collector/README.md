@@ -1,18 +1,21 @@
 # SellerOps NAVER Review Collector — offline core POC
 
-A separate automation-client slice (not part of the backend ingestion PR). This
-directory currently holds the **offline core only**: the state model, the
-session detector, and the SellerOps upload client — all exercised **without any
-live NAVER automation and without a browser engine**.
+A separate automation-client slice (not part of the backend ingestion PR). It
+holds the **offline core** (state model, session detector, SellerOps upload
+client — all exercised without any browser) plus a **live export-discovery
+layer** (Playwright). The offline test suite needs no browser; the live layer is
+human-attended and runs **only under explicit, per-run operator approval**.
 
 ## Why this exists
 
 NAVER exposes no official review API, so reviews come from the official
 seller-center Excel export. The product direction is a Local Collector Agent that
-runs that export on a schedule inside the user's own authenticated browser
-session. This POC proves the parts that can be proven offline first; the live
-browser layer (Playwright `launchPersistentContext`) and a scheduler are
-deliberately **not** here yet.
+runs that export inside the user's own authenticated browser session. The offline
+core proves the parts provable without a browser; the live layer answers the two
+gating unknowns — can a persistent profile reach the export area in a valid human
+session, and is the export a sync download or an async job. A scheduler/recurring
+collection and async-job download follow-through are deliberately **not** here
+yet.
 
 ## Safety boundaries (enforced by design)
 
@@ -35,9 +38,14 @@ src/log.ts      metadata-only logger (+ in-memory sink for tests)
 src/status.ts   CollectorState + decideState() + writeStatus()
 src/session.ts  detectSession() + signalsFromHtml() (browser-free)
 src/upload.ts   login() / resolveChannelId() / uploadReviewFile()
-src/cli/upload-file.ts   offline manual check: upload a local .xlsx to SellerOps
+src/profile.ts  launchPersistentContext() wrapper + profile-dir path guard (LIVE)
+src/naver/session-check.ts  live Page -> SessionSignals -> detectSession()
+src/naver/review-export.ts  classify export (sync/async/unknown) + capture (LIVE)
+src/cli/upload-file.ts      offline manual check: upload a local .xlsx to SellerOps
+src/cli/discover-export.ts  LIVE export discovery (--login / --discover); gated
 test/           vitest unit tests + one gated live-backend integration test
-fixtures/       session HTML stand-ins (markers are PLACEHOLDERS, see below)
+fixtures/       session + export HTML stand-ins (markers are PLACEHOLDERS, see below)
+findings/       milestone1.md — static template; real findings only after a live run
 ```
 
 ## Run
@@ -71,11 +79,33 @@ It asserts: upload #1 → `successRows>0`, `failedRows=0`, and item-analysis cou
 rises by exactly `successRows`; upload #2 (same file) → `successRows=0`,
 `skippedRows >= first.successRows`, and item-analysis count is unchanged.
 
+### Live export discovery (requires explicit per-run operator approval)
+
+`npm run discover` drives a **real browser** against NAVER seller-center to answer
+milestone 1. It is human-attended and must run **only when an operator explicitly
+authorizes that single run** — never during planning/implementation, never on a
+schedule. A human performs the login and any 2FA/CAPTCHA; the collector never
+types NAVER credentials, never bypasses auth, and never writes to NAVER. Use a
+**user-owned test seller account** only.
+
+```bash
+cp .env.example .env                 # set NAVER_REVIEW_URL for --discover
+npm run discover -- --login          # headed browser opens; human logs in
+npm run discover -- --discover       # session check → classify export → capture-if-sync → upload
+```
+
+The NAVER session lives **only** in the local profile dir (`.profile/naver`,
+gitignored); it is never serialized or sent. Captured files land in `downloads/`
+(gitignored) and are uploaded through the same `/api/uploads` path the offline
+core uses. The session/export markers in `src/session.ts` and
+`src/naver/review-export.ts` are **placeholders to be confirmed** during the
+approved live run, then recorded in `findings/milestone1.md`.
+
 ## Not in this slice (next steps)
 
-- Live browser layer: `profile.ts` / `navigate.ts` / `export.ts` (Playwright),
-  and the milestone-1 export-mechanism discovery (sync blob vs async job). The
-  session markers in `src/session.ts` are **placeholders to be confirmed** during
-  that live run.
-- Scheduler loop. Productization: pairing/collector token + signed upload URL,
-  collector status/run-history endpoints. Packaging/signing/multi-OS.
+- Async-job **download follow-through** (this slice only *detects*
+  `EXPORT_ASYNC_JOB_DETECTED`; it does not poll/download an async export).
+- Scheduler / recurring collection loop.
+- Productization: pairing/collector token + signed upload URL, collector
+  status/run-history endpoints. Packaging/signing/multi-OS. Managed cloud
+  collector.

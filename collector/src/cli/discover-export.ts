@@ -1,0 +1,108 @@
+/**
+ * Live NAVER review-export discovery — one human-attended run (NO scheduler loop).
+ *
+ *   node --env-file=.env src/cli/discover-export.ts --login
+ *   node --env-file=.env src/cli/discover-export.ts --discover
+ *
+ * LIVE RUN — requires explicit, per-run operator approval. It launches a real
+ * browser against NAVER seller-center. A human performs the login and any
+ * 2FA/CAPTCHA; the collector never types credentials, never bypasses auth, and
+ * never writes to NAVER. Do NOT run during planning/implementation.
+ */
+import { loadConfig } from "../config";
+import { log } from "../log";
+import { checkLiveSession } from "../naver/session-check";
+import { runExport } from "../naver/review-export";
+import { launchNaverContext, type PwPage } from "../profile";
+import { decideState, writeStatus, type RunSignals, type SessionState } from "../status";
+import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
+
+// PLACEHOLDER landing URL; the human navigates/logs in from here.
+const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
+
+function banner(): void {
+  const line = "─".repeat(64);
+  console.error(line);
+  console.error(" LIVE NAVER discovery — requires explicit per-run operator approval.");
+  console.error(" A human logs in; the collector never types NAVER credentials,");
+  console.error(" never bypasses auth, and never writes to NAVER. Ctrl-C to abort.");
+  console.error(line);
+}
+
+async function doLogin(): Promise<void> {
+  const cfg = loadConfig();
+  const ctx = await launchNaverContext(cfg.profileDir);
+  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+  await page.goto(NAVER_LANDING_URL, { waitUntil: "domcontentloaded" });
+  log("login.prompt", { note: "human-login-required" });
+  console.error("Log in (and clear any 2FA/CAPTCHA) in the opened window, then close it.");
+  // Intentionally left open: the human finishes; the session persists to the
+  // profile dir automatically. The collector stores nothing itself.
+}
+
+async function doDiscover(): Promise<void> {
+  const cfg = loadConfig();
+  if (!cfg.naverReviewUrl) {
+    console.error("Set NAVER_REVIEW_URL to the review-management/export page URL first.");
+    process.exit(2);
+    return;
+  }
+  const ctx = await launchNaverContext(cfg.profileDir);
+  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+  const base: RunSignals = { paired: true, session: "LOGGED_OUT" };
+  const now = (): string => new Date().toISOString();
+
+  // 1) Session check — never proceed on an ambiguous/invalid session.
+  await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
+  const session: SessionState = await checkLiveSession(page);
+  if (session !== "LOGGED_IN") {
+    const state = decideState({ ...base, session });
+    writeStatus(cfg.statusFile, { state, detail: "session not usable; reconnect required", updatedAt: now() });
+    await ctx.close();
+    log("run.halted", { state });
+    return;
+  }
+
+  // 2) Export discovery — classify sync/async/blocked and capture only if sync.
+  const { outcome, filePath } = await runExport(page, cfg.downloadDir);
+  if (outcome !== "CAPTURED" || !filePath) {
+    const state = decideState({ ...base, session, exportOutcome: outcome });
+    writeStatus(cfg.statusFile, { state, detail: `export outcome: ${outcome}`, updatedAt: now() });
+    await ctx.close();
+    log("run.done", { state, outcome });
+    return;
+  }
+
+  // 3) Sync capture → upload through the existing offline-core client (no new path).
+  let uploadOutcome: "OK" | "FAILED" = "OK";
+  let detail = "";
+  try {
+    const token = await login(cfg.baseUrl, cfg.email, cfg.password);
+    const channelId = await resolveChannelId(cfg.baseUrl, token, cfg.naverChannelCode);
+    const result = await uploadReviewFile(cfg.baseUrl, token, channelId, filePath);
+    detail = `inserted ${result.successRows}, skipped ${result.skippedRows}, failed ${result.failedRows}`;
+  } catch (error) {
+    uploadOutcome = "FAILED";
+    detail = `upload failed at ${error instanceof UploadError ? error.stage : "unknown"}`;
+  }
+  const state = decideState({ ...base, session, exportOutcome: "CAPTURED", uploadOutcome });
+  writeStatus(cfg.statusFile, {
+    state,
+    detail,
+    lastCollectedAt: uploadOutcome === "OK" ? now() : undefined,
+    updatedAt: now(),
+  });
+  await ctx.close();
+  log("run.done", { state });
+}
+
+async function main(): Promise<void> {
+  banner();
+  const mode = process.argv[2];
+  if (mode === "--login") return doLogin();
+  if (mode === "--discover") return doDiscover();
+  console.error("usage: discover-export.ts --login | --discover");
+  process.exit(2);
+}
+
+void main();
