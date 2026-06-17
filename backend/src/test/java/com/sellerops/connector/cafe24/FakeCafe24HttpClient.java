@@ -1,0 +1,75 @@
+package com.sellerops.connector.cafe24;
+
+import java.net.URI;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Recording fake for the connector's single HTTP boundary. Tests enqueue
+ * responses and assert on {@link #sent}; an un-enqueued call fails the test —
+ * which is how the fail-closed tests prove "zero HTTP requests" happened.
+ */
+final class FakeCafe24HttpClient implements Cafe24HttpClient {
+
+    record Sent(String method, URI uri, Map<String, String> headers, Map<String, String> form) {
+
+        /** Failed-assertion output must not echo the Basic credential or tokens. */
+        @Override
+        public String toString() {
+            Map<String, String> maskedHeaders = mask(headers, "Authorization");
+            Map<String, String> maskedForm = mask(form, "refresh_token");
+            return "Sent[method=" + method + ", uri=" + uri
+                    + ", headers=" + maskedHeaders + ", form=" + maskedForm + "]";
+        }
+
+        private static Map<String, String> mask(Map<String, String> values, String secretKey) {
+            if (values == null) {
+                return null;
+            }
+            Map<String, String> masked = new LinkedHashMap<>();
+            for (Map.Entry<String, String> entry : values.entrySet()) {
+                masked.put(entry.getKey(),
+                        secretKey.equalsIgnoreCase(entry.getKey()) ? "<masked>" : entry.getValue());
+            }
+            return masked;
+        }
+    }
+
+    final List<Sent> sent = new ArrayList<>();
+    private final Deque<Response> responses = new ArrayDeque<>();
+
+    void enqueue(Response response) {
+        responses.add(response);
+    }
+
+    static Response tokenOk(String accessToken, String refreshToken) {
+        return new Response(200,
+                "{\"access_token\":\"" + accessToken + "\","
+                        + "\"expires_at\":\"2026-06-12T15:50:00.000\","
+                        + "\"refresh_token\":\"" + refreshToken + "\","
+                        + "\"refresh_token_expires_at\":\"2026-06-26T13:50:00.000\","
+                        + "\"token_type\":\"Bearer\"}",
+                Map.of());
+    }
+
+    /** The official 429 with the X-Cafe24-Call-Remain resumption hint. */
+    static Response rateLimited429(String callRemainSeconds) {
+        Map<String, String> headers = callRemainSeconds != null
+                ? Map.of("X-Cafe24-Call-Remain", callRemainSeconds)
+                : Map.of();
+        return new Response(429, "{\"error\":{\"code\":429}}", headers);
+    }
+
+    @Override
+    public Response postForm(URI uri, Map<String, String> headers, Map<String, String> form) {
+        sent.add(new Sent("POST_FORM", uri, headers, form));
+        if (responses.isEmpty()) {
+            throw new AssertionError("Unexpected HTTP call: POST " + uri);
+        }
+        return responses.pop();
+    }
+}

@@ -1,0 +1,1554 @@
+"""Pure Notion payload builder (I1). No network, no Notion client, no env.
+
+Exercises notion_page_title / build_notion_blocks / build_notion_payload only.
+The actual API client + Streamlit button land in I2 and are not tested here.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+from src.voc.review_ops.industrial import notion_export as nx
+from src.voc.review_ops.industrial.notion_export import (
+    APPLICABILITY_ORDER,
+    MAX_PRIORITY_REVIEWS,
+    NO_NEEDS_REPLY_TEXT,
+    NOTION_API_VERSION,
+    NOTION_DB_SCHEMA_MISMATCH_NOTE,
+    SECTION_TITLES,
+    build_database_properties,
+    build_notion_blocks,
+    build_notion_database_payload,
+    build_notion_payload,
+    export_to_notion,
+    export_to_notion_database,
+    notion_database_row_title,
+    notion_page_title,
+    resolve_notion_config,
+    resolve_notion_database_config,
+)
+
+# Wording that would overpromise automation or assert causality — must never
+# appear in the page text built from a clean fixture.
+BANNED_WORDING = ["반드시", "원인", "매출 영향", "자동 처리 완료", "개선해야"]
+
+TODAY = date(2026, 1, 21)
+
+
+# --- fixtures ----------------------------------------------------------------
+
+
+def _review(text, *, product="전선몰딩", rating=2.0, day=20, tags=("needs_reply",)):
+    return (
+        SimpleNamespace(
+            review_id=f"r-{text[:4]}",
+            text=text,
+            product_name=product,
+            rating=rating,
+            review_date=date(2026, 1, day),
+        ),
+        list(tags),
+    )
+
+
+def _issue(title, *, count=8, action="고정력 보강 안내 추가 검토", reps=None):
+    return {
+        "issue_title": title,
+        "severity": 3,
+        "severity_label": "높음",
+        "type_label": "품질",
+        "tag_label": "접착력",
+        "review_count": count,
+        "summary": f"{title} 관련 의견이 반복됩니다.",
+        "recommended_action": action,
+        "product_summary": "상품: 전선몰딩",
+        "reps": reps
+        or [
+            {"작성일": "2026-01-19", "채널": "네이버", "평점": "2", "상품명": "전선몰딩",
+             "리뷰": "벽지에 붙였더니 접착력이 약해서 떨어졌어요."},
+            {"작성일": "2026-01-18", "채널": "네이버", "평점": "1", "상품명": "전선몰딩",
+             "리뷰": "자를 때 깨졌습니다."},
+            {"작성일": "2026-01-17", "채널": "네이버", "평점": "2", "상품명": "전선몰딩",
+             "리뷰": "세 번째 근거 (캡 초과되어야 함)."},
+        ],
+    }
+
+
+def _worklist_item(text, *, day=20, reason="평점이 낮아 확인이 필요합니다.",
+                   action="내용 확인 후 필요하면 답글로 안내하세요."):
+    return {
+        "review_id": f"w-{text[:4]}",
+        "작성일": f"2026-01-{day}",
+        "채널": "네이버",
+        "상품명": "전선몰딩",
+        "평점": "2",
+        "태그": "품질",
+        "리뷰": text,
+        "reason": reason,
+        "suggested_action": action,
+    }
+
+
+def _full_result():
+    return {
+        "scope_label": "선택 상품 6개",
+        "scope_products": ["전선몰딩"],
+        "total": 1141,
+        "full_active_count": 2962,
+        "scoped_active_count": 1141,
+        "today_count": 12,
+        "week_count": 30,
+        "issue_count": 2,
+        "rating_summary": {"average": 3.1, "low_count": 210, "total": 1141},
+        "issue_items": [_issue("접착력 부족"), _issue("절단 시 깨짐", action="절단 도구/작업 방법 안내 검토")],
+        "worklist_items": [_worklist_item(f"리뷰 {i}", day=20) for i in range(10)],
+        "tagged": [
+            _review("답글이 필요한 리뷰입니다.", tags=("needs_reply",)),
+            _review("자석이 약해요.", tags=("quality",)),
+        ],
+    }
+
+
+def _empty_result():
+    return {
+        "scope_label": "전체 상품",
+        "scope_products": [],
+        "total": 0,
+        "full_active_count": 0,
+        "scoped_active_count": 0,
+        "today_count": 0,
+        "week_count": 0,
+        "issue_count": 0,
+        "rating_summary": {"average": None, "low_count": 0, "total": 0},
+        "issue_items": [],
+        "worklist_items": [],
+        "tagged": [],
+    }
+
+
+def _headings(blocks):
+    return [
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] in ("heading_2", "heading_3")
+    ]
+
+
+def _all_text(blocks):
+    out = []
+    for b in blocks:
+        rt = b.get(b["type"], {}).get("rich_text")
+        if rt:
+            out.append(rt[0]["text"]["content"])
+    return "\n".join(out)
+
+
+# --- title -------------------------------------------------------------------
+
+
+def test_title_includes_scope_label_and_date():
+    title = notion_page_title(_full_result(), TODAY)
+    assert "리뷰 운영 점검" in title
+    assert "선택 상품 6개" in title
+    assert "2026-01-21" in title
+
+
+def test_scoped_vs_full_title_differs():
+    scoped = notion_page_title(_full_result(), TODAY)
+    full = notion_page_title(_empty_result(), TODAY)
+    assert scoped != full
+    assert "전체 상품" in full
+
+
+# --- sections present --------------------------------------------------------
+
+
+def test_all_section_headings_exist():
+    headings = _headings(build_notion_blocks(_full_result()))
+    for title in SECTION_TITLES:
+        assert title in headings, title
+
+
+def test_old_worklist_heading_gone():
+    headings = _headings(build_notion_blocks(_full_result()))
+    assert "오늘/이번 주 확인할 리뷰" not in headings
+    assert "우선 확인 리뷰" in headings
+
+
+def test_ceo_summary_includes_key_counts_and_scope():
+    blocks = build_notion_blocks(_full_result())
+    # 운영 요약 is the first section
+    assert _headings(blocks)[0] == "운영 요약"
+    text = _all_text(blocks)
+    assert "선택 상품 6개" in text
+    assert "1,141" in text  # scoped count
+    assert "2,962" in text  # full count
+    assert "3.1점" in text   # average rating
+    assert "우선 점검 항목" in text  # the lead-in sentence + section
+
+
+def test_old_headings_absent():
+    text = _all_text(build_notion_blocks(_full_result()))
+    for old in (
+        "대표님 요약",
+        "이번에 먼저 볼 것",
+        "운영 적용 가능성",
+        "다음 업로드 때 비교할 것",
+        "대표님에게 물어볼 질문",
+    ):
+        assert old not in text, old
+
+
+def test_no_direct_address():
+    text = _all_text(build_notion_blocks(_full_result()))
+    assert "대표님" not in text
+
+
+def test_new_applicability_labels_exist():
+    headings = _headings(build_notion_blocks(_full_result()))
+    for label in ("현재 적용 가능", "추가 데이터 필요", "보류 권장"):
+        assert label in headings, label
+
+
+def test_action_list_precedes_evidence_quotes():
+    blocks = build_notion_blocks(_full_result())
+    action_idx = next(
+        i for i, b in enumerate(blocks)
+        if b["type"] == "heading_2"
+        and b["heading_2"]["rich_text"][0]["text"]["content"] == "우선 점검 항목"
+    )
+    first_quote_idx = next(i for i, b in enumerate(blocks) if b["type"] == "quote")
+    assert action_idx < first_quote_idx
+
+
+# --- issues ------------------------------------------------------------------
+
+
+def test_issue_blocks_include_evidence_and_action():
+    text = _all_text(build_notion_blocks(_full_result()))
+    assert "접착력 부족" in text
+    assert "절단 시 깨짐" in text
+    assert "추천 조치" in text
+    assert "고정력 보강 안내 추가 검토" in text
+    # verbatim evidence quote present
+    assert "접착력이 약해서 떨어졌어요" in text
+
+
+def test_issue_evidence_is_capped():
+    blocks = build_notion_blocks(_full_result())
+    quotes = [b for b in blocks if b["type"] == "quote"]
+    # 2 issues x 2 evidence + worklist quotes; the 3rd-rep marker must not appear.
+    assert "세 번째 근거" not in _all_text(blocks)
+    assert quotes  # some evidence rendered
+
+
+def test_issue_block_includes_capped_evidence_note():
+    text = _all_text(build_notion_blocks(_full_result()))
+    # the issue has 3 reps but only 2 are shown
+    assert "관련 8건 중 2건 표시" in text
+
+
+def test_issue_heading_has_no_long_product_name():
+    long_name = "(벌크) 신개념 일체형 전선몰딩 선바로 1P 열고 닫기 편한 전선몰드 추가구성 세트"
+    issue = _issue("접착력 부족", count=5)
+    for rep in issue["reps"]:
+        rep["상품명"] = long_name
+    result = _full_result()
+    result["issue_items"] = [issue]
+    blocks = build_notion_blocks(result)
+    issue_headings = [
+        b["heading_3"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "heading_3"
+    ]
+    # the issue heading is exactly 'title · 관련 리뷰 N건' — no product name
+    assert "접착력 부족 · 관련 리뷰 5건" in issue_headings
+    assert not any(long_name in h for h in issue_headings)
+
+
+def test_issue_product_context_is_shortened():
+    long_name = "(벌크) 신개념 일체형 전선몰딩 선바로 1P 열고 닫기 편한 전선몰드 추가구성 세트"
+    issue = _issue("접착력 부족")
+    for rep in issue["reps"]:
+        rep["상품명"] = long_name
+    result = _full_result()
+    result["issue_items"] = [issue]
+    text = _all_text(build_notion_blocks(result))
+    assert "대표 상품:" in text
+    assert long_name not in text  # full long name never rendered
+    assert "…" in text  # shortened
+
+
+# --- worklist ----------------------------------------------------------------
+
+
+def test_worklist_includes_reason_and_action():
+    text = _all_text(build_notion_blocks(_full_result()))
+    assert "확인 이유:" in text
+    assert "다음 조치:" in text
+    assert "평점이 낮아 확인이 필요합니다." in text
+
+
+def test_worklist_cap_respected():
+    result = _full_result()
+    # quotes carry the 긴목록 marker; the action list uses suggested_action, so
+    # the marker only appears for priority-review quotes (capped).
+    result["worklist_items"] = [_worklist_item(f"긴목록 {i}") for i in range(20)]
+    text = _all_text(build_notion_blocks(result))
+    assert f"긴목록 {MAX_PRIORITY_REVIEWS - 1}" in text
+    assert f"긴목록 {MAX_PRIORITY_REVIEWS}" not in text
+
+
+# --- needs reply -------------------------------------------------------------
+
+
+def test_needs_reply_fallback_when_none():
+    result = _full_result()
+    result["tagged"] = [_review("일반 리뷰", tags=("quality",))]
+    text = _all_text(build_notion_blocks(result))
+    assert NO_NEEDS_REPLY_TEXT in text
+
+
+def test_needs_reply_lists_reviews_when_present():
+    text = _all_text(build_notion_blocks(_full_result()))
+    assert "답글이 필요한 리뷰입니다." in text
+    assert NO_NEEDS_REPLY_TEXT not in text
+
+
+# --- applicability -----------------------------------------------------------
+
+
+def test_applicability_includes_all_three_categories():
+    headings = _headings(build_notion_blocks(_full_result()))
+    for category in APPLICABILITY_ORDER:
+        assert category in headings, category
+
+
+def test_applicability_does_not_overclaim():
+    text = _all_text(build_notion_blocks(_full_result()))
+    # not-yet-automate category items appear under the right framing
+    assert "답글 자동 게시" in text
+    assert "고객 응대 완전 자동화" in text
+
+
+# --- block budget / safety ---------------------------------------------------
+
+
+def test_detail_candidates_are_action_first_and_deduped():
+    result = _full_result()
+    # two issues that share the same title+action must collapse to one candidate
+    dup = _issue("접착력 부족", action="추가 고정 안내 추가 검토")
+    result["issue_items"] = [dup, dup, _issue("절단 시 깨짐", action="절단 도구/작업 방법 안내 검토")]
+    blocks = build_notion_blocks(result)
+    bullets = [
+        b["bulleted_list_item"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "bulleted_list_item"
+    ]
+    cand = [b for b in bullets if "보강할 후보" in b]
+    # action-first phrasing, framed as a check (not a claim the page lacks it)
+    assert any(
+        b.startswith("추가 고정 안내 추가 검토 — 상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다.")
+        for b in cand
+    )
+    assert not any("관련 보완 후보" in b for b in cand)  # old suffix gone
+    # deduped: the shared candidate appears once
+    assert sum(1 for b in cand if "추가 고정 안내 추가 검토" in b) == 1
+
+
+# --- 상세페이지/안내 점검 후보 (review-only, honest framing) ------------------
+
+# Banned wording for this section: directive/causal phrasing and any verb that
+# implies we know the page is missing the guidance.
+_DETAIL_BANNED = ["추가하세요", "개선해야", "원인 분석", "반드시", "자동 처리", "즉시 반영"]
+# Phrasings that would imply we already inspected the live detail page.
+_DETAIL_PRESUMPTION = ["상세페이지에 없는", "상세페이지에 누락", "상세페이지에 미반영",
+                       "이미 안내되어 있습니다", "안내되어 있지 않"]
+
+
+def _detail_section(result, *, compact):
+    return _section_blocks(build_notion_blocks(result, compact=compact), "상세페이지/안내 점검 후보")
+
+
+def test_detail_section_heading_renamed_compact_and_full():
+    for compact in (True, False):
+        headings = _headings(build_notion_blocks(_full_result(), compact=compact))
+        assert "상세페이지/안내 점검 후보" in headings
+        assert "상세페이지/안내 보완 후보" not in headings
+
+
+def test_detail_section_compact_includes_review_only_caution():
+    paras = _para_texts(_detail_section(_full_result(), compact=True))
+    assert "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다." in paras
+
+
+def test_detail_candidate_wording_is_a_check_not_a_claim():
+    bullets = _bullets(_detail_section(_full_result(), compact=True))
+    texts = [b["bulleted_list_item"]["rich_text"][0]["text"]["content"] for b in bullets]
+    assert texts  # the fixture has issues → candidates render
+    for t in texts:
+        assert "이미 안내되어 있는지 확인" in t
+        assert "없다면 보강할 후보" in t
+
+
+def test_detail_candidate_does_not_presume_page_contents():
+    # full + compact: never assert what the live detail page does or does not have
+    for compact in (True, False):
+        section = _detail_section(_full_result(), compact=compact)
+        text = "\n".join(
+            b[b["type"]]["rich_text"][0]["text"]["content"]
+            for b in section
+            if b.get(b["type"], {}).get("rich_text")
+        )
+        for bad in _DETAIL_PRESUMPTION:
+            assert bad not in text, bad
+
+
+def test_detail_section_no_banned_wording():
+    # even when the engine hands us directive action text, the section stays clean
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "recommended_action": "원인 분석 및 개선 방안을 검토하세요"}
+    ]
+    section = _detail_section(result, compact=True)
+    text = "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+    for bad in _DETAIL_BANNED:
+        assert bad not in text, bad
+    assert "검토을" not in text
+    assert "검토이" not in text
+
+
+# --- 상세페이지/안내 점검 후보 (S2x.5a, optional detail-guidance gap results) --
+
+# The gap path must stay extraction-based ("추출 결과 기준") and never assert
+# what the original detail page contains, nor use directive/causal wording.
+_GAP_BANNED = ["상세페이지에 없습니다", "반드시", "원인", "개선해야"]
+
+
+def _gap_item(title="접착력 부족", *, found=None, not_found=None, check=None):
+    """One detail_guidance_gaps entry in the S2x.4a/4b output shape."""
+    if found is None:
+        found = ["부착 전 물기/먼지 제거", "피스/실리콘 고정"]
+    if not_found is None:
+        not_found = ["실크벽지 조건", "추가 양면테이프"]
+    return {
+        "issue_title": title,
+        "detail_page_status": "partial_guidance",
+        "found_guidance": found,
+        "not_found_guidance": not_found,
+        "operator_check": check or (
+            "상세페이지 추출 결과 기준으로 부착 전 물기/먼지 제거, 피스/실리콘 고정 안내는 "
+            "확인되지만, 실크벽지 조건, 추가 양면테이프 안내는 찾지 못했습니다. "
+            "안내 위치/표현을 점검할 후보입니다."
+        ),
+        "needs_operator_review": True,
+        "basis": "consumer_visible_detail_image_draft",
+        "caution": (
+            "not_found는 원본 상세페이지에 없다는 단정이 아니라, "
+            "추출 draft에서 찾지 못했다는 의미입니다."
+        ),
+    }
+
+
+def _gap_result():
+    result = _full_result()
+    result["detail_guidance_gaps"] = [_gap_item()]
+    return result
+
+
+def _section_text(section):
+    return "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+
+
+def test_detail_gap_section_renders_gap_items_compact_and_full():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        assert "상세페이지 이미지 추출 결과" in text
+        assert "추출 결과 기준이며 운영자 확인이 필요합니다." in text
+        assert "접착력 부족" in text
+        assert "확인된 안내: 부착 전 물기/먼지 제거, 피스/실리콘 고정" in text
+        assert "추출 결과에서 찾지 못한 안내: 실크벽지 조건, 추가 양면테이프" in text
+        # operator_check carried verbatim
+        assert "안내 위치/표현을 점검할 후보입니다." in text
+        assert "운영자 확인" in text
+
+
+def test_detail_gap_section_drops_review_only_caution():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        assert "현재는 상세페이지 스냅샷이 없어" not in text
+        assert "없다면 보강할 후보" not in text  # review-only suffix replaced
+
+
+def test_detail_gap_section_no_banned_wording():
+    for compact in (True, False):
+        text = _section_text(_detail_section(_gap_result(), compact=compact))
+        for bad in _GAP_BANNED:
+            assert bad not in text, bad
+        for bad in _DETAIL_PRESUMPTION:
+            assert bad not in text, bad
+
+
+def test_detail_gap_empty_lists_omit_their_bullets():
+    result = _full_result()
+    result["detail_guidance_gaps"] = [
+        _gap_item("구성품 누락", found=["구성품 안내 11건"], not_found=[],
+                  check="상세페이지 추출 결과 기준으로 구성품 안내가 확인됩니다. 운영자 확인 후보입니다."),
+    ]
+    text = _section_text(_detail_section(result, compact=True))
+    assert "확인된 안내: 구성품 안내 11건" in text
+    assert "추출 결과에서 찾지 못한 안내" not in text
+
+
+def test_detail_gap_missing_or_empty_falls_back_to_review_only():
+    # missing key entirely, and explicitly-empty list: both keep the old behavior
+    for result in (_full_result(), {**_full_result(), "detail_guidance_gaps": []}):
+        text = _section_text(_detail_section(result, compact=True))
+        assert "현재는 상세페이지 스냅샷이 없어 리뷰 기반 점검 후보로 표시합니다." in text
+        assert "상세페이지에 이미 안내되어 있는지 확인하고, 없다면 보강할 후보입니다." in text
+        assert "상세페이지 이미지 추출 결과" not in text
+
+
+def test_detail_gap_db_properties_unchanged():
+    # the gap payload affects the body only — DB property mapping is identical
+    now = datetime(2026, 1, 21, 10, 0, 0)
+    assert build_database_properties(_gap_result(), now) == build_database_properties(
+        _full_result(), now
+    )
+
+
+def test_detail_gap_rendering_adds_no_module_imports():
+    # rendering support only: the result key may appear, but notion_export must
+    # not import the gap helpers, the multimodal extractor, or network clients
+    src = Path(nx.__file__).read_text(encoding="utf-8")
+    assert "detail_snapshot" not in src  # covers guidance_gap(_apply) / multimodal_extract
+    for banned in (
+        "import openai", "from openai",
+        "import requests", "from requests",
+        "import httpx", "from httpx",
+        "import playwright", "from playwright",
+    ):
+        assert banned not in src.lower(), banned
+
+
+def test_detail_gap_block_count_under_100_at_caps():
+    # max everything plus a full slate of gap items: both bodies stay under 100
+    result = _gap_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [_review(f"답글 {i}", tags=("needs_reply",)) for i in range(8)]
+    result["detail_guidance_gaps"] = [_gap_item(f"이슈 {i}") for i in range(6)]
+    assert len(build_notion_blocks(result)) < 100
+    assert len(build_notion_blocks(result, compact=True)) < 100
+
+
+def test_no_overpromise_wording():
+    text = _all_text(build_notion_blocks(_full_result()))
+    # 운영 적용 가능성 intentionally names "원인/매출 영향 단정" as a thing NOT to do —
+    # that caution is allowed; strip it before scanning the report's own voice.
+    text = text.replace("원인/매출 영향 단정", "")
+    for banned in BANNED_WORDING:
+        assert banned not in text, banned
+
+
+def test_block_count_under_100():
+    assert len(build_notion_blocks(_full_result())) < 100
+
+
+def test_block_count_under_100_at_caps():
+    # max everything: 5 issues (3 reps each), 20 worklist, 5 needs-reply
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [_review(f"답글 {i}", tags=("needs_reply",)) for i in range(8)]
+    assert len(build_notion_blocks(result)) < 100
+
+
+def test_empty_result_builds_safely():
+    blocks = build_notion_blocks(_empty_result())
+    assert len(blocks) < 100
+    headings = _headings(blocks)
+    for title in SECTION_TITLES:
+        assert title in headings
+    # fallbacks present, no crash
+    text = _all_text(blocks)
+    assert NO_NEEDS_REPLY_TEXT in text
+
+
+# --- payload assembly --------------------------------------------------------
+
+
+def test_payload_shape():
+    payload = build_notion_payload(_full_result(), "parent-123", TODAY)
+    assert payload["parent"] == {"type": "page_id", "page_id": "parent-123"}
+    title_rt = payload["properties"]["title"]["title"][0]["text"]["content"]
+    assert "선택 상품 6개" in title_rt
+    assert isinstance(payload["children"], list)
+    assert payload["children"] == build_notion_blocks(_full_result())
+
+
+def test_valid_block_objects():
+    for b in build_notion_blocks(_full_result()):
+        assert b.get("object") == "block" or b["type"] == "divider"
+        assert b["type"] in b  # the type-keyed payload exists
+
+
+# --- I2 client: resolve_notion_config ---------------------------------------
+
+
+def test_resolve_config_missing_is_safe(monkeypatch, tmp_path):
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_PARENT_PAGE_ID", raising=False)
+    # force a fresh load against an empty cwd so no real .env interferes
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    key, parent = resolve_notion_config()
+    assert key is None
+    assert parent is None
+
+
+def test_resolve_config_reads_env(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "secret-abc")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "parent-xyz")
+    key, parent = resolve_notion_config()
+    assert key == "secret-abc"
+    assert parent == "parent-xyz"
+
+
+# --- I2 client: export_to_notion (fake transport, no network) ---------------
+
+
+def test_export_ok_returns_url():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/created-page-123"}
+
+    payload = build_notion_payload(_full_result(), "parent-1", TODAY)
+    res = export_to_notion(payload, api_key="secret-key", transport=fake_transport)
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/created-page-123"
+    assert res.error is None
+
+
+def test_export_failure_returns_error_not_ok():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("network down")
+
+    res = export_to_notion({}, api_key="secret-key", transport=raising_transport)
+    assert res.ok is False
+    assert res.url is None
+    assert "network down" in (res.error or "")
+
+
+def test_export_sends_method_headers_and_json():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/p"}
+
+    payload = build_notion_payload(_full_result(), "parent-9", TODAY)
+    export_to_notion(payload, api_key="secret-key", transport=fake_transport)
+    assert captured["url"] == nx.NOTION_PAGES_URL
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert captured["headers"]["Content-Type"] == "application/json"
+    assert captured["headers"]["Notion-Version"] == NOTION_API_VERSION
+    # the JSON payload is the I1 page-create body
+    assert captured["payload"]["parent"]["page_id"] == "parent-9"
+    assert "children" in captured["payload"]
+
+
+def test_api_key_not_in_result_repr():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("boom")
+
+    res = export_to_notion({}, api_key="super-secret-key", transport=raising_transport)
+    assert "super-secret-key" not in repr(res)
+    assert "super-secret-key" not in (res.error or "")
+
+
+def test_default_transport_builds_post_request(monkeypatch):
+    """Exercises the real _default_transport without any network: monkeypatch
+    urllib.request.urlopen to capture the Request and return a fake body."""
+    seen = {}
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"url": "https://www.notion.so/real"}'
+
+    def fake_urlopen(req, timeout=None):
+        seen["method"] = req.get_method()
+        seen["url"] = req.full_url
+        seen["body"] = req.data
+        seen["auth"] = req.headers.get("Authorization")
+        return _FakeResp()
+
+    monkeypatch.setattr(nx.urllib.request, "urlopen", fake_urlopen)
+    payload = build_notion_payload(_full_result(), "parent-real", TODAY)
+    res = export_to_notion(payload, api_key="k-123")
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/real"
+    assert seen["method"] == "POST"
+    assert seen["url"] == nx.NOTION_PAGES_URL
+    assert seen["auth"] == "Bearer k-123"
+    # body is valid JSON carrying the page-create payload
+    import json
+
+    decoded = json.loads(seen["body"].decode("utf-8"))
+    assert decoded["parent"]["page_id"] == "parent-real"
+
+
+# --- J1: database row payload builder (pure, no network) --------------------
+
+NOW = datetime(2026, 1, 21, 20, 33, 46)
+
+
+def _db_result(scope_products, **overrides):
+    """A result tailored for DB-property tests: control scope + counts."""
+    result = _full_result()
+    result["scope_products"] = list(scope_products)
+    result["worklist_review_ids"] = set(overrides.pop("worklist_review_ids", []))
+    result.update(overrides)
+    return result
+
+
+def test_db_title_includes_time_scope_and_issue_count():
+    result = _db_result(["a", "b", "c", "d", "e", "f"], issue_count=4)
+    title = notion_database_row_title(result, NOW)
+    assert "리뷰 점검" in title
+    assert "01/21 20:33" in title       # MM/DD HH:mm
+    assert "선택 6개" in title           # scope_short
+    assert "이슈 4건" in title           # issue count
+
+
+def test_db_title_scope_short_full():
+    title = notion_database_row_title(_db_result([], issue_count=0), NOW)
+    assert "전체" in title
+
+
+def test_db_payload_parent_is_database_and_id_echoed():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert payload["parent"] == {"type": "database_id", "database_id": "db-123"}
+
+
+def test_db_payload_children_equals_compact_blocks():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert payload["children"] == build_notion_blocks(_full_result(), compact=True)
+
+
+def test_db_payload_block_count_under_100():
+    payload = build_notion_database_payload(_full_result(), "db-123", NOW)
+    assert len(payload["children"]) < 100
+
+
+def test_db_properties_have_expected_type_wrappers():
+    props = build_database_properties(
+        _db_result(["전선몰딩"], worklist_review_ids=["w1", "w2"]), NOW
+    )
+    assert "title" in props["이름"]
+    assert "start" in props["분석일시"]["date"]
+    assert "rich_text" in props["분석 범위"]
+    assert "name" in props["범위 유형"]["select"]
+    assert isinstance(props["리뷰 수"]["number"], int)
+    assert isinstance(props["전체 리뷰 수"]["number"], int)
+    assert isinstance(props["저평점 수"]["number"], int)
+    assert isinstance(props["우선 확인 수"]["number"], int)
+    assert isinstance(props["반복 이슈 수"]["number"], int)
+    assert "rich_text" in props["주요 이슈"]
+    assert "name" in props["우선도"]["select"]
+
+
+def test_db_properties_map_values():
+    result = _db_result(["전선몰딩"], worklist_review_ids=["w1", "w2", "w3"])
+    props = build_database_properties(result, NOW)
+    assert props["분석 범위"]["rich_text"][0]["text"]["content"] == "선택 상품 6개"
+    assert props["리뷰 수"]["number"] == 1141
+    assert props["전체 리뷰 수"]["number"] == 2962
+    assert props["저평점 수"]["number"] == 210
+    assert props["우선 확인 수"]["number"] == 3
+    assert props["반복 이슈 수"]["number"] == 2
+
+
+def test_db_status_never_set():
+    props = build_database_properties(_full_result(), NOW)
+    assert "상태" not in props
+
+
+def test_db_priority_always_set():
+    props = build_database_properties(_full_result(), NOW)
+    assert "우선도" in props
+
+
+def test_db_new_review_count_omitted_when_missing():
+    result = _full_result()
+    result.pop("new_summary", None)
+    props = build_database_properties(result, NOW)
+    assert "신규 리뷰 수" not in props
+
+
+def test_db_new_review_count_present_when_available():
+    result = _full_result()
+    result["new_summary"] = {"new_count": 17}
+    props = build_database_properties(result, NOW)
+    assert props["신규 리뷰 수"]["number"] == 17
+
+
+def test_db_average_omitted_when_none():
+    result = _full_result()
+    result["rating_summary"] = {"average": None, "low_count": 0, "total": 0}
+    props = build_database_properties(result, NOW)
+    assert "평균 평점" not in props
+
+
+def test_db_average_present_when_available():
+    props = build_database_properties(_full_result(), NOW)
+    assert props["평균 평점"]["number"] == 3.1
+
+
+# --- 분석일시 timezone-aware Date value (no +9h shift) -----------------------
+
+KST = timezone(timedelta(hours=9))
+
+
+def test_db_date_value_offset_preserved_for_aware():
+    now = datetime(2026, 6, 4, 17, 44, 0, tzinfo=KST)
+    props = build_database_properties(_full_result(), now)
+    assert props["분석일시"]["date"]["start"] == "2026-06-04T17:44:00+09:00"
+
+
+def test_db_date_value_has_offset_for_naive():
+    # a naive datetime must not be emitted offset-less (Notion would read it as
+    # UTC and shift it forward); the wall clock must be preserved, not converted
+    now = datetime(2026, 6, 4, 17, 44, 0)
+    start = build_database_properties(_full_result(), now)["분석일시"]["date"]["start"]
+    parsed = datetime.fromisoformat(start)
+    assert parsed.utcoffset() is not None          # an offset is attached
+    assert start.startswith("2026-06-04T17:44")     # same wall clock, no shift
+
+
+def test_db_date_matches_row_title_local_time():
+    now = datetime(2026, 6, 4, 17, 44, 0, tzinfo=KST)
+    result = _full_result()
+    title = notion_database_row_title(result, now)
+    parsed = datetime.fromisoformat(
+        build_database_properties(result, now)["분석일시"]["date"]["start"]
+    )
+    assert "06/04 17:44" in title                          # title local time
+    assert parsed.strftime("%m/%d %H:%M") == "06/04 17:44"  # property local time
+
+
+def test_db_date_no_plus_nine_shift():
+    # KST 02:44 on 06-05 must stay 02:44/06-05, not roll back to 17:44/06-04
+    now = datetime(2026, 6, 5, 2, 44, 0, tzinfo=KST)
+    parsed = datetime.fromisoformat(
+        build_database_properties(_full_result(), now)["분석일시"]["date"]["start"]
+    )
+    assert parsed.hour == 2
+    assert parsed.date().isoformat() == "2026-06-05"
+    assert parsed.utcoffset() == timedelta(hours=9)
+
+
+def test_db_scope_kind_full():
+    assert nx._scope_kind(_db_result([])) == "전체 상품"
+
+
+def test_db_scope_kind_single():
+    assert nx._scope_kind(_db_result(["전선몰딩"])) == "개별 상품"
+
+
+def test_db_scope_kind_multiple():
+    assert nx._scope_kind(_db_result(["a", "b"])) == "선택 상품"
+
+
+def test_db_priority_high_on_two_issues():
+    result = _db_result([], issue_count=2, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 10}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_high_on_low_rating_count():
+    result = _db_result([], issue_count=0, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 2.0, "low_count": 10, "total": 50}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_high_on_priority_count():
+    result = _db_result(
+        [], issue_count=0, worklist_review_ids=[f"w{i}" for i in range(10)]
+    )
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "높음"
+
+
+def test_db_priority_medium_on_some_signal():
+    result = _db_result([], issue_count=1, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.0, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "보통"
+
+
+def test_db_priority_low_when_quiet():
+    result = _db_result([], issue_count=0, worklist_review_ids=[])
+    result["rating_summary"] = {"average": 4.8, "low_count": 0, "total": 50}
+    assert nx._compute_priority(result) == "낮음"
+
+
+def test_db_key_issues_is_rich_text_and_preserves_commas():
+    result = _full_result()
+    result["issue_items"] = [
+        _issue("접착력 문제, 절단 시 깨짐"),
+        _issue("표면 자국, 변색 우려"),
+    ]
+    props = build_database_properties(result, NOW)
+    content = props["주요 이슈"]["rich_text"][0]["text"]["content"]
+    assert "접착력 문제, 절단 시 깨짐" in content      # comma-bearing title intact
+    assert "표면 자국, 변색 우려" in content
+    assert " · " in content                          # titles joined
+
+
+# --- J2 client: resolve_notion_database_config ------------------------------
+
+
+def test_resolve_db_config_missing_is_safe(monkeypatch):
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    key, db = resolve_notion_database_config()
+    assert key is None
+    assert db is None
+
+
+def test_resolve_db_config_reads_env(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "secret-abc")
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-xyz")
+    key, db = resolve_notion_database_config()
+    assert key == "secret-abc"
+    assert db == "db-xyz"
+
+
+# --- J2 client: export_to_notion_database (fake transport, no network) ------
+
+
+def test_db_export_ok_returns_url():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/db-row-123"}
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=fake_transport)
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/db-row-123"
+    assert res.error is None
+    assert res.note is None
+
+
+def test_db_export_sends_post_headers_and_db_payload():
+    captured = {}
+
+    def fake_transport(url, payload, headers):
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["headers"] = headers
+        return {"url": "https://www.notion.so/r"}
+
+    payload = build_notion_database_payload(_full_result(), "db-9", NOW)
+    export_to_notion_database(payload, api_key="secret-key", transport=fake_transport)
+    assert captured["url"] == nx.NOTION_PAGES_URL
+    assert captured["headers"]["Authorization"] == "Bearer secret-key"
+    assert captured["headers"]["Content-Type"] == "application/json"
+    assert captured["headers"]["Notion-Version"] == NOTION_API_VERSION
+    assert captured["payload"]["parent"]["type"] == "database_id"
+    assert captured["payload"]["parent"]["database_id"] == "db-9"
+    assert "children" in captured["payload"]
+
+
+def test_db_export_failure_returns_error_not_ok():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("network down")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=raising_transport)
+    assert res.ok is False
+    assert res.url is None
+    assert "network down" in (res.error or "")
+
+
+def test_db_export_title_only_retry_on_schema_mismatch():
+    calls = {"n": 0}
+
+    def flaky_transport(url, payload, headers):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # full create rejected (e.g. property name/type mismatch)
+            raise RuntimeError("body failed validation: 평균 평점 is not a property")
+        # retry payload must be title-only + body
+        assert list(payload["properties"].keys()) == ["이름"]
+        assert "children" in payload
+        return {"url": "https://www.notion.so/retry-row"}
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=flaky_transport)
+    assert calls["n"] == 2
+    assert res.ok is True
+    assert res.url == "https://www.notion.so/retry-row"
+    assert res.note == NOTION_DB_SCHEMA_MISMATCH_NOTE
+
+
+def test_db_export_retry_failure_is_fail_soft():
+    def always_raising(url, payload, headers):
+        raise RuntimeError("auth invalid")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="secret-key", transport=always_raising)
+    assert res.ok is False
+    assert "auth invalid" in (res.error or "")
+    assert res.note is None
+
+
+def test_db_export_api_key_not_in_result_repr():
+    def raising_transport(url, payload, headers):
+        raise RuntimeError("boom")
+
+    payload = build_notion_database_payload(_full_result(), "db-1", NOW)
+    res = export_to_notion_database(payload, api_key="super-secret-key", transport=raising_transport)
+    assert "super-secret-key" not in repr(res)
+    assert "super-secret-key" not in (res.error or "")
+
+
+# --- compact DB body (Notion-native layout) ---------------------------------
+
+# Sections that stay top-level headings in the compact body. 운영 요약 keeps its
+# heading + a callout; 적용 범위 is folded into a toggle (checked separately).
+_COMPACT_HEADING_SECTIONS = (
+    "운영 요약",
+    "우선 점검 항목",
+    "반복 이슈",
+    "운영 판단",
+    "상세페이지/안내 점검 후보",
+)
+
+
+def _walk(blocks):
+    """Yield every block, descending into toggle/callout children."""
+    for b in blocks:
+        yield b
+        children = b.get(b["type"], {}).get("children")
+        if children:
+            yield from _walk(children)
+
+
+def _all_text_deep(blocks):
+    out = []
+    for b in _walk(blocks):
+        rt = b.get(b["type"], {}).get("rich_text")
+        if rt:
+            out.append(rt[0]["text"]["content"])
+    return "\n".join(out)
+
+
+def _toggle_titles(blocks):
+    return [
+        b["toggle"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "toggle"
+    ]
+
+
+def _issue_toggles(blocks):
+    return [
+        b for b in blocks
+        if b["type"] == "toggle"
+        and "관련 리뷰" in b["toggle"]["rich_text"][0]["text"]["content"]
+    ]
+
+
+def test_compact_blocks_include_required_sections():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    headings = _headings(blocks)
+    for title in _COMPACT_HEADING_SECTIONS:
+        assert title in headings, title
+    # 적용 범위 is folded into a toggle rather than a heading
+    assert "적용 범위 보기" in _toggle_titles(blocks)
+
+
+def test_compact_blocks_omit_long_list_sections():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    headings = _headings(blocks)
+    titles = _toggle_titles(blocks)
+    assert "우선 확인 리뷰" not in headings
+    assert "다음 업로드 비교 항목" not in headings
+    assert all("우선 확인 리뷰" not in t and "다음 업로드 비교" not in t for t in titles)
+
+
+def test_compact_ceo_summary_is_callout():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    callouts = [b for b in blocks if b["type"] == "callout"]
+    assert len(callouts) == 1
+    callout = callouts[0]
+    assert callout["callout"]["icon"]["type"] == "emoji"
+    text = callout["callout"]["rich_text"][0]["text"]["content"]
+    assert "선택 상품 6개" in text   # scope
+    assert "1,141" in text          # scoped review count
+    assert "우선 점검:" in text       # executive lead-in
+
+
+def test_compact_issues_are_toggles():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    titles = _toggle_titles(blocks)
+    assert "접착력 부족 · 관련 리뷰 8건" in titles
+    assert "절단 시 깨짐 · 관련 리뷰 8건" in titles
+
+
+def test_compact_issue_toggle_has_child_evidence():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    toggles = _issue_toggles(blocks)
+    assert toggles
+    children = toggles[0]["toggle"]["children"]
+    child_text = "\n".join(
+        c[c["type"]]["rich_text"][0]["text"]["content"]
+        for c in children
+        if c.get(c["type"], {}).get("rich_text")
+    )
+    assert "요약:" in child_text
+    assert "추천 조치:" in child_text
+    # verbatim evidence is a child quote block inside the toggle
+    assert any(c["type"] == "quote" for c in children)
+    assert "접착력이 약해서 떨어졌어요" in child_text
+
+
+def test_compact_blocks_fewer_than_full():
+    full = build_notion_blocks(_full_result())
+    compact = build_notion_blocks(_full_result(), compact=True)
+    assert len(compact) < len(full)
+
+
+def test_compact_blocks_under_60():
+    assert len(build_notion_blocks(_full_result(), compact=True)) < 60
+
+
+def test_compact_evidence_capped_at_two():
+    # the issue fixture carries a 3rd rep marked "세 번째 근거 (캡 초과되어야 함)"
+    text = _all_text_deep(build_notion_blocks(_full_result(), compact=True))
+    assert "세 번째 근거" not in text
+    # each issue toggle holds at most 2 evidence quote children
+    for toggle in _issue_toggles(build_notion_blocks(_full_result(), compact=True)):
+        quotes = [c for c in toggle["toggle"]["children"] if c["type"] == "quote"]
+        assert len(quotes) <= 2
+
+
+def test_compact_applicability_is_toggle():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    toggles = [
+        b for b in blocks
+        if b["type"] == "toggle"
+        and b["toggle"]["rich_text"][0]["text"]["content"] == "적용 범위 보기"
+    ]
+    assert len(toggles) == 1
+    child_text = _all_text_deep(toggles)
+    for category in APPLICABILITY_ORDER:
+        assert category in child_text, category
+
+
+# --- 운영 판단 (operator decision workspace) --------------------------------
+
+
+def _todo_text(blocks):
+    return "\n".join(
+        b["to_do"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "to_do"
+    )
+
+
+def _paragraph_text(blocks):
+    return "\n".join(
+        b["paragraph"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "paragraph" and b["paragraph"]["rich_text"]
+    )
+
+
+def test_compact_includes_operator_decision():
+    headings = _headings(build_notion_blocks(_full_result(), compact=True))
+    assert "운영 판단" in headings
+
+
+def test_operator_decision_after_issues_before_detail():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    order = [
+        b["heading_2"]["rich_text"][0]["text"]["content"]
+        for b in blocks
+        if b["type"] == "heading_2"
+    ]
+    assert order.index("반복 이슈") < order.index("운영 판단")
+    assert order.index("운영 판단") < order.index("상세페이지/안내 점검 후보")
+
+
+def test_operator_decision_one_todo_per_issue():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    todos = [b for b in blocks if b["type"] == "to_do"]
+    # _full_result has 2 issues → exactly 2 unchecked to-do blocks (was 6)
+    assert len(todos) == 2
+    assert all(b["to_do"]["checked"] is False for b in todos)
+
+
+def test_operator_decision_todo_count_capped_at_max_issues():
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(nx.MAX_ISSUES + 3)]
+    todos = [
+        b for b in build_notion_blocks(result, compact=True) if b["type"] == "to_do"
+    ]
+    assert len(todos) == nx.MAX_ISSUES
+
+
+def test_operator_decision_lists_each_issue_title():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    assert "접착력 부족" in todo_text
+    assert "절단 시 깨짐" in todo_text
+
+
+def test_operator_decision_no_legacy_subtodos():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    assert "조치 방향 선택:" not in todo_text
+    assert "처리 여부 결정:" not in todo_text
+    # 메모 is a paragraph now — never a checkbox
+    assert "메모:" not in todo_text
+    assert not any(line.strip().startswith("메모") for line in todo_text.split("\n"))
+
+
+def test_operator_decision_memo_is_paragraph():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert "메모:" in _paragraph_text(blocks)
+
+
+def test_operator_decision_keeps_intro():
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert nx.OPERATOR_DECISION_INTRO == "처리할 항목만 체크하고, 필요하면 아래에 메모를 남기세요."
+    assert nx.OPERATOR_DECISION_INTRO in _paragraph_text(blocks)
+
+
+def test_operator_decision_wording_is_cautious():
+    todo_text = _todo_text(build_notion_blocks(_full_result(), compact=True))
+    # recommended actions are hedged candidates → end in 검토
+    assert "검토" in todo_text
+    for banned in ("자동 처리", "즉시 반영", "반드시"):
+        assert banned not in todo_text, banned
+
+
+def test_operator_decision_fallback_when_no_action():
+    result = _full_result()
+    result["issue_items"] = [_issue("포장 손상", action="")]  # no recommended action
+    todo_text = _todo_text(build_notion_blocks(result, compact=True))
+    assert "포장 손상" in todo_text
+    assert "확인" in todo_text
+    assert "보류" in todo_text
+    assert "검토" in todo_text
+
+
+def test_operator_decision_empty_result_safe():
+    blocks = build_notion_blocks(_empty_result(), compact=True)
+    assert "운영 판단" in _headings(blocks)
+    assert [b for b in blocks if b["type"] == "to_do"] == []
+
+
+def test_compact_under_60_at_caps():
+    # 5 issues drive the largest 운영 판단 / 반복 이슈 footprint
+    result = _full_result()
+    result["issue_items"] = [_issue(f"이슈 {i}") for i in range(5)]
+    result["worklist_items"] = [_worklist_item(f"리뷰 {i}") for i in range(20)]
+    result["tagged"] = [
+        _review(f"답글 {i}", rating=2.0, tags=("needs_reply",)) for i in range(8)
+    ]
+    assert len(build_notion_blocks(result, compact=True)) < 60
+
+
+def test_compact_needs_reply_included_when_non_positive():
+    # _full_result has one needs_reply review at rating 2.0 → worth a reply
+    blocks = build_notion_blocks(_full_result(), compact=True)
+    assert "답글 검토 리뷰" in _headings(blocks)
+    assert "답글이 필요한 리뷰입니다." in _all_text(blocks)
+
+
+def test_compact_needs_reply_omitted_when_only_positive():
+    result = _full_result()
+    result["tagged"] = [
+        _review("잘 쓰고 있어요 만족합니다.", rating=5.0, tags=("needs_reply",))
+    ]
+    headings = _headings(build_notion_blocks(result, compact=True))
+    assert "답글 검토 리뷰" not in headings
+
+
+def test_compact_needs_reply_capped():
+    result = _full_result()
+    result["tagged"] = [
+        _review(f"답글 대상 {i}", rating=2.0, tags=("needs_reply",)) for i in range(10)
+    ]
+    text = _all_text(build_notion_blocks(result, compact=True))
+    assert f"답글 대상 {nx.MAX_COMPACT_NEEDS_REPLY - 1}" in text
+    assert f"답글 대상 {nx.MAX_COMPACT_NEEDS_REPLY}" not in text
+
+
+def test_compact_no_overpromise_wording():
+    # scan deep so toggle children (incl. 적용 범위) are covered too
+    text = _all_text_deep(build_notion_blocks(_full_result(), compact=True))
+    text = text.replace("원인/매출 영향 단정", "")  # the 보류 권장 caution is allowed
+    for banned in BANNED_WORDING:
+        assert banned not in text, banned
+
+
+def test_compact_empty_result_builds_safely():
+    blocks = build_notion_blocks(_empty_result(), compact=True)
+    assert len(blocks) < 60
+    headings = _headings(blocks)
+    for title in _COMPACT_HEADING_SECTIONS:
+        assert title in headings, title
+    assert "적용 범위 보기" in _toggle_titles(blocks)
+
+
+def test_full_body_layout_unchanged():
+    # full page export stays a flat document: no toggle/callout, all sections
+    # rendered as headings.
+    blocks = build_notion_blocks(_full_result())
+    types = {b["type"] for b in blocks}
+    assert "toggle" not in types
+    assert "callout" not in types
+    assert "to_do" not in types  # 운영 판단 checklist is compact-only
+    headings = _headings(blocks)
+    assert "운영 판단" not in headings  # decision workspace is compact-only
+    for title in SECTION_TITLES:
+        assert title in headings, title
+
+
+# --- single-button routing: resolve_notion_export_mode ----------------------
+
+
+def test_export_mode_database_when_db_id_present(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "k")
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-1")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "database"
+    assert key == "k"
+    assert target == "db-1"  # DB wins over page when both are set
+
+
+def test_export_mode_page_when_only_parent_present(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.setenv("NOTION_API_KEY", "k")
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "page"
+    assert key == "k"
+    assert target == "page-1"
+
+
+def test_export_mode_none_when_all_missing(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.delenv("NOTION_DATABASE_ID", raising=False)
+    monkeypatch.delenv("NOTION_PARENT_PAGE_ID", raising=False)
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "none"
+    assert key is None
+    assert target is None
+
+
+def test_export_mode_none_when_key_missing(monkeypatch):
+    monkeypatch.setattr(nx, "_notion_env_loaded", True, raising=False)
+    monkeypatch.delenv("NOTION_API_KEY", raising=False)
+    monkeypatch.setenv("NOTION_DATABASE_ID", "db-1")
+    monkeypatch.setenv("NOTION_PARENT_PAGE_ID", "page-1")
+    mode, key, target = nx.resolve_notion_export_mode()
+    assert mode == "none"
+    assert key is None
+    assert target is None
+
+
+# --- compact 우선 점검 항목: decision-level grouping + sanitization -----------
+
+# The 7 phrases this slice must keep out of the compact DB body (S1a list).
+S1D_BANNED = [
+    "원인 분석", "개선 방안", "개선해야", "반드시", "매출 영향", "자동 처리", "즉시 반영",
+]
+
+
+def _graded_issue(title, *, severity_label, action, count=3):
+    return {**_issue(title, count=count), "severity_label": severity_label,
+            "recommended_action": action}
+
+
+def _section_blocks(blocks, heading):
+    """Top-level blocks between a heading_2 == heading and the next heading_2."""
+    out, capture = [], False
+    for b in blocks:
+        if b["type"] == "heading_2":
+            content = b["heading_2"]["rich_text"][0]["text"]["content"]
+            if content == heading:
+                capture = True
+                continue
+            if capture:
+                break
+        elif capture:
+            out.append(b)
+    return out
+
+
+def _bullets(section):
+    return [b for b in section if b["type"] == "bulleted_list_item"]
+
+
+def _para_texts(section):
+    return [b["paragraph"]["rich_text"][0]["text"]["content"]
+            for b in section
+            if b["type"] == "paragraph" and b["paragraph"]["rich_text"]]
+
+
+def test_compact_action_list_grouped_by_decision_level():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력 부족", severity_label="우선 확인",
+                      action="실크벽지 사용 시 추가 고정 안내 검토"),
+        _graded_issue("절단 깨짐", severity_label="확인 필요",
+                      action="절단 도구/작업 방법 안내 검토", count=2),
+    ]
+    result["worklist_items"] = [
+        _worklist_item("구성품 누락", day=24, action="구성품 누락 표현 확인")
+    ]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    paras = _para_texts(section)
+    assert nx.DECISION_GROUP_RED in paras
+    assert nx.DECISION_GROUP_YELLOW in paras
+    assert nx.DECISION_GROUP_WHITE in paras
+    # fixed order: 🔴 → 🟡 → ⚪
+    assert paras.index(nx.DECISION_GROUP_RED) < paras.index(nx.DECISION_GROUP_YELLOW)
+    assert paras.index(nx.DECISION_GROUP_YELLOW) < paras.index(nx.DECISION_GROUP_WHITE)
+
+
+def test_compact_action_list_capped_to_max():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue(f"이슈 {i}", severity_label="우선 확인", action=f"조치 {i} 검토")
+        for i in range(3)
+    ]
+    result["worklist_items"] = [
+        _worklist_item(f"리뷰 {i}", action=f"확인 {i} 검토") for i in range(10)
+    ]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    assert len(_bullets(section)) <= nx.MAX_COMPACT_ACTION_ITEMS
+
+
+def test_compact_action_list_dedups_repeated_action():
+    result = _full_result()
+    dup = "동일 조치 검토"
+    result["issue_items"] = [
+        _graded_issue("A", severity_label="우선 확인", action=dup),
+        _graded_issue("B", severity_label="우선 확인", action=dup),
+    ]
+    result["worklist_items"] = []
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    assert len(_bullets(section)) == 1
+
+
+def test_compact_action_list_only_present_groups_render():
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력", severity_label="우선 확인", action="고정 안내 검토")
+    ]
+    result["worklist_items"] = []
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    paras = _para_texts(section)
+    assert nx.DECISION_GROUP_RED in paras
+    assert nx.DECISION_GROUP_YELLOW not in paras  # empty group hidden
+    assert nx.DECISION_GROUP_WHITE not in paras
+
+
+def test_compact_no_banned_wording_anywhere():
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "recommended_action": "원인 분석 및 개선 방안을 검토하세요",
+         "summary": "매출 영향이 큽니다"}
+    ]
+    result["worklist_items"] = [
+        _worklist_item("리뷰", action="제품의 내구성 및 품질을 점검하고, 필요시 개선 방안을 마련하세요.")
+    ]
+    text = _all_text_deep(build_notion_blocks(result, compact=True))
+    text = text.replace("원인/매출 영향 단정", "")  # the 보류 권장 caution is allowed
+    for bad in S1D_BANNED:
+        assert bad not in text, bad
+    # no awkward particle artifacts reach the compact body
+    assert "검토을" not in text
+    assert "검토이" not in text
+
+
+def test_compact_worklist_improvement_phrase_sanitized():
+    result = _full_result()
+    result["issue_items"] = []  # force worklist into the action list
+    result["worklist_items"] = [_worklist_item("리뷰", action="필요시 개선 방안을 마련하세요")]
+    section = _section_blocks(build_notion_blocks(result, compact=True), "우선 점검 항목")
+    text = "\n".join(
+        b[b["type"]]["rich_text"][0]["text"]["content"]
+        for b in section
+        if b.get(b["type"], {}).get("rich_text")
+    )
+    assert "개선 방안" not in text
+    assert "검토을" not in text
+    # natural Korean: the full action phrase is rewritten, not a dangling token
+    assert "필요하면 보완 여부를 검토하세요" in text
+
+
+def test_compact_issue_toggle_summary_sanitized():
+    result = _full_result()
+    result["issue_items"] = [
+        {**_issue("내구성"), "summary": "원인 분석 및 개선 방안 필요", "recommended_action": "즉시 반영"}
+    ]
+    text = _all_text_deep(build_notion_blocks(result, compact=True))
+    for bad in ("원인 분석", "개선 방안", "즉시 반영"):
+        assert bad not in text, bad
+
+
+def test_full_page_action_list_format_unchanged():
+    # full body keeps the bracket-label digest; decision emojis are compact-only
+    result = _full_result()
+    result["issue_items"] = [
+        _graded_issue("접착력", severity_label="우선 확인", action="고정 안내 검토")
+    ]
+    text = _all_text(build_notion_blocks(result))  # full body
+    assert "[우선 확인]" in text
+    for emoji in ("🔴", "🟡", "⚪"):
+        assert emoji not in text
+
+
+def test_db_properties_have_no_decision_emojis():
+    props = build_database_properties(_full_result(), datetime(2026, 1, 21, 17, 44))
+    blob = json.dumps(props, ensure_ascii=False)
+    for emoji in ("🔴", "🟡", "⚪"):
+        assert emoji not in blob

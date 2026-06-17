@@ -12,8 +12,10 @@ build/
 venv/
 env/
 
-# Environment
+# Environment (unanchored: matches at every level, e.g. backend/.env too).
+# Real local env files are never committed; only *.example templates are.
 .env
+.env.local
 
 # IDE
 .vscode/
@@ -46,6 +48,13 @@ debug_dumps/
 *.db
 *.db-shm
 *.db-wal
+
+# Industrial review-ops local workspace store (Slice A; local demo only)
+.review_ops_data/
+
+# Operator-provided product detail images (consumer-visible source input;
+# never commit — used by the local detail-image snapshot ingest)
+/data/
 
 # Root-level runtime state + scratch
 /retry_queue.json
@@ -96,6 +105,30 @@ Thumbs.db
 .Rhistory
 # Added by code-review-graph
 .code-review-graph/
+
+# ──────────────────────────────────────────────────────────────────────────
+# SellerOps AI (new primary product — Java/React monorepo at repo root)
+# ──────────────────────────────────────────────────────────────────────────
+# Backend (Spring Boot / Gradle)
+backend/.gradle/
+backend/build/
+backend/bin/
+backend/out/
+# Frontend (React / Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+# Local stack env (compose reads root .env; keep .env.example tracked)
+.env.sellerops
+docker-compose.override.yml
+# Operator-provided data dumps / upload fixtures at repo root (never commit).
+# Scoped to root so test resources under src/test/** stay trackable.
+/*.xlsx
+/*.csv
+
+# Operator-provided seller-center review export samples (raw; may contain
+# reviewer / order PII) — used locally for schema analysis, never committed.
+naver/
 
 # Discord outreach bot — local config + runtime artifacts (never commit)
 ops/discord_outreach_bot/config.yaml
