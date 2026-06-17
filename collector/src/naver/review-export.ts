@@ -81,31 +81,32 @@ function isHidden(attrs: string): boolean {
   );
 }
 
-function matchWording(text: string): { re: RegExp; keyword: string } | undefined {
-  return EXPORT_WORDING.find(({ re }) => re.test(text));
-}
-
 /**
- * Pure: find top-document interactive elements that read like an actionable export
- * trigger — matching export/download wording AND visible AND enabled. A disabled or
- * hidden control is deliberately excluded (it is not actionable yet, e.g. gated
- * behind a search step), so it is not treated as a sync trigger. Comment text is
- * stripped first so a marker word inside an HTML comment can't fabricate a
- * candidate. Operates on serialized HTML, so it is fully offline-testable.
+ * Pure: scan top-document interactive elements (button / anchor / role=button /
+ * input button) and return those whose accessible name matches `wording`, are
+ * visible + enabled, and do NOT match any `exclude` pattern. Accessible name is
+ * visible text + aria-label/title/value only — deliberately NOT the whole
+ * attribute string, so a class/href like `excel-btn` can't false-match. Comment
+ * text is stripped first so a marker word inside an HTML comment can't fabricate a
+ * candidate. Shared by the export-trigger finder and the modal-confirm finder, so
+ * both apply the same visibility/enabled discipline. Offline-testable.
  */
-export function findExportCandidates(rawHtml: string): ExportCandidate[] {
+function scanInteractiveElements(
+  rawHtml: string,
+  wording: ReadonlyArray<{ re: RegExp; keyword: string }>,
+  exclude: readonly RegExp[] = [],
+): ExportCandidate[] {
   const html = stripComments(rawHtml);
   const out: ExportCandidate[] = [];
 
   const consider = (tag: string, attrs: string, inner: string): void => {
     if (isDisabled(attrs) || isHidden(attrs)) return;
-    // Accessible name only — visible text + aria-label/title/value. Deliberately
-    // NOT the whole attribute string, so a class/href like `excel-btn` can't
-    // false-match. `value` counts as visible-ish text (e.g. <input value="...">).
     const visibleText = `${stripTags(inner)} ${readAttr(attrs, "value") ?? ""}`;
     const ariaLabel = readAttr(attrs, "aria-label") ?? "";
     const title = readAttr(attrs, "title") ?? "";
-    const matched = matchWording(`${visibleText} ${ariaLabel} ${title}`);
+    const accessible = `${visibleText} ${ariaLabel} ${title}`;
+    if (exclude.some((re) => re.test(accessible))) return; // e.g. never treat 취소 as confirm
+    const matched = wording.find(({ re }) => re.test(accessible));
     if (!matched) return;
     out.push({
       tag,
@@ -136,6 +137,16 @@ export function findExportCandidates(rawHtml: string): ExportCandidate[] {
     consider("input", attrs, "");
   }
   return out;
+}
+
+/**
+ * Pure: find top-document interactive elements that read like an actionable export
+ * trigger — matching export/download wording AND visible AND enabled. A disabled or
+ * hidden control is deliberately excluded (it is not actionable yet, e.g. gated
+ * behind a search step), so it is not treated as a sync trigger.
+ */
+export function findExportCandidates(rawHtml: string): ExportCandidate[] {
+  return scanInteractiveElements(rawHtml, EXPORT_WORDING);
 }
 
 /**
@@ -172,6 +183,30 @@ const DOWNLOAD_TIMEOUT_MS = 15_000;
  * Playwright's actionability checks at click time, so a disabled/hidden element is
  * never clicked.
  */
+/**
+ * Pure: the ordered Playwright selector variants that target one matched
+ * interactive element — `#id` → visible-text `:has-text(<keyword>)` →
+ * `[aria-label*=...]` → `[title*=...]`, each carrying the enabled guard so a
+ * gated control is never targeted. Shared by the trigger and modal-confirm paths.
+ */
+function selectorVariantsFor(c: ExportCandidate): string[] {
+  if (c.id) return [`#${c.id}`];
+  const isRoleButton = c.tag !== "button" && c.tag !== "a" && c.tag !== "input";
+  const scope = isRoleButton ? `${c.tag}[role="button"]` : c.tag;
+  const guard = isRoleButton ? ':not([aria-disabled="true"])' : ":not([disabled])";
+  const out: string[] = [];
+  if (c.tag === "input") {
+    out.push(`input[type="button"][value*="${c.keyword}"], input[type="submit"][value*="${c.keyword}"]`);
+  } else if (c.inText) {
+    out.push(`${scope}:has-text("${c.keyword}")${guard}`);
+  }
+  // Attribute fallbacks for controls whose keyword is only in aria-label/title
+  // (e.g. an icon button with no visible text).
+  if (c.inAriaLabel) out.push(`${scope}[aria-label*="${c.keyword}"]${guard}`);
+  if (c.inTitle) out.push(`${scope}[title*="${c.keyword}"]${guard}`);
+  return out;
+}
+
 export function buildTriggerSelectors(rawHtml: string): string[] {
   const candidates = findExportCandidates(rawHtml);
   const selectors: string[] = [];
@@ -182,29 +217,68 @@ export function buildTriggerSelectors(rawHtml: string): string[] {
   if (candidates.some((c) => c.dataExportReview)) push(PREFERRED_TRIGGER_SELECTOR);
   for (const c of candidates) {
     if (c.dataExportReview) continue;
-    if (c.id) {
-      push(`#${c.id}`);
-      continue;
-    }
-    const isRoleButton = c.tag !== "button" && c.tag !== "a" && c.tag !== "input";
-    // Scope prefix + the enabled guard, parallel across visible-text and attribute
-    // selectors so a gated control is still never targeted.
-    const scope = isRoleButton ? `${c.tag}[role="button"]` : c.tag;
-    const guard = isRoleButton ? ':not([aria-disabled="true"])' : ":not([disabled])";
-
-    if (c.tag === "input") {
-      push(`input[type="button"][value*="${c.keyword}"], input[type="submit"][value*="${c.keyword}"]`);
-    } else if (c.inText) {
-      push(`${scope}:has-text("${c.keyword}")${guard}`);
-    }
-    // Attribute fallbacks for controls whose keyword is only in aria-label/title
-    // (e.g. an icon button with no visible text).
-    if (c.inAriaLabel) push(`${scope}[aria-label*="${c.keyword}"]${guard}`);
-    if (c.inTitle) push(`${scope}[title*="${c.keyword}"]${guard}`);
+    for (const s of selectorVariantsFor(c)) push(s);
   }
   // Defensive fallback: classify said SYNC but nothing built a selector.
   if (selectors.length === 0) push(PREFERRED_TRIGGER_SELECTOR);
   return selectors;
+}
+
+// A post-click confirmation/warning modal can sit between the export trigger and
+// the actual download (the live milestone-1 verification clicked the export button
+// successfully but no download fired — a confirm/warning dialog intervened). We
+// confirm ONLY a safe action and never click cancel/close.
+//
+// Auto-confirm is intentionally limited to 확인 — the action the observed NAVER
+// export modal uses. 동의 is too legally meaningful to auto-click; 계속 / 다운로드
+// can appear in unrelated flows. Add others only when a specific observed modal
+// requires them.
+const SAFE_CONFIRM_WORDING: ReadonlyArray<{ re: RegExp; keyword: string }> = [
+  { re: /확인/, keyword: "확인" },
+];
+const CANCEL_WORDING: readonly RegExp[] = [/취소/, /닫기/, /\bcancel\b/i, /\bclose\b/i];
+const MODAL_MARKERS: readonly RegExp[] = [
+  /role\s*=\s*["'](?:dialog|alertdialog)["']/i,
+  /aria-modal\s*=\s*["']true["']/i,
+  /\b(?:class|id)\s*=\s*["'][^"']*(?:modal|dialog|popup|layer|overlay)[^"']*["']/i,
+];
+
+export interface ModalConfirm {
+  hasModal: boolean;
+  confirmSelector?: string;
+}
+
+/**
+ * Strongest available modal scope selector, used to confine the confirm click to
+ * the dialog so a stray 확인 elsewhere on the page can't be targeted. role /
+ * aria-modal scopes are precise; a class/id-only container falls back to a global
+ * (still 확인-only, still gated on modal markers) selector.
+ */
+function modalScopeSelector(html: string): string | undefined {
+  if (/role\s*=\s*["']dialog["']/i.test(html)) return '[role="dialog"]';
+  if (/role\s*=\s*["']alertdialog["']/i.test(html)) return '[role="alertdialog"]';
+  if (/aria-modal\s*=\s*["']true["']/i.test(html)) return '[aria-modal="true"]';
+  return undefined;
+}
+
+/**
+ * Pure: detect a post-click confirmation/warning modal and, if present, a selector
+ * for its SAFE confirm action (only 확인). Cancel/close controls are excluded, so a
+ * modal that offers only 취소/닫기 (or only 동의/계속) returns `hasModal:true` with
+ * NO `confirmSelector` — the caller must not guess another control. The confirm
+ * selector is scoped to the modal container when possible. Operates on serialized
+ * HTML → offline-testable.
+ */
+export function findModalConfirm(rawHtml: string): ModalConfirm {
+  const html = stripComments(rawHtml);
+  if (!MODAL_MARKERS.some((re) => re.test(html))) return { hasModal: false };
+  const confirm = scanInteractiveElements(html, SAFE_CONFIRM_WORDING, CANCEL_WORDING)[0];
+  if (!confirm) return { hasModal: true };
+  const variant = selectorVariantsFor(confirm)[0];
+  if (!variant) return { hasModal: true };
+  // An #id is already unique; otherwise confine the click to the modal container.
+  const scope = variant.startsWith("#") ? undefined : modalScopeSelector(html);
+  return { hasModal: true, confirmSelector: scope ? `${scope} ${variant}` : variant };
 }
 
 export interface ExportResult {
@@ -234,6 +308,26 @@ export interface RunExportOptions {
  * impossible. In classify-only mode the file is NOT persisted (no `saveAs`), so
  * CAPTURED carries no `filePath`. LIVE-ONLY.
  */
+type ModalOutcome = "no-modal" | "confirmed" | "no-safe-confirm";
+
+/**
+ * Live: after the export trigger click, handle a confirmation/warning modal if one
+ * intervened before the download. Clicks only a SAFE confirm action; returns
+ * `no-safe-confirm` (so the caller halts as DOWNLOAD_FAILED) when a modal is present
+ * but offers only cancel/close. LIVE-ONLY.
+ */
+async function confirmExportModal(page: PwPage): Promise<ModalOutcome> {
+  const modal = findModalConfirm(await page.content());
+  if (!modal.hasModal) return "no-modal";
+  if (!modal.confirmSelector) return "no-safe-confirm";
+  try {
+    await page.click(modal.confirmSelector, { timeout: TRIGGER_CLICK_TIMEOUT_MS });
+  } catch {
+    return "no-safe-confirm";
+  }
+  return "confirmed";
+}
+
 export async function runExport(
   page: PwPage,
   downloadDir: string,
@@ -261,6 +355,14 @@ export async function runExport(
       // pending download wait and try the next candidate.
       void downloadPromise.catch(() => undefined);
       continue;
+    }
+    // A confirmation/warning modal may sit between the trigger and the download.
+    const modal = await confirmExportModal(page);
+    if (modal === "no-safe-confirm") {
+      // Modal present but only unsafe actions (e.g. 취소/닫기) — do NOT guess; halt.
+      void downloadPromise.catch(() => undefined);
+      log("export.download_failed", { kind, reason: "modal_no_safe_confirm" }, "error");
+      return { outcome: "DOWNLOAD_FAILED" };
     }
     try {
       const download = await downloadPromise;

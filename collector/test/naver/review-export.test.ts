@@ -7,6 +7,7 @@ import {
   buildTriggerSelectors,
   classifyExportPage,
   findExportCandidates,
+  findModalConfirm,
   runExport,
 } from "../../src/naver/review-export";
 import type { PwDownload, PwPage } from "../../src/profile";
@@ -128,19 +129,57 @@ describe("buildTriggerSelectors", () => {
   });
 });
 
-/** Fake Playwright page: supplies content + a controllable download outcome. */
+describe("findModalConfirm", () => {
+  it("no modal markers → hasModal false", () => {
+    expect(findModalConfirm("<main><button>엑셀 다운로드</button></main>")).toEqual({ hasModal: false });
+  });
+
+  it("dialog with a safe 확인 action → modal-scoped confirm selector", () => {
+    const r = findModalConfirm(read("export_confirm_modal.html"));
+    expect(r.hasModal).toBe(true);
+    expect(r.confirmSelector).toBe('[role="dialog"] button:has-text("확인"):not([disabled])');
+  });
+
+  it("dialog with only 취소/닫기 → hasModal true, no confirm selector", () => {
+    const r = findModalConfirm(read("export_cancel_only_modal.html"));
+    expect(r.hasModal).toBe(true);
+    expect(r.confirmSelector).toBeUndefined();
+  });
+
+  it("never selects a cancel/close control as confirm", () => {
+    const r = findModalConfirm('<div role="dialog"><button>취소</button><button>닫기</button></div>');
+    expect(r.confirmSelector).toBeUndefined();
+  });
+
+  it("does NOT auto-confirm 동의 / 계속 (only 확인 is auto-confirmed)", () => {
+    const r = findModalConfirm('<div role="dialog"><button>동의</button><button>계속</button></div>');
+    expect(r.hasModal).toBe(true);
+    expect(r.confirmSelector).toBeUndefined();
+  });
+});
+
+/**
+ * Fake Playwright page: supplies content + a controllable download outcome.
+ * `afterClickHtml`, when set, is returned by `content()` after the first click —
+ * used to simulate a confirmation modal appearing after the export trigger.
+ * `onClick` receives the clicked selector so tests can assert which controls were
+ * (and were not) clicked.
+ */
 function fakePage(opts: {
   html: string;
+  afterClickHtml?: string;
   download?: PwDownload;
   downloadError?: boolean;
-  onClick?: () => void;
+  onClick?: (selector: string) => void;
 }): PwPage {
+  let clicks = 0;
   return {
     url: () => "https://sell.smartstore.naver.com/o/n/review",
-    content: async () => opts.html,
+    content: async () => (clicks > 0 && opts.afterClickHtml ? opts.afterClickHtml : opts.html),
     goto: async () => null,
-    click: async () => {
-      opts.onClick?.();
+    click: async (selector: string) => {
+      clicks += 1;
+      opts.onClick?.(selector);
     },
     waitForEvent: async () => {
       if (opts.downloadError || !opts.download) throw new Error("download timeout");
@@ -206,6 +245,38 @@ describe("runExport", () => {
     const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
     expect(result.outcome).toBe("LAYOUT_UNRECOGNIZED");
     expect(clicked).toBe(false);
+  });
+
+  it("trigger opens a 확인 confirmation modal → confirmed, then CAPTURED (classify-only)", async () => {
+    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const clicks: string[] = [];
+    const page = fakePage({
+      html: read("export_modal_trigger.html"),
+      afterClickHtml: read("export_confirm_modal.html"),
+      download,
+      onClick: (s) => clicks.push(s),
+    });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(result.filePath).toBeUndefined(); // classify-only: nothing persisted
+    expect(clicks).toHaveLength(2); // export trigger, then the safe 확인 confirm
+    expect(clicks[1]).toContain("확인");
+  });
+
+  it("modal offers only 취소/닫기 → DOWNLOAD_FAILED and never clicks an unsafe action", async () => {
+    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const clicks: string[] = [];
+    const page = fakePage({
+      html: read("export_modal_trigger.html"),
+      afterClickHtml: read("export_cancel_only_modal.html"),
+      download, // a download is even available, but we must not proceed past the modal
+      onClick: (s) => clicks.push(s),
+    });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("DOWNLOAD_FAILED");
+    expect(clicks).toHaveLength(1); // only the export trigger; the modal is never confirmed
+    expect(clicks.join(" ")).not.toContain("취소");
+    expect(clicks.join(" ")).not.toContain("닫기");
   });
 
   it("async layout → ASYNC_JOB_DETECTED without clicking any control", async () => {
