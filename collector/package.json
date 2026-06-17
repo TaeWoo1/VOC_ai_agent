@@ -3,15 +3,17 @@
   "private": true,
   "version": "0.0.1-poc",
   "type": "module",
-  "description": "SellerOps NAVER Review Collector — offline core POC. No live NAVER automation; no browser engine bundled yet (the live layer adds Playwright in a later slice).",
+  "description": "SellerOps NAVER Review Collector POC. Offline core + a live export-discovery layer (Playwright). Live NAVER runs are human-attended and require explicit per-run operator approval; the offline test suite needs no browser.",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "upload": "tsx src/cli/upload-file.ts"
+    "upload": "tsx src/cli/upload-file.ts",
+    "discover": "tsx src/cli/discover-export.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "playwright": "^1.49.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

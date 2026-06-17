@@ -26,6 +26,11 @@ describe("decideState", () => {
       "EXPORT_LAYOUT_CHANGED",
     ],
     [
+      "export is an async job → EXPORT_ASYNC_JOB_DETECTED",
+      { paired: true, session: "LOGGED_IN", exportOutcome: "ASYNC_JOB_DETECTED" },
+      "EXPORT_ASYNC_JOB_DETECTED",
+    ],
+    [
       "export download failed → DOWNLOAD_FAILED",
       { paired: true, session: "LOGGED_IN", exportOutcome: "DOWNLOAD_FAILED" },
       "DOWNLOAD_FAILED",
@@ -59,6 +64,8 @@ describe("decideState", () => {
       { paired: true, session: "LOGGED_IN", exportOutcome: "CAPTURED", uploadOutcome: "FAILED" },
       { paired: false, session: "LOGGED_IN", exportOutcome: "CAPTURED", uploadOutcome: "OK" },
       { paired: true, session: "LOGGED_OUT", exportOutcome: "CAPTURED", uploadOutcome: "OK" },
+      // An async export is a job, never a captured-and-uploaded success.
+      { paired: true, session: "LOGGED_IN", exportOutcome: "ASYNC_JOB_DETECTED", uploadOutcome: "OK" },
     ];
     for (const s of noSuccess) {
       expect(decideState(s)).not.toBe("LAST_SUCCESS");
