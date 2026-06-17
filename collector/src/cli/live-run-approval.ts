@@ -6,9 +6,23 @@
  */
 export const APPROVAL_FLAG = "--i-understand-this-opens-live-naver";
 
+/**
+ * Classify-only (a.k.a. no-upload) mode: discover/classify the export mechanism
+ * WITHOUT ingesting a real seller-center export into SellerOps. This is the
+ * milestone-1 discovery mode — no SellerOps login, no channel resolve, no upload,
+ * and LAST_SUCCESS stays structurally impossible (capture without upload is only
+ * COLLECTING). `--no-upload` is an accepted alias.
+ */
+export const CLASSIFY_ONLY_FLAGS = ["--classify-only", "--no-upload"] as const;
+
 /** Did the operator pass the explicit live-run approval flag? */
 export function hasLiveRunApproval(args: string[]): boolean {
   return args.includes(APPROVAL_FLAG);
+}
+
+/** Is this a classify-only / no-upload run (discovery, never ingestion)? */
+export function isClassifyOnly(args: string[]): boolean {
+  return CLASSIFY_ONLY_FLAGS.some((flag) => args.includes(flag));
 }
 
 /** Operator-facing refusal message shown when the approval flag is missing. */

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { APPROVAL_FLAG, approvalRequiredMessage, hasLiveRunApproval } from "../../src/cli/live-run-approval";
+import {
+  APPROVAL_FLAG,
+  approvalRequiredMessage,
+  hasLiveRunApproval,
+  isClassifyOnly,
+} from "../../src/cli/live-run-approval";
 
 describe("hasLiveRunApproval", () => {
   it("is false for a bare --login (no approval flag)", () => {
@@ -46,5 +51,32 @@ describe("approvalRequiredMessage", () => {
 
   it("shows the exact approval flag to re-run with", () => {
     expect(msg).toContain(APPROVAL_FLAG);
+  });
+});
+
+describe("isClassifyOnly", () => {
+  it("detects --classify-only", () => {
+    expect(isClassifyOnly(["--discover", "--classify-only", APPROVAL_FLAG])).toBe(true);
+  });
+
+  it("detects the --no-upload alias", () => {
+    expect(isClassifyOnly(["--discover", "--no-upload", APPROVAL_FLAG])).toBe(true);
+  });
+
+  it("is false when neither flag is present", () => {
+    expect(isClassifyOnly(["--discover", APPROVAL_FLAG])).toBe(false);
+  });
+
+  it("is false for no args", () => {
+    expect(isClassifyOnly([])).toBe(false);
+  });
+
+  it("is not fooled by a prefix-similar flag", () => {
+    expect(isClassifyOnly(["--discover", "--classify-only-please"])).toBe(false);
+    expect(isClassifyOnly(["--discover", "--no-uploads"])).toBe(false);
+  });
+
+  it("is order-independent", () => {
+    expect(isClassifyOnly(["--no-upload", "--discover"])).toBe(true);
   });
 });
