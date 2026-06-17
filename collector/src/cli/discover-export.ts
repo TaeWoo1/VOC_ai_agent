@@ -2,7 +2,12 @@
  * Live NAVER review-export discovery — one human-attended run (NO scheduler loop).
  *
  *   node --env-file=.env src/cli/discover-export.ts --login    --i-understand-this-opens-live-naver
- *   node --env-file=.env src/cli/discover-export.ts --discover --i-understand-this-opens-live-naver
+ *   node --env-file=.env src/cli/discover-export.ts --discover --classify-only --i-understand-this-opens-live-naver
+ *
+ * Milestone-1 uses --classify-only (alias --no-upload): it classifies the export
+ * mechanism without uploading to SellerOps (no backend needed, LAST_SUCCESS
+ * impossible). Bare --discover (without --classify-only) runs the full
+ * capture→upload path and requires the local backend.
  *
  * LIVE RUN — requires explicit, per-run operator approval. The CLI refuses every
  * live action unless the approval flag is present. It launches a real browser
@@ -17,7 +22,7 @@ import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
 import { decideState, writeStatus, type RunSignals, type SessionState } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
-import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
 
 // PLACEHOLDER landing URL; the human navigates/logs in from here.
 const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
@@ -42,7 +47,7 @@ async function doLogin(): Promise<void> {
   // profile dir automatically. The collector stores nothing itself.
 }
 
-async function doDiscover(): Promise<void> {
+async function doDiscover(classifyOnly: boolean): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.naverReviewUrl) {
     console.error("Set NAVER_REVIEW_URL to the review-management/export page URL first.");
@@ -66,7 +71,24 @@ async function doDiscover(): Promise<void> {
   }
 
   // 2) Export discovery — classify sync/async/blocked and capture only if sync.
-  const { outcome, filePath } = await runExport(page, cfg.downloadDir);
+  const { outcome, filePath } = await runExport(page, cfg.downloadDir, { classifyOnly });
+
+  // Classify-only (milestone-1 discovery): record the mechanism and STOP. No
+  // SellerOps login, no channel resolve, no upload — so LAST_SUCCESS is
+  // impossible (a CAPTURED sync export maps to COLLECTING, never success). No
+  // real file was persisted (runExport skipped saveAs).
+  if (classifyOnly) {
+    const state = decideState({ ...base, session, exportOutcome: outcome });
+    const detail =
+      outcome === "CAPTURED"
+        ? "classify-only: sync export detected; not captured to disk, not uploaded"
+        : `classify-only: export outcome ${outcome}`;
+    writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
+    await ctx.close();
+    log("run.done", { state, outcome, classifyOnly: true });
+    return;
+  }
+
   if (outcome !== "CAPTURED" || !filePath) {
     const state = decideState({ ...base, session, exportOutcome: outcome });
     writeStatus(cfg.statusFile, { state, detail: `export outcome: ${outcome}`, updatedAt: now() });
@@ -114,7 +136,7 @@ async function main(): Promise<void> {
     return;
   }
   if (mode === "--login") return doLogin();
-  return doDiscover();
+  return doDiscover(isClassifyOnly(args));
 }
 
 void main();

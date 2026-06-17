@@ -93,18 +93,40 @@ The CLI **refuses every live action** unless the explicit approval flag
 fails fast with a message stating what a live run entails. The gate is a pure
 function (`src/cli/live-run-approval.ts`) covered by offline tests.
 
+**Milestone-1 = discovery, not ingestion.** Run `--discover` with
+`--classify-only` (alias `--no-upload`): the collector classifies the export
+mechanism (sync download / async job / blocked / layout-unrecognized) but does
+**not** upload anything to SellerOps. In classify-only mode there is **no
+SellerOps login, no channel resolve, no `/api/uploads` call**, so the
+`SELLEROPS_*` / `NAVER_CHANNEL_CODE` settings are unused and **the backend does
+not need to be running**. `LAST_SUCCESS` is structurally impossible in this mode
+(a captured sync export maps to `COLLECTING`, never success — discovery is not
+collection). On a sync export the file is **not** persisted (no `saveAs`); the
+mechanism is proven by the Playwright download event alone, and the browser's
+temporary artifact is discarded when the context closes.
+
 ```bash
 cp .env.example .env                 # set NAVER_REVIEW_URL for --discover
 npm run discover -- --login    --i-understand-this-opens-live-naver   # headed browser; human logs in
-npm run discover -- --discover --i-understand-this-opens-live-naver   # session check → classify export → capture-if-sync → upload
+
+# Milestone-1: classify only, no upload, backend down
+npm run discover -- --discover --classify-only --i-understand-this-opens-live-naver
+
+# Full capture→upload path (requires the local backend) — NOT milestone-1
+npm run discover -- --discover --i-understand-this-opens-live-naver
 ```
 
 The NAVER session lives **only** in the local profile dir (`.profile/naver`,
-gitignored); it is never serialized or sent. Captured files land in `downloads/`
+gitignored); it is never serialized or sent. The session/export markers in
+`src/session.ts` and `src/naver/review-export.ts` are **placeholders to be
+confirmed** during the approved live run, then recorded (sanitized — no customer
+data, no store identity) in `findings/milestone1.md`.
+
+In the **full** (non-classify-only) path, captured files land in `downloads/`
 (gitignored) and are uploaded through the same `/api/uploads` path the offline
-core uses. The session/export markers in `src/session.ts` and
-`src/naver/review-export.ts` are **placeholders to be confirmed** during the
-approved live run, then recorded in `findings/milestone1.md`.
+core uses. **Milestone-1 must not upload or commit a real captured export.** If a
+real file is ever written to `downloads/`, it stays gitignored and must be
+deleted/handled manually after the run — never committed.
 
 ## Not in this slice (next steps)
 

@@ -65,6 +65,23 @@ describe("runExport", () => {
     expect(clicked).toBe(true);
   });
 
+  it("classify-only: sync layout → CAPTURED but does NOT persist the file (no saveAs)", async () => {
+    let savedTo = "";
+    const download: PwDownload = {
+      suggestedFilename: () => "review_export.xlsx",
+      saveAs: async (p) => {
+        savedTo = p;
+      },
+    };
+    let clicked = false;
+    const page = fakePage({ html: read("export_sync_blob.html"), download, onClick: () => (clicked = true) });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(result.filePath).toBeUndefined(); // mechanism proven by the download event; nothing written
+    expect(savedTo).toBe(""); // saveAs never called — no real file lands in downloadDir
+    expect(clicked).toBe(true);
+  });
+
   it("async layout → ASYNC_JOB_DETECTED without clicking any control", async () => {
     let clicked = false;
     const page = fakePage({ html: read("export_async_job.html"), onClick: () => (clicked = true) });
@@ -107,5 +124,28 @@ describe("export outcome → collector state (via decideState)", () => {
   ];
   it.each(cases)("%s → %s", (exportOutcome, expected) => {
     expect(decideState({ ...base, exportOutcome })).toBe(expected);
+  });
+});
+
+describe("classify-only never reports success (LAST_SUCCESS impossible)", () => {
+  // Classify-only writes status from {session, exportOutcome} with NO
+  // uploadOutcome (the upload leg is skipped). Prove that for EVERY export
+  // outcome the resulting state is never LAST_SUCCESS — discovery is not
+  // successful collection.
+  const base = { paired: true, session: "LOGGED_IN" } as const;
+  const outcomes: ExportOutcome[] = [
+    "CAPTURED",
+    "ASYNC_JOB_DETECTED",
+    "LAYOUT_UNRECOGNIZED",
+    "DOWNLOAD_FAILED",
+    "NOT_ATTEMPTED",
+  ];
+
+  it.each(outcomes)("classify-only %s does not yield LAST_SUCCESS", (exportOutcome) => {
+    expect(decideState({ ...base, exportOutcome })).not.toBe("LAST_SUCCESS");
+  });
+
+  it("a captured sync export in classify-only is COLLECTING, not LAST_SUCCESS", () => {
+    expect(decideState({ ...base, exportOutcome: "CAPTURED" })).toBe("COLLECTING");
   });
 });

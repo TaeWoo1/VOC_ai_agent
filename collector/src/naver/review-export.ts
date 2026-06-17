@@ -46,14 +46,30 @@ export interface ExportResult {
   filePath?: string;
 }
 
+export interface RunExportOptions {
+  /**
+   * Classify-only (milestone-1 discovery): prove the sync mechanism from the
+   * Playwright download event WITHOUT persisting the real export. No `saveAs` is
+   * called, so nothing is written into `downloadDir`; the browser's temporary
+   * download artifact is discarded when the context closes. CAPTURED is returned
+   * with no `filePath`, and the caller must not upload it.
+   */
+  classifyOnly?: boolean;
+}
+
 /**
  * Live: on the export page, classify the mechanism and — only for a sync
  * download — trigger and capture the file. Async jobs are DETECTED only (no
  * polling/loop in this slice). Every failure resolves to a specific
- * ExportOutcome; CAPTURED is returned only when a file actually arrived, so a
- * fake success is impossible. LIVE-ONLY.
+ * ExportOutcome; CAPTURED is returned only when a download actually arrived, so a
+ * fake success is impossible. In classify-only mode the file is NOT persisted
+ * (no `saveAs`), so CAPTURED carries no `filePath`. LIVE-ONLY.
  */
-export async function runExport(page: PwPage, downloadDir: string): Promise<ExportResult> {
+export async function runExport(
+  page: PwPage,
+  downloadDir: string,
+  options: RunExportOptions = {},
+): Promise<ExportResult> {
   const kind = classifyExportPage(await page.content());
   if (kind === "UNRECOGNIZED") {
     log("export.classify", { kind, outcome: "LAYOUT_UNRECOGNIZED" });
@@ -67,6 +83,13 @@ export async function runExport(page: PwPage, downloadDir: string): Promise<Expo
     const downloadPromise = page.waitForEvent("download", { timeout: DOWNLOAD_TIMEOUT_MS });
     await page.click(TRIGGER_SELECTOR, { timeout: DOWNLOAD_TIMEOUT_MS });
     const download = await downloadPromise;
+    if (options.classifyOnly) {
+      // The download event alone proves the export is sync. Do NOT persist the
+      // real file — milestone-1 is discovery, not ingestion. The browser's temp
+      // artifact is discarded on context close; nothing lands in downloadDir.
+      log("export.captured", { kind, classifyOnly: true });
+      return { outcome: "CAPTURED" };
+    }
     const filePath = resolve(downloadDir, download.suggestedFilename());
     await download.saveAs(filePath);
     log("export.captured", { kind });
