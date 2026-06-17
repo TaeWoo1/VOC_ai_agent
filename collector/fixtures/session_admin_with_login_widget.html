@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- Synthetic: an authenticated SmartStore Center admin shell that ALSO embeds an
+     ambient global login widget (NAVER keeps one in the chrome even when logged
+     in). Strong logged-in signals (logout affordance + seller GNB + authenticated
+     shell) must outrank the ambient login form. No real NAVER DOM / PII. -->
+<html lang="ko">
+  <head><title>스마트스토어센터</title></head>
+  <body data-seller-authenticated="true">
+    <nav id="seller-gnb">
+      <a href="/logout">로그아웃</a>
+    </nav>
+    <!-- ambient global login widget, present even while logged in -->
+    <div id="gnb-login-widget" hidden>
+      <form id="nidlogin" method="post"><input type="password" name="pw" /></form>
+    </div>
+    <main><h1>리뷰 관리</h1></main>
+  </body>
+</html>

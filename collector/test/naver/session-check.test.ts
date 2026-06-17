@@ -30,6 +30,36 @@ describe("sessionStateFromContent", () => {
   });
 });
 
+describe("sessionStateFromContent — seller-center detector precedence (synthetic)", () => {
+  const SELLER_REVIEW_URL = "https://sell.smartstore.naver.com/#/review/search";
+
+  it("authenticated admin shell WITH an ambient login widget → LOGGED_IN", () => {
+    // The live milestone-1 regression: strong logged-in signals (logout + seller
+    // GNB + authenticated shell) must beat an ambient embedded login form.
+    expect(sessionStateFromContent(read("session_admin_with_login_widget.html"), SELLER_REVIEW_URL)).toBe(
+      "LOGGED_IN",
+    );
+  });
+
+  it("authenticated review route (seller GNB + shell) → LOGGED_IN", () => {
+    expect(sessionStateFromContent(read("session_logged_in.html"), SELLER_REVIEW_URL)).toBe("LOGGED_IN");
+  });
+
+  it("login URL with SmartStore branding → LOGGED_OUT", () => {
+    expect(sessionStateFromContent(read("session_login_with_branding.html"), LOGIN_URL)).toBe("LOGGED_OUT");
+  });
+
+  it("seller-center page with branding only (no logout/GNB/shell) → LOGGED_OUT", () => {
+    expect(sessionStateFromContent(read("session_branding_only.html"), SELLER_REVIEW_URL)).toBe("LOGGED_OUT");
+  });
+
+  it("unknown seller-center shell without strong markers → LOGGED_OUT (fail-safe)", () => {
+    expect(sessionStateFromContent("<html><body><div id='app'></div></body></html>", SELLER_REVIEW_URL)).toBe(
+      "LOGGED_OUT",
+    );
+  });
+});
+
 describe("urlCategory", () => {
   it("categorizes without exposing the raw URL", () => {
     expect(urlCategory(LOGIN_URL)).toBe("login");
