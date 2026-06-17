@@ -116,6 +116,11 @@ and the profile-dir path guard still forbids any dir outside the collector tree.
 Leave it unset/blank to fall back to bundled Chromium. It changes only which
 browser binary launches; classify-only / no-upload behavior is unchanged.
 
+The browser launches with the **Chromium sandbox enabled** (`chromiumSandbox:
+true`), so Chrome does **not** show the "unsupported command-line flag
+(--no-sandbox)" security warning. This is purely how the browser is launched —
+no change to the dedicated profile or to classify-only / no-upload behavior.
+
 ```bash
 cp .env.example .env                 # set NAVER_REVIEW_URL for --discover
 # Recommended for milestone-1: drive installed Chrome with the dedicated profile
