@@ -27,18 +27,24 @@ describe("resolveProfileDir", () => {
 });
 
 describe("buildLaunchOptions", () => {
-  it("defaults to bundled Chromium (no channel) when unset", () => {
+  it("defaults to bundled Chromium (no channel) with the sandbox enabled", () => {
     const opts = buildLaunchOptions(undefined);
-    expect(opts).toEqual({ headless: false, acceptDownloads: true });
+    expect(opts).toEqual({ headless: false, acceptDownloads: true, chromiumSandbox: true });
     expect("channel" in opts).toBe(false);
   });
 
-  it("maps a configured channel (chrome) to Playwright's channel option", () => {
+  it("maps a configured channel (chrome) to Playwright's channel option, sandbox enabled", () => {
     expect(buildLaunchOptions("chrome")).toEqual({
       headless: false,
       acceptDownloads: true,
+      chromiumSandbox: true,
       channel: "chrome",
     });
+  });
+
+  it("enables chromiumSandbox (no --no-sandbox) for both bundled and chrome channel", () => {
+    expect(buildLaunchOptions(undefined).chromiumSandbox).toBe(true);
+    expect(buildLaunchOptions("chrome").chromiumSandbox).toBe(true);
   });
 
   it("treats a blank/whitespace channel as unset (bundled Chromium)", () => {
