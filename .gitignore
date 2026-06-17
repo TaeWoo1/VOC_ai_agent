@@ -128,7 +128,9 @@ docker-compose.override.yml
 
 # Operator-provided seller-center review export samples (raw; may contain
 # reviewer / order PII) — used locally for schema analysis, never committed.
-naver/
+# Anchored to repo root so it does not also match nested source/test dirs such
+# as collector/src/naver/ and collector/test/naver/.
+/naver/
 
 # Discord outreach bot — local config + runtime artifacts (never commit)
 ops/discord_outreach_bot/config.yaml
