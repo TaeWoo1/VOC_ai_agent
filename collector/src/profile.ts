@@ -42,22 +42,47 @@ export function resolveProfileDir(profileDir: string, root: string = collectorRo
   return resolved;
 }
 
+/** Persistent-context launch options the collector controls. */
+export interface NaverLaunchOptions {
+  headless: boolean;
+  acceptDownloads: boolean;
+  /** Present only when a browser channel is configured (e.g. `chrome`). */
+  channel?: string;
+}
+
 /**
- * Launch a headed, persistent Chromium context against the local profile dir.
- * Headed so a human can log into NAVER and clear any 2FA/CAPTCHA themselves — the
- * collector never types credentials. Downloads are accepted so a sync export can
- * be captured. The session lives ONLY in userDataDir; it is never serialized or
- * sent anywhere.
+ * Pure: build the persistent-context launch options. Always headed (a human logs
+ * in) and download-accepting (a sync export can be captured). A non-empty
+ * `channel` (e.g. `chrome`) selects the installed browser of that channel instead
+ * of the bundled Chromium; an unset/blank channel omits the key, so Playwright
+ * uses its bundled Chromium. This only changes WHICH browser binary launches — it
+ * never changes the profile dir, so the dedicated SellerOps profile (not the
+ * user's personal Chrome profile) is used regardless.
+ */
+export function buildLaunchOptions(channel?: string): NaverLaunchOptions {
+  const base: NaverLaunchOptions = { headless: false, acceptDownloads: true };
+  const trimmed = channel?.trim();
+  return trimmed ? { ...base, channel: trimmed } : base;
+}
+
+/**
+ * Launch a headed, persistent context against the local profile dir. Headed so a
+ * human can log into NAVER and clear any 2FA/CAPTCHA themselves — the collector
+ * never types credentials. Downloads are accepted so a sync export can be
+ * captured. When `channel` is set the installed browser of that channel is used
+ * (e.g. real Chrome) instead of the bundled Chromium; the session still lives
+ * ONLY in the dedicated userDataDir and is never serialized or sent anywhere.
  *
  * LIVE-ONLY: launches a real browser. Run only under explicit, per-run operator
  * approval (see README).
  */
-export async function launchNaverContext(profileDir: string): Promise<BrowserContext> {
+export async function launchNaverContext(
+  profileDir: string,
+  channel?: string,
+): Promise<BrowserContext> {
   const userDataDir = resolveProfileDir(profileDir);
   mkdirSync(userDataDir, { recursive: true });
-  log("profile.launch", { headless: false });
-  return chromium.launchPersistentContext(userDataDir, {
-    headless: false,
-    acceptDownloads: true,
-  });
+  const options = buildLaunchOptions(channel);
+  log("profile.launch", { headless: options.headless, channel: options.channel ?? "bundled" });
+  return chromium.launchPersistentContext(userDataDir, options);
 }

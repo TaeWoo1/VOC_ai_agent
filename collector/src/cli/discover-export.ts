@@ -38,7 +38,7 @@ function banner(): void {
 
 async function doLogin(): Promise<void> {
   const cfg = loadConfig();
-  const ctx = await launchNaverContext(cfg.profileDir);
+  const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
   await page.goto(NAVER_LANDING_URL, { waitUntil: "domcontentloaded" });
   log("login.prompt", { note: "human-login-required" });
@@ -54,7 +54,7 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
     process.exit(2);
     return;
   }
-  const ctx = await launchNaverContext(cfg.profileDir);
+  const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
   const base: RunSignals = { paired: true, session: "LOGGED_OUT" };
   const now = (): string => new Date().toISOString();

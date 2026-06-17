@@ -20,6 +20,15 @@ export interface CollectorConfig {
   statusFile: string;
   /** Review-management/export URL (live layer; unknown until milestone 1). */
   naverReviewUrl: string | undefined;
+  /**
+   * Optional Playwright browser channel (live layer). When set (e.g. `chrome`),
+   * the launcher drives the installed browser of that channel instead of the
+   * bundled Chromium — recommended for NAVER (a mainstream Chrome fingerprint is
+   * less likely to trip account security). Undefined → bundled Chromium. The
+   * dedicated profile dir is unchanged either way; the user's normal Chrome
+   * profile is never used.
+   */
+  browserChannel: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
@@ -32,5 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
+    browserChannel: env.COLLECTOR_BROWSER_CHANNEL,
   };
 }
