@@ -3,7 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearLogSink, getLogSink } from "../../src/log";
-import { classifyExportPage, runExport } from "../../src/naver/review-export";
+import {
+  buildTriggerSelectors,
+  classifyExportPage,
+  findExportCandidates,
+  runExport,
+} from "../../src/naver/review-export";
 import type { PwDownload, PwPage } from "../../src/profile";
 import { decideState, type ExportOutcome } from "../../src/status";
 
@@ -21,6 +26,105 @@ describe("classifyExportPage", () => {
 
   it("unknown layout → UNRECOGNIZED", () => {
     expect(classifyExportPage(read("export_layout_unknown.html"))).toBe("UNRECOGNIZED");
+  });
+
+  // The live milestone-1 fix: a top-document, visible, enabled Excel/download
+  // control WITHOUT the placeholder data-export='review' selector must still be
+  // recognized as sync.
+  it("top-document Excel button without data-export → SYNC_DOWNLOAD", () => {
+    expect(classifyExportPage(read("export_top_doc_excel_button.html"))).toBe("SYNC_DOWNLOAD");
+  });
+
+  it("export control as anchor / role=button → SYNC_DOWNLOAD", () => {
+    expect(classifyExportPage(read("export_top_doc_anchor_rolebutton.html"))).toBe("SYNC_DOWNLOAD");
+  });
+
+  it("only a DISABLED Excel control → UNRECOGNIZED (not actionable)", () => {
+    expect(classifyExportPage(read("export_disabled_button.html"))).toBe("UNRECOGNIZED");
+  });
+
+  it("export wording only in non-interactive copy → UNRECOGNIZED", () => {
+    expect(classifyExportPage(read("export_text_only_no_control.html"))).toBe("UNRECOGNIZED");
+  });
+
+  it("non-export file controls (파일 첨부 / 파일 선택) → UNRECOGNIZED", () => {
+    // `파일` is intentionally NOT export wording — file upload/attach/select must
+    // not be mistaken for an export trigger.
+    expect(classifyExportPage("<main><button>파일 첨부</button><button>파일 선택</button></main>")).toBe(
+      "UNRECOGNIZED",
+    );
+  });
+});
+
+describe("findExportCandidates", () => {
+  it("matches a top-document button by wording, without data-export", () => {
+    const cands = findExportCandidates(read("export_top_doc_excel_button.html"));
+    expect(cands).toHaveLength(1);
+    expect(cands[0]).toMatchObject({ tag: "button", keyword: "엑셀", dataExportReview: false });
+  });
+
+  it("matches both an anchor and a role=button container", () => {
+    const cands = findExportCandidates(read("export_top_doc_anchor_rolebutton.html"));
+    const tags = cands.map((c) => c.tag).sort();
+    expect(tags).toEqual(["a", "div"]);
+  });
+
+  it("excludes a disabled control (not actionable)", () => {
+    expect(findExportCandidates(read("export_disabled_button.html"))).toHaveLength(0);
+  });
+
+  it("excludes export wording that is not inside an interactive element", () => {
+    expect(findExportCandidates(read("export_text_only_no_control.html"))).toHaveLength(0);
+  });
+
+  it("does not match broad non-export wording (파일 첨부 / 파일 선택)", () => {
+    expect(findExportCandidates("<button>파일 첨부</button>")).toHaveLength(0);
+    expect(findExportCandidates("<button>파일 선택</button>")).toHaveLength(0);
+  });
+
+  it("excludes a hidden control even with export wording", () => {
+    expect(findExportCandidates('<button hidden>엑셀 다운로드</button>')).toHaveLength(0);
+    expect(findExportCandidates('<button aria-hidden="true">엑셀 다운로드</button>')).toHaveLength(0);
+    expect(findExportCandidates('<button style="display:none">엑셀 다운로드</button>')).toHaveLength(0);
+  });
+
+  it("ignores export wording inside an HTML comment", () => {
+    expect(findExportCandidates("<!-- <button>엑셀 다운로드</button> --><main>리뷰</main>")).toHaveLength(0);
+  });
+});
+
+describe("buildTriggerSelectors", () => {
+  it("prefers the data-export selector when present", () => {
+    expect(buildTriggerSelectors(read("export_sync_blob.html"))).toEqual(["[data-export='review']"]);
+  });
+
+  it("falls back to a tag+keyword text selector when data-export is absent", () => {
+    expect(buildTriggerSelectors(read("export_top_doc_excel_button.html"))).toEqual([
+      'button:has-text("엑셀"):not([disabled])',
+    ]);
+  });
+
+  it("builds anchor and role=button text selectors", () => {
+    expect(buildTriggerSelectors(read("export_top_doc_anchor_rolebutton.html"))).toEqual([
+      'a:has-text("엑셀"):not([disabled])',
+      'div[role="button"]:has-text("엑셀"):not([aria-disabled="true"])',
+    ]);
+  });
+
+  it("uses an id selector when the candidate has one", () => {
+    expect(buildTriggerSelectors('<button id="rv-excel">엑셀 다운로드</button>')).toEqual(["#rv-excel"]);
+  });
+
+  it("builds an aria-label fallback when there is no visible text", () => {
+    expect(buildTriggerSelectors('<button aria-label="엑셀 다운로드"></button>')).toEqual([
+      'button[aria-label*="엑셀"]:not([disabled])',
+    ]);
+  });
+
+  it("builds a title fallback when there is no visible text", () => {
+    expect(buildTriggerSelectors('<button title="엑셀 다운로드"></button>')).toEqual([
+      'button[title*="엑셀"]:not([disabled])',
+    ]);
   });
 });
 
@@ -80,6 +184,28 @@ describe("runExport", () => {
     expect(result.filePath).toBeUndefined(); // mechanism proven by the download event; nothing written
     expect(savedTo).toBe(""); // saveAs never called — no real file lands in downloadDir
     expect(clicked).toBe(true);
+  });
+
+  it("top-document Excel button (no data-export) → CAPTURED and clicked", async () => {
+    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    let clicked = false;
+    const page = fakePage({
+      html: read("export_top_doc_excel_button.html"),
+      download,
+      onClick: () => (clicked = true),
+    });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(result.filePath).toBeUndefined(); // classify-only: nothing persisted
+    expect(clicked).toBe(true);
+  });
+
+  it("only a DISABLED control → LAYOUT_UNRECOGNIZED and never clicks", async () => {
+    let clicked = false;
+    const page = fakePage({ html: read("export_disabled_button.html"), onClick: () => (clicked = true) });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("LAYOUT_UNRECOGNIZED");
+    expect(clicked).toBe(false);
   });
 
   it("async layout → ASYNC_JOB_DETECTED without clicking any control", async () => {
