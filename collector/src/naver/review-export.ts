@@ -172,6 +172,10 @@ const PREFERRED_TRIGGER_SELECTOR = "[data-export='review']";
 // itself gets the longer DOWNLOAD_TIMEOUT_MS.
 const TRIGGER_CLICK_TIMEOUT_MS = 8_000;
 const DOWNLOAD_TIMEOUT_MS = 15_000;
+// Shorter per-attempt budget for ordered modal-confirm selectors so trying several
+// alternatives (most specific → general) stays bounded; the most specific should
+// match first. The download itself still gets the full DOWNLOAD_TIMEOUT_MS.
+const MODAL_CONFIRM_CLICK_TIMEOUT_MS = 4_000;
 
 /**
  * Pure: build an ordered, deduped list of Playwright selectors for the actionable
@@ -245,40 +249,86 @@ const MODAL_MARKERS: readonly RegExp[] = [
 
 export interface ModalConfirm {
   hasModal: boolean;
-  confirmSelector?: string;
+  /**
+   * Ordered, deduped confirm-action selectors to try in turn. Empty when a modal
+   * is present but offers no safe 확인 action (e.g. only 취소/닫기, or only 동의/계속)
+   * — the caller must then NOT guess another control.
+   */
+  confirmSelectors: string[];
+}
+
+/** Is a class token (e.g. `modal-dialog`) present on any element's class attribute? */
+function hasClass(html: string, cls: string): boolean {
+  return new RegExp(`class\\s*=\\s*["'][^"']*\\b${cls}\\b[^"']*["']`, "i").test(html);
 }
 
 /**
- * Strongest available modal scope selector, used to confine the confirm click to
- * the dialog so a stray 확인 elsewhere on the page can't be targeted. role /
- * aria-modal scopes are precise; a class/id-only container falls back to a global
- * (still 확인-only, still gated on modal markers) selector.
+ * Ordered modal scope selectors that are actually present in the HTML. NAVER's
+ * export modal is class-based Bootstrap/Angular markup (`.modal-dialog`,
+ * `.modal-content`, `.modal-footer`, `.seller-btn-area`) with no ARIA role, so
+ * those class containers must be scoped BEFORE the precise role/aria scopes; only
+ * then is a global match considered. `:visible` skips hidden/duplicate modals.
  */
-function modalScopeSelector(html: string): string | undefined {
-  if (/role\s*=\s*["']dialog["']/i.test(html)) return '[role="dialog"]';
-  if (/role\s*=\s*["']alertdialog["']/i.test(html)) return '[role="alertdialog"]';
-  if (/aria-modal\s*=\s*["']true["']/i.test(html)) return '[aria-modal="true"]';
-  return undefined;
+function presentModalScopes(html: string): string[] {
+  const scopes: string[] = [];
+  for (const cls of ["modal-dialog", "modal-content", "modal-footer", "seller-btn-area"]) {
+    if (hasClass(html, cls)) scopes.push(`.${cls}:visible`);
+  }
+  if (/role\s*=\s*["']dialog["']/i.test(html)) scopes.push('[role="dialog"]');
+  if (/role\s*=\s*["']alertdialog["']/i.test(html)) scopes.push('[role="alertdialog"]');
+  if (/aria-modal\s*=\s*["']true["']/i.test(html)) scopes.push('[aria-modal="true"]');
+  return scopes;
 }
 
 /**
- * Pure: detect a post-click confirmation/warning modal and, if present, a selector
- * for its SAFE confirm action (only 확인). Cancel/close controls are excluded, so a
- * modal that offers only 취소/닫기 (or only 동의/계속) returns `hasModal:true` with
- * NO `confirmSelector` — the caller must not guess another control. The confirm
- * selector is scoped to the modal container when possible. Operates on serialized
- * HTML → offline-testable.
+ * Pure: build the ordered confirm-action selectors for a detected modal whose safe
+ * confirm element is `confirm` (only 확인; cancel/close already excluded). Within a
+ * class-based dialog the footer's primary button is tried first, then any primary
+ * button, then any 확인 button — each scoped to a visible modal container so a
+ * stray/hidden 확인 elsewhere can't be hit. Role/aria scopes and the candidate's own
+ * selectors follow, with a global 확인-only selector as the last resort.
+ */
+function buildConfirmSelectors(html: string, confirm: ExportCandidate): string[] {
+  const kw = confirm.keyword; // "확인"
+  const out: string[] = [];
+  const push = (s: string): void => {
+    if (s && !out.includes(s)) out.push(s);
+  };
+
+  if (confirm.id) push(`#${confirm.id}`); // a unique id is the most precise
+  const scopes = presentModalScopes(html);
+  for (const scope of scopes) {
+    const isClassScope = scope.startsWith(".");
+    if (scope.startsWith(".modal-dialog") || scope.startsWith(".modal-content")) {
+      push(`${scope} .modal-footer button.btn-primary:has-text("${kw}"):not([disabled])`);
+    }
+    if (isClassScope) push(`${scope} button.btn-primary:has-text("${kw}"):not([disabled])`);
+    push(`${scope} button:has-text("${kw}"):not([disabled])`);
+  }
+  // Candidate-derived fallbacks (anchor / role=button / aria-label / title / id),
+  // scoped to the strongest present modal container to avoid a global text match.
+  const strongest = scopes[0];
+  for (const v of selectorVariantsFor(confirm)) {
+    push(strongest && !v.startsWith("#") ? `${strongest} ${v}` : v);
+  }
+  // Global last resort — still 확인-only and only after modal markers matched.
+  push(`button:has-text("${kw}"):not([disabled])`);
+  return out;
+}
+
+/**
+ * Pure: detect a post-click confirmation/warning modal and, if present, the ordered
+ * SAFE confirm-action selectors (only 확인). Cancel/close controls are excluded, so a
+ * modal that offers only 취소/닫기 (or only 동의/계속) returns `hasModal:true` with an
+ * EMPTY `confirmSelectors` — the caller must not guess another control. Operates on
+ * serialized HTML → offline-testable.
  */
 export function findModalConfirm(rawHtml: string): ModalConfirm {
   const html = stripComments(rawHtml);
-  if (!MODAL_MARKERS.some((re) => re.test(html))) return { hasModal: false };
+  if (!MODAL_MARKERS.some((re) => re.test(html))) return { hasModal: false, confirmSelectors: [] };
   const confirm = scanInteractiveElements(html, SAFE_CONFIRM_WORDING, CANCEL_WORDING)[0];
-  if (!confirm) return { hasModal: true };
-  const variant = selectorVariantsFor(confirm)[0];
-  if (!variant) return { hasModal: true };
-  // An #id is already unique; otherwise confine the click to the modal container.
-  const scope = variant.startsWith("#") ? undefined : modalScopeSelector(html);
-  return { hasModal: true, confirmSelector: scope ? `${scope} ${variant}` : variant };
+  if (!confirm) return { hasModal: true, confirmSelectors: [] };
+  return { hasModal: true, confirmSelectors: buildConfirmSelectors(html, confirm) };
 }
 
 export interface ExportResult {
@@ -312,20 +362,25 @@ type ModalOutcome = "no-modal" | "confirmed" | "no-safe-confirm";
 
 /**
  * Live: after the export trigger click, handle a confirmation/warning modal if one
- * intervened before the download. Clicks only a SAFE confirm action; returns
- * `no-safe-confirm` (so the caller halts as DOWNLOAD_FAILED) when a modal is present
- * but offers only cancel/close. LIVE-ONLY.
+ * intervened before the download. Tries the ordered SAFE confirm selectors (only
+ * 확인) until one clicks; returns `no-safe-confirm` (so the caller halts as
+ * DOWNLOAD_FAILED) when a modal is present but offers only cancel/close, or when
+ * none of the safe selectors resolve. A short per-attempt budget keeps the ordered
+ * fallback from stacking long waits. LIVE-ONLY.
  */
 async function confirmExportModal(page: PwPage): Promise<ModalOutcome> {
   const modal = findModalConfirm(await page.content());
   if (!modal.hasModal) return "no-modal";
-  if (!modal.confirmSelector) return "no-safe-confirm";
-  try {
-    await page.click(modal.confirmSelector, { timeout: TRIGGER_CLICK_TIMEOUT_MS });
-  } catch {
-    return "no-safe-confirm";
+  if (modal.confirmSelectors.length === 0) return "no-safe-confirm";
+  for (const selector of modal.confirmSelectors) {
+    try {
+      await page.click(selector, { timeout: MODAL_CONFIRM_CLICK_TIMEOUT_MS });
+      return "confirmed";
+    } catch {
+      // This safe-confirm selector did not resolve; try the next, more general one.
+    }
   }
-  return "confirmed";
+  return "no-safe-confirm";
 }
 
 export async function runExport(

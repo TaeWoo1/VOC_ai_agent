@@ -131,30 +131,44 @@ describe("buildTriggerSelectors", () => {
 
 describe("findModalConfirm", () => {
   it("no modal markers → hasModal false", () => {
-    expect(findModalConfirm("<main><button>엑셀 다운로드</button></main>")).toEqual({ hasModal: false });
+    expect(findModalConfirm("<main><button>엑셀 다운로드</button></main>")).toEqual({
+      hasModal: false,
+      confirmSelectors: [],
+    });
   });
 
-  it("dialog with a safe 확인 action → modal-scoped confirm selector", () => {
+  it("class-based NAVER modal → visible class-scoped 확인 selector first", () => {
+    const r = findModalConfirm(read("export_class_modal.html"));
+    expect(r.hasModal).toBe(true);
+    expect(r.confirmSelectors[0]).toBe(
+      '.modal-dialog:visible .modal-footer button.btn-primary:has-text("확인"):not([disabled])',
+    );
+    // cancel/close are never offered as a confirm
+    expect(r.confirmSelectors.join(" ")).not.toContain("취소");
+    expect(r.confirmSelectors.join(" ")).not.toContain("닫기");
+  });
+
+  it("role=dialog with a safe 확인 action → modal-scoped confirm selector first", () => {
     const r = findModalConfirm(read("export_confirm_modal.html"));
     expect(r.hasModal).toBe(true);
-    expect(r.confirmSelector).toBe('[role="dialog"] button:has-text("확인"):not([disabled])');
+    expect(r.confirmSelectors[0]).toBe('[role="dialog"] button:has-text("확인"):not([disabled])');
   });
 
-  it("dialog with only 취소/닫기 → hasModal true, no confirm selector", () => {
+  it("dialog with only 취소/닫기 → hasModal true, no confirm selectors", () => {
     const r = findModalConfirm(read("export_cancel_only_modal.html"));
     expect(r.hasModal).toBe(true);
-    expect(r.confirmSelector).toBeUndefined();
+    expect(r.confirmSelectors).toEqual([]);
   });
 
   it("never selects a cancel/close control as confirm", () => {
     const r = findModalConfirm('<div role="dialog"><button>취소</button><button>닫기</button></div>');
-    expect(r.confirmSelector).toBeUndefined();
+    expect(r.confirmSelectors).toEqual([]);
   });
 
   it("does NOT auto-confirm 동의 / 계속 (only 확인 is auto-confirmed)", () => {
     const r = findModalConfirm('<div role="dialog"><button>동의</button><button>계속</button></div>');
     expect(r.hasModal).toBe(true);
-    expect(r.confirmSelector).toBeUndefined();
+    expect(r.confirmSelectors).toEqual([]);
   });
 });
 
@@ -260,6 +274,23 @@ describe("runExport", () => {
     expect(result.outcome).toBe("CAPTURED");
     expect(result.filePath).toBeUndefined(); // classify-only: nothing persisted
     expect(clicks).toHaveLength(2); // export trigger, then the safe 확인 confirm
+    expect(clicks[1]).toContain("확인");
+  });
+
+  it("class-based NAVER modal → scoped 확인 confirmed, then CAPTURED (classify-only)", async () => {
+    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const clicks: string[] = [];
+    const page = fakePage({
+      html: read("export_modal_trigger.html"),
+      afterClickHtml: read("export_class_modal.html"),
+      download,
+      onClick: (s) => clicks.push(s),
+    });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(result.filePath).toBeUndefined(); // classify-only: nothing persisted
+    expect(clicks).toHaveLength(2); // export trigger, then the scoped 확인 confirm
+    expect(clicks[1]).toContain(".modal-dialog:visible");
     expect(clicks[1]).toContain("확인");
   });
 
