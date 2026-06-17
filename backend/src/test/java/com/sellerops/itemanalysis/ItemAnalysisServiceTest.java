@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
 import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.review.Review;
@@ -147,6 +148,128 @@ class ItemAnalysisServiceTest {
 
         assertThat(result.analyzed()).isEqualTo(1);
         assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "INQUIRY", q.getId())).isTrue();
+    }
+
+    @Test
+    void backfillAnalyzesMissingReviews() {
+        Review a = reviews.save(review(org, "배송이 너무 느려요", 2, true));
+        Review b = reviews.save(review(org, "포장이 꼼꼼해요", 5, false));
+
+        BackfillResult result = service.backfillMissing(org, 100);
+
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "REVIEW", a.getId())).isTrue();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "REVIEW", b.getId())).isTrue();
+        assertThat(result.remaining()).isZero();
+
+        ItemAnalysis row = analyses.findAllByOrgIdOrderByCreatedAtDesc(org).stream()
+                .filter(x -> x.getSourceId().equals(a.getId())).findFirst().orElseThrow();
+        assertThat(row.getAnalyzerKind()).isEqualTo("RULE_BASED");
+        assertThat(row.getAnalyzerVersion()).isEqualTo("rules-v1");
+        assertThat(row.getModelName()).isNull();
+        assertThat(row.getPromptVersion()).isNull();
+    }
+
+    @Test
+    void backfillAnalyzesMissingInquiries() {
+        Inquiry q = inquiries.save(inquiry(org, "교환은 어떻게 하나요?", "UNANSWERED"));
+
+        service.backfillMissing(org, 100);
+
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "INQUIRY", q.getId())).isTrue();
+    }
+
+    @Test
+    void backfillSkipsAlreadyAnalyzed() {
+        service.backfillMissing(org, 100);
+        long countAfterFirst = analyses.findAllByOrgIdOrderByCreatedAtDesc(org).size();
+
+        BackfillResult second = service.backfillMissing(org, 100);
+
+        assertThat(second.analyzed()).isZero();
+        assertThat(second.remaining()).isZero();
+        assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(org)).hasSize((int) countAfterFirst);
+    }
+
+    @Test
+    void backfillRespectsLimit() {
+        // Fresh org with no @BeforeEach-seeded rows, so the counts are exact.
+        UUID freshOrg = UUID.randomUUID();
+        for (int i = 0; i < 5; i++) {
+            reviews.save(review(freshOrg, "리뷰 본문 " + i, 3, false));
+        }
+
+        BackfillResult first = service.backfillMissing(freshOrg, 2);
+        assertThat(first.analyzed()).isEqualTo(2);
+        assertThat(first.remaining()).isEqualTo(3);
+
+        BackfillResult second = service.backfillMissing(freshOrg, 2);
+        assertThat(second.analyzed()).isEqualTo(2);
+        assertThat(second.remaining()).isEqualTo(1);
+    }
+
+    @Test
+    void backfillIsOrgScoped() {
+        // otherOrg has a seeded inquiry; backfilling `org` must never touch it.
+        UUID otherOrgInquiryId = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(otherOrg)
+                .get(0).getId();
+
+        service.backfillMissing(org, 100);
+
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "INQUIRY", otherOrgInquiryId))
+                .isFalse();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(otherOrg, "INQUIRY", otherOrgInquiryId))
+                .isFalse();
+    }
+
+    @Test
+    void backfillCreatesNoDuplicates() {
+        UUID freshOrg = UUID.randomUUID();
+        Review a = reviews.save(review(freshOrg, "중복 방지 리뷰", 4, false));
+        Inquiry q = inquiries.save(inquiry(freshOrg, "중복 방지 문의", "UNANSWERED"));
+
+        service.backfillMissing(freshOrg, 100);
+        service.backfillMissing(freshOrg, 100);
+
+        assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(freshOrg).stream()
+                .filter(x -> x.getSourceId().equals(a.getId())).count()).isEqualTo(1);
+        assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(freshOrg).stream()
+                .filter(x -> x.getSourceId().equals(q.getId())).count()).isEqualTo(1);
+    }
+
+    @Test
+    void backfillProcessesInquiriesBeforeReviews() {
+        // Many reviews, few inquiries, limit smaller than the review count: inquiries
+        // must not be starved — all of them get analyzed first.
+        UUID freshOrg = UUID.randomUUID();
+        for (int i = 0; i < 5; i++) {
+            reviews.save(review(freshOrg, "리뷰 " + i, 3, false));
+        }
+        for (int i = 0; i < 2; i++) {
+            inquiries.save(inquiry(freshOrg, "문의 " + i, "UNANSWERED"));
+        }
+
+        BackfillResult result = service.backfillMissing(freshOrg, 3);
+
+        assertThat(result.analyzedInquiries()).isEqualTo(2);
+        assertThat(result.analyzedReviews()).isEqualTo(1);
+        assertThat(result.analyzed()).isEqualTo(3);
+        assertThat(result.remaining()).isEqualTo(4); // 4 reviews left
+    }
+
+    @Test
+    void backfillSharedBudgetRespectsTotalLimit() {
+        UUID freshOrg = UUID.randomUUID();
+        for (int i = 0; i < 3; i++) {
+            reviews.save(review(freshOrg, "리뷰 " + i, 3, false));
+            inquiries.save(inquiry(freshOrg, "문의 " + i, "UNANSWERED"));
+        }
+
+        BackfillResult result = service.backfillMissing(freshOrg, 4);
+
+        assertThat(result.analyzed()).isEqualTo(4);
+        assertThat(result.analyzedInquiries()).isEqualTo(3); // inquiries first
+        assertThat(result.analyzedReviews()).isEqualTo(1);
+        assertThat(result.remaining()).isEqualTo(2);
     }
 
     private static Inquiry inquiry(UUID org, String body, String status) {

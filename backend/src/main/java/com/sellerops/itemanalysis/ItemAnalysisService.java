@@ -4,6 +4,7 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.itemanalysis.InboxItemAnalyzer.Result;
 import com.sellerops.itemanalysis.InboxItemAnalyzer.SourceItem;
+import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
 import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.review.Review;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,10 @@ public class ItemAnalysisService {
 
     static final String INQUIRY = "INQUIRY";
     static final String REVIEW = "REVIEW";
+
+    /** Hard ceiling on one backfill batch so a single call can never wrap the whole corpus
+     *  in one transaction. Operators re-call until {@code remaining == 0}. */
+    static final int MAX_BACKFILL_LIMIT = 2000;
 
     private final InquiryRepository inquiries;
     private final ReviewRepository reviews;
@@ -106,6 +112,47 @@ public class ItemAnalysisService {
         log.info("item-analysis upload-trigger org={} type={} analyzed={} skipped={}",
                 orgId, sourceType, analyzed, skipped);
         return new RunResult(analyzed, skipped);
+    }
+
+    /**
+     * Bounded, idempotent corpus backfill: analyze up to {@code limit} un-analyzed
+     * REVIEW/INQUIRY rows for this org, drawing the un-analyzed rows directly from the DB
+     * (no top-50 limit, no full-corpus load). INQUIRY is drained first so a large review
+     * backlog cannot starve the operationally-urgent inquiries out of the shared budget.
+     * Reuses the same deterministic, local, skip-if-exists path as {@link #run(UUID)}.
+     */
+    @Transactional
+    public BackfillResult backfillMissing(UUID orgId, int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), MAX_BACKFILL_LIMIT);
+        int analyzedInquiries = 0;
+        int analyzedReviews = 0;
+        int skipped = 0;
+
+        // Inquiries first (response-latency / unanswered workload is more urgent).
+        for (Inquiry q : inquiries.findUnanalyzedByOrgId(orgId, PageRequest.of(0, safeLimit))) {
+            if (analyzeInquiry(orgId, q)) {
+                analyzedInquiries++;
+            } else {
+                skipped++;
+            }
+        }
+        int remainingBudget = safeLimit - analyzedInquiries;
+        if (remainingBudget > 0) {
+            for (Review r : reviews.findUnanalyzedByOrgId(orgId, PageRequest.of(0, remainingBudget))) {
+                if (analyzeReview(orgId, r)) {
+                    analyzedReviews++;
+                } else {
+                    skipped++;
+                }
+            }
+        }
+
+        long remaining = inquiries.countUnanalyzedByOrgId(orgId)
+                + reviews.countUnanalyzedByOrgId(orgId);
+        // Counts only — never the body.
+        log.info("item-analysis backfill org={} inquiries={} reviews={} skipped={} remaining={}",
+                orgId, analyzedInquiries, analyzedReviews, skipped, remaining);
+        return new BackfillResult(analyzedInquiries, analyzedReviews, skipped, remaining);
     }
 
     /** @return true if a new analysis was written, false if skipped (already exists). */
