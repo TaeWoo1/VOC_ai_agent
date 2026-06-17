@@ -209,6 +209,22 @@ no backend, no DB, and **no `saveAs`** of a real export. `LAST_SUCCESS` is
 structurally impossible (a captured sync export maps to `COLLECTING`). Logs are
 metadata-only.
 
+Add `--emit-session-probe` to diagnose a same-session run that still reports
+`SESSION_EXPIRED` even though you reached the admin screen:
+
+```bash
+npm run discover-same-session -- --i-understand-this-opens-live-naver --emit-session-probe
+```
+
+When set, the flow logs the sanitized `extractProbeSignals` snapshot
+(booleans / buckets / categories — **no HTML, page text, raw URL, or PII**) at
+three points: **after you press Enter but before re-navigation**, **after
+re-navigation + SPA settle but before the session check**, and **after the check
+if still logged-out**. Comparing the pre- vs post-re-navigation snapshots tells us
+whether the logged-in markers are simply wrong (absent in both) or the re-navigation
+is resetting the SPA (present before, gone after). Off by default — without the
+flag the flow emits no probe diagnostics and behaves exactly as before.
+
 ## Not in this slice (next steps)
 
 - Async-job **download follow-through** (this slice only *detects*

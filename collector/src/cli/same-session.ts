@@ -1,3 +1,4 @@
+import type { SanitizedProbeSignals } from "../naver/session-probe";
 import { decideState, type CollectorState, type ExportOutcome, type SessionState } from "../status";
 
 /**
@@ -34,6 +35,32 @@ export type ConfirmationResult = "confirmed" | "timeout";
 /** Pure: proceed to discovery only on an explicit confirmation, never on timeout. */
 export function proceedAfterConfirmation(result: ConfirmationResult): boolean {
   return result === "confirmed";
+}
+
+/**
+ * Opt-in diagnostic flag: emit the sanitized `extractProbeSignals` snapshot at the
+ * key same-session points so we can tell WHY a logged-in session still reads
+ * LOGGED_OUT (placeholder markers vs. re-navigation resetting the SPA). Off by
+ * default — without this flag the flow emits no probe diagnostics.
+ */
+export const EMIT_SESSION_PROBE_FLAG = "--emit-session-probe";
+
+/** Pure: did the operator opt into same-session probe diagnostics? */
+export function emitSessionProbe(args: string[]): boolean {
+  return args.includes(EMIT_SESSION_PROBE_FLAG);
+}
+
+/**
+ * Pure: build the metadata-only payload logged for a probe phase. Wraps the
+ * already-sanitized signals (booleans/buckets/categories — never raw HTML, text,
+ * URL, or PII) with a coarse phase label, so the diagnostic log line can never
+ * carry sensitive content.
+ */
+export function buildSessionProbeMeta(
+  phase: string,
+  signals: SanitizedProbeSignals,
+): Record<string, unknown> {
+  return { phase, ...signals };
 }
 
 /**

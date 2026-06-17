@@ -18,12 +18,15 @@ import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { checkLiveSession } from "../naver/session-check";
+import { extractProbeSignals, type HydrationWaitResult } from "../naver/session-probe";
 import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
 import { writeStatus, type SessionState } from "../status";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import {
+  buildSessionProbeMeta,
   classifyOnlyStatus,
+  emitSessionProbe,
   proceedAfterConfirmation,
   SAME_SESSION_CONFIRM_PROMPT,
   type ConfirmationResult,
@@ -42,6 +45,33 @@ function banner(): void {
   console.error(" A human completes login/2FA/CAPTCHA in the SAME window; the collector");
   console.error(" never types credentials, never bypasses auth, never writes to NAVER.");
   console.error(line);
+}
+
+/**
+ * Live I/O: read a sanitized structural snapshot at a labeled phase and log it
+ * (metadata-only — booleans/buckets/categories; never HTML, text, URL, or PII).
+ * Diagnostic-only; called solely when --emit-session-probe is passed.
+ */
+async function logSessionProbe(
+  realPage: Page,
+  phase: string,
+  hydrationWaitResult?: HydrationWaitResult,
+): Promise<void> {
+  const dom = await realPage.evaluate(() => {
+    const root = document.querySelector("#app, #root, #__next, [data-reactroot]");
+    return {
+      readyState: document.readyState,
+      appRootChildCount: root ? root.childElementCount : -1,
+    };
+  });
+  const signals = extractProbeSignals({
+    url: realPage.url(),
+    html: await realPage.content(),
+    readyState: dom.readyState,
+    appRootChildCount: dom.appRootChildCount >= 0 ? dom.appRootChildCount : undefined,
+    hydrationWaitResult,
+  });
+  log("session.probe", buildSessionProbeMeta(phase, signals));
 }
 
 /** Live I/O: wait for a single Enter keypress, or resolve "timeout". Not unit-tested. */
@@ -84,6 +114,7 @@ async function main(): Promise<void> {
     process.exit(2);
     return;
   }
+  const wantProbe = emitSessionProbe(args);
   const now = (): string => new Date().toISOString();
 
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
@@ -106,16 +137,29 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Diagnostic: snapshot the page AS THE HUMAN LEFT IT, before we re-navigate.
+    // If this shows a logged-in shell but the post-renav snapshot does not, the
+    // re-navigation is resetting the SPA (not a marker problem).
+    if (wantProbe) await logSessionProbe(realPage, "after-confirm-before-renav");
+
     // 3) Re-navigate in the SAME context (session now established by the human),
     //    then best-effort wait for the SPA to settle before reading the session.
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
-    await realPage.waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS }).catch(() => {
-      /* best-effort; the session check below is the source of truth */
-    });
+    const hydrationWaitResult: HydrationWaitResult = await realPage
+      .waitForLoadState("networkidle", { timeout: SETTLE_TIMEOUT_MS })
+      .then(() => "hydrated" as const)
+      .catch(() => "timeout" as const);
+
+    // Diagnostic: snapshot what the re-navigation + settle produced, before the
+    // session check. If logged-in markers are absent here even when present in
+    // the pre-renav snapshot, the issue is re-navigation/hydration, not markers.
+    if (wantProbe) await logSessionProbe(realPage, "after-renav-before-check", hydrationWaitResult);
 
     // 4) Session check — never proceed to export on an ambiguous/invalid session.
     const session: SessionState = await checkLiveSession(page);
     if (session !== "LOGGED_IN") {
+      // Diagnostic: confirm what the detector saw when it decided not-logged-in.
+      if (wantProbe) await logSessionProbe(realPage, "after-check-logged-out", hydrationWaitResult);
       const { state, detail } = classifyOnlyStatus(session);
       writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
       log("run.halted", { state });
