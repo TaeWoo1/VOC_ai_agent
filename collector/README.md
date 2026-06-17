@@ -88,10 +88,15 @@ schedule. A human performs the login and any 2FA/CAPTCHA; the collector never
 types NAVER credentials, never bypasses auth, and never writes to NAVER. Use a
 **user-owned test seller account** only.
 
+The CLI **refuses every live action** unless the explicit approval flag
+`--i-understand-this-opens-live-naver` is passed — a bare `--login`/`--discover`
+fails fast with a message stating what a live run entails. The gate is a pure
+function (`src/cli/live-run-approval.ts`) covered by offline tests.
+
 ```bash
 cp .env.example .env                 # set NAVER_REVIEW_URL for --discover
-npm run discover -- --login          # headed browser opens; human logs in
-npm run discover -- --discover       # session check → classify export → capture-if-sync → upload
+npm run discover -- --login    --i-understand-this-opens-live-naver   # headed browser; human logs in
+npm run discover -- --discover --i-understand-this-opens-live-naver   # session check → classify export → capture-if-sync → upload
 ```
 
 The NAVER session lives **only** in the local profile dir (`.profile/naver`,

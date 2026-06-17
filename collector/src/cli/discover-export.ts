@@ -1,13 +1,14 @@
 /**
  * Live NAVER review-export discovery — one human-attended run (NO scheduler loop).
  *
- *   node --env-file=.env src/cli/discover-export.ts --login
- *   node --env-file=.env src/cli/discover-export.ts --discover
+ *   node --env-file=.env src/cli/discover-export.ts --login    --i-understand-this-opens-live-naver
+ *   node --env-file=.env src/cli/discover-export.ts --discover --i-understand-this-opens-live-naver
  *
- * LIVE RUN — requires explicit, per-run operator approval. It launches a real
- * browser against NAVER seller-center. A human performs the login and any
- * 2FA/CAPTCHA; the collector never types credentials, never bypasses auth, and
- * never writes to NAVER. Do NOT run during planning/implementation.
+ * LIVE RUN — requires explicit, per-run operator approval. The CLI refuses every
+ * live action unless the approval flag is present. It launches a real browser
+ * against NAVER seller-center. A human performs the login and any 2FA/CAPTCHA;
+ * the collector never types credentials, never bypasses auth, and never writes
+ * to NAVER. Do NOT run during planning/implementation.
  */
 import { loadConfig } from "../config";
 import { log } from "../log";
@@ -16,6 +17,7 @@ import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
 import { decideState, writeStatus, type RunSignals, type SessionState } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
+import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 
 // PLACEHOLDER landing URL; the human navigates/logs in from here.
 const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
@@ -98,11 +100,21 @@ async function doDiscover(): Promise<void> {
 
 async function main(): Promise<void> {
   banner();
-  const mode = process.argv[2];
+  const args = process.argv.slice(2);
+  const mode = args[0];
+  if (mode !== "--login" && mode !== "--discover") {
+    console.error("usage: discover-export.ts (--login | --discover) --i-understand-this-opens-live-naver");
+    process.exit(2);
+    return;
+  }
+  // Hard gate: never take a live action without the explicit per-run approval flag.
+  if (!hasLiveRunApproval(args)) {
+    console.error(approvalRequiredMessage());
+    process.exit(3);
+    return;
+  }
   if (mode === "--login") return doLogin();
-  if (mode === "--discover") return doDiscover();
-  console.error("usage: discover-export.ts --login | --discover");
-  process.exit(2);
+  return doDiscover();
 }
 
 void main();
