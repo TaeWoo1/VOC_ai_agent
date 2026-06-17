@@ -1,0 +1,15 @@
+# Dependencies / build
+node_modules/
+
+# Local browser profile (holds the user's NAVER session — must NEVER be committed)
+.profile/
+
+# Captured export files and run status (local only)
+downloads/
+.status/
+
+# Environment
+.env
+
+# Live-run findings artifacts may contain account-specific notes — keep local
+findings/*.local.md
