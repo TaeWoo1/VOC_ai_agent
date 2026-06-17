@@ -105,8 +105,21 @@ collection). On a sync export the file is **not** persisted (no `saveAs`); the
 mechanism is proven by the Playwright download event alone, and the browser's
 temporary artifact is discarded when the context closes.
 
+**Recommended for NAVER: use installed Chrome, not bundled Chromium.** Set
+`COLLECTOR_BROWSER_CHANNEL=chrome` so the live layer drives your **installed
+Google Chrome** (via Playwright's `channel: "chrome"`) instead of the bundled
+Chromium. A mainstream Chrome fingerprint is less likely to trip NAVER account
+security than the automation-oriented Chrome-for-Testing build. This still uses
+the **dedicated SellerOps profile** at `collector/.profile/naver` — **never your
+personal Chrome profile** — so your normal Chrome sessions/data are untouched,
+and the profile-dir path guard still forbids any dir outside the collector tree.
+Leave it unset/blank to fall back to bundled Chromium. It changes only which
+browser binary launches; classify-only / no-upload behavior is unchanged.
+
 ```bash
 cp .env.example .env                 # set NAVER_REVIEW_URL for --discover
+# Recommended for milestone-1: drive installed Chrome with the dedicated profile
+echo 'COLLECTOR_BROWSER_CHANNEL=chrome' >> .env
 npm run discover -- --login    --i-understand-this-opens-live-naver   # headed browser; human logs in
 
 # Milestone-1: classify only, no upload, backend down
