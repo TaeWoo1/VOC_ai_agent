@@ -225,6 +225,51 @@ whether the logged-in markers are simply wrong (absent in both) or the re-naviga
 is resetting the SPA (present before, gone after). Off by default — without the
 flag the flow emits no probe diagnostics and behaves exactly as before.
 
+Add `--emit-export-probe` to diagnose the *next* failure mode: a run that now
+passes the session gate (`LOGGED_IN`) but classifies the export area as
+`EXPORT_LAYOUT_CHANGED` / `LAYOUT_UNRECOGNIZED` (what the last live run showed,
+with `exportCandidateCount:"none"`). It is used **after** the session passes but
+the export UI is unrecognized — observation first, **not** selector guessing
+(`review-export.ts` is left untouched):
+
+```bash
+npm run discover-same-session -- --i-understand-this-opens-live-naver --emit-export-probe
+```
+
+When set, the flow logs the sanitized `extractExportProbeSignals` snapshot
+(`src/naver/export-probe.ts`) at two points: **on the confirmed logged-in page
+just before classification**, and **again if the classifier returns
+`LAYOUT_UNRECOGNIZED`**. Output is **sanitized structural signals only** — a fixed
+set of booleans / bucketed counts / category enums (and frame URL *categories*,
+never raw frame URLs). No field copies input text, so a store name, account,
+product, review text, id, token, label, selector, or raw URL can never appear.
+This is enforced by an offline hostile-fixture test. The probe **does not** save
+screenshots/HTML, dump page text, upload, call `/api/uploads`, start the backend,
+mutate the DB, or change `review-export.ts`. Off by default; independent of
+`--emit-session-probe` (you can pass either, both, or neither).
+
+The signals are chosen to separate the three causes of a `LAYOUT_UNRECOGNIZED`
+verdict:
+
+- **Missing selector** — `excelLike` / `downloadLike` / `exportLike` true (and/or
+  a non-zero `exportCandidateCount`) on the main document: an export affordance
+  *is* here; `review-export.ts`'s placeholder markers just don't match it.
+- **Hidden / gated UI** — keyword present but `enabledExportCandidateCount:"none"`
+  (with a non-zero total) and/or a non-zero `disabledControlCount` plus date/search
+  filters: the export is gated behind a prior search/date-range step.
+- **Iframe / sub-route** — export keywords absent on the main document but
+  `iframeCount` non-zero and/or `frameUrlCategories` showing another context: the
+  export UI lives in a child frame or a different route.
+
+Emitted fields: `urlCategory`, `reviewRouteLike`, `iframeCount`, `buttonCount`,
+`anchorCount`, `roleButtonCount`, `disabledControlCount`, `downloadAttributeCount`,
+`dateInputCount`, `tableGridListCount`, `excelLike`, `downloadLike`, `exportLike`,
+`csvOrXlsxLike`, `reviewLike`, `searchLike`, `frameUrlCategories`,
+`shadowRootHostCount`, `exportCandidateCount`, `visibleExportCandidateCount`,
+`enabledExportCandidateCount`. Count-like fields are buckets
+(`none`/`one`/`few`/`some`/`many`); live-only fields (frames, shadow roots,
+visible/enabled candidate counts) are `unknown`/empty when run offline.
+
 ## Not in this slice (next steps)
 
 - Async-job **download follow-through** (this slice only *detects*
