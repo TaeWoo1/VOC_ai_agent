@@ -18,7 +18,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -68,6 +68,25 @@ export async function resolveChannelId(
   if (!match) throw new UploadError(`channel not found: ${code}`, "resolveChannel");
   log("channel.resolved", { code });
   return match.id;
+}
+
+/**
+ * Count stored analyses for this org via `GET /api/item-analysis`. Used by the
+ * gated integration test to assert item-analysis enrichment fired only for newly
+ * inserted rows (delta after a fresh upload; no delta after a duplicate upload).
+ */
+export async function fetchItemAnalysisCount(
+  baseUrl: string,
+  token: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<number> {
+  const res = await fetchImpl(`${baseUrl}/api/item-analysis`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new UploadError("item-analysis fetch failed", "itemAnalysis", res.status);
+  const rows = (await res.json()) as unknown[];
+  log("item-analysis.count", { count: rows.length });
+  return rows.length;
 }
 
 /**

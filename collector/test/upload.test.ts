@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearLogSink, getLogSink } from "../src/log";
 import { decideState } from "../src/status";
-import { login, resolveChannelId, uploadReviewFile, UploadError } from "../src/upload";
+import { fetchItemAnalysisCount, login, resolveChannelId, uploadReviewFile, UploadError } from "../src/upload";
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), "../fixtures");
 const SAMPLE_FILE = resolve(fixtures, "session_login.html"); // any local file; mock ignores content
@@ -90,6 +90,22 @@ describe("uploadReviewFile", () => {
   });
 });
 
+describe("fetchItemAnalysisCount", () => {
+  it("returns the length of the org-wide analysis list", async () => {
+    const fakeFetch = async () => jsonResponse([{ id: "a" }, { id: "b" }, { id: "c" }]);
+    const count = await fetchItemAnalysisCount("http://x", "t", fakeFetch as typeof fetch);
+    expect(count).toBe(3);
+  });
+
+  it("throws UploadError(itemAnalysis) on non-2xx", async () => {
+    const fakeFetch = async () => new Response("err", { status: 503 });
+    await expect(fetchItemAnalysisCount("http://x", "t", fakeFetch as typeof fetch)).rejects.toMatchObject({
+      stage: "itemAnalysis",
+      httpStatus: 503,
+    });
+  });
+});
+
 describe("metadata-only logging", () => {
   beforeEach(() => clearLogSink());
 
@@ -123,24 +139,52 @@ describe("metadata-only logging", () => {
 
 /**
  * Gated real integration: hits a running local backend. Disabled by default.
- * Run with:  RUN_INTEGRATION=1 NAVER_SAMPLE_XLSX=/abs/review.xlsx npm test
+ * Run with:
+ *   RUN_INTEGRATION=1 NAVER_SAMPLE_XLSX=/abs/synthetic_review.xlsx npm test
+ *
+ * NAVER_SAMPLE_XLSX MUST point to a SYNTHETIC NAVER-shaped export (fake rows with
+ * unique 리뷰글번호 ids) — never a real seller-center export. This test ingests the
+ * file into the local dev DB, so real customer data must not be used. No NAVER
+ * credentials and no live NAVER access are involved — only the local SellerOps
+ * login + the synthetic file.
  */
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
 describe("live-backend integration (gated)", () => {
-  it.skipIf(!RUN_INTEGRATION)("uploads twice and the second run dedups to zero new rows", async () => {
-    const baseUrl = process.env.SELLEROPS_BASE_URL ?? "http://localhost:8080";
-    const sample = process.env.NAVER_SAMPLE_XLSX;
-    expect(sample, "set NAVER_SAMPLE_XLSX to a real review export").toBeTruthy();
+  it.skipIf(!RUN_INTEGRATION)(
+    "uploads twice: first inserts + enriches, second dedups with no new analyses",
+    async () => {
+      const baseUrl = process.env.SELLEROPS_BASE_URL ?? "http://localhost:8080";
+      const sample = process.env.NAVER_SAMPLE_XLSX;
+      expect(sample, "set NAVER_SAMPLE_XLSX to a SYNTHETIC review export (not a real one)").toBeTruthy();
 
-    const token = await login(baseUrl, process.env.SELLEROPS_EMAIL ?? "demo@sellerops.ai", process.env.SELLEROPS_PASSWORD ?? "demo1234");
-    const channelId = await resolveChannelId(baseUrl, token, process.env.NAVER_CHANNEL_CODE ?? "NAVER");
+      const token = await login(
+        baseUrl,
+        process.env.SELLEROPS_EMAIL ?? "demo@sellerops.ai",
+        process.env.SELLEROPS_PASSWORD ?? "demo1234",
+      );
+      const channelId = await resolveChannelId(baseUrl, token, process.env.NAVER_CHANNEL_CODE ?? "NAVER");
 
-    const first = await uploadReviewFile(baseUrl, token, channelId, sample!);
-    const second = await uploadReviewFile(baseUrl, token, channelId, sample!);
+      // Baseline → upload #1 → measure enrichment delta.
+      const beforeCount = await fetchItemAnalysisCount(baseUrl, token);
+      const first = await uploadReviewFile(baseUrl, token, channelId, sample!);
+      const afterFirstCount = await fetchItemAnalysisCount(baseUrl, token);
 
-    expect(decideState({ paired: true, session: "LOGGED_IN", exportOutcome: "CAPTURED", uploadOutcome: "OK" })).toBe("LAST_SUCCESS");
-    // Idempotency: the second upload inserts nothing new (리뷰글번호 dedup).
-    expect(second.successRows).toBe(0);
-    expect(second.skippedRows).toBeGreaterThanOrEqual(first.successRows);
-  });
+      expect(first.status).toBe("SUCCESS");
+      expect(first.failedRows).toBe(0);
+      expect(first.successRows).toBeGreaterThan(0);
+      expect(
+        decideState({ paired: true, session: "LOGGED_IN", exportOutcome: "CAPTURED", uploadOutcome: "OK" }),
+      ).toBe("LAST_SUCCESS");
+      // Item-analysis enrichment fired for exactly the newly inserted rows.
+      expect(afterFirstCount - beforeCount).toBe(first.successRows);
+
+      // Upload #2 (same file) → dedup, and no new analyses for duplicates.
+      const second = await uploadReviewFile(baseUrl, token, channelId, sample!);
+      const afterSecondCount = await fetchItemAnalysisCount(baseUrl, token);
+
+      expect(second.successRows).toBe(0);
+      expect(second.skippedRows).toBeGreaterThanOrEqual(first.successRows);
+      expect(afterSecondCount).toBe(afterFirstCount);
+    },
+  );
 });

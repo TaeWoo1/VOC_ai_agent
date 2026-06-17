@@ -56,12 +56,20 @@ cp .env.example .env   # SellerOps dev creds — NOT NAVER credentials
 node --env-file=.env src/cli/upload-file.ts /absolute/path/to/review_export.xlsx
 ```
 
-### Gated live-backend integration test (uploads + verifies dedup)
+### Gated live-backend integration test (uploads + verifies dedup + item-analysis delta)
+
+`NAVER_SAMPLE_XLSX` MUST be a **synthetic** NAVER-shaped export (fake rows, unique
+`리뷰글번호` ids) — never a real seller-center export, since the file is ingested
+into the local dev DB. No NAVER credentials / no live NAVER are involved.
 
 ```bash
-RUN_INTEGRATION=1 NAVER_SAMPLE_XLSX=/abs/review.xlsx \
+RUN_INTEGRATION=1 NAVER_SAMPLE_XLSX=/tmp/synthetic_review.xlsx \
   SELLEROPS_BASE_URL=http://localhost:8080 npm test
 ```
+
+It asserts: upload #1 → `successRows>0`, `failedRows=0`, and item-analysis count
+rises by exactly `successRows`; upload #2 (same file) → `successRows=0`,
+`skippedRows >= first.successRows`, and item-analysis count is unchanged.
 
 ## Not in this slice (next steps)
 
