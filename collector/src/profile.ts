@@ -26,6 +26,14 @@ export interface PwPage {
 export interface PwDownload {
   suggestedFilename(): string;
   saveAs(path: string): Promise<void>;
+  /**
+   * Resolves to the local temp path once the download stream completes; rejects on
+   * a failed/canceled download. Used (in classify-only) to wait for completion
+   * WITHOUT `saveAs` — we never read the file's contents.
+   */
+  path(): Promise<string | null>;
+  /** Download error string if the download failed, else null. */
+  failure(): Promise<string | null>;
 }
 
 /**
