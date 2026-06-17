@@ -175,6 +175,40 @@ npm run probe-session -- --i-understand-this-opens-live-naver
 - Used only to **correct the session-detection markers (`src/session.ts`) and the
   SPA-wait logic** before retrying discovery.
 
+### Same-session discovery (recommended for NAVER Commerce)
+
+The separate `--login` → quit Chrome → later `--discover` flow does **not** work
+for NAVER Commerce: the NAVER-ID login persists (the "logged-in account" card
+shows), but the **SmartStore Center / commerce-admin session is not re-entered
+automatically** when Chrome restarts — a fresh launch on the review route
+redirects to login, so discovery always lands `SESSION_EXPIRED` (confirmed by the
+sanitized probe: `urlCategory:"login"` with the SPA fully hydrated). The fix is to
+stay in **one persistent-context lifetime**:
+
+```bash
+set -a && . ./.env && set +a    # load NAVER_REVIEW_URL + COLLECTOR_BROWSER_CHANNEL
+npm run discover-same-session -- --i-understand-this-opens-live-naver
+```
+
+Flow (`src/cli/discover-same-session.ts`):
+
+1. Launches installed Chrome (`COLLECTOR_BROWSER_CHANNEL=chrome`) with the
+   dedicated profile (`collector/.profile/naver`) and `chromiumSandbox: true`,
+   and opens `NAVER_REVIEW_URL`.
+2. You complete the **NAVER-ID login, any 2FA/CAPTCHA, and click the commerce-ID
+   card to enter the actual SmartStore Center admin screen** — in that same
+   window. The collector never types credentials and never bypasses auth.
+3. You return to the terminal and **press Enter** (a 10-minute timeout aborts
+   safely as `SESSION_EXPIRED` if you don't). **Do not close the browser.**
+4. The **same context** re-navigates to the review route, waits for the SPA to
+   settle, checks the session, and — if logged in — classifies the export
+   mechanism.
+
+It is **classify-only**: no SellerOps login/channel resolve, no `/api/uploads`,
+no backend, no DB, and **no `saveAs`** of a real export. `LAST_SUCCESS` is
+structurally impossible (a captured sync export maps to `COLLECTING`). Logs are
+metadata-only.
+
 ## Not in this slice (next steps)
 
 - Async-job **download follow-through** (this slice only *detects*
