@@ -1,0 +1,33 @@
+<!doctype html>
+<!--
+  HOSTILE fixture for the sanitizer test: deliberately stuffed with fake PII /
+  sensitive strings. The probe's sanitized output must contain NONE of them.
+  Everything here is synthetic.
+-->
+<html lang="ko">
+  <head>
+    <title>달빛코스메틱 스마트스토어센터</title>
+    <base href="https://sell.smartstore.naver.com/#/review/search?authToken=SECRETTOKEN12345&sellerId=SELLER-7788" />
+  </head>
+  <body data-seller-authenticated="true">
+    <nav id="seller-gnb">
+      <span class="account">seller-admin@example-store.co.kr</span>
+      <a href="/logout">로그아웃</a>
+    </nav>
+    <main id="app">
+      <section class="review">
+        <h1>리뷰 관리 — 판매자센터</h1>
+        <article data-order-id="ORD-998877" data-customer-id="CUST-554433">
+          <h2>수분진정 수분크림 50ml</h2>
+          <p class="review-body">정말 최악이에요 환불해주세요 별점 1점도 아깝습니다</p>
+          <span class="reviewer">홍길동 (gildong@example.com)</span>
+        </article>
+        <button data-export="review">엑셀 다운로드</button>
+        <button data-export="review">excel download</button>
+        <a class="download-center" href="/다운로드센터">다운로드 센터</a>
+      </section>
+    </main>
+    <script src="/app.bundle.js"></script>
+    <script>window.__STORE__ = "달빛코스메틱";</script>
+  </body>
+</html>

@@ -146,6 +146,35 @@ core uses. **Milestone-1 must not upload or commit a real captured export.** If 
 real file is ever written to `downloads/`, it stays gitignored and must be
 deleted/handled manually after the run — never committed.
 
+### Debug-safe session probe (live-gated diagnostic)
+
+When classify-only discovery keeps reporting `SESSION_EXPIRED` on a page you know
+is logged in, the cause is usually the placeholder session markers and/or SPA
+hydration timing (the review route is a client-rendered SPA, so `page.content()`
+right after `domcontentloaded` is an un-hydrated shell). `src/cli/probe-session.ts`
+helps confirm what the real logged-in DOM looks like **without exposing any
+sensitive content**:
+
+```bash
+set -a && . ./.env && set +a    # load NAVER_REVIEW_URL + COLLECTOR_BROWSER_CHANNEL
+npm run probe-session -- --i-understand-this-opens-live-naver
+```
+
+- **Sanitized structural signals only.** It prints a fixed JSON object of
+  booleans / bucketed counts / category enums (`extractProbeSignals` in
+  `src/naver/session-probe.ts`) — e.g. `urlCategory`, `documentReadyState`,
+  `htmlLengthBucket`, `appRootChildCount` (bucket), `candidateLoggedInShellPresent`,
+  `exportCandidateCount` (bucket), `hydrationWaitResult`. No field copies input
+  text, so a store name, account, product, review text, id, token, or raw URL can
+  never appear in the output. This is enforced by an offline hostile-fixture test.
+- **It does NOT** save screenshots, save raw HTML, dump page text, upload
+  anything, call `/api/uploads`, start the backend, or mutate the DB.
+- **Live-gated** behind the same `--i-understand-this-opens-live-naver` flag and
+  the same installed-Chrome + dedicated-profile + sandbox launch path as
+  discovery.
+- Used only to **correct the session-detection markers (`src/session.ts`) and the
+  SPA-wait logic** before retrying discovery.
+
 ## Not in this slice (next steps)
 
 - Async-job **download follow-through** (this slice only *detects*
