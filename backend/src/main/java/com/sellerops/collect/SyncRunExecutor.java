@@ -185,7 +185,7 @@ public class SyncRunExecutor {
             case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, typed(page, CanonicalInquiry.class));
             case ORDER_SUMMARY -> ingestionService.ingestOrderSummaries(orgId, channelId, typed(page, CanonicalOrderSummary.class));
             // No canonical type yet; the mock returns empty pages. Routing is deferred.
-            case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of());
+            case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());
         };
     }
 

@@ -114,6 +114,46 @@ class IngestionServiceTest {
     }
 
     @Test
+    void returnsInsertedIdsForNewlyPersistedRows() {
+        IngestOutcome outcome = service.ingestReviews(org, channel, List.of(
+                new CanonicalReview("전선몰딩", "SKU1", 5, "새 리뷰 A", at("2026-06-01"), "NEW-1", 2),
+                new CanonicalReview("전선몰딩", "SKU1", 4, "새 리뷰 B", at("2026-06-02"), "NEW-2", 3)));
+
+        assertThat(outcome.success()).isEqualTo(2);
+        assertThat(outcome.insertedIds()).hasSize(2);
+        // The ids are the real persisted review ids.
+        assertThat(outcome.insertedIds())
+                .containsExactlyInAnyOrderElementsOf(
+                        reviews.findAllByOrgId(org).stream().map(r -> r.getId()).toList());
+    }
+
+    @Test
+    void insertedIdsExcludeDedupSkips() {
+        service.ingestReviews(org, channel, List.of(
+                new CanonicalReview("전선몰딩", "SKU1", 5, "한 번만", at("2026-06-01"), "DUP-1", 2)));
+
+        // Re-ingesting the same external id inserts nothing → empty insertedIds.
+        IngestOutcome second = service.ingestReviews(org, channel, List.of(
+                new CanonicalReview("전선몰딩", "SKU1", 5, "한 번만", at("2026-06-01"), "DUP-1", 2)));
+
+        assertThat(second.success()).isZero();
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(second.insertedIds()).isEmpty();
+    }
+
+    @Test
+    void returnsInsertedIdsForNewlyPersistedInquiries() {
+        IngestOutcome outcome = service.ingestInquiries(org, channel, List.of(
+                new CanonicalInquiry("전선몰딩", "SKU1", "구매자1", "곡면 가능?", "UNANSWERED",
+                        at("2026-06-01"), "QNEW-1", 2)));
+
+        assertThat(outcome.success()).isEqualTo(1);
+        assertThat(outcome.insertedIds()).hasSize(1);
+        assertThat(outcome.insertedIds().get(0))
+                .isEqualTo(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getId());
+    }
+
+    @Test
     void upsertsOrderSummariesByDate() {
         LocalDate day = LocalDate.parse("2026-06-01");
         IngestOutcome counts = service.ingestOrderSummaries(org, channel, List.of(

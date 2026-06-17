@@ -82,7 +82,7 @@ public class IngestionService {
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
                 trySave(tally, row.sourceRow(),
-                        () -> reviews.save(entity),
+                        () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));
             } catch (Exception e) {
                 tally.fail(row.sourceRow(), "처리 실패: " + e.getMessage());
@@ -119,7 +119,7 @@ public class IngestionService {
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
                 trySave(tally, row.sourceRow(),
-                        () -> inquiries.save(entity),
+                        () -> inquiries.save(entity).getId(),
                         () -> existsInquiry(orgId, channelId, hasExternal, row.externalId(), hash));
             } catch (Exception e) {
                 tally.fail(row.sourceRow(), "처리 실패: " + e.getMessage());
@@ -141,7 +141,7 @@ public class IngestionService {
                 entity.setOrderCount(row.orderCount());
                 entity.setSalesAmount(row.salesAmount());
                 trySave(tally, row.sourceRow(),
-                        () -> orderSummaries.save(entity),
+                        () -> orderSummaries.save(entity).getId(),
                         () -> orderSummaries
                                 .findByOrgIdAndChannelIdAndSummaryDate(orgId, channelId, row.summaryDate())
                                 .isPresent());
@@ -153,13 +153,15 @@ public class IngestionService {
     }
 
     /**
-     * Persist one row. On a unique-constraint violation, re-probe the dedup key:
-     * present ⇒ a concurrent writer won (duplicate skip); absent ⇒ genuine failure.
+     * Persist one row, recording the new id on success. On a unique-constraint
+     * violation, re-probe the dedup key: present ⇒ a concurrent writer won
+     * (duplicate skip); absent ⇒ genuine failure.
      */
-    private void trySave(Tally tally, int sourceRow, Runnable save, java.util.function.BooleanSupplier nowExists) {
+    private void trySave(Tally tally, int sourceRow, java.util.function.Supplier<UUID> save,
+                         java.util.function.BooleanSupplier nowExists) {
         try {
-            save.run();
-            tally.success();
+            UUID id = save.get();
+            tally.success(id);
         } catch (DataIntegrityViolationException dup) {
             if (nowExists.getAsBoolean()) {
                 tally.skip();
@@ -197,9 +199,11 @@ public class IngestionService {
         private int skipped;
         private int failed;
         private final List<RowError> errors = new ArrayList<>();
+        private final List<UUID> insertedIds = new ArrayList<>();
 
-        void success() {
+        void success(UUID id) {
             success++;
+            insertedIds.add(id);
         }
 
         void skip() {
@@ -212,7 +216,7 @@ public class IngestionService {
         }
 
         IngestOutcome toOutcome() {
-            return new IngestOutcome(success, skipped, failed, errors);
+            return new IngestOutcome(success, skipped, failed, errors, insertedIds);
         }
     }
 }

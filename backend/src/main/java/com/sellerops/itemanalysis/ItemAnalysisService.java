@@ -48,30 +48,86 @@ public class ItemAnalysisService {
         int skipped = 0;
 
         for (Inquiry q : inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
-            if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, INQUIRY, q.getId())) {
+            if (analyzeInquiry(orgId, q)) {
+                analyzed++;
+            } else {
                 skipped++;
-                continue;
             }
-            SourceItem item = new SourceItem(INQUIRY, q.getId(), q.getBody(),
-                    null, q.getStatus(), false);
-            persist(orgId, item, q.getContentHash());
-            analyzed++;
         }
 
         for (Review r : reviews.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
-            if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, REVIEW, r.getId())) {
+            if (analyzeReview(orgId, r)) {
+                analyzed++;
+            } else {
                 skipped++;
-                continue;
             }
-            SourceItem item = new SourceItem(REVIEW, r.getId(), r.getBody(),
-                    r.getRating(), null, r.isNegative());
-            persist(orgId, item, r.getContentHash());
-            analyzed++;
         }
 
         // Counts only — never the body.
         log.info("item-analysis run org={} analyzed={} skipped={}", orgId, analyzed, skipped);
         return new RunResult(analyzed, skipped);
+    }
+
+    /**
+     * Analyze exactly the given source ids (the rows a single upload just inserted),
+     * skipping any that already have an analysis. Org-scoped: ids not belonging to
+     * {@code orgId} are ignored. Same deterministic, local, idempotent path as
+     * {@link #run(UUID)} — no rescan of the org, no top-50 dependency.
+     */
+    @Transactional
+    public RunResult analyzeForSources(UUID orgId, String sourceType, List<UUID> ids) {
+        int analyzed = 0;
+        int skipped = 0;
+        if (ids != null && !ids.isEmpty()) {
+            if (REVIEW.equals(sourceType)) {
+                for (Review r : reviews.findAllById(ids)) {
+                    if (!orgId.equals(r.getOrgId())) {
+                        continue;
+                    }
+                    if (analyzeReview(orgId, r)) {
+                        analyzed++;
+                    } else {
+                        skipped++;
+                    }
+                }
+            } else if (INQUIRY.equals(sourceType)) {
+                for (Inquiry q : inquiries.findAllById(ids)) {
+                    if (!orgId.equals(q.getOrgId())) {
+                        continue;
+                    }
+                    if (analyzeInquiry(orgId, q)) {
+                        analyzed++;
+                    } else {
+                        skipped++;
+                    }
+                }
+            }
+        }
+        log.info("item-analysis upload-trigger org={} type={} analyzed={} skipped={}",
+                orgId, sourceType, analyzed, skipped);
+        return new RunResult(analyzed, skipped);
+    }
+
+    /** @return true if a new analysis was written, false if skipped (already exists). */
+    private boolean analyzeInquiry(UUID orgId, Inquiry q) {
+        if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, INQUIRY, q.getId())) {
+            return false;
+        }
+        SourceItem item = new SourceItem(INQUIRY, q.getId(), q.getBody(),
+                null, q.getStatus(), false);
+        persist(orgId, item, q.getContentHash());
+        return true;
+    }
+
+    /** @return true if a new analysis was written, false if skipped (already exists). */
+    private boolean analyzeReview(UUID orgId, Review r) {
+        if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, REVIEW, r.getId())) {
+            return false;
+        }
+        SourceItem item = new SourceItem(REVIEW, r.getId(), r.getBody(),
+                r.getRating(), null, r.isNegative());
+        persist(orgId, item, r.getContentHash());
+        return true;
     }
 
     @Transactional(readOnly = true)

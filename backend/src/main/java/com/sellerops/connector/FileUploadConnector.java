@@ -16,6 +16,7 @@ import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.ingest.parse.ParsedTable;
+import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
 import java.io.InputStream;
@@ -23,6 +24,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,6 +35,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class FileUploadConnector implements ChannelConnector {
 
+    private static final Logger log = LoggerFactory.getLogger(FileUploadConnector.class);
+
     private final ChannelRepository channels;
     private final FileParser fileParser;
     private final ReviewRowMapper reviewMapper;
@@ -39,11 +44,12 @@ public class FileUploadConnector implements ChannelConnector {
     private final OrderSummaryRowMapper orderMapper;
     private final IngestionService ingestionService;
     private final SyncJobRepository syncJobs;
+    private final ItemAnalysisService itemAnalysis;
 
     public FileUploadConnector(ChannelRepository channels, FileParser fileParser,
                                ReviewRowMapper reviewMapper, InquiryRowMapper inquiryMapper,
                                OrderSummaryRowMapper orderMapper, IngestionService ingestionService,
-                               SyncJobRepository syncJobs) {
+                               SyncJobRepository syncJobs, ItemAnalysisService itemAnalysis) {
         this.channels = channels;
         this.fileParser = fileParser;
         this.reviewMapper = reviewMapper;
@@ -51,6 +57,7 @@ public class FileUploadConnector implements ChannelConnector {
         this.orderMapper = orderMapper;
         this.ingestionService = ingestionService;
         this.syncJobs = syncJobs;
+        this.itemAnalysis = itemAnalysis;
     }
 
     @Override
@@ -89,6 +96,12 @@ public class FileUploadConnector implements ChannelConnector {
                 default -> throw ApiException.badRequest("지원하지 않는 업로드 유형입니다.");
             }
 
+            // Enrich exactly the rows this upload inserted with rule-based item-analysis.
+            // Best-effort: enrichment failure must never fail the upload (rows are saved).
+            if (type == UploadType.REVIEW || type == UploadType.INQUIRY) {
+                triggerAnalysis(orgId, type.name(), outcome.insertedIds());
+            }
+
             // Both mapping errors (bad rows) and per-row persistence errors are surfaced.
             List<RowError> allErrors = new ArrayList<>(mapErrors);
             allErrors.addAll(outcome.errors());
@@ -107,6 +120,23 @@ public class FileUploadConnector implements ChannelConnector {
         } catch (Exception e) {
             return finishJob(job, type, 0, 0, 0, 0, "FAILED",
                     "파일을 처리하지 못했습니다: " + e.getMessage(), List.of());
+        }
+    }
+
+    /**
+     * Trigger rule-based item-analysis on the newly inserted source ids. Deliberately
+     * swallows failures (logged): the upload has already persisted its rows, and
+     * enrichment is best-effort — {@code /inbox} loads analyses fail-soft.
+     */
+    private void triggerAnalysis(UUID orgId, String sourceType, List<UUID> insertedIds) {
+        if (insertedIds == null || insertedIds.isEmpty()) {
+            return;
+        }
+        try {
+            itemAnalysis.analyzeForSources(orgId, sourceType, insertedIds);
+        } catch (Exception e) {
+            log.warn("upload-triggered item-analysis failed org={} type={} count={}: {}",
+                    orgId, sourceType, insertedIds.size(), e.getMessage());
         }
     }
 

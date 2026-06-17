@@ -9,6 +9,7 @@ import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,6 +91,62 @@ class ItemAnalysisServiceTest {
         assertThat(view.category()).isEqualTo("교환");
         assertThat(view.sentiment()).isEqualTo("NEGATIVE");
         assertThat(view.summary()).isEqualTo("교환 관련 부정 리뷰");
+    }
+
+    @Test
+    void analyzeForSourcesAnalyzesOnlyGivenNewIds() {
+        // Two fresh reviews; analyze only the first by id.
+        Review a = reviews.save(review(org, "배송이 너무 느려요", 2, true));
+        Review b = reviews.save(review(org, "색상이 예뻐요", 5, false));
+
+        RunResult result = service.analyzeForSources(org, "REVIEW", List.of(a.getId()));
+
+        assertThat(result.analyzed()).isEqualTo(1);
+        assertThat(result.skipped()).isZero();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "REVIEW", a.getId())).isTrue();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "REVIEW", b.getId())).isFalse();
+
+        ItemAnalysis row = analyses.findAllByOrgIdOrderByCreatedAtDesc(org).stream()
+                .filter(x -> x.getSourceId().equals(a.getId())).findFirst().orElseThrow();
+        assertThat(row.getAnalyzerKind()).isEqualTo("RULE_BASED");
+        assertThat(row.getAnalyzerVersion()).isEqualTo("rules-v1");
+        assertThat(row.getModelName()).isNull();
+        assertThat(row.getPromptVersion()).isNull();
+    }
+
+    @Test
+    void analyzeForSourcesIsIdempotent() {
+        Review a = reviews.save(review(org, "불량 환불 원해요", 1, true));
+
+        service.analyzeForSources(org, "REVIEW", List.of(a.getId()));
+        RunResult second = service.analyzeForSources(org, "REVIEW", List.of(a.getId()));
+
+        assertThat(second.analyzed()).isZero();
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(org).stream()
+                .filter(x -> x.getSourceId().equals(a.getId())).count()).isEqualTo(1);
+    }
+
+    @Test
+    void analyzeForSourcesIsOrgScoped() {
+        Review foreign = reviews.save(review(otherOrg, "다른 조직 리뷰", 3, false));
+
+        // Even if a foreign id is passed under `org`, it must not be analyzed.
+        RunResult result = service.analyzeForSources(org, "REVIEW", List.of(foreign.getId()));
+
+        assertThat(result.analyzed()).isZero();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "REVIEW", foreign.getId())).isFalse();
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(otherOrg, "REVIEW", foreign.getId())).isFalse();
+    }
+
+    @Test
+    void analyzeForSourcesHandlesInquiries() {
+        Inquiry q = inquiries.save(inquiry(org, "교환하고 싶어요", "UNANSWERED"));
+
+        RunResult result = service.analyzeForSources(org, "INQUIRY", List.of(q.getId()));
+
+        assertThat(result.analyzed()).isEqualTo(1);
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "INQUIRY", q.getId())).isTrue();
     }
 
     private static Inquiry inquiry(UUID org, String body, String status) {
