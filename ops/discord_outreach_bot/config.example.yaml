@@ -1,0 +1,66 @@
+# Discord outreach operator bot — example config (v0.1)
+#
+# v0.1 (the CLI) needs NO config — the repo root and targets dir are
+# auto-detected, and `--today` / `--targets-dir` are CLI flags. This file
+# documents the settings that v0.2 (the Discord transport) will read. Copy to
+# config.yaml and fill in when wiring Discord.
+#
+# Nothing here grants the bot any send/collection capability — those remain
+# operator-authorized Claude Code turns.
+
+# Path to the outreach packets dir (default: outputs/outreach/new_targets,
+# resolved relative to the auto-detected repo root). Override only if needed.
+targets_dir: null
+
+# --- v0.2 Discord transport (read by discord_bot.py; v0.1 CLI ignores it) ----
+discord:
+  # Provide via env var DISCORD_BOT_TOKEN; do NOT commit a real token.
+  bot_token_env: DISCORD_BOT_TOKEN
+  # Optional dev guild id: per-guild slash-command sync is instant (global sync
+  # can take ~1h). Leave null to register commands globally.
+  guild_id: null
+  # Channel the bot posts status / prompts / follow-up reminders to.
+  operator_channel_id: null
+  # Restrict commands to these Discord user IDs (the operator).
+  # Empty list = fail-closed (block everyone).
+  allowed_operator_ids: []
+
+# --- v0.2 approval flow ------------------------------------------------------
+approvals:
+  # Append-only log of operator approvals captured via /outreach_approve.
+  # The bot writes ONLY here — never into a packet's status.json / send_log.md.
+  # null -> ops/discord_outreach_bot/approvals.log.jsonl
+  log_path: null
+  # 🔴 gates that require a fresh approval record before the prompt is actionable.
+  gated_moves:
+    - collect_execute
+    - render_pdf
+    - prepare_send
+    - follow_up
+
+# Generated prompts too long for one Discord message are saved here (NOT a
+# packet folder). Auto-created on first use.
+generated_prompts_dir: ops/discord_outreach_bot/generated_prompts
+
+# --- v0.3 M2 orchestration tasks (Discord input adapter) ---------------------
+tasks:
+  # Append-only snapshot store for orchestration tasks.
+  # null -> ops/discord_outreach_bot/orchestration_tasks.jsonl
+  store_path: null
+events:
+  # Append-only orchestration event spine.
+  # null -> ops/discord_outreach_bot/orchestration_events.jsonl
+  log_path: null
+nl:
+  # Natural-language on_message handler. OFF by default: enabling it requires
+  # the privileged "Message Content Intent" (Developer Portal → Bot → enable
+  # Message Content Intent). When false, only slash commands work (v0.2 parity).
+  # Restrict NL to discord.operator_channel_id; only allowed_operator_ids are
+  # honored. PROPOSE-ONLY: messages create/advance tasks, never external actions.
+  enabled: false
+
+# --- follow-up reminders (v0.2) ---------------------------------------------
+followups:
+  # Days before/after the due date to ping the operator channel.
+  remind_days_before: 1
+  # The bot only REMINDS; outreach:follow_up stays a 🔴 operator-authorized move.

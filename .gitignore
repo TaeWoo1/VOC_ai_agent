@@ -129,3 +129,11 @@ docker-compose.override.yml
 # Operator-provided seller-center review export samples (raw; may contain
 # reviewer / order PII) — used locally for schema analysis, never committed.
 naver/
+
+# Discord outreach bot — local config + runtime artifacts (never commit)
+ops/discord_outreach_bot/config.yaml
+ops/discord_outreach_bot/*.jsonl
+ops/discord_outreach_bot/generated_prompts/
+ops/discord_outreach_bot/agent_runs/
+ops/discord_outreach_bot/__pycache__/
+tests/discord_outreach_bot/__pycache__/
