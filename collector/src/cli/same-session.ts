@@ -1,3 +1,4 @@
+import type { SanitizedExportProbeSignals } from "../naver/export-probe";
 import type { SanitizedProbeSignals } from "../naver/session-probe";
 import { decideState, type CollectorState, type ExportOutcome, type SessionState } from "../status";
 
@@ -48,6 +49,33 @@ export const EMIT_SESSION_PROBE_FLAG = "--emit-session-probe";
 /** Pure: did the operator opt into same-session probe diagnostics? */
 export function emitSessionProbe(args: string[]): boolean {
   return args.includes(EMIT_SESSION_PROBE_FLAG);
+}
+
+/**
+ * Opt-in diagnostic flag: emit the sanitized `extractExportProbeSignals` snapshot
+ * at the export-classification points so a LAYOUT_UNRECOGNIZED verdict can be
+ * explained (missing selector vs. hidden/gated export UI vs. iframe/sub-route)
+ * without exposing labels, selectors, URLs, or PII. Off by default — without this
+ * flag the flow emits no export-probe diagnostics.
+ */
+export const EMIT_EXPORT_PROBE_FLAG = "--emit-export-probe";
+
+/** Pure: did the operator opt into export-area probe diagnostics? */
+export function emitExportProbe(args: string[]): boolean {
+  return args.includes(EMIT_EXPORT_PROBE_FLAG);
+}
+
+/**
+ * Pure: build the metadata-only payload logged for an export-probe phase. The
+ * `frameUrlCategories` array is flattened to a comma-joined category string so the
+ * metadata-only logger (`safeMeta`, which collapses non-scalars to a type tag)
+ * keeps it readable; every joined token is a fixed category enum, never a raw URL.
+ */
+export function buildExportProbeMeta(
+  phase: string,
+  signals: SanitizedExportProbeSignals,
+): Record<string, unknown> {
+  return { phase, ...signals, frameUrlCategories: signals.frameUrlCategories.join(",") };
 }
 
 /**

@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  SYNTHETIC diagnostic fixture — the "iframe / sub-route" case. The main document
+  is just a shell that hosts the review-management UI inside a child frame; the
+  export keywords/controls live in the frame, NOT in this serialized HTML. So the
+  main-document scan sees no export keyword (excel/download false) but an iframe
+  is present — a signal the real export UI is in another browsing context. The
+  frame's URL category is supplied live (page.frames()), never echoed raw. No
+  real NAVER DOM / PII.
+-->
+<html lang="ko">
+  <head><title>리뷰 관리</title></head>
+  <body>
+    <div id="seller-gnb">판매자센터</div>
+    <main>
+      <h1>리뷰</h1>
+      <iframe src="/embedded/review-app"></iframe>
+    </main>
+  </body>
+</html>

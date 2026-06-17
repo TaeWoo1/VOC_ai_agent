@@ -17,6 +17,7 @@
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
+import { extractExportProbeSignals } from "../naver/export-probe";
 import { checkLiveSession } from "../naver/session-check";
 import { extractProbeSignals, type HydrationWaitResult } from "../naver/session-probe";
 import { runExport } from "../naver/review-export";
@@ -24,8 +25,10 @@ import { launchNaverContext, type PwPage } from "../profile";
 import { writeStatus, type SessionState } from "../status";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import {
+  buildExportProbeMeta,
   buildSessionProbeMeta,
   classifyOnlyStatus,
+  emitExportProbe,
   emitSessionProbe,
   proceedAfterConfirmation,
   SAME_SESSION_CONFIRM_PROMPT,
@@ -74,6 +77,55 @@ async function logSessionProbe(
   log("session.probe", buildSessionProbeMeta(phase, signals));
 }
 
+/**
+ * Live I/O: read a sanitized structural snapshot of the EXPORT area at a labeled
+ * phase and log it (metadata-only — booleans/buckets/categories; never HTML,
+ * labels, selectors, URL, or PII). Gathers a few live-only scalars the serialized
+ * HTML can't give us — frame URL categories, shadow-root host count, and how many
+ * keyword-matched export candidates are present/visible/enabled — then sanitizes
+ * them through `extractExportProbeSignals`. Diagnostic-only; called solely when
+ * --emit-export-probe is passed.
+ */
+async function logExportProbe(realPage: Page, phase: string): Promise<void> {
+  // Generic, selector-free observation: interactive elements whose accessible
+  // text reads like an export/download control. We count them (total / visible /
+  // enabled) — we never return the text. This is observation, not selector
+  // promotion: review-export.ts is left untouched.
+  const live = await realPage.evaluate(() => {
+    const KW = /엑셀|excel|다운로드|download|내려받기|내보내기|export|추출|csv|xlsx/i;
+    const nodes = Array.from(
+      document.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']"),
+    );
+    let total = 0;
+    let visible = 0;
+    let enabled = 0;
+    for (const el of nodes) {
+      const text = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${(el as HTMLInputElement).value ?? ""}`;
+      if (!KW.test(text)) continue;
+      total += 1;
+      const he = el as HTMLElement;
+      if (he.offsetParent !== null || he.getClientRects().length > 0) visible += 1;
+      const ariaDisabled = el.getAttribute("aria-disabled") === "true";
+      if (!(el as HTMLButtonElement).disabled && !ariaDisabled) enabled += 1;
+    }
+    let shadowRootHostCount = 0;
+    for (const el of Array.from(document.querySelectorAll("*"))) {
+      if ((el as Element & { shadowRoot?: unknown }).shadowRoot) shadowRootHostCount += 1;
+    }
+    return { total, visible, enabled, shadowRootHostCount };
+  });
+  const signals = extractExportProbeSignals({
+    url: realPage.url(),
+    html: await realPage.content(),
+    frameUrls: realPage.frames().map((f) => f.url()),
+    shadowRootHostCount: live.shadowRootHostCount,
+    exportCandidateTotal: live.total,
+    exportCandidateVisible: live.visible,
+    exportCandidateEnabled: live.enabled,
+  });
+  log("export.probe", buildExportProbeMeta(phase, signals));
+}
+
 /** Live I/O: wait for a single Enter keypress, or resolve "timeout". Not unit-tested. */
 function waitForEnter(timeoutMs: number): Promise<ConfirmationResult> {
   return new Promise((resolve) => {
@@ -115,6 +167,7 @@ async function main(): Promise<void> {
     return;
   }
   const wantProbe = emitSessionProbe(args);
+  const wantExportProbe = emitExportProbe(args);
   const now = (): string => new Date().toISOString();
 
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
@@ -166,9 +219,23 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Diagnostic: snapshot the export area on the confirmed logged-in page BEFORE
+    // classification, so we can see whether export controls / keywords / frames are
+    // present at all on the route the classifier is about to read.
+    if (wantExportProbe) await logExportProbe(realPage, "logged-in-before-classify");
+
     // 5) Classify-only export discovery — classify sync/async/blocked; NEVER saveAs,
     //    NEVER upload. A captured sync export maps to COLLECTING, never LAST_SUCCESS.
     const { outcome } = await runExport(page, cfg.downloadDir, { classifyOnly: true });
+
+    // Diagnostic: when the classifier did not recognize the layout, snapshot the
+    // export area again so the verdict can be explained — missing selector (export
+    // keywords/controls present here) vs. hidden/gated UI (present but disabled/zero
+    // visible) vs. iframe/sub-route (keywords absent here, a child frame present).
+    if (wantExportProbe && outcome === "LAYOUT_UNRECOGNIZED") {
+      await logExportProbe(realPage, "after-classify-layout-unrecognized");
+    }
+
     const { state, detail } = classifyOnlyStatus(session, outcome);
     writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
     log("run.done", { state, outcome, classifyOnly: true });
