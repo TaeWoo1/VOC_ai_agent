@@ -6,6 +6,7 @@ import { clearLogSink, getLogSink } from "../../src/log";
 import {
   buildTriggerSelectors,
   classifyExportPage,
+  extensionCategory,
   findExportCandidates,
   findModalConfirm,
   runExport,
@@ -202,17 +203,51 @@ function fakePage(opts: {
   };
 }
 
+/**
+ * Fake Playwright download. Defaults to a completed `.xlsx`. `filename` varies the
+ * extension category; `failure` simulates a failed/canceled stream (so `path()`
+ * rejects). `onPath` / `onSaveAs` let tests observe completion-wait vs. persistence.
+ */
+function fakeDownload(opts: {
+  filename?: string;
+  failure?: string | null;
+  onPath?: () => void;
+  onSaveAs?: (p: string) => void;
+} = {}): PwDownload {
+  return {
+    suggestedFilename: () => opts.filename ?? "review_export.xlsx",
+    saveAs: async (p) => {
+      opts.onSaveAs?.(p);
+    },
+    path: async () => {
+      opts.onPath?.();
+      if (opts.failure) throw new Error(opts.failure);
+      return "/tmp/pw-download/artifact";
+    },
+    failure: async () => opts.failure ?? null,
+  };
+}
+
+describe("extensionCategory", () => {
+  it("categorizes common export extensions without echoing the filename", () => {
+    expect(extensionCategory("리뷰_store_20260617.xlsx")).toBe("xlsx");
+    expect(extensionCategory("export.xls")).toBe("xls");
+    expect(extensionCategory("data.csv")).toBe("csv");
+    expect(extensionCategory("archive.zip")).toBe("zip");
+    expect(extensionCategory("page.html")).toBe("html");
+    expect(extensionCategory("page.htm")).toBe("html");
+    expect(extensionCategory("notes.txt")).toBe("txt");
+    expect(extensionCategory("blob")).toBe("unknown");
+    expect(extensionCategory("weird.bin")).toBe("unknown");
+  });
+});
+
 describe("runExport", () => {
   beforeEach(() => clearLogSink());
 
   it("sync layout with a download → CAPTURED and saves the file", async () => {
     let savedTo = "";
-    const download: PwDownload = {
-      suggestedFilename: () => "review_export.xlsx",
-      saveAs: async (p) => {
-        savedTo = p;
-      },
-    };
+    const download = fakeDownload({ onSaveAs: (p) => (savedTo = p) });
     let clicked = false;
     const page = fakePage({ html: read("export_sync_blob.html"), download, onClick: () => (clicked = true) });
     const result = await runExport(page, "/tmp/dl");
@@ -224,12 +259,7 @@ describe("runExport", () => {
 
   it("classify-only: sync layout → CAPTURED but does NOT persist the file (no saveAs)", async () => {
     let savedTo = "";
-    const download: PwDownload = {
-      suggestedFilename: () => "review_export.xlsx",
-      saveAs: async (p) => {
-        savedTo = p;
-      },
-    };
+    const download = fakeDownload({ onSaveAs: (p) => (savedTo = p) });
     let clicked = false;
     const page = fakePage({ html: read("export_sync_blob.html"), download, onClick: () => (clicked = true) });
     const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
@@ -239,8 +269,55 @@ describe("runExport", () => {
     expect(clicked).toBe(true);
   });
 
+  it("classify-only: waits for the download to COMPLETE, never saveAs, logs only the extension category", async () => {
+    let pathAwaited = false;
+    let saveAsCalled = false;
+    const download = fakeDownload({
+      filename: "리뷰_달빛코스메틱_20260617.xlsx",
+      onPath: () => (pathAwaited = true),
+      onSaveAs: () => (saveAsCalled = true),
+    });
+    const page = fakePage({ html: read("export_sync_blob.html"), download });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(pathAwaited).toBe(true); // waited for the stream to finish before returning
+    expect(saveAsCalled).toBe(false); // never persisted
+    const logged = JSON.stringify(getLogSink());
+    expect(logged).toContain('"downloadCompleted":true');
+    expect(logged).toContain('"suggestedExtensionCategory":"xlsx"');
+    expect(logged).not.toContain("달빛코스메틱"); // raw filename / store name never logged
+    expect(logged).not.toContain(".xlsx"); // only the bare category, not the raw extension
+  });
+
+  it("classify-only: a failed/canceled download after the event → DOWNLOAD_FAILED (sanitized reason)", async () => {
+    const download = fakeDownload({ failure: "net::ERR_ABORTED; download canceled" });
+    const page = fakePage({ html: read("export_sync_blob.html"), download });
+    const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+    expect(result.outcome).toBe("DOWNLOAD_FAILED");
+    const logged = JSON.stringify(getLogSink());
+    expect(logged).toContain('"downloadCompleted":false');
+    expect(logged).toContain('"reason":"canceled"'); // "cancel" in failure → canceled category
+    expect(logged).not.toContain("net::ERR_ABORTED"); // raw failure string never logged
+  });
+
+  it("classify-only: csv/unknown extension categories are reported, still no saveAs", async () => {
+    for (const [filename, category] of [
+      ["export.csv", "csv"],
+      ["download", "unknown"],
+    ] as const) {
+      clearLogSink();
+      let saveAsCalled = false;
+      const download = fakeDownload({ filename, onSaveAs: () => (saveAsCalled = true) });
+      const page = fakePage({ html: read("export_sync_blob.html"), download });
+      const result = await runExport(page, "/tmp/dl", { classifyOnly: true });
+      expect(result.outcome).toBe("CAPTURED");
+      expect(saveAsCalled).toBe(false);
+      expect(JSON.stringify(getLogSink())).toContain(`"suggestedExtensionCategory":"${category}"`);
+    }
+  });
+
   it("top-document Excel button (no data-export) → CAPTURED and clicked", async () => {
-    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const download = fakeDownload();
     let clicked = false;
     const page = fakePage({
       html: read("export_top_doc_excel_button.html"),
@@ -262,7 +339,7 @@ describe("runExport", () => {
   });
 
   it("trigger opens a 확인 confirmation modal → confirmed, then CAPTURED (classify-only)", async () => {
-    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const download = fakeDownload();
     const clicks: string[] = [];
     const page = fakePage({
       html: read("export_modal_trigger.html"),
@@ -278,7 +355,7 @@ describe("runExport", () => {
   });
 
   it("class-based NAVER modal → scoped 확인 confirmed, then CAPTURED (classify-only)", async () => {
-    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const download = fakeDownload();
     const clicks: string[] = [];
     const page = fakePage({
       html: read("export_modal_trigger.html"),
@@ -295,7 +372,7 @@ describe("runExport", () => {
   });
 
   it("modal offers only 취소/닫기 → DOWNLOAD_FAILED and never clicks an unsafe action", async () => {
-    const download: PwDownload = { suggestedFilename: () => "review_export.xlsx", saveAs: async () => {} };
+    const download = fakeDownload();
     const clicks: string[] = [];
     const page = fakePage({
       html: read("export_modal_trigger.html"),

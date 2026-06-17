@@ -358,6 +358,39 @@ export interface RunExportOptions {
  * impossible. In classify-only mode the file is NOT persisted (no `saveAs`), so
  * CAPTURED carries no `filePath`. LIVE-ONLY.
  */
+export type ExtensionCategory = "xlsx" | "xls" | "csv" | "zip" | "html" | "txt" | "unknown";
+
+/**
+ * Pure: categorize a suggested download filename by its extension WITHOUT echoing
+ * the raw filename (which can carry a store name / date / id). Only the fixed
+ * category enum is ever logged.
+ */
+export function extensionCategory(filename: string): ExtensionCategory {
+  const ext = filename.toLowerCase().match(/\.([a-z0-9]+)\s*$/)?.[1] ?? "";
+  switch (ext) {
+    case "xlsx":
+      return "xlsx";
+    case "xls":
+      return "xls";
+    case "csv":
+      return "csv";
+    case "zip":
+      return "zip";
+    case "html":
+    case "htm":
+      return "html";
+    case "txt":
+      return "txt";
+    default:
+      return "unknown";
+  }
+}
+
+/** Pure: collapse a Playwright failure string to a fixed category — never log the raw string. */
+function downloadFailureCategory(failure: string | null): "canceled" | "failed" {
+  return failure && /cancel/i.test(failure) ? "canceled" : "failed";
+}
+
 type ModalOutcome = "no-modal" | "confirmed" | "no-safe-confirm";
 
 /**
@@ -422,10 +455,26 @@ export async function runExport(
     try {
       const download = await downloadPromise;
       if (options.classifyOnly) {
-        // The download event alone proves the export is sync. Do NOT persist the
-        // real file — milestone-1 is discovery, not ingestion. The browser's temp
-        // artifact is discarded on context close; nothing lands in downloadDir.
-        log("export.captured", { kind, classifyOnly: true });
+        // The download event proves the export is sync, but the stream may still be
+        // in flight — wait for it to FINISH (so we don't close Chrome mid-download),
+        // WITHOUT persisting it. `download.path()` waits for completion and rejects
+        // on a failed/canceled download; we never `saveAs`, never read contents, and
+        // nothing lands in downloadDir — the browser's temp artifact is discarded on
+        // context close. Only a sanitized extension category is logged.
+        const suggestedExtensionCategory = extensionCategory(download.suggestedFilename());
+        try {
+          await download.path();
+        } catch {
+          const reason = downloadFailureCategory(await download.failure().catch(() => null));
+          log("export.download_failed", { kind, classifyOnly: true, downloadCompleted: false, reason }, "error");
+          return { outcome: "DOWNLOAD_FAILED" };
+        }
+        log("export.captured", {
+          kind,
+          classifyOnly: true,
+          downloadCompleted: true,
+          suggestedExtensionCategory,
+        });
         return { outcome: "CAPTURED" };
       }
       const filePath = resolve(downloadDir, download.suggestedFilename());
