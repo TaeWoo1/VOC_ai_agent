@@ -6,9 +6,11 @@ import com.sellerops.itemanalysis.InboxItemAnalyzer.Result;
 import com.sellerops.itemanalysis.InboxItemAnalyzer.SourceItem;
 import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
+import com.sellerops.itemanalysis.dto.LookupRequest;
 import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -34,6 +36,9 @@ public class ItemAnalysisService {
     /** Hard ceiling on one backfill batch so a single call can never wrap the whole corpus
      *  in one transaction. Operators re-call until {@code remaining == 0}. */
     static final int MAX_BACKFILL_LIMIT = 2000;
+
+    /** Defensive ceiling on one inbox lookup; the inbox feed is at most ~50 rows. */
+    static final int MAX_LOOKUP = 500;
 
     private final InquiryRepository inquiries;
     private final ReviewRepository reviews;
@@ -182,6 +187,39 @@ public class ItemAnalysisService {
         return analyses.findAllByOrgIdOrderByCreatedAtDesc(orgId).stream()
                 .map(ItemAnalysisView::of)
                 .toList();
+    }
+
+    /**
+     * Inbox-scoped read: return the stored analyses for exactly the given feed rows, so the
+     * response is bounded by the feed size rather than the org-wide corpus. Org-scoped (refs
+     * for another org return nothing), unknown ids are ignored, and duplicate requested ids
+     * collapse in the {@code IN} clause. Does not write or analyze — read-only enrichment.
+     */
+    @Transactional(readOnly = true)
+    public List<ItemAnalysisView> lookup(UUID orgId, List<LookupRequest.SourceRef> refs) {
+        if (refs == null || refs.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> reviewIds = new ArrayList<>();
+        List<UUID> inquiryIds = new ArrayList<>();
+        for (LookupRequest.SourceRef ref : refs.stream().limit(MAX_LOOKUP).toList()) {
+            if (ref == null || ref.sourceId() == null) {
+                continue;
+            }
+            if (REVIEW.equals(ref.sourceType())) {
+                reviewIds.add(ref.sourceId());
+            } else if (INQUIRY.equals(ref.sourceType())) {
+                inquiryIds.add(ref.sourceId());
+            }
+        }
+        List<ItemAnalysis> rows = new ArrayList<>();
+        if (!reviewIds.isEmpty()) {
+            rows.addAll(analyses.findByOrgIdAndSourceTypeAndSourceIdIn(orgId, REVIEW, reviewIds));
+        }
+        if (!inquiryIds.isEmpty()) {
+            rows.addAll(analyses.findByOrgIdAndSourceTypeAndSourceIdIn(orgId, INQUIRY, inquiryIds));
+        }
+        return rows.stream().map(ItemAnalysisView::of).toList();
     }
 
     private void persist(UUID orgId, SourceItem item, String sourceContentHash) {

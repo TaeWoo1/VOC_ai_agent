@@ -6,6 +6,7 @@ import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
+import com.sellerops.itemanalysis.dto.LookupRequest.SourceRef;
 import com.sellerops.itemanalysis.dto.RunResult;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
@@ -270,6 +271,86 @@ class ItemAnalysisServiceTest {
         assertThat(result.analyzedInquiries()).isEqualTo(3); // inquiries first
         assertThat(result.analyzedReviews()).isEqualTo(1);
         assertThat(result.remaining()).isEqualTo(2);
+    }
+
+    @Test
+    void lookupReturnsOnlyRequestedAnalyses() {
+        // Fresh org with two analyzed reviews; request only one of them.
+        UUID freshOrg = UUID.randomUUID();
+        Review wanted = reviews.save(review(freshOrg, "조회 대상 리뷰", 2, true));
+        Review other = reviews.save(review(freshOrg, "조회 제외 리뷰", 5, false));
+        service.backfillMissing(freshOrg, 100);
+
+        List<ItemAnalysisView> result =
+                service.lookup(freshOrg, List.of(new SourceRef("REVIEW", wanted.getId())));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).sourceId()).isEqualTo(wanted.getId());
+        assertThat(result).noneMatch(v -> v.sourceId().equals(other.getId()));
+    }
+
+    @Test
+    void lookupIsOrgScoped() {
+        // An analyzed review under otherOrg must never surface when looked up under `org`.
+        Review foreign = reviews.save(review(otherOrg, "다른 조직 리뷰", 1, true));
+        service.backfillMissing(otherOrg, 100);
+
+        List<ItemAnalysisView> result =
+                service.lookup(org, List.of(new SourceRef("REVIEW", foreign.getId())));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void lookupIgnoresUnknownIds() {
+        UUID freshOrg = UUID.randomUUID();
+        Review known = reviews.save(review(freshOrg, "분석된 리뷰", 3, false));
+        service.backfillMissing(freshOrg, 100);
+
+        List<ItemAnalysisView> result = service.lookup(freshOrg, List.of(
+                new SourceRef("REVIEW", known.getId()),
+                new SourceRef("REVIEW", UUID.randomUUID()),       // never analyzed
+                new SourceRef("INQUIRY", UUID.randomUUID())));     // never analyzed
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).sourceId()).isEqualTo(known.getId());
+    }
+
+    @Test
+    void lookupHandlesMixedReviewAndInquiry() {
+        UUID freshOrg = UUID.randomUUID();
+        Review r = reviews.save(review(freshOrg, "혼합 조회 리뷰", 2, true));
+        Inquiry q = inquiries.save(inquiry(freshOrg, "혼합 조회 문의", "UNANSWERED"));
+        service.backfillMissing(freshOrg, 100);
+
+        List<ItemAnalysisView> result = service.lookup(freshOrg, List.of(
+                new SourceRef("REVIEW", r.getId()),
+                new SourceRef("INQUIRY", q.getId())));
+
+        assertThat(result).hasSize(2);
+        assertThat(result).anyMatch(v -> v.sourceType().equals("REVIEW") && v.sourceId().equals(r.getId()));
+        assertThat(result).anyMatch(v -> v.sourceType().equals("INQUIRY") && v.sourceId().equals(q.getId()));
+    }
+
+    @Test
+    void lookupDeduplicatesRequestedIds() {
+        UUID freshOrg = UUID.randomUUID();
+        Review r = reviews.save(review(freshOrg, "중복 요청 리뷰", 4, false));
+        service.backfillMissing(freshOrg, 100);
+
+        List<ItemAnalysisView> result = service.lookup(freshOrg, List.of(
+                new SourceRef("REVIEW", r.getId()),
+                new SourceRef("REVIEW", r.getId())));
+
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
+    void lookupEmptyRequestReturnsEmpty() {
+        service.run(org); // analyses exist, but an empty request must touch nothing.
+
+        assertThat(service.lookup(org, List.of())).isEmpty();
+        assertThat(service.lookup(org, null)).isEmpty();
     }
 
     private static Inquiry inquiry(UUID org, String body, String status) {

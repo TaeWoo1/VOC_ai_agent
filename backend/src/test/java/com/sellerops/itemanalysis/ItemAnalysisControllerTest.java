@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
+import com.sellerops.itemanalysis.dto.LookupRequest;
+import com.sellerops.itemanalysis.dto.LookupRequest.SourceRef;
 import com.sellerops.itemanalysis.dto.RunResult;
 import java.util.List;
 import java.util.UUID;
@@ -43,5 +45,26 @@ class ItemAnalysisControllerTest {
 
         assertThat(result).isEmpty();
         verify(service).list(orgId);
+    }
+
+    @Test
+    void lookupDelegatesWithPrincipalOrgIdAndBodyItems() {
+        List<SourceRef> items = List.of(new SourceRef("REVIEW", UUID.randomUUID()));
+        when(service.lookup(orgId, items)).thenReturn(List.<ItemAnalysisView>of());
+
+        List<ItemAnalysisView> result = controller.lookup(principal, new LookupRequest(items));
+
+        assertThat(result).isEmpty();
+        verify(service).lookup(orgId, items);
+    }
+
+    @Test
+    void lookupToleratesNullBody() {
+        when(service.lookup(orgId, null)).thenReturn(List.<ItemAnalysisView>of());
+
+        List<ItemAnalysisView> result = controller.lookup(principal, null);
+
+        assertThat(result).isEmpty();
+        verify(service).lookup(orgId, null);
     }
 }

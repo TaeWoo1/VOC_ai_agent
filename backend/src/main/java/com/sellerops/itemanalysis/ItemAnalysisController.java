@@ -3,11 +3,13 @@ package com.sellerops.itemanalysis;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
+import com.sellerops.itemanalysis.dto.LookupRequest;
 import com.sellerops.itemanalysis.dto.RunResult;
 import java.util.List;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,5 +49,16 @@ public class ItemAnalysisController {
     @GetMapping
     public List<ItemAnalysisView> list(@AuthenticationPrincipal AuthPrincipal principal) {
         return service.list(principal.orgId());
+    }
+
+    /**
+     * Inbox-scoped read: analyses for exactly the feed rows the inbox is displaying
+     * ({@code {items:[{sourceType,sourceId}]}}). Org-scoped; unknown/foreign ids are ignored.
+     * Keeps the inbox off the unbounded {@code GET /api/item-analysis} as the corpus grows.
+     */
+    @PostMapping("/lookup")
+    public List<ItemAnalysisView> lookup(@AuthenticationPrincipal AuthPrincipal principal,
+                                         @RequestBody LookupRequest request) {
+        return service.lookup(principal.orgId(), request == null ? null : request.items());
     }
 }

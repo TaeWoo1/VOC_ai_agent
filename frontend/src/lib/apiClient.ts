@@ -277,6 +277,25 @@ export const api = {
     const { data } = await http.get<ItemAnalysis[]>("/api/item-analysis");
     return data;
   },
+  // Inbox-scoped variant: fetch analyses ONLY for the feed rows currently on
+  // screen, so the inbox never pulls the whole org-wide analysis list (which
+  // grows into the thousands after connector backfills). Same fail-soft contract
+  // as getItemAnalysisStrict — the Inbox page treats a failure as enrichment-only.
+  // Empty input short-circuits (no request). Honors the VITE_USE_MOCKS escape
+  // hatch (returns the same seeded mock list; the page joins by id, so extra
+  // mock rows are simply unused).
+  async lookupItemAnalysisStrict(
+    items: { sourceType: string; sourceId: string }[],
+  ): Promise<ItemAnalysis[]> {
+    if (USE_MOCKS) {
+      return mockItemAnalysis();
+    }
+    if (items.length === 0) {
+      return [];
+    }
+    const { data } = await http.post<ItemAnalysis[]>("/api/item-analysis/lookup", { items });
+    return data;
+  },
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>
     getOrMock("/api/orders/summary", mockOrders),
   // Strict variant for the order/sales dashboard (Orders page): no silent mock

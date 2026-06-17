@@ -25,17 +25,21 @@ const STRIP_TONE: Record<ChipTone, string> = {
 
 export function Inbox() {
   const { data, loading, error } = useApiData(() => api.getInboxStrict());
+  const items = data?.items ?? [];
   // Analysis is enrichment, not an essential read: fetched separately so a failure
   // here never blocks the inbox. On error we fall back to an empty index and the
-  // cards simply render without an analysis area (fail-soft).
-  const { data: analysisData } = useApiData(() => api.getItemAnalysisStrict());
+  // cards simply render without an analysis area (fail-soft). Scoped to the loaded
+  // feed rows (not the org-wide list), so the inbox payload stays bounded by feed
+  // size as the analysis corpus grows. Re-runs when the feed arrives ([data] dep).
+  const { data: analysisData } = useApiData(
+    () => api.lookupItemAnalysisStrict(items.map((i) => ({ sourceType: i.type, sourceId: i.id }))),
+    [data],
+  );
   const [tab, setTab] = useState<InboxTabKey>("ALL");
   const [channel, setChannel] = useState<string>("ALL");
   // Optional action/status filter set from the workload strip; composes with the
   // tab + channel filters. null = 전체 작업 (no action filter).
   const [action, setAction] = useState<string | null>(null);
-
-  const items = data?.items ?? [];
   const analysisIndex = useMemo(
     () => buildAnalysisIndex(analysisData ?? []),
     [analysisData],
