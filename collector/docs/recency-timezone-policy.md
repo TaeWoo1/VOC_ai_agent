@@ -1,10 +1,23 @@
 # SellerOps recency timezone policy
 
-> **Docs-only policy — no implementation.** Defines how timezone-bearing vs.
-> timezone-less timestamp strings should be treated when recency parsing (Phase 2)
-> is eventually built. No parser, no `eventTimeMs`, no `recencyBucket` wiring, no
-> normalizer/scoring/ranking/view change, no `Date.now`/`new Date`/`generatedAt`.
-> Offline; no AI.
+> Offline; no AI. The offset-bearing parser helper (Phase 2b) is implemented; it is
+> not wired into normalizers and adds no `eventTimeMs`/`recencyBucket` (Phases 2c+
+> deferred). No `Date.*` API, no wall-clock read, no `generatedAt`.
+
+## Implementation status
+
+- **Phase 2b — `parseOffsetTimestampToEpochMs(raw)` implemented**
+  (`src/events/offset-timestamp-parser.ts`). Pure, deterministic. Accepts **only**
+  strict ISO-like `Z` / `±HH:MM` offset-bearing forms; **timezone-less strings are
+  rejected** (→ `null`); **no KST assumption**. Uses strict regex + manual
+  calendar/offset arithmetic — **no `Date.parse`, `new Date`, `Date.now`, or
+  `Date.UTC`** (no `Date.*` at all), no wall-clock read. Invalid/ambiguous/non-string
+  input → `null`. Not wired into normalizers; no `eventTimeMs` field; no
+  `recencyBucket` summary wiring.
+- **Phase 2c — internal `eventTimeMs` in selected normalizers — deferred.**
+- **Phase 2d — `recencyBucket` in sanitized summaries — deferred.**
+- **Phase 3 — recency factor in `priorityScoreFor` — deferred.**
+- **Phase 4 — `attentionView` passthrough — deferred.**
 
 ## Summary
 
