@@ -174,9 +174,28 @@ notes show how a run outcome updates the connection.
   reuse it later — but it must not be built without its own dedicated design and
   approval.
 
+## Implementation status
+
+The pure, offline connection foundation for this model lives in
+`src/connection/`: `types.ts` (platform / status / `CollectorConnection` /
+fingerprint + reachability signal types), `connection.ts`
+(`profileNameForConnection`, `createPendingConnection`,
+`bindConnectionToFingerprint`, `markNeedsReauth`, `markAccountMismatch`, and the
+one-way `fingerprintHash`), `guard.ts` (`evaluateExportGuard`, the pre-export
+drift guard), `apply.ts` (`applyGuardDecision` / `recordExportAttempt`, folding a
+guard decision onto a connection), and `record.ts` (`toConnectionRecord` /
+`parseConnectionRecord` / `roundTripConnectionRecord`, JSON-safe serialization
+with allow-list validation and sanitized error categories), `workflow.ts`
+(`markPendingAccountSelection` / `completeManualAccountSelection` /
+`prepareExportAttempt`, the human-driven onboarding + export pre-flight steps),
+and `registry.ts` (`createConnectionRegistry` + `registryFromRecords`, a minimal
+in-memory keyed store). These are pure/in-memory types/logic only — no browser,
+backend, DB, fs, or session/profile I/O. Wiring them into the live CLI and a
+persisted store is a later, separately-approved step.
+
 ## Out of scope for this design pass
 
-- No implementation, schema migration, or CLI surface in this pass.
+- No live wiring, schema migration, or CLI surface in this pass.
 - No scheduler / recurring collection (still paused).
 - No async-job download follow-through (export is confirmed sync).
 - No real export ingestion — the upload/parse path is validated separately with a
