@@ -23,7 +23,16 @@
   signals/digest/views, logs, or telemetry (asserted by tests).
 - **Phase 2c (remaining kinds) — `cs_inquiry` / `claim` / `order_shipping` —
   deferred** (`sales_context` stays `unknown` by design).
-- **Phase 2d — `recencyBucket` in sanitized summaries — deferred.**
+- **Phase 2d-1 — review-only sanitized `recencyBucket` — implemented**
+  (`src/review/review-normalizer.ts`, `src/events/sanitized-summary.ts`).
+  `sanitizedReviewSummary(event, { referenceTimeMs })` and `sanitizedSummaryFor(event,
+  { referenceTimeMs })` surface a coarse `recencyBucket`, computed via `recencyBucketFor`
+  from the internal `eventTimeMs` + an **explicit caller reference time**. Missing /
+  non-finite `referenceTimeMs` → `"unknown"`; missing / future `eventTimeMs` →
+  `"unknown"`. No wall-clock read. `eventTimeMs`, raw timestamps, and elapsed duration
+  are never exposed. No scoring/ranking/view behavior change.
+- **Phase 2d (remaining kinds) — `cs_inquiry` / `claim` / `order_shipping` — deferred**
+  (`sales_context` stays `unknown` by design).
 - **Phase 3 — recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough — deferred.**
 

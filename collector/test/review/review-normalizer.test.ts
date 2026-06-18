@@ -168,6 +168,7 @@ describe("sanitizedReviewSummary", () => {
       hasWrittenAt: true,
       replyStatus: "not_replied",
       collectionMethod: "browser_export",
+      recencyBucket: "unknown",
     });
     const serialized = JSON.stringify(summary);
     for (const leak of [
@@ -258,5 +259,70 @@ describe("normalizeReview — eventTimeMs is internal only", () => {
 
   it("never appears in the attention view (digest + ranked rows) built from review input", () => {
     expect(JSON.stringify(attentionView([e]))).not.toContain("eventTimeMs");
+  });
+});
+
+describe("sanitizedReviewSummary — recencyBucket (Phase 2d-1)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  // writtenAt parses to eventTimeMs = 0 (Unix epoch).
+  const epochReview = normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T00:00:00Z" });
+
+  const bucketAt = (refMs: number) => sanitizedReviewSummary(epochReview, { referenceTimeMs: refMs }).recencyBucket;
+
+  it("computes each boundary bucket from explicit referenceTimeMs", () => {
+    expect(bucketAt(0)).toBe("fresh_0_2h");
+    expect(bucketAt(2 * HOUR)).toBe("same_day_2_24h");
+    expect(bucketAt(24 * HOUR)).toBe("recent_1_3d");
+    expect(bucketAt(3 * DAY)).toBe("aging_3_7d");
+    expect(bucketAt(7 * DAY)).toBe("stale_over_7d");
+  });
+
+  it("returns unknown when referenceTimeMs is missing / non-finite", () => {
+    expect(sanitizedReviewSummary(epochReview).recencyBucket).toBe("unknown");
+    expect(sanitizedReviewSummary(epochReview, {}).recencyBucket).toBe("unknown");
+    expect(sanitizedReviewSummary(epochReview, { referenceTimeMs: Number.NaN }).recencyBucket).toBe("unknown");
+    expect(sanitizedReviewSummary(epochReview, { referenceTimeMs: Number.POSITIVE_INFINITY }).recencyBucket).toBe("unknown");
+  });
+
+  it("returns unknown when the event has no eventTimeMs (timezone-less writtenAt)", () => {
+    const noTime = normalizeReview({ platform: "NAVER", writtenAt: "2026-06-18T09:00:00" });
+    expect(noTime).not.toHaveProperty("eventTimeMs");
+    expect(sanitizedReviewSummary(noTime, { referenceTimeMs: 1_000_000 }).recencyBucket).toBe("unknown");
+  });
+
+  it("returns unknown for a future eventTimeMs", () => {
+    const future = normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T01:00:00Z" }); // eventTimeMs = 3_600_000
+    expect(sanitizedReviewSummary(future, { referenceTimeMs: 0 }).recencyBucket).toBe("unknown");
+  });
+
+  it("never exposes eventTimeMs, raw writtenAt, or elapsed duration", () => {
+    const summary = sanitizedReviewSummary(epochReview, { referenceTimeMs: 5 * HOUR });
+    expect(summary.recencyBucket).toBe("same_day_2_24h");
+    expect(summary).not.toHaveProperty("eventTimeMs");
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain("eventTimeMs");
+    expect(serialized).not.toContain("1970-01-01T00:00:00Z"); // raw writtenAt
+    expect(serialized).not.toContain(String(5 * HOUR)); // elapsed duration must not leak
+  });
+});
+
+describe("sanitizedSummaryFor — forwards referenceTimeMs to review (Phase 2d-1)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const epochReview = normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T00:00:00Z" });
+
+  it("forwards referenceTimeMs into the review recencyBucket", () => {
+    const s = sanitizedSummaryFor(epochReview, { referenceTimeMs: 2 * HOUR });
+    expect(s.kind).toBe("review");
+    if (s.kind === "review") expect(s.recencyBucket).toBe("same_day_2_24h");
+  });
+
+  it("without options, review recencyBucket is unknown", () => {
+    const s = sanitizedSummaryFor(epochReview);
+    if (s.kind === "review") expect(s.recencyBucket).toBe("unknown");
+  });
+
+  it("attention view built from a review never carries eventTimeMs", () => {
+    expect(JSON.stringify(attentionView([epochReview]))).not.toContain("eventTimeMs");
   });
 });

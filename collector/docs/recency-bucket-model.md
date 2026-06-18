@@ -15,11 +15,15 @@
   `[0,2h) fresh · [2h,24h) same_day · [24h,3d) recent · [3d,7d) aging · [7d,∞) stale`.
   Output is the coarse bucket only — never a timestamp, duration, raw date string, or
   timezone.
-- **Phase 2 — sanitized-summary `recencyBucket` field — deferred.** Prerequisite
-  audit of safe timestamp sources (which raw fields exist per kind, why none are
-  currently epoch-ms-safe, and the preferred parsing boundary) is in
-  `recency-timestamp-source-audit.md`; the timezone-handling rules for that future
-  parsing are in `recency-timezone-policy.md`.
+- **Phase 2b — offset-bearing parser `parseOffsetTimestampToEpochMs` implemented**
+  (`src/events/offset-timestamp-parser.ts`). See `recency-timezone-policy.md`.
+- **Phase 2c-1 — internal `eventTimeMs` on review events implemented**; other kinds
+  deferred (`sales_context` stays `unknown`). See `recency-timestamp-source-audit.md`.
+- **Phase 2d-1 — review-only sanitized `recencyBucket` implemented**
+  (`sanitizedReviewSummary` / `sanitizedSummaryFor` accept an explicit
+  `{ referenceTimeMs }`; missing/non-finite ref or missing/future `eventTimeMs` →
+  `"unknown"`; no wall-clock read; `eventTimeMs`/raw timestamps/elapsed never exposed).
+  Remaining kinds deferred.
 - **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
