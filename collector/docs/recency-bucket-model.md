@@ -1,10 +1,25 @@
-# SellerOps recency-bucket model — specification (docs-only)
+# SellerOps recency-bucket model — specification
 
-> **Specification only — NO implementation.** This PR documents the safety boundary,
-> bucket model, allowed/forbidden inputs and outputs, the deterministic reference-time
-> rule, and a phased implementation plan. There is **no** `recencyBucketFor`, **no**
-> normalizer change, **no** scoring/ranking change, and **no** `Date.now` / `new Date`
-> in source. Offline; no AI; no live collection.
+> Offline; no AI; no live collection. Phase 1 (the pure helper) is implemented;
+> Phases 2–4 (sanitized-summary field, scoring factor, view passthrough) remain
+> deferred. No `Date.now` / `new Date` / current-time read in source.
+
+## Implementation status
+
+- **Phase 1 — `recencyBucketFor(eventTimeMs, referenceTimeMs)` implemented**
+  (`src/events/recency-bucket.ts`). Pure, deterministic. Accepts **epoch milliseconds
+  only** — no `Date` objects, no raw date-string parsing, **no `Date.now`**, **no
+  `new Date`**, no current-time read. `eventTimeMs` null/undefined/non-finite →
+  `unknown`; non-finite `referenceTimeMs` → `unknown`; future event
+  (`eventTimeMs > referenceTimeMs`) → `unknown`. Otherwise buckets by age:
+  `[0,2h) fresh · [2h,24h) same_day · [24h,3d) recent · [3d,7d) aging · [7d,∞) stale`.
+  Output is the coarse bucket only — never a timestamp, duration, raw date string, or
+  timezone.
+- **Phase 2 — sanitized-summary `recencyBucket` field — deferred.**
+- **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
+- **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
+- **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
+  UI — deferred** (§8).
 
 ## 1. Why this layer exists
 
