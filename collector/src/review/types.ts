@@ -63,6 +63,13 @@ export interface SellerOpsReviewEvent {
   updatedAt: string | null;
   replyStatus: ReviewReplyStatus;
   collectionMethod: ReviewCollectionMethod;
+  /**
+   * INTERNAL parsed event time (epoch ms), derived from `writtenAt` when it is an
+   * explicit-offset timestamp. Absent when `writtenAt` is missing / timezone-less /
+   * invalid. **Internal only** — never exposed in sanitized summaries, attention
+   * signals/digest/views, logs, or telemetry. Phase 2c-1 (review pilot).
+   */
+  eventTimeMs?: number;
 }
 
 /** Coarse rating bucket for sanitized summaries — never the exact rating value. */

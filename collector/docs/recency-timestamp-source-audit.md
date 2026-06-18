@@ -37,7 +37,11 @@ purposes.
 - Normalizer (`review-normalizer.ts`): `writtenAt: trimOrNull(raw.writtenAt)`,
   `updatedAt: trimOrNull(raw.updatedAt)` — raw marketplace string, trimmed only.
 - Sanitized summary exposes `hasWrittenAt: boolean` (no value).
-- **Not safe** for `recencyBucketFor`. Primary recency source would be `writtenAt`.
+- **Status (Phase 2c-1 implemented):** the review event now also carries an
+  **internal** `eventTimeMs?: number`, parsed from `writtenAt` via
+  `parseOffsetTimestampToEpochMs` (offset-bearing only; timezone-less/invalid/missing →
+  omitted). The raw `writtenAt` is unchanged, and `eventTimeMs` is internal-only (never
+  in sanitized output). Primary recency source = `writtenAt`.
 
 ### cs_inquiry
 - Type: `createdAt: string | null`.
