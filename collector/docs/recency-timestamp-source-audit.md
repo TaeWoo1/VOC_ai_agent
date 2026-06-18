@@ -118,7 +118,9 @@ kind recommended to remain `unknown` regardless, given period-range ambiguity.)
 ## Deferred work
 
 - Phase 2 parsing + `eventTimeMs` + sanitized `recencyBucket` field (the subject of
-  this audit's recommendation — not implemented here).
+  this audit's recommendation — not implemented here). The timezone-handling rules for
+  that parsing (explicit-offset-only, timezone-less → `unknown`, no KST assumption) are
+  specified in `recency-timezone-policy.md`.
 - Phase 3 recency factor in `priorityScoreFor`.
 - Phase 4 `attentionView` passthrough via the sanitized priority explanation.
 - Exact SLA calculation, platform-specific **timezone handling** (raw strings may lack

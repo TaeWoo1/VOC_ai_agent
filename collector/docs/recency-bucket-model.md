@@ -18,7 +18,8 @@
 - **Phase 2 — sanitized-summary `recencyBucket` field — deferred.** Prerequisite
   audit of safe timestamp sources (which raw fields exist per kind, why none are
   currently epoch-ms-safe, and the preferred parsing boundary) is in
-  `recency-timestamp-source-audit.md`.
+  `recency-timestamp-source-audit.md`; the timezone-handling rules for that future
+  parsing are in `recency-timezone-policy.md`.
 - **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
