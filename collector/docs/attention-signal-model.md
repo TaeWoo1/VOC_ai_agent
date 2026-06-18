@@ -61,6 +61,13 @@ sales amounts/counts, `productRef`/`orderRef`/`reviewRef`/`claimRef`/`shipmentRe
 `settlementNo`, or buyer/reviewer/seller identity. No AI, no model prompt, no numeric
 score.
 
+## Batch rollup
+
+The batch-level rollup of these signals across many events is the **attention
+digest** — see `attention-digest-model.md` (`attentionDigest`), a deterministic,
+sanitized count of signal codes / severities / event kinds / platforms / channels (no
+score, no ranking, no AI).
+
 ## Future priority score
 
 A later priority layer can combine these signals — weighing severity, signal
