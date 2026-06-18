@@ -189,9 +189,20 @@ with allow-list validation and sanitized error categories), `workflow.ts`
 (`markPendingAccountSelection` / `completeManualAccountSelection` /
 `prepareExportAttempt`, the human-driven onboarding + export pre-flight steps),
 and `registry.ts` (`createConnectionRegistry` + `registryFromRecords`, a minimal
-in-memory keyed store). These are pure/in-memory types/logic only — no browser,
-backend, DB, fs, or session/profile I/O. Wiring them into the live CLI and a
-persisted store is a later, separately-approved step.
+in-memory keyed store). Local persistence is introduced in `store.ts`
+(`loadConnectionRegistryFromFile` / `saveConnectionRegistryToFile` with atomic
+temp-then-rename writes and sanitized `ConnectionStoreError` categories) — the
+ONLY module here that touches the filesystem; all others remain fs-free. The
+store path (`.connections/connections.json`, default via
+`defaultConnectionStorePath`) is gitignored; runtime records are local-only and
+contain only connection records (fingerprint hash + source category + user
+alias) — never raw NAVER identity. `status-bridge.ts`
+(`connectionStatusToCollectorState` / `connectionStatusDetail` /
+`connectionToStatusSnapshot`) maps a connection's status to the closest existing
+run-level `CollectorState` and builds a sanitized `StatusRecord` payload (no
+identity, hash, connectionId, or profile name; never `LAST_SUCCESS`) — purely, so
+connection health can be surfaced without a browser; it does not write `.status/`.
+Wiring this into the live CLI is a later, separately-approved step.
 
 ## Out of scope for this design pass
 

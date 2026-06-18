@@ -8,6 +8,9 @@ node_modules/
 downloads/
 .status/
 
+# Local connection registry store (holds connection records — local only)
+.connections/
+
 # Environment
 .env
 
