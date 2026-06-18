@@ -62,7 +62,8 @@ recency) belong to a later layer once a safe age bucket exists.
 
 - **Backend endpoint** serving the view.
 - **UI card / list** rendering it.
-- **Recency bucket** (and recency-aware ordering).
+- **Recency bucket** (and recency-aware ordering) — boundary + phased plan specified
+  in `recency-bucket-model.md` (docs-only, not yet implemented).
 - **Deduplication.**
 - **Clustering.**
 - **AI summary** of the digest / top rows.
