@@ -11,6 +11,10 @@ The official **ESM Trading API guide** is the primary reference going forward:
 `ESM_TRADING_API_GUIDE_URL`). It is used as **documentation context only** — no
 live API calls are made from this layer.
 
+For *how access is obtained* (seller-owned pilot vs. approved selling-tool
+provider vs. browser/export fallback), the recommended SellerOps path, and the
+open questions for ESM support, see **`esmplus-access-model.md`**.
+
 ## Platform
 
 ESM Plus is the unified seller console for **Gmarket** and **Auction** (eBay
