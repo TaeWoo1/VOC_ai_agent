@@ -1,7 +1,7 @@
 # SellerOps priority-score model — specification
 
-> Offline; no AI; no live collection. The single-event scorer is now implemented;
-> batch ranking and recency/dedup/cluster/AI factors remain deferred.
+> Offline; no AI; no live collection. The single-event scorer and batch ranking are
+> now implemented; recency/dedup/cluster/AI factors remain deferred.
 
 ## Implementation status
 
@@ -11,7 +11,14 @@
   conservative co-occurrence bonus (§6), a coarse `high_sales_context` bonus from the
   amountBucket-derived signal (§6), band mapping (§7), and fixed deterministic
   explanation codes (§8). No raw content, no AI, no live I/O, no current-time read.
-- **`prioritizeEvents(events)` / ranking — still deferred.**
+- **`prioritizeEvents(events)` — implemented** (`src/events/prioritize-events.ts`).
+  Pure, deterministic batch ranking over `priorityScoreFor`. Returns **sanitized**
+  `PrioritizedEvent[]` (`inputIndex`, coarse `kind`/`platform`/`channel`, and the
+  priority explanation) — **never the raw event object**, refs, content, exact
+  amounts/counts, or identity. Order: **score descending**, then **`inputIndex`
+  ascending** as the stable tie-breaker (no hidden product judgment via event-kind
+  ordering yet). Empty input → `[]`. No recency, no dedup, no cluster, no AI, no
+  current-time read.
 - **Recency / deduplication / clustering / AI summaries — still deferred** (§9).
 - **Automatic reply / posting — excluded** (§9).
 
