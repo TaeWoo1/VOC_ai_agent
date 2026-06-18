@@ -43,6 +43,10 @@ claims; `unknown` is the honest default until confirmed.
 Source of truth in code: `src/esmplus/capabilities.ts` (`ESM_CAPABILITIES`,
 `capabilityFor`, `firstMilestoneTarget`).
 
+For the cross-platform review signal model and the multi-track review collection
+strategy (official API → official export → user-consented browser/export → manual
+upload), see `review-collection-strategy.md`.
+
 ## Integration assumptions (from the guide)
 
 - **API-first**: model ESM Plus / Gmarket / Auction via official seller APIs, not browser collection.

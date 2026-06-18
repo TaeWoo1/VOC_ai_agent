@@ -261,3 +261,8 @@ trigger NAVER 2FA/security verification, so no live login is attempted for now.
 - No async-job download follow-through (export is confirmed sync).
 - No real export ingestion — the upload/parse path is validated separately with a
   **synthetic** NAVER-shaped `.xlsx`, never the real captured file.
+
+Once a NAVER review export is collected (later, with consent), it normalizes into
+the cross-platform review signal model; the multi-track strategy and the
+NAVER-style safety rules it reuses are documented in
+`review-collection-strategy.md`.
