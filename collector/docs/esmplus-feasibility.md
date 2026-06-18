@@ -65,6 +65,26 @@ A pure normalizer maps a raw (synthetic) ESM inquiry to the common
 - `sanitizedInquirySummary` is the log-safe view — categories/booleans only,
   never content, refs, ids, or PII.
 
+## Normalized event shapes (offline)
+
+CS/inquiry remains the **first milestone**. Additional normalized shapes + pure
+normalizers now exist, all fixture-only:
+
+- **Order/shipping** — `SellerOpsOrderEvent` (`src/esmplus/order-normalizer.ts`,
+  `normalizeEsmOrder` / `sanitizedOrderSummary`): status
+  (new_order/preparing/shipped/delivered/cancelled/unknown), order/product/shipment
+  refs, title, quantity.
+- **Claim** — `SellerOpsClaimEvent` (`src/esmplus/claim-normalizer.ts`,
+  `normalizeEsmClaim` / `sanitizedClaimSummary`): claim type
+  (cancel/return/exchange/refund/unknown), status, reason category, order/product/
+  claim refs, reason text.
+
+All normalizers drop buyer/recipient PII (name, id, phone, email, address) and
+carry only operational reference codes; sanitized summaries expose categories/
+booleans only. Deterministic `eventId` (row id, or a `JSON.stringify`-based content
+hash when absent). The **live ESM API client / auth / JWT remains deferred** — no
+credentials, no live calls.
+
 ## Out of scope (now)
 
 Live ESM API calls · credentials/seller IDs · backend · DB · upload · browser
