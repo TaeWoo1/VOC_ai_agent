@@ -55,7 +55,7 @@ export interface SanitizedAdapterSummary {
  * parsing). Internal whitespace is left as-is — these are expected to be compact
  * id/path tokens, and rewriting them could change identity.
  */
-function normalizeCandidate(raw: string | null | undefined): string | null {
+export function normalizeCandidateToken(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined) return null;
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
@@ -85,7 +85,7 @@ export function toAccountFingerprintInput(
 ): AccountFingerprintInput {
   const accountContextCandidates: AccountContextCandidate[] = [];
   for (const { key, sourceCategory } of CANDIDATE_FIELDS) {
-    const token = normalizeCandidate(signals[key] as string | null | undefined);
+    const token = normalizeCandidateToken(signals[key] as string | null | undefined);
     if (token !== null) accountContextCandidates.push({ sourceCategory, token });
   }
   return {
