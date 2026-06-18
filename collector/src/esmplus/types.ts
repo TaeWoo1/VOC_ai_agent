@@ -102,3 +102,108 @@ export interface SanitizedInquirySummary {
   hasOrderRef: boolean;
   hasCreatedAt: boolean;
 }
+
+// --- Normalized SellerOps order/shipping event ----------------------------
+
+/** Normalized lifecycle status of an order/shipment. */
+export type OrderStatus =
+  | "new_order"
+  | "preparing"
+  | "shipped"
+  | "delivered"
+  | "cancelled"
+  | "unknown";
+
+/**
+ * The common SellerOps event an ESM order/shipping row normalizes into. It carries
+ * operational reference CODES (order/product/shipment) and the product title, but
+ * NO buyer/recipient identity (name, phone, email, address) and NO seller identity.
+ */
+export interface SellerOpsOrderEvent {
+  eventId: string;
+  platform: EsmPlatform;
+  kind: "order_shipping";
+  channel: EsmChannel;
+  status: OrderStatus;
+  /** ISO-ish order timestamp as provided; null when absent. */
+  orderedAt: string | null;
+  /** ISO-ish last-update timestamp as provided; null when absent. */
+  updatedAt: string | null;
+  productRef: string | null;
+  orderRef: string | null;
+  shipmentRef: string | null;
+  /** Product title (content, not PII); null when absent. */
+  title: string | null;
+  /** Ordered quantity; null when absent/unparseable. */
+  quantity: number | null;
+}
+
+/** Log-safe summary of an order event — categories/booleans only, never refs/ids/PII. */
+export interface SanitizedOrderSummary {
+  platform: EsmPlatform;
+  kind: "order_shipping";
+  channel: EsmChannel;
+  status: OrderStatus;
+  hasOrderRef: boolean;
+  hasProductRef: boolean;
+  hasShipmentRef: boolean;
+  hasTitle: boolean;
+  hasQuantity: boolean;
+  hasOrderedAt: boolean;
+  hasUpdatedAt: boolean;
+}
+
+// --- Normalized SellerOps claim event -------------------------------------
+
+/** Normalized claim type. */
+export type ClaimType = "cancel" | "return" | "exchange" | "refund" | "unknown";
+
+/** Normalized claim lifecycle status. */
+export type ClaimStatus = "open" | "in_progress" | "resolved" | "rejected" | "unknown";
+
+/** Conservative, normalized claim-reason category — defaults to `unknown` when unmapped. */
+export type ClaimReasonCategory =
+  | "delivery"
+  | "product"
+  | "customer_change"
+  | "payment"
+  | "other"
+  | "unknown";
+
+/**
+ * The common SellerOps event an ESM claim row normalizes into. Carries operational
+ * reference CODES (order/product/claim) and the claim reason text (content), but NO
+ * buyer/recipient identity and NO seller identity.
+ */
+export interface SellerOpsClaimEvent {
+  eventId: string;
+  platform: EsmPlatform;
+  kind: "claim";
+  channel: EsmChannel;
+  claimType: ClaimType;
+  status: ClaimStatus;
+  createdAt: string | null;
+  updatedAt: string | null;
+  productRef: string | null;
+  orderRef: string | null;
+  claimRef: string | null;
+  reasonCategory: ClaimReasonCategory;
+  /** Free-form claim reason (content, not PII); null when absent. */
+  reasonText: string | null;
+}
+
+/** Log-safe summary of a claim event — categories/booleans only, never content/refs/ids/PII. */
+export interface SanitizedClaimSummary {
+  platform: EsmPlatform;
+  kind: "claim";
+  channel: EsmChannel;
+  claimType: ClaimType;
+  status: ClaimStatus;
+  reasonCategory: ClaimReasonCategory;
+  hasReasonText: boolean;
+  hasOrderRef: boolean;
+  hasProductRef: boolean;
+  hasClaimRef: boolean;
+  hasCreatedAt: boolean;
+  hasUpdatedAt: boolean;
+}
