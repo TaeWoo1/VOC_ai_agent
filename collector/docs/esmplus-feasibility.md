@@ -82,12 +82,23 @@ normalizers now exist, all fixture-only:
   `normalizeEsmClaim` / `sanitizedClaimSummary`): claim type
   (cancel/return/exchange/refund/unknown), status, reason category, order/product/
   claim refs, reason text.
+- **Sales/settlement context** — `SellerOpsSalesContextEvent`
+  (`src/esmplus/sales-context-normalizer.ts`, `normalizeEsmSalesContext` /
+  `sanitizedSalesContextSummary`): channel, period bounds, product ref, order/claim
+  counts, gross-sales + settlement amounts, currency (KRW/unknown). This is a
+  lightweight **operational context** layer to help prioritize reviews / inquiries /
+  claims / product issues — **not** accounting, **not** a dashboard, **no**
+  aggregation. Monetary fields are business-sensitive: the sanitized summary exposes
+  presence booleans + a single coarse `amountBucket` (gross-sales magnitude), never
+  exact amounts. Counts/amounts are parsed conservatively (non-negative; invalid →
+  null); seller identity (seller/master/account id) and buyer PII are dropped.
 
 All normalizers drop buyer/recipient PII (name, id, phone, email, address) and
-carry only operational reference codes; sanitized summaries expose categories/
-booleans only. Deterministic `eventId` (row id, or a `JSON.stringify`-based content
-hash when absent). The **live ESM API client / auth / JWT remains deferred** — no
-credentials, no live calls.
+seller identity, and carry only operational reference codes; sanitized summaries
+expose categories/booleans only (sales context adds one coarse amount bucket, never
+an exact amount). Deterministic `eventId` (row id, or a `JSON.stringify`-based
+content hash when absent). The **live ESM API client / auth / JWT remains deferred**
+— no credentials, no live calls.
 
 ## Out of scope (now)
 
