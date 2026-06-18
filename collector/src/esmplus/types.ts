@@ -207,3 +207,75 @@ export interface SanitizedClaimSummary {
   hasCreatedAt: boolean;
   hasUpdatedAt: boolean;
 }
+
+// --- Normalized SellerOps sales/settlement context event ------------------
+
+/** Normalized currency tag for a sales-context event — `unknown` until confirmed. */
+export type SalesCurrency = "KRW" | "unknown";
+
+/**
+ * Coarse magnitude bucket for a monetary field. This is the ONLY amount-derived
+ * value that may appear in a sanitized summary — it deliberately loses precision
+ * so exact, business-sensitive amounts never leak into logs. `unknown` means the
+ * amount was absent/unparseable; `zero` means a parsed 0.
+ */
+export type SalesAmountBucket =
+  | "zero"
+  | "under_100k"
+  | "100k_to_1m"
+  | "1m_to_10m"
+  | "10m_to_100m"
+  | "100m_plus"
+  | "unknown";
+
+/**
+ * Lightweight operational CONTEXT — not accounting, not a sales dashboard. It exists
+ * only to help prioritize reviews / inquiries / claims / product issues (e.g. "this
+ * product has high sales and rising claims"). Amounts are normalized straight from
+ * source rows; no aggregation, no financial-accuracy claim beyond the source data.
+ *
+ * Carries a product reference CODE and coarse counts/amounts, but NO buyer PII and
+ * NO seller identity (seller id / master id / account id are dropped at
+ * normalization, never mapped here).
+ */
+export interface SellerOpsSalesContextEvent {
+  /** Deterministic id: `esmplus:<channel>:sales:<rowId>` or a content hash when absent. */
+  eventId: string;
+  platform: EsmPlatform;
+  kind: "sales_context";
+  channel: EsmChannel;
+  /** ISO-ish period bounds as provided; null when absent. */
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Product reference code (not PII); null when absent. */
+  productRef: string | null;
+  /** Non-negative order count; null when absent/unparseable. */
+  orderCount: number | null;
+  /** Non-negative claim count; null when absent/unparseable. */
+  claimCount: number | null;
+  /** Non-negative gross sales amount (source units); null when absent/unparseable. */
+  grossSalesAmount: number | null;
+  /** Non-negative settlement/payout amount (source units); null when absent/unparseable. */
+  settlementAmount: number | null;
+  currency: SalesCurrency;
+}
+
+/**
+ * Log-safe summary of a sales-context event. Monetary fields are business-sensitive,
+ * so exact amounts NEVER appear here — only presence booleans and a single coarse
+ * `amountBucket` (derived from gross sales). No product/order/seller/buyer identity.
+ */
+export interface SanitizedSalesContextSummary {
+  platform: EsmPlatform;
+  kind: "sales_context";
+  channel: EsmChannel;
+  currency: SalesCurrency;
+  hasProductRef: boolean;
+  hasPeriod: boolean;
+  hasOrderCount: boolean;
+  hasClaimCount: boolean;
+  hasGrossSalesAmount: boolean;
+  hasSettlementAmount: boolean;
+  /** Coarse magnitude of gross sales — never the exact amount. */
+  amountBucket: SalesAmountBucket;
+}
