@@ -22,6 +22,15 @@ export type RecencyBucket =
   | "stale_over_7d"
   | "unknown";
 
+/**
+ * Options for sanitized-summary builders that can surface a coarse `recencyBucket`.
+ * `referenceTimeMs` is an EXPLICIT caller-provided reference (epoch ms) — the library
+ * never reads the wall clock. Omitted / non-finite → recency `"unknown"`.
+ */
+export interface SanitizedSummaryOptions {
+  referenceTimeMs?: number;
+}
+
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 

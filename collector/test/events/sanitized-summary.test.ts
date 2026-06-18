@@ -104,7 +104,7 @@ describe("sanitizedSummaryFor dispatch", () => {
 describe("dispatched summaries leak nothing sensitive", () => {
   it("never exposes content, reference codes, exact amounts/counts, or identity", () => {
     const events = [reviewEvent, inquiryEvent, orderEvent, claimEvent, salesEvent];
-    const serialized = JSON.stringify(events.map(sanitizedSummaryFor));
+    const serialized = JSON.stringify(events.map((e) => sanitizedSummaryFor(e)));
     const forbidden = [
       // content
       REVIEW_BODY, REVIEW_TITLE, REVIEW_OPTION, INQUIRY_BODY, INQUIRY_TITLE, CLAIM_REASON, ORDER_TITLE,

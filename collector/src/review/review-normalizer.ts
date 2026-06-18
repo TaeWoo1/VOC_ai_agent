@@ -12,6 +12,8 @@
 
 import { createHash } from "node:crypto";
 import { parseOffsetTimestampToEpochMs } from "../events/offset-timestamp-parser";
+import { recencyBucketFor } from "../events/recency-bucket";
+import type { SanitizedSummaryOptions } from "../events/recency-bucket";
 import type {
   RatingBucket,
   ReviewCollectionMethod,
@@ -177,7 +179,17 @@ export function normalizeReview(raw: RawReview): SellerOpsReviewEvent {
  * Log-safe summary — categories/booleans + a coarse rating bucket only. NEVER the
  * review body/title/option, NEVER product/review/order refs, NEVER any identity.
  */
-export function sanitizedReviewSummary(event: SellerOpsReviewEvent): SanitizedReviewSummary {
+export function sanitizedReviewSummary(
+  event: SellerOpsReviewEvent,
+  opts: SanitizedSummaryOptions = {},
+): SanitizedReviewSummary {
+  // Recency is derived from the internal `eventTimeMs` + an EXPLICIT caller reference
+  // time only; no wall-clock read. No reference time → `unknown`. The exact time and
+  // elapsed duration are never exposed — only the coarse bucket.
+  const recencyBucket =
+    opts.referenceTimeMs === undefined
+      ? "unknown"
+      : recencyBucketFor(event.eventTimeMs, opts.referenceTimeMs);
   return {
     platform: event.platform,
     kind: event.kind,
@@ -190,5 +202,6 @@ export function sanitizedReviewSummary(event: SellerOpsReviewEvent): SanitizedRe
     hasWrittenAt: event.writtenAt !== null,
     replyStatus: event.replyStatus,
     collectionMethod: event.collectionMethod,
+    recencyBucket,
   };
 }

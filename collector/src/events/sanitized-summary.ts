@@ -15,6 +15,7 @@ import { sanitizedInquirySummary } from "../esmplus/inquiry-normalizer";
 import { sanitizedOrderSummary } from "../esmplus/order-normalizer";
 import { sanitizedSalesContextSummary } from "../esmplus/sales-context-normalizer";
 import { sanitizedReviewSummary } from "../review/review-normalizer";
+import type { SanitizedSummaryOptions } from "./recency-bucket";
 import type { SellerOpsEvent, SellerOpsSanitizedSummary } from "./types";
 
 /** Compile-time exhaustiveness guard — unreachable at runtime if the switch is total. */
@@ -26,11 +27,18 @@ function assertNever(x: never): never {
  * Map any unified event to its log-safe sanitized summary. The returned shape is
  * exactly the normalizer's own sanitized summary — no content, refs, ids, exact
  * amounts/counts, or identity are ever added here.
+ *
+ * `opts.referenceTimeMs` (explicit, never the wall clock) is forwarded only to the
+ * review summary's coarse `recencyBucket`; without it, review recency is `"unknown"`.
+ * Other kinds do not yet carry recency.
  */
-export function sanitizedSummaryFor(event: SellerOpsEvent): SellerOpsSanitizedSummary {
+export function sanitizedSummaryFor(
+  event: SellerOpsEvent,
+  opts: SanitizedSummaryOptions = {},
+): SellerOpsSanitizedSummary {
   switch (event.kind) {
     case "review":
-      return sanitizedReviewSummary(event);
+      return sanitizedReviewSummary(event, opts);
     case "cs_inquiry":
       return sanitizedInquirySummary(event);
     case "order_shipping":

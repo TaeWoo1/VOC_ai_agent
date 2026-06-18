@@ -11,6 +11,8 @@
  * reviewer PII, seller identity, raw URL/HTML, screenshot, or token belongs here.
  */
 
+import type { RecencyBucket } from "../events/recency-bucket";
+
 /**
  * How a review was (or would be) obtained. Reviews are platform-specific: some
  * platforms expose an official API, some only an export, some neither (→ a
@@ -92,4 +94,10 @@ export interface SanitizedReviewSummary {
   hasWrittenAt: boolean;
   replyStatus: ReviewReplyStatus;
   collectionMethod: ReviewCollectionMethod;
+  /**
+   * Coarse recency of the review (from internal `eventTimeMs` + an explicit caller
+   * reference time). `"unknown"` when no reference time is supplied, no `eventTimeMs`
+   * exists, or the time is future/invalid. Never the exact time or elapsed duration.
+   */
+  recencyBucket: RecencyBucket;
 }
