@@ -238,6 +238,21 @@ capture boundary the future live step will fill lives in
 page text, screenshot, or raw URL), gates on the authenticated seller context,
 and normalizes candidates through the shared `normalizeCandidateToken` rule
 (trim, drop empty, reject URL-with-query/hash) to emit `AccountFingerprintRawSignals`.
+The seam a future live boundary fills lives in `src/naver/account-signal-page.ts`
+(`toAccountSignalSnapshot`): it converts a sanitized page `AccountSignalPageProbe`
+(the live code will populate it from a logged-in page) into an
+`AccountSignalSnapshot`, reducing the raw URL to a coarse `urlCategory` (never
+re-emitted) and carrying only named candidate fields. It imports no Playwright,
+clicks/selects nothing, and persists nothing. An offline CLI
+`connect --probe-json` command (`npm run connection -- connect …`) binds a pending
+connection from a **synthetic sanitized probe JSON** (`AccountSignalPageProbe`),
+running snapshot → `captureAccountSignals` → `runConnectionBindFromSignals` with no
+browser; failures return fixed categories (`invalid-probe-json` /
+`signal-capture-failed` / bind errors) and never echo the raw probe/token/URL/path.
+The **live** browser `connect` (a real page reader behind
+`--i-understand-this-opens-live-naver`) remains **deferred until the user is back
+in a stable environment and explicitly approves** — a changed IP/location can
+trigger NAVER 2FA/security verification, so no live login is attempted for now.
 
 ## Out of scope for this design pass
 
