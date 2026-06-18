@@ -222,7 +222,22 @@ extractor's input lives in `src/naver/account-fingerprint-adapter.ts`
 converts named candidate fields (commerce-id / store-url-path / account-scope)
 into `AccountFingerprintInput`, trimming whitespace, dropping empty candidates,
 and conservatively rejecting URL-with-query/hash candidates so query tokens never
-become identity — browser-free and fixture-free.
+become identity — browser-free and fixture-free. Offline bind orchestration lives
+in `src/connection/onboarding.ts` (`runConnectionBindFromSignals`): it loads the
+persisted connection, runs the adapter + extractor over sanitized structural
+signals, and — only when the identity is resolvable — hashes the token in-line,
+binds via `completeManualAccountSelection`, and saves; non-resolvable / not-found /
+store errors return fixed categories and bind nothing. It assumes the user already
+manually selected the account/store, never auto-selects, and never guesses on
+ambiguous candidates. The live browser step that fills these signals is a later,
+separately-approved (per-run-gated) slice; no browser is launched here. The thin
+capture boundary the future live step will fill lives in
+`src/naver/account-signal-capture.ts` (`captureAccountSignals` /
+`sanitizedAccountSignalSummary`): it accepts a small sanitized
+`AccountSignalSnapshot` (named structural candidates — never a Page, raw HTML,
+page text, screenshot, or raw URL), gates on the authenticated seller context,
+and normalizes candidates through the shared `normalizeCandidateToken` rule
+(trim, drop empty, reject URL-with-query/hash) to emit `AccountFingerprintRawSignals`.
 
 ## Out of scope for this design pass
 
