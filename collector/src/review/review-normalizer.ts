@@ -11,6 +11,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { parseOffsetTimestampToEpochMs } from "../events/offset-timestamp-parser";
 import type {
   RatingBucket,
   ReviewCollectionMethod,
@@ -148,6 +149,10 @@ export function normalizeReview(raw: RawReview): SellerOpsReviewEvent {
   const platform = platformOf(raw.platform);
   const channel = channelOf(raw.channel);
   const reviewRef = refOrNull(raw.reviewRef);
+  const writtenAt = trimOrNull(raw.writtenAt);
+  // INTERNAL: parse the primary timestamp only when it is offset-bearing; absent
+  // otherwise (timezone-less / invalid / missing). Never exposed in sanitized output.
+  const parsedEventTimeMs = parseOffsetTimestampToEpochMs(writtenAt);
   return {
     eventId: eventIdFor(platform, channel, reviewRef, raw),
     platform,
@@ -160,10 +165,11 @@ export function normalizeReview(raw: RawReview): SellerOpsReviewEvent {
     title: trimOrNull(raw.title),
     body: trimOrNull(raw.body),
     optionText: trimOrNull(raw.optionText),
-    writtenAt: trimOrNull(raw.writtenAt),
+    writtenAt,
     updatedAt: trimOrNull(raw.updatedAt),
     replyStatus: replyStatusOf(raw.replyStatus),
     collectionMethod: collectionMethodOf(raw.collectionMethod),
+    ...(parsedEventTimeMs !== null ? { eventTimeMs: parsedEventTimeMs } : {}),
   };
 }
 

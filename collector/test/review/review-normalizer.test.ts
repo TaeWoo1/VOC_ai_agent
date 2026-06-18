@@ -6,6 +6,8 @@ import {
   sanitizedReviewSummary,
   type RawReview,
 } from "../../src/review/review-normalizer";
+import { sanitizedSummaryFor } from "../../src/events/sanitized-summary";
+import { attentionView } from "../../src/events/attention-view";
 
 // Synthetic only — reviewer/buyer/seller identity here must never reach output.
 const REVIEWER_NAME = "리뷰어홍길동";
@@ -62,6 +64,8 @@ describe("normalizeReview", () => {
       updatedAt: "2026-06-18T10:00:00.000Z",
       replyStatus: "not_replied",
       collectionMethod: "browser_export",
+      // internal parsed epoch ms from the offset-bearing writtenAt
+      eventTimeMs: 1_781_773_200_000,
     });
   });
 
@@ -207,5 +211,52 @@ describe("module boundary", () => {
       })
       .join("\n");
     expect(/rawUrl|rawHtml|screenshot|\btoken\b/i.test(code)).toBe(false);
+  });
+});
+
+describe("normalizeReview — internal eventTimeMs (Phase 2c-1)", () => {
+  it("parses an offset-bearing writtenAt into internal eventTimeMs", () => {
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T00:00:00Z" }).eventTimeMs).toBe(0);
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T09:00:00+09:00" }).eventTimeMs).toBe(0);
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T00:00:00-05:00" }).eventTimeMs).toBe(18_000_000);
+  });
+
+  it("omits eventTimeMs for timezone-less / invalid writtenAt", () => {
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "2026-06-18T09:00:00" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "not-a-date" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "2026-06-18T09:00:00+0900" })).not.toHaveProperty("eventTimeMs");
+  });
+
+  it("omits eventTimeMs for missing / null / blank writtenAt", () => {
+    expect(normalizeReview({ platform: "NAVER" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeReview({ platform: "NAVER", writtenAt: null })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "   " })).not.toHaveProperty("eventTimeMs");
+  });
+
+  it("preserves the raw writtenAt string regardless of parse outcome", () => {
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "1970-01-01T00:00:00Z" }).writtenAt).toBe("1970-01-01T00:00:00Z");
+    expect(normalizeReview({ platform: "NAVER", writtenAt: "2026-06-18T09:00:00" }).writtenAt).toBe("2026-06-18T09:00:00");
+  });
+});
+
+describe("normalizeReview — eventTimeMs is internal only", () => {
+  const e = normalizeReview({ platform: "NAVER", channel: "smartstore_acme", rating: 1, writtenAt: "1970-01-01T00:00:00Z" });
+
+  it("is present on the normalized event", () => {
+    expect(e.eventTimeMs).toBe(0);
+  });
+
+  it("never appears in the sanitized review summary", () => {
+    const summary = sanitizedReviewSummary(e);
+    expect(summary).not.toHaveProperty("eventTimeMs");
+    expect(JSON.stringify(summary)).not.toContain("eventTimeMs");
+  });
+
+  it("never appears in the event-dispatched sanitized summary", () => {
+    expect(JSON.stringify(sanitizedSummaryFor(e))).not.toContain("eventTimeMs");
+  });
+
+  it("never appears in the attention view (digest + ranked rows) built from review input", () => {
+    expect(JSON.stringify(attentionView([e]))).not.toContain("eventTimeMs");
   });
 });

@@ -14,7 +14,15 @@
   `Date.UTC`** (no `Date.*` at all), no wall-clock read. Invalid/ambiguous/non-string
   input → `null`. Not wired into normalizers; no `eventTimeMs` field; no
   `recencyBucket` summary wiring.
-- **Phase 2c — internal `eventTimeMs` in selected normalizers — deferred.**
+- **Phase 2c-1 — internal `eventTimeMs` on review events only — implemented**
+  (`src/review/review-normalizer.ts`). The review normalizer parses `writtenAt` with
+  `parseOffsetTimestampToEpochMs` and includes an **internal** `eventTimeMs?: number`
+  only when the result is a number; timezone-less / invalid / missing `writtenAt` →
+  field omitted. The raw `writtenAt` string is unchanged. `eventTimeMs` is **internal
+  only** — it never appears in sanitized summaries, the dispatched summary, attention
+  signals/digest/views, logs, or telemetry (asserted by tests).
+- **Phase 2c (remaining kinds) — `cs_inquiry` / `claim` / `order_shipping` —
+  deferred** (`sales_context` stays `unknown` by design).
 - **Phase 2d — `recencyBucket` in sanitized summaries — deferred.**
 - **Phase 3 — recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough — deferred.**
