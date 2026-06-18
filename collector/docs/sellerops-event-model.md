@@ -48,6 +48,10 @@ the seller pay attention to today?"*. Signals that layer is expected to weigh
 - **sales importance** (the sales-context amount bucket / order counts)
 - **repeated-complaint signal** (clusters of the same issue across reviews)
 
+The first concrete consumer of this boundary is the deterministic attention-signal
+layer — see `attention-signal-model.md` (`attentionSignalsFor`), which derives
+rule-based attention reasons from these sanitized summaries (no AI, no scoring).
+
 ## Sanitized summaries are the only safe telemetry shape
 
 `sanitizedSummaryFor` returns **only** the existing per-kind sanitized summaries. It
