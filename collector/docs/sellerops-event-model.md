@@ -50,7 +50,9 @@ the seller pay attention to today?"*. Signals that layer is expected to weigh
 
 The first concrete consumer of this boundary is the deterministic attention-signal
 layer — see `attention-signal-model.md` (`attentionSignalsFor`), which derives
-rule-based attention reasons from these sanitized summaries (no AI, no scoring).
+rule-based attention reasons from these sanitized summaries (no AI, no scoring). Those
+signals roll up into the batch `attention-digest-model.md`, and the planned priority
+score over them is specified (docs-only) in `priority-score-model.md`.
 
 ## Sanitized summaries are the only safe telemetry shape
 

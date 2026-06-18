@@ -73,7 +73,9 @@ no per-event ranking.
 - **Dashboard / backend persistence.**
 
 This layer is the **input boundary** for that future priority score / dashboard; it
-produces only the deterministic counts they will consume.
+produces only the deterministic counts they will consume. The priority score's
+philosophy, allowed/forbidden inputs, and draft weighting are specified (docs-only,
+not yet implemented) in `priority-score-model.md`.
 
 ## Out of scope (now)
 
