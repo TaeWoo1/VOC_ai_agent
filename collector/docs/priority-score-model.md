@@ -21,6 +21,9 @@
   current-time read.
 - **Recency / deduplication / clustering / AI summaries — still deferred** (§9).
 - **Automatic reply / posting — excluded** (§9).
+- The ranked rows + batch digest are assembled into a top-N "what needs attention
+  today" payload by `attentionView` — see `attention-view-model.md` (no new scoring,
+  no AI, no timestamp).
 
 ## 1. Why this layer exists
 
