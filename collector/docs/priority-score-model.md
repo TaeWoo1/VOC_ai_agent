@@ -1,10 +1,19 @@
-# SellerOps priority-score model — specification (docs-only)
+# SellerOps priority-score model — specification
 
-> **Specification only — NO implementation.** This PR documents the scoring
-> philosophy, allowed/forbidden inputs, a draft weighting model, score bands, audit
-> requirements, and deferred work. There is **no** `priorityScoreFor`, **no**
-> `prioritizeEvents`, and **no** scoring/ranking code in this branch. Offline; no AI;
-> no live collection.
+> Offline; no AI; no live collection. The single-event scorer is now implemented;
+> batch ranking and recency/dedup/cluster/AI factors remain deferred.
+
+## Implementation status
+
+- **`priorityScoreFor(event)` — implemented** (`src/events/priority-score.ts`). Pure,
+  deterministic, AI-free single-event scorer. Reads only `attentionSignalsFor` (hence
+  only sanitized summaries). It follows this spec: severity weights (§6), a
+  conservative co-occurrence bonus (§6), a coarse `high_sales_context` bonus from the
+  amountBucket-derived signal (§6), band mapping (§7), and fixed deterministic
+  explanation codes (§8). No raw content, no AI, no live I/O, no current-time read.
+- **`prioritizeEvents(events)` / ranking — still deferred.**
+- **Recency / deduplication / clustering / AI summaries — still deferred** (§9).
+- **Automatic reply / posting — excluded** (§9).
 
 ## 1. Why this layer exists
 
