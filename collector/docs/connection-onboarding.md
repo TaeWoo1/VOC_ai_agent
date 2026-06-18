@@ -202,7 +202,27 @@ alias) — never raw NAVER identity. `status-bridge.ts`
 run-level `CollectorState` and builds a sanitized `StatusRecord` payload (no
 identity, hash, connectionId, or profile name; never `LAST_SUCCESS`) — purely, so
 connection health can be surfaced without a browser; it does not write `.status/`.
-Wiring this into the live CLI is a later, separately-approved step.
+The account/store fingerprint extractor lives in
+`src/naver/account-fingerprint.ts` (`extractAccountFingerprint` /
+`sanitizedFingerprintSummary`): a pure function over already-extracted structural
+candidates (no Playwright/HTML/fs) that returns either a resolvable
+`{ rawIdentityToken, sourceCategory }` (consumed immediately by `fingerprintHash`,
+never logged/persisted) or a fixed unresolvable `reasonCategory`; it prefers
+conservative failure over guessing and never auto-selects an account/store.
+An offline connection onboarding CLI skeleton lives in `src/cli/connection.ts`
+(`npm run connection -- init …`, with pure `parseConnectionInitArgs` /
+`runConnectionInit`): it creates a `PENDING_USER_LOGIN` connection, persists it
+via the store layer, and prints a sanitized snapshot (no hash, no raw identity,
+no file path; duplicate ids are refused). It is offline only — no live NAVER,
+browser, fingerprint extraction, or upload, and accepts no live flag yet. Wiring
+the live login / manual-selection / fingerprint-binding flow into it is a later,
+separately-approved step. The bridge from structural page/probe signals to the
+extractor's input lives in `src/naver/account-fingerprint-adapter.ts`
+(`toAccountFingerprintInput` / `sanitizedAdapterSummary`): a pure adapter that
+converts named candidate fields (commerce-id / store-url-path / account-scope)
+into `AccountFingerprintInput`, trimming whitespace, dropping empty candidates,
+and conservatively rejecting URL-with-query/hash candidates so query tokens never
+become identity — browser-free and fixture-free.
 
 ## Out of scope for this design pass
 
