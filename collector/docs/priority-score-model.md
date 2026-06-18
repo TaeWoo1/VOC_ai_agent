@@ -19,7 +19,9 @@
   ascending** as the stable tie-breaker (no hidden product judgment via event-kind
   ordering yet). Empty input → `[]`. No recency, no dedup, no cluster, no AI, no
   current-time read.
-- **Recency / deduplication / clustering / AI summaries — still deferred** (§9).
+- **Recency / deduplication / clustering / AI summaries — still deferred** (§9). The
+  safe recency factor's boundary and phased plan are specified (docs-only, not yet
+  implemented) in `recency-bucket-model.md`.
 - **Automatic reply / posting — excluded** (§9).
 - The ranked rows + batch digest are assembled into a top-N "what needs attention
   today" payload by `attentionView` — see `attention-view-model.md` (no new scoring,
