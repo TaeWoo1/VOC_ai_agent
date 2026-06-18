@@ -15,7 +15,10 @@
   `[0,2h) fresh · [2h,24h) same_day · [24h,3d) recent · [3d,7d) aging · [7d,∞) stale`.
   Output is the coarse bucket only — never a timestamp, duration, raw date string, or
   timezone.
-- **Phase 2 — sanitized-summary `recencyBucket` field — deferred.**
+- **Phase 2 — sanitized-summary `recencyBucket` field — deferred.** Prerequisite
+  audit of safe timestamp sources (which raw fields exist per kind, why none are
+  currently epoch-ms-safe, and the preferred parsing boundary) is in
+  `recency-timestamp-source-audit.md`.
 - **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
