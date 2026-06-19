@@ -65,7 +65,14 @@ purposes.
 - Normalizer (`claim-normalizer.ts`): `createdAt: trimOrNull(raw.regDt)`,
   `updatedAt: trimOrNull(raw.updateDt)` — raw string passthrough.
 - Sanitized summary exposes `hasCreatedAt` / `hasUpdatedAt`.
-- **Not safe.** Primary recency source would be `createdAt`.
+- **Status (Phase 2c + 2d implemented):** the claim event now also carries an
+  **internal** `eventTimeMs?: number`, parsed from `createdAt` via
+  `parseOffsetTimestampToEpochMs` (offset-bearing only; timezone-less/invalid/missing →
+  omitted). The raw `createdAt` is unchanged, and `eventTimeMs` is internal-only (never
+  in sanitized output). The **sanitized claim summary now exposes a coarse
+  `recencyBucket`** (computed from `eventTimeMs` + an explicit caller `referenceTimeMs`;
+  `"unknown"` without a reference time / event time). Primary recency source =
+  `createdAt`.
 
 ### order_shipping
 - Type: `orderedAt: string | null`, `updatedAt: string | null`.
