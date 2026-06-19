@@ -108,9 +108,19 @@ NAVER/Commerce session on the browser restart, so the probe always re-reads a lo
 variable). To read the verdict in the session the human actually established, use
 `src/cli/probe-same-session.ts` (`npm run probe-same-session -- --i-understand-this-opens-live-naver`):
 one persistent-context lifetime — open NAVER → the human logs in / clears 2FA-CAPTCHA /
-picks the Commerce account+store and navigates to the target → press Enter → the **same**
-context reads the page **as left** and prints the sanitized `extractProbeSignals` output
-(including `sessionVerdict`).
+picks the Commerce account+store and navigates to the target → **signals readiness by
+creating the sentinel file the probe prints** → the **same** context reads the page **as
+left** and prints the sanitized `extractProbeSignals` output (including `sessionVerdict`).
+
+**Continuation = a sentinel file, not a terminal Enter.** The Bash tool's stdin does not
+reliably deliver an Enter keypress, so the probe polls for a sentinel file whose exact
+absolute path it prints — default `.status/probe-same-session.ready`, derived by the pure
+`src/cli/probe-sentinel.ts` (`sentinelPathFor`). When ready, the operator (or Claude on
+their behalf) creates that file with constant non-secret content
+(`printf 'ready\n' > .status/probe-same-session.ready`). The probe clears any stale
+sentinel at startup (so a leftover can never auto-proceed), proceeds only when it appears
+afterwards, removes it after use, and on timeout aborts **without reading** the page. It
+only ever reads/clears the sentinel — it never writes a status record.
 
 It is **read-only and structurally separate** from the classify-only discovery flow: it
 never imports `review-export`/`runExport`, never clicks/captures an export, waits on no
