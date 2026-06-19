@@ -8,40 +8,43 @@
  * two SEPARATE browser launches loses the NAVER/Commerce session on restart, so the
  * probe always re-reads a login page. This keeps ONE persistent-context lifetime: open
  * NAVER -> the human completes login / 2FA / CAPTCHA / Commerce account+store selection
- * and navigates to whatever page they want read -> presses Enter -> the SAME context
+ * and navigates to whatever page they want read -> signals readiness -> the SAME context
  * reads the page AS LEFT and prints the sanitized structural signals (including the
  * five-state `sessionVerdict`).
  *
+ * CONTINUATION: it does NOT read a terminal keypress (the Bash tool's stdin does not
+ * reliably deliver Enter). Instead it polls for a SENTINEL FILE whose exact absolute path
+ * it prints; the operator (or Claude on their behalf) creates that file when ready. See
+ * `probe-sentinel.ts` for the shared path.
+ *
  * This is a pure DIAGNOSTIC: it is structurally separate from the classify-only discovery
  * flow. It does not reach the export/capture path at all — it never classifies, triggers,
- * clicks, or captures an export, writes no file, starts no backend, touches no DB, writes
- * no status record, and sends nothing to SellerOps. It only reads the page and emits
- * booleans / bucketed counts / category enums. LIVE-ONLY — refuses to act without the
- * explicit per-run approval flag, exactly like the other live CLIs.
+ * clicks, or captures an export, saves no export file, starts no backend, touches no DB,
+ * writes no status record, and sends nothing to SellerOps. It only reads the page and
+ * emits booleans / bucketed counts / category enums. LIVE-ONLY — refuses to act without
+ * the explicit per-run approval flag, exactly like the other live CLIs.
  */
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { extractProbeSignals, type HydrationWaitResult } from "../naver/session-probe";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
-import {
-  buildSessionProbeMeta,
-  emitSessionProbe,
-  proceedAfterConfirmation,
-  type ConfirmationResult,
-} from "./same-session";
+import { sentinelPathFor } from "./probe-sentinel";
+import { buildSessionProbeMeta, emitSessionProbe } from "./same-session";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give them
-// plenty of time, but never hang forever.
+// plenty of time, but never wait forever.
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
+const SENTINEL_POLL_INTERVAL_MS = 750;
 
 /**
  * Prompt shown after the browser opens. Deliberately NOT the same-session discovery
  * prompt — that one promises to "classify the export mechanism", which this read-only
- * probe never does. This wording states exactly what happens: a sanitized read, nothing
- * else.
+ * probe never does. The exact sentinel path is printed separately, below the prompt.
  */
 const PROBE_CONFIRM_PROMPT = [
   "",
@@ -50,13 +53,13 @@ const PROBE_CONFIRM_PROMPT = [
   "  2) Navigate to whichever page you want read — the SmartStore Center review",
   "     page, an account/store reconnect screen, the login page, or an auth-",
   "     challenge page.",
-  "  3) Leave the browser OPEN and return here.",
+  "  3) Leave the browser OPEN.",
   "",
-  "Then press Enter — the collector will read ONLY sanitized session signals in",
-  "this same window. It never classifies, triggers, clicks, or captures an export,",
-  "writes no file, starts no backend, and sends nothing to SellerOps. Do NOT close",
-  "the browser. (Ctrl-C to abort.)",
-  "",
+  "Then signal readiness by creating the sentinel file shown below (in Claude Code,",
+  "just say \"ready\" and Claude creates it). The collector is polling for it and will",
+  "then read ONLY sanitized session signals in this same window. It never classifies,",
+  "triggers, clicks, or captures an export, saves no export file, writes no status",
+  "record, starts no backend, and sends nothing to SellerOps. (Ctrl-C to abort.)",
 ].join("\n");
 
 function banner(): void {
@@ -64,7 +67,7 @@ function banner(): void {
   console.error(line);
   console.error(" LIVE NAVER same-session verdict probe — explicit per-run approval required.");
   console.error(" Read-only: a human logs in; the collector reads SANITIZED structural signals");
-  console.error(" only. No export, no file written, nothing sent to SellerOps. Ctrl-C to abort.");
+  console.error(" only. No export, no status write, nothing sent to SellerOps. Ctrl-C to abort.");
   console.error(line);
 }
 
@@ -89,29 +92,32 @@ async function readDomScalars(page: Page): Promise<{ readyState: string; appRoot
   });
 }
 
-/** Live I/O: wait for a single Enter keypress, or resolve "timeout". Not unit-tested. */
-function waitForEnter(timeoutMs: number): Promise<ConfirmationResult> {
-  return new Promise((resolve) => {
-    const stdin = process.stdin;
-    const finish = (result: ConfirmationResult): void => {
-      clearTimeout(timer);
-      stdin.off("data", onData);
-      try {
-        stdin.pause();
-      } catch {
-        /* ignore */
-      }
-      resolve(result);
-    };
-    const onData = (): void => finish("confirmed");
-    const timer = setTimeout(() => finish("timeout"), timeoutMs);
-    try {
-      stdin.resume();
-    } catch {
-      /* ignore */
-    }
-    stdin.once("data", onData);
-  });
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Best-effort: remove the sentinel if present. Used at startup (clear stale) and cleanup. */
+function removeSentinel(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort — a leftover is cleared by the next run's startup unlink anyway */
+  }
+}
+
+/**
+ * Poll for the sentinel file up to `timeoutMs`. Returns true once it appears, false on
+ * timeout. Bounded by a fixed iteration count (no wall-clock read). The caller clears any
+ * stale sentinel BEFORE calling this, so a hit here only ever reflects a post-startup
+ * creation.
+ */
+async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<boolean> {
+  const maxChecks = Math.max(1, Math.ceil(timeoutMs / intervalMs));
+  for (let i = 0; i < maxChecks; i += 1) {
+    if (existsSync(path)) return true;
+    await sleep(intervalMs);
+  }
+  return existsSync(path);
 }
 
 async function main(): Promise<void> {
@@ -131,19 +137,29 @@ async function main(): Promise<void> {
   }
   const wantProbe = emitSessionProbe(args);
 
+  // Single source of truth for the continuation file; clear any stale sentinel BEFORE
+  // waiting so a leftover from a crashed run can never auto-proceed.
+  const sentinelPath = sentinelPathFor(cfg.statusFile);
+  mkdirSync(dirname(sentinelPath), { recursive: true });
+  removeSentinel(sentinelPath);
+
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
   try {
     // 1) Open the review route — this typically redirects to login / Commerce select.
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
-    // 2) Hand off to the human IN THE SAME CONTEXT; wait for explicit confirmation.
+    // 2) Hand off to the human IN THE SAME CONTEXT; wait for the sentinel (not stdin).
     console.error(PROBE_CONFIRM_PROMPT);
-    const confirmation = await waitForEnter(CONFIRM_TIMEOUT_MS);
-    if (!proceedAfterConfirmation(confirmation)) {
+    console.error("");
+    console.error(`  Sentinel file (create this when ready):`);
+    console.error(`    ${sentinelPath}`);
+    console.error("");
+    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+    if (!ready) {
       // Never read a half-loaded page on a timeout — abort cleanly without a snapshot.
-      console.error("No confirmation within the timeout; aborting without reading the page.");
-      log("probe.aborted", { reason: "confirmation-timeout" });
+      console.error("No sentinel within the timeout; aborting without reading the page.");
+      log("probe.aborted", { reason: "sentinel-timeout" });
       return;
     }
 
@@ -162,8 +178,9 @@ async function main(): Promise<void> {
     // Sanitized JSON is the only stdout payload; the log echoes the same scalars.
     console.log(JSON.stringify(signals, null, 2));
     log("probe.done", { ...signals });
-    if (wantProbe) log("session.probe", buildSessionProbeMeta("same-session-after-confirm", signals));
+    if (wantProbe) log("session.probe", buildSessionProbeMeta("same-session-after-sentinel", signals));
   } finally {
+    removeSentinel(sentinelPath);
     await ctx.close();
   }
 }

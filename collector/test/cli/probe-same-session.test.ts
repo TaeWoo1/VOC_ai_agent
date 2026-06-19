@@ -57,3 +57,34 @@ describe("probe-same-session — structurally cannot reach export / download / u
     expect(/console\.log\(JSON\.stringify\(signals/.test(code)).toBe(true);
   });
 });
+
+describe("probe-same-session — sentinel-file continuation (no terminal stdin)", () => {
+  const code = stripComments(readFileSync(CLI_PATH, "utf8"));
+
+  it("does not depend on terminal stdin / an Enter keypress", () => {
+    // The whole point of this change: stdin is unreliable in the harness, so the probe
+    // must NOT read process.stdin or wait on an Enter keypress.
+    expect(code.includes("process.stdin")).toBe(false);
+    expect(/waitForEnter/.test(code)).toBe(false);
+  });
+
+  it("derives the sentinel path from the shared helper (single source of truth)", () => {
+    expect(/from\s+["']\.\/probe-sentinel["']/.test(code)).toBe(true);
+    expect(/sentinelPathFor\s*\(/.test(code)).toBe(true);
+  });
+
+  it("polls for the sentinel file rather than blocking on input", () => {
+    expect(/existsSync/.test(code)).toBe(true);
+    expect(/waitForSentinel\s*\(/.test(code)).toBe(true);
+  });
+
+  it("clears any stale sentinel before waiting and cleans up afterwards", () => {
+    // removeSentinel is used at startup (clear stale) and in finally (cleanup).
+    expect(/removeSentinel\s*\(/.test(code)).toBe(true);
+    expect(/unlinkSync/.test(code)).toBe(true);
+  });
+
+  it("aborts without reading the page when the sentinel never appears", () => {
+    expect(/sentinel-timeout/.test(code)).toBe(true);
+  });
+});
