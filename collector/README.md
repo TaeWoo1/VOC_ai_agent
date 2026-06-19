@@ -135,10 +135,14 @@ npm run discover -- --discover --i-understand-this-opens-live-naver
 ```
 
 The NAVER session lives **only** in the local profile dir (`.profile/naver`,
-gitignored); it is never serialized or sent. The session/export markers in
-`src/session.ts` and `src/naver/review-export.ts` are **placeholders to be
-confirmed** during the approved live run, then recorded (sanitized — no customer
-data, no store identity) in `findings/milestone1.md`.
+gitignored); it is never serialized or sent. The **session** markers in
+`src/session.ts` (and the async-job markers in `src/naver/review-export.ts`)
+remain **placeholders to confirm** during an approved live run, recorded
+(sanitized — no customer data, no store identity) in `findings/milestone1.md`.
+The **sync export** wording in `src/naver/review-export.ts` is no longer a
+placeholder: it was confirmed against the milestone-1 live finding (an
+interactive, visible+enabled `엑셀`/`다운로드` control in the top document) and
+re-corroborated by `probe-export-same-session`.
 
 In the **full** (non-classify-only) path, captured files land in `downloads/`
 (gitignored) and are uploaded through the same `/api/uploads` path the offline
