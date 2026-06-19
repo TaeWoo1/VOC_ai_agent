@@ -13,7 +13,8 @@
     "discover": "tsx src/cli/discover-export.ts",
     "discover-same-session": "tsx src/cli/discover-same-session.ts",
     "probe-session": "tsx src/cli/probe-session.ts",
-    "probe-same-session": "tsx src/cli/probe-same-session.ts"
+    "probe-same-session": "tsx src/cli/probe-same-session.ts",
+    "probe-export-same-session": "tsx src/cli/probe-export-same-session.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

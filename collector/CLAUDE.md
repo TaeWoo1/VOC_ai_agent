@@ -71,6 +71,7 @@ npm run discover -- --discover --classify-only --i-understand-this-opens-live-na
 npm run discover-same-session -- --i-understand-this-opens-live-naver   # recommended for NAVER Commerce
 npm run probe-session -- --i-understand-this-opens-live-naver           # sanitized DOM probe (separate launch)
 npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-ONLY same-context verdict probe; sentinel-file continuation; no export/click/download
+npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 
@@ -145,7 +146,8 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   `LAYOUT_UNRECOGNIZED` without exposing any DOM content (hostile-fixture tests
   enforce no leakage).
 - `cli/discover-export.ts`, `cli/discover-same-session.ts`, `cli/probe-session.ts`,
-  `cli/probe-same-session.ts` — live entrypoints, all gated by `cli/live-run-approval.ts`.
+  `cli/probe-same-session.ts`, `cli/probe-export-same-session.ts` — live entrypoints, all
+  gated by `cli/live-run-approval.ts`.
   `probe-same-session.ts` is a READ-ONLY diagnostic: it keeps one persistent-context
   lifetime (human logs in → creates the sentinel file printed by the probe → the SAME
   context reads the verdict) and is structurally separate from discovery — it never
@@ -153,6 +155,12 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   status file (source-guard test). The continuation is a sentinel file (not a terminal
   Enter, which the harness can't deliver); its path is derived by `cli/probe-sentinel.ts`
   (default `.status/probe-same-session.ready`), cleared at startup and after use.
+  `probe-export-same-session.ts` is the same read-only one-context + sentinel flow but
+  **frame-aware**: it runs the pure `extractExportProbeSignals` once per frame (top document
+  + every child frame, via `page.frames()`) and folds them with `summarizeFrameExportProbes`,
+  to locate *where* the export UI lives (iframe vs shadow DOM vs sub-route vs gated control
+  vs marker mismatch) without ever clicking/downloading — same source-guard boundary, same
+  shared sentinel path (run only one probe at a time).
 
 ---
 

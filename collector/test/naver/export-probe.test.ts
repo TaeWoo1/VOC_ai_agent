@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   extractExportProbeSignals,
+  FRAME_AWARE_EXPORT_PROBE_KEYS,
+  FRAME_EXPORT_PROBE_KEYS,
   SANITIZED_EXPORT_PROBE_KEYS,
+  summarizeFrameExportProbes,
+  type FrameExportProbe,
 } from "../../src/naver/export-probe";
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
@@ -178,5 +182,125 @@ describe("extractExportProbeSignals — count bucketing", () => {
     expect(make(4).buttonCount).toBe("few");
     expect(make(12).buttonCount).toBe("some");
     expect(make(30).buttonCount).toBe("many");
+  });
+});
+
+describe("summarizeFrameExportProbes — frame-aware aggregation (PURE)", () => {
+  // A top document with an actionable (visible AND enabled) export candidate.
+  const topWithCandidate = extractExportProbeSignals({
+    url: SELLER_URL,
+    html: "<html></html>",
+    exportCandidateVisible: 1,
+    exportCandidateEnabled: 1,
+  });
+  // A top document with no candidate (offline live-scalars degrade to "unknown").
+  const topNoCandidate = extractExportProbeSignals({ url: SELLER_URL, html: "<html></html>" });
+
+  // A child that has a visible but DISABLED candidate (not actionable).
+  const childGated = extractExportProbeSignals({
+    url: SELLER_URL,
+    html: "<html></html>",
+    exportCandidateVisible: 1,
+    exportCandidateEnabled: 0,
+  });
+  // A child with an actionable candidate.
+  const childActionable = extractExportProbeSignals({
+    url: SELLER_URL,
+    html: "<html></html>",
+    exportCandidateVisible: 2,
+    exportCandidateEnabled: 2,
+  });
+
+  const blockedFrame: FrameExportProbe = { frameUrlCategory: "other", readResult: "blocked", signals: null };
+  const childFrames = (n: number): FrameExportProbe[] => Array.from({ length: n }, () => blockedFrame);
+
+  it("buckets the TOTAL frame count (top document + children)", () => {
+    const fc = (n: number) =>
+      summarizeFrameExportProbes({ sessionVerdict: "LOGGED_IN", topDocument: topNoCandidate, frames: childFrames(n) })
+        .frameCount;
+    expect(fc(0)).toBe("one"); // just the top document
+    expect(fc(4)).toBe("few"); // 5 total
+    expect(fc(19)).toBe("some"); // 20 total
+    expect(fc(25)).toBe("many"); // 26 total
+  });
+
+  it("anyFrameExportCandidates is true when the TOP document has an actionable candidate", () => {
+    const s = summarizeFrameExportProbes({
+      sessionVerdict: "LOGGED_IN",
+      topDocument: topWithCandidate,
+      frames: childFrames(2),
+    });
+    expect(s.anyFrameExportCandidates).toBe(true);
+  });
+
+  it("anyFrameExportCandidates is true when a CHILD frame has an actionable candidate", () => {
+    const s = summarizeFrameExportProbes({
+      sessionVerdict: "LOGGED_IN",
+      topDocument: topNoCandidate,
+      frames: [{ frameUrlCategory: "seller-center", readResult: "read", signals: childActionable }],
+    });
+    expect(s.anyFrameExportCandidates).toBe(true);
+  });
+
+  it("anyFrameExportCandidates is false when no frame has a visible AND enabled candidate", () => {
+    const s = summarizeFrameExportProbes({
+      sessionVerdict: "LOGGED_IN",
+      topDocument: topNoCandidate,
+      frames: [
+        { frameUrlCategory: "seller-center", readResult: "read", signals: childGated },
+        blockedFrame,
+      ],
+    });
+    expect(s.anyFrameExportCandidates).toBe(false);
+  });
+
+  it("is deterministic for the same input", () => {
+    const input = {
+      sessionVerdict: "LOGGED_IN" as const,
+      topDocument: topNoCandidate,
+      frames: [{ frameUrlCategory: "other" as const, readResult: "read" as const, signals: childActionable }],
+    };
+    expect(summarizeFrameExportProbes(input)).toEqual(summarizeFrameExportProbes(input));
+  });
+
+  it("emits ONLY the allowed top-level / per-frame / signal keys", () => {
+    const s = summarizeFrameExportProbes({
+      sessionVerdict: "LOGGED_IN",
+      topDocument: topWithCandidate,
+      frames: [{ frameUrlCategory: "seller-center", readResult: "read", signals: childActionable }, blockedFrame],
+    });
+    expect(Object.keys(s).sort()).toEqual([...FRAME_AWARE_EXPORT_PROBE_KEYS].sort());
+    for (const f of s.frames) {
+      expect(Object.keys(f).sort()).toEqual([...FRAME_EXPORT_PROBE_KEYS].sort());
+      if (f.signals) {
+        expect(Object.keys(f.signals).sort()).toEqual([...SANITIZED_EXPORT_PROBE_KEYS].sort());
+      }
+    }
+    expect(Object.keys(s.topDocument).sort()).toEqual([...SANITIZED_EXPORT_PROBE_KEYS].sort());
+  });
+
+  it("never reintroduces raw PII / tokens from a hostile per-frame read", () => {
+    const hostileTop = extractExportProbeSignals({
+      url: `${SELLER_URL}?authToken=SECRETTOKEN12345&sellerId=SELLER-7788`,
+      html: read("probe_hostile.html"),
+      frameUrls: [`${SELLER_URL}?authToken=SECRETTOKEN12345`, "https://nid.naver.com/nidlogin.login"],
+      shadowRootHostCount: 2,
+      exportCandidateTotal: 3,
+      exportCandidateVisible: 3,
+      exportCandidateEnabled: 3,
+    });
+    const hostileChild = extractExportProbeSignals({
+      url: `${SELLER_URL}?authToken=SECRETTOKEN12345`,
+      html: read("probe_hostile.html"),
+    });
+    const s = summarizeFrameExportProbes({
+      sessionVerdict: "LOGGED_IN",
+      topDocument: hostileTop,
+      frames: [{ frameUrlCategory: "seller-center", readResult: "read", signals: hostileChild }],
+    });
+    const serialized = JSON.stringify(s);
+    for (const str of HOSTILE_STRINGS) expect(serialized).not.toContain(str);
+    expect(serialized).not.toContain("authToken");
+    expect(serialized).not.toContain("nidlogin");
   });
 });
