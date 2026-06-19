@@ -1,0 +1,28 @@
+<!--
+  SYNTHETIC fixture: a fully usable seller-center page that ALSO embeds an ambient
+  "로그인" (login) LINK in the global footer — but NO password field. This is the
+  relaxed-LOGGED_IN case: a login *affordance* must not suppress a strong seller-center
+  session; only a real password field forces ACCOUNT_LOGIN_REQUIRED. No real DOM / PII.
+  Strong signals: data-seller-authenticated, seller-gnb, <nav>, 로그아웃, 엑셀 다운로드.
+-->
+<!DOCTYPE html>
+<html lang="ko" data-seller-authenticated="true">
+  <head>
+    <meta charset="utf-8" />
+    <title>스마트스토어센터</title>
+  </head>
+  <body>
+    <div id="app">
+      <nav id="seller-gnb" class="gnb">
+        <span>판매자센터</span>
+        <a href="#/logout">로그아웃</a>
+      </nav>
+      <main>
+        <button type="button" data-export="review">엑셀 다운로드</button>
+      </main>
+      <footer>
+        <a href="https://nid.naver.com/nidlogin.login">로그인</a>
+      </footer>
+    </div>
+  </body>
+</html>
