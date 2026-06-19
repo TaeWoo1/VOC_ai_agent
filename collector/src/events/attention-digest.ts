@@ -7,13 +7,17 @@
  * AI, NOT live collection.
  *
  * It reads only `attentionSignalsFor` (which itself reads only sanitized summaries)
- * and the sanitized summary's coarse `kind` / `platform` / `channel`. It therefore
- * cannot expose event ids, reference codes, raw content, exact amounts/counts, or
- * identity. No I/O, no network, no fs, no browser, no env, no AI.
+ * and the sanitized summary's coarse `kind` / `platform` / `channel` / `recencyBucket`.
+ * It therefore cannot expose event ids, reference codes, raw content, exact
+ * amounts/counts, identity, exact timestamps, or internal `eventTimeMs`. The recency
+ * histogram (`byRecency`, Phase 4) is coarse buckets only and needs an explicit caller
+ * `referenceTimeMs` — never a wall-clock read. No I/O, no network, no fs, no browser,
+ * no env, no AI.
  */
 
 import { attentionSignalsFor } from "./attention-signals";
 import type { AttentionSignalCode, AttentionSignalSeverity } from "./attention-signals";
+import type { RecencyBucket, SanitizedSummaryOptions } from "./recency-bucket";
 import { sanitizedSummaryFor } from "./sanitized-summary";
 import type { SellerOpsEvent, SellerOpsEventKind } from "./types";
 
@@ -42,6 +46,11 @@ export interface AttentionPlatformCount {
   count: number;
 }
 
+export interface AttentionRecencyCount {
+  bucket: RecencyBucket;
+  count: number;
+}
+
 export interface AttentionDigest {
   totalEvents: number;
   totalSignals: number;
@@ -50,6 +59,12 @@ export interface AttentionDigest {
   byEventKind: AttentionKindCount[];
   byPlatform: AttentionPlatformCount[];
   byChannel: AttentionChannelCount[];
+  /**
+   * Coarse recency histogram over ALL events (display only, Phase 4). Counts each event by
+   * its `recencyBucket`, in fixed `RECENCY_ORDER`, filtered to buckets that occur. Needs the
+   * explicit `opts.referenceTimeMs`; omitted → every event is `"unknown"`. Empty input → `[]`.
+   */
+  byRecency: AttentionRecencyCount[];
 }
 
 /** Fixed signal-code order — mirrors the declared `AttentionSignalCode` order. */
@@ -75,30 +90,49 @@ const KIND_ORDER: readonly SellerOpsEventKind[] = [
   "sales_context",
 ];
 
+/** Fixed recency-bucket order: freshest → oldest, then `unknown`. */
+const RECENCY_ORDER: readonly RecencyBucket[] = [
+  "fresh_0_2h",
+  "same_day_2_24h",
+  "recent_1_3d",
+  "aging_3_7d",
+  "stale_over_7d",
+  "unknown",
+];
+
 function inc<K>(map: Map<K, number>, key: K): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
 /**
  * Roll up a batch of events into a sanitized digest. Signal-level counts come from
- * `attentionSignalsFor`; event-level counts (kind/platform/channel) come from the
- * sanitized summary. Ordering is deterministic: declared order for codes/severities/
- * kinds, lexicographic for platforms/channels. Empty input → zero counts, empty
- * arrays. No deduplication in this slice (see attention-digest-model.md — future work).
+ * `attentionSignalsFor`; event-level counts (kind/platform/channel/recencyBucket) come
+ * from the sanitized summary. Ordering is deterministic: declared order for codes/
+ * severities/kinds/recency-buckets, lexicographic for platforms/channels. Empty input →
+ * zero counts, empty arrays. No deduplication in this slice (see attention-digest-model.md
+ * — future work).
  */
-export function attentionDigest(events: SellerOpsEvent[]): AttentionDigest {
+export function attentionDigest(
+  events: SellerOpsEvent[],
+  opts: SanitizedSummaryOptions = {},
+): AttentionDigest {
   const codeCounts = new Map<AttentionSignalCode, number>();
   const severityCounts = new Map<AttentionSignalSeverity, number>();
   const kindCounts = new Map<SellerOpsEventKind, number>();
   const platformCounts = new Map<string, number>();
   const channelCounts = new Map<string, number>();
+  const recencyCounts = new Map<RecencyBucket, number>();
   let totalSignals = 0;
 
   for (const event of events) {
-    const summary = sanitizedSummaryFor(event);
+    // `opts.referenceTimeMs` (explicit, never the wall clock) only affects the coarse
+    // `recencyBucket`; kind/platform/channel/signals are recency-independent. Omitted →
+    // every event reads `"unknown"`.
+    const summary = sanitizedSummaryFor(event, opts);
     inc(kindCounts, summary.kind);
     inc(platformCounts, summary.platform);
     inc(channelCounts, summary.channel);
+    inc(recencyCounts, "recencyBucket" in summary ? summary.recencyBucket : "unknown");
     for (const signal of attentionSignalsFor(event)) {
       totalSignals += 1;
       inc(codeCounts, signal.code);
@@ -128,6 +162,10 @@ export function attentionDigest(events: SellerOpsEvent[]): AttentionDigest {
     byChannel: [...channelCounts.keys()].sort().map((channel) => ({
       channel,
       count: channelCounts.get(channel) ?? 0,
+    })),
+    byRecency: RECENCY_ORDER.filter((b) => recencyCounts.has(b)).map((bucket) => ({
+      bucket,
+      count: recencyCounts.get(bucket) ?? 0,
     })),
   };
 }

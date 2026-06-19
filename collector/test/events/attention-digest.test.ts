@@ -25,6 +25,7 @@ describe("attentionDigest — empty", () => {
       byEventKind: [],
       byPlatform: [],
       byChannel: [],
+      byRecency: [],
     });
   });
 });
@@ -40,6 +41,8 @@ describe("attentionDigest — single low-rating review", () => {
     expect(d.byEventKind).toEqual([{ kind: "review", count: 1 }]);
     expect(d.byPlatform).toEqual([{ platform: "NAVER", count: 1 }]);
     expect(d.byChannel).toEqual([{ channel: "smartstore_acme", count: 1 }]);
+    // no referenceTimeMs → the recency histogram is all-unknown
+    expect(d.byRecency).toEqual([{ bucket: "unknown", count: 1 }]);
   });
 });
 
@@ -102,6 +105,51 @@ describe("attentionDigest — mixed batch", () => {
       { channel: "smartstore_acme", count: 1 },
     ]);
   });
+
+  it("with no referenceTimeMs the recency histogram is all-unknown over every event", () => {
+    expect(d.byRecency).toEqual([{ bucket: "unknown", count: 5 }]);
+  });
+});
+
+describe("attentionDigest — recency histogram (Phase 4)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  it("counts events per coarse bucket in fixed order for a known referenceTimeMs", () => {
+    const REF = 8 * DAY;
+    const fresh = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-09T00:00:00Z" }); // age 0 → fresh
+    const sameDay = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-08T18:00:00Z" }); // age 6h → same_day
+    const stale = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" }); // age 8d → stale
+    const d = attentionDigest([stale, fresh, sameDay], { referenceTimeMs: REF });
+    // fixed RECENCY_ORDER: fresh → same_day → … → stale → unknown (filtered to occurring)
+    expect(d.byRecency).toEqual([
+      { bucket: "fresh_0_2h", count: 1 },
+      { bucket: "same_day_2_24h", count: 1 },
+      { bucket: "stale_over_7d", count: 1 },
+    ]);
+  });
+
+  it("sales_context lands in the unknown bucket even with a reference time", () => {
+    const REF = 8 * DAY;
+    const fresh = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-09T00:00:00Z" });
+    const sales = normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100 });
+    const d = attentionDigest([fresh, sales], { referenceTimeMs: REF });
+    expect(d.byRecency).toEqual([
+      { bucket: "fresh_0_2h", count: 1 },
+      { bucket: "unknown", count: 1 },
+    ]);
+  });
+
+  it("is deterministic for a fixed referenceTimeMs", () => {
+    const REF = 5 * HOUR;
+    const events = [
+      normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T02:00:00Z" }),
+      normalizeEsmInquiry({ siteGubun: "GMARKET", answerYn: "N", regDt: "1970-01-01T00:00:00+00:00" }),
+    ];
+    expect(attentionDigest(events, { referenceTimeMs: REF })).toEqual(
+      attentionDigest(events, { referenceTimeMs: REF }),
+    );
+  });
 });
 
 describe("attentionDigest — high sales context", () => {
@@ -134,7 +182,11 @@ describe("attentionDigest — no leakage", () => {
       normalizeEsmClaim({ siteGubun: "AUCTION", claimStatus: "접수", reasonText: CLAIM_REASON, claimNo: 900800700 }),
       normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100, sellerId: SELLER_ID, masterId: MASTER_ID, settlementNo: 50607080 }),
     ];
-    const serialized = JSON.stringify(attentionDigest(events));
+    // Exercise both the recency-blind path and the histogram path (referenceTimeMs set):
+    // a coarse bucket is the only recency output — no timestamp/eventTimeMs/elapsed leaks.
+    const serialized =
+      JSON.stringify(attentionDigest(events)) +
+      JSON.stringify(attentionDigest(events, { referenceTimeMs: 8 * 24 * 60 * 60 * 1000 }));
     for (const leak of [
       REVIEW_BODY, CLAIM_REASON,
       "778899", "555", "900800700", "50607080",
