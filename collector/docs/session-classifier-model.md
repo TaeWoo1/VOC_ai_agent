@@ -3,7 +3,9 @@
 > Offline; pure; sanitized. Coarse signals → a five-state `SessionVerdict`. No `Date.*`,
 > no wall-clock, no live collection, no real NAVER DOM/PII in source. Implemented in
 > `src/naver/session-verdict.ts`; wired into the sanitized probe in
-> `src/naver/session-probe.ts`.
+> `src/naver/session-probe.ts`; and — since the discovery-rewiring slice — the **primary
+> classifier for the discovery halt path** via `src/naver/session-halt.ts` +
+> `src/naver/session-check.ts`.
 
 ## 1. Why this exists
 
@@ -69,19 +71,42 @@ Over coarse, already-sanitized boolean inputs (`SessionVerdictInput`):
 All fields remain booleans / bucketed counts / category enums — the no-leak contract holds
 (`sessionVerdict` and the new boolean cannot carry text/PII).
 
-## 5. What is NOT in this PR (deferred follow-ups)
+## 5. Discovery / status wiring (implemented)
 
-- **Discovery / status wiring.** `src/session.ts` `detectSession()` (the discovery gate) and
-  `src/status.ts` `decideState()` are **unchanged** here; discovery still maps
-  `LOGGED_OUT → SESSION_EXPIRED`. Note the probe verdict is intentionally stricter on a
-  password field than `detectSession` (which lets a strong shell outrank an ambient login
-  *form*). A follow-up PR should reconcile discovery to this verdict so that
-  `RECONNECT_REQUIRED` and `ACCOUNT_LOGIN_REQUIRED` produce distinct, honest halt states
-  (e.g. "Commerce reconnect required — complete account/store selection via interactive
-  `--login`, then re-probe") instead of the generic `SESSION_EXPIRED`.
-- **Live confirmation of the placeholder reconnect markers** and a real `LOGGED_IN` /
-  `RECONNECT_REQUIRED` contrast sample — the standard "correct placeholders from sanitized
-  findings" loop, on explicit operator approval.
+The verdict is now the authority for the discovery HALT decision. Pure mapping
+`haltForVerdict(verdict)` (`src/naver/session-halt.ts`) → `{ proceed, state, detail }`:
+
+| `SessionVerdict`          | proceed? | `CollectorState`                       | detail (operator-facing) |
+|---------------------------|----------|----------------------------------------|--------------------------|
+| `LOGGED_IN`               | **yes**  | — (continue to export classification)  | n/a |
+| `RECONNECT_REQUIRED`      | no       | `RECONNECT_REQUIRED` *(new)*           | "Commerce reconnect required — complete account/store selection via interactive `--login`, then re-probe." |
+| `ACCOUNT_LOGIN_REQUIRED`  | no       | `ACCOUNT_LOGIN_REQUIRED` *(new)*       | "NAVER account login required." |
+| `AUTH_CHALLENGE_REQUIRED` | no       | `ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA`   | "Auth challenge (2FA/CAPTCHA) — clear it, then re-probe." |
+| `UNKNOWN`                 | no       | `SESSION_EXPIRED` *(conservative)*     | "Session not confirmed usable — reconnect required." |
+
+- **New `CollectorState` members** `RECONNECT_REQUIRED` and `ACCOUNT_LOGIN_REQUIRED`
+  (`src/status.ts`); `SESSION_EXPIRED` is now reserved for the genuinely-ambiguous/expired
+  case, so a known-account Commerce reconnect no longer reads as "session expired / profile
+  broken". The additions are purely additive (no exhaustive switch over `CollectorState`).
+- **Verdict seam** `sessionVerdictFromContent(html, url)` + live wrapper
+  `checkLiveSessionVerdict(page)` (`src/naver/session-check.ts`) reuse the probe's tightened,
+  branding-demoted markers — so discovery and the diagnostic probe share **one** signal
+  source. Both live CLIs (`discover-export.ts`, `discover-same-session.ts` via
+  `classifyOnlyStatus`) gate on the verdict; discovery never auto-clicks account/store
+  selection — every non-`LOGGED_IN` verdict halts for a human.
+- **Back-compat preserved:** `src/session.ts` `detectSession()` / `signalsFromHtml()` and
+  `src/status.ts` `decideState()` are **unchanged** (still `LOGGED_OUT → SESSION_EXPIRED`);
+  they remain for the export/upload legs and existing tests but are no longer the halt
+  authority. Two marker sets thus coexist (`session.ts` vs `session-probe.ts`) — intentional
+  for now; a future cleanup can retire `detectSession` once the verdict is proven live.
+
+## 5b. Still deferred
+
+- **Live confirmation of the placeholder reconnect markers** (`ACCOUNT_RECONNECT_MARKERS`)
+  and a real `LOGGED_IN` / `RECONNECT_REQUIRED` contrast sample. Until then a real Commerce
+  interstitial may still fall to `UNKNOWN → SESSION_EXPIRED`: the wiring is honest, the
+  trigger is still a placeholder. This is the standard "correct placeholders from sanitized
+  findings" loop, on explicit operator approval — a diagnostic run, not a code PR.
 
 ## 6. Tests & fixtures
 
@@ -89,6 +114,12 @@ All fields remain booleans / bucketed counts / category enums — the no-leak co
 - `test/naver/session-probe.test.ts` — verdict wiring across fixtures, the
   `candidateLoggedInShellPresent` structural-only **regression**, the no-leak sweep, and the
   allow-list (`SANITIZED_PROBE_KEYS`) for the two new fields.
+- `test/naver/session-halt.test.ts` — `haltForVerdict` for all five verdicts (proceed flag,
+  `CollectorState`, honest content-free detail; reconnect ≠ `SESSION_EXPIRED`; never
+  `LAST_SUCCESS`).
+- `test/naver/session-check.test.ts` — `sessionVerdictFromContent` across fixtures and
+  `checkLiveSessionVerdict` log-safety (verdict + coarse category only, no raw URL).
+- `test/cli/same-session.test.ts` — `classifyOnlyStatus` verdict-keyed halt states.
 - Fixtures (synthetic, no PII): existing `session_login*.html`, `session_2fa.html`,
   `session_logged_in.html`, `session_branding_only.html`, `session_admin_with_login_widget.html`,
   plus new `session_reconnect.html` (Commerce account-selection interstitial — PLACEHOLDER

@@ -1,6 +1,8 @@
 import type { SanitizedExportProbeSignals } from "../naver/export-probe";
+import { haltForVerdict } from "../naver/session-halt";
 import type { SanitizedProbeSignals } from "../naver/session-probe";
-import { decideState, type CollectorState, type ExportOutcome, type SessionState } from "../status";
+import type { SessionVerdict } from "../naver/session-verdict";
+import { decideState, type CollectorState, type ExportOutcome } from "../status";
 
 /**
  * Pure helpers for the same-session classify-only discovery flow.
@@ -92,23 +94,29 @@ export function buildSessionProbeMeta(
 }
 
 /**
- * Pure: map same-session classify-only signals to a status record. There is NO
- * upload leg in this flow, so `uploadOutcome` is never set — `decideState` can
- * therefore never return LAST_SUCCESS (a captured sync export is only
- * COLLECTING). Discovery is not collection.
+ * Pure: map same-session classify-only signals to a status record, keyed on the
+ * five-state `SessionVerdict`.
+ *
+ * Non-`LOGGED_IN` verdicts halt via `haltForVerdict` — so a Commerce reconnect reads
+ * `RECONNECT_REQUIRED`, a full login `ACCOUNT_LOGIN_REQUIRED`, an auth challenge
+ * `ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA`, and the ambiguous case `SESSION_EXPIRED` — never
+ * the old blanket "session expired" for all four. On `LOGGED_IN` the export-outcome
+ * detail is unchanged. There is NO upload leg here, so `uploadOutcome` is never set and
+ * `decideState` can never return LAST_SUCCESS (a captured sync export is only COLLECTING).
+ * Discovery is not collection.
  */
 export function classifyOnlyStatus(
-  session: SessionState,
+  verdict: SessionVerdict,
   exportOutcome?: ExportOutcome,
 ): { state: CollectorState; detail: string } {
-  const state = decideState({ paired: true, session, exportOutcome });
-  let detail: string;
-  if (session !== "LOGGED_IN") {
-    detail = "classify-only: session not usable after confirmation; reconnect required";
-  } else if (exportOutcome === "CAPTURED") {
-    detail = "classify-only: sync export detected; not captured to disk, not uploaded";
-  } else {
-    detail = `classify-only: export outcome ${exportOutcome ?? "NOT_ATTEMPTED"}`;
+  if (verdict !== "LOGGED_IN") {
+    const halt = haltForVerdict(verdict);
+    return { state: halt.state, detail: `classify-only: ${halt.detail}` };
   }
+  const state = decideState({ paired: true, session: "LOGGED_IN", exportOutcome });
+  const detail =
+    exportOutcome === "CAPTURED"
+      ? "classify-only: sync export detected; not captured to disk, not uploaded"
+      : `classify-only: export outcome ${exportOutcome ?? "NOT_ATTEMPTED"}`;
   return { state, detail };
 }

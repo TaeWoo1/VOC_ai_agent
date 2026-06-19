@@ -18,11 +18,11 @@ import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
 import { extractExportProbeSignals } from "../naver/export-probe";
-import { checkLiveSession } from "../naver/session-check";
+import { checkLiveSessionVerdict } from "../naver/session-check";
 import { extractProbeSignals, type HydrationWaitResult } from "../naver/session-probe";
 import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
-import { writeStatus, type SessionState } from "../status";
+import { writeStatus } from "../status";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import {
   buildExportProbeMeta,
@@ -208,12 +208,13 @@ async function main(): Promise<void> {
     // the pre-renav snapshot, the issue is re-navigation/hydration, not markers.
     if (wantProbe) await logSessionProbe(realPage, "after-renav-before-check", hydrationWaitResult);
 
-    // 4) Session check — never proceed to export on an ambiguous/invalid session.
-    const session: SessionState = await checkLiveSession(page);
-    if (session !== "LOGGED_IN") {
-      // Diagnostic: confirm what the detector saw when it decided not-logged-in.
+    // 4) Session check — the five-state verdict is the authority; never proceed to
+    //    export on anything but LOGGED_IN. Each other verdict halts with an honest state.
+    const verdict = await checkLiveSessionVerdict(page);
+    if (verdict !== "LOGGED_IN") {
+      // Diagnostic: confirm what the probe saw when it decided not-logged-in.
       if (wantProbe) await logSessionProbe(realPage, "after-check-logged-out", hydrationWaitResult);
-      const { state, detail } = classifyOnlyStatus(session);
+      const { state, detail } = classifyOnlyStatus(verdict);
       writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
       log("run.halted", { state });
       return;
@@ -236,7 +237,7 @@ async function main(): Promise<void> {
       await logExportProbe(realPage, "after-classify-layout-unrecognized");
     }
 
-    const { state, detail } = classifyOnlyStatus(session, outcome);
+    const { state, detail } = classifyOnlyStatus(verdict, outcome);
     writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
     log("run.done", { state, outcome, classifyOnly: true });
   } finally {
