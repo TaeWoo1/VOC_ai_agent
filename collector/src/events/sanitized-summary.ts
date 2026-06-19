@@ -29,8 +29,9 @@ function assertNever(x: never): never {
  * amounts/counts, or identity are ever added here.
  *
  * `opts.referenceTimeMs` (explicit, never the wall clock) is forwarded to the review,
- * cs_inquiry, and claim summaries' coarse `recencyBucket`; without it, their recency is
- * `"unknown"`. The remaining kinds do not yet carry recency.
+ * cs_inquiry, claim, and order_shipping summaries' coarse `recencyBucket`; without it,
+ * their recency is `"unknown"`. `sales_context` does not carry recency (unknown by
+ * design — its timestamps are a period range, not an instant).
  */
 export function sanitizedSummaryFor(
   event: SellerOpsEvent,
@@ -42,7 +43,7 @@ export function sanitizedSummaryFor(
     case "cs_inquiry":
       return sanitizedInquirySummary(event, opts);
     case "order_shipping":
-      return sanitizedOrderSummary(event);
+      return sanitizedOrderSummary(event, opts);
     case "claim":
       return sanitizedClaimSummary(event, opts);
     case "sales_context":

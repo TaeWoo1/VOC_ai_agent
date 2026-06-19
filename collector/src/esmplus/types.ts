@@ -151,6 +151,13 @@ export interface SellerOpsOrderEvent {
   title: string | null;
   /** Ordered quantity; null when absent/unparseable. */
   quantity: number | null;
+  /**
+   * INTERNAL parsed event time (epoch ms), derived from `orderedAt` when it is an
+   * explicit-offset timestamp. Absent when `orderedAt` is missing / timezone-less /
+   * invalid. **Internal only** — never exposed in sanitized summaries, attention
+   * signals/digest/views, logs, or telemetry. Phase 2c (order_shipping).
+   */
+  eventTimeMs?: number;
 }
 
 /** Log-safe summary of an order event — categories/booleans only, never refs/ids/PII. */
@@ -166,6 +173,12 @@ export interface SanitizedOrderSummary {
   hasQuantity: boolean;
   hasOrderedAt: boolean;
   hasUpdatedAt: boolean;
+  /**
+   * Coarse recency of the order (from internal `eventTimeMs` + an explicit caller
+   * reference time). `"unknown"` when no reference time is supplied, no `eventTimeMs`
+   * exists, or the time is future/invalid. Never the exact time or elapsed duration.
+   */
+  recencyBucket: RecencyBucket;
 }
 
 // --- Normalized SellerOps claim event -------------------------------------

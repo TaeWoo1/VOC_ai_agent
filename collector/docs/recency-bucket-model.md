@@ -17,15 +17,17 @@
   timezone.
 - **Phase 2b — offset-bearing parser `parseOffsetTimestampToEpochMs` implemented**
   (`src/events/offset-timestamp-parser.ts`). See `recency-timezone-policy.md`.
-- **Phase 2c — internal `eventTimeMs` on `review`, `cs_inquiry`, and `claim` events
-  implemented** (review from `writtenAt`, inquiry/claim from `createdAt`);
-  `order_shipping` deferred (`sales_context` stays `unknown`). See
-  `recency-timestamp-source-audit.md`.
-- **Phase 2d — sanitized `recencyBucket` on `review`, `cs_inquiry`, and `claim`
-  implemented** (`sanitizedReviewSummary` / `sanitizedInquirySummary` /
-  `sanitizedClaimSummary` / `sanitizedSummaryFor` accept an explicit `{ referenceTimeMs }`;
-  missing/non-finite ref or missing/future `eventTimeMs` → `"unknown"`; no wall-clock
-  read; `eventTimeMs`/raw timestamps/elapsed never exposed). `order_shipping` deferred.
+- **Phase 2c — internal `eventTimeMs` on `review`, `cs_inquiry`, `claim`, and
+  `order_shipping` events implemented** (review from `writtenAt`,
+  inquiry/claim from `createdAt`, order from `orderedAt`); all timestamp-bearing kinds
+  now covered (`sales_context` stays `unknown` by design — its timestamps are a period
+  range, not an instant). See `recency-timestamp-source-audit.md`.
+- **Phase 2d — sanitized `recencyBucket` on `review`, `cs_inquiry`, `claim`, and
+  `order_shipping` implemented** (`sanitizedReviewSummary` / `sanitizedInquirySummary` /
+  `sanitizedClaimSummary` / `sanitizedOrderSummary` / `sanitizedSummaryFor` accept an
+  explicit `{ referenceTimeMs }`; missing/non-finite ref or missing/future `eventTimeMs` →
+  `"unknown"`; no wall-clock read; `eventTimeMs`/raw timestamps/elapsed never exposed).
+  `sales_context` stays `unknown` by design.
 - **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
