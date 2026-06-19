@@ -79,7 +79,14 @@ purposes.
 - Normalizer (`order-normalizer.ts`): `orderedAt: trimOrNull(raw.orderDt)`,
   `updatedAt: trimOrNull(raw.updateDt)` — raw string passthrough.
 - Sanitized summary exposes `hasOrderedAt` / `hasUpdatedAt`.
-- **Not safe.** Primary recency source would be `orderedAt`.
+- **Status (Phase 2c + 2d implemented):** the order event now also carries an
+  **internal** `eventTimeMs?: number`, parsed from `orderedAt` via
+  `parseOffsetTimestampToEpochMs` (offset-bearing only; timezone-less/invalid/missing →
+  omitted). The raw `orderedAt` is unchanged, and `eventTimeMs` is internal-only (never
+  in sanitized output). The **sanitized order summary now exposes a coarse
+  `recencyBucket`** (computed from `eventTimeMs` + an explicit caller `referenceTimeMs`;
+  `"unknown"` without a reference time / event time). Primary recency source =
+  `orderedAt`.
 
 ### sales_context
 - Type: `periodStart: string | null`, `periodEnd: string | null`.

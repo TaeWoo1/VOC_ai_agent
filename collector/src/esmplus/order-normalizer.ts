@@ -10,6 +10,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { parseOffsetTimestampToEpochMs } from "../events/offset-timestamp-parser";
+import { recencyBucketFor } from "../events/recency-bucket";
+import type { SanitizedSummaryOptions } from "../events/recency-bucket";
 import type {
   EsmChannel,
   OrderStatus,
@@ -106,24 +109,39 @@ function eventIdFor(channel: EsmChannel, orderNo: unknown, raw: RawEsmOrder): st
 /** Normalize one raw ESM order into a `SellerOpsOrderEvent`. Buyer/recipient PII is dropped. */
 export function normalizeEsmOrder(raw: RawEsmOrder): SellerOpsOrderEvent {
   const channel = channelOf(raw.siteGubun);
+  const orderedAt = trimOrNull(raw.orderDt);
+  // INTERNAL: parse the primary timestamp only when it is offset-bearing; absent
+  // otherwise (timezone-less / invalid / missing). Never exposed in sanitized output.
+  const parsedEventTimeMs = parseOffsetTimestampToEpochMs(orderedAt);
   return {
     eventId: eventIdFor(channel, raw.orderNo, raw),
     platform: "ESM_PLUS",
     kind: "order_shipping",
     channel,
     status: statusOf(raw.orderStatus),
-    orderedAt: trimOrNull(raw.orderDt),
+    orderedAt,
     updatedAt: trimOrNull(raw.updateDt),
     productRef: refOrNull(raw.itemNo),
     orderRef: refOrNull(raw.orderNo),
     shipmentRef: refOrNull(raw.shipmentNo),
     title: trimOrNull(raw.itemName),
     quantity: quantityOrNull(raw.quantity),
+    ...(parsedEventTimeMs !== null ? { eventTimeMs: parsedEventTimeMs } : {}),
   };
 }
 
 /** Log-safe summary — categories/booleans only; never refs, ids, content, or PII. */
-export function sanitizedOrderSummary(event: SellerOpsOrderEvent): SanitizedOrderSummary {
+export function sanitizedOrderSummary(
+  event: SellerOpsOrderEvent,
+  opts: SanitizedSummaryOptions = {},
+): SanitizedOrderSummary {
+  // Recency is derived from the internal `eventTimeMs` + an EXPLICIT caller reference
+  // time only; no wall-clock read. No reference time → `unknown`. The exact time and
+  // elapsed duration are never exposed — only the coarse bucket.
+  const recencyBucket =
+    opts.referenceTimeMs === undefined
+      ? "unknown"
+      : recencyBucketFor(event.eventTimeMs, opts.referenceTimeMs);
   return {
     platform: event.platform,
     kind: event.kind,
@@ -136,5 +154,6 @@ export function sanitizedOrderSummary(event: SellerOpsOrderEvent): SanitizedOrde
     hasQuantity: event.quantity !== null,
     hasOrderedAt: event.orderedAt !== null,
     hasUpdatedAt: event.updatedAt !== null,
+    recencyBucket,
   };
 }
