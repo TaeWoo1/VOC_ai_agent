@@ -40,6 +40,7 @@ describe("attentionView — empty", () => {
       byEventKind: [],
       byPlatform: [],
       byChannel: [],
+      byRecency: [],
     });
   });
 });
@@ -114,6 +115,7 @@ describe("attentionView — digest vs top", () => {
       "kind",
       "platform",
       "priority",
+      "recencyBucket",
     ]);
   });
 
@@ -147,18 +149,46 @@ describe("attentionView — recency passthrough (Phase 3)", () => {
     expect(v.top[0]?.priority.explanationCodes).not.toContain("recency_bucket_applied");
   });
 
-  it("row shape is unchanged — recency is NOT surfaced as a row field (Phase 4 deferred)", () => {
-    const v = attentionView([freshLowRating], { referenceTimeMs: 0 });
-    expect(Object.keys(v.top[0]!).sort()).toEqual(["channel", "inputIndex", "kind", "platform", "priority"]);
-    expect(JSON.stringify(v)).not.toContain("recencyBucket");
-    expect(JSON.stringify(v)).not.toContain("eventTimeMs");
-  });
-
   it("is deterministic for a fixed referenceTimeMs", () => {
     const events = makeBatch(5);
     expect(attentionView(events, { limit: 3, referenceTimeMs: 0 })).toEqual(
       attentionView(events, { limit: 3, referenceTimeMs: 0 }),
     );
+  });
+});
+
+describe("attentionView — recency display (Phase 4)", () => {
+  const freshLowRating = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" });
+
+  it("surfaces the coarse recencyBucket on the row (still no eventTimeMs / raw timestamp)", () => {
+    const v = attentionView([freshLowRating], { referenceTimeMs: 0 }); // fresh
+    expect(v.top[0]?.recencyBucket).toBe("fresh_0_2h");
+    expect(JSON.stringify(v)).not.toContain("eventTimeMs");
+    expect(JSON.stringify(v)).not.toContain("1970-01-01T00:00:00Z"); // no raw timestamp string
+  });
+
+  it("without referenceTimeMs the row recencyBucket is 'unknown'", () => {
+    const v = attentionView([freshLowRating]);
+    expect(v.top[0]?.recencyBucket).toBe("unknown");
+  });
+
+  it("forwards referenceTimeMs into the digest histogram (byRecency)", () => {
+    const v = attentionView([freshLowRating], { referenceTimeMs: 0 });
+    expect(v.digest.byRecency).toEqual([{ bucket: "fresh_0_2h", count: 1 }]);
+  });
+
+  it("without referenceTimeMs the digest histogram is all-unknown", () => {
+    const v = attentionView([freshLowRating]);
+    expect(v.digest.byRecency).toEqual([{ bucket: "unknown", count: 1 }]);
+  });
+
+  it("display fields do not change scoring or ordering", () => {
+    // Same input + reference as the Phase-3 score test → identical score/codes; the row
+    // simply also carries the coarse bucket now.
+    const v = attentionView([freshLowRating], { referenceTimeMs: 0 });
+    expect(v.top[0]?.priority.score).toBe(78);
+    expect(v.top[0]?.priority.explanationCodes).toContain("recency_bucket_applied");
+    expect(v.top[0]?.recencyBucket).toBe("fresh_0_2h");
   });
 });
 
@@ -169,7 +199,11 @@ describe("attentionView — no leakage", () => {
       normalizeEsmClaim({ siteGubun: "AUCTION", claimStatus: "접수", reasonText: CLAIM_REASON, claimNo: 900800700 }),
       normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100, sellerId: SELLER_ID, masterId: MASTER_ID, settlementNo: 50607080 }),
     ];
-    const serialized = JSON.stringify(attentionView(events));
+    // Sweep both the recency-blind path and the reference-time path (row buckets +
+    // byRecency histogram) — the only recency output is a coarse bucket.
+    const serialized =
+      JSON.stringify(attentionView(events)) +
+      JSON.stringify(attentionView(events, { referenceTimeMs: 8 * 24 * 60 * 60 * 1000 }));
     for (const leak of [
       REVIEW_BODY, CLAIM_REASON,
       "778899", "555", "900800700", "50607080",
@@ -196,9 +230,9 @@ describe("module boundary", () => {
     expect(/from\s+["'](node:)?https?["']/.test(imports)).toBe(false);
     expect(/openai|anthropic/i.test(imports)).toBe(false);
     expect(/process\.env|\bfetch\(|\baxios\b/.test(src)).toBe(false);
-    // assembler-only slice: it forwards an explicit referenceTimeMs to scoring but
-    // contains NO recency LOGIC of its own (Phase 3), NO dedup/cluster, NO wall-clock
-    // read, and NO generatedAt. Check CODE only.
+    // assembler-only slice: it forwards an explicit referenceTimeMs to the digest and
+    // scoring (Phase 3/4) but adds NO recency math of its own, NO dedup/cluster, NO
+    // wall-clock read, and NO generatedAt. Check CODE only.
     const code = src
       .split("\n")
       .filter((l) => {
@@ -208,8 +242,8 @@ describe("module boundary", () => {
       .join("\n");
     expect(/Date\.now|new Date\(|Date\.UTC/.test(code)).toBe(false);
     expect(/generatedAt/.test(code)).toBe(false);
-    // `referenceTimeMs` is allowed (it's a caller input); `recency`/`recencyBucket` logic
-    // must NOT appear in the view's own code (that stays Phase 4).
-    expect(/recencyBucket|dedup|cluster/i.test(code)).toBe(false);
+    // `referenceTimeMs` is allowed (it's a caller input) and Phase 4 surfaces the coarse
+    // bucket via the digest/rows; the view still must not introduce dedup/cluster.
+    expect(/dedup|cluster/i.test(code)).toBe(false);
   });
 });

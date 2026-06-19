@@ -1,9 +1,9 @@
 # SellerOps recency-bucket model — specification
 
-> Offline; no AI; no live collection. Phases 1–3 (the pure helper, the sanitized-summary
-> `recencyBucket` field, and the capped scoring tie-breaker) are implemented; Phase 4
-> (view-row passthrough) remains deferred. No `Date.now` / `new Date` / current-time read
-> in source.
+> Offline; no AI; no live collection. Phases 1–4 are implemented: the pure helper, the
+> sanitized-summary `recencyBucket` field, the capped scoring tie-breaker, and the display
+> passthrough (coarse `recencyBucket` on prioritized/view rows + a `byRecency` digest
+> histogram). No `Date.now` / `new Date` / current-time read in source.
 
 ## Implementation status
 
@@ -33,9 +33,12 @@
   (`RECENCY_BUCKET_POINTS`, capped +8, secondary tie-breaker; applied only from an
   explicit `referenceTimeMs`, threaded through `prioritizeEvents` / `attentionView`).
   See `recency-scoring-policy.md`.
-- **Phase 4 — `attentionView` view-row recency passthrough — deferred.** Phase 3 forwards
-  `referenceTimeMs` into scoring, but the coarse bucket is **not** yet surfaced as a
-  view-row field / digest histogram.
+- **Phase 4 — display passthrough — implemented.** The coarse `recencyBucket` is now
+  surfaced as a **display-only** field on each `PrioritizedEvent` row (and therefore each
+  `attentionView` top row), and the digest carries a `byRecency` histogram
+  (`AttentionRecencyCount[]`). Both derive from the same sanitized summary + explicit
+  `referenceTimeMs`; omitted → `"unknown"`. Display only: they do **not** change scoring or
+  ordering, and add no `generatedAt`.
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
   UI — deferred** (§8).
 
@@ -145,10 +148,14 @@ so it nudges but never dominates. The full policy — bucket→points table, gua
 negative penalty, `unknown` never punished), the score-folded band rule, and
 determinism/safety constraints — is in `recency-scoring-policy.md`.
 
-**Phase 4 — view passthrough.**
-Let `attentionView` carry recency **only** through the already-sanitized priority
-explanation. Do **not** add a `generatedAt` (the reference time stays a caller input,
-not a view-generated timestamp).
+**Phase 4 — display passthrough (implemented).**
+`prioritizeEvents` surfaces a coarse `recencyBucket` on each row, `attentionDigest` adds a
+`byRecency` histogram over all events, and `attentionView` forwards the explicit
+`referenceTimeMs` to both. These are **coarse buckets only** (`fresh_0_2h` …
+`stale_over_7d` / `unknown`), **display only** — they never affect scoring or ordering
+(that is Phase 3's capped tie-breaker), and they add no `generatedAt` (the reference time
+stays a caller input, not a view-generated timestamp). `sales_context` and the
+no-`referenceTimeMs` case both read `"unknown"`.
 
 ## 8. Deferred work (beyond this model)
 

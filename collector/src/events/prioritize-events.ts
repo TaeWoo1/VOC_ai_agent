@@ -3,8 +3,10 @@
  *
  * `prioritizeEvents(events)` scores each event with `priorityScoreFor` and returns a
  * ranked list of SANITIZED rows — the raw event object is never returned. Each row
- * carries only the input index, the coarse `kind`/`platform`/`channel` from the
- * sanitized summary, and the priority explanation (score/band/signals/reason codes).
+ * carries only the input index, the coarse `kind`/`platform`/`channel` and coarse
+ * `recencyBucket` from the sanitized summary, and the priority explanation
+ * (score/band/signals/reason codes). The `recencyBucket` is display only (Phase 4) — it
+ * never changes ordering; the score (Phase 3) is the sole recency influence on rank.
  *
  * Deterministic: sort by score descending, then `inputIndex` ascending as a stable
  * tie-breaker — no hidden product judgment, no randomness. Recency (Phase 3) is applied
@@ -16,20 +18,28 @@
 
 import type { PriorityScoreExplanation } from "./priority-score";
 import { priorityScoreFor } from "./priority-score";
-import type { SanitizedSummaryOptions } from "./recency-bucket";
+import type { RecencyBucket, SanitizedSummaryOptions } from "./recency-bucket";
 import { sanitizedSummaryFor } from "./sanitized-summary";
 import type { SellerOpsEvent, SellerOpsEventKind } from "./types";
 
 /**
  * One ranked row. Sanitized by construction — it holds the input index, coarse
- * kind/platform/channel, and the priority explanation. It never holds the raw event,
- * reference codes, raw content, exact amounts/counts, or identity.
+ * kind/platform/channel, the coarse `recencyBucket`, and the priority explanation. It
+ * never holds the raw event, reference codes, raw content, exact amounts/counts, identity,
+ * or any exact timestamp / internal `eventTimeMs` / elapsed duration.
  */
 export interface PrioritizedEvent {
   inputIndex: number;
   kind: SellerOpsEventKind;
   platform: string;
   channel: string;
+  /**
+   * Coarse recency bucket (display only, Phase 4) derived from the same sanitized summary
+   * the score uses. `"unknown"` when no `opts.referenceTimeMs` is supplied, when the event
+   * carries no safe timestamp, or for kinds with no recency (`sales_context`). It does NOT
+   * affect ordering — that is the score's job (Phase 3) — it only surfaces the bucket.
+   */
+  recencyBucket: RecencyBucket;
   priority: PriorityScoreExplanation;
 }
 
@@ -49,14 +59,16 @@ export function prioritizeEvents(
   opts: SanitizedSummaryOptions = {},
 ): PrioritizedEvent[] {
   const rows: PrioritizedEvent[] = events.map((event, inputIndex) => {
-    // Row metadata (kind/platform/channel) does not depend on recency; only the score
-    // does, so only `priorityScoreFor` receives the reference time.
-    const summary = sanitizedSummaryFor(event);
+    // One sanitized summary feeds both the row metadata and the coarse recencyBucket, so
+    // the bucket shown on the row matches the bucket the score used (same `opts`). Kinds
+    // with no recency field (e.g. `sales_context`) read as `"unknown"`.
+    const summary = sanitizedSummaryFor(event, opts);
     return {
       inputIndex,
       kind: summary.kind,
       platform: summary.platform,
       channel: summary.channel,
+      recencyBucket: "recencyBucket" in summary ? summary.recencyBucket : "unknown",
       priority: priorityScoreFor(event, opts),
     };
   });

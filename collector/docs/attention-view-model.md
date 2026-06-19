@@ -55,15 +55,18 @@ product/order/review/claim/shipment/settlement refs · exact sales amounts/count
 buyer/reviewer/seller identity · seller ID / Master ID / account ID · API key/JWT/token ·
 raw URL / raw HTML / screenshot · **the raw event object** · **any current timestamp**.
 
-This layer deliberately generates **no `generatedAt`/timestamp** — time-stamping (and
-recency) belong to a later layer once a safe age bucket exists.
+This layer deliberately generates **no `generatedAt`/timestamp**. It may forward an
+explicit caller `referenceTimeMs` (never a wall-clock read) so the rows carry a coarse
+`recencyBucket` and the digest a `byRecency` histogram — **display only**, with no effect
+on scoring or ordering (Phase 4; see `recency-bucket-model.md` §7).
 
 ## Future work (out of scope here)
 
 - **Backend endpoint** serving the view.
 - **UI card / list** rendering it.
-- **Recency bucket** (and recency-aware ordering) — boundary + phased plan specified
-  in `recency-bucket-model.md` (docs-only, not yet implemented).
+- **Recency-aware ordering / SLA windows** — the coarse `recencyBucket` is now surfaced
+  for display (Phase 4) and feeds the Phase 3 score tie-breaker, but exact date-windowed
+  ordering and SLA math remain deferred (`recency-bucket-model.md`).
 - **Deduplication.**
 - **Clustering.**
 - **AI summary** of the digest / top rows.
@@ -71,6 +74,7 @@ recency) belong to a later layer once a safe age bucket exists.
 ## Out of scope (now)
 
 Live NAVER / ESM / browser / Playwright · AI calls / model prompts · new scoring logic ·
-recency · deduplication · clustering · timestamps · credentials / seller IDs / Master ID /
-API key / JWT · backend · DB · upload · RUN_INTEGRATION · real data. NAVER live work is
-**paused**; ESM live/API/credential work is **deferred**.
+recency-aware ordering / SLA math · deduplication · clustering · `generatedAt` / wall-clock
+timestamps · credentials / seller IDs / Master ID / API key / JWT · backend · DB · upload ·
+RUN_INTEGRATION · real data. NAVER live work is **paused**; ESM live/API/credential work is
+**deferred**.

@@ -8,14 +8,15 @@
  * and slicing the ranked rows to a normalized top-N limit.
  *
  * It adds NO new scoring logic, NO AI, NO dedup/clustering, and NO timestamp of its own.
- * It may forward an explicit caller `referenceTimeMs` to `prioritizeEvents` so the
- * priority score can apply its capped recency tie-breaker (Phase 3) — this is a caller
- * input, never a wall-clock read, and the view adds no `generatedAt`. The view ROW shape
- * is unchanged: recency affects ordering via the score only, it is not surfaced as a
- * row field (Phase 4, deferred). The output is fully sanitized (it only carries the
- * digest counts + sanitized `PrioritizedEvent` rows) — never raw events, refs, content,
- * exact amounts/counts, or identity. No I/O, no network, no fs, no browser, no env, no
- * current-time read.
+ * It may forward an explicit caller `referenceTimeMs` to BOTH `prioritizeEvents` (so the
+ * priority score can apply its capped recency tie-breaker, Phase 3) and `attentionDigest`
+ * (so the recency histogram and the rows' coarse `recencyBucket` reflect the same
+ * reference, Phase 4) — this is a caller input, never a wall-clock read, and the view adds
+ * no `generatedAt`. The surfaced `recencyBucket` (row field) and `byRecency` (digest) are
+ * display only: coarse buckets that do NOT change ordering. The output is fully sanitized
+ * (digest counts + sanitized `PrioritizedEvent` rows) — never raw events, refs, content,
+ * exact amounts/counts, identity, exact timestamps, or internal `eventTimeMs`. No I/O, no
+ * network, no fs, no browser, no env, no current-time read.
  */
 
 import { attentionDigest } from "./attention-digest";
@@ -68,8 +69,10 @@ export function attentionView(
   opts?: AttentionViewOptions,
 ): AttentionView {
   const limit = normalizeLimit(opts?.limit);
-  const digest = attentionDigest(events);
-  // Forward the explicit reference time to scoring only (digest carries no recency).
+  // Forward the explicit reference time to BOTH layers so the digest's coarse recency
+  // histogram and the ranked rows' `recencyBucket` reflect the same caller reference time
+  // (display only — ordering is unchanged). Omitted → recency is `"unknown"` everywhere.
+  const digest = attentionDigest(events, { referenceTimeMs: opts?.referenceTimeMs });
   const ranked = prioritizeEvents(events, { referenceTimeMs: opts?.referenceTimeMs });
   return {
     totalEvents: events.length,

@@ -1,8 +1,9 @@
 # SellerOps priority-score model — specification
 
-> Offline; no AI; no live collection. The single-event scorer, batch ranking, and a
-> small capped recency tie-breaker (Phase 3) are now implemented; dedup/cluster/AI
-> factors and Phase 4 view-row recency surfacing remain deferred.
+> Offline; no AI; no live collection. The single-event scorer, batch ranking, a small
+> capped recency tie-breaker (Phase 3), and the Phase 4 display passthrough (coarse
+> `recencyBucket` on rows + `byRecency` digest histogram) are now implemented;
+> dedup/cluster/AI factors remain deferred.
 
 ## Implementation status
 
@@ -26,8 +27,10 @@
   current-time read.
 - **Recency scoring (Phase 3) — implemented** (see `recency-scoring-policy.md`): a small,
   capped (+8 max) secondary tie-breaker from the coarse `recencyBucket`, applied only
-  from an explicit `referenceTimeMs`. **Deduplication / clustering / AI summaries — still
-  deferred** (§9). **Phase 4** (surfacing `recencyBucket` as a view-row field) — deferred.
+  from an explicit `referenceTimeMs`. **Phase 4 display passthrough — implemented**: the
+  coarse `recencyBucket` is surfaced (display only) on each ranked/view row and as a
+  `byRecency` digest histogram; it does not change scoring or ordering. **Deduplication /
+  clustering / AI summaries — still deferred** (§9).
 - **Automatic reply / posting — excluded** (§9).
 - The ranked rows + batch digest are assembled into a top-N "what needs attention
   today" payload by `attentionView` — see `attention-view-model.md` (no new scoring,
@@ -182,8 +185,9 @@ interface PriorityScoreExplanation {
 ## 9. Deferred work (and why)
 
 - **Recency scoring (Phase 3)** — **implemented** as a small capped tie-breaker (see §6
-  and `recency-scoring-policy.md`). **Phase 4** (surfacing `recencyBucket` as a view-row
-  field / digest histogram) remains deferred.
+  and `recency-scoring-policy.md`). **Phase 4** (surfacing `recencyBucket` as a
+  display-only view-row field + a `byRecency` digest histogram) — **implemented**; it does
+  not affect scoring or ordering.
 - **Deduplication** — deferred until a safe, stable grouping key exists (event ids and
   refs are intentionally not in the summaries).
 - **Product-level clustering** — deferred until a safe product grouping strategy exists.

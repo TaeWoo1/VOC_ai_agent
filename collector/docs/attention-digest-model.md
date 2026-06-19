@@ -26,13 +26,19 @@ AttentionDigest {
   byEventKind:   { kind, count }[]
   byPlatform:    { platform, count }[]
   byChannel:     { channel, count }[]
+  byRecency:     { bucket, count }[]   // Phase 4 — coarse recency histogram (display only)
 }
 ```
 
 - **Signal-level** counts: `bySignalCode`, `bySeverity` (a count per emitted signal).
-- **Event-level** counts: `byEventKind`, `byPlatform`, `byChannel` (a count per event,
-  so an event with zero signals — e.g. an order — still counts toward its kind/
-  platform/channel).
+- **Event-level** counts: `byEventKind`, `byPlatform`, `byChannel`, `byRecency` (a count
+  per event, so an event with zero signals — e.g. an order — still counts toward its kind/
+  platform/channel/recency bucket).
+- `byRecency` (Phase 4) counts every event by its coarse `recencyBucket`. It needs the
+  explicit `attentionDigest(events, { referenceTimeMs })`; omitted → every event is
+  `"unknown"`. `sales_context` (no safe timestamp) is always `"unknown"`. It is **display
+  only** — coarse buckets, never an exact timestamp / `eventTimeMs` / elapsed, and it does
+  not influence any score or ordering.
 
 ## Deterministic ordering
 
@@ -41,6 +47,8 @@ AttentionDigest {
   `unknown_attention_signal`.
 - `bySeverity` — `high` → `medium` → `low`.
 - `byEventKind` — `review`, `cs_inquiry`, `claim`, `order_shipping`, `sales_context`.
+- `byRecency` — fixed bucket order: `fresh_0_2h`, `same_day_2_24h`, `recent_1_3d`,
+  `aging_3_7d`, `stale_over_7d`, `unknown`.
 - `byPlatform` / `byChannel` — lexicographic after counting.
 - Only entries with a non-zero count appear (empty input → all empty arrays, zero
   totals).
@@ -67,8 +75,8 @@ no per-event ranking.
   Deferred deliberately: there is no safe, stable dedup key exposed in the sanitized
   summaries yet (event ids and refs are intentionally not in the summary). When a safe
   coarse key exists, dedup can be added without reading raw content.
-- **Recency windows** (today / 7d / 30d).
-- **Numeric priority score** combining severity + co-occurrence + recency.
+- **Exact recency windows** (today / 7d / 30d). The coarse `byRecency` histogram is now
+  implemented (Phase 4); exact date-windowed counts remain deferred.
 - **AI summaries** of the digest.
 - **Dashboard / backend persistence.**
 

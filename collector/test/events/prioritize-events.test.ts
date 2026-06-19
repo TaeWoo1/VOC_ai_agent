@@ -30,6 +30,7 @@ describe("prioritizeEvents — basics", () => {
       kind: "review",
       platform: "NAVER",
       channel: "smartstore_acme",
+      recencyBucket: "unknown", // no referenceTimeMs → coarse bucket is "unknown"
       priority: {
         score: 70,
         band: "high",
@@ -38,7 +39,14 @@ describe("prioritizeEvents — basics", () => {
       },
     });
     // exactly the sanitized fields — no raw event leaked in
-    expect(Object.keys(row).sort()).toEqual(["channel", "inputIndex", "kind", "platform", "priority"]);
+    expect(Object.keys(row).sort()).toEqual([
+      "channel",
+      "inputIndex",
+      "kind",
+      "platform",
+      "priority",
+      "recencyBucket",
+    ]);
   });
 });
 
@@ -127,6 +135,47 @@ describe("prioritizeEvents — recency (Phase 3)", () => {
     expect(prioritizeEvents(events, { referenceTimeMs: REF })).toEqual(
       prioritizeEvents(events, { referenceTimeMs: REF }),
     );
+  });
+});
+
+describe("prioritizeEvents — recency display (Phase 4)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  it("surfaces the coarse recencyBucket per row when referenceTimeMs is supplied", () => {
+    const REF = 8 * DAY;
+    const fresh = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-09T00:00:00Z" }); // age 0 → fresh
+    const stale = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" }); // age 8d → stale
+    const ranked = prioritizeEvents([fresh, stale], { referenceTimeMs: REF });
+    const byIndex = new Map(ranked.map((r) => [r.inputIndex, r.recencyBucket]));
+    expect(byIndex.get(0)).toBe("fresh_0_2h");
+    expect(byIndex.get(1)).toBe("stale_over_7d");
+  });
+
+  it("without referenceTimeMs every row's recencyBucket is 'unknown'", () => {
+    const a = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-09T00:00:00Z" });
+    const b = normalizeEsmInquiry({ siteGubun: "GMARKET", answerYn: "N", regDt: "1970-01-09T00:00:00+00:00" });
+    const ranked = prioritizeEvents([a, b]); // no referenceTimeMs
+    expect(ranked.every((r) => r.recencyBucket === "unknown")).toBe(true);
+  });
+
+  it("sales_context has no recency → row recencyBucket is 'unknown' even with a reference", () => {
+    const REF = 8 * DAY;
+    const sales = normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100 });
+    const ranked = prioritizeEvents([sales], { referenceTimeMs: REF });
+    expect(ranked[0]?.recencyBucket).toBe("unknown");
+  });
+
+  it("the recencyBucket field is display only — it does not change scores or ordering", () => {
+    const REF = 8 * DAY;
+    const freshMedium = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", writtenAt: "1970-01-09T00:00:00Z" }); // 48
+    const staleHigh = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" }); // 70
+    const ranked = prioritizeEvents([freshMedium, staleHigh], { referenceTimeMs: REF });
+    // identical order + scores to the Phase-3 expectation; the new field is purely additive.
+    expect(ranked.map((r) => r.inputIndex)).toEqual([1, 0]);
+    expect(ranked.map((r) => r.priority.score)).toEqual([70, 48]);
+    // and the buckets are still surfaced for display
+    expect(ranked.map((r) => r.recencyBucket)).toEqual(["stale_over_7d", "fresh_0_2h"]);
   });
 });
 

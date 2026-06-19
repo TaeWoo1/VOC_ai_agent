@@ -4,7 +4,8 @@
 > `recencyBucket` (Phase 2c/2d) now feeds `priorityScoreFor` as a small, capped,
 > secondary tie-breaker. No `Date.*`, no `Date.now` / `new Date` / `generatedAt`, no
 > wall-clock read — recency scoring uses an **explicit `referenceTimeMs`** only. Phase 4
-> (surfacing the bucket as a view-row field) stays deferred.
+> (surfacing the bucket as a display-only view-row field + a `byRecency` digest histogram)
+> is now also implemented, and does not change scoring or ordering.
 
 This is the Phase 3 detail behind `recency-bucket-model.md` §7 ("small scoring
 factor") and `priority-score-model.md` §6 ("Future recency factor"). The *policy*
@@ -133,8 +134,10 @@ audit-meaningful ("recency did not move this score").
    contribution is non-zero (§4); `PriorityScoreExplanation` shape is unchanged.
 3. **Deterministic ranking.** `prioritizeEvents(events, opts?)` forwards a SINGLE
    batch-wide `referenceTimeMs` to every event's score; sort stays score-descending then
-   `inputIndex`-ascending. `attentionView(events, { referenceTimeMs })` forwards it to
-   `prioritizeEvents` only (not the digest); the view row shape is unchanged.
+   `inputIndex`-ascending. `attentionView(events, { referenceTimeMs })` forwards it to both
+   `prioritizeEvents` and `attentionDigest` so the Phase 4 display fields (row
+   `recencyBucket`, digest `byRecency`) reflect the same reference — display only, no effect
+   on score or order.
 4. **Per-bucket tests** — each bucket yields exactly its §2 points; `unknown`, future
    `eventTimeMs`, and missing `referenceTimeMs` → `+0`.
 5. **Dominance + safety tests** — a stale high-severity event still outranks a
@@ -145,15 +148,17 @@ audit-meaningful ("recency did not move this score").
 
 ## 6. Still deferred after Phase 3
 
-- **Phase 4 — `attentionView` recency passthrough.** Carry recency only through the
-  already-sanitized priority explanation; do **not** add a `generatedAt` (reference time
-  stays a caller input). Specified in `recency-bucket-model.md` §7; not in this PR.
+- **Phase 4 — display passthrough — now implemented.** The coarse `recencyBucket` is
+  surfaced (display only) on each prioritized/view row and as a `byRecency` digest
+  histogram, threaded from the explicit `referenceTimeMs`; no `generatedAt`, no effect on
+  score or order. Specified in `recency-bucket-model.md` §7.
 - **Negative recency penalties, SLA math, dedup, clustering, AI summaries, backend, UI**
   — all remain out of scope.
 
 ## Out of scope (now)
 
-Live NAVER / ESM / browser / Playwright · AI calls / model prompts · Phase 4 view-row
-recency surfacing · `Date.now` / `new Date` / `generatedAt` / wall-clock · credentials /
-seller IDs / Master ID / API key / JWT · backend · DB · upload · RUN_INTEGRATION · real
-data. NAVER live work is **paused**; ESM live/API/credential work is **deferred**.
+Live NAVER / ESM / browser / Playwright · AI calls / model prompts · negative recency
+penalties / SLA math / dedup / clustering · `Date.now` / `new Date` / `generatedAt` /
+wall-clock · credentials / seller IDs / Master ID / API key / JWT · backend · DB · upload ·
+RUN_INTEGRATION · real data. NAVER live work is **paused**; ESM live/API/credential work is
+**deferred**.
