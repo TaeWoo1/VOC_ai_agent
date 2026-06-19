@@ -10,6 +10,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { parseOffsetTimestampToEpochMs } from "../events/offset-timestamp-parser";
+import { recencyBucketFor } from "../events/recency-bucket";
+import type { SanitizedSummaryOptions } from "../events/recency-bucket";
 import type {
   ClaimReasonCategory,
   ClaimStatus,
@@ -116,6 +119,10 @@ function eventIdFor(channel: EsmChannel, claimNo: unknown, raw: RawEsmClaim): st
 /** Normalize one raw ESM claim into a `SellerOpsClaimEvent`. Buyer/recipient PII is dropped. */
 export function normalizeEsmClaim(raw: RawEsmClaim): SellerOpsClaimEvent {
   const channel = channelOf(raw.siteGubun);
+  const createdAt = trimOrNull(raw.regDt);
+  // INTERNAL: parse the primary timestamp only when it is offset-bearing; absent
+  // otherwise (timezone-less / invalid / missing). Never exposed in sanitized output.
+  const parsedEventTimeMs = parseOffsetTimestampToEpochMs(createdAt);
   return {
     eventId: eventIdFor(channel, raw.claimNo, raw),
     platform: "ESM_PLUS",
@@ -123,18 +130,29 @@ export function normalizeEsmClaim(raw: RawEsmClaim): SellerOpsClaimEvent {
     channel,
     claimType: claimTypeOf(raw.claimType),
     status: claimStatusOf(raw.claimStatus),
-    createdAt: trimOrNull(raw.regDt),
+    createdAt,
     updatedAt: trimOrNull(raw.updateDt),
     productRef: refOrNull(raw.itemNo),
     orderRef: refOrNull(raw.orderNo),
     claimRef: refOrNull(raw.claimNo),
     reasonCategory: reasonCategoryOf(raw.reasonName),
     reasonText: trimOrNull(raw.reasonText),
+    ...(parsedEventTimeMs !== null ? { eventTimeMs: parsedEventTimeMs } : {}),
   };
 }
 
 /** Log-safe summary — categories/booleans only; never content, refs, ids, or PII. */
-export function sanitizedClaimSummary(event: SellerOpsClaimEvent): SanitizedClaimSummary {
+export function sanitizedClaimSummary(
+  event: SellerOpsClaimEvent,
+  opts: SanitizedSummaryOptions = {},
+): SanitizedClaimSummary {
+  // Recency is derived from the internal `eventTimeMs` + an EXPLICIT caller reference
+  // time only; no wall-clock read. No reference time → `unknown`. The exact time and
+  // elapsed duration are never exposed — only the coarse bucket.
+  const recencyBucket =
+    opts.referenceTimeMs === undefined
+      ? "unknown"
+      : recencyBucketFor(event.eventTimeMs, opts.referenceTimeMs);
   return {
     platform: event.platform,
     kind: event.kind,
@@ -148,5 +166,6 @@ export function sanitizedClaimSummary(event: SellerOpsClaimEvent): SanitizedClai
     hasClaimRef: event.claimRef !== null,
     hasCreatedAt: event.createdAt !== null,
     hasUpdatedAt: event.updatedAt !== null,
+    recencyBucket,
   };
 }

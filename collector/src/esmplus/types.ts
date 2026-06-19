@@ -205,6 +205,13 @@ export interface SellerOpsClaimEvent {
   reasonCategory: ClaimReasonCategory;
   /** Free-form claim reason (content, not PII); null when absent. */
   reasonText: string | null;
+  /**
+   * INTERNAL parsed event time (epoch ms), derived from `createdAt` when it is an
+   * explicit-offset timestamp. Absent when `createdAt` is missing / timezone-less /
+   * invalid. **Internal only** — never exposed in sanitized summaries, attention
+   * signals/digest/views, logs, or telemetry. Phase 2c (claim).
+   */
+  eventTimeMs?: number;
 }
 
 /** Log-safe summary of a claim event — categories/booleans only, never content/refs/ids/PII. */
@@ -221,6 +228,12 @@ export interface SanitizedClaimSummary {
   hasClaimRef: boolean;
   hasCreatedAt: boolean;
   hasUpdatedAt: boolean;
+  /**
+   * Coarse recency of the claim (from internal `eventTimeMs` + an explicit caller
+   * reference time). `"unknown"` when no reference time is supplied, no `eventTimeMs`
+   * exists, or the time is future/invalid. Never the exact time or elapsed duration.
+   */
+  recencyBucket: RecencyBucket;
 }
 
 // --- Normalized SellerOps sales/settlement context event ------------------
