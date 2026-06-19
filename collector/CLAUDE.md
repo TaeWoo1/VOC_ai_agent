@@ -69,7 +69,8 @@ ingested into the dev DB. Never a real seller-center export.
 ```bash
 npm run discover -- --discover --classify-only --i-understand-this-opens-live-naver
 npm run discover-same-session -- --i-understand-this-opens-live-naver   # recommended for NAVER Commerce
-npm run probe-session -- --i-understand-this-opens-live-naver           # sanitized DOM probe
+npm run probe-session -- --i-understand-this-opens-live-naver           # sanitized DOM probe (separate launch)
+npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-ONLY same-context verdict probe; no export/click/download
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 
@@ -143,8 +144,12 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   booleans/bucketed counts/category enums for diagnosing `SESSION_EXPIRED` and
   `LAYOUT_UNRECOGNIZED` without exposing any DOM content (hostile-fixture tests
   enforce no leakage).
-- `cli/discover-export.ts`, `cli/discover-same-session.ts`, `cli/probe-session.ts`
-  — live entrypoints, all gated by `cli/live-run-approval.ts`.
+- `cli/discover-export.ts`, `cli/discover-same-session.ts`, `cli/probe-session.ts`,
+  `cli/probe-same-session.ts` — live entrypoints, all gated by `cli/live-run-approval.ts`.
+  `probe-same-session.ts` is a READ-ONLY diagnostic: it keeps one persistent-context
+  lifetime (human logs in → Enter → the SAME context reads the verdict) and is
+  structurally separate from discovery — it never imports `review-export`/`runExport`,
+  never clicks/captures an export, and writes no status file (source-guard test).
 
 ---
 

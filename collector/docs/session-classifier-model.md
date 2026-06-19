@@ -100,13 +100,33 @@ The verdict is now the authority for the discovery HALT decision. Pure mapping
   authority. Two marker sets thus coexist (`session.ts` vs `session-probe.ts`) — intentional
   for now; a future cleanup can retire `detectSession` once the verdict is proven live.
 
-## 5b. Still deferred
+## 5b. Confirming the verdict live (read-only) — `probe-same-session`
+
+Bridging an interactive `--login` to a later separate-launch `probe-session` loses the
+NAVER/Commerce session on the browser restart, so the probe always re-reads a login page
+(diagnosed: same `profileDir`/channel, not a path bug — the *restart* is the failing
+variable). To read the verdict in the session the human actually established, use
+`src/cli/probe-same-session.ts` (`npm run probe-same-session -- --i-understand-this-opens-live-naver`):
+one persistent-context lifetime — open NAVER → the human logs in / clears 2FA-CAPTCHA /
+picks the Commerce account+store and navigates to the target → press Enter → the **same**
+context reads the page **as left** and prints the sanitized `extractProbeSignals` output
+(including `sessionVerdict`).
+
+It is **read-only and structurally separate** from the classify-only discovery flow: it
+never imports `review-export`/`runExport`, never clicks/captures an export, waits on no
+download, writes no `.status` file, and sends nothing to SellerOps — locked by a
+source-guard test (`test/cli/probe-same-session.test.ts`). Use it (not
+`discover-same-session`, whose classify-only path *can* click a sync-export control on a
+`LOGGED_IN` page) when the boundary is "no export click, no download".
+
+## 5c. Still deferred
 
 - **Live confirmation of the placeholder reconnect markers** (`ACCOUNT_RECONNECT_MARKERS`)
-  and a real `LOGGED_IN` / `RECONNECT_REQUIRED` contrast sample. Until then a real Commerce
-  interstitial may still fall to `UNKNOWN → SESSION_EXPIRED`: the wiring is honest, the
-  trigger is still a placeholder. This is the standard "correct placeholders from sanitized
-  findings" loop, on explicit operator approval — a diagnostic run, not a code PR.
+  and a real `LOGGED_IN` / `RECONNECT_REQUIRED` contrast sample — now capturable via
+  `probe-same-session` above. Until confirmed, a real Commerce interstitial may still fall
+  to `UNKNOWN → SESSION_EXPIRED`: the wiring is honest, the trigger is still a placeholder.
+  This is the standard "correct placeholders from sanitized findings" loop, on explicit
+  operator approval — a diagnostic run, not a code PR.
 
 ## 6. Tests & fixtures
 
