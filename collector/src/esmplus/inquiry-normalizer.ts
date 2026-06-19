@@ -10,6 +10,9 @@
  */
 
 import { createHash } from "node:crypto";
+import { parseOffsetTimestampToEpochMs } from "../events/offset-timestamp-parser";
+import { recencyBucketFor } from "../events/recency-bucket";
+import type { SanitizedSummaryOptions } from "../events/recency-bucket";
 import type {
   EsmChannel,
   InquiryCategory,
@@ -95,6 +98,10 @@ function eventIdFor(channel: EsmChannel, inquiryNo: unknown, raw: RawEsmInquiry)
  */
 export function normalizeEsmInquiry(raw: RawEsmInquiry): SellerOpsInquiryEvent {
   const channel = channelOf(raw.siteGubun);
+  const createdAt = trimOrNull(raw.regDt);
+  // INTERNAL: parse the primary timestamp only when it is offset-bearing; absent
+  // otherwise (timezone-less / invalid / missing). Never exposed in sanitized output.
+  const parsedEventTimeMs = parseOffsetTimestampToEpochMs(createdAt);
   return {
     eventId: eventIdFor(channel, raw.inquiryNo, raw),
     platform: "ESM_PLUS",
@@ -104,14 +111,25 @@ export function normalizeEsmInquiry(raw: RawEsmInquiry): SellerOpsInquiryEvent {
     status: statusOf(raw.answerYn),
     title: trimOrNull(raw.title),
     body: trimOrNull(raw.contents),
-    createdAt: trimOrNull(raw.regDt),
+    createdAt,
     productRef: refOrNull(raw.itemNo),
     orderRef: refOrNull(raw.orderNo),
+    ...(parsedEventTimeMs !== null ? { eventTimeMs: parsedEventTimeMs } : {}),
   };
 }
 
 /** Log-safe summary — categories/booleans only; never content, refs, ids, or PII. */
-export function sanitizedInquirySummary(event: SellerOpsInquiryEvent): SanitizedInquirySummary {
+export function sanitizedInquirySummary(
+  event: SellerOpsInquiryEvent,
+  opts: SanitizedSummaryOptions = {},
+): SanitizedInquirySummary {
+  // Recency is derived from the internal `eventTimeMs` + an EXPLICIT caller reference
+  // time only; no wall-clock read. No reference time → `unknown`. The exact time and
+  // elapsed duration are never exposed — only the coarse bucket.
+  const recencyBucket =
+    opts.referenceTimeMs === undefined
+      ? "unknown"
+      : recencyBucketFor(event.eventTimeMs, opts.referenceTimeMs);
   return {
     platform: event.platform,
     kind: event.kind,
@@ -123,5 +141,6 @@ export function sanitizedInquirySummary(event: SellerOpsInquiryEvent): Sanitized
     hasProductRef: event.productRef !== null,
     hasOrderRef: event.orderRef !== null,
     hasCreatedAt: event.createdAt !== null,
+    recencyBucket,
   };
 }

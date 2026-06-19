@@ -17,13 +17,14 @@
   timezone.
 - **Phase 2b — offset-bearing parser `parseOffsetTimestampToEpochMs` implemented**
   (`src/events/offset-timestamp-parser.ts`). See `recency-timezone-policy.md`.
-- **Phase 2c-1 — internal `eventTimeMs` on review events implemented**; other kinds
+- **Phase 2c — internal `eventTimeMs` on `review` and `cs_inquiry` events implemented**
+  (review from `writtenAt`, inquiry from `createdAt`); `claim` / `order_shipping`
   deferred (`sales_context` stays `unknown`). See `recency-timestamp-source-audit.md`.
-- **Phase 2d-1 — review-only sanitized `recencyBucket` implemented**
-  (`sanitizedReviewSummary` / `sanitizedSummaryFor` accept an explicit
-  `{ referenceTimeMs }`; missing/non-finite ref or missing/future `eventTimeMs` →
+- **Phase 2d — sanitized `recencyBucket` on `review` and `cs_inquiry` implemented**
+  (`sanitizedReviewSummary` / `sanitizedInquirySummary` / `sanitizedSummaryFor` accept an
+  explicit `{ referenceTimeMs }`; missing/non-finite ref or missing/future `eventTimeMs` →
   `"unknown"`; no wall-clock read; `eventTimeMs`/raw timestamps/elapsed never exposed).
-  Remaining kinds deferred.
+  `claim` / `order_shipping` deferred.
 - **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,

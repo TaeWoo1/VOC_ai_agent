@@ -11,6 +11,8 @@ import {
   sanitizedInquirySummary,
   type RawEsmInquiry,
 } from "../../src/esmplus/inquiry-normalizer";
+import { sanitizedSummaryFor } from "../../src/events/sanitized-summary";
+import { attentionView } from "../../src/events/attention-view";
 
 // Synthetic only — never real ESM data. Buyer identity here must never reach output.
 const BUYER_NAME = "구매자홍길동";
@@ -88,6 +90,8 @@ describe("normalizeEsmInquiry", () => {
       createdAt: "2026-06-18T09:00:00.000Z",
       productRef: "12345",
       orderRef: "67890",
+      // internal parsed epoch ms from the offset-bearing createdAt (regDt)
+      eventTimeMs: 1_781_773_200_000,
     });
   });
 
@@ -156,12 +160,125 @@ describe("sanitizedInquirySummary", () => {
       hasProductRef: true,
       hasOrderRef: true,
       hasCreatedAt: true,
+      recencyBucket: "unknown",
     });
     const serialized = JSON.stringify(summary);
     expect(serialized).not.toContain("언제 배송");
     expect(serialized).not.toContain("12345");
     expect(serialized).not.toContain("778899");
     expect(serialized).not.toContain(BUYER_NAME);
+  });
+});
+
+describe("normalizeEsmInquiry — internal eventTimeMs (Phase 2c)", () => {
+  it("parses an offset-bearing createdAt (regDt) into internal eventTimeMs", () => {
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T00:00:00Z" }).eventTimeMs).toBe(0);
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T09:00:00+09:00" }).eventTimeMs).toBe(0);
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T00:00:00-05:00" }).eventTimeMs).toBe(18_000_000);
+  });
+
+  it("omits eventTimeMs for timezone-less / invalid createdAt", () => {
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "2026-06-18T09:00:00" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "not-a-date" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "2026-06-18T09:00:00+0900" })).not.toHaveProperty("eventTimeMs");
+  });
+
+  it("omits eventTimeMs for missing / null / blank createdAt", () => {
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET" })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: null })).not.toHaveProperty("eventTimeMs");
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "   " })).not.toHaveProperty("eventTimeMs");
+  });
+
+  it("preserves the raw createdAt string regardless of parse outcome", () => {
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T00:00:00Z" }).createdAt).toBe("1970-01-01T00:00:00Z");
+    expect(normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "2026-06-18T09:00:00" }).createdAt).toBe("2026-06-18T09:00:00");
+  });
+});
+
+describe("normalizeEsmInquiry — eventTimeMs is internal only", () => {
+  const e = normalizeEsmInquiry({ siteGubun: "GMARKET", answerYn: "N", regDt: "1970-01-01T00:00:00Z" });
+
+  it("is present on the normalized event", () => {
+    expect(e.eventTimeMs).toBe(0);
+  });
+
+  it("never appears in the sanitized inquiry summary", () => {
+    const summary = sanitizedInquirySummary(e);
+    expect(summary).not.toHaveProperty("eventTimeMs");
+    expect(JSON.stringify(summary)).not.toContain("eventTimeMs");
+  });
+
+  it("never appears in the event-dispatched sanitized summary", () => {
+    expect(JSON.stringify(sanitizedSummaryFor(e))).not.toContain("eventTimeMs");
+  });
+
+  it("never appears in the attention view (digest + ranked rows) built from inquiry input", () => {
+    expect(JSON.stringify(attentionView([e]))).not.toContain("eventTimeMs");
+  });
+});
+
+describe("sanitizedInquirySummary — recencyBucket (Phase 2d)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  // createdAt parses to eventTimeMs = 0 (Unix epoch).
+  const epochInquiry = normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T00:00:00Z" });
+
+  const bucketAt = (refMs: number) => sanitizedInquirySummary(epochInquiry, { referenceTimeMs: refMs }).recencyBucket;
+
+  it("computes each boundary bucket from explicit referenceTimeMs", () => {
+    expect(bucketAt(0)).toBe("fresh_0_2h");
+    expect(bucketAt(2 * HOUR)).toBe("same_day_2_24h");
+    expect(bucketAt(24 * HOUR)).toBe("recent_1_3d");
+    expect(bucketAt(3 * DAY)).toBe("aging_3_7d");
+    expect(bucketAt(7 * DAY)).toBe("stale_over_7d");
+  });
+
+  it("returns unknown when referenceTimeMs is missing / non-finite", () => {
+    expect(sanitizedInquirySummary(epochInquiry).recencyBucket).toBe("unknown");
+    expect(sanitizedInquirySummary(epochInquiry, {}).recencyBucket).toBe("unknown");
+    expect(sanitizedInquirySummary(epochInquiry, { referenceTimeMs: Number.NaN }).recencyBucket).toBe("unknown");
+    expect(sanitizedInquirySummary(epochInquiry, { referenceTimeMs: Number.POSITIVE_INFINITY }).recencyBucket).toBe("unknown");
+  });
+
+  it("returns unknown when the event has no eventTimeMs (timezone-less createdAt)", () => {
+    const noTime = normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "2026-06-18T09:00:00" });
+    expect(noTime).not.toHaveProperty("eventTimeMs");
+    expect(sanitizedInquirySummary(noTime, { referenceTimeMs: 1_000_000 }).recencyBucket).toBe("unknown");
+  });
+
+  it("returns unknown for a future eventTimeMs", () => {
+    const future = normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T01:00:00Z" }); // eventTimeMs = 3_600_000
+    expect(sanitizedInquirySummary(future, { referenceTimeMs: 0 }).recencyBucket).toBe("unknown");
+  });
+
+  it("never exposes eventTimeMs, raw createdAt, or elapsed duration", () => {
+    const summary = sanitizedInquirySummary(epochInquiry, { referenceTimeMs: 5 * HOUR });
+    expect(summary.recencyBucket).toBe("same_day_2_24h");
+    expect(summary).not.toHaveProperty("eventTimeMs");
+    const serialized = JSON.stringify(summary);
+    expect(serialized).not.toContain("eventTimeMs");
+    expect(serialized).not.toContain("1970-01-01T00:00:00Z"); // raw createdAt
+    expect(serialized).not.toContain(String(5 * HOUR)); // elapsed duration must not leak
+  });
+});
+
+describe("sanitizedSummaryFor — forwards referenceTimeMs to cs_inquiry (Phase 2d)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const epochInquiry = normalizeEsmInquiry({ siteGubun: "GMARKET", regDt: "1970-01-01T00:00:00Z" });
+
+  it("forwards referenceTimeMs into the inquiry recencyBucket", () => {
+    const s = sanitizedSummaryFor(epochInquiry, { referenceTimeMs: 2 * HOUR });
+    expect(s.kind).toBe("cs_inquiry");
+    if (s.kind === "cs_inquiry") expect(s.recencyBucket).toBe("same_day_2_24h");
+  });
+
+  it("without options, inquiry recencyBucket is unknown", () => {
+    const s = sanitizedSummaryFor(epochInquiry);
+    if (s.kind === "cs_inquiry") expect(s.recencyBucket).toBe("unknown");
+  });
+
+  it("attention view built from an inquiry never carries eventTimeMs", () => {
+    expect(JSON.stringify(attentionView([epochInquiry]))).not.toContain("eventTimeMs");
   });
 });
 

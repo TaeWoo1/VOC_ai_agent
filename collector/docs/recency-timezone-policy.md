@@ -14,24 +14,25 @@
   `Date.UTC`** (no `Date.*` at all), no wall-clock read. Invalid/ambiguous/non-string
   input → `null`. Not wired into normalizers; no `eventTimeMs` field; no
   `recencyBucket` summary wiring.
-- **Phase 2c-1 — internal `eventTimeMs` on review events only — implemented**
-  (`src/review/review-normalizer.ts`). The review normalizer parses `writtenAt` with
+- **Phase 2c — internal `eventTimeMs` on `review` and `cs_inquiry` events — implemented**
+  (`src/review/review-normalizer.ts`, `src/esmplus/inquiry-normalizer.ts`). Each
+  normalizer parses its primary raw field (review `writtenAt`, inquiry `createdAt`) with
   `parseOffsetTimestampToEpochMs` and includes an **internal** `eventTimeMs?: number`
-  only when the result is a number; timezone-less / invalid / missing `writtenAt` →
-  field omitted. The raw `writtenAt` string is unchanged. `eventTimeMs` is **internal
-  only** — it never appears in sanitized summaries, the dispatched summary, attention
-  signals/digest/views, logs, or telemetry (asserted by tests).
-- **Phase 2c (remaining kinds) — `cs_inquiry` / `claim` / `order_shipping` —
-  deferred** (`sales_context` stays `unknown` by design).
-- **Phase 2d-1 — review-only sanitized `recencyBucket` — implemented**
-  (`src/review/review-normalizer.ts`, `src/events/sanitized-summary.ts`).
-  `sanitizedReviewSummary(event, { referenceTimeMs })` and `sanitizedSummaryFor(event,
-  { referenceTimeMs })` surface a coarse `recencyBucket`, computed via `recencyBucketFor`
-  from the internal `eventTimeMs` + an **explicit caller reference time**. Missing /
-  non-finite `referenceTimeMs` → `"unknown"`; missing / future `eventTimeMs` →
-  `"unknown"`. No wall-clock read. `eventTimeMs`, raw timestamps, and elapsed duration
-  are never exposed. No scoring/ranking/view behavior change.
-- **Phase 2d (remaining kinds) — `cs_inquiry` / `claim` / `order_shipping` — deferred**
+  only when the result is a number; timezone-less / invalid / missing → field omitted.
+  The raw string is unchanged. `eventTimeMs` is **internal only** — it never appears in
+  sanitized summaries, the dispatched summary, attention signals/digest/views, logs, or
+  telemetry (asserted by tests).
+- **Phase 2c (remaining kinds) — `claim` / `order_shipping` — deferred**
+  (`sales_context` stays `unknown` by design).
+- **Phase 2d — sanitized `recencyBucket` on `review` and `cs_inquiry` — implemented**
+  (`src/review/review-normalizer.ts`, `src/esmplus/inquiry-normalizer.ts`,
+  `src/events/sanitized-summary.ts`). `sanitizedReviewSummary` / `sanitizedInquirySummary`
+  and `sanitizedSummaryFor(event, { referenceTimeMs })` surface a coarse `recencyBucket`,
+  computed via `recencyBucketFor` from the internal `eventTimeMs` + an **explicit caller
+  reference time**. Missing / non-finite `referenceTimeMs` → `"unknown"`; missing / future
+  `eventTimeMs` → `"unknown"`. No wall-clock read. `eventTimeMs`, raw timestamps, and
+  elapsed duration are never exposed. No scoring/ranking/view behavior change.
+- **Phase 2d (remaining kinds) — `claim` / `order_shipping` — deferred**
   (`sales_context` stays `unknown` by design).
 - **Phase 3 — recency factor in `priorityScoreFor` — deferred.**
 - **Phase 4 — `attentionView` passthrough — deferred.**
