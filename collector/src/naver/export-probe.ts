@@ -1,5 +1,6 @@
 import { urlCategory } from "./session-check";
 import type { UrlCategory } from "./session-probe";
+import type { SessionVerdict } from "./session-verdict";
 
 /**
  * Debug-safe EXPORT-AREA structural probe — PURE + SANITIZED.
@@ -187,5 +188,96 @@ export function extractExportProbeSignals(input: RawExportProbeInput): Sanitized
     exportCandidateCount: optionalBucket(input.exportCandidateTotal),
     visibleExportCandidateCount: optionalBucket(input.exportCandidateVisible),
     enabledExportCandidateCount: optionalBucket(input.exportCandidateEnabled),
+  };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Frame-aware aggregation (PURE).
+ *
+ * `extractExportProbeSignals` above sanitizes ONE document. The frame-aware
+ * probe runs it once per frame (top document + every child frame) and then
+ * folds the per-frame results into a single sanitized summary with this pure,
+ * browser-free aggregator. Keeping the fold here (not inline in the live CLI)
+ * makes the summary fields unit-testable and keeps the no-leak contract in one
+ * place: the aggregator only reads already-sanitized signals + category enums,
+ * so it can never reintroduce raw URL/HTML/label/PII. Asserted by an offline
+ * allow-list + hostile-fixture test, exactly like the per-document sanitizer.
+ * ------------------------------------------------------------------------- */
+
+/** Why a child frame's sanitized signals are present, blocked, or empty. */
+export type FrameReadResult = "read" | "blocked" | "empty";
+
+/** One child frame's read outcome. `signals` is null unless `readResult === "read"`. */
+export interface FrameExportProbe {
+  /** Coarse category of the frame's URL — never the raw URL. */
+  frameUrlCategory: UrlCategory;
+  readResult: FrameReadResult;
+  signals: SanitizedExportProbeSignals | null;
+}
+
+/** The ONLY shape ever printed by the frame-aware probe. Every leaf is non-sensitive. */
+export interface FrameAwareExportProbe {
+  /** Five-state session judgment (gate), from the top document's session probe. */
+  sessionVerdict: SessionVerdict;
+  /** Bucketed total frame count (top document + child frames). */
+  frameCount: CountBucket;
+  /** True iff some frame (top or child) exposes a visible AND enabled export candidate. */
+  anyFrameExportCandidates: boolean;
+  /** The top (main) document's sanitized export signals. */
+  topDocument: SanitizedExportProbeSignals;
+  /** One entry per child frame (the top document is reported separately, above). */
+  frames: FrameExportProbe[];
+}
+
+/** Exact set of top-level keys the frame-aware probe may emit — used by the allow-list test. */
+export const FRAME_AWARE_EXPORT_PROBE_KEYS: ReadonlyArray<keyof FrameAwareExportProbe> = [
+  "sessionVerdict",
+  "frameCount",
+  "anyFrameExportCandidates",
+  "topDocument",
+  "frames",
+];
+
+/** Exact set of per-child-frame keys — used by the allow-list test. */
+export const FRAME_EXPORT_PROBE_KEYS: ReadonlyArray<keyof FrameExportProbe> = [
+  "frameUrlCategory",
+  "readResult",
+  "signals",
+];
+
+/** A count bucket that actually indicates ≥1 (excludes "none" and the live-only "unknown"). */
+function isPositiveBucket(b: OptionalCountBucket): boolean {
+  return b !== "none" && b !== "unknown";
+}
+
+/** A document exposes an actionable export control iff it has a visible AND enabled candidate. */
+function hasActionableExportCandidate(signals: SanitizedExportProbeSignals): boolean {
+  return (
+    isPositiveBucket(signals.visibleExportCandidateCount) &&
+    isPositiveBucket(signals.enabledExportCandidateCount)
+  );
+}
+
+/**
+ * Pure: fold the top document + per-frame sanitized signals into one summary.
+ * `frameCount` buckets the total frames (top + children); `anyFrameExportCandidates`
+ * ORs the actionable-candidate test across the top document and every successfully
+ * read child frame. No field copies input text — see the SAFETY CONTRACT above.
+ */
+export function summarizeFrameExportProbes(input: {
+  sessionVerdict: SessionVerdict;
+  topDocument: SanitizedExportProbeSignals;
+  frames: FrameExportProbe[];
+}): FrameAwareExportProbe {
+  const { sessionVerdict, topDocument, frames } = input;
+  const anyChildHasCandidate = frames.some(
+    (f) => f.signals !== null && hasActionableExportCandidate(f.signals),
+  );
+  return {
+    sessionVerdict,
+    frameCount: bucket(frames.length + 1),
+    anyFrameExportCandidates: hasActionableExportCandidate(topDocument) || anyChildHasCandidate,
+    topDocument,
+    frames,
   };
 }

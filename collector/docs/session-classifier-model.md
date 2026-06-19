@@ -129,6 +129,34 @@ source-guard test (`test/cli/probe-same-session.test.ts`). Use it (not
 `discover-same-session`, whose classify-only path *can* click a sync-export control on a
 `LOGGED_IN` page) when the boundary is "no export click, no download".
 
+## 5b′. Locating the export UI live (read-only, frame-aware) — `probe-export-same-session`
+
+`probe-same-session` reads only the **top document**, so on the review route a `LOGGED_IN`
+page still reports `exportCandidateCount: "none"` — and that one reading **cannot tell apart**
+a nested iframe, a shadow DOM, a sub-route, a gated/hidden control, or a marker mismatch (all
+read identically as "none"). `src/cli/probe-export-same-session.ts`
+(`npm run probe-export-same-session -- --i-understand-this-opens-live-naver`) keeps the **same**
+one-context + sentinel flow but reads the **top document plus every child frame** so the next
+live run can *observe* which frame (if any) hosts export controls instead of guessing.
+
+It reuses the existing pure sanitizer `extractExportProbeSignals` (`src/naver/export-probe.ts`)
+**once per frame** — `page.frames()` returns all frames flattened (nested included) — then folds
+the per-frame results with the pure `summarizeFrameExportProbes`. Output is sanitized only:
+`sessionVerdict` (gate), a bucketed `frameCount`, `anyFrameExportCandidates` (a frame with a
+**visible AND enabled** candidate), the top document's signals, and one record per child frame
+(`frameUrlCategory` — a category enum, never a raw URL — `readResult`, and that frame's sanitized
+signals). Per-frame reads degrade on detached/cross-origin/`about:blank` frames (`"blocked"`/
+`"empty"`, `signals: null`) without aborting; only **open** shadow roots are observable (a
+browser limit, not claimed exhaustive).
+
+Same **read-only, structurally-separate** boundary as `probe-same-session`, locked by its own
+source-guard (`test/cli/probe-export-same-session.test.ts`): never imports `review-export`/
+`runExport`, never clicks/captures an export (the per-frame scan only reads text/attributes/
+geometry — no click/fill/press/dispatch), waits on no download, writes no `.status` file, and
+sends nothing to SellerOps. It shares the **same** sentinel path, so run only **one** probe at a
+time. It does not assert "iframe confirmed" — it reports observed structure; a confirmed cause
+requires a frame actually showing candidates.
+
 ## 5c. Still deferred
 
 - **Live confirmation of the placeholder reconnect markers** (`ACCOUNT_RECONNECT_MARKERS`)
