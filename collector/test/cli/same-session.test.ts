@@ -13,7 +13,8 @@ import {
 } from "../../src/cli/same-session";
 import { extractExportProbeSignals, SANITIZED_EXPORT_PROBE_KEYS } from "../../src/naver/export-probe";
 import { extractProbeSignals, SANITIZED_PROBE_KEYS } from "../../src/naver/session-probe";
-import type { ExportOutcome, SessionState } from "../../src/status";
+import type { SessionVerdict } from "../../src/naver/session-verdict";
+import type { ExportOutcome } from "../../src/status";
 
 describe("same-session: live approval is required", () => {
   // The same-session CLI guards every live action with the shared approval flag.
@@ -177,13 +178,24 @@ describe("SAME_SESSION_CONFIRM_PROMPT", () => {
   });
 });
 
-describe("classifyOnlyStatus", () => {
-  it("LOGGED_OUT after confirmation → SESSION_EXPIRED", () => {
-    expect(classifyOnlyStatus("LOGGED_OUT").state).toBe("SESSION_EXPIRED");
+describe("classifyOnlyStatus — verdict-keyed halt states", () => {
+  it("RECONNECT_REQUIRED → RECONNECT_REQUIRED (no longer the blanket SESSION_EXPIRED)", () => {
+    const { state, detail } = classifyOnlyStatus("RECONNECT_REQUIRED");
+    expect(state).toBe("RECONNECT_REQUIRED");
+    expect(detail).toMatch(/classify-only:/);
+    expect(detail).toMatch(/Commerce reconnect required/i);
   });
 
-  it("AUTH_CHALLENGE after confirmation → ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA", () => {
-    expect(classifyOnlyStatus("AUTH_CHALLENGE").state).toBe("ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA");
+  it("ACCOUNT_LOGIN_REQUIRED → ACCOUNT_LOGIN_REQUIRED", () => {
+    expect(classifyOnlyStatus("ACCOUNT_LOGIN_REQUIRED").state).toBe("ACCOUNT_LOGIN_REQUIRED");
+  });
+
+  it("AUTH_CHALLENGE_REQUIRED → ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA", () => {
+    expect(classifyOnlyStatus("AUTH_CHALLENGE_REQUIRED").state).toBe("ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA");
+  });
+
+  it("UNKNOWN → SESSION_EXPIRED (conservative — unconfirmed session)", () => {
+    expect(classifyOnlyStatus("UNKNOWN").state).toBe("SESSION_EXPIRED");
   });
 
   it("LOGGED_IN + CAPTURED → COLLECTING (capture is not success without upload)", () => {
@@ -210,7 +222,13 @@ describe("classifyOnlyStatus", () => {
 });
 
 describe("classify-only never reports success (LAST_SUCCESS impossible)", () => {
-  const sessions: SessionState[] = ["LOGGED_IN", "LOGGED_OUT", "AUTH_CHALLENGE"];
+  const verdicts: SessionVerdict[] = [
+    "LOGGED_IN",
+    "RECONNECT_REQUIRED",
+    "ACCOUNT_LOGIN_REQUIRED",
+    "AUTH_CHALLENGE_REQUIRED",
+    "UNKNOWN",
+  ];
   const outcomes: Array<ExportOutcome | undefined> = [
     undefined,
     "CAPTURED",
@@ -220,10 +238,10 @@ describe("classify-only never reports success (LAST_SUCCESS impossible)", () => 
     "NOT_ATTEMPTED",
   ];
 
-  for (const session of sessions) {
+  for (const verdict of verdicts) {
     for (const outcome of outcomes) {
-      it(`session=${session} export=${outcome ?? "none"} is never LAST_SUCCESS / UPLOAD_FAILED`, () => {
-        const { state } = classifyOnlyStatus(session, outcome);
+      it(`verdict=${verdict} export=${outcome ?? "none"} is never LAST_SUCCESS / UPLOAD_FAILED`, () => {
+        const { state } = classifyOnlyStatus(verdict, outcome);
         expect(state).not.toBe("LAST_SUCCESS");
         expect(state).not.toBe("UPLOAD_FAILED");
       });

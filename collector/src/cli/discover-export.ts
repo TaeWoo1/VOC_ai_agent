@@ -17,10 +17,11 @@
  */
 import { loadConfig } from "../config";
 import { log } from "../log";
-import { checkLiveSession } from "../naver/session-check";
+import { haltForVerdict } from "../naver/session-halt";
+import { checkLiveSessionVerdict } from "../naver/session-check";
 import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
-import { decideState, writeStatus, type RunSignals, type SessionState } from "../status";
+import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
 
@@ -56,17 +57,20 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
   }
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
-  const base: RunSignals = { paired: true, session: "LOGGED_OUT" };
+  // Reached only after a LOGGED_IN verdict; the export/upload legs use this base.
+  const base: RunSignals = { paired: true, session: "LOGGED_IN" };
   const now = (): string => new Date().toISOString();
 
-  // 1) Session check — never proceed on an ambiguous/invalid session.
+  // 1) Session check — the five-state verdict is the authority. Never proceed on
+  //    anything but LOGGED_IN; each other verdict halts with an honest state + detail
+  //    (RECONNECT_REQUIRED / ACCOUNT_LOGIN_REQUIRED / 2FA action / conservative expiry).
   await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
-  const session: SessionState = await checkLiveSession(page);
-  if (session !== "LOGGED_IN") {
-    const state = decideState({ ...base, session });
-    writeStatus(cfg.statusFile, { state, detail: "session not usable; reconnect required", updatedAt: now() });
+  const verdict = await checkLiveSessionVerdict(page);
+  const halt = haltForVerdict(verdict);
+  if (!halt.proceed) {
+    writeStatus(cfg.statusFile, { state: halt.state, detail: halt.detail, updatedAt: now() });
     await ctx.close();
-    log("run.halted", { state });
+    log("run.halted", { state: halt.state });
     return;
   }
 
@@ -78,7 +82,7 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
   // impossible (a CAPTURED sync export maps to COLLECTING, never success). No
   // real file was persisted (runExport skipped saveAs).
   if (classifyOnly) {
-    const state = decideState({ ...base, session, exportOutcome: outcome });
+    const state = decideState({ ...base, exportOutcome: outcome });
     const detail =
       outcome === "CAPTURED"
         ? "classify-only: sync export detected; not captured to disk, not uploaded"
@@ -90,7 +94,7 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
   }
 
   if (outcome !== "CAPTURED" || !filePath) {
-    const state = decideState({ ...base, session, exportOutcome: outcome });
+    const state = decideState({ ...base, exportOutcome: outcome });
     writeStatus(cfg.statusFile, { state, detail: `export outcome: ${outcome}`, updatedAt: now() });
     await ctx.close();
     log("run.done", { state, outcome });
@@ -109,7 +113,7 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
     uploadOutcome = "FAILED";
     detail = `upload failed at ${error instanceof UploadError ? error.stage : "unknown"}`;
   }
-  const state = decideState({ ...base, session, exportOutcome: "CAPTURED", uploadOutcome });
+  const state = decideState({ ...base, exportOutcome: "CAPTURED", uploadOutcome });
   writeStatus(cfg.statusFile, {
     state,
     detail,

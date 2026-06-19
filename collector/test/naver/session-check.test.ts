@@ -3,7 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { clearLogSink, getLogSink } from "../../src/log";
-import { checkLiveSession, sessionStateFromContent, urlCategory } from "../../src/naver/session-check";
+import {
+  checkLiveSession,
+  checkLiveSessionVerdict,
+  sessionStateFromContent,
+  sessionVerdictFromContent,
+  urlCategory,
+} from "../../src/naver/session-check";
 import type { PwPage } from "../../src/profile";
 
 const fixtures = resolve(dirname(fileURLToPath(import.meta.url)), "../../fixtures");
@@ -60,6 +66,37 @@ describe("sessionStateFromContent — seller-center detector precedence (synthet
   });
 });
 
+describe("sessionVerdictFromContent — content → five-state verdict (fixtures)", () => {
+  // The pure offline seam the live discovery HALT runs on (`checkLiveSessionVerdict` is
+  // its I/O wrapper). It reuses the probe's tightened, branding-demoted markers, so a
+  // fixture-level verdict here is exactly what discovery would decide on the same page.
+  it("Commerce reconnect interstitial (account chooser, no password) → RECONNECT_REQUIRED", () => {
+    expect(sessionVerdictFromContent(read("session_reconnect.html"), SELLER_URL)).toBe(
+      "RECONNECT_REQUIRED",
+    );
+  });
+
+  it("full NAVER account login page (password field) → ACCOUNT_LOGIN_REQUIRED", () => {
+    expect(sessionVerdictFromContent(read("session_login.html"), LOGIN_URL)).toBe(
+      "ACCOUNT_LOGIN_REQUIRED",
+    );
+  });
+
+  it("2FA / CAPTCHA page → AUTH_CHALLENGE_REQUIRED", () => {
+    expect(sessionVerdictFromContent(read("session_2fa.html"), LOGIN_URL)).toBe(
+      "AUTH_CHALLENGE_REQUIRED",
+    );
+  });
+
+  it("usable seller-center shell (no password) → LOGGED_IN", () => {
+    expect(sessionVerdictFromContent(read("session_logged_in.html"), SELLER_URL)).toBe("LOGGED_IN");
+  });
+
+  it("branding-only seller page (no strong signal, no reconnect) → UNKNOWN", () => {
+    expect(sessionVerdictFromContent(read("session_branding_only.html"), SELLER_URL)).toBe("UNKNOWN");
+  });
+});
+
 describe("urlCategory", () => {
   it("categorizes without exposing the raw URL", () => {
     expect(urlCategory(LOGIN_URL)).toBe("login");
@@ -92,6 +129,19 @@ describe("checkLiveSession", () => {
     expect(serialized).toContain("session.check");
     expect(serialized).toContain("seller-center");
     // the raw URL (and its query token) must never appear in logs
+    expect(serialized).not.toContain("SECRET-SHOULD-NOT-LOG");
+    expect(serialized).not.toContain("sell.smartstore.naver.com");
+  });
+
+  it("checkLiveSessionVerdict returns the verdict and logs only the verdict + category", async () => {
+    const page = fakePage(read("session_logged_in.html"), `${SELLER_URL}?token=SECRET-SHOULD-NOT-LOG`);
+    const verdict = await checkLiveSessionVerdict(page);
+    expect(verdict).toBe("LOGGED_IN");
+
+    const serialized = JSON.stringify(getLogSink());
+    expect(serialized).toContain("session.check");
+    expect(serialized).toContain("LOGGED_IN");
+    expect(serialized).toContain("seller-center");
     expect(serialized).not.toContain("SECRET-SHOULD-NOT-LOG");
     expect(serialized).not.toContain("sell.smartstore.naver.com");
   });
