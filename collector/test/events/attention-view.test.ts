@@ -131,6 +131,37 @@ describe("attentionView — determinism", () => {
   });
 });
 
+describe("attentionView — recency passthrough (Phase 3)", () => {
+  // A fresh low-rating review (one high signal → 70). writtenAt parses to eventTimeMs = 0.
+  const freshLowRating = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" });
+
+  it("forwards referenceTimeMs into scoring (recency raises the row's score)", () => {
+    const v = attentionView([freshLowRating], { referenceTimeMs: 0 }); // fresh → +8
+    expect(v.top[0]?.priority.score).toBe(78);
+    expect(v.top[0]?.priority.explanationCodes).toContain("recency_bucket_applied");
+  });
+
+  it("without referenceTimeMs, scoring is recency-blind (identical to before)", () => {
+    const v = attentionView([freshLowRating]);
+    expect(v.top[0]?.priority.score).toBe(70);
+    expect(v.top[0]?.priority.explanationCodes).not.toContain("recency_bucket_applied");
+  });
+
+  it("row shape is unchanged — recency is NOT surfaced as a row field (Phase 4 deferred)", () => {
+    const v = attentionView([freshLowRating], { referenceTimeMs: 0 });
+    expect(Object.keys(v.top[0]!).sort()).toEqual(["channel", "inputIndex", "kind", "platform", "priority"]);
+    expect(JSON.stringify(v)).not.toContain("recencyBucket");
+    expect(JSON.stringify(v)).not.toContain("eventTimeMs");
+  });
+
+  it("is deterministic for a fixed referenceTimeMs", () => {
+    const events = makeBatch(5);
+    expect(attentionView(events, { limit: 3, referenceTimeMs: 0 })).toEqual(
+      attentionView(events, { limit: 3, referenceTimeMs: 0 }),
+    );
+  });
+});
+
 describe("attentionView — no leakage", () => {
   it("never exposes raw content, refs/ids, exact amounts/counts, identity, or raw events", () => {
     const events = [
@@ -165,7 +196,9 @@ describe("module boundary", () => {
     expect(/from\s+["'](node:)?https?["']/.test(imports)).toBe(false);
     expect(/openai|anthropic/i.test(imports)).toBe(false);
     expect(/process\.env|\bfetch\(|\baxios\b/.test(src)).toBe(false);
-    // assembler-only slice: no time / generatedAt / recency / dedup / cluster in code.
+    // assembler-only slice: it forwards an explicit referenceTimeMs to scoring but
+    // contains NO recency LOGIC of its own (Phase 3), NO dedup/cluster, NO wall-clock
+    // read, and NO generatedAt. Check CODE only.
     const code = src
       .split("\n")
       .filter((l) => {
@@ -173,8 +206,10 @@ describe("module boundary", () => {
         return !(t.startsWith("*") || t.startsWith("//") || t.startsWith("/*") || t.startsWith("*/"));
       })
       .join("\n");
-    expect(/Date\.now|new Date\(/.test(code)).toBe(false);
+    expect(/Date\.now|new Date\(|Date\.UTC/.test(code)).toBe(false);
     expect(/generatedAt/.test(code)).toBe(false);
-    expect(/recency|dedup|cluster/i.test(code)).toBe(false);
+    // `referenceTimeMs` is allowed (it's a caller input); `recency`/`recencyBucket` logic
+    // must NOT appear in the view's own code (that stays Phase 4).
+    expect(/recencyBucket|dedup|cluster/i.test(code)).toBe(false);
   });
 });
