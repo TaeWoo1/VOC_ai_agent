@@ -28,9 +28,9 @@ function assertNever(x: never): never {
  * exactly the normalizer's own sanitized summary — no content, refs, ids, exact
  * amounts/counts, or identity are ever added here.
  *
- * `opts.referenceTimeMs` (explicit, never the wall clock) is forwarded only to the
- * review summary's coarse `recencyBucket`; without it, review recency is `"unknown"`.
- * Other kinds do not yet carry recency.
+ * `opts.referenceTimeMs` (explicit, never the wall clock) is forwarded to the review
+ * and cs_inquiry summaries' coarse `recencyBucket`; without it, their recency is
+ * `"unknown"`. The remaining kinds do not yet carry recency.
  */
 export function sanitizedSummaryFor(
   event: SellerOpsEvent,
@@ -40,7 +40,7 @@ export function sanitizedSummaryFor(
     case "review":
       return sanitizedReviewSummary(event, opts);
     case "cs_inquiry":
-      return sanitizedInquirySummary(event);
+      return sanitizedInquirySummary(event, opts);
     case "order_shipping":
       return sanitizedOrderSummary(event);
     case "claim":

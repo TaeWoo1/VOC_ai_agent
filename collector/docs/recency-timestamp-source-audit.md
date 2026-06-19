@@ -51,7 +51,14 @@ purposes.
 - Normalizer (`inquiry-normalizer.ts`): `createdAt: trimOrNull(raw.regDt)` — raw
   string passthrough from the marketplace `regDt`.
 - Sanitized summary exposes `hasCreatedAt: boolean`.
-- **Not safe.** Primary recency source would be `createdAt`.
+- **Status (Phase 2c + 2d implemented):** the inquiry event now also carries an
+  **internal** `eventTimeMs?: number`, parsed from `createdAt` via
+  `parseOffsetTimestampToEpochMs` (offset-bearing only; timezone-less/invalid/missing →
+  omitted). The raw `createdAt` is unchanged, and `eventTimeMs` is internal-only (never
+  in sanitized output). The **sanitized inquiry summary now exposes a coarse
+  `recencyBucket`** (computed from `eventTimeMs` + an explicit caller `referenceTimeMs`;
+  `"unknown"` without a reference time / event time). Primary recency source =
+  `createdAt`.
 
 ### claim
 - Type: `createdAt: string | null`, `updatedAt: string | null`.

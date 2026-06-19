@@ -11,6 +11,8 @@
  * identity, API key, master/seller ID, or customer PII belongs in this layer.
  */
 
+import type { RecencyBucket } from "../events/recency-bucket";
+
 /** Platform tag for normalized SellerOps events from ESM Plus. */
 export type EsmPlatform = "ESM_PLUS";
 
@@ -87,6 +89,13 @@ export interface SellerOpsInquiryEvent {
   productRef: string | null;
   /** Order reference code (not PII); null when absent. */
   orderRef: string | null;
+  /**
+   * INTERNAL parsed event time (epoch ms), derived from `createdAt` when it is an
+   * explicit-offset timestamp. Absent when `createdAt` is missing / timezone-less /
+   * invalid. **Internal only** — never exposed in sanitized summaries, attention
+   * signals/digest/views, logs, or telemetry. Phase 2c (cs_inquiry).
+   */
+  eventTimeMs?: number;
 }
 
 /** Log-safe summary of an inquiry event — categories/booleans only, never content/refs/ids. */
@@ -101,6 +110,12 @@ export interface SanitizedInquirySummary {
   hasProductRef: boolean;
   hasOrderRef: boolean;
   hasCreatedAt: boolean;
+  /**
+   * Coarse recency of the inquiry (from internal `eventTimeMs` + an explicit caller
+   * reference time). `"unknown"` when no reference time is supplied, no `eventTimeMs`
+   * exists, or the time is future/invalid. Never the exact time or elapsed duration.
+   */
+  recencyBucket: RecencyBucket;
 }
 
 // --- Normalized SellerOps order/shipping event ----------------------------
