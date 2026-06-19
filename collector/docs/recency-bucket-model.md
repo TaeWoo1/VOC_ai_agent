@@ -1,8 +1,9 @@
 # SellerOps recency-bucket model — specification
 
-> Offline; no AI; no live collection. Phase 1 (the pure helper) is implemented;
-> Phases 2–4 (sanitized-summary field, scoring factor, view passthrough) remain
-> deferred. No `Date.now` / `new Date` / current-time read in source.
+> Offline; no AI; no live collection. Phases 1–3 (the pure helper, the sanitized-summary
+> `recencyBucket` field, and the capped scoring tie-breaker) are implemented; Phase 4
+> (view-row passthrough) remains deferred. No `Date.now` / `new Date` / current-time read
+> in source.
 
 ## Implementation status
 
@@ -28,8 +29,13 @@
   explicit `{ referenceTimeMs }`; missing/non-finite ref or missing/future `eventTimeMs` →
   `"unknown"`; no wall-clock read; `eventTimeMs`/raw timestamps/elapsed never exposed).
   `sales_context` stays `unknown` by design.
-- **Phase 3 — small recency factor in `priorityScoreFor` — deferred.**
-- **Phase 4 — `attentionView` passthrough via priority explanation — deferred.**
+- **Phase 3 — small recency factor in `priorityScoreFor` — implemented**
+  (`RECENCY_BUCKET_POINTS`, capped +8, secondary tie-breaker; applied only from an
+  explicit `referenceTimeMs`, threaded through `prioritizeEvents` / `attentionView`).
+  See `recency-scoring-policy.md`.
+- **Phase 4 — `attentionView` view-row recency passthrough — deferred.** Phase 3 forwards
+  `referenceTimeMs` into scoring, but the coarse bucket is **not** yet surfaced as a
+  view-row field / digest histogram.
 - **Exact SLA, timezone handling, deduplication, clustering, AI summaries, backend,
   UI — deferred** (§8).
 
@@ -132,10 +138,12 @@ only, no `Date.now`, invalid/missing → `unknown`. Pure + unit-tested at bounda
 Add a safe `recencyBucket` to sanitized summaries **only where a safe event timestamp
 already exists** in the normalized event. Expose the **bucket**, never the timestamp.
 
-**Phase 3 — small scoring factor.**
-Add a small recency factor to `priorityScoreFor` with a fixed explanation code
-`recency_bucket_applied`. Keep it **lower** than claim/review/inquiry severity, so it
-nudges but never dominates.
+**Phase 3 — small scoring factor (implemented).**
+`priorityScoreFor` adds a small recency factor with the fixed explanation code
+`recency_bucket_applied`. It is **lower** than claim/review/inquiry severity (capped +8),
+so it nudges but never dominates. The full policy — bucket→points table, guardrails (no
+negative penalty, `unknown` never punished), the score-folded band rule, and
+determinism/safety constraints — is in `recency-scoring-policy.md`.
 
 **Phase 4 — view passthrough.**
 Let `attentionView` carry recency **only** through the already-sanitized priority

@@ -7,10 +7,15 @@
  *   - `prioritizeEvents(events)`  — sanitized ranked rows
  * and slicing the ranked rows to a normalized top-N limit.
  *
- * It adds NO new scoring logic, NO AI, NO recency/dedup/clustering, and NO timestamp.
- * The output is fully sanitized (it only carries the digest counts + sanitized
- * `PrioritizedEvent` rows) — never raw events, refs, content, exact amounts/counts,
- * or identity. No I/O, no network, no fs, no browser, no env, no current-time read.
+ * It adds NO new scoring logic, NO AI, NO dedup/clustering, and NO timestamp of its own.
+ * It may forward an explicit caller `referenceTimeMs` to `prioritizeEvents` so the
+ * priority score can apply its capped recency tie-breaker (Phase 3) — this is a caller
+ * input, never a wall-clock read, and the view adds no `generatedAt`. The view ROW shape
+ * is unchanged: recency affects ordering via the score only, it is not surfaced as a
+ * row field (Phase 4, deferred). The output is fully sanitized (it only carries the
+ * digest counts + sanitized `PrioritizedEvent` rows) — never raw events, refs, content,
+ * exact amounts/counts, or identity. No I/O, no network, no fs, no browser, no env, no
+ * current-time read.
  */
 
 import { attentionDigest } from "./attention-digest";
@@ -21,6 +26,12 @@ import type { SellerOpsEvent } from "./types";
 
 export interface AttentionViewOptions {
   limit?: number;
+  /**
+   * Explicit caller reference time (epoch ms) for recency scoring — never the wall
+   * clock. Forwarded to `prioritizeEvents` → `priorityScoreFor`. Omitted → recency
+   * contributes `+0` and ordering is identical to the pre-recency behavior.
+   */
+  referenceTimeMs?: number;
 }
 
 export interface AttentionView {
@@ -58,7 +69,8 @@ export function attentionView(
 ): AttentionView {
   const limit = normalizeLimit(opts?.limit);
   const digest = attentionDigest(events);
-  const ranked = prioritizeEvents(events);
+  // Forward the explicit reference time to scoring only (digest carries no recency).
+  const ranked = prioritizeEvents(events, { referenceTimeMs: opts?.referenceTimeMs });
   return {
     totalEvents: events.length,
     totalRankedEvents: ranked.length,

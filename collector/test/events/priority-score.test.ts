@@ -104,7 +104,7 @@ describe("priorityScoreFor — no leakage", () => {
       normalizeEsmClaim({ siteGubun: "AUCTION", claimStatus: "접수", reasonText: CLAIM_REASON, claimNo: 900800700 }),
       normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100, sellerId: SELLER_ID, masterId: MASTER_ID, settlementNo: 50607080 }),
     ];
-    const serialized = JSON.stringify(events.map(priorityScoreFor));
+    const serialized = JSON.stringify(events.map((e) => priorityScoreFor(e)));
     for (const leak of [
       REVIEW_BODY, CLAIM_REASON,
       "778899", "555", "900800700", "50607080",
@@ -113,6 +113,97 @@ describe("priorityScoreFor — no leakage", () => {
     ]) {
       expect(serialized).not.toContain(leak);
     }
+  });
+
+  it("recency does not leak eventTimeMs, a raw timestamp, or an elapsed duration", () => {
+    // A fresh low-rating review whose writtenAt parses to eventTimeMs = 0.
+    const e = normalizeReview({ platform: "NAVER", rating: 1, body: REVIEW_BODY, writtenAt: "1970-01-01T00:00:00Z" });
+    const REF = 5 * 60 * 60 * 1000; // 5h → same_day bucket
+    const serialized = JSON.stringify(priorityScoreFor(e, { referenceTimeMs: REF }));
+    expect(serialized).not.toContain("eventTimeMs");
+    expect(serialized).not.toContain("1970-01-01T00:00:00Z"); // raw timestamp
+    expect(serialized).not.toContain(String(REF)); // elapsed/reference duration
+  });
+});
+
+describe("priorityScoreFor — recency (Phase 3)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  // A low-rating review (one high signal → base 70 / high). writtenAt parses to eventTimeMs = 0.
+  const lowRating = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" });
+
+  it("no referenceTimeMs → identical to pre-recency behavior (no recency code)", () => {
+    const r = priorityScoreFor(lowRating);
+    expect(r.score).toBe(70);
+    expect(r.band).toBe("high");
+    expect(r.explanationCodes).toEqual(["severity_weight_applied", "band_assigned"]);
+    expect(r.explanationCodes).not.toContain("recency_bucket_applied");
+  });
+
+  it("adds exactly the per-bucket points from an explicit referenceTimeMs", () => {
+    const scoreAt = (refMs: number) => priorityScoreFor(lowRating, { referenceTimeMs: refMs }).score;
+    expect(scoreAt(0)).toBe(78); // fresh_0_2h  +8
+    expect(scoreAt(2 * HOUR)).toBe(75); // same_day_2_24h +5
+    expect(scoreAt(24 * HOUR)).toBe(72); // recent_1_3d +2
+    expect(scoreAt(3 * DAY)).toBe(70); // aging_3_7d +0
+    expect(scoreAt(7 * DAY)).toBe(70); // stale_over_7d +0
+  });
+
+  it("records recency_bucket_applied only when the contribution is non-zero", () => {
+    const codesAt = (refMs: number) => priorityScoreFor(lowRating, { referenceTimeMs: refMs }).explanationCodes;
+    expect(codesAt(0)).toContain("recency_bucket_applied"); // fresh
+    expect(codesAt(24 * HOUR)).toContain("recency_bucket_applied"); // recent
+    expect(codesAt(3 * DAY)).not.toContain("recency_bucket_applied"); // aging → +0
+    expect(codesAt(7 * DAY)).not.toContain("recency_bucket_applied"); // stale → +0
+    // code is appended before band_assigned (after the severity/bonus codes)
+    expect(codesAt(0)).toEqual(["severity_weight_applied", "recency_bucket_applied", "band_assigned"]);
+  });
+
+  it("score-folded: recency adds to the raw score and band is derived from the total", () => {
+    const r = priorityScoreFor(lowRating, { referenceTimeMs: 0 }); // fresh +8
+    expect(r.score).toBe(78); // 70 + 8, folded into the score
+    expect(r.band).toBe("high"); // band = bandFor(78); +8 cap < the 30-pt gap to urgent, so no tip
+  });
+
+  it("future event time → unknown → +0 (recency never rewards a future timestamp)", () => {
+    const future = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T01:00:00Z" }); // eventTimeMs = 3_600_000
+    const r = priorityScoreFor(future, { referenceTimeMs: 0 });
+    expect(r.score).toBe(70);
+    expect(r.explanationCodes).not.toContain("recency_bucket_applied");
+  });
+
+  it("sales_context has no recencyBucket → unknown → +0 even with a referenceTimeMs", () => {
+    const sales = normalizeEsmSalesContext({ siteGubun: "GMARKET", grossSalesAmount: GROSS, orderCount: 100 });
+    const withRef = priorityScoreFor(sales, { referenceTimeMs: 0 });
+    const noRef = priorityScoreFor(sales);
+    expect(withRef.score).toBe(noRef.score); // recency makes no difference
+    expect(withRef.explanationCodes).not.toContain("recency_bucket_applied");
+  });
+
+  it("a fresh no-signal event stays score 0 — recency never invents priority", () => {
+    const order = normalizeEsmOrder({ siteGubun: "GMARKET", orderStatus: "배송완료", orderDt: "1970-01-01T00:00:00Z" });
+    const r = priorityScoreFor(order, { referenceTimeMs: 0 }); // would be fresh, but no signals
+    expect(r.score).toBe(0);
+    expect(r.band).toBe("low");
+    expect(r.explanationCodes).toEqual(["no_attention_signals", "band_assigned"]);
+  });
+
+  it("recency cannot overcome severity: a stale high outscores a fresh medium", () => {
+    const REF = 8 * DAY;
+    const staleHigh = priorityScoreFor(lowRating, { referenceTimeMs: REF }); // 70 + 0 (stale)
+    const freshMedium = priorityScoreFor(
+      normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", writtenAt: "1970-01-09T00:00:00Z" }),
+      { referenceTimeMs: REF }, // not-replied (40) + fresh (+8) = 48
+    );
+    expect(staleHigh.score).toBe(70);
+    expect(freshMedium.score).toBe(48);
+    expect(staleHigh.score).toBeGreaterThan(freshMedium.score);
+  });
+
+  it("is deterministic for a fixed referenceTimeMs", () => {
+    expect(priorityScoreFor(lowRating, { referenceTimeMs: 0 })).toEqual(
+      priorityScoreFor(lowRating, { referenceTimeMs: 0 }),
+    );
   });
 });
 

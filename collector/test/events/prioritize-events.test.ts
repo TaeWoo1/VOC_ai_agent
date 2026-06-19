@@ -82,6 +82,54 @@ describe("prioritizeEvents — determinism", () => {
   });
 });
 
+describe("prioritizeEvents — recency (Phase 3)", () => {
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  it("without referenceTimeMs, ordering is identical to the pre-recency behavior", () => {
+    // Two not-replied reviews (both score 40); fresh writtenAt must NOT reorder them.
+    const a = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", reviewRef: "a", writtenAt: "1970-01-09T00:00:00Z" });
+    const b = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", reviewRef: "b", writtenAt: "1970-01-01T00:00:00Z" });
+    const ranked = prioritizeEvents([a, b]); // no referenceTimeMs
+    expect(ranked.every((r) => r.priority.score === 40)).toBe(true);
+    expect(ranked.map((r) => r.inputIndex)).toEqual([0, 1]); // stable, recency-blind
+  });
+
+  it("a batch-wide referenceTimeMs reorders equal-severity events by recency", () => {
+    const REF = 8 * DAY;
+    // Both not-replied reviews (medium 40). `fresh` is recent vs REF; `stale` is old.
+    const stale = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", reviewRef: "stale", writtenAt: "1970-01-01T00:00:00Z" });
+    const fresh = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", reviewRef: "fresh", writtenAt: "1970-01-09T00:00:00Z" });
+    const ranked = prioritizeEvents([stale, fresh], { referenceTimeMs: REF });
+    // fresh (40 + 8 = 48) now outranks stale (40 + 0), so input index 1 comes first.
+    expect(ranked.map((r) => r.inputIndex)).toEqual([1, 0]);
+    expect(ranked[0]?.priority.score).toBe(48);
+    expect(ranked[1]?.priority.score).toBe(40);
+  });
+
+  it("recency does not dominate severity: a stale high outranks a fresh medium", () => {
+    const REF = 8 * DAY;
+    const freshMedium = normalizeReview({ platform: "NAVER", rating: 5, replyStatus: "미답변", writtenAt: "1970-01-09T00:00:00Z" }); // 48
+    const staleHigh = normalizeReview({ platform: "NAVER", rating: 1, writtenAt: "1970-01-01T00:00:00Z" }); // 70
+    const ranked = prioritizeEvents([freshMedium, staleHigh], { referenceTimeMs: REF });
+    expect(ranked.map((r) => r.inputIndex)).toEqual([1, 0]); // staleHigh first despite freshMedium being fresher
+    expect(ranked[0]?.priority.score).toBe(70);
+    expect(ranked[1]?.priority.score).toBe(48);
+  });
+
+  it("is deterministic for a fixed batch-wide referenceTimeMs", () => {
+    const REF = 5 * HOUR;
+    const events = [
+      normalizeReview({ platform: "NAVER", rating: 2, replyStatus: "미답변", writtenAt: "1970-01-01T00:00:00Z" }),
+      normalizeEsmInquiry({ siteGubun: "GMARKET", answerYn: "N" }),
+      normalizeEsmOrder({ siteGubun: "GMARKET", orderStatus: "배송완료" }),
+    ];
+    expect(prioritizeEvents(events, { referenceTimeMs: REF })).toEqual(
+      prioritizeEvents(events, { referenceTimeMs: REF }),
+    );
+  });
+});
+
 describe("prioritizeEvents — no leakage", () => {
   it("ranked rows never expose raw content, refs/ids, exact amounts/counts, or identity", () => {
     const events = [
@@ -116,7 +164,9 @@ describe("module boundary", () => {
     expect(/from\s+["'](node:)?https?["']/.test(imports)).toBe(false);
     expect(/openai|anthropic/i.test(imports)).toBe(false);
     expect(/process\.env|\bfetch\(|\baxios\b/.test(src)).toBe(false);
-    // ranking-only slice: no recency/dedup/cluster, no time. Check CODE only.
+    // ranking slice: recency is applied via priorityScoreFor from an explicit
+    // referenceTimeMs (the `./recency-bucket` import is legitimate); still NO dedup/
+    // cluster and NO wall-clock read. Check CODE only.
     const code = src
       .split("\n")
       .filter((l) => {
@@ -124,7 +174,7 @@ describe("module boundary", () => {
         return !(t.startsWith("*") || t.startsWith("//") || t.startsWith("/*") || t.startsWith("*/"));
       })
       .join("\n");
-    expect(/Date\.now|new Date\(/.test(code)).toBe(false);
-    expect(/recency|dedup|cluster/i.test(code)).toBe(false);
+    expect(/Date\.now|new Date\(|Date\.UTC|generatedAt/.test(code)).toBe(false);
+    expect(/dedup|cluster/i.test(code)).toBe(false);
   });
 });

@@ -1,27 +1,33 @@
 # SellerOps priority-score model — specification
 
-> Offline; no AI; no live collection. The single-event scorer and batch ranking are
-> now implemented; recency/dedup/cluster/AI factors remain deferred.
+> Offline; no AI; no live collection. The single-event scorer, batch ranking, and a
+> small capped recency tie-breaker (Phase 3) are now implemented; dedup/cluster/AI
+> factors and Phase 4 view-row recency surfacing remain deferred.
 
 ## Implementation status
 
-- **`priorityScoreFor(event)` — implemented** (`src/events/priority-score.ts`). Pure,
-  deterministic, AI-free single-event scorer. Reads only `attentionSignalsFor` (hence
-  only sanitized summaries). It follows this spec: severity weights (§6), a
-  conservative co-occurrence bonus (§6), a coarse `high_sales_context` bonus from the
-  amountBucket-derived signal (§6), band mapping (§7), and fixed deterministic
-  explanation codes (§8). No raw content, no AI, no live I/O, no current-time read.
-- **`prioritizeEvents(events)` — implemented** (`src/events/prioritize-events.ts`).
+- **`priorityScoreFor(event, opts?)` — implemented** (`src/events/priority-score.ts`).
+  Pure, deterministic, AI-free single-event scorer. Reads only `attentionSignalsFor` and
+  the sanitized summary's coarse `recencyBucket`. It follows this spec: severity weights
+  (§6), a conservative co-occurrence bonus (§6), a coarse `high_sales_context` bonus from
+  the amountBucket-derived signal (§6), a small capped recency tie-breaker (§6, Phase 3 —
+  applied only from an explicit `opts.referenceTimeMs`), band mapping (§7), and fixed
+  deterministic explanation codes (§8). No raw content, no AI, no live I/O, no
+  current-time read.
+- **`prioritizeEvents(events, opts?)` — implemented** (`src/events/prioritize-events.ts`).
   Pure, deterministic batch ranking over `priorityScoreFor`. Returns **sanitized**
   `PrioritizedEvent[]` (`inputIndex`, coarse `kind`/`platform`/`channel`, and the
   priority explanation) — **never the raw event object**, refs, content, exact
   amounts/counts, or identity. Order: **score descending**, then **`inputIndex`
   ascending** as the stable tie-breaker (no hidden product judgment via event-kind
-  ordering yet). Empty input → `[]`. No recency, no dedup, no cluster, no AI, no
+  ordering yet). A single batch-wide `opts.referenceTimeMs` (explicit, never the wall
+  clock) is forwarded to scoring so recency can break ties; omitted → recency `+0`,
+  ordering identical to before. Empty input → `[]`. No dedup, no cluster, no AI, no
   current-time read.
-- **Recency / deduplication / clustering / AI summaries — still deferred** (§9). The
-  safe recency factor's boundary and phased plan are specified (docs-only, not yet
-  implemented) in `recency-bucket-model.md`.
+- **Recency scoring (Phase 3) — implemented** (see `recency-scoring-policy.md`): a small,
+  capped (+8 max) secondary tie-breaker from the coarse `recencyBucket`, applied only
+  from an explicit `referenceTimeMs`. **Deduplication / clustering / AI summaries — still
+  deferred** (§9). **Phase 4** (surfacing `recencyBucket` as a view-row field) — deferred.
 - **Automatic reply / posting — excluded** (§9).
 - The ranked rows + batch digest are assembled into a top-N "what needs attention
   today" payload by `attentionView` — see `attention-view-model.md` (no new scoring,
@@ -126,7 +132,13 @@ high/medium signal beyond the first. Exact curve TBD at implementation.
 - `unknown` → neutral (never penalize for missing data)
 - never use the exact amount.
 
-**Future recency factor** — *deferred* until a safe timestamp/age **bucket** exists.
+**Recency factor (Phase 3 — implemented)** — a small additive, **capped at +8**,
+secondary tie-breaker from the coarse `recencyBucket` (`fresh_0_2h` +8 ·
+`same_day_2_24h` +5 · `recent_1_3d` +2 · `aging_3_7d`/`stale_over_7d`/`unknown` +0), no
+negative penalty, `unknown` never punished, applied only from an explicit
+`referenceTimeMs` (never the wall clock). Encoded as `RECENCY_BUCKET_POINTS` in
+`src/events/priority-score.ts`. Full policy + the score-folded band rule:
+`recency-scoring-policy.md`.
 
 **Future repeat / cluster factor** — *deferred* until a dedup/cluster model with a safe
 grouping key exists.
@@ -169,8 +181,9 @@ interface PriorityScoreExplanation {
 
 ## 9. Deferred work (and why)
 
-- **Exact recency scoring** — deferred until safe age **buckets** exist (raw
-  timestamps are not exposed in sanitized summaries).
+- **Recency scoring (Phase 3)** — **implemented** as a small capped tie-breaker (see §6
+  and `recency-scoring-policy.md`). **Phase 4** (surfacing `recencyBucket` as a view-row
+  field / digest histogram) remains deferred.
 - **Deduplication** — deferred until a safe, stable grouping key exists (event ids and
   refs are intentionally not in the summaries).
 - **Product-level clustering** — deferred until a safe product grouping strategy exists.
@@ -188,7 +201,8 @@ interface PriorityScoreExplanation {
 5. Map score → band with documented thresholds (§7).
 6. Tests: determinism, band thresholds, co-occurrence compounding, sales multiplier
    from bucket only, **no-leak sweep**, module boundary (no network/fs/browser/env/AI).
-7. Keep recency/dedup/cluster factors stubbed/deferred per §9 until safe fields exist.
+7. Recency tie-breaker (Phase 3) — **done** (§6). Keep dedup/cluster factors deferred per
+   §9 until safe grouping keys exist.
 
 ## Out of scope (now)
 
