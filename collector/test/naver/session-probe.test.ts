@@ -41,9 +41,17 @@ const ALLOWED_VALUES: Record<string, ReadonlyArray<unknown> | "number" | "boolea
   candidateLoggedInShellPresent: "boolean",
   candidateMenuOrGnbPresent: "boolean",
   candidateLogoutAffordancePresent: "boolean",
+  accountReconnectAffordancePresent: "boolean",
   reviewRouteLike: "boolean",
   exportCandidateCount: ["none", "one", "few", "many"],
   hydrationWaitResult: ["hydrated", "timeout", "not-attempted", "error"],
+  sessionVerdict: [
+    "LOGGED_IN",
+    "RECONNECT_REQUIRED",
+    "ACCOUNT_LOGIN_REQUIRED",
+    "AUTH_CHALLENGE_REQUIRED",
+    "UNKNOWN",
+  ],
 };
 
 describe("extractProbeSignals — sanitization (hostile fixture)", () => {
@@ -82,6 +90,8 @@ describe("extractProbeSignals — sanitization (hostile fixture)", () => {
     expect(signals.appRootPresent).toBe(true);
     expect(signals.appRootChildCount).toBe("some"); // 12 → some
     expect(signals.reviewRouteLike).toBe(true);
+    // seller-center URL + logout + export, no password → LOGGED_IN
+    expect(signals.sessionVerdict).toBe("LOGGED_IN");
   });
 });
 
@@ -128,5 +138,67 @@ describe("extractProbeSignals — discrete signal detection", () => {
     expect(few.exportCandidateCount).toBe("one");
     const none = extractProbeSignals({ url: SELLER_URL, html: "<html><body>no export here</body></html>" });
     expect(none.exportCandidateCount).toBe("none");
+  });
+});
+
+describe("extractProbeSignals — candidateLoggedInShellPresent is structural-only (demoted)", () => {
+  it("branding text alone (판매자센터 / 스마트스토어 / 커머스) does NOT set the shell flag", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_branding_only.html") });
+    expect(s.candidateLoggedInShellPresent).toBe(false);
+  });
+
+  it("REGRESSION: a login page with branding reads shell=false (was a false positive)", () => {
+    const s = extractProbeSignals({ url: LOGIN_URL, html: read("session_login_with_branding.html") });
+    expect(s.candidateLoggedInShellPresent).toBe(false);
+    expect(s.passwordFieldPresent).toBe(true);
+  });
+
+  it("a real structural shell attribute still sets the flag", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_logged_in.html") });
+    expect(s.candidateLoggedInShellPresent).toBe(true);
+  });
+});
+
+describe("extractProbeSignals — sessionVerdict (classifier wiring)", () => {
+  it("login page (password present) → ACCOUNT_LOGIN_REQUIRED", () => {
+    const plain = extractProbeSignals({ url: LOGIN_URL, html: read("session_login.html") });
+    expect(plain.sessionVerdict).toBe("ACCOUNT_LOGIN_REQUIRED");
+    const branded = extractProbeSignals({ url: LOGIN_URL, html: read("session_login_with_branding.html") });
+    expect(branded.sessionVerdict).toBe("ACCOUNT_LOGIN_REQUIRED");
+  });
+
+  it("2FA page → AUTH_CHALLENGE_REQUIRED (challenge outranks the password field)", () => {
+    const s = extractProbeSignals({ url: LOGIN_URL, html: read("session_2fa.html") });
+    expect(s.sessionVerdict).toBe("AUTH_CHALLENGE_REQUIRED");
+  });
+
+  it("seller-center with strong signals, no password → LOGGED_IN", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_logged_in.html") });
+    expect(s.sessionVerdict).toBe("LOGGED_IN");
+  });
+
+  it("seller-center with strong signals AND an ambient login link → still LOGGED_IN (relaxed)", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_seller_center_with_login_link.html") });
+    expect(s.loginAffordancePresent).toBe(true); // ambient login link is present...
+    expect(s.passwordFieldPresent).toBe(false); // ...but no real password field
+    expect(s.sessionVerdict).toBe("LOGGED_IN");
+  });
+
+  it("admin page with an embedded login WIDGET (password field) → ACCOUNT_LOGIN_REQUIRED", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_admin_with_login_widget.html") });
+    expect(s.passwordFieldPresent).toBe(true);
+    expect(s.sessionVerdict).toBe("ACCOUNT_LOGIN_REQUIRED");
+  });
+
+  it("Commerce reconnect interstitial (account chooser, no password, no strong shell) → RECONNECT_REQUIRED", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_reconnect.html") });
+    expect(s.accountReconnectAffordancePresent).toBe(true);
+    expect(s.passwordFieldPresent).toBe(false);
+    expect(s.sessionVerdict).toBe("RECONNECT_REQUIRED");
+  });
+
+  it("branding-only seller page (no strong signal, no reconnect) → UNKNOWN", () => {
+    const s = extractProbeSignals({ url: SELLER_URL, html: read("session_branding_only.html") });
+    expect(s.sessionVerdict).toBe("UNKNOWN");
   });
 });
