@@ -418,6 +418,68 @@ describe("runExport", () => {
   });
 });
 
+describe("runExport — strictSingleCandidate (the one-click bound is structural)", () => {
+  beforeEach(() => clearLogSink());
+
+  // One actionable control with an id → buildTriggerSelectors yields exactly ONE selector.
+  const ONE = '<main>리뷰 관리 판매자센터<button id="exp">엑셀 다운로드</button></main>';
+  // Two distinct id'd controls → TWO selectors (the ambiguous case strict mode forbids).
+  const TWO =
+    '<main>리뷰 관리 판매자센터<button id="exp-a">엑셀</button><button id="exp-b">다운로드</button></main>';
+
+  it("exactly one selector → clicks ONCE and CAPTURED", async () => {
+    const download = fakeDownload();
+    const clicks: string[] = [];
+    const page = fakePage({ html: ONE, download, onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl", { strictSingleCandidate: true });
+    expect(result.outcome).toBe("CAPTURED");
+    expect(clicks).toHaveLength(1);
+  });
+
+  it("more than one buildable selector → refuses WITHOUT clicking (DOWNLOAD_FAILED)", async () => {
+    const download = fakeDownload();
+    const clicks: string[] = [];
+    const page = fakePage({ html: TWO, download, onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl", { strictSingleCandidate: true });
+    expect(result.outcome).toBe("DOWNLOAD_FAILED");
+    expect(clicks).toHaveLength(0); // never clicked — no guessing among multiple controls
+  });
+
+  it("the SAME multi-control page WITHOUT strict mode can still fall back and capture", async () => {
+    // Proves it is strict mode — not the page — that blocks the multi-candidate case.
+    const download = fakeDownload();
+    const clicks: string[] = [];
+    const page = fakePage({ html: TWO, download, onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl");
+    expect(result.outcome).toBe("CAPTURED");
+    expect(clicks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("single selector but the click yields no download → DOWNLOAD_FAILED, clicked once, no retry", async () => {
+    const clicks: string[] = [];
+    const page = fakePage({ html: ONE, downloadError: true, onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl", { strictSingleCandidate: true });
+    expect(result.outcome).toBe("DOWNLOAD_FAILED");
+    expect(clicks).toHaveLength(1); // one trigger click, no fallback
+  });
+
+  it("async layout under strict mode still never clicks", async () => {
+    const clicks: string[] = [];
+    const page = fakePage({ html: read("export_async_job.html"), onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl", { strictSingleCandidate: true });
+    expect(result.outcome).toBe("ASYNC_JOB_DETECTED");
+    expect(clicks).toHaveLength(0);
+  });
+
+  it("unrecognized layout under strict mode still never clicks", async () => {
+    const clicks: string[] = [];
+    const page = fakePage({ html: "<main>no export here</main>", onClick: (s) => clicks.push(s) });
+    const result = await runExport(page, "/tmp/dl", { strictSingleCandidate: true });
+    expect(result.outcome).toBe("LAYOUT_UNRECOGNIZED");
+    expect(clicks).toHaveLength(0);
+  });
+});
+
 describe("export outcome → collector state (via decideState)", () => {
   const base = { paired: true, session: "LOGGED_IN" } as const;
   const cases: Array<[ExportOutcome, string]> = [

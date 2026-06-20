@@ -345,6 +345,16 @@ export interface RunExportOptions {
    * with no `filePath`, and the caller must not upload it.
    */
   classifyOnly?: boolean;
+  /**
+   * Validation-bridge guard (the same-session CAPTURE path): make the one-click
+   * bound STRUCTURAL. The page must yield EXACTLY ONE trigger selector; that single
+   * control is clicked at most once with NO fallback loop. If more than one (or zero)
+   * trigger selector would be tried, refuse WITHOUT clicking (`DOWNLOAD_FAILED`); if
+   * the single click fails or yields no download, return `DOWNLOAD_FAILED` with no
+   * retry. The post-click safe-confirm (확인) of that single trigger is unchanged.
+   * Default callers leave this unset and keep the ordered-fallback behavior.
+   */
+  strictSingleCandidate?: boolean;
 }
 
 /**
@@ -434,6 +444,13 @@ export async function runExport(
 
   log("export.classify", { kind });
   const selectors = buildTriggerSelectors(html);
+  if (options.strictSingleCandidate && selectors.length !== 1) {
+    // Strict single-candidate (capture-export-same-session): only ONE unambiguous
+    // trigger may be clicked, with no fallback. Anything but exactly one selector → do
+    // NOT click; halt as DOWNLOAD_FAILED. `selectorCount` is a count, never a selector.
+    log("export.strict_single_violation", { kind, selectorCount: selectors.length }, "error");
+    return { outcome: "DOWNLOAD_FAILED" };
+  }
   for (const selector of selectors) {
     const downloadPromise = page.waitForEvent("download", { timeout: DOWNLOAD_TIMEOUT_MS });
     try {
