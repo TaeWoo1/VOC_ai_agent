@@ -9,18 +9,21 @@
  * commerce-ID / SmartStore Center flow → presses Enter → the SAME context
  * re-checks the session and classifies the export mechanism. This avoids the
  * commerce-session loss that happens when Chrome is restarted between login and
- * discovery (see src/cli/same-session.ts). Always classify-only: no SellerOps
- * login/channel/upload, no saveAs, no backend; LAST_SUCCESS is impossible.
+ * discovery (see src/cli/same-session.ts). Always classify-only AND strictly
+ * NO-CLICK: the export layout is decided from the rendered structure via the pure
+ * `planExportAction` — the control is never clicked, no download is ever awaited,
+ * nothing is captured. No SellerOps login/channel/upload, no saveAs, no backend;
+ * LAST_SUCCESS is impossible.
  *
  * LIVE-ONLY — refuses to act without the explicit per-run approval flag.
  */
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
 import { log } from "../log";
+import { planExportAction } from "../naver/export-classify";
 import { extractExportProbeSignals } from "../naver/export-probe";
 import { checkLiveSessionVerdict } from "../naver/session-check";
 import { extractProbeSignals, type HydrationWaitResult } from "../naver/session-probe";
-import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
 import { writeStatus } from "../status";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
@@ -28,6 +31,7 @@ import {
   buildExportProbeMeta,
   buildSessionProbeMeta,
   classifyOnlyStatus,
+  classifyOnlyStatusFromPlan,
   emitExportProbe,
   emitSessionProbe,
   proceedAfterConfirmation,
@@ -225,21 +229,32 @@ async function main(): Promise<void> {
     // present at all on the route the classifier is about to read.
     if (wantExportProbe) await logExportProbe(realPage, "logged-in-before-classify");
 
-    // 5) Classify-only export discovery — classify sync/async/blocked; NEVER saveAs,
-    //    NEVER upload. A captured sync export maps to COLLECTING, never LAST_SUCCESS.
-    const { outcome } = await runExport(page, cfg.downloadDir, { classifyOnly: true });
+    // 5) NO-CLICK export-layout classification — decide sync/async/unrecognized from
+    //    the rendered structure ALONE via the pure `planExportAction`. Unlike the old
+    //    `runExport({ classifyOnly })` path, this NEVER clicks the control, never waits
+    //    for a download, captures nothing, and uploads nothing. A recognized sync layout
+    //    reads EXPORT_SYNC_DETECTED (discovery) — never COLLECTING/LAST_SUCCESS.
+    const html = await realPage.content();
+    const plan = planExportAction(html);
 
     // Diagnostic: when the classifier did not recognize the layout, snapshot the
     // export area again so the verdict can be explained — missing selector (export
     // keywords/controls present here) vs. hidden/gated UI (present but disabled/zero
     // visible) vs. iframe/sub-route (keywords absent here, a child frame present).
-    if (wantExportProbe && outcome === "LAYOUT_UNRECOGNIZED") {
+    if (wantExportProbe && plan.layout === "LAYOUT_UNRECOGNIZED") {
       await logExportProbe(realPage, "after-classify-layout-unrecognized");
     }
 
-    const { state, detail } = classifyOnlyStatus(verdict, outcome);
+    const { state, detail } = classifyOnlyStatusFromPlan(verdict, plan);
     writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
-    log("run.done", { state, outcome, classifyOnly: true });
+    log("run.done", {
+      state,
+      layout: plan.layout,
+      hasActionableExportCandidate: plan.hasActionableExportCandidate,
+      asyncMarkerPresent: plan.asyncMarkerPresent,
+      classifyOnly: true,
+      noClick: true,
+    });
   } finally {
     await ctx.close();
   }

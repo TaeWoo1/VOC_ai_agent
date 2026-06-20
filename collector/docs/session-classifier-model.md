@@ -91,9 +91,9 @@ The verdict is now the authority for the discovery HALT decision. Pure mapping
 - **Verdict seam** `sessionVerdictFromContent(html, url)` + live wrapper
   `checkLiveSessionVerdict(page)` (`src/naver/session-check.ts`) reuse the probe's tightened,
   branding-demoted markers — so discovery and the diagnostic probe share **one** signal
-  source. Both live CLIs (`discover-export.ts`, `discover-same-session.ts` via
-  `classifyOnlyStatus`) gate on the verdict; discovery never auto-clicks account/store
-  selection — every non-`LOGGED_IN` verdict halts for a human.
+  source. Both live CLIs gate on the verdict (`discover-export.ts` via `classifyOnlyStatus`,
+  `discover-same-session.ts` via the no-click `classifyOnlyStatusFromPlan`); discovery never
+  auto-clicks account/store selection — every non-`LOGGED_IN` verdict halts for a human.
 - **Back-compat preserved:** `src/session.ts` `detectSession()` / `signalsFromHtml()` and
   `src/status.ts` `decideState()` are **unchanged** (still `LOGGED_OUT → SESSION_EXPIRED`);
   they remain for the export/upload legs and existing tests but are no longer the halt
@@ -122,12 +122,12 @@ sentinel at startup (so a leftover can never auto-proceed), proceeds only when i
 afterwards, removes it after use, and on timeout aborts **without reading** the page. It
 only ever reads/clears the sentinel — it never writes a status record.
 
-It is **read-only and structurally separate** from the classify-only discovery flow: it
-never imports `review-export`/`runExport`, never clicks/captures an export, waits on no
-download, writes no `.status` file, and sends nothing to SellerOps — locked by a
-source-guard test (`test/cli/probe-same-session.test.ts`). Use it (not
-`discover-same-session`, whose classify-only path *can* click a sync-export control on a
-`LOGGED_IN` page) when the boundary is "no export click, no download".
+It is **read-only and structurally separate** from the discovery flow: it never imports
+`review-export`/`runExport`, never clicks/captures an export, waits on no download, writes
+no `.status` file, and sends nothing to SellerOps — locked by a source-guard test
+(`test/cli/probe-same-session.test.ts`). Use it when you want only the session verdict and
+nothing written to `.status` — `discover-same-session` is now also no-click (§5b″) but reads
+the export structure and persists a status record.
 
 ## 5b′. Locating the export UI live (read-only, frame-aware) — `probe-export-same-session`
 
@@ -159,9 +159,9 @@ requires a frame actually showing candidates.
 
 ## 5b″. Classifying the export layout live without clicking — `classify-export-same-session`
 
-Discovery's `classifyOnly` path proves the mechanism by *triggering* it — it still clicks the
-export control and waits for the download stream (it only skips persisting the file, §129–130
-above). For a strict **no-click** boundary we instead decide the layout from the **rendered
+The original `runExport({ classifyOnly })` path proved the mechanism by *triggering* it — it
+clicked the export control and waited for the download stream (it only skipped persisting the
+file). For a strict **no-click** boundary we instead decide the layout from the **rendered
 structure alone**. `src/naver/export-classify.ts` adds a pure `planExportAction(html)` that folds
 `review-export.ts`'s existing pure pieces (`classifyExportPage` / `findExportCandidates` /
 `buildTriggerSelectors`) into one sanitized `ExportActionPlan`:
@@ -181,9 +181,27 @@ reused sanitized `extractExportProbeSignals` context. It imports **only** the pu
 `review-export`/`runExport`); its source-guard (`test/cli/classify-export-same-session.test.ts`)
 forbids `.click(` / `.fill(` / `.press(` / `dispatchEvent` / `waitForEvent("download")` / `saveAs` /
 upload / `writeStatus`, and a purity guard on `export-classify.ts` proves that module reaches no
-browser/click/download/save path. **This adds the safe path only — it does not change the existing
-discovery/capture behavior;** converting `discover-same-session`'s `classifyOnly` to this no-click
-planner (or gating its click behind a separate flag) is a deliberate follow-up slice.
+browser/click/download/save path.
+
+### `discover-same-session` now classifies no-click (default discovery path)
+
+`discover-same-session.ts`'s classify-only step is now wired onto `planExportAction` too: after
+the `LOGGED_IN` verdict it reads the page the human left (`page.content()`) and decides the
+layout from structure — it **no longer imports `runExport`** and never clicks the control or
+waits for a download (own source-guard: `test/cli/discover-same-session.test.ts`). The layout maps
+to a status record via the pure `classifyOnlyStatusFromPlan(verdict, plan)`:
+
+- `SYNC_DOWNLOAD` → export outcome `SYNC_DOWNLOAD_DETECTED` → state **`EXPORT_SYNC_DETECTED`** —
+  the sync mechanism is recognized but **not triggered**, so no file exists. `decideState` returns
+  this before the upload leg, so it can never become `COLLECTING`/`LAST_SUCCESS` (it replaces the
+  old `CAPTURED → COLLECTING` that the clicking path produced).
+- `ASYNC_JOB_DETECTED` → `EXPORT_ASYNC_JOB_DETECTED`; `LAYOUT_UNRECOGNIZED` → `EXPORT_LAYOUT_CHANGED`
+  (unchanged from the prior outcome mapping).
+
+The only path that still actually triggers/captures the export is `discover-export.ts`: its full
+(non-`--classify-only`) path is the real capture+upload leg, and its `--classify-only` branch still
+clicks today. Converting that branch onto `planExportAction` (while keeping `runExport` for the
+capture path) is a deliberate follow-up slice.
 
 ## 5c. Still deferred
 
@@ -205,7 +223,14 @@ planner (or gating its click behind a separate flag) is a deliberate follow-up s
   `LAST_SUCCESS`).
 - `test/naver/session-check.test.ts` — `sessionVerdictFromContent` across fixtures and
   `checkLiveSessionVerdict` log-safety (verdict + coarse category only, no raw URL).
-- `test/cli/same-session.test.ts` — `classifyOnlyStatus` verdict-keyed halt states.
+- `test/cli/same-session.test.ts` — `classifyOnlyStatus` verdict-keyed halt states, plus
+  `classifyOnlyStatusFromPlan` (no-click layout → status: `SYNC_DOWNLOAD → EXPORT_SYNC_DETECTED`,
+  never `COLLECTING`/`LAST_SUCCESS`; identical verdict halting).
+- `test/cli/discover-same-session.test.ts` — source-guard that the default discovery path is
+  strictly no-click (no `runExport`/`review-export`/`.click(`/`waitForEvent("download")`/`saveAs`/
+  `download.path`/upload; imports the pure `planExportAction` + `classifyOnlyStatusFromPlan`).
+- `test/status.test.ts` — `SYNC_DOWNLOAD_DETECTED → EXPORT_SYNC_DETECTED`, and that it can never
+  reach `COLLECTING`/`LAST_SUCCESS` even with an `OK` upload field (no captured file).
 - `test/naver/export-classify.test.ts` — `planExportAction` layout/bucket/async-precedence
   units, allow-list (`EXPORT_ACTION_PLAN_KEYS`), hostile-fixture no-leak (incl. no raw selector),
   and the purity source-guard on `export-classify.ts`.

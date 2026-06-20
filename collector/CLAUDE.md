@@ -68,7 +68,7 @@ ingested into the dev DB. Never a real seller-center export.
 
 ```bash
 npm run discover -- --discover --classify-only --i-understand-this-opens-live-naver
-npm run discover-same-session -- --i-understand-this-opens-live-naver   # recommended for NAVER Commerce
+npm run discover-same-session -- --i-understand-this-opens-live-naver   # recommended for NAVER Commerce; NO-CLICK classify (sync/async/unrecognized from structure only); never triggers/captures
 npm run probe-session -- --i-understand-this-opens-live-naver           # sanitized DOM probe (separate launch)
 npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-ONLY same-context verdict probe; sentinel-file continuation; no export/click/download
 npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
@@ -91,7 +91,12 @@ npm run upload -- /abs/path/to/export.xlsx                              # offlin
 - `status.ts` — `CollectorState` + the pure `decideState(RunSignals)` mapping.
   **Precedence is deliberate**: pairing → session stop-states → export → upload.
   `LAST_SUCCESS` is reachable **only** when a file was both captured *and*
-  uploaded — a fake-success state is structurally impossible.
+  uploaded — a fake-success state is structurally impossible. The no-click
+  classifier's `SYNC_DOWNLOAD_DETECTED` export outcome maps to the honest
+  `EXPORT_SYNC_DETECTED` state (sync mechanism recognized but NOT triggered, so no
+  file exists); it returns before the upload leg and can never become
+  `COLLECTING`/`LAST_SUCCESS`. Only `CAPTURED` (a real triggered download) flows to
+  the upload leg.
 - `session.ts` — `detectSession()` / `signalsFromHtml()`: browser-free HTML →
   `SessionState` (`LOGGED_IN`/`LOGGED_OUT`/`AUTH_CHALLENGE`). Markers are
   **placeholders** to be confirmed/corrected by a live run.
@@ -179,11 +184,17 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   shared sentinel path (run only one probe at a time).
   `classify-export-same-session.ts` is the same read-only one-context + sentinel flow and
   classifies the export **layout** (sync / async / unrecognized) via the pure
-  `planExportAction` under a **strict no-click boundary** — unlike `discover-same-session`,
-  whose `classifyOnly` path still clicks the control and waits for the download. It imports
+  `planExportAction` under a **strict no-click boundary**, writing no status record. It imports
   only the pure planner (never `review-export`/`runExport`), and its source-guard forbids
-  `.click(`/`waitForEvent("download")`/`saveAs`/upload/`writeStatus` (this PR adds the safe
-  path; it does **not** change the existing discovery/capture behavior).
+  `.click(`/`waitForEvent("download")`/`saveAs`/upload/`writeStatus`.
+  `discover-same-session.ts`'s classify-only path is **also no-click**: it reads the page the
+  human reached and decides the layout via the same `planExportAction` — it never clicks the
+  control, never waits for a download, captures nothing (its own source-guard forbids
+  `runExport`/`.click(`/`waitForEvent("download")`/`saveAs`). A recognized sync layout writes
+  the honest `EXPORT_SYNC_DETECTED` state (mechanism detected, NOT triggered) — never
+  `COLLECTING`, which would imply a captured file. The only path that actually triggers/captures
+  the export is `discover-export.ts` (its `--classify-only` branch still clicks today and is a
+  follow-up to convert to the no-click planner).
 
 ---
 

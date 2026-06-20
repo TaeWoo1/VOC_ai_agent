@@ -4,6 +4,7 @@ import {
   buildExportProbeMeta,
   buildSessionProbeMeta,
   classifyOnlyStatus,
+  classifyOnlyStatusFromPlan,
   emitExportProbe,
   emitSessionProbe,
   EMIT_EXPORT_PROBE_FLAG,
@@ -11,10 +12,22 @@ import {
   proceedAfterConfirmation,
   SAME_SESSION_CONFIRM_PROMPT,
 } from "../../src/cli/same-session";
+import type { ExportActionPlan, ExportLayout } from "../../src/naver/export-classify";
 import { extractExportProbeSignals, SANITIZED_EXPORT_PROBE_KEYS } from "../../src/naver/export-probe";
 import { extractProbeSignals, SANITIZED_PROBE_KEYS } from "../../src/naver/session-probe";
 import type { SessionVerdict } from "../../src/naver/session-verdict";
 import type { ExportOutcome } from "../../src/status";
+
+/** Build a minimal `ExportActionPlan` for a given layout (other leaves are inert here). */
+function planFor(layout: ExportLayout): ExportActionPlan {
+  return {
+    layout,
+    hasActionableExportCandidate: layout === "SYNC_DOWNLOAD",
+    actionableExportCandidateCount: layout === "SYNC_DOWNLOAD" ? "one" : "none",
+    triggerSelectorCount: layout === "SYNC_DOWNLOAD" ? "one" : "none",
+    asyncMarkerPresent: layout === "ASYNC_JOB_DETECTED",
+  };
+}
 
 describe("same-session: live approval is required", () => {
   // The same-session CLI guards every live action with the shared approval flag.
@@ -219,6 +232,67 @@ describe("classifyOnlyStatus — verdict-keyed halt states", () => {
   it("LOGGED_IN with no export attempted → CONNECTED", () => {
     expect(classifyOnlyStatus("LOGGED_IN").state).toBe("CONNECTED");
   });
+});
+
+describe("classifyOnlyStatusFromPlan — NO-CLICK layout → status", () => {
+  it("LOGGED_IN + SYNC_DOWNLOAD → EXPORT_SYNC_DETECTED (detected, never triggered/captured)", () => {
+    const { state, detail } = classifyOnlyStatusFromPlan("LOGGED_IN", planFor("SYNC_DOWNLOAD"));
+    expect(state).toBe("EXPORT_SYNC_DETECTED");
+    expect(detail).toMatch(/no-click:/);
+    expect(detail).toMatch(/not triggered, not captured, not uploaded/);
+  });
+
+  it("LOGGED_IN + SYNC_DOWNLOAD is NEVER COLLECTING (no file was captured)", () => {
+    expect(classifyOnlyStatusFromPlan("LOGGED_IN", planFor("SYNC_DOWNLOAD")).state).not.toBe("COLLECTING");
+  });
+
+  it("LOGGED_IN + ASYNC_JOB_DETECTED → EXPORT_ASYNC_JOB_DETECTED", () => {
+    expect(classifyOnlyStatusFromPlan("LOGGED_IN", planFor("ASYNC_JOB_DETECTED")).state).toBe(
+      "EXPORT_ASYNC_JOB_DETECTED",
+    );
+  });
+
+  it("LOGGED_IN + LAYOUT_UNRECOGNIZED → EXPORT_LAYOUT_CHANGED", () => {
+    expect(classifyOnlyStatusFromPlan("LOGGED_IN", planFor("LAYOUT_UNRECOGNIZED")).state).toBe(
+      "EXPORT_LAYOUT_CHANGED",
+    );
+  });
+
+  it("halts identically to classifyOnlyStatus on non-LOGGED_IN verdicts", () => {
+    const nonLoggedIn: SessionVerdict[] = [
+      "RECONNECT_REQUIRED",
+      "ACCOUNT_LOGIN_REQUIRED",
+      "AUTH_CHALLENGE_REQUIRED",
+      "UNKNOWN",
+    ];
+    for (const verdict of nonLoggedIn) {
+      // The layout is irrelevant when the session is not logged in — the verdict halt wins.
+      expect(classifyOnlyStatusFromPlan(verdict, planFor("SYNC_DOWNLOAD")).state).toBe(
+        classifyOnlyStatus(verdict).state,
+      );
+    }
+  });
+});
+
+describe("classify-only-from-plan never reports success (LAST_SUCCESS impossible)", () => {
+  const verdicts: SessionVerdict[] = [
+    "LOGGED_IN",
+    "RECONNECT_REQUIRED",
+    "ACCOUNT_LOGIN_REQUIRED",
+    "AUTH_CHALLENGE_REQUIRED",
+    "UNKNOWN",
+  ];
+  const layouts: ExportLayout[] = ["SYNC_DOWNLOAD", "ASYNC_JOB_DETECTED", "LAYOUT_UNRECOGNIZED"];
+  for (const verdict of verdicts) {
+    for (const layout of layouts) {
+      it(`verdict=${verdict} layout=${layout} is never LAST_SUCCESS / COLLECTING / UPLOAD_FAILED`, () => {
+        const { state } = classifyOnlyStatusFromPlan(verdict, planFor(layout));
+        expect(state).not.toBe("LAST_SUCCESS");
+        expect(state).not.toBe("COLLECTING");
+        expect(state).not.toBe("UPLOAD_FAILED");
+      });
+    }
+  }
 });
 
 describe("classify-only never reports success (LAST_SUCCESS impossible)", () => {
