@@ -29,30 +29,46 @@ interface RawDomStorage {
   idb: string[];
 }
 
-/** Read storage key names + value LENGTHS inside the page; values never leave it. */
+/**
+ * Read storage key names + value LENGTHS inside the page; values never leave it.
+ *
+ * IMPORTANT (no named inner functions): the evaluate callback is serialized and run
+ * in the page sandbox, so it must contain NO named inner helper (`const dump = …` /
+ * `function dump …`). Under tsx/esbuild `keepNames` such a helper is rewritten to
+ * `__name(…)`, whose helper is NOT defined in the page → `ReferenceError: __name is
+ * not defined` at runtime. The enumeration is therefore inlined with plain loops and
+ * no inner declarations. A source-guard test locks this shape.
+ */
 async function readDomStorage(page: Page): Promise<RawDomStorage> {
   return page.evaluate(async () => {
-    const dump = (s: Storage): Array<{ key: string; valueLength: number }> => {
-      const out: Array<{ key: string; valueLength: number }> = [];
-      for (let i = 0; i < s.length; i += 1) {
-        const key = s.key(i);
-        if (key === null) continue;
-        const value = s.getItem(key);
-        out.push({ key, valueLength: value ? value.length : 0 });
-      }
-      return out;
-    };
-    let idb: string[] = [];
+    const local: Array<{ key: string; valueLength: number }> = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key === null) continue;
+      const value = localStorage.getItem(key);
+      local.push({ key, valueLength: value ? value.length : 0 });
+    }
+    const session: Array<{ key: string; valueLength: number }> = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key === null) continue;
+      const value = sessionStorage.getItem(key);
+      session.push({ key, valueLength: value ? value.length : 0 });
+    }
+    const idb: string[] = [];
     try {
       const dbApi = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
       if (typeof dbApi.databases === "function") {
         const dbs = await dbApi.databases();
-        idb = dbs.map((d) => d.name ?? "").filter((n) => n.length > 0);
+        for (const d of dbs) {
+          const name = d.name ?? "";
+          if (name.length > 0) idb.push(name);
+        }
       }
     } catch {
-      idb = [];
+      /* databases() unsupported/blocked → leave idb empty */
     }
-    return { local: dump(localStorage), session: dump(sessionStorage), idb };
+    return { local, session, idb };
   });
 }
 
