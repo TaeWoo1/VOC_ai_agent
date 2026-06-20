@@ -187,14 +187,17 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   `planExportAction` under a **strict no-click boundary**, writing no status record. It imports
   only the pure planner (never `review-export`/`runExport`), and its source-guard forbids
   `.click(`/`waitForEvent("download")`/`saveAs`/upload/`writeStatus`.
-  `discover-same-session.ts`'s classify-only path is **also no-click**: it reads the page the
-  human reached and decides the layout via the same `planExportAction` — it never clicks the
-  control, never waits for a download, captures nothing (its own source-guard forbids
-  `runExport`/`.click(`/`waitForEvent("download")`/`saveAs`). A recognized sync layout writes
-  the honest `EXPORT_SYNC_DETECTED` state (mechanism detected, NOT triggered) — never
-  `COLLECTING`, which would imply a captured file. The only path that actually triggers/captures
-  the export is `discover-export.ts` (its `--classify-only` branch still clicks today and is a
-  follow-up to convert to the no-click planner).
+  Both discovery CLIs' classify-only paths are **also no-click**: `discover-same-session.ts`
+  and `discover-export.ts --classify-only` each read the page the human reached and decide the
+  layout via the same `planExportAction` — never clicking the control, never waiting for a
+  download, capturing nothing. A recognized sync layout writes the honest `EXPORT_SYNC_DETECTED`
+  state (mechanism detected, NOT triggered) — never `COLLECTING`, which would imply a captured
+  file. `discover-export.ts` keeps importing `runExport` for its **full** capture path, so its
+  no-click guarantee is proved by a *branch-separation* source-guard: `doDiscover` splits into
+  `doDiscoverClassifyOnly` (no `runExport`/`.click(`/`waitForEvent("download")`/`saveAs`/upload)
+  and `doDiscoverFullCapture`, and `runExport` is confined to the latter. The **only** path that
+  actually triggers/captures the export is that deliberate full capture leg
+  (`discover-export --discover` without `--classify-only`).
 
 ---
 

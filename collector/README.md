@@ -100,15 +100,15 @@ mechanism (sync download / async job / blocked / layout-unrecognized) but does
 SellerOps login, no channel resolve, no `/api/uploads` call**, so the
 `SELLEROPS_*` / `NAVER_CHANNEL_CODE` settings are unused and **the backend does
 not need to be running**. `LAST_SUCCESS` is structurally impossible in this mode
-(a captured sync export maps to `COLLECTING`, never success — discovery is not
-collection). On a sync export the file is **not** persisted (no `saveAs`); the
-mechanism is proven by the Playwright download event alone, and the browser's
-temporary artifact is discarded when the context closes. This describes the
-`discover-export --classify-only` path, which still *clicks* the control to prove
-the download fires. The recommended `discover-same-session` path is **stricter — no
-click at all**: it classifies the layout from structure and records a recognized
-sync mechanism as `EXPORT_SYNC_DETECTED` without ever triggering it (see its section
-below).
+(discovery is not collection). **Classify-only is strictly NO-CLICK on both CLIs**
+(`discover-same-session` and `discover-export --classify-only`): the export layout is
+decided from the rendered structure via the pure `planExportAction` — the control is
+**never clicked**, no download is ever awaited, nothing is captured or persisted (no
+`saveAs`). A recognized sync mechanism is recorded as `EXPORT_SYNC_DETECTED`
+(detected but **not triggered**, so no file exists) — never `COLLECTING`. The **only**
+path that clicks the control, waits for the download, and persists/uploads a file is
+the **full** capture leg (`discover-export --discover` without `--classify-only`),
+which needs the backend.
 
 **Recommended for NAVER: use installed Chrome, not bundled Chromium.** Set
 `COLLECTOR_BROWSER_CHANNEL=chrome` so the live layer drives your **installed
