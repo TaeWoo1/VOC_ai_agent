@@ -137,9 +137,16 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   `profileDir` resolving outside the collector tree (unit-tested).
 - `naver/session-check.ts` — live `Page` → `SessionSignals` → `detectSession()`.
 - `naver/review-export.ts` — classify the export (`CAPTURED` / `ASYNC_JOB_DETECTED`
-  / `LAYOUT_UNRECOGNIZED` / `DOWNLOAD_FAILED`) and capture. Selectors/markers
-  (`SYNC_EXPORT_MARKERS`, `ASYNC_JOB_MARKERS`, `TRIGGER_SELECTOR`) are
-  **placeholders** to confirm/correct via a live run — do not guess-tune them.
+  / `LAYOUT_UNRECOGNIZED` / `DOWNLOAD_FAILED`) and capture. A **sync** download is
+  recognized by finding an *interactive, visible+enabled* control whose accessible
+  wording matches `EXPORT_WORDING` (`엑셀`/`다운로드`/`내려받기`/`excel`/`download`/
+  `xlsx`/`csv`) via `findExportCandidates` → `buildTriggerSelectors`; an
+  `ASYNC_JOB_MARKERS` affordance wins over it. The sync wording is **confirmed** —
+  corrected from the milestone-1 live finding (top-document, visible+enabled
+  Excel/download control; the old `[data-export='review']`-only selector missed it)
+  and re-corroborated by `probe-export-same-session`. `ASYNC_JOB_MARKERS` stays a
+  placeholder pending a live async run — correct it only from observed findings, per
+  §6, never guess-tune.
 - `naver/session-probe.ts` + `export-probe.ts` — sanitized structural probes
   (`extractProbeSignals` / `extractExportProbeSignals`) emitting only
   booleans/bucketed counts/category enums for diagnosing `SESSION_EXPIRED` and
