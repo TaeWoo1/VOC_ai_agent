@@ -29,6 +29,14 @@ export interface CollectorConfig {
    * profile is never used.
    */
   browserChannel: string | undefined;
+  /**
+   * Shared salt for the storage diagnostic's one-way key-name hashing (live
+   * diagnostic only). The SAME value must be set for both the same-session (State
+   * A) and the cold (State B) legs so their hashed key names are comparable for
+   * the A/B diff; an absent salt makes the diagnostic fail closed. Never printed,
+   * never written to status/docs. Undefined → diagnostic refuses to run.
+   */
+  storageProbeSalt: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
@@ -42,5 +50,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
     browserChannel: env.COLLECTOR_BROWSER_CHANNEL,
+    storageProbeSalt: env.STORAGE_PROBE_SALT,
   };
 }
