@@ -21,6 +21,17 @@ export interface PwPage {
   ): Promise<unknown>;
   click(selector: string, opts?: { timeout?: number }): Promise<void>;
   waitForEvent(event: "download", opts?: { timeout?: number }): Promise<PwDownload>;
+  /**
+   * Live-only: poll a browser-evaluated predicate until it returns truthy or the
+   * timeout elapses (rejects with a `TimeoutError` on timeout). OPTIONAL on this
+   * structural surface so pure unit tests can fake a page WITHOUT it — the
+   * hydration wait then reports `not-attempted`. A real Playwright page always has it.
+   */
+  waitForFunction?(
+    pageFunction: () => boolean,
+    arg?: unknown,
+    opts?: { timeout?: number },
+  ): Promise<unknown>;
 }
 
 export interface PwDownload {

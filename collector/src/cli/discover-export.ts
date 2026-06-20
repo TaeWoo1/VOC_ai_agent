@@ -24,6 +24,7 @@ import { log } from "../log";
 import { planExportAction } from "../naver/export-classify";
 import { haltForVerdict } from "../naver/session-halt";
 import { checkLiveSessionVerdict } from "../naver/session-check";
+import { waitForSpaHydration } from "../naver/hydration";
 import { runExport } from "../naver/review-export";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { launchNaverContext, type PwPage } from "../profile";
@@ -69,7 +70,12 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
   // 1) Session check — the five-state verdict is the authority. Never proceed on
   //    anything but LOGGED_IN; each other verdict halts with an honest state + detail
   //    (RECONNECT_REQUIRED / ACCOUNT_LOGIN_REQUIRED / 2FA action / conservative expiry).
+  //    The review route is an SPA, so give it a bounded chance to hydrate before reading
+  //    the verdict — a cold programmatic navigation otherwise reads UNKNOWN before the
+  //    logged-in signals render. The wait is READ-ONLY and never changes the verdict.
   await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
+  const hydration = await waitForSpaHydration(page);
+  log("session.hydration", { result: hydration });
   const verdict = await checkLiveSessionVerdict(page);
   const halt = haltForVerdict(verdict);
   if (!halt.proceed) {
