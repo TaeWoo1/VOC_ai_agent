@@ -1,0 +1,36 @@
+<!--
+  SYNTHETIC fixture: NAVER Commerce reconnect screen WITH an alternate login form.
+  Models the Run-1 finding — the real reconnect screen shows a "currently logged in
+  as «Commerce ID» — continue?" CONTINUATION card ABOVE an alternate sign-in form.
+  The alternate form carries a password input, so passwordFieldPresent is true here;
+  the continuation card is what makes this a reconnect, not a plain login. No real
+  account / ID / URL / DOM — fully fabricated. (This comment avoids the literal marker
+  phrase, since the probe scans raw HTML including comments.)
+-->
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>스마트스토어센터</title>
+  </head>
+  <body>
+    <div id="app">
+      <main class="account-continuation">
+        <h1>판매자센터</h1>
+        <section class="commerce-account-card">
+          <p>현재 로그인 중인 네이버 커머스ID</p>
+          <p class="masked-account">커머스테스트계정</p>
+          <button type="button">이 계정으로 계속</button>
+        </section>
+        <section class="alternate-login">
+          <p>네이버 아이디로 간편 로그인</p>
+          <form id="nidlogin" method="post">
+            <input type="text" name="id" />
+            <input type="password" name="pw" />
+            <button type="submit">로그인</button>
+          </form>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

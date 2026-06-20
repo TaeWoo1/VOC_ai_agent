@@ -197,6 +197,30 @@ describe("extractProbeSignals — sessionVerdict (classifier wiring)", () => {
     expect(s.sessionVerdict).toBe("RECONNECT_REQUIRED");
   });
 
+  it("Commerce reconnect screen WITH an alternate login form → RECONNECT_REQUIRED (Run-1 finding; the password form does not mask it)", () => {
+    // urlCategory was "login" on the live screen — use the login URL, the harder case.
+    const s = extractProbeSignals({ url: LOGIN_URL, html: read("session_reconnect_with_login_form.html") });
+    expect(s.accountReconnectAffordancePresent).toBe(true); // matched by `현재 로그인 중인`
+    expect(s.passwordFieldPresent).toBe(true); // the alternate login form is present...
+    expect(s.sessionVerdict).toBe("RECONNECT_REQUIRED"); // ...but reconnect wins now
+  });
+
+  it("a plain login page that merely OFFERS 네이버 아이디로 간편 로그인 stays ACCOUNT_LOGIN_REQUIRED (no over-match)", () => {
+    // Locks the rejected broad markers: a generic login-button phrase must NOT make a
+    // real login page read as a reconnect, even under the reconnect-guarded password rule.
+    const html = [
+      "<!doctype html><html lang=ko><head><title>로그인</title></head><body>",
+      "<p>네이버 아이디로 간편 로그인</p>",
+      '<form id="nidlogin" method="post"><input type="text" name="id" />',
+      '<input type="password" name="pw" /><button type="submit">로그인</button></form>',
+      "</body></html>",
+    ].join("\n");
+    const s = extractProbeSignals({ url: LOGIN_URL, html });
+    expect(s.accountReconnectAffordancePresent).toBe(false); // generic phrase is NOT a marker
+    expect(s.passwordFieldPresent).toBe(true);
+    expect(s.sessionVerdict).toBe("ACCOUNT_LOGIN_REQUIRED");
+  });
+
   it("branding-only seller page (no strong signal, no reconnect) → UNKNOWN", () => {
     const s = extractProbeSignals({ url: SELLER_URL, html: read("session_branding_only.html") });
     expect(s.sessionVerdict).toBe("UNKNOWN");
