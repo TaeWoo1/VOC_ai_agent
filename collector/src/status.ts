@@ -15,6 +15,7 @@ export type CollectorState =
   | "ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA"
   | "EXPORT_LAYOUT_CHANGED"
   | "EXPORT_ASYNC_JOB_DETECTED"
+  | "EXPORT_SYNC_DETECTED"
   | "DOWNLOAD_FAILED"
   | "UPLOAD_FAILED"
   | "DISCONNECTED";
@@ -22,6 +23,7 @@ export type CollectorState =
 export type SessionState = "LOGGED_IN" | "LOGGED_OUT" | "AUTH_CHALLENGE";
 export type ExportOutcome =
   | "CAPTURED"
+  | "SYNC_DOWNLOAD_DETECTED"
   | "ASYNC_JOB_DETECTED"
   | "LAYOUT_UNRECOGNIZED"
   | "DOWNLOAD_FAILED"
@@ -57,6 +59,10 @@ export function decideState(s: RunSignals): CollectorState {
   // for a captured file.
   if (exportOutcome === "ASYNC_JOB_DETECTED") return "EXPORT_ASYNC_JOB_DETECTED";
   if (exportOutcome === "DOWNLOAD_FAILED") return "DOWNLOAD_FAILED";
+  // A no-click classifier recognized a sync export control but DID NOT trigger it —
+  // so no file exists. Returned here (before the upload leg) so it can never become
+  // COLLECTING/LAST_SUCCESS; "sync detected" is discovery, not capture.
+  if (exportOutcome === "SYNC_DOWNLOAD_DETECTED") return "EXPORT_SYNC_DETECTED";
   if (exportOutcome === "NOT_ATTEMPTED") return "CONNECTED";
 
   const uploadOutcome = s.uploadOutcome ?? "NOT_ATTEMPTED";

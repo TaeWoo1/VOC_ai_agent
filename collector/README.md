@@ -103,7 +103,12 @@ not need to be running**. `LAST_SUCCESS` is structurally impossible in this mode
 (a captured sync export maps to `COLLECTING`, never success — discovery is not
 collection). On a sync export the file is **not** persisted (no `saveAs`); the
 mechanism is proven by the Playwright download event alone, and the browser's
-temporary artifact is discarded when the context closes.
+temporary artifact is discarded when the context closes. This describes the
+`discover-export --classify-only` path, which still *clicks* the control to prove
+the download fires. The recommended `discover-same-session` path is **stricter — no
+click at all**: it classifies the layout from structure and records a recognized
+sync mechanism as `EXPORT_SYNC_DETECTED` without ever triggering it (see its section
+below).
 
 **Recommended for NAVER: use installed Chrome, not bundled Chromium.** Set
 `COLLECTOR_BROWSER_CHANNEL=chrome` so the live layer drives your **installed
@@ -206,12 +211,16 @@ Flow (`src/cli/discover-same-session.ts`):
    safely as `SESSION_EXPIRED` if you don't). **Do not close the browser.**
 4. The **same context** re-navigates to the review route, waits for the SPA to
    settle, checks the session, and — if logged in — classifies the export
-   mechanism.
+   **layout** from the rendered structure via the pure `planExportAction`.
 
-It is **classify-only**: no SellerOps login/channel resolve, no `/api/uploads`,
-no backend, no DB, and **no `saveAs`** of a real export. `LAST_SUCCESS` is
-structurally impossible (a captured sync export maps to `COLLECTING`). Logs are
-metadata-only.
+It is **classify-only and strictly NO-CLICK**: it never clicks the export control,
+never waits for a download, captures nothing — no SellerOps login/channel resolve,
+no `/api/uploads`, no backend, no DB, and **no `saveAs`**. A recognized sync layout
+is recorded as **`EXPORT_SYNC_DETECTED`** (the mechanism is detected but **not
+triggered**, so no file exists) — never `COLLECTING`, which would imply a captured
+file; `LAST_SUCCESS` is structurally impossible. (`async` → `EXPORT_ASYNC_JOB_DETECTED`,
+unrecognized → `EXPORT_LAYOUT_CHANGED`.) A real triggered download only happens in
+the `discover-export` capture path. Logs are metadata-only.
 
 Add `--emit-session-probe` to diagnose a same-session run that still reports
 `SESSION_EXPIRED` even though you reached the admin screen:

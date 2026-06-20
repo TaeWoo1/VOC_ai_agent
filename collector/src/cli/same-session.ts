@@ -1,3 +1,4 @@
+import type { ExportActionPlan, ExportLayout } from "../naver/export-classify";
 import type { SanitizedExportProbeSignals } from "../naver/export-probe";
 import { haltForVerdict } from "../naver/session-halt";
 import type { SanitizedProbeSignals } from "../naver/session-probe";
@@ -118,5 +119,48 @@ export function classifyOnlyStatus(
     exportOutcome === "CAPTURED"
       ? "classify-only: sync export detected; not captured to disk, not uploaded"
       : `classify-only: export outcome ${exportOutcome ?? "NOT_ATTEMPTED"}`;
+  return { state, detail };
+}
+
+/**
+ * Pure: map the layout of a NO-CLICK `planExportAction` plan to the `ExportOutcome`
+ * vocabulary. The planner only ever observes structure, so a sync layout becomes
+ * `SYNC_DOWNLOAD_DETECTED` (mechanism recognized, NOT triggered) — never `CAPTURED`,
+ * which would imply a file stream completed. Exhaustive over `ExportLayout` (no
+ * `default`), so a new layout is a compile error.
+ */
+function exportOutcomeForLayout(layout: ExportLayout): ExportOutcome {
+  switch (layout) {
+    case "SYNC_DOWNLOAD":
+      return "SYNC_DOWNLOAD_DETECTED";
+    case "ASYNC_JOB_DETECTED":
+      return "ASYNC_JOB_DETECTED";
+    case "LAYOUT_UNRECOGNIZED":
+      return "LAYOUT_UNRECOGNIZED";
+  }
+}
+
+/**
+ * Pure: map a NO-CLICK export-layout plan to a status record, keyed on the five-state
+ * `SessionVerdict`. The no-click sibling of `classifyOnlyStatus`: identical verdict
+ * halting, but the export state is derived from the structurally-classified layout
+ * (`planExportAction`) rather than a triggered outcome. A recognized sync layout reads
+ * `EXPORT_SYNC_DETECTED` — discovery, not capture — so `decideState` can never return
+ * COLLECTING/LAST_SUCCESS from this path (there is no captured file and no upload leg).
+ */
+export function classifyOnlyStatusFromPlan(
+  verdict: SessionVerdict,
+  plan: ExportActionPlan,
+): { state: CollectorState; detail: string } {
+  if (verdict !== "LOGGED_IN") {
+    const halt = haltForVerdict(verdict);
+    return { state: halt.state, detail: `classify-only: ${halt.detail}` };
+  }
+  const exportOutcome = exportOutcomeForLayout(plan.layout);
+  const state = decideState({ paired: true, session: "LOGGED_IN", exportOutcome });
+  const detail =
+    plan.layout === "SYNC_DOWNLOAD"
+      ? "no-click: sync export layout detected; not triggered, not captured, not uploaded"
+      : `no-click: export layout ${plan.layout}`;
   return { state, detail };
 }
