@@ -6,8 +6,11 @@
  *
  * Milestone-1 uses --classify-only (alias --no-upload): it classifies the export
  * mechanism without uploading to SellerOps (no backend needed, LAST_SUCCESS
- * impossible). Bare --discover (without --classify-only) runs the full
- * capture→upload path and requires the local backend.
+ * impossible). That branch is strictly NO-CLICK — it decides the export layout
+ * from the rendered structure via the pure `planExportAction`, never clicking the
+ * control, never waiting for a download, capturing nothing. Bare --discover
+ * (without --classify-only) runs the full capture→upload path (the only path that
+ * triggers/captures the export, via `runExport`) and requires the local backend.
  *
  * LIVE RUN — requires explicit, per-run operator approval. The CLI refuses every
  * live action unless the approval flag is present. It launches a real browser
@@ -15,15 +18,19 @@
  * the collector never types credentials, never bypasses auth, and never writes
  * to NAVER. Do NOT run during planning/implementation.
  */
-import { loadConfig } from "../config";
+import type { BrowserContext } from "playwright";
+import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
+import { planExportAction } from "../naver/export-classify";
 import { haltForVerdict } from "../naver/session-halt";
 import { checkLiveSessionVerdict } from "../naver/session-check";
 import { runExport } from "../naver/review-export";
+import type { SessionVerdict } from "../naver/session-verdict";
 import { launchNaverContext, type PwPage } from "../profile";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
+import { classifyOnlyStatusFromPlan } from "./same-session";
 
 // PLACEHOLDER landing URL; the human navigates/logs in from here.
 const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
@@ -57,8 +64,6 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
   }
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
-  // Reached only after a LOGGED_IN verdict; the export/upload legs use this base.
-  const base: RunSignals = { paired: true, session: "LOGGED_IN" };
   const now = (): string => new Date().toISOString();
 
   // 1) Session check — the five-state verdict is the authority. Never proceed on
@@ -74,24 +79,58 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
     return;
   }
 
-  // 2) Export discovery — classify sync/async/blocked and capture only if sync.
-  const { outcome, filePath } = await runExport(page, cfg.downloadDir, { classifyOnly });
+  // 2) LOGGED_IN — branch by mode. Classify-only is strictly NO-CLICK (it never
+  //    calls runExport); the full path is the ONLY one that triggers/captures.
+  if (classifyOnly) return doDiscoverClassifyOnly(page, verdict, ctx, cfg, now);
+  return doDiscoverFullCapture(page, ctx, cfg, now);
+}
 
-  // Classify-only (milestone-1 discovery): record the mechanism and STOP. No
-  // SellerOps login, no channel resolve, no upload — so LAST_SUCCESS is
-  // impossible (a CAPTURED sync export maps to COLLECTING, never success). No
-  // real file was persisted (runExport skipped saveAs).
-  if (classifyOnly) {
-    const state = decideState({ ...base, exportOutcome: outcome });
-    const detail =
-      outcome === "CAPTURED"
-        ? "classify-only: sync export detected; not captured to disk, not uploaded"
-        : `classify-only: export outcome ${outcome}`;
-    writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
-    await ctx.close();
-    log("run.done", { state, outcome, classifyOnly: true });
-    return;
-  }
+/**
+ * Classify-only (milestone-1 discovery) — STRICT NO-CLICK. Decide the export layout
+ * from the rendered structure via the pure `planExportAction` and record it; never
+ * call `runExport`, never click the control, never wait for a download, capture or
+ * persist nothing, no SellerOps login/channel/upload. A recognized sync layout reads
+ * EXPORT_SYNC_DETECTED (mechanism detected, NOT triggered) — never COLLECTING/
+ * LAST_SUCCESS. Reached only after a LOGGED_IN verdict, so `verdict` is LOGGED_IN.
+ */
+async function doDiscoverClassifyOnly(
+  page: PwPage,
+  verdict: SessionVerdict,
+  ctx: BrowserContext,
+  cfg: CollectorConfig,
+  now: () => string,
+): Promise<void> {
+  const html = await page.content();
+  const plan = planExportAction(html);
+  const { state, detail } = classifyOnlyStatusFromPlan(verdict, plan);
+  writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
+  await ctx.close();
+  log("run.done", {
+    state,
+    layout: plan.layout,
+    hasActionableExportCandidate: plan.hasActionableExportCandidate,
+    asyncMarkerPresent: plan.asyncMarkerPresent,
+    classifyOnly: true,
+    noClick: true,
+  });
+}
+
+/**
+ * Full capture → upload path (bare --discover). This is the ONLY path that triggers
+ * and captures the export: `runExport` clicks the control, waits for the download,
+ * and persists the file (saveAs), then uploads it through the existing offline-core
+ * client. Requires the local backend. Reached only when !classifyOnly.
+ */
+async function doDiscoverFullCapture(
+  page: PwPage,
+  ctx: BrowserContext,
+  cfg: CollectorConfig,
+  now: () => string,
+): Promise<void> {
+  const base: RunSignals = { paired: true, session: "LOGGED_IN" };
+
+  // 2) Export discovery — classify sync/async/blocked and capture only if sync.
+  const { outcome, filePath } = await runExport(page, cfg.downloadDir, { classifyOnly: false });
 
   if (outcome !== "CAPTURED" || !filePath) {
     const state = decideState({ ...base, exportOutcome: outcome });

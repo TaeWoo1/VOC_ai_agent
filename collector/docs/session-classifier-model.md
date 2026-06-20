@@ -91,9 +91,10 @@ The verdict is now the authority for the discovery HALT decision. Pure mapping
 - **Verdict seam** `sessionVerdictFromContent(html, url)` + live wrapper
   `checkLiveSessionVerdict(page)` (`src/naver/session-check.ts`) reuse the probe's tightened,
   branding-demoted markers — so discovery and the diagnostic probe share **one** signal
-  source. Both live CLIs gate on the verdict (`discover-export.ts` via `classifyOnlyStatus`,
-  `discover-same-session.ts` via the no-click `classifyOnlyStatusFromPlan`); discovery never
-  auto-clicks account/store selection — every non-`LOGGED_IN` verdict halts for a human.
+  source. Both live CLIs gate on the verdict (`haltForVerdict` / `classifyOnlyStatus`), and both
+  classify-only paths (`discover-export.ts` and `discover-same-session.ts`) map the no-click layout
+  to status via `classifyOnlyStatusFromPlan`; discovery never auto-clicks account/store selection
+  — every non-`LOGGED_IN` verdict halts for a human.
 - **Back-compat preserved:** `src/session.ts` `detectSession()` / `signalsFromHtml()` and
   `src/status.ts` `decideState()` are **unchanged** (still `LOGGED_OUT → SESSION_EXPIRED`);
   they remain for the export/upload legs and existing tests but are no longer the halt
@@ -198,10 +199,16 @@ to a status record via the pure `classifyOnlyStatusFromPlan(verdict, plan)`:
 - `ASYNC_JOB_DETECTED` → `EXPORT_ASYNC_JOB_DETECTED`; `LAYOUT_UNRECOGNIZED` → `EXPORT_LAYOUT_CHANGED`
   (unchanged from the prior outcome mapping).
 
-The only path that still actually triggers/captures the export is `discover-export.ts`: its full
-(non-`--classify-only`) path is the real capture+upload leg, and its `--classify-only` branch still
-clicks today. Converting that branch onto `planExportAction` (while keeping `runExport` for the
-capture path) is a deliberate follow-up slice.
+`discover-export.ts`'s `--classify-only` branch is now no-click too: `doDiscover` splits into
+`doDiscoverClassifyOnly` (reads `page.content()` → `planExportAction` → `classifyOnlyStatusFromPlan`,
+**no `runExport`**) and `doDiscoverFullCapture` (keeps `runExport` for the real capture+upload leg).
+Because the file legitimately still imports `runExport`, a global "no `runExport`" guard is
+impossible — instead a **branch-separation** source-guard
+(`test/cli/discover-export.test.ts`) slices the file into its top-level `async function` bodies and
+proves `runExport`/`.click(`/`waitForEvent("download")`/`saveAs`/upload appear **only** in
+`doDiscoverFullCapture`, never in the classify-only function. The **only** path that still
+triggers/captures the export is that deliberate full capture leg (`discover-export --discover`
+without `--classify-only`).
 
 ## 5c. Still deferred
 
@@ -229,6 +236,10 @@ capture path) is a deliberate follow-up slice.
 - `test/cli/discover-same-session.test.ts` — source-guard that the default discovery path is
   strictly no-click (no `runExport`/`review-export`/`.click(`/`waitForEvent("download")`/`saveAs`/
   `download.path`/upload; imports the pure `planExportAction` + `classifyOnlyStatusFromPlan`).
+- `test/cli/discover-export.test.ts` — branch-separation source-guard: slices the file into its
+  `async function` bodies and proves `doDiscoverClassifyOnly` is no-click (no `runExport`/`.click(`/
+  `waitForEvent("download")`/`saveAs`/upload) while `runExport` stays confined to
+  `doDiscoverFullCapture`.
 - `test/status.test.ts` — `SYNC_DOWNLOAD_DETECTED → EXPORT_SYNC_DETECTED`, and that it can never
   reach `COLLECTING`/`LAST_SUCCESS` even with an `OK` upload field (no captured file).
 - `test/naver/export-classify.test.ts` — `planExportAction` layout/bucket/async-precedence
