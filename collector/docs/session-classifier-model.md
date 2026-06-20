@@ -157,6 +157,34 @@ sends nothing to SellerOps. It shares the **same** sentinel path, so run only **
 time. It does not assert "iframe confirmed" — it reports observed structure; a confirmed cause
 requires a frame actually showing candidates.
 
+## 5b″. Classifying the export layout live without clicking — `classify-export-same-session`
+
+Discovery's `classifyOnly` path proves the mechanism by *triggering* it — it still clicks the
+export control and waits for the download stream (it only skips persisting the file, §129–130
+above). For a strict **no-click** boundary we instead decide the layout from the **rendered
+structure alone**. `src/naver/export-classify.ts` adds a pure `planExportAction(html)` that folds
+`review-export.ts`'s existing pure pieces (`classifyExportPage` / `findExportCandidates` /
+`buildTriggerSelectors`) into one sanitized `ExportActionPlan`:
+
+- `layout` — `SYNC_DOWNLOAD` / `ASYNC_JOB_DETECTED` / `LAYOUT_UNRECOGNIZED`;
+- `hasActionableExportCandidate` + `actionableExportCandidateCount` — a visible+enabled
+  interactive export control is present (bucketed count);
+- `triggerSelectorCount` — how many trigger selectors `runExport` *would* try, **count only**
+  (the raw selector strings, which can embed ids/keywords, are never emitted);
+- `asyncMarkerPresent` — an async download-center/job affordance is present (it wins over sync).
+
+`src/cli/classify-export-same-session.ts`
+(`npm run classify-export-same-session -- --i-understand-this-opens-live-naver`) keeps the **same**
+one-context + sentinel flow as the probes, reads the page **as the human left it** (no re-nav),
+and prints `{ sessionVerdict, plan, exportSignals }` — the verdict gate, the no-click plan, and the
+reused sanitized `extractExportProbeSignals` context. It imports **only** the pure planner (never
+`review-export`/`runExport`); its source-guard (`test/cli/classify-export-same-session.test.ts`)
+forbids `.click(` / `.fill(` / `.press(` / `dispatchEvent` / `waitForEvent("download")` / `saveAs` /
+upload / `writeStatus`, and a purity guard on `export-classify.ts` proves that module reaches no
+browser/click/download/save path. **This adds the safe path only — it does not change the existing
+discovery/capture behavior;** converting `discover-same-session`'s `classifyOnly` to this no-click
+planner (or gating its click behind a separate flag) is a deliberate follow-up slice.
+
 ## 5c. Still deferred
 
 - **Live confirmation of the placeholder reconnect markers** (`ACCOUNT_RECONNECT_MARKERS`)
@@ -178,6 +206,12 @@ requires a frame actually showing candidates.
 - `test/naver/session-check.test.ts` — `sessionVerdictFromContent` across fixtures and
   `checkLiveSessionVerdict` log-safety (verdict + coarse category only, no raw URL).
 - `test/cli/same-session.test.ts` — `classifyOnlyStatus` verdict-keyed halt states.
+- `test/naver/export-classify.test.ts` — `planExportAction` layout/bucket/async-precedence
+  units, allow-list (`EXPORT_ACTION_PLAN_KEYS`), hostile-fixture no-leak (incl. no raw selector),
+  and the purity source-guard on `export-classify.ts`.
+- `test/cli/classify-export-same-session.test.ts` — the no-click CLI source-guard (no
+  `.click(`/download-wait/`saveAs`/upload/`writeStatus`; imports only the pure planner; sentinel
+  continuation).
 - Fixtures (synthetic, no PII): existing `session_login*.html`, `session_2fa.html`,
   `session_logged_in.html`, `session_branding_only.html`, `session_admin_with_login_widget.html`,
   plus new `session_reconnect.html` (Commerce account-selection interstitial — PLACEHOLDER

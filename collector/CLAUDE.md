@@ -72,6 +72,7 @@ npm run discover-same-session -- --i-understand-this-opens-live-naver   # recomm
 npm run probe-session -- --i-understand-this-opens-live-naver           # sanitized DOM probe (separate launch)
 npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-ONLY same-context verdict probe; sentinel-file continuation; no export/click/download
 npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
+npm run classify-export-same-session -- --i-understand-this-opens-live-naver  # STRICT NO-CLICK export-layout classifier (sync/async/unrecognized from structure only); same sentinel flow; never triggers/captures
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 
@@ -152,8 +153,16 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   booleans/bucketed counts/category enums for diagnosing `SESSION_EXPIRED` and
   `LAYOUT_UNRECOGNIZED` without exposing any DOM content (hostile-fixture tests
   enforce no leakage).
+- `naver/export-classify.ts` — pure, no-click export-layout planner
+  (`planExportAction`). Folds `review-export.ts`'s existing pure pieces
+  (`classifyExportPage` / `findExportCandidates` / `buildTriggerSelectors`) into one
+  sanitized `ExportActionPlan` (layout enum + actionable-candidate / trigger-selector
+  count buckets + async-marker boolean) so the export mechanism can be classified
+  **without** triggering it. Raw selectors are counted, never emitted; a purity
+  source-guard test proves the module reaches no click/download/save path.
 - `cli/discover-export.ts`, `cli/discover-same-session.ts`, `cli/probe-session.ts`,
-  `cli/probe-same-session.ts`, `cli/probe-export-same-session.ts` — live entrypoints, all
+  `cli/probe-same-session.ts`, `cli/probe-export-same-session.ts`,
+  `cli/classify-export-same-session.ts` — live entrypoints, all
   gated by `cli/live-run-approval.ts`.
   `probe-same-session.ts` is a READ-ONLY diagnostic: it keeps one persistent-context
   lifetime (human logs in → creates the sentinel file printed by the probe → the SAME
@@ -168,6 +177,13 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   to locate *where* the export UI lives (iframe vs shadow DOM vs sub-route vs gated control
   vs marker mismatch) without ever clicking/downloading — same source-guard boundary, same
   shared sentinel path (run only one probe at a time).
+  `classify-export-same-session.ts` is the same read-only one-context + sentinel flow and
+  classifies the export **layout** (sync / async / unrecognized) via the pure
+  `planExportAction` under a **strict no-click boundary** — unlike `discover-same-session`,
+  whose `classifyOnly` path still clicks the control and waits for the download. It imports
+  only the pure planner (never `review-export`/`runExport`), and its source-guard forbids
+  `.click(`/`waitForEvent("download")`/`saveAs`/upload/`writeStatus` (this PR adds the safe
+  path; it does **not** change the existing discovery/capture behavior).
 
 ---
 
