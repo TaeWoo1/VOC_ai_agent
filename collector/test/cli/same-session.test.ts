@@ -5,6 +5,7 @@ import {
   buildSessionProbeMeta,
   classifyOnlyStatus,
   classifyOnlyStatusFromPlan,
+  decideCaptureGate,
   emitExportProbe,
   emitSessionProbe,
   EMIT_EXPORT_PROBE_FLAG,
@@ -12,6 +13,7 @@ import {
   proceedAfterConfirmation,
   SAME_SESSION_CONFIRM_PROMPT,
 } from "../../src/cli/same-session";
+import type { CountBucket } from "../../src/naver/export-probe";
 import type { ExportActionPlan, ExportLayout } from "../../src/naver/export-classify";
 import { extractExportProbeSignals, SANITIZED_EXPORT_PROBE_KEYS } from "../../src/naver/export-probe";
 import { extractProbeSignals, SANITIZED_PROBE_KEYS } from "../../src/naver/session-probe";
@@ -321,4 +323,83 @@ describe("classify-only never reports success (LAST_SUCCESS impossible)", () => 
       });
     }
   }
+});
+
+/** A clean single-control sync plan; pass overrides to perturb one leaf at a time. */
+function syncPlan(overrides: Partial<ExportActionPlan> = {}): ExportActionPlan {
+  return {
+    layout: "SYNC_DOWNLOAD",
+    hasActionableExportCandidate: true,
+    actionableExportCandidateCount: "one",
+    triggerSelectorCount: "one",
+    asyncMarkerPresent: false,
+    ...overrides,
+  };
+}
+
+describe("decideCaptureGate — the pre-click chokepoint for the CAPTURE path", () => {
+  it("proceeds ONLY for LOGGED_IN + single unambiguous sync control", () => {
+    const gate = decideCaptureGate("LOGGED_IN", syncPlan());
+    expect(gate.proceed).toBe(true);
+    expect(gate.state).toBe("CONNECTED");
+    expect(gate.detail).toMatch(/one guarded click/i);
+  });
+
+  it("never proceeds on a non-LOGGED_IN verdict (defers to the five-state halt)", () => {
+    const nonLoggedIn: Array<[SessionVerdict, string]> = [
+      ["RECONNECT_REQUIRED", "RECONNECT_REQUIRED"],
+      ["ACCOUNT_LOGIN_REQUIRED", "ACCOUNT_LOGIN_REQUIRED"],
+      ["AUTH_CHALLENGE_REQUIRED", "ACTION_REQUIRED_FOR_2FA_OR_CAPTCHA"],
+      ["UNKNOWN", "SESSION_EXPIRED"],
+    ];
+    for (const [verdict, state] of nonLoggedIn) {
+      // Even a perfect single-sync plan cannot rescue a non-logged-in session.
+      const gate = decideCaptureGate(verdict, syncPlan());
+      expect(gate.proceed).toBe(false);
+      expect(gate.state).toBe(state);
+      expect(gate.detail).toMatch(/^capture:/);
+    }
+  });
+
+  it("LOGGED_IN + async marker → halt, no click (EXPORT_ASYNC_JOB_DETECTED)", () => {
+    const gate = decideCaptureGate("LOGGED_IN", planFor("ASYNC_JOB_DETECTED"));
+    expect(gate.proceed).toBe(false);
+    expect(gate.state).toBe("EXPORT_ASYNC_JOB_DETECTED");
+  });
+
+  it("LOGGED_IN + unrecognized layout → halt, no click (EXPORT_LAYOUT_CHANGED)", () => {
+    const gate = decideCaptureGate("LOGGED_IN", planFor("LAYOUT_UNRECOGNIZED"));
+    expect(gate.proceed).toBe(false);
+    expect(gate.state).toBe("EXPORT_LAYOUT_CHANGED");
+  });
+
+  it("LOGGED_IN + SYNC but an async marker also present → halt (async wins)", () => {
+    const gate = decideCaptureGate("LOGGED_IN", syncPlan({ asyncMarkerPresent: true }));
+    expect(gate.proceed).toBe(false);
+  });
+
+  it("LOGGED_IN + SYNC but MULTIPLE candidates → halt, no click (ambiguous)", () => {
+    for (const count of ["few", "some", "many"] as CountBucket[]) {
+      const gate = decideCaptureGate("LOGGED_IN", syncPlan({ actionableExportCandidateCount: count }));
+      expect(gate.proceed, `candidates=${count}`).toBe(false);
+      // The sync mechanism is still honestly recorded, just not triggered.
+      expect(gate.state).toBe("EXPORT_SYNC_DETECTED");
+      expect(gate.detail).toMatch(/not a single unambiguous control/i);
+    }
+  });
+
+  it("LOGGED_IN + SYNC but MORE THAN ONE trigger selector → halt, no click", () => {
+    for (const count of ["few", "some", "many"] as CountBucket[]) {
+      const gate = decideCaptureGate("LOGGED_IN", syncPlan({ triggerSelectorCount: count }));
+      expect(gate.proceed, `selectors=${count}`).toBe(false);
+    }
+  });
+
+  it("LOGGED_IN + SYNC but NO actionable candidate → halt, no click", () => {
+    const gate = decideCaptureGate(
+      "LOGGED_IN",
+      syncPlan({ hasActionableExportCandidate: false, actionableExportCandidateCount: "none", triggerSelectorCount: "none" }),
+    );
+    expect(gate.proceed).toBe(false);
+  });
 });

@@ -164,3 +164,57 @@ export function classifyOnlyStatusFromPlan(
       : `no-click: export layout ${plan.layout}`;
   return { state, detail };
 }
+
+/** The pre-click gate decision for the same-session CAPTURE path. */
+export interface CaptureGateDecision {
+  /** Only an unambiguous single-control sync export on a LOGGED_IN session proceeds. */
+  proceed: boolean;
+  /** Honest state to record when halting (ignored when `proceed`). */
+  state: CollectorState;
+  /** Content-free, operator-facing explanation. */
+  detail: string;
+}
+
+/**
+ * Pure: the pre-click gate for the same-session CAPTURE path. Unlike the no-click
+ * classifier, this path WILL click, so it must clear a STRICT bar first — it proceeds
+ * ONLY when the human-loaded page is an unambiguous single-control sync export on a
+ * confirmed session:
+ *   - `verdict === "LOGGED_IN"`,
+ *   - `layout === "SYNC_DOWNLOAD"` and NOT `asyncMarkerPresent`,
+ *   - exactly one actionable export candidate AND exactly one trigger selector.
+ * Any other shape HALTS with an honest, content-free state (the five-state halt for a
+ * non-`LOGGED_IN` verdict; otherwise the layout state from `classifyOnlyStatusFromPlan`)
+ * and NO click happens. This is the single chokepoint the capture CLI consults before
+ * ever calling `runExport`; it never relaxes a guard, only decides whether to proceed.
+ */
+export function decideCaptureGate(
+  verdict: SessionVerdict,
+  plan: ExportActionPlan,
+): CaptureGateDecision {
+  // Non-LOGGED_IN never clicks — defer to the five-state halt mapping.
+  if (verdict !== "LOGGED_IN") {
+    const halt = haltForVerdict(verdict);
+    return { proceed: false, state: halt.state, detail: `capture: ${halt.detail}` };
+  }
+  // LOGGED_IN, but proceed only for an unambiguous single sync control.
+  const single =
+    plan.layout === "SYNC_DOWNLOAD" &&
+    !plan.asyncMarkerPresent &&
+    plan.hasActionableExportCandidate &&
+    plan.actionableExportCandidateCount === "one" &&
+    plan.triggerSelectorCount === "one";
+  if (!single) {
+    const status = classifyOnlyStatusFromPlan(verdict, plan);
+    const detail =
+      plan.layout === "SYNC_DOWNLOAD"
+        ? "capture: sync layout but not a single unambiguous control; not triggered"
+        : status.detail;
+    return { proceed: false, state: status.state, detail };
+  }
+  return {
+    proceed: true,
+    state: "CONNECTED",
+    detail: "capture: single sync export control on a logged-in session; proceeding to one guarded click",
+  };
+}

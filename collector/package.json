@@ -15,7 +15,8 @@
     "probe-session": "tsx src/cli/probe-session.ts",
     "probe-same-session": "tsx src/cli/probe-same-session.ts",
     "probe-export-same-session": "tsx src/cli/probe-export-same-session.ts",
-    "classify-export-same-session": "tsx src/cli/classify-export-same-session.ts"
+    "classify-export-same-session": "tsx src/cli/classify-export-same-session.ts",
+    "capture-export-same-session": "tsx src/cli/capture-export-same-session.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
