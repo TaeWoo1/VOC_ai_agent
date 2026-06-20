@@ -60,6 +60,39 @@ async function doLogin(): Promise<void> {
   // profile dir automatically. The collector stores nothing itself.
 }
 
+/**
+ * Optional cold STORAGE diagnostic (State B) — emit a NO-CLICK sanitized storage
+ * snapshot of the current cold context, on ANY verdict: the LOGGED_IN classify-only
+ * path OR a halt verdict (e.g. RECONNECT_REQUIRED / ACCOUNT_LOGIN_REQUIRED). Storage
+ * exists on the cold page regardless of the session verdict, so this lets State B be
+ * diffed against State A even when the cold run halts before classify.
+ *
+ * No-op unless requested; requires `cfg.storageProbeSalt` (validated earlier in
+ * `doDiscover`, re-checked defensively here). It only READS storage metadata via the
+ * pure sanitizer — never clicks, never writes status, never uploads, never captures.
+ * On a collection error it logs ONLY a coarse sanitized reason — never a raw stack,
+ * URL, key, value, host, token, or HTML.
+ */
+async function emitColdStorageDiagnosticIfRequested(
+  page: Page,
+  ctx: BrowserContext,
+  cfg: CollectorConfig,
+  diagnoseStorage: boolean,
+): Promise<void> {
+  if (!diagnoseStorage || !cfg.storageProbeSalt) return;
+  try {
+    const signals = await collectSanitizedStorage(page, ctx, {
+      contextLabel: "B_cold",
+      salt: cfg.storageProbeSalt,
+    });
+    console.log(JSON.stringify(signals, null, 2));
+    log("diagnose.storage.no-click", { contextLabel: signals.contextLabel, groupCount: signals.groups.length });
+  } catch {
+    // Coarse + sanitized — the underlying error could embed a URL/selector, so never echo it.
+    log("diagnose.storage.failed", { reason: "storage-read-error" });
+  }
+}
+
 async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.naverReviewUrl) {
@@ -102,9 +135,15 @@ async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Prom
   const verdict = await checkLiveSessionVerdict(page);
   const halt = haltForVerdict(verdict);
   if (!halt.proceed) {
+    // Cold STORAGE diagnostic (State B) on a NON-LOGGED_IN verdict (e.g.
+    // RECONNECT_REQUIRED): storage exists on the cold page regardless of the verdict,
+    // so emit the sanitized snapshot BEFORE closing — this is precisely the cold state
+    // we want to diff against State A. No-op unless --diagnose-storage was requested.
+    // The halt status itself stays honest and unchanged (never LAST_SUCCESS).
+    await emitColdStorageDiagnosticIfRequested(page as unknown as Page, ctx, cfg, diagnoseStorage);
     writeStatus(cfg.statusFile, { state: halt.state, detail: halt.detail, updatedAt: now() });
     await ctx.close();
-    log("run.halted", { state: halt.state });
+    log("run.halted", { state: halt.state, diagnoseStorage });
     return;
   }
 
@@ -135,17 +174,10 @@ async function doDiscoverClassifyOnly(
   const { state, detail } = classifyOnlyStatusFromPlan(verdict, plan);
   writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
 
-  // Optional cold STORAGE diagnostic (State B) — a no-click sanitized read of the
-  // same already-loaded context, printed alongside the verdict. Guarded above to be
-  // classify-only + salted. Default behaviour (flag absent) is byte-for-byte unchanged.
-  if (diagnoseStorage && cfg.storageProbeSalt) {
-    const signals = await collectSanitizedStorage(page as unknown as Page, ctx, {
-      contextLabel: "B_cold",
-      salt: cfg.storageProbeSalt,
-    });
-    console.log(JSON.stringify(signals, null, 2));
-    log("diagnose.storage.no-click", { contextLabel: signals.contextLabel, groupCount: signals.groups.length });
-  }
+  // Optional cold STORAGE diagnostic (State B) on the LOGGED_IN classify-only path —
+  // same no-click sanitized read, printed alongside the verdict. Default behaviour
+  // (flag absent) is byte-for-byte unchanged.
+  await emitColdStorageDiagnosticIfRequested(page as unknown as Page, ctx, cfg, diagnoseStorage);
 
   await ctx.close();
   log("run.done", {
