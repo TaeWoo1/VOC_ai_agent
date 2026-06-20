@@ -18,7 +18,7 @@
  * the collector never types credentials, never bypasses auth, and never writes
  * to NAVER. Do NOT run during planning/implementation.
  */
-import type { BrowserContext } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
 import { planExportAction } from "../naver/export-classify";
@@ -28,10 +28,14 @@ import { waitForSpaHydration } from "../naver/hydration";
 import { runExport } from "../naver/review-export";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { launchNaverContext, type PwPage } from "../profile";
+import { collectSanitizedStorage } from "../naver/storage-collect";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
 import { classifyOnlyStatusFromPlan } from "./same-session";
+
+/** Optional cold STORAGE diagnostic (State B); valid ONLY with --classify-only. */
+const DIAGNOSE_STORAGE_FLAG = "--diagnose-storage";
 
 // PLACEHOLDER landing URL; the human navigates/logs in from here.
 const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
@@ -56,12 +60,31 @@ async function doLogin(): Promise<void> {
   // profile dir automatically. The collector stores nothing itself.
 }
 
-async function doDiscover(classifyOnly: boolean): Promise<void> {
+async function doDiscover(classifyOnly: boolean, diagnoseStorage: boolean): Promise<void> {
   const cfg = loadConfig();
   if (!cfg.naverReviewUrl) {
     console.error("Set NAVER_REVIEW_URL to the review-management/export page URL first.");
     process.exit(2);
     return;
+  }
+  // The cold STORAGE diagnostic is a NO-CLICK read; it is allowed only on the
+  // classify-only path and never during full capture, and it fails closed without
+  // the shared salt (so its hashes line up with the same-session State A leg).
+  if (diagnoseStorage) {
+    if (!classifyOnly) {
+      console.error(`${DIAGNOSE_STORAGE_FLAG} is only valid with --classify-only (never during capture).`);
+      process.exit(2);
+      return;
+    }
+    if (!cfg.storageProbeSalt) {
+      console.error(
+        "Refusing to run the storage diagnostic without STORAGE_PROBE_SALT.\n" +
+          "  - Set the SAME STORAGE_PROBE_SALT as the same-session (State A) leg.\n" +
+          "  - It is used only for one-way hashing and is never printed or stored.",
+      );
+      process.exit(2);
+      return;
+    }
   }
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
@@ -87,7 +110,7 @@ async function doDiscover(classifyOnly: boolean): Promise<void> {
 
   // 2) LOGGED_IN — branch by mode. Classify-only is strictly NO-CLICK (it never
   //    calls runExport); the full path is the ONLY one that triggers/captures.
-  if (classifyOnly) return doDiscoverClassifyOnly(page, verdict, ctx, cfg, now);
+  if (classifyOnly) return doDiscoverClassifyOnly(page, verdict, ctx, cfg, now, diagnoseStorage);
   return doDiscoverFullCapture(page, ctx, cfg, now);
 }
 
@@ -105,11 +128,25 @@ async function doDiscoverClassifyOnly(
   ctx: BrowserContext,
   cfg: CollectorConfig,
   now: () => string,
+  diagnoseStorage: boolean,
 ): Promise<void> {
   const html = await page.content();
   const plan = planExportAction(html);
   const { state, detail } = classifyOnlyStatusFromPlan(verdict, plan);
   writeStatus(cfg.statusFile, { state, detail, updatedAt: now() });
+
+  // Optional cold STORAGE diagnostic (State B) — a no-click sanitized read of the
+  // same already-loaded context, printed alongside the verdict. Guarded above to be
+  // classify-only + salted. Default behaviour (flag absent) is byte-for-byte unchanged.
+  if (diagnoseStorage && cfg.storageProbeSalt) {
+    const signals = await collectSanitizedStorage(page as unknown as Page, ctx, {
+      contextLabel: "B_cold",
+      salt: cfg.storageProbeSalt,
+    });
+    console.log(JSON.stringify(signals, null, 2));
+    log("diagnose.storage.no-click", { contextLabel: signals.contextLabel, groupCount: signals.groups.length });
+  }
+
   await ctx.close();
   log("run.done", {
     state,
@@ -185,7 +222,7 @@ async function main(): Promise<void> {
     return;
   }
   if (mode === "--login") return doLogin();
-  return doDiscover(isClassifyOnly(args));
+  return doDiscover(isClassifyOnly(args), args.includes(DIAGNOSE_STORAGE_FLAG));
 }
 
 void main();
