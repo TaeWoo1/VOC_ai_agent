@@ -41,12 +41,17 @@ Over coarse, already-sanitized boolean inputs (`SessionVerdictInput`):
 3. `isSellerCenterUrl` **and** at least one STRONG seller-center signal
    (`menuOrGnbPresent` | `logoutAffordancePresent` | `exportCandidatesPresent`) →
    **LOGGED_IN**. **Relaxed:** an ambient login / account / reconnect *affordance* does
-   **not** suppress this — only a real password field does (caught by rule 2) — because
-   NAVER/Commerce seller-center pages can embed ambient login widgets while the session is
-   usable. `LOGGED_IN` is checked **before** `RECONNECT_REQUIRED`.
+   **not** suppress this. `LOGGED_IN` is checked **before** `RECONNECT_REQUIRED`.
+   Rule 2 (password) is **guarded by the reconnect affordance** (Run-1 finding): a password
+   field forces `ACCOUNT_LOGIN_REQUIRED` **only when there is no reconnect/account-continuation
+   affordance**. The real Commerce reconnect screen shows a currently-logged-in
+   account-continuation card above an *alternate* login form; that form sets
+   `passwordFieldPresent`, but the human can continue without re-login, so a bare password rule
+   wrongly masked the reconnect. When both are present the verdict falls through — a strong
+   seller-center session still wins (rule 3), otherwise reconnect does (rule 4).
 4. `accountReconnectAffordancePresent` (and not already `LOGGED_IN`) →
-   **RECONNECT_REQUIRED** — account chooser / Commerce reconnect / store selection; a human
-   click/login is needed.
+   **RECONNECT_REQUIRED** — account chooser / Commerce reconnect / store selection /
+   account-continuation card; a human click/login is needed.
 5. otherwise → **UNKNOWN** (ambiguous; never proceed to export).
 
 ### Demoted / non-inputs
@@ -62,10 +67,15 @@ Over coarse, already-sanitized boolean inputs (`SessionVerdictInput`):
 
 - **Added** `sessionVerdict: SessionVerdict` (coarse enum).
 - **Added** `accountReconnectAffordancePresent: boolean` — account-chooser / Commerce
-  reconnect / store-selection affordance. **PLACEHOLDER markers** (`ACCOUNT_RECONNECT_MARKERS`
-  in `session-probe.ts`) — specific phrases (다른 계정 / 계정 선택 / 이 계정으로 계속 / 스토어
-  선택 / 커머스 ID 로그인 / account-chooser / reconnect), deliberately not bare
-  계정/account/스토어/커머스. To be confirmed/corrected from a later sanitized live probe.
+  reconnect / store-selection / account-continuation affordance (`ACCOUNT_RECONNECT_MARKERS`
+  in `session-probe.ts`) — specific phrases (다른 계정 / 계정 선택 / 이 계정으로 계속 /
+  **현재 로그인 중인** / 스토어 선택 / 커머스 ID 로그인 / account-chooser / reconnect), deliberately
+  not bare 계정/account/스토어/커머스. **Corrected from the Run-1 sanitized finding:** the live
+  Commerce reconnect screen presents a *currently-logged-in account-continuation card*
+  (`현재 로그인 중인 …`) above an alternate login form. That card wording is the discriminator;
+  generic login-button text (간편 로그인 / 네이버 아이디로 간편 로그인 / bare 네이버 커머스 ID) is
+  **deliberately excluded** — it appears on plain login pages too and would flip a real login
+  page to `RECONNECT_REQUIRED` under the reconnect-guarded password rule.
 - **Tightened** `candidateLoggedInShellPresent` to structural-only (see §3).
 
 All fields remain booleans / bucketed counts / category enums — the no-leak contract holds
@@ -210,21 +220,37 @@ proves `runExport`/`.click(`/`waitForEvent("download")`/`saveAs`/upload appear *
 triggers/captures the export is that deliberate full capture leg (`discover-export --discover`
 without `--classify-only`).
 
-## 5c. Still deferred
+## 5c. Reconnect markers — corrected from Run 1
 
-- **Live confirmation of the placeholder reconnect markers** (`ACCOUNT_RECONNECT_MARKERS`)
-  and a real `LOGGED_IN` / `RECONNECT_REQUIRED` contrast sample — now capturable via
-  `probe-same-session` above. Until confirmed, a real Commerce interstitial may still fall
-  to `UNKNOWN → SESSION_EXPIRED`: the wiring is honest, the trigger is still a placeholder.
-  This is the standard "correct placeholders from sanitized findings" loop, on explicit
-  operator approval — a diagnostic run, not a code PR.
+- **Run 1 (`probe-same-session`)** read the live Commerce reconnect screen as
+  `accountReconnectAffordancePresent: false` / `sessionVerdict: ACCOUNT_LOGIN_REQUIRED`. The
+  sanitized finding showed two defects, both now fixed offline: (a) the screen's
+  account-continuation card wording (`현재 로그인 중인 …`) was not a marker — **added**; and
+  (b) the alternate login form's `passwordFieldPresent` masked the reconnect — the password
+  rule is now **guarded by the reconnect affordance** (`session-verdict.ts`). Covered by the
+  synthetic `fixtures/session_reconnect_with_login_form.html` (continuation card + alternate
+  login form → `RECONNECT_REQUIRED`) plus an over-match guard (a generic 간편 로그인 phrase
+  alone stays `ACCOUNT_LOGIN_REQUIRED`).
+
+## 5d. Still deferred
+
+- **`ASYNC_JOB_MARKERS`** (`review-export.ts`) remain placeholders pending a live async run —
+  the in-flight status wording (`처리 중` / `대기열`) only appears with a real job, so confirming
+  it needs a separately-approved diagnostic, not a code PR.
+- An optional `LOGGED_IN` ↔ `RECONNECT_REQUIRED` live contrast sample (human completes the
+  account-continuation step) would further corroborate the corrected markers — on explicit
+  operator approval, a diagnostic run.
 
 ## 6. Tests & fixtures
 
-- `test/naver/session-verdict.test.ts` — pure precedence/relaxed-rule unit tests.
+- `test/naver/session-verdict.test.ts` — pure precedence/relaxed-rule unit tests, incl. the
+  **reconnect-guarded password rule** (password + reconnect → `RECONNECT_REQUIRED`; password
+  alone → `ACCOUNT_LOGIN_REQUIRED`; auth still first; a strong seller-center session still wins).
 - `test/naver/session-probe.test.ts` — verdict wiring across fixtures, the
-  `candidateLoggedInShellPresent` structural-only **regression**, the no-leak sweep, and the
-  allow-list (`SANITIZED_PROBE_KEYS`) for the two new fields.
+  `candidateLoggedInShellPresent` structural-only **regression**, the no-leak sweep, the
+  allow-list (`SANITIZED_PROBE_KEYS`), the Run-1 `session_reconnect_with_login_form.html`
+  (continuation card + alternate login form → `RECONNECT_REQUIRED`), and the over-match guard
+  (a generic 간편 로그인 phrase alone stays `ACCOUNT_LOGIN_REQUIRED`).
 - `test/naver/session-halt.test.ts` — `haltForVerdict` for all five verdicts (proceed flag,
   `CollectorState`, honest content-free detail; reconnect ≠ `SESSION_EXPIRED`; never
   `LAST_SUCCESS`).
@@ -250,6 +276,7 @@ without `--classify-only`).
   continuation).
 - Fixtures (synthetic, no PII): existing `session_login*.html`, `session_2fa.html`,
   `session_logged_in.html`, `session_branding_only.html`, `session_admin_with_login_widget.html`,
-  plus new `session_reconnect.html` (Commerce account-selection interstitial — PLACEHOLDER
-  markers) and `session_seller_center_with_login_link.html` (relaxed-LOGGED_IN: ambient login
-  link, no password).
+  `session_reconnect.html` (Commerce account-selection interstitial — clean chooser, no
+  password), `session_reconnect_with_login_form.html` (Run-1: account-continuation card +
+  alternate login form), and `session_seller_center_with_login_link.html` (relaxed-LOGGED_IN:
+  ambient login link, no password).

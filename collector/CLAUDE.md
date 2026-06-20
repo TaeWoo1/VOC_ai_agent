@@ -157,7 +157,13 @@ one-way `boundStoreFingerprintHash` + a coarse `fingerprintSourceCategory`. See
   (`extractProbeSignals` / `extractExportProbeSignals`) emitting only
   booleans/bucketed counts/category enums for diagnosing `SESSION_EXPIRED` and
   `LAYOUT_UNRECOGNIZED` without exposing any DOM content (hostile-fixture tests
-  enforce no leakage).
+  enforce no leakage). `ACCOUNT_RECONNECT_MARKERS` were **corrected from the Run-1
+  sanitized finding**: the live Commerce reconnect screen shows a currently-logged-in
+  account-continuation card (`현재 로그인 중인 …`) above an *alternate* login form, so
+  `session-verdict.ts` guards the password rule (`passwordFieldPresent && !accountReconnect
+  → ACCOUNT_LOGIN_REQUIRED`) to stop the alternate form masking the reconnect. Generic
+  login-button phrases are deliberately not markers. `ASYNC_JOB_MARKERS` remain a placeholder
+  pending a live async run — correct from observed findings only, per §6.
 - `naver/export-classify.ts` — pure, no-click export-layout planner
   (`planExportAction`). Folds `review-export.ts`'s existing pure pieces
   (`classifyExportPage` / `findExportCandidates` / `buildTriggerSelectors`) into one

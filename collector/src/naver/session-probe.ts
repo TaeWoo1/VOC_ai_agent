@@ -104,13 +104,19 @@ const LOGIN_AFFORDANCE_MARKERS = [/nidlogin/i, /\blogin\b/i, /로그인/, /type=
 const LOGGED_IN_SHELL_MARKERS = [/data-seller-authenticated/i, /id=["']seller-gnb["']/i];
 const MENU_GNB_MARKERS = [/\b[lg]nb\b/i, /id=["'][^"']*(gnb|lnb|nav|sidebar|aside)[^"']*["']/i, /<nav\b/i];
 const LOGOUT_MARKERS = [/로그아웃/, /\blogout\b/i];
-// Account chooser / Commerce reconnect / store-selection interstitial. PLACEHOLDER markers —
-// deliberately specific phrases (not bare 계정/account/스토어/커머스, which appear elsewhere),
-// to be confirmed/corrected from a later sanitized live probe of the real interstitial.
+// Account chooser / Commerce reconnect / store-selection / account-continuation interstitial.
+// Deliberately specific phrases (not bare 계정/account/스토어/커머스, which appear elsewhere).
+// `현재 로그인 중인` is the Run-1 finding: the real Commerce reconnect screen shows a
+// "currently logged in as «Commerce ID» — continue?" CONTINUATION card above an alternate
+// login form. That card (not the login form) is the discriminator. Generic login-button text
+// (간편 로그인 / 네이버 아이디로 간편 로그인 / bare 네이버 커머스 ID) is intentionally EXCLUDED —
+// it appears on plain NAVER-ID login pages too, so it would flip a real login page to
+// RECONNECT_REQUIRED under the reconnect-guarded password rule (see session-verdict.ts).
 const ACCOUNT_RECONNECT_MARKERS = [
   /다른\s*계정/,
   /계정\s*선택/,
   /이\s*계정으로\s*계속/,
+  /현재\s*로그인\s*중인/,
   /스토어\s*선택/,
   /판매자\s*선택/,
   /커머스\s*(아이디|id)\s*로그인/i,
