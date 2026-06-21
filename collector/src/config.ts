@@ -37,6 +37,30 @@ export interface CollectorConfig {
    * never written to status/docs. Undefined → diagnostic refuses to run.
    */
   storageProbeSalt: string | undefined;
+  /**
+   * Expected Commerce channel code the account/store resolver matches candidates
+   * against (live layer). Defaults to `naverChannelCode` (the user's "use existing
+   * channel code if possible") so no extra config is required for the common case.
+   * The resolver clicks at most one candidate, and only when exactly one candidate
+   * structurally matches this code (or `naverExpectedStoreFingerprint`).
+   */
+  naverExpectedChannelCode: string;
+  /**
+   * Optional stronger account/store match: a precomputed salted hash
+   * (`sha256(STORAGE_PROBE_SALT + " " + token).slice(0,16)`) of the expected store's
+   * stable identity token. Never a raw store label. Undefined → channel-code match
+   * only. When set, the salt (`storageProbeSalt`) must also be set for it to apply.
+   */
+  naverExpectedStoreFingerprint: string | undefined;
+  /**
+   * Optional salted fingerprint of the expected NAVER Commerce "continue with this
+   * account" reconnect-CARD display text (`sha256(STORAGE_PROBE_SALT + " " +
+   * normalizedCardText).slice(0,16)`). This is NOT a store-id fingerprint — it is the
+   * display-text fingerprint of the single-account continuation surface. Absent → the
+   * diagnostic still reports the observed card hash but a future guarded continue is
+   * never allowed. Never a raw account/Commerce-ID label.
+   */
+  naverExpectedContinueCardFingerprint: string | undefined;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
@@ -45,6 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     email: env.SELLEROPS_EMAIL ?? "demo@sellerops.ai",
     password: env.SELLEROPS_PASSWORD ?? "demo1234",
     naverChannelCode: env.NAVER_CHANNEL_CODE ?? "NAVER",
+    naverExpectedChannelCode: env.NAVER_EXPECTED_CHANNEL_CODE ?? env.NAVER_CHANNEL_CODE ?? "NAVER",
+    naverExpectedStoreFingerprint: env.NAVER_EXPECTED_STORE_FINGERPRINT,
+    naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
     profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
