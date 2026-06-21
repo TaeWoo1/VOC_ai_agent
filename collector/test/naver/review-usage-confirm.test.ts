@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   confirmReviewUsageOnce,
+  REVIEW_USAGE_CANDIDATES_KEYS,
   REVIEW_USAGE_CONFIRM_KEYS,
+  scanReviewUsageConfirmCandidates,
   type ConfirmContext,
   type ConfirmDeps,
   type ConfirmDialog,
@@ -38,8 +40,10 @@ const PII_CONSENT = `<div role="dialog" aria-modal="true">
 interface FakePageOpts {
   /** content() responses: index 0 = consent re-check, then observe reads (last repeats). */
   contentSeq: string[];
-  /** what the in-page scan returns. */
+  /** what the bind in-page scan returns (affirmative match count). */
   scanCount: number;
+  /** what the candidate in-page scan returns (overrides scanCount for that evaluate). */
+  candidatesReturn?: { candidates: Array<{ index: number; kind: string; visible: boolean; enabled: boolean; textLength: number }> };
   /** what locator(stamp).count() returns (default = scanCount). */
   locatorCount?: number;
   /** if set, waitForEvent("download") resolves with this suggested filename. */
@@ -48,6 +52,10 @@ interface FakePageOpts {
   dialog?: { type: string; message: string };
   /** force the click to throw (control not actionable). */
   clickThrows?: boolean;
+  /** force page.content() to throw (closed/detached page). */
+  contentThrows?: boolean;
+  /** force page.evaluate() to throw (context destroyed). */
+  evaluateThrows?: boolean;
 }
 
 interface FakeHandles {
@@ -62,12 +70,15 @@ function makeFakes(opts: FakePageOpts): FakeHandles {
 
   const page = {
     async content(): Promise<string> {
+      if (opts.contentThrows) throw new Error("Target page, context or browser has been closed");
       const i = Math.min(counts.content, opts.contentSeq.length - 1);
       counts.content += 1;
       return opts.contentSeq[i] ?? "";
     },
     async evaluate(_fn: unknown, _arg: unknown): Promise<unknown> {
       counts.evaluate += 1;
+      if (opts.evaluateThrows) throw new Error("Execution context was destroyed");
+      if (opts.candidatesReturn !== undefined) return opts.candidatesReturn;
       return opts.scanCount;
     },
     locator(_selector: string) {
@@ -232,6 +243,101 @@ describe("confirmReviewUsageOnce — no raw leak; output keys allow-listed", () 
   });
 });
 
+describe("confirmReviewUsageOnce — read failures degrade to a sanitized halt (never throw)", () => {
+  it("a closed page on the re-confirm read → CONFIRM_READ_FAILED, no click, no throw", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, contentThrows: true });
+    const r = await confirmReviewUsageOnce(page, ctx, DEPS);
+    expect(r.confirmBind).toBe("CONFIRM_READ_FAILED");
+    expect(r.confirmClicked).toBe(false);
+    expect(r.confirmClickedCount).toBe(0);
+    expect(r.confirmOutcome).toBe("NO_CHANGE");
+    expect(counts.click).toBe(0);
+  });
+
+  it("a destroyed context during the bind scan → CONFIRM_READ_FAILED, no click, no throw", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, evaluateThrows: true });
+    const r = await confirmReviewUsageOnce(page, ctx, DEPS);
+    expect(r.confirmBind).toBe("CONFIRM_READ_FAILED");
+    expect(counts.click).toBe(0);
+  });
+});
+
+describe("scanReviewUsageConfirmCandidates — NO-CLICK candidate-index diagnostic", () => {
+  const RAW_CANDIDATES = {
+    candidates: [
+      { index: 0, kind: "cancel", visible: true, enabled: true, textLength: 2 },
+      { index: 1, kind: "affirmative", visible: true, enabled: true, textLength: 2 },
+      { index: 2, kind: "other", visible: false, enabled: false, textLength: 5 },
+    ],
+  };
+
+  it("scans the consent modal and reports sanitized per-candidate metadata, never clicking", async () => {
+    const { page, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: RAW_CANDIDATES });
+    const r = await scanReviewUsageConfirmCandidates(page);
+    expect(r.candidateScan).toBe("SCANNED");
+    expect(counts.click).toBe(0); // NEVER clicks in candidate mode
+    expect(r.candidateIndices).toEqual([0, 1, 2]);
+    expect(r.candidateCountBucket).toBe("few");
+    expect(r.candidates.map((c) => c.buttonKind)).toEqual(["cancel", "affirmative", "other"]);
+    expect(r.candidates[0]?.visible).toBe(true);
+    expect(r.candidates[2]?.enabled).toBe(false);
+    // metadata is bucketed, not raw lengths
+    expect(r.candidates[0]?.textLengthBucket).toBe("tiny");
+  });
+
+  it("reports MULTIPLE candidates without clicking any", async () => {
+    const many = {
+      candidates: Array.from({ length: 4 }, (_v, i) => ({
+        index: i,
+        kind: i === 1 ? "affirmative" : "other",
+        visible: true,
+        enabled: true,
+        textLength: 3,
+      })),
+    };
+    const { page, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: many });
+    const r = await scanReviewUsageConfirmCandidates(page);
+    expect(r.candidates.length).toBe(4);
+    expect(counts.click).toBe(0);
+  });
+
+  it("CONFIRM_NOT_CONSENT when the foreground modal is not the consent modal (no scan)", async () => {
+    const { page, counts } = makeFakes({ contentSeq: [DISMISSED_HTML], scanCount: 0 });
+    const r = await scanReviewUsageConfirmCandidates(page);
+    expect(r.candidateScan).toBe("CONFIRM_NOT_CONSENT");
+    expect(r.candidates).toEqual([]);
+    expect(counts.evaluate).toBe(0); // never scans a non-consent modal
+    expect(counts.click).toBe(0);
+  });
+
+  it("CONFIRM_READ_FAILED on a closed page / destroyed context (no throw)", async () => {
+    const closed = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 0, contentThrows: true });
+    expect((await scanReviewUsageConfirmCandidates(closed.page)).candidateScan).toBe("CONFIRM_READ_FAILED");
+    const destroyed = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 0, evaluateThrows: true });
+    const r = await scanReviewUsageConfirmCandidates(destroyed.page);
+    expect(r.candidateScan).toBe("CONFIRM_READ_FAILED");
+    expect(destroyed.counts.click).toBe(0);
+  });
+
+  it("candidate metadata carries no raw text/selector; output keys allow-listed", async () => {
+    const piiRaw = {
+      candidates: [{ index: 0, kind: "affirmative", visible: true, enabled: true, textLength: 12 }],
+    };
+    const { page } = makeFakes({ contentSeq: [PII_CONSENT], scanCount: 1, candidatesReturn: piiRaw });
+    const r = await scanReviewUsageConfirmCandidates(page);
+    const json = JSON.stringify(r);
+    expect(json.includes("행복마켓")).toBe(false);
+    expect(json.includes("확인")).toBe(false); // no raw button text
+    expect(/[<>]/.test(json)).toBe(false);
+    for (const k of Object.keys(r)) {
+      expect((REVIEW_USAGE_CANDIDATES_KEYS as readonly string[]).includes(k)).toBe(true);
+    }
+    for (const c of r.candidates) {
+      expect(Object.keys(c).sort()).toEqual(["buttonKind", "enabled", "index", "textLengthBucket", "visible"]);
+    }
+  });
+});
+
 describe("review-usage-confirm.ts — strict action-adapter source guard", () => {
   const raw = readFileSync(SRC_PATH, "utf8");
   // Strip block + line comments so the guard checks executable source, not prose.
@@ -272,5 +378,46 @@ describe("review-usage-confirm.ts — strict action-adapter source guard", () =>
       expect(/playwright/.test(line)).toBe(false);
       expect(/node:fs|node:http|node:https/.test(line)).toBe(false);
     }
+  });
+
+  // --- esbuild keepNames (`__name`) safety: every page.evaluate callback must be an INLINE
+  //     anonymous arrow with NO inner named declarations. A named top-level function reference or a
+  //     named inner helper becomes `__name(...)`, undefined in the page → ReferenceError. ---
+
+  it("never references the esbuild keepNames helper `__name(`", () => {
+    expect(code.includes("__name(")).toBe(false);
+  });
+
+  it("passes ONLY inline anonymous arrows to page.evaluate (no named function reference)", () => {
+    // Every `.evaluate(` must be immediately followed by `(` (an arrow param list), never an identifier.
+    const calls = code.match(/\.evaluate\s*\(\s*[^)]/g) ?? [];
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      // the char after `.evaluate(` (and optional ws) must be `(` — the start of an arrow's params.
+      expect(/\.evaluate\s*\(\s*\(/.test(c)).toBe(true);
+    }
+    // and there is no `.evaluate(` whose first non-space arg is an identifier (a named fn reference).
+    expect(/\.evaluate\s*\(\s*[A-Za-z_$]/.test(code)).toBe(false);
+  });
+
+  it("has no named inner helper inside any evaluate body (the __name trigger)", () => {
+    // Slice each evaluate body conservatively (from `.evaluate((` to the next `}, ` arg boundary)
+    // and assert no `const NAME = (...) =>` and no `function NAME(` inside.
+    const bodies = code.split(/\.evaluate\s*\(\s*\(/).slice(1);
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const tail of bodies) {
+      const body = tail.slice(0, tail.indexOf("}, "));
+      expect(/const\s+[A-Za-z_$][\w$]*\s*(?::[^=]+)?=\s*(?:async\s*)?\([^)]*\)\s*=>/.test(body)).toBe(false);
+      expect(/\bfunction\s+[A-Za-z_$]/.test(body)).toBe(false);
+    }
+  });
+
+  it("the candidate diagnostic body performs NO click", () => {
+    const start = code.indexOf("async function scanReviewUsageConfirmCandidates");
+    const end = code.indexOf("function readFailedCandidates");
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const body = code.slice(start, end);
+    expect(/\.click\s*\(/.test(body)).toBe(false);
   });
 });

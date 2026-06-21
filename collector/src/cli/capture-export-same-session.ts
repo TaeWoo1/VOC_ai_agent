@@ -51,8 +51,10 @@ import {
 } from "../naver/export-click-signals";
 import {
   confirmReviewUsageOnce,
+  scanReviewUsageConfirmCandidates,
   type ConfirmContext,
   type ConfirmPage,
+  type ReviewUsageCandidatesResult,
   type ReviewUsageConfirmResult,
 } from "../naver/review-usage-confirm";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
@@ -407,6 +409,10 @@ async function main(): Promise<void> {
     // modal's 확인 ONCE — gated on the dedicated flag (never auto-confirmed). Active only inside the
     // supervised-fast (override) branch, which already requires --diagnose-allow-empty-target.
     const diagnoseConfirm = diagnoseClick && args.includes("--diagnose-confirm-review-usage");
+    // NO-CLICK candidate-index diagnostic for the consent modal: badge visible modal buttons with
+    // indices (human inspection) and report sanitized candidate metadata only. Never clicks. When set,
+    // it takes precedence over the confirm-click step (which is suppressed).
+    const diagnoseConfirmCandidates = diagnoseClick && args.includes("--diagnose-review-usage-confirm-candidates");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -522,9 +528,20 @@ async function main(): Promise<void> {
             settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
           },
         );
-        // PR B: ONLY when the flag is set AND the click reached the consent gate, press 확인 ONCE.
-        // The consent modal is blocking and still open on the same page/ctx. Never auto-confirmed.
-        const confirmDecision = decideReviewUsageConfirm({ outcome: diagnosis.outcome, confirmFlag: diagnoseConfirm });
+        // NO-CLICK candidate-index diagnostic (precedence): when set AND the click reached consent,
+        // badge the modal buttons and report sanitized candidate metadata. It NEVER clicks, and it
+        // suppresses the confirm-click step below.
+        let candidates: ReviewUsageCandidatesResult | undefined;
+        if (diagnoseConfirmCandidates && diagnosis.outcome === "REVIEW_USAGE_CONFIRMATION") {
+          candidates = await scanReviewUsageConfirmCandidates(page as unknown as ConfirmPage);
+        }
+        // PR B: ONLY when the confirm flag is set AND the click reached the consent gate — and NOT in
+        // candidate-diagnostic mode — press 확인 ONCE. The consent modal is blocking and still open on
+        // the same page/ctx. Never auto-confirmed.
+        const confirmDecision = decideReviewUsageConfirm({
+          outcome: diagnosis.outcome,
+          confirmFlag: diagnoseConfirm && !diagnoseConfirmCandidates,
+        });
         let confirm: ReviewUsageConfirmResult | undefined;
         if (confirmDecision === "ATTEMPT") {
           confirm = await confirmReviewUsageOnce(page as unknown as ConfirmPage, ctx as unknown as ConfirmContext, {
@@ -545,6 +562,8 @@ async function main(): Promise<void> {
             supervisedChecks: supervised.checks,
             supervisedElapsedMs: supervised.elapsedMs,
             ...diagnosis,
+            candidatesRequested: diagnoseConfirmCandidates,
+            ...(candidates ?? {}),
             confirmRequested: diagnoseConfirm,
             confirmDecision,
             ...(confirm ?? {}),
@@ -554,6 +573,7 @@ async function main(): Promise<void> {
           outcome: diagnosis.outcome,
           clicked: diagnosis.clickedCount,
           readinessMode: "supervised-fast",
+          candidateScan: candidates?.candidateScan ?? "none",
           confirmDecision,
           confirmOutcome: confirm?.confirmOutcome ?? "none",
         });
