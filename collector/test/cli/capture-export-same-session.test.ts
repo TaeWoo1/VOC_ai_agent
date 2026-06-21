@@ -327,3 +327,43 @@ describe("capture-export-same-session — export-target readiness gate stops emp
     expect(/checks/.test(branch)).toBe(true); // reports the number of stabilization checks
   });
 });
+
+describe("capture-export-same-session — read-only live-DOM probe enriches the diagnostic halt ONLY", () => {
+  it("imports the pure probe core AND the live read adapter (decision pure, reads live)", () => {
+    expect(/from\s+["']\.\.\/naver\/live-export-target-probe["']/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/naver\/live-export-target-probe-reads["']/.test(code)).toBe(true);
+    expect(/probeLiveExportTargetReadiness/.test(code)).toBe(true);
+    expect(/readLiveProbeSignals/.test(code)).toBe(true);
+  });
+
+  it("runs the live probe inside the diagnostic not-READY block and reports its sanitized fields", () => {
+    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
+    const branch = mainFn.slice(diagIdx, dispatchIdx);
+    expect(/probeLiveExportTargetReadiness\(/.test(branch)).toBe(true);
+    expect(/readSignalsFn:\s*readLiveProbeSignals/.test(branch)).toBe(true);
+    expect(/liveProbe:\s*live\.decision/.test(branch)).toBe(true);
+    expect(/visibleRowCountBucket/.test(branch)).toBe(true);
+    // The probe runs read-only past the existing readiness gate; it still writes no status here.
+    expect(/writeStatus/.test(branch)).toBe(false);
+    expect(/wouldClick:\s*false/.test(branch)).toBe(true); // never proposes a click
+  });
+
+  it("the live probe NEVER runs in the real capture path (diagnostic-only this slice)", () => {
+    // Everything from the real-capture readiness stabilization onward carries no live-probe call,
+    // and capture is still dispatched exactly once, gated only by the HTML readiness decision.
+    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const realStableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(", dispatchIdx);
+    const realBranch = mainFn.slice(realStableIdx);
+    expect(realStableIdx).toBeGreaterThan(dispatchIdx);
+    expect(/probeLiveExportTargetReadiness\(/.test(realBranch)).toBe(false);
+    expect((mainFn.match(/captureAndUpload\(/g) ?? []).length).toBe(1);
+    // The probe call appears exactly once in main — only in the diagnostic block.
+    expect((mainFn.match(/probeLiveExportTargetReadiness\(/g) ?? []).length).toBe(1);
+  });
+
+  it("the CLI itself drives no frame/evaluate read directly (those live in the adapter)", () => {
+    expect(/\.evaluate\s*\(/.test(code)).toBe(false);
+    expect(/\.frames\s*\(/.test(code)).toBe(false);
+  });
+});

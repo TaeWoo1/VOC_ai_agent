@@ -48,6 +48,8 @@ import {
   waitForExportTargetReadinessStable,
   type ExportTargetReadinessStableDeps,
 } from "../naver/export-target-readiness-stable";
+import { probeLiveExportTargetReadiness } from "../naver/live-export-target-probe";
+import { readLiveProbeSignals } from "../naver/live-export-target-probe-reads";
 import { waitForSpaHydration } from "../naver/hydration";
 import { resolveReconnectIfNeeded, type ReconnectResolution } from "../naver/reconnect-resolve";
 import { checkLiveSessionVerdict } from "../naver/session-check";
@@ -82,6 +84,11 @@ const POST_CONTINUE_STABILIZE_INTERVAL_MS = 1_500;
 // never misread as empty on an early read. Bounded; never clicks.
 const EXPORT_TARGET_READINESS_STABILIZE_TIMEOUT_MS = 15_000;
 const EXPORT_TARGET_READINESS_STABILIZE_INTERVAL_MS = 1_500;
+// Read-only LIVE-DOM disambiguation poll: when the HTML-only readiness HALTS in DIAGNOSTIC mode,
+// ask the rendered page (visible rows / visible empty placeholder / frames) whether the static
+// "empty" is a false positive. Diagnostic-only — never changes a gate decision, never clicks.
+const LIVE_EXPORT_TARGET_PROBE_TIMEOUT_MS = 8_000;
+const LIVE_EXPORT_TARGET_PROBE_INTERVAL_MS = 1_500;
 
 /** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
 const AUTO_READ_PROMPT = [
@@ -406,6 +413,15 @@ async function main(): Promise<void> {
       // Safe-by-default: do NOT click into a not-READY target unless explicitly overridden.
       // Report the (stabilized) readiness verdict and STOP — no status, no upload, no capture.
       if (readiness.decision !== "READY" && !allowEmptyTarget) {
+        // Read-only LIVE-DOM disambiguation: the static HTML readiness may have matched a HIDDEN
+        // empty-state placeholder while real rows render in a live grid / iframe. Ask the RENDERED
+        // page. DIAGNOSTIC-ONLY — this enriches the halt report; it never changes the decision or
+        // adds a click (`wouldClick` stays false). The pure poll reads only via the live adapter.
+        const live = await probeLiveExportTargetReadiness(page, {
+          timeoutMs: LIVE_EXPORT_TARGET_PROBE_TIMEOUT_MS,
+          intervalMs: LIVE_EXPORT_TARGET_PROBE_INTERVAL_MS,
+          readSignalsFn: readLiveProbeSignals,
+        });
         console.log(
           JSON.stringify({
             mode: "diagnose-export-click",
@@ -417,10 +433,18 @@ async function main(): Promise<void> {
             checks: stable.checks,
             stableCount: stable.stableCount,
             elapsedMs: stable.elapsedMs,
+            liveProbe: live.decision,
+            visibleRowCountBucket: live.visibleRowCountBucket,
+            visibleEmptyState: live.visibleEmptyState,
+            visibleGridLikeSurface: live.visibleGridLikeSurface,
+            frameCountBucket: live.frameCountBucket,
+            checkedFramesBucket: live.checkedFramesBucket,
+            liveChecks: live.checks,
+            liveElapsedMs: live.elapsedMs,
             wouldClick: false,
           }),
         );
-        log("run.halted", { state: readiness.state });
+        log("run.halted", { state: readiness.state, liveProbe: live.decision });
         return;
       }
       const diagnosis: ExportClickDiagnosis = await diagnoseExportClickOnce(
