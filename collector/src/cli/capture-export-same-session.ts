@@ -43,6 +43,7 @@ import {
   type ExportClickDiagnosis,
 } from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
+import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
 import { waitForSpaHydration } from "../naver/hydration";
 import { resolveReconnectIfNeeded, type ReconnectResolution } from "../naver/reconnect-resolve";
 import { checkLiveSessionVerdict } from "../naver/session-check";
@@ -354,11 +355,20 @@ async function main(): Promise<void> {
     // 5) Canonical re-read for the EXPORT decision — identical inputs to before. Continue never
     //    changes the export gate logic; on a LOGGED_IN pass-through this reads the page as-is.
     const exportVerdict = await checkLiveSessionVerdict(page);
-    const plan = planExportAction(await page.content());
+    const html = await page.content();
+    const plan = planExportAction(html);
 
     // 6) The single export chokepoint: only an unambiguous single sync control on a LOGGED_IN
     //    session proceeds to the click. Everything else halts with an honest status.
     const gate = decideCaptureGate(exportVerdict, plan);
+
+    // 6b) Second, narrower gate: a single sync control EXISTS, but is there anything to export?
+    //     Evaluated read-only from the SAME page HTML (no extra read, no click). Only positive
+    //     evidence of exportable rows is READY; empty/date-range/ambiguous HALT before the click.
+    const readiness = evaluateExportTargetReadiness(html);
+    // --diagnose-allow-empty-target: in DIAGNOSTIC mode only, intentionally click into a
+    // not-READY surface for further observation. Never affects real capture mode.
+    const allowEmptyTarget = diagnoseClick && args.includes("--diagnose-allow-empty-target");
 
     // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before any click,
     //    download, upload, or status write.
@@ -376,6 +386,23 @@ async function main(): Promise<void> {
         log("run.halted", { state: gate.state });
         return;
       }
+      // Safe-by-default: do NOT click into a not-READY target unless explicitly overridden.
+      // Report the readiness verdict (sanitized) and STOP — no status, no upload, no capture.
+      if (readiness.decision !== "READY" && !allowEmptyTarget) {
+        console.log(
+          JSON.stringify({
+            mode: "diagnose-export-click",
+            halted: true,
+            gateState: gate.state,
+            targetReadiness: readiness.decision,
+            targetState: readiness.state,
+            reason: readiness.reason,
+            wouldClick: false,
+          }),
+        );
+        log("run.halted", { state: readiness.state });
+        return;
+      }
       const diagnosis: ExportClickDiagnosis = await diagnoseExportClickOnce(
         page as unknown as DiagPage,
         ctx as unknown as DiagContext,
@@ -387,7 +414,14 @@ async function main(): Promise<void> {
           settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
         },
       );
-      console.log(JSON.stringify({ mode: "diagnose-export-click", gateState: gate.state, ...diagnosis }));
+      console.log(
+        JSON.stringify({
+          mode: "diagnose-export-click",
+          gateState: gate.state,
+          targetReadiness: readiness.decision,
+          ...diagnosis,
+        }),
+      );
       log("run.diagnose-export-click", { outcome: diagnosis.outcome, clicked: diagnosis.clickedCount });
       return;
     }
@@ -395,6 +429,19 @@ async function main(): Promise<void> {
     if (!gate.proceed) {
       writeStatus(cfg.statusFile, { state: gate.state, detail: gate.detail, updatedAt: now() });
       log("run.halted", { state: gate.state });
+      return;
+    }
+
+    // 7c) EXPORT-TARGET readiness halt (real capture): the control exists, but there is
+    //     nothing to export under the current condition. Record the honest state and STOP
+    //     before the click — no download, no upload, no LAST_SUCCESS.
+    if (readiness.decision !== "READY") {
+      writeStatus(cfg.statusFile, {
+        state: readiness.state,
+        detail: `export-target not ready: ${readiness.reason}`,
+        updatedAt: now(),
+      });
+      log("run.halted", { state: readiness.state });
       return;
     }
 
