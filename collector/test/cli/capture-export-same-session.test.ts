@@ -131,3 +131,101 @@ describe("capture-export-same-session — gated + sentinel-file continuation", (
     expect(captureIdx).toBeGreaterThan(verdictIdx);
   });
 });
+
+describe("capture-export-same-session — reconnect pre-step is delegated, not driven here", () => {
+  it("runs resolveReconnectIfNeeded AFTER the verdict read and BEFORE the export gate", () => {
+    const verdictIdx = mainFn.indexOf("checkLiveSessionVerdict(");
+    const resolveIdx = mainFn.indexOf("resolveReconnectIfNeeded(");
+    const gateIdx = mainFn.indexOf("decideCaptureGate(");
+    expect(resolveIdx).toBeGreaterThan(verdictIdx); // pre-step keys off the pre-click verdict
+    expect(gateIdx).toBeGreaterThan(resolveIdx); // the export gate still runs after resolution
+  });
+
+  it("imports the resolver helper and never calls the continue boundary directly", () => {
+    expect(/from\s+["']\.\.\/naver\/reconnect-resolve["']/.test(code)).toBe(true);
+    // The single guarded continue click lives inside the boundary, reached only via the helper.
+    expect(code.includes("continueAtCardOnce")).toBe(false);
+  });
+
+  it("a pre-step HALT records the honest state (real run) and never reaches capture", () => {
+    expect(/resolution\.decision\s*===\s*"HALT"/.test(mainFn)).toBe(true);
+    const haltIdx = mainFn.indexOf('resolution.decision === "HALT"');
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(haltIdx).toBeGreaterThanOrEqual(0);
+    expect(haltIdx).toBeLessThan(captureIdx); // the halt returns before any capture dispatch
+  });
+});
+
+describe("capture-export-same-session — auto-read by default, sentinel opt-in", () => {
+  it("defaults to auto-read: polls for the start verdict, no ready-file hand-off", () => {
+    expect(/const\s+sentinelMode\s*=/.test(code)).toBe(true);
+    expect(/waitForCaptureStartState\s*\(/.test(mainFn)).toBe(true);
+    expect(code.includes("auto-read mode: complete manual login if prompted")).toBe(true);
+  });
+
+  it("enables sentinel mode ONLY via --require-sentinel or --sentinel", () => {
+    expect(/--require-sentinel/.test(code)).toBe(true);
+    expect(
+      /sentinelMode\s*=\s*\(?\s*args\.includes\("--require-sentinel"\)\s*\|\|\s*args\.includes\("--sentinel"\)/.test(
+        code,
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts --no-sentinel / --auto-read-after-hydration as auto-read aliases (override sentinel)", () => {
+    expect(/--no-sentinel/.test(code)).toBe(true);
+    expect(/--auto-read-after-hydration/.test(code)).toBe(true);
+    expect(/!args\.includes\("--no-sentinel"\)/.test(code)).toBe(true);
+  });
+
+  it("reaches resolveReconnectIfNeeded only AFTER a resolvable start verdict (auto-read or sentinel)", () => {
+    const autoIdx = mainFn.indexOf("waitForCaptureStartState(");
+    const sentinelIdx = mainFn.indexOf("waitForSentinel(");
+    const resolveIdx = mainFn.indexOf("resolveReconnectIfNeeded(");
+    expect(autoIdx).toBeGreaterThanOrEqual(0);
+    expect(sentinelIdx).toBeGreaterThanOrEqual(0);
+    expect(resolveIdx).toBeGreaterThan(autoIdx); // after the auto-read poll
+    expect(resolveIdx).toBeGreaterThan(sentinelIdx); // and after the sentinel wait
+  });
+
+  it("an auto-read timeout halts without click/capture/status write", () => {
+    expect(/auto-read-timeout/.test(mainFn)).toBe(true);
+    const timeoutIdx = mainFn.indexOf("auto-read-timeout");
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(timeoutIdx).toBeLessThan(captureIdx); // the timeout returns before any capture
+    // The timeout branch is log + return only — no status record is written.
+    const seg = mainFn.slice(timeoutIdx, mainFn.indexOf("return", timeoutIdx) + "return".length);
+    expect(/writeStatus/.test(seg)).toBe(false);
+  });
+});
+
+describe("capture-export-same-session — classify-only dry-run stops before capture", () => {
+  it("consults isClassifyOnly and reports via the sanitized builder", () => {
+    expect(/isClassifyOnly\s*\(/.test(mainFn)).toBe(true);
+    expect(/classifyOnlyReport\s*\(/.test(mainFn)).toBe(true);
+  });
+
+  it("the dry-run report path precedes captureAndUpload (it returns before capture)", () => {
+    const reportIdx = mainFn.indexOf("classifyOnlyReport(");
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(reportIdx).toBeGreaterThanOrEqual(0);
+    expect(reportIdx).toBeLessThan(captureIdx);
+  });
+
+  it("the classify-only branch writes no status and triggers no upload (report-only)", () => {
+    // captureAndUpload (the only capture/upload/status-writing leg) is dispatched once, past
+    // the gate — the classify-only branch returns before reaching it.
+    expect((mainFn.match(/captureAndUpload\(/g) ?? []).length).toBe(1);
+    // The dry-run emits a sanitized report on stdout, not a status record.
+    expect(/console\.log\(\s*classifyOnlyReport/.test(mainFn)).toBe(true);
+  });
+
+  it("the report carries only sanitized fields (enums/booleans), never raw page content", () => {
+    const start = code.indexOf("function classifyOnlyReport");
+    const after = code.indexOf("\nfunction ", start + 1);
+    const reportBody = code.slice(start, after === -1 ? undefined : after);
+    expect(/wouldCapture/.test(reportBody)).toBe(true);
+    expect(/\.content\s*\(/.test(reportBody)).toBe(false);
+    expect(/successRows|filePath|suggestedFilename/.test(reportBody)).toBe(false);
+  });
+});
