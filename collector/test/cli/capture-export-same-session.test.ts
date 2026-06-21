@@ -276,3 +276,46 @@ describe("capture-export-same-session — diagnose-export-click clicks once but 
     expect(/diagnose-export-click/.test(branch)).toBe(true);
   });
 });
+
+describe("capture-export-same-session — export-target readiness gate stops empty-target captures", () => {
+  it("evaluates readiness AFTER the capture gate and BEFORE any capture", () => {
+    expect(/evaluateExportTargetReadiness\s*\(/.test(mainFn)).toBe(true);
+    const gateIdx = mainFn.indexOf("decideCaptureGate(");
+    const readinessIdx = mainFn.indexOf("evaluateExportTargetReadiness(");
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(readinessIdx).toBeGreaterThan(gateIdx);
+    expect(readinessIdx).toBeLessThan(captureIdx);
+  });
+
+  it("reuses the page HTML already read for planExportAction (no second content() read)", () => {
+    expect((mainFn.match(/await page\.content\(\)/g) ?? []).length).toBe(1);
+    expect(/planExportAction\(html\)/.test(mainFn)).toBe(true);
+    expect(/evaluateExportTargetReadiness\(html\)/.test(mainFn)).toBe(true);
+  });
+
+  it("real capture HALTS with the honest readiness state before captureAndUpload when not READY", () => {
+    // The real-path readiness halt is the readiness check AFTER the diagnose dispatch.
+    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const haltIdx = mainFn.indexOf('readiness.decision !== "READY"', dispatchIdx);
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(haltIdx).toBeGreaterThan(dispatchIdx);
+    expect(haltIdx).toBeLessThan(captureIdx); // the halt guards the capture
+    const branch = mainFn.slice(haltIdx, captureIdx);
+    expect(/writeStatus/.test(branch)).toBe(true); // records the readiness state
+    expect(/readiness\.state/.test(branch)).toBe(true);
+    // captureAndUpload is dispatched exactly once, only past this gate.
+    expect((mainFn.match(/captureAndUpload\(/g) ?? []).length).toBe(1);
+  });
+
+  it("the diagnostic readiness halt REPORTS only (no status, no capture) unless overridden", () => {
+    expect(/--diagnose-allow-empty-target/.test(code)).toBe(true);
+    expect(/allowEmptyTarget/.test(mainFn)).toBe(true);
+    // The diagnostic readiness guard lives inside the MAIN diagnose block, before the dispatch.
+    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
+    const branch = mainFn.slice(diagIdx, dispatchIdx);
+    expect(/readiness\.decision\s*!==\s*"READY"\s*&&\s*!allowEmptyTarget/.test(branch)).toBe(true);
+    expect(/writeStatus/.test(branch)).toBe(false); // diagnostic mode never persists status
+    expect(/wouldClick/.test(branch)).toBe(true); // sanitized stdout report instead
+  });
+});

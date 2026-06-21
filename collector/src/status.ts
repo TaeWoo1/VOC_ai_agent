@@ -16,6 +16,12 @@ export type CollectorState =
   | "EXPORT_LAYOUT_CHANGED"
   | "EXPORT_ASYNC_JOB_DETECTED"
   | "EXPORT_SYNC_DETECTED"
+  // Pre-click export-target readiness halts (written directly by the readiness gate, not
+  // by decideState): a recognized single sync control was reached, but the current result
+  // has nothing to export. These never reach the upload leg and never become LAST_SUCCESS.
+  | "EXPORT_TARGET_EMPTY"
+  | "EXPORT_TARGET_UNKNOWN"
+  | "EXPORT_DATE_RANGE_REQUIRED"
   | "DOWNLOAD_FAILED"
   | "UPLOAD_FAILED"
   | "DISCONNECTED";

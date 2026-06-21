@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideState, type RunSignals } from "../src/status";
+import { decideState, type CollectorState, type RunSignals } from "../src/status";
 
 describe("decideState", () => {
   const cases: Array<[string, RunSignals, string]> = [
@@ -82,6 +82,41 @@ describe("decideState", () => {
     ];
     for (const s of noSuccess) {
       expect(decideState(s)).not.toBe("LAST_SUCCESS");
+    }
+  });
+});
+
+describe("export-target readiness states", () => {
+  // Written DIRECTLY by the pre-click readiness gate, never produced by decideState.
+  const readinessStates = new Set<CollectorState>([
+    "EXPORT_TARGET_EMPTY",
+    "EXPORT_TARGET_UNKNOWN",
+    "EXPORT_DATE_RANGE_REQUIRED",
+  ]);
+
+  it("are valid CollectorState members the readiness gate can record", () => {
+    expect(readinessStates.size).toBe(3);
+  });
+
+  it("decideState never emits a readiness state (those are pre-click gate halts, not run outcomes)", () => {
+    const exportOutcomes: RunSignals["exportOutcome"][] = [
+      undefined,
+      "CAPTURED",
+      "SYNC_DOWNLOAD_DETECTED",
+      "ASYNC_JOB_DETECTED",
+      "LAYOUT_UNRECOGNIZED",
+      "DOWNLOAD_FAILED",
+      "NOT_ATTEMPTED",
+    ];
+    const uploadOutcomes: RunSignals["uploadOutcome"][] = [undefined, "OK", "FAILED", "NOT_ATTEMPTED"];
+    for (const paired of [true, false]) {
+      for (const session of ["LOGGED_IN", "LOGGED_OUT", "AUTH_CHALLENGE"] as const) {
+        for (const exportOutcome of exportOutcomes) {
+          for (const uploadOutcome of uploadOutcomes) {
+            expect(readinessStates.has(decideState({ paired, session, exportOutcome, uploadOutcome }))).toBe(false);
+          }
+        }
+      }
     }
   });
 });
