@@ -43,6 +43,11 @@ import {
   type ExportClickDiagnosis,
 } from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
+import {
+  decideSupervisedExportReady,
+  diagnosePreClickSignals,
+  type PreClickSignals,
+} from "../naver/export-click-signals";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
 import {
   waitForExportTargetReadinessStable,
@@ -89,6 +94,12 @@ const EXPORT_TARGET_READINESS_STABILIZE_INTERVAL_MS = 1_500;
 // "empty" is a false positive. Diagnostic-only — never changes a gate decision, never clicks.
 const LIVE_EXPORT_TARGET_PROBE_TIMEOUT_MS = 8_000;
 const LIVE_EXPORT_TARGET_PROBE_INTERVAL_MS = 1_500;
+// SUPERVISED-FAST diagnostic readiness: in `--diagnose-allow-empty-target` mode the HTML
+// `EXPORT_TARGET_EMPTY` reading is a known false positive, so we do NOT consume the full
+// readiness stabilization window. Settle briefly (read-only) for the sync export control to
+// become actionable, then take the existing single diagnostic click. Bounded; never clicks.
+const SUPERVISED_SETTLE_TIMEOUT_MS = 4_000;
+const SUPERVISED_SETTLE_INTERVAL_MS = 1_000;
 
 /** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
 const AUTO_READ_PROMPT = [
@@ -126,6 +137,57 @@ function banner(): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Result of the read-only supervised-fast settle — sanitized scalars only. */
+interface SupervisedExportReadiness {
+  ready: boolean;
+  preClick: PreClickSignals;
+  checks: number;
+  elapsedMs: number;
+}
+
+/**
+ * SUPERVISED-FAST readiness settle (READ-ONLY): briefly poll the rendered page for the sync
+ * export control to become actionable, short-circuiting as soon as `decideSupervisedExportReady`
+ * is satisfied. Reads only (`waitForSpaHydration` + `page.content()` → pure pre-click signals) —
+ * it NEVER clicks, exports, downloads, or writes status. Bounded by `SUPERVISED_SETTLE_TIMEOUT_MS`;
+ * `elapsedMs` is derived from checks×interval (no wall-clock read).
+ */
+async function waitForSupervisedExportReady(page: PwPage): Promise<SupervisedExportReadiness> {
+  const maxChecks = Math.max(1, Math.ceil(SUPERVISED_SETTLE_TIMEOUT_MS / SUPERVISED_SETTLE_INTERVAL_MS));
+  let pre = emptyPreClick();
+  let checks = 0;
+  for (let i = 0; i < maxChecks; i += 1) {
+    checks += 1;
+    try {
+      await waitForSpaHydration(page);
+    } catch {
+      // Mid-navigation settle failure — keep polling within the bound.
+    }
+    let html = "";
+    try {
+      html = await page.content();
+    } catch {
+      // Transient read during a re-render — skip this snapshot.
+    }
+    if (html) pre = diagnosePreClickSignals(html);
+    if (decideSupervisedExportReady(pre)) break;
+    if (i + 1 < maxChecks) await sleep(SUPERVISED_SETTLE_INTERVAL_MS);
+  }
+  return { ready: decideSupervisedExportReady(pre), preClick: pre, checks, elapsedMs: checks * SUPERVISED_SETTLE_INTERVAL_MS };
+}
+
+/** A pessimistic pre-click snapshot used before the first successful read (never ready). */
+function emptyPreClick(): PreClickSignals {
+  return {
+    exportLayout: "LAYOUT_UNRECOGNIZED",
+    exportActionable: false,
+    dateRangeControlPresence: "none",
+    selectedRangePresent: false,
+    modalOpen: false,
+    toastRegionPresent: false,
+  };
 }
 
 /**
@@ -405,6 +467,68 @@ async function main(): Promise<void> {
       if (!gate.proceed) {
         console.log(diagnoseHaltReport(verdict, resolution, gate));
         log("run.halted", { state: gate.state });
+        return;
+      }
+      // 7b-fast) SUPERVISED-FAST (override only): the HTML `EXPORT_TARGET_EMPTY` readiness is a
+      // KNOWN false positive on this surface, so `--diagnose-allow-empty-target` does NOT burn the
+      // full ~15s stabilization window. Settle briefly (read-only) for the sync export control to
+      // be actionable on the already-LOGGED_IN review-ready surface, then take the EXISTING single
+      // diagnostic click. The non-override (stable) branch below is left unchanged.
+      if (allowEmptyTarget) {
+        const supervised = await waitForSupervisedExportReady(page);
+        // Still conditional: the fast path replaces the false-positive empty wait with a SHORTER,
+        // more relevant readiness check — it does NOT click blindly. If the sync export control is
+        // not confirmed actionable within the settle, HALT and REPORT (no click), exactly like the
+        // stable branch reports a not-READY halt.
+        if (!supervised.ready) {
+          console.log(
+            JSON.stringify({
+              mode: "diagnose-export-click",
+              halted: true,
+              readinessMode: "supervised-fast",
+              gateState: gate.state,
+              supervisedReady: false,
+              supervisedExportLayout: supervised.preClick.exportLayout,
+              supervisedExportActionable: supervised.preClick.exportActionable,
+              supervisedChecks: supervised.checks,
+              supervisedElapsedMs: supervised.elapsedMs,
+              clicked: false,
+              clickedCount: 0,
+              wouldClick: false,
+            }),
+          );
+          log("run.halted", { state: "SUPERVISED_EXPORT_NOT_READY", readinessMode: "supervised-fast" });
+          return;
+        }
+        const diagnosis: ExportClickDiagnosis = await diagnoseExportClickOnce(
+          page as unknown as DiagPage,
+          ctx as unknown as DiagContext,
+          {
+            observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
+            pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
+            clickTimeoutMs: DIAGNOSE_CLICK_TIMEOUT_MS,
+            salt: cfg.storageProbeSalt,
+            settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+          },
+        );
+        console.log(
+          JSON.stringify({
+            mode: "diagnose-export-click",
+            readinessMode: "supervised-fast",
+            gateState: gate.state,
+            supervisedReady: supervised.ready,
+            supervisedExportLayout: supervised.preClick.exportLayout,
+            supervisedExportActionable: supervised.preClick.exportActionable,
+            supervisedChecks: supervised.checks,
+            supervisedElapsedMs: supervised.elapsedMs,
+            ...diagnosis,
+          }),
+        );
+        log("run.diagnose-export-click", {
+          outcome: diagnosis.outcome,
+          clicked: diagnosis.clickedCount,
+          readinessMode: "supervised-fast",
+        });
         return;
       }
       // Read-only readiness stabilization (bounded poll) before considering the click.

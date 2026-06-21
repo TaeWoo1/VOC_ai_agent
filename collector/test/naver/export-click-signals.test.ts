@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDialogMessage,
   classifyModalCategory,
+  decideSupervisedExportReady,
   deriveExportClickOutcome,
   diagnosePreClickSignals,
   DIALOG_RECORD_KEYS,
@@ -14,6 +15,7 @@ import {
   summarizePostClick,
   type DialogRecord,
   type PostClickSignals,
+  type PreClickSignals,
 } from "../../src/naver/export-click-signals";
 import { evaluateExportTargetReadiness } from "../../src/naver/export-target-readiness";
 
@@ -226,6 +228,44 @@ describe("diagnosePreClickSignals — sanitized pre-click snapshot", () => {
   it("only ever emits the allow-listed keys", () => {
     const s = diagnosePreClickSignals(SYNC_HTML);
     expect(Object.keys(s).sort()).toEqual([...PRE_CLICK_SIGNAL_KEYS].sort());
+  });
+});
+
+describe("decideSupervisedExportReady — light readiness for the supervised-fast path", () => {
+  const base: PreClickSignals = {
+    exportLayout: "LAYOUT_UNRECOGNIZED",
+    exportActionable: false,
+    dateRangeControlPresence: "none",
+    selectedRangePresent: false,
+    modalOpen: false,
+    toastRegionPresent: false,
+  };
+
+  it("is ready when an actionable SYNC_DOWNLOAD control is present", () => {
+    expect(decideSupervisedExportReady(diagnosePreClickSignals(SYNC_HTML))).toBe(true);
+    expect(decideSupervisedExportReady({ ...base, exportLayout: "SYNC_DOWNLOAD", exportActionable: true })).toBe(true);
+  });
+
+  it("ignores HTML empty-state: readiness depends only on the actionable sync control", () => {
+    // A surface with a (false-positive) hidden empty placeholder still reports SYNC_DOWNLOAD +
+    // actionable from the visible control — the supervised path must treat it as ready.
+    const withHiddenEmpty = `<main><button id="exp">엑셀 다운로드</button>
+      <div style="display:none">검색 결과가 없습니다</div></main>`;
+    const pre = diagnosePreClickSignals(withHiddenEmpty);
+    expect(pre.exportLayout).toBe("SYNC_DOWNLOAD");
+    expect(decideSupervisedExportReady(pre)).toBe(true);
+  });
+
+  it("is NOT ready when the sync control exists but is not actionable", () => {
+    expect(decideSupervisedExportReady({ ...base, exportLayout: "SYNC_DOWNLOAD", exportActionable: false })).toBe(false);
+  });
+
+  it("is NOT ready for an async-job layout, even if actionable", () => {
+    expect(decideSupervisedExportReady({ ...base, exportLayout: "ASYNC_JOB_DETECTED", exportActionable: true })).toBe(false);
+  });
+
+  it("is NOT ready for an unrecognized layout", () => {
+    expect(decideSupervisedExportReady(base)).toBe(false);
   });
 });
 

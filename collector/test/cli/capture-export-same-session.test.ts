@@ -277,6 +277,84 @@ describe("capture-export-same-session — diagnose-export-click clicks once but 
   });
 });
 
+describe("capture-export-same-session — supervised-fast override skips the false-empty stable wait", () => {
+  it("gates the override branch on the light readiness settle, not the full stabilization window", () => {
+    // The fast branch runs ONLY under --diagnose-allow-empty-target and is anchored BEFORE the
+    // stable stabilization. It settles via the read-only helper, never the full readiness poll.
+    const fastDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const fastBranchStart = mainFn.lastIndexOf("if (allowEmptyTarget)", fastDispatchIdx);
+    const fastBranch = mainFn.slice(fastBranchStart, fastDispatchIdx);
+    expect(fastBranchStart).toBeGreaterThanOrEqual(0);
+    expect(/waitForSupervisedExportReady\(/.test(fastBranch)).toBe(true);
+    // It does NOT consume the stable readiness poll in this branch.
+    expect(/waitForExportTargetReadinessStable\(/.test(fastBranch)).toBe(false);
+    // The fast dispatch precedes the stable stabilization in source order.
+    expect(fastDispatchIdx).toBeLessThan(mainFn.indexOf("waitForExportTargetReadinessStable("));
+  });
+
+  it("tags the fast report readinessMode and writes NO status / capture / upload", () => {
+    const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+    const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+    const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+    expect(/readinessMode:\s*["']supervised-fast["']/.test(fastBranch)).toBe(true);
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
+    expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
+    // It reuses the SAME single diagnostic click boundary — no new click mechanism is added.
+    expect(/diagnoseExportClickOnce\(/.test(fastBranch)).toBe(true);
+  });
+
+  it("the supervised settle helper is read-only (no click/export/download/status)", () => {
+    const helperStart = code.indexOf("async function waitForSupervisedExportReady");
+    const helperEnd = code.indexOf("function emptyPreClick");
+    const helper = code.slice(helperStart, helperEnd);
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    expect(/\.click\(/.test(helper)).toBe(false);
+    expect(/waitForEvent\(/.test(helper)).toBe(false);
+    expect(/saveAs|uploadReviewFile|writeStatus|runExport/.test(helper)).toBe(false);
+    // Reads only: SPA settle + page.content() folded through the pure pre-click signals.
+    expect(/page\.content\(\)/.test(helper)).toBe(true);
+    expect(/decideSupervisedExportReady\(/.test(helper)).toBe(true);
+  });
+
+  it("HALTS without clicking when the supervised readiness is NOT satisfied", () => {
+    // The not-ready guard sits between the settle and the fast dispatch; it emits a sanitized
+    // halt (clicked:false / clickedCount:0 / wouldClick:false) and returns BEFORE any click.
+    const guardIdx = mainFn.indexOf("if (!supervised.ready)");
+    const haltReturnIdx = mainFn.indexOf("return;", guardIdx);
+    const haltBlock = mainFn.slice(guardIdx, haltReturnIdx);
+    expect(guardIdx).toBeGreaterThanOrEqual(0);
+    expect(haltReturnIdx).toBeGreaterThan(guardIdx);
+    // the not-ready halt precedes the fast dispatch and performs NO diagnostic click
+    expect(guardIdx).toBeLessThan(mainFn.indexOf("diagnoseExportClickOnce("));
+    expect(/diagnoseExportClickOnce\(/.test(haltBlock)).toBe(false);
+    // sanitized halt fields
+    expect(/readinessMode:\s*["']supervised-fast["']/.test(haltBlock)).toBe(true);
+    expect(/supervisedReady:\s*false/.test(haltBlock)).toBe(true);
+    expect(/clicked:\s*false/.test(haltBlock)).toBe(true);
+    expect(/clickedCount:\s*0/.test(haltBlock)).toBe(true);
+    expect(/wouldClick:\s*false/.test(haltBlock)).toBe(true);
+    // diagnostic mode never persists status / capture / upload, even on the not-ready halt
+    expect(/writeStatus/.test(haltBlock)).toBe(false);
+    expect(/uploadReviewFile/.test(haltBlock)).toBe(false);
+    expect(/captureAndUpload\(/.test(haltBlock)).toBe(false);
+  });
+
+  it("clicks the existing diagnostic boundary EXACTLY ONCE, only when readiness is satisfied", () => {
+    const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+    const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+    const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+    const guardIdx = fastBranch.indexOf("if (!supervised.ready)");
+    const dispatchIdx = fastBranch.indexOf("diagnoseExportClickOnce(");
+    expect(guardIdx).toBeGreaterThanOrEqual(0);
+    // the single diagnostic click is GATED behind the ready guard (appears after it)…
+    expect(dispatchIdx).toBeGreaterThan(guardIdx);
+    // …and is dispatched exactly once in the fast branch (no fallback / retry).
+    expect((fastBranch.match(/diagnoseExportClickOnce\(/g) ?? []).length).toBe(1);
+  });
+});
+
 describe("capture-export-same-session — export-target readiness gate stops empty-target captures", () => {
   it("STABILIZES readiness (bounded read-only poll) AFTER the capture gate and BEFORE any capture", () => {
     expect(/waitForExportTargetReadinessStable\s*\(/.test(mainFn)).toBe(true);
@@ -315,12 +393,14 @@ describe("capture-export-same-session — export-target readiness gate stops emp
   it("the diagnostic readiness halt REPORTS only (no status, no capture) unless overridden", () => {
     expect(/--diagnose-allow-empty-target/.test(code)).toBe(true);
     expect(/allowEmptyTarget/.test(mainFn)).toBe(true);
-    // The diagnostic readiness guard lives inside the MAIN diagnose block, before the dispatch,
-    // and is fed by the bounded poll (it reports checks/stableCount, never writeStatus).
-    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
-    const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
-    const branch = mainFn.slice(diagIdx, dispatchIdx);
-    expect(/waitForExportTargetReadinessStable\(/.test(branch)).toBe(true);
+    // The STABLE (non-override) diagnose branch stabilizes readiness and, when not READY, REPORTS
+    // the sanitized halt (checks/stableCount/wouldClick) — it never writes status. Anchor the slice
+    // between the stable stabilization and the stable-branch dispatch (the SECOND diagnostic click).
+    const stableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(");
+    const fastDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const stableDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(", fastDispatchIdx + 1);
+    const branch = mainFn.slice(stableIdx, stableDispatchIdx);
+    expect(stableDispatchIdx).toBeGreaterThan(stableIdx);
     expect(/readiness\.decision\s*!==\s*"READY"\s*&&\s*!allowEmptyTarget/.test(branch)).toBe(true);
     expect(/writeStatus/.test(branch)).toBe(false); // diagnostic mode never persists status
     expect(/wouldClick/.test(branch)).toBe(true); // sanitized stdout report instead
@@ -337,9 +417,13 @@ describe("capture-export-same-session — read-only live-DOM probe enriches the 
   });
 
   it("runs the live probe inside the diagnostic not-READY block and reports its sanitized fields", () => {
-    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
-    const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
-    const branch = mainFn.slice(diagIdx, dispatchIdx);
+    // The live probe lives in the STABLE branch's not-READY block: between the stable stabilization
+    // and the stable-branch dispatch (the SECOND diagnostic click). The fast override branch precedes
+    // the stable stabilization and never runs the probe.
+    const stableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(");
+    const fastDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const stableDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(", fastDispatchIdx + 1);
+    const branch = mainFn.slice(stableIdx, stableDispatchIdx);
     expect(/probeLiveExportTargetReadiness\(/.test(branch)).toBe(true);
     expect(/readSignalsFn:\s*readLiveProbeSignals/.test(branch)).toBe(true);
     expect(/liveProbe:\s*live\.decision/.test(branch)).toBe(true);
@@ -351,11 +435,13 @@ describe("capture-export-same-session — read-only live-DOM probe enriches the 
 
   it("the live probe NEVER runs in the real capture path (diagnostic-only this slice)", () => {
     // Everything from the real-capture readiness stabilization onward carries no live-probe call,
-    // and capture is still dispatched exactly once, gated only by the HTML readiness decision.
-    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
-    const realStableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(", dispatchIdx);
+    // and capture is still dispatched exactly once, gated only by the HTML readiness decision. The
+    // real stabilization is the one AFTER the stable-branch dispatch (the SECOND diagnostic click).
+    const fastDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const stableDispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(", fastDispatchIdx + 1);
+    const realStableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(", stableDispatchIdx);
     const realBranch = mainFn.slice(realStableIdx);
-    expect(realStableIdx).toBeGreaterThan(dispatchIdx);
+    expect(realStableIdx).toBeGreaterThan(stableDispatchIdx);
     expect(/probeLiveExportTargetReadiness\(/.test(realBranch)).toBe(false);
     expect((mainFn.match(/captureAndUpload\(/g) ?? []).length).toBe(1);
     // The probe call appears exactly once in main — only in the diagnostic block.
