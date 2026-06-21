@@ -229,3 +229,50 @@ describe("capture-export-same-session — classify-only dry-run stops before cap
     expect(/successRows|filePath|suggestedFilename/.test(reportBody)).toBe(false);
   });
 });
+
+describe("capture-export-same-session — diagnose-export-click clicks once but never collects", () => {
+  it("parses --diagnose-export-click and yields to classify-only (no click) if both are set", () => {
+    expect(/--diagnose-export-click/.test(code)).toBe(true);
+    // classify-only (no click) wins: diagnoseClick is gated on !classifyOnly.
+    expect(/const\s+diagnoseClick\s*=\s*!classifyOnly\s*&&\s*args\.includes\("--diagnose-export-click"\)/.test(mainFn)).toBe(
+      true,
+    );
+  });
+
+  it("delegates the single observed click to the diagnostic boundary (not the capture leg)", () => {
+    expect(/diagnoseExportClickOnce\s*\(/.test(mainFn)).toBe(true);
+    // The diagnose dispatch sits after the gate and before the real-capture write.
+    const diagIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const gateIdx = mainFn.indexOf("decideCaptureGate(");
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    expect(diagIdx).toBeGreaterThan(gateIdx);
+    expect(diagIdx).toBeLessThan(captureIdx);
+  });
+
+  it("clicks only past the SAME gate — its halt branch reports, never captures", () => {
+    const diagIdx = mainFn.indexOf("if (diagnoseClick)");
+    expect(diagIdx).toBeGreaterThanOrEqual(0);
+    const captureIdx = mainFn.indexOf("captureAndUpload(");
+    // The whole diagnose branch precedes the capture dispatch and returns within itself.
+    const branch = mainFn.slice(diagIdx, captureIdx);
+    expect(/gate\.proceed/.test(branch)).toBe(true);
+    expect(/diagnoseExportClickOnce\(/.test(branch)).toBe(true);
+  });
+
+  it("the diagnose branch writes NO status and triggers NO upload/capture", () => {
+    // Bound the slice to the MAIN diagnose branch ONLY: from the `if (diagnoseClick)` that
+    // precedes the dispatch (not the earlier HALT-branch `else if (diagnoseClick)`) up to the
+    // real-capture path's own `!gate.proceed`, so the real path's writeStatus is not caught.
+    const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
+    const realGate = mainFn.indexOf("!gate.proceed", dispatchIdx); // the real-capture path halt
+    const branch = mainFn.slice(diagIdx, realGate);
+    expect(diagIdx).toBeGreaterThanOrEqual(0);
+    expect(realGate).toBeGreaterThan(dispatchIdx);
+    expect(/writeStatus/.test(branch)).toBe(false);
+    expect(/uploadReviewFile/.test(branch)).toBe(false);
+    expect(/captureAndUpload\(/.test(branch)).toBe(false);
+    // Output is a sanitized stdout report (mode tag), not a status record.
+    expect(/diagnose-export-click/.test(branch)).toBe(true);
+  });
+});

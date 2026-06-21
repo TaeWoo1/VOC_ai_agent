@@ -36,6 +36,12 @@ import { dirname } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
+import {
+  diagnoseExportClickOnce,
+  type DiagContext,
+  type DiagPage,
+  type ExportClickDiagnosis,
+} from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
 import { waitForSpaHydration } from "../naver/hydration";
 import { resolveReconnectIfNeeded, type ReconnectResolution } from "../naver/reconnect-resolve";
@@ -57,6 +63,15 @@ const SENTINEL_POLL_INTERVAL_MS = 750;
 // Auto-read default: re-settle + re-read the verdict on this cadence until a resolvable
 // start state (LOGGED_IN / RECONNECT_REQUIRED) appears or the timeout elapses.
 const START_POLL_INTERVAL_MS = 1_500;
+// --diagnose-export-click: after the gate permits, click ONCE and observe (no capture,
+// no upload, no status) what the click produced for a slow, bounded window.
+const DIAGNOSE_OBSERVE_WINDOW_MS = 45_000;
+const DIAGNOSE_POLL_INTERVAL_MS = 3_000;
+const DIAGNOSE_CLICK_TIMEOUT_MS = 8_000;
+// Read-only post-continue stabilization: settle + re-read until the page is a logged-in
+// actionable sync export surface (or halt). Patient enough to outlast cold-context hydration.
+const POST_CONTINUE_STABILIZE_TIMEOUT_MS = 20_000;
+const POST_CONTINUE_STABILIZE_INTERVAL_MS = 1_500;
 
 /** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
 const AUTO_READ_PROMPT = [
@@ -116,6 +131,27 @@ function classifyOnlyReport(
     reachedExportSurface: resolution.reachedExportSurface,
     wouldCapture: gate?.proceed ?? false,
     gateState: gate?.state ?? resolution.halt?.state,
+  });
+}
+
+/**
+ * Sanitized report for `--diagnose-export-click` when the run HALTS before the click
+ * (a pre-step reconnect halt, or the export gate refusing). Enums/booleans only — it
+ * mirrors the no-status discipline of the classify-only dry-run.
+ */
+function diagnoseHaltReport(
+  preVerdict: SessionVerdict,
+  resolution: ReconnectResolution,
+  gate?: CaptureGateDecision,
+): string {
+  return JSON.stringify({
+    mode: "diagnose-export-click",
+    halted: true,
+    preVerdict,
+    decision: resolution.decision,
+    resolvedVerdict: resolution.resolvedVerdict,
+    gateState: gate?.state ?? resolution.halt?.state,
+    wouldClick: gate?.proceed ?? false,
   });
 }
 
@@ -278,6 +314,9 @@ async function main(): Promise<void> {
     //    boundary). LOGGED_IN passes straight through (the boundary is never invoked); everything
     //    ambiguous HALTS without clicking. Continue success is NOT collection success.
     const classifyOnly = isClassifyOnly(args);
+    // Diagnostic mode: click ONCE through the existing gate and observe — never upload,
+    // never write status. classify-only (NO click) takes precedence if both are passed.
+    const diagnoseClick = !classifyOnly && args.includes("--diagnose-export-click");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -286,11 +325,24 @@ async function main(): Promise<void> {
       salt: cfg.storageProbeSalt,
       expectedContinueCard: { expectedCardFingerprint: cfg.naverExpectedContinueCardFingerprint },
       fingerprintConfigured: cfg.naverExpectedContinueCardFingerprint !== undefined,
+      // Read-only post-continue stabilization: if the continue advances but its post-click
+      // read is weak/unstable, settle + re-read (verdict + no-click export plan) until the
+      // page is a logged-in actionable sync surface, or halt. Never clicks/exports/uploads.
+      stabilize: {
+        timeoutMs: POST_CONTINUE_STABILIZE_TIMEOUT_MS,
+        intervalMs: POST_CONTINUE_STABILIZE_INTERVAL_MS,
+        settleFn: waitForSpaHydration,
+        checkVerdictFn: checkLiveSessionVerdict,
+        readExportPlanFn: async (p) => planExportAction(await p.content()),
+      },
     });
     if (resolution.decision === "HALT") {
-      // A dry-run reports only and persists NOTHING; a real run records the honest halt state.
+      // A diagnostic / dry-run reports only and persists NOTHING; a real run records the
+      // honest halt state.
       if (classifyOnly) {
         console.log(classifyOnlyReport(verdict, resolution));
+      } else if (diagnoseClick) {
+        console.log(diagnoseHaltReport(verdict, resolution));
       } else {
         const halted = resolution.halt!;
         writeStatus(cfg.statusFile, { state: halted.state, detail: halted.detail, updatedAt: now() });
@@ -313,6 +365,30 @@ async function main(): Promise<void> {
     if (classifyOnly) {
       console.log(classifyOnlyReport(verdict, resolution, gate));
       log("run.classify-only", { wouldCapture: gate.proceed, state: gate.state });
+      return;
+    }
+
+    // 7b) DIAGNOSE (one observed click): only past the SAME gate, click ONCE and observe
+    // what it produced. No capture/upload/status — `noStatusMode` keeps this leg honest.
+    if (diagnoseClick) {
+      if (!gate.proceed) {
+        console.log(diagnoseHaltReport(verdict, resolution, gate));
+        log("run.halted", { state: gate.state });
+        return;
+      }
+      const diagnosis: ExportClickDiagnosis = await diagnoseExportClickOnce(
+        page as unknown as DiagPage,
+        ctx as unknown as DiagContext,
+        {
+          observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
+          pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
+          clickTimeoutMs: DIAGNOSE_CLICK_TIMEOUT_MS,
+          salt: cfg.storageProbeSalt,
+          settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+        },
+      );
+      console.log(JSON.stringify({ mode: "diagnose-export-click", gateState: gate.state, ...diagnosis }));
+      log("run.diagnose-export-click", { outcome: diagnosis.outcome, clicked: diagnosis.clickedCount });
       return;
     }
 
