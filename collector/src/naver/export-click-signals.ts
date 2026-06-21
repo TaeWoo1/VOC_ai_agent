@@ -221,17 +221,21 @@ export function toastMarkersPresent(rawHtml: string): boolean {
 
 /**
  * Pure: classify an open modal into a fixed category, or null when no modal marker
- * is present. Precedence: an async-job notice wins, then a date/range requirement,
- * then a generic confirmation, else unknown.
+ * is present. Precedence: an async-job notice wins, then the legal review-usage consent,
+ * then a date/range requirement, then a generic confirmation, else unknown.
  */
 export function classifyModalCategory(rawHtml: string): ModalCategory | null {
   const html = stripComments(rawHtml);
   if (!anyMatch(MODAL_MARKERS, html)) return null;
   if (anyMatch(ASYNC_JOB_MARKERS, html)) return "async_job_notice";
-  if (anyMatch(DATE_RANGE_MARKERS, html)) return "date_range_required";
-  // The review-usage consent is a specific confirm — classify it BEFORE a generic confirm
-  // (its "계속하시겠습니까" would otherwise fall through to confirmation_required).
+  // The legal review-usage consent is the FOREGROUND actionable gate; classify it BEFORE a
+  // date-range requirement. A live run misread this modal as `date_range_required`: the consent
+  // renders OVER a populated review grid whose background carries date/range markers (조회 기간 /
+  // 최대 N개월 / 시작일·종료일), which mis-promoted it. Its own markers (리뷰 다운로드 및 활용 /
+  // 저작권자 / 리뷰데이터 다운로드 / 계속하시겠습니까) are specific enough to win safely. It is also
+  // checked before a generic confirm (its "계속하시겠습니까" would otherwise fall through).
   if (anyMatch(REVIEW_USAGE_MARKERS, html)) return "review_usage_confirmation";
+  if (anyMatch(DATE_RANGE_MARKERS, html)) return "date_range_required";
   if (anyMatch(CONFIRM_MARKERS, html)) return "confirmation_required";
   return "unknown_modal";
 }
@@ -239,8 +243,10 @@ export function classifyModalCategory(rawHtml: string): ModalCategory | null {
 /** Pure: classify a native dialog MESSAGE into a fixed category — never echoed. */
 export function classifyDialogMessage(message: string): DialogMessageCategory {
   if (anyMatch(ASYNC_JOB_MARKERS, message)) return "async_job";
-  if (anyMatch(DATE_RANGE_MARKERS, message)) return "date_range";
+  // Review-usage consent wins over a bare date-range match — same foreground-gate reasoning as
+  // `classifyModalCategory`: a consent message that also mentions a period must not read as date_range.
   if (anyMatch(REVIEW_USAGE_MARKERS, message)) return "review_usage_confirmation";
+  if (anyMatch(DATE_RANGE_MARKERS, message)) return "date_range";
   if (anyMatch(ERROR_WARN_MARKERS, message)) return "error_warning";
   if (anyMatch(CONFIRM_MARKERS, message)) return "confirmation";
   return "other";
@@ -305,8 +311,9 @@ export function mergePostClick(acc: PostClickSignals, next: PostClickSignals): P
 /**
  * Pure: collapse the observed signals into ONE outcome. Precedence is deliberate —
  * an actual download is the answer; otherwise a native dialog (it blocks everything);
- * then a date/range requirement (the most likely cause of the no-download), a generic
- * modal, an async job, a toast, a popup, and finally a no-op.
+ * then the legal review-usage consent gate (reaching it means the click SUCCEEDED over a
+ * populated grid); then a date/range requirement, a generic modal, an async job, a toast,
+ * a popup, and finally a no-op.
  */
 export function deriveExportClickOutcome(input: {
   downloadFired: boolean;
@@ -317,10 +324,12 @@ export function deriveExportClickOutcome(input: {
   const { downloadFired, dialogPresent, post, popupOpened } = input;
   if (downloadFired) return "DOWNLOAD";
   if (dialogPresent) return "NATIVE_DIALOG";
-  if (post.dateRangeRequired) return "DATE_RANGE_REQUIRED";
-  // The review-usage consent gate is a specific, actionable modal — surface it distinctly
-  // (above a generic MODAL) so the diagnostic names exactly which gate blocked the download.
+  // The review-usage consent gate is the actionable FOREGROUND blocker — reaching it means the
+  // export click succeeded and rows exist. Surface it ABOVE a date-range requirement: background
+  // date/range markers behind the modal must not mask it (a live run misread exactly this case as
+  // DATE_RANGE_REQUIRED). When both booleans are set, review-usage consent is the real gate.
   if (post.reviewUsageConfirmation) return "REVIEW_USAGE_CONFIRMATION";
+  if (post.dateRangeRequired) return "DATE_RANGE_REQUIRED";
   if (post.modalOpen) return "MODAL";
   if (post.asyncJobMarkerPresent) return "ASYNC_JOB";
   if (post.toastPresent) return "TOAST";

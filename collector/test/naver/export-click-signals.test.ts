@@ -138,6 +138,74 @@ describe("review-usage download-consent classification (legal modal/dialog)", ()
   });
 });
 
+describe("review-usage consent rendered OVER a populated grid (live misclassification fix)", () => {
+  // The exact shape a live run misread as DATE_RANGE_REQUIRED: the legal consent modal renders OVER
+  // a populated review grid whose background filters carry date/range markers (조회 기간 / 최대 N개월
+  // / 시작일·종료일). The review rows behind it mean the export click SUCCEEDED and reviews EXIST.
+  const REVIEW_USAGE_OVER_DATE_BG = `<div class="review-management">
+    <div class="filters">조회 기간: 최대 3개월 · 시작일 · 종료일</div>
+    <table><tbody>
+      <tr><td>리뷰1</td></tr><tr><td>리뷰2</td></tr><tr><td>리뷰3</td></tr>
+    </tbody></table>
+    <div class="modal-dialog" role="dialog" aria-modal="true">
+      <p>리뷰 다운로드 및 활용에 유의해 주세요.</p>
+      <p>리뷰 작성자 및 저작권자의 권리를 존중해 주세요.</p>
+      <p>리뷰데이터 다운로드를 계속하시겠습니까?</p>
+      <button class="btn-cancel">취소</button>
+      <button class="btn-primary">확인</button>
+    </div></div>`;
+
+  it("classifies as review_usage_confirmation, NOT date_range_required, despite background date markers", () => {
+    const cat = classifyModalCategory(REVIEW_USAGE_OVER_DATE_BG);
+    expect(cat).toBe("review_usage_confirmation");
+    expect(cat).not.toBe("date_range_required");
+  });
+
+  it("summarizePostClick keeps the modal category as review_usage_confirmation (background date markers still reported)", () => {
+    const p = summarizePostClick(REVIEW_USAGE_OVER_DATE_BG);
+    expect(p.modalCategory).toBe("review_usage_confirmation");
+    expect(p.reviewUsageConfirmation).toBe(true);
+    expect(p.dateRangeRequired).toBe(true); // the report may still note background date markers…
+  });
+
+  it("when BOTH reviewUsageConfirmation and dateRangeRequired are true → outcome REVIEW_USAGE_CONFIRMATION", () => {
+    const p = summarizePostClick(REVIEW_USAGE_OVER_DATE_BG);
+    expect(
+      deriveExportClickOutcome({ downloadFired: false, dialogPresent: false, post: p, popupOpened: false }),
+    ).toBe("REVIEW_USAGE_CONFIRMATION"); // …but the actionable foreground gate is the consent
+  });
+
+  it("a real download still wins over the review-usage gate", () => {
+    const p = summarizePostClick(REVIEW_USAGE_OVER_DATE_BG);
+    expect(
+      deriveExportClickOutcome({ downloadFired: true, dialogPresent: false, post: p, popupOpened: false }),
+    ).toBe("DOWNLOAD");
+  });
+
+  it("a PURE date-range modal (no review-usage markers) STILL classifies/derives as date_range", () => {
+    const p = summarizePostClick(PII_MODAL); // date-range modal, no review-usage text
+    expect(p.modalCategory).toBe("date_range_required");
+    expect(p.reviewUsageConfirmation).toBe(false);
+    expect(deriveExportClickOutcome({ downloadFired: false, dialogPresent: false, post: p, popupOpened: false })).toBe(
+      "DATE_RANGE_REQUIRED",
+    );
+  });
+
+  it("native-dialog path: a consent message that also mentions a period is review_usage_confirmation", () => {
+    expect(classifyDialogMessage("리뷰데이터 다운로드를 계속하시겠습니까? (조회 기간 최대 3개월)")).toBe(
+      "review_usage_confirmation",
+    );
+  });
+
+  it("never echoes the raw modal/background text (enums/booleans only)", () => {
+    const json = JSON.stringify(summarizePostClick(REVIEW_USAGE_OVER_DATE_BG));
+    for (const s of ["리뷰 작성자", "저작권자", "활용에 유의", "조회 기간", "시작일", "종료일", "리뷰1"]) {
+      expect(json.includes(s)).toBe(false);
+    }
+    expect(/[<>]/.test(json)).toBe(false);
+  });
+});
+
 describe("diagnosePreClickSignals — sanitized pre-click snapshot", () => {
   it("reads the sync layout, actionable, and date-range presence", () => {
     const s = diagnosePreClickSignals(SYNC_HTML);
