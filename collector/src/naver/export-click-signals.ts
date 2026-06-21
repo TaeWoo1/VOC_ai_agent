@@ -31,6 +31,9 @@ export type MessageLengthBucket = "empty" | "tiny" | "short" | "medium" | "long"
 /** Sanitized category of a confirmation/warning MODAL surfaced after the click. */
 export type ModalCategory =
   | "date_range_required"
+  // The legal "리뷰 다운로드 및 활용에 유의 … 계속하시겠습니까?" review-usage consent prompt —
+  // a real export gate, distinct from "no target" / "pick a range" / a generic confirm.
+  | "review_usage_confirmation"
   | "confirmation_required"
   | "async_job_notice"
   | "unknown_modal";
@@ -38,6 +41,7 @@ export type ModalCategory =
 /** Sanitized category of a NATIVE dialog (window.alert/confirm/prompt) message. */
 export type DialogMessageCategory =
   | "date_range"
+  | "review_usage_confirmation"
   | "confirmation"
   | "error_warning"
   | "async_job"
@@ -48,6 +52,7 @@ export type ExportClickOutcome =
   | "DOWNLOAD"
   | "NATIVE_DIALOG"
   | "DATE_RANGE_REQUIRED"
+  | "REVIEW_USAGE_CONFIRMATION"
   | "MODAL"
   | "ASYNC_JOB"
   | "TOAST"
@@ -75,6 +80,8 @@ export interface PostClickSignals {
   toastPresent: boolean;
   asyncJobMarkerPresent: boolean;
   dateRangeRequired: boolean;
+  /** The legal review-usage download-consent prompt is present (diagnostic only; never auto-confirmed). */
+  reviewUsageConfirmation: boolean;
 }
 
 /** Sanitized record of a native dialog — never the raw message. */
@@ -104,6 +111,7 @@ export const POST_CLICK_SIGNAL_KEYS: ReadonlyArray<keyof PostClickSignals> = [
   "toastPresent",
   "asyncJobMarkerPresent",
   "dateRangeRequired",
+  "reviewUsageConfirmation",
 ];
 export const DIALOG_RECORD_KEYS: ReadonlyArray<keyof DialogRecord> = [
   "type",
@@ -142,6 +150,18 @@ const DATE_RANGE_MARKERS: readonly RegExp[] = [
   /최대\s*\d+\s*(?:개월|일|주)/,
   /date\s*range/i,
   /\bperiod\b/i,
+];
+// The legal review-download consent prompt: "리뷰 다운로드 및 활용에 유의해 주세요 … 리뷰 작성자
+// … 저작권자 … 리뷰데이터 다운로드를 계속하시겠습니까?". Distinct from a generic confirm, a
+// no-target notice, or a date-range requirement — it means reviews EXIST and consent is asked.
+const REVIEW_USAGE_MARKERS: readonly RegExp[] = [
+  /리뷰\s*다운로드\s*및\s*활용/,
+  /활용에\s*유의/,
+  /리뷰\s*작성자/,
+  /저작권자/,
+  /리뷰\s*데이터\s*다운로드/,
+  /리뷰데이터\s*다운로드/,
+  /다운로드를?\s*계속하시겠습니까/,
 ];
 const CONFIRM_MARKERS: readonly RegExp[] = [/확인/, /계속/, /저장/, /\bconfirm\b/i, /\bcontinue\b/i, /\bok\b/i];
 const ERROR_WARN_MARKERS: readonly RegExp[] = [/오류/, /실패/, /경고/, /불가/, /\berror\b/i, /\bfail/i, /\bwarn/i];
@@ -209,6 +229,9 @@ export function classifyModalCategory(rawHtml: string): ModalCategory | null {
   if (!anyMatch(MODAL_MARKERS, html)) return null;
   if (anyMatch(ASYNC_JOB_MARKERS, html)) return "async_job_notice";
   if (anyMatch(DATE_RANGE_MARKERS, html)) return "date_range_required";
+  // The review-usage consent is a specific confirm — classify it BEFORE a generic confirm
+  // (its "계속하시겠습니까" would otherwise fall through to confirmation_required).
+  if (anyMatch(REVIEW_USAGE_MARKERS, html)) return "review_usage_confirmation";
   if (anyMatch(CONFIRM_MARKERS, html)) return "confirmation_required";
   return "unknown_modal";
 }
@@ -217,6 +240,7 @@ export function classifyModalCategory(rawHtml: string): ModalCategory | null {
 export function classifyDialogMessage(message: string): DialogMessageCategory {
   if (anyMatch(ASYNC_JOB_MARKERS, message)) return "async_job";
   if (anyMatch(DATE_RANGE_MARKERS, message)) return "date_range";
+  if (anyMatch(REVIEW_USAGE_MARKERS, message)) return "review_usage_confirmation";
   if (anyMatch(ERROR_WARN_MARKERS, message)) return "error_warning";
   if (anyMatch(CONFIRM_MARKERS, message)) return "confirmation";
   return "other";
@@ -246,6 +270,7 @@ export function summarizePostClick(rawHtml: string): PostClickSignals {
     toastPresent: anyMatch(TOAST_MARKERS, html),
     asyncJobMarkerPresent: anyMatch(ASYNC_JOB_MARKERS, html),
     dateRangeRequired: modalCategory === "date_range_required" || anyMatch(DATE_RANGE_MARKERS, html),
+    reviewUsageConfirmation: modalCategory === "review_usage_confirmation" || anyMatch(REVIEW_USAGE_MARKERS, html),
   };
 }
 
@@ -257,6 +282,7 @@ export function emptyPostClick(): PostClickSignals {
     toastPresent: false,
     asyncJobMarkerPresent: false,
     dateRangeRequired: false,
+    reviewUsageConfirmation: false,
   };
 }
 
@@ -272,6 +298,7 @@ export function mergePostClick(acc: PostClickSignals, next: PostClickSignals): P
     toastPresent: acc.toastPresent || next.toastPresent,
     asyncJobMarkerPresent: acc.asyncJobMarkerPresent || next.asyncJobMarkerPresent,
     dateRangeRequired: acc.dateRangeRequired || next.dateRangeRequired,
+    reviewUsageConfirmation: acc.reviewUsageConfirmation || next.reviewUsageConfirmation,
   };
 }
 
@@ -291,6 +318,9 @@ export function deriveExportClickOutcome(input: {
   if (downloadFired) return "DOWNLOAD";
   if (dialogPresent) return "NATIVE_DIALOG";
   if (post.dateRangeRequired) return "DATE_RANGE_REQUIRED";
+  // The review-usage consent gate is a specific, actionable modal — surface it distinctly
+  // (above a generic MODAL) so the diagnostic names exactly which gate blocked the download.
+  if (post.reviewUsageConfirmation) return "REVIEW_USAGE_CONFIRMATION";
   if (post.modalOpen) return "MODAL";
   if (post.asyncJobMarkerPresent) return "ASYNC_JOB";
   if (post.toastPresent) return "TOAST";

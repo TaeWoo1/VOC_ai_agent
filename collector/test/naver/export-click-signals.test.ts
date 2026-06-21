@@ -15,6 +15,7 @@ import {
   type DialogRecord,
   type PostClickSignals,
 } from "../../src/naver/export-click-signals";
+import { evaluateExportTargetReadiness } from "../../src/naver/export-target-readiness";
 
 /** A realistic single-control sync export surface (one visible enabled Excel button). */
 const SYNC_HTML = `<main><button id="exp">엑셀 다운로드</button>
@@ -85,6 +86,58 @@ describe("classifyDialogMessage — fixed categories, never the text", () => {
   });
 });
 
+describe("review-usage download-consent classification (legal modal/dialog)", () => {
+  /** The legal review-usage consent modal — PII-ish names included to prove no echo. */
+  const REVIEW_USAGE_MODAL = `<div class="modal-dialog" role="dialog">
+    <p>리뷰 다운로드 및 활용에 유의해 주세요.</p>
+    <p>리뷰 작성자 및 저작권자의 권리를 존중해 주세요.</p>
+    <p>리뷰데이터 다운로드를 계속하시겠습니까?</p>
+    <button class="btn-primary">확인</button></div>`;
+
+  it("the modal classifies as review_usage_confirmation (distinct from a generic confirm)", () => {
+    expect(classifyModalCategory(REVIEW_USAGE_MODAL)).toBe("review_usage_confirmation");
+  });
+
+  it("is NOT mistaken for date_range / async / a bare confirmation", () => {
+    const cat = classifyModalCategory(REVIEW_USAGE_MODAL);
+    expect(cat).not.toBe("date_range_required");
+    expect(cat).not.toBe("async_job_notice");
+    expect(cat).not.toBe("confirmation_required");
+  });
+
+  it("the native-dialog form classifies as review_usage_confirmation too", () => {
+    expect(classifyDialogMessage("리뷰데이터 다운로드를 계속하시겠습니까?")).toBe("review_usage_confirmation");
+    expect(classifyDialogMessage("리뷰 다운로드 및 활용에 유의해 주세요")).toBe("review_usage_confirmation");
+  });
+
+  it("summarizePostClick flags reviewUsageConfirmation and folds the outcome distinctly", () => {
+    const p = summarizePostClick(REVIEW_USAGE_MODAL);
+    expect(p.reviewUsageConfirmation).toBe(true);
+    expect(p.modalCategory).toBe("review_usage_confirmation");
+    expect(
+      deriveExportClickOutcome({ downloadFired: false, dialogPresent: false, post: p, popupOpened: false }),
+    ).toBe("REVIEW_USAGE_CONFIRMATION");
+  });
+
+  it("the readiness gate does NOT read a consent modal as an empty/no-target page", () => {
+    // A consent prompt means reviews EXIST — it must never be conflated with empty_state /
+    // no_export_target / date_range_missing by the separate readiness evaluator.
+    const r = evaluateExportTargetReadiness(REVIEW_USAGE_MODAL);
+    if (r.decision === "HALT") {
+      expect(r.state).not.toBe("EXPORT_TARGET_EMPTY");
+      expect(r.state).not.toBe("EXPORT_DATE_RANGE_REQUIRED");
+    }
+  });
+
+  it("never echoes the raw consent text (enums/booleans only)", () => {
+    const json = JSON.stringify(summarizePostClick(REVIEW_USAGE_MODAL));
+    for (const s of ["리뷰 작성자", "저작권자", "활용에 유의", "계속하시겠습니까"]) {
+      expect(json.includes(s)).toBe(false);
+    }
+    expect(/[<>]/.test(json)).toBe(false);
+  });
+});
+
 describe("diagnosePreClickSignals — sanitized pre-click snapshot", () => {
   it("reads the sync layout, actionable, and date-range presence", () => {
     const s = diagnosePreClickSignals(SYNC_HTML);
@@ -133,6 +186,7 @@ describe("summarizePostClick + mergePostClick — accumulate observations", () =
       toastPresent: false,
       asyncJobMarkerPresent: false,
       dateRangeRequired: false,
+      reviewUsageConfirmation: false,
     });
   });
 });

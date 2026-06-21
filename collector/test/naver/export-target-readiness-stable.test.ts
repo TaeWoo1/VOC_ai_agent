@@ -39,61 +39,66 @@ const deps = (over: Partial<ExportTargetReadinessStableDeps>): ExportTargetReadi
   ...over,
 });
 
-describe("waitForExportTargetReadinessStable — READY short-circuits immediately", () => {
+describe("waitForExportTargetReadinessStable — only READY short-circuits", () => {
   it("returns READY on the first check when the result is already rendered", async () => {
     const res = await waitForExportTargetReadinessStable(PAGE, deps(scripted([READY])));
     expect(res.decision).toBe("READY");
     expect(res.checks).toBe(1);
+    expect(res.elapsedMs).toBe(0);
     expect(res.readiness).toEqual(READY);
+    expect(res.lastReadiness).toEqual(READY);
   });
 
-  it("waits through a transient empty, then proceeds when rows render (EMPTY → READY)", async () => {
-    const res = await waitForExportTargetReadinessStable(PAGE, deps(scripted([EMPTY, READY])));
-    expect(res.decision).toBe("READY");
-    expect(res.checks).toBe(2); // the single empty never halted
+  it("EMPTY observed twice quickly does NOT halt early — it polls the FULL window", async () => {
+    // maxChecks = ceil(50/10) = 5; a repeated empty must survive all 5 checks (no 2-check early exit).
+    const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([EMPTY, EMPTY]), timeoutMs: 50, intervalMs: 10 }));
+    expect(res.decision).toBe("HALT");
+    expect(res.readiness).toEqual(EMPTY);
+    expect(res.checks).toBe(5); // ran the full window, not 2
   });
 
-  it("waits through an unknown shell, then proceeds when it resolves (UNKNOWN → READY)", async () => {
-    const res = await waitForExportTargetReadinessStable(PAGE, deps(scripted([UNKNOWN, READY])));
+  it("EMPTY persists through the full window → HALT EXPORT_TARGET_EMPTY with stableCount === checks", async () => {
+    const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([EMPTY]), timeoutMs: 30, intervalMs: 10 }));
+    expect(res.decision).toBe("HALT");
+    expect(res.readiness).toEqual(EMPTY);
+    expect(res.checks).toBe(3);
+    if (res.decision === "HALT") expect(res.stableCount).toBe(3);
+    expect(res.elapsedMs).toBe(20); // (3 - 1) * 10
+  });
+
+  it("EMPTY for several checks then READY → proceeds (a late-rendering result wins)", async () => {
+    const res = await waitForExportTargetReadinessStable(
+      PAGE,
+      deps({ ...scripted([EMPTY, EMPTY, EMPTY, READY]), timeoutMs: 100, intervalMs: 10 }),
+    );
     expect(res.decision).toBe("READY");
-    expect(res.checks).toBe(2);
+    expect(res.checks).toBe(4);
   });
 });
 
-describe("waitForExportTargetReadinessStable — halts only on a confirmed/persistent state", () => {
-  it("EMPTY twice consecutively → HALT EXPORT_TARGET_EMPTY (early, once confirmed)", async () => {
-    const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([EMPTY, EMPTY]), timeoutMs: 200, intervalMs: 10 }));
-    expect(res.decision).toBe("HALT");
-    expect(res.readiness).toEqual(EMPTY);
-    expect(res.checks).toBe(2);
-    if (res.decision === "HALT") expect(res.stableCount).toBe(2);
-  });
-
-  it("DATE_RANGE_REQUIRED persists until timeout → HALT EXPORT_DATE_RANGE_REQUIRED", async () => {
-    const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([DRR]), timeoutMs: 30, intervalMs: 10 }));
-    expect(res.decision).toBe("HALT");
-    expect(res.readiness).toEqual(DRR);
-    expect(res.checks).toBe(3); // ran the full window (no early short-circuit for non-empty)
-  });
-
-  it("UNKNOWN persists until timeout → HALT EXPORT_TARGET_UNKNOWN", async () => {
+describe("waitForExportTargetReadinessStable — non-empty halts also wait out the window", () => {
+  it("UNKNOWN persists → HALT EXPORT_TARGET_UNKNOWN after the bounded window", async () => {
     const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([UNKNOWN]), timeoutMs: 30, intervalMs: 10 }));
     expect(res.decision).toBe("HALT");
     expect(res.readiness).toEqual(UNKNOWN);
     expect(res.checks).toBe(3);
   });
 
-  it("a single EMPTY at the very end (no second confirm) halts on the last state at timeout", async () => {
-    // UNKNOWN, UNKNOWN, EMPTY across a 3-check window: EMPTY appears once, never confirmed,
-    // so the window expires and we halt honestly on the last observed state (EMPTY).
+  it("DATE_RANGE_REQUIRED persists → HALT EXPORT_DATE_RANGE_REQUIRED after the bounded window", async () => {
+    const res = await waitForExportTargetReadinessStable(PAGE, deps({ ...scripted([DRR]), timeoutMs: 30, intervalMs: 10 }));
+    expect(res.decision).toBe("HALT");
+    expect(res.readiness).toEqual(DRR);
+    expect(res.checks).toBe(3);
+  });
+
+  it("halts on the LAST observed state when the page flaps (UNKNOWN, UNKNOWN, EMPTY)", async () => {
     const res = await waitForExportTargetReadinessStable(
       PAGE,
       deps({ ...scripted([UNKNOWN, UNKNOWN, EMPTY]), timeoutMs: 30, intervalMs: 10 }),
     );
     expect(res.decision).toBe("HALT");
     expect(res.readiness).toEqual(EMPTY);
-    expect(res.checks).toBe(3);
-    if (res.decision === "HALT") expect(res.stableCount).toBe(1);
+    if (res.decision === "HALT") expect(res.stableCount).toBe(1); // only the final EMPTY
   });
 });
 
@@ -105,10 +110,7 @@ describe("waitForExportTargetReadinessStable — transient errors keep polling",
       if (i === 1) return Promise.reject(new Error("navigating"));
       return Promise.resolve("<html/>");
     };
-    const res = await waitForExportTargetReadinessStable(
-      PAGE,
-      deps({ readHtmlFn, evaluateReadinessFn: () => READY }),
-    );
+    const res = await waitForExportTargetReadinessStable(PAGE, deps({ readHtmlFn, evaluateReadinessFn: () => READY }));
     expect(res.decision).toBe("READY");
     expect(res.checks).toBe(2);
   });
@@ -126,7 +128,6 @@ describe("waitForExportTargetReadinessStable — transient errors keep polling",
 
 describe("waitForExportTargetReadinessStable — sanitized output (no leak)", () => {
   it("the stable result carries only the sanitized readiness + counts — no raw page content", async () => {
-    // Even when the reader hands the loop hostile HTML, the result echoes only the readiness enum.
     const res = await waitForExportTargetReadinessStable(
       PAGE,
       deps({ ...scripted([READY]), readHtmlFn: () => Promise.resolve("<div>행복마켓 Commerce ID 1234567 홍길동</div>") }),

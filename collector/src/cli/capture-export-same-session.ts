@@ -78,9 +78,9 @@ const DIAGNOSE_CLICK_TIMEOUT_MS = 8_000;
 const POST_CONTINUE_STABILIZE_TIMEOUT_MS = 20_000;
 const POST_CONTINUE_STABILIZE_INTERVAL_MS = 1_500;
 // Read-only export-target readiness stabilization: past the gate, poll the results read-only
-// until readiness is stable/READY (or the bounded window expires) — so a still-rendering table
-// is not misread as empty. Bounded; never clicks.
-const EXPORT_TARGET_READINESS_STABILIZE_TIMEOUT_MS = 12_000;
+// across the FULL bounded window (only READY short-circuits) — so a still-rendering table is
+// never misread as empty on an early read. Bounded; never clicks.
+const EXPORT_TARGET_READINESS_STABILIZE_TIMEOUT_MS = 15_000;
 const EXPORT_TARGET_READINESS_STABILIZE_INTERVAL_MS = 1_500;
 
 /** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
@@ -415,7 +415,8 @@ async function main(): Promise<void> {
             targetState: readiness.state,
             reason: readiness.reason,
             checks: stable.checks,
-            stableCount: stable.decision === "HALT" ? stable.stableCount : 0,
+            stableCount: stable.stableCount,
+            elapsedMs: stable.elapsedMs,
             wouldClick: false,
           }),
         );
@@ -439,6 +440,8 @@ async function main(): Promise<void> {
           gateState: gate.state,
           targetReadiness: readiness.decision,
           checks: stable.checks,
+          stableCount: stable.stableCount,
+          elapsedMs: stable.elapsedMs,
           ...diagnosis,
         }),
       );
@@ -461,7 +464,7 @@ async function main(): Promise<void> {
     if (readiness.decision !== "READY") {
       writeStatus(cfg.statusFile, {
         state: readiness.state,
-        detail: `export-target not ready: ${readiness.reason} (checks ${stable.checks})`,
+        detail: `export-target not ready: ${readiness.reason} (checks ${stable.checks}, stable ${stable.stableCount})`,
         updatedAt: now(),
       });
       log("run.halted", { state: readiness.state });
