@@ -219,3 +219,31 @@ describe("account-store-collect — continue-control diagnostic emits marker BOO
     expect(/\.(click|focus|dispatchEvent|scrollIntoView)\s*\(/.test(evaluateBody)).toBe(false);
   });
 });
+
+describe("account-store-collect — the click-locate stamp is INDEX-only and flag-gated", () => {
+  it("stamps ONLY under the stampForClick flag, and only the candidate index (never a value)", () => {
+    // The in-page stamp is `if (stamp) el.setAttribute("data-sellerops-cand", String(out.length))`.
+    expect(
+      /if\s*\(\s*stamp\s*\)\s*el\.setAttribute\(\s*"data-sellerops-cand"\s*,\s*String\(\s*out\.length\s*\)\s*\)/.test(
+        evaluateBody,
+      ),
+    ).toBe(true);
+    // The stamp attribute appears exactly once in the file, and the ONLY setAttribute call is
+    // that index-only form — together these prove no name/id/text/href value is ever stamped.
+    expect((code.match(/setAttribute\(/g) ?? []).length).toBe(1);
+    expect((code.match(/setAttribute\(\s*"data-sellerops-cand"\s*,\s*String\(out\.length\)\s*\)/g) ?? []).length).toBe(
+      1,
+    );
+  });
+
+  it("threads stampForClick to the TOP frame only; child frames are never stamped", () => {
+    expect(/opts\s*:\s*\{\s*stampForClick\?\s*:\s*boolean\s*\}/.test(code)).toBe(true);
+    expect(/scanFrameSafe\(\s*mainFrame\s*,\s*stampForClick\s*\)/.test(code)).toBe(true);
+    expect(/scanFrameSafe\(\s*frame\s*,\s*false\s*\)/.test(code)).toBe(true);
+  });
+
+  it("the stamp is a DOM attribute set, not a page drive — still no click/fill/etc. in the file", () => {
+    expect(/\.(click|fill|press|selectOption|check|dispatchEvent|tap|focus)\s*\(/.test(code)).toBe(false);
+    expect(code.includes("__name(")).toBe(false);
+  });
+});

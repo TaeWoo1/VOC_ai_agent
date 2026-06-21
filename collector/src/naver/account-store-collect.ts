@@ -106,8 +106,8 @@ export interface CollectedSelection {
  * rewritten by esbuild keepNames to `__name(...)`, undefined in the page (the storage-collect
  * bug). A source-guard test locks this shape.
  */
-async function scanSelectionCandidates(frame: Frame): Promise<RawCandidateScan[]> {
-  return frame.evaluate(() => {
+async function scanSelectionCandidates(frame: Frame, stampForClick: boolean): Promise<RawCandidateScan[]> {
+  return frame.evaluate((stamp) => {
     const ID_ATTRS = [
       "data-channel-no",
       "data-channel-code",
@@ -373,16 +373,22 @@ async function scanSelectionCandidates(frame: Frame): Promise<RawCandidateScan[]
         hrefPathSegmentCount,
       };
 
+      // Click-locate stamp (top frame only, flag-gated): an INDEX-ONLY attribute so a later
+      // guarded-continue boundary can map a PROVEN safe candidate index to exactly one
+      // locator. It is never a name/id/text — only `out.length`, this candidate's index
+      // (empty candidates `continue` above, so they consume no index). The report-only path
+      // passes stamp=false → no DOM mutation at all.
+      if (stamp) el.setAttribute("data-sellerops-cand", String(out.length));
       out.push({ visibleText: text, commerceId, storeUrlPath, accountScope, clickable, shape, hrefParts, markers, containment });
     }
     return out;
-  });
+  }, stampForClick);
 }
 
 /** Per-frame read that degrades to [] on a detached/navigating frame (never aborts the run). */
-async function scanFrameSafe(frame: Frame): Promise<RawCandidateScan[]> {
+async function scanFrameSafe(frame: Frame, stampForClick: boolean): Promise<RawCandidateScan[]> {
   try {
-    return await scanSelectionCandidates(frame);
+    return await scanSelectionCandidates(frame, stampForClick);
   } catch {
     return [];
   }
@@ -466,7 +472,13 @@ export async function collectSelectionSurface(
   expected: ExpectedIdentity,
   salt: string,
   expectedContinueCard: ExpectedContinueCard = {},
+  opts: { stampForClick?: boolean } = {},
 ): Promise<CollectedSelection> {
+  // Stamp an index-only locator attribute on the TOP-DOCUMENT clickable candidates only, and
+  // only when the (separately-approved) guarded-continue boundary asks for it. Top-frame-only
+  // keeps `data-sellerops-cand="<i>"` equal to the GLOBAL candidateIndex (top scans come first
+  // in `all`) with no cross-frame collisions; the report-only path never stamps.
+  const stampForClick = opts.stampForClick ?? false;
   const url = page.url();
   const topHtml = await page.content();
   const verdict = sessionVerdictFromContent(topHtml, url);
@@ -481,12 +493,14 @@ export async function collectSelectionSurface(
   let inChildFrame = false;
   if (surface === "account-chooser" || surface === "store-chooser" || surface === "reconnect-continue") {
     const mainFrame = page.mainFrame();
-    const top = await scanFrameSafe(mainFrame);
+    const top = await scanFrameSafe(mainFrame, stampForClick);
     inTopDocument = top.length > 0;
     const all = [...top];
     for (const frame of page.frames()) {
       if (frame === mainFrame) continue;
-      const fc = await scanFrameSafe(frame);
+      // Child frames are NEVER stamped — a page-level locator only searches the top frame, so
+      // a child-frame index could never collide with / be mistaken for a top-frame stamp.
+      const fc = await scanFrameSafe(frame, false);
       if (fc.length > 0) inChildFrame = true;
       all.push(...fc);
     }
