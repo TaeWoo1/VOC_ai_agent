@@ -99,6 +99,8 @@ export interface ExportClickDiagnosis {
   toastPresent: boolean;
   asyncJobMarkerPresent: boolean;
   dateRangeRequired: boolean;
+  /** The legal review-usage download-consent prompt was observed (diagnostic only). */
+  reviewUsageConfirmation: boolean;
   popupOpened: boolean;
   observeChecks: number;
   detail: string;
@@ -116,6 +118,7 @@ export const EXPORT_CLICK_DIAGNOSIS_KEYS: ReadonlyArray<keyof ExportClickDiagnos
   "toastPresent",
   "asyncJobMarkerPresent",
   "dateRangeRequired",
+  "reviewUsageConfirmation",
   "popupOpened",
   "observeChecks",
   "detail",
@@ -153,6 +156,7 @@ export async function diagnoseExportClickOnce(
       toastPresent: false,
       asyncJobMarkerPresent: false,
       dateRangeRequired: false,
+      reviewUsageConfirmation: false,
       popupOpened: false,
       observeChecks: 0,
       detail: "diagnose: not a single unambiguous control; no click",
@@ -267,6 +271,7 @@ export async function diagnoseExportClickOnce(
     toastPresent: post.toastPresent,
     asyncJobMarkerPresent: post.asyncJobMarkerPresent,
     dateRangeRequired: post.dateRangeRequired,
+    reviewUsageConfirmation: post.reviewUsageConfirmation,
     popupOpened,
     observeChecks: checks,
     detail: `diagnose: clicked=${clicked ? 1 : 0} outcome=${outcome}`,
