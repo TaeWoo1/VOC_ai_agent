@@ -1,23 +1,31 @@
 /**
- * Live REVIEW-USAGE CONSENT CONFIRM — exactly one modal-scoped `확인` click, observe-only after.
+ * Live REVIEW-USAGE CONSENT handling — observe-only diagnostics + an exactly-once 확인 click.
  *
- * Reached ONLY when the supervised diagnostic export click already produced
- * `outcome: REVIEW_USAGE_CONFIRMATION` AND the operator passed
- * `--diagnose-confirm-review-usage` (gated upstream by `decideReviewUsageConfirm`). It presses the
- * legal review-usage consent modal's affirmative `확인` button — the only remaining export gate —
- * and then watches, for a bounded window, whether a real download fires.
+ * Two surfaces, both reached ONLY after the supervised diagnostic export click already produced
+ * `outcome: REVIEW_USAGE_CONFIRMATION`:
+ *
+ *  1. `scanReviewUsageConfirmCandidates` — NO-CLICK candidate-index diagnostic. It badges every
+ *     visible button in the foreground consent modal with an index (for human inspection in the live
+ *     browser) and returns ONLY sanitized per-candidate metadata (index / kind / visible / enabled /
+ *     text-length bucket). It never clicks.
+ *  2. `confirmReviewUsageOnce` — presses the single modal-scoped affirmative `확인` EXACTLY ONCE,
+ *     then observes whether a download / dialog / follow-up modal results. Gated upstream by
+ *     `decideReviewUsageConfirm` + the explicit `--diagnose-confirm-review-usage` flag.
  *
  * HARD INVARIANTS:
- *   - Exactly ONE `.click(`, on a control bound by a read-only in-page scan that stamps the SINGLE
- *     affirmative button inside the VISIBLE consent modal and is re-checked with `count() === 1`.
- *     Never a global `확인`. No fallback selector, no retry. Zero-or-multiple candidates → halt.
- *   - It NEVER persists, uploads, or records status: no `saveAs`, no `uploadReviewFile`, no
- *     `writeStatus`, no `runExport`, no navigation. A download that fires is observed (sanitized)
- *     and discarded with the context.
- *   - The foreground modal is re-confirmed to still be review-usage consent before any click; a
- *     non-consent modal halts with `CONFIRM_NOT_CONSENT`, no click.
- *   - All output is sanitized via `export-click-signals` — enums / booleans / coarse buckets /
- *     salted 16-hex hashes. No raw modal/dialog/toast text, filename, URL, selector, id, or token.
+ *   - Exactly ONE `.click(` in this module (inside `confirmReviewUsageOnce`), on a control bound by a
+ *     read-only in-page scan that stamps the SINGLE affirmative button inside the VISIBLE consent
+ *     modal and is re-checked with `count() === 1`. Never a global `확인`. No fallback, no retry.
+ *   - NEVER persists / uploads / writes status: no `saveAs`, `uploadReviewFile`, `writeStatus`,
+ *     `runExport`, navigation. A download that fires is observed (sanitized) and discarded.
+ *   - esbuild/`keepNames` safety: every `page.evaluate(...)` callback is an INLINE anonymous arrow
+ *     with plain loops and NO inner named declarations — a named inner helper becomes `__name(...)`,
+ *     undefined in the page sandbox → `ReferenceError: __name is not defined`. A source guard locks this.
+ *   - Resilience: every `page.content()` / `page.evaluate()` is wrapped — a closed/detached page or
+ *     context returns a sanitized `CONFIRM_READ_FAILED` halt, never an uncaught exception.
+ *   - All output is sanitized — enums / booleans / coarse buckets / salted 16-hex hashes. No raw
+ *     modal/dialog/toast/button text, filename, URL, selector, id, or token. Badge labels (index +
+ *     derived kind) may render in the browser for inspection, but never reach console/log output.
  */
 import { log } from "../log";
 import {
@@ -37,10 +45,13 @@ import {
   type MessageLengthBucket,
   type ModalCategory,
 } from "./export-click-signals";
+import type { CountBucket } from "./export-probe";
 import { extensionCategory, type ExtensionCategory } from "./review-export";
 
 /** Internal index attribute stamped on the single bound affirmative control (read-identity only). */
 const STAMP_ATTR = "data-sellerops-confirm";
+/** Internal index attribute stamped on each badged candidate in the no-click diagnostic. */
+const CAND_INDEX_ATTR = "data-sellerops-cand-index";
 
 /** Per-`확인`-click actionability budget (matches the export safe-confirm timeout). */
 const CONFIRM_CLICK_TIMEOUT_MS = 4_000;
@@ -59,13 +70,16 @@ const MODAL_SCOPES: readonly string[] = [
   ".seller-btn-area",
 ];
 
+/** The button selector enumerated within the modal container (shared by both scans). */
+const BUTTON_SEL = 'button, a[role="button"], [role="button"], input[type="button"], input[type="submit"]';
+
 /** Minimal structural surface of a Playwright locator the confirm step touches. */
 export interface ConfirmLocator {
   count(): Promise<number>;
   click(opts?: { timeout?: number }): Promise<void>;
 }
 
-/** Minimal structural surface of the Playwright page the confirm step touches. */
+/** Minimal structural surface of the Playwright page these steps touch. */
 export interface ConfirmPage {
   content(): Promise<string>;
   evaluate<R, A>(fn: (arg: A) => R, arg: A): Promise<R>;
@@ -114,9 +128,14 @@ export interface ConfirmDownloadRecord {
 }
 
 /** How the single affirmative control was (or wasn't) bound before any click. */
-export type ConfirmBind = "BOUND" | "CONFIRM_NOT_CONSENT" | "CONFIRM_NOT_FOUND" | "CONFIRM_NOT_UNIQUE";
+export type ConfirmBind =
+  | "BOUND"
+  | "CONFIRM_NOT_CONSENT"
+  | "CONFIRM_NOT_FOUND"
+  | "CONFIRM_NOT_UNIQUE"
+  | "CONFIRM_READ_FAILED";
 
-/** The ONLY shape the confirm step contributes to the report. Every leaf is non-sensitive. */
+/** The ONLY shape the confirm-click step contributes to the report. Every leaf is non-sensitive. */
 export interface ReviewUsageConfirmResult {
   confirmBind: ConfirmBind;
   confirmClicked: boolean;
@@ -152,82 +171,114 @@ export const REVIEW_USAGE_CONFIRM_KEYS: ReadonlyArray<keyof ReviewUsageConfirmRe
   "detail",
 ];
 
+/** Sanitized classification of a modal button candidate (no raw text/selector). */
+export type ButtonKind = "affirmative" | "cancel" | "other" | "unknown";
+
+/** Sanitized metadata for one badged modal button candidate. */
+export interface CandidateMeta {
+  index: number;
+  buttonKind: ButtonKind;
+  visible: boolean;
+  enabled: boolean;
+  textLengthBucket: MessageLengthBucket;
+}
+
+/** Result of the NO-CLICK candidate-index diagnostic. */
+export type CandidateScan = "SCANNED" | "CONFIRM_NOT_CONSENT" | "CONFIRM_READ_FAILED";
+
+export interface ReviewUsageCandidatesResult {
+  candidateScan: CandidateScan;
+  candidateCountBucket: CountBucket;
+  candidateIndices: number[];
+  candidates: CandidateMeta[];
+  detail: string;
+}
+
+/** Exact top-level key allow-list for the candidate diagnostic — used by the no-leak test. */
+export const REVIEW_USAGE_CANDIDATES_KEYS: ReadonlyArray<keyof ReviewUsageCandidatesResult> = [
+  "candidateScan",
+  "candidateCountBucket",
+  "candidateIndices",
+  "candidates",
+  "detail",
+];
+
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-interface ScanArg {
-  affirmative: { source: string; flags: string }[];
-  cancel: { source: string; flags: string }[];
-  scopes: string[];
-  stampAttr: string;
+/** Coarse count bucket (kept local so this stays import-light). */
+function countBucket(n: number): CountBucket {
+  if (n <= 0) return "none";
+  if (n === 1) return "one";
+  if (n <= 5) return "few";
+  if (n <= 20) return "some";
+  return "many";
+}
+
+/** Marker source/flags passed into the in-page scans (single source of truth, rebuilt in the page). */
+interface MarkerSrc {
+  source: string;
+  flags: string;
+}
+function markerSrc(markers: readonly RegExp[]): MarkerSrc[] {
+  return markers.map((m) => ({ source: m.source, flags: m.flags }));
 }
 
 /**
- * READ-ONLY in-page scan (runs in the browser): find the FIRST visible modal container among the
- * scopes, enumerate its visible+enabled buttons, and select the AFFIRMATIVE one (accessible name
- * matches an affirmative marker and NOT a cancel marker). If EXACTLY ONE matches, stamp it with the
- * index attribute. Returns the match count only — never text, selectors, or nodes. Cancel exclusion
- * wins. Scoped to the modal container; never the whole document.
+ * Bind the single affirmative control inside the visible consent modal, or report why not. The scan
+ * is an INLINE anonymous arrow (no named inner helper → no esbuild `__name`). Returns a bind verdict;
+ * read failures are caught by the caller and become `CONFIRM_READ_FAILED`.
  */
-function scanForAffirmative(arg: ScanArg): number {
-  const aff = arg.affirmative.map((m) => new RegExp(m.source, m.flags));
-  const can = arg.cancel.map((m) => new RegExp(m.source, m.flags));
-  const visible = (el: Element): boolean => {
-    const he = el as HTMLElement;
-    return he.offsetParent !== null || he.getClientRects().length > 0;
-  };
-  let container: Element | null = null;
-  for (const sel of arg.scopes) {
-    const nodes = Array.from(document.querySelectorAll(sel));
-    for (const n of nodes) {
-      if (visible(n)) {
-        container = n;
-        break;
-      }
-    }
-    if (container) break;
-  }
-  if (!container) return 0;
-  const buttons = Array.from(
-    container.querySelectorAll('button, a[role="button"], [role="button"], input[type="button"], input[type="submit"]'),
-  );
-  const matches: Element[] = [];
-  for (const el of buttons) {
-    if (!visible(el)) continue;
-    const ariaDisabled = el.getAttribute("aria-disabled") === "true";
-    if ((el as HTMLButtonElement).disabled || ariaDisabled) continue;
-    const label = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${
-      (el as HTMLInputElement).value ?? ""
-    }`;
-    if (can.some((re) => re.test(label))) continue; // cancel/close exclusion wins
-    if (!aff.some((re) => re.test(label))) continue;
-    matches.push(el);
-  }
-  const only = matches[0];
-  if (matches.length === 1 && only) only.setAttribute(arg.stampAttr, "0");
-  return matches.length;
-}
-
-/** Bind the single affirmative control inside the visible consent modal, or report why not. */
 async function bindAffirmative(page: ConfirmPage): Promise<ConfirmBind> {
-  const arg: ScanArg = {
-    affirmative: AFFIRMATIVE_MARKERS.map((m) => ({ source: m.source, flags: m.flags })),
-    cancel: CANCEL_MARKERS.map((m) => ({ source: m.source, flags: m.flags })),
+  const arg = {
+    affirmative: markerSrc(AFFIRMATIVE_MARKERS),
+    cancel: markerSrc(CANCEL_MARKERS),
     scopes: [...MODAL_SCOPES],
+    buttonSel: BUTTON_SEL,
     stampAttr: STAMP_ATTR,
   };
-  const scanned = await page.evaluate(scanForAffirmative, arg);
-  if (scanned === 0) return "CONFIRM_NOT_FOUND";
-  if (scanned > 1) return "CONFIRM_NOT_UNIQUE";
-  // Re-confirm the stamp resolves to exactly one element before trusting it for the click.
+  const matched = await page.evaluate((a: typeof arg): number => {
+    const aff = a.affirmative.map((m) => new RegExp(m.source, m.flags));
+    const can = a.cancel.map((m) => new RegExp(m.source, m.flags));
+    let container: Element | null = null;
+    for (const sel of a.scopes) {
+      for (const n of Array.from(document.querySelectorAll(sel))) {
+        const hn = n as HTMLElement;
+        if (hn.offsetParent !== null || hn.getClientRects().length > 0) {
+          container = n;
+          break;
+        }
+      }
+      if (container) break;
+    }
+    if (!container) return 0;
+    const hits: Element[] = [];
+    for (const el of Array.from(container.querySelectorAll(a.buttonSel))) {
+      const he = el as HTMLElement;
+      if (!(he.offsetParent !== null || he.getClientRects().length > 0)) continue;
+      if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") continue;
+      const label = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${
+        (el as HTMLInputElement).value ?? ""
+      }`;
+      if (can.some((re) => re.test(label))) continue; // cancel/close exclusion wins
+      if (!aff.some((re) => re.test(label))) continue;
+      hits.push(el);
+    }
+    const only = hits[0];
+    if (hits.length === 1 && only) only.setAttribute(a.stampAttr, "0");
+    return hits.length;
+  }, arg);
+
+  if (matched === 0) return "CONFIRM_NOT_FOUND";
+  if (matched > 1) return "CONFIRM_NOT_UNIQUE";
   const resolved = await page.locator(`[${STAMP_ATTR}="0"]`).count();
   if (resolved === 0) return "CONFIRM_NOT_FOUND";
   if (resolved > 1) return "CONFIRM_NOT_UNIQUE";
   return "BOUND";
 }
 
-/** A no-click result (bind failed / not consent) — every observation field is its inert default. */
+/** A no-click confirm result (bind failed / not consent / read failed) — inert observation defaults. */
 function haltResult(bind: ConfirmBind): ReviewUsageConfirmResult {
   return {
     confirmBind: bind,
@@ -247,9 +298,130 @@ function haltResult(bind: ConfirmBind): ReviewUsageConfirmResult {
 }
 
 /**
- * Live: re-confirm the consent modal, bind its single affirmative `확인`, click it ONCE, then
- * observe (sanitized) whether a download / follow-up modal / dialog / toast / popup results. See the
- * module doc for the invariants. The caller must already have `decideReviewUsageConfirm === ATTEMPT`.
+ * NO-CLICK candidate-index diagnostic. Re-confirm the foreground modal is review-usage consent, then
+ * badge every visible modal button with an index (for human inspection) and return sanitized
+ * per-candidate metadata only. Never clicks. The scan is an INLINE anonymous arrow (no `__name`).
+ */
+export async function scanReviewUsageConfirmCandidates(page: ConfirmPage): Promise<ReviewUsageCandidatesResult> {
+  let html = "";
+  try {
+    html = await page.content();
+  } catch {
+    return readFailedCandidates();
+  }
+  if (classifyModalCategory(html) !== "review_usage_confirmation") {
+    return {
+      candidateScan: "CONFIRM_NOT_CONSENT",
+      candidateCountBucket: "none",
+      candidateIndices: [],
+      candidates: [],
+      detail: "candidates: foreground modal is not review-usage consent; no scan",
+    };
+  }
+
+  const arg = {
+    affirmative: markerSrc(AFFIRMATIVE_MARKERS),
+    cancel: markerSrc(CANCEL_MARKERS),
+    scopes: [...MODAL_SCOPES],
+    buttonSel: BUTTON_SEL,
+    badgeAttr: CAND_INDEX_ATTR,
+  };
+  let raw: { candidates: Array<{ index: number; kind: string; visible: boolean; enabled: boolean; textLength: number }> };
+  try {
+    raw = await page.evaluate((a: typeof arg) => {
+      const aff = a.affirmative.map((m) => new RegExp(m.source, m.flags));
+      const can = a.cancel.map((m) => new RegExp(m.source, m.flags));
+      let container: Element | null = null;
+      for (const sel of a.scopes) {
+        for (const n of Array.from(document.querySelectorAll(sel))) {
+          const hn = n as HTMLElement;
+          if (hn.offsetParent !== null || hn.getClientRects().length > 0) {
+            container = n;
+            break;
+          }
+        }
+        if (container) break;
+      }
+      const out: Array<{ index: number; kind: string; visible: boolean; enabled: boolean; textLength: number }> = [];
+      if (!container) return { candidates: out };
+      let idx = 0;
+      for (const el of Array.from(container.querySelectorAll(a.buttonSel))) {
+        const he = el as HTMLElement;
+        const visible = he.offsetParent !== null || he.getClientRects().length > 0;
+        const enabled = !(el as HTMLButtonElement).disabled && el.getAttribute("aria-disabled") !== "true";
+        const label = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${
+          (el as HTMLInputElement).value ?? ""
+        }`.trim();
+        const isCancel = can.some((re) => re.test(label));
+        const isAff = aff.some((re) => re.test(label));
+        const kind = isCancel ? "cancel" : isAff ? "affirmative" : label.length > 0 ? "other" : "unknown";
+        el.setAttribute(a.badgeAttr, String(idx));
+        // Visible badge for human inspection (index + DERIVED kind only — never the raw button text).
+        if (visible) {
+          const rect = he.getBoundingClientRect();
+          const badge = document.createElement("div");
+          badge.setAttribute("data-sellerops-badge", "1");
+          badge.textContent = "#" + idx + " " + kind;
+          badge.style.position = "fixed";
+          badge.style.left = Math.max(0, rect.left) + "px";
+          badge.style.top = Math.max(0, rect.top - 14) + "px";
+          badge.style.zIndex = "2147483647";
+          badge.style.background = "magenta";
+          badge.style.color = "white";
+          badge.style.font = "bold 11px sans-serif";
+          badge.style.padding = "0 3px";
+          badge.style.pointerEvents = "none";
+          document.body.appendChild(badge);
+        }
+        out.push({ index: idx, kind, visible, enabled, textLength: label.length });
+        idx += 1;
+      }
+      return { candidates: out };
+    }, arg);
+  } catch {
+    return readFailedCandidates();
+  }
+
+  const kinds: ReadonlyArray<ButtonKind> = ["affirmative", "cancel", "other", "unknown"];
+  const candidates: CandidateMeta[] = raw.candidates.map((c) => ({
+    index: c.index,
+    buttonKind: kinds.includes(c.kind as ButtonKind) ? (c.kind as ButtonKind) : "unknown",
+    visible: c.visible,
+    enabled: c.enabled,
+    textLengthBucket: lengthBucket(c.textLength),
+  }));
+
+  log("confirm.review-usage-candidates", {
+    count: candidates.length,
+    affirmative: candidates.filter((c) => c.buttonKind === "affirmative").length,
+    cancel: candidates.filter((c) => c.buttonKind === "cancel").length,
+    visible: candidates.filter((c) => c.visible).length,
+  });
+
+  return {
+    candidateScan: "SCANNED",
+    candidateCountBucket: countBucket(candidates.length),
+    candidateIndices: candidates.map((c) => c.index),
+    candidates,
+    detail: `candidates: scanned=${candidates.length} (no click)`,
+  };
+}
+
+function readFailedCandidates(): ReviewUsageCandidatesResult {
+  return {
+    candidateScan: "CONFIRM_READ_FAILED",
+    candidateCountBucket: "none",
+    candidateIndices: [],
+    candidates: [],
+    detail: "candidates: page/content/evaluate read failed; no scan",
+  };
+}
+
+/**
+ * Live: re-confirm the consent modal, bind its single affirmative `확인`, click it ONCE, then observe
+ * (sanitized) whether a download / follow-up modal / dialog / toast / popup results. A closed/detached
+ * page returns a sanitized `CONFIRM_READ_FAILED` halt — never an uncaught exception. The caller must
+ * already have `decideReviewUsageConfirm === ATTEMPT`.
  */
 export async function confirmReviewUsageOnce(
   page: ConfirmPage,
@@ -259,13 +431,23 @@ export async function confirmReviewUsageOnce(
   const { observeWindowMs, pollIntervalMs, salt, settleFn, sleepFn = defaultSleep } = deps;
 
   // 1) Re-confirm the FOREGROUND modal is still the review-usage consent — never confirm anything else.
-  const preHtml = await page.content();
+  let preHtml = "";
+  try {
+    preHtml = await page.content();
+  } catch {
+    return haltResult("CONFIRM_READ_FAILED");
+  }
   if (classifyModalCategory(preHtml) !== "review_usage_confirmation") {
     return haltResult("CONFIRM_NOT_CONSENT");
   }
 
   // 2) Bind exactly one modal-scoped affirmative control, or halt without clicking.
-  const bind = await bindAffirmative(page);
+  let bind: ConfirmBind;
+  try {
+    bind = await bindAffirmative(page);
+  } catch {
+    return haltResult("CONFIRM_READ_FAILED");
+  }
   if (bind !== "BOUND") return haltResult(bind);
 
   // 3) Observers set up BEFORE the click (the export-click observers are already released).
@@ -331,7 +513,7 @@ export async function confirmReviewUsageOnce(
     try {
       html = await page.content();
     } catch {
-      // Transient read during a re-render — skip this snapshot.
+      // Transient read during a re-render (or a closed page) — skip this snapshot.
     }
     if (html) {
       post = mergePostClick(post, summarizePostClick(html));

@@ -399,6 +399,47 @@ describe("capture-export-same-session — supervised review-usage 확인 confirm
   });
 });
 
+describe("capture-export-same-session — NO-CLICK review-usage candidate-index diagnostic, flag-gated", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("imports the candidate scanner", () => {
+    expect(/scanReviewUsageConfirmCandidates/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-review-usage-confirm-candidates and gates it on diagnoseClick", () => {
+    expect(/--diagnose-review-usage-confirm-candidates/.test(code)).toBe(true);
+    expect(
+      /const\s+diagnoseConfirmCandidates\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-review-usage-confirm-candidates"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+  });
+
+  it("runs the candidate scan ONLY in the supervised-fast branch, ONLY on the consent outcome", () => {
+    expect(/scanReviewUsageConfirmCandidates\(/.test(fastBranch)).toBe(true);
+    expect(
+      /diagnoseConfirmCandidates\s*&&\s*diagnosis\.outcome\s*===\s*["']REVIEW_USAGE_CONFIRMATION["']/.test(fastBranch),
+    ).toBe(true);
+    // appears exactly once in main, never in the stable / real-capture path
+    expect((mainFn.match(/scanReviewUsageConfirmCandidates\(/g) ?? []).length).toBe(1);
+    expect(/scanReviewUsageConfirmCandidates\(/.test(mainFn.slice(stableStart))).toBe(false);
+  });
+
+  it("candidate mode SUPPRESSES the confirm click (never clicks in candidate mode)", () => {
+    // The confirm gate excludes candidate mode: confirmFlag = diagnoseConfirm && !diagnoseConfirmCandidates.
+    expect(/confirmFlag:\s*diagnoseConfirm\s*&&\s*!diagnoseConfirmCandidates/.test(fastBranch)).toBe(true);
+  });
+
+  it("the candidate path writes NO status, performs NO upload / capture / saveAs", () => {
+    // (the whole fast branch is already asserted status/upload/capture/saveAs-free by the confirm suite;
+    // re-assert here for the candidate-specific lens)
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/saveAs/.test(fastBranch)).toBe(false);
+  });
+});
+
 describe("capture-export-same-session — export-target readiness gate stops empty-target captures", () => {
   it("STABILIZES readiness (bounded read-only poll) AFTER the capture gate and BEFORE any capture", () => {
     expect(/waitForExportTargetReadinessStable\s*\(/.test(mainFn)).toBe(true);
