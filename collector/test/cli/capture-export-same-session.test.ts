@@ -278,27 +278,32 @@ describe("capture-export-same-session — diagnose-export-click clicks once but 
 });
 
 describe("capture-export-same-session — export-target readiness gate stops empty-target captures", () => {
-  it("evaluates readiness AFTER the capture gate and BEFORE any capture", () => {
-    expect(/evaluateExportTargetReadiness\s*\(/.test(mainFn)).toBe(true);
+  it("STABILIZES readiness (bounded read-only poll) AFTER the capture gate and BEFORE any capture", () => {
+    expect(/waitForExportTargetReadinessStable\s*\(/.test(mainFn)).toBe(true);
     const gateIdx = mainFn.indexOf("decideCaptureGate(");
-    const readinessIdx = mainFn.indexOf("evaluateExportTargetReadiness(");
+    const stableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(");
     const captureIdx = mainFn.indexOf("captureAndUpload(");
-    expect(readinessIdx).toBeGreaterThan(gateIdx);
-    expect(readinessIdx).toBeLessThan(captureIdx);
+    expect(stableIdx).toBeGreaterThan(gateIdx);
+    expect(stableIdx).toBeLessThan(captureIdx);
   });
 
-  it("reuses the page HTML already read for planExportAction (no second content() read)", () => {
+  it("wires the existing evaluator into the poll, reading content read-only (no extra page read in main)", () => {
+    // main still reads page content exactly once (for planExportAction); the poll reads via its
+    // injected readHtmlFn, not a second `await page.content()` in main.
     expect((mainFn.match(/await page\.content\(\)/g) ?? []).length).toBe(1);
     expect(/planExportAction\(html\)/.test(mainFn)).toBe(true);
-    expect(/evaluateExportTargetReadiness\(html\)/.test(mainFn)).toBe(true);
+    expect(/evaluateReadinessFn:\s*evaluateExportTargetReadiness/.test(mainFn)).toBe(true);
+    expect(/readHtmlFn:\s*\(p\)\s*=>\s*p\.content\(\)/.test(mainFn)).toBe(true);
   });
 
   it("real capture HALTS with the honest readiness state before captureAndUpload when not READY", () => {
-    // The real-path readiness halt is the readiness check AFTER the diagnose dispatch.
+    // The real-path readiness halt is the stabilized check AFTER the diagnose dispatch.
     const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
+    const stableIdx = mainFn.indexOf("waitForExportTargetReadinessStable(", dispatchIdx);
     const haltIdx = mainFn.indexOf('readiness.decision !== "READY"', dispatchIdx);
     const captureIdx = mainFn.indexOf("captureAndUpload(");
-    expect(haltIdx).toBeGreaterThan(dispatchIdx);
+    expect(stableIdx).toBeGreaterThan(dispatchIdx); // a second poll guards the real capture
+    expect(haltIdx).toBeGreaterThan(stableIdx);
     expect(haltIdx).toBeLessThan(captureIdx); // the halt guards the capture
     const branch = mainFn.slice(haltIdx, captureIdx);
     expect(/writeStatus/.test(branch)).toBe(true); // records the readiness state
@@ -310,12 +315,15 @@ describe("capture-export-same-session — export-target readiness gate stops emp
   it("the diagnostic readiness halt REPORTS only (no status, no capture) unless overridden", () => {
     expect(/--diagnose-allow-empty-target/.test(code)).toBe(true);
     expect(/allowEmptyTarget/.test(mainFn)).toBe(true);
-    // The diagnostic readiness guard lives inside the MAIN diagnose block, before the dispatch.
+    // The diagnostic readiness guard lives inside the MAIN diagnose block, before the dispatch,
+    // and is fed by the bounded poll (it reports checks/stableCount, never writeStatus).
     const dispatchIdx = mainFn.indexOf("diagnoseExportClickOnce(");
     const diagIdx = mainFn.lastIndexOf("if (diagnoseClick)", dispatchIdx);
     const branch = mainFn.slice(diagIdx, dispatchIdx);
+    expect(/waitForExportTargetReadinessStable\(/.test(branch)).toBe(true);
     expect(/readiness\.decision\s*!==\s*"READY"\s*&&\s*!allowEmptyTarget/.test(branch)).toBe(true);
     expect(/writeStatus/.test(branch)).toBe(false); // diagnostic mode never persists status
     expect(/wouldClick/.test(branch)).toBe(true); // sanitized stdout report instead
+    expect(/checks/.test(branch)).toBe(true); // reports the number of stabilization checks
   });
 });

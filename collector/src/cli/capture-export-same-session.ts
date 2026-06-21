@@ -44,6 +44,10 @@ import {
 } from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
+import {
+  waitForExportTargetReadinessStable,
+  type ExportTargetReadinessStableDeps,
+} from "../naver/export-target-readiness-stable";
 import { waitForSpaHydration } from "../naver/hydration";
 import { resolveReconnectIfNeeded, type ReconnectResolution } from "../naver/reconnect-resolve";
 import { checkLiveSessionVerdict } from "../naver/session-check";
@@ -73,6 +77,11 @@ const DIAGNOSE_CLICK_TIMEOUT_MS = 8_000;
 // actionable sync export surface (or halt). Patient enough to outlast cold-context hydration.
 const POST_CONTINUE_STABILIZE_TIMEOUT_MS = 20_000;
 const POST_CONTINUE_STABILIZE_INTERVAL_MS = 1_500;
+// Read-only export-target readiness stabilization: past the gate, poll the results read-only
+// until readiness is stable/READY (or the bounded window expires) — so a still-rendering table
+// is not misread as empty. Bounded; never clicks.
+const EXPORT_TARGET_READINESS_STABILIZE_TIMEOUT_MS = 12_000;
+const EXPORT_TARGET_READINESS_STABILIZE_INTERVAL_MS = 1_500;
 
 /** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
 const AUTO_READ_PROMPT = [
@@ -363,12 +372,17 @@ async function main(): Promise<void> {
     const gate = decideCaptureGate(exportVerdict, plan);
 
     // 6b) Second, narrower gate: a single sync control EXISTS, but is there anything to export?
-    //     Evaluated read-only from the SAME page HTML (no extra read, no click). Only positive
-    //     evidence of exportable rows is READY; empty/date-range/ambiguous HALT before the click.
-    const readiness = evaluateExportTargetReadiness(html);
-    // --diagnose-allow-empty-target: in DIAGNOSTIC mode only, intentionally click into a
-    // not-READY surface for further observation. Never affects real capture mode.
+    //     --diagnose-allow-empty-target: in DIAGNOSTIC mode only, intentionally click into a
+    //     not-READY surface for further observation. Never affects real capture mode.
     const allowEmptyTarget = diagnoseClick && args.includes("--diagnose-allow-empty-target");
+    // Bounded read-only readiness stabilization deps. Built once; the poll runs only past the
+    // gate (in the diagnose / real-capture branches), never for the classify-only dry run.
+    const readinessStabilizeDeps: ExportTargetReadinessStableDeps = {
+      timeoutMs: EXPORT_TARGET_READINESS_STABILIZE_TIMEOUT_MS,
+      intervalMs: EXPORT_TARGET_READINESS_STABILIZE_INTERVAL_MS,
+      readHtmlFn: (p) => p.content(),
+      evaluateReadinessFn: evaluateExportTargetReadiness,
+    };
 
     // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before any click,
     //    download, upload, or status write.
@@ -386,8 +400,11 @@ async function main(): Promise<void> {
         log("run.halted", { state: gate.state });
         return;
       }
+      // Read-only readiness stabilization (bounded poll) before considering the click.
+      const stable = await waitForExportTargetReadinessStable(page, readinessStabilizeDeps);
+      const readiness = stable.readiness;
       // Safe-by-default: do NOT click into a not-READY target unless explicitly overridden.
-      // Report the readiness verdict (sanitized) and STOP — no status, no upload, no capture.
+      // Report the (stabilized) readiness verdict and STOP — no status, no upload, no capture.
       if (readiness.decision !== "READY" && !allowEmptyTarget) {
         console.log(
           JSON.stringify({
@@ -397,6 +414,8 @@ async function main(): Promise<void> {
             targetReadiness: readiness.decision,
             targetState: readiness.state,
             reason: readiness.reason,
+            checks: stable.checks,
+            stableCount: stable.decision === "HALT" ? stable.stableCount : 0,
             wouldClick: false,
           }),
         );
@@ -419,6 +438,7 @@ async function main(): Promise<void> {
           mode: "diagnose-export-click",
           gateState: gate.state,
           targetReadiness: readiness.decision,
+          checks: stable.checks,
           ...diagnosis,
         }),
       );
@@ -432,13 +452,16 @@ async function main(): Promise<void> {
       return;
     }
 
-    // 7c) EXPORT-TARGET readiness halt (real capture): the control exists, but there is
-    //     nothing to export under the current condition. Record the honest state and STOP
-    //     before the click — no download, no upload, no LAST_SUCCESS.
+    // 7c) EXPORT-TARGET readiness halt (real capture): the control exists, but is there
+    //     anything to export? Stabilize read-only (a still-rendering table is not misread as
+    //     empty), then on any non-READY settle record the honest state and STOP before the
+    //     click — no download, no upload, no LAST_SUCCESS.
+    const stable = await waitForExportTargetReadinessStable(page, readinessStabilizeDeps);
+    const readiness = stable.readiness;
     if (readiness.decision !== "READY") {
       writeStatus(cfg.statusFile, {
         state: readiness.state,
-        detail: `export-target not ready: ${readiness.reason}`,
+        detail: `export-target not ready: ${readiness.reason} (checks ${stable.checks})`,
         updatedAt: now(),
       });
       log("run.halted", { state: readiness.state });
