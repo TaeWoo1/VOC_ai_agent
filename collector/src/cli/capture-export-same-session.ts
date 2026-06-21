@@ -33,24 +33,39 @@
  */
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import type { BrowserContext } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
 import { planExportAction } from "../naver/export-classify";
 import { waitForSpaHydration } from "../naver/hydration";
+import { resolveReconnectIfNeeded, type ReconnectResolution } from "../naver/reconnect-resolve";
 import { checkLiveSessionVerdict } from "../naver/session-check";
+import type { SessionVerdict } from "../naver/session-verdict";
 import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
 import { decideState, writeStatus, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
-import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
-import { decideCaptureGate } from "./same-session";
+import { waitForCaptureStartState } from "./capture-start-state";
+import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
+import { decideCaptureGate, type CaptureGateDecision } from "./same-session";
 import { sentinelPathFor } from "./probe-sentinel";
 
 // The human may need to clear 2FA/CAPTCHA and the Commerce account/store flow; give
 // them plenty of time, but never wait forever.
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
 const SENTINEL_POLL_INTERVAL_MS = 750;
+// Auto-read default: re-settle + re-read the verdict on this cadence until a resolvable
+// start state (LOGGED_IN / RECONNECT_REQUIRED) appears or the timeout elapses.
+const START_POLL_INTERVAL_MS = 1_500;
+
+/** Shown in auto-read (default) mode after the browser opens — no ready file is needed. */
+const AUTO_READ_PROMPT = [
+  "",
+  "auto-read mode: complete manual login if prompted; the CLI will detect LOGGED_IN or",
+  "RECONNECT_REQUIRED automatically (no ready file needed). Leave the browser OPEN.",
+  "A RECONNECT_REQUIRED screen is resolved by the guarded continue; login/2FA/unknown are",
+  "waited through until they clear or the timeout halts the run. (Ctrl-C to abort.)",
+].join("\n");
 
 /** Prompt shown after the browser opens. The exact sentinel path is printed below it. */
 const CONFIRM_PROMPT = [
@@ -79,6 +94,29 @@ function banner(): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Build the sanitized classify-only (dry-run) report. Field-by-field by design: only
+ * enums (verdicts/decision/outcome/state) and booleans are emitted — never page text,
+ * URL, HTML, id, or token. `gate` is absent on a pre-export halt; then `wouldCapture`
+ * is false and `gateState` falls back to the halt state.
+ */
+function classifyOnlyReport(
+  preVerdict: SessionVerdict,
+  resolution: ReconnectResolution,
+  gate?: CaptureGateDecision,
+): string {
+  return JSON.stringify({
+    mode: "classify-only",
+    preVerdict,
+    decision: resolution.decision,
+    resolvedVerdict: resolution.resolvedVerdict,
+    continueOutcome: resolution.continueOutcome,
+    reachedExportSurface: resolution.reachedExportSurface,
+    wouldCapture: gate?.proceed ?? false,
+    gateState: gate?.state ?? resolution.halt?.state,
+  });
 }
 
 /** Best-effort: remove the sentinel if present. Used at startup (clear stale) and cleanup. */
@@ -172,6 +210,16 @@ async function main(): Promise<void> {
   }
   const now = (): string => new Date().toISOString();
 
+  // Readiness mode. DEFAULT = auto-read: after the human completes manual login, the CLI
+  // polls the page itself and proceeds on the first resolvable start verdict — no "ready"
+  // hand-off. Opt into the legacy manual ready-file flow with --require-sentinel/--sentinel;
+  // --no-sentinel / --auto-read-after-hydration are explicit auto-read aliases (and override
+  // sentinel mode if both are passed).
+  const sentinelMode =
+    (args.includes("--require-sentinel") || args.includes("--sentinel")) &&
+    !args.includes("--no-sentinel") &&
+    !args.includes("--auto-read-after-hydration");
+
   // Single source of truth for the continuation file; clear any stale sentinel BEFORE
   // waiting so a leftover from a crashed run can never auto-proceed.
   const sentinelPath = sentinelPathFor(cfg.statusFile);
@@ -184,30 +232,90 @@ async function main(): Promise<void> {
     // 1) Open the review route — this typically redirects to login / Commerce select.
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
-    // 2) Hand off to the human IN THE SAME CONTEXT; wait for the sentinel (not stdin).
-    console.error(CONFIRM_PROMPT);
-    console.error("");
-    console.error(`  Sentinel file (create this when ready):`);
-    console.error(`    ${sentinelPath}`);
-    console.error("");
-    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
-    if (!ready) {
-      // Never act on a half-loaded page on a timeout — abort cleanly without reading or clicking.
-      console.error("No sentinel within the timeout; aborting without reading the page.");
-      log("capture.aborted", { reason: "sentinel-timeout" });
+    // 2) Reach a resolvable start verdict (LOGGED_IN or RECONNECT_REQUIRED). The human still
+    //    logs in / clears 2FA manually; how we then detect readiness depends on the mode.
+    let verdict: SessionVerdict;
+    if (sentinelMode) {
+      // Legacy opt-in: hand off to the human and wait for the sentinel file (not stdin).
+      console.error(CONFIRM_PROMPT);
+      console.error("");
+      console.error(`  Sentinel file (create this when ready):`);
+      console.error(`    ${sentinelPath}`);
+      console.error("");
+      const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+      if (!ready) {
+        // Never act on a half-loaded page on a timeout — abort cleanly without reading or clicking.
+        console.error("No sentinel within the timeout; aborting without reading the page.");
+        log("capture.aborted", { reason: "sentinel-timeout" });
+        return;
+      }
+      // Read the page AS THE HUMAN LEFT IT (no re-navigation), with a bounded hydrate first.
+      const hydration = await waitForSpaHydration(page);
+      log("session.hydration", { result: hydration });
+      verdict = await checkLiveSessionVerdict(page);
+    } else {
+      // DEFAULT: auto-read. Poll the page ourselves — settle + read the verdict — and proceed
+      // on the first resolvable start state. Login/2FA/unknown are waited through; a window
+      // with no resolvable state HALTS honestly WITHOUT clicking or reading raw content.
+      console.error(AUTO_READ_PROMPT);
+      const start = await waitForCaptureStartState(page, {
+        timeoutMs: CONFIRM_TIMEOUT_MS,
+        intervalMs: START_POLL_INTERVAL_MS,
+        settleFn: waitForSpaHydration,
+        checkVerdictFn: checkLiveSessionVerdict,
+      });
+      if (start.kind === "TIMEOUT") {
+        console.error("No resolvable start state within the timeout; halting without clicking.");
+        log("capture.aborted", { reason: "auto-read-timeout", checks: start.checks });
+        return;
+      }
+      log("session.start", { verdict: start.verdict, checks: start.checks });
+      verdict = start.verdict;
+    }
+
+    // 4) PRE-STEP: if the human-left page is the Commerce reconnect-continue screen, resolve it
+    //    with ONE guarded continue click — but ONLY when every guard holds (verified inside the
+    //    boundary). LOGGED_IN passes straight through (the boundary is never invoked); everything
+    //    ambiguous HALTS without clicking. Continue success is NOT collection success.
+    const classifyOnly = isClassifyOnly(args);
+    const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
+      expected: {
+        expectedChannelCode: cfg.naverExpectedChannelCode,
+        expectedStoreFingerprint: cfg.naverExpectedStoreFingerprint,
+      },
+      salt: cfg.storageProbeSalt,
+      expectedContinueCard: { expectedCardFingerprint: cfg.naverExpectedContinueCardFingerprint },
+      fingerprintConfigured: cfg.naverExpectedContinueCardFingerprint !== undefined,
+    });
+    if (resolution.decision === "HALT") {
+      // A dry-run reports only and persists NOTHING; a real run records the honest halt state.
+      if (classifyOnly) {
+        console.log(classifyOnlyReport(verdict, resolution));
+      } else {
+        const halted = resolution.halt!;
+        writeStatus(cfg.statusFile, { state: halted.state, detail: halted.detail, updatedAt: now() });
+      }
+      log("run.halted", { state: resolution.halt!.state });
       return;
     }
 
-    // 3) Read the page AS THE HUMAN LEFT IT (no re-navigation — a re-nav can reset the SPA),
-    //    giving the SPA a bounded chance to hydrate before the verdict + plan are read.
-    const hydration = await waitForSpaHydration(page);
-    log("session.hydration", { result: hydration });
-    const verdict = await checkLiveSessionVerdict(page);
+    // 5) Canonical re-read for the EXPORT decision — identical inputs to before. Continue never
+    //    changes the export gate logic; on a LOGGED_IN pass-through this reads the page as-is.
+    const exportVerdict = await checkLiveSessionVerdict(page);
     const plan = planExportAction(await page.content());
 
-    // 4) The single chokepoint: only an unambiguous single sync control on a LOGGED_IN
+    // 6) The single export chokepoint: only an unambiguous single sync control on a LOGGED_IN
     //    session proceeds to the click. Everything else halts with an honest status.
-    const gate = decideCaptureGate(verdict, plan);
+    const gate = decideCaptureGate(exportVerdict, plan);
+
+    // 7) DRY-RUN (classify-only): report the would-capture decision and STOP before any click,
+    //    download, upload, or status write.
+    if (classifyOnly) {
+      console.log(classifyOnlyReport(verdict, resolution, gate));
+      log("run.classify-only", { wouldCapture: gate.proceed, state: gate.state });
+      return;
+    }
+
     if (!gate.proceed) {
       writeStatus(cfg.statusFile, { state: gate.state, detail: gate.detail, updatedAt: now() });
       log("run.halted", { state: gate.state });
