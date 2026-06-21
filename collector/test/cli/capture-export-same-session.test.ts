@@ -355,6 +355,50 @@ describe("capture-export-same-session — supervised-fast override skips the fal
   });
 });
 
+describe("capture-export-same-session — supervised review-usage 확인 confirm (PR B), flag-gated", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("imports the confirm adapter and the pure ATTEMPT decision", () => {
+    expect(/from\s+["']\.\.\/naver\/review-usage-confirm["']/.test(code)).toBe(true);
+    expect(/confirmReviewUsageOnce/.test(code)).toBe(true);
+    expect(/decideReviewUsageConfirm/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-confirm-review-usage and gates it on diagnoseClick", () => {
+    expect(/--diagnose-confirm-review-usage/.test(code)).toBe(true);
+    expect(
+      /const\s+diagnoseConfirm\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-confirm-review-usage"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+  });
+
+  it("runs the confirm step ONLY in the supervised-fast branch, ONLY on an ATTEMPT decision", () => {
+    expect(/decideReviewUsageConfirm\(/.test(fastBranch)).toBe(true);
+    expect(/confirmReviewUsageOnce\(/.test(fastBranch)).toBe(true);
+    // gated: the adapter is invoked under `confirmDecision === "ATTEMPT"`.
+    expect(/confirmDecision\s*===\s*["']ATTEMPT["']/.test(fastBranch)).toBe(true);
+    // the decision is fed the diagnostic outcome + the flag (never auto-confirmed).
+    expect(/outcome:\s*diagnosis\.outcome/.test(fastBranch)).toBe(true);
+    expect(/confirmFlag:\s*diagnoseConfirm/.test(fastBranch)).toBe(true);
+  });
+
+  it("invokes the confirm adapter exactly once in main, and NEVER in the stable / real-capture path", () => {
+    expect((mainFn.match(/confirmReviewUsageOnce\(/g) ?? []).length).toBe(1);
+    const stableAndAfter = mainFn.slice(stableStart);
+    expect(/confirmReviewUsageOnce\(/.test(stableAndAfter)).toBe(false);
+  });
+
+  it("the confirm path writes NO status, performs NO upload / capture / saveAs", () => {
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
+    expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
+    expect(/saveAs/.test(fastBranch)).toBe(false);
+  });
+});
+
 describe("capture-export-same-session — export-target readiness gate stops empty-target captures", () => {
   it("STABILIZES readiness (bounded read-only poll) AFTER the capture gate and BEFORE any capture", () => {
     expect(/waitForExportTargetReadinessStable\s*\(/.test(mainFn)).toBe(true);

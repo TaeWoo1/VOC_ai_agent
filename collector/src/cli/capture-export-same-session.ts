@@ -44,10 +44,17 @@ import {
 } from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
 import {
+  decideReviewUsageConfirm,
   decideSupervisedExportReady,
   diagnosePreClickSignals,
   type PreClickSignals,
 } from "../naver/export-click-signals";
+import {
+  confirmReviewUsageOnce,
+  type ConfirmContext,
+  type ConfirmPage,
+  type ReviewUsageConfirmResult,
+} from "../naver/review-usage-confirm";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
 import {
   waitForExportTargetReadinessStable,
@@ -396,6 +403,10 @@ async function main(): Promise<void> {
     // Diagnostic mode: click ONCE through the existing gate and observe — never upload,
     // never write status. classify-only (NO click) takes precedence if both are passed.
     const diagnoseClick = !classifyOnly && args.includes("--diagnose-export-click");
+    // PR B: only after a supervised-fast click reaches REVIEW_USAGE_CONFIRMATION, press the consent
+    // modal's 확인 ONCE — gated on the dedicated flag (never auto-confirmed). Active only inside the
+    // supervised-fast (override) branch, which already requires --diagnose-allow-empty-target.
+    const diagnoseConfirm = diagnoseClick && args.includes("--diagnose-confirm-review-usage");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -511,6 +522,18 @@ async function main(): Promise<void> {
             settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
           },
         );
+        // PR B: ONLY when the flag is set AND the click reached the consent gate, press 확인 ONCE.
+        // The consent modal is blocking and still open on the same page/ctx. Never auto-confirmed.
+        const confirmDecision = decideReviewUsageConfirm({ outcome: diagnosis.outcome, confirmFlag: diagnoseConfirm });
+        let confirm: ReviewUsageConfirmResult | undefined;
+        if (confirmDecision === "ATTEMPT") {
+          confirm = await confirmReviewUsageOnce(page as unknown as ConfirmPage, ctx as unknown as ConfirmContext, {
+            observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
+            pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
+            salt: cfg.storageProbeSalt,
+            settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+          });
+        }
         console.log(
           JSON.stringify({
             mode: "diagnose-export-click",
@@ -522,12 +545,17 @@ async function main(): Promise<void> {
             supervisedChecks: supervised.checks,
             supervisedElapsedMs: supervised.elapsedMs,
             ...diagnosis,
+            confirmRequested: diagnoseConfirm,
+            confirmDecision,
+            ...(confirm ?? {}),
           }),
         );
         log("run.diagnose-export-click", {
           outcome: diagnosis.outcome,
           clicked: diagnosis.clickedCount,
           readinessMode: "supervised-fast",
+          confirmDecision,
+          confirmOutcome: confirm?.confirmOutcome ?? "none",
         });
         return;
       }

@@ -352,3 +352,76 @@ export function deriveExportClickOutcome(input: {
 export function decideSupervisedExportReady(pre: PreClickSignals): boolean {
   return pre.exportLayout === "SYNC_DOWNLOAD" && pre.exportActionable;
 }
+
+// --- review-usage consent confirmation (PR B) --------------------------------
+//
+// The supervised export click reaches the legal review-usage consent modal (취소 / 확인). PR B can
+// press its affirmative 확인 — exactly once, modal-scoped, ONLY behind --diagnose-confirm-review-usage.
+// These pure pieces decide WHETHER to attempt it, supply the affirmative/cancel vocabulary the
+// (modal-scoped) live scan uses, and collapse the post-confirm observation into one outcome enum.
+
+/** Whether the supervised confirm step should attempt the 확인 click. */
+export type ReviewUsageConfirmDecision = "ATTEMPT" | "SKIP_NO_FLAG" | "SKIP_NOT_CONSENT";
+
+/** Pure: attempt the confirm click ONLY when the flag is set AND the click reached consent. */
+export function decideReviewUsageConfirm(input: {
+  outcome: ExportClickOutcome;
+  confirmFlag: boolean;
+}): ReviewUsageConfirmDecision {
+  if (!input.confirmFlag) return "SKIP_NO_FLAG";
+  if (input.outcome !== "REVIEW_USAGE_CONFIRMATION") return "SKIP_NOT_CONSENT";
+  return "ATTEMPT";
+}
+
+/**
+ * Affirmative confirm wording for the consent modal's `확인`-style button, and the cancel/close
+ * wording that must NEVER be clicked. Cancel exclusion wins: a control matching any CANCEL marker
+ * is rejected even if it also matches an affirmative one. The live modal-scoped scan rebuilds these
+ * inside the page from `.source`/`.flags` (single source of truth) — they are never emitted.
+ */
+export const AFFIRMATIVE_MARKERS: readonly RegExp[] = [
+  /확인/,
+  /계속/,
+  /다운로드/,
+  /동의/,
+  /\bconfirm\b/i,
+  /\bok\b/i,
+];
+export const CANCEL_MARKERS: readonly RegExp[] = [/취소/, /닫기/, /\bcancel\b/i, /\bclose\b/i];
+
+/** Pure: is an accessible label an AFFIRMATIVE confirm control (and not a cancel/close)? */
+export function isAffirmativeConfirmLabel(label: string): boolean {
+  if (anyMatch(CANCEL_MARKERS, label)) return false;
+  return anyMatch(AFFIRMATIVE_MARKERS, label);
+}
+
+/** The single derived classification of what the one 확인 click produced. */
+export type ConfirmOutcome =
+  | "DOWNLOAD"
+  | "NATIVE_DIALOG"
+  | "ASYNC_JOB"
+  | "FOLLOW_UP_MODAL"
+  | "MODAL_DISMISSED_NO_DOWNLOAD"
+  | "NO_CHANGE";
+
+/**
+ * Pure: collapse the post-confirm observation into ONE outcome. Precedence — an actual download is
+ * the answer; else a native dialog (it blocks everything); else an async-job notice; else a NEW
+ * (non-consent) modal; else the consent modal simply dismissed with no download; else no change
+ * (the click had no observable effect / the consent modal is still up).
+ */
+export function deriveConfirmOutcome(input: {
+  downloadFired: boolean;
+  dialogPresent: boolean;
+  modalDisappeared: boolean;
+  followUpModalCategory: ModalCategory | null;
+  asyncJobMarkerPresent: boolean;
+}): ConfirmOutcome {
+  const { downloadFired, dialogPresent, modalDisappeared, followUpModalCategory, asyncJobMarkerPresent } = input;
+  if (downloadFired) return "DOWNLOAD";
+  if (dialogPresent) return "NATIVE_DIALOG";
+  if (asyncJobMarkerPresent || followUpModalCategory === "async_job_notice") return "ASYNC_JOB";
+  if (followUpModalCategory !== null) return "FOLLOW_UP_MODAL";
+  if (modalDisappeared) return "MODAL_DISMISSED_NO_DOWNLOAD";
+  return "NO_CHANGE";
+}

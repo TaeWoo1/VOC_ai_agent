@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDialogMessage,
   classifyModalCategory,
+  decideReviewUsageConfirm,
   decideSupervisedExportReady,
+  deriveConfirmOutcome,
   deriveExportClickOutcome,
   diagnosePreClickSignals,
+  isAffirmativeConfirmLabel,
   DIALOG_RECORD_KEYS,
   emptyPostClick,
   lengthBucket,
@@ -266,6 +269,86 @@ describe("decideSupervisedExportReady — light readiness for the supervised-fas
 
   it("is NOT ready for an unrecognized layout", () => {
     expect(decideSupervisedExportReady(base)).toBe(false);
+  });
+});
+
+describe("decideReviewUsageConfirm — flag-gated, consent-only confirm attempt", () => {
+  it("SKIP_NO_FLAG when the flag is absent (default: never auto-confirm)", () => {
+    expect(decideReviewUsageConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", confirmFlag: false })).toBe("SKIP_NO_FLAG");
+  });
+
+  it("SKIP_NOT_CONSENT when the click did not reach the consent gate, even with the flag", () => {
+    expect(decideReviewUsageConfirm({ outcome: "DATE_RANGE_REQUIRED", confirmFlag: true })).toBe("SKIP_NOT_CONSENT");
+    expect(decideReviewUsageConfirm({ outcome: "DOWNLOAD", confirmFlag: true })).toBe("SKIP_NOT_CONSENT");
+    expect(decideReviewUsageConfirm({ outcome: "NO_OP", confirmFlag: true })).toBe("SKIP_NOT_CONSENT");
+  });
+
+  it("ATTEMPT only when the flag is set AND the outcome is review-usage consent", () => {
+    expect(decideReviewUsageConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", confirmFlag: true })).toBe("ATTEMPT");
+  });
+});
+
+describe("isAffirmativeConfirmLabel — affirmative wins, cancel/close always excluded", () => {
+  it("accepts affirmative labels", () => {
+    for (const label of ["확인", "계속", "다운로드", "동의", "Confirm", "OK"]) {
+      expect(isAffirmativeConfirmLabel(label)).toBe(true);
+    }
+  });
+
+  it("rejects pure cancel/close labels", () => {
+    for (const label of ["취소", "닫기", "Cancel", "Close"]) {
+      expect(isAffirmativeConfirmLabel(label)).toBe(false);
+    }
+  });
+
+  it("rejects a control that matches BOTH (cancel exclusion wins)", () => {
+    // e.g. a "취소 확인" composite label must never be treated as the affirmative control.
+    expect(isAffirmativeConfirmLabel("취소 확인")).toBe(false);
+    expect(isAffirmativeConfirmLabel("확인 취소")).toBe(false);
+  });
+
+  it("rejects a label with no affirmative marker", () => {
+    expect(isAffirmativeConfirmLabel("뒤로")).toBe(false);
+    expect(isAffirmativeConfirmLabel("")).toBe(false);
+  });
+});
+
+describe("deriveConfirmOutcome — post-확인 precedence", () => {
+  const base = {
+    downloadFired: false,
+    dialogPresent: false,
+    modalDisappeared: false,
+    followUpModalCategory: null,
+    asyncJobMarkerPresent: false,
+  };
+
+  it("a fired download is the definitive answer", () => {
+    expect(deriveConfirmOutcome({ ...base, downloadFired: true })).toBe("DOWNLOAD");
+    // download wins even if a follow-up modal also appears
+    expect(deriveConfirmOutcome({ ...base, downloadFired: true, followUpModalCategory: "async_job_notice" })).toBe(
+      "DOWNLOAD",
+    );
+  });
+
+  it("a native dialog blocks everything below download", () => {
+    expect(deriveConfirmOutcome({ ...base, dialogPresent: true })).toBe("NATIVE_DIALOG");
+  });
+
+  it("an async-job notice (marker or follow-up modal) is ASYNC_JOB", () => {
+    expect(deriveConfirmOutcome({ ...base, asyncJobMarkerPresent: true })).toBe("ASYNC_JOB");
+    expect(deriveConfirmOutcome({ ...base, followUpModalCategory: "async_job_notice" })).toBe("ASYNC_JOB");
+  });
+
+  it("a NEW non-consent modal is FOLLOW_UP_MODAL", () => {
+    expect(deriveConfirmOutcome({ ...base, followUpModalCategory: "date_range_required" })).toBe("FOLLOW_UP_MODAL");
+  });
+
+  it("modal closed with no download is MODAL_DISMISSED_NO_DOWNLOAD", () => {
+    expect(deriveConfirmOutcome({ ...base, modalDisappeared: true })).toBe("MODAL_DISMISSED_NO_DOWNLOAD");
+  });
+
+  it("nothing observed (consent modal still up) is NO_CHANGE", () => {
+    expect(deriveConfirmOutcome(base)).toBe("NO_CHANGE");
   });
 });
 
