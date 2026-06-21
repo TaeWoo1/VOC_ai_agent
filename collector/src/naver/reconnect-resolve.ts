@@ -1,7 +1,12 @@
 import type { BrowserContext, Page } from "playwright";
+import type { PwPage } from "../profile";
 import type { CollectorState } from "../status";
 import { continueAtCardOnce, type ContinueOutcome } from "./account-store-continue";
 import type { ExpectedContinueCard, ExpectedIdentity } from "./account-store-resolver";
+import {
+  waitForPostContinueExportSurface,
+  type PostContinueStabilizeDeps,
+} from "./post-continue-stabilize";
 import { haltForVerdict } from "./session-halt";
 import type { SessionVerdict } from "./session-verdict";
 
@@ -27,6 +32,11 @@ import type { SessionVerdict } from "./session-verdict";
  *   - Continue success is NOT collection success. A `RESOLVED_PROCEED` only means the
  *     page is now a logged-in export surface; the independent `decideCaptureGate`
  *     still governs whether the export click happens.
+ *   - A CONTINUED click whose post-click read is weak/unstable (a briefly-visible
+ *     review-ready surface read as UNKNOWN / LAYOUT_UNRECOGNIZED before hydration
+ *     settled) is NOT trusted: a READ-ONLY stabilization waits until the page is truly
+ *     a logged-in actionable sync export surface, or HALTS honestly on timeout. It
+ *     never re-clicks continue and never clicks/export/upload/writes status.
  *   - Every non-proceed branch HALTS honestly with a content-free state/detail and
  *     never clicks (and never re-clicks). All fields are enums/booleans — no PII.
  */
@@ -40,6 +50,12 @@ export interface ReconnectResolveDeps {
   expectedContinueCard: ExpectedContinueCard;
   /** Whether the expected continue-card fingerprint is configured (`!!cfg.naverExpectedContinueCardFingerprint`). */
   fingerprintConfigured: boolean;
+  /**
+   * Read-only post-continue stabilization config (settle/verdict/export-plan readers +
+   * timeouts), wired live at the CLI. Used ONLY when the continue advances but its own
+   * post-click read is weak/unstable — never clicks, exports, or writes anything.
+   */
+  stabilize: PostContinueStabilizeDeps;
 }
 
 export type ReconnectDecision = "PROCEED_LOGGED_IN" | "RESOLVED_PROCEED" | "HALT";
@@ -59,6 +75,9 @@ export interface ReconnectResolution {
 /** The continue boundary's signature — injectable so the helper is fully offline-testable. */
 export type ContinueFn = typeof continueAtCardOnce;
 
+/** The post-continue stabilization signature — injectable so the helper is fully offline-testable. */
+export type StabilizeFn = typeof waitForPostContinueExportSurface;
+
 /**
  * Resolve a reconnect-continue screen if (and only if) needed and safe, returning a
  * proceed/halt decision for the capture CLI. See the module doc for the invariants.
@@ -72,6 +91,7 @@ export async function resolveReconnectIfNeeded(
   verdict: SessionVerdict,
   deps: ReconnectResolveDeps,
   continueFn: ContinueFn = continueAtCardOnce,
+  stabilizeFn: StabilizeFn = waitForPostContinueExportSurface,
 ): Promise<ReconnectResolution> {
   // 1) Already usable — never touch the continue boundary; the existing capture path takes over.
   if (verdict === "LOGGED_IN") {
@@ -91,26 +111,56 @@ export async function resolveReconnectIfNeeded(
     // Delegate the single guarded click to the validated boundary — its own gate may still refuse.
     const result = await continueFn(page, ctx, deps.expected, deps.salt, deps.expectedContinueCard);
     const post = result.postClick;
-    const reached = post?.reachedExportSurface === true;
 
-    if (result.outcome === "CONTINUED" && post?.verdict === "LOGGED_IN" && reached) {
+    // A gate refusal / clicked-but-not-CONTINUED never reaches stabilization: HALT honestly,
+    // keyed on the post-click verdict (or the reconnect verdict when the gate never clicked).
+    if (result.outcome !== "CONTINUED") {
+      const halted = haltForVerdict(post?.verdict ?? "RECONNECT_REQUIRED");
+      return {
+        decision: "HALT",
+        resolvedVerdict: post?.verdict ?? verdict,
+        continueOutcome: result.outcome,
+        reachedExportSurface: post?.reachedExportSurface === true,
+        halt: { state: halted.state, detail: `reconnect: continue ${result.outcome}; not collection` },
+      };
+    }
+
+    // CONTINUED + already strongly ready (LOGGED_IN + actionable export surface): proceed at once,
+    // no extra waiting — the continue's own post-click read already proved the surface.
+    if (post?.verdict === "LOGGED_IN" && post.reachedExportSurface === true) {
       return {
         decision: "RESOLVED_PROCEED",
         resolvedVerdict: "LOGGED_IN",
-        continueOutcome: result.outcome,
+        continueOutcome: "CONTINUED",
         reachedExportSurface: true,
       };
     }
 
-    // Clicked-but-not-advanced, advanced-but-no-export-surface, or a gate refusal: HALT honestly,
-    // keyed on the post-click verdict (or the reconnect verdict when the gate never clicked). No re-click.
-    const halted = haltForVerdict(post?.verdict ?? "RECONNECT_REQUIRED");
+    // CONTINUED but the post-click read is weak/unstable (a briefly-visible review-ready surface
+    // read as UNKNOWN / LAYOUT_UNRECOGNIZED before hydration finished). Settle READ-ONLY until the
+    // page is truly a logged-in actionable sync export surface — never re-clicking continue.
+    const stab = await stabilizeFn(page as unknown as PwPage, deps.stabilize);
+    if (stab.kind === "READY") {
+      return {
+        decision: "RESOLVED_PROCEED",
+        resolvedVerdict: "LOGGED_IN",
+        continueOutcome: "CONTINUED",
+        reachedExportSurface: true,
+      };
+    }
+
+    // It continued but never stabilized into a usable export surface within the window: HALT
+    // honestly, keyed on the last stabilization verdict. No re-click, no export.
+    const halted = haltForVerdict(stab.verdict);
     return {
       decision: "HALT",
-      resolvedVerdict: post?.verdict ?? verdict,
-      continueOutcome: result.outcome,
-      reachedExportSurface: reached,
-      halt: { state: halted.state, detail: `reconnect: continue ${result.outcome}; not collection` },
+      resolvedVerdict: stab.verdict,
+      continueOutcome: "CONTINUED",
+      reachedExportSurface: false,
+      halt: {
+        state: halted.state,
+        detail: "reconnect: continued but export surface did not stabilize; not collection",
+      },
     };
   }
 
