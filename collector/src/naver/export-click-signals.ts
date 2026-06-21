@@ -336,3 +336,19 @@ export function deriveExportClickOutcome(input: {
   if (popupOpened) return "POPUP";
   return "NO_OP";
 }
+
+/**
+ * Pure: the LIGHT readiness signal for the SUPERVISED-FAST diagnostic path.
+ *
+ * The diagnose branch only runs PAST the capture gate, so the session is already
+ * `LOGGED_IN` and the review-ready export surface has been reached. The HTML-only
+ * `EXPORT_TARGET_EMPTY` readiness is a KNOWN false positive on this surface (a hidden
+ * empty-state placeholder ships in the static HTML while real rows render live), so it
+ * must NOT block the supervised click. The only remaining structural question is whether
+ * the sync export control is actually present and actionable — exactly what the pre-click
+ * snapshot already answers. Ready ⇔ a recognized SYNC_DOWNLOAD layout with an actionable
+ * export candidate.
+ */
+export function decideSupervisedExportReady(pre: PreClickSignals): boolean {
+  return pre.exportLayout === "SYNC_DOWNLOAD" && pre.exportActionable;
+}
