@@ -6,6 +6,7 @@ import {
   decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
   decideSaveReviewDownload,
+  decideUploadSavedReviewDownload,
   decideSupervisedExportReady,
   deriveConfirmOutcome,
   deriveExportClickOutcome,
@@ -526,6 +527,25 @@ describe("decideSaveReviewDownload — save only when requested + clicked + a do
   });
   it("SAVE_FAILED when the save/validate cycle did not succeed", () => {
     expect(decideSaveReviewDownload({ ...base, saveSucceeded: false })).toBe("SAVE_FAILED");
+  });
+});
+
+describe("decideUploadSavedReviewDownload — upload only when requested + saved + a real .xlsx", () => {
+  const base = { uploadRequested: true, downloadSaved: true, xlsxReadable: true, uploadSucceeded: true };
+  it("NOT_REQUESTED when the upload flag is absent", () => {
+    expect(decideUploadSavedReviewDownload({ ...base, uploadRequested: false })).toBe("NOT_REQUESTED");
+  });
+  it("NOT_SAVED when the download was never saved", () => {
+    expect(decideUploadSavedReviewDownload({ ...base, downloadSaved: false })).toBe("NOT_SAVED");
+  });
+  it("NOT_READABLE when the saved file is not structurally a real .xlsx", () => {
+    expect(decideUploadSavedReviewDownload({ ...base, xlsxReadable: false })).toBe("NOT_READABLE");
+  });
+  it("UPLOADED when requested + saved + readable + the backend accepted the ingest", () => {
+    expect(decideUploadSavedReviewDownload(base)).toBe("UPLOADED");
+  });
+  it("UPLOAD_FAILED when the backend did not accept the ingest", () => {
+    expect(decideUploadSavedReviewDownload({ ...base, uploadSucceeded: false })).toBe("UPLOAD_FAILED");
   });
 });
 

@@ -645,3 +645,60 @@ describe("capture-export-same-session — controlled diagnostic download save, f
     expect(/\.saveAs\s*\(/.test(code)).toBe(false); // saveAs is confined to review-download-save.ts
   });
 });
+
+describe("capture-export-same-session — controlled backend upload diagnostic, flag-gated, higher-consequence", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("imports the upload-diagnostic module fn and the pure upload decision", () => {
+    expect(/from\s+["']\.\.\/naver\/review-upload-diagnostic["']/.test(code)).toBe(true);
+    expect(/uploadSavedReviewDownload/.test(code)).toBe(true);
+    expect(/decideUploadSavedReviewDownload/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-upload-saved-review-download and is INERT without the save flag", () => {
+    expect(/--diagnose-upload-saved-review-download/.test(code)).toBe(true);
+    // gated on diagnoseSaveDownload (not diagnoseClick) — you can only upload what was saved.
+    expect(
+      /const\s+diagnoseUpload\s*=\s*diagnoseSaveDownload\s*&&\s*args\.includes\("--diagnose-upload-saved-review-download"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+  });
+
+  it("wires the uploadFn ONLY when diagnoseUpload, NESTED inside the save hook (upload-before-delete)", () => {
+    expect(/uploadFn:/.test(fastBranch)).toBe(true);
+    expect(/uploadSavedReviewDownload\(/.test(fastBranch)).toBe(true);
+    // conditional spread, never unconditional, and inside the save closure (after saveDownloadFn opens).
+    const saveIdx = fastBranch.indexOf("saveDownloadFn:");
+    const upWireIdx = fastBranch.indexOf("uploadFn:");
+    expect(saveIdx).toBeGreaterThanOrEqual(0);
+    expect(upWireIdx).toBeGreaterThan(saveIdx);
+    expect(/\.\.\.\(diagnoseUpload\s*\?/.test(fastBranch)).toBe(true);
+  });
+
+  it("emits the HONEST upload invariants — backendIngested, NOT dbMutated:false, no collector status", () => {
+    expect(/uploadRequested:\s*diagnoseUpload/.test(fastBranch)).toBe(true);
+    expect(/uploadReason/.test(fastBranch)).toBe(true);
+    // isolate the upload REPORT arm (the spread after `uploadRequested: diagnoseUpload`).
+    const reqIdx = fastBranch.indexOf("uploadRequested: diagnoseUpload");
+    const armStart = fastBranch.indexOf("...(diagnoseUpload", reqIdx);
+    const armEnd = fastBranch.indexOf(": diagnoseSaveDownload", armStart);
+    expect(armStart).toBeGreaterThan(reqIdx);
+    expect(armEnd).toBeGreaterThan(armStart);
+    const uploadReportArm = fastBranch.slice(armStart, armEnd);
+    expect(/backendIngested/.test(uploadReportArm)).toBe(true);
+    expect(/collectorStatusWritten:\s*false/.test(uploadReportArm)).toBe(true);
+    expect(/lastSuccessWritten:\s*false/.test(uploadReportArm)).toBe(true);
+    // HONESTY: the upload path must never claim dbMutated:false (the backend DB IS ingested).
+    expect(/dbMutated/.test(uploadReportArm)).toBe(false);
+  });
+
+  it("the CLI itself never names uploadReviewFile or calls saveAs (confined to the wrapper/module)", () => {
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
+    expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
+    expect(/\.saveAs\s*\(/.test(code)).toBe(false);
+  });
+});

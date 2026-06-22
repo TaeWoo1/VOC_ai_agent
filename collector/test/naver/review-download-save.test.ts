@@ -11,6 +11,20 @@ import {
   type DownloadSaveIo,
   type SaveableDownload,
 } from "../../src/naver/review-download-save";
+import type { UploadInspection } from "../../src/naver/review-upload-diagnostic";
+
+/** A sanitized inspection a fake `uploadFn` can return. */
+const FAKE_UPLOAD: UploadInspection = {
+  uploaded: true,
+  ingestStatusCategory: "COMPLETED",
+  syncJobIdHash: "0123456789abcdef",
+  totalRowsBucket: "hundreds",
+  successRowsBucket: "hundreds",
+  skippedRowsBucket: "zero",
+  failedRowsBucket: "zero",
+  hasErrorMessage: false,
+  sampleErrorPresent: false,
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_PATH = join(__dirname, "..", "..", "src", "naver", "review-download-save.ts");
@@ -166,6 +180,52 @@ describe("saveAndInspectDownload — save → validate → DELETE, sanitized rec
     for (const k of Object.keys(r)) {
       expect((SAVED_DOWNLOAD_INSPECTION_KEYS as readonly string[]).includes(k)).toBe(true);
     }
+  });
+});
+
+describe("saveAndInspectDownload — optional uploadFn (upload-before-delete, only when xlsxReadable)", () => {
+  it("uploads the saved file BEFORE deleting it, exactly once, and surfaces the inspection", async () => {
+    const { io, download, calls } = makeFakes({ size: 50_000 });
+    let uploadCalls = 0;
+    let removeCountAtUpload = -1;
+    let uploadedPath = "";
+    const uploadFn = async (path: string): Promise<UploadInspection> => {
+      uploadCalls += 1;
+      removeCountAtUpload = calls.removeFile; // 0 ⇒ uploaded before the delete
+      uploadedPath = path;
+      return FAKE_UPLOAD;
+    };
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io, uploadFn });
+    expect(uploadCalls).toBe(1);
+    expect(removeCountAtUpload).toBe(0); // upload-before-delete
+    expect(calls.removeFile).toBe(1); // still deleted after (delete-after-validate)
+    expect(uploadedPath.startsWith(OPTS_DIR)).toBe(true);
+    expect(r.uploaded).toEqual(FAKE_UPLOAD);
+    expect((SAVED_DOWNLOAD_INSPECTION_KEYS as readonly string[]).includes("uploaded")).toBe(true);
+  });
+
+  it("does NOT upload a non-OOXML payload (skips uploadFn when !xlsxReadable), still saves+deletes", async () => {
+    const { io, download, calls } = makeFakes({ head: new Uint8Array([0x3c, 0x68, 0x74, 0x6d, 0x6c]) });
+    let uploadCalls = 0;
+    const r = await saveAndInspectDownload(download, {
+      dir: OPTS_DIR,
+      salt: "s",
+      io,
+      uploadFn: async () => {
+        uploadCalls += 1;
+        return FAKE_UPLOAD;
+      },
+    });
+    expect(r.xlsxReadable).toBe(false);
+    expect(uploadCalls).toBe(0);
+    expect(r.uploaded).toBeUndefined();
+    expect(calls.removeFile).toBe(1);
+  });
+
+  it("without an uploadFn, behaves exactly as before (no uploaded field)", async () => {
+    const { io, download } = makeFakes({ size: 50_000 });
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
+    expect(r.uploaded).toBeUndefined();
   });
 });
 

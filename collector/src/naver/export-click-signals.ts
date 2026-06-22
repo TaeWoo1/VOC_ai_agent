@@ -526,3 +526,33 @@ export function decideSaveReviewDownload(input: {
   if (!input.downloadFired) return "NO_DOWNLOAD";
   return input.saveSucceeded ? "SAVED" : "SAVE_FAILED";
 }
+
+// --- controlled backend upload of the validated download (higher-consequence) ---
+//
+// After the saved download is structurally validated as a real .xlsx, the operator may upload it to
+// the SellerOps backend's existing /api/uploads — which INGESTS the rows into the backend DB (real
+// state change, idempotent via 리뷰글번호 dedup). This is the deliberate crossing of the "a real
+// captured export is never uploaded" boundary, so it is its own explicit flag and is honestly
+// reported. This pure piece decides the report REASON; the actual login/channel/upload + sanitized
+// ingest folding lives in `review-upload-diagnostic.ts` (the only diagnostic caller of `upload.ts`).
+
+/** Why a validated review download was (or wasn't) uploaded to the backend. */
+export type UploadReason = "NOT_REQUESTED" | "NOT_SAVED" | "NOT_READABLE" | "UPLOADED" | "UPLOAD_FAILED";
+
+/**
+ * Pure: the report reason for the diagnostic upload step. Upload only proceeds when requested AND the
+ * download was saved AND it is structurally a real `.xlsx` (`xlsxReadable`) — a non-OOXML payload is
+ * never uploaded. `uploadSucceeded` distinguishes a backend-accepted ingest from a failed one. Never
+ * reads a page, the filesystem, or the network.
+ */
+export function decideUploadSavedReviewDownload(input: {
+  uploadRequested: boolean;
+  downloadSaved: boolean;
+  xlsxReadable: boolean;
+  uploadSucceeded: boolean;
+}): UploadReason {
+  if (!input.uploadRequested) return "NOT_REQUESTED";
+  if (!input.downloadSaved) return "NOT_SAVED";
+  if (!input.xlsxReadable) return "NOT_READABLE";
+  return input.uploadSucceeded ? "UPLOADED" : "UPLOAD_FAILED";
+}
