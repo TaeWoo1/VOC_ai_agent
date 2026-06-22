@@ -227,6 +227,60 @@ describe("confirmReviewUsageOnce — exactly one modal-scoped 확인 click, obse
   });
 });
 
+describe("confirmReviewUsageOnce — controlled save hook (saveDownloadFn) [PR C1 parity]", () => {
+  const SAVED_FIXTURE: SavedDownloadInspection = {
+    downloadSaved: true,
+    savedPathCategory: "downloads_diagnostic_quarantine",
+    savedBasenameHash: "abcdef0123456789",
+    savedExtensionCategory: "xlsx",
+    fileSizeBucket: "small",
+    xlsxReadable: true,
+    workbookContentValidation: "deferred",
+    rawCellLeak: false,
+    fileRetained: false,
+    retentionPolicy: "delete-after-validate",
+  };
+
+  it("invokes the save hook once with the fired download and surfaces savedDownload (semantic path)", async () => {
+    const { page, ctx } = makeFakes({ contentSeq: [CONSENT_HTML, DISMISSED_HTML], scanCount: 1, downloadName: "리뷰_행복마켓.xlsx" });
+    let calls = 0;
+    let gotName = "";
+    const saveDownloadFn = async (d: ConfirmDownload): Promise<SavedDownloadInspection> => {
+      calls += 1;
+      gotName = d.suggestedFilename();
+      return SAVED_FIXTURE;
+    };
+    const r = await confirmReviewUsageOnce(page, ctx, { ...DEPS, saveDownloadFn });
+    expect(r.confirmClicked).toBe(true);
+    expect(r.postConfirmDownloadFired).toBe(true);
+    expect(calls).toBe(1); // exactly once…
+    expect(gotName).toBe("리뷰_행복마켓.xlsx"); // …with the real download (sanitization happens INSIDE the hook)
+    expect(r.savedDownload).toEqual(SAVED_FIXTURE);
+  });
+
+  it("does NOT invoke the save hook when no download fires (semantic path)", async () => {
+    const { page, ctx } = makeFakes({ contentSeq: [CONSENT_HTML, DISMISSED_HTML], scanCount: 1 });
+    let calls = 0;
+    const r = await confirmReviewUsageOnce(page, ctx, {
+      ...DEPS,
+      saveDownloadFn: async (): Promise<SavedDownloadInspection> => {
+        calls += 1;
+        return SAVED_FIXTURE;
+      },
+    });
+    expect(r.postConfirmDownloadFired).toBe(false);
+    expect(calls).toBe(0);
+    expect(r.savedDownload).toBeUndefined();
+  });
+
+  it("without a save hook, a fired download is observed-and-discarded (no savedDownload)", async () => {
+    const { page, ctx } = makeFakes({ contentSeq: [CONSENT_HTML, DISMISSED_HTML], scanCount: 1, downloadName: "리뷰.xlsx" });
+    const r = await confirmReviewUsageOnce(page, ctx, DEPS);
+    expect(r.postConfirmDownloadFired).toBe(true);
+    expect(r.savedDownload).toBeUndefined();
+  });
+});
+
 describe("confirmReviewUsageOnce — no raw leak; output keys allow-listed", () => {
   it("PII in modal/filename never appears in the result JSON", async () => {
     const { page, ctx } = makeFakes({

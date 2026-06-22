@@ -559,10 +559,37 @@ async function main(): Promise<void> {
             settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
           },
         );
+        // Shared controlled-save deps — wired IDENTICALLY into both the approved-index and the SEMANTIC
+        // single-affirmative confirm dispatch, so whichever path fires the download saves/validates (and,
+        // with --diagnose-upload-saved-review-download, uploads to the backend before deletion) the same
+        // way. Save only with --diagnose-save-review-download; the upload fn owns the only backend call
+        // (the CLI never names uploadReviewFile here) and runs only when the file validates as a real .xlsx.
+        const captureSaveDeps = diagnoseSaveDownload
+          ? {
+              saveDownloadFn: (d: ConfirmDownload) =>
+                saveAndInspectDownload(d, {
+                  dir: join(cfg.downloadDir, "diagnostic"),
+                  salt: cfg.storageProbeSalt,
+                  ...(diagnoseUpload
+                    ? {
+                        uploadFn: (p: string) =>
+                          uploadSavedReviewDownload(p, {
+                            baseUrl: cfg.baseUrl,
+                            email: cfg.email,
+                            password: cfg.password,
+                            channelCode: cfg.naverChannelCode,
+                            salt: cfg.storageProbeSalt,
+                          }),
+                      }
+                    : {}),
+                }),
+            }
+          : {};
+
         // Approved-index confirm (HIGHEST precedence): click EXACTLY the operator-approved candidate
         // index, ONCE — only when the flag carried a valid index AND the click reached consent. The
         // adapter rescans + re-validates the index live before binding, so a stale approval can't click
-        // the wrong control. It suppresses the candidate scan + plain confirm below.
+        // the wrong control. It suppresses the candidate scan + semantic confirm below.
         const approvedIndexDecision = decideApprovedIndexConfirm({
           outcome: diagnosis.outcome,
           indexRequested: approvedIndexRequested,
@@ -578,32 +605,7 @@ async function main(): Promise<void> {
               pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
               salt: cfg.storageProbeSalt,
               settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
-              // Controlled diagnostic save (only with --diagnose-save-review-download): a fired download
-              // is saved to a gitignored quarantine, validated, then DELETED. With
-              // --diagnose-upload-saved-review-download it is ALSO uploaded to the backend (real DB
-              // ingest) BEFORE deletion — the upload fn owns the only backend call (the CLI never
-              // names uploadReviewFile here); upload only runs when the file validates as a real .xlsx.
-              ...(diagnoseSaveDownload
-                ? {
-                    saveDownloadFn: (d: ConfirmDownload) =>
-                      saveAndInspectDownload(d, {
-                        dir: join(cfg.downloadDir, "diagnostic"),
-                        salt: cfg.storageProbeSalt,
-                        ...(diagnoseUpload
-                          ? {
-                              uploadFn: (p: string) =>
-                                uploadSavedReviewDownload(p, {
-                                  baseUrl: cfg.baseUrl,
-                                  email: cfg.email,
-                                  password: cfg.password,
-                                  channelCode: cfg.naverChannelCode,
-                                  salt: cfg.storageProbeSalt,
-                                }),
-                            }
-                          : {}),
-                      }),
-                  }
-                : {}),
+              ...captureSaveDeps,
             },
             approvedIndex,
           );
@@ -611,16 +613,49 @@ async function main(): Promise<void> {
         // The emitted decision is the adapter's refined verdict (ATTEMPT → REJECT_* on a live mismatch)
         // when it ran, else the pure pre-scan gate.
         const finalApprovedIndexDecision = approvedIndexResult?.approvedIndexDecision ?? approvedIndexDecision;
+
+        // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
+        // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
+        let candidates: ReviewUsageCandidatesResult | undefined;
+        if (diagnoseConfirmCandidates && diagnosis.outcome === "REVIEW_USAGE_CONFIRMATION") {
+          candidates = await scanReviewUsageConfirmCandidates(page as unknown as ConfirmPage);
+        }
+        // SEMANTIC single-affirmative confirm: ONLY when --diagnose-confirm-review-usage is set AND the
+        // click reached consent — and NOT in candidate or approved-index mode — bind the modal's SINGLE
+        // affirmative 확인 (no index needed; halts on zero/multiple/disabled/invisible) and click it ONCE.
+        // Carries the SAME captureSaveDeps, so the semantic path saves/uploads/validates identically.
+        const confirmDecision = decideReviewUsageConfirm({
+          outcome: diagnosis.outcome,
+          confirmFlag: diagnoseConfirm && !diagnoseConfirmCandidates && !approvedIndexRequested,
+        });
+        let confirm: ReviewUsageConfirmResult | undefined;
+        if (confirmDecision === "ATTEMPT") {
+          confirm = await confirmReviewUsageOnce(page as unknown as ConfirmPage, ctx as unknown as ConfirmContext, {
+            observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
+            pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
+            salt: cfg.storageProbeSalt,
+            settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+            ...captureSaveDeps,
+          });
+        }
+
+        // Unified capture result — the approved-index and semantic confirm paths are MUTUALLY EXCLUSIVE,
+        // so at most one ran. The downstream save / upload / status logic is identical regardless of which
+        // fired the download; it reads the click/download/saved-inspection from whichever produced them.
+        const captureClicked = approvedIndexResult?.approvedIndexClicked ?? confirm?.confirmClicked ?? false;
+        const captureDownloadFired =
+          approvedIndexResult?.postConfirmDownloadFired ?? confirm?.postConfirmDownloadFired ?? false;
+        const savedDownload = approvedIndexResult?.savedDownload ?? confirm?.savedDownload;
+
         // Sanitized reason for the diagnostic-save step (and the invariant assertions it upholds).
         const downloadSaveReason = decideSaveReviewDownload({
           saveRequested: diagnoseSaveDownload,
-          approvedIndexClicked: approvedIndexResult?.approvedIndexClicked ?? false,
-          downloadFired: approvedIndexResult?.postConfirmDownloadFired ?? false,
-          saveSucceeded: approvedIndexResult?.savedDownload?.downloadSaved ?? false,
+          approvedIndexClicked: captureClicked,
+          downloadFired: captureDownloadFired,
+          saveSucceeded: savedDownload?.downloadSaved ?? false,
         });
         // Sanitized reason for the controlled backend-upload step. The sanitized ingest inspection
-        // itself rides inside `savedDownload.uploaded` (spread via `...approvedIndexResult`).
-        const savedDownload = approvedIndexResult?.savedDownload;
+        // itself rides inside `savedDownload.uploaded` (spread via the index/confirm result).
         const uploadReason = decideUploadSavedReviewDownload({
           uploadRequested: diagnoseUpload,
           downloadSaved: savedDownload?.downloadSaved ?? false,
@@ -641,7 +676,7 @@ async function main(): Promise<void> {
         let statusDetail: string | undefined;
         if (diagnoseWriteStatus) {
           const statusSignals = decideStatusSignalsAfterUpload({
-            downloadFired: approvedIndexResult?.postConfirmDownloadFired ?? false,
+            downloadFired: captureDownloadFired,
             downloadSaved: savedDownload?.downloadSaved ?? false,
             xlsxReadable: savedDownload?.xlsxReadable ?? false,
             uploadReason,
@@ -661,29 +696,6 @@ async function main(): Promise<void> {
             updatedAt: now(),
           });
           collectorStatusWritten = true;
-        }
-
-        // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
-        // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
-        let candidates: ReviewUsageCandidatesResult | undefined;
-        if (diagnoseConfirmCandidates && diagnosis.outcome === "REVIEW_USAGE_CONFIRMATION") {
-          candidates = await scanReviewUsageConfirmCandidates(page as unknown as ConfirmPage);
-        }
-        // PR B: ONLY when the confirm flag is set AND the click reached the consent gate — and NOT in
-        // candidate-diagnostic or approved-index mode — press 확인 ONCE. The consent modal is blocking and
-        // still open on the same page/ctx. Never auto-confirmed.
-        const confirmDecision = decideReviewUsageConfirm({
-          outcome: diagnosis.outcome,
-          confirmFlag: diagnoseConfirm && !diagnoseConfirmCandidates && !approvedIndexRequested,
-        });
-        let confirm: ReviewUsageConfirmResult | undefined;
-        if (confirmDecision === "ATTEMPT") {
-          confirm = await confirmReviewUsageOnce(page as unknown as ConfirmPage, ctx as unknown as ConfirmContext, {
-            observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
-            pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
-            salt: cfg.storageProbeSalt,
-            settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
-          });
         }
         console.log(
           JSON.stringify({
