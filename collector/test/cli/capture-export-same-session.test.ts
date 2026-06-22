@@ -538,3 +538,60 @@ describe("capture-export-same-session — read-only live-DOM probe enriches the 
     expect(/\.frames\s*\(/.test(code)).toBe(false);
   });
 });
+
+describe("capture-export-same-session — approved-index review-usage confirm, flag-gated, highest precedence", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("imports the index adapter and the pure parse + decision", () => {
+    expect(/confirmReviewUsageByIndexOnce/.test(code)).toBe(true);
+    expect(/decideApprovedIndexConfirm/.test(code)).toBe(true);
+    expect(/parseApprovedIndexArg/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-confirm-review-usage-index and gates it on diagnoseClick", () => {
+    expect(/--diagnose-confirm-review-usage-index/.test(code)).toBe(true);
+    expect(
+      /const\s+approvedIndexRequested\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-confirm-review-usage-index"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+    expect(/const\s+approvedIndex\s*=\s*parseApprovedIndexArg\(args\)/.test(mainFn)).toBe(true);
+  });
+
+  it("runs the index adapter ONLY in the supervised-fast branch, ONLY on an ATTEMPT decision", () => {
+    expect(/confirmReviewUsageByIndexOnce\(/.test(fastBranch)).toBe(true);
+    expect(/decideApprovedIndexConfirm\(/.test(fastBranch)).toBe(true);
+    expect(/approvedIndexDecision\s*===\s*["']ATTEMPT["']/.test(fastBranch)).toBe(true);
+    // the decision is fed the diagnostic outcome + the flag + the parsed index (never auto-confirmed).
+    expect(/outcome:\s*diagnosis\.outcome/.test(fastBranch)).toBe(true);
+    expect(/indexRequested:\s*approvedIndexRequested/.test(fastBranch)).toBe(true);
+    expect(/parsedIndex:\s*approvedIndex/.test(fastBranch)).toBe(true);
+  });
+
+  it("invokes the index adapter exactly once in main, and NEVER in the stable / real-capture path", () => {
+    expect((mainFn.match(/confirmReviewUsageByIndexOnce\(/g) ?? []).length).toBe(1);
+    expect(/confirmReviewUsageByIndexOnce\(/.test(mainFn.slice(stableStart))).toBe(false);
+  });
+
+  it("index mode SUPPRESSES the candidate scan and the plain confirm click (precedence)", () => {
+    // the candidate flag is forced off in index mode…
+    expect(
+      /const\s+diagnoseConfirmCandidates\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-review-usage-confirm-candidates"\)\s*&&\s*!approvedIndexRequested/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+    // …and the plain confirm flag excludes index mode too.
+    expect(/confirmFlag:\s*diagnoseConfirm\s*&&\s*!diagnoseConfirmCandidates\s*&&\s*!approvedIndexRequested/.test(fastBranch)).toBe(
+      true,
+    );
+  });
+
+  it("the index path writes NO status, performs NO upload / capture / saveAs", () => {
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
+    expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
+    expect(/saveAs/.test(fastBranch)).toBe(false);
+  });
+});

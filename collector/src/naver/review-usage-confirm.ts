@@ -33,12 +33,15 @@ import {
   CANCEL_MARKERS,
   classifyDialogMessage,
   classifyModalCategory,
+  decideApprovedIndexBind,
   deriveConfirmOutcome,
   emptyPostClick,
   lengthBucket,
   mergePostClick,
   messageFingerprint,
   summarizePostClick,
+  type ApprovedIndexBind,
+  type ApprovedIndexDecision,
   type ConfirmOutcome,
   type DialogMessageCategory,
   type DialogRecord,
@@ -203,6 +206,46 @@ export const REVIEW_USAGE_CANDIDATES_KEYS: ReadonlyArray<keyof ReviewUsageCandid
   "detail",
 ];
 
+/** The ONLY shape the approved-index confirm step contributes to the report. Every leaf is non-sensitive. */
+export interface ReviewUsageConfirmIndexResult {
+  approvedIndex: number;
+  approvedIndexDecision: ApprovedIndexDecision;
+  approvedIndexBind: ApprovedIndexBind;
+  approvedIndexClicked: boolean;
+  approvedIndexClickedCount: 0 | 1;
+  confirmOutcome: ConfirmOutcome;
+  modalDisappeared: boolean;
+  followUpModalCategory: ModalCategory | null;
+  postConfirmDownloadFired: boolean;
+  postConfirmAsyncJob: boolean;
+  postConfirmToastPresent: boolean;
+  postConfirmDialogCategory: DialogMessageCategory | "none";
+  postConfirmPopupOpened: boolean;
+  postConfirmChecks: number;
+  download?: ConfirmDownloadRecord;
+  detail: string;
+}
+
+/** Exact top-level key allow-list for the approved-index result — used by the no-leak test. */
+export const REVIEW_USAGE_CONFIRM_INDEX_KEYS: ReadonlyArray<keyof ReviewUsageConfirmIndexResult> = [
+  "approvedIndex",
+  "approvedIndexDecision",
+  "approvedIndexBind",
+  "approvedIndexClicked",
+  "approvedIndexClickedCount",
+  "confirmOutcome",
+  "modalDisappeared",
+  "followUpModalCategory",
+  "postConfirmDownloadFired",
+  "postConfirmAsyncJob",
+  "postConfirmToastPresent",
+  "postConfirmDialogCategory",
+  "postConfirmPopupOpened",
+  "postConfirmChecks",
+  "download",
+  "detail",
+];
+
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -329,6 +372,14 @@ export async function scanReviewUsageConfirmCandidates(page: ConfirmPage): Promi
   let raw: { candidates: Array<{ index: number; kind: string; visible: boolean; enabled: boolean; textLength: number }> };
   try {
     raw = await page.evaluate((a: typeof arg) => {
+      // Idempotent: clear any stale index stamps / floating badges from a prior scan in this page,
+      // so a re-scan (e.g. the approved-index path's rescan) can never inherit a stale numbering.
+      for (const stale of Array.from(document.querySelectorAll("[" + a.badgeAttr + "]"))) {
+        stale.removeAttribute(a.badgeAttr);
+      }
+      for (const oldBadge of Array.from(document.querySelectorAll('[data-sellerops-badge="1"]'))) {
+        oldBadge.remove();
+      }
       const aff = a.affirmative.map((m) => new RegExp(m.source, m.flags));
       const can = a.cancel.map((m) => new RegExp(m.source, m.flags));
       let container: Element | null = null;
@@ -417,40 +468,36 @@ function readFailedCandidates(): ReviewUsageCandidatesResult {
   };
 }
 
+/** Sanitized post-click observation, shared by the single-affirmative and approved-index click paths. */
+interface PostConfirmObservation {
+  clicked: boolean;
+  confirmOutcome: ConfirmOutcome;
+  modalDisappeared: boolean;
+  followUpModalCategory: ModalCategory | null;
+  postConfirmDownloadFired: boolean;
+  postConfirmAsyncJob: boolean;
+  postConfirmToastPresent: boolean;
+  postConfirmDialogCategory: DialogMessageCategory | "none";
+  postConfirmPopupOpened: boolean;
+  postConfirmChecks: number;
+  download?: ConfirmDownloadRecord;
+}
+
 /**
- * Live: re-confirm the consent modal, bind its single affirmative `확인`, click it ONCE, then observe
- * (sanitized) whether a download / follow-up modal / dialog / toast / popup results. A closed/detached
- * page returns a sanitized `CONFIRM_READ_FAILED` halt — never an uncaught exception. The caller must
- * already have `decideReviewUsageConfirm === ATTEMPT`.
+ * Wire the dialog / popup / download observers, run the single bound click (`clickFn` — the ONE
+ * `.click(` lives in the CALLER's thunk, so each adapter owns exactly one), then poll the post-confirm
+ * structure read-only for the bounded window and collapse it into one sanitized observation. Shared by
+ * `confirmReviewUsageOnce` and `confirmReviewUsageByIndexOnce` so the post-click logic has one source.
  */
-export async function confirmReviewUsageOnce(
+async function observeBoundConfirmClick(
   page: ConfirmPage,
   ctx: ConfirmContext,
   deps: ConfirmDeps,
-): Promise<ReviewUsageConfirmResult> {
+  clickFn: () => Promise<void>,
+): Promise<PostConfirmObservation> {
   const { observeWindowMs, pollIntervalMs, salt, settleFn, sleepFn = defaultSleep } = deps;
 
-  // 1) Re-confirm the FOREGROUND modal is still the review-usage consent — never confirm anything else.
-  let preHtml = "";
-  try {
-    preHtml = await page.content();
-  } catch {
-    return haltResult("CONFIRM_READ_FAILED");
-  }
-  if (classifyModalCategory(preHtml) !== "review_usage_confirmation") {
-    return haltResult("CONFIRM_NOT_CONSENT");
-  }
-
-  // 2) Bind exactly one modal-scoped affirmative control, or halt without clicking.
-  let bind: ConfirmBind;
-  try {
-    bind = await bindAffirmative(page);
-  } catch {
-    return haltResult("CONFIRM_READ_FAILED");
-  }
-  if (bind !== "BOUND") return haltResult(bind);
-
-  // 3) Observers set up BEFORE the click (the export-click observers are already released).
+  // Observers set up BEFORE the click (the export-click observers are already released).
   let dialog: DialogRecord | undefined;
   page.on("dialog", (d: ConfirmDialog): void => {
     const type = d.type();
@@ -488,16 +535,16 @@ export async function confirmReviewUsageOnce(
     })
     .catch(() => undefined);
 
-  // 4) The single 확인 click — exactly once, no fallback, no retry.
+  // The single bound click — exactly once, no fallback, no retry (the literal click is in clickFn).
   let clicked = false;
   try {
-    await page.locator(`[${STAMP_ATTR}="0"]`).click({ timeout: CONFIRM_CLICK_TIMEOUT_MS });
+    await clickFn();
     clicked = true;
   } catch {
     // The bound control did not resolve to an actionable click; we still observe.
   }
 
-  // 5) Slow, repeated read of the post-confirm structure for the bounded window.
+  // Slow, repeated read of the post-confirm structure for the bounded window.
   let post = emptyPostClick();
   let lastModalCategory: ModalCategory | null = "review_usage_confirmation";
   let checks = 0;
@@ -524,8 +571,8 @@ export async function confirmReviewUsageOnce(
   }
   await downloadPromise; // ensure the download wait has settled before returning
 
-  // 6) Derive the single outcome. The consent modal is "gone" if the latest read is not consent;
-  //    a NEW non-consent modal is the actionable follow-up.
+  // The consent modal is "gone" if the latest read is not consent; a NEW non-consent modal is the
+  // actionable follow-up.
   const modalDisappeared = lastModalCategory !== "review_usage_confirmation";
   const followUpModalCategory =
     lastModalCategory !== null && lastModalCategory !== "review_usage_confirmation" ? lastModalCategory : null;
@@ -537,23 +584,8 @@ export async function confirmReviewUsageOnce(
     asyncJobMarkerPresent: post.asyncJobMarkerPresent,
   });
 
-  log("confirm.review-usage", {
-    bind,
-    clicked: clicked ? 1 : 0,
-    checks,
-    confirmOutcome,
-    modalDisappeared,
-    followUpModalCategory: followUpModalCategory ?? "none",
-    downloadFired,
-    asyncJobMarkerPresent: post.asyncJobMarkerPresent,
-    popupOpened,
-    dialogType: dialog?.type ?? "none",
-  });
-
   return {
-    confirmBind: bind,
-    confirmClicked: clicked,
-    confirmClickedCount: clicked ? 1 : 0,
+    clicked,
     confirmOutcome,
     modalDisappeared,
     followUpModalCategory,
@@ -564,6 +596,194 @@ export async function confirmReviewUsageOnce(
     postConfirmPopupOpened: popupOpened,
     postConfirmChecks: checks,
     download,
-    detail: `confirm: clicked=${clicked ? 1 : 0} outcome=${confirmOutcome}`,
+  };
+}
+
+/**
+ * Live: re-confirm the consent modal, bind its single affirmative `확인`, click it ONCE, then observe
+ * (sanitized) whether a download / follow-up modal / dialog / toast / popup results. A closed/detached
+ * page returns a sanitized `CONFIRM_READ_FAILED` halt — never an uncaught exception. The caller must
+ * already have `decideReviewUsageConfirm === ATTEMPT`.
+ */
+export async function confirmReviewUsageOnce(
+  page: ConfirmPage,
+  ctx: ConfirmContext,
+  deps: ConfirmDeps,
+): Promise<ReviewUsageConfirmResult> {
+  const { observeWindowMs, pollIntervalMs, salt, settleFn, sleepFn = defaultSleep } = deps;
+
+  // 1) Re-confirm the FOREGROUND modal is still the review-usage consent — never confirm anything else.
+  let preHtml = "";
+  try {
+    preHtml = await page.content();
+  } catch {
+    return haltResult("CONFIRM_READ_FAILED");
+  }
+  if (classifyModalCategory(preHtml) !== "review_usage_confirmation") {
+    return haltResult("CONFIRM_NOT_CONSENT");
+  }
+
+  // 2) Bind exactly one modal-scoped affirmative control, or halt without clicking.
+  let bind: ConfirmBind;
+  try {
+    bind = await bindAffirmative(page);
+  } catch {
+    return haltResult("CONFIRM_READ_FAILED");
+  }
+  if (bind !== "BOUND") return haltResult(bind);
+
+  // 3) Observe a single bound 확인 click (observers wired BEFORE the click; exactly once, no retry).
+  const obs = await observeBoundConfirmClick(page, ctx, deps, () =>
+    page.locator(`[${STAMP_ATTR}="0"]`).click({ timeout: CONFIRM_CLICK_TIMEOUT_MS }),
+  );
+
+  log("confirm.review-usage", {
+    bind,
+    clicked: obs.clicked ? 1 : 0,
+    checks: obs.postConfirmChecks,
+    confirmOutcome: obs.confirmOutcome,
+    modalDisappeared: obs.modalDisappeared,
+    followUpModalCategory: obs.followUpModalCategory ?? "none",
+    downloadFired: obs.postConfirmDownloadFired,
+    asyncJobMarkerPresent: obs.postConfirmAsyncJob,
+    popupOpened: obs.postConfirmPopupOpened,
+    dialogCategory: obs.postConfirmDialogCategory,
+  });
+
+  return {
+    confirmBind: bind,
+    confirmClicked: obs.clicked,
+    confirmClickedCount: obs.clicked ? 1 : 0,
+    confirmOutcome: obs.confirmOutcome,
+    modalDisappeared: obs.modalDisappeared,
+    followUpModalCategory: obs.followUpModalCategory,
+    postConfirmDownloadFired: obs.postConfirmDownloadFired,
+    postConfirmAsyncJob: obs.postConfirmAsyncJob,
+    postConfirmToastPresent: obs.postConfirmToastPresent,
+    postConfirmDialogCategory: obs.postConfirmDialogCategory,
+    postConfirmPopupOpened: obs.postConfirmPopupOpened,
+    postConfirmChecks: obs.postConfirmChecks,
+    download: obs.download,
+    detail: `confirm: clicked=${obs.clicked ? 1 : 0} outcome=${obs.confirmOutcome}`,
+  };
+}
+
+/** A no-click approved-index result (skip / reject / read failure) — inert observation defaults. */
+function indexHaltResult(
+  approvedIndex: number,
+  decision: ApprovedIndexDecision,
+  bind: ApprovedIndexBind,
+): ReviewUsageConfirmIndexResult {
+  return {
+    approvedIndex,
+    approvedIndexDecision: decision,
+    approvedIndexBind: bind,
+    approvedIndexClicked: false,
+    approvedIndexClickedCount: 0,
+    confirmOutcome: "NO_CHANGE",
+    modalDisappeared: false,
+    followUpModalCategory: null,
+    postConfirmDownloadFired: false,
+    postConfirmAsyncJob: false,
+    postConfirmToastPresent: false,
+    postConfirmDialogCategory: "none",
+    postConfirmPopupOpened: false,
+    postConfirmChecks: 0,
+    detail: `confirm-index ${approvedIndex}: decision=${decision} bind=${bind}; no click`,
+  };
+}
+
+/** Map a metadata-validation bind verdict to the corresponding REJECT_* decision. */
+function rejectDecisionFor(bind: ApprovedIndexBind): ApprovedIndexDecision {
+  switch (bind) {
+    case "INDEX_NOT_FOUND":
+      return "REJECT_MISSING";
+    case "INDEX_NOT_AFFIRMATIVE":
+      return "REJECT_NOT_AFFIRMATIVE";
+    case "INDEX_NOT_VISIBLE":
+      return "REJECT_NOT_VISIBLE";
+    case "INDEX_DISABLED":
+      return "REJECT_DISABLED";
+    default:
+      return "ATTEMPT";
+  }
+}
+
+/**
+ * Live: click EXACTLY the operator-approved candidate index in the review-usage consent modal, ONCE.
+ *
+ * Re-runs the no-click candidate scan (single source of index numbering + the `data-sellerops-cand-index`
+ * stamp), re-validates that the requested index is still an affirmative / visible / enabled control
+ * THIS run (so a stale approval from an earlier run cannot click the wrong button), binds the single
+ * `[data-sellerops-cand-index="N"]` locator with a `count() === 1` guard, clicks once, and observes. Any
+ * miss → a sanitized halt with no click. Caller must already have `decideApprovedIndexConfirm === ATTEMPT`.
+ */
+export async function confirmReviewUsageByIndexOnce(
+  page: ConfirmPage,
+  ctx: ConfirmContext,
+  deps: ConfirmDeps,
+  approvedIndex: number,
+): Promise<ReviewUsageConfirmIndexResult> {
+  // 1) Rescan: reuses the candidate scan's consent re-check, read-failure handling, and — critically —
+  //    its exact index numbering + `data-sellerops-cand-index` stamp (the bind bridge).
+  const scan = await scanReviewUsageConfirmCandidates(page);
+  if (scan.candidateScan === "CONFIRM_READ_FAILED") {
+    return indexHaltResult(approvedIndex, "ATTEMPT", "CONFIRM_READ_FAILED");
+  }
+  if (scan.candidateScan === "CONFIRM_NOT_CONSENT") {
+    return indexHaltResult(approvedIndex, "SKIP_NOT_CONSENT", "CONFIRM_NOT_CONSENT");
+  }
+
+  // 2) Validate the requested index against the (sanitized) candidate metadata — affirmative+visible+enabled.
+  const metaBind = decideApprovedIndexBind({ candidates: scan.candidates, requestedIndex: approvedIndex });
+  if (metaBind !== "BOUND") {
+    return indexHaltResult(approvedIndex, rejectDecisionFor(metaBind), metaBind);
+  }
+
+  // 3) Bind the single stamped control for the approved index; require exactly one match (else halt).
+  let resolved: number;
+  try {
+    resolved = await page.locator(`[${CAND_INDEX_ATTR}="${approvedIndex}"]`).count();
+  } catch {
+    return indexHaltResult(approvedIndex, "ATTEMPT", "CONFIRM_READ_FAILED");
+  }
+  if (resolved === 0) return indexHaltResult(approvedIndex, "ATTEMPT", "INDEX_NOT_FOUND");
+  if (resolved > 1) return indexHaltResult(approvedIndex, "ATTEMPT", "INDEX_NOT_UNIQUE");
+
+  // 4) Observe a single bound click on EXACTLY the approved index (the one `.click(` is in the thunk).
+  const obs = await observeBoundConfirmClick(page, ctx, deps, () =>
+    page.locator(`[${CAND_INDEX_ATTR}="${approvedIndex}"]`).click({ timeout: CONFIRM_CLICK_TIMEOUT_MS }),
+  );
+
+  log("confirm.review-usage-index", {
+    approvedIndex,
+    clicked: obs.clicked ? 1 : 0,
+    checks: obs.postConfirmChecks,
+    confirmOutcome: obs.confirmOutcome,
+    modalDisappeared: obs.modalDisappeared,
+    followUpModalCategory: obs.followUpModalCategory ?? "none",
+    downloadFired: obs.postConfirmDownloadFired,
+    asyncJobMarkerPresent: obs.postConfirmAsyncJob,
+    popupOpened: obs.postConfirmPopupOpened,
+    dialogCategory: obs.postConfirmDialogCategory,
+  });
+
+  return {
+    approvedIndex,
+    approvedIndexDecision: "ATTEMPT",
+    approvedIndexBind: "BOUND",
+    approvedIndexClicked: obs.clicked,
+    approvedIndexClickedCount: obs.clicked ? 1 : 0,
+    confirmOutcome: obs.confirmOutcome,
+    modalDisappeared: obs.modalDisappeared,
+    followUpModalCategory: obs.followUpModalCategory,
+    postConfirmDownloadFired: obs.postConfirmDownloadFired,
+    postConfirmAsyncJob: obs.postConfirmAsyncJob,
+    postConfirmToastPresent: obs.postConfirmToastPresent,
+    postConfirmDialogCategory: obs.postConfirmDialogCategory,
+    postConfirmPopupOpened: obs.postConfirmPopupOpened,
+    postConfirmChecks: obs.postConfirmChecks,
+    download: obs.download,
+    detail: `confirm-index ${approvedIndex}: clicked=${obs.clicked ? 1 : 0} outcome=${obs.confirmOutcome}`,
   };
 }

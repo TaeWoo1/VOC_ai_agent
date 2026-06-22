@@ -3,8 +3,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  confirmReviewUsageByIndexOnce,
   confirmReviewUsageOnce,
   REVIEW_USAGE_CANDIDATES_KEYS,
+  REVIEW_USAGE_CONFIRM_INDEX_KEYS,
   REVIEW_USAGE_CONFIRM_KEYS,
   scanReviewUsageConfirmCandidates,
   type ConfirmContext,
@@ -338,13 +340,134 @@ describe("scanReviewUsageConfirmCandidates — NO-CLICK candidate-index diagnost
   });
 });
 
+describe("confirmReviewUsageByIndexOnce — clicks EXACTLY the operator-approved index, observe-only", () => {
+  /** The live scan shape: index 0/1 cancel, index 2 affirmative — all visible/enabled. */
+  const CANDS = {
+    candidates: [
+      { index: 0, kind: "cancel", visible: true, enabled: true, textLength: 2 },
+      { index: 1, kind: "cancel", visible: true, enabled: true, textLength: 2 },
+      { index: 2, kind: "affirmative", visible: true, enabled: true, textLength: 2 },
+    ],
+  };
+
+  it("ATTEMPT/BOUND: the approved affirmative index → clicks once and observes DOWNLOAD", async () => {
+    const { page, ctx, counts } = makeFakes({
+      contentSeq: [CONSENT_HTML, DISMISSED_HTML],
+      scanCount: 1,
+      candidatesReturn: CANDS,
+      locatorCount: 1,
+      downloadName: "리뷰_행복마켓_20260622.xlsx",
+    });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 2);
+    expect(r.approvedIndex).toBe(2);
+    expect(r.approvedIndexDecision).toBe("ATTEMPT");
+    expect(r.approvedIndexBind).toBe("BOUND");
+    expect(r.approvedIndexClicked).toBe(true);
+    expect(r.approvedIndexClickedCount).toBe(1);
+    expect(counts.click).toBe(1); // EXACTLY ONE click
+    expect(r.confirmOutcome).toBe("DOWNLOAD");
+    expect(r.download?.extensionCategory).toBe("xlsx");
+    expect(r.download?.filenameHash).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it("REJECT_NOT_AFFIRMATIVE: a cancel index (0/1) → no click", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: CANDS });
+    const r0 = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 0);
+    expect(r0.approvedIndexDecision).toBe("REJECT_NOT_AFFIRMATIVE");
+    expect(r0.approvedIndexBind).toBe("INDEX_NOT_AFFIRMATIVE");
+    expect(r0.approvedIndexClicked).toBe(false);
+    expect(counts.click).toBe(0);
+  });
+
+  it("REJECT_MISSING: an out-of-range index → no click", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: CANDS });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 9);
+    expect(r.approvedIndexDecision).toBe("REJECT_MISSING");
+    expect(r.approvedIndexBind).toBe("INDEX_NOT_FOUND");
+    expect(counts.click).toBe(0);
+  });
+
+  it("REJECT_NOT_VISIBLE: an invisible affirmative index → no click", async () => {
+    const cands = { candidates: [{ index: 0, kind: "affirmative", visible: false, enabled: true, textLength: 2 }] };
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: cands });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 0);
+    expect(r.approvedIndexDecision).toBe("REJECT_NOT_VISIBLE");
+    expect(r.approvedIndexBind).toBe("INDEX_NOT_VISIBLE");
+    expect(counts.click).toBe(0);
+  });
+
+  it("REJECT_DISABLED: a disabled affirmative index → no click", async () => {
+    const cands = { candidates: [{ index: 0, kind: "affirmative", visible: true, enabled: false, textLength: 2 }] };
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, candidatesReturn: cands });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 0);
+    expect(r.approvedIndexDecision).toBe("REJECT_DISABLED");
+    expect(r.approvedIndexBind).toBe("INDEX_DISABLED");
+    expect(counts.click).toBe(0);
+  });
+
+  it("SKIP_NOT_CONSENT: a non-consent foreground modal → no scan/click", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [DISMISSED_HTML], scanCount: 0 });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 2);
+    expect(r.approvedIndexDecision).toBe("SKIP_NOT_CONSENT");
+    expect(r.approvedIndexBind).toBe("CONFIRM_NOT_CONSENT");
+    expect(counts.evaluate).toBe(0); // the scan never evaluates a non-consent modal
+    expect(counts.click).toBe(0);
+  });
+
+  it("CONFIRM_READ_FAILED: a closed page during the rescan → no click, no throw", async () => {
+    const { page, ctx, counts } = makeFakes({ contentSeq: [CONSENT_HTML], scanCount: 1, contentThrows: true });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 2);
+    expect(r.approvedIndexBind).toBe("CONFIRM_READ_FAILED");
+    expect(r.approvedIndexClicked).toBe(false);
+    expect(counts.click).toBe(0);
+  });
+
+  it("INDEX_NOT_UNIQUE: valid metadata but the stamped locator resolves to ≠1 → no click", async () => {
+    const { page, ctx, counts } = makeFakes({
+      contentSeq: [CONSENT_HTML],
+      scanCount: 1,
+      candidatesReturn: CANDS,
+      locatorCount: 2,
+    });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 2);
+    expect(r.approvedIndexDecision).toBe("ATTEMPT"); // metadata validated, but the live bind wasn't unique
+    expect(r.approvedIndexBind).toBe("INDEX_NOT_UNIQUE");
+    expect(r.approvedIndexClicked).toBe(false);
+    expect(counts.click).toBe(0);
+  });
+
+  it("no raw leak; output keys allow-listed", async () => {
+    const piiCands = { candidates: [{ index: 0, kind: "affirmative", visible: true, enabled: true, textLength: 12 }] };
+    const { page, ctx } = makeFakes({
+      contentSeq: [PII_CONSENT, PII_CONSENT],
+      scanCount: 1,
+      candidatesReturn: piiCands,
+      locatorCount: 1,
+      downloadName: "행복마켓_1234567_리뷰.xlsx",
+      dialog: { type: "confirm", message: "행복마켓 Commerce ID 1234567" },
+    });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 0);
+    const json = JSON.stringify(r);
+    expect(json.includes("행복마켓")).toBe(false);
+    expect(json.includes("1234567")).toBe(false);
+    expect(json.includes(".xlsx")).toBe(false); // extension is a CATEGORY, not the raw name
+    expect(/https?:\/\//.test(json)).toBe(false);
+    expect(/[<>]/.test(json)).toBe(false);
+    for (const k of Object.keys(r)) {
+      expect((REVIEW_USAGE_CONFIRM_INDEX_KEYS as readonly string[]).includes(k)).toBe(true);
+    }
+  });
+});
+
 describe("review-usage-confirm.ts — strict action-adapter source guard", () => {
   const raw = readFileSync(SRC_PATH, "utf8");
   // Strip block + line comments so the guard checks executable source, not prose.
   const code = raw.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-  it("performs EXACTLY ONE click (no fallback, no retry)", () => {
-    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(1);
+  it("performs EXACTLY TWO clicks (one per confirm adapter — single-affirmative + approved-index)", () => {
+    // One `.click(` in confirmReviewUsageOnce's thunk, one in confirmReviewUsageByIndexOnce's thunk;
+    // the candidate scan stays click-free. The shared observe helper calls the thunk, adding none.
+    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(2);
   });
 
   it("allows ONLY read-only DOM access + the download observe", () => {
@@ -419,5 +542,19 @@ describe("review-usage-confirm.ts — strict action-adapter source guard", () =>
     expect(end).toBeGreaterThan(start);
     const body = code.slice(start, end);
     expect(/\.click\s*\(/.test(body)).toBe(false);
+  });
+
+  it("the approved-index body binds via the cand-index stamp with a count() guard BEFORE its click", () => {
+    const start = code.indexOf("async function confirmReviewUsageByIndexOnce");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const body = code.slice(start);
+    // binds the operator-approved index via the SAME stamp the scan writes (never a global selector)…
+    expect(/CAND_INDEX_ATTR/.test(body)).toBe(true);
+    expect(/document\.querySelectorAll/.test(body)).toBe(false);
+    // …and the single click is preceded by a count() uniqueness guard.
+    const countIdx = body.indexOf(".count(");
+    const clickIdx = body.indexOf(".click(");
+    expect(countIdx).toBeGreaterThanOrEqual(0);
+    expect(clickIdx).toBeGreaterThan(countIdx);
   });
 });
