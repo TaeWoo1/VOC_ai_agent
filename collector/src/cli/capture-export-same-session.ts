@@ -47,9 +47,11 @@ import {
   decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
   decideSaveReviewDownload,
+  decideStatusSignalsAfterUpload,
   decideSupervisedExportReady,
   decideUploadSavedReviewDownload,
   diagnosePreClickSignals,
+  statusDetailAfterUpload,
   parseApprovedIndexArg,
   type PreClickSignals,
 } from "../naver/export-click-signals";
@@ -79,7 +81,7 @@ import { checkLiveSessionVerdict } from "../naver/session-check";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { runExport } from "../naver/review-export";
 import { launchNaverContext, type PwPage } from "../profile";
-import { decideState, writeStatus, type RunSignals } from "../status";
+import { decideState, writeStatus, type CollectorState, type RunSignals } from "../status";
 import { login, resolveChannelId, uploadReviewFile, UploadError } from "../upload";
 import { waitForCaptureStartState } from "./capture-start-state";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
@@ -437,6 +439,11 @@ async function main(): Promise<void> {
     // unless --diagnose-save-review-download is also set (you can only upload what was saved). Honestly
     // reported: emits upload/backendIngested (never dbMutated:false), writes no collector status.
     const diagnoseUpload = diagnoseSaveDownload && args.includes("--diagnose-upload-saved-review-download");
+    // PR B: after the real upload, advance collector run-state via the EXISTING decideState/writeStatus
+    // (no new states). Inert unless --diagnose-upload-saved-review-download is also set — you can only
+    // write an upload outcome once an upload ran. This is the FIRST diagnostic path that writes
+    // .status/naver.json; gated so the first status write is separately approved.
+    const diagnoseWriteStatus = diagnoseUpload && args.includes("--diagnose-write-status-after-upload");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -625,6 +632,37 @@ async function main(): Promise<void> {
         const uploadAttempted = uploadReason === "UPLOADED" || uploadReason === "UPLOAD_FAILED";
         const backendIngested = uploadReason === "UPLOADED";
 
+        // PR B: ONLY when --diagnose-write-status-after-upload is set, advance collector run-state via the
+        // EXISTING decideState/writeStatus (no new states). This is the only writeStatus in the supervised-
+        // fast branch and it lives entirely inside this gate. lastCollectedAt is set ONLY on LAST_SUCCESS
+        // (upload-success time via the same now() the real path uses); detail is SANITIZED (buckets only).
+        let collectorStatusWritten = false;
+        let writtenState: CollectorState | undefined;
+        let statusDetail: string | undefined;
+        if (diagnoseWriteStatus) {
+          const statusSignals = decideStatusSignalsAfterUpload({
+            downloadFired: approvedIndexResult?.postConfirmDownloadFired ?? false,
+            downloadSaved: savedDownload?.downloadSaved ?? false,
+            xlsxReadable: savedDownload?.xlsxReadable ?? false,
+            uploadReason,
+            ingestStatusCategory: savedDownload?.uploaded?.ingestStatusCategory,
+          });
+          writtenState = decideState({
+            paired: true,
+            session: "LOGGED_IN",
+            exportOutcome: statusSignals.exportOutcome,
+            uploadOutcome: statusSignals.uploadOutcome,
+          });
+          statusDetail = statusDetailAfterUpload({ downloadSaveReason, uploadReason, uploaded: savedDownload?.uploaded });
+          writeStatus(cfg.statusFile, {
+            state: writtenState,
+            detail: statusDetail,
+            lastCollectedAt: writtenState === "LAST_SUCCESS" ? now() : undefined,
+            updatedAt: now(),
+          });
+          collectorStatusWritten = true;
+        }
+
         // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
         // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
         let candidates: ReviewUsageCandidatesResult | undefined;
@@ -666,14 +704,18 @@ async function main(): Promise<void> {
             downloadSaveReason,
             uploadRequested: diagnoseUpload,
             // The upload path is HONEST about backend DB ingestion: it emits `upload`/`backendIngested`
-            // and NEVER `dbMutated:false`. The save-only path keeps the original observe/save invariants.
+            // and NEVER `dbMutated:false`. With --diagnose-write-status-after-upload it ALSO writes the
+            // mapped collector run-state, so `collectorStatusWritten`/`lastSuccessWritten` are honest
+            // (true only when the status was actually written / the written state is LAST_SUCCESS).
             ...(diagnoseUpload
               ? {
                   upload: uploadAttempted,
                   uploadReason,
                   backendIngested,
-                  collectorStatusWritten: false,
-                  lastSuccessWritten: false,
+                  diagnoseWriteStatusAfterUpload: diagnoseWriteStatus,
+                  collectorStatusWritten,
+                  ...(collectorStatusWritten ? { writtenState, statusDetail } : {}),
+                  lastSuccessWritten: writtenState === "LAST_SUCCESS",
                 }
               : diagnoseSaveDownload
                 ? { upload: false, statusWritten: false, dbMutated: false, lastSuccessWritten: false }
@@ -692,6 +734,8 @@ async function main(): Promise<void> {
           approvedIndexDecision: finalApprovedIndexDecision,
           downloadSaveReason,
           uploadReason,
+          collectorStatusWritten,
+          writtenState: writtenState ?? "none",
           candidateScan: candidates?.candidateScan ?? "none",
           confirmDecision,
           confirmOutcome: confirm?.confirmOutcome ?? approvedIndexResult?.confirmOutcome ?? "none",

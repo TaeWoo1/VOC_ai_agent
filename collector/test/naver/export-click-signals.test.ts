@@ -6,7 +6,9 @@ import {
   decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
   decideSaveReviewDownload,
+  decideStatusSignalsAfterUpload,
   decideUploadSavedReviewDownload,
+  statusDetailAfterUpload,
   decideSupervisedExportReady,
   deriveConfirmOutcome,
   deriveExportClickOutcome,
@@ -26,6 +28,7 @@ import {
   type PreClickSignals,
 } from "../../src/naver/export-click-signals";
 import { evaluateExportTargetReadiness } from "../../src/naver/export-target-readiness";
+import { decideState } from "../../src/status";
 
 /** A realistic single-control sync export surface (one visible enabled Excel button). */
 const SYNC_HTML = `<main><button id="exp">엑셀 다운로드</button>
@@ -546,6 +549,81 @@ describe("decideUploadSavedReviewDownload — upload only when requested + saved
   });
   it("UPLOAD_FAILED when the backend did not accept the ingest", () => {
     expect(decideUploadSavedReviewDownload({ ...base, uploadSucceeded: false })).toBe("UPLOAD_FAILED");
+  });
+});
+
+describe("decideStatusSignalsAfterUpload — map the diagnostic upload onto decideState (PR B)", () => {
+  const cap = { downloadFired: true, downloadSaved: true, xlsxReadable: true } as const;
+  const ld = { paired: true as const, session: "LOGGED_IN" as const };
+
+  it("download not fired/saved/readable → DOWNLOAD_FAILED, NOT_ATTEMPTED → state DOWNLOAD_FAILED", () => {
+    for (const bad of [
+      { ...cap, downloadFired: false },
+      { ...cap, downloadSaved: false },
+      { ...cap, xlsxReadable: false },
+    ]) {
+      const s = decideStatusSignalsAfterUpload({ ...bad, uploadReason: "UPLOADED", ingestStatusCategory: "COMPLETED" });
+      expect(s).toEqual({ exportOutcome: "DOWNLOAD_FAILED", uploadOutcome: "NOT_ATTEMPTED" });
+      expect(decideState({ ...ld, ...s })).toBe("DOWNLOAD_FAILED");
+    }
+  });
+
+  it("UPLOADED + COMPLETED → CAPTURED, OK → LAST_SUCCESS", () => {
+    const s = decideStatusSignalsAfterUpload({ ...cap, uploadReason: "UPLOADED", ingestStatusCategory: "COMPLETED" });
+    expect(s).toEqual({ exportOutcome: "CAPTURED", uploadOutcome: "OK" });
+    expect(decideState({ ...ld, ...s })).toBe("LAST_SUCCESS");
+  });
+
+  it("UPLOADED + PARTIAL → CAPTURED, OK → LAST_SUCCESS (success-with-warnings)", () => {
+    const s = decideStatusSignalsAfterUpload({ ...cap, uploadReason: "UPLOADED", ingestStatusCategory: "PARTIAL" });
+    expect(s).toEqual({ exportOutcome: "CAPTURED", uploadOutcome: "OK" });
+    expect(decideState({ ...ld, ...s })).toBe("LAST_SUCCESS");
+  });
+
+  it("UPLOADED + FAILED or UNKNOWN → CAPTURED, FAILED → UPLOAD_FAILED", () => {
+    for (const cat of ["FAILED", "UNKNOWN"] as const) {
+      const s = decideStatusSignalsAfterUpload({ ...cap, uploadReason: "UPLOADED", ingestStatusCategory: cat });
+      expect(s).toEqual({ exportOutcome: "CAPTURED", uploadOutcome: "FAILED" });
+      expect(decideState({ ...ld, ...s })).toBe("UPLOAD_FAILED");
+    }
+  });
+
+  it("UPLOAD_FAILED (backend unavailable/threw) → CAPTURED, FAILED → UPLOAD_FAILED", () => {
+    const s = decideStatusSignalsAfterUpload({ ...cap, uploadReason: "UPLOAD_FAILED" });
+    expect(s).toEqual({ exportOutcome: "CAPTURED", uploadOutcome: "FAILED" });
+    expect(decideState({ ...ld, ...s })).toBe("UPLOAD_FAILED");
+  });
+});
+
+describe("statusDetailAfterUpload — sanitized buckets/categories only, never raw data", () => {
+  const inspection = {
+    uploaded: true as const,
+    ingestStatusCategory: "PARTIAL" as const,
+    syncJobIdHash: "deadbeefdeadbeef",
+    totalRowsBucket: "tens" as const,
+    successRowsBucket: "tens" as const,
+    skippedRowsBucket: "few" as const,
+    failedRowsBucket: "few" as const,
+    hasErrorMessage: true,
+    sampleErrorPresent: true,
+  };
+
+  it("UPLOADED → buckets + ingest category, never exact counts / syncJobId / filename", () => {
+    const d = statusDetailAfterUpload({ downloadSaveReason: "SAVED", uploadReason: "UPLOADED", uploaded: inspection });
+    expect(d).toBe("upload UPLOADED PARTIAL total=tens success=tens skipped=few failed=few");
+    expect(/\d/.test(d)).toBe(false); // no exact counts
+    expect(d.includes("deadbeef")).toBe(false); // no syncJobIdHash
+    expect(d.includes(".xlsx")).toBe(false); // no filename
+  });
+
+  it("UPLOAD_FAILED → bare category, no backend error body", () => {
+    expect(statusDetailAfterUpload({ downloadSaveReason: "SAVED", uploadReason: "UPLOAD_FAILED" })).toBe("upload UPLOAD_FAILED");
+  });
+
+  it("not a validated capture → reflects the save reason only", () => {
+    expect(statusDetailAfterUpload({ downloadSaveReason: "SAVE_FAILED", uploadReason: "NOT_READABLE" })).toBe(
+      "download not validated: SAVE_FAILED",
+    );
   });
 });
 
