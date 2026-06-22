@@ -30,6 +30,10 @@ public class SyncJob extends BaseEntity {
     @Column(name = "data_type")
     private String dataType;
 
+    /** How the run collected data: API / SELLER_CENTER_EXPORT / MANUAL_UPLOAD (null on legacy rows). */
+    @Column(name = "method")
+    private String method;
+
     /** How the run was triggered: UPLOAD / SCHEDULED / MANUAL / RETRY. Defaults to UPLOAD. */
     @Column(name = "\"trigger\"", nullable = false)
     private String trigger = "UPLOAD";
