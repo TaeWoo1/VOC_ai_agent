@@ -32,7 +32,7 @@
  * LIVE-ONLY — refuses to act without the explicit per-run approval flag.
  */
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 import { loadConfig, type CollectorConfig } from "../config";
 import { log } from "../log";
@@ -46,6 +46,7 @@ import { planExportAction } from "../naver/export-classify";
 import {
   decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
+  decideSaveReviewDownload,
   decideSupervisedExportReady,
   diagnosePreClickSignals,
   parseApprovedIndexArg,
@@ -56,11 +57,13 @@ import {
   confirmReviewUsageOnce,
   scanReviewUsageConfirmCandidates,
   type ConfirmContext,
+  type ConfirmDownload,
   type ConfirmPage,
   type ReviewUsageCandidatesResult,
   type ReviewUsageConfirmIndexResult,
   type ReviewUsageConfirmResult,
 } from "../naver/review-usage-confirm";
+import { saveAndInspectDownload } from "../naver/review-download-save";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
 import {
   waitForExportTargetReadinessStable,
@@ -423,6 +426,10 @@ async function main(): Promise<void> {
     // it takes precedence over the confirm-click step (which is suppressed). Suppressed in index mode.
     const diagnoseConfirmCandidates =
       diagnoseClick && args.includes("--diagnose-review-usage-confirm-candidates") && !approvedIndexRequested;
+    // CONTROLLED DIAGNOSTIC SAVE: after an approved-index click fires a real download, save it to a
+    // gitignored quarantine, validate it is a real .xlsx, then DELETE it. Never uploads/persists/writes
+    // status. Active only in the approved-index path (the save hook is wired only there).
+    const diagnoseSaveDownload = diagnoseClick && args.includes("--diagnose-save-review-download");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -557,6 +564,17 @@ async function main(): Promise<void> {
               pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
               salt: cfg.storageProbeSalt,
               settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+              // Controlled diagnostic save (only with --diagnose-save-review-download): a fired download
+              // is saved to a gitignored quarantine, validated, then DELETED — never uploaded/persisted.
+              ...(diagnoseSaveDownload
+                ? {
+                    saveDownloadFn: (d: ConfirmDownload) =>
+                      saveAndInspectDownload(d, {
+                        dir: join(cfg.downloadDir, "diagnostic"),
+                        salt: cfg.storageProbeSalt,
+                      }),
+                  }
+                : {}),
             },
             approvedIndex,
           );
@@ -564,6 +582,13 @@ async function main(): Promise<void> {
         // The emitted decision is the adapter's refined verdict (ATTEMPT → REJECT_* on a live mismatch)
         // when it ran, else the pure pre-scan gate.
         const finalApprovedIndexDecision = approvedIndexResult?.approvedIndexDecision ?? approvedIndexDecision;
+        // Sanitized reason for the diagnostic-save step (and the invariant assertions it upholds).
+        const downloadSaveReason = decideSaveReviewDownload({
+          saveRequested: diagnoseSaveDownload,
+          approvedIndexClicked: approvedIndexResult?.approvedIndexClicked ?? false,
+          downloadFired: approvedIndexResult?.postConfirmDownloadFired ?? false,
+          saveSucceeded: approvedIndexResult?.savedDownload?.downloadSaved ?? false,
+        });
 
         // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
         // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
@@ -602,6 +627,11 @@ async function main(): Promise<void> {
             approvedIndex: approvedIndexRequested ? approvedIndex : null,
             approvedIndexDecision: finalApprovedIndexDecision,
             ...(approvedIndexResult ?? {}),
+            downloadSaveRequested: diagnoseSaveDownload,
+            downloadSaveReason,
+            ...(diagnoseSaveDownload
+              ? { upload: false, statusWritten: false, dbMutated: false, lastSuccessWritten: false }
+              : {}),
             candidatesRequested: diagnoseConfirmCandidates,
             ...(candidates ?? {}),
             confirmRequested: diagnoseConfirm,
@@ -614,6 +644,7 @@ async function main(): Promise<void> {
           clicked: diagnosis.clickedCount,
           readinessMode: "supervised-fast",
           approvedIndexDecision: finalApprovedIndexDecision,
+          downloadSaveReason,
           candidateScan: candidates?.candidateScan ?? "none",
           confirmDecision,
           confirmOutcome: confirm?.confirmOutcome ?? approvedIndexResult?.confirmOutcome ?? "none",
