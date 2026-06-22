@@ -32,6 +32,19 @@ const bodies = functionBodies(code);
 const captureFn = bodies.captureAndUpload ?? "";
 const mainFn = bodies.main ?? "";
 
+/**
+ * Honest source guard for PR B: every `writeStatus(` in the supervised-fast branch must sit INSIDE
+ * the `--diagnose-write-status-after-upload` gate (never hidden behind a wrapper). With no gate
+ * present, the branch must contain NO `writeStatus(` at all. So a status write is reachable only via
+ * the explicit flag — confirming the confirm/candidate/index/save/upload-only modes write none.
+ */
+function writeStatusOnlyGated(branch: string): boolean {
+  const calls = [...branch.matchAll(/writeStatus\s*\(/g)];
+  const gate = branch.indexOf("if (diagnoseWriteStatus)");
+  if (gate < 0) return calls.length === 0;
+  return calls.length === 1 && (calls[0]?.index ?? -1) > gate;
+}
+
 describe("capture-export-same-session — capture is confined behind the gate", () => {
   it("exposes the split functions (gate in main, click/upload in captureAndUpload)", () => {
     expect(bodies.captureAndUpload, "captureAndUpload must exist").toBeTruthy();
@@ -269,7 +282,9 @@ describe("capture-export-same-session — diagnose-export-click clicks once but 
     const branch = mainFn.slice(diagIdx, realGate);
     expect(diagIdx).toBeGreaterThanOrEqual(0);
     expect(realGate).toBeGreaterThan(dispatchIdx);
-    expect(/writeStatus/.test(branch)).toBe(false);
+    // PR B: the diagnose branch's ONLY writeStatus is gated behind --diagnose-write-status-after-upload
+    // (never the plain diagnose path); upload/capture are still never named here.
+    expect(writeStatusOnlyGated(branch)).toBe(true);
     expect(/uploadReviewFile/.test(branch)).toBe(false);
     expect(/captureAndUpload\(/.test(branch)).toBe(false);
     // Output is a sanitized stdout report (mode tag), not a status record.
@@ -297,7 +312,7 @@ describe("capture-export-same-session — supervised-fast override skips the fal
     const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
     const fastBranch = mainFn.slice(fastBranchStart, stableStart);
     expect(/readinessMode:\s*["']supervised-fast["']/.test(fastBranch)).toBe(true);
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
     // It reuses the SAME single diagnostic click boundary — no new click mechanism is added.
@@ -392,7 +407,7 @@ describe("capture-export-same-session — supervised review-usage 확인 confirm
   });
 
   it("the confirm path writes NO status, performs NO upload / capture / saveAs", () => {
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
     expect(/saveAs/.test(fastBranch)).toBe(false);
@@ -435,7 +450,7 @@ describe("capture-export-same-session — NO-CLICK review-usage candidate-index 
   it("the candidate path writes NO status, performs NO upload / capture / saveAs", () => {
     // (the whole fast branch is already asserted status/upload/capture/saveAs-free by the confirm suite;
     // re-assert here for the candidate-specific lens)
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/saveAs/.test(fastBranch)).toBe(false);
   });
 });
@@ -589,7 +604,7 @@ describe("capture-export-same-session — approved-index review-usage confirm, f
   });
 
   it("the index path writes NO status, performs NO upload / capture / saveAs", () => {
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
     expect(/\.saveAs\s*\(/.test(fastBranch)).toBe(false);
@@ -639,7 +654,7 @@ describe("capture-export-same-session — controlled diagnostic download save, f
   });
 
   it("the save path writes NO status / upload / capture, and the CLI itself never calls saveAs", () => {
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
     expect(/\.saveAs\s*\(/.test(code)).toBe(false); // saveAs is confined to review-download-save.ts
@@ -678,7 +693,7 @@ describe("capture-export-same-session — controlled backend upload diagnostic, 
     expect(/\.\.\.\(diagnoseUpload\s*\?/.test(fastBranch)).toBe(true);
   });
 
-  it("emits the HONEST upload invariants — backendIngested, NOT dbMutated:false, no collector status", () => {
+  it("emits the HONEST upload invariants — backendIngested, NOT dbMutated:false, honest status fields", () => {
     expect(/uploadRequested:\s*diagnoseUpload/.test(fastBranch)).toBe(true);
     expect(/uploadReason/.test(fastBranch)).toBe(true);
     // isolate the upload REPORT arm (the spread after `uploadRequested: diagnoseUpload`).
@@ -689,16 +704,78 @@ describe("capture-export-same-session — controlled backend upload diagnostic, 
     expect(armEnd).toBeGreaterThan(armStart);
     const uploadReportArm = fastBranch.slice(armStart, armEnd);
     expect(/backendIngested/.test(uploadReportArm)).toBe(true);
-    expect(/collectorStatusWritten:\s*false/.test(uploadReportArm)).toBe(true);
-    expect(/lastSuccessWritten:\s*false/.test(uploadReportArm)).toBe(true);
+    // PR B: collectorStatusWritten / lastSuccessWritten are now HONEST (the computed values, not
+    // hard-coded false) — true only when a status was actually written / the written state is LAST_SUCCESS.
+    expect(/collectorStatusWritten,/.test(uploadReportArm)).toBe(true);
+    expect(/lastSuccessWritten:\s*writtenState === "LAST_SUCCESS"/.test(uploadReportArm)).toBe(true);
+    expect(/collectorStatusWritten:\s*false/.test(uploadReportArm)).toBe(false); // no longer hard-coded
     // HONESTY: the upload path must never claim dbMutated:false (the backend DB IS ingested).
     expect(/dbMutated/.test(uploadReportArm)).toBe(false);
   });
 
   it("the CLI itself never names uploadReviewFile or calls saveAs (confined to the wrapper/module)", () => {
-    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true); // status write reachable only via the gate
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
     expect(/\.saveAs\s*\(/.test(code)).toBe(false);
+  });
+});
+
+describe("capture-export-same-session — diagnostic status progression after upload (PR B), flag-gated", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+  const gate = fastBranch.indexOf("if (diagnoseWriteStatus)");
+  const gatedBlock = fastBranch.slice(gate, fastBranch.indexOf("\n        }", gate));
+
+  it("imports the pure status mapping and REUSES the existing decideState/writeStatus", () => {
+    expect(/decideStatusSignalsAfterUpload/.test(code)).toBe(true);
+    expect(/statusDetailAfterUpload/.test(code)).toBe(true);
+    expect(/import \{ decideState, writeStatus,.*\} from "\.\.\/status"/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-write-status-after-upload and is INERT without the upload flag", () => {
+    expect(/--diagnose-write-status-after-upload/.test(code)).toBe(true);
+    // gated on diagnoseUpload (which itself requires the save flag) — you can only write an upload outcome.
+    expect(
+      /const\s+diagnoseWriteStatus\s*=\s*diagnoseUpload\s*&&\s*args\.includes\("--diagnose-write-status-after-upload"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+  });
+
+  it("writes status ONLY inside the gate (honest guard — not hidden behind a wrapper)", () => {
+    expect(gate).toBeGreaterThanOrEqual(0);
+    expect(writeStatusOnlyGated(fastBranch)).toBe(true);
+    // the mapping + write all live inside the gated block
+    expect(/decideStatusSignalsAfterUpload\(/.test(gatedBlock)).toBe(true);
+    expect(/decideState\(/.test(gatedBlock)).toBe(true);
+    expect(/writeStatus\(cfg\.statusFile/.test(gatedBlock)).toBe(true);
+    expect(/statusDetailAfterUpload\(/.test(gatedBlock)).toBe(true);
+  });
+
+  it("sets lastCollectedAt ONLY on LAST_SUCCESS, updatedAt always", () => {
+    expect(/lastCollectedAt:\s*writtenState === "LAST_SUCCESS"\s*\?\s*now\(\)\s*:\s*undefined/.test(gatedBlock)).toBe(true);
+    expect(/updatedAt:\s*now\(\)/.test(gatedBlock)).toBe(true);
+  });
+
+  it("feeds decideState the LOGGED_IN run signals from the diagnostic upload", () => {
+    expect(/paired:\s*true/.test(gatedBlock)).toBe(true);
+    expect(/session:\s*"LOGGED_IN"/.test(gatedBlock)).toBe(true);
+    expect(/exportOutcome:\s*statusSignals\.exportOutcome/.test(gatedBlock)).toBe(true);
+    expect(/uploadOutcome:\s*statusSignals\.uploadOutcome/.test(gatedBlock)).toBe(true);
+  });
+
+  it("emits the honest status report fields (collectorStatusWritten / writtenState / lastSuccessWritten)", () => {
+    expect(/diagnoseWriteStatusAfterUpload:\s*diagnoseWriteStatus/.test(fastBranch)).toBe(true);
+    expect(/collectorStatusWritten,/.test(fastBranch)).toBe(true);
+    expect(/writtenState, statusDetail/.test(fastBranch)).toBe(true);
+    expect(/lastSuccessWritten:\s*writtenState === "LAST_SUCCESS"/.test(fastBranch)).toBe(true);
+  });
+
+  it("does NOT mutate status.ts and introduces no new CollectorState", () => {
+    // decideState/writeStatus are reused as-is; no new state literal is added in the CLI status block.
+    expect(/state:\s*writtenState/.test(gatedBlock)).toBe(true);
+    expect(/new (?:state|CollectorState)/.test(gatedBlock)).toBe(false);
   });
 });

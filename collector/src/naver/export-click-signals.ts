@@ -23,8 +23,10 @@
  * offline hostile-fixture test.
  */
 import { createHash } from "node:crypto";
+import type { ExportOutcome, UploadOutcome } from "../status";
 import { planExportAction, type ExportLayout } from "./export-classify";
 import type { CountBucket } from "./export-probe";
+import type { IngestStatusCategory, UploadInspection } from "./review-upload-diagnostic";
 
 export type MessageLengthBucket = "empty" | "tiny" | "short" | "medium" | "long";
 
@@ -555,4 +557,67 @@ export function decideUploadSavedReviewDownload(input: {
   if (!input.downloadSaved) return "NOT_SAVED";
   if (!input.xlsxReadable) return "NOT_READABLE";
   return input.uploadSucceeded ? "UPLOADED" : "UPLOAD_FAILED";
+}
+
+// --- collector status progression after a real upload (PR B) -------------------
+//
+// After the diagnostic upload completes, map its sanitized result onto the EXISTING run-state
+// machinery (`decideState` in `status.ts`) so a real captured-and-ingested file can finally advance
+// the collector to LAST_SUCCESS — gated behind `--diagnose-write-status-after-upload`. These pure
+// pieces decide the (exportOutcome, uploadOutcome) signals and a SANITIZED status detail; the actual
+// `writeStatus` stays in the CLI's gated block. No new CollectorState is introduced.
+//
+// PARTIAL is a SUCCESS-with-warnings (the file was ingested, some rows succeeded) — like the existing
+// `captureAndUpload`, a non-throwing upload is OK → LAST_SUCCESS, with PARTIAL surfaced in the detail.
+// A FAILED/UNKNOWN ingest (nothing inserted) or a failed upload is uploadOutcome FAILED → UPLOAD_FAILED.
+
+/** The two run signals derived from the diagnostic upload, fed to the existing `decideState`. */
+export interface StatusSignalsAfterUpload {
+  exportOutcome: ExportOutcome;
+  uploadOutcome: UploadOutcome;
+}
+
+/**
+ * Pure: map the diagnostic upload result onto `decideState`'s (exportOutcome, uploadOutcome). A
+ * download that didn't fire / wasn't saved / isn't a real `.xlsx` is NOT a validated capture →
+ * `DOWNLOAD_FAILED`. A validated capture maps by upload result: a non-throwing ingest that is
+ * COMPLETED or PARTIAL is `OK` (→ LAST_SUCCESS); a FAILED/UNKNOWN ingest or a failed upload is
+ * `FAILED` (→ UPLOAD_FAILED). Reuses the existing states only.
+ */
+export function decideStatusSignalsAfterUpload(input: {
+  downloadFired: boolean;
+  downloadSaved: boolean;
+  xlsxReadable: boolean;
+  uploadReason: UploadReason;
+  ingestStatusCategory?: IngestStatusCategory;
+}): StatusSignalsAfterUpload {
+  const validatedCapture = input.downloadFired && input.downloadSaved && input.xlsxReadable;
+  if (!validatedCapture) {
+    return { exportOutcome: "DOWNLOAD_FAILED", uploadOutcome: "NOT_ATTEMPTED" };
+  }
+  if (input.uploadReason === "UPLOADED") {
+    const ingested = input.ingestStatusCategory === "COMPLETED" || input.ingestStatusCategory === "PARTIAL";
+    return { exportOutcome: "CAPTURED", uploadOutcome: ingested ? "OK" : "FAILED" };
+  }
+  // The capture is valid but the upload did not succeed (UPLOAD_FAILED / backend unavailable).
+  return { exportOutcome: "CAPTURED", uploadOutcome: "FAILED" };
+}
+
+/**
+ * Pure: a SANITIZED status detail — enums / categories / coarse buckets only. Never a raw filename,
+ * path, `syncJobId`, exact row count, backend error body, sample-error content, or review/customer/
+ * order/product text. Examples: `upload UPLOADED COMPLETED total=tens success=tens skipped=tens
+ * failed=zero`, `upload UPLOAD_FAILED`, `download not validated: SAVE_FAILED`.
+ */
+export function statusDetailAfterUpload(input: {
+  downloadSaveReason: DownloadSaveReason;
+  uploadReason: UploadReason;
+  uploaded?: UploadInspection;
+}): string {
+  if (input.uploadReason === "UPLOADED" && input.uploaded) {
+    const u = input.uploaded;
+    return `upload UPLOADED ${u.ingestStatusCategory} total=${u.totalRowsBucket} success=${u.successRowsBucket} skipped=${u.skippedRowsBucket} failed=${u.failedRowsBucket}`;
+  }
+  if (input.uploadReason === "UPLOAD_FAILED") return "upload UPLOAD_FAILED";
+  return `download not validated: ${input.downloadSaveReason}`;
 }
