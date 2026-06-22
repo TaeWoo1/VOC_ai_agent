@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyDialogMessage,
   classifyModalCategory,
+  decideApprovedIndexBind,
+  decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
   decideSupervisedExportReady,
   deriveConfirmOutcome,
@@ -13,6 +15,7 @@ import {
   lengthBucket,
   mergePostClick,
   messageFingerprint,
+  parseApprovedIndexArg,
   PRE_CLICK_SIGNAL_KEYS,
   POST_CLICK_SIGNAL_KEYS,
   summarizePostClick,
@@ -422,6 +425,87 @@ describe("deriveExportClickOutcome — deliberate precedence", () => {
     expect(mk({ toastPresent: true })).toBe("TOAST");
     expect(mk({}, true)).toBe("POPUP");
     expect(mk({})).toBe("NO_OP");
+  });
+});
+
+describe("parseApprovedIndexArg — strict non-negative integer after the value flag", () => {
+  const FLAG = "--diagnose-confirm-review-usage-index";
+  it("parses a non-negative integer in the token after the flag", () => {
+    expect(parseApprovedIndexArg([FLAG, "2"])).toBe(2);
+    expect(parseApprovedIndexArg([FLAG, "0"])).toBe(0);
+    expect(parseApprovedIndexArg(["--diagnose-export-click", FLAG, "10", "--x"])).toBe(10);
+  });
+  it("returns null when the flag is absent", () => {
+    expect(parseApprovedIndexArg(["--diagnose-export-click"])).toBeNull();
+    expect(parseApprovedIndexArg([])).toBeNull();
+  });
+  it("returns null when the value is missing, negative, or non-integer", () => {
+    expect(parseApprovedIndexArg([FLAG])).toBeNull(); // no value token
+    expect(parseApprovedIndexArg([FLAG, "-1"])).toBeNull();
+    expect(parseApprovedIndexArg([FLAG, "2.5"])).toBeNull();
+    expect(parseApprovedIndexArg([FLAG, "abc"])).toBeNull();
+    expect(parseApprovedIndexArg([FLAG, "--next-flag"])).toBeNull();
+  });
+});
+
+describe("decideApprovedIndexConfirm — flag+index gated, consent-only attempt", () => {
+  it("SKIP_NO_INDEX when not requested or the index did not parse", () => {
+    expect(
+      decideApprovedIndexConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", indexRequested: false, parsedIndex: 2 }),
+    ).toBe("SKIP_NO_INDEX");
+    expect(
+      decideApprovedIndexConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", indexRequested: true, parsedIndex: null }),
+    ).toBe("SKIP_NO_INDEX");
+  });
+  it("SKIP_NOT_CONSENT when the click did not reach the consent gate", () => {
+    expect(decideApprovedIndexConfirm({ outcome: "DATE_RANGE_REQUIRED", indexRequested: true, parsedIndex: 2 })).toBe(
+      "SKIP_NOT_CONSENT",
+    );
+    expect(decideApprovedIndexConfirm({ outcome: "DOWNLOAD", indexRequested: true, parsedIndex: 2 })).toBe(
+      "SKIP_NOT_CONSENT",
+    );
+  });
+  it("ATTEMPT only when requested, a valid index parsed, AND the outcome is consent", () => {
+    expect(
+      decideApprovedIndexConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", indexRequested: true, parsedIndex: 2 }),
+    ).toBe("ATTEMPT");
+    expect(
+      decideApprovedIndexConfirm({ outcome: "REVIEW_USAGE_CONFIRMATION", indexRequested: true, parsedIndex: 0 }),
+    ).toBe("ATTEMPT");
+  });
+});
+
+describe("decideApprovedIndexBind — index must be an affirmative, visible, enabled control", () => {
+  // The live scan shape: index 0/1 cancel, index 2 affirmative — all visible/enabled.
+  const CANDIDATES = [
+    { index: 0, buttonKind: "cancel", visible: true, enabled: true },
+    { index: 1, buttonKind: "cancel", visible: true, enabled: true },
+    { index: 2, buttonKind: "affirmative", visible: true, enabled: true },
+  ];
+
+  it("BOUND for the affirmative visible+enabled index", () => {
+    expect(decideApprovedIndexBind({ candidates: CANDIDATES, requestedIndex: 2 })).toBe("BOUND");
+  });
+  it("INDEX_NOT_FOUND when the requested index is out of range", () => {
+    expect(decideApprovedIndexBind({ candidates: CANDIDATES, requestedIndex: 5 })).toBe("INDEX_NOT_FOUND");
+  });
+  it("INDEX_NOT_AFFIRMATIVE for a cancel index (operator can't bind 0/1)", () => {
+    expect(decideApprovedIndexBind({ candidates: CANDIDATES, requestedIndex: 0 })).toBe("INDEX_NOT_AFFIRMATIVE");
+    expect(decideApprovedIndexBind({ candidates: CANDIDATES, requestedIndex: 1 })).toBe("INDEX_NOT_AFFIRMATIVE");
+  });
+  it("INDEX_NOT_VISIBLE / INDEX_DISABLED in precedence order (affirmative first, then visible, then enabled)", () => {
+    expect(
+      decideApprovedIndexBind({
+        candidates: [{ index: 0, buttonKind: "affirmative", visible: false, enabled: true }],
+        requestedIndex: 0,
+      }),
+    ).toBe("INDEX_NOT_VISIBLE");
+    expect(
+      decideApprovedIndexBind({
+        candidates: [{ index: 0, buttonKind: "affirmative", visible: true, enabled: false }],
+        requestedIndex: 0,
+      }),
+    ).toBe("INDEX_DISABLED");
   });
 });
 

@@ -44,17 +44,21 @@ import {
 } from "../naver/export-click-diagnose";
 import { planExportAction } from "../naver/export-classify";
 import {
+  decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
   decideSupervisedExportReady,
   diagnosePreClickSignals,
+  parseApprovedIndexArg,
   type PreClickSignals,
 } from "../naver/export-click-signals";
 import {
+  confirmReviewUsageByIndexOnce,
   confirmReviewUsageOnce,
   scanReviewUsageConfirmCandidates,
   type ConfirmContext,
   type ConfirmPage,
   type ReviewUsageCandidatesResult,
+  type ReviewUsageConfirmIndexResult,
   type ReviewUsageConfirmResult,
 } from "../naver/review-usage-confirm";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
@@ -409,10 +413,16 @@ async function main(): Promise<void> {
     // modal's 확인 ONCE — gated on the dedicated flag (never auto-confirmed). Active only inside the
     // supervised-fast (override) branch, which already requires --diagnose-allow-empty-target.
     const diagnoseConfirm = diagnoseClick && args.includes("--diagnose-confirm-review-usage");
+    // Approved-index confirm (HIGHEST precedence): the operator inspected the candidate badges and now
+    // approves ONE index to click. When set, it suppresses BOTH the no-click candidate scan and the
+    // single-affirmative confirm click, so the report can never carry two click results.
+    const approvedIndexRequested = diagnoseClick && args.includes("--diagnose-confirm-review-usage-index");
+    const approvedIndex = parseApprovedIndexArg(args);
     // NO-CLICK candidate-index diagnostic for the consent modal: badge visible modal buttons with
     // indices (human inspection) and report sanitized candidate metadata only. Never clicks. When set,
-    // it takes precedence over the confirm-click step (which is suppressed).
-    const diagnoseConfirmCandidates = diagnoseClick && args.includes("--diagnose-review-usage-confirm-candidates");
+    // it takes precedence over the confirm-click step (which is suppressed). Suppressed in index mode.
+    const diagnoseConfirmCandidates =
+      diagnoseClick && args.includes("--diagnose-review-usage-confirm-candidates") && !approvedIndexRequested;
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -528,19 +538,45 @@ async function main(): Promise<void> {
             settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
           },
         );
-        // NO-CLICK candidate-index diagnostic (precedence): when set AND the click reached consent,
-        // badge the modal buttons and report sanitized candidate metadata. It NEVER clicks, and it
-        // suppresses the confirm-click step below.
+        // Approved-index confirm (HIGHEST precedence): click EXACTLY the operator-approved candidate
+        // index, ONCE — only when the flag carried a valid index AND the click reached consent. The
+        // adapter rescans + re-validates the index live before binding, so a stale approval can't click
+        // the wrong control. It suppresses the candidate scan + plain confirm below.
+        const approvedIndexDecision = decideApprovedIndexConfirm({
+          outcome: diagnosis.outcome,
+          indexRequested: approvedIndexRequested,
+          parsedIndex: approvedIndex,
+        });
+        let approvedIndexResult: ReviewUsageConfirmIndexResult | undefined;
+        if (approvedIndexDecision === "ATTEMPT" && approvedIndex !== null) {
+          approvedIndexResult = await confirmReviewUsageByIndexOnce(
+            page as unknown as ConfirmPage,
+            ctx as unknown as ConfirmContext,
+            {
+              observeWindowMs: DIAGNOSE_OBSERVE_WINDOW_MS,
+              pollIntervalMs: DIAGNOSE_POLL_INTERVAL_MS,
+              salt: cfg.storageProbeSalt,
+              settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
+            },
+            approvedIndex,
+          );
+        }
+        // The emitted decision is the adapter's refined verdict (ATTEMPT → REJECT_* on a live mismatch)
+        // when it ran, else the pure pre-scan gate.
+        const finalApprovedIndexDecision = approvedIndexResult?.approvedIndexDecision ?? approvedIndexDecision;
+
+        // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
+        // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
         let candidates: ReviewUsageCandidatesResult | undefined;
         if (diagnoseConfirmCandidates && diagnosis.outcome === "REVIEW_USAGE_CONFIRMATION") {
           candidates = await scanReviewUsageConfirmCandidates(page as unknown as ConfirmPage);
         }
         // PR B: ONLY when the confirm flag is set AND the click reached the consent gate — and NOT in
-        // candidate-diagnostic mode — press 확인 ONCE. The consent modal is blocking and still open on
-        // the same page/ctx. Never auto-confirmed.
+        // candidate-diagnostic or approved-index mode — press 확인 ONCE. The consent modal is blocking and
+        // still open on the same page/ctx. Never auto-confirmed.
         const confirmDecision = decideReviewUsageConfirm({
           outcome: diagnosis.outcome,
-          confirmFlag: diagnoseConfirm && !diagnoseConfirmCandidates,
+          confirmFlag: diagnoseConfirm && !diagnoseConfirmCandidates && !approvedIndexRequested,
         });
         let confirm: ReviewUsageConfirmResult | undefined;
         if (confirmDecision === "ATTEMPT") {
@@ -562,6 +598,10 @@ async function main(): Promise<void> {
             supervisedChecks: supervised.checks,
             supervisedElapsedMs: supervised.elapsedMs,
             ...diagnosis,
+            approvedIndexRequested,
+            approvedIndex: approvedIndexRequested ? approvedIndex : null,
+            approvedIndexDecision: finalApprovedIndexDecision,
+            ...(approvedIndexResult ?? {}),
             candidatesRequested: diagnoseConfirmCandidates,
             ...(candidates ?? {}),
             confirmRequested: diagnoseConfirm,
@@ -573,9 +613,10 @@ async function main(): Promise<void> {
           outcome: diagnosis.outcome,
           clicked: diagnosis.clickedCount,
           readinessMode: "supervised-fast",
+          approvedIndexDecision: finalApprovedIndexDecision,
           candidateScan: candidates?.candidateScan ?? "none",
           confirmDecision,
-          confirmOutcome: confirm?.confirmOutcome ?? "none",
+          confirmOutcome: confirm?.confirmOutcome ?? approvedIndexResult?.confirmOutcome ?? "none",
         });
         return;
       }

@@ -425,3 +425,77 @@ export function deriveConfirmOutcome(input: {
   if (modalDisappeared) return "MODAL_DISMISSED_NO_DOWNLOAD";
   return "NO_CHANGE";
 }
+
+// --- approved-index review-usage confirmation (operator-approved single index) ----------------
+//
+// The NO-CLICK candidate diagnostic badges each consent-modal button with an index; the operator
+// inspects the badges and approves ONE index via --diagnose-confirm-review-usage-index <N>. These
+// pure pieces parse that index, decide WHETHER to attempt the click, and validate the requested
+// index against the (sanitized) candidate metadata before any DOM bind. They never touch a page.
+
+/** The operator-approved-index confirm flag (value flag: takes the next token as the index). */
+export const APPROVED_INDEX_CONFIRM_FLAG = "--diagnose-confirm-review-usage-index";
+
+/**
+ * Pure: parse the approved candidate index from argv. Accepts ONLY a non-negative base-10 integer
+ * in the token immediately after the flag; a missing value, a negative/non-integer value, or the
+ * flag being absent all yield `null` (→ `SKIP_NO_INDEX` upstream). Never throws.
+ */
+export function parseApprovedIndexArg(args: string[]): number | null {
+  const i = args.indexOf(APPROVED_INDEX_CONFIRM_FLAG);
+  if (i < 0) return null;
+  const raw = args[i + 1];
+  if (raw === undefined || !/^\d+$/.test(raw)) return null;
+  return Number.parseInt(raw, 10);
+}
+
+/** High-level gate / verdict for the approved-index confirm step (refined post-scan by the adapter). */
+export type ApprovedIndexDecision =
+  | "ATTEMPT"
+  | "SKIP_NO_INDEX"
+  | "SKIP_NOT_CONSENT"
+  | "REJECT_MISSING"
+  | "REJECT_NOT_AFFIRMATIVE"
+  | "REJECT_NOT_VISIBLE"
+  | "REJECT_DISABLED";
+
+/** DOM-bind verdict for the requested index (BOUND ⇒ proceed to the single click). */
+export type ApprovedIndexBind =
+  | "BOUND"
+  | "CONFIRM_READ_FAILED"
+  | "CONFIRM_NOT_CONSENT"
+  | "INDEX_NOT_FOUND"
+  | "INDEX_NOT_AFFIRMATIVE"
+  | "INDEX_NOT_VISIBLE"
+  | "INDEX_DISABLED"
+  | "INDEX_NOT_UNIQUE";
+
+/** Pure: attempt the index click ONLY when the flag carried a valid index AND the click reached consent. */
+export function decideApprovedIndexConfirm(input: {
+  outcome: ExportClickOutcome;
+  indexRequested: boolean;
+  parsedIndex: number | null;
+}): ApprovedIndexDecision {
+  if (!input.indexRequested || input.parsedIndex === null) return "SKIP_NO_INDEX";
+  if (input.outcome !== "REVIEW_USAGE_CONFIRMATION") return "SKIP_NOT_CONSENT";
+  return "ATTEMPT";
+}
+
+/**
+ * Pure: validate the operator-approved index against the (sanitized) candidate metadata from the
+ * rescan. `BOUND` ⇒ the requested index is an affirmative, visible, enabled control (eligible to
+ * bind+click). Otherwise the closest rejection reason — precedence: missing index wins, then a
+ * non-affirmative (e.g. cancel) control, then not-visible, then disabled. Structural input only
+ * (no candidate-module dependency) so this stays a pure leaf.
+ */
+export function decideApprovedIndexBind(input: {
+  candidates: ReadonlyArray<{ index: number; buttonKind: string; visible: boolean; enabled: boolean }>;
+  requestedIndex: number;
+}): "BOUND" | "INDEX_NOT_FOUND" | "INDEX_NOT_AFFIRMATIVE" | "INDEX_NOT_VISIBLE" | "INDEX_DISABLED" {
+  const c = input.candidates.find((cand) => cand.index === input.requestedIndex);
+  if (!c) return "INDEX_NOT_FOUND";
+  if (c.buttonKind !== "affirmative") return "INDEX_NOT_AFFIRMATIVE";
+  if (!c.visible) return "INDEX_NOT_VISIBLE";
+  if (!c.enabled) return "INDEX_DISABLED";
+  return "BOUND";
+}
