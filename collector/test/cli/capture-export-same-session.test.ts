@@ -631,14 +631,16 @@ describe("capture-export-same-session — controlled diagnostic download save, f
     ).toBe(true);
   });
 
-  it("wires the save hook ONLY in the approved-index dispatch and ONLY when the flag is set", () => {
-    expect(/saveDownloadFn:/.test(fastBranch)).toBe(true);
-    expect(/diagnoseSaveDownload\s*\?/.test(fastBranch)).toBe(true); // conditional, never unconditional
-    // the save hook is wired inside the approved-index ATTEMPT block (after the adapter call opens)
+  it("wires ONE shared save hook (captureSaveDeps) into BOTH confirm dispatches, gated on the flag", () => {
+    // PR C1: the save hook is a single conditional `captureSaveDeps` const, spread into BOTH the
+    // approved-index and the semantic confirm dispatch — so either path saves identically.
+    expect(/const\s+captureSaveDeps\s*=\s*diagnoseSaveDownload\s*\?/.test(fastBranch)).toBe(true); // conditional, never unconditional
+    expect((fastBranch.match(/saveDownloadFn:/g) ?? []).length).toBe(1); // defined once
+    expect((fastBranch.match(/\.\.\.captureSaveDeps/g) ?? []).length).toBe(2); // spread into both dispatches
     const idxIdx = fastBranch.indexOf("confirmReviewUsageByIndexOnce(");
-    const saveIdx = fastBranch.indexOf("saveDownloadFn:");
+    const confIdx = fastBranch.indexOf("confirmReviewUsageOnce(");
     expect(idxIdx).toBeGreaterThanOrEqual(0);
-    expect(saveIdx).toBeGreaterThan(idxIdx);
+    expect(confIdx).toBeGreaterThan(idxIdx);
     // wired to saveAndInspectDownload into the gitignored diagnostic quarantine dir
     expect(/saveAndInspectDownload\(/.test(fastBranch)).toBe(true);
     expect(/join\(cfg\.downloadDir,\s*["']diagnostic["']\)/.test(fastBranch)).toBe(true);
@@ -777,5 +779,37 @@ describe("capture-export-same-session — diagnostic status progression after up
     // decideState/writeStatus are reused as-is; no new state literal is added in the CLI status block.
     expect(/state:\s*writtenState/.test(gatedBlock)).toBe(true);
     expect(/new (?:state|CollectorState)/.test(gatedBlock)).toBe(false);
+  });
+});
+
+describe("capture-export-same-session — semantic-confirm parity (PR C1): unified save/upload/status", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("the SEMANTIC confirm dispatch carries the same save deps as the approved-index dispatch", () => {
+    // confirmReviewUsageOnce is invoked with the shared captureSaveDeps spread (so it saves/uploads too).
+    const confIdx = fastBranch.indexOf("confirmReviewUsageOnce(");
+    const afterConf = fastBranch.slice(confIdx, fastBranch.indexOf("}", fastBranch.indexOf("settleFn", confIdx)));
+    expect(confIdx).toBeGreaterThanOrEqual(0);
+    expect(/\.\.\.captureSaveDeps/.test(afterConf)).toBe(true);
+  });
+
+  it("the downstream save/upload/status read from the UNIFIED capture result (index OR semantic)", () => {
+    // not hard-wired to approvedIndexResult: the unified accessors fall back to the confirm result.
+    expect(/approvedIndexResult\?\.approvedIndexClicked\s*\?\?\s*confirm\?\.confirmClicked/.test(fastBranch)).toBe(true);
+    expect(
+      /approvedIndexResult\?\.postConfirmDownloadFired\s*\?\?\s*confirm\?\.postConfirmDownloadFired/.test(fastBranch),
+    ).toBe(true);
+    expect(/approvedIndexResult\?\.savedDownload\s*\?\?\s*confirm\?\.savedDownload/.test(fastBranch)).toBe(true);
+    // the save/upload/status feeders consume the unified values, not the index result directly.
+    expect(/downloadFired:\s*captureDownloadFired/.test(fastBranch)).toBe(true);
+    expect(/approvedIndexClicked:\s*captureClicked/.test(fastBranch)).toBe(true);
+  });
+
+  it("index and semantic confirm remain mutually exclusive (confirm flag excludes approved-index mode)", () => {
+    expect(/confirmFlag:\s*diagnoseConfirm\s*&&\s*!diagnoseConfirmCandidates\s*&&\s*!approvedIndexRequested/.test(fastBranch)).toBe(
+      true,
+    );
   });
 });

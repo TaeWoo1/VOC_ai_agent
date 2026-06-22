@@ -162,6 +162,13 @@ export interface ReviewUsageConfirmResult {
   postConfirmPopupOpened: boolean;
   postConfirmChecks: number;
   download?: ConfirmDownloadRecord;
+  /**
+   * Present only when a `saveDownloadFn` was injected (the controlled diagnostic save/upload path) AND
+   * a download fired — the sanitized inspection of the saved-then-deleted file (and, on the upload
+   * path, its nested backend ingest). Mirrors `ReviewUsageConfirmIndexResult.savedDownload` so the
+   * SEMANTIC single-affirmative confirm carries the same save/upload result as the approved-index one.
+   */
+  savedDownload?: SavedDownloadInspection;
   detail: string;
 }
 
@@ -180,6 +187,7 @@ export const REVIEW_USAGE_CONFIRM_KEYS: ReadonlyArray<keyof ReviewUsageConfirmRe
   "postConfirmPopupOpened",
   "postConfirmChecks",
   "download",
+  "savedDownload",
   "detail",
 ];
 
@@ -686,6 +694,7 @@ export async function confirmReviewUsageOnce(
     postConfirmPopupOpened: obs.postConfirmPopupOpened,
     postConfirmChecks: obs.postConfirmChecks,
     download: obs.download,
+    savedDownload: obs.savedDownload,
     detail: `confirm: clicked=${obs.clicked ? 1 : 0} outcome=${obs.confirmOutcome}`,
   };
 }
