@@ -12,8 +12,10 @@ import {
   type ConfirmContext,
   type ConfirmDeps,
   type ConfirmDialog,
+  type ConfirmDownload,
   type ConfirmPage,
 } from "../../src/naver/review-usage-confirm";
+import type { SavedDownloadInspection } from "../../src/naver/review-download-save";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_PATH = join(__dirname, "..", "..", "src", "naver", "review-usage-confirm.ts");
@@ -107,8 +109,12 @@ function makeFakes(opts: FakePageOpts): FakeHandles {
     on(_event: "dialog", handler: (d: ConfirmDialog) => void): void {
       dialogHandler = handler;
     },
-    async waitForEvent(_event: "download"): Promise<{ suggestedFilename: () => string }> {
-      if (opts.downloadName) return { suggestedFilename: () => opts.downloadName as string };
+    async waitForEvent(
+      _event: "download",
+    ): Promise<{ suggestedFilename: () => string; saveAs: (p: string) => Promise<void> }> {
+      if (opts.downloadName) {
+        return { suggestedFilename: () => opts.downloadName as string, saveAs: async () => undefined };
+      }
       throw new Error("download timeout");
     },
   } as unknown as ConfirmPage;
@@ -459,6 +465,77 @@ describe("confirmReviewUsageByIndexOnce — clicks EXACTLY the operator-approved
   });
 });
 
+describe("confirmReviewUsageByIndexOnce — controlled save hook (saveDownloadFn)", () => {
+  const CANDS = {
+    candidates: [
+      { index: 0, kind: "cancel", visible: true, enabled: true, textLength: 2 },
+      { index: 1, kind: "cancel", visible: true, enabled: true, textLength: 2 },
+      { index: 2, kind: "affirmative", visible: true, enabled: true, textLength: 2 },
+    ],
+  };
+  const SAVED_FIXTURE: SavedDownloadInspection = {
+    downloadSaved: true,
+    savedPathCategory: "downloads_diagnostic_quarantine",
+    savedBasenameHash: "abcdef0123456789",
+    savedExtensionCategory: "xlsx",
+    fileSizeBucket: "small",
+    xlsxReadable: true,
+    workbookContentValidation: "deferred",
+    rawCellLeak: false,
+    fileRetained: false,
+    retentionPolicy: "delete-after-validate",
+  };
+
+  it("invokes the save hook once with the fired download and surfaces savedDownload", async () => {
+    const { page, ctx } = makeFakes({
+      contentSeq: [CONSENT_HTML, DISMISSED_HTML],
+      scanCount: 1,
+      candidatesReturn: CANDS,
+      locatorCount: 1,
+      downloadName: "리뷰_행복마켓.xlsx",
+    });
+    let calls = 0;
+    let gotName = "";
+    const saveDownloadFn = async (d: ConfirmDownload): Promise<SavedDownloadInspection> => {
+      calls += 1;
+      gotName = d.suggestedFilename();
+      return SAVED_FIXTURE;
+    };
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, { ...DEPS, saveDownloadFn }, 2);
+    expect(r.approvedIndexClicked).toBe(true);
+    expect(r.postConfirmDownloadFired).toBe(true);
+    expect(calls).toBe(1); // hook invoked exactly once…
+    expect(gotName).toBe("리뷰_행복마켓.xlsx"); // …with the real download (sanitization happens INSIDE the hook)
+    expect(r.savedDownload).toEqual(SAVED_FIXTURE);
+  });
+
+  it("does NOT invoke the save hook when no download fires", async () => {
+    const { page, ctx } = makeFakes({ contentSeq: [CONSENT_HTML, DISMISSED_HTML], scanCount: 1, candidatesReturn: CANDS, locatorCount: 1 });
+    let calls = 0;
+    const saveDownloadFn = async (): Promise<SavedDownloadInspection> => {
+      calls += 1;
+      return SAVED_FIXTURE;
+    };
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, { ...DEPS, saveDownloadFn }, 2);
+    expect(r.postConfirmDownloadFired).toBe(false);
+    expect(calls).toBe(0);
+    expect(r.savedDownload).toBeUndefined();
+  });
+
+  it("without a save hook, a fired download is observed-and-discarded (no savedDownload)", async () => {
+    const { page, ctx } = makeFakes({
+      contentSeq: [CONSENT_HTML, DISMISSED_HTML],
+      scanCount: 1,
+      candidatesReturn: CANDS,
+      locatorCount: 1,
+      downloadName: "리뷰.xlsx",
+    });
+    const r = await confirmReviewUsageByIndexOnce(page, ctx, DEPS, 2);
+    expect(r.postConfirmDownloadFired).toBe(true);
+    expect(r.savedDownload).toBeUndefined();
+  });
+});
+
 describe("review-usage-confirm.ts — strict action-adapter source guard", () => {
   const raw = readFileSync(SRC_PATH, "utf8");
   // Strip block + line comments so the guard checks executable source, not prose.
@@ -479,10 +556,13 @@ describe("review-usage-confirm.ts — strict action-adapter source guard", () =>
   });
 
   it("never persists, uploads, writes status, or runs the capture/other-action verbs", () => {
-    expect(/saveAs/.test(code)).toBe(false);
+    // The adapter may DECLARE/forward a download's `saveAs` (the type member + the injected save hook),
+    // but it must never CALL `.saveAs(` itself — the actual file write is confined to review-download-save.ts.
+    expect(/\.saveAs\s*\(/.test(code)).toBe(false);
     expect(/uploadReviewFile|\buploadReview\w*/.test(code)).toBe(false);
     expect(/writeStatus/.test(code)).toBe(false);
     expect(/runExport/.test(code)).toBe(false);
+    expect(/\bmkdirSync\b|\bunlinkSync\b|\bwriteFileSync\b|node:fs/.test(code)).toBe(false); // no fs in the adapter
     expect(/\.fill\s*\(/.test(code)).toBe(false);
     expect(/\.press\s*\(/.test(code)).toBe(false);
     expect(/\.goto\s*\(/.test(code)).toBe(false);

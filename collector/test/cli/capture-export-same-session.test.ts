@@ -592,6 +592,56 @@ describe("capture-export-same-session — approved-index review-usage confirm, f
     expect(/writeStatus/.test(fastBranch)).toBe(false);
     expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
     expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
-    expect(/saveAs/.test(fastBranch)).toBe(false);
+    expect(/\.saveAs\s*\(/.test(fastBranch)).toBe(false);
+  });
+});
+
+describe("capture-export-same-session — controlled diagnostic download save, flag-gated", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("imports the save module fn and the pure save decision", () => {
+    expect(/from\s+["']\.\.\/naver\/review-download-save["']/.test(code)).toBe(true);
+    expect(/saveAndInspectDownload/.test(code)).toBe(true);
+    expect(/decideSaveReviewDownload/.test(code)).toBe(true);
+  });
+
+  it("parses --diagnose-save-review-download and gates it on diagnoseClick", () => {
+    expect(/--diagnose-save-review-download/.test(code)).toBe(true);
+    expect(
+      /const\s+diagnoseSaveDownload\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-save-review-download"\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
+  });
+
+  it("wires the save hook ONLY in the approved-index dispatch and ONLY when the flag is set", () => {
+    expect(/saveDownloadFn:/.test(fastBranch)).toBe(true);
+    expect(/diagnoseSaveDownload\s*\?/.test(fastBranch)).toBe(true); // conditional, never unconditional
+    // the save hook is wired inside the approved-index ATTEMPT block (after the adapter call opens)
+    const idxIdx = fastBranch.indexOf("confirmReviewUsageByIndexOnce(");
+    const saveIdx = fastBranch.indexOf("saveDownloadFn:");
+    expect(idxIdx).toBeGreaterThanOrEqual(0);
+    expect(saveIdx).toBeGreaterThan(idxIdx);
+    // wired to saveAndInspectDownload into the gitignored diagnostic quarantine dir
+    expect(/saveAndInspectDownload\(/.test(fastBranch)).toBe(true);
+    expect(/join\(cfg\.downloadDir,\s*["']diagnostic["']\)/.test(fastBranch)).toBe(true);
+  });
+
+  it("emits the save reason + the invariant assertions (save mode only)", () => {
+    expect(/downloadSaveRequested:\s*diagnoseSaveDownload/.test(fastBranch)).toBe(true);
+    expect(/downloadSaveReason/.test(fastBranch)).toBe(true);
+    expect(/upload:\s*false/.test(fastBranch)).toBe(true);
+    expect(/statusWritten:\s*false/.test(fastBranch)).toBe(true);
+    expect(/dbMutated:\s*false/.test(fastBranch)).toBe(true);
+    expect(/lastSuccessWritten:\s*false/.test(fastBranch)).toBe(true);
+  });
+
+  it("the save path writes NO status / upload / capture, and the CLI itself never calls saveAs", () => {
+    expect(/writeStatus/.test(fastBranch)).toBe(false);
+    expect(/uploadReviewFile/.test(fastBranch)).toBe(false);
+    expect(/captureAndUpload\(/.test(fastBranch)).toBe(false);
+    expect(/\.saveAs\s*\(/.test(code)).toBe(false); // saveAs is confined to review-download-save.ts
   });
 });

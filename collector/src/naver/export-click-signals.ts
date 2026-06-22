@@ -499,3 +499,30 @@ export function decideApprovedIndexBind(input: {
   if (!c.enabled) return "INDEX_DISABLED";
   return "BOUND";
 }
+
+// --- controlled diagnostic download save (no upload/status/DB) ----------------
+//
+// After the approved-index confirm click fires a real download, the operator may save it to a
+// gitignored quarantine and validate it is a real .xlsx — strictly diagnostic, never uploaded.
+// This pure piece decides the report REASON; the actual save/validate/delete lives in
+// `review-download-save.ts` (the only module that may call `saveAs` / touch the filesystem).
+
+/** Why a fired review download was (or wasn't) saved+validated. */
+export type DownloadSaveReason = "NOT_REQUESTED" | "NOT_CLICKED" | "NO_DOWNLOAD" | "SAVED" | "SAVE_FAILED";
+
+/**
+ * Pure: the report reason for the diagnostic save step. Save only proceeds when requested AND the
+ * approved-index click landed AND a download actually fired; `saveSucceeded` distinguishes a clean
+ * save+validate from an inspection failure. Never reads a page or the filesystem.
+ */
+export function decideSaveReviewDownload(input: {
+  saveRequested: boolean;
+  approvedIndexClicked: boolean;
+  downloadFired: boolean;
+  saveSucceeded: boolean;
+}): DownloadSaveReason {
+  if (!input.saveRequested) return "NOT_REQUESTED";
+  if (!input.approvedIndexClicked) return "NOT_CLICKED";
+  if (!input.downloadFired) return "NO_DOWNLOAD";
+  return input.saveSucceeded ? "SAVED" : "SAVE_FAILED";
+}

@@ -50,6 +50,7 @@ import {
 } from "./export-click-signals";
 import type { CountBucket } from "./export-probe";
 import { extensionCategory, type ExtensionCategory } from "./review-export";
+import type { SavedDownloadInspection } from "./review-download-save";
 
 /** Internal index attribute stamped on the single bound affirmative control (read-identity only). */
 const STAMP_ATTR = "data-sellerops-confirm";
@@ -104,9 +105,11 @@ export interface ConfirmDialog {
   dismiss(): Promise<void>;
 }
 
-/** Minimal structural surface of a download event — we read only the suggested name. */
+/** Minimal structural surface of a download event — read the suggested name; `saveAs` is used ONLY
+ *  by the injected diagnostic save hook (which confines the actual `saveAs`/fs to its own module). */
 export interface ConfirmDownload {
   suggestedFilename(): string;
+  saveAs(path: string): Promise<void>;
 }
 
 export interface ConfirmDeps {
@@ -120,6 +123,12 @@ export interface ConfirmDeps {
   settleFn: (page: ConfirmPage) => Promise<unknown>;
   /** Injectable sleep so tests run without real timers. */
   sleepFn?: (ms: number) => Promise<void>;
+  /**
+   * Optional CONTROLLED-SAVE hook: when set, a fired download is saved+validated+deleted by the
+   * injected fn (which owns the only `saveAs`/fs). Wired ONLY in the approved-index diagnostic path
+   * when `--diagnose-save-review-download` is set; absent everywhere else (observe-and-discard).
+   */
+  saveDownloadFn?: (download: ConfirmDownload) => Promise<SavedDownloadInspection | undefined>;
 }
 
 /** Sanitized observation of a download that fired — filename is hashed, never echoed. */
@@ -223,6 +232,8 @@ export interface ReviewUsageConfirmIndexResult {
   postConfirmPopupOpened: boolean;
   postConfirmChecks: number;
   download?: ConfirmDownloadRecord;
+  /** Sanitized inspection of a saved-then-deleted download (only when the save hook is wired). */
+  savedDownload?: SavedDownloadInspection;
   detail: string;
 }
 
@@ -243,6 +254,7 @@ export const REVIEW_USAGE_CONFIRM_INDEX_KEYS: ReadonlyArray<keyof ReviewUsageCon
   "postConfirmPopupOpened",
   "postConfirmChecks",
   "download",
+  "savedDownload",
   "detail",
 ];
 
@@ -481,6 +493,7 @@ interface PostConfirmObservation {
   postConfirmPopupOpened: boolean;
   postConfirmChecks: number;
   download?: ConfirmDownloadRecord;
+  savedDownload?: SavedDownloadInspection;
 }
 
 /**
@@ -488,6 +501,10 @@ interface PostConfirmObservation {
  * `.click(` lives in the CALLER's thunk, so each adapter owns exactly one), then poll the post-confirm
  * structure read-only for the bounded window and collapse it into one sanitized observation. Shared by
  * `confirmReviewUsageOnce` and `confirmReviewUsageByIndexOnce` so the post-click logic has one source.
+ *
+ * When `deps.saveDownloadFn` is set, a fired download is additionally handed to it for the controlled
+ * diagnostic save+validate+delete (the fn owns the only `saveAs`/fs); its sanitized inspection is
+ * surfaced on the observation. Absent that hook, the download is observed-and-discarded as before.
  */
 async function observeBoundConfirmClick(
   page: ConfirmPage,
@@ -495,7 +512,7 @@ async function observeBoundConfirmClick(
   deps: ConfirmDeps,
   clickFn: () => Promise<void>,
 ): Promise<PostConfirmObservation> {
-  const { observeWindowMs, pollIntervalMs, salt, settleFn, sleepFn = defaultSleep } = deps;
+  const { observeWindowMs, pollIntervalMs, salt, settleFn, sleepFn = defaultSleep, saveDownloadFn } = deps;
 
   // Observers set up BEFORE the click (the export-click observers are already released).
   let dialog: DialogRecord | undefined;
@@ -521,9 +538,10 @@ async function observeBoundConfirmClick(
 
   let downloadFired = false;
   let download: ConfirmDownloadRecord | undefined;
+  let savedDownload: SavedDownloadInspection | undefined;
   const downloadPromise = page
     .waitForEvent("download", { timeout: observeWindowMs })
-    .then((d) => {
+    .then(async (d) => {
       downloadFired = true;
       const name = d.suggestedFilename();
       download = {
@@ -532,6 +550,9 @@ async function observeBoundConfirmClick(
         filenameLengthBucket: lengthBucket(name.length),
         filenameHash: messageFingerprint(salt, name),
       };
+      // Controlled diagnostic save+validate+delete (only when the hook is wired); the fn owns the
+      // sole `saveAs`/fs and returns a sanitized inspection — never uploads/persists/writes status.
+      if (saveDownloadFn) savedDownload = await saveDownloadFn(d);
     })
     .catch(() => undefined);
 
@@ -596,6 +617,7 @@ async function observeBoundConfirmClick(
     postConfirmPopupOpened: popupOpened,
     postConfirmChecks: checks,
     download,
+    savedDownload,
   };
 }
 
@@ -784,6 +806,7 @@ export async function confirmReviewUsageByIndexOnce(
     postConfirmPopupOpened: obs.postConfirmPopupOpened,
     postConfirmChecks: obs.postConfirmChecks,
     download: obs.download,
+    savedDownload: obs.savedDownload,
     detail: `confirm-index ${approvedIndex}: clicked=${obs.clicked ? 1 : 0} outcome=${obs.confirmOutcome}`,
   };
 }

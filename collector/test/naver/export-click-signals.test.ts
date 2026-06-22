@@ -5,6 +5,7 @@ import {
   decideApprovedIndexBind,
   decideApprovedIndexConfirm,
   decideReviewUsageConfirm,
+  decideSaveReviewDownload,
   decideSupervisedExportReady,
   deriveConfirmOutcome,
   deriveExportClickOutcome,
@@ -506,6 +507,25 @@ describe("decideApprovedIndexBind — index must be an affirmative, visible, ena
         requestedIndex: 0,
       }),
     ).toBe("INDEX_DISABLED");
+  });
+});
+
+describe("decideSaveReviewDownload — save only when requested + clicked + a download fired", () => {
+  const base = { saveRequested: true, approvedIndexClicked: true, downloadFired: true, saveSucceeded: true };
+  it("NOT_REQUESTED when the flag is absent", () => {
+    expect(decideSaveReviewDownload({ ...base, saveRequested: false })).toBe("NOT_REQUESTED");
+  });
+  it("NOT_CLICKED when the approved-index click did not land", () => {
+    expect(decideSaveReviewDownload({ ...base, approvedIndexClicked: false })).toBe("NOT_CLICKED");
+  });
+  it("NO_DOWNLOAD when no download fired", () => {
+    expect(decideSaveReviewDownload({ ...base, downloadFired: false })).toBe("NO_DOWNLOAD");
+  });
+  it("SAVED when requested + clicked + download fired + inspection succeeded", () => {
+    expect(decideSaveReviewDownload(base)).toBe("SAVED");
+  });
+  it("SAVE_FAILED when the save/validate cycle did not succeed", () => {
+    expect(decideSaveReviewDownload({ ...base, saveSucceeded: false })).toBe("SAVE_FAILED");
   });
 });
 
