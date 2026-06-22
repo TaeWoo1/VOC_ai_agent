@@ -48,6 +48,7 @@ import {
   decideReviewUsageConfirm,
   decideSaveReviewDownload,
   decideSupervisedExportReady,
+  decideUploadSavedReviewDownload,
   diagnosePreClickSignals,
   parseApprovedIndexArg,
   type PreClickSignals,
@@ -64,6 +65,7 @@ import {
   type ReviewUsageConfirmResult,
 } from "../naver/review-usage-confirm";
 import { saveAndInspectDownload } from "../naver/review-download-save";
+import { uploadSavedReviewDownload } from "../naver/review-upload-diagnostic";
 import { evaluateExportTargetReadiness } from "../naver/export-target-readiness";
 import {
   waitForExportTargetReadinessStable,
@@ -430,6 +432,11 @@ async function main(): Promise<void> {
     // gitignored quarantine, validate it is a real .xlsx, then DELETE it. Never uploads/persists/writes
     // status. Active only in the approved-index path (the save hook is wired only there).
     const diagnoseSaveDownload = diagnoseClick && args.includes("--diagnose-save-review-download");
+    // CONTROLLED BACKEND UPLOAD (higher-consequence): after the saved download validates as a real
+    // .xlsx, upload it to the backend /api/uploads — which INGESTS rows into the backend DB. Inert
+    // unless --diagnose-save-review-download is also set (you can only upload what was saved). Honestly
+    // reported: emits upload/backendIngested (never dbMutated:false), writes no collector status.
+    const diagnoseUpload = diagnoseSaveDownload && args.includes("--diagnose-upload-saved-review-download");
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -565,13 +572,28 @@ async function main(): Promise<void> {
               salt: cfg.storageProbeSalt,
               settleFn: (p) => waitForSpaHydration(p as unknown as PwPage),
               // Controlled diagnostic save (only with --diagnose-save-review-download): a fired download
-              // is saved to a gitignored quarantine, validated, then DELETED — never uploaded/persisted.
+              // is saved to a gitignored quarantine, validated, then DELETED. With
+              // --diagnose-upload-saved-review-download it is ALSO uploaded to the backend (real DB
+              // ingest) BEFORE deletion — the upload fn owns the only backend call (the CLI never
+              // names uploadReviewFile here); upload only runs when the file validates as a real .xlsx.
               ...(diagnoseSaveDownload
                 ? {
                     saveDownloadFn: (d: ConfirmDownload) =>
                       saveAndInspectDownload(d, {
                         dir: join(cfg.downloadDir, "diagnostic"),
                         salt: cfg.storageProbeSalt,
+                        ...(diagnoseUpload
+                          ? {
+                              uploadFn: (p: string) =>
+                                uploadSavedReviewDownload(p, {
+                                  baseUrl: cfg.baseUrl,
+                                  email: cfg.email,
+                                  password: cfg.password,
+                                  channelCode: cfg.naverChannelCode,
+                                  salt: cfg.storageProbeSalt,
+                                }),
+                            }
+                          : {}),
                       }),
                   }
                 : {}),
@@ -589,6 +611,19 @@ async function main(): Promise<void> {
           downloadFired: approvedIndexResult?.postConfirmDownloadFired ?? false,
           saveSucceeded: approvedIndexResult?.savedDownload?.downloadSaved ?? false,
         });
+        // Sanitized reason for the controlled backend-upload step. The sanitized ingest inspection
+        // itself rides inside `savedDownload.uploaded` (spread via `...approvedIndexResult`).
+        const savedDownload = approvedIndexResult?.savedDownload;
+        const uploadReason = decideUploadSavedReviewDownload({
+          uploadRequested: diagnoseUpload,
+          downloadSaved: savedDownload?.downloadSaved ?? false,
+          xlsxReadable: savedDownload?.xlsxReadable ?? false,
+          uploadSucceeded: savedDownload?.uploaded?.uploaded ?? false,
+        });
+        // Honest invariants: an UPLOADED reason means the backend DB WAS ingested. We never claim
+        // dbMutated:false on the upload path; `upload` flags an attempt, `backendIngested` the real write.
+        const uploadAttempted = uploadReason === "UPLOADED" || uploadReason === "UPLOAD_FAILED";
+        const backendIngested = uploadReason === "UPLOADED";
 
         // NO-CLICK candidate-index diagnostic (suppressed in approved-index mode): when set AND the click
         // reached consent, badge the modal buttons and report sanitized candidate metadata. NEVER clicks.
@@ -629,9 +664,20 @@ async function main(): Promise<void> {
             ...(approvedIndexResult ?? {}),
             downloadSaveRequested: diagnoseSaveDownload,
             downloadSaveReason,
-            ...(diagnoseSaveDownload
-              ? { upload: false, statusWritten: false, dbMutated: false, lastSuccessWritten: false }
-              : {}),
+            uploadRequested: diagnoseUpload,
+            // The upload path is HONEST about backend DB ingestion: it emits `upload`/`backendIngested`
+            // and NEVER `dbMutated:false`. The save-only path keeps the original observe/save invariants.
+            ...(diagnoseUpload
+              ? {
+                  upload: uploadAttempted,
+                  uploadReason,
+                  backendIngested,
+                  collectorStatusWritten: false,
+                  lastSuccessWritten: false,
+                }
+              : diagnoseSaveDownload
+                ? { upload: false, statusWritten: false, dbMutated: false, lastSuccessWritten: false }
+                : {}),
             candidatesRequested: diagnoseConfirmCandidates,
             ...(candidates ?? {}),
             confirmRequested: diagnoseConfirm,
@@ -645,6 +691,7 @@ async function main(): Promise<void> {
           readinessMode: "supervised-fast",
           approvedIndexDecision: finalApprovedIndexDecision,
           downloadSaveReason,
+          uploadReason,
           candidateScan: candidates?.candidateScan ?? "none",
           confirmDecision,
           confirmOutcome: confirm?.confirmOutcome ?? approvedIndexResult?.confirmOutcome ?? "none",
