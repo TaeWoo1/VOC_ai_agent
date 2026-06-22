@@ -242,9 +242,10 @@ function diagnoseHaltReport(
   preVerdict: SessionVerdict,
   resolution: ReconnectResolution,
   gate?: CaptureGateDecision,
+  mode: "diagnose-export-click" | "capture-reviews" = "diagnose-export-click",
 ): string {
   return JSON.stringify({
-    mode: "diagnose-export-click",
+    mode,
     halted: true,
     preVerdict,
     decision: resolution.decision,
@@ -413,16 +414,23 @@ async function main(): Promise<void> {
     //    boundary). LOGGED_IN passes straight through (the boundary is never invoked); everything
     //    ambiguous HALTS without clicking. Continue success is NOT collection success.
     const classifyOnly = isClassifyOnly(args);
+    // PR C2a — NORMAL capture (non-diagnostic). `--capture-reviews` runs the SAME live-validated chain as
+    // the diagnostic flags (supervised-fast readiness → one export click → SEMANTIC single-affirmative
+    // confirm → save → upload → status) by turning the same internal switches on — zero chain duplication.
+    // It deliberately does NOT enable approved-index mode, so the SEMANTIC confirm is always used (never a
+    // hardcoded index). The bare default command (no flags) is unaffected and still runs captureAndUpload.
+    const captureReviews = !classifyOnly && args.includes("--capture-reviews");
     // Diagnostic mode: click ONCE through the existing gate and observe — never upload,
     // never write status. classify-only (NO click) takes precedence if both are passed.
-    const diagnoseClick = !classifyOnly && args.includes("--diagnose-export-click");
+    const diagnoseClick = !classifyOnly && (args.includes("--diagnose-export-click") || captureReviews);
     // PR B: only after a supervised-fast click reaches REVIEW_USAGE_CONFIRMATION, press the consent
     // modal's 확인 ONCE — gated on the dedicated flag (never auto-confirmed). Active only inside the
     // supervised-fast (override) branch, which already requires --diagnose-allow-empty-target.
-    const diagnoseConfirm = diagnoseClick && args.includes("--diagnose-confirm-review-usage");
+    const diagnoseConfirm = diagnoseClick && (args.includes("--diagnose-confirm-review-usage") || captureReviews);
     // Approved-index confirm (HIGHEST precedence): the operator inspected the candidate badges and now
     // approves ONE index to click. When set, it suppresses BOTH the no-click candidate scan and the
-    // single-affirmative confirm click, so the report can never carry two click results.
+    // single-affirmative confirm click, so the report can never carry two click results. DIAGNOSTIC-ONLY:
+    // `--capture-reviews` never sets this (it must use the semantic confirm, never a hardcoded index).
     const approvedIndexRequested = diagnoseClick && args.includes("--diagnose-confirm-review-usage-index");
     const approvedIndex = parseApprovedIndexArg(args);
     // NO-CLICK candidate-index diagnostic for the consent modal: badge visible modal buttons with
@@ -433,17 +441,22 @@ async function main(): Promise<void> {
     // CONTROLLED DIAGNOSTIC SAVE: after an approved-index click fires a real download, save it to a
     // gitignored quarantine, validate it is a real .xlsx, then DELETE it. Never uploads/persists/writes
     // status. Active only in the approved-index path (the save hook is wired only there).
-    const diagnoseSaveDownload = diagnoseClick && args.includes("--diagnose-save-review-download");
+    const diagnoseSaveDownload = diagnoseClick && (args.includes("--diagnose-save-review-download") || captureReviews);
     // CONTROLLED BACKEND UPLOAD (higher-consequence): after the saved download validates as a real
     // .xlsx, upload it to the backend /api/uploads — which INGESTS rows into the backend DB. Inert
     // unless --diagnose-save-review-download is also set (you can only upload what was saved). Honestly
     // reported: emits upload/backendIngested (never dbMutated:false), writes no collector status.
-    const diagnoseUpload = diagnoseSaveDownload && args.includes("--diagnose-upload-saved-review-download");
+    const diagnoseUpload =
+      diagnoseSaveDownload && (args.includes("--diagnose-upload-saved-review-download") || captureReviews);
     // PR B: after the real upload, advance collector run-state via the EXISTING decideState/writeStatus
     // (no new states). Inert unless --diagnose-upload-saved-review-download is also set — you can only
     // write an upload outcome once an upload ran. This is the FIRST diagnostic path that writes
     // .status/naver.json; gated so the first status write is separately approved.
-    const diagnoseWriteStatus = diagnoseUpload && args.includes("--diagnose-write-status-after-upload");
+    const diagnoseWriteStatus =
+      diagnoseUpload && (args.includes("--diagnose-write-status-after-upload") || captureReviews);
+    // Report mode tag: a NORMAL `--capture-reviews` run is reported as "capture-reviews" (not the
+    // diagnostic mode), even though it reuses the same validated chain underneath.
+    const captureMode = captureReviews ? "capture-reviews" : "diagnose-export-click";
     const resolution = await resolveReconnectIfNeeded(page as unknown as Page, ctx, verdict, {
       expected: {
         expectedChannelCode: cfg.naverExpectedChannelCode,
@@ -469,7 +482,7 @@ async function main(): Promise<void> {
       if (classifyOnly) {
         console.log(classifyOnlyReport(verdict, resolution));
       } else if (diagnoseClick) {
-        console.log(diagnoseHaltReport(verdict, resolution));
+        console.log(diagnoseHaltReport(verdict, resolution, undefined, captureMode));
       } else {
         const halted = resolution.halt!;
         writeStatus(cfg.statusFile, { state: halted.state, detail: halted.detail, updatedAt: now() });
@@ -491,7 +504,7 @@ async function main(): Promise<void> {
     // 6b) Second, narrower gate: a single sync control EXISTS, but is there anything to export?
     //     --diagnose-allow-empty-target: in DIAGNOSTIC mode only, intentionally click into a
     //     not-READY surface for further observation. Never affects real capture mode.
-    const allowEmptyTarget = diagnoseClick && args.includes("--diagnose-allow-empty-target");
+    const allowEmptyTarget = diagnoseClick && (args.includes("--diagnose-allow-empty-target") || captureReviews);
     // Bounded read-only readiness stabilization deps. Built once; the poll runs only past the
     // gate (in the diagnose / real-capture branches), never for the classify-only dry run.
     const readinessStabilizeDeps: ExportTargetReadinessStableDeps = {
@@ -513,7 +526,7 @@ async function main(): Promise<void> {
     // what it produced. No capture/upload/status — `noStatusMode` keeps this leg honest.
     if (diagnoseClick) {
       if (!gate.proceed) {
-        console.log(diagnoseHaltReport(verdict, resolution, gate));
+        console.log(diagnoseHaltReport(verdict, resolution, gate, captureMode));
         log("run.halted", { state: gate.state });
         return;
       }
@@ -531,7 +544,7 @@ async function main(): Promise<void> {
         if (!supervised.ready) {
           console.log(
             JSON.stringify({
-              mode: "diagnose-export-click",
+              mode: captureMode,
               halted: true,
               readinessMode: "supervised-fast",
               gateState: gate.state,
@@ -699,7 +712,8 @@ async function main(): Promise<void> {
         }
         console.log(
           JSON.stringify({
-            mode: "diagnose-export-click",
+            mode: captureMode,
+            captureReviews,
             readinessMode: "supervised-fast",
             gateState: gate.state,
             supervisedReady: supervised.ready,

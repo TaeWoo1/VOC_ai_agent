@@ -246,10 +246,13 @@ describe("capture-export-same-session — classify-only dry-run stops before cap
 describe("capture-export-same-session — diagnose-export-click clicks once but never collects", () => {
   it("parses --diagnose-export-click and yields to classify-only (no click) if both are set", () => {
     expect(/--diagnose-export-click/.test(code)).toBe(true);
-    // classify-only (no click) wins: diagnoseClick is gated on !classifyOnly.
-    expect(/const\s+diagnoseClick\s*=\s*!classifyOnly\s*&&\s*args\.includes\("--diagnose-export-click"\)/.test(mainFn)).toBe(
-      true,
-    );
+    // classify-only (no click) wins: diagnoseClick is gated on !classifyOnly. PR C2a: --capture-reviews
+    // ORs in (so a normal capture enters the same chain), but classify-only still suppresses it.
+    expect(
+      /const\s+diagnoseClick\s*=\s*!classifyOnly\s*&&\s*\(args\.includes\("--diagnose-export-click"\)\s*\|\|\s*captureReviews\)/.test(
+        mainFn,
+      ),
+    ).toBe(true);
   });
 
   it("delegates the single observed click to the diagnostic boundary (not the capture leg)", () => {
@@ -384,7 +387,7 @@ describe("capture-export-same-session — supervised review-usage 확인 confirm
   it("parses --diagnose-confirm-review-usage and gates it on diagnoseClick", () => {
     expect(/--diagnose-confirm-review-usage/.test(code)).toBe(true);
     expect(
-      /const\s+diagnoseConfirm\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-confirm-review-usage"\)/.test(
+      /const\s+diagnoseConfirm\s*=\s*diagnoseClick\s*&&\s*\(args\.includes\("--diagnose-confirm-review-usage"\)\s*\|\|\s*captureReviews\)/.test(
         mainFn,
       ),
     ).toBe(true);
@@ -625,7 +628,7 @@ describe("capture-export-same-session — controlled diagnostic download save, f
   it("parses --diagnose-save-review-download and gates it on diagnoseClick", () => {
     expect(/--diagnose-save-review-download/.test(code)).toBe(true);
     expect(
-      /const\s+diagnoseSaveDownload\s*=\s*diagnoseClick\s*&&\s*args\.includes\("--diagnose-save-review-download"\)/.test(
+      /const\s+diagnoseSaveDownload\s*=\s*diagnoseClick\s*&&\s*\(args\.includes\("--diagnose-save-review-download"\)\s*\|\|\s*captureReviews\)/.test(
         mainFn,
       ),
     ).toBe(true);
@@ -678,7 +681,7 @@ describe("capture-export-same-session — controlled backend upload diagnostic, 
     expect(/--diagnose-upload-saved-review-download/.test(code)).toBe(true);
     // gated on diagnoseSaveDownload (not diagnoseClick) — you can only upload what was saved.
     expect(
-      /const\s+diagnoseUpload\s*=\s*diagnoseSaveDownload\s*&&\s*args\.includes\("--diagnose-upload-saved-review-download"\)/.test(
+      /const\s+diagnoseUpload\s*=\s*diagnoseSaveDownload\s*&&\s*\(args\.includes\("--diagnose-upload-saved-review-download"\)\s*\|\|\s*captureReviews\)/.test(
         mainFn,
       ),
     ).toBe(true);
@@ -740,7 +743,7 @@ describe("capture-export-same-session — diagnostic status progression after up
     expect(/--diagnose-write-status-after-upload/.test(code)).toBe(true);
     // gated on diagnoseUpload (which itself requires the save flag) — you can only write an upload outcome.
     expect(
-      /const\s+diagnoseWriteStatus\s*=\s*diagnoseUpload\s*&&\s*args\.includes\("--diagnose-write-status-after-upload"\)/.test(
+      /const\s+diagnoseWriteStatus\s*=\s*diagnoseUpload\s*&&\s*\(args\.includes\("--diagnose-write-status-after-upload"\)\s*\|\|\s*captureReviews\)/.test(
         mainFn,
       ),
     ).toBe(true);
@@ -779,6 +782,55 @@ describe("capture-export-same-session — diagnostic status progression after up
     // decideState/writeStatus are reused as-is; no new state literal is added in the CLI status block.
     expect(/state:\s*writtenState/.test(gatedBlock)).toBe(true);
     expect(/new (?:state|CollectorState)/.test(gatedBlock)).toBe(false);
+  });
+});
+
+describe("capture-export-same-session — normal capture flag --capture-reviews (PR C2a)", () => {
+  const fastBranchStart = mainFn.indexOf("if (allowEmptyTarget)");
+  const stableStart = mainFn.indexOf("waitForExportTargetReadinessStable(");
+  const fastBranch = mainFn.slice(fastBranchStart, stableStart);
+
+  it("parses --capture-reviews into a non-diagnostic, classify-only-suppressed flag", () => {
+    expect(/--capture-reviews/.test(code)).toBe(true);
+    expect(/const\s+captureReviews\s*=\s*!classifyOnly\s*&&\s*args\.includes\("--capture-reviews"\)/.test(mainFn)).toBe(true);
+  });
+
+  it("ORs --capture-reviews into ALL six derived chain switches (reuse, not duplication)", () => {
+    // each derived boolean enables the validated chain for a normal capture, with no separate code path.
+    expect(/diagnoseClick\s*=\s*!classifyOnly\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+    expect(/allowEmptyTarget\s*=\s*diagnoseClick\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+    expect(/diagnoseConfirm\s*=\s*diagnoseClick\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+    expect(/diagnoseSaveDownload\s*=\s*diagnoseClick\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+    expect(/diagnoseUpload\s*=\s*diagnoseSaveDownload\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+    expect(/diagnoseWriteStatus\s*=\s*diagnoseUpload\s*&&\s*\(args\.includes\([^)]*\)\s*\|\|\s*captureReviews\)/.test(mainFn)).toBe(true);
+  });
+
+  it("does NOT set approvedIndexRequested from --capture-reviews (semantic confirm only, never index 2)", () => {
+    // approvedIndexRequested is diagnostic-only: it must NOT reference captureReviews.
+    const m = mainFn.match(/const\s+approvedIndexRequested\s*=\s*[^;]+;/);
+    expect(m).not.toBeNull();
+    expect(/captureReviews/.test(m![0])).toBe(false);
+    // and there is no hardcoded approved index literal anywhere (no auto-index-2 default).
+    expect(/approvedIndex\s*=\s*2\b/.test(mainFn)).toBe(false);
+  });
+
+  it("reports mode:capture-reviews (+ captureReviews flag) for a normal run, diagnostic otherwise", () => {
+    expect(/const\s+captureMode\s*=\s*captureReviews\s*\?\s*"capture-reviews"\s*:\s*"diagnose-export-click"/.test(mainFn)).toBe(
+      true,
+    );
+    // the supervised-fast success report uses the mode tag and exposes the captureReviews boolean.
+    expect(/mode:\s*captureMode/.test(fastBranch)).toBe(true);
+    expect(/captureReviews,/.test(fastBranch)).toBe(true);
+  });
+
+  it("leaves the bare default command unchanged (captureAndUpload still the no-flag fallthrough)", () => {
+    // capture-reviews/diagnose both enter the diagnose branch and RETURN before the real capture path;
+    // with no flags, diagnoseClick is false and control still reaches captureAndUpload.
+    const captureIdx = mainFn.indexOf("await captureAndUpload(page, cfg, now)");
+    expect(captureIdx).toBeGreaterThan(0);
+    const diagBranchIdx = mainFn.indexOf("if (diagnoseClick) {");
+    expect(diagBranchIdx).toBeGreaterThanOrEqual(0);
+    expect(captureIdx).toBeGreaterThan(diagBranchIdx); // real capture is AFTER (and outside) the diagnose branch
   });
 });
 
