@@ -305,23 +305,35 @@ class SyncRunExecutorTest {
     }
 
     @Test
-    void cafe24SkeletonStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
-        // Phase 3D-3: same safe state as the Coupang skeleton — empty
-        // capabilities kill a manual sync at the config gate before fetch,
-        // so no vault access, no token refresh, no HTTP.
+    void cafe24UnsupportedDataTypeStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
+        // Cafe24 now collects ORDER_SUMMARY, but an unsupported type (REVIEW) is
+        // still killed at the config gate before fetch — no vault, no token
+        // refresh, no HTTP. (The ORDER_SUMMARY pull is covered at the connector level.)
         SellerAccount acc = account("CAFE24");
-        com.sellerops.connector.cafe24.Cafe24HttpClient neverCalled = (uri, headers, form) -> {
-            throw new AssertionError("must not reach the HTTP boundary");
-        };
+        com.sellerops.connector.cafe24.Cafe24HttpClient neverCalled =
+                new com.sellerops.connector.cafe24.Cafe24HttpClient() {
+                    @Override
+                    public Response postForm(java.net.URI uri, java.util.Map<String, String> headers,
+                                             java.util.Map<String, String> form) {
+                        throw new AssertionError("must not reach the HTTP boundary");
+                    }
+
+                    @Override
+                    public Response get(java.net.URI uri, java.util.Map<String, String> headers) {
+                        throw new AssertionError("must not reach the HTTP boundary");
+                    }
+                };
         com.sellerops.connector.cafe24.Cafe24ApiConnector cafe24 =
                 new com.sellerops.connector.cafe24.Cafe24ApiConnector(
-                        new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null);
+                        new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null,
+                        new com.sellerops.connector.cafe24.Cafe24OrdersClient(neverCalled),
+                        java.time.Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
-        SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+        SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL");
 
         assertThat(job.getStatus()).isEqualTo("FAILED");
         assertThat(job.getErrorMessage()).contains("지원되지");

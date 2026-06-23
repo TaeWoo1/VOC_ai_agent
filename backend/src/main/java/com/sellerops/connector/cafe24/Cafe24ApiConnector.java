@@ -8,28 +8,43 @@ import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
+import com.sellerops.ingest.canonical.CanonicalOrderSummary;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * The real Cafe24 Admin API connector. Phase 3D-3 is the <b>refresh-token auth
- * skeleton only</b>: capabilities expose <b>no collectable data type</b>, so
- * neither the scheduler nor manual sync can reach an unimplemented fetch path.
- * The bean exists only behind {@code sellerops.connector.cafe24.enabled=true}
+ * The real Cafe24 Admin API connector. It collects {@code ORDER_SUMMARY}: a
+ * refresh-token grant yields an access token, the Admin orders list is paged
+ * over a trailing window, and the orders are folded into per-day
+ * {@link CanonicalOrderSummary} ({@code payment_amount} summed by
+ * {@code order_date}, in KST). The bean exists only behind
+ * {@code sellerops.connector.cafe24.enabled=true}
  * ({@link Cafe24ConnectorConfiguration}); with the flag off, CAFE24 keeps
  * resolving to the mock connector and runtime behavior is unchanged.
  *
  * <p>Fail-closed ordering inside {@code fetch} (the Phase 3C Slice 1a
  * convention): data-type gate → vault open (missing credential / missing
- * master key throw here) → secret-shape check → refresh-token grant (the one
- * HTTP call, proving the credential chain) → <b>immediate rotation
- * write-back</b> → schema-pending stop. The write-back ordering is an
- * invariant, not a convenience: Cafe24 refresh tokens are single-use, so the
- * moment the provider answers, the stored token is dead — persisting the
- * replacement before anything else can fail is what keeps the credential
- * usable. A failed refresh never writes back (the exception fires first), so
- * the stored credential is untouched on failure.
+ * master key throw here) → secret-shape check → refresh-token grant (proving
+ * the credential chain) → <b>immediate rotation write-back</b> → orders pull +
+ * per-day aggregation. The write-back ordering is an invariant, not a
+ * convenience: Cafe24 refresh tokens are single-use, so the moment the provider
+ * answers, the stored token is dead — persisting the replacement before
+ * anything else (the orders call) can fail is what keeps the credential usable.
+ * A failed refresh never writes back (the exception fires first), so the stored
+ * credential is untouched on failure.
+ *
+ * <p>The whole window is aggregated in-memory and returned as a <b>single</b>
+ * {@link FetchPage} (each date exactly once, {@code hasMore=false}), because
+ * {@code ingestOrderSummaries} upserts last-wins per day — emitting partial
+ * per-day rows across pages would undercount. A mid-window 429 discards the
+ * partial aggregate and leaves the cursor unchanged, so the next run re-collects
+ * the window cleanly.
  *
  * <p>The initial refresh token enters through the credential intake API after
  * the operator completes Cafe24's interactive authorization-code consent —
@@ -57,12 +72,32 @@ public class Cafe24ApiConnector implements PullConnector {
      */
     static final int FALLBACK_RETRY_AFTER_SECONDS = 1;
 
+    /**
+     * Cafe24 is a Korean platform: order dates and the {@code date_type} window
+     * are KST. This is the explicit per-platform timezone policy — "today" and
+     * the per-day bucketing are both computed in this zone, never an implicit
+     * assumption elsewhere.
+     */
+    static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /** v1 collects a fixed trailing window; re-collection upserts (idempotent). */
+    static final int LOOKBACK_DAYS = 14;
+    /** Cafe24's max page size; the connector pages internally to cover the window. */
+    static final int ORDER_PAGE_LIMIT = 1000;
+    /** Safety bound on internal pages (200k orders) — caps a runaway loop. */
+    static final int MAX_ORDER_PAGES = 200;
+
     private final Cafe24TokenClient tokenClient;
     private final CredentialVault vault;
+    private final Cafe24OrdersClient ordersClient;
+    private final Clock clock;
 
-    public Cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault) {
+    public Cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault,
+                              Cafe24OrdersClient ordersClient, Clock clock) {
         this.tokenClient = tokenClient;
         this.vault = vault;
+        this.ordersClient = ordersClient;
+        this.clock = clock;
     }
 
     @Override
@@ -79,12 +114,11 @@ public class Cafe24ApiConnector implements PullConnector {
     public ConnectorCapabilities capabilities(String channelCode) {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(),
-                Map.of(),
-                "Phase 3D-3 auth skeleton: no collectable data type yet."
-                        + " Order/product/board schemas land in later approved slices;"
-                        + " reviews/inquiries flow through the generic boards API"
-                        + " (per-mall board discovery, schema unverified).");
+                Set.of(DataType.ORDER_SUMMARY),
+                Map.of(DataType.ORDER_SUMMARY, "NEEDS_VERIFICATION"),
+                "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST)."
+                        + " Field names / range caps / paging are doc-asserted — NEEDS_VERIFICATION"
+                        + " until a gated live run. Product/review/inquiry remain deferred.");
     }
 
     @Override
@@ -123,8 +157,36 @@ public class Cafe24ApiConnector implements PullConnector {
             vault.rotateSecrets(request.orgId(), request.sellerAccountId(), rotated);
         }
 
-        throw new IllegalStateException(
-                "카페24 주문 수집은 아직 구현되지 않았습니다 (Phase 3D-3 인증 스켈레톤 — 주문 스키마는 다음 슬라이스).");
+        // Fixed trailing window in the explicit Cafe24 zone. Re-collecting the
+        // same window each run and upserting (last-wins per day) is idempotent
+        // and self-healing for late orders / cancellations.
+        LocalDate endDate = LocalDate.now(clock.withZone(KST));
+        LocalDate startDate = endDate.minusDays(LOOKBACK_DAYS);
+
+        List<Cafe24OrderRow> orders = new ArrayList<>();
+        try {
+            int offset = 0;
+            for (int page = 0; page < MAX_ORDER_PAGES; page++) {
+                List<Cafe24OrderRow> batch = ordersClient.fetchPage(
+                        token.accessToken(), mallId, startDate, endDate, ORDER_PAGE_LIMIT, offset);
+                orders.addAll(batch);
+                if (batch.size() < ORDER_PAGE_LIMIT) {
+                    break;
+                }
+                offset += ORDER_PAGE_LIMIT;
+            }
+        } catch (Cafe24RateLimitedException e) {
+            // Discard the partial aggregate: a half-collected window must not
+            // overwrite earlier days with undercounts. Cursor unchanged → the
+            // next run re-collects the whole window.
+            int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
+            return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
+        }
+
+        // One page of per-day summaries (each date exactly once) — the executor
+        // ingests it in a single upsert batch. hasMore=false: one window per run.
+        List<CanonicalOrderSummary> summaries = Cafe24OrderAggregator.aggregate(orders, KST);
+        return FetchPage.of(DataType.ORDER_SUMMARY, summaries, endDate.toString(), false, KIND);
     }
 
     private static boolean isBlank(String value) {

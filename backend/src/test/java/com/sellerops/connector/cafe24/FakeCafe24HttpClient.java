@@ -64,11 +64,32 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
         return new Response(429, "{\"error\":{\"code\":429}}", headers);
     }
 
+    /** A 200 orders page: {@code {"orders":[ ...order objects... ]}}. */
+    static Response ordersOk(String... orderObjects) {
+        return new Response(200, "{\"orders\":[" + String.join(",", orderObjects) + "]}", Map.of());
+    }
+
+    /** One order object literal with the three fields the connector reads. */
+    static String order(String orderId, String orderDate, String paymentAmount) {
+        return "{\"order_id\":\"" + orderId + "\","
+                + "\"order_date\":\"" + orderDate + "\","
+                + "\"payment_amount\":\"" + paymentAmount + "\"}";
+    }
+
     @Override
     public Response postForm(URI uri, Map<String, String> headers, Map<String, String> form) {
         sent.add(new Sent("POST_FORM", uri, headers, form));
         if (responses.isEmpty()) {
             throw new AssertionError("Unexpected HTTP call: POST " + uri);
+        }
+        return responses.pop();
+    }
+
+    @Override
+    public Response get(URI uri, Map<String, String> headers) {
+        sent.add(new Sent("GET", uri, headers, null));
+        if (responses.isEmpty()) {
+            throw new AssertionError("Unexpected HTTP call: GET " + uri);
         }
         return responses.pop();
     }
