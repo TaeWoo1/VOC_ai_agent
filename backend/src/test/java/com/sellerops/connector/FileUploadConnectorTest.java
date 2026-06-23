@@ -1,6 +1,7 @@
 package com.sellerops.connector;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.common.ApiException;
 import com.sellerops.collect.runtime.CollectionDescriptor;
 import com.sellerops.collect.runtime.CollectionMethod;
 import com.sellerops.collect.runtime.CollectionRunService;
@@ -38,7 +40,8 @@ import org.mockito.ArgumentCaptor;
  * Upload connector contract. Dependencies are mocked so the test isolates: (1) the
  * enrichment trigger — analyze exactly the inserted ids, only for REVIEW/INQUIRY, never let
  * analysis failure fail the upload; and (2) the wiring through {@link CollectionRunService}
- * — a faithful run row stamped with {@code method=MANUAL_UPLOAD}, and a status mapping
+ * — a faithful run row stamped with the source {@code method} (MANUAL_UPLOAD by default,
+ * SELLER_CENTER_EXPORT for collector captures; API rejected), and a status mapping
  * equivalent to the legacy resolveStatus.
  */
 class FileUploadConnectorTest {
@@ -157,6 +160,54 @@ class FileUploadConnectorTest {
         assertThat(d.dataType()).isNull();                                // legacy upload row stays dataType-less
         assertThat(d.orgId()).isEqualTo(org);
         assertThat(d.channelId()).isEqualTo(channel);
+    }
+
+    @Test
+    void exportUploadStampsSellerCenterExportMethod() {
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+                .thenReturn(new IngestOutcome(3, 0, 0, List.of(), List.of()));
+
+        connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data(),
+                CollectionMethod.SELLER_CENTER_EXPORT);
+
+        // The run descriptor carries the export method; every other faithful-row field is unchanged.
+        ArgumentCaptor<CollectionDescriptor> dc = ArgumentCaptor.forClass(CollectionDescriptor.class);
+        verify(collectionRuns).open(dc.capture());
+        CollectionDescriptor d = dc.getValue();
+        assertThat(d.method()).isEqualTo(CollectionMethod.SELLER_CENTER_EXPORT);  // the source distinction
+        assertThat(d.trigger()).isEqualTo("UPLOAD");
+        assertThat(d.jobType()).isEqualTo("FILE_UPLOAD");
+        assertThat(d.uploadType()).isEqualTo("REVIEW");
+        assertThat(d.sellerAccountId()).isNull();
+        assertThat(d.dataType()).isNull();
+
+        // The finalize result mirrors the same method (used only by the sanitized view).
+        ArgumentCaptor<ConnectorResult> rc = ArgumentCaptor.forClass(ConnectorResult.class);
+        verify(collectionRuns).finalizeRun(any(SyncJob.class), rc.capture(), any());
+        assertThat(rc.getValue().method()).isEqualTo(CollectionMethod.SELLER_CENTER_EXPORT);
+    }
+
+    @Test
+    void nullMethodDefaultsToManualUpload() {
+        when(ingestionService.ingestReviews(eq(org), eq(channel), any()))
+                .thenReturn(new IngestOutcome(1, 0, 0, List.of(), List.of()));
+
+        connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data(), /*method*/ null);
+
+        ArgumentCaptor<CollectionDescriptor> dc = ArgumentCaptor.forClass(CollectionDescriptor.class);
+        verify(collectionRuns).open(dc.capture());
+        assertThat(dc.getValue().method()).isEqualTo(CollectionMethod.MANUAL_UPLOAD);
+    }
+
+    @Test
+    void apiMethodIsRejectedBeforeOpeningRun() {
+        assertThatThrownBy(() -> connector.ingest(org, channel, UploadType.REVIEW, "r.csv", data(),
+                CollectionMethod.API))
+                .isInstanceOf(ApiException.class);
+
+        // Rejected up front → no RUNNING run row is ever opened, no finalize.
+        verify(collectionRuns, never()).open(any());
+        verify(collectionRuns, never()).finalizeRun(any(), any(), any());
     }
 
     @Test

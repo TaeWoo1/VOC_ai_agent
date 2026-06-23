@@ -313,7 +313,9 @@ async function captureAndUpload(
   try {
     const token = await login(cfg.baseUrl, cfg.email, cfg.password);
     const channelId = await resolveChannelId(cfg.baseUrl, token, cfg.naverChannelCode);
-    const result = await uploadReviewFile(cfg.baseUrl, token, channelId, filePath);
+    // This file is a seller-center export the collector captured itself, not a human upload.
+    const result = await uploadReviewFile(cfg.baseUrl, token, channelId, filePath, fetch,
+      "SELLER_CENTER_EXPORT");
     detail = `inserted ${result.successRows}, skipped ${result.skippedRows}, failed ${result.failedRows}`;
   } catch (error) {
     uploadOutcome = "FAILED";

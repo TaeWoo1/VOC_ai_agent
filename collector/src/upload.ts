@@ -29,6 +29,13 @@ export class UploadError extends Error {
 type FetchImpl = typeof fetch;
 
 /**
+ * Source provenance for an upload, mirroring the backend `CollectionMethod` values that are
+ * valid for the upload path. Omitting it leaves the backend default (`MANUAL_UPLOAD`); the
+ * collector's capture paths pass `SELLER_CENTER_EXPORT` for files it exported itself.
+ */
+export type UploadMethod = "MANUAL_UPLOAD" | "SELLER_CENTER_EXPORT";
+
+/**
  * Authenticate against the SellerOps backend and return a JWT. For the POC the
  * collector uses SellerOps dev credentials; the productized path replaces this
  * with a revocable collector/pairing token (separate slice). Either way, no NAVER
@@ -93,6 +100,10 @@ export async function fetchItemAnalysisCount(
  * Upload a captured review export to the existing `/api/uploads` endpoint as a
  * REVIEW file. The backend runs the existing ReviewRowMapper → dedup →
  * item-analysis; re-uploading the same file is idempotent (리뷰글번호 dedup).
+ *
+ * When `method` is supplied it is sent as the source provenance (the collector's
+ * capture paths pass `SELLER_CENTER_EXPORT`); omitting it preserves the original
+ * wire shape, so the backend records the default `MANUAL_UPLOAD`.
  */
 export async function uploadReviewFile(
   baseUrl: string,
@@ -100,11 +111,13 @@ export async function uploadReviewFile(
   channelId: string,
   filePath: string,
   fetchImpl: FetchImpl = fetch,
+  method?: UploadMethod,
 ): Promise<IngestResult> {
   const bytes = await readFile(filePath);
   const form = new FormData();
   form.append("channelId", channelId);
   form.append("uploadType", "REVIEW");
+  if (method !== undefined) form.append("method", method);
   form.append("file", new Blob([new Uint8Array(bytes)]), basename(filePath));
 
   const res = await fetchImpl(`${baseUrl}/api/uploads`, {
