@@ -136,7 +136,9 @@ export async function uploadSavedReviewDownload(
     const fetchImpl = opts.fetchImpl ?? fetch;
     const token = await login(opts.baseUrl, opts.email, opts.password, fetchImpl);
     const channelId = await resolveChannelId(opts.baseUrl, token, opts.channelCode ?? "NAVER", fetchImpl);
-    const result = await uploadReviewFile(opts.baseUrl, token, channelId, filePath, fetchImpl);
+    // The quarantined file is a captured NAVER review export, not a human upload.
+    const result = await uploadReviewFile(opts.baseUrl, token, channelId, filePath, fetchImpl,
+      "SELLER_CENTER_EXPORT");
     return sanitizeIngest(result, opts.salt);
   } catch {
     return failedUploadInspection();

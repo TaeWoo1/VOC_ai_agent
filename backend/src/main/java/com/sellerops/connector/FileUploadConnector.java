@@ -32,15 +32,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Connector for operator-uploaded CSV/XLSX files. Parses → maps to canonical
- * records → ingests via the shared {@link IngestionService} → records the run through
- * the common {@link CollectionRunService} with {@code method=MANUAL_UPLOAD}.
+ * Connector for uploaded CSV/XLSX files. Parses → maps to canonical records → ingests via
+ * the shared {@link IngestionService} → records the run through the common
+ * {@link CollectionRunService}. The run's {@code method} carries the source: a human upload
+ * defaults to {@code MANUAL_UPLOAD}; a collector-captured seller-center export passes
+ * {@code SELLER_CENTER_EXPORT} (the {@code API} method is rejected — uploads are never API-pull).
  *
  * <p>The run row stays faithful to the legacy upload shape — {@code jobType="FILE_UPLOAD"},
  * the upload sub-type, the raw first row-error in {@code error_message}, null
- * {@code dataType}/{@code sellerAccountId} — so the history endpoints are unchanged; only
- * the new {@code method} column is populated. With no seller account the runtime's health
- * update no-ops, exactly as uploads behaved before.
+ * {@code dataType}/{@code sellerAccountId} — so the history endpoints are unchanged; {@code method}
+ * is the only field that distinguishes the two sources. With no seller account the runtime's
+ * health update no-ops, exactly as uploads behaved before.
  */
 @Component
 public class FileUploadConnector implements ChannelConnector {
@@ -75,15 +77,22 @@ public class FileUploadConnector implements ChannelConnector {
         return "FILE_UPLOAD";
     }
 
+    /** Backward-compatible entry point: an upload with no explicit method is a manual upload. */
     public IngestResult ingest(UUID orgId, UUID channelId, UploadType type,
                                String filename, InputStream data) {
+        return ingest(orgId, channelId, type, filename, data, CollectionMethod.MANUAL_UPLOAD);
+    }
+
+    public IngestResult ingest(UUID orgId, UUID channelId, UploadType type,
+                               String filename, InputStream data, CollectionMethod method) {
         if (channelId == null || !channels.existsById(channelId)) {
             throw ApiException.notFound("채널을 찾을 수 없습니다.");
         }
+        CollectionMethod resolvedMethod = resolveUploadMethod(method);
 
         String channelCode = channels.findById(channelId)
                 .map(Channel::getCode).orElse(channelId.toString());
-        SyncJob job = collectionRuns.open(uploadDescriptor(orgId, channelId, channelCode, type));
+        SyncJob job = collectionRuns.open(uploadDescriptor(orgId, channelId, channelCode, type, resolvedMethod));
         try {
             ParsedTable table = fileParser.parse(filename, data);
             List<RowError> mapErrors;
@@ -122,15 +131,30 @@ public class FileUploadConnector implements ChannelConnector {
                     ? null
                     : allErrors.get(0).message();
 
-            return finish(job, channelCode, type, outcome.success(), outcome.skipped(),
+            return finish(job, channelCode, type, resolvedMethod, outcome.success(), outcome.skipped(),
                     failed, errorMessage, sample(allErrors));
         } catch (ApiException e) {
-            finish(job, channelCode, type, 0, 0, 0, e.getMessage(), List.of());
+            finish(job, channelCode, type, resolvedMethod, 0, 0, 0, e.getMessage(), List.of());
             throw e;
         } catch (Exception e) {
-            return finish(job, channelCode, type, 0, 0, 0,
+            return finish(job, channelCode, type, resolvedMethod, 0, 0, 0,
                     "파일을 처리하지 못했습니다: " + e.getMessage(), List.of());
         }
+    }
+
+    /**
+     * An upload arrives either as a human {@code MANUAL_UPLOAD} (the default when the request
+     * omits the method) or a collector-captured {@code SELLER_CENTER_EXPORT}. {@code API} is not
+     * a file-upload provenance — reject it before any run row is opened.
+     */
+    private CollectionMethod resolveUploadMethod(CollectionMethod method) {
+        if (method == null) {
+            return CollectionMethod.MANUAL_UPLOAD;
+        }
+        if (method == CollectionMethod.API) {
+            throw ApiException.badRequest("업로드에는 API 수집 방식을 사용할 수 없습니다.");
+        }
+        return method;
     }
 
     /**
@@ -152,14 +176,15 @@ public class FileUploadConnector implements ChannelConnector {
 
     /**
      * Open-time identity for an upload run. {@code jobType=kind()} ("FILE_UPLOAD") keeps the
-     * legacy connector kind; {@code method=MANUAL_UPLOAD} is the new orthogonal dimension.
-     * No seller account (uploads are channel-scoped) and no dataType, preserving today's row
-     * and leaving the runtime's connection-health update a no-op.
+     * legacy connector kind; {@code method} (MANUAL_UPLOAD or SELLER_CENTER_EXPORT) is the
+     * orthogonal source dimension and the only field that distinguishes a human upload from a
+     * collector-captured export. No seller account (uploads are channel-scoped) and no dataType,
+     * preserving today's row and leaving the runtime's connection-health update a no-op.
      */
     private CollectionDescriptor uploadDescriptor(UUID orgId, UUID channelId, String channelCode,
-                                                  UploadType type) {
+                                                  UploadType type, CollectionMethod method) {
         return new CollectionDescriptor(orgId, /*sellerAccountId*/ null, channelId, channelCode,
-                /*dataType*/ null, CollectionMethod.MANUAL_UPLOAD, /*trigger*/ "UPLOAD",
+                /*dataType*/ null, method, /*trigger*/ "UPLOAD",
                 /*jobType*/ kind(), /*uploadType*/ type.name());
     }
 
@@ -172,11 +197,11 @@ public class FileUploadConnector implements ChannelConnector {
      * {@code IngestResult} is built in-memory so the HTTP response is unchanged.
      */
     private IngestResult finish(SyncJob job, String channelCode, UploadType type,
-                                int success, int skipped, int failed, String errorMessage,
-                                List<RowError> sampleErrors) {
+                                CollectionMethod method, int success, int skipped, int failed,
+                                String errorMessage, List<RowError> sampleErrors) {
         int total = success + skipped + failed;
         ConnectorResult r = ConnectorResult.of(channelCode, DataType.valueOf(type.name()),
-                CollectionMethod.MANUAL_UPLOAD, success, skipped, failed,
+                method, success, skipped, failed,
                 /*rateLimited*/ false, /*errored*/ total == 0, /*failureCode*/ null);
         collectionRuns.finalizeRun(job, r, errorMessage);
         return new IngestResult(job.getId(), type, r.jobStatus(), total, success, skipped, failed,

@@ -80,6 +80,27 @@ describe("uploadReviewFile", () => {
     expect(captured!.body.get("channelId")).toBe("chan-1");
     expect(captured!.body.get("uploadType")).toBe("REVIEW");
     expect(captured!.body.get("file")).toBeInstanceOf(Blob);
+    // No method passed → field omitted, so the backend records its default (MANUAL_UPLOAD).
+    expect(captured!.body.get("method")).toBeNull();
+  });
+
+  it("sends method=SELLER_CENTER_EXPORT when the file is a captured export", async () => {
+    let captured: { body: FormData } | null = null;
+    const fakeFetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      captured = { body: init?.body as FormData };
+      return jsonResponse({
+        syncJobId: "job1",
+        uploadType: "REVIEW",
+        status: "SUCCESS",
+        totalRows: 1,
+        successRows: 1,
+        skippedRows: 0,
+        failedRows: 0,
+      });
+    };
+    await uploadReviewFile("http://x", "t", "chan-1", SAMPLE_FILE,
+      fakeFetch as typeof fetch, "SELLER_CENTER_EXPORT");
+    expect(captured!.body.get("method")).toBe("SELLER_CENTER_EXPORT");
   });
 
   it("throws UploadError(upload) on 500", async () => {

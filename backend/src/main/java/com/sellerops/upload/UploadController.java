@@ -1,6 +1,7 @@
 package com.sellerops.upload;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.collect.runtime.CollectionMethod;
 import com.sellerops.common.ApiException;
 import com.sellerops.connector.FileUploadConnector;
 import com.sellerops.ingest.IngestResult;
@@ -30,13 +31,16 @@ public class UploadController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @RequestParam UUID channelId,
             @RequestParam UploadType uploadType,
+            @RequestParam(required = false) CollectionMethod method,
             @RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw ApiException.badRequest("파일이 비어 있습니다.");
         }
         try {
+            // method is optional: omitted → MANUAL_UPLOAD (human upload). The collector
+            // passes SELLER_CENTER_EXPORT for captured seller-center exports.
             return connector.ingest(principal.orgId(), channelId, uploadType,
-                    file.getOriginalFilename(), file.getInputStream());
+                    file.getOriginalFilename(), file.getInputStream(), method);
         } catch (IOException e) {
             throw ApiException.badRequest("파일을 읽지 못했습니다: " + e.getMessage());
         }
