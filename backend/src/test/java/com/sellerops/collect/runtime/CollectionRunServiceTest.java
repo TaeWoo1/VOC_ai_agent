@@ -179,4 +179,36 @@ class CollectionRunServiceTest {
         verify(connectionStatus, never()).findBySellerAccountId(any());
         verify(connectionStatus, never()).save(any());
     }
+
+    @Test
+    void openHonorsExplicitJobTypeAndUploadType() {
+        // Manual-upload style: keep the legacy connector kind + sub-type, add the method dimension.
+        CollectionDescriptor d = new CollectionDescriptor(orgId, null, channelId, "NAVER",
+                null, CollectionMethod.MANUAL_UPLOAD, "UPLOAD", "FILE_UPLOAD", "REVIEW");
+        SyncJob job = service.open(d);
+
+        assertThat(job.getJobType()).isEqualTo("FILE_UPLOAD");      // connector kind preserved
+        assertThat(job.getMethod()).isEqualTo("MANUAL_UPLOAD");     // new orthogonal dimension
+        assertThat(job.getUploadType()).isEqualTo("REVIEW");
+        assertThat(job.getDataType()).isNull();
+        assertThat(job.getSellerAccountId()).isNull();
+        assertThat(job.getTrigger()).isEqualTo("UPLOAD");
+    }
+
+    @Test
+    void finalizeWithExplicitMessageStoresRawMessageWithoutLeakingToHealth() {
+        CollectionDescriptor d = new CollectionDescriptor(orgId, null, channelId, "NAVER",
+                null, CollectionMethod.MANUAL_UPLOAD, "UPLOAD", "FILE_UPLOAD", "REVIEW");
+        SyncJob job = service.open(d);
+
+        ConnectorResult r = ConnectorResult.of("NAVER", DataType.REVIEW, CollectionMethod.MANUAL_UPLOAD,
+                2, 0, 1, false, false, null);
+        SyncJob done = service.finalizeRun(job, r, "셀 형식 오류");
+
+        assertThat(done.getStatus()).isEqualTo("PARTIAL");
+        assertThat(done.getErrorMessage()).isEqualTo("셀 형식 오류");  // explicit raw message, not a bounded code
+        // No seller account → the raw message never reaches connection health.
+        verify(connectionStatus, never()).findBySellerAccountId(any());
+        verify(connectionStatus, never()).save(any());
+    }
 }
