@@ -1,6 +1,11 @@
 package com.sellerops.connector;
 
+import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
+import com.sellerops.collect.runtime.CollectionDescriptor;
+import com.sellerops.collect.runtime.CollectionMethod;
+import com.sellerops.collect.runtime.CollectionRunService;
+import com.sellerops.collect.runtime.ConnectorResult;
 import com.sellerops.common.ApiException;
 import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestResult;
@@ -18,9 +23,7 @@ import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.ingest.parse.ParsedTable;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.sync.SyncJob;
-import com.sellerops.sync.SyncJobRepository;
 import java.io.InputStream;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -30,7 +33,14 @@ import org.springframework.stereotype.Component;
 
 /**
  * Connector for operator-uploaded CSV/XLSX files. Parses → maps to canonical
- * records → ingests via the shared {@link IngestionService} → records a SyncJob.
+ * records → ingests via the shared {@link IngestionService} → records the run through
+ * the common {@link CollectionRunService} with {@code method=MANUAL_UPLOAD}.
+ *
+ * <p>The run row stays faithful to the legacy upload shape — {@code jobType="FILE_UPLOAD"},
+ * the upload sub-type, the raw first row-error in {@code error_message}, null
+ * {@code dataType}/{@code sellerAccountId} — so the history endpoints are unchanged; only
+ * the new {@code method} column is populated. With no seller account the runtime's health
+ * update no-ops, exactly as uploads behaved before.
  */
 @Component
 public class FileUploadConnector implements ChannelConnector {
@@ -43,20 +53,20 @@ public class FileUploadConnector implements ChannelConnector {
     private final InquiryRowMapper inquiryMapper;
     private final OrderSummaryRowMapper orderMapper;
     private final IngestionService ingestionService;
-    private final SyncJobRepository syncJobs;
+    private final CollectionRunService collectionRuns;
     private final ItemAnalysisService itemAnalysis;
 
     public FileUploadConnector(ChannelRepository channels, FileParser fileParser,
                                ReviewRowMapper reviewMapper, InquiryRowMapper inquiryMapper,
                                OrderSummaryRowMapper orderMapper, IngestionService ingestionService,
-                               SyncJobRepository syncJobs, ItemAnalysisService itemAnalysis) {
+                               CollectionRunService collectionRuns, ItemAnalysisService itemAnalysis) {
         this.channels = channels;
         this.fileParser = fileParser;
         this.reviewMapper = reviewMapper;
         this.inquiryMapper = inquiryMapper;
         this.orderMapper = orderMapper;
         this.ingestionService = ingestionService;
-        this.syncJobs = syncJobs;
+        this.collectionRuns = collectionRuns;
         this.itemAnalysis = itemAnalysis;
     }
 
@@ -71,7 +81,9 @@ public class FileUploadConnector implements ChannelConnector {
             throw ApiException.notFound("채널을 찾을 수 없습니다.");
         }
 
-        SyncJob job = startJob(orgId, channelId, type);
+        String channelCode = channels.findById(channelId)
+                .map(Channel::getCode).orElse(channelId.toString());
+        SyncJob job = collectionRuns.open(uploadDescriptor(orgId, channelId, channelCode, type));
         try {
             ParsedTable table = fileParser.parse(filename, data);
             List<RowError> mapErrors;
@@ -105,20 +117,18 @@ public class FileUploadConnector implements ChannelConnector {
             // Both mapping errors (bad rows) and per-row persistence errors are surfaced.
             List<RowError> allErrors = new ArrayList<>(mapErrors);
             allErrors.addAll(outcome.errors());
-            int total = outcome.success() + outcome.skipped() + outcome.failed() + mapErrors.size();
             int failed = outcome.failed() + mapErrors.size();
-            String status = resolveStatus(total, outcome.success(), failed);
             String errorMessage = allErrors.isEmpty()
                     ? null
                     : allErrors.get(0).message();
 
-            return finishJob(job, type, total, outcome.success(), outcome.skipped(),
-                    failed, status, errorMessage, sample(allErrors));
+            return finish(job, channelCode, type, outcome.success(), outcome.skipped(),
+                    failed, errorMessage, sample(allErrors));
         } catch (ApiException e) {
-            finishJob(job, type, 0, 0, 0, 0, "FAILED", e.getMessage(), List.of());
+            finish(job, channelCode, type, 0, 0, 0, e.getMessage(), List.of());
             throw e;
         } catch (Exception e) {
-            return finishJob(job, type, 0, 0, 0, 0, "FAILED",
+            return finish(job, channelCode, type, 0, 0, 0,
                     "파일을 처리하지 못했습니다: " + e.getMessage(), List.of());
         }
     }
@@ -140,44 +150,37 @@ public class FileUploadConnector implements ChannelConnector {
         }
     }
 
-    private SyncJob startJob(UUID orgId, UUID channelId, UploadType type) {
-        SyncJob job = new SyncJob();
-        job.setOrgId(orgId);
-        job.setChannelId(channelId);
-        job.setJobType(kind());
-        job.setUploadType(type.name());
-        job.setStatus("RUNNING");
-        job.setStartedAt(Instant.now());
-        return syncJobs.save(job);
+    /**
+     * Open-time identity for an upload run. {@code jobType=kind()} ("FILE_UPLOAD") keeps the
+     * legacy connector kind; {@code method=MANUAL_UPLOAD} is the new orthogonal dimension.
+     * No seller account (uploads are channel-scoped) and no dataType, preserving today's row
+     * and leaving the runtime's connection-health update a no-op.
+     */
+    private CollectionDescriptor uploadDescriptor(UUID orgId, UUID channelId, String channelCode,
+                                                  UploadType type) {
+        return new CollectionDescriptor(orgId, /*sellerAccountId*/ null, channelId, channelCode,
+                /*dataType*/ null, CollectionMethod.MANUAL_UPLOAD, /*trigger*/ "UPLOAD",
+                /*jobType*/ kind(), /*uploadType*/ type.name());
     }
 
-    private IngestResult finishJob(SyncJob job, UploadType type, int total, int success,
-                                   int skipped, int failed, String status, String errorMessage,
-                                   List<RowError> sampleErrors) {
-        job.setTotalRows(total);
-        job.setSuccessRows(success);
-        job.setSkippedRows(skipped);
-        job.setFailedRows(failed);
-        job.setStatus(status);
-        job.setErrorMessage(errorMessage);
-        job.setFinishedAt(Instant.now());
-        syncJobs.save(job);
-        return new IngestResult(job.getId(), type, status, total, success, skipped, failed,
+    /**
+     * Finalize the run through the common runtime and build the operator-facing result.
+     * The status mapping ({@link ConnectorResult#jobStatus()}) is equivalent to the legacy
+     * resolveStatus: an empty upload (total 0) is an error → FAILED; otherwise failures with
+     * any landed/skipped row are PARTIAL, all-fail is FAILED, and a clean (incl. all-duplicate)
+     * upload is SUCCESS. The raw first row-error is preserved in {@code error_message}; the
+     * {@code IngestResult} is built in-memory so the HTTP response is unchanged.
+     */
+    private IngestResult finish(SyncJob job, String channelCode, UploadType type,
+                                int success, int skipped, int failed, String errorMessage,
+                                List<RowError> sampleErrors) {
+        int total = success + skipped + failed;
+        ConnectorResult r = ConnectorResult.of(channelCode, DataType.valueOf(type.name()),
+                CollectionMethod.MANUAL_UPLOAD, success, skipped, failed,
+                /*rateLimited*/ false, /*errored*/ total == 0, /*failureCode*/ null);
+        collectionRuns.finalizeRun(job, r, errorMessage);
+        return new IngestResult(job.getId(), type, r.jobStatus(), total, success, skipped, failed,
                 errorMessage, sampleErrors);
-    }
-
-    private String resolveStatus(int total, int success, int failed) {
-        if (total == 0) {
-            return "FAILED";
-        }
-        if (failed > 0) {
-            // Some rows failed: partial if anything (incl. dedup skips) was processed,
-            // otherwise a full failure.
-            return success > 0 ? "PARTIAL" : (success + failed < total ? "PARTIAL" : "FAILED");
-        }
-        // No failures. Successes and/or dedup skips (e.g. an all-duplicate re-upload)
-        // are a successful, idempotent outcome — not a failure.
-        return "SUCCESS";
     }
 
     private List<RowError> sample(List<RowError> errors) {

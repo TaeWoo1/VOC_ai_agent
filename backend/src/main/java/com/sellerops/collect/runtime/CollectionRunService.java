@@ -48,8 +48,12 @@ public class CollectionRunService {
         job.setChannelId(d.channelId());
         job.setDataType(d.dataType() != null ? d.dataType().name() : null);
         job.setMethod(d.method() != null ? d.method().name() : null);
+        job.setUploadType(d.uploadType());
         job.setTrigger(d.trigger() != null ? d.trigger() : "UPLOAD");
-        job.setJobType(d.method() != null ? d.method().name() : "UNKNOWN");
+        // jobType = connector kind (e.g. FILE_UPLOAD), orthogonal to method. A caller may carry
+        // it explicitly to keep the legacy row shape; otherwise it mirrors the collection method.
+        job.setJobType(d.jobType() != null ? d.jobType()
+                : (d.method() != null ? d.method().name() : "UNKNOWN"));
         job.setAttempt(1);
         job.setStatus("RUNNING");
         job.setStartedAt(Instant.now());
@@ -63,6 +67,18 @@ public class CollectionRunService {
      * connection health.
      */
     public SyncJob finalizeRun(SyncJob job, ConnectorResult r) {
+        return finalizeRun(job, r, r.failureCode());
+    }
+
+    /**
+     * Finalize variant that stores an explicit {@code error_message} rather than the bounded
+     * {@code failureCode}. The default ({@link #finalizeRun(SyncJob, ConnectorResult)}) keeps
+     * the sanitized bounded code; this overload exists for the manual-upload path, which
+     * faithfully preserves the legacy raw first row-error in the (operator-facing) row. The
+     * stored message reaches connection health only when there is a seller account — uploads
+     * pass none, so the raw text never lands in {@code channel_connection_status.last_error}.
+     */
+    public SyncJob finalizeRun(SyncJob job, ConnectorResult r, String storedErrorMessage) {
         String status = r.jobStatus();
         job.setTotalRows(r.totalRows());
         job.setSuccessRows(r.successRows());
@@ -70,8 +86,7 @@ public class CollectionRunService {
         job.setFailedRows(r.failedRows());
         job.setStatus(status);
         job.setRateLimited(r.rateLimited());
-        // Only a bounded classification code is stored — raw provider messages never reach this slot.
-        job.setErrorMessage(r.failureCode());
+        job.setErrorMessage(storedErrorMessage);
         job.setFinishedAt(Instant.now());
         SyncJob saved = syncJobs.save(job);
         updateHealth(saved, status, r.rateLimited());
