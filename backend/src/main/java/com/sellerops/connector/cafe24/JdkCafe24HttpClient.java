@@ -42,6 +42,16 @@ public class JdkCafe24HttpClient implements Cafe24HttpClient {
         return send(builder.build());
     }
 
+    @Override
+    public Response get(URI uri, Map<String, String> headers) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+                .timeout(REQUEST_TIMEOUT)
+                .header("Accept", "application/json")
+                .GET();
+        headers.forEach(builder::header);
+        return send(builder.build());
+    }
+
     private Response send(HttpRequest request) {
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());

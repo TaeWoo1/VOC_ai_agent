@@ -18,6 +18,9 @@ public interface Cafe24HttpClient {
     /** POST an {@code application/x-www-form-urlencoded} body with headers. */
     Response postForm(URI uri, Map<String, String> headers, Map<String, String> form);
 
+    /** GET with headers (e.g. {@code Authorization: Bearer {access_token}}). */
+    Response get(URI uri, Map<String, String> headers);
+
     /**
      * One HTTP response. {@code headers} are single-valued (first value wins);
      * use {@link #header} for case-insensitive lookup.
