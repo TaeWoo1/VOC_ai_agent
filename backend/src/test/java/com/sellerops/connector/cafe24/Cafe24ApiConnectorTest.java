@@ -104,12 +104,14 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
-    void capabilitiesExposeOrderSummaryAsNeedsVerification() {
+    void capabilitiesExposeOrderSummaryAsConfirmed() {
         var capabilities = connector.capabilities("CAFE24");
         assertThat(capabilities.connectorClass()).isEqualTo("API");
         assertThat(capabilities.supports(DataType.ORDER_SUMMARY)).isTrue();
+        // Promoted from NEEDS_VERIFICATION after the gated live run against a real
+        // target mall (see docs/sellerops_cafe24_live_verification.md).
         assertThat(capabilities.verificationStatus())
-                .containsEntry(DataType.ORDER_SUMMARY, "NEEDS_VERIFICATION");
+                .containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED");
         // Only ORDER_SUMMARY is collectable; the rest stay deferred.
         for (DataType dataType : new DataType[] {
                 DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT, DataType.SALES}) {

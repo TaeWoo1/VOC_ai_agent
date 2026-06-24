@@ -14,8 +14,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * {@link Cafe24OrderAggregator} owns all interpretation (KST bucketing, decimal
  * → long), so this type carries no parsing logic and makes no zone assumption.
  *
- * <p>Field names are the doc-asserted Cafe24 names; they are a live-verification
- * item (see the connector's {@code NEEDS_VERIFICATION} capability status).
+ * <p>Field names are the Cafe24 admin order-row names, confirmed against a real
+ * mall by the gated ORDER_SUMMARY live run (see the connector's {@code CONFIRMED}
+ * capability status).
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Cafe24OrderRow(

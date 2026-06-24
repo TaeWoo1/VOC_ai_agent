@@ -115,10 +115,12 @@ public class Cafe24ApiConnector implements PullConnector {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
                 Set.of(DataType.ORDER_SUMMARY),
-                Map.of(DataType.ORDER_SUMMARY, "NEEDS_VERIFICATION"),
+                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
                 "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST)."
-                        + " Field names / range caps / paging are doc-asserted — NEEDS_VERIFICATION"
-                        + " until a gated live run. Product/review/inquiry remain deferred.");
+                        + " CONFIRMED by a gated live run against a real target mall: refresh-token"
+                        + " rotation persisted, orders GET paged and parsed, per-day rows written, and"
+                        + " seller-center reconciliation matched (sales_amount = 총 실결제금액 / actual"
+                        + " paid total). Product/review/inquiry remain deferred.");
     }
 
     @Override
