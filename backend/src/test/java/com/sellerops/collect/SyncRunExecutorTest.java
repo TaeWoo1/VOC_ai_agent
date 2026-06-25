@@ -572,6 +572,25 @@ class SyncRunExecutorTest {
     }
 
     @Test
+    void backfillOnAConnectorWithoutWindowSupportFailsClosedNotUnboundedSweep() {
+        // The mock supports REVIEW but offers no backfillCursor seam (default empty).
+        // A windowed backfill must die at a config gate, never fall through to an
+        // unbounded offset sweep of the whole source.
+        SellerAccount acc = account("GMARKET");
+
+        SyncJob job = executor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL",
+                BackfillWindow.of(java.time.LocalDate.parse("2026-01-01"), java.time.LocalDate.parse("2026-06-25")));
+
+        assertThat(job.getStatus()).isEqualTo("FAILED");
+        assertThat(job.getErrorMessage()).contains("기간 지정 백필");
+        assertThat(reviews.count()).isZero();
+        // A config issue, not a connectivity failure → no health row, no cursor seeded.
+        assertThat(connectionStatus.findBySellerAccountId(acc.getId())).isEmpty();
+        assertThat(cursors.findByOrgIdAndSellerAccountIdAndDataTypeAndCursorKey(
+                org, acc.getId(), DataType.REVIEW.name(), SyncRunExecutor.CURSOR_KEY)).isEmpty();
+    }
+
+    @Test
     void unsupportedDataTypeRecordsConfigFailureWithoutTouchingHealth() {
         SellerAccount acc = account("COUPANG"); // mock: reviews unsupported on Coupang
 

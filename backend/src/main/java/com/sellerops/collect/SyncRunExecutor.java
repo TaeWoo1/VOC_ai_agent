@@ -75,10 +75,24 @@ public class SyncRunExecutor {
     }
 
     /**
-     * Execute one collection run. {@code trigger} is SCHEDULED / MANUAL / RETRY.
-     * Returns the finished {@link SyncJob} (SUCCESS / PARTIAL / FAILED).
+     * Execute one incremental collection run. {@code trigger} is SCHEDULED /
+     * MANUAL / RETRY. Returns the finished {@link SyncJob} (SUCCESS / PARTIAL /
+     * FAILED).
      */
     public SyncJob execute(UUID orgId, UUID sellerAccountId, DataType dataType, String trigger) {
+        return execute(orgId, sellerAccountId, dataType, trigger, null);
+    }
+
+    /**
+     * Execute one collection run. When {@code backfill} is non-null the run is a
+     * bounded date-window backfill: the connector translates the window into the
+     * starting cursor ({@link PullConnector#backfillCursor}); a connector that
+     * cannot serve a windowed backfill fails closed as a config error, never an
+     * unbounded sweep. Both {@code sync_jobs} and {@code sync_cursors} are written
+     * only here — the seed and every advance share the one runtime path.
+     */
+    public SyncJob execute(UUID orgId, UUID sellerAccountId, DataType dataType, String trigger,
+                           BackfillWindow backfill) {
         SellerAccount account = sellerAccounts.findById(sellerAccountId)
                 .filter(a -> a.getOrgId().equals(orgId))
                 .orElseThrow(() -> ApiException.notFound("판매 계정을 찾을 수 없습니다."));
@@ -98,14 +112,33 @@ public class SyncRunExecutor {
                     label(dataType) + " 데이터 유형은 이 채널에서 지원되지 않습니다.");
         }
 
+        String backfillSeed = null;
+        if (backfill != null) {
+            Optional<String> seed = connector.backfillCursor(dataType, backfill.startDate(), backfill.endDate());
+            if (seed.isEmpty()) {
+                // Fail closed: a connector with no windowed-backfill seed must not
+                // fall through to an unbounded sweep of the whole board.
+                return recordConfigFailure(orgId, account, dataType, trigger, connector.kind(),
+                        label(dataType) + " 데이터 유형은 이 채널에서 기간 지정 백필을 지원하지 않습니다.");
+            }
+            backfillSeed = seed.get();
+        }
+
         SyncJob job = startJob(orgId, account, dataType, trigger, connector.kind());
-        return runPages(job, connector, orgId, account, channel, dataType);
+        return runPages(job, connector, orgId, account, channel, dataType, backfillSeed);
     }
 
     private SyncJob runPages(SyncJob job, PullConnector connector, UUID orgId,
-                             SellerAccount account, Channel channel, DataType dataType) {
+                             SellerAccount account, Channel channel, DataType dataType,
+                             String backfillSeed) {
         UUID channelId = channel.getId();
         SyncCursor cursor = loadOrCreateCursor(orgId, account.getId(), dataType);
+        if (backfillSeed != null) {
+            // A backfill re-seeds the window at offset 0; this seed write and every
+            // subsequent advance below go through the one sync_cursors path.
+            cursor.setCursorValue(backfillSeed);
+            cursors.save(cursor);
+        }
         String cursorValue = cursor.getCursorValue();
 
         int success = 0;

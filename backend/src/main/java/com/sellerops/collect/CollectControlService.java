@@ -135,6 +135,21 @@ public class CollectControlService {
         return SyncRunView.from(executor.execute(orgId, sellerAccountId, dataType, "MANUAL"));
     }
 
+    /**
+     * Operator-initiated bounded date-window backfill for one data type — a
+     * synchronous MANUAL run scoped to [{@code startDate}, {@code endDate}]. The
+     * window is validated here ({@link BackfillWindow#of}) and seeded into the run
+     * by {@link SyncRunExecutor}; the scheduler is never involved. A channel whose
+     * connector cannot serve a windowed backfill fails closed inside the executor.
+     */
+    public SyncRunView manualBackfill(UUID orgId, UUID sellerAccountId, String dataTypeRaw,
+                                      java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        requireAccount(orgId, sellerAccountId);
+        DataType dataType = parseDataType(dataTypeRaw);
+        BackfillWindow window = BackfillWindow.of(startDate, endDate);
+        return SyncRunView.from(executor.execute(orgId, sellerAccountId, dataType, "MANUAL", window));
+    }
+
     /** Operator re-run of a FAILED/PARTIAL pull run, with the attempt counter advanced. */
     public SyncRunView retry(UUID orgId, UUID jobId) {
         SyncJob original = syncJobs.findByIdAndOrgId(jobId, orgId)

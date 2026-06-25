@@ -237,22 +237,120 @@ exercised here. The **answered** `reply_status` token also remains unobserved (o
 `REVIEW`/`INQUIRY` **remain `NEEDS_VERIFICATION`** until the production
 backfill/incremental runtime (through `SyncRunExecutor`) is verified.
 
+## Production runtime backfill + incremental (PR E)
+
+PR D proved persistence through a **bypass** verifier (no `SyncRunExecutor`, no
+`sync_jobs`/`sync_cursors`). PR E moves the whole bounded backfill onto the
+**normal runtime** — the same `SyncRunExecutor` that scheduled/manual collection
+already uses — and designs incremental on top of it. **No live Cafe24 call, no
+scheduler, no live sync** is run in PR E; this is the offline runtime path plus
+tests, and `REVIEW`/`INQUIRY` stay `NEEDS_VERIFICATION`.
+
+### The one missing piece: seeding a *bounded* window through the runtime
+
+The runtime was already able to run Cafe24 `REVIEW`/`INQUIRY` end to end — the
+connector serves both, `fetchArticles` reads the date window from the cursor, and
+`SyncRunExecutor.ingestPage` routes community-article pages to
+`ingestCommunityArticles`, advancing `sync_cursors` per page and recording
+`sync_jobs`. What was missing: on a **first** run `loadOrCreateCursor` creates an
+empty cursor → the connector decodes "no window" → an **unbounded** offset sweep of
+the entire board. A bounded backfill needs the operator's `[start, end]` window
+seeded **as the run's first cursor**, written by the runtime (not a side channel).
+
+The seam (smallest safe, zero churn to other connectors):
+
+- **`PullConnector.backfillCursor(dataType, start, end) → Optional<String>`** — a
+  default method returning `empty()` ("this connector cannot serve a windowed
+  backfill"). Every other connector (mock, Naver, Coupang, ESM, …) inherits the
+  default unchanged — no `switch`/enum edits, no new `DataType`.
+- **`Cafe24ApiConnector`** overrides it: `REVIEW` → board 4 window, `INQUIRY` →
+  board 6 window (`Cafe24ArticleCursor.window(...).encode()`); `ORDER_SUMMARY`
+  self-windows and product/sales aren't collected here, so all three return empty.
+- **`SyncRunExecutor.execute(..., BackfillWindow)`** (an overload; the existing
+  4-arg `execute` delegates with no window) asks the connector for the seed; an
+  **empty** seed **fails closed** as a config error — never a fall-through to the
+  unbounded sweep. The seed is written to the `SyncCursor` **inside `runPages`**,
+  so the seed and every subsequent advance share the **one** `sync_cursors` path.
+  `sync_jobs` and `sync_cursors` are still written **only by the runtime**.
+- **`BackfillWindow.of(start, end)`** validates the window closed (both bounds
+  required; `start ≤ end`); **`CollectControlService.manualBackfill`** + a
+  dedicated `POST /api/seller-accounts/{id}/backfill` (`BackfillRequest`) are the
+  operator trigger — a synchronous **MANUAL** run, never the scheduler.
+
+### Backfill request shape (user-selected initial backfill)
+
+- **`startDate` / `endDate`** — Cafe24 **KST** calendar dates (the platform's
+  explicit zone), passed straight to the articles `start_date`/`end_date` filter.
+  This is a collection window, not a recency signal — it carries no time-of-day and
+  never feeds `eventTimeMs`.
+- **Board 4 / 6 only** — expressed through `REVIEW`/`INQUIRY`; the connector maps
+  each to its primary board. **Board 9 (1:1 맞춤상담) is never requested.**
+- **Page size** — the runtime default (`SyncRunExecutor.PAGE_LIMIT = 50`) for this
+  first verification. A *user-selected* page size is **deferred by decision**: it
+  would thread an override through the shared executor and every connector's
+  `request.limit()` contract, widening the blast radius beyond this slice. A long
+  range simply pages internally at 50 under the `MAX_PAGES` guard.
+
+### Incremental sync (design)
+
+Incremental re-uses the **same mechanism**: re-seed a **trailing overlap window**
+(e.g. `[lastEnd − overlapDays, today]`, KST) at offset 0 and run through
+`SyncRunExecutor` again. The **hash-guarded upsert** absorbs the result — new
+articles insert, edited articles / reply-status changes update in place, unchanged
+rows **no-op** — exactly as `ORDER_SUMMARY` already self-heals its trailing window.
+A manually-triggered overlap re-scan is covered by the backfill trigger today;
+**automatic scheduled** incremental (a per-board high-water mark + clock-derived
+trailing window) is a later, separately gated step and is **not** wired in PR E.
+
+### Verified offline (through `SyncRunExecutor`, no network)
+
+`Cafe24ArticleBackfillFlowTest` drives the **real** executor against the **real**
+connector over the recording fake + H2:
+
+- a seeded `REVIEW` backfill bounds **board 4** (window reaches the GET; cursor
+  seeded and advanced through `sync_cursors`);
+- a seeded `INQUIRY` backfill bounds **board 6** and **never requests board 9**;
+- the cursor **advances across pages preserving the window** (offset 0 → 50, board
+  4, still windowed);
+- a **repeated same-window** backfill is an **idempotent no-op** — re-seed at
+  offset 0, re-fetch, natural-key/`source_hash` dedupe → 0 inserted, **no duplicate
+  rows**.
+
+`SyncRunExecutorTest` adds the fail-closed guard: a backfill on a connector with no
+`backfillCursor` seam is a **config failure**, not an unbounded sweep (no cursor
+seeded, no health touched). `BackfillWindowTest` covers the window validation.
+
+### Route to `CONFIRMED`
+
+The runtime path is now real and tested offline. Two gates remain before
+`REVIEW`/`INQUIRY` can move from `NEEDS_VERIFICATION` to `CONFIRMED`, **each its own
+gated PR**:
+
+1. **One supervised live production backfill** through `SyncRunExecutor` against the
+   live mall — proving real `sync_jobs` + `sync_cursors` rows, cursor advance, and
+   bounded windowing on the production runtime (not the PR D bypass).
+2. **The answered `reply_status` token** — still unobserved (only `N → PENDING`
+   seen); unknown tokens stay `UNKNOWN` and must not be guessed.
+
 ## Forward plan (later, separately gated PRs)
 
-- **Initial backfill** will be **date-range based** (user-selected start/end with
-  recent-30/90/180 + custom presets). The **window seed** now exists (PR D); what
-  remains is the user-facing trigger and ~30-day **chunking** across a long range.
-- **Incremental sync** will use a per-board high-water mark plus a small **overlap
-  window**, relying on the **hash-guarded upsert** to absorb edited articles and
-  reply-status changes cheaply (unchanged rows no-op).
-- **Live-shape verification** — **done**: the articles endpoint, date-filter params,
-  and `rating` presence are confirmed for boards 4 and 6, and the `N` reply token is
-  mapped.
-- **Bounded persistence verification** — **done** (see above): one supervised run
-  persisted 6 rows end-to-end and live-verified insert, natural-key/`source_hash`
-  no-op, and the date-window cursor seed. Still open before `CONFIRMED`: the
-  **production runtime** through `SyncRunExecutor` (`sync_jobs`/`sync_cursors`) and the
-  **answered** reply token (unobserved so far).
+- **Initial backfill** — the date-range trigger and runtime seed now exist (PR E:
+  `BackfillWindow` + `manualBackfill` + `POST /backfill`, seeded through
+  `SyncRunExecutor`). Still future: a user-facing preset UI (recent-30/90/180 +
+  custom) and a configurable page size / long-range chunking.
+- **Incremental sync** — the overlap-window mechanism is designed and reachable via
+  the backfill trigger (PR E). Still future: **automatic scheduled** incremental (a
+  per-board high-water mark + clock-derived trailing window), separately gated.
+- **Live-shape verification** — **done** (PR C): the articles endpoint, date-filter
+  params, and `rating` presence are confirmed for boards 4 and 6, and the `N` reply
+  token is mapped.
+- **Bounded persistence verification** — **done** (PR D): one supervised bypass run
+  persisted 6 rows and live-verified insert, natural-key/`source_hash` no-op, and the
+  date-window cursor seed.
+- **Production runtime path** — **done offline** (PR E): bounded backfill +
+  incremental seed run through `SyncRunExecutor` (writing `sync_jobs`/`sync_cursors`),
+  proven by tests. Still open before `CONFIRMED`: **one supervised live production
+  backfill** and the **answered** `reply_status` token (unobserved so far).
 
 ## AI moat — source stays separate from AI outputs
 
