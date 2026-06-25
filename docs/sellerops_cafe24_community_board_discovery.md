@@ -3,9 +3,10 @@
 The first slice toward collecting Cafe24 **reviews and inquiries**. On Cafe24 those
 live inside community **boards** (게시판), so before any capture we need a
 `board_no → REVIEW / INQUIRY / OTHER` mapping. This slice ships that **Board
-Discovery** read skeleton **offline**: the connector stays flag-off by default
-(`sellerops.connector.cafe24.enabled`), nothing calls Cafe24, and the capability is
-**`NEEDS_VERIFICATION`** until one gated live `/boards` read.
+Discovery** read capability: the connector stays flag-off by default
+(`sellerops.connector.cafe24.enabled`), and the capability is **`CONFIRMED`** by one
+supervised live `/boards` read against the real target mall (see
+[Live verification](#capability-status--confirmed) below).
 
 ## Scope
 
@@ -41,35 +42,54 @@ exist and runtime is byte-identical.
 | `Cafe24BoardRow` | Jackson projection of one board row — **metadata only**: `board_no`, `board_name`, `board_type`. No article body / writer / customer fields. |
 | `Cafe24BoardsClient` | `GET /api/v2/admin/boards` with `Authorization: Bearer …`; mall_id shape guard, 429 → `Cafe24RateLimitedException`, non-200 → HTTP-coded throw (body kept out of the message). |
 | `Cafe24BoardClassifier` | Pure offline `classify(row) → REVIEW_BEARING / INQUIRY_BEARING / OTHER` by name keywords, **inquiry before review** precedence; null/blank → OTHER. |
-| `Cafe24BoardDiscovery` | Thin orchestrator: list → classify → sanitized `Result` (per-board `board_no` + kind + name, plus a per-kind count map). Takes an already-minted access token; does not open the vault or refresh tokens. |
+| `Cafe24BoardDiscovery` | Thin orchestrator: list → classify → sanitized `Result` (per-board `board_no` + `board_name` + `board_type` + kind, plus a per-kind count map). Takes an already-minted access token; does not open the vault or refresh tokens. |
 
-Classifier keywords (doc-asserted): inquiry — 문의, Q&A/QnA, 1:1, 상담, `inquiry`;
+Classifier keywords: inquiry — 문의, Q&A/QnA, 1:1, 상담, `inquiry`;
 review — 후기, 리뷰, `review`; everything else (공지, 자유게시판, 갤러리, …) is OTHER.
 
-## Capability status — `NEEDS_VERIFICATION`
+## Capability status — `CONFIRMED`
 
-The `/boards` endpoint shape, the board-row field names, and the classifier's
-keyword rules are all **doc-asserted and unobserved** against a real mall. A mall may
-rename or add boards, so the mapping must be confirmed by a gated live read before any
-review/inquiry collection is keyed off it.
+Confirmed by **one supervised live `/boards` read** against the real target mall
+(`Cafe24BoardDiscovery.VERIFICATION_STATUS`). The capability ships **flag-off by
+default** (`sellerops.connector.cafe24.enabled`); the run used the re-stored
+Community-read credential and a temporary, doubly-flag-gated verifier that has since
+been removed. Evidence is sanitized — board-level metadata and aggregate counts only,
+never article content, customer data, tokens, `mall_id`, or raw bodies.
 
-## Live-verification plan (gated, later turn)
+### Outcome — PASS
 
-Run only under an explicit per-run operator approval; dev backend + disposable dev DB,
-scheduler off, flag on for the single run.
+| field | value |
+|---|---|
+| verifier calls | exactly **1** (one token refresh + one `GET /api/v2/admin/boards`) |
+| HTTP status | **200** |
+| boards parsed | **13** |
+| token rotation | persisted (single-use refresh token rotated and written back) |
+| DB writes | refresh-token rotation only — no sync_jobs / sync_cursors / order_daily_summaries / canonical reviews / inquiries |
+| articles / comments / urgent-inquiry | not fetched |
 
-1. In Cafe24 Developers, add **Community read** (`mall.read_community`) to the app's
-   scopes (alongside the existing order read).
-2. **Re-run OAuth consent** for the **correct target mall** (the scope set changed, so
-   the prior grant is insufficient) and exchange the code locally for a fresh
-   `refresh_token`.
-3. **Re-store** the credential via the local intake endpoint (refresh token entered
-   locally, never echoed).
-4. Trigger **one** gated `/boards` read (the only live call) and print **sanitized
-   board metadata only**: per-board `board_no` + classified kind + board name, and the
-   per-kind counts. No tokens, mall_id, article content, customer data, or raw bodies.
-5. If the board shapes and the mapping check out, a follow-up offline PR promotes the
-   Board Discovery status `NEEDS_VERIFICATION → CONFIRMED`.
+### Classification result
+
+| classification | count | boards |
+|---|---|---|
+| REVIEW_BEARING | 1 | 구매후기 |
+| INQUIRY_BEARING | 2 | 문의사항 · 1:1 맞춤상담 |
+| OTHER | 10 | 공지·이벤트·FAQ·자유게시판·자료실·한줄메모 etc. |
+
+The three VOC-bearing boards were identified with **no false positives or negatives**
+across the 10 OTHER boards. Field names `board_no` / `board_name` / `board_type`
+parsed cleanly (`board_type` arrives as a numeric code).
+
+### `board_name`-based classification validated
+
+`board_type` alone is insufficient: the run showed **one `board_type` value (5)
+spanning a REVIEW board, an INQUIRY board, and an OTHER board**. Keying classification
+off `board_name` (with `board_type` captured as metadata only) is therefore the
+correct approach, now confirmed against real data.
+
+### Caveat
+
+A mall that **renames or adds** boards may need the classifier keyword set extended;
+the confirmation covers the default Cafe24 board naming observed on the target mall.
 
 ## Follow-ups (separate, gated)
 

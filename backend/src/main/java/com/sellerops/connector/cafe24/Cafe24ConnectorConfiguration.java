@@ -41,8 +41,8 @@ public class Cafe24ConnectorConfiguration {
     }
 
     // Board Discovery (community read) infrastructure — wired behind the same
-    // flag, NEEDS_VERIFICATION. Inert until a gated live /boards run; not part of
-    // the DataType/scheduling backbone, so no runtime path reaches these by default.
+    // flag, CONFIRMED by a supervised live /boards run. Not part of the
+    // DataType/scheduling backbone, so no runtime path reaches these by default.
     @Bean
     Cafe24BoardsClient cafe24BoardsClient(Cafe24HttpClient http) {
         return new Cafe24BoardsClient(http);

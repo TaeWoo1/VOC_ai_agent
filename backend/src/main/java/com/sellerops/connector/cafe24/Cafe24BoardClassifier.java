@@ -16,11 +16,13 @@ import java.util.Locale;
  * actionable VOC surface, so a name matching both keyword sets resolves to
  * {@code INQUIRY_BEARING}. A null/blank name is {@code OTHER} (never guessed).
  *
- * <p>The keyword rules are <b>doc-asserted</b> against Cafe24's default board
- * naming and remain a live-verification item ({@code NEEDS_VERIFICATION}) until a
- * real mall's board names are observed in a gated {@code /boards} read — a mall
- * may rename or add boards, so the live run confirms the mapping before any
- * review/inquiry collection is keyed off it.
+ * <p>The keyword rules were <b>confirmed</b> ({@code CONFIRMED}) against a real
+ * target mall by the supervised {@code /boards} live run: the default board
+ * naming classified correctly (구매후기 → review; 문의사항 and 1:1 맞춤상담 →
+ * inquiry) with no false positives across the non-VOC boards. The run also showed
+ * {@code board_type} alone is insufficient (one type spanned REVIEW/INQUIRY/OTHER),
+ * validating this name-based approach. A mall that renames or adds boards may still
+ * need the keyword set extended.
  */
 public class Cafe24BoardClassifier {
 
