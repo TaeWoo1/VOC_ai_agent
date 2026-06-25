@@ -161,19 +161,98 @@ the incremental overlap re-scan**, not a source timestamp.
 - **Board 9 (1:1 맞춤상담)** remains a follow-up: high-PII, **not included** in this
   verification, and **not wired** into `INQUIRY` fetch.
 
+## Bounded persistence verification (PR D)
+
+The shape is verified, but **`CONFIRMED` requires a persisted end-to-end run**. PR D
+adds the **date-window backfill seed** and a **bounded, supervised** persistence
+verification path — REVIEW/INQUIRY stay `NEEDS_VERIFICATION` until that run lands.
+
+**Permanent foundation (committed):**
+
+- **`Cafe24ArticleCursor` carries an optional date window** —
+  `"b<board>:o<offset>:s<start>:e<end>"`. When seeded, the connector passes
+  `start_date`/`end_date` to the articles endpoint and `advance()` preserves the
+  window across pages; an unseeded cursor is the prior plain offset sweep. This is the
+  backfill seed — no runtime contract change. Decoding is defensive (half-window or
+  malformed date → no window).
+- **`Cafe24ApiConnector.fetchArticles`** now reads the window from the cursor.
+- The end-to-end path (windowed `fetch` → `CanonicalCommunityArticle` →
+  `ingestCommunityArticles` → hash-guarded upsert) is proven offline over fakes:
+  insert, idempotent no-op, in-place update, cursor advance, and the **REVIEW→4 /
+  INQUIRY→6** routing (board 9 never requested).
+
+**Temporary verifier (used once, then removed):** a doubly-flag-gated
+`POST /api/diagnostics/cafe24/article-persistence/{accountId}`
+(`sellerops.connector.cafe24.article-persistence-verification.enabled`) drove the
+one supervised live run below. It was **bounded by construction** — boards 4 & 6
+only, a date window, page limit clamped to ≤3 — and persisted **only through the
+normal path** (`connector.fetch` + `ingestCommunityArticles`, **not**
+`SyncRunExecutor`, so it created **no** sync_jobs or sync_cursors). An optional
+`runTwice` re-ran the same bounded page in one execution to demonstrate the no-op.
+Its sanitized output was structural only. The controller has been **removed** in this
+PR (like the shape verifier before it) — only the permanent foundation above remains.
+
+### Outcome — bounded persistence **live-verified** for boards 4 and 6
+
+One supervised execution
+(`POST …/article-persistence/{accountId}?limit=3&runTwice=true&startDate=2026-01-01&endDate=2026-06-25`,
+HTTP 200) persisted real board articles end-to-end through the normal ingestion path.
+Sanitized evidence:
+
+- **`tokenRotated = true`** — the connector refreshed and rotated the single-use
+  refresh token via the normal credential path.
+- **`cafe24_community_articles` for the test seller account: before 0 → after 6
+  (delta +6).** These **6 rows were intentionally persisted** in the dev DB and are
+  **left in place** as live evidence (3 reviews on board 4, 3 inquiries on board 6).
+- **REVIEW / board 4** — pass 1: fetched 3, inserted 3, updated 0, no-op 0, failed 0,
+  rateLimited false, cursor `b4:o0:s…:e…` → `b4:o3:s…:e…`; pass 2 (same window):
+  fetched 3, inserted 0, updated 0, **no-op 3**, failed 0, cursor unchanged window.
+- **INQUIRY / board 6** — pass 1: fetched 3, inserted 3, updated 0, no-op 0, failed 0,
+  rateLimited false, cursor `b6:o0:s…:e…` → `b6:o3:s…:e…`; pass 2 (same window):
+  fetched 3, inserted 0, updated 0, **no-op 3**, failed 0, cursor unchanged window.
+
+What this **live-verified**:
+
+- **Insert path** end-to-end through `connector.fetch` → `CanonicalCommunityArticle`
+  → `ingestCommunityArticles` → hash-guarded upsert.
+- **Natural-key dedupe + `source_hash` no-op** — the identical second pass inserted and
+  updated **zero**; the +6 delta equals exactly the 6 first-pass inserts (no
+  duplication).
+- **Date-window cursor seed** — both boards fetched with the seeded
+  `s2026-01-01:e2026-06-25` window and the cursor advanced `o0 → o3` while preserving
+  the window.
+- **Board 9 remains excluded** — it was never requested; routing is REVIEW→4,
+  INQUIRY→6 only.
+- No rows were skipped for missing `article_no`; no failures and no rate-limits
+  occurred.
+
+Privacy: the run printed **no** article titles, article contents, writer/customer
+names, contact/address fields, order IDs, raw response body, or secrets — only the
+structural counts and cursors above.
+
+**Not verified by this run:** `SyncRunExecutor` and its `sync_jobs` / `sync_cursors`
+were **bypassed by design**, so the production scheduling/runtime path is **not**
+exercised here. The **answered** `reply_status` token also remains unobserved (only
+`N → PENDING` seen; unknown/unobserved tokens stay `UNKNOWN`). Accordingly,
+`REVIEW`/`INQUIRY` **remain `NEEDS_VERIFICATION`** until the production
+backfill/incremental runtime (through `SyncRunExecutor`) is verified.
+
 ## Forward plan (later, separately gated PRs)
 
 - **Initial backfill** will be **date-range based** (user-selected start/end with
-  recent-30/90/180 + custom presets), split into ~30-day chunks, paginated with
-  limit/offset, the plan seeded into the connector's opaque cursor — no runtime
-  contract change.
+  recent-30/90/180 + custom presets). The **window seed** now exists (PR D); what
+  remains is the user-facing trigger and ~30-day **chunking** across a long range.
 - **Incremental sync** will use a per-board high-water mark plus a small **overlap
   window**, relying on the **hash-guarded upsert** to absorb edited articles and
   reply-status changes cheaply (unchanged rows no-op).
-- **Live-shape verification** — **done** (see above): the articles endpoint,
-  date-filter params, and `rating` presence are confirmed for boards 4 and 6, and the
-  `N` reply token is mapped. Still open before `CONFIRMED`: a persisted end-to-end run
-  and the **answered** reply token (unobserved so far).
+- **Live-shape verification** — **done**: the articles endpoint, date-filter params,
+  and `rating` presence are confirmed for boards 4 and 6, and the `N` reply token is
+  mapped.
+- **Bounded persistence verification** — **done** (see above): one supervised run
+  persisted 6 rows end-to-end and live-verified insert, natural-key/`source_hash`
+  no-op, and the date-window cursor seed. Still open before `CONFIRMED`: the
+  **production runtime** through `SyncRunExecutor` (`sync_jobs`/`sync_cursors`) and the
+  **answered** reply token (unobserved so far).
 
 ## AI moat — source stays separate from AI outputs
 

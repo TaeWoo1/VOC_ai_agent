@@ -473,6 +473,27 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
+    void articleFetchUsesDateWindowFromSeededCursorAndPreservesIt() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(1001L, "t", "c", null, 5, null, "N")));
+
+        // A windowed cursor seed (backfill) bounds the sweep to [start, end].
+        String seeded = "b4:o0:s2026-01-01:e2026-06-25";
+        FetchPage page = connector.fetch(request(DataType.REVIEW, seeded));
+
+        FakeCafe24HttpClient.Sent articlesGet = http.sent.get(1);
+        assertThat(articlesGet.uri().toString())
+                .contains("/api/v2/admin/boards/4/articles?")
+                .contains("start_date=2026-01-01")
+                .contains("end_date=2026-06-25")
+                .contains("offset=0");
+        // The next cursor keeps the window so paging stays inside it.
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o1:s2026-01-01:e2026-06-25");
+    }
+
+    @Test
     void rateLimitedArticlesKeepsCursorUnchanged() {
         storeCafe24Credential();
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));

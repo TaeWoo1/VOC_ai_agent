@@ -190,9 +190,11 @@ public class Cafe24ApiConnector implements PullConnector {
         Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
         try {
             Authorized auth = authorize(request);
-            // No date window in PR B (no backfill trigger yet) — a plain offset sweep.
+            // A windowed cursor (backfill seed) bounds the sweep to [start, end]; an
+            // unseeded cursor sweeps by offset only. advance() preserves the window.
             List<Cafe24BoardArticleRow> rows = articlesClient.fetchPage(
-                    auth.accessToken(), auth.mallId(), boardNo, null, null, request.limit(), cursor.offset());
+                    auth.accessToken(), auth.mallId(), boardNo,
+                    cursor.windowStart(), cursor.windowEnd(), request.limit(), cursor.offset());
 
             List<CanonicalCommunityArticle> records = new ArrayList<>();
             int position = 0;
