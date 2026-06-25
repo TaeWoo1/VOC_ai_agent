@@ -15,4 +15,7 @@ public interface Cafe24CommunityArticleRepository extends JpaRepository<Cafe24Co
 
     List<Cafe24CommunityArticle> findAllByOrgIdAndSellerAccountIdAndBoardNo(
             UUID orgId, UUID sellerAccountId, int boardNo);
+
+    /** Row count scoped to one connected mall — drives the verifier's count-delta report. */
+    long countByOrgIdAndSellerAccountId(UUID orgId, UUID sellerAccountId);
 }

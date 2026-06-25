@@ -1,0 +1,153 @@
+package com.sellerops.connector.cafe24;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sellerops.community.Cafe24CommunityArticle;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
+import com.sellerops.connector.DataType;
+import com.sellerops.connector.FetchPage;
+import com.sellerops.connector.FetchRequest;
+import com.sellerops.credential.ConnectorCredentialRepository;
+import com.sellerops.credential.CredentialVault;
+import com.sellerops.ingest.IngestOutcome;
+import com.sellerops.ingest.IngestionService;
+import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.product.ProductRepository;
+import com.sellerops.product.ProductService;
+import com.sellerops.review.ReviewRepository;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.test.context.ActiveProfiles;
+
+/**
+ * PR D bounded persistence path, end to end over the recording fake + real (H2) DB:
+ * the connector fetches a windowed page of board articles and the result is
+ * persisted via {@link IngestionService#ingestCommunityArticles} — exactly the path
+ * the temporary persistence verifier drives, but with no network. Proves insert,
+ * idempotent no-op, in-place update, cursor advance, the REVIEW→4 / INQUIRY→6
+ * routing (board 9 never reached), and that the seeded date window reaches the GET.
+ */
+@DataJpaTest
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@ActiveProfiles("test")
+class Cafe24ArticlePersistenceFlowTest {
+
+    private static final LocalDate START = LocalDate.parse("2026-01-01");
+    private static final LocalDate END = LocalDate.parse("2026-06-25");
+
+    @Autowired ReviewRepository reviews;
+    @Autowired InquiryRepository inquiries;
+    @Autowired OrderDailySummaryRepository orders;
+    @Autowired ProductRepository products;
+    @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired ConnectorCredentialRepository credentials;
+
+    private final UUID org = UUID.randomUUID();
+    private final UUID account = UUID.randomUUID();
+    private final UUID channel = UUID.randomUUID();
+    private final FakeCafe24HttpClient http = new FakeCafe24HttpClient();
+
+    private CredentialVault vault;
+    private IngestionService ingestion;
+    private Cafe24ApiConnector connector;
+
+    @BeforeEach
+    void setUp() {
+        byte[] key = new byte[32];
+        new SecureRandom().nextBytes(key);
+        vault = new CredentialVault(credentials, new ObjectMapper(), Base64.getEncoder().encodeToString(key),
+                "local-test-1");
+        vault.store(org, account, "API", "OAUTH2",
+                Map.of("mall_id", "samplemall", "client_id", "cid", "client_secret", "secret",
+                        "refresh_token", "old-refresh-token"),
+                null, null, null);
+        ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
+                communityArticles);
+        connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault, new Cafe24OrdersClient(http),
+                new Cafe24BoardArticlesClient(http), Clock.systemUTC());
+    }
+
+    /** Drive one bounded pass through the normal path: windowed fetch → ingest. */
+    private IngestOutcome runPass(DataType dataType, int boardNo, long articleNo, String content, String reply) {
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(articleNo, "제목", content, 77L, 5, null, reply)));
+        String cursor = Cafe24ArticleCursor.window(boardNo, START, END).encode();
+        FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", dataType, cursor, 3));
+        @SuppressWarnings("unchecked")
+        List<CanonicalCommunityArticle> records = (List<CanonicalCommunityArticle>) page.records();
+        return ingestion.ingestCommunityArticles(org, channel, account, records);
+    }
+
+    @Test
+    void reviewArticlesPersistThroughTheNormalPathWithWindowedFetch() {
+        IngestOutcome outcome = runPass(DataType.REVIEW, 4, 2001L, "잘 쓰고 있어요", "N");
+
+        assertThat(outcome.success()).isEqualTo(1);
+        assertThat(outcome.insertedIds()).hasSize(1);
+
+        List<Cafe24CommunityArticle> rows = communityArticles.findAllByOrgId(org);
+        assertThat(rows).hasSize(1);
+        Cafe24CommunityArticle a = rows.get(0);
+        assertThat(a.getBoardNo()).isEqualTo(4);
+        assertThat(a.getArticleNo()).isEqualTo(2001L);
+        assertThat(a.getSourceKind()).isEqualTo("REVIEW");
+        assertThat(a.getReplyStatus()).isEqualTo("PENDING"); // N → PENDING
+        assertThat(a.getSellerAccountId()).isEqualTo(account);
+
+        // The seeded window reached the GET, and the cursor advanced inside the window.
+        assertThat(http.sent.get(1).uri().toString())
+                .contains("/api/v2/admin/boards/4/articles?")
+                .contains("start_date=2026-01-01")
+                .contains("end_date=2026-06-25");
+    }
+
+    @Test
+    void reRunningTheSameWindowedPageIsANoOp() {
+        runPass(DataType.REVIEW, 4, 2001L, "동일 본문", "N");
+        IngestOutcome second = runPass(DataType.REVIEW, 4, 2001L, "동일 본문", "N");
+
+        assertThat(second.success()).isZero();
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(communityArticles.countByOrgIdAndSellerAccountId(org, account)).isEqualTo(1);
+    }
+
+    @Test
+    void changedContentUpdatesInPlaceWithoutDuplicating() {
+        runPass(DataType.REVIEW, 4, 2001L, "원래 본문", "N");
+        IngestOutcome second = runPass(DataType.REVIEW, 4, 2001L, "수정 본문", "N");
+
+        assertThat(second.success()).isEqualTo(1);
+        assertThat(second.insertedIds()).isEmpty(); // an update, not a new insert
+        List<Cafe24CommunityArticle> rows = communityArticles.findAllByOrgId(org);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getContent()).isEqualTo("수정 본문");
+    }
+
+    @Test
+    void inquiryArticlesRouteToBoard6NeverBoard9() {
+        IngestOutcome outcome = runPass(DataType.INQUIRY, 6, 3001L, "곡면 가능?", "N");
+
+        assertThat(outcome.success()).isEqualTo(1);
+        Cafe24CommunityArticle a = communityArticles.findAllByOrgId(org).get(0);
+        assertThat(a.getBoardNo()).isEqualTo(6);
+        assertThat(a.getSourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        // INQUIRY fans out to board 6 only — board 9 is never requested.
+        assertThat(http.sent.get(1).uri().toString())
+                .contains("/api/v2/admin/boards/6/articles?")
+                .doesNotContain("/boards/9/");
+    }
+}
