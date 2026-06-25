@@ -11,6 +11,7 @@ import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -63,7 +64,8 @@ class Cafe24ApiConnectorTest {
     }
 
     private Cafe24ApiConnector connectorWith(CredentialVault v) {
-        return new Cafe24ApiConnector(new Cafe24TokenClient(http), v, new Cafe24OrdersClient(http), CLOCK);
+        return new Cafe24ApiConnector(new Cafe24TokenClient(http), v, new Cafe24OrdersClient(http),
+                new Cafe24BoardArticlesClient(http), CLOCK);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -91,8 +93,9 @@ class Cafe24ApiConnectorTest {
 
     @Test
     void unsupportedDataTypesThrowWithZeroHttp() {
-        for (DataType dataType : new DataType[] {
-                DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT, DataType.SALES}) {
+        // PRODUCT/SALES stay deferred; REVIEW/INQUIRY are now collectable (community
+        // board articles) and no longer throw here.
+        for (DataType dataType : new DataType[] {DataType.PRODUCT, DataType.SALES}) {
             assertThatThrownBy(() -> connector.fetch(request(dataType, null)))
                     .isInstanceOf(UnsupportedDataTypeException.class);
         }
@@ -108,13 +111,16 @@ class Cafe24ApiConnectorTest {
         var capabilities = connector.capabilities("CAFE24");
         assertThat(capabilities.connectorClass()).isEqualTo("API");
         assertThat(capabilities.supports(DataType.ORDER_SUMMARY)).isTrue();
-        // Promoted from NEEDS_VERIFICATION after the gated live run against a real
-        // target mall (see docs/sellerops_cafe24_live_verification.md).
+        // ORDER_SUMMARY promoted after the gated live run; REVIEW/INQUIRY added by
+        // PR B as collectable-but-unverified community board article capture.
         assertThat(capabilities.verificationStatus())
-                .containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED");
-        // Only ORDER_SUMMARY is collectable; the rest stay deferred.
-        for (DataType dataType : new DataType[] {
-                DataType.REVIEW, DataType.INQUIRY, DataType.PRODUCT, DataType.SALES}) {
+                .containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED")
+                .containsEntry(DataType.REVIEW, "NEEDS_VERIFICATION")
+                .containsEntry(DataType.INQUIRY, "NEEDS_VERIFICATION");
+        assertThat(capabilities.supports(DataType.REVIEW)).isTrue();
+        assertThat(capabilities.supports(DataType.INQUIRY)).isTrue();
+        // PRODUCT/SALES stay deferred.
+        for (DataType dataType : new DataType[] {DataType.PRODUCT, DataType.SALES}) {
             assertThat(capabilities.supports(dataType))
                     .as("%s stays deferred", dataType)
                     .isFalse();
@@ -363,8 +369,131 @@ class Cafe24ApiConnectorTest {
         assertThat(vault.readMasked(org, account).lastRotatedAt()).isNotNull();
     }
 
+    @Test
+    void reviewFetchMapsBoard4ArticlesToCanonicalCommunityArticles() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(1001L, "좋은 상품", "잘 쓰고 있어요", 77L, 5,
+                        "2026-06-20T10:00:00+09:00", "N")));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, null));
+
+        assertThat(page.dataType()).isEqualTo(DataType.REVIEW);
+        assertThat(page.rateLimited()).isFalse();
+        assertThat(page.hasMore()).isFalse();
+        assertThat(page.source()).isEqualTo(Cafe24ApiConnector.KIND);
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o1");
+
+        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(rows).hasSize(1);
+        CanonicalCommunityArticle a = rows.get(0);
+        assertThat(a.boardNo()).isEqualTo(4);
+        assertThat(a.articleNo()).isEqualTo(1001L);
+        assertThat(a.sourceKind()).isEqualTo("REVIEW");
+        assertThat(a.rating()).isEqualTo(5);
+        assertThat(a.replyStatus()).isEqualTo("N");
+
+        // The articles GET carried the board path, paging, and Bearer token.
+        FakeCafe24HttpClient.Sent articlesGet = http.sent.get(1);
+        assertThat(articlesGet.method()).isEqualTo("GET");
+        assertThat(articlesGet.uri().toString())
+                .contains("/api/v2/admin/boards/4/articles?")
+                .contains("limit=50")
+                .contains("offset=0");
+        assertThat(articlesGet.headers().get("Authorization")).isEqualTo("Bearer access-1");
+    }
+
+    @Test
+    void inquiryFetchMapsBoard6Articles() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(3003L, "곡면 가능?", "곡면에도 붙나요", null, null, null, "N")));
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, null));
+
+        assertThat(page.dataType()).isEqualTo(DataType.INQUIRY);
+        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).boardNo()).isEqualTo(6);
+        assertThat(rows.get(0).sourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        assertThat(http.sent.get(1).uri().toString()).contains("/api/v2/admin/boards/6/articles?");
+    }
+
+    @Test
+    void articleFetchSignalsHasMoreAndAdvancesCursorOnAFullPage() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        // A full page (== request limit 50) forces continuation.
+        String[] fullPage = new String[50];
+        for (int i = 0; i < fullPage.length; i++) {
+            fullPage[i] = FakeCafe24HttpClient.article(1000L + i, "t" + i, "c" + i, null, 5,
+                    "2026-06-20T10:00:00+09:00", "N");
+        }
+        http.enqueue(FakeCafe24HttpClient.articlesOk(fullPage));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, null));
+
+        assertThat(page.hasMore()).isTrue();
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o50");
+        assertThat(articles(page)).hasSize(50);
+    }
+
+    @Test
+    void articleFetchResumesFromTheCursorOffset() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk()); // empty tail
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o50"));
+
+        assertThat(page.hasMore()).isFalse();
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o50");
+        assertThat(articles(page)).isEmpty();
+        assertThat(http.sent.get(1).uri().toString()).contains("offset=50");
+    }
+
+    @Test
+    void articleRowsMissingArticleNoAreDropped() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(1001L, "유효", "본문", null, 5, null, "N"),
+                "{\"title\":\"번호 없음\"}"));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, null));
+
+        // Only the row with an article_no can be keyed; the other is dropped, but the
+        // cursor still advances by the full page size consumed.
+        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).articleNo()).isEqualTo(1001L);
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o2");
+    }
+
+    @Test
+    void rateLimitedArticlesKeepsCursorUnchanged() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.rateLimited429("8"));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o20"));
+
+        assertThat(page.rateLimited()).isTrue();
+        assertThat(page.records()).isEmpty();
+        assertThat(page.retryAfterSeconds()).isEqualTo(8);
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o20");
+        assertThat(page.source()).isEqualTo(Cafe24ApiConnector.KIND);
+    }
+
     @SuppressWarnings("unchecked")
     private static List<CanonicalOrderSummary> summaries(FetchPage page) {
         return (List<CanonicalOrderSummary>) page.records();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<CanonicalCommunityArticle> articles(FetchPage page) {
+        return (List<CanonicalCommunityArticle>) page.records();
     }
 }
