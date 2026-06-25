@@ -20,14 +20,18 @@ import java.util.Map;
  * {@link Cafe24RateLimitedException} from the boards call propagates unchanged.
  *
  * <p>Board Discovery is <b>{@value #VERIFICATION_STATUS}</b>: the endpoint shape,
- * board-row field names, and the classifier's keyword rules are doc-asserted and
- * unverified until one gated {@code /boards} read against the real target mall
- * (see docs/sellerops_cafe24_community_board_discovery.md). The connector ships
+ * board-row field names ({@code board_no}/{@code board_name}/{@code board_type}),
+ * and the classifier's name-based mapping were confirmed by one supervised live
+ * {@code /boards} read against the real target mall — 13 boards parsed, the three
+ * VOC-bearing boards correctly identified, and {@code board_type} shown to be
+ * insufficient on its own (one type spanned REVIEW/INQUIRY/OTHER), which is why
+ * classification keys off {@code board_name} (see
+ * docs/sellerops_cafe24_community_board_discovery.md). The connector ships
  * flag-off by default, so nothing here runs until the flag is deliberately set.
  */
 public class Cafe24BoardDiscovery {
 
-    public static final String VERIFICATION_STATUS = "NEEDS_VERIFICATION";
+    public static final String VERIFICATION_STATUS = "CONFIRMED";
 
     private final Cafe24BoardsClient boardsClient;
     private final Cafe24BoardClassifier classifier;
@@ -47,14 +51,14 @@ public class Cafe24BoardDiscovery {
 
         for (Cafe24BoardRow row : boardsClient.list(accessToken, mallId)) {
             BoardKind kind = classifier.classify(row);
-            classified.add(new ClassifiedBoard(row.boardNo(), row.boardName(), kind));
+            classified.add(new ClassifiedBoard(row.boardNo(), row.boardName(), row.boardType(), kind));
             counts.merge(kind, 1, Integer::sum);
         }
         return new Result(List.copyOf(classified), Map.copyOf(counts));
     }
 
     /** One board placed in the discovery mapping (metadata only). */
-    public record ClassifiedBoard(int boardNo, String boardName, BoardKind kind) {
+    public record ClassifiedBoard(int boardNo, String boardName, String boardType, BoardKind kind) {
     }
 
     /** Sanitized discovery output: the classified boards and a per-kind tally. */
