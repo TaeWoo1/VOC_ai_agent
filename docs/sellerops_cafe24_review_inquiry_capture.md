@@ -242,9 +242,23 @@ backfill/incremental runtime (through `SyncRunExecutor`) is verified.
 PR D proved persistence through a **bypass** verifier (no `SyncRunExecutor`, no
 `sync_jobs`/`sync_cursors`). PR E moves the whole bounded backfill onto the
 **normal runtime** — the same `SyncRunExecutor` that scheduled/manual collection
-already uses — and designs incremental on top of it. **No live Cafe24 call, no
-scheduler, no live sync** is run in PR E; this is the offline runtime path plus
-tests, and `REVIEW`/`INQUIRY` stay `NEEDS_VERIFICATION`.
+already uses — and designs incremental on top of it. The PR E **code change**
+makes **no live Cafe24 call** and runs no scheduler/sync — it is the offline
+runtime path plus tests. The **live** production-runtime verification that followed
+(a separate gated step) is recorded in the *Outcome — production runtime
+live-verified* subsection below. `REVIEW`/`INQUIRY` stay `NEEDS_VERIFICATION`.
+
+**Three distinct verification layers** (do not conflate them):
+
+1. **Shape verification (PR C)** — a read-only live `/articles` read confirming the
+   endpoint shape, date-filter params, `rating` presence, and the `N` reply token.
+   No persistence.
+2. **Bounded persistence verifier (PR D)** — a temporary, flag-gated diagnostic that
+   **bypassed** `SyncRunExecutor` (so it wrote **no** `sync_jobs`/`sync_cursors`) to
+   prove only the ingestion/upsert path; it persisted 6 rows, then was removed.
+3. **Production-runtime backfill (PR E, below)** — the **normal** `SyncRunExecutor`
+   path via `POST /backfill`, writing real `sync_jobs` + `sync_cursors`. This is the
+   layer the live REVIEW + INQUIRY runs exercised.
 
 ### The one missing piece: seeding a *bounded* window through the runtime
 
@@ -320,17 +334,86 @@ connector over the recording fake + H2:
 `backfillCursor` seam is a **config failure**, not an unbounded sweep (no cursor
 seeded, no health touched). `BackfillWindowTest` covers the window validation.
 
+### Outcome — production runtime **live-verified** (REVIEW + INQUIRY)
+
+Two supervised live runs (one each, `REVIEW` then `INQUIRY`) drove the **normal
+runtime** — `POST /api/seller-accounts/{accountId}/backfill` →
+`CollectControlService.manualBackfill` → `SyncRunExecutor` →
+`Cafe24ApiConnector.fetch` → `IngestionService.ingestCommunityArticles` →
+`cafe24_community_articles` — writing real `sync_jobs` and `sync_cursors`. No
+scheduler, no `manualSync`, no verifier, no comments/urgent-inquiry fetch. Each run
+was bounded to the **narrowest date window that covers the existing dev rows for its
+board**, chosen from safe DB metadata (`board_no`, `source_created_at` dates) only.
+
+**REVIEW — board 4** (window `2026-04-09 … 2026-06-25`):
+
+| field | value |
+| --- | --- |
+| HTTP / job status | 200 / `SUCCESS` |
+| `sync_job` id | `a1facd0f-da3c-4921-82d8-7dc99c0bdf7d` |
+| `sync_cursor` before → after | none → `b4:o3:s2026-04-09:e2026-06-25` |
+| fetched / inserted / updated / no-op / failed | 3 / 0 / 0 / 3 / 0 |
+| account article count before → after → Δ | 6 → 6 → **+0** |
+| board 4 used / board 6 used / board 9 used | yes / no / no |
+
+Live-verifies the production-runtime **`sync_job` creation, `sync_cursor`
+seed+advance, board-4-only routing, and idempotent no-op** over existing rows.
+**Caveat:** the chosen window returned only the already-captured rows, so REVIEW did
+**not** live-observe a *fresh insert* through the production runtime (that path is
+covered offline by `Cafe24ArticleBackfillFlowTest`).
+
+**INQUIRY — board 6** (window `2026-05-06 … 2026-05-06`, single day):
+
+| field | value |
+| --- | --- |
+| HTTP / job status | 200 / `SUCCESS` |
+| `sync_job` id | `830d8639-3cee-4d88-ac12-0e829b0ec801` |
+| `sync_cursor` before → after | none → `b6:o905:s2026-05-06:e2026-05-06` |
+| fetched / inserted / updated / no-op / failed | 905 / 902 / 0 / 3 / 0 |
+| account article count before → after → Δ | 6 → 908 → **+902** |
+| `reply_status` tokens (normalized) | `PENDING` = 905 |
+| window bounding | all 905 rows `source_created_at` = 2026-05-06; 0 outside; 0 null |
+| board 6 used / board 4 used / board 9 used | yes / no / no |
+
+Live-verifies the production-runtime **`sync_job` creation, `sync_cursor`
+seed+advance, multi-page cursor advance (~19 pages, offset 0 → 905, window
+preserved), board-6-only routing, fresh inserts, and idempotent no-op** in one run.
+The REVIEW `sync_cursor` and board-4 rows were untouched by the INQUIRY run.
+
+**Data left in place (intentional):** the **6** prior dev verification rows remain,
+and the **902** new real board-6 inquiry rows persisted by the INQUIRY run are
+**intentionally retained as production-runtime verification data** — not deleted.
+
+**Reply-status normalization is unchanged:** `N → PENDING` only. Every token observed
+across both boards is `PENDING`. The **answered** token is still **unobserved** —
+unknown/unobserved tokens stay `UNKNOWN` and are **not guessed or mapped**.
+
+**Board 9 (1:1 맞춤상담)** was never requested and remains **excluded and unverified
+for persistence**.
+
+**Privacy:** the runs printed only structural counts, cursors, job ids, and the
+`reply_status` enum token — **no** article titles, article contents, raw Cafe24
+response bodies, writer/customer identifiers, contact/address fields, order ids,
+`mall_id`, or secrets.
+
 ### Route to `CONFIRMED`
 
-The runtime path is now real and tested offline. Two gates remain before
-`REVIEW`/`INQUIRY` can move from `NEEDS_VERIFICATION` to `CONFIRMED`, **each its own
-gated PR**:
+The runtime path is real, tested offline, **and now live-verified** for both
+`REVIEW` and `INQUIRY` (`sync_jobs`/`sync_cursors` written by the normal runtime,
+cursor seed+advance, board-4/6-only routing, insert + idempotent no-op). Remaining
+gates before `REVIEW`/`INQUIRY` can move from `NEEDS_VERIFICATION` to `CONFIRMED`
+(**each its own gated step, requires explicit approval**):
 
-1. **One supervised live production backfill** through `SyncRunExecutor` against the
-   live mall — proving real `sync_jobs` + `sync_cursors` rows, cursor advance, and
-   bounded windowing on the production runtime (not the PR D bypass).
-2. **The answered `reply_status` token** — still unobserved (only `N → PENDING`
-   seen); unknown tokens stay `UNKNOWN` and must not be guessed.
+1. **The answered `reply_status` token** — still unobserved (only `N → PENDING`
+   seen; all live rows `PENDING`); unknown tokens stay `UNKNOWN` and must not be
+   guessed.
+2. **Date-filter exclusion not yet proven** — both live windows happened to contain
+   only in-window rows (REVIEW returned the existing 3; INQUIRY's board 6 is entirely
+   dated 2026-05-06, 0 outside). A window that **excludes** known rows is needed to
+   prove the `start_date`/`end_date` filter actively *rejects* out-of-window
+   articles (vs. the board simply having no out-of-window rows).
+3. **REVIEW fresh insert through the production runtime** — observed offline only;
+   not yet live (REVIEW's live window returned no new rows).
 
 ## Forward plan (later, separately gated PRs)
 
@@ -347,10 +430,14 @@ gated PR**:
 - **Bounded persistence verification** — **done** (PR D): one supervised bypass run
   persisted 6 rows and live-verified insert, natural-key/`source_hash` no-op, and the
   date-window cursor seed.
-- **Production runtime path** — **done offline** (PR E): bounded backfill +
-  incremental seed run through `SyncRunExecutor` (writing `sync_jobs`/`sync_cursors`),
-  proven by tests. Still open before `CONFIRMED`: **one supervised live production
-  backfill** and the **answered** `reply_status` token (unobserved so far).
+- **Production runtime path** — **done offline + live-verified** (PR E): bounded
+  backfill through `SyncRunExecutor` (writing `sync_jobs`/`sync_cursors`), proven by
+  tests and by one supervised live run each for `REVIEW` (board-4 no-op) and
+  `INQUIRY` (board-6 multi-page insert + no-op). See *Outcome — production runtime
+  live-verified* above. Still open before `CONFIRMED`: the **answered**
+  `reply_status` token (unobserved), a **window that excludes known rows** (to prove
+  the date filter rejects out-of-window articles), and a **live REVIEW fresh insert**
+  (observed offline only).
 
 ## AI moat — source stays separate from AI outputs
 
