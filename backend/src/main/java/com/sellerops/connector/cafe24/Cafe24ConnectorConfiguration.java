@@ -39,4 +39,23 @@ public class Cafe24ConnectorConfiguration {
         // System UTC clock; the connector applies the explicit KST zone for date math.
         return new Cafe24ApiConnector(tokenClient, vault, ordersClient, Clock.systemUTC());
     }
+
+    // Board Discovery (community read) infrastructure — wired behind the same
+    // flag, NEEDS_VERIFICATION. Inert until a gated live /boards run; not part of
+    // the DataType/scheduling backbone, so no runtime path reaches these by default.
+    @Bean
+    Cafe24BoardsClient cafe24BoardsClient(Cafe24HttpClient http) {
+        return new Cafe24BoardsClient(http);
+    }
+
+    @Bean
+    Cafe24BoardClassifier cafe24BoardClassifier() {
+        return new Cafe24BoardClassifier();
+    }
+
+    @Bean
+    Cafe24BoardDiscovery cafe24BoardDiscovery(Cafe24BoardsClient boardsClient,
+                                              Cafe24BoardClassifier classifier) {
+        return new Cafe24BoardDiscovery(boardsClient, classifier);
+    }
 }
