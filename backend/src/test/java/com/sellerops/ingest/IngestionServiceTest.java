@@ -2,6 +2,7 @@ package com.sellerops.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
@@ -31,6 +32,7 @@ class IngestionServiceTest {
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
+    @Autowired Cafe24CommunityArticleRepository communityArticles;
 
     private IngestionService service;
     private final UUID org = UUID.randomUUID();
@@ -38,7 +40,8 @@ class IngestionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        service = new IngestionService(reviews, inquiries, orders, new ProductService(products),
+                communityArticles);
     }
 
     private static Instant at(String date) {

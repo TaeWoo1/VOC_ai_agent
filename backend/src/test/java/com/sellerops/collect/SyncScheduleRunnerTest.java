@@ -18,6 +18,7 @@ import com.sellerops.connector.PullConnector;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.ReviewRepository;
@@ -57,6 +58,7 @@ class SyncScheduleRunnerTest {
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
+    @Autowired Cafe24CommunityArticleRepository communityArticles;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -77,7 +79,7 @@ class SyncScheduleRunnerTest {
 
     private SyncScheduleRunner runnerWith(PullConnector connector) {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products));
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         return new SyncScheduleRunner(

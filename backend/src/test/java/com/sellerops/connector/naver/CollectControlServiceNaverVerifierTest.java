@@ -17,6 +17,7 @@ import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummaryRepository;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.ReviewRepository;
@@ -60,6 +61,7 @@ class CollectControlServiceNaverVerifierTest {
     @Autowired InquiryRepository inquiries;
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
+    @Autowired Cafe24CommunityArticleRepository communityArticles;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -84,7 +86,7 @@ class CollectControlServiceNaverVerifierTest {
                 vault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver));
         IngestionService ingestion =
-                new IngestionService(reviews, inquiries, orders, new ProductService(products));
+                new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,

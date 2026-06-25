@@ -1,5 +1,10 @@
 package com.sellerops.ingest;
 
+import com.sellerops.community.Cafe24CommunityArticle;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
+import com.sellerops.community.CommunityReplyStatus;
+import com.sellerops.community.CommunitySourceKind;
+import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
@@ -16,6 +21,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,6 +43,7 @@ import org.springframework.stereotype.Service;
  *
  * Dedup order per row: external_id when present, else content hash of
  * channel + product + date + body. Order summaries upsert by (channel, date).
+ * Cafe24 community articles upsert by their natural key with a hash guard.
  */
 @Service
 public class IngestionService {
@@ -45,13 +52,16 @@ public class IngestionService {
     private final InquiryRepository inquiries;
     private final OrderDailySummaryRepository orderSummaries;
     private final ProductService productService;
+    private final Cafe24CommunityArticleRepository communityArticles;
 
     public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
-                            OrderDailySummaryRepository orderSummaries, ProductService productService) {
+                            OrderDailySummaryRepository orderSummaries, ProductService productService,
+                            Cafe24CommunityArticleRepository communityArticles) {
         this.reviews = reviews;
         this.inquiries = inquiries;
         this.orderSummaries = orderSummaries;
         this.productService = productService;
+        this.communityArticles = communityArticles;
     }
 
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
@@ -153,6 +163,86 @@ public class IngestionService {
     }
 
     /**
+     * Upsert Cafe24 community board articles into their dedicated store, keyed by the
+     * natural key {@code (channel, seller account, board, article)}. New articles
+     * insert; an existing article updates in place only when its {@code source_hash}
+     * (over title/content/rating/reply_status) changed; an unchanged hash is a no-op
+     * skip. Raw {@code sourceKind}/{@code replyStatus} tokens are normalized to their
+     * closed sets here, so only canonical values land. {@code insertedIds} holds only
+     * genuinely new rows (updates count as success but contribute no id).
+     */
+    public IngestOutcome ingestCommunityArticles(UUID orgId, UUID channelId, UUID sellerAccountId,
+                                                 List<CanonicalCommunityArticle> rows) {
+        Tally tally = new Tally();
+        Set<String> seen = new HashSet<>();
+        for (CanonicalCommunityArticle row : rows) {
+            try {
+                // Same article twice in one batch: natural-key dedupe within the batch.
+                if (!seen.add(row.boardNo() + ":" + row.articleNo())) {
+                    tally.skip();
+                    continue;
+                }
+                CommunitySourceKind kind = CommunitySourceKind.normalize(row.sourceKind());
+                CommunityReplyStatus reply = CommunityReplyStatus.normalize(row.replyStatus());
+                String hash = communitySourceHash(row.title(), row.content(), row.rating(), reply);
+
+                Optional<Cafe24CommunityArticle> existing = communityArticles
+                        .findByChannelIdAndSellerAccountIdAndBoardNoAndArticleNo(
+                                channelId, sellerAccountId, row.boardNo(), row.articleNo());
+                if (existing.isPresent()) {
+                    Cafe24CommunityArticle entity = existing.get();
+                    if (hash.equals(entity.getSourceHash())) {
+                        // Nothing mutable changed — no-op.
+                        tally.skip();
+                        continue;
+                    }
+                    applyMutable(entity, kind, reply, row, hash);
+                    communityArticles.save(entity);
+                    tally.update();
+                    continue;
+                }
+
+                Cafe24CommunityArticle entity = new Cafe24CommunityArticle();
+                entity.setOrgId(orgId);
+                entity.setSellerAccountId(sellerAccountId);
+                entity.setChannelId(channelId);
+                entity.setBoardNo(row.boardNo());
+                entity.setArticleNo(row.articleNo());
+                entity.setProductNo(row.productNo());
+                entity.setSourceCreatedAt(row.sourceCreatedAt());
+                applyMutable(entity, kind, reply, row, hash);
+                trySave(tally, row.sourceRow(),
+                        () -> communityArticles.save(entity).getId(),
+                        () -> communityArticles.findByChannelIdAndSellerAccountIdAndBoardNoAndArticleNo(
+                                channelId, sellerAccountId, row.boardNo(), row.articleNo()).isPresent());
+            } catch (Exception e) {
+                tally.fail(row.sourceRow(), "처리 실패: " + e.getMessage());
+            }
+        }
+        return tally.toOutcome();
+    }
+
+    /** Write the mutable (source-driven) fields plus the refreshed hash and collect time. */
+    private void applyMutable(Cafe24CommunityArticle entity, CommunitySourceKind kind,
+                              CommunityReplyStatus reply, CanonicalCommunityArticle row, String hash) {
+        entity.setSourceKind(kind.name());
+        entity.setReplyStatus(reply.name());
+        entity.setTitle(row.title());
+        entity.setContent(row.content());
+        entity.setRating(row.rating());
+        entity.setSourceUpdatedAt(row.sourceUpdatedAt());
+        entity.setSourceHash(hash);
+        entity.setCollectedAt(Instant.now());
+    }
+
+    /** Stable fingerprint over the mutable fields; an unchanged hash means a no-op upsert. */
+    private String communitySourceHash(String title, String content, Integer rating,
+                                       CommunityReplyStatus reply) {
+        return ContentHash.of(title, content,
+                rating == null ? "" : Integer.toString(rating), reply.name());
+    }
+
+    /**
      * Persist one row, recording the new id on success. On a unique-constraint
      * violation, re-probe the dedup key: present ⇒ a concurrent writer won
      * (duplicate skip); absent ⇒ genuine failure.
@@ -204,6 +294,11 @@ public class IngestionService {
         void success(UUID id) {
             success++;
             insertedIds.add(id);
+        }
+
+        /** A successful in-place update: counts as success, contributes no inserted id. */
+        void update() {
+            success++;
         }
 
         void skip() {
