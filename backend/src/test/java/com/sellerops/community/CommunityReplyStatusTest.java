@@ -14,6 +14,13 @@ class CommunityReplyStatusTest {
     }
 
     @Test
+    void mapsCafe24NoReplyTokenNToPending() {
+        // "N" (미답변) confirmed by live shape verification; case-insensitive.
+        assertThat(CommunityReplyStatus.normalize("N")).isEqualTo(CommunityReplyStatus.PENDING);
+        assertThat(CommunityReplyStatus.normalize("n")).isEqualTo(CommunityReplyStatus.PENDING);
+    }
+
+    @Test
     void mapsInProgressSynonyms() {
         assertThat(CommunityReplyStatus.normalize("in_progress")).isEqualTo(CommunityReplyStatus.IN_PROGRESS);
         assertThat(CommunityReplyStatus.normalize("processing")).isEqualTo(CommunityReplyStatus.IN_PROGRESS);

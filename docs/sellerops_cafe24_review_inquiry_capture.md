@@ -103,6 +103,64 @@ highest-PII surface (its body-handling policy is still open), and whether it is 
 via board articles or a dedicated endpoint is unverified. The mapper knows its
 `source_kind`, but `INQUIRY` fetch currently fans out to board 6 only.
 
+## Live shape verification (PR C)
+
+The **endpoint shape** was confirmed by **one supervised, sanitized** call against
+the real target mall (a temporary, doubly-flag-gated verifier, since removed —
+exactly like the Board Discovery verifier). Evidence is **structural only**: HTTP
+status, JSON key names, per-field presence, and enum-like `reply_status` tokens —
+**never** an article title/content value, writer/customer field, raw body, `mall_id`,
+or token. One refresh-token rotation was persisted; no articles/`sync_jobs`/
+`sync_cursors`/`cafe24_community_articles` rows were created.
+
+### Outcome — board article endpoint shape **live-verified** for boards 4 and 6
+
+| field | board 4 (구매후기 / REVIEW) | board 6 (문의사항 / PRODUCT_INQUIRY) |
+|---|---|---|
+| HTTP status | 200 | 200 |
+| envelope keys | `articles`, `links` | `articles`, `links` |
+| rows sampled | 3 | 3 |
+| `article_no` present | yes | yes |
+| `title` present | yes | yes |
+| `content` present | yes | yes |
+| `product_no` present | yes | yes |
+| `rating` present | yes | yes |
+| `created_date` present | yes | yes |
+| `updated_date` present | **no** | **no** |
+| `reply_status` enum-like token | *(none in sample)* | **`N`** |
+| date filter (`start_date`/`end_date`) | tested → HTTP 200 | tested → HTTP 200 |
+
+The capture projection (`article_no, title, content, product_no, rating,
+created_date, reply_status`) matches the live field names. The response also carries
+**PII-bearing keys** (`writer, writer_email, member_id, client_ip, order_id`, plus a
+`secret`/비밀글 flag) which the connector **intentionally does not project**.
+
+**Confirmed:**
+- the `{"articles":[…]}` envelope and the capture field names exist on the real mall;
+- `rating` is present on the review board (4) and `product_no` on both;
+- the `start_date`/`end_date` date-filter params are accepted (HTTP 200) — validates
+  the backfill window.
+
+**`reply_status`:** `N` (no-reply / 미답변) is now mapped to `PENDING`
+(`CommunityReplyStatus`). The **answered** token was **not observed** (the sampled
+rows were unanswered) and is deliberately **not guessed** — it stays `UNKNOWN` until a
+later sample pins it down.
+
+**`updated_date` is absent** in the live response (no source-side modified field), so
+`source_updated_at` remains nullable and **change detection relies on `source_hash` +
+the incremental overlap re-scan**, not a source timestamp.
+
+### Status — precise
+
+- **Endpoint shape: live-verified** for board 4 and board 6.
+- **REVIEW/INQUIRY persistence + backfill: not yet `CONFIRMED`.** The connector
+  capability for `REVIEW`/`INQUIRY` therefore **stays `NEEDS_VERIFICATION`** (no
+  intermediate status exists in the capability model, and none is invented);
+  `ORDER_SUMMARY` stays `CONFIRMED`. Promotion to `CONFIRMED` awaits a persisted
+  end-to-end run and the answered-token mapping.
+- **Board 9 (1:1 맞춤상담)** remains a follow-up: high-PII, **not included** in this
+  verification, and **not wired** into `INQUIRY` fetch.
+
 ## Forward plan (later, separately gated PRs)
 
 - **Initial backfill** will be **date-range based** (user-selected start/end with
@@ -112,9 +170,10 @@ via board articles or a dedicated endpoint is unverified. The mapper knows its
 - **Incremental sync** will use a per-board high-water mark plus a small **overlap
   window**, relying on the **hash-guarded upsert** to absorb edited articles and
   reply-status changes cheaply (unchanged rows no-op).
-- **Live-shape verification** (one supervised, sanitized call) will confirm the
-  articles endpoint, date-filter semantics, rating presence, and the concrete reply
-  tokens before the connector maps them onto the canonical reply states.
+- **Live-shape verification** — **done** (see above): the articles endpoint,
+  date-filter params, and `rating` presence are confirmed for boards 4 and 6, and the
+  `N` reply token is mapped. Still open before `CONFIRMED`: a persisted end-to-end run
+  and the **answered** reply token (unobserved so far).
 
 ## AI moat — source stays separate from AI outputs
 
