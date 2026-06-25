@@ -10,6 +10,7 @@ import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestionService;
+import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
@@ -130,7 +131,7 @@ public class SyncRunExecutor {
                     break;
                 }
 
-                IngestOutcome outcome = ingestPage(page, orgId, channelId);
+                IngestOutcome outcome = ingestPage(page, orgId, channelId, account.getId());
                 success += outcome.success();
                 skipped += outcome.skipped();
                 failed += outcome.failed();
@@ -179,7 +180,15 @@ public class SyncRunExecutor {
     }
 
     /** Route a page to the right ingestion method by data type — no unsafe casts. */
-    private IngestOutcome ingestPage(FetchPage page, UUID orgId, UUID channelId) {
+    private IngestOutcome ingestPage(FetchPage page, UUID orgId, UUID channelId, UUID sellerAccountId) {
+        // Cafe24 community articles (REVIEW/INQUIRY boards) are a richer, upsertable
+        // asset stored in their own table — routed by the canonical record type the
+        // connector emits, not by data type. Dormant until the Cafe24 community
+        // article connector lands (a later PR); existing connectors never emit these.
+        if (isCommunityArticlePage(page)) {
+            return ingestionService.ingestCommunityArticles(orgId, channelId, sellerAccountId,
+                    typed(page, CanonicalCommunityArticle.class));
+        }
         return switch (page.dataType()) {
             case REVIEW -> ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
             case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, typed(page, CanonicalInquiry.class));
@@ -187,6 +196,10 @@ public class SyncRunExecutor {
             // No canonical type yet; the mock returns empty pages. Routing is deferred.
             case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());
         };
+    }
+
+    private static boolean isCommunityArticlePage(FetchPage page) {
+        return !page.records().isEmpty() && page.records().get(0) instanceof CanonicalCommunityArticle;
     }
 
     private static <T> List<T> typed(FetchPage page, Class<T> type) {
