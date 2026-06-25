@@ -68,6 +68,41 @@ source_updated_at?, source_hash, collected_at, created_at, updated_at`.
    the hash changed; **no-op** if the hash is unchanged. Inserts contribute an id to
    `insertedIds`; updates count as success but contribute no id.
 
+## Article capture wiring (PR B)
+
+The Cafe24 client + parser + connector `fetch` path that produces
+`CanonicalCommunityArticle` records — **offline, doc-asserted, `NEEDS_VERIFICATION`**.
+No Cafe24 call, no OAuth; the connector stays flag-gated.
+
+- **`Cafe24BoardArticlesClient`** reads one page of
+  `GET /api/v2/admin/boards/{board_no}/articles` (Bearer, `mall_id` host guard,
+  `board_no` guard, optional `start_date`/`end_date`, `limit`/`offset`). 429 →
+  `Cafe24RateLimitedException`; non-200 → HTTP-coded throw with **no response body
+  in the message** (articles carry writer/customer data). Read-only
+  (`mall.read_community`) — never writes a post.
+- **`Cafe24BoardArticleRow`** projects `article_no, title, content, product_no,
+  rating, created_date, updated_date, reply_status` — every field nullable so an
+  unexpected/missing value is tolerated.
+- **`Cafe24BoardArticleMapper`** maps a row → `CanonicalCommunityArticle`, deciding
+  `source_kind` from the board (4 구매후기 → `REVIEW`, 6 문의사항 →
+  `PRODUCT_INQUIRY`, 9 1:1 맞춤상담 → `ONE_TO_ONE_INQUIRY`). Raw `reply_status` is
+  passed through (ingestion normalizes it); timestamps parse **only when offset-
+  bearing** — timezone-less/unknown stays `null`, never an assumed zone.
+- **`Cafe24ApiConnector.fetch`** now serves `REVIEW` (board 4) and `INQUIRY`
+  (board 6) by paging articles via an opaque board+offset cursor
+  (`Cafe24ArticleCursor`, `"b<board>:o<offset>"`); the executor pages while
+  `hasMore`. A row missing `article_no` is dropped. The shared fail-closed
+  credential chain (vault → shape check → refresh → single-use rotation) is reused.
+- **Capability:** `REVIEW`/`INQUIRY` are now exposed as **`NEEDS_VERIFICATION`**
+  (not `CONFIRMED`); `ORDER_SUMMARY` stays `CONFIRMED`. The endpoint shape,
+  `reply_status` tokens, `rating` presence, and the date-filter parameter names are
+  doc-asserted and confirmed only at the gated **live-shape verification (PR C)**.
+
+**Board 9 (1:1 맞춤상담) is a deliberate follow-up, not wired in PR B:** it is the
+highest-PII surface (its body-handling policy is still open), and whether it is read
+via board articles or a dedicated endpoint is unverified. The mapper knows its
+`source_kind`, but `INQUIRY` fetch currently fans out to board 6 only.
+
 ## Forward plan (later, separately gated PRs)
 
 - **Initial backfill** will be **date-range based** (user-selected start/end with

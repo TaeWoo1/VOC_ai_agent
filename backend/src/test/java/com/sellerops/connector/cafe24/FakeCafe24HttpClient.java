@@ -88,6 +88,41 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
                 + "\"board_type\":\"" + boardType + "\"}";
     }
 
+    /** A 200 articles page: {@code {"articles":[ ...article objects... ]}}. */
+    static Response articlesOk(String... articleObjects) {
+        return new Response(200, "{\"articles\":[" + String.join(",", articleObjects) + "]}", Map.of());
+    }
+
+    /**
+     * One article object literal with the capture fields. {@code title}/{@code content}
+     * are emitted as JSON null when null; {@code productNo}/{@code rating}/
+     * {@code createdDate}/{@code replyStatus} are omitted when null (so a row can carry
+     * only {@code article_no}).
+     */
+    static String article(long articleNo, String title, String content, Long productNo,
+                          Integer rating, String createdDate, String replyStatus) {
+        StringBuilder sb = new StringBuilder("{\"article_no\":").append(articleNo);
+        sb.append(",\"title\":").append(jsonStringOrNull(title));
+        sb.append(",\"content\":").append(jsonStringOrNull(content));
+        if (productNo != null) {
+            sb.append(",\"product_no\":").append(productNo);
+        }
+        if (rating != null) {
+            sb.append(",\"rating\":").append(rating);
+        }
+        if (createdDate != null) {
+            sb.append(",\"created_date\":\"").append(createdDate).append('"');
+        }
+        if (replyStatus != null) {
+            sb.append(",\"reply_status\":\"").append(replyStatus).append('"');
+        }
+        return sb.append('}').toString();
+    }
+
+    private static String jsonStringOrNull(String value) {
+        return value == null ? "null" : "\"" + value + "\"";
+    }
+
     @Override
     public Response postForm(URI uri, Map<String, String> headers, Map<String, String> form) {
         sent.add(new Sent("POST_FORM", uri, headers, form));

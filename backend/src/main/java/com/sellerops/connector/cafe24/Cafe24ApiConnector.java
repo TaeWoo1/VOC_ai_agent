@@ -8,6 +8,7 @@ import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
+import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -90,13 +91,16 @@ public class Cafe24ApiConnector implements PullConnector {
     private final Cafe24TokenClient tokenClient;
     private final CredentialVault vault;
     private final Cafe24OrdersClient ordersClient;
+    private final Cafe24BoardArticlesClient articlesClient;
     private final Clock clock;
 
     public Cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault,
-                              Cafe24OrdersClient ordersClient, Clock clock) {
+                              Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
+                              Clock clock) {
         this.tokenClient = tokenClient;
         this.vault = vault;
         this.ordersClient = ordersClient;
+        this.articlesClient = articlesClient;
         this.clock = clock;
     }
 
@@ -114,23 +118,116 @@ public class Cafe24ApiConnector implements PullConnector {
     public ConnectorCapabilities capabilities(String channelCode) {
         return new ConnectorCapabilities(
                 CONNECTOR_CLASS,
-                Set.of(DataType.ORDER_SUMMARY),
-                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED"),
-                "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST)."
-                        + " CONFIRMED by a gated live run against a real target mall: refresh-token"
-                        + " rotation persisted, orders GET paged and parsed, per-day rows written, and"
-                        + " seller-center reconciliation matched (sales_amount = 총 실결제금액 / actual"
-                        + " paid total). Product/review/inquiry remain deferred.");
+                Set.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY),
+                Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
+                        DataType.REVIEW, "NEEDS_VERIFICATION",
+                        DataType.INQUIRY, "NEEDS_VERIFICATION"),
+                "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST),"
+                        + " CONFIRMED by a gated live run. REVIEW/INQUIRY collect community board"
+                        + " articles into CanonicalCommunityArticle (REVIEW → board 4 구매후기; INQUIRY"
+                        + " → board 6 문의사항; board 9 1:1 맞춤상담 is a follow-up). The article endpoint"
+                        + " shape, reply_status tokens, rating presence, and date-filter params are"
+                        + " doc-asserted — REVIEW/INQUIRY stay NEEDS_VERIFICATION until the gated live"
+                        + " shape run. Product/sales remain deferred.");
     }
 
     @Override
     public FetchPage fetch(FetchRequest request) {
-        if (!CHANNEL_CODE.equals(request.channelCode()) || request.dataType() != DataType.ORDER_SUMMARY) {
+        if (!CHANNEL_CODE.equals(request.channelCode())) {
             throw new UnsupportedDataTypeException(request.channelCode(), request.dataType());
         }
+        return switch (request.dataType()) {
+            case ORDER_SUMMARY -> fetchOrderSummary(request);
+            case REVIEW, INQUIRY -> fetchArticles(request);
+            case PRODUCT, SALES -> throw new UnsupportedDataTypeException(
+                    request.channelCode(), request.dataType());
+        };
+    }
 
-        // Fail closed before any HTTP: vault.open throws when no credential row
-        // exists (org-scoped) or the vault master key is not configured.
+    /**
+     * ORDER_SUMMARY: page the KST trailing window and fold it into one upsert page
+     * (each date once, {@code hasMore=false}). A throttle during refresh or
+     * mid-window discards the partial aggregate and leaves the cursor unchanged.
+     */
+    private FetchPage fetchOrderSummary(FetchRequest request) {
+        try {
+            Authorized auth = authorize(request);
+
+            // Fixed trailing window in the explicit Cafe24 zone. Re-collecting the
+            // same window each run and upserting (last-wins per day) is idempotent
+            // and self-healing for late orders / cancellations.
+            LocalDate endDate = LocalDate.now(clock.withZone(KST));
+            LocalDate startDate = endDate.minusDays(LOOKBACK_DAYS);
+
+            List<Cafe24OrderRow> orders = new ArrayList<>();
+            int offset = 0;
+            for (int page = 0; page < MAX_ORDER_PAGES; page++) {
+                List<Cafe24OrderRow> batch = ordersClient.fetchPage(
+                        auth.accessToken(), auth.mallId(), startDate, endDate, ORDER_PAGE_LIMIT, offset);
+                orders.addAll(batch);
+                if (batch.size() < ORDER_PAGE_LIMIT) {
+                    break;
+                }
+                offset += ORDER_PAGE_LIMIT;
+            }
+            List<CanonicalOrderSummary> summaries = Cafe24OrderAggregator.aggregate(orders, KST);
+            return FetchPage.of(DataType.ORDER_SUMMARY, summaries, endDate.toString(), false, KIND);
+        } catch (Cafe24RateLimitedException e) {
+            return rateLimited(request, e);
+        }
+    }
+
+    /**
+     * REVIEW/INQUIRY: one page of community board articles mapped to
+     * {@link CanonicalCommunityArticle}. The board is fixed by data type
+     * ({@link #primaryBoard}); the opaque {@link Cafe24ArticleCursor} carries the
+     * offset across runs and the executor pages while {@code hasMore}. A row
+     * missing {@code article_no} cannot be keyed and is dropped. Status stays
+     * NEEDS_VERIFICATION until the gated live shape run.
+     */
+    private FetchPage fetchArticles(FetchRequest request) {
+        int boardNo = primaryBoard(request.dataType());
+        Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
+        try {
+            Authorized auth = authorize(request);
+            // No date window in PR B (no backfill trigger yet) — a plain offset sweep.
+            List<Cafe24BoardArticleRow> rows = articlesClient.fetchPage(
+                    auth.accessToken(), auth.mallId(), boardNo, null, null, request.limit(), cursor.offset());
+
+            List<CanonicalCommunityArticle> records = new ArrayList<>();
+            int position = 0;
+            for (Cafe24BoardArticleRow row : rows) {
+                position++;
+                if (row.articleNo() == null) {
+                    continue; // cannot dedupe/store without the natural-key article number
+                }
+                records.add(Cafe24BoardArticleMapper.toCanonical(boardNo, row, position));
+            }
+            boolean hasMore = rows.size() == request.limit();
+            String nextCursor = cursor.advance(rows.size()).encode();
+            return FetchPage.of(request.dataType(), records, nextCursor, hasMore, KIND);
+        } catch (Cafe24RateLimitedException e) {
+            // Cursor unchanged → the next run re-requests the same offset.
+            return rateLimited(request, e);
+        }
+    }
+
+    /** REVIEW → board 4 구매후기; INQUIRY → board 6 문의사항 (board 9 1:1 is a follow-up). */
+    private static int primaryBoard(DataType dataType) {
+        return dataType == DataType.REVIEW
+                ? Cafe24BoardArticleMapper.REVIEW_BOARD_NO
+                : Cafe24BoardArticleMapper.PRODUCT_INQUIRY_BOARD_NO;
+    }
+
+    /**
+     * Fail-closed credential chain shared by every data type: vault open (missing
+     * credential / master key throws here) → secret-shape check → refresh-token
+     * grant → <b>immediate single-use rotation write-back</b>. Returns the mall id
+     * and a fresh access token. A {@link Cafe24RateLimitedException} on refresh
+     * propagates before any write-back; a failed refresh leaves the stored
+     * credential untouched.
+     */
+    private Authorized authorize(FetchRequest request) {
         DecryptedCredential credential = vault.open(request.orgId(), request.sellerAccountId());
         String mallId = credential.secrets().get("mall_id");
         String clientId = credential.secrets().get("client_id");
@@ -141,54 +238,26 @@ public class Cafe24ApiConnector implements PullConnector {
                     "카페24 자격 증명에 mall_id, client_id, client_secret 또는 refresh_token이 없습니다.");
         }
 
-        Cafe24TokenResult token;
-        try {
-            token = tokenClient.refresh(mallId, clientId, clientSecret, refreshToken);
-        } catch (Cafe24RateLimitedException e) {
-            int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
-            // Cursor unchanged — a throttled attempt must re-request the same position.
-            return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
-        }
+        Cafe24TokenResult token = tokenClient.refresh(mallId, clientId, clientSecret, refreshToken);
 
         // Single-use rotation: persist the replacement before anything else can
-        // fail. rotateSecrets re-encrypts the payload only — connector class,
-        // auth type, creator, and the separate refresh-token slot are preserved.
+        // fail. rotateSecrets re-encrypts the payload only — connector class, auth
+        // type, creator, and the separate refresh-token slot are preserved.
         if (token.rotatedFrom(refreshToken)) {
             Map<String, String> rotated = new LinkedHashMap<>(credential.secrets());
             rotated.put("refresh_token", token.refreshToken());
             vault.rotateSecrets(request.orgId(), request.sellerAccountId(), rotated);
         }
+        return new Authorized(mallId, token.accessToken());
+    }
 
-        // Fixed trailing window in the explicit Cafe24 zone. Re-collecting the
-        // same window each run and upserting (last-wins per day) is idempotent
-        // and self-healing for late orders / cancellations.
-        LocalDate endDate = LocalDate.now(clock.withZone(KST));
-        LocalDate startDate = endDate.minusDays(LOOKBACK_DAYS);
+    private FetchPage rateLimited(FetchRequest request, Cafe24RateLimitedException e) {
+        int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
+        // Cursor unchanged — a throttled attempt must re-request the same position.
+        return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
+    }
 
-        List<Cafe24OrderRow> orders = new ArrayList<>();
-        try {
-            int offset = 0;
-            for (int page = 0; page < MAX_ORDER_PAGES; page++) {
-                List<Cafe24OrderRow> batch = ordersClient.fetchPage(
-                        token.accessToken(), mallId, startDate, endDate, ORDER_PAGE_LIMIT, offset);
-                orders.addAll(batch);
-                if (batch.size() < ORDER_PAGE_LIMIT) {
-                    break;
-                }
-                offset += ORDER_PAGE_LIMIT;
-            }
-        } catch (Cafe24RateLimitedException e) {
-            // Discard the partial aggregate: a half-collected window must not
-            // overwrite earlier days with undercounts. Cursor unchanged → the
-            // next run re-collects the whole window.
-            int retryAfter = e.retryAfterSeconds() != null ? e.retryAfterSeconds() : FALLBACK_RETRY_AFTER_SECONDS;
-            return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
-        }
-
-        // One page of per-day summaries (each date exactly once) — the executor
-        // ingests it in a single upsert batch. hasMore=false: one window per run.
-        List<CanonicalOrderSummary> summaries = Cafe24OrderAggregator.aggregate(orders, KST);
-        return FetchPage.of(DataType.ORDER_SUMMARY, summaries, endDate.toString(), false, KIND);
+    private record Authorized(String mallId, String accessToken) {
     }
 
     private static boolean isBlank(String value) {

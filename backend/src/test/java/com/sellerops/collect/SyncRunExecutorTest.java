@@ -308,9 +308,10 @@ class SyncRunExecutorTest {
 
     @Test
     void cafe24UnsupportedDataTypeStopsAtCapabilityGateBeforeAnyFetchOrHttp() {
-        // Cafe24 now collects ORDER_SUMMARY, but an unsupported type (REVIEW) is
-        // still killed at the config gate before fetch — no vault, no token
-        // refresh, no HTTP. (The ORDER_SUMMARY pull is covered at the connector level.)
+        // Cafe24 now collects ORDER_SUMMARY plus REVIEW/INQUIRY articles, but a still-
+        // unsupported type (PRODUCT) is killed at the config gate before fetch — no
+        // vault, no token refresh, no HTTP. (The collectable pulls are covered at the
+        // connector level.)
         SellerAccount acc = account("CAFE24");
         com.sellerops.connector.cafe24.Cafe24HttpClient neverCalled =
                 new com.sellerops.connector.cafe24.Cafe24HttpClient() {
@@ -329,13 +330,14 @@ class SyncRunExecutorTest {
                 new com.sellerops.connector.cafe24.Cafe24ApiConnector(
                         new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null,
                         new com.sellerops.connector.cafe24.Cafe24OrdersClient(neverCalled),
+                        new com.sellerops.connector.cafe24.Cafe24BoardArticlesClient(neverCalled),
                         java.time.Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
-        SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL");
+        SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.PRODUCT, "MANUAL");
 
         assertThat(job.getStatus()).isEqualTo("FAILED");
         assertThat(job.getErrorMessage()).contains("지원되지");
