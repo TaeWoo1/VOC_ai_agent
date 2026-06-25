@@ -37,4 +37,20 @@ public interface PullConnector extends ChannelConnector {
      *         requested data type for the request's channel.
      */
     FetchPage fetch(FetchRequest request);
+
+    /**
+     * Translate an operator-selected bounded date window into this connector's
+     * opaque <em>starting</em> cursor for a backfill run, or
+     * {@link java.util.Optional#empty()} if the connector cannot serve a windowed
+     * backfill for {@code dataType}. The executor seeds the returned value as the
+     * run's first cursor — so {@link #fetch} reads the window — and persists every
+     * subsequent advance through the normal {@code sync_cursors} path. A connector
+     * that returns empty fails the backfill closed (a config error), never an
+     * unbounded sweep. Default: unsupported.
+     */
+    default java.util.Optional<String> backfillCursor(DataType dataType,
+                                                      java.time.LocalDate startDate,
+                                                      java.time.LocalDate endDate) {
+        return java.util.Optional.empty();
+    }
 }

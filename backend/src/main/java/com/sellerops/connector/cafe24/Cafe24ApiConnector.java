@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -212,6 +213,25 @@ public class Cafe24ApiConnector implements PullConnector {
             // Cursor unchanged → the next run re-requests the same offset.
             return rateLimited(request, e);
         }
+    }
+
+    /**
+     * Seed a bounded date-window backfill cursor for the community-article boards.
+     * REVIEW/INQUIRY map to their primary board ({@link #primaryBoard}) with the
+     * operator window encoded; the executor seeds this as the run's first cursor and
+     * {@link Cafe24ArticleCursor#advance} preserves the window across pages. The dates
+     * are Cafe24 KST calendar dates (the platform's explicit zone), passed straight to
+     * the articles {@code start_date}/{@code end_date} filter. ORDER_SUMMARY self-windows
+     * (fixed KST trailing range) and product/sales are not collected here, so all three
+     * return empty — a windowed backfill is not theirs to serve.
+     */
+    @Override
+    public Optional<String> backfillCursor(DataType dataType, LocalDate startDate, LocalDate endDate) {
+        return switch (dataType) {
+            case REVIEW, INQUIRY ->
+                    Optional.of(Cafe24ArticleCursor.window(primaryBoard(dataType), startDate, endDate).encode());
+            case ORDER_SUMMARY, PRODUCT, SALES -> Optional.empty();
+        };
     }
 
     /** REVIEW → board 4 구매후기; INQUIRY → board 6 문의사항 (board 9 1:1 is a follow-up). */

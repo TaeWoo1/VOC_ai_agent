@@ -1,6 +1,7 @@
 package com.sellerops.collect;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.collect.dto.BackfillRequest;
 import com.sellerops.collect.dto.ConnectionStatusView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
@@ -50,6 +51,19 @@ public class SellerAccountCollectController {
                                   @PathVariable UUID accountId,
                                   @Valid @RequestBody ManualSyncRequest request) {
         return service.manualSync(principal.orgId(), accountId, request.dataType());
+    }
+
+    /**
+     * Operator-initiated bounded date-window backfill for one data type — a
+     * synchronous MANUAL run, never the scheduler. The window is seeded into the
+     * run's starting cursor; channels without windowed-backfill support fail closed.
+     */
+    @PostMapping("/backfill")
+    public SyncRunView backfill(@AuthenticationPrincipal AuthPrincipal principal,
+                                @PathVariable UUID accountId,
+                                @Valid @RequestBody BackfillRequest request) {
+        return service.manualBackfill(principal.orgId(), accountId,
+                request.dataType(), request.startDate(), request.endDate());
     }
 
     @GetMapping("/connection-status")
