@@ -76,6 +76,18 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
                 + "\"payment_amount\":\"" + paymentAmount + "\"}";
     }
 
+    /** A 200 boards page: {@code {"boards":[ ...board objects... ]}}. */
+    static Response boardsOk(String... boardObjects) {
+        return new Response(200, "{\"boards\":[" + String.join(",", boardObjects) + "]}", Map.of());
+    }
+
+    /** One board object literal with the metadata fields the discovery reads. */
+    static String board(int boardNo, String boardName, String boardType) {
+        return "{\"board_no\":" + boardNo + ","
+                + "\"board_name\":\"" + boardName + "\","
+                + "\"board_type\":\"" + boardType + "\"}";
+    }
+
     @Override
     public Response postForm(URI uri, Map<String, String> headers, Map<String, String> form) {
         sent.add(new Sent("POST_FORM", uri, headers, form));
