@@ -8,6 +8,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.collect.BackfillWindow;
 import com.sellerops.common.ApiException;
+import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.community.Cafe24CommunityArticle;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.community.CommunityReplyStatus;
@@ -127,8 +128,11 @@ public class OperatorAttentionService {
     private OperatorVocItem toItem(Cafe24CommunityArticle a, AttentionSignalType signalType,
                                    String channelCode, String channelNameKo) {
         String sourceType = SOURCE_KIND_REVIEW.equals(a.getSourceKind()) ? SOURCE_TYPE_REVIEW : SOURCE_TYPE_INQUIRY;
+        // Read-time, fail-closed preview — never the raw body, never persisted/logged.
+        String rawText = a.getContent() == null || a.getContent().isBlank() ? a.getTitle() : a.getContent();
+        String safePreview = VocPreviewSanitizer.sanitize(rawText).text();
         return new OperatorVocItem(channelCode, channelNameKo, sourceType, a.getRating(), a.getReplyStatus(),
-                kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name());
+                kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview);
     }
 
     /** Parse an operator drill-down type into a signal type; unknown → bad request. */

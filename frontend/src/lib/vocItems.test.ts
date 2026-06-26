@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { AttentionSignal, OperatorVocItem } from "./types";
-import { drilldownParams, replyStatusLabel, vocItemKey } from "./vocItems";
+import {
+  PREVIEW_PLACEHOLDER,
+  drilldownParams,
+  previewText,
+  replyStatusLabel,
+  vocItemKey,
+} from "./vocItems";
 
 function signal(type: string, sourceType: string): AttentionSignal {
   return { type, severity: "HIGH", count: 1, label: type, description: "", sourceType, channel: "카페24" };
@@ -16,6 +22,7 @@ function item(signalType: string): OperatorVocItem {
     sourceCreatedDate: "2026-05-10",
     collectedDate: "2026-05-30",
     signalType,
+    safePreview: null,
   };
 }
 
@@ -53,5 +60,23 @@ describe("replyStatusLabel", () => {
 
   it("falls back to UNKNOWN for an unrecognized status", () => {
     expect(replyStatusLabel("WHATEVER")).toEqual(replyStatusLabel("UNKNOWN"));
+  });
+});
+
+describe("previewText", () => {
+  it("returns the sanitized preview when present", () => {
+    expect(previewText("배송 빨라요 [전화번호] 문의")).toEqual({
+      text: "배송 빨라요 [전화번호] 문의",
+      isPlaceholder: false,
+    });
+  });
+
+  it("returns the placeholder when null", () => {
+    expect(previewText(null)).toEqual({ text: PREVIEW_PLACEHOLDER, isPlaceholder: true });
+  });
+
+  it("returns the placeholder when empty or whitespace", () => {
+    expect(previewText("").isPlaceholder).toBe(true);
+    expect(previewText("   ").isPlaceholder).toBe(true);
   });
 });

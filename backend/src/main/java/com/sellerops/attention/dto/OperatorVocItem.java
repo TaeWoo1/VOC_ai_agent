@@ -2,10 +2,13 @@ package com.sellerops.attention.dto;
 
 /**
  * One collected VOC row behind an attention signal — the channel-generic drill-down
- * unit. METADATA ONLY: deliberately no article title/content, {@code articleNo},
- * {@code productNo}, source/customer/order/product identifiers, or {@code mall_id};
- * there is no free-text preview field (a sanitized preview is a documented follow-up,
- * gated on a real PII sanitizer that does not yet exist).
+ * unit. METADATA ONLY: deliberately no raw article title/content, {@code articleNo},
+ * {@code productNo}, source/customer/order/product identifiers, or {@code mall_id}.
+ *
+ * <p>{@code safePreview} is the one free-text field: a sanitized, length-limited
+ * preview produced read-time by {@link com.sellerops.common.VocPreviewSanitizer} —
+ * never the raw body. It is {@code null} when the source was empty or the sanitizer
+ * suppressed it (too much redacted); the raw text is never exposed either way.
  *
  * <p>{@code sourceType} is the operator-facing kind (REVIEW / INQUIRY);
  * {@code channelCode}/{@code channelNameKo} identify the channel; dates are KST
@@ -21,5 +24,6 @@ public record OperatorVocItem(
         String replyStatus,
         String sourceCreatedDate,
         String collectedDate,
-        String signalType) {
+        String signalType,
+        String safePreview) {
 }

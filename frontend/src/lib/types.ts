@@ -406,10 +406,12 @@ export interface OperatorAttentionSummary {
 }
 
 // Mirrors com.sellerops.attention.dto.OperatorVocItem — the channel-generic
-// drill-down unit behind one attention signal. METADATA ONLY: no article
-// title/content, articleNo, source/customer/order/product identifiers, and no
-// free-text preview (a sanitized preview is a deferred follow-up). Dates are KST
-// calendar dates; sourceCreatedDate is null when the source value was timezone-less.
+// drill-down unit behind one attention signal. No raw article title/content,
+// articleNo, or source/customer/order/product identifiers. `safePreview` is the one
+// free-text field: a sanitized, length-limited preview produced read-time by the
+// backend VocPreviewSanitizer — never the raw body. It is null when the source was
+// empty or the sanitizer suppressed it. Dates are KST calendar dates;
+// sourceCreatedDate is null when the source value was timezone-less.
 export interface OperatorVocItem {
   channelCode: string | null;
   channelNameKo: string | null;
@@ -419,6 +421,7 @@ export interface OperatorVocItem {
   sourceCreatedDate: string | null;
   collectedDate: string | null;
   signalType: string; // the requesting AttentionSignalType
+  safePreview: string | null; // sanitized preview, or null when suppressed/empty
 }
 
 // Mirrors com.sellerops.attention.dto.OperatorVocItemPage. Reads no server clock;
