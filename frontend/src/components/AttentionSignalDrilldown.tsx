@@ -29,6 +29,11 @@ export function AttentionSignalDrilldown({
           닫기
         </button>
       </div>
+      {/* The two low/mid-rating cards (1~2점·3점) share one signal type and drill to
+          the combined 1~3점 set, so the list total can exceed this card's count. */}
+      {signal.type === "LOW_RATING_REVIEW" ? (
+        <p className="mb-3 text-sm text-muted">낮은 평점(1~3점) 리뷰 전체를 보여줍니다.</p>
+      ) : null}
       <OperatorVocItemList
         accountId={accountId}
         type={signal.type}
