@@ -73,4 +73,33 @@ public interface Cafe24CommunityArticleRepository extends JpaRepository<Cafe24Co
     /** Drill-down list for one source kind, most-recently-collected first (deterministic). */
     Page<Cafe24CommunityArticle> findByOrgIdAndSellerAccountIdAndSourceKindOrderByCollectedAtDesc(
             UUID orgId, UUID sellerAccountId, String sourceKind, Pageable pageable);
+
+    /**
+     * Attention-signal drill-down: one page of rows for a source kind inside the same
+     * half-open KST window [{@code from}, {@code toExclusive}) the counts use, so a
+     * signal's count and its drilled rows stay consistent. The nullable
+     * {@code replyStatus}/{@code minRating}/{@code maxRating} collapse to "no
+     * constraint" when null, covering reply-filtered and rating-bucketed signals with
+     * one query. Rows with an unknown source date are excluded (conservative, matching
+     * {@link #countInWindow}); {@code articleNo} is an internal pagination tiebreaker
+     * only (never surfaced).
+     */
+    @Query("""
+            select a from Cafe24CommunityArticle a
+            where a.orgId = :orgId and a.sellerAccountId = :accountId
+              and a.sourceKind = :sourceKind
+              and (:replyStatus is null or a.replyStatus = :replyStatus)
+              and (:minRating is null or a.rating >= :minRating)
+              and (:maxRating is null or a.rating <= :maxRating)
+              and a.sourceCreatedAt >= :from and a.sourceCreatedAt < :toExclusive
+            order by a.sourceCreatedAt desc, a.articleNo desc
+            """)
+    Page<Cafe24CommunityArticle> findInWindowFiltered(@Param("orgId") UUID orgId, @Param("accountId") UUID accountId,
+                                                      @Param("sourceKind") String sourceKind,
+                                                      @Param("replyStatus") String replyStatus,
+                                                      @Param("minRating") Integer minRating,
+                                                      @Param("maxRating") Integer maxRating,
+                                                      @Param("from") Instant from,
+                                                      @Param("toExclusive") Instant toExclusive,
+                                                      Pageable pageable);
 }

@@ -404,3 +404,31 @@ export interface OperatorAttentionSummary {
   toDate: string;
   items: AttentionSignal[];
 }
+
+// Mirrors com.sellerops.attention.dto.OperatorVocItem — the channel-generic
+// drill-down unit behind one attention signal. METADATA ONLY: no article
+// title/content, articleNo, source/customer/order/product identifiers, and no
+// free-text preview (a sanitized preview is a deferred follow-up). Dates are KST
+// calendar dates; sourceCreatedDate is null when the source value was timezone-less.
+export interface OperatorVocItem {
+  channelCode: string | null;
+  channelNameKo: string | null;
+  sourceType: string; // REVIEW | INQUIRY
+  rating: number | null;
+  replyStatus: string;
+  sourceCreatedDate: string | null;
+  collectedDate: string | null;
+  signalType: string; // the requesting AttentionSignalType
+}
+
+// Mirrors com.sellerops.attention.dto.OperatorVocItemPage. Reads no server clock;
+// the [fromDate, toDate] window is the as-of context (no generatedAt).
+export interface OperatorVocItemPage {
+  signalType: string;
+  fromDate: string; // ISO yyyy-MM-dd
+  toDate: string;
+  page: number;
+  size: number;
+  total: number;
+  items: OperatorVocItem[];
+}

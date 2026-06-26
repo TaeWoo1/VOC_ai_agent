@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
 import java.time.LocalDate;
 import java.util.List;
@@ -36,5 +37,21 @@ class OperatorAttentionControllerTest {
 
         assertThat(result).isSameAs(view);
         verify(service).attention(orgId, accountId, from, to);
+    }
+
+    @Test
+    void attentionItemsDelegatesWithPrincipalOrgPathAccountTypeWindowAndPaging() {
+        UUID orgId = UUID.randomUUID();
+        UUID accountId = UUID.randomUUID();
+        LocalDate from = LocalDate.parse("2026-05-01");
+        LocalDate to = LocalDate.parse("2026-05-31");
+        AuthPrincipal principal = new AuthPrincipal(UUID.randomUUID(), orgId, "op@example.com");
+        OperatorVocItemPage view = new OperatorVocItemPage("NEW_REVIEW", from, to, 0, 20, 0, List.of());
+        when(service.attentionItems(orgId, accountId, "NEW_REVIEW", from, to, 0, 20)).thenReturn(view);
+
+        OperatorVocItemPage result = controller.attentionItems(principal, accountId, "NEW_REVIEW", from, to, 0, 20);
+
+        assertThat(result).isSameAs(view);
+        verify(service).attentionItems(orgId, accountId, "NEW_REVIEW", from, to, 0, 20);
     }
 }

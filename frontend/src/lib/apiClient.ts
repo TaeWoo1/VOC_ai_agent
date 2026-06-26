@@ -18,6 +18,7 @@ import type {
   InboxResponse,
   ItemAnalysis,
   OperatorAttentionSummary,
+  OperatorVocItemPage,
   OrderSummaryResponse,
   ScheduleView,
   SellerAccountResponse,
@@ -31,6 +32,7 @@ import {
   mockAccountArticles,
   mockAccountAttention,
   mockAccountDashboard,
+  mockAttentionItems,
   mockAuth,
   mockCapabilities,
   mockCapabilityOverview,
@@ -477,6 +479,27 @@ export const api = {
     const search = new URLSearchParams({ from: range.from, to: range.to });
     const { data } = await http.get<OperatorAttentionSummary>(
       `/api/seller-accounts/${accountId}/attention?${search.toString()}`,
+    );
+    return data;
+  },
+  // Drill-down: the metadata-only rows behind one attention signal (by signal type)
+  // over the same [from, to] window, paginated. Fail-closed, like the summary read.
+  async getAttentionItems(
+    accountId: string,
+    params: { type: string; from: string; to: string; page?: number; size?: number },
+  ): Promise<OperatorVocItemPage> {
+    if (USE_MOCKS) {
+      return mockAttentionItems(accountId, params, params.page ?? 0, params.size ?? 20);
+    }
+    const search = new URLSearchParams({ type: params.type, from: params.from, to: params.to });
+    if (params.page != null) {
+      search.set("page", String(params.page));
+    }
+    if (params.size != null) {
+      search.set("size", String(params.size));
+    }
+    const { data } = await http.get<OperatorVocItemPage>(
+      `/api/seller-accounts/${accountId}/attention/items?${search.toString()}`,
     );
     return data;
   },

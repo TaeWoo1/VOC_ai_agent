@@ -1,6 +1,7 @@
 package com.sellerops.attention;
 
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -36,5 +37,21 @@ public class OperatorAttentionController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return service.attention(principal.orgId(), accountId, from, to);
+    }
+
+    /**
+     * Drill-down: one page of the metadata-only rows behind a chosen signal
+     * ({@code type} = {@link AttentionSignalType} name) over the same [from, to] window.
+     */
+    @GetMapping("/attention/items")
+    public OperatorVocItemPage attentionItems(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @RequestParam String type,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return service.attentionItems(principal.orgId(), accountId, type, from, to, page, size);
     }
 }
