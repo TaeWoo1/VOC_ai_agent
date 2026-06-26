@@ -111,12 +111,14 @@ class Cafe24ApiConnectorTest {
         var capabilities = connector.capabilities("CAFE24");
         assertThat(capabilities.connectorClass()).isEqualTo("API");
         assertThat(capabilities.supports(DataType.ORDER_SUMMARY)).isTrue();
-        // ORDER_SUMMARY promoted after the gated live run; REVIEW/INQUIRY added by
-        // PR B as collectable-but-unverified community board article capture.
+        // ORDER_SUMMARY promoted after the gated live run; REVIEW (board 4) and
+        // INQUIRY (board 6) promoted to CONFIRMED after live runtime backfill runs
+        // verified the production path (sync_job/sync_cursor, board-only routing,
+        // dedupe; INQUIRY multi-page fresh insert + no-op). Board 9 stays excluded.
         assertThat(capabilities.verificationStatus())
                 .containsEntry(DataType.ORDER_SUMMARY, "CONFIRMED")
-                .containsEntry(DataType.REVIEW, "NEEDS_VERIFICATION")
-                .containsEntry(DataType.INQUIRY, "NEEDS_VERIFICATION");
+                .containsEntry(DataType.REVIEW, "CONFIRMED")
+                .containsEntry(DataType.INQUIRY, "CONFIRMED");
         assertThat(capabilities.supports(DataType.REVIEW)).isTrue();
         assertThat(capabilities.supports(DataType.INQUIRY)).isTrue();
         // PRODUCT/SALES stay deferred.

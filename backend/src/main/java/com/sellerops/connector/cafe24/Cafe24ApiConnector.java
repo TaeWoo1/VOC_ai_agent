@@ -121,15 +121,18 @@ public class Cafe24ApiConnector implements PullConnector {
                 CONNECTOR_CLASS,
                 Set.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY),
                 Map.of(DataType.ORDER_SUMMARY, "CONFIRMED",
-                        DataType.REVIEW, "NEEDS_VERIFICATION",
-                        DataType.INQUIRY, "NEEDS_VERIFICATION"),
+                        DataType.REVIEW, "CONFIRMED",
+                        DataType.INQUIRY, "CONFIRMED"),
                 "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST),"
-                        + " CONFIRMED by a gated live run. REVIEW/INQUIRY collect community board"
-                        + " articles into CanonicalCommunityArticle (REVIEW → board 4 구매후기; INQUIRY"
-                        + " → board 6 문의사항; board 9 1:1 맞춤상담 is a follow-up). The article endpoint"
-                        + " shape, reply_status tokens, rating presence, and date-filter params are"
-                        + " doc-asserted — REVIEW/INQUIRY stay NEEDS_VERIFICATION until the gated live"
-                        + " shape run. Product/sales remain deferred.");
+                        + " CONFIRMED by a gated live run. REVIEW (board 4 구매후기) and INQUIRY (board 6"
+                        + " 문의사항, PRODUCT_INQUIRY) collect community board articles into"
+                        + " CanonicalCommunityArticle — read-only, via date-window backfill through the"
+                        + " production runtime (sync_job/sync_cursor, board-4/6-only routing,"
+                        + " natural-key/source_hash dedupe). CONFIRMED by live runtime backfill runs"
+                        + " (REVIEW no-op path; INQUIRY multi-page fresh insert + no-op). Board 9 1:1"
+                        + " 맞춤상담 stays excluded (PII + endpoint uncertainty). reply_status maps"
+                        + " N → PENDING; the answered token is unobserved so unknown tokens stay UNKNOWN."
+                        + " Product/sales remain deferred.");
     }
 
     @Override
@@ -183,8 +186,9 @@ public class Cafe24ApiConnector implements PullConnector {
      * {@link CanonicalCommunityArticle}. The board is fixed by data type
      * ({@link #primaryBoard}); the opaque {@link Cafe24ArticleCursor} carries the
      * offset across runs and the executor pages while {@code hasMore}. A row
-     * missing {@code article_no} cannot be keyed and is dropped. Status stays
-     * NEEDS_VERIFICATION until the gated live shape run.
+     * missing {@code article_no} cannot be keyed and is dropped. CONFIRMED for
+     * boards 4/6 by live runtime backfill runs; the answered {@code reply_status}
+     * token stays UNKNOWN until observed.
      */
     private FetchPage fetchArticles(FetchRequest request) {
         int boardNo = primaryBoard(request.dataType());

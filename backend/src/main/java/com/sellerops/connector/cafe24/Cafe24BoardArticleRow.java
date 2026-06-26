@@ -8,12 +8,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * ({@code GET /api/v2/admin/boards/{board_no}/articles}) — the fields the
  * review/inquiry capture needs. Everything else in the article object is ignored.
  *
- * <p><b>Doc-asserted shape ({@code NEEDS_VERIFICATION}).</b> Field names, the
- * presence of {@code rating} on review boards, the concrete {@code reply_status}
- * tokens, and the {@code created_date}/{@code updated_date} formats are taken from
- * the Admin API docs and confirmed only at the gated live-shape step (PR C). Every
- * field is nullable so an unexpected/missing value is tolerated rather than fatal;
- * {@code article_no} is the one field a row cannot be stored without.
+ * <p><b>Shape live-verified (boards 4/6).</b> Field names, the presence of
+ * {@code rating} on review boards, the observed {@code reply_status} tokens, and the
+ * {@code created_date}/{@code updated_date} formats were confirmed at the gated
+ * live-shape step (PR C) and the live runtime backfill runs. The one token still
+ * unobserved is the <em>answered</em> {@code reply_status} value — it stays
+ * {@code UNKNOWN} until seen. Every field is nullable so an unexpected/missing value
+ * is tolerated rather than fatal; {@code article_no} is the one field a row cannot
+ * be stored without.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Cafe24BoardArticleRow(
