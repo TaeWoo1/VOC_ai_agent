@@ -181,13 +181,49 @@ class OperatorAttentionItemsServiceTest {
     }
 
     @Test
-    void rowDtoExposesNoRawContentField() {
-        // Privacy contract: the drill-down unit is metadata only — no body or source identifiers.
-        var forbidden = Arrays.asList("title", "content", "body", "articleno", "productno",
-                "sourceid", "customerid", "orderid", "productname", "mallid", "preview");
+    void rowDtoExposesNoRawContentFieldButCarriesSafePreview() {
+        // Privacy contract: no raw body or source identifiers. The ONE free-text field
+        // is the sanitized safePreview — assert it is present and the raw ones are not.
+        var forbidden = Arrays.asList("title", "content", "body", "rawpreview", "articleno",
+                "productno", "sourceid", "customerid", "orderid", "productname", "mallid");
         var fields = Arrays.stream(OperatorVocItem.class.getRecordComponents())
                 .map(RecordComponent::getName).map(String::toLowerCase).toList();
         assertThat(fields).doesNotContainAnyElementsOf(forbidden);
+        assertThat(fields).contains("safepreview");
+    }
+
+    @Test
+    void mapsArticleBodyToASanitizedPreviewNeverTheRawText() {
+        Fixture f = seedChannelAndAccount();
+        articleWithText(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5,
+                null, "배송 빨라요 연락은 010-1234-5678 로 주세요");
+
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+
+        String preview = p.items().get(0).safePreview();
+        assertThat(preview).isNotNull().contains("[전화번호]")
+                .doesNotContain("1234").doesNotContain("5678");
+    }
+
+    @Test
+    void suppressesPreviewWhenContentIsAlmostEntirelyPii() {
+        Fixture f = seedChannelAndAccount();
+        articleWithText(f, "REVIEW", "2026-05-06T12:00:00+09:00", "UNKNOWN", 5,
+                null, "010-1234-5678 buyer@example.com");
+
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(p.items().get(0).safePreview()).isNull();
+    }
+
+    @Test
+    void previewIsNullWhenArticleHasNoText() {
+        Fixture f = seedChannelAndAccount();
+        articleWithText(f, "REVIEW", "2026-05-07T12:00:00+09:00", "UNKNOWN", 5, null, null);
+
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(p.items().get(0).safePreview()).isNull();
     }
 
     // --- fixtures ------------------------------------------------------------
@@ -222,11 +258,22 @@ class OperatorAttentionItemsServiceTest {
     }
 
     private void articleUnknownDate(Fixture f, String sourceKind, String replyStatus, Integer rating) {
-        saveArticle(f, sourceKind, null, replyStatus, rating);
+        saveArticle(f, sourceKind, null, replyStatus, rating, null, null);
+    }
+
+    private void articleWithText(Fixture f, String sourceKind, String sourceCreatedAt, String replyStatus,
+                                 Integer rating, String title, String content) {
+        saveArticle(f, sourceKind, OffsetDateTime.parse(sourceCreatedAt).toInstant(), replyStatus, rating,
+                title, content);
     }
 
     private void saveArticle(Fixture f, String sourceKind, Instant sourceCreatedAt,
                              String replyStatus, Integer rating) {
+        saveArticle(f, sourceKind, sourceCreatedAt, replyStatus, rating, null, null);
+    }
+
+    private void saveArticle(Fixture f, String sourceKind, Instant sourceCreatedAt,
+                             String replyStatus, Integer rating, String title, String content) {
         Cafe24CommunityArticle a = new Cafe24CommunityArticle();
         a.setOrgId(org);
         a.setSellerAccountId(f.accountId);
@@ -236,6 +283,8 @@ class OperatorAttentionItemsServiceTest {
         a.setSourceKind(sourceKind);
         a.setReplyStatus(replyStatus);
         a.setRating(rating);
+        a.setTitle(title);
+        a.setContent(content);
         a.setSourceCreatedAt(sourceCreatedAt);
         a.setSourceHash("h-" + a.getArticleNo());
         a.setCollectedAt(Instant.parse("2026-05-25T00:00:00Z"));

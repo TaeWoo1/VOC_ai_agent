@@ -44,3 +44,21 @@ const REPLY_STATUS_LABEL: Record<string, ReplyStatusLabel> = {
 export function replyStatusLabel(status: string): ReplyStatusLabel {
   return REPLY_STATUS_LABEL[status] ?? REPLY_STATUS_LABEL.UNKNOWN;
 }
+
+/** Neutral placeholder when no sanitized preview is available (empty or suppressed). */
+export const PREVIEW_PLACEHOLDER = "미리보기 없음";
+
+export interface PreviewText {
+  text: string;
+  isPlaceholder: boolean;
+}
+
+// The backend already sanitizes; this only decides preview-vs-placeholder. Null OR
+// an empty/whitespace string → the neutral placeholder (the absence can be empty
+// content or a safety suppression, so the wording does not overclaim "protected").
+export function previewText(safePreview: string | null): PreviewText {
+  if (safePreview != null && safePreview.trim() !== "") {
+    return { text: safePreview, isPlaceholder: false };
+  }
+  return { text: PREVIEW_PLACEHOLDER, isPlaceholder: true };
+}

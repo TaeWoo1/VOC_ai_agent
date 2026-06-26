@@ -717,6 +717,13 @@ export function mockAttentionItems(
     const n = page * size + i;
     const rating =
       type === "LOW_RATING_REVIEW" ? 1 + (n % 3) : type === "NEW_REVIEW" ? 4 + (n % 2) : null;
+    // Sanitized-looking previews for some rows, null (suppressed/empty) for others,
+    // so the UI exercises both the preview and placeholder paths.
+    const previews = [
+      isReview ? "포장이 꼼꼼했어요 다음에 또 살게요" : "배송 언제쯤 오나요 [전화번호] 로 연락 주세요",
+      "사이즈 문의드려요 [번호] 주문 건입니다",
+      null,
+    ];
     return {
       channelCode: "CAFE24",
       channelNameKo: "카페24",
@@ -726,6 +733,7 @@ export function mockAttentionItems(
       sourceCreatedDate: `2026-05-${String(28 - (n % 28)).padStart(2, "0")}`,
       collectedDate: "2026-05-30",
       signalType: type,
+      safePreview: previews[n % previews.length],
     };
   });
   return { signalType: type, fromDate: params.from, toDate: params.to, page, size, total, items: rows };
