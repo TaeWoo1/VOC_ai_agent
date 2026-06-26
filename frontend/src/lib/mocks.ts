@@ -19,6 +19,7 @@ import type {
   InboxResponse,
   ItemAnalysis,
   OperatorAttentionSummary,
+  OperatorVocItemPage,
   OrderSummaryResponse,
   SalesTrendPoint,
   ScheduleView,
@@ -697,6 +698,37 @@ export function mockAccountAttention(
       },
     ],
   };
+}
+
+export function mockAttentionItems(
+  _accountId: string,
+  params: { type: string; from: string; to: string },
+  page: number,
+  size: number,
+): OperatorVocItemPage {
+  const { type } = params;
+  const isReview = type === "LOW_RATING_REVIEW" || type === "NEW_REVIEW";
+  const sourceType = isReview ? "REVIEW" : "INQUIRY";
+  // Reply/rating consistent with the signal the operator drilled into.
+  const replyStatus =
+    type === "UNANSWERED_INQUIRY" ? "PENDING" : type === "UNKNOWN_REPLY_STATUS" ? "UNKNOWN" : "ANSWERED";
+  const total = isReview ? 6 : 4;
+  const rows = Array.from({ length: Math.min(size, Math.max(0, total - page * size)) }, (_, i) => {
+    const n = page * size + i;
+    const rating =
+      type === "LOW_RATING_REVIEW" ? 1 + (n % 3) : type === "NEW_REVIEW" ? 4 + (n % 2) : null;
+    return {
+      channelCode: "CAFE24",
+      channelNameKo: "카페24",
+      sourceType,
+      rating,
+      replyStatus: isReview ? "UNKNOWN" : replyStatus,
+      sourceCreatedDate: `2026-05-${String(28 - (n % 28)).padStart(2, "0")}`,
+      collectedDate: "2026-05-30",
+      signalType: type,
+    };
+  });
+  return { signalType: type, fromDate: params.from, toDate: params.to, page, size, total, items: rows };
 }
 
 export function mockSyncRuns(): SyncRunView[] {
