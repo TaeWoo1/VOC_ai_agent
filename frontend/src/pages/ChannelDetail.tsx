@@ -4,6 +4,10 @@ import { isAxiosError } from "axios";
 import { Section } from "../components/Section";
 import { EmptyState } from "../components/EmptyState";
 import { HealthBadge } from "../components/HealthBadge";
+import { CapabilityBadges } from "../components/CapabilityBadges";
+import { ChannelSummaryCards } from "../components/ChannelSummaryCards";
+import { BackfillPanel } from "../components/BackfillPanel";
+import { CommunityArticleList } from "../components/CommunityArticleList";
 import { api } from "../lib/apiClient";
 import { relativeTime, untilTime } from "../lib/format";
 import type {
@@ -370,6 +374,14 @@ export function ChannelDetail() {
       {notice ? <div className="rounded-xl bg-brand/10 px-4 py-3 text-brand-700">{notice}</div> : null}
       {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
 
+      {accountId ? (
+        <>
+          {channel?.code ? <CapabilityBadges channelCode={channel.code} /> : null}
+          <ChannelSummaryCards accountId={accountId} refreshKey={refreshKey} />
+          <BackfillPanel accountId={accountId} onCompleted={reload} />
+        </>
+      ) : null}
+
       <Section title="연결 상태">
         {loadingCollection ? (
           <p className="text-base text-muted">불러오는 중…</p>
@@ -460,6 +472,8 @@ export function ChannelDetail() {
         )}
       </Section>
       </div>
+
+      {accountId ? <CommunityArticleList accountId={accountId} refreshKey={refreshKey} /> : null}
 
       <div className="rounded-xl bg-canvas px-4 py-3 text-base text-muted">
         자동 수집이 어려운 데이터는{" "}

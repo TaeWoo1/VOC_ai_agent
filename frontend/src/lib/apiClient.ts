@@ -1,7 +1,11 @@
 import axios, { isAxiosError } from "axios";
 import type {
+  AccountDashboardSummary,
+  ArticleListResponse,
   AuthResponse,
+  BackfillRequest,
   CapabilityView,
+  ChannelCapabilityOverview,
   ChannelResponse,
   ConnectionInfoView,
   ConnectionStatusView,
@@ -23,8 +27,11 @@ import type {
   UserView,
 } from "./types";
 import {
+  mockAccountArticles,
+  mockAccountDashboard,
   mockAuth,
   mockCapabilities,
+  mockCapabilityOverview,
   mockChannels,
   mockConnectionInfo,
   mockConnectionStatus,
@@ -395,6 +402,65 @@ export const api = {
 
   async retryRun(runId: string): Promise<SyncRunView> {
     const { data } = await http.post<SyncRunView>(`/api/sync-runs/${runId}/retry`);
+    return data;
+  },
+
+  // --- Operator dashboard + backfill ---
+
+  // Channel-generic capability overview (in-code connector capabilities + honest
+  // unsupported scopes). No silent mock fallback: a dead backend must fail closed
+  // rather than render fake CONFIRMED badges. Honors the VITE_USE_MOCKS escape hatch.
+  async getChannelCapabilityOverview(channelCode: string): Promise<ChannelCapabilityOverview> {
+    if (USE_MOCKS) {
+      return mockCapabilityOverview(channelCode);
+    }
+    const { data } = await http.get<ChannelCapabilityOverview>(
+      `/api/channels/${channelCode}/capabilities/overview`,
+    );
+    return data;
+  },
+  // Per-account dashboard summary over an explicit [from, to] window (KST dates).
+  // Fail-closed read so a dead backend never renders demo numbers as real.
+  async getAccountDashboard(
+    accountId: string,
+    range: { from: string; to: string },
+  ): Promise<AccountDashboardSummary> {
+    if (USE_MOCKS) {
+      return mockAccountDashboard(accountId, range);
+    }
+    const search = new URLSearchParams({ from: range.from, to: range.to });
+    const { data } = await http.get<AccountDashboardSummary>(
+      `/api/seller-accounts/${accountId}/dashboard?${search.toString()}`,
+    );
+    return data;
+  },
+  // Metadata-only article drill-down for one type (REVIEW / INQUIRY), paginated.
+  async getAccountArticles(
+    accountId: string,
+    params: { type: string; page?: number; size?: number },
+  ): Promise<ArticleListResponse> {
+    if (USE_MOCKS) {
+      return mockAccountArticles(params.type, params.page ?? 0, params.size ?? 20);
+    }
+    const search = new URLSearchParams({ type: params.type });
+    if (params.page != null) {
+      search.set("page", String(params.page));
+    }
+    if (params.size != null) {
+      search.set("size", String(params.size));
+    }
+    const { data } = await http.get<ArticleListResponse>(
+      `/api/seller-accounts/${accountId}/articles?${search.toString()}`,
+    );
+    return data;
+  },
+  // Mutating: operator-initiated bounded date-window backfill (one data type). No
+  // mock fallback; errors surface to the UI.
+  async backfill(accountId: string, request: BackfillRequest): Promise<SyncRunView> {
+    const { data } = await http.post<SyncRunView>(
+      `/api/seller-accounts/${accountId}/backfill`,
+      request,
+    );
     return data;
   },
 };

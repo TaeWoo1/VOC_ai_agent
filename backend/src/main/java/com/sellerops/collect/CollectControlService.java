@@ -3,6 +3,7 @@ package com.sellerops.collect;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.collect.dto.CapabilityView;
+import com.sellerops.collect.dto.ChannelCapabilityOverview;
 import com.sellerops.collect.dto.ConnectionStatusView;
 import com.sellerops.collect.dto.ConnectionTestResultView;
 import com.sellerops.collect.dto.CredentialIntakeRequest;
@@ -13,6 +14,7 @@ import com.sellerops.common.ApiException;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.connector.ConnectionVerifier;
+import com.sellerops.connector.ConnectorCapabilities;
 import com.sellerops.connector.ConnectorCapabilityRepository;
 import com.sellerops.connector.ConnectorRegistry;
 import com.sellerops.connector.DataType;
@@ -210,6 +212,55 @@ public class CollectControlService {
         return capabilities.findByChannelCode(channelCode).stream()
                 .map(CapabilityView::from)
                 .toList();
+    }
+
+    /** The canonical operator-facing data types, in display order, with Korean labels. */
+    private static final List<DataType> OVERVIEW_DATA_TYPES =
+            List.of(DataType.ORDER_SUMMARY, DataType.REVIEW, DataType.INQUIRY);
+
+    private static String dataTypeLabel(DataType dataType) {
+        return switch (dataType) {
+            case ORDER_SUMMARY -> "주문·매출";
+            case REVIEW -> "리뷰";
+            case INQUIRY -> "문의";
+            case PRODUCT -> "상품";
+            case SALES -> "판매 통계";
+        };
+    }
+
+    /**
+     * Channel-generic capability overview that prefers the in-code connector
+     * capabilities (the source of truth for API connectors, several of which are
+     * not seeded into {@code connector_capabilities}) over the reference table.
+     * It reflects the connector actually resolved for the channel, plus that
+     * connector's honest unsupported-scope boundaries. A channel with no pull
+     * connector (file-upload / not integrated) reports auto-collect unsupported.
+     */
+    public ChannelCapabilityOverview channelCapabilityOverview(String channelCode) {
+        String channelNameKo = channels.findByCode(channelCode)
+                .map(Channel::getNameKo)
+                .orElse(null);
+        PullConnector connector = registry.resolvePullConnector(channelCode).orElse(null);
+        if (connector == null) {
+            return new ChannelCapabilityOverview(
+                    channelCode, channelNameKo, null, false, List.of(), List.of());
+        }
+
+        ConnectorCapabilities caps = connector.capabilities(channelCode);
+        List<ChannelCapabilityOverview.DataTypeCapability> dataTypes = OVERVIEW_DATA_TYPES.stream()
+                .map(dt -> new ChannelCapabilityOverview.DataTypeCapability(
+                        dt.name(),
+                        dataTypeLabel(dt),
+                        caps.supports(dt),
+                        caps.supports(dt)
+                                ? caps.verificationStatus().getOrDefault(dt, "NEEDS_VERIFICATION")
+                                : "UNSUPPORTED"))
+                .toList();
+        List<ChannelCapabilityOverview.ScopeNote> scopes = connector.unsupportedScopes(channelCode).stream()
+                .map(s -> new ChannelCapabilityOverview.ScopeNote(s.code(), s.label()))
+                .toList();
+        return new ChannelCapabilityOverview(
+                channelCode, channelNameKo, caps.connectorClass(), true, dataTypes, scopes);
     }
 
     /**
