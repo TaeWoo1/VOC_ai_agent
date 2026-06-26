@@ -396,24 +396,51 @@ for persistence**.
 response bodies, writer/customer identifiers, contact/address fields, order ids,
 `mall_id`, or secrets.
 
-### Route to `CONFIRMED`
+### Promotion to `CONFIRMED`
 
-The runtime path is real, tested offline, **and now live-verified** for both
-`REVIEW` and `INQUIRY` (`sync_jobs`/`sync_cursors` written by the normal runtime,
-cursor seed+advance, board-4/6-only routing, insert + idempotent no-op). Remaining
-gates before `REVIEW`/`INQUIRY` can move from `NEEDS_VERIFICATION` to `CONFIRMED`
-(**each its own gated step, requires explicit approval**):
+With the offline tests plus the supervised live REVIEW and INQUIRY runtime backfill
+runs, `REVIEW` and `INQUIRY` are **promoted from `NEEDS_VERIFICATION` to
+`CONFIRMED`** — within the explicit scope below. The items previously tracked as
+open gates are **not** blockers to the scoped capability; they are recorded as
+**known limitations** and remain genuinely open work.
 
-1. **The answered `reply_status` token** — still unobserved (only `N → PENDING`
-   seen; all live rows `PENDING`); unknown tokens stay `UNKNOWN` and must not be
-   guessed.
+## Cafe24 REVIEW/INQUIRY — `CONFIRMED` capability scope
+
+`REVIEW` and `INQUIRY` are `CONFIRMED` **only** for exactly this:
+
+- **`REVIEW` = Cafe24 board 4 구매후기**; **`INQUIRY` = Cafe24 board 6 문의사항**
+  (`source_kind = PRODUCT_INQUIRY`).
+- **Read-only collection** of community board articles into
+  `cafe24_community_articles` — no writes back to Cafe24.
+- **Date-window backfill through the production runtime**
+  (`POST /backfill` → `manualBackfill` → `SyncRunExecutor`), writing real
+  `sync_jobs` and `sync_cursors`, with cursor seed + (multi-page) advance and
+  board-4/6-only routing.
+- **Natural-key + `source_hash` dedupe** — insert / in-place update / idempotent
+  no-op (no duplicate rows).
+
+**Explicitly NOT part of the confirmed capability** (each remains out of scope /
+unverified):
+
+- **Board 9 (1:1 맞춤상담)** — excluded (PII surface + endpoint uncertainty); never
+  requested by the connector and **not** confirmed for persistence.
+- **Comments**, **urgent-inquiry**, **Community write**, and **automatic AI reply
+  posting** — none are collected or built.
+- **`reply_status` beyond the fallback** — only `N → PENDING` is mapped.
+
+**Known limitations (open work, do not block the scoped `CONFIRMED`):**
+
+1. **Answered `reply_status` token unobserved** — every live row seen was `PENDING`;
+   the answered/closed token stays **`UNKNOWN`** until actually observed and is
+   **never guessed or mapped**.
 2. **Date-filter exclusion not yet proven** — both live windows happened to contain
    only in-window rows (REVIEW returned the existing 3; INQUIRY's board 6 is entirely
-   dated 2026-05-06, 0 outside). A window that **excludes** known rows is needed to
-   prove the `start_date`/`end_date` filter actively *rejects* out-of-window
-   articles (vs. the board simply having no out-of-window rows).
-3. **REVIEW fresh insert through the production runtime** — observed offline only;
-   not yet live (REVIEW's live window returned no new rows).
+   dated 2026-05-06, 0 outside), so the `start_date`/`end_date` filter is shown to
+   *include* but not yet to actively *reject* out-of-window articles.
+3. **REVIEW fresh insert through the production runtime** — live-observed only as a
+   no-op (the REVIEW window returned already-captured rows); a live fresh insert is
+   proven offline (`Cafe24ArticleBackfillFlowTest`) and live for INQUIRY, not yet
+   live for REVIEW.
 
 ## Forward plan (later, separately gated PRs)
 
@@ -430,14 +457,14 @@ gates before `REVIEW`/`INQUIRY` can move from `NEEDS_VERIFICATION` to `CONFIRMED
 - **Bounded persistence verification** — **done** (PR D): one supervised bypass run
   persisted 6 rows and live-verified insert, natural-key/`source_hash` no-op, and the
   date-window cursor seed.
-- **Production runtime path** — **done offline + live-verified** (PR E): bounded
+- **Production runtime path** — **done + `CONFIRMED`** (PR E + promotion): bounded
   backfill through `SyncRunExecutor` (writing `sync_jobs`/`sync_cursors`), proven by
   tests and by one supervised live run each for `REVIEW` (board-4 no-op) and
-  `INQUIRY` (board-6 multi-page insert + no-op). See *Outcome — production runtime
-  live-verified* above. Still open before `CONFIRMED`: the **answered**
-  `reply_status` token (unobserved), a **window that excludes known rows** (to prove
-  the date filter rejects out-of-window articles), and a **live REVIEW fresh insert**
-  (observed offline only).
+  `INQUIRY` (board-6 multi-page insert + no-op). `REVIEW`/`INQUIRY` are now
+  `CONFIRMED` within the scope above. Remaining **known limitations** (not blockers):
+  the **answered** `reply_status` token (unobserved → stays `UNKNOWN`), a **window
+  that excludes known rows** (to prove the date filter rejects out-of-window
+  articles), and a **live REVIEW fresh insert** (proven offline + live for INQUIRY).
 
 ## AI moat — source stays separate from AI outputs
 

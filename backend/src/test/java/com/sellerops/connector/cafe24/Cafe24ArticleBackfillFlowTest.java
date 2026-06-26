@@ -49,8 +49,9 @@ import org.springframework.test.context.ActiveProfiles;
  * proves the operator window is seeded into {@code sync_cursors} by the runtime (not
  * a bypass), reaches the articles GET, advances across pages while preserving the
  * window, routes REVIEW→board 4 / INQUIRY→board 6 (board 9 never requested), and is
- * idempotent on a repeated same-window run (no duplicate rows). REVIEW/INQUIRY stay
- * NEEDS_VERIFICATION — this is the runtime shape, not a live confirmation.
+ * idempotent on a repeated same-window run (no duplicate rows). This offline test
+ * proves the runtime shape; supervised live backfill runs then confirmed the same
+ * path against the real mall (REVIEW/INQUIRY are now CONFIRMED for boards 4/6).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
