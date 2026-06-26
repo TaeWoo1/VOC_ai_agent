@@ -238,6 +238,25 @@ public class Cafe24ApiConnector implements PullConnector {
         };
     }
 
+    /**
+     * The boundaries the confirmed Cafe24 capability deliberately excludes. Board 9
+     * (1:1 맞춤상담) is never read (PII + endpoint uncertainty); article comments are
+     * not collected; community write and automatic reply posting are never performed
+     * (AI replies, when they exist, stay internal drafts). Surfaced read-only so the
+     * operator UI is transparent about scope; not tied to any {@link DataType}.
+     */
+    @Override
+    public List<com.sellerops.connector.UnsupportedScope> unsupportedScopes(String channelCode) {
+        if (!CHANNEL_CODE.equals(channelCode)) {
+            return List.of();
+        }
+        return List.of(
+                new com.sellerops.connector.UnsupportedScope("BOARD_9", "1:1 맞춤상담(게시판 9) 미수집"),
+                new com.sellerops.connector.UnsupportedScope("COMMENTS", "게시글 댓글 미수집"),
+                new com.sellerops.connector.UnsupportedScope("COMMUNITY_WRITE", "게시판 글쓰기 미지원"),
+                new com.sellerops.connector.UnsupportedScope("AUTO_REPLY", "자동 답변 등록 미지원"));
+    }
+
     /** REVIEW → board 4 구매후기; INQUIRY → board 6 문의사항 (board 9 1:1 is a follow-up). */
     private static int primaryBoard(DataType dataType) {
         return dataType == DataType.REVIEW

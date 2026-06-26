@@ -1,8 +1,11 @@
 // Seeded mock responses. Used when VITE_USE_MOCKS=true, and as a fallback when
 // the backend is unreachable — so the UI is never blank during a demo.
 import type {
+  AccountDashboardSummary,
+  ArticleListResponse,
   AuthResponse,
   CapabilityView,
+  ChannelCapabilityOverview,
   ChannelResponse,
   ChannelStatus,
   ChannelSupport,
@@ -562,6 +565,86 @@ export function mockConnectorAlerts(): ConnectorAlertView[] {
 
 export function mockCapabilities(): CapabilityView[] {
   return [];
+}
+
+// Demo capability overview: a confirmed Cafe24-style channel. Other codes get a
+// generic "auto-collect supported, no documented exclusions" shape.
+export function mockCapabilityOverview(channelCode: string): ChannelCapabilityOverview {
+  const confirmed = (dataType: string, label: string) => ({
+    dataType,
+    label,
+    supported: true,
+    verificationStatus: "CONFIRMED",
+  });
+  if (channelCode === "CAFE24") {
+    return {
+      channelCode,
+      channelNameKo: "카페24",
+      connectorClass: "API",
+      autoCollectSupported: true,
+      dataTypes: [
+        confirmed("ORDER_SUMMARY", "주문·매출"),
+        confirmed("REVIEW", "리뷰"),
+        confirmed("INQUIRY", "문의"),
+      ],
+      unsupportedScopes: [
+        { code: "BOARD_9", label: "1:1 맞춤상담(게시판 9) 미수집" },
+        { code: "COMMENTS", label: "게시글 댓글 미수집" },
+        { code: "COMMUNITY_WRITE", label: "게시판 글쓰기 미지원" },
+        { code: "AUTO_REPLY", label: "자동 답변 등록 미지원" },
+      ],
+    };
+  }
+  return {
+    channelCode,
+    channelNameKo: null,
+    connectorClass: "API",
+    autoCollectSupported: true,
+    dataTypes: [
+      confirmed("ORDER_SUMMARY", "주문·매출"),
+      confirmed("REVIEW", "리뷰"),
+      confirmed("INQUIRY", "문의"),
+    ],
+    unsupportedScopes: [],
+  };
+}
+
+export function mockAccountDashboard(
+  accountId: string,
+  range: { from: string; to: string },
+): AccountDashboardSummary {
+  return {
+    sellerAccountId: accountId,
+    channelId: "mock-channel-0",
+    channelNameKo: "카페24",
+    fromDate: range.from,
+    toDate: range.to,
+    salesAmount: 1_284_000,
+    orderCount: 37,
+    newReviews: 12,
+    newInquiries: 8,
+    unansweredInquiries: 3,
+    lastSyncState: "CONNECTED",
+    lastSuccessAt: hoursAgoISO(2),
+  };
+}
+
+export function mockAccountArticles(
+  type: string,
+  page: number,
+  size: number,
+): ArticleListResponse {
+  const isReview = type === "REVIEW";
+  const total = isReview ? 12 : 8;
+  const rows = Array.from({ length: Math.min(size, Math.max(0, total - page * size)) }, (_, i) => ({
+    type,
+    channelNameKo: "카페24",
+    rating: isReview ? 4 + ((i + page) % 2) : null,
+    replyStatus: isReview ? "UNKNOWN" : i % 2 === 0 ? "PENDING" : "ANSWERED",
+    sourceCreatedDate: `2026-05-${String(28 - ((page * size + i) % 28)).padStart(2, "0")}`,
+    collectedDate: "2026-05-30",
+  }));
+  return { type, page, size, total, items: rows };
 }
 
 export function mockSyncRuns(): SyncRunView[] {

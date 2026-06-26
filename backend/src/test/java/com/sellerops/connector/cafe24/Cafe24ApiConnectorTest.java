@@ -132,6 +132,17 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
+    void unsupportedScopesAreHonestForCafe24AndEmptyElsewhere() {
+        // The confirmed CAFE24 capability deliberately excludes these boundaries —
+        // surfaced read-only so the operator UI is transparent, never silent.
+        assertThat(connector.unsupportedScopes("CAFE24"))
+                .extracting(com.sellerops.connector.UnsupportedScope::code)
+                .containsExactly("BOARD_9", "COMMENTS", "COMMUNITY_WRITE", "AUTO_REPLY");
+        // A different channel is not this connector's concern → no scope claims.
+        assertThat(connector.unsupportedScopes("NAVER")).isEmpty();
+    }
+
+    @Test
     void missingCredentialFailsClosedWithZeroHttp() {
         assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY, null)))
                 .isInstanceOf(ApiException.class)

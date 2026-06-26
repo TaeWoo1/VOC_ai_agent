@@ -53,4 +53,16 @@ public interface PullConnector extends ChannelConnector {
                                                       java.time.LocalDate endDate) {
         return java.util.Optional.empty();
     }
+
+    /**
+     * Honest, operator-facing boundaries this connector deliberately does not
+     * cover for {@code channelCode} — boards it never reads, write actions it
+     * never performs, etc. Surfaced read-only in the capability overview so the UI
+     * can be transparent about what is out of scope. Default: none (a connector
+     * with no documented exclusions). Channel-specific boundaries live in the
+     * channel's own connector, never in the generic control surface.
+     */
+    default java.util.List<UnsupportedScope> unsupportedScopes(String channelCode) {
+        return java.util.List.of();
+    }
 }

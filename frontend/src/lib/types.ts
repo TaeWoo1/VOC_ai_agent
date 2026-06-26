@@ -304,3 +304,76 @@ export interface CapabilityView {
   verificationStatus: string; // CONFIRMED | NEEDS_VERIFICATION | UNSUPPORTED
   notes: string | null;
 }
+
+// --- Operator dashboard + backfill (channel-generic) ---
+
+// Mirrors com.sellerops.collect.dto.ChannelCapabilityOverview — the in-code
+// connector capabilities plus honest unsupported-scope boundaries. Channel-generic:
+// every API channel answers the same shape.
+export interface DataTypeCapability {
+  dataType: string;
+  label: string;
+  supported: boolean;
+  verificationStatus: string; // CONFIRMED | NEEDS_VERIFICATION | UNSUPPORTED
+}
+
+export interface ScopeNote {
+  code: string;
+  label: string;
+}
+
+export interface ChannelCapabilityOverview {
+  channelCode: string;
+  channelNameKo: string | null;
+  connectorClass: string | null;
+  autoCollectSupported: boolean;
+  dataTypes: DataTypeCapability[];
+  unsupportedScopes: ScopeNote[];
+}
+
+// Mirrors com.sellerops.collect.dto.AccountDashboardSummary. Window-scoped totals
+// for one connected account; counts cover only known-date articles, and
+// unansweredInquiries is the conservative PENDING-only count.
+export interface AccountDashboardSummary {
+  sellerAccountId: string;
+  channelId: string;
+  channelNameKo: string | null;
+  fromDate: string; // ISO yyyy-MM-dd
+  toDate: string;
+  salesAmount: number;
+  orderCount: number;
+  newReviews: number;
+  newInquiries: number;
+  unansweredInquiries: number;
+  lastSyncState: string;
+  lastSuccessAt: string | null;
+}
+
+// Mirrors com.sellerops.collect.dto.CommunityArticleView — METADATA ONLY. No
+// title/content/source identifiers: the drill-down never carries free-text body or
+// customer PII. Dates are KST calendar dates (no time); sourceCreatedDate is null
+// when the source value was timezone-less.
+export interface CommunityArticleView {
+  type: string; // REVIEW | INQUIRY
+  channelNameKo: string | null;
+  rating: number | null;
+  replyStatus: string;
+  sourceCreatedDate: string | null;
+  collectedDate: string | null;
+}
+
+export interface ArticleListResponse {
+  type: string;
+  page: number;
+  size: number;
+  total: number;
+  items: CommunityArticleView[];
+}
+
+// Write payload for POST /api/seller-accounts/{id}/backfill, mirroring the backend
+// BackfillRequest. Dates are KST calendar dates (yyyy-MM-dd).
+export interface BackfillRequest {
+  dataType: string;
+  startDate: string;
+  endDate: string;
+}
