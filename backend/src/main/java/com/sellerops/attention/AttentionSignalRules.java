@@ -59,8 +59,9 @@ public final class AttentionSignalRules {
                     "기간 내 새로 수집된 리뷰입니다.", SOURCE_REVIEW, channel));
         }
 
-        // Stable sort by severity (HIGH→LOW); within a tier the declared order above holds.
-        signals.sort(Comparator.comparingInt(s -> AttentionSeverity.valueOf(s.severity()).ordinal()));
+        // Stable sort by explicit severity rank (HIGH→LOW); within a tier the emission
+        // order above holds. Uses rank(), not ordinal(), so enum order is not load-bearing.
+        signals.sort(Comparator.comparingInt(s -> AttentionSeverity.valueOf(s.severity()).rank()));
         return List.copyOf(signals);
     }
 

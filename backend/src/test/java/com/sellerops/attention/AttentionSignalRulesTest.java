@@ -97,6 +97,13 @@ class AttentionSignalRulesTest {
     }
 
     @Test
+    void severityRankIsExplicitAndIndependentOfDeclarationOrder() {
+        // Pins the triage contract so ranking does not silently depend on enum ordinal().
+        assertThat(AttentionSeverity.HIGH.rank()).isLessThan(AttentionSeverity.MEDIUM.rank());
+        assertThat(AttentionSeverity.MEDIUM.rank()).isLessThan(AttentionSeverity.LOW.rank());
+    }
+
+    @Test
     void signalsCarryOnlySafeMetadataNeverRawContent() {
         List<AttentionSignal> signals = AttentionSignalRules.evaluate(
                 new VocWindowSnapshot(11, 6, 4, 1, 2, 3), CHANNEL);
