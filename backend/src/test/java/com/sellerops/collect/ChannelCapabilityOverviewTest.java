@@ -15,6 +15,7 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedScope;
+import com.sellerops.connector.esm.EsmApiConnector;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,6 +77,43 @@ class ChannelCapabilityOverviewTest {
         assertThat(overview.connectorClass()).isNull();
         assertThat(overview.dataTypes()).isEmpty();
         assertThat(overview.unsupportedScopes()).isEmpty();
+    }
+
+    /**
+     * Second-channel (ESM+ = the GMARKET catalog code) validation: the channel-generic
+     * overview must represent a non-Cafe24 channel honestly off the connector's in-code
+     * capabilities — no {@code connector_capabilities} DB rows are seeded here — and must
+     * never claim CONFIRMED for a skeleton connector with no collectable data type.
+     * Uses the REAL {@link EsmApiConnector} (its http/vault are untouched by capabilities()).
+     */
+    @Test
+    void esmGmarketOverviewExposesNoConfirmedDataType() {
+        // The real ESM connector's empty, fail-honest capability surface.
+        EsmApiConnector esm = new EsmApiConnector(null, null);
+        assertThat(esm.dedicatedChannels()).containsExactly("GMARKET");
+        assertThat(esm.capabilities("GMARKET").supportedDataTypes()).isEmpty();
+
+        Channel gmarket = new Channel();
+        gmarket.setCode("GMARKET");
+        gmarket.setNameKo("G마켓/옥션");
+        when(channels.findByCode("GMARKET")).thenReturn(Optional.of(gmarket));
+        ConnectorRegistry registry = new ConnectorRegistry(List.of(esm));
+
+        ChannelCapabilityOverview overview = serviceWith(registry).channelCapabilityOverview("GMARKET");
+
+        assertThat(overview.channelCode()).isEqualTo("GMARKET");
+        assertThat(overview.channelNameKo()).isEqualTo("G마켓/옥션");   // non-Cafe24 name, generically carried
+        assertThat(overview.connectorClass()).isEqualTo("API");
+        assertThat(overview.autoCollectSupported()).isTrue();
+        // Skeleton connector → every data type is UNSUPPORTED, and crucially none is CONFIRMED.
+        assertThat(overview.dataTypes())
+                .allSatisfy(d -> {
+                    assertThat(d.supported()).isFalse();
+                    assertThat(d.verificationStatus()).isEqualTo("UNSUPPORTED");
+                });
+        assertThat(overview.dataTypes())
+                .extracting(ChannelCapabilityOverview.DataTypeCapability::verificationStatus)
+                .doesNotContain("CONFIRMED");
     }
 
     /** Minimal CAFE24-dedicated pull connector with CONFIRMED caps + honest scopes. */
