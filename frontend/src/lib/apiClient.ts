@@ -17,6 +17,7 @@ import type {
   IngestResult,
   InboxResponse,
   ItemAnalysis,
+  OperatorAttentionSummary,
   OrderSummaryResponse,
   ScheduleView,
   SellerAccountResponse,
@@ -28,6 +29,7 @@ import type {
 } from "./types";
 import {
   mockAccountArticles,
+  mockAccountAttention,
   mockAccountDashboard,
   mockAuth,
   mockCapabilities,
@@ -460,6 +462,21 @@ export const api = {
     const { data } = await http.post<SyncRunView>(
       `/api/seller-accounts/${accountId}/backfill`,
       request,
+    );
+    return data;
+  },
+  // Channel-generic operator attention signals over an explicit [from, to] window.
+  // Fail-closed read so a dead backend never renders demo action items as real.
+  async getAccountAttention(
+    accountId: string,
+    range: { from: string; to: string },
+  ): Promise<OperatorAttentionSummary> {
+    if (USE_MOCKS) {
+      return mockAccountAttention(accountId, range);
+    }
+    const search = new URLSearchParams({ from: range.from, to: range.to });
+    const { data } = await http.get<OperatorAttentionSummary>(
+      `/api/seller-accounts/${accountId}/attention?${search.toString()}`,
     );
     return data;
   },

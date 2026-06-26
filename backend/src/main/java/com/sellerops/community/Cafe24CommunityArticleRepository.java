@@ -52,6 +52,24 @@ public interface Cafe24CommunityArticleRepository extends JpaRepository<Cafe24Co
                                     @Param("replyStatus") String replyStatus,
                                     @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
 
+    /**
+     * As {@link #countInWindow} but additionally restricted to a rating bucket
+     * [{@code minRating}, {@code maxRating}] (inclusive). Rows with a null rating are
+     * excluded (a null comparison is unknown in JPQL), so an unrated review never
+     * lands in a low/mid-rating attention signal.
+     */
+    @Query("""
+            select count(a) from Cafe24CommunityArticle a
+            where a.orgId = :orgId and a.sellerAccountId = :accountId
+              and a.sourceKind = :sourceKind
+              and a.rating >= :minRating and a.rating <= :maxRating
+              and a.sourceCreatedAt >= :from and a.sourceCreatedAt < :toExclusive
+            """)
+    long countInWindowByRatingBetween(@Param("orgId") UUID orgId, @Param("accountId") UUID accountId,
+                                      @Param("sourceKind") String sourceKind,
+                                      @Param("minRating") int minRating, @Param("maxRating") int maxRating,
+                                      @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
+
     /** Drill-down list for one source kind, most-recently-collected first (deterministic). */
     Page<Cafe24CommunityArticle> findByOrgIdAndSellerAccountIdAndSourceKindOrderByCollectedAtDesc(
             UUID orgId, UUID sellerAccountId, String sourceKind, Pageable pageable);

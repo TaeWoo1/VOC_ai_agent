@@ -377,3 +377,30 @@ export interface BackfillRequest {
   startDate: string;
   endDate: string;
 }
+
+// --- Operator attention signals (channel-generic VOC) ---
+
+// Mirrors com.sellerops.attention.dto.AttentionSignal — METADATA ONLY. A typed,
+// severity-ranked count of collected review/inquiry rows that need a look. Carries
+// no raw article title/content, source identifiers, or customer PII; label and
+// description are fixed operator-safe strings.
+export interface AttentionSignal {
+  type: string; // UNANSWERED_INQUIRY | LOW_RATING_REVIEW | NEW_INQUIRY | NEW_REVIEW | UNKNOWN_REPLY_STATUS
+  severity: string; // HIGH | MEDIUM | LOW
+  count: number;
+  label: string;
+  description: string;
+  sourceType: string; // REVIEW | INQUIRY
+  channel: string | null;
+}
+
+// Mirrors com.sellerops.attention.dto.OperatorAttentionSummary. Reads no server
+// clock: the [fromDate, toDate] window is the as-of context (no generatedAt). Items
+// arrive pre-sorted by severity; an empty list means nothing needs attention.
+export interface OperatorAttentionSummary {
+  sellerAccountId: string;
+  channel: string | null;
+  fromDate: string; // ISO yyyy-MM-dd
+  toDate: string;
+  items: AttentionSignal[];
+}
