@@ -18,6 +18,7 @@ import type {
   DashboardSummaryResponse,
   InboxResponse,
   ItemAnalysis,
+  OperatorAttentionSummary,
   OrderSummaryResponse,
   SalesTrendPoint,
   ScheduleView,
@@ -645,6 +646,57 @@ export function mockAccountArticles(
     collectedDate: "2026-05-30",
   }));
   return { type, page, size, total, items: rows };
+}
+
+export function mockAccountAttention(
+  accountId: string,
+  range: { from: string; to: string },
+): OperatorAttentionSummary {
+  const channel = "카페24";
+  return {
+    sellerAccountId: accountId,
+    channel,
+    fromDate: range.from,
+    toDate: range.to,
+    items: [
+      {
+        type: "UNANSWERED_INQUIRY",
+        severity: "HIGH",
+        count: 3,
+        label: "답변 필요 문의",
+        description: "미답변 상태의 문의입니다. 우선 확인해 주세요.",
+        sourceType: "INQUIRY",
+        channel,
+      },
+      {
+        type: "LOW_RATING_REVIEW",
+        severity: "HIGH",
+        count: 2,
+        label: "낮은 평점(1~2점) 리뷰",
+        description: "불만족 리뷰입니다. 내용을 확인하고 대응을 검토하세요.",
+        sourceType: "REVIEW",
+        channel,
+      },
+      {
+        type: "NEW_INQUIRY",
+        severity: "MEDIUM",
+        count: 8,
+        label: "신규 문의",
+        description: "기간 내 새로 수집된 문의입니다.",
+        sourceType: "INQUIRY",
+        channel,
+      },
+      {
+        type: "NEW_REVIEW",
+        severity: "LOW",
+        count: 12,
+        label: "신규 리뷰",
+        description: "기간 내 새로 수집된 리뷰입니다.",
+        sourceType: "REVIEW",
+        channel,
+      },
+    ],
+  };
 }
 
 export function mockSyncRuns(): SyncRunView[] {

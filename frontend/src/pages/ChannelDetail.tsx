@@ -7,6 +7,7 @@ import { HealthBadge } from "../components/HealthBadge";
 import { CapabilityBadges } from "../components/CapabilityBadges";
 import { ChannelSummaryCards } from "../components/ChannelSummaryCards";
 import { BackfillPanel } from "../components/BackfillPanel";
+import { AttentionSignalList } from "../components/AttentionSignalList";
 import { CommunityArticleList } from "../components/CommunityArticleList";
 import { api } from "../lib/apiClient";
 import { relativeTime, untilTime } from "../lib/format";
@@ -378,6 +379,7 @@ export function ChannelDetail() {
         <>
           {channel?.code ? <CapabilityBadges channelCode={channel.code} /> : null}
           <ChannelSummaryCards accountId={accountId} refreshKey={refreshKey} />
+          <AttentionSignalList accountId={accountId} refreshKey={refreshKey} />
           <BackfillPanel accountId={accountId} onCompleted={reload} />
         </>
       ) : null}
