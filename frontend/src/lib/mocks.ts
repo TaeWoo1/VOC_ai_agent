@@ -688,6 +688,16 @@ export function mockAccountAttention(
         channel,
       },
       {
+        // Same 8 current inquiries as NEW_INQUIRY, up from 3 in the prior equal-length window.
+        type: "RECENT_INQUIRY_SPIKE_CANDIDATE",
+        severity: "MEDIUM",
+        count: 8,
+        label: "문의 급증 감지",
+        description: "선택 기간 문의가 8건으로 직전 동일 기간 3건보다 증가했습니다.",
+        sourceType: "INQUIRY",
+        channel,
+      },
+      {
         type: "NEW_REVIEW",
         severity: "LOW",
         count: 12,

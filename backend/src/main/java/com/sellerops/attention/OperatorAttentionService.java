@@ -39,7 +39,7 @@ public class OperatorAttentionService {
     static final int MAX_PAGE_SIZE = 50;
     /** A channel with no source contributes no counts — yields zero signals. */
     private static final VocWindowSnapshot EMPTY_SNAPSHOT =
-            new VocWindowSnapshot(0, 0, 0, 0, 0, 0);
+            new VocWindowSnapshot(0, 0, 0, 0, 0, 0, 0, 0);
 
     private final SellerAccountRepository sellerAccounts;
     private final ChannelRepository channels;

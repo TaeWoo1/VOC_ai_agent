@@ -7,6 +7,10 @@ package com.sellerops.attention;
  * bucket, {@code midRatingReviews} the 3★ bucket; both are subsets of
  * {@code newReviews}. Counts cover known-date rows only (unknown source dates are
  * excluded upstream, a conservative undercount).
+ *
+ * <p>{@code previousReviews}/{@code previousInquiries} are the same review/inquiry
+ * counts over the immediately preceding equal-length window — the baseline for the
+ * spike lenses. They never surface directly; only the comparison does.
  */
 public record VocWindowSnapshot(
         long newReviews,
@@ -14,5 +18,7 @@ public record VocWindowSnapshot(
         long unansweredInquiries,
         long unknownReplyInquiries,
         long lowRatingReviews,
-        long midRatingReviews) {
+        long midRatingReviews,
+        long previousReviews,
+        long previousInquiries) {
 }
