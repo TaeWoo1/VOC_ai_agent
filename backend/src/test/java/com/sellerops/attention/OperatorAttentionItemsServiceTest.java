@@ -122,6 +122,21 @@ class OperatorAttentionItemsServiceTest {
     }
 
     @Test
+    void spikeDrilldownReturnsCurrentWindowRowsOnlyNotTheBaselineWindow() {
+        Fixture f = seedChannelAndAccount();
+        article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5);   // current window
+        article(f, "REVIEW", "2026-04-15T12:00:00+09:00", "UNKNOWN", 5);   // prior (baseline) window
+
+        OperatorVocItemPage p = service.attentionItems(
+                org, f.accountId, "RECENT_REVIEW_SPIKE_CANDIDATE", FROM, TO, 0, 20);
+
+        // The spike's baseline window is compared, never listed: only the current row shows.
+        assertThat(p.signalType()).isEqualTo("RECENT_REVIEW_SPIKE_CANDIDATE");
+        assertThat(p.total()).isEqualTo(1);
+        assertThat(p.items()).extracting(OperatorVocItem::sourceCreatedDate).containsExactly("2026-05-05");
+    }
+
+    @Test
     void excludesRowsOutsideTheWindowAndWithUnknownDate() {
         Fixture f = seedChannelAndAccount();
         article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 1);   // in window

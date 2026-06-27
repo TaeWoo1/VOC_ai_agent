@@ -30,6 +30,10 @@ public final class AttentionItemFilters {
                     new VocItemFilter(SOURCE_KIND_INQUIRY, CommunityReplyStatus.UNKNOWN.name(), null, null);
             case NEW_INQUIRY -> new VocItemFilter(SOURCE_KIND_INQUIRY, null, null, null);
             case NEW_REVIEW -> new VocItemFilter(SOURCE_KIND_REVIEW, null, null, null);
+            // Spike drill-down shows the current window's rows of that kind only (the
+            // baseline window is never listed); same predicates as the NEW_* lenses.
+            case RECENT_REVIEW_SPIKE_CANDIDATE -> new VocItemFilter(SOURCE_KIND_REVIEW, null, null, null);
+            case RECENT_INQUIRY_SPIKE_CANDIDATE -> new VocItemFilter(SOURCE_KIND_INQUIRY, null, null, null);
             // 1–2★ (HIGH) and 3★ (MEDIUM) count cards share this type; the drill-down
             // shows their union (1–3★). Null-rating reviews are excluded by minRating=1.
             case LOW_RATING_REVIEW -> new VocItemFilter(SOURCE_KIND_REVIEW, null, 1, 3);

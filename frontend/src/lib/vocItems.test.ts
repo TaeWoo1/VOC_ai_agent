@@ -41,6 +41,17 @@ describe("drilldownParams", () => {
     expect(drilldownParams(signal("LOW_RATING_REVIEW", "REVIEW"), range).type).toBe("LOW_RATING_REVIEW");
     expect(drilldownParams(signal("NEW_REVIEW", "REVIEW"), range).type).toBe("NEW_REVIEW");
   });
+
+  it("routes each spike type to its own drill-down, never colliding", () => {
+    const range = { from: "2026-06-20", to: "2026-06-26" };
+    // The two spike lenses are distinct TYPES (not one type + sourceType), so the
+    // type-only drill-down stays unambiguous and the list keys cannot collide.
+    const review = drilldownParams(signal("RECENT_REVIEW_SPIKE_CANDIDATE", "REVIEW"), range);
+    const inquiry = drilldownParams(signal("RECENT_INQUIRY_SPIKE_CANDIDATE", "INQUIRY"), range);
+    expect(review.type).toBe("RECENT_REVIEW_SPIKE_CANDIDATE");
+    expect(inquiry.type).toBe("RECENT_INQUIRY_SPIKE_CANDIDATE");
+    expect(review.type).not.toBe(inquiry.type);
+  });
 });
 
 describe("vocItemKey", () => {

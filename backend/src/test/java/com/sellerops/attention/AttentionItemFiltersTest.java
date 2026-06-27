@@ -54,4 +54,24 @@ class AttentionItemFiltersTest {
         assertThat(f.minRating()).isEqualTo(1);
         assertThat(f.maxRating()).isEqualTo(3);
     }
+
+    @Test
+    void reviewSpikeDrilldownSelectsCurrentWindowReviews() {
+        // The spike drill-down lists the current window's reviews of that kind (the
+        // baseline window is never listed); same predicates as NEW_REVIEW.
+        VocItemFilter f = AttentionItemFilters.forType(AttentionSignalType.RECENT_REVIEW_SPIKE_CANDIDATE);
+        assertThat(f.sourceKind()).isEqualTo("REVIEW");
+        assertThat(f.replyStatus()).isNull();
+        assertThat(f.minRating()).isNull();
+        assertThat(f.maxRating()).isNull();
+    }
+
+    @Test
+    void inquirySpikeDrilldownSelectsCurrentWindowInquiries() {
+        VocItemFilter f = AttentionItemFilters.forType(AttentionSignalType.RECENT_INQUIRY_SPIKE_CANDIDATE);
+        assertThat(f.sourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        assertThat(f.replyStatus()).isNull();
+        assertThat(f.minRating()).isNull();
+        assertThat(f.maxRating()).isNull();
+    }
 }

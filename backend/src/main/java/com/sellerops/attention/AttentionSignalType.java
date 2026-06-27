@@ -10,5 +10,9 @@ public enum AttentionSignalType {
     LOW_RATING_REVIEW,
     NEW_INQUIRY,
     NEW_REVIEW,
-    UNKNOWN_REPLY_STATUS
+    UNKNOWN_REPLY_STATUS,
+    // Volume changed vs the immediately preceding equal-length window. REVIEW and
+    // INQUIRY are kept as distinct types so the type-only drill-down stays unambiguous.
+    RECENT_REVIEW_SPIKE_CANDIDATE,
+    RECENT_INQUIRY_SPIKE_CANDIDATE
 }

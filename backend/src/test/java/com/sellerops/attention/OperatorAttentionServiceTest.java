@@ -88,6 +88,51 @@ class OperatorAttentionServiceTest {
     }
 
     @Test
+    void noReviewSpikeWhenThePriorEqualLengthWindowHasNoBaseline() {
+        Fixture f = seedChannelAndAccount();
+        // 5 reviews this window, but the only earlier review predates the immediately
+        // preceding window (prior window = [2026-03-31, 2026-05-01)), so baseline = 0.
+        article(f, "REVIEW", "2026-05-02T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-09T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-12T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-20T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-01-15T12:00:00+09:00", "UNKNOWN", 5);   // older than prior window
+
+        OperatorAttentionSummary s = service.attention(org, f.accountId, FROM, TO);
+
+        // Baseline is the immediately preceding window only, not all history → 0 → no spike.
+        assertThat(s.items()).extracting(AttentionSignal::type)
+                .doesNotContain("RECENT_REVIEW_SPIKE_CANDIDATE");
+    }
+
+    @Test
+    void reviewSpikePriorWindowStartIsInclusiveAndCurrentStartBelongsToCurrent() {
+        Fixture f = seedChannelAndAccount();
+        // Baseline: one review exactly at the prior-window start (2026-03-31 00:00 KST, inclusive).
+        article(f, "REVIEW", "2026-03-31T00:00:00+09:00", "UNKNOWN", 5);
+        // Current window: 5 reviews, one exactly at the current-window start (counts here, not baseline).
+        article(f, "REVIEW", "2026-05-01T00:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-09T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-12T12:00:00+09:00", "UNKNOWN", 5);
+        article(f, "REVIEW", "2026-05-20T12:00:00+09:00", "UNKNOWN", 5);
+
+        OperatorAttentionSummary s = service.attention(org, f.accountId, FROM, TO);
+
+        // current=5 (incl. the 2026-05-01 boundary row), baseline=1 (the 2026-03-31 row):
+        // 5>=5, 1>=1, 5>=2×1 → MEDIUM. A leak across the shared boundary would break the 5-vs-1.
+        assertThat(s.items()).filteredOn(i -> i.type().equals("RECENT_REVIEW_SPIKE_CANDIDATE"))
+                .singleElement().satisfies(sig -> {
+                    assertThat(sig.severity()).isEqualTo("MEDIUM");
+                    assertThat(sig.count()).isEqualTo(5);
+                });
+        // NEW_REVIEW counts the 5 current rows; the prior-window row is not "new".
+        assertThat(s.items()).filteredOn(i -> i.type().equals("NEW_REVIEW"))
+                .singleElement().satisfies(sig -> assertThat(sig.count()).isEqualTo(5));
+    }
+
+    @Test
     void unratedReviewsNeverEnterLowOrMidRatingSignals() {
         Fixture f = seedChannelAndAccount();
         article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", null);   // no rating

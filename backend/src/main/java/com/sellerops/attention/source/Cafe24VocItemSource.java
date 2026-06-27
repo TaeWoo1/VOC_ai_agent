@@ -12,6 +12,7 @@ import com.sellerops.community.CommunityReplyStatus;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -56,6 +57,11 @@ public class Cafe24VocItemSource implements VocItemSource {
     public VocWindowSnapshot snapshot(UUID orgId, UUID accountId, LocalDate from, LocalDate to) {
         Instant fromInstant = from.atStartOfDay(KST).toInstant();
         Instant toExclusive = to.plusDays(1).atStartOfDay(KST).toInstant();
+        // Baseline = the immediately preceding equal-length window, same KST half-open
+        // semantics; its exclusive end is exactly the current window's start. Reuses the
+        // existing window count query — no new repository method, no server clock.
+        long windowDays = ChronoUnit.DAYS.between(from, to) + 1;
+        Instant prevFromInstant = from.minusDays(windowDays).atStartOfDay(KST).toInstant();
         return new VocWindowSnapshot(
                 articles.countInWindow(orgId, accountId, SOURCE_KIND_REVIEW, fromInstant, toExclusive),
                 articles.countInWindow(orgId, accountId, SOURCE_KIND_INQUIRY, fromInstant, toExclusive),
@@ -66,7 +72,9 @@ public class Cafe24VocItemSource implements VocItemSource {
                 articles.countInWindowByRatingBetween(orgId, accountId, SOURCE_KIND_REVIEW,
                         1, 2, fromInstant, toExclusive),
                 articles.countInWindowByRatingBetween(orgId, accountId, SOURCE_KIND_REVIEW,
-                        3, 3, fromInstant, toExclusive));
+                        3, 3, fromInstant, toExclusive),
+                articles.countInWindow(orgId, accountId, SOURCE_KIND_REVIEW, prevFromInstant, fromInstant),
+                articles.countInWindow(orgId, accountId, SOURCE_KIND_INQUIRY, prevFromInstant, fromInstant));
     }
 
     @Override

@@ -385,7 +385,9 @@ export interface BackfillRequest {
 // no raw article title/content, source identifiers, or customer PII; label and
 // description are fixed operator-safe strings.
 export interface AttentionSignal {
-  type: string; // UNANSWERED_INQUIRY | LOW_RATING_REVIEW | NEW_INQUIRY | NEW_REVIEW | UNKNOWN_REPLY_STATUS
+  // UNANSWERED_INQUIRY | LOW_RATING_REVIEW | NEW_INQUIRY | NEW_REVIEW | UNKNOWN_REPLY_STATUS
+  //   | RECENT_REVIEW_SPIKE_CANDIDATE | RECENT_INQUIRY_SPIKE_CANDIDATE
+  type: string;
   severity: string; // HIGH | MEDIUM | LOW
   count: number;
   label: string;
