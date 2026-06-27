@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.sellerops.attention.dto.OperatorAttentionSummary;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.source.Cafe24VocItemSource;
+import com.sellerops.attention.source.VocItemSourceRegistry;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
@@ -11,6 +13,7 @@ import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,12 +24,12 @@ import org.springframework.test.context.ActiveProfiles;
 
 /**
  * Second-channel (ESM+ = the GMARKET catalog code) safe-empty validation for the
- * attention surface (PR #131–133). That surface reads the Cafe24-specific
- * {@code cafe24_community_articles} store by {@code orgId + accountId + window}
- * with <b>no channel guard</b>, so a non-Cafe24 account simply owns zero such rows.
- * The contract must therefore <b>fail closed into an empty state</b> — no throw, no
- * Cafe24 assumption leaking — rather than fabricate signals for a channel that has
- * no VOC source yet. (The data-source gap is documented in
+ * attention surface (PR #131–135). Since PR #135 the data access is delegated to a
+ * per-channel {@link com.sellerops.attention.source.VocItemSource}; GMARKET has
+ * <b>no source adapter</b>, so {@code VocItemSourceRegistry.forChannel} resolves to
+ * empty and the attention layer <b>fails closed into an empty state by explicit
+ * registry policy</b> — no throw, no fabricated signals, no Cafe24 assumption
+ * leaking. (The data-source gap and its partial closure are documented in
  * {@code docs/sellerops_phase0_esm_discovery.md} §7.)
  */
 @DataJpaTest
@@ -46,7 +49,8 @@ class EsmAttentionEmptyStateTest {
 
     @BeforeEach
     void setUp() {
-        service = new OperatorAttentionService(sellerAccounts, channels, articles);
+        service = new OperatorAttentionService(sellerAccounts, channels,
+                new VocItemSourceRegistry(List.of(new Cafe24VocItemSource(articles))));
     }
 
     @Test
