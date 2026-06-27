@@ -94,6 +94,9 @@ Gate 0–2에서 도메인별로 다음을 sanitized로 채운다(빈칸 = 미�
 원칙: 새 DataType은 만들지 않는다(기존 `{REVIEW, INQUIRY, ORDER_SUMMARY, PRODUCT, SALES}`에 매핑). REVIEW는 공식
 API 부재 가능성이 높아 **manual/EXPERIMENTAL부터** 출발한다(Product Scope §6).
 
+> 실행된 **Gate 0 오프라인 검토 결과**(이 표의 셀을 공개 문서 증거로 채운 버전)는
+> `docs/sellerops_phase0_esm_gate0_findings.md`에 있다. 본 §4 표는 재사용 가능한 템플릿으로 유지한다.
+
 ## 5. 증거 로깅 정책
 
 오직 sanitized 메타데이터만 기록한다(Connector Roadmap §9, CLAUDE.md §4).
