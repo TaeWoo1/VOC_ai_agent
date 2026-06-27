@@ -87,7 +87,9 @@ ESM+에서 어떤 데이터든 수집하려면 최소한:
 1. `EsmApiConnector.fetch` 의 실제 DataType별 스키마 구현(현재 미구현, 후속 승인 슬라이스) — capability가
    해당 DataType를 `supported`로 올리는 근거.
 2. attention/drill-down/preview가 의미를 가지려면 **GMARKET `VocItemSource` 어댑터**(PR #135의 seam에 연결)
-   또는 ESM 전용 소스 테이블. read-side seam(`VocItemSource`/registry)은 PR #135에서 이미 준비됨.
+   또는 ESM 전용 소스 테이블. read-side seam(`VocItemSource`/registry)은 PR #135에서 이미 준비됨. 이를 위한
+   감독형 라이브 디스커버리 절차(승인 게이트·증거 로깅·candidate-index 진단)는
+   `docs/sellerops_phase0_esm_live_discovery_protocol.md`에 정의돼 있다.
 3. (선택) credential template/route 조정 — 현재 GMARKET 형상으로 충분.
 
 `DataType` enum, `ConnectorCapability`/`connector_capabilities` 구조, `ChannelCapabilityOverview` DTO,
