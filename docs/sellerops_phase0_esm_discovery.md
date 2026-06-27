@@ -71,20 +71,23 @@ Connector Roadmap §4 체크리스트로 별도 확인해야 한다. 2FA/CAPTCHA
 |---|---|---|
 | **Capability overview** (`GET /api/channels/{code}/capabilities/overview`) | `connectorClass="API"`, `autoCollectSupported=true`, 모든 DataType `supported=false` / `verificationStatus="UNSUPPORTED"`. **CONFIRMED 없음.** | **완전 일반화** — `CollectControlService.channelCapabilityOverview` 가 커넥터의 **in-code** `ConnectorCapabilities` 를 읽는다(`connector_capabilities` DB 행 불필요). GMARKET이 `EsmApiConnector` 로 resolve → 정직한 빈 capability. |
 | **Dashboard summary** | 계정-scoped 일반 구조는 동작하나 수집 데이터 없음 → 빈 상태 | DTO 일반화. 데이터 소스만 부재. |
-| **Attention signals / `OperatorVocItem` / `safePreview`** (PR #131–133) | GMARKET 계정 → **safe empty / zero-signal** (예외 없음, 누수 없음) | **DTO/계약은 일반화, 데이터 소스는 Cafe24 종속.** `OperatorAttentionService` 가 `cafe24_community_articles` 를 `orgId+accountId+window` 로만 조회(채널 가드 없음) → 비-Cafe24 계정은 해당 행이 0이므로 안전하게 빈 결과. |
+| **Attention signals / `OperatorVocItem` / `safePreview`** (PR #131–133) | GMARKET 계정 → **safe empty / zero-signal** (예외 없음, 누수 없음) | **DTO/계약은 일반화.** PR #135부터 데이터 접근은 channel-generic `VocItemSource` 로 위임된다(아래 gap 노트). |
 | **`VocPreviewSanitizer`** | 입력이 평문 텍스트 → 채널 무관 | **이미 일반화** — 소스가 생기면 그대로 재사용. |
 
-**문서화된 gap:** attention 표면은 계약(OperatorVocItem/safePreview)은 일반화돼 있으나 **데이터 소스가
-Cafe24 전용 테이블**이다. 실제 ESM+ attention 피드를 내려면 channel-generic VOC 소스(또는 ESM 소스 테이블)가
-필요하며, 이는 별도 슬라이스다. 본 슬라이스는 이 비대칭을 가드레일 테스트로 고정한다(§9).
+**문서화된 gap (PR #135로 부분 해소):** attention 계약(OperatorVocItem/safePreview)은 일반화돼 있고, PR #135가
+read-side 데이터 접근을 채널 일반화된 `VocItemSource` + `VocItemSourceRegistry` 뒤로 추출했다 —
+`OperatorAttentionService` 는 더 이상 `Cafe24CommunityArticleRepository` 에 직접 의존하지 않는다. **Cafe24가
+첫 어댑터(`Cafe24VocItemSource`)** 이고, **GMARKET은 아직 실제 source 어댑터가 없어** registry 정책상 safe empty
+를 반환한다(허위 신호 없음). 실제 ESM+/GMARKET attention 피드는 별도의 source 어댑터(또는 ESM 소스 테이블)와
+라이브 discovery가 필요하며 향후 작업이다.
 
 ## 8. 최소 어댑터 계약 (ESM+ 수집 전 필요 조건)
 
 ESM+에서 어떤 데이터든 수집하려면 최소한:
 1. `EsmApiConnector.fetch` 의 실제 DataType별 스키마 구현(현재 미구현, 후속 승인 슬라이스) — capability가
    해당 DataType를 `supported`로 올리는 근거.
-2. attention/drill-down/preview가 의미를 가지려면 **channel-generic VOC 소스**(Cafe24 전용 테이블 대체/일반화)
-   또는 ESM 전용 소스 테이블.
+2. attention/drill-down/preview가 의미를 가지려면 **GMARKET `VocItemSource` 어댑터**(PR #135의 seam에 연결)
+   또는 ESM 전용 소스 테이블. read-side seam(`VocItemSource`/registry)은 PR #135에서 이미 준비됨.
 3. (선택) credential template/route 조정 — 현재 GMARKET 형상으로 충분.
 
 `DataType` enum, `ConnectorCapability`/`connector_capabilities` 구조, `ChannelCapabilityOverview` DTO,

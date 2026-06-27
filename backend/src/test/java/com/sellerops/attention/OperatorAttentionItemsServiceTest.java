@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.source.Cafe24VocItemSource;
+import com.sellerops.attention.source.VocItemSourceRegistry;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
@@ -19,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +54,8 @@ class OperatorAttentionItemsServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new OperatorAttentionService(sellerAccounts, channels, articles);
+        service = new OperatorAttentionService(sellerAccounts, channels,
+                new VocItemSourceRegistry(List.of(new Cafe24VocItemSource(articles))));
     }
 
     @Test
