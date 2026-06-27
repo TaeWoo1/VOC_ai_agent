@@ -86,6 +86,8 @@ Discovery Protocol §4 템플릿의 셀을 **공개 문서 증거로 채운 결�
   export/리포트·이메일 경로; 라이브 스키마·페이지네이션·날짜필터 동작·실제 PII 표면·볼륨.
 - **미래 Gate 1/2에서 먼저 볼 도메인**: **INQUIRY 추천.** 이유 — (1) 공식 API가 문서화돼 있고, (2) `status`가
   replyStatus 신호에 직결돼 SellerOps attention 루프에 **즉시 가치**가 있으며, (3) 주문 대비 **PII 표면이 낮다.**
+  그 INQUIRY Gate 1 사전 준비(허용 sanitized 관측·중단 조건·복붙 관측 양식)는
+  `docs/sellerops_phase0_esm_inquiry_gate1_readiness.md`에 정의돼 있다(Gate 1 미실행).
 - **Gate 0에서 추론하면 안 되는 것**:
   - 어떤 도메인도 **CONFIRMED 아님** — 라이브 end-to-end 미통과.
   - 라이브 스키마·정확한 페이지네이션·날짜필터·볼륨·PII 구성을 **단정 금지**.
