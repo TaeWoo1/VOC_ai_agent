@@ -143,4 +143,46 @@ class EsmInquiriesClientTest {
         assertThat(http.sent.get(0).jsonBody()).contains("\"qnaType\":\"PRODUCT\"");
         assertThat(http.sent.get(0).jsonBody()).contains("\"status\":\"미처리\"");
     }
+
+    /** Drives fetchRange and returns the rate-limit exception it must throw. */
+    private EsmInquiryRateLimitedException fetchExpectingRateLimit() {
+        try {
+            client.fetchRange(LocalDate.of(2026, 6, 1), LocalDate.of(2026, 6, 7), null, null, AUTH);
+        } catch (EsmInquiryRateLimitedException e) {
+            return e;
+        }
+        throw new AssertionError("expected EsmInquiryRateLimitedException");
+    }
+
+    @Test
+    void rateLimitedWithoutRetryAfterThrowsTypedExceptionWithNoHint() {
+        http.enqueue(new EsmHttpClient.Response(429, "{\"trace\":\"secret-marker-9999\"}", Map.of()));
+
+        EsmInquiryRateLimitedException e = fetchExpectingRateLimit();
+
+        assertThat(e.retryAfterSeconds()).isNull();
+        assertThat(e.retryAfterAt()).isEmpty();
+        // Body never leaks into the message.
+        assertThat(e.getMessage()).contains("429").doesNotContain("secret-marker-9999");
+    }
+
+    @Test
+    void rateLimitedWithNumericRetryAfterCarriesSeconds() {
+        http.enqueue(new EsmHttpClient.Response(429, "{}", Map.of("Retry-After", "30")));
+
+        EsmInquiryRateLimitedException e = fetchExpectingRateLimit();
+
+        assertThat(e.retryAfterSeconds()).isEqualTo(30);
+    }
+
+    @Test
+    void rateLimitedWithHttpDateRetryAfterCarriesAbsoluteInstant() {
+        http.enqueue(new EsmHttpClient.Response(
+                429, "{}", Map.of("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT")));
+
+        EsmInquiryRateLimitedException e = fetchExpectingRateLimit();
+
+        assertThat(e.retryAfterSeconds()).isNull();
+        assertThat(e.retryAfterAt()).contains(java.time.Instant.parse("2026-10-21T07:28:00Z"));
+    }
 }
