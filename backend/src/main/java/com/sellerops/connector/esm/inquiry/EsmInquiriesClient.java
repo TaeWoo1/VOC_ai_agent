@@ -32,7 +32,9 @@ import java.util.Map;
  * <p><b>Safety.</b> No credentials are derived here — the caller supplies the
  * assembled {@code Authorization} header value. Response bodies never appear in
  * error messages (HTTP failures carry the status only; parse failures defer to
- * {@link EsmInquiryParser}, which masks the body). Pagination is bounded by
+ * {@link EsmInquiryParser}, which masks the body). A {@code 429} surfaces as a
+ * typed {@link EsmInquiryRateLimitedException} carrying the standard
+ * {@code Retry-After} hint (no body classification). Pagination is bounded by
  * {@link #MAX_PAGES_PER_WINDOW} so a misbehaving {@code hasMore} cannot loop
  * forever. No clock is read (callers pass an explicit range), keeping the
  * recency rules intact.
@@ -99,7 +101,13 @@ public class EsmInquiriesClient {
     private EsmInquiryResponse requestPage(EsmInquiryQuery query, String authorization) {
         EsmHttpClient.Response response =
                 http.postJson(uri(INQUIRY_PATH), headers(authorization), requestBody(query));
+        // HTTP-standard 429 handling: surface a typed rate-limit signal carrying the
+        // standard Retry-After hint (no body classification — unverified taxonomy).
+        if (response.statusCode() == 429) {
+            throw EsmInquiryRateLimitedException.fromResponse(response);
+        }
         if (response.statusCode() != 200) {
+            // Body stays masked: status only, never the response payload.
             throw new IllegalStateException(
                     "ESM 문의 조회에 실패했습니다 (HTTP " + response.statusCode() + ").");
         }
