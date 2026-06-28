@@ -147,6 +147,14 @@ readiness gate(`decideCaptureGate`, `collector/src/cli/same-session.ts`) 정신:
 진행하고, 모호하면 진행하지 않는다(가드 완화 금지). halt 상태(EXPORT_TARGET_EMPTY / _UNKNOWN /
 EXPORT_DATE_RANGE_REQUIRED / RECONNECT_REQUIRED 등, `collector/src/status.ts`)는 그대로 멈춤 사유로 쓴다.
 
+### 6.1 데이터 보유(data-bearing) 표면
+
+§6 기본 candidate-index는 **비-data-bearing 표면**(예: NAVER export 플로우 — 행 자체가 PII/본문을 노출하지 않음)을
+가정한다. **행이 PII·문의 본문을 직접 노출**하는 표면(예: ESM+/GMARKET **INQUIRY 리스트** — Gate 1에서 data-bearing
+으로 확인됨)은 §6를 그대로 쓸 수 없다. 이런 표면은 **제약된 변형**을 따른다: 행 내용 스캔·스크린샷·raw HTML·값
+복사·식별자·본문 금지, **안전한 컨테이너/컨트롤의 존재 여부만** 관측(행은 개수 버킷까지만). 전체 제약 절차는
+`docs/sellerops_phase0_esm_inquiry_gate1_findings.md` §3을 참조한다(여기서 복제하지 않는다).
+
 ## 7. 상태 모델 (evidence ladder — 문서 레벨 전용)
 
 본 프로토콜은 증거 수준을 다음 사다리로 서술한다:
