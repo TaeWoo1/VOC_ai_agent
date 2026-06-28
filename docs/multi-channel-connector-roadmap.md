@@ -145,11 +145,19 @@ ChannelCollectionAdapter {
 |---|---|---|---|---|
 | NAVER | API (스캐폴드 존재) | **EXPORT** (collector 검증됨) | EXPORT 가설 | 리뷰 공식 API 없음 확인 |
 | Cafe24 | API 가설 | discovery 필요 | discovery 필요 | OAuth 앱 등록 전제 |
-| ESM+ (`GMARKET`) | API 가설 | discovery 필요 | discovery 필요 | Gmarket+Auction 통합 |
+| ESM+ (`GMARKET`) | API 가설 | discovery 필요 | discovery 진행 중(스켈레톤+Gate 1) | Gmarket+Auction 통합 |
 | SSG | API 가설 | discovery 필요 | discovery 필요 | |
 | Coupang | API 가설 (서명 기반) | discovery 필요 | discovery 필요 | WING/Open API 서명 |
 | 11번가 (`ELEVENST`) | API 가설 | discovery 필요 | discovery 필요 | |
 | 오늘의집 (`OHOU`) | discovery 필요 | discovery 필요 | discovery 필요 | 커넥터 미존재, 전부 신규 |
+
+> **ESM+ INQUIRY 진행 노트.** PR #141로 **offline INQUIRY read 스켈레톤**
+> (`com.sellerops.connector.esm.inquiry` — status 매핑, 7일 date 청킹, request/response DTO, parser, fake-HTTP
+> 클라이언트 오케스트레이션, offline signed seam 테스트)이 존재한다. **아직 unwired**이며 wire shape는
+> `NEEDS_VERIFICATION`(엔드포인트·필드명·페이징 신호 미검증). 사람-관측 **Gate 1**(판매자센터 UI)도 1회 완료되어
+> surface가 확인됐다(결과: `docs/sellerops_phase0_esm_inquiry_gate1_findings.md` — UI는 3개월/최대 1년 범위로,
+> 7일 API 가정과 표면이 다름; 리스트가 data-bearing). 다음 단계는 **제약된 Gate 2 read-only probe(별도 1회성
+> 승인)**다. **capability 변경 없음, INQUIRY는 `NEEDS_VERIFICATION` 유지, nothing CONFIRMED.**
 
 ---
 

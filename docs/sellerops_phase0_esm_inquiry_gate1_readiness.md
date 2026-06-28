@@ -160,6 +160,8 @@ INQUIRY 전용. 각 항목은 **`yes` / `no` / `unknown`** 또는 **일반 카�
 - INQUIRY 메뉴가 존재하고 **status/date 컨트롤이 안전하게 관측**되면 → Discovery Protocol §6의 **Gate 2
   candidate-index 진단**으로 진행할 근거가 된다(여전히 별도 승인).
 - **데이터가 보이는 행만** 보이고 컨트롤을 안전하게 관측할 수 없으면 → **멈추고**, 더 제약된 Gate 2 계획을 요구한다.
+  (그 제약된 Gate 2 프로토콜과 실제 Gate 1 관측 결과는 `docs/sellerops_phase0_esm_inquiry_gate1_findings.md` §1/§3에
+  기록됨 — Gate 1은 1회 완료, 리스트가 data-bearing으로 확인됨.)
 - export/download 컨트롤이 보이면 → **존재만 기록**, 클릭하지 않는다(Gate 4/5 경계).
 - reply/write 컨트롤이 보이면 → **존재만 기록**, 클릭하지 않는다.
 - Gate 1 관측은 INQUIRY를 **CONFIRMED로 표기하지 않는다.**
