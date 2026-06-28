@@ -384,6 +384,14 @@ export interface BackfillRequest {
 // severity-ranked count of collected review/inquiry rows that need a look. Carries
 // no raw article title/content, source identifiers, or customer PII; label and
 // description are fixed operator-safe strings.
+// Mirrors com.sellerops.attention.dto.SpikeComparison — aggregate counts only (the
+// same numbers as the signal description), present only on RECENT_*_SPIKE_CANDIDATE.
+export interface SpikeComparison {
+  previousCount: number;
+  deltaCount: number;
+  ratio: number;
+}
+
 export interface AttentionSignal {
   // UNANSWERED_INQUIRY | LOW_RATING_REVIEW | NEW_INQUIRY | NEW_REVIEW | UNKNOWN_REPLY_STATUS
   //   | RECENT_REVIEW_SPIKE_CANDIDATE | RECENT_INQUIRY_SPIKE_CANDIDATE
@@ -394,6 +402,8 @@ export interface AttentionSignal {
   description: string;
   sourceType: string; // REVIEW | INQUIRY
   channel: string | null;
+  // Optional, additive: structured spike comparison; null/absent for routine signals.
+  spike?: SpikeComparison | null;
 }
 
 // Mirrors com.sellerops.attention.dto.OperatorAttentionSummary. Reads no server

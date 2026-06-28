@@ -696,6 +696,7 @@ export function mockAccountAttention(
         description: "선택 기간 문의가 8건으로 직전 동일 기간 3건보다 증가했습니다.",
         sourceType: "INQUIRY",
         channel,
+        spike: { previousCount: 3, deltaCount: 5, ratio: 8 / 3 },
       },
       {
         type: "NEW_REVIEW",

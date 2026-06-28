@@ -1,6 +1,7 @@
 package com.sellerops.attention;
 
 import com.sellerops.attention.dto.AttentionSignal;
+import com.sellerops.attention.dto.SpikeComparison;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -107,6 +108,10 @@ public final class AttentionSignalRules {
                 ? AttentionSeverity.HIGH : AttentionSeverity.MEDIUM;
         String description = "선택 기간 " + noun + "가 " + current + "건으로 직전 동일 기간 "
                 + previous + "건보다 증가했습니다.";
-        return Optional.of(signal(type, severity, current, label, description, sourceType, channel));
+        // Same aggregate numbers as the description, exposed as structured metadata so the
+        // UI can render a quantified line without parsing prose. previous >= 1 here.
+        SpikeComparison comparison = new SpikeComparison(previous, current - previous, (double) current / previous);
+        return Optional.of(new AttentionSignal(type.name(), severity.name(), current, label, description,
+                sourceType, channel, comparison));
     }
 }

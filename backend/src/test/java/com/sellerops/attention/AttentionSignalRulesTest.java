@@ -151,6 +151,11 @@ class AttentionSignalRulesTest {
                     assertThat(s.sourceType()).isEqualTo("REVIEW");
                     // Aggregate counts are safe to state; both numbers appear in the description.
                     assertThat(s.description()).contains("6").contains("3");
+                    // Structured comparison mirrors the description numbers: 6 vs 3 → +3, 2.0×.
+                    assertThat(s.spike()).isNotNull();
+                    assertThat(s.spike().previousCount()).isEqualTo(3);
+                    assertThat(s.spike().deltaCount()).isEqualTo(3);
+                    assertThat(s.spike().ratio()).isEqualTo(2.0);
                 });
     }
 
@@ -164,6 +169,11 @@ class AttentionSignalRulesTest {
                     assertThat(s.count()).isEqualTo(21);
                     assertThat(s.sourceType()).isEqualTo("INQUIRY");
                     assertThat(s.description()).contains("21").contains("6");
+                    // 21 vs 6 → +15, 3.5×.
+                    assertThat(s.spike()).isNotNull();
+                    assertThat(s.spike().previousCount()).isEqualTo(6);
+                    assertThat(s.spike().deltaCount()).isEqualTo(15);
+                    assertThat(s.spike().ratio()).isEqualTo(3.5);
                 });
     }
 
@@ -176,6 +186,17 @@ class AttentionSignalRulesTest {
                 .singleElement().satisfies(s -> assertThat(s.sourceType()).isEqualTo("REVIEW"));
         assertThat(typed(signals, AttentionSignalType.RECENT_INQUIRY_SPIKE_CANDIDATE))
                 .singleElement().satisfies(s -> assertThat(s.sourceType()).isEqualTo("INQUIRY"));
+    }
+
+    @Test
+    void routineSignalsCarryNoSpikeComparison() {
+        // No prior-window baseline → no spike signals; every emitted signal is routine.
+        List<AttentionSignal> signals = AttentionSignalRules.evaluate(
+                new VocWindowSnapshot(11, 6, 4, 1, 2, 3, 0, 0), CHANNEL);
+        assertThat(signals).isNotEmpty().allSatisfy(s -> {
+            assertThat(s.type()).doesNotStartWith("RECENT_");
+            assertThat(s.spike()).isNull();
+        });
     }
 
     @Test
