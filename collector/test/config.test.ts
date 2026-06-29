@@ -32,6 +32,19 @@ describe("loadConfig — ESM+ review discovery (model-C)", () => {
     expect(cfg.esmProfileDir).toBe("/some/where/.profile/esm-test");
   });
 
+  it("esmFrameOriginAllowlist is empty by default (fail-closed: no cross-origin scan)", () => {
+    expect(loadConfig({}).esmFrameOriginAllowlist).toEqual([]);
+  });
+
+  it("parses ESM_FRAME_ORIGIN_ALLOWLIST (comma/space separated, lowercased, deduped)", () => {
+    const cfg = loadConfig({ ESM_FRAME_ORIGIN_ALLOWLIST: "EsmPlus.com, gmarket.co.kr  esmplus.com" });
+    expect(cfg.esmFrameOriginAllowlist).toEqual(["esmplus.com", "gmarket.co.kr"]);
+  });
+
+  it("blank ESM_FRAME_ORIGIN_ALLOWLIST → empty list", () => {
+    expect(loadConfig({ ESM_FRAME_ORIGIN_ALLOWLIST: "   " }).esmFrameOriginAllowlist).toEqual([]);
+  });
+
   it("the default ESM profile dir cannot escape the collector tree (path guard)", () => {
     // The default lives inside the collector tree, so the shared guard accepts it...
     expect(() => resolveProfileDir(loadConfig({}).esmProfileDir)).not.toThrow();

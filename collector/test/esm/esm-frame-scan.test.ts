@@ -3,6 +3,7 @@ import type { ExportCandidateVisibilitySummary } from "../../src/esm/esm-export-
 import {
   FRAME_AWARE_EXPORT_SCAN_KEYS,
   FRAME_SCOPE_PROBE_KEYS,
+  frameHostAllowed,
   type FrameScanResult,
   summarizeFrameAwareExportScan,
 } from "../../src/esm/esm-frame-scan";
@@ -16,13 +17,46 @@ function frame(
   frameUrlCategory: EsmUrlCategory,
   readResult: FrameScanResult,
   summary: ExportCandidateVisibilitySummary | null,
+  allowlisted = false,
 ) {
-  return { frameUrlCategory, readResult, summary };
+  return { frameUrlCategory, readResult, allowlisted, summary };
 }
 
 const COUNT_BUCKETS = ["none", "one", "few", "some", "many"];
-const SCOPE_CATS = ["top-document", "same-origin-frame", "none"];
+const SCOPE_CATS = ["top-document", "same-origin-frame", "allowlisted-frame", "none"];
 const READ_RESULTS = ["read", "skipped-cross-origin", "blocked"];
+
+describe("frameHostAllowed — ESM-family cross-origin allowlist (fail-closed)", () => {
+  const allow = ["esmplus.com", "gmarket.co.kr"];
+
+  it("empty allowlist → always false (fail-closed default)", () => {
+    expect(frameHostAllowed("https://sa2.esmplus.com/x", [])).toBe(false);
+  });
+
+  it("exact host match", () => {
+    expect(frameHostAllowed("https://esmplus.com/Home", allow)).toBe(true);
+  });
+
+  it("dotted subdomain match (sa2.esmplus.com ⊂ esmplus.com)", () => {
+    expect(frameHostAllowed("https://sa2.esmplus.com/Home/v2/manage-feedback", allow)).toBe(true);
+    expect(frameHostAllowed("https://www.gmarket.co.kr/panel", allow)).toBe(true);
+  });
+
+  it("look-alike host is NOT a subdomain match", () => {
+    expect(frameHostAllowed("https://evil-esmplus.com/x", allow)).toBe(false);
+    expect(frameHostAllowed("https://esmplus.com.evil.test/x", allow)).toBe(false);
+  });
+
+  it("non-http(s) and malformed URLs are rejected", () => {
+    expect(frameHostAllowed("about:blank", allow)).toBe(false);
+    expect(frameHostAllowed("data:text/html,hi", allow)).toBe(false);
+    expect(frameHostAllowed("not a url", allow)).toBe(false);
+  });
+
+  it("matching is case-insensitive", () => {
+    expect(frameHostAllowed("https://SA2.EsmPlus.COM/x", allow)).toBe(true);
+  });
+});
 
 describe("summarizeFrameAwareExportScan — scope aggregation", () => {
   it("ACTIONABLE control inside a same-origin frame → aggregate true, scope = same-origin-frame", () => {
@@ -90,6 +124,33 @@ describe("summarizeFrameAwareExportScan — cross-origin / blocked frames skippe
     expect(r.hasActionableExportCandidate).toBe(false);
   });
 
+  it("an ALLOWLISTED cross-origin frame with an actionable control → scope = allowlisted-frame", () => {
+    const r = summarizeFrameAwareExportScan({
+      topDocument: sum({ total: 3, visible: 0, enabled: 3, actionable: 0 }), // the run-3 top doc
+      frames: [
+        // The run-3 iframe, now READ via the allowlist, with an actionable export control.
+        frame("seller-center", "read", sum({ total: 1, visible: 1, enabled: 1, actionable: 1 }), true),
+      ],
+    });
+    expect(r.hasActionableExportCandidate).toBe(true);
+    expect(r.actionableScope).toBe("allowlisted-frame");
+    expect(r.allowlistedFrameCount).toBe("one");
+    expect(r.frames[0]?.allowlisted).toBe(true);
+  });
+
+  it("allowlistedFrameCount counts allowlisted frames; same-origin reads are not allowlisted", () => {
+    const r = summarizeFrameAwareExportScan({
+      topDocument: sum(),
+      frames: [
+        frame("seller-center", "read", sum(), false), // same-origin
+        frame("seller-center", "read", sum(), true), // allowlisted cross-origin
+        frame("other", "skipped-cross-origin", null, false),
+      ],
+    });
+    expect(r.allowlistedFrameCount).toBe("one");
+    expect(r.skippedFrameCount).toBe("one");
+  });
+
   it("buckets total frame count (top + children) and dedupes/sorts frame categories", () => {
     const r = summarizeFrameAwareExportScan({
       topDocument: sum(),
@@ -126,9 +187,11 @@ describe("summarizeFrameAwareExportScan — sanitized shape (no leaks)", () => {
     expect(/[가-힣]/.test(serialized)).toBe(false); // no Korean DOM text
     expect(COUNT_BUCKETS).toContain(r.frameCount);
     expect(COUNT_BUCKETS).toContain(r.skippedFrameCount);
+    expect(COUNT_BUCKETS).toContain(r.allowlistedFrameCount);
     expect(SCOPE_CATS).toContain(r.actionableScope);
     for (const f of r.frames) {
       expect(READ_RESULTS).toContain(f.readResult);
+      expect(typeof f.allowlisted).toBe("boolean");
       if (f.candidates) {
         for (const v of Object.values(f.candidates)) expect(COUNT_BUCKETS).toContain(v);
       }

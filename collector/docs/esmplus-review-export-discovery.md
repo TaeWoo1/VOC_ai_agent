@@ -190,11 +190,52 @@ entered), an aggregate `hasActionableExportCandidate`, and `actionableScope`
 hypothesis is a separately-approved Gate-2 step** — still `NEEDS_DISCOVERY`, nothing
 CONFIRMED.
 
+## Gate 2 result — third live no-click re-run (frame-aware, sanitized)
+
+A third human-attended run (with the frame-aware scan) completed safely — same
+no-click discipline. Sanitized findings only:
+
+| Signal | Value |
+|--------|-------|
+| DOM-settle | `stable-no-networkidle` |
+| top-document candidates | total `few` / visible `none` / enabled `few` / actionable `none` |
+| `frameCount` | `few` (top + 1 child) |
+| child frame | category `seller-center`, `readResult: skipped-cross-origin`, candidates `null` |
+| `skippedFrameCount` | `one` |
+| aggregate `hasActionableExportCandidate` | `false` |
+| `actionableScope` | `none` |
+
+**Decisive finding — the review iframe is CROSS-ORIGIN.** The single child frame
+categorizes as `seller-center` but resolves to a **different origin than the top
+document** (same vendor, different subdomain), so the same-origin-only scan correctly
+recorded it as `skipped-cross-origin` and **did not enter it**. The top-document
+keyword matches stay enabled-but-not-actionable across all three runs — almost
+certainly the outer-shell menu/decoy controls. So the actionable export control is
+**most plausibly inside that cross-origin ESM-family iframe**, which is unscanned by
+the same-origin policy. **Gate 3 remains BLOCKED** — no actionable control confirmed
+in any scanned scope.
+
+**Refinement applied (allowlist slice, no live run):** the frame scan now admits a
+**cross-origin** child frame for a read-only scan **only** when its host is on an
+explicit, operator-configured **ESM-family allowlist** (`frameHostAllowed` +
+`ESM_FRAME_ORIGIN_ALLOWLIST`, hostnames such as `esmplus.com` matched by exact host or
+dotted subdomain). It is **fail-closed**: an empty allowlist (default) reads **no**
+cross-origin frame, exactly as before. Output adds a per-frame `allowlisted` boolean, an
+`allowlistedFrameCount` bucket, an `actionableScope` value `allowlisted-frame`, and a
+sanitized `allowlistConfigured` boolean — **raw hosts/origins are never logged or
+emitted**, only the category + booleans/buckets. This crosses the same-origin line
+**only** into operator-trusted first-party vendor origins, still strictly **no-click**.
+A **re-run with the allowlist configured is a separately-approved Gate-2 step** — still
+`NEEDS_DISCOVERY`, nothing CONFIRMED, Gate 3 still not justified.
+
 ## Standing constraints for this track
 
-- No ESM+ review collection is implemented yet. **Two human-attended, read-only
+- No ESM+ review collection is implemented yet. **Three human-attended, read-only
   no-click classifier runs** have occurred (Gate 2 above); **no click, no download,
   and no upload have ever happened**, and no upload path is enabled.
+- Cross-origin frames are read **only** when on the operator-configured ESM-family
+  allowlist (`ESM_FRAME_ORIGIN_ALLOWLIST`), which is **fail-closed** (empty → none) and
+  reaches only trusted first-party vendor origins; raw hosts/origins are never emitted.
 - Every live gate (1–4) requires explicit per-run operator approval in a stable
   environment; user-owned **test** seller account only.
 - Human performs all login / 2FA / CAPTCHA; the collector never types

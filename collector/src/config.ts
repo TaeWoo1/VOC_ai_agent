@@ -34,6 +34,15 @@ export interface CollectorConfig {
    */
   esmProfileDir: string;
   /**
+   * ESM-family cross-origin frame allowlist (HOSTNAMES, e.g. `esmplus.com`,
+   * `gmarket.co.kr`) for the no-click classifier. A cross-origin child frame is read
+   * read-only ONLY when its host equals or is a subdomain of an entry here; everything
+   * else is skipped. Operator-supplied via `ESM_FRAME_ORIGIN_ALLOWLIST` (comma/space
+   * separated), never hardcoded. Empty (default) → **fail-closed**: no cross-origin
+   * frame is read. Raw hosts are never logged or emitted.
+   */
+  esmFrameOriginAllowlist: string[];
+  /**
    * Optional Playwright browser channel (live layer). When set (e.g. `chrome`),
    * the launcher drives the installed browser of that channel instead of the
    * bundled Chromium — recommended for NAVER (a mainstream Chrome fingerprint is
@@ -76,6 +85,20 @@ export interface CollectorConfig {
   naverExpectedContinueCardFingerprint: string | undefined;
 }
 
+/**
+ * Parse a comma/whitespace-separated host allowlist into a normalized, deduped,
+ * lower-cased list. Undefined/blank → empty list (fail-closed). Never throws.
+ */
+function parseHostAllowlist(raw: string | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  for (const part of raw.split(/[\s,]+/)) {
+    const host = part.trim().toLowerCase();
+    if (host.length > 0) seen.add(host);
+  }
+  return [...seen];
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfig {
   return {
     baseUrl: env.SELLEROPS_BASE_URL ?? "http://localhost:8080",
@@ -87,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
     profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
     esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(root, ".profile/esm"),
+    esmFrameOriginAllowlist: parseHostAllowlist(env.ESM_FRAME_ORIGIN_ALLOWLIST),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,

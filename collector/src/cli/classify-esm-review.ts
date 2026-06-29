@@ -39,6 +39,7 @@ import {
   summarizeExportCandidateVisibility,
 } from "../esm/esm-export-visibility";
 import {
+  frameHostAllowed,
   type FrameScanResult,
   summarizeFrameAwareExportScan,
 } from "../esm/esm-frame-scan";
@@ -191,19 +192,25 @@ function sameOrigin(frameUrl: string, topUrl: string): boolean {
 }
 
 /**
- * READ-ONLY frame-aware export scan. Runs `candidateScanInFrame` in the TOP document
- * and in each SAME-ORIGIN child frame; cross-origin frames are deliberately skipped
- * (we never reach into third-party frame content) and an inaccessible same-origin
- * frame is recorded as `blocked`. Returns the top-document candidates + per-frame
- * SANITIZED summaries + the coarse `EsmUrlCategory` of each frame — never a raw frame
- * URL, selector, attribute, or any DOM text.
+ * READ-ONLY frame-aware export scan. Runs `candidateScanInFrame` in the TOP document,
+ * in each SAME-ORIGIN child frame, and in each cross-origin child frame whose host is
+ * on the operator-configured ESM-family `allowlist` (`frameHostAllowed`). Every other
+ * cross-origin frame is deliberately skipped (we never reach into third-party content)
+ * and an inaccessible frame is recorded as `blocked`. The allowlist is fail-closed:
+ * empty → no cross-origin frame is read. Returns the top-document candidates + per-frame
+ * SANITIZED summaries + the coarse `EsmUrlCategory` + an `allowlisted` boolean per frame
+ * — never a raw frame URL, host, selector, attribute, or any DOM text.
  */
-async function scanFramesForExport(page: Page): Promise<{
+async function scanFramesForExport(
+  page: Page,
+  allowlist: readonly string[],
+): Promise<{
   topCandidates: ExportCandidateVisibility[];
   shadowRootHostCount: number;
   frames: Array<{
     frameUrlCategory: EsmUrlCategory;
     readResult: FrameScanResult;
+    allowlisted: boolean;
     summary: ExportCandidateVisibilitySummary | null;
   }>;
 }> {
@@ -215,12 +222,16 @@ async function scanFramesForExport(page: Page): Promise<{
   const frames: Array<{
     frameUrlCategory: EsmUrlCategory;
     readResult: FrameScanResult;
+    allowlisted: boolean;
     summary: ExportCandidateVisibilitySummary | null;
   }> = [];
   for (const frame of children) {
     const frameUrlCategory = esmUrlCategory(frame.url());
-    if (!sameOrigin(frame.url(), topUrl)) {
-      frames.push({ frameUrlCategory, readResult: "skipped-cross-origin", summary: null });
+    const isSameOrigin = sameOrigin(frame.url(), topUrl);
+    // Cross-origin frames are read ONLY when explicitly allowlisted (ESM-family vendor).
+    const allowlisted = !isSameOrigin && frameHostAllowed(frame.url(), allowlist);
+    if (!isSameOrigin && !allowlisted) {
+      frames.push({ frameUrlCategory, readResult: "skipped-cross-origin", allowlisted: false, summary: null });
       continue;
     }
     try {
@@ -228,11 +239,12 @@ async function scanFramesForExport(page: Page): Promise<{
       frames.push({
         frameUrlCategory,
         readResult: "read",
+        allowlisted,
         summary: summarizeExportCandidateVisibility(scan.candidates),
       });
     } catch {
-      // Detached / inaccessible same-origin frame — record sanitized, never the error.
-      frames.push({ frameUrlCategory, readResult: "blocked", summary: null });
+      // Detached / inaccessible frame — record sanitized, never the error.
+      frames.push({ frameUrlCategory, readResult: "blocked", allowlisted, summary: null });
     }
   }
   return { topCandidates: top.candidates, shadowRootHostCount: top.shadowRootHostCount, frames };
@@ -317,8 +329,10 @@ async function main(): Promise<void> {
     // 3) Read the page AS THE HUMAN LEFT IT (no re-navigation — a re-nav can reset the SPA).
     const domSettle = await settleDom(page);
     const html = await page.content();
-    // Frame-aware read-only scan: top document + each SAME-ORIGIN child frame.
-    const scan = await scanFramesForExport(page);
+    // Frame-aware read-only scan: top document + each same-origin child frame + each
+    // allowlisted cross-origin ESM-family frame (fail-closed when no allowlist set).
+    const allowlist = cfg.esmFrameOriginAllowlist;
+    const scan = await scanFramesForExport(page, allowlist);
     // Pure, robust visibility cross-check on the TOP document (offsetParent OR
     // client-rects OR box, not CSS-hidden; enabled = not disabled/aria-disabled).
     const topVis = summarizeExportCandidateVisibility(scan.topCandidates);
@@ -338,18 +352,22 @@ async function main(): Promise<void> {
     // Aggregate top + per-frame scopes (where, if anywhere, an actionable control lives).
     const frameAware = summarizeFrameAwareExportScan({ topDocument: topVis, frames: scan.frames });
 
-    const summary = { domSettle, signals, frameAware };
+    // `allowlistConfigured` is a sanitized boolean (was a cross-origin allowlist set at
+    // all?) — it never reveals the configured hosts, only whether scanning was possible.
+    const summary = { domSettle, allowlistConfigured: allowlist.length > 0, signals, frameAware };
 
     // Sanitized JSON is the only stdout payload; the log echoes coarse scalars only.
     console.log(JSON.stringify(summary, null, 2));
     log("esm.review.classify.no-click", {
       domSettle,
+      allowlistConfigured: allowlist.length > 0,
       sessionVerdict: signals.sessionVerdict,
       exportLayoutHint: signals.exportLayoutHint,
       topDocActionable: signals.hasActionableExportCandidate,
       aggregateActionable: frameAware.hasActionableExportCandidate,
       actionableScope: frameAware.actionableScope,
       skippedFrameCount: frameAware.skippedFrameCount,
+      allowlistedFrameCount: frameAware.allowlistedFrameCount,
       asyncMarkerPresent: signals.asyncMarkerPresent,
       manageFeedbackRouteLike: signals.manageFeedbackRouteLike,
     });

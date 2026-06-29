@@ -18,16 +18,54 @@ import type { CountBucket, EsmUrlCategory } from "./esm-review-probe";
  * `JSON.stringify(summarizeFrameAwareExportScan(x))` can never contain an identifier,
  * label, product name, review text, or token. Asserted by an offline test.
  *
- * SAME-ORIGIN POLICY: only same-origin child frames are read (the CLI enforces it);
- * cross-origin or otherwise-inaccessible frames are **skipped** and recorded only as a
- * sanitized skipped-frame bucket — we never reach into third-party frame content.
+ * FRAME-ORIGIN POLICY: a child frame is read only when it is SAME-ORIGIN, or when it
+ * is cross-origin but its host is on an explicit, operator-configured **ESM-family
+ * allowlist** (`frameHostAllowed`). Run #3 showed the review panel is a cross-origin
+ * ESM-family iframe (same vendor, different subdomain), which a same-origin-only scan
+ * cannot enter; the allowlist permits reading ONLY those trusted vendor origins,
+ * read-only. Every other cross-origin frame, and any unreadable frame, is **skipped**
+ * and recorded only as a sanitized bucket — we never reach into third-party content.
+ * The allowlist is **fail-closed**: empty (default) → no cross-origin frame is read.
  */
 
 /** Why a child frame's candidates are present, deliberately skipped, or unreadable. */
 export type FrameScanResult = "read" | "skipped-cross-origin" | "blocked";
 
 /** Which scope category holds the first actionable export candidate (if any). */
-export type ExportScopeCategory = "top-document" | "same-origin-frame" | "none";
+export type ExportScopeCategory =
+  | "top-document"
+  | "same-origin-frame"
+  | "allowlisted-frame"
+  | "none";
+
+/**
+ * Pure: is `frameUrl` an http(s) URL whose host equals — or is a dotted subdomain of —
+ * an entry on the ESM-family allowlist? The allowlist holds HOSTNAMES (e.g.
+ * `esmplus.com`), supplied by the operator via config and never hardcoded/guessed. The
+ * dot-boundary subdomain check (`host.endsWith("." + entry)`) admits `sa2.esmplus.com`
+ * for `esmplus.com` while rejecting `evil-esmplus.com`. Empty allowlist → always false
+ * (fail-closed). Only the boolean is used by the caller; the raw URL/origin is never
+ * emitted.
+ */
+export function frameHostAllowed(frameUrl: string, allowlist: readonly string[]): boolean {
+  if (allowlist.length === 0) return false;
+  let host: string;
+  let protocol: string;
+  try {
+    const u = new URL(frameUrl);
+    host = u.hostname.toLowerCase();
+    protocol = u.protocol;
+  } catch {
+    return false;
+  }
+  if (protocol !== "http:" && protocol !== "https:") return false;
+  if (host.length === 0) return false;
+  return allowlist.some((raw) => {
+    const entry = raw.trim().toLowerCase();
+    if (entry.length === 0) return false;
+    return host === entry || host.endsWith(`.${entry}`);
+  });
+}
 
 /** Per-scope sanitized candidate counts, each bucketed. */
 export interface ScopeCandidateBuckets {
@@ -42,6 +80,8 @@ export interface FrameScopeProbe {
   /** Coarse category of the frame's URL — never the raw URL. */
   frameUrlCategory: EsmUrlCategory;
   readResult: FrameScanResult;
+  /** True iff this frame was treated as a cross-origin ESM-family allowlisted frame. */
+  allowlisted: boolean;
   candidates: ScopeCandidateBuckets | null;
 }
 
@@ -53,6 +93,8 @@ export interface FrameAwareExportScan {
   frameUrlCategories: EsmUrlCategory[];
   /** Bucketed count of child frames skipped (cross-origin) or unreadable (blocked). */
   skippedFrameCount: CountBucket;
+  /** Bucketed count of cross-origin ESM-family frames admitted via the allowlist. */
+  allowlistedFrameCount: CountBucket;
   /** The top (main) document's per-scope candidate buckets. */
   topDocument: ScopeCandidateBuckets;
   /** One entry per child frame (the top document is reported separately, above). */
@@ -68,6 +110,7 @@ export const FRAME_AWARE_EXPORT_SCAN_KEYS: ReadonlyArray<keyof FrameAwareExportS
   "frameCount",
   "frameUrlCategories",
   "skippedFrameCount",
+  "allowlistedFrameCount",
   "topDocument",
   "frames",
   "hasActionableExportCandidate",
@@ -78,6 +121,7 @@ export const FRAME_AWARE_EXPORT_SCAN_KEYS: ReadonlyArray<keyof FrameAwareExportS
 export const FRAME_SCOPE_PROBE_KEYS: ReadonlyArray<keyof FrameScopeProbe> = [
   "frameUrlCategory",
   "readResult",
+  "allowlisted",
   "candidates",
 ];
 
@@ -118,6 +162,7 @@ export function summarizeFrameAwareExportScan(input: {
   frames: Array<{
     frameUrlCategory: EsmUrlCategory;
     readResult: FrameScanResult;
+    allowlisted: boolean;
     summary: ExportCandidateVisibilitySummary | null;
   }>;
 }): FrameAwareExportScan {
@@ -127,26 +172,33 @@ export function summarizeFrameAwareExportScan(input: {
   for (const f of frames) categories.add(f.frameUrlCategory);
 
   const skipped = frames.filter((f) => f.readResult !== "read").length;
+  const allowlistedCount = frames.filter((f) => f.allowlisted).length;
   const topActionable = topDocument.actionable > 0;
-  const anyFrameActionable = frames.some(frameIsActionable);
+  // The first actionable frame decides whether the scope is a same-origin or an
+  // allowlisted (cross-origin ESM-family) frame — the top document still wins overall.
+  const firstActionableFrame = frames.find(frameIsActionable);
 
   const actionableScope: ExportScopeCategory = topActionable
     ? "top-document"
-    : anyFrameActionable
-      ? "same-origin-frame"
+    : firstActionableFrame
+      ? firstActionableFrame.allowlisted
+        ? "allowlisted-frame"
+        : "same-origin-frame"
       : "none";
 
   return {
     frameCount: bucket(frames.length + 1),
     frameUrlCategories: [...categories].sort(),
     skippedFrameCount: bucket(skipped),
+    allowlistedFrameCount: bucket(allowlistedCount),
     topDocument: toScopeBuckets(topDocument),
     frames: frames.map((f) => ({
       frameUrlCategory: f.frameUrlCategory,
       readResult: f.readResult,
+      allowlisted: f.allowlisted,
       candidates: f.readResult === "read" && f.summary !== null ? toScopeBuckets(f.summary) : null,
     })),
-    hasActionableExportCandidate: topActionable || anyFrameActionable,
+    hasActionableExportCandidate: topActionable || firstActionableFrame !== undefined,
     actionableScope,
   };
 }
