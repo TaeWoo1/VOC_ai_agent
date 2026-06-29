@@ -142,20 +142,59 @@ read before it settled, and the old visibility test relied on `offsetParent` alo
 visible** export control is confirmed no-click, **no supervised Gate-3 capture is
 warranted.**
 
-**Refinement applied this slice (no live run):** the classifier now (a) waits on a
-**bounded DOM-stability poll** (element-count stable across N samples) in addition
-to `networkidle`, and (b) decides candidate visibility with a **robust cross-check**
+**Refinement applied (visibility slice, no live run):** the classifier (a) waits on a
+**bounded DOM-stability poll** (element-count stable across N samples) in addition to
+`networkidle`, and (b) decides candidate visibility with a **robust cross-check**
 (`offsetParent` OR client-rects OR non-zero box, AND not `display:none` /
 `visibility:hidden`, AND not `disabled` / `aria-disabled`) folded by the pure
-`esm-export-visibility.ts`, surfacing a new `actionableExportCandidateCount`. A
-**re-run to confirm whether the ambiguity resolves is a separately-approved Gate-2
-step** — still `NEEDS_DISCOVERY`, nothing CONFIRMED.
+`esm-export-visibility.ts`, surfacing `actionableExportCandidateCount`.
+
+## Gate 2 result — second live no-click re-run (sanitized)
+
+A second human-attended `classify-esm-review` run (after the visibility refinement)
+completed safely — same no-click / no-download / no-upload / no-API / no-DB /
+no-capability-change discipline. Sanitized findings only:
+
+| Signal | Value | vs. run 1 |
+|--------|-------|-----------|
+| DOM-settle | `stable-no-networkidle` | was hydration **timeout** |
+| `sessionVerdict` | `LOGGED_IN` | same |
+| `manageFeedbackRouteLike` / `reviewRouteLike` | `true` / `true` | same |
+| `excelLike` / `downloadLike` | `true` / `true` | same |
+| `asyncMarkerPresent` | `false` | same |
+| `iframeCount` / `frameUrlCategories` | `one` / `[seller-center]` | same |
+| `exportCandidateCount` / `enabledExportCandidateCount` | `few` / `few` | same |
+| `visibleExportCandidateCount` | `none` | same |
+| `actionableExportCandidateCount` | `none` | (new field) |
+| `hasActionableExportCandidate` | `false` | same |
+| `exportLayoutHint` | `SYNC_LIKELY` | same |
+
+**Hydration timeout is RULED OUT.** The bounded DOM-stability poll **settled**
+(`stable-no-networkidle`) — the page was read after the SPA stopped mutating. The
+visibility ambiguity nonetheless **persists** under the robust cross-check, so it is
+**not** a timing artifact: the top-document keyword matches are genuinely not laid out.
+
+**Actionable export control remains UNCONFIRMED. Gate 3 is still not justified.**
+
+**New hypothesis — same-origin iframe scan gap.** There is exactly **one same-origin
+(`seller-center`) iframe**, and the candidate scan inspected the **top document only**;
+the actionable export control may live **inside that iframe**, unseen.
+
+**Refinement applied (frame-aware slice, no live run):** the classifier now scans the
+top document **plus each same-origin child frame** read-only (`esm-frame-scan.ts` +
+`scanFramesForExport`), keeping the scopes **separate** and emitting only sanitized
+buckets/categories — per-scope candidate buckets, `frameUrlCategories`, a
+`skippedFrameCount` bucket (cross-origin / inaccessible frames are skipped, never
+entered), an aggregate `hasActionableExportCandidate`, and `actionableScope`
+(`top-document` / `same-origin-frame` / `none`). A **re-run to test the iframe
+hypothesis is a separately-approved Gate-2 step** — still `NEEDS_DISCOVERY`, nothing
+CONFIRMED.
 
 ## Standing constraints for this track
 
-- No ESM+ review collection is implemented yet. Exactly **one human-attended,
-  read-only no-click classifier run** has occurred (Gate 2 above); **no click, no
-  download, and no upload have ever happened**, and no upload path is enabled.
+- No ESM+ review collection is implemented yet. **Two human-attended, read-only
+  no-click classifier runs** have occurred (Gate 2 above); **no click, no download,
+  and no upload have ever happened**, and no upload path is enabled.
 - Every live gate (1–4) requires explicit per-run operator approval in a stable
   environment; user-owned **test** seller account only.
 - Human performs all login / 2FA / CAPTCHA; the collector never types
