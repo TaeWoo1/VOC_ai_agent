@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <title>구매후기 관리 — 별빛상회</title>
+  </head>
+  <body data-store="별빛상회" data-seller-id="ESM-SELLER-4521">
+    <nav id="gnb">
+      <a href="/Home/v2/manage-feedback">구매후기 관리</a>
+      <button type="button">로그아웃</button>
+    </nav>
+    <main>
+      <section class="filters">
+        <label>기간</label>
+        <input type="date" name="from" />
+        <input type="date" name="to" />
+        <input type="text" placeholder="검색" />
+        <button type="button">조회</button>
+      </section>
+      <section class="actions">
+        <!-- export affordance: an enabled Excel/download control -->
+        <button type="button" aria-label="엑셀 다운로드">엑셀 다운로드</button>
+        <a download href="#">전체 다운로드 (xlsx)</a>
+      </section>
+      <table role="grid">
+        <tr role="row">
+          <td>홍길동</td>
+          <td>gildong@example.com</td>
+          <td>수분진정 수분크림 50ml</td>
+          <td>정말 최악이에요 환불해주세요</td>
+          <td>ORD-998877</td>
+          <td>CUST-554433</td>
+        </tr>
+      </table>
+    </main>
+  </body>
+</html>
