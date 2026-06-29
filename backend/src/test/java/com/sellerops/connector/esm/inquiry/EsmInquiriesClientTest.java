@@ -144,6 +144,33 @@ class EsmInquiriesClientTest {
         assertThat(http.sent.get(0).jsonBody()).contains("\"status\":\"미처리\"");
     }
 
+    @Test
+    void probeSinglePageIssuesExactlyOneRequestAndDoesNotPaginate() {
+        // The response advertises many more pages (totalCount 50, pageSize 1);
+        // the probe must still fire exactly one call and never paginate.
+        http.enqueueOk(page("INQ-1", 50, 1, 1));
+
+        EsmHttpClient.Response response =
+                client.probeSinglePage(LocalDate.of(2026, 6, 1), null, null, AUTH);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(http.sent).hasSize(1);
+    }
+
+    @Test
+    void probeSinglePageEnforcesPageOnePageSizeOneAndSingleDayWindow() {
+        http.enqueueOk(page("INQ-1", 1, 1, 1));
+
+        client.probeSinglePage(LocalDate.of(2026, 6, 1), "PRODUCT", "처리완료", AUTH);
+
+        String body = http.sent.get(0).jsonBody();
+        assertThat(body).contains("\"page\":1");
+        assertThat(body).contains("\"pageSize\":1");
+        // from == to: a single-day window, no window walk.
+        assertThat(body).contains("\"fromDate\":\"2026-06-01\"");
+        assertThat(body).contains("\"toDate\":\"2026-06-01\"");
+    }
+
     /** Drives fetchRange and returns the rate-limit exception it must throw. */
     private EsmInquiryRateLimitedException fetchExpectingRateLimit() {
         try {
