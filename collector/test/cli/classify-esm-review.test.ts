@@ -98,6 +98,16 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
     expect(/esmUrlCategory\s*\(\s*frame\.url\(\)\s*\)/.test(code)).toBe(true);
   });
 
+  it("reads cross-origin frames ONLY via the operator-configured ESM-family allowlist", () => {
+    // The allowlist comes from config (fail-closed when unset) and is checked per frame.
+    expect(/frameHostAllowed\s*\(/.test(code)).toBe(true);
+    expect(/cfg\.esmFrameOriginAllowlist/.test(code)).toBe(true);
+    // It never reaches a cross-origin frame except through the allowlist gate.
+    expect(/frameHostAllowed\s*\(\s*frame\.url\(\)\s*,\s*allowlist\s*\)/.test(code)).toBe(true);
+    // Only a sanitized boolean about the allowlist is surfaced — never the hosts.
+    expect(/allowlistConfigured/.test(code)).toBe(true);
+  });
+
   it("prints only the sanitized summary object, never the raw url/html", () => {
     expect(/console\.log\([^)]*page\.(url|content)/.test(code)).toBe(false);
     expect(/console\.log\(JSON\.stringify\(summary/.test(code)).toBe(true);
