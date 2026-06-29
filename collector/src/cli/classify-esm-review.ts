@@ -31,14 +31,19 @@
  */
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import { loadConfig } from "../config";
 import {
   type ExportCandidateVisibility,
+  type ExportCandidateVisibilitySummary,
   summarizeExportCandidateVisibility,
 } from "../esm/esm-export-visibility";
+import {
+  type FrameScanResult,
+  summarizeFrameAwareExportScan,
+} from "../esm/esm-frame-scan";
 import { esmApprovalRequiredMessage, hasEsmLiveApproval } from "../esm/esm-live-approval";
-import { extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
+import { esmUrlCategory, type EsmUrlCategory, extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
 import { esmSentinelPathFor } from "../esm/esm-sentinel";
 import { log } from "../log";
 import { launchPersistentBrowser } from "../profile";
@@ -125,54 +130,119 @@ async function settleDom(page: Page): Promise<DomSettleResult> {
 }
 
 /**
- * READ-ONLY export-candidate scan of the top document. Finds interactive elements
- * whose accessible text reads like an export/download control and, for each, extracts
- * a small fixed set of BOOLEAN visibility descriptors via `getComputedStyle` /
- * `getBoundingClientRect` / `offsetParent` / `getClientRects` / `disabled` /
- * `aria-disabled` — the robust cross-check that replaces the `offsetParent`-only
- * visibility test. It only READS attributes / computed style / geometry — it never
- * acts on an element, and it NEVER returns the matched text. The booleans are folded
- * into sanitized buckets by the pure `summarizeExportCandidateVisibility`.
+ * READ-ONLY in-frame export-candidate descriptor extractor. Runs IN the browser
+ * context (passed to `frame.evaluate`), so it must be self-contained (no outer refs).
+ * Finds interactive elements whose accessible text reads like an export/download
+ * control and, for each, extracts a small fixed set of BOOLEAN visibility descriptors
+ * via `getComputedStyle` / `getBoundingClientRect` / `offsetParent` / `getClientRects`
+ * / `disabled` / `aria-disabled` — the robust cross-check. It only READS attributes /
+ * computed style / geometry — it never acts on an element, and it NEVER returns the
+ * matched text. The booleans are folded into sanitized buckets by the pure
+ * `summarizeExportCandidateVisibility`.
  */
-async function scanExportCandidates(
-  page: Page,
-): Promise<{ candidates: ExportCandidateVisibility[]; shadowRootHostCount: number }> {
-  return page.evaluate(() => {
-    const KW = /엑셀|excel|다운로드|download|내려받기|내보내기|export|추출|csv|xlsx/i;
-    const nodes = Array.from(
-      document.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']"),
-    );
-    const candidates: Array<{
-      offsetParentPresent: boolean;
-      clientRectsPresent: boolean;
-      boundingBoxNonZero: boolean;
-      displayNotNone: boolean;
-      visibilityNotHidden: boolean;
-      notDisabled: boolean;
-      notAriaDisabled: boolean;
-    }> = [];
-    for (const el of nodes) {
-      const text = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${(el as HTMLInputElement).value ?? ""}`;
-      if (!KW.test(text)) continue;
-      const he = el as HTMLElement;
-      const cs = getComputedStyle(he);
-      const rect = he.getBoundingClientRect();
-      candidates.push({
-        offsetParentPresent: he.offsetParent !== null,
-        clientRectsPresent: he.getClientRects().length > 0,
-        boundingBoxNonZero: rect.width > 0 && rect.height > 0,
-        displayNotNone: cs.display !== "none",
-        visibilityNotHidden: cs.visibility !== "hidden" && cs.visibility !== "collapse",
-        notDisabled: !(el as HTMLButtonElement).disabled,
-        notAriaDisabled: el.getAttribute("aria-disabled") !== "true",
+function candidateScanInFrame(): { candidates: ExportCandidateVisibility[]; shadowRootHostCount: number } {
+  const KW = /엑셀|excel|다운로드|download|내려받기|내보내기|export|추출|csv|xlsx/i;
+  const nodes = Array.from(
+    document.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']"),
+  );
+  const candidates: Array<{
+    offsetParentPresent: boolean;
+    clientRectsPresent: boolean;
+    boundingBoxNonZero: boolean;
+    displayNotNone: boolean;
+    visibilityNotHidden: boolean;
+    notDisabled: boolean;
+    notAriaDisabled: boolean;
+  }> = [];
+  for (const el of nodes) {
+    const text = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${(el as HTMLInputElement).value ?? ""}`;
+    if (!KW.test(text)) continue;
+    const he = el as HTMLElement;
+    const cs = getComputedStyle(he);
+    const rect = he.getBoundingClientRect();
+    candidates.push({
+      offsetParentPresent: he.offsetParent !== null,
+      clientRectsPresent: he.getClientRects().length > 0,
+      boundingBoxNonZero: rect.width > 0 && rect.height > 0,
+      displayNotNone: cs.display !== "none",
+      visibilityNotHidden: cs.visibility !== "hidden" && cs.visibility !== "collapse",
+      notDisabled: !(el as HTMLButtonElement).disabled,
+      notAriaDisabled: el.getAttribute("aria-disabled") !== "true",
+    });
+  }
+  let shadowRootHostCount = 0;
+  for (const el of Array.from(document.querySelectorAll("*"))) {
+    if ((el as Element & { shadowRoot?: unknown }).shadowRoot) shadowRootHostCount += 1;
+  }
+  return { candidates, shadowRootHostCount };
+}
+
+/**
+ * Same-origin guard, computed in Node from the frame + top URLs. Only the ORIGIN
+ * comparison result (a boolean) is used; the raw URLs are never emitted. A non-http(s)
+ * / opaque / unparyseable frame URL (e.g. `about:blank`) fails closed → not scanned.
+ */
+function sameOrigin(frameUrl: string, topUrl: string): boolean {
+  try {
+    return new URL(frameUrl).origin === new URL(topUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * READ-ONLY frame-aware export scan. Runs `candidateScanInFrame` in the TOP document
+ * and in each SAME-ORIGIN child frame; cross-origin frames are deliberately skipped
+ * (we never reach into third-party frame content) and an inaccessible same-origin
+ * frame is recorded as `blocked`. Returns the top-document candidates + per-frame
+ * SANITIZED summaries + the coarse `EsmUrlCategory` of each frame — never a raw frame
+ * URL, selector, attribute, or any DOM text.
+ */
+async function scanFramesForExport(page: Page): Promise<{
+  topCandidates: ExportCandidateVisibility[];
+  shadowRootHostCount: number;
+  frames: Array<{
+    frameUrlCategory: EsmUrlCategory;
+    readResult: FrameScanResult;
+    summary: ExportCandidateVisibilitySummary | null;
+  }>;
+}> {
+  const mainFrame = page.mainFrame();
+  const topUrl = page.url();
+  const top = await scanFrameCandidates(mainFrame);
+
+  const children = page.frames().filter((f) => f !== mainFrame);
+  const frames: Array<{
+    frameUrlCategory: EsmUrlCategory;
+    readResult: FrameScanResult;
+    summary: ExportCandidateVisibilitySummary | null;
+  }> = [];
+  for (const frame of children) {
+    const frameUrlCategory = esmUrlCategory(frame.url());
+    if (!sameOrigin(frame.url(), topUrl)) {
+      frames.push({ frameUrlCategory, readResult: "skipped-cross-origin", summary: null });
+      continue;
+    }
+    try {
+      const scan = await scanFrameCandidates(frame);
+      frames.push({
+        frameUrlCategory,
+        readResult: "read",
+        summary: summarizeExportCandidateVisibility(scan.candidates),
       });
+    } catch {
+      // Detached / inaccessible same-origin frame — record sanitized, never the error.
+      frames.push({ frameUrlCategory, readResult: "blocked", summary: null });
     }
-    let shadowRootHostCount = 0;
-    for (const el of Array.from(document.querySelectorAll("*"))) {
-      if ((el as Element & { shadowRoot?: unknown }).shadowRoot) shadowRootHostCount += 1;
-    }
-    return { candidates, shadowRootHostCount };
-  });
+  }
+  return { topCandidates: top.candidates, shadowRootHostCount: top.shadowRootHostCount, frames };
+}
+
+/** Evaluate the in-frame descriptor extractor in one frame (top or child). */
+async function scanFrameCandidates(
+  frame: Frame,
+): Promise<{ candidates: ExportCandidateVisibility[]; shadowRootHostCount: number }> {
+  return frame.evaluate(candidateScanInFrame);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -247,24 +317,28 @@ async function main(): Promise<void> {
     // 3) Read the page AS THE HUMAN LEFT IT (no re-navigation — a re-nav can reset the SPA).
     const domSettle = await settleDom(page);
     const html = await page.content();
-    const live = await scanExportCandidates(page);
-    // Pure, robust visibility cross-check (offsetParent OR client-rects OR box, not
-    // CSS-hidden; enabled = not disabled/aria-disabled). Counts only — never text.
-    const vis = summarizeExportCandidateVisibility(live.candidates);
+    // Frame-aware read-only scan: top document + each SAME-ORIGIN child frame.
+    const scan = await scanFramesForExport(page);
+    // Pure, robust visibility cross-check on the TOP document (offsetParent OR
+    // client-rects OR box, not CSS-hidden; enabled = not disabled/aria-disabled).
+    const topVis = summarizeExportCandidateVisibility(scan.topCandidates);
 
-    // No-click sanitized classification from the rendered HTML + read-only live scalars.
+    // Top-document sanitized classification (kept SEPARATE from the frame view).
     const signals = extractEsmReviewProbeSignals({
       url: page.url(),
       html,
       frameUrls: page.frames().map((f) => f.url()),
-      shadowRootHostCount: live.shadowRootHostCount,
-      exportCandidateTotal: vis.total,
-      exportCandidateVisible: vis.visible,
-      exportCandidateEnabled: vis.enabled,
-      exportCandidateActionable: vis.actionable,
+      shadowRootHostCount: scan.shadowRootHostCount,
+      exportCandidateTotal: topVis.total,
+      exportCandidateVisible: topVis.visible,
+      exportCandidateEnabled: topVis.enabled,
+      exportCandidateActionable: topVis.actionable,
     });
 
-    const summary = { domSettle, signals };
+    // Aggregate top + per-frame scopes (where, if anywhere, an actionable control lives).
+    const frameAware = summarizeFrameAwareExportScan({ topDocument: topVis, frames: scan.frames });
+
+    const summary = { domSettle, signals, frameAware };
 
     // Sanitized JSON is the only stdout payload; the log echoes coarse scalars only.
     console.log(JSON.stringify(summary, null, 2));
@@ -272,7 +346,10 @@ async function main(): Promise<void> {
       domSettle,
       sessionVerdict: signals.sessionVerdict,
       exportLayoutHint: signals.exportLayoutHint,
-      hasActionableExportCandidate: signals.hasActionableExportCandidate,
+      topDocActionable: signals.hasActionableExportCandidate,
+      aggregateActionable: frameAware.hasActionableExportCandidate,
+      actionableScope: frameAware.actionableScope,
+      skippedFrameCount: frameAware.skippedFrameCount,
       asyncMarkerPresent: signals.asyncMarkerPresent,
       manageFeedbackRouteLike: signals.manageFeedbackRouteLike,
     });

@@ -85,6 +85,19 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
     expect(/querySelectorAll\(["']\*["']\)\.length/.test(code)).toBe(true);
   });
 
+  it("scans SAME-ORIGIN child frames read-only and keeps top/frame scopes separate", () => {
+    expect(/from\s+["']\.\.\/esm\/esm-frame-scan["']/.test(code)).toBe(true);
+    expect(/summarizeFrameAwareExportScan\s*\(/.test(code)).toBe(true);
+    expect(/scanFramesForExport\s*\(/.test(code)).toBe(true);
+    // Frame reads go through frame.evaluate (read-only) — never a click/fill/dispatch.
+    expect(/\.evaluate\s*\(\s*candidateScanInFrame\s*\)/.test(code)).toBe(true);
+    // Same-origin policy is enforced; cross-origin frames are skipped, not entered.
+    expect(/sameOrigin\s*\(/.test(code)).toBe(true);
+    expect(/skipped-cross-origin/.test(code)).toBe(true);
+    // Frame URLs are categorized, never echoed raw.
+    expect(/esmUrlCategory\s*\(\s*frame\.url\(\)\s*\)/.test(code)).toBe(true);
+  });
+
   it("prints only the sanitized summary object, never the raw url/html", () => {
     expect(/console\.log\([^)]*page\.(url|content)/.test(code)).toBe(false);
     expect(/console\.log\(JSON\.stringify\(summary/.test(code)).toBe(true);
