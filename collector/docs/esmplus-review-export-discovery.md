@@ -51,8 +51,10 @@ A human logs into the ESM+ (Gmarket / Auction) seller center and **observes** th
 review surface, recording **only sanitized findings** (booleans / categories /
 coarse buckets — no raw URLs, HTML, screenshots, counts, or PII). No code runs,
 nothing is clicked for capture, nothing is downloaded. The checklist below is the
-deliverable. **Status: `NEEDS_DISCOVERY`. Not started; do not start in this
-slice.**
+deliverable. **Status: OBSERVED (sanitized).** A human-attended observation
+confirmed a review-management surface on a `manage-feedback`-like route with an
+엑셀/다운로드-like export control; sync-vs-async and the consent/account-store flow
+stay `NEEDS_DISCOVERY`. (Corroborated no-click — see "Gate 2 result" below.)
 
 ### Gate 2 — no-click browser classification / probe
 Port the NAVER **read-only** probes (`probe-export-same-session` /
@@ -61,7 +63,10 @@ continuation + an ESM approval flag (e.g. `--i-understand-this-opens-live-esm`),
 emitting only sanitized booleans / bucketed counts / category enums. **Strict
 no-click**: no `.click(`, no `waitForEvent("download")`, no `saveAs`, no upload,
 no status write. Classifies sync-vs-async and locates the export UI without
-triggering it. **Status: `NEEDS_DISCOVERY`. Not designed; depends on Gate 1.**
+triggering it. **Status: IMPLEMENTED + RAN ONCE (sanitized).** The classifier
+(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts`) ran once
+under human-attended login and corroborated the surface; one visibility ambiguity
+remains open (see "Gate 2 result" below). REVIEW stays `NEEDS_DISCOVERY`.
 
 ### Gate 3 — supervised approved-index single capture
 Only after Gate 2 confirms the layout. Reuse the NAVER **supervised
@@ -101,10 +106,56 @@ or PII). Every item starts **`NEEDS_DISCOVERY`**.
 is verified concretely in Gate 3/4, not asserted from a glance — keep it
 `NEEDS_VERIFICATION` until a real, schema-only inspection confirms it.)
 
+## Gate 2 result — first live no-click run (sanitized)
+
+One human-attended `classify-esm-review` run completed safely (no click, no
+download, no upload, no API call, no DB/status write, no capability change).
+**Sanitized findings only** (booleans / coarse buckets / categories):
+
+| Signal | Value |
+|--------|-------|
+| `sessionVerdict` | `LOGGED_IN` |
+| `urlCategory` | `seller-center` |
+| `manageFeedbackRouteLike` / `reviewRouteLike` | `true` / `true` |
+| `passwordFieldPresent` / `authChallengePresent` / `accountReconnectAffordancePresent` | `false` / `false` / `false` |
+| `excelLike` / `downloadLike` | `true` / `true` |
+| `exportLike` / `csvOrXlsxLike` | `false` / `false` |
+| `asyncMarkerPresent` | `false` |
+| `exportCandidateCount` | `few` |
+| `enabledExportCandidateCount` | `few` |
+| `visibleExportCandidateCount` | `none` |
+| `hasActionableExportCandidate` | `false` |
+| `exportLayoutHint` (coarse, non-authoritative) | `SYNC_LIKELY` |
+| DOM-settle | hydration wait **timed out** |
+
+**What Gate 2 corroborates:** a logged-in **seller-center** session on a
+**`manage-feedback`-like** route exposing **엑셀/다운로드-like** export keywords with
+**no async** download-center marker — consistent with Gate 1. The route and the
+export-keyword surface are corroborated no-click.
+
+**What Gate 2 does NOT establish — Gate 3 is not justified yet.** An **unresolved
+visibility ambiguity** remains: export candidates were **enabled (`few`)** but
+**zero registered as visible (`none`)**, so **`hasActionableExportCandidate` is
+`false`**, and the **DOM hydration wait timed out** — i.e. the page may have been
+read before it settled, and the old visibility test relied on `offsetParent` alone
+(a false-negative for fixed/portaled controls). Until a genuinely **actionable,
+visible** export control is confirmed no-click, **no supervised Gate-3 capture is
+warranted.**
+
+**Refinement applied this slice (no live run):** the classifier now (a) waits on a
+**bounded DOM-stability poll** (element-count stable across N samples) in addition
+to `networkidle`, and (b) decides candidate visibility with a **robust cross-check**
+(`offsetParent` OR client-rects OR non-zero box, AND not `display:none` /
+`visibility:hidden`, AND not `disabled` / `aria-disabled`) folded by the pure
+`esm-export-visibility.ts`, surfacing a new `actionableExportCandidateCount`. A
+**re-run to confirm whether the ambiguity resolves is a separately-approved Gate-2
+step** — still `NEEDS_DISCOVERY`, nothing CONFIRMED.
+
 ## Standing constraints for this track
 
-- No ESM+ review collection is implemented yet; no live browser run, download, or
-  upload has occurred, and no upload path is enabled.
+- No ESM+ review collection is implemented yet. Exactly **one human-attended,
+  read-only no-click classifier run** has occurred (Gate 2 above); **no click, no
+  download, and no upload have ever happened**, and no upload path is enabled.
 - Every live gate (1–4) requires explicit per-run operator approval in a stable
   environment; user-owned **test** seller account only.
 - Human performs all login / 2FA / CAPTCHA; the collector never types

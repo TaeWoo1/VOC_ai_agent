@@ -53,6 +53,12 @@ export interface RawEsmReviewProbeInput {
   exportCandidateVisible?: number;
   /** Live-only: how many of those candidates are enabled (not disabled/aria-disabled). */
   exportCandidateEnabled?: number;
+  /**
+   * Live-only: how many candidates are ACTIONABLE = rendered AND enabled, decided by
+   * the robust visibility cross-check (`esm-export-visibility.ts`), not `offsetParent`
+   * alone. When supplied it is the authority for `hasActionableExportCandidate`.
+   */
+  exportCandidateActionable?: number;
 }
 
 /** The ONLY shape ever printed/logged by the ESM review probe. All fields are non-sensitive. */
@@ -90,7 +96,16 @@ export interface SanitizedEsmReviewProbeSignals {
   exportCandidateCount: OptionalCountBucket;
   visibleExportCandidateCount: OptionalCountBucket;
   enabledExportCandidateCount: OptionalCountBucket;
-  /** True iff at least one export candidate is BOTH visible and enabled (live-only). */
+  /**
+   * Bucketed count of ACTIONABLE candidates (rendered AND enabled) from the robust
+   * visibility cross-check. "unknown" when the live scan did not supply it.
+   */
+  actionableExportCandidateCount: OptionalCountBucket;
+  /**
+   * True iff at least one export candidate is actionable. Authority is the explicit
+   * actionable count when supplied; otherwise it falls back to visible AND enabled
+   * (so offline callers behave as before).
+   */
   hasActionableExportCandidate: boolean;
   /** Coarse, NON-authoritative sync/async hint — NEEDS_DISCOVERY (see type doc). */
   exportLayoutHint: EsmExportLayoutHint;
@@ -126,6 +141,7 @@ export const SANITIZED_ESM_REVIEW_PROBE_KEYS: ReadonlyArray<keyof SanitizedEsmRe
   "exportCandidateCount",
   "visibleExportCandidateCount",
   "enabledExportCandidateCount",
+  "actionableExportCandidateCount",
   "hasActionableExportCandidate",
   "exportLayoutHint",
   "sessionVerdict",
@@ -236,8 +252,13 @@ export function extractEsmReviewProbeSignals(input: RawEsmReviewProbeInput): San
 
   const visibleExportCandidateCount = optionalBucket(input.exportCandidateVisible);
   const enabledExportCandidateCount = optionalBucket(input.exportCandidateEnabled);
+  const actionableExportCandidateCount = optionalBucket(input.exportCandidateActionable);
+  // The explicit actionable count (from the robust visibility cross-check) is the
+  // authority; fall back to visible AND enabled only when it was not supplied.
   const hasActionableExportCandidate =
-    isPositiveBucket(visibleExportCandidateCount) && isPositiveBucket(enabledExportCandidateCount);
+    input.exportCandidateActionable !== undefined
+      ? isPositiveBucket(actionableExportCandidateCount)
+      : isPositiveBucket(visibleExportCandidateCount) && isPositiveBucket(enabledExportCandidateCount);
 
   // Export controls present → at least one export candidate is present (the verdict's
   // STRONG export signal, mirroring NAVER's `exportCandidatesPresent`).
@@ -288,6 +309,7 @@ export function extractEsmReviewProbeSignals(input: RawEsmReviewProbeInput): San
     exportCandidateCount: optionalBucket(input.exportCandidateTotal),
     visibleExportCandidateCount,
     enabledExportCandidateCount,
+    actionableExportCandidateCount,
     hasActionableExportCandidate,
     exportLayoutHint,
     sessionVerdict,

@@ -60,6 +60,7 @@ const ALLOWED_VALUES: Record<string, ReadonlyArray<unknown> | "boolean" | "frame
   exportCandidateCount: OPTIONAL_BUCKETS,
   visibleExportCandidateCount: OPTIONAL_BUCKETS,
   enabledExportCandidateCount: OPTIONAL_BUCKETS,
+  actionableExportCandidateCount: OPTIONAL_BUCKETS,
   hasActionableExportCandidate: "boolean",
   exportLayoutHint: LAYOUT_HINTS,
   sessionVerdict: VERDICTS,
@@ -212,7 +213,35 @@ describe("extractEsmReviewProbeSignals — live-only inputs degrade offline", ()
     expect(s.exportCandidateCount).toBe("one");
     expect(s.visibleExportCandidateCount).toBe("one");
     expect(s.enabledExportCandidateCount).toBe("none");
+    expect(s.actionableExportCandidateCount).toBe("unknown"); // not supplied → unknown
     expect(s.hasActionableExportCandidate).toBe(false);
+  });
+
+  it("explicit actionable count is the AUTHORITY for hasActionableExportCandidate", () => {
+    // Reproduces the first live ambiguity: enabled few, visible none → actionable none.
+    const ambiguous = extractEsmReviewProbeSignals({
+      url: ESM_REVIEW_URL,
+      html: "<html></html>",
+      exportCandidateTotal: 3,
+      exportCandidateVisible: 0,
+      exportCandidateEnabled: 3,
+      exportCandidateActionable: 0,
+    });
+    expect(ambiguous.actionableExportCandidateCount).toBe("none");
+    expect(ambiguous.hasActionableExportCandidate).toBe(false);
+
+    // When an actionable candidate IS present, the flag is true even if the coarse
+    // visible/enabled buckets disagree — the explicit count wins.
+    const actionable = extractEsmReviewProbeSignals({
+      url: ESM_REVIEW_URL,
+      html: "<html></html>",
+      exportCandidateTotal: 2,
+      exportCandidateVisible: 0,
+      exportCandidateEnabled: 2,
+      exportCandidateActionable: 1,
+    });
+    expect(actionable.actionableExportCandidateCount).toBe("one");
+    expect(actionable.hasActionableExportCandidate).toBe(true);
   });
 });
 

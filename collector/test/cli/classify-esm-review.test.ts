@@ -68,6 +68,23 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
     expect(/\.(click|fill|press|selectOption|check|dispatchEvent)\s*\(/.test(code)).toBe(false);
   });
 
+  it("uses the pure visibility cross-check (robust beyond offsetParent), no-click", () => {
+    expect(/from\s+["']\.\.\/esm\/esm-export-visibility["']/.test(code)).toBe(true);
+    expect(/summarizeExportCandidateVisibility\s*\(/.test(code)).toBe(true);
+    // The robust cross-check reads computed style + geometry (never clicks).
+    expect(/getComputedStyle\s*\(/.test(code)).toBe(true);
+    expect(/getBoundingClientRect\s*\(/.test(code)).toBe(true);
+    // Still derives actionability — and feeds it to the probe as a count, not by acting.
+    expect(/exportCandidateActionable/.test(code)).toBe(true);
+  });
+
+  it("uses a BOUNDED DOM-settle (no unbounded wait), reading only an element count", () => {
+    expect(/settleDom\s*\(/.test(code)).toBe(true);
+    expect(/STABILITY_MAX_CHECKS/.test(code)).toBe(true);
+    // The stability poll reads a numeric element count, never DOM text/content.
+    expect(/querySelectorAll\(["']\*["']\)\.length/.test(code)).toBe(true);
+  });
+
   it("prints only the sanitized summary object, never the raw url/html", () => {
     expect(/console\.log\([^)]*page\.(url|content)/.test(code)).toBe(false);
     expect(/console\.log\(JSON\.stringify\(summary/.test(code)).toBe(true);

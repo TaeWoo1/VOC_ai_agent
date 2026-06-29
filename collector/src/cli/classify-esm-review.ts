@@ -33,17 +33,31 @@ import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Page } from "playwright";
 import { loadConfig } from "../config";
+import {
+  type ExportCandidateVisibility,
+  summarizeExportCandidateVisibility,
+} from "../esm/esm-export-visibility";
 import { esmApprovalRequiredMessage, hasEsmLiveApproval } from "../esm/esm-live-approval";
 import { extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
 import { esmSentinelPathFor } from "../esm/esm-sentinel";
 import { log } from "../log";
 import { launchPersistentBrowser } from "../profile";
 
-const HYDRATION_TIMEOUT_MS = 15_000;
+// Network-idle is a best-effort first try; SPAs (like this review surface) often keep
+// connections open, so a timeout here is NOT failure — the DOM-stability poll follows.
+const NETWORKIDLE_BUDGET_MS = 8_000;
+// Bounded DOM-stability poll: consider the DOM settled once the total element count is
+// unchanged across STABLE_READS consecutive samples, or give up after MAX_STABILITY_CHECKS.
+const STABILITY_INTERVAL_MS = 500;
+const STABILITY_STABLE_READS = 3;
+const STABILITY_MAX_CHECKS = 24; // ≤ ~12s, bounded
 // The human may need to clear 2FA/CAPTCHA and any account/store flow; give them plenty
 // of time, but never wait forever.
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
 const SENTINEL_POLL_INTERVAL_MS = 750;
+
+/** Sanitized outcome of the bounded DOM-settle (no raw content, just a category). */
+type DomSettleResult = "stable" | "stable-no-networkidle" | "unsettled";
 
 /** Prompt shown after the browser opens. The exact sentinel path is printed below it. */
 const CONFIRM_PROMPT = [
@@ -70,48 +84,94 @@ function banner(): void {
   console.error(line);
 }
 
-/** Best-effort SPA settle before reading (the review route is an SPA). */
-async function settleSpa(page: Page): Promise<"hydrated" | "timeout"> {
-  try {
-    await page.waitForLoadState("networkidle", { timeout: HYDRATION_TIMEOUT_MS });
-    return "hydrated";
-  } catch {
-    return "timeout";
-  }
+/** Live: total element count of the top document (a number, never any DOM text). */
+async function domElementCount(page: Page): Promise<number> {
+  return page.evaluate(() => document.querySelectorAll("*").length);
 }
 
 /**
- * READ-ONLY export-candidate scan of the top document. Counts interactive elements
- * whose accessible text reads like an export/download control (total / visible /
- * enabled) and how many elements host an OPEN shadow root. It only READS text /
- * attributes / geometry — it never acts on an element, and it never returns the
- * matched text. Feeds the sanitized probe signals.
+ * Best-effort, BOUNDED settle before reading. The earlier version waited only for
+ * `networkidle` (which timed out on this SPA, so the scan ran on an unsettled DOM and
+ * mis-counted visibility). Now: try `networkidle` on a short budget, then poll the
+ * top-document element count until it is unchanged across STABLE_READS samples (the
+ * SPA has finished injecting controls), or give up after a bounded number of checks.
+ * Returns a sanitized category only — never reads or returns any DOM content.
+ */
+async function settleDom(page: Page): Promise<DomSettleResult> {
+  let networkIdle = false;
+  try {
+    await page.waitForLoadState("networkidle", { timeout: NETWORKIDLE_BUDGET_MS });
+    networkIdle = true;
+  } catch {
+    /* SPAs keep connections open; not a failure — fall through to the stability poll. */
+  }
+
+  let previous = -1;
+  let stableReads = 0;
+  for (let i = 0; i < STABILITY_MAX_CHECKS; i += 1) {
+    const count = await domElementCount(page);
+    if (count === previous) {
+      stableReads += 1;
+      if (stableReads >= STABILITY_STABLE_READS) {
+        return networkIdle ? "stable" : "stable-no-networkidle";
+      }
+    } else {
+      stableReads = 0;
+      previous = count;
+    }
+    await sleep(STABILITY_INTERVAL_MS);
+  }
+  return "unsettled";
+}
+
+/**
+ * READ-ONLY export-candidate scan of the top document. Finds interactive elements
+ * whose accessible text reads like an export/download control and, for each, extracts
+ * a small fixed set of BOOLEAN visibility descriptors via `getComputedStyle` /
+ * `getBoundingClientRect` / `offsetParent` / `getClientRects` / `disabled` /
+ * `aria-disabled` — the robust cross-check that replaces the `offsetParent`-only
+ * visibility test. It only READS attributes / computed style / geometry — it never
+ * acts on an element, and it NEVER returns the matched text. The booleans are folded
+ * into sanitized buckets by the pure `summarizeExportCandidateVisibility`.
  */
 async function scanExportCandidates(
   page: Page,
-): Promise<{ total: number; visible: number; enabled: number; shadowRootHostCount: number }> {
+): Promise<{ candidates: ExportCandidateVisibility[]; shadowRootHostCount: number }> {
   return page.evaluate(() => {
     const KW = /엑셀|excel|다운로드|download|내려받기|내보내기|export|추출|csv|xlsx/i;
     const nodes = Array.from(
       document.querySelectorAll("button, a, [role='button'], input[type='button'], input[type='submit']"),
     );
-    let total = 0;
-    let visible = 0;
-    let enabled = 0;
+    const candidates: Array<{
+      offsetParentPresent: boolean;
+      clientRectsPresent: boolean;
+      boundingBoxNonZero: boolean;
+      displayNotNone: boolean;
+      visibilityNotHidden: boolean;
+      notDisabled: boolean;
+      notAriaDisabled: boolean;
+    }> = [];
     for (const el of nodes) {
       const text = `${el.textContent ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""} ${(el as HTMLInputElement).value ?? ""}`;
       if (!KW.test(text)) continue;
-      total += 1;
       const he = el as HTMLElement;
-      if (he.offsetParent !== null || he.getClientRects().length > 0) visible += 1;
-      const ariaDisabled = el.getAttribute("aria-disabled") === "true";
-      if (!(el as HTMLButtonElement).disabled && !ariaDisabled) enabled += 1;
+      const cs = getComputedStyle(he);
+      const rect = he.getBoundingClientRect();
+      candidates.push({
+        offsetParentPresent: he.offsetParent !== null,
+        clientRectsPresent: he.getClientRects().length > 0,
+        boundingBoxNonZero: rect.width > 0 && rect.height > 0,
+        displayNotNone: cs.display !== "none",
+        visibilityNotHidden: cs.visibility !== "hidden" && cs.visibility !== "collapse",
+        notDisabled: !(el as HTMLButtonElement).disabled,
+        notAriaDisabled: el.getAttribute("aria-disabled") !== "true",
+      });
     }
     let shadowRootHostCount = 0;
     for (const el of Array.from(document.querySelectorAll("*"))) {
       if ((el as Element & { shadowRoot?: unknown }).shadowRoot) shadowRootHostCount += 1;
     }
-    return { total, visible, enabled, shadowRootHostCount };
+    return { candidates, shadowRootHostCount };
   });
 }
 
@@ -185,9 +245,12 @@ async function main(): Promise<void> {
     }
 
     // 3) Read the page AS THE HUMAN LEFT IT (no re-navigation — a re-nav can reset the SPA).
-    const hydrationWaitResult = await settleSpa(page);
+    const domSettle = await settleDom(page);
     const html = await page.content();
     const live = await scanExportCandidates(page);
+    // Pure, robust visibility cross-check (offsetParent OR client-rects OR box, not
+    // CSS-hidden; enabled = not disabled/aria-disabled). Counts only — never text.
+    const vis = summarizeExportCandidateVisibility(live.candidates);
 
     // No-click sanitized classification from the rendered HTML + read-only live scalars.
     const signals = extractEsmReviewProbeSignals({
@@ -195,16 +258,18 @@ async function main(): Promise<void> {
       html,
       frameUrls: page.frames().map((f) => f.url()),
       shadowRootHostCount: live.shadowRootHostCount,
-      exportCandidateTotal: live.total,
-      exportCandidateVisible: live.visible,
-      exportCandidateEnabled: live.enabled,
+      exportCandidateTotal: vis.total,
+      exportCandidateVisible: vis.visible,
+      exportCandidateEnabled: vis.enabled,
+      exportCandidateActionable: vis.actionable,
     });
 
-    const summary = { hydrationWaitResult, signals };
+    const summary = { domSettle, signals };
 
     // Sanitized JSON is the only stdout payload; the log echoes coarse scalars only.
     console.log(JSON.stringify(summary, null, 2));
     log("esm.review.classify.no-click", {
+      domSettle,
       sessionVerdict: signals.sessionVerdict,
       exportLayoutHint: signals.exportLayoutHint,
       hasActionableExportCandidate: signals.hasActionableExportCandidate,
