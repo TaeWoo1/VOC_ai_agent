@@ -134,6 +134,16 @@ document does not claim to. What the guide makes reasonable to infer:
 
 ## 5. Review strategy — dual track
 
+> **Decision (current).** The ESM+ **API path is blocked** — we do not have
+> approved ESM Trading API credentials / Secret Key / API permission, and
+> seller-center login alone is not enough for the API. Accordingly: ESM+
+> **INQUIRY / ORDER / CLAIM** stay on the deferred **API-first** track, and ESM+
+> **REVIEW** moves to the **model-C browser/export fallback** track (this §5),
+> because no official review API path is confirmed. ESM+ REVIEW is
+> **`NEEDS_DISCOVERY`**; nothing is CONFIRMED. The step-by-step discovery ladder
+> (Gates 0–4) and the Gate-1 manual-observation checklist live in
+> **`esmplus-review-export-discovery.md`**.
+
 Replaces any vague "review unknown" interpretation with an explicit two-field
 stance. Reviews **remain part of the ultimate product goal**; we just do not yet
 know the mechanism.

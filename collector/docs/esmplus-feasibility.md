@@ -18,9 +18,19 @@ open questions for ESM support, see **`esmplus-access-model.md`**.
 ## Platform
 
 ESM Plus is the unified seller console for **Gmarket** and **Auction** (eBay
-Korea). Unlike NAVER (no official review API → export-based collection), ESM Plus
-is treated as **API-first**: seller data is expected from official APIs, not
-browser automation. No browser collection is modeled for ESM Plus.
+Korea). For the **API-supported domains** — CS/inquiry, order/shipping, claim,
+settlement, etc. — ESM Plus is treated as **API-first**: that data is expected
+from official APIs, not browser automation.
+
+**REVIEW is the exception.** No official ESM review API is confirmed (see the
+capability table below and `esmplus-access-model.md` §5), so ESM+ **REVIEW**
+follows the **model-C browser/export fallback** track — the same seller-center
+export approach used for NAVER, under the same human-attended, consented,
+sanitized discipline. The end-to-end discovery ladder for that track lives in
+`esmplus-review-export-discovery.md`. ESM+ REVIEW is **`NEEDS_DISCOVERY`**:
+nothing about it is confirmed, no browser run has happened, and no collection is
+implemented. This carve-out is **not** a reversal of the API-first posture for
+the API-supported domains — it applies to reviews only.
 
 ## Capability map
 
@@ -38,7 +48,7 @@ claims; `unknown` is the honest default until confirmed.
 | `settlement` | planned | no | Settlement/payout; via official API. |
 | `service` | planned | no | Seller "service" area visible in the guide; scope TBD. |
 | `star_delivery` | planned | no | Star-delivery (스타배송) area visible in the guide; scope TBD. |
-| `review` | **unknown** | no | Not among the guide's confirmed areas — support **UNCONFIRMED**; do not model collection until verified. |
+| `review` | **unknown (API)** | no | No review **API** among the guide's confirmed areas — API support **UNCONFIRMED**. REVIEW is instead pursued on the **model-C browser/export fallback** track (`esmplus-review-export-discovery.md`), status **`NEEDS_DISCOVERY`** — not via this API layer. |
 
 Source of truth in code: `src/esmplus/capabilities.ts` (`ESM_CAPABILITIES`,
 `capabilityFor`, `firstMilestoneTarget`).
@@ -49,12 +59,12 @@ upload), see `review-collection-strategy.md`.
 
 ## Integration assumptions (from the guide)
 
-- **API-first**: model ESM Plus / Gmarket / Auction via official seller APIs, not browser collection.
-- Live API access appears to require: **Gmarket/Auction seller membership**, an **ESM+ Master ID**, **API permission / application approval**, and **key/JWT-based authentication**.
+- **API-first for API-supported domains**: model ESM Plus / Gmarket / Auction CS/inquiry / order / claim / settlement via official seller APIs, not browser collection.
+- Live API access appears to require: **Gmarket/Auction seller membership**, an **ESM+ Master ID**, **API permission / application approval**, and **key/JWT-based authentication**. This API path is currently **blocked**: we do not have approved ESM Trading API credentials / Secret Key / API permission, and seller-center login alone is not sufficient for the API.
 - **Allowed-IP / key-permission** registration is likely a setup prerequisite — not something already in place.
 - Store **no** raw seller identity, Master ID, or API key/JWT in logs or the repo; **no credentials are present here**.
-- Review API support is unconfirmed; no review collection until verified.
-- First milestone is **CS/inquiry** normalization, validated offline with synthetic fixtures.
+- **Review** has no confirmed API; ESM+ REVIEW is pursued on the **model-C browser/export fallback** track (`esmplus-review-export-discovery.md`), **`NEEDS_DISCOVERY`** — no live browser run, no download, no upload path enabled.
+- First API milestone is **CS/inquiry** normalization, validated offline with synthetic fixtures.
 
 ## First milestone — CS inquiry normalization
 
@@ -107,5 +117,7 @@ content hash when absent). The **live ESM API client / auth / JWT remains deferr
 ## Out of scope (now)
 
 Live ESM API calls · credentials/seller IDs · backend · DB · upload · browser
-automation · RUN_INTEGRATION · review collection. NAVER live work is separately
-**paused** (see `connection-onboarding.md`).
+automation · RUN_INTEGRATION · **live** ESM review collection (the model-C
+browser/export track is documented in `esmplus-review-export-discovery.md` but
+remains `NEEDS_DISCOVERY` — no run, no download, no upload). NAVER live work is
+separately **paused** (see `connection-onboarding.md`).
