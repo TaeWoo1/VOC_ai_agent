@@ -21,6 +21,19 @@ export interface CollectorConfig {
   /** Review-management/export URL (live layer; unknown until milestone 1). */
   naverReviewUrl: string | undefined;
   /**
+   * ESM+ (Gmarket / Auction) review-management/export URL (live layer; the model-C
+   * REVIEW discovery track). Gate-1 observed a `/Home/v2/manage-feedback`-like route
+   * on an esmplus host; the exact URL is supplied out-of-band, never committed.
+   * Unset until an operator provides it for a Gate-2 no-click classifier run.
+   */
+  esmReviewUrl: string | undefined;
+  /**
+   * Persistent browser profile dir for the ESM+ live layer — SEPARATE from the NAVER
+   * profile so the two platforms' sessions never share storage. Holds the ESM+
+   * session locally only; gitignored under `.profile/`.
+   */
+  esmProfileDir: string;
+  /**
    * Optional Playwright browser channel (live layer). When set (e.g. `chrome`),
    * the launcher drives the installed browser of that channel instead of the
    * bundled Chromium — recommended for NAVER (a mainstream Chrome fingerprint is
@@ -73,9 +86,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     naverExpectedStoreFingerprint: env.NAVER_EXPECTED_STORE_FINGERPRINT,
     naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
     profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
+    esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(root, ".profile/esm"),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
+    esmReviewUrl: env.ESM_REVIEW_URL,
     browserChannel: env.COLLECTOR_BROWSER_CHANNEL,
     storageProbeSalt: env.STORAGE_PROBE_SALT,
   };

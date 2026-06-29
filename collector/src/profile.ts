@@ -118,3 +118,12 @@ export async function launchNaverContext(
   log("profile.launch", { headless: options.headless, channel: options.channel ?? "bundled" });
   return chromium.launchPersistentContext(userDataDir, options);
 }
+
+/**
+ * Channel-generic alias of {@link launchNaverContext}: the persistent-context launcher
+ * is NOT NAVER-specific — it only differs by the `profileDir` it is given (and the
+ * path guard keeps every profile inside the collector tree). The ESM+ REVIEW discovery
+ * layer uses this with its OWN profile dir (`cfg.esmProfileDir`), so the two platforms'
+ * sessions never share storage. No behavioural difference from `launchNaverContext`.
+ */
+export const launchPersistentBrowser = launchNaverContext;
