@@ -63,19 +63,24 @@ continuation + an ESM approval flag (e.g. `--i-understand-this-opens-live-esm`),
 emitting only sanitized booleans / bucketed counts / category enums. **Strict
 no-click**: no `.click(`, no `waitForEvent("download")`, no `saveAs`, no upload,
 no status write. Classifies sync-vs-async and locates the export UI without
-triggering it. **Status: IMPLEMENTED + RAN ONCE (sanitized).** The classifier
-(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts`) ran once
-under human-attended login and corroborated the surface; one visibility ambiguity
-remains open (see "Gate 2 result" below). REVIEW stays `NEEDS_DISCOVERY`.
+triggering it. **Status: OBJECTIVE MET (sanitized).** The classifier
+(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts` +
+`esm-export-visibility.ts` + `esm-frame-scan.ts`) ran **four** times under
+human-attended login. Run #4 (with the ESM-family frame allowlist active) located
+**one actionable export control** (`actionableScope: allowlisted-frame`) — Gate 2's
+goal of locating an actionable, visible export control no-click is **met**. REVIEW
+stays `NEEDS_DISCOVERY`. (See "Gate 2 result — fourth … run" below.)
 
 ### Gate 3 — supervised approved-index single capture
-Only after Gate 2 confirms the layout. Reuse the NAVER **supervised
-approved-index** pattern: locate the review-usage/consent prompt (if any),
-operator passes an explicit `--approved-index`, and **exactly one**
-human-approved click fires a download — observe-and-discard via the
-format-agnostic `review-download-save.ts` (OOXML/ZIP magic sniff, no cell
-parsing, delete-after-validate). No auto-repeat, no upload yet. **Status:
-`NEEDS_DISCOVERY`. Depends on Gates 1–2.**
+Reuse the NAVER **supervised approved-index** pattern, adapted to the cross-origin
+allowlisted frame: locate the review-usage/consent prompt (if any), operator passes
+an explicit `--approved-index`, and **exactly one** human-approved click fires a
+download — observe-and-discard via the format-agnostic `review-download-save.ts`
+(OOXML/ZIP magic sniff, no cell parsing, delete-after-validate). No auto-repeat, no
+upload yet. **Status: JUSTIFIED TO DESIGN — DESIGNED, NOT STARTED.** Gate 2's
+objective is met (run #4 located an actionable control in the `allowlisted-frame`
+scope), so Gate 3 is justified; the full design is in **"Gate 3 design"** below. No
+code, no live run, no click has happened. REVIEW stays `NEEDS_DISCOVERY`.
 
 ### Gate 4 — controlled upload *(only after schema is known)*
 Only after the review xlsx/csv **column schema** — especially the **dedup key**
@@ -228,11 +233,114 @@ emitted**, only the category + booleans/buckets. This crosses the same-origin li
 A **re-run with the allowlist configured is a separately-approved Gate-2 step** — still
 `NEEDS_DISCOVERY`, nothing CONFIRMED, Gate 3 still not justified.
 
+## Gate 2 result — fourth live no-click re-run (allowlist active, sanitized)
+
+A fourth human-attended run, with `ESM_FRAME_ORIGIN_ALLOWLIST` configured
+(`allowlistConfigured: true`), completed safely — same no-click discipline.
+Sanitized findings only:
+
+| Signal | Value |
+|--------|-------|
+| `sessionVerdict` / `domSettle` | `LOGGED_IN` / `stable-no-networkidle` |
+| `manageFeedbackRouteLike` | `true` |
+| `asyncMarkerPresent` / `exportLayoutHint` | `false` / `SYNC_LIKELY` |
+| top-document candidates | total `few` / visible `none` / enabled `few` / **actionable `none`** |
+| `frameCount` / `skippedFrameCount` / `allowlistedFrameCount` | `few` / `none` / `one` |
+| allowlisted frame | category `seller-center`, `readResult: read`, `allowlisted: true` |
+| allowlisted frame candidates | total `one` / visible `one` / enabled `one` / **actionable `one`** |
+| aggregate `hasActionableExportCandidate` | **`true`** |
+| `actionableScope` | **`allowlisted-frame`** |
+
+**The actionable export control is located in the `allowlisted-frame` scope.** The
+cross-origin ESM-family vendor iframe — skipped in run #3 — was read read-only via the
+allowlist, and inside it is **exactly one** actionable (visible AND enabled) export
+control. **The top-document candidates are decoys** (`actionable: none` across all four
+runs — outer-shell menu items, not the export button).
+
+**Gate 2 objective is MET.** An actionable, visible export control was located
+**no-click**. The visibility / scope ambiguity that blocked Gate 3 is resolved.
+
+**Gate 3 is justified to DESIGN — but has NOT started** (no code, no live run, no click
+in this slice). REVIEW remains `NEEDS_DISCOVERY`; locating a control is **not**
+capability confirmation — the capture → schema → ingest path (Gates 3–4) is still ahead.
+
+## Gate 3 design — supervised approved-index single capture (DESIGN ONLY)
+
+> **Design posture, not execution.** Nothing below is built or run in this slice. The
+> Gate-3 code slice and any Gate-3 live run are each **separately approved**. ESM+
+> REVIEW stays `NEEDS_DISCOVERY`; nothing is CONFIRMED by this design.
+
+**Shape.** Mirror the NAVER supervised approved-index precedent
+(`review-usage-confirm.ts` + `export-click-diagnose.ts` + `review-download-save.ts`),
+adapted to the **cross-origin allowlisted frame** that run #4 found. The operator runs a
+gated CLI under the ESM approval flag, the human logs in and reaches the review surface,
+the tool scans the **allowlisted frame** for export/consent candidates and prints
+**sanitized indexed candidate metadata** (index + coarse category + visible/enabled
+booleans — never raw text). The operator passes an explicit `--approved-index`; the tool
+re-scans (single source of index numbering), validates the chosen candidate is still
+present/visible/enabled **on this run**, and fires **exactly one** click bound to that
+single element. The fired download is observed and discarded.
+
+**Hard invariants (carried from NAVER, extended for ESM):**
+
+- **Cross-origin allowlisted-frame aware** — the click targets the candidate inside the
+  allowlisted vendor frame (run #4 scope); the frame is re-confirmed allowlisted +
+  readable immediately before acting.
+- **Exactly one human-approved candidate index**, **exactly one click**, bound to a
+  single element (`count() === 1` guard). **No auto-repeat. No broad/loop selector
+  clicking. No fallback clicking** of other candidates.
+- **No credential typing; no CAPTCHA / 2FA bypass** — the human authenticates.
+- **No DB write**, **no status / `LAST_SUCCESS` write**, **no scheduler / manualSync**.
+- **No upload in Gate 3** unless separately approved (Gate 4).
+- **Observe-and-discard.** Save the fired download to the gitignored quarantine, run
+  **structural file validation only** (OOXML/ZIP magic sniff + extension category — the
+  existing `review-download-save.ts`), then **delete-after-validate** in a `finally`.
+- **No raw filename in logs** (salted-hash basename only). **No row parsing.** **No
+  review text / product / customer / seller identifiers** logged or emitted — sanitized
+  buckets / categories / booleans only.
+
+**Gate 3 must handle (each a recorded sanitized outcome, several are stop conditions):**
+
+- **Consent / usage prompt** appears before download → surface it as a sanitized
+  candidate (category only); require an explicit approved index for it too; never
+  auto-accept.
+- **Sync vs async** — run #4 says `SYNC_LIKELY`, but treat **async / unknown** as a
+  **stop condition**: if the click yields a job/queue affordance instead of a download,
+  record `async-observed` and stop (no polling, no second action).
+- **Download timeout** → record `download-timeout`, stop, no retry.
+- **No download event** after the click → record `no-download-event`, stop (no retry, no
+  second click).
+- **Multiple candidates** at the approved index scope → refuse without clicking
+  (`ambiguous-candidates`); the operator must re-approve a single index.
+- **Candidate disappears / not actionable** on the confirming re-scan → refuse without
+  clicking (`candidate-gone`).
+- **Frame no longer allowlisted / readable** (origin changed, detached) → refuse without
+  clicking (`frame-unavailable`).
+- **Downloaded file not xlsx/csv** (magic sniff fails) → record `unrecognized-format`,
+  delete, stop — never parse, never upload.
+- **Any PII-bearing page/file risk** → the file is quarantined, never opened/parsed, and
+  deleted after the structural sniff; no page content is logged.
+
+**Gate 3 success (all must hold):**
+
+1. exactly **one approved click fired**;
+2. exactly **one file observed**;
+3. the file **structurally validates** as xlsx/csv (magic sniff only);
+4. the file is **deleted after validation**;
+5. only a **sanitized capture summary** is emitted (booleans / buckets / categories);
+6. **no upload**;
+7. **no schema / dedup-key claims** are made.
+
+**Gate 3 non-goals (explicitly out of scope):** not upload; not parse rows; not infer
+column schema; not confirm the dedup key; not mark ESM+ REVIEW `CONFIRMED`; not enable
+scheduled collection. Those belong to Gate 4 and a later product decision.
+
 ## Standing constraints for this track
 
-- No ESM+ review collection is implemented yet. **Three human-attended, read-only
+- No ESM+ review collection is implemented yet. **Four human-attended, read-only
   no-click classifier runs** have occurred (Gate 2 above); **no click, no download,
-  and no upload have ever happened**, and no upload path is enabled.
+  and no upload have ever happened**, and no upload path is enabled. Gate 3 is
+  **designed but not started** — no supervised click has occurred.
 - Cross-origin frames are read **only** when on the operator-configured ESM-family
   allowlist (`ESM_FRAME_ORIGIN_ALLOWLIST`), which is **fail-closed** (empty → none) and
   reaches only trusted first-party vendor origins; raw hosts/origins are never emitted.
