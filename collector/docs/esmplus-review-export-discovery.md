@@ -493,7 +493,187 @@ click, one download, inspect-before-delete, observe-and-discard). It has **not**
 started here.
 
 **Status unchanged.** The wiring is local code + tests only. **REVIEW remains
-`NEEDS_DISCOVERY`; nothing is CONFIRMED.**
+`NEEDS_DISCOVERY`; nothing is CONFIRMED.** *(Superseded by the live run below: the
+`--inspect-schema-shape` path was executed live on 2026-06-30 — see the next section.
+The capability status is unchanged regardless.)*
+
+## Gate 4 result — first live capture→inspect→delete run (2026-06-30, schema-shape)
+
+> One supervised, separately-approved live run on a stable IP/environment. Headed
+> browser, human login/navigation, **one** click, **one** download, schema-shape
+> inspected **before** the delete-in-`finally`, file deleted. Observe-and-discard;
+> no ingest. **Read the caveat below before drawing any data conclusion.**
+
+**Run outcome (sanitized):** `result: CAPTURED_VALID`, `stop: null`.
+
+| signal | value |
+|---|---|
+| `sessionVerdict` | `LOGGED_IN` |
+| `actionableScope` | `allowlisted-frame` (one allowlisted frame, top-document not actionable) |
+| approved index | `0` — the single actionable export candidate; bound to exactly one element |
+| `clickedCount` | `1` |
+| `postClickOutcome` | `download-fired` |
+| `fileStructure` / `savedExtensionCategory` | `xlsx-valid` / `xlsx` |
+| `fileSizeBucket` | `small` |
+| `schemaShapeInspected` | `true` |
+| `deleteFailed` / `fileRetained` | `false` / `false` (`retentionPolicy: delete-after-validate`) |
+| `rawCellLeak` | `false` |
+| `uploaded` / `rowsParsed` / `schemaInferred` / `dedupKeyClaimed` | all `false` |
+
+**Sanitized schema-shape (structure + header row only — no cell values):**
+
+| field | value |
+|---|---|
+| `workbookReadable` | `true` |
+| `sheetCount` / `selectedSheetIndex` | `1` / `0` |
+| `rowCountBucket` | `one` *(see caveat — likely the header-only/empty-result shape)* |
+| `columnCount` / `headerCount` | `14` / `14` |
+| header category tally | reviewText ×3, orderOrBuyerRisk ×3, product ×2, reviewDate ×2, replyStatus ×1, rating ×1, unknown ×2 |
+| `reviewIdCandidate` | `false` |
+| `candidateDedupFields` | `[]` |
+| `risks` | `pii-like-header-present`, `no-dedup-key-candidate` |
+| `rawCellLeak` | `false` |
+| `schemaMappingConfirmed` / `dedupKeyConfirmed` | `false` / `false` |
+
+**⚠️ Operator caveat — this is an empty-result / header-only export.** The page/filter
+was set to **today's reviews**, and **no reviews matched that filter**. The downloaded
+xlsx therefore most likely represents an **empty-result (header-only) export**, not a
+populated one. Consequently:
+
+- **Do not** read `rowCountBucket: one` as "one review row" — it reflects the export's
+  header/placeholder shape under an empty filter, not one populated review.
+- **Do not** conclude a final dedup strategy from this run.
+- The **`no-dedup-key-candidate`** finding is a **header-level signal from an empty-result
+  export**, not a populated-data confirmation. A stable review-ID column could still
+  appear (or be confirmable) once real rows are present.
+- A **separately approved populated schema-shape run** is needed, with a date filter/range
+  **known to contain at least one review**, before any dedup conclusion.
+
+**What the run *did* establish (transport/structure only):** the export path works
+end-to-end through the allowlisted vendor frame — one supervised click yields a
+structurally valid 14-column `.xlsx`, and the offline schema-shape inspector reads its
+header shape and deletes the file, all inside one supervised run. **What it did NOT
+establish:** any populated-data shape, any field mapping, or any dedup key.
+
+**Status unchanged.** No upload, no row parsing, no schema-mapping confirmation, no
+dedup-key confirmation, no DB / status / `LAST_SUCCESS` / scheduler write. **REVIEW
+remains `NEEDS_DISCOVERY`; nothing is CONFIRMED.**
+
+### Next step — Gate 4b populated schema-shape run (separately approved) — DONE 2026-06-30
+
+> **Executed 2026-06-30** under separate per-run approval — see the result section below.
+> The plan it described is unchanged; this note is retained for context.
+
+A single supervised capture→inspect→delete run against a **populated** export, to turn
+the header-only signals above into a populated-data shape:
+
+- the **operator manually sets a safe date range/filter known to contain at least one
+  review** (volume kept minimal);
+- **no raw review / customer / product / order values** are reported — sanitized
+  booleans / buckets / hash+category header meta only;
+- **one** capture→inspect→delete run (one click, one download, delete-after-validate);
+- **header-only inspection is unchanged** — the inspector still reads sheet/row/column
+  shape **plus the header row only**, never a data-row cell;
+- **no upload / DB / status / scheduler / `manualSync`**;
+- **dedup stays `NEEDS_VERIFICATION`** until separately verified on populated data;
+- **REVIEW remains `NEEDS_DISCOVERY`; nothing CONFIRMED.**
+
+This run requires its own explicit per-run approval (live browser, human login). It has
+**not** been started here.
+
+## Gate 4b result — first populated capture→inspect→delete run (2026-06-30, schema-shape)
+
+> One supervised, separately-approved live run on a stable IP/environment. The operator
+> **manually set a date range/filter known to contain at least one review**; headed
+> browser, human login/navigation/filtering, **one** approved-index click, **one**
+> download, schema-shape inspected **before** the delete-in-`finally`, file deleted.
+> Observe-and-discard; **no row/cell values were read or reported**; no ingest.
+
+**Run outcome (sanitized):** `result: CAPTURED_VALID`, `stop: null`.
+
+| signal | value |
+|---|---|
+| `sessionVerdict` | `LOGGED_IN` |
+| `actionableScope` | `allowlisted-frame` (one allowlisted frame; top-document not actionable) |
+| approved index | `0` — the single actionable export candidate; bound to exactly one element |
+| `clickedCount` | `1` |
+| `postClickOutcome` | `download-fired` |
+| `fileStructure` / `savedExtensionCategory` | `xlsx-valid` / `xlsx` |
+| `fileSizeBucket` | `small` |
+| `schemaShapeInspected` | `true` |
+| `deleteFailed` / `fileRetained` | `false` / `false` (`retentionPolicy: delete-after-validate`) |
+| `rawCellLeak` | `false` |
+| `uploaded` / `rowsParsed` / `schemaInferred` / `dedupKeyClaimed` | all `false` |
+
+`downloads/esm-diagnostic` was re-verified **empty** after the run (file deleted; sentinel
+auto-removed). No DB / status / `LAST_SUCCESS` / scheduler / `manualSync` write occurred.
+
+**Sanitized schema-shape (structure + header row only — no cell values):**
+
+| field | value |
+|---|---|
+| `workbookReadable` | `true` |
+| `sheetCount` / `selectedSheetIndex` | `1` / `0` |
+| `rowCountBucket` | **`few`** *(populated — at least one review row present)* |
+| `columnCount` / `headerCount` | `14` / `14` |
+| header category tally | reviewText ×3, orderOrBuyerRisk ×3, product ×2, reviewDate ×2, replyStatus ×1, rating ×1, unknown ×2 |
+| `categoryPresence` | reviewDate ✓, rating ✓, product ✓, reviewText ✓, replyStatus ✓, orderOrBuyerRisk ✓, unknown ✓ — **reviewIdCandidate: false** |
+| `candidateDedupFields` | `[]` |
+| `risks` | `pii-like-header-present`, `no-dedup-key-candidate` |
+| `rawCellLeak` | `false` |
+| `schemaMappingConfirmed` / `dedupKeyConfirmed` | `false` / `false` |
+
+### Sanitized comparison — empty-result run vs. populated run
+
+| sanitized field | empty-result run (today's-reviews, none matched) | **Gate 4b populated run** |
+|---|---|---|
+| `rowCountBucket` | `one` *(header-only/empty shape)* | **`few`** *(real rows present)* |
+| `columnCount` / `headerCount` | `14` / `14` | `14` / `14` |
+| header category tally | reviewText ×3 · orderOrBuyerRisk ×3 · product ×2 · reviewDate ×2 · replyStatus ×1 · rating ×1 · unknown ×2 | **identical** |
+| header hashes (per column) | (14 hashes) | **identical** |
+| `categoryPresence` | reviewId `false`; date/rating/product/text/replyStatus/orderOrBuyerRisk/unknown `true` | **identical** |
+| `candidateDedupFields` | `[]` | `[]` |
+| `risks` | `pii-like-header-present`, `no-dedup-key-candidate` | **identical** |
+
+**The only material shape change was `rowCountBucket` `one` → `few`.** Column count, the
+full header category tally, **every header hash**, `categoryPresence`, and `risks` are
+**identical** across the two runs → the **export layout is stable** between an empty-result
+and a populated export.
+
+### Dedup implication (signal, NOT a confirmed strategy)
+
+- **No obvious stable review-ID / dedup-key column was detected even on the populated
+  export** — `reviewIdCandidate: false` and `candidateDedupFields: []` hold on real rows,
+  not just the empty-result shape. This is a **stronger** signal than the empty run, but
+  it is **still not** a final dedup strategy.
+- **Implication for future ingest:** a single-column natural key is unlikely; ingest will
+  **probably need a composite dedup strategy**.
+- **Candidate components (sanitized, unconfirmed):** a composite key may be derivable from
+  the **date / product / rating / review-text / reply-status**-derived header categories
+  already observed — but **no row/cell values may be logged**, no field mapping is claimed,
+  and **no dedup strategy is confirmed**. These are candidate categories only.
+- **Dedup remains `NEEDS_VERIFICATION`.** Confirming any composite key requires a separate,
+  offline strategy-design pass (below) — not a live run.
+
+### Next step — offline dedup-strategy design — DONE 2026-06-30
+
+> **Drafted 2026-06-30** as a linked design doc:
+> [`esmplus-review-dedup-strategy-design.md`](./esmplus-review-dedup-strategy-design.md).
+> Offline, category-level reasoning only; produces **candidate** composite keys (L1/L2/L3),
+> privacy rules, and a verification plan. **Dedup stays `NEEDS_VERIFICATION`; nothing
+> CONFIRMED.** The discovery-vs-product-storage data policy it relies on is in
+> [`esmplus-review-data-policy.md`](./esmplus-review-data-policy.md) (Policy A = binding
+> discovery no-raw; Policy B = future raw review-text storage under consent/retention).
+
+- **Offline only** — reason about a composite dedup key from the **sanitized header-shape
+  categories** already captured; **no live browser**, no new capture.
+- **No upload / DB / status / scheduler / `manualSync`.**
+- **No row/cell logging** — design works from category/shape signals, never values.
+- Produces a **candidate** composite-key design; **dedup stays `NEEDS_VERIFICATION`** and
+  **no capability is CONFIRMED** until separately verified.
+
+**Status unchanged.** No upload, row parsing, schema-mapping confirmation, or dedup-key
+confirmation occurred. **REVIEW remains `NEEDS_DISCOVERY`; nothing is CONFIRMED.**
 
 ## Keep-open session-TTL probe — result (2026-06-29, no-click)
 
