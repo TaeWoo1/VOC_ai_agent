@@ -111,22 +111,20 @@ describe("capture-esm-review — Gate 4 opt-in schema-shape inspection (--inspec
     expect(/inspectSchemaShape\s*=\s*args\.includes\(/.test(code)).toBe(true);
   });
 
-  it("wires the offline Gate-4 inspector (readWorkbookShape → summarizeSchemaShape) as the pre-delete hook", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-review-xlsx-reader["']/.test(code)).toBe(true);
-    expect(/from\s+["']\.\.\/esm\/esm-review-schema-shape["']/.test(code)).toBe(true);
-    expect(/summarizeSchemaShape\s*\(\s*readWorkbookShape\s*\(/.test(code)).toBe(true);
-    // The inspector is passed to the SAME save module (so it runs after structural validation, before delete).
-    expect(/saveAndInspectDownload<SanitizedSchemaShape>\s*\(/.test(code)).toBe(true);
+  it("wires the opt-in inspectors via the esm-capture-inspect helper as the pre-delete hook", () => {
+    // The schema-shape composition (readWorkbookShape → summarizeSchemaShape) now lives in the
+    // helper; the CLI delegates to it and passes the combined hook to the SAME save module.
+    expect(/from\s+["']\.\.\/esm\/esm-capture-inspect["']/.test(code)).toBe(true);
+    expect(/buildCaptureInspectFn\s*\(/.test(code)).toBe(true);
+    expect(/saveAndInspectDownload<CaptureInspection>\s*\(/.test(code)).toBe(true);
     expect(/inspectFn/.test(code)).toBe(true);
   });
 
-  it("inspection runs ONLY after structural xlsx validation, and fails closed", () => {
-    // Structural sniff still gates the result, and a non-readable workbook under the flag stops.
+  it("inspection runs ONLY after structural xlsx validation, and the stop precedence fails closed", () => {
+    // Structural sniff still gates the result; the fail-closed precedence is encoded in the helper.
     expect(/classifyFileStructure\s*\(/.test(code)).toBe(true);
-    expect(/"schema-inspect-failed"/.test(code)).toBe(true);
-    expect(/!schemaShape\.workbookReadable/.test(code)).toBe(true);
-    // A failed cleanup is surfaced (observable, not silent).
-    expect(/"delete-failed"/.test(code)).toBe(true);
+    expect(/deriveCaptureStop\s*\(/.test(code)).toBe(true);
+    // A failed cleanup is still surfaced (observable, not silent).
     expect(/inspection\.deleteFailed/.test(code)).toBe(true);
   });
 
@@ -150,5 +148,43 @@ describe("capture-esm-review — Gate 4 opt-in schema-shape inspection (--inspec
     }
     expect(/from\s+["']\.\.\/upload["']/.test(code)).toBe(false);
     expect(/from\s+["']\.\.\/status["']/.test(code)).toBe(false);
+  });
+});
+
+describe("capture-esm-review — Gate 5 opt-in row-shape probe (--probe-row-shape)", () => {
+  const code = stripComments(readFileSync(CLI_PATH, "utf8"));
+
+  it("is opt-in and dormant by default: gated on the --probe-row-shape flag", () => {
+    expect(/--probe-row-shape/.test(code)).toBe(true);
+    expect(/probeRowShape\s*=\s*args\.includes\(/.test(code)).toBe(true);
+  });
+
+  it("parses an optional --row-sample-rows cap", () => {
+    expect(/parseRowSampleRowsArg\s*\(/.test(code)).toBe(true);
+    expect(/rowSampleRows/.test(code)).toBe(true);
+  });
+
+  it("composes schema-shape + row-shape through the one inspect hook", () => {
+    expect(/buildCaptureInspectFn\s*\(/.test(code)).toBe(true);
+    expect(/probeRowShape/.test(code)).toBe(true);
+    expect(/inspection\.inspection\?\.rowShape/.test(code)).toBe(true);
+  });
+
+  it("surfaces the sanitized row-shape and keeps honest non-goal markers", () => {
+    expect(/rowShapeProbed/.test(code)).toBe(true);
+    expect(/rowShape\b/.test(code)).toBe(true);
+    expect(/rowsParsed:\s*false/.test(code)).toBe(true);
+    expect(/dedupKeyClaimed:\s*false/.test(code)).toBe(true);
+  });
+
+  it("adds NO extra click / download path (Gate 3 invariants preserved)", () => {
+    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(1);
+    expect((code.match(/waitForEvent\s*\(\s*["']download["']/g) ?? []).length).toBe(1);
+  });
+
+  it("adds NO upload / DB / status / scheduler", () => {
+    for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
+      expect(code.includes(token)).toBe(false);
+    }
   });
 });

@@ -48,9 +48,13 @@ import {
 import { summarizeExportCandidateVisibility } from "../esm/esm-export-visibility";
 import { frameHostAllowed, summarizeFrameAwareExportScan } from "../esm/esm-frame-scan";
 import { esmApprovalRequiredMessage, hasEsmLiveApproval } from "../esm/esm-live-approval";
+import {
+  buildCaptureInspectFn,
+  deriveCaptureStop,
+  parseRowSampleRowsArg,
+  type CaptureInspection,
+} from "../esm/esm-capture-inspect";
 import { esmUrlCategory, extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
-import { summarizeSchemaShape, type SanitizedSchemaShape } from "../esm/esm-review-schema-shape";
-import { readWorkbookShape } from "../esm/esm-review-xlsx-reader";
 import { esmSentinelPathFor } from "../esm/esm-sentinel";
 import { log } from "../log";
 import { saveAndInspectDownload, type SavedDownloadInspection } from "../naver/review-download-save";
@@ -214,6 +218,12 @@ async function main(): Promise<void> {
   // Gate 4 opt-in: when set, the validated xlsx is structurally inspected (schema-SHAPE only)
   // before the delete-after-validate. Absent → unchanged Gate 3 observe-and-discard.
   const inspectSchemaShape = args.includes("--inspect-schema-shape");
+  // Gate 5 opt-in (dormant by default): when set, the validated xlsx's first N data rows are
+  // reduced to SANITIZED row-shape (presence / value-class / distinctness / salted hashes — never
+  // raw values) before the delete. `--row-sample-rows=N` (default 3, clamped 1–5) caps N. Absent →
+  // no row-shape probe; combined with --inspect-schema-shape, both inspections run on the one file.
+  const probeRowShape = args.includes("--probe-row-shape");
+  const rowSampleRows = parseRowSampleRowsArg(args);
 
   const cfg = loadConfig();
   if (!cfg.esmReviewUrl) {
@@ -382,14 +392,17 @@ async function main(): Promise<void> {
       return;
     }
 
-    // 8) Observe-and-discard: save → structural validate → (Gate 4 opt-in: schema-shape inspect)
-    //    → delete (the save module owns fs; the inspect hook runs on the still-present xlsx BEFORE
-    //    the delete, and ONLY when the structural sniff passed). Gate 4 reads SHAPE only, never cells.
-    const inspectFn = inspectSchemaShape
-      ? (path: string): Promise<SanitizedSchemaShape> =>
-          Promise.resolve(summarizeSchemaShape(readWorkbookShape(path), cfg.storageProbeSalt))
-      : undefined;
-    const inspection: SavedDownloadInspection<SanitizedSchemaShape> = await saveAndInspectDownload<SanitizedSchemaShape>(
+    // 8) Observe-and-discard: save → structural validate → (Gate 4/5 opt-in: schema-shape +/or
+    //    row-shape inspect) → delete (the save module owns fs; the inspect hook runs on the
+    //    still-present xlsx BEFORE the delete, and ONLY when the structural sniff passed). Both
+    //    inspectors read SHAPE only, never raw cells; the hook is undefined when no flag is set.
+    const inspectFn = buildCaptureInspectFn({
+      inspectSchemaShape,
+      probeRowShape,
+      rowSampleRows,
+      salt: cfg.storageProbeSalt,
+    });
+    const inspection: SavedDownloadInspection<CaptureInspection> = await saveAndInspectDownload<CaptureInspection>(
       download,
       {
         dir: join(cfg.downloadDir, "esm-diagnostic"),
@@ -398,13 +411,19 @@ async function main(): Promise<void> {
       },
     );
     const fileStructure = classifyFileStructure(inspection.savedExtensionCategory, inspection.xlsxReadable);
-    const schemaShape = inspection.inspection ?? null;
+    const schemaShape = inspection.inspection?.schemaShape ?? null;
+    const rowShape = inspection.inspection?.rowShape ?? null;
 
-    // Stop precedence: bad file → (Gate 4) inspector failed-closed → cleanup could not delete.
-    let stop: CaptureStop | null = null;
-    if (fileStructure === "unrecognized") stop = "unrecognized-format";
-    else if (inspectSchemaShape && (schemaShape === null || !schemaShape.workbookReadable)) stop = "schema-inspect-failed";
-    else if (inspection.deleteFailed) stop = "delete-failed";
+    // Stop precedence: bad file → (Gate 4) schema inspect failed-closed → (Gate 5) row-shape
+    // inspect failed-closed → cleanup could not delete. Encoded in the pure helper.
+    const stop = deriveCaptureStop({
+      fileStructure,
+      inspectSchemaShape,
+      schemaShape,
+      probeRowShape,
+      rowShape,
+      deleteFailed: inspection.deleteFailed,
+    });
     const result = stop === null ? "CAPTURED_VALID" : "STOPPED";
 
     console.log(
@@ -426,7 +445,14 @@ async function main(): Promise<void> {
           // confirms a mapping or dedup key (schemaMappingConfirmed/dedupKeyConfirmed stay false).
           schemaShapeInspected: inspectSchemaShape,
           schemaShape,
-          // Honest non-goal markers — this CLI never uploads, parses rows, or claims schema/dedup.
+          // Gate 5 (opt-in) minimal ROW-SHAPE result — sanitized; null when --probe-row-shape is
+          // absent. Carries its own honest markers (rawCellLeak:false, minimalRowsInspected,
+          // schemaMappingConfirmed/dedupKeyConfirmed:false). No raw cell/header value is emitted.
+          rowShapeProbed: probeRowShape,
+          rowShape,
+          // Honest non-goal markers — this CLI never uploads, parses rows into records, infers a
+          // schema mapping, or claims a dedup key. (`rowShape.minimalRowsInspected` separately
+          // reports that cells were shape-read; that is not record parsing.)
           uploaded: false,
           rowsParsed: false,
           schemaInferred: false,
@@ -447,6 +473,8 @@ async function main(): Promise<void> {
       deleteFailed: inspection.deleteFailed,
       schemaShapeInspected: inspectSchemaShape,
       schemaWorkbookReadable: schemaShape?.workbookReadable ?? false,
+      rowShapeProbed: probeRowShape,
+      rowShapeWorkbookReadable: rowShape?.workbookReadable ?? false,
     });
   } finally {
     removeSentinel(sentinelPath);

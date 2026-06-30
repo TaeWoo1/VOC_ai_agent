@@ -41,6 +41,8 @@ export type CaptureStop =
   | "unrecognized-format"
   // Gate-4 capture→inspect→delete additions (only reachable under `--inspect-schema-shape`):
   | "schema-inspect-failed"
+  // Gate-5 minimal row-shape addition (only reachable under `--probe-row-shape`):
+  | "row-shape-inspect-failed"
   | "delete-failed";
 
 /** Coarse category of an in-frame candidate, by accessible-text class (never the text). */
