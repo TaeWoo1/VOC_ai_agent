@@ -51,8 +51,12 @@ export interface DownloadSaveIo {
 /** Coarse file-size bucket — never the exact byte count. */
 export type FileSizeBucket = "empty" | "tiny" | "small" | "medium" | "large";
 
-/** Sanitized inspection of a saved-then-deleted diagnostic download. Every leaf is non-sensitive. */
-export interface SavedDownloadInspection {
+/**
+ * Sanitized inspection of a saved-then-deleted diagnostic download. Every leaf is non-sensitive.
+ * `R` is the (sanitized) result type of an optional pre-delete `inspectFn` — `never` by default,
+ * so observe/save-only callers are unaffected.
+ */
+export interface SavedDownloadInspection<R = never> {
   downloadSaved: boolean;
   savedPathCategory: typeof PATH_CATEGORY;
   savedBasenameHash: string;
@@ -61,10 +65,12 @@ export interface SavedDownloadInspection {
   xlsxReadable: boolean;
   /** Sheet/row/column/header validation is deferred to a follow-up PR that adds a parser. */
   workbookContentValidation: "deferred";
-  /** No cell is ever read (no parser) — structurally true. */
+  /** No cell is ever read by THIS module (no parser) — structurally true. */
   rawCellLeak: false;
   fileRetained: false;
   retentionPolicy: "delete-after-validate";
+  /** True when delete-after-validate could NOT remove the file — observable, never silently retained. */
+  deleteFailed: boolean;
   /**
    * Present ONLY when an `uploadFn` was injected (the `--diagnose-upload-saved-review-download`
    * path) AND the file validated as a real `.xlsx`. A sanitized backend ingest inspection — its
@@ -72,10 +78,17 @@ export interface SavedDownloadInspection {
    * on the observe/save-only paths.
    */
   uploaded?: UploadInspection;
+  /**
+   * Present ONLY when an `inspectFn` was injected AND the file validated as a real `.xlsx`. The
+   * injected fn runs on the still-present quarantine file BEFORE the delete and returns a SANITISED
+   * inspection (e.g. the Gate-4 schema-shape). This module stays parser-free and decoupled — it
+   * never reads a cell itself and never imports the inspector's module.
+   */
+  inspection?: R;
 }
 
 /** Exact top-level key allow-list — used by the offline no-leak test. */
-export const SAVED_DOWNLOAD_INSPECTION_KEYS: ReadonlyArray<keyof SavedDownloadInspection> = [
+export const SAVED_DOWNLOAD_INSPECTION_KEYS: ReadonlyArray<keyof SavedDownloadInspection<unknown>> = [
   "downloadSaved",
   "savedPathCategory",
   "savedBasenameHash",
@@ -86,10 +99,12 @@ export const SAVED_DOWNLOAD_INSPECTION_KEYS: ReadonlyArray<keyof SavedDownloadIn
   "rawCellLeak",
   "fileRetained",
   "retentionPolicy",
+  "deleteFailed",
   "uploaded",
+  "inspection",
 ];
 
-export interface SaveDownloadOpts {
+export interface SaveDownloadOpts<R = never> {
   /** The gitignored quarantine directory (e.g. `downloads/diagnostic`). */
   dir: string;
   /** Salt for the basename hash (shared `storageProbeSalt`). */
@@ -106,6 +121,14 @@ export interface SaveDownloadOpts {
    * never writes status, and never lets the raw path escape — the fn receives it transiently.
    */
   uploadFn?: (path: string) => Promise<UploadInspection>;
+  /**
+   * Optional pre-delete INSPECT hook (the Gate-4 `--inspect-schema-shape` path). When set AND the
+   * saved file validates as a real `.xlsx`, the injected fn reads the still-present quarantine file
+   * BEFORE the delete and returns a SANITISED result (e.g. the schema-shape). The fn owns whatever
+   * read it performs; this module remains parser-free and never imports the inspector. The raw path
+   * is passed transiently and never logged or returned.
+   */
+  inspectFn?: (path: string) => Promise<R>;
 }
 
 /** Pure: coarse size bucket (never the exact count). */
@@ -167,7 +190,11 @@ const defaultIo: DownloadSaveIo = {
   },
 };
 
-function failedInspection(salt: string | undefined, basename: string, category: ExtensionCategory): SavedDownloadInspection {
+function failedInspection<R = never>(
+  salt: string | undefined,
+  basename: string,
+  category: ExtensionCategory,
+): SavedDownloadInspection<R> {
   return {
     downloadSaved: false,
     savedPathCategory: PATH_CATEGORY,
@@ -179,6 +206,7 @@ function failedInspection(salt: string | undefined, basename: string, category: 
     rawCellLeak: false,
     fileRetained: false,
     retentionPolicy: "delete-after-validate",
+    deleteFailed: false,
   };
 }
 
@@ -187,15 +215,18 @@ function failedInspection(salt: string | undefined, basename: string, category: 
  * Returns a sanitized inspection. Never throws — a save/validate failure degrades to a sanitized
  * `downloadSaved:false` record. The file is always removed in `finally` (delete-after-validate).
  */
-export async function saveAndInspectDownload(
+export async function saveAndInspectDownload<R = never>(
   download: SaveableDownload,
-  opts: SaveDownloadOpts,
-): Promise<SavedDownloadInspection> {
+  opts: SaveDownloadOpts<R>,
+): Promise<SavedDownloadInspection<R>> {
   const io = opts.io ?? defaultIo;
   const headBytes = opts.headBytes ?? DEFAULT_HEAD_BYTES;
   let targetPath = "";
   let basename = "";
   let category: ExtensionCategory = "unknown";
+  // `result` is the reference returned from try/catch; the finally block mutates `deleteFailed` on
+  // it AFTER the delete attempt, so the caller sees an HONEST cleanup outcome.
+  let result: SavedDownloadInspection<R> = failedInspection<R>(opts.salt, basename, category);
   try {
     const rawName = download.suggestedFilename();
     category = extensionCategory(rawName);
@@ -206,12 +237,12 @@ export async function saveAndInspectDownload(
     const size = io.fileSize(targetPath);
     const head = io.readHead(targetPath, headBytes);
     const xlsxReadable = sniffXlsxReadable(head);
-    // Controlled backend upload (only when the hook is wired AND the file is a real .xlsx): upload
-    // the quarantine file BEFORE the finally-block deletes it. A non-OOXML payload is never uploaded.
-    // The injected fn owns the sole backend call and returns a sanitized inspection (never throws
-    // past its own boundary, but guard here too so a hook error still degrades cleanly).
+    // Pre-delete hooks run ONLY when the file is a structurally-valid .xlsx, and BEFORE the finally
+    // delete. A non-OOXML payload is never uploaded or inspected. Each injected fn owns its own
+    // read/call and returns a sanitized result; this module never parses a cell itself.
     const uploaded = opts.uploadFn && xlsxReadable ? await opts.uploadFn(targetPath) : undefined;
-    return {
+    const inspection = opts.inspectFn && xlsxReadable ? await opts.inspectFn(targetPath) : undefined;
+    result = {
       downloadSaved: true,
       savedPathCategory: PATH_CATEGORY,
       savedBasenameHash: messageFingerprint(opts.salt, basename),
@@ -222,17 +253,23 @@ export async function saveAndInspectDownload(
       rawCellLeak: false,
       fileRetained: false,
       retentionPolicy: "delete-after-validate",
+      deleteFailed: false,
       ...(uploaded ? { uploaded } : {}),
+      ...(inspection !== undefined ? { inspection } : {}),
     };
+    return result;
   } catch {
-    return failedInspection(opts.salt, basename, category);
+    result = failedInspection<R>(opts.salt, basename, category);
+    return result;
   } finally {
-    // delete-after-validate: best-effort cleanup so no real review data ever lingers on disk.
+    // delete-after-validate: best-effort cleanup so no real review data ever lingers on disk. Record
+    // an honest `deleteFailed` rather than silently assuming the unlink succeeded.
     if (targetPath) {
       try {
         io.removeFile(targetPath);
+        result.deleteFailed = false;
       } catch {
-        /* best-effort — the quarantine dir is gitignored and cleared on the next run anyway */
+        result.deleteFailed = true;
       }
     }
   }

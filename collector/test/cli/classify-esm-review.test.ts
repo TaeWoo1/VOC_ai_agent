@@ -45,13 +45,13 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
     expect(/esmApprovalRequiredMessage\s*\(/.test(code)).toBe(true);
   });
 
-  it("imports ONLY the pure probe for classification (no capture/upload/status module)", () => {
+  it("delegates classification to the SHARED no-click scan (no capture/upload/status module)", () => {
     const importLines = code
       .split("\n")
       .filter((l) => /^\s*import\b/.test(l) || /\bfrom\s+["']/.test(l));
     const imports = importLines.join("\n");
-    expect(/from\s+["']\.\.\/esm\/esm-review-probe["']/.test(imports)).toBe(true);
-    expect(/extractEsmReviewProbeSignals/.test(code)).toBe(true);
+    expect(/from\s+["']\.\.\/esm\/esm-review-live-scan["']/.test(imports)).toBe(true);
+    expect(/classifyOpenEsmReviewPage\s*\(/.test(code)).toBe(true);
     expect(/review-export/.test(imports)).toBe(false);
     expect(/from\s+["'][^"']*upload[^"']*["']/.test(imports)).toBe(false);
     expect(/from\s+["']\.\.\/status["']/.test(imports)).toBe(false);
@@ -68,42 +68,17 @@ describe("classify-esm-review — strict no-click boundary (cannot trigger/captu
     expect(/\.(click|fill|press|selectOption|check|dispatchEvent)\s*\(/.test(code)).toBe(false);
   });
 
-  it("uses the pure visibility cross-check (robust beyond offsetParent), no-click", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-export-visibility["']/.test(code)).toBe(true);
-    expect(/summarizeExportCandidateVisibility\s*\(/.test(code)).toBe(true);
-    // The robust cross-check reads computed style + geometry (never clicks).
-    expect(/getComputedStyle\s*\(/.test(code)).toBe(true);
-    expect(/getBoundingClientRect\s*\(/.test(code)).toBe(true);
-    // Still derives actionability — and feeds it to the probe as a count, not by acting.
-    expect(/exportCandidateActionable/.test(code)).toBe(true);
+  it("delegates the cross-check / bounded settle / frame-aware scan to the shared module", () => {
+    // The scan mechanics (getComputedStyle / frame.evaluate / bounded settle / allowlist
+    // gate) live in esm-review-live-scan.ts; this CLI must not re-implement them.
+    expect(/classifyOpenEsmReviewPage\s*\(\s*page\s*,\s*cfg\.esmFrameOriginAllowlist\s*\)/.test(code)).toBe(true);
+    expect(/getComputedStyle\s*\(/.test(code)).toBe(false);
+    expect(/\.evaluate\s*\(/.test(code)).toBe(false);
+    expect(/scanFramesForExport\s*\(/.test(code)).toBe(false);
   });
 
-  it("uses a BOUNDED DOM-settle (no unbounded wait), reading only an element count", () => {
-    expect(/settleDom\s*\(/.test(code)).toBe(true);
-    expect(/STABILITY_MAX_CHECKS/.test(code)).toBe(true);
-    // The stability poll reads a numeric element count, never DOM text/content.
-    expect(/querySelectorAll\(["']\*["']\)\.length/.test(code)).toBe(true);
-  });
-
-  it("scans SAME-ORIGIN child frames read-only and keeps top/frame scopes separate", () => {
-    expect(/from\s+["']\.\.\/esm\/esm-frame-scan["']/.test(code)).toBe(true);
-    expect(/summarizeFrameAwareExportScan\s*\(/.test(code)).toBe(true);
-    expect(/scanFramesForExport\s*\(/.test(code)).toBe(true);
-    // Frame reads go through frame.evaluate (read-only) — never a click/fill/dispatch.
-    expect(/\.evaluate\s*\(\s*candidateScanInFrame\s*\)/.test(code)).toBe(true);
-    // Same-origin policy is enforced; cross-origin frames are skipped, not entered.
-    expect(/sameOrigin\s*\(/.test(code)).toBe(true);
-    expect(/skipped-cross-origin/.test(code)).toBe(true);
-    // Frame URLs are categorized, never echoed raw.
-    expect(/esmUrlCategory\s*\(\s*frame\.url\(\)\s*\)/.test(code)).toBe(true);
-  });
-
-  it("reads cross-origin frames ONLY via the operator-configured ESM-family allowlist", () => {
-    // The allowlist comes from config (fail-closed when unset) and is checked per frame.
-    expect(/frameHostAllowed\s*\(/.test(code)).toBe(true);
+  it("passes the operator-configured ESM-family allowlist to the shared scan (fail-closed)", () => {
     expect(/cfg\.esmFrameOriginAllowlist/.test(code)).toBe(true);
-    // It never reaches a cross-origin frame except through the allowlist gate.
-    expect(/frameHostAllowed\s*\(\s*frame\.url\(\)\s*,\s*allowlist\s*\)/.test(code)).toBe(true);
     // Only a sanitized boolean about the allowlist is surfaced — never the hosts.
     expect(/allowlistConfigured/.test(code)).toBe(true);
   });
