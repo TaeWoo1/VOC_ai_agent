@@ -692,6 +692,105 @@ confirmation occurred. **REVIEW remains `NEEDS_DISCOVERY`; nothing is CONFIRMED.
 - **No raw row/cell values** in output — hashes / buckets / categories only (Policy A).
 - **Dedup stays `NEEDS_VERIFICATION`; REVIEW stays `NEEDS_DISCOVERY`; nothing CONFIRMED.**
 
+## Gate 5 result — first live row-shape probe run (2026-06-30, populated)
+
+> One supervised, separately-approved live run on a stable IP/environment (slice 4B of
+> the approved Gate 5 plan). The operator **manually set a date range/filter known to
+> contain reviews**; headed browser, human login/navigation/filtering, **one** approved-
+> index click, **one** download, then — before the delete-in-`finally` — both the Gate-4
+> **schema-shape** and the Gate-5 **minimal row-shape** were inspected on the first **3**
+> data rows (`--row-sample-rows=3`), and the file was deleted. Observe-and-discard;
+> **no raw row/cell/header values were read or reported**; no ingest. This is the first
+> time the dormant `--probe-row-shape` flag was exercised against a real populated export.
+
+**Run outcome (sanitized):** `result: CAPTURED_VALID`, `stop: null`.
+
+| signal | value |
+|---|---|
+| `sessionVerdict` | `LOGGED_IN` |
+| `actionableScope` | `allowlisted-frame` (one allowlisted frame; top-document not actionable) |
+| approved index | `0` — bound to exactly one element (`count() === 1`) |
+| `clickedCount` | `1` |
+| `postClickOutcome` | `download-fired` |
+| `fileStructure` / `savedExtensionCategory` | `xlsx-valid` / `xlsx` |
+| `fileSizeBucket` | `small` |
+| `schemaShapeInspected` / `rowShapeProbed` / `minimalRowsInspected` | `true` / `true` / `true` |
+| `deleteFailed` / `fileRetained` | `false` / `false` (`retentionPolicy: delete-after-validate`) |
+| `rawCellLeak` | `false` |
+| `uploaded` / `rowsParsed` / `schemaInferred` / `dedupKeyClaimed` | all `false` |
+
+`downloads/esm-diagnostic` was re-verified **empty** after the run (file deleted; sentinel
+auto-removed). No DB / status / `LAST_SUCCESS` / scheduler / `manualSync` write occurred.
+The pre-existing `.status/naver.json` was **not** modified by this run.
+
+**Schema-shape (this run):** `rowCountBucket: tens`, `columnCount/headerCount: 14`,
+`reviewIdCandidate: false`, `candidateDedupFields: []`, `risks: pii-like-header-present,
+no-dedup-key-candidate` — **identical column layout and header categories to the Gate 4 /
+4b runs**, now on a larger (`tens`) populated set. Export layout remains stable.
+
+**Sanitized minimal row-shape — 14 columns, `sampledRowBucket: few` (of `totalRowBucket:
+tens`); per-column signals only, no cell values:**
+
+| # | header category | `populated` | `valueClass` | `distinctness` | `enumLike` |
+|---|---|---|---|---|---|
+| 1 | replyStatusCandidate | all | text-short | all-same | yes |
+| 2 | productCandidate | all | mixed | all-distinct | no |
+| 3 | ratingCandidate | all | numeric-small | some-distinct | yes |
+| 4 | reviewTextCandidate | all | text-short | all-distinct | no |
+| 5 | reviewTextCandidate | none | empty | n/a | no |
+| 6 | unknown | all | numeric-small | all-same | yes |
+| 7 | productCandidate | all | numeric-long | all-distinct | no |
+| 8 | orderOrBuyerRiskCandidate *(PII)* | all | numeric-long | all-distinct | no |
+| 9 | orderOrBuyerRiskCandidate *(PII)* | all | text-short | all-distinct | no |
+| 10 | orderOrBuyerRiskCandidate *(PII)* | all | id-like | all-same | no |
+| 11 | unknown | all | date-like | all-distinct | no |
+| 12 | reviewDateCandidate | all | date-like | all-distinct | no |
+| 13 | reviewDateCandidate | none | empty | n/a | no |
+| 14 | reviewTextCandidate | all | text-short | some-distinct | yes |
+
+*(The three PII `orderOrBuyerRiskCandidate` columns emit **no value hashes** by design;
+all other columns emit salted per-cell hashes only — never raw values. Hashes are omitted
+from this doc.)*
+
+**Analyser dedup feasibility (signal, NOT confirmation):** `l1Feasible: true`,
+`l2Feasible: true`, `l3Only: false`, `idColumnSuspected: false`, `notes: []`.
+
+### What this populated row-shape establishes (sanitized)
+
+- **No latent stable review-ID surfaced on real rows.** `idColumnSuspected: false`, and
+  `reviewIdCandidate: false` holds at the **row** level, not just the header/empty shape.
+  The two `unknown` columns resolved to a **constant** `numeric-small` (col 6, all-same,
+  enum-like) and a `date-like` value (col 11, all-distinct) — neither is a unique id key.
+  The only `id-like` *valueClass* sits on a **PII** `orderOrBuyerRiskCandidate` column
+  (col 10) and is **`all-same`** (not distinct), so it is **not** a usable per-review id.
+  This **strengthens Gate 4b's no-stable-id finding with populated row-shape evidence** —
+  the composite-key direction remains the working direction.
+- **Candidate component signals (sanitized, unconfirmed) for a composite key:**
+  - **product** — strong: two columns, one `mixed`/all-distinct (col 2) and one
+    `numeric-long`/all-distinct (col 7, looks like a product code);
+  - **date** — present: `reviewDateCandidate` `date-like`/all-distinct (col 12); a second
+    date column (col 13) was empty;
+  - **reviewText** — present: `reviewTextCandidate` `text-short`/all-distinct (col 4); two
+    other text columns were empty (col 5) or `some-distinct` (col 14);
+  - **rating** — present: `ratingCandidate` `numeric-small`/some-distinct/enum-like (col 3).
+  These are **candidate categories with usable distinctness**, not a chosen key or a field
+  mapping.
+
+### What it does NOT establish
+
+- **No cross-export uniqueness/stability** — a single export cannot prove a composite key
+  is stable or collision-free across exports. That is the next slice (two-export overlap
+  validation), not this run.
+- **No field mapping, no schema confirmation, no dedup-key confirmation.**
+  `schemaMappingConfirmed: false`, `dedupKeyConfirmed: false`, `dedupKeyClaimed: false`.
+
+**Status unchanged.** No upload, row parsing into records, schema-mapping confirmation, or
+dedup-key confirmation occurred. **REVIEW remains `NEEDS_DISCOVERY`; dedup remains
+`NEEDS_VERIFICATION`; nothing is CONFIRMED.** The probe surfaced a plausible composite-
+component set (product + date + reviewText + rating) with usable distinctness on real rows
+and no single stable id — the precondition a future **two-export overlap validation** slice
+needs, which is **separately approved and not started here**.
+
 ## Keep-open session-TTL probe — result (2026-06-29, no-click)
 
 > Local-only characterization, not a capability claim. One persistent context kept
