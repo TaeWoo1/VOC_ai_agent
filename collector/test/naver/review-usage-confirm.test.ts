@@ -239,6 +239,7 @@ describe("confirmReviewUsageOnce — controlled save hook (saveDownloadFn) [PR C
     rawCellLeak: false,
     fileRetained: false,
     retentionPolicy: "delete-after-validate",
+    deleteFailed: false,
   };
 
   it("invokes the save hook once with the fired download and surfaces savedDownload (semantic path)", async () => {
@@ -538,6 +539,7 @@ describe("confirmReviewUsageByIndexOnce — controlled save hook (saveDownloadFn
     rawCellLeak: false,
     fileRetained: false,
     retentionPolicy: "delete-after-validate",
+    deleteFailed: false,
   };
 
   it("invokes the save hook once with the fired download and surfaces savedDownload", async () => {

@@ -63,19 +63,24 @@ continuation + an ESM approval flag (e.g. `--i-understand-this-opens-live-esm`),
 emitting only sanitized booleans / bucketed counts / category enums. **Strict
 no-click**: no `.click(`, no `waitForEvent("download")`, no `saveAs`, no upload,
 no status write. Classifies sync-vs-async and locates the export UI without
-triggering it. **Status: IMPLEMENTED + RAN ONCE (sanitized).** The classifier
-(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts`) ran once
-under human-attended login and corroborated the surface; one visibility ambiguity
-remains open (see "Gate 2 result" below). REVIEW stays `NEEDS_DISCOVERY`.
+triggering it. **Status: OBJECTIVE MET (sanitized).** The classifier
+(`src/cli/classify-esm-review.ts` + pure `src/esm/esm-review-probe.ts` +
+`esm-export-visibility.ts` + `esm-frame-scan.ts`) ran **four** times under
+human-attended login. Run #4 (with the ESM-family frame allowlist active) located
+**one actionable export control** (`actionableScope: allowlisted-frame`) — Gate 2's
+goal of locating an actionable, visible export control no-click is **met**. REVIEW
+stays `NEEDS_DISCOVERY`. (See "Gate 2 result — fourth … run" below.)
 
 ### Gate 3 — supervised approved-index single capture
-Only after Gate 2 confirms the layout. Reuse the NAVER **supervised
-approved-index** pattern: locate the review-usage/consent prompt (if any),
-operator passes an explicit `--approved-index`, and **exactly one**
-human-approved click fires a download — observe-and-discard via the
-format-agnostic `review-download-save.ts` (OOXML/ZIP magic sniff, no cell
-parsing, delete-after-validate). No auto-repeat, no upload yet. **Status:
-`NEEDS_DISCOVERY`. Depends on Gates 1–2.**
+Reuse the NAVER **supervised approved-index** pattern, adapted to the cross-origin
+allowlisted frame: locate the review-usage/consent prompt (if any), operator passes
+an explicit `--approved-index`, and **exactly one** human-approved click fires a
+download — observe-and-discard via the format-agnostic `review-download-save.ts`
+(OOXML/ZIP magic sniff, no cell parsing, delete-after-validate). No auto-repeat, no
+upload yet. **Status: JUSTIFIED TO DESIGN — DESIGNED, NOT STARTED.** Gate 2's
+objective is met (run #4 located an actionable control in the `allowlisted-frame`
+scope), so Gate 3 is justified; the full design is in **"Gate 3 design"** below. No
+code, no live run, no click has happened. REVIEW stays `NEEDS_DISCOVERY`.
 
 ### Gate 4 — controlled upload *(only after schema is known)*
 Only after the review xlsx/csv **column schema** — especially the **dedup key**
@@ -228,11 +233,338 @@ emitted**, only the category + booleans/buckets. This crosses the same-origin li
 A **re-run with the allowlist configured is a separately-approved Gate-2 step** — still
 `NEEDS_DISCOVERY`, nothing CONFIRMED, Gate 3 still not justified.
 
+## Gate 2 result — fourth live no-click re-run (allowlist active, sanitized)
+
+A fourth human-attended run, with `ESM_FRAME_ORIGIN_ALLOWLIST` configured
+(`allowlistConfigured: true`), completed safely — same no-click discipline.
+Sanitized findings only:
+
+| Signal | Value |
+|--------|-------|
+| `sessionVerdict` / `domSettle` | `LOGGED_IN` / `stable-no-networkidle` |
+| `manageFeedbackRouteLike` | `true` |
+| `asyncMarkerPresent` / `exportLayoutHint` | `false` / `SYNC_LIKELY` |
+| top-document candidates | total `few` / visible `none` / enabled `few` / **actionable `none`** |
+| `frameCount` / `skippedFrameCount` / `allowlistedFrameCount` | `few` / `none` / `one` |
+| allowlisted frame | category `seller-center`, `readResult: read`, `allowlisted: true` |
+| allowlisted frame candidates | total `one` / visible `one` / enabled `one` / **actionable `one`** |
+| aggregate `hasActionableExportCandidate` | **`true`** |
+| `actionableScope` | **`allowlisted-frame`** |
+
+**The actionable export control is located in the `allowlisted-frame` scope.** The
+cross-origin ESM-family vendor iframe — skipped in run #3 — was read read-only via the
+allowlist, and inside it is **exactly one** actionable (visible AND enabled) export
+control. **The top-document candidates are decoys** (`actionable: none` across all four
+runs — outer-shell menu items, not the export button).
+
+**Gate 2 objective is MET.** An actionable, visible export control was located
+**no-click**. The visibility / scope ambiguity that blocked Gate 3 is resolved.
+
+**Gate 3 is justified to DESIGN — but has NOT started** (no code, no live run, no click
+in this slice). REVIEW remains `NEEDS_DISCOVERY`; locating a control is **not**
+capability confirmation — the capture → schema → ingest path (Gates 3–4) is still ahead.
+
+## Gate 3 design — supervised approved-index single capture (DESIGN ONLY)
+
+> **Design posture, not execution.** Nothing below is built or run in this slice. The
+> Gate-3 code slice and any Gate-3 live run are each **separately approved**. ESM+
+> REVIEW stays `NEEDS_DISCOVERY`; nothing is CONFIRMED by this design.
+
+**Shape.** Mirror the NAVER supervised approved-index precedent
+(`review-usage-confirm.ts` + `export-click-diagnose.ts` + `review-download-save.ts`),
+adapted to the **cross-origin allowlisted frame** that run #4 found. The operator runs a
+gated CLI under the ESM approval flag, the human logs in and reaches the review surface,
+the tool scans the **allowlisted frame** for export/consent candidates and prints
+**sanitized indexed candidate metadata** (index + coarse category + visible/enabled
+booleans — never raw text). The operator passes an explicit `--approved-index`; the tool
+re-scans (single source of index numbering), validates the chosen candidate is still
+present/visible/enabled **on this run**, and fires **exactly one** click bound to that
+single element. The fired download is observed and discarded.
+
+**Hard invariants (carried from NAVER, extended for ESM):**
+
+- **Cross-origin allowlisted-frame aware** — the click targets the candidate inside the
+  allowlisted vendor frame (run #4 scope); the frame is re-confirmed allowlisted +
+  readable immediately before acting.
+- **Exactly one human-approved candidate index**, **exactly one click**, bound to a
+  single element (`count() === 1` guard). **No auto-repeat. No broad/loop selector
+  clicking. No fallback clicking** of other candidates.
+- **No credential typing; no CAPTCHA / 2FA bypass** — the human authenticates.
+- **No DB write**, **no status / `LAST_SUCCESS` write**, **no scheduler / manualSync**.
+- **No upload in Gate 3** unless separately approved (Gate 4).
+- **Observe-and-discard.** Save the fired download to the gitignored quarantine, run
+  **structural file validation only** (OOXML/ZIP magic sniff + extension category — the
+  existing `review-download-save.ts`), then **delete-after-validate** in a `finally`.
+- **No raw filename in logs** (salted-hash basename only). **No row parsing.** **No
+  review text / product / customer / seller identifiers** logged or emitted — sanitized
+  buckets / categories / booleans only.
+
+**Gate 3 must handle (each a recorded sanitized outcome, several are stop conditions):**
+
+- **Consent / usage prompt** appears before download → surface it as a sanitized
+  candidate (category only); require an explicit approved index for it too; never
+  auto-accept.
+- **Sync vs async** — run #4 says `SYNC_LIKELY`, but treat **async / unknown** as a
+  **stop condition**: if the click yields a job/queue affordance instead of a download,
+  record `async-observed` and stop (no polling, no second action).
+- **Download timeout** → record `download-timeout`, stop, no retry.
+- **No download event** after the click → record `no-download-event`, stop (no retry, no
+  second click).
+- **Multiple candidates** at the approved index scope → refuse without clicking
+  (`ambiguous-candidates`); the operator must re-approve a single index.
+- **Candidate disappears / not actionable** on the confirming re-scan → refuse without
+  clicking (`candidate-gone`).
+- **Frame no longer allowlisted / readable** (origin changed, detached) → refuse without
+  clicking (`frame-unavailable`).
+- **Downloaded file not xlsx/csv** (magic sniff fails) → record `unrecognized-format`,
+  delete, stop — never parse, never upload.
+- **Any PII-bearing page/file risk** → the file is quarantined, never opened/parsed, and
+  deleted after the structural sniff; no page content is logged.
+
+**Gate 3 success (all must hold):**
+
+1. exactly **one approved click fired**;
+2. exactly **one file observed**;
+3. the file **structurally validates** as xlsx/csv (magic sniff only);
+4. the file is **deleted after validation**;
+5. only a **sanitized capture summary** is emitted (booleans / buckets / categories);
+6. **no upload**;
+7. **no schema / dedup-key claims** are made.
+
+**Gate 3 non-goals (explicitly out of scope):** not upload; not parse rows; not infer
+column schema; not confirm the dedup key; not mark ESM+ REVIEW `CONFIRMED`; not enable
+scheduled collection. Those belong to Gate 4 and a later product decision.
+
+## Gate 3 result — supervised approved-index single capture (2026-06-30)
+
+> One human-attended live run under explicit per-run approval. Observe-and-discard:
+> exactly one approved click, one download, structural validation only, then delete.
+> Sanitized summary only — booleans / categories / buckets / a salted-hash basename;
+> no raw URL / frame URL / host / origin / DOM text / selector / filename / identifier.
+
+**Gate 3 objective is MET.** A single supervised approved-index click yielded **one
+structurally-valid `.xlsx` download**, which was **deleted after validation**.
+
+| gate / observation | value |
+|---|---|
+| `sessionVerdict` | `LOGGED_IN` |
+| `actionableScope` | `allowlisted-frame` (one read frame, candidate actionable `one`) |
+| top-document candidates | actionable `none` (decoys) |
+| `approvedIndex` | `0`, bound uniquely (`count() === 1`) |
+| consent prompt | none |
+| `clickedCount` | **1** (exactly one click) |
+| `postClickOutcome` | `download-fired` (exactly one download observed) |
+| `fileStructure` / `savedExtensionCategory` | `xlsx-valid` / `xlsx` |
+| `xlsxReadable` | `true` (structural OOXML/ZIP magic sniff — no cell read) |
+| `fileSizeBucket` | `small` |
+| basename | `savedBasenameHash` only (no raw filename) |
+| `workbookContentValidation` | `deferred` |
+| `rawCellLeak` / `fileRetained` | `false` / `false` |
+| `retentionPolicy` | `delete-after-validate` (quarantine folder empty after the run) |
+| `uploaded` / `rowsParsed` / `schemaInferred` / `dedupKeyClaimed` | `false` / `false` / `false` / `false` |
+
+**What this establishes:** the allowlisted-frame export control located in Gate 2
+(run #4) does, on one supervised click, produce a single structurally-valid xlsx
+download end-to-end. **No upload, no row parsing, no schema inference, and no dedup
+claim occurred.**
+
+**What this does NOT establish:** the file's **contents / schema** are unread, so this
+**does not confirm ESM+ REVIEW capability**. Locating + capturing a file is not
+ingestion. **REVIEW remains `NEEDS_DISCOVERY`; nothing is CONFIRMED.** Gate 4 (schema
+discovery) is now justified to **design**.
+
+## Gate 4 design — workbook schema discovery (DESIGN ONLY)
+
+> **Design posture, not execution.** Nothing below is built or run. The Gate-4 code
+> slice and any Gate-4 live/offline run are each **separately approved**. ESM+ REVIEW
+> stays `NEEDS_DISCOVERY`; nothing is CONFIRMED by this design.
+
+**Objective.** **Schema discovery only** — determine the workbook's *structure* (sheets,
+header row, column shape) safely enough to plan a future normalizer, **without** reading
+or logging any row content. This is the bridge between "a valid file exists" (Gate 3) and
+a future ingest decision — it does **not** itself ingest.
+
+**Hard invariants:**
+
+- **Inspect workbook structure safely** — open the (quarantined) xlsx read-only to read
+  sheet/column *shape*; **no row text is ever logged**; the file stays observe-and-discard
+  (delete after inspection), exactly as Gate 3.
+- **No customer / product / seller / review identifiers** in logs or output — ever.
+- **Column headers** may be summarized **only** as sanitized categories or hashed /
+  header-count metadata (e.g. "N columns; header row present; a date-like / rating-like /
+  text-like column appears") — the **raw header strings are not emitted** unless explicitly
+  approved in a later step.
+- **Candidate-field identification, not mapping** — identify *candidate* columns for
+  review id, date, rating, product, content, and reply/status, but **do not claim any
+  field mapping until verified**. Every candidate is provisional / `NEEDS_VERIFICATION`.
+- **Dedup key stays `NEEDS_VERIFICATION`** — Gate 4 does not confirm it.
+- **No upload, no DB ingest, no status / scheduler / manualSync, no backend capability
+  change.** **No `CONFIRMED` capability.**
+
+**Gate 4 non-goals:** not ingest; not normalize for real; not confirm field mappings or
+the dedup key; not mark ESM+ REVIEW `CONFIRMED`; not enable scheduled collection. Those
+remain a later, separately-approved product decision.
+
+## Gate 4 implementation — schema-shape inspector (built locally, NOT yet run on a real file)
+
+> The Gate-4 design above is now **implemented offline**. It has **not** been executed
+> against a real ESM+ export. Sanitized schema-shape only; no real-file run, no ingest.
+
+**What exists locally (offline, dependency-free):**
+
+- a **pure schema-shape summariser** — categorises + salt-hashes header strings, derives
+  the row bucket, lists dedup candidates, and collects risk tokens;
+- a **dependency-free xlsx reader** — opens the ZIP, inflates only the structural parts
+  via Node's built-in `zlib`, and reads **sheet/row/column shape + the header row only**
+  (it never reads a data-row cell); adds **no dependency** (`package.json`/lock unchanged);
+- an **offline CLI** (`inspect-esm-review-xlsx`) that takes an **explicit local xlsx path**
+  (`--xlsx <path>`) and prints the sanitized summary.
+
+**Behaviour / invariants (enforced by tests):**
+
+- **Offline-only** — launches no browser; no click / download / upload / API / DB / status
+  write / scheduler / `manualSync`; no backend capability change.
+- **Reads structure + the header row only** — never reads or emits a data-row cell value.
+- **Raw headers are never printed** — header metadata is **hash + candidate category** only.
+- **Risk-first categorisation** — buyer / order / contact / author-like headers are flagged
+  as a sanitized risk (`pii-like-header-present`) and never emitted raw.
+- **Candidate-only** — dedup-key candidates are candidates; `dedupKeyConfirmed: false` and
+  `schemaMappingConfirmed: false` always. No field mapping is claimed.
+- **No raw path / filename / identifier** is ever logged.
+- Tests green: `typecheck` clean, `npm test` 1561 passed / 1 skipped, `git diff --check` clean.
+
+**Not yet run on a real file — and why.** The Gate 3 capture is **observe-and-discard**, so
+it **deleted** its downloaded xlsx after structural validation; no real ESM+ workbook is
+retained on disk. A real Gate-4 schema-shape run therefore needs **either** a separately
+approved **capture → inspect → delete** flow (capture a file, inspect its shape, delete it
+in the same supervised run) **or** a quarantined test xlsx supplied for offline inspection.
+Both are **separately approved** and **not started here**.
+
+**Status unchanged.** The inspector's output is **sanitized schema-shape only**; no upload,
+DB ingest, row parsing, schema confirmation, or dedup confirmation occurs. **REVIEW remains
+`NEEDS_DISCOVERY`; nothing is CONFIRMED.** Gate 4 *real execution* is a separate, approved
+step that has not been taken.
+
+## Gate 4 capture→inspect→delete wiring — implemented locally, NOT yet live-run
+
+> The "either a capture→inspect→delete flow **or** a quarantined test xlsx" choice noted
+> above is now resolved on the code side: the **capture→inspect→delete** path is wired
+> into the existing Gate 3 capture CLI as an **opt-in** flag. It is **implemented and
+> green offline**, but has **not** been run live. The live run is intentionally deferred
+> until the ESM+ IP/environment is stable for live testing.
+
+**What was wired (offline, green):**
+
+- `capture-esm-review` gained an **opt-in** `--inspect-schema-shape` flag. Without the
+  flag, the existing Gate 3 path is **byte-for-byte preserved**.
+- The shared save module's `saveAndInspectDownload<R>` now accepts a **generic pre-delete
+  `inspectFn`** hook. It runs **only after** the structural xlsx validation passes, and
+  **before** the delete-in-`finally`, surfacing an optional sanitized `inspection`.
+- Under the flag, `inspectFn` is `summarizeSchemaShape(readWorkbookShape(path), salt)` —
+  the same Gate-4 offline inspector — so the captured file's **schema shape** is read
+  once, in-frame of the same supervised run, then the file is deleted.
+- `deleteFailed: boolean` is now **observable** (the cleanup result is surfaced, not
+  silently assumed); a failed cleanup stops with `delete-failed`, and a flagged-but-
+  unreadable workbook stops with `schema-inspect-failed` (both fail-closed).
+- The shared save module stays **parser-free and ESM-decoupled** (no xlsx parser, no
+  `esm-review-*` import in it — the generic `R` keeps it decoupled).
+
+**Invariants preserved (source-guarded by tests):**
+
+- **Exactly one** click path and **one** download wait remain (Gate 3 unchanged).
+- Sanitized output only — schema-shape booleans / buckets / hash+category header meta;
+  no raw header, cell, path, filename, URL, or identifier.
+- Honest non-goal markers held: `schemaMappingConfirmed: false`, `dedupKeyConfirmed: false`,
+  `uploaded: false`, `rowsParsed: false`, `schemaInferred: false`, `dedupKeyClaimed: false`,
+  `fileRetained: false`.
+- No upload / DB / status write / scheduler / `manualSync` on the new path.
+- Tests green: `typecheck` clean, `npm test` 1572 passed / 1 skipped, `git diff --check`
+  clean; `package.json` / lock unchanged.
+
+**Live run is deferred (by design).** ESM+ live work is paused while the current
+IP/environment is not stable for live testing. The later live command will be:
+
+```bash
+npm run capture-esm-review -- --i-understand-this-opens-live-esm --approved-index 0 --inspect-schema-shape
+```
+
+That run **still requires separate explicit approval** (live browser, human login, one
+click, one download, inspect-before-delete, observe-and-discard). It has **not** been
+started here.
+
+**Status unchanged.** The wiring is local code + tests only. **REVIEW remains
+`NEEDS_DISCOVERY`; nothing is CONFIRMED.**
+
+## Keep-open session-TTL probe — result (2026-06-29, no-click)
+
+> Local-only characterization, not a capability claim. One persistent context kept
+> open across four no-click reads; never clicked, downloaded, uploaded, or wrote
+> status. Sanitized rows persisted to the gitignored `.status/esm-session-ttl-probe.jsonl`.
+
+A single logged-in ESM+ context with periodic no-click activity was read at **T0,
+T+120m, T+190m, and T+240m**. Every checkpoint:
+
+| signal | T0 / T+120m / T+190m / T+240m |
+|---|---|
+| `sessionVerdict` | **`LOGGED_IN`** at all four |
+| `actionableScope` | `allowlisted-frame` at all four |
+| `hasActionableExportCandidate` | `true` at all four |
+| `allowlistedFrameCount` / `skippedFrameCount` | `one` / `none` |
+| `exportLayoutHint` / `asyncMarkerPresent` | `SYNC_LIKELY` / `false` |
+| `stop` | `null` (never expired) |
+
+**What this shows:** a kept-open ESM+ browser context with light periodic no-click
+reads stayed usable **past the documented ~3h boundary and through 4h** — the session
+did not expire mid-window, and the export control stayed locatable throughout. This
+supports the product hypothesis that a **keep-open connector worker on a ~2-hour
+internal sync cadence is viable**.
+
+**What this does NOT show (still open):**
+
+- It does **not** prove repeated **download/capture** stability (no click ever fired).
+- It does **not** prove **restart / cold-context** persistence (one continuous process;
+  reopening the profile has separately been observed to often require re-login).
+- It does **not** characterize an **idle** session (each checkpoint did light activity);
+  absolute-vs-idle-timeout is not disambiguated by this single keep-open run.
+- ESM+ REVIEW stays `NEEDS_DISCOVERY`; nothing is CONFIRMED.
+
+## Product design note — separate sync cadence from report schedule
+
+The TTL result motivates a clean split (design posture, not built):
+
+- **Internal connector sync** — default **every ~2 hours**, for data freshness and to
+  keep the authenticated session warm. This is the only thing tied to the browser export
+  cadence.
+- **User report / dashboard schedule** — a **user-chosen** reporting time, generated from
+  the **latest successfully synced DB snapshot**. It is *decoupled* from the export
+  cadence: the report reads stored data, it does not drive a live export.
+- **Dashboard surface** — show `lastSyncedAt`, `nextSyncAt`, `syncStatus`, and
+  `reconnectRequired` when applicable, so freshness and any reconnect need are visible
+  without conflating "when my report runs" with "when the browser exports".
+
+Hard line: the user-facing report time is **not** the same thing as the browser export
+cadence. Conflating them would couple report delivery to live-session health.
+
+## Next development direction — Gate 3 live capture validation (separately approved)
+
+The TTL result clears the session-continuity question that motivated keeping a worker
+open; the next unknown is whether a **single supervised capture** actually fires and
+yields a structurally valid file. Scope when approved (already designed above):
+
+- one supervised **approved-index** click; one download;
+- **structural validation only** (magic sniff), **delete-after-validate**;
+- **no upload**, **no row parsing**, **no schema / dedup claims**, **no CONFIRMED**
+  capability.
+
+Gate 3 live capture is **not** started here and requires its own explicit per-run
+approval in a stable environment (user-owned test seller account).
+
 ## Standing constraints for this track
 
-- No ESM+ review collection is implemented yet. **Three human-attended, read-only
+- No ESM+ review collection is implemented yet. **Four human-attended, read-only
   no-click classifier runs** have occurred (Gate 2 above); **no click, no download,
-  and no upload have ever happened**, and no upload path is enabled.
+  and no upload have ever happened**, and no upload path is enabled. Gate 3 is
+  **designed but not started** — no supervised click has occurred.
 - Cross-origin frames are read **only** when on the operator-configured ESM-family
   allowlist (`ESM_FRAME_ORIGIN_ALLOWLIST`), which is **fail-closed** (empty → none) and
   reaches only trusted first-party vendor origins; raw hosts/origins are never emitted.

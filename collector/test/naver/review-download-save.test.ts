@@ -43,6 +43,7 @@ interface FakeOpts {
   head?: Uint8Array;
   ensureThrows?: boolean;
   saveAsThrows?: boolean;
+  removeThrows?: boolean;
 }
 interface FakeHandles {
   io: DownloadSaveIo;
@@ -66,6 +67,7 @@ function makeFakes(opts: FakeOpts = {}): FakeHandles {
     },
     removeFile(): void {
       calls.removeFile += 1;
+      if (opts.removeThrows) throw new Error("unlink fail");
     },
   };
   const download: SaveableDownload = {
@@ -226,6 +228,71 @@ describe("saveAndInspectDownload — optional uploadFn (upload-before-delete, on
     const { io, download } = makeFakes({ size: 50_000 });
     const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
     expect(r.uploaded).toBeUndefined();
+  });
+});
+
+describe("saveAndInspectDownload — optional inspectFn (inspect-before-delete, only when xlsxReadable)", () => {
+  const FAKE_SHAPE = { readable: true, tag: "schema-shape" };
+
+  it("inspects the saved file BEFORE deleting it, exactly once, and surfaces the result", async () => {
+    const { io, download, calls } = makeFakes({ size: 50_000 });
+    let inspectCalls = 0;
+    let removeCountAtInspect = -1;
+    let inspectedPath = "";
+    const inspectFn = async (path: string): Promise<typeof FAKE_SHAPE> => {
+      inspectCalls += 1;
+      removeCountAtInspect = calls.removeFile; // 0 ⇒ inspected before the delete
+      inspectedPath = path;
+      return FAKE_SHAPE;
+    };
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io, inspectFn });
+    expect(inspectCalls).toBe(1);
+    expect(removeCountAtInspect).toBe(0); // inspect-before-delete
+    expect(calls.removeFile).toBe(1); // still deleted after (delete-after-validate)
+    expect(r.fileRetained).toBe(false);
+    expect(inspectedPath.startsWith(OPTS_DIR)).toBe(true);
+    expect(r.inspection).toEqual(FAKE_SHAPE);
+    expect((SAVED_DOWNLOAD_INSPECTION_KEYS as readonly string[]).includes("inspection")).toBe(true);
+  });
+
+  it("does NOT inspect a non-OOXML payload (skips inspectFn when !xlsxReadable), still saves+deletes", async () => {
+    const { io, download, calls } = makeFakes({ head: new Uint8Array([0x3c, 0x68, 0x74, 0x6d, 0x6c]) });
+    let inspectCalls = 0;
+    const r = await saveAndInspectDownload(download, {
+      dir: OPTS_DIR,
+      salt: "s",
+      io,
+      inspectFn: async () => {
+        inspectCalls += 1;
+        return FAKE_SHAPE;
+      },
+    });
+    expect(r.xlsxReadable).toBe(false);
+    expect(inspectCalls).toBe(0); // inspector runs ONLY after structural validation passes
+    expect(r.inspection).toBeUndefined();
+    expect(calls.removeFile).toBe(1);
+  });
+
+  it("without an inspectFn, no inspection field", async () => {
+    const { io, download } = makeFakes({ size: 50_000 });
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
+    expect(r.inspection).toBeUndefined();
+  });
+});
+
+describe("saveAndInspectDownload — deleteFailed is observable", () => {
+  it("deleteFailed:false on a normal save→validate→delete", async () => {
+    const { io, download } = makeFakes({ size: 50_000 });
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
+    expect(r.deleteFailed).toBe(false);
+  });
+
+  it("deleteFailed:true when the unlink throws (file could not be removed)", async () => {
+    const { io, download, calls } = makeFakes({ size: 50_000, removeThrows: true });
+    const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
+    expect(r.downloadSaved).toBe(true);
+    expect(calls.removeFile).toBe(1); // attempted...
+    expect(r.deleteFailed).toBe(true); // ...but failed, and that is surfaced (never silently retained)
   });
 });
 
