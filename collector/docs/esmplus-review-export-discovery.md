@@ -675,6 +675,23 @@ and a populated export.
 **Status unchanged.** No upload, row parsing, schema-mapping confirmation, or dedup-key
 confirmation occurred. **REVIEW remains `NEEDS_DISCOVERY`; nothing is CONFIRMED.**
 
+### Next step — Gate 5 minimal row-shape analyser design — DONE 2026-06-30
+
+> **Drafted 2026-06-30** as a linked design doc:
+> [`esmplus-review-row-shape-design.md`](./esmplus-review-row-shape-design.md) (slice 2 of
+> the approved Gate 5 plan). Designs the **minimal-row analyser** that reads the first N
+> data rows and reduces each cell to sanitized signals (presence / value-class / salted
+> hash / per-column distinctness) to evaluate the L1/L2/L3 dedup candidates and test the
+> "no stable ID" assumption at the row level. Reuses the dependency-free xlsx reader
+> (extended to first-N rows) and the schema-shape sanitiser primitives; a new pure
+> `esm-review-row-shape.ts` sibling does the analysis.
+
+- **Offline design only** — no code in this slice; slice 3 implements it with synthetic
+  fixtures, slice 4 runs it live behind a new opt-in `--probe-row-shape` flag.
+- **No upload / DB / status / scheduler / `manualSync`**, no live browser.
+- **No raw row/cell values** in output — hashes / buckets / categories only (Policy A).
+- **Dedup stays `NEEDS_VERIFICATION`; REVIEW stays `NEEDS_DISCOVERY`; nothing CONFIRMED.**
+
 ## Keep-open session-TTL probe — result (2026-06-29, no-click)
 
 > Local-only characterization, not a capability claim. One persistent context kept
