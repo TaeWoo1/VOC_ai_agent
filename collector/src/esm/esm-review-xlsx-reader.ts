@@ -116,14 +116,54 @@ export function columnLetterToNumber(letters: string): number {
   return n;
 }
 
+/** A raw data cell, column-aware (Gate 5). `col` is the 1-based column from the cell ref. */
+export interface DataCell {
+  col: number | null;
+  type: string | null;
+  v: string | null;
+  inline: string | null;
+}
+
 interface SheetScan {
   rowCount: number;
   dimensionColumns: number | null;
   firstRowCells: Array<{ type: string | null; v: string | null; inline: string | null }>;
+  /** First ≤`maxDataRows` populated data rows' cells (Gate 5). Undefined unless requested. */
+  dataRows?: DataCell[][];
 }
 
-/** Pure: scan a worksheet's XML for row count, declared column width, and the header row's cells. */
-export function scanSheetXml(sheetXml: string): SheetScan {
+/** Pure: extract a row's cells with their 1-based column index (Gate 5 data-row read). */
+export function extractDataCells(rowInner: string): DataCell[] {
+  const out: DataCell[] = [];
+  const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+  let c: RegExpExecArray | null;
+  while ((c = cellRe.exec(rowInner)) !== null) {
+    const attrs = c[1] ?? "";
+    const body = c[2] ?? "";
+    const refLetters = /\br="([A-Za-z]+)\d+"/.exec(attrs)?.[1] ?? null;
+    const col = refLetters ? columnLetterToNumber(refLetters) : null;
+    const type = /\bt="([^"]+)"/.exec(attrs)?.[1] ?? null;
+    const v = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? null;
+    const inlineBlock = /<is>([\s\S]*?)<\/is>/.exec(body)?.[1] ?? null;
+    let inline: string | null = null;
+    if (inlineBlock !== null) {
+      inline = "";
+      const tRe = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
+      let t: RegExpExecArray | null;
+      while ((t = tRe.exec(inlineBlock)) !== null) inline += decodeXml(t[1] ?? "");
+    }
+    out.push({ col, type, v, inline });
+  }
+  return out;
+}
+
+/**
+ * Pure: scan a worksheet's XML for row count, declared column width, and the header row's
+ * cells. When `maxDataRows > 0`, ALSO collect the first ≤N **populated** data rows' cells
+ * (column-aware) for the Gate 5 minimal row-shape read — the default (0) preserves the
+ * Gate 4 header-only behaviour byte-for-byte.
+ */
+export function scanSheetXml(sheetXml: string, maxDataRows = 0): SheetScan {
   const rowCount = (sheetXml.match(/<row\b/g) ?? []).length;
 
   let dimensionColumns: number | null = null;
@@ -158,7 +198,32 @@ export function scanSheetXml(sheetXml: string): SheetScan {
       firstRowCells.push({ type, v, inline });
     }
   }
-  return { rowCount, dimensionColumns, firstRowCells };
+
+  let dataRows: DataCell[][] | undefined;
+  if (maxDataRows > 0) {
+    dataRows = [];
+    // Self-closing `<row .../>` (blank) alternative first, so a blank row is skipped rather
+    // than pairing its `>` with the next row's `</row>`.
+    const rowRe = /<row\b[^>]*?\/>|<row\b[^>]*>([\s\S]*?)<\/row>/g;
+    let r: RegExpExecArray | null;
+    let seenHeader = false;
+    while ((r = rowRe.exec(sheetXml)) !== null && dataRows.length < maxDataRows) {
+      const inner = r[1];
+      if (inner === undefined) {
+        if (!seenHeader) seenHeader = true; // a (degenerate) blank header row
+        continue; // blank row — no cells
+      }
+      if (!seenHeader) {
+        seenHeader = true; // the first non-blank <row> is the header — already captured above
+        continue;
+      }
+      const cells = extractDataCells(inner);
+      // Only keep rows that carry at least one value (skip fully-blank rows).
+      if (cells.some((c) => c.v !== null || c.inline !== null)) dataRows.push(cells);
+    }
+  }
+
+  return { rowCount, dimensionColumns, firstRowCells, dataRows };
 }
 
 /** Resolve the header row's cells to text, using the shared-strings table where referenced. */
@@ -254,5 +319,107 @@ export function readWorkbookShape(filePath: string): WorkbookShape {
     columnCount,
     headers,
     readerRisks: [],
+  };
+}
+
+/** Resolve a single data cell to its text (shared-string / inline / literal), or null if empty. */
+function resolveCellText(cell: DataCell, shared: readonly string[]): string | null {
+  if (cell.type === "s" && cell.v !== null) {
+    const idx = Number.parseInt(cell.v, 10);
+    return Number.isInteger(idx) ? (shared[idx] ?? "") : "";
+  }
+  if (cell.type === "inlineStr" && cell.inline !== null) return cell.inline;
+  if (cell.v !== null) return decodeXml(cell.v); // t="str" or literal numeric/boolean
+  return null;
+}
+
+/** Place a row's cells into a fixed-length, column-aligned array (null = empty in that column). */
+function resolveRowToColumns(cells: DataCell[], shared: readonly string[], columnCount: number): Array<string | null> {
+  const row = new Array<string | null>(Math.max(0, columnCount)).fill(null);
+  let seq = 0; // fallback position when a cell lacks an explicit column ref
+  for (const cell of cells) {
+    const idx = cell.col !== null ? cell.col - 1 : seq;
+    seq = idx + 1;
+    if (idx >= 0 && idx < row.length) row[idx] = resolveCellText(cell, shared);
+  }
+  return row;
+}
+
+/**
+ * Gate 5 reader → analyser handoff. Extends `WorkbookShape` with the **column-aligned RAW**
+ * header cells and the first ≤`maxDataRows` populated data rows. These raw arrays are
+ * INPUT-ONLY for the pure analyser (`esm-review-row-shape.ts`) — they are hashed / classified
+ * and NEVER emitted. Reading them is the only difference from `readWorkbookShape`.
+ */
+export interface WorkbookRowSample extends WorkbookShape {
+  /** Column-aligned RAW header cells (length `columnCount`). INPUT ONLY — never emitted. */
+  headerCells: ReadonlyArray<string | null>;
+  /** First ≤N populated data rows, column-aligned RAW values. INPUT ONLY — never emitted. */
+  sampleRows: ReadonlyArray<ReadonlyArray<string | null>>;
+}
+
+function emptySample(base: WorkbookShape): WorkbookRowSample {
+  return { ...base, headerCells: [], sampleRows: [] };
+}
+
+/**
+ * Read an xlsx into a `WorkbookRowSample`: the same structural shape as `readWorkbookShape`
+ * PLUS the first ≤`maxDataRows` populated data rows (column-aligned, raw). Never throws to the
+ * caller — every failure path yields an unreadable shape with empty samples + a sanitized risk.
+ * Reads no more than `maxDataRows` data rows.
+ */
+export function readWorkbookRowSample(filePath: string, maxDataRows: number): WorkbookRowSample {
+  let buf: Buffer;
+  try {
+    buf = readFileSync(filePath);
+  } catch {
+    return emptySample(unreadable(["file-not-found"]));
+  }
+  if (buf.length < 4 || buf.readUInt32LE(0) !== LFH_SIG) return emptySample(unreadable(["not-zip-container"]));
+
+  const entries = readZipEntries(buf);
+  if (entries === null) return emptySample(unreadable(["zip-parse-failed-or-zip64"]));
+
+  const workbookPart = entries.get("xl/workbook.xml");
+  if (!workbookPart) return emptySample(unreadable(["no-workbook-part"]));
+  const sheetCount = countSheets(workbookPart.toString("utf8"));
+
+  const sheetName = firstWorksheetName(entries);
+  if (sheetName === null) {
+    return emptySample({
+      workbookReadable: true,
+      sheetCount,
+      selectedSheetIndex: null,
+      rowCount: 0,
+      columnCount: 0,
+      headers: [],
+      readerRisks: ["no-worksheet"],
+    });
+  }
+
+  const shared = entries.has("xl/sharedStrings.xml")
+    ? parseSharedStrings(entries.get("xl/sharedStrings.xml")!.toString("utf8"))
+    : [];
+  const sheetXml = entries.get(sheetName)!.toString("utf8");
+  const scan = scanSheetXml(sheetXml, Math.max(0, maxDataRows));
+  const headers = resolveHeaders(scan.firstRowCells, shared);
+  const columnCount = scan.dimensionColumns ?? scan.firstRowCells.length;
+
+  // Column-aligned header cells (header row is dense; re-extract with column refs).
+  const firstRowInner = /<row\b[^>]*>([\s\S]*?)<\/row>/.exec(sheetXml)?.[1] ?? "";
+  const headerCells = resolveRowToColumns(extractDataCells(firstRowInner), shared, columnCount);
+
+  const sampleRows = (scan.dataRows ?? []).map((cells) => resolveRowToColumns(cells, shared, columnCount));
+
+  return {
+    workbookReadable: true,
+    sheetCount,
+    selectedSheetIndex: 0,
+    rowCount: scan.rowCount,
+    columnCount,
+    headers,
+    readerRisks: [],
+    headerCells,
+    sampleRows,
   };
 }

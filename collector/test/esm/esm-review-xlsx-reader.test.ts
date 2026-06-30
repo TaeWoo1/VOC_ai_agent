@@ -5,7 +5,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   columnLetterToNumber,
   countSheets,
+  extractDataCells,
   parseSharedStrings,
+  readWorkbookRowSample,
   readWorkbookShape,
   scanSheetXml,
 } from "../../src/esm/esm-review-xlsx-reader";
@@ -110,6 +112,87 @@ describe("scanSheetXml", () => {
     const xml = `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Rating</t></is></c></row></sheetData></worksheet>`;
     const scan = scanSheetXml(xml);
     expect(scan.firstRowCells[0]!.inline).toBe("Rating");
+  });
+
+  it("maxDataRows=0 (default) leaves the header path unchanged and collects no data rows", () => {
+    const xml = `<worksheet><sheetData>
+      <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+      <row r="2"><c r="A2" t="s"><v>1</v></c></row>
+    </sheetData></worksheet>`;
+    expect(scanSheetXml(xml).dataRows).toBeUndefined();
+  });
+
+  it("maxDataRows>0 collects the first N populated, column-aware data rows (skipping the header)", () => {
+    const xml = `<worksheet><dimension ref="A1:C4"/><sheetData>
+      <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>
+      <row r="2"><c r="A2" t="s"><v>3</v></c><c r="C2" t="s"><v>4</v></c></row>
+      <row r="3"/>
+      <row r="4"><c r="B4" t="s"><v>5</v></c></row>
+    </sheetData></worksheet>`;
+    const scan = scanSheetXml(xml, 5);
+    // Header (row 1) excluded; blank row 3 (self-closing) skipped; rows 2 and 4 captured.
+    expect(scan.dataRows).toHaveLength(2);
+    // Row 2 cells carry their 1-based column index (A=1, C=3) — B is simply absent.
+    expect(scan.dataRows![0]!.map((c) => c.col)).toEqual([1, 3]);
+    expect(scan.dataRows![1]!.map((c) => c.col)).toEqual([2]);
+  });
+});
+
+describe("extractDataCells", () => {
+  it("reads each cell's 1-based column, type, and value", () => {
+    const cells = extractDataCells(`<c r="A2" t="s"><v>7</v></c><c r="C2" t="inlineStr"><is><t>hi</t></is></c>`);
+    expect(cells).toEqual([
+      { col: 1, type: "s", v: "7", inline: null },
+      { col: 3, type: "inlineStr", v: null, inline: "hi" },
+    ]);
+  });
+});
+
+describe("readWorkbookRowSample — first-N data rows, column-aligned", () => {
+  const WB = WORKBOOK_ONE_SHEET;
+  // shared indices: 0-2 headers, 3-8 data values (incl. fake PII-like values).
+  const shared = `<sst>` +
+    `<si><t>리뷰내용</t></si><si><t>평점</t></si><si><t>구매자휴대폰</t></si>` +
+    `<si><t>정말좋아요</t></si><si><t>배송빨라요</t></si>` +
+    `</sst>`;
+  const sheet = `<worksheet><dimension ref="A1:C4"/><sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>
+    <row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2"><v>5</v></c><c r="C2"><v>01011112222</v></c></row>
+    <row r="3"><c r="A3" t="s"><v>4</v></c><c r="B3"><v>4</v></c></row>
+  </sheetData></worksheet>`;
+
+  it("returns column-aligned header + sample rows when maxDataRows>0", () => {
+    const p = writeXlsx("rowsample.xlsx", [
+      { name: "xl/workbook.xml", content: WB },
+      { name: "xl/worksheets/sheet1.xml", content: sheet },
+      { name: "xl/sharedStrings.xml", content: shared },
+    ]);
+    const s = readWorkbookRowSample(p, 3);
+    expect(s.workbookReadable).toBe(true);
+    expect(s.columnCount).toBe(3);
+    expect(s.headerCells).toEqual(["리뷰내용", "평점", "구매자휴대폰"]);
+    expect(s.sampleRows).toHaveLength(2);
+    expect(s.sampleRows[0]).toEqual(["정말좋아요", "5", "01011112222"]);
+    // Column C empty on row 3 ⇒ null in that column (column alignment preserved).
+    expect(s.sampleRows[1]).toEqual(["배송빨라요", "4", null]);
+  });
+
+  it("maxDataRows=0 reads no data rows (header-only handoff)", () => {
+    const p = writeXlsx("rowsample0.xlsx", [
+      { name: "xl/workbook.xml", content: WB },
+      { name: "xl/worksheets/sheet1.xml", content: sheet },
+      { name: "xl/sharedStrings.xml", content: shared },
+    ]);
+    const s = readWorkbookRowSample(p, 0);
+    expect(s.sampleRows).toEqual([]);
+    expect(s.headerCells).toHaveLength(3);
+  });
+
+  it("unreadable input → empty samples + sanitized risk (no throw)", () => {
+    const s = readWorkbookRowSample(join(dir, "nope.xlsx"), 3);
+    expect(s.workbookReadable).toBe(false);
+    expect(s.sampleRows).toEqual([]);
+    expect(s.readerRisks).toContain("file-not-found");
   });
 });
 
