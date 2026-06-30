@@ -128,7 +128,8 @@ attention/state, but should be **excluded from the identity key** (or only used 
    stable), still **observe-and-discard**, emitting **only hashes / buckets / categories** —
    never raw cell values. This resolves the §1 caveat (is there really no ID? are the 2
    `unknown` columns ID-like?) and which of the 2 product / 2 reviewText / 2 reviewDate
-   columns is the stabler representative.
+   columns is the stabler representative. **Analyser design:**
+   [`esmplus-review-row-shape-design.md`](./esmplus-review-row-shape-design.md) (Gate 5).
 2. **Component-stability check** — across the dry-run, confirm (via hashes only) that the
    chosen components are present and non-empty often enough to support L1/L2.
 3. **Overlap-duplicate check** — capture **two exports with overlapping date ranges** and
