@@ -763,8 +763,8 @@ from this doc.)*
   enum-like) and a `date-like` value (col 11, all-distinct) — neither is a unique id key.
   The only `id-like` *valueClass* sits on a **PII** `orderOrBuyerRiskCandidate` column
   (col 10) and is **`all-same`** (not distinct), so it is **not** a usable per-review id.
-  This **confirms Gate 4b's no-stable-id finding against populated data** — the composite-
-  key direction holds.
+  This **strengthens Gate 4b's no-stable-id finding with populated row-shape evidence** —
+  the composite-key direction remains the working direction.
 - **Candidate component signals (sanitized, unconfirmed) for a composite key:**
   - **product** — strong: two columns, one `mixed`/all-distinct (col 2) and one
     `numeric-long`/all-distinct (col 7, looks like a product code);
