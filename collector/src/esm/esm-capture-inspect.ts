@@ -28,6 +28,11 @@ import {
   type ChannelLiteral,
   type SanitizedCompositeKeySet,
 } from "./esm-review-composite-key";
+import {
+  captureHeaderLabels,
+  type HeaderArtifactIo,
+  type SanitizedHeaderLabelCapture,
+} from "./esm-review-header-quarantine";
 import { summarizeRowShape, type SanitizedRowShape } from "./esm-review-row-shape";
 import { summarizeSchemaShape, type SanitizedSchemaShape } from "./esm-review-schema-shape";
 import { readWorkbookRowSample, readWorkbookShape, type WorkbookRowSample } from "./esm-review-xlsx-reader";
@@ -42,6 +47,8 @@ export interface CaptureInspection {
   schemaShape: SanitizedSchemaShape | null;
   rowShape: SanitizedRowShape | null;
   compositeKeys: SanitizedCompositeKeySet | null;
+  /** Slice-2b: sanitized header-label capture (literal labels went to the local artifact, not here). */
+  headerLabels: SanitizedHeaderLabelCapture | null;
 }
 
 /** Clamp a requested row-sample size into `[MIN, MAX]`, defaulting non-finite input. */
@@ -86,10 +93,22 @@ export function buildCaptureInspectFn(opts: {
   channel?: ChannelLiteral;
   /** One-way store fingerprint namespacing the keys — NOT a raw store id. */
   storeFingerprint?: string | undefined;
+  /**
+   * Slice-2b (dormant by default): capture the HEADER LABELS to the local quarantine artifact and
+   * return a sanitized summary. Reads the header row ONLY (`readWorkbookShape`, no data cells). The
+   * literal labels go solely to `headerLabelArtifactPath` via `headerArtifactIo` (default `node:fs`).
+   */
+  captureHeaderLabels?: boolean;
+  /** Absolute path to the gitignored `findings/*.local.md` artifact (required when capturing). */
+  headerLabelArtifactPath?: string;
+  /** Injected artifact writer (tests pass an in-memory fake so no real file is written). */
+  headerArtifactIo?: HeaderArtifactIo;
 }): ((path: string) => Promise<CaptureInspection>) | undefined {
   const emitCompositeKey = opts.emitCompositeKey ?? false;
-  if (!opts.inspectSchemaShape && !opts.probeRowShape && !emitCompositeKey) return undefined;
+  const captureHeaders = (opts.captureHeaderLabels ?? false) && opts.headerLabelArtifactPath !== undefined;
+  if (!opts.inspectSchemaShape && !opts.probeRowShape && !emitCompositeKey && !captureHeaders) return undefined;
   const rows = clampRowSampleRows(opts.rowSampleRows);
+  const artifactPath = opts.headerLabelArtifactPath;
   return (path: string): Promise<CaptureInspection> => {
     const schemaShape = opts.inspectSchemaShape
       ? summarizeSchemaShape(readWorkbookShape(path), opts.salt)
@@ -106,7 +125,16 @@ export function buildCaptureInspectFn(opts: {
             salt: opts.salt,
           })
         : null;
-    return Promise.resolve({ schemaShape, rowShape, compositeKeys });
+    // Header-label capture uses its own HEADER-ONLY read (readWorkbookShape reads no data cells) and
+    // delegates the literal-label write to the quarantine module; only its sanitized summary returns.
+    const headerLabels =
+      captureHeaders && artifactPath !== undefined
+        ? captureHeaderLabels(readWorkbookShape(path), {
+            artifactPath,
+            ...(opts.headerArtifactIo ? { io: opts.headerArtifactIo } : {}),
+          })
+        : null;
+    return Promise.resolve({ schemaShape, rowShape, compositeKeys, headerLabels });
   };
 }
 
@@ -122,6 +150,8 @@ export function deriveCaptureStop(input: {
   schemaShape: SanitizedSchemaShape | null;
   probeRowShape: boolean;
   rowShape: SanitizedRowShape | null;
+  captureHeaderLabels: boolean;
+  headerLabels: SanitizedHeaderLabelCapture | null;
   deleteFailed: boolean;
 }): CaptureStop | null {
   if (input.fileStructure === "unrecognized") return "unrecognized-format";
@@ -130,6 +160,9 @@ export function deriveCaptureStop(input: {
   }
   if (input.probeRowShape && (input.rowShape === null || !input.rowShape.workbookReadable)) {
     return "row-shape-inspect-failed";
+  }
+  if (input.captureHeaderLabels && (input.headerLabels === null || !input.headerLabels.workbookReadable)) {
+    return "header-capture-failed";
   }
   if (input.deleteFailed) return "delete-failed";
   return null;

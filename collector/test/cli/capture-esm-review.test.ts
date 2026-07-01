@@ -222,3 +222,42 @@ describe("capture-esm-review — Gate 5 / Slice 5A opt-in composite-key emit (--
     }
   });
 });
+
+describe("capture-esm-review — Slice 2b opt-in header-label capture (--capture-review-headers)", () => {
+  const code = stripComments(readFileSync(CLI_PATH, "utf8"));
+
+  it("is opt-in and dormant by default: gated on the --capture-review-headers flag", () => {
+    expect(/--capture-review-headers/.test(code)).toBe(true);
+    expect(/captureReviewHeaders\s*=\s*args\.includes\(/.test(code)).toBe(true);
+  });
+
+  it("wires the header-label capture through the one inspect hook + local artifact path", () => {
+    expect(/from\s+["']\.\.\/esm\/esm-review-header-quarantine["']/.test(code)).toBe(true);
+    expect(/headerLabelArtifactPath\s*\(/.test(code)).toBe(true);
+    expect(/captureHeaderLabels:\s*captureReviewHeaders/.test(code)).toBe(true);
+    expect(/inspection\.inspection\?\.headerLabels/.test(code)).toBe(true);
+  });
+
+  it("surfaces the sanitized header-label capture and keeps honest non-goal markers", () => {
+    expect(/headerLabelsCaptureRequested/.test(code)).toBe(true);
+    expect(/headerLabels\b/.test(code)).toBe(true);
+    expect(/schemaInferred:\s*false/.test(code)).toBe(true);
+    expect(/dedupKeyClaimed:\s*false/.test(code)).toBe(true);
+  });
+
+  it("delegates the literal-label write to the quarantine module (CLI never names saveAs/writeFile)", () => {
+    expect(code.includes("saveAs")).toBe(false);
+    expect(code.includes("writeFileSync")).toBe(false);
+  });
+
+  it("adds NO extra click / download path (Gate 3 invariants preserved)", () => {
+    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(1);
+    expect((code.match(/waitForEvent\s*\(\s*["']download["']/g) ?? []).length).toBe(1);
+  });
+
+  it("adds NO upload / DB / status / scheduler", () => {
+    for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
+      expect(code.includes(token)).toBe(false);
+    }
+  });
+});

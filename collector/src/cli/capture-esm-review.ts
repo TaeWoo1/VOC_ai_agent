@@ -54,6 +54,7 @@ import {
   parseRowSampleRowsArg,
   type CaptureInspection,
 } from "../esm/esm-capture-inspect";
+import { headerLabelArtifactPath } from "../esm/esm-review-header-quarantine";
 import { esmUrlCategory, extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
 import { esmSentinelPathFor } from "../esm/esm-sentinel";
 import { log } from "../log";
@@ -228,6 +229,11 @@ async function main(): Promise<void> {
   // per-row SANITIZED composite dedup keys (L1/L2/L3 + context, salted hashes — never raw values)
   // so two overlapping exports can be compared offline (`compare-esm-overlap`). Absent → no keys.
   const emitCompositeKey = args.includes("--emit-composite-key");
+  // Slice 2b opt-in (dormant by default): when set, the validated xlsx's HEADER ROW labels are
+  // written to a gitignored LOCAL artifact for operator review (the adopted header-label-only
+  // Policy-A carve-out), and a SANITIZED summary (category / NFC-NFD form / count bucket / booleans —
+  // never a literal label) is returned. Reads the header row only (no data cells). Absent → no capture.
+  const captureReviewHeaders = args.includes("--capture-review-headers");
 
   const cfg = loadConfig();
   if (!cfg.esmReviewUrl) {
@@ -400,6 +406,10 @@ async function main(): Promise<void> {
     //    row-shape inspect) → delete (the save module owns fs; the inspect hook runs on the
     //    still-present xlsx BEFORE the delete, and ONLY when the structural sniff passed). Both
     //    inspectors read SHAPE only, never raw cells; the hook is undefined when no flag is set.
+    // Slice 2b: the header-label artifact lives in the collector's gitignored `findings/` dir
+    // (a sibling of the download dir). The literal labels are written there by the quarantine
+    // module; this CLI only names the path and never holds a label.
+    const headerArtifactPath = headerLabelArtifactPath(join(dirname(cfg.downloadDir), "findings"));
     const inspectFn = buildCaptureInspectFn({
       inspectSchemaShape,
       probeRowShape,
@@ -408,6 +418,8 @@ async function main(): Promise<void> {
       emitCompositeKey,
       channel: "esmplus",
       storeFingerprint: cfg.esmStoreFingerprint,
+      captureHeaderLabels: captureReviewHeaders,
+      headerLabelArtifactPath: headerArtifactPath,
     });
     const inspection: SavedDownloadInspection<CaptureInspection> = await saveAndInspectDownload<CaptureInspection>(
       download,
@@ -421,6 +433,7 @@ async function main(): Promise<void> {
     const schemaShape = inspection.inspection?.schemaShape ?? null;
     const rowShape = inspection.inspection?.rowShape ?? null;
     const compositeKeys = inspection.inspection?.compositeKeys ?? null;
+    const headerLabels = inspection.inspection?.headerLabels ?? null;
 
     // Stop precedence: bad file → (Gate 4) schema inspect failed-closed → (Gate 5) row-shape
     // inspect failed-closed → cleanup could not delete. Encoded in the pure helper.
@@ -430,6 +443,8 @@ async function main(): Promise<void> {
       schemaShape,
       probeRowShape,
       rowShape,
+      captureHeaderLabels: captureReviewHeaders,
+      headerLabels,
       deleteFailed: inspection.deleteFailed,
     });
     const result = stop === null ? "CAPTURED_VALID" : "STOPPED";
@@ -463,6 +478,12 @@ async function main(): Promise<void> {
           // two-export overlap comparator. Confirms nothing (dedupKeyConfirmed stays false).
           compositeKeyEmitted: emitCompositeKey,
           compositeKeys,
+          // Slice 2b (opt-in) header-LABEL capture result — sanitized (category / NFC-NFD form /
+          // count bucket / booleans); null when --capture-review-headers is absent. The literal
+          // labels went ONLY to the gitignored local artifact; this summary never carries one.
+          // schemaMappingConfirmed/dedupKeyConfirmed stay false.
+          headerLabelsCaptureRequested: captureReviewHeaders,
+          headerLabels,
           // Honest non-goal markers — this CLI never uploads, parses rows into records, infers a
           // schema mapping, or claims a dedup key. (`rowShape.minimalRowsInspected` separately
           // reports that cells were shape-read; that is not record parsing.)
@@ -490,6 +511,8 @@ async function main(): Promise<void> {
       rowShapeWorkbookReadable: rowShape?.workbookReadable ?? false,
       compositeKeyEmitted: emitCompositeKey,
       compositeKeyWorkbookReadable: compositeKeys?.workbookReadable ?? false,
+      headerLabelsCaptureRequested: captureReviewHeaders,
+      headerLabelsCaptured: headerLabels?.labelsCapturedToLocalArtifact ?? false,
     });
   } finally {
     removeSentinel(sentinelPath);
