@@ -328,3 +328,49 @@ behavior — observed on the synthetic fixture, **not** a production dedup guara
 `NEEDS_DISCOVERY`; `schemaMappingConfirmed:false` (no promotion gate accepted); dedup remains
 `NEEDS_VERIFICATION`; `dedupKeyConfirmed:false`; the capability stays `NEEDS_VERIFICATION`; nothing is
 CONFIRMED.**
+
+---
+
+## 15. Milestone status — `content_hash` v2 / `dedup_key_version` (executed 2026-07-02)
+
+Supersedes §14's "not implemented" note for the versioned key: the **versioned, channel-gated** part of
+§10.4 is now implemented (the **tiered** part — L2/L3, `dedup_tier`, collision-cluster — is **not**; see
+below). This is a **production dedup-key change**, scoped to REVIEW and to the ESM+ (**GMARKET**) channel.
+No live action, no real data — synthetic H2 tests only.
+
+**What was implemented (backend):**
+
+- **`reviews.dedup_key_version`** column added via **`V8__review_dedup_key_version.sql`** (additive
+  `add column if not exists … integer not null default 1`). **Existing rows default to version 1** — no
+  backfill was performed.
+- **NAVER and every non-GMARKET REVIEW row stays on v1** — the v1 formula
+  (`channel · product · date · body`) is unchanged **byte-for-byte**.
+- **GMARKET/ESM+ REVIEW rows use v2**, which **includes `rating`** in the review content-hash input path
+  (identity = *what the review is*; reduces false-merge of distinct same-body reviews). ESM+ carries no
+  stable review-id, so it always dedups on this hash.
+- The versioning lives in a new pure `ingest/ReviewDedupKey` helper + a `ChannelRepository` lookup in
+  `IngestionService.ingestReviews` (resolved once per batch). **`ContentHash.of` remains untouched**
+  because it is shared with inquiries and Cafe24 community — so **inquiry and community dedup behavior is
+  unchanged**. The existing **unique `content_hash` constraint/index is unchanged** (the hash string
+  already encodes the formula's inputs; each channel is single-version).
+
+**Explicitly NOT in this milestone (still deferred):** no `dedup_tier`; no **L2/L3 tiering**; no
+**collision→duplicate-cluster** logic; no **`reply_status` update-on-match**; no **capability/status seed**;
+no NAVER re-key/backfill. (Doc §10.4 partial; §10.5/§10.6 untouched.)
+
+**Implementation deviation (recorded):** the new `ChannelRepository` constructor dependency on
+`IngestionService` required updating **10 existing test files**, not the initially estimated 3 — all were
+**mechanical** test-constructor updates (append the autowired `ChannelRepository` arg); no assertion or
+behavior change.
+
+**Test results (at close):** two new suites — `ReviewDedupKeyTest` (pure) and
+`ReviewDedupKeyVersionIngestTest` (`@DataJpaTest`: GMARKET v2 keeps differing-rating rows distinct;
+non-GMARKET stays v1 and dedups them; `dedup_key_version` stamped 2 vs 1). Full backend `./gradlew test`
+green (0 failures/errors); every existing dedup test stayed green (proof the gate is non-disruptive).
+Collector regression unchanged and green. Entity↔DDL parity (`Review.dedupKeyVersion` ↔ V8 column)
+checked by hand — no migration test exists.
+
+**Status:** ships the **designed** v2 key; **does not confirm** the dedup strategy. **REVIEW remains
+`NEEDS_DISCOVERY`; `schemaMappingConfirmed:false`; dedup remains `NEEDS_VERIFICATION`;
+`dedupKeyConfirmed:false`; capability/status unchanged (`NEEDS_VERIFICATION`, unseeded); nothing is
+CONFIRMED.** No live/browser/upload/API/real-DB/status/capability/scheduler/manualSync occurred.

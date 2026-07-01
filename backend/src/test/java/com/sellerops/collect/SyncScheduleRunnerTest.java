@@ -79,7 +79,7 @@ class SyncScheduleRunnerTest {
 
     private SyncScheduleRunner runnerWith(PullConnector connector) {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         return new SyncScheduleRunner(

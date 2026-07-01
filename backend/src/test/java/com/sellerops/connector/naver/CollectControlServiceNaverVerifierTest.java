@@ -86,7 +86,7 @@ class CollectControlServiceNaverVerifierTest {
                 vault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver));
         IngestionService ingestion =
-                new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
+                new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
