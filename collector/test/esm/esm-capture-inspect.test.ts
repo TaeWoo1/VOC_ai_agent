@@ -12,6 +12,10 @@ import {
   deriveCaptureStop,
   parseRowSampleRowsArg,
 } from "../../src/esm/esm-capture-inspect";
+import type {
+  HeaderArtifactIo,
+  SanitizedHeaderLabelCapture,
+} from "../../src/esm/esm-review-header-quarantine";
 import type { SanitizedRowShape } from "../../src/esm/esm-review-row-shape";
 import type { SanitizedSchemaShape } from "../../src/esm/esm-review-schema-shape";
 
@@ -153,9 +157,49 @@ describe("buildCaptureInspectFn", () => {
     for (const raw of ["리뷰내용", "평점", "좋아요", "그냥"]) expect(json).not.toContain(raw);
   });
 
-  it("still returns undefined when ALL THREE flags are off (Gate 3 path unchanged)", () => {
+  it("still returns undefined when ALL flags are off (Gate 3 path unchanged)", () => {
     expect(
-      buildCaptureInspectFn({ inspectSchemaShape: false, probeRowShape: false, rowSampleRows: 3, salt: "s", emitCompositeKey: false }),
+      buildCaptureInspectFn({
+        inspectSchemaShape: false,
+        probeRowShape: false,
+        rowSampleRows: 3,
+        salt: "s",
+        emitCompositeKey: false,
+        captureHeaderLabels: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("captures header labels through a fake io when only --capture-review-headers is set", async () => {
+    const writes: Array<{ path: string; contents: string }> = [];
+    const fakeIo: HeaderArtifactIo = { writeArtifact: (path, contents) => writes.push({ path, contents }) };
+    const fn = buildCaptureInspectFn({
+      inspectSchemaShape: false,
+      probeRowShape: false,
+      rowSampleRows: 3,
+      salt: "s",
+      captureHeaderLabels: true,
+      headerLabelArtifactPath: join(dir, "findings", "esm-review-header-labels.local.md"),
+      headerArtifactIo: fakeIo,
+    })!;
+    const out = await fn(VALID_XLSX);
+    expect(out.schemaShape).toBeNull();
+    expect(out.rowShape).toBeNull();
+    expect(out.compositeKeys).toBeNull();
+    expect(out.headerLabels?.workbookReadable).toBe(true);
+    expect(out.headerLabels?.labelsCapturedToLocalArtifact).toBe(true);
+    expect(out.headerLabels?.schemaMappingConfirmed).toBe(false);
+    // The literal header labels reach the artifact (confinement target) but NOT the returned summary.
+    expect(writes).toHaveLength(1);
+    for (const raw of ["리뷰내용", "평점"]) {
+      expect(writes[0]!.contents).toContain(raw);
+      expect(JSON.stringify(out.headerLabels)).not.toContain(raw);
+    }
+  });
+
+  it("does NOT capture headers when the flag is set but no artifact path is provided", () => {
+    expect(
+      buildCaptureInspectFn({ inspectSchemaShape: false, probeRowShape: false, rowSampleRows: 3, salt: "s", captureHeaderLabels: true }),
     ).toBeUndefined();
   });
 });
@@ -171,6 +215,8 @@ describe("deriveCaptureStop — precedence (fail-closed)", () => {
     schemaShape: null,
     probeRowShape: false,
     rowShape: null,
+    captureHeaderLabels: false,
+    headerLabels: null,
     deleteFailed: false,
   };
 
@@ -190,9 +236,28 @@ describe("deriveCaptureStop — precedence (fail-closed)", () => {
   it("row-shape check is SKIPPED when --probe-row-shape is off", () => {
     expect(deriveCaptureStop({ ...base, probeRowShape: false, rowShape: badRow })).toBeNull();
   });
+  it("header-label capture fails closed when requested and unreadable", () => {
+    const badHeader = { workbookReadable: false } as unknown as SanitizedHeaderLabelCapture;
+    expect(deriveCaptureStop({ ...base, captureHeaderLabels: true, headerLabels: badHeader })).toBe("header-capture-failed");
+    expect(deriveCaptureStop({ ...base, captureHeaderLabels: true, headerLabels: null })).toBe("header-capture-failed");
+  });
+  it("header-label capture check is SKIPPED when --capture-review-headers is off", () => {
+    const badHeader = { workbookReadable: false } as unknown as SanitizedHeaderLabelCapture;
+    expect(deriveCaptureStop({ ...base, captureHeaderLabels: false, headerLabels: badHeader })).toBeNull();
+  });
   it("delete failure is surfaced last", () => {
+    const okHeader = { workbookReadable: true } as unknown as SanitizedHeaderLabelCapture;
     expect(
-      deriveCaptureStop({ ...base, inspectSchemaShape: true, schemaShape: okSchema, probeRowShape: true, rowShape: okRow, deleteFailed: true }),
+      deriveCaptureStop({
+        ...base,
+        inspectSchemaShape: true,
+        schemaShape: okSchema,
+        probeRowShape: true,
+        rowShape: okRow,
+        captureHeaderLabels: true,
+        headerLabels: okHeader,
+        deleteFailed: true,
+      }),
     ).toBe("delete-failed");
   });
 });

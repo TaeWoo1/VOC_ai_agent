@@ -43,6 +43,8 @@ export type CaptureStop =
   | "schema-inspect-failed"
   // Gate-5 minimal row-shape addition (only reachable under `--probe-row-shape`):
   | "row-shape-inspect-failed"
+  // Slice-2b header-LABEL capture addition (only reachable under `--capture-review-headers`):
+  | "header-capture-failed"
   | "delete-failed";
 
 /** Coarse category of an in-frame candidate, by accessible-text class (never the text). */
