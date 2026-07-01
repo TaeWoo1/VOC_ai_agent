@@ -128,7 +128,7 @@ slice which fix it needs:
 This is a Policy-A-safe signal (a form label, not content) and de-risks step 3 before any
 mapper edit.
 
-## 7. Follow-on grounded-alias slice (step 3 — named, NOT executed)
+## 7. Follow-on grounded-alias slice (step 3 — EXECUTED 2026-07-01)
 
 After a successful capture, a separate backend slice would:
 
@@ -141,7 +141,17 @@ After a successful capture, a separate backend slice would:
   raises: **flat vs. `channelCode`-threaded** aliases (cross-channel collision risk) and
   **NFC handling** per §6.
 
-That slice is **not** part of this design and needs its own approval.
+That slice was separately approved and **executed as Slice 3** (grounded aliases; merged).
+Sanitized outcome: the mapped-field labels were grounded in `ReviewRowMapper` and the canary
+in `RowMapperTest` flipped to the real grounded headers. Only three fields needed new literals
+(body / sku / receipt-date); product and rating already matched existing generic aliases;
+`externalId` was **left ungrounded** — the ESM+ REVIEW export exposes no stable review-id
+column, so ESM+ dedups by `content_hash` only. The two open questions resolved as: **flat**
+alias lists retained (no `channelCode` threading), and **no `FileParser` NFC change** — all
+captured header labels were NFC form, so a source-typed NFC alias matches without touching the
+shared parser. See the ingest-validation milestone note in
+[`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) §14.
+`schemaMappingConfirmed` stays **false**; nothing is CONFIRMED.
 
 ## 8. Non-goals (hard)
 
