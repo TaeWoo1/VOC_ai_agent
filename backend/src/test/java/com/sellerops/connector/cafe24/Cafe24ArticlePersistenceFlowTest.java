@@ -3,6 +3,7 @@ package com.sellerops.connector.cafe24;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.community.Cafe24CommunityArticle;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.connector.DataType;
@@ -53,6 +54,7 @@ class Cafe24ArticlePersistenceFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired ChannelRepository channels;
     @Autowired ConnectorCredentialRepository credentials;
 
     private final UUID org = UUID.randomUUID();
@@ -75,7 +77,7 @@ class Cafe24ArticlePersistenceFlowTest {
                         "refresh_token", "old-refresh-token"),
                 null, null, null);
         ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles);
+                communityArticles, channels);
         connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault, new Cafe24OrdersClient(http),
                 new Cafe24BoardArticlesClient(http), Clock.systemUTC());
     }

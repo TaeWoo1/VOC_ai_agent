@@ -42,4 +42,10 @@ public class Review extends BaseEntity {
     /** Fallback dedup key when no external id: hash of channel+product+date+body. */
     @Column(name = "content_hash")
     private String contentHash;
+
+    /** Which content_hash formula produced this row: v1 = channel+product+date+body;
+     *  v2 (ESM+/GMARKET) also folds in rating. Lets the formula evolve per channel
+     *  without invalidating existing hashes. Defaults to 1 in the DB. */
+    @Column(name = "dedup_key_version")
+    private Integer dedupKeyVersion;
 }

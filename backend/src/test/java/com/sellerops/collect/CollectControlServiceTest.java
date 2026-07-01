@@ -93,7 +93,7 @@ class CollectControlServiceTest {
     void setUp() {
         mock = new MockApiConnector();
         registry = new ConnectorRegistry(List.of(mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
         executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         service = serviceWith(vaultWithKey(randomKeyBase64()));

@@ -112,7 +112,7 @@ class Cafe24ArticleBackfillFlowTest {
                 null, null, null);
 
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders,
-                new ProductService(products), communityArticles);
+                new ProductService(products), communityArticles, channels);
         Cafe24ApiConnector connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
                 new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));

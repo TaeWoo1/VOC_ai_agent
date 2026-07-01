@@ -86,7 +86,7 @@ class FileUploadConnectorReviewIngestFlowTest {
     void setUp() {
         ProductService productService = new ProductService(products);
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, productService,
-                communityArticles);
+                communityArticles, channels);
         CollectionRunService runs = new CollectionRunService(syncJobs, connectionStatus, sellerAccounts);
         ItemAnalysisService analysis = new ItemAnalysisService(inquiries, reviews, analyses,
                 new RuleBasedInboxItemAnalyzer());

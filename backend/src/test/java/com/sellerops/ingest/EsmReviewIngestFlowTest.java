@@ -2,6 +2,7 @@ package com.sellerops.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.ingest.map.MapResult;
@@ -50,6 +51,7 @@ class EsmReviewIngestFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired ChannelRepository channels;
 
     private final FileParser parser = new FileParser();
     private final ReviewRowMapper mapper = new ReviewRowMapper();
@@ -71,7 +73,7 @@ class EsmReviewIngestFlowTest {
     @BeforeEach
     void setUp() {
         service = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles);
+                communityArticles, channels);
     }
 
     @Test

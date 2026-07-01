@@ -9,6 +9,8 @@ import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.ingest.map.RowError;
+import com.sellerops.channel.Channel;
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.order.OrderDailySummary;
@@ -53,27 +55,32 @@ public class IngestionService {
     private final OrderDailySummaryRepository orderSummaries;
     private final ProductService productService;
     private final Cafe24CommunityArticleRepository communityArticles;
+    private final ChannelRepository channels;
 
     public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
                             OrderDailySummaryRepository orderSummaries, ProductService productService,
-                            Cafe24CommunityArticleRepository communityArticles) {
+                            Cafe24CommunityArticleRepository communityArticles, ChannelRepository channels) {
         this.reviews = reviews;
         this.inquiries = inquiries;
         this.orderSummaries = orderSummaries;
         this.productService = productService;
         this.communityArticles = communityArticles;
+        this.channels = channels;
     }
 
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
         Tally tally = new Tally();
         Set<String> seen = new HashSet<>();
+        // Resolve the channel's dedup-key formula version once per batch (not per row).
+        int keyVersion = ReviewDedupKey.versionFor(
+                channels.findById(channelId).map(Channel::getCode).orElse(null));
         for (CanonicalReview row : rows) {
             try {
                 Product product = productService.resolveOrCreate(orgId, row.productName(), row.sku());
                 boolean hasExternal = isPresent(row.externalId());
                 String hash = hasExternal ? null
-                        : ContentHash.of(channelId.toString(), product.getId().toString(),
-                        datePart(row.receivedAt()), row.body());
+                        : ReviewDedupKey.contentHash(keyVersion, channelId, product.getId(),
+                        datePart(row.receivedAt()), row.body(), row.rating());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
                 if (!seen.add(token) || existsReview(orgId, channelId, hasExternal, row.externalId(), hash)) {
@@ -91,6 +98,7 @@ public class IngestionService {
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
+                entity.setDedupKeyVersion(keyVersion);
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));

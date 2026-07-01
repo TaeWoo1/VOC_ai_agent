@@ -2,6 +2,7 @@ package com.sellerops.ingest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.community.Cafe24CommunityArticle;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
@@ -33,6 +34,7 @@ class Cafe24CommunityArticleIngestTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired ChannelRepository channels;
 
     private IngestionService service;
     private final UUID org = UUID.randomUUID();
@@ -42,7 +44,7 @@ class Cafe24CommunityArticleIngestTest {
     @BeforeEach
     void setUp() {
         service = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles);
+                communityArticles, channels);
     }
 
     /** A 구매후기 (board 4) review article. */

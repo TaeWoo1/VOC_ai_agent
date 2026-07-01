@@ -121,6 +121,16 @@ attention/state, but should be **excluded from the identity key** (or only used 
 - A **collision** (two genuinely different reviews → same key) must surface as a sanitized
   warning, never as a silent overwrite.
 
+> **Implementation status (2026-07-02, partial).** The backend now ships a **versioned,
+> channel-gated** key: GMARKET/ESM+ REVIEW rows fold `rating` into the single production
+> `content_hash` (recorded as `reviews.dedup_key_version = 2`), while NAVER/other channels stay
+> on the prior formula (v1, rating excluded). This realizes the **rating component** above for
+> ESM+ within the existing single-key regime. **L2/L3 tiering, `dedupTier`, collision-risk
+> markers, and the duplicate-cluster holding state remain design-only** (not implemented). The
+> production store namespace is `(org_id, channel_id)`, not a separate `storeFingerprint`
+> column. See `esmplus-review-db-ingest-design.md` §15. Dedup stays `NEEDS_VERIFICATION`;
+> `dedupKeyConfirmed:false`; nothing CONFIRMED.
+
 ## 5. Verification plan (separately approved; dedup stays NEEDS_VERIFICATION)
 
 1. **Row-shape / parse dry-run** — a future, **separately-approved** supervised run that
