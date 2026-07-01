@@ -147,9 +147,41 @@ attention/state, but should be **excluded from the identity key** (or only used 
    distinct reviews stay distinct (no false-merge). Compare **key hashes / counts only**.
 4. **Repeatability gate** — dedup is promoted off `NEEDS_VERIFICATION` **only after repeated
    overlap validation passes** (stable across multiple overlapping exports, incl. one where a
-   review's `replyStatus` changed between exports — the key must **not** move).
+   review's `replyStatus` changed between exports — the key must **not** move). See the
+   concrete pass/fail protocol below.
 5. Until then, every artifact records `dedupKeyConfirmed: false`, `schemaMappingConfirmed:
    false`.
+
+### 5.4 Repeatability gate — concrete pass/fail protocol
+
+The gate is an **empirical** claim about ESM's *real* export behavior. **Synthetic data can
+harden the code's properties but can never prove real-export repeatability** — so the gate is
+staged by evidence class, and only future live evidence can move `dedupKeyConfirmed`.
+
+- **R1 (offline, no live action) — what `dedupKeyConfirmed` *should* mean, and the code-property
+  half locked with synthetic tests.** `dedupKeyConfirmed: true` will assert, on **real** ESM+
+  data, that the production key (v2, single-tier L1) is a **stable, correct identity**:
+  *(a)* repeatable — same real review → same key across **repeated** overlapping exports;
+  *(b)* no false-merge — distinct reviews never collide; *(c)* stable under mutable change — a
+  `replyStatus` change does **not** move the key; *(d)* tenant/store isolated — identical content
+  in two `(org_id, channel_id)` namespaces stays distinct; *(e)* known false-splits characterized
+  and accepted (an **edited body** or a **SKU change** reads as a new review — a documented
+  single-tier limitation, not a silent defect). Backend synthetic tests now lock (b)-(e) as code
+  properties. **Two findings recorded:** a **display-name rename with a stable SKU does NOT split**
+  (product identity in the production key is the SKU-keyed `productId`, so renames are tolerated —
+  only a SKU change splits); date strings **canonicalize to UTC start-of-day** across common
+  formats (no KST assumption), so format drift alone does not split. R1 **confirms nothing** — it
+  is necessary-but-not-sufficient.
+- **R2 (future, separately approved, live) — the confirming evidence.** A supervised capture of
+  **≥ 2 repeated** overlapping real exports **beyond** the 5B in-sample pass (separate
+  sessions/windows, incl. one **non-adjacent / larger** window), each `matchRate: ALL`,
+  `falseMerge: ZERO` at **L1**; **≥ 1 `replyStatus`-changed** overlap (key unchanged both sides);
+  **≥ 1 multi-store / two-tenant** case (identical content stays distinct); a **sample larger than
+  `few`** on at least one pass. All compared **offline, hashes/counts only**, real files
+  **quarantined then deleted** (Policy A holds; fail closed on any raw-leak risk). No upload, no
+  DB/status/capability write during the gate.
+- **R3 (future, separately approved) — promotion.** Passing R2 is **not** auto-promotion; a
+  **separate explicit decision** then moves `dedupKeyConfirmed` (and decides any capability seed).
 
 **Status (2026-07-01):** step 1 (row-shape dry-run) and step 3's **first in-sample overlap
 pass** are done — a live two-export overlap validation (Gate 5 Slice 5B) captured two
@@ -161,6 +193,16 @@ This **strengthens** the composite-key direction but confirms nothing: step 4 (t
 **repeatability gate** — repeated overlapping exports incl. a `replyStatus`-changed case, a
 larger sample, and a **multi-store fingerprinted** run; the 5B run **waived** the store
 fingerprint) is **still open**, so dedup stays `NEEDS_VERIFICATION`.
+
+**Status (2026-07-02):** the gate's **R1 offline stage** is done — the pass/fail protocol above
+is written and the backend now carries **synthetic** hardening tests locking the code-property
+half (store-namespace isolation, `replyStatus`/PII exclusion from identity, null-rating
+stability, edited-body / SKU-change false-split characterization, date-format canonicalization).
+The confirming **R2 live stage** (repeated overlapping real exports, incl. a `replyStatus`-changed
+and a multi-store case, offline-compared under quarantine) is **not run** and needs explicit
+per-run live approval; **R3 promotion** is a further separate decision. dedup stays
+`NEEDS_VERIFICATION`; `dedupKeyConfirmed: false`; nothing CONFIRMED. See
+[`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) §16.
 
 > **DB-ingest design (docs-only):** how this working key becomes durable, idempotent review
 > records — by **evolving the existing backend** ingest, not this design's concern — is specified in

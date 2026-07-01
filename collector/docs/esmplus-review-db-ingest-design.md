@@ -374,3 +374,58 @@ checked by hand — no migration test exists.
 `NEEDS_DISCOVERY`; `schemaMappingConfirmed:false`; dedup remains `NEEDS_VERIFICATION`;
 `dedupKeyConfirmed:false`; capability/status unchanged (`NEEDS_VERIFICATION`, unseeded); nothing is
 CONFIRMED.** No live/browser/upload/API/real-DB/status/capability/scheduler/manualSync occurred.
+
+---
+
+## 16. Milestone status — dedup **repeatability gate**, R1 offline stage (executed 2026-07-02)
+
+Opens the §5.4 / dedup-design §5.4 repeatability gate — the step that will eventually move
+`dedupKeyConfirmed` — and executes only its **offline** stage. The gate is an **empirical** claim about
+ESM's *real* export behavior; **synthetic data can harden the code's properties but can never prove
+real-export repeatability**, so the gate is staged by evidence class and only future live evidence can
+move the flag. No live action, no real data — synthetic H2 + pure tests only.
+
+**What was executed (backend, tests + docs only — no production/migration/entity/`ContentHash` change):**
+
+- **Gate protocol written** into the dedup-strategy design (§5.4): what `dedupKeyConfirmed` *should*
+  mean, the **R1 → R2 → R3** evidence ladder (offline hardening → live multi-export offline-compared →
+  separate promotion decision), and the minimum R2 evidence (≥ 2 repeated overlapping real exports incl.
+  a `replyStatus`-changed and a multi-store case, larger-than-`few` sample, offline hashes/counts only,
+  quarantine-then-delete).
+- **Synthetic hardening tests** locking the **code-property** half of the gate:
+  - `ReviewDedupGateHardeningTest` (`@DataJpaTest`, GMARKET-seeded): multi-tenant (org) and
+    multi-channel **store-namespace isolation** (identical content in two `(org_id, channel_id)`
+    namespaces → distinct rows — the structural replacement for the 5B-waived store fingerprint);
+    null/blank-rating **stability** under v2; the **edited-body false-split** (an edited review reads as
+    new under single-tier L1 — a documented limitation); and the **product-identity characterization**.
+  - `ReviewDedupMapperCharacterizationTest` (pure): **date-format canonicalization** (equivalent
+    date strings → same key; a different day → different key) and **`replyStatus`/PII exclusion from
+    identity** (rows differing only in the reply/order/buyer columns → the same production key), both
+    computed through the real `ReviewDedupKey` v2.
+
+**Two findings recorded (characterized, not fixed):**
+
+- **Product identity in the key is the SKU-keyed `productId`, not a raw product string.** A **display-name
+  rename with a stable SKU does NOT split** (renames are tolerated); only a **SKU change** splits. This
+  refines the dedup-design's abstract `H(product)` component — production resolves it to the product row.
+- **Dates canonicalize to UTC start-of-day** across common formats (`-`/`/`/`.`/`yyyyMMdd`/trailing-dot/
+  with-time), so format drift alone does not split a duplicate. Neutral offset — **no KST assumption**.
+
+**What this establishes (and only this):** the gate's **offline / code-property** stage passes on
+synthetic data — necessary but **not sufficient**. The **edited-review** and **empty-text** false-splits
+remain **characterized, not solved** (an L2-fuzzy / `dedup_tier` tier — deferred §10.4/§10.6 — would
+address them). `reply_status` is proven *excluded from identity* only; it is **not stored or updated**
+(update-on-match stays deferred, §10.5).
+
+**Explicitly NOT done / NOT promoted:** no live capture; no R2 live overlap evidence; no L2/L3 tiering,
+`dedup_tier`, or collision→cluster; no `reply_status` storage; no capability/status seed; no
+`ContentHash`/entity/migration/index change.
+
+**Test results (at close):** two new suites (`ReviewDedupGateHardeningTest` +
+`ReviewDedupMapperCharacterizationTest`) green; full backend `./gradlew test` green (every existing
+dedup test stays green); collector regression unchanged and green.
+
+**Status:** REVIEW remains `NEEDS_DISCOVERY`; `schemaMappingConfirmed:false`; dedup remains
+`NEEDS_VERIFICATION`; `dedupKeyConfirmed:false` (only the future R2 live stage + R3 promotion can move
+it); capability/status unchanged (`NEEDS_VERIFICATION`, unseeded); **nothing is CONFIRMED.** No
+live/browser/upload/API/real-DB/status/capability/scheduler/manualSync occurred.
