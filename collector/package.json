@@ -20,6 +20,7 @@
     "capture-esm-review": "tsx src/cli/capture-esm-review.ts",
     "probe-esm-session-ttl": "tsx src/cli/probe-esm-session-ttl.ts",
     "inspect-esm-review-xlsx": "tsx src/cli/inspect-esm-review-xlsx.ts",
+    "compare-esm-overlap": "tsx src/cli/compare-esm-overlap.ts",
     "capture-export-same-session": "tsx src/cli/capture-export-same-session.ts",
     "diagnose-selection-state-same-session": "tsx src/cli/diagnose-selection-state-same-session.ts",
     "classify-account-store-same-session": "tsx src/cli/classify-account-store-same-session.ts",

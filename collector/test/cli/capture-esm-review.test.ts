@@ -188,3 +188,37 @@ describe("capture-esm-review — Gate 5 opt-in row-shape probe (--probe-row-shap
     }
   });
 });
+
+describe("capture-esm-review — Gate 5 / Slice 5A opt-in composite-key emit (--emit-composite-key)", () => {
+  const code = stripComments(readFileSync(CLI_PATH, "utf8"));
+
+  it("is opt-in and dormant by default: gated on the --emit-composite-key flag", () => {
+    expect(/--emit-composite-key/.test(code)).toBe(true);
+    expect(/emitCompositeKey\s*=\s*args\.includes\(/.test(code)).toBe(true);
+  });
+
+  it("passes the flag + channel + store fingerprint through the one inspect hook", () => {
+    expect(/buildCaptureInspectFn\s*\(/.test(code)).toBe(true);
+    expect(/emitCompositeKey/.test(code)).toBe(true);
+    expect(/channel:\s*["']esmplus["']/.test(code)).toBe(true);
+    expect(/storeFingerprint:\s*cfg\.esmStoreFingerprint/.test(code)).toBe(true);
+    expect(/inspection\.inspection\?\.compositeKeys/.test(code)).toBe(true);
+  });
+
+  it("surfaces the sanitized composite keys and keeps honest non-goal markers", () => {
+    expect(/compositeKeyEmitted/.test(code)).toBe(true);
+    expect(/compositeKeys\b/.test(code)).toBe(true);
+    expect(/dedupKeyClaimed:\s*false/.test(code)).toBe(true);
+  });
+
+  it("adds NO extra click / download path (Gate 3 invariants preserved)", () => {
+    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(1);
+    expect((code.match(/waitForEvent\s*\(\s*["']download["']/g) ?? []).length).toBe(1);
+  });
+
+  it("adds NO upload / DB / status / scheduler", () => {
+    for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
+      expect(code.includes(token)).toBe(false);
+    }
+  });
+});

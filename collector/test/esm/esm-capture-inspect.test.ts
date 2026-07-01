@@ -125,11 +125,38 @@ describe("buildCaptureInspectFn", () => {
     const out = await fn(VALID_XLSX);
     expect(out.schemaShape?.workbookReadable).toBe(true);
     expect(out.rowShape?.workbookReadable).toBe(true);
+    expect(out.compositeKeys).toBeNull();
     const json = JSON.stringify(out);
     for (const raw of ["리뷰내용", "평점", "좋아요", "그냥"]) expect(json).not.toContain(raw);
     expect(out.rowShape?.rawCellLeak).toBe(false);
     expect(out.rowShape?.dedupKeyConfirmed).toBe(false);
     expect(out.schemaShape?.schemaMappingConfirmed).toBe(false);
+  });
+
+  it("computes only compositeKeys when only --emit-composite-key is set", async () => {
+    const fn = buildCaptureInspectFn({
+      inspectSchemaShape: false,
+      probeRowShape: false,
+      rowSampleRows: 3,
+      salt: "s",
+      emitCompositeKey: true,
+      channel: "esmplus",
+    })!;
+    const out = await fn(VALID_XLSX);
+    expect(out.schemaShape).toBeNull();
+    expect(out.rowShape).toBeNull();
+    expect(out.compositeKeys?.workbookReadable).toBe(true);
+    expect(out.compositeKeys?.channel).toBe("esmplus");
+    expect(out.compositeKeys?.dedupKeyConfirmed).toBe(false);
+    // No raw header/cell value from the fixture leaks through the key set.
+    const json = JSON.stringify(out.compositeKeys);
+    for (const raw of ["리뷰내용", "평점", "좋아요", "그냥"]) expect(json).not.toContain(raw);
+  });
+
+  it("still returns undefined when ALL THREE flags are off (Gate 3 path unchanged)", () => {
+    expect(
+      buildCaptureInspectFn({ inspectSchemaShape: false, probeRowShape: false, rowSampleRows: 3, salt: "s", emitCompositeKey: false }),
+    ).toBeUndefined();
   });
 });
 

@@ -7,11 +7,14 @@
  * delete-in-`finally`. This module owns what that hook computes and the stop precedence that
  * follows, so the CLI stays a thin Playwright shell and the wiring is unit-testable offline.
  *
- * Two opt-in flags compose here:
- *   - `--inspect-schema-shape` (Gate 4) → `schemaShape` via `summarizeSchemaShape(readWorkbookShape())`.
- *   - `--probe-row-shape` (Gate 5)      → `rowShape` via `summarizeRowShape(readWorkbookRowSample())`.
- * With neither flag, `buildCaptureInspectFn` returns `undefined` — no inspector runs and the
- * Gate 3 observe-and-discard path is byte-for-byte unchanged.
+ * Three opt-in flags compose here:
+ *   - `--inspect-schema-shape` (Gate 4)  → `schemaShape` via `summarizeSchemaShape(readWorkbookShape())`.
+ *   - `--probe-row-shape` (Gate 5)       → `rowShape` via `summarizeRowShape(readWorkbookRowSample())`.
+ *   - `--emit-composite-key` (Gate 5, 5A)→ `compositeKeys` via `summarizeCompositeKeys(readWorkbookRowSample())`,
+ *     the per-row sanitized composite dedup keys the two-export overlap comparator consumes.
+ * With none of the flags, `buildCaptureInspectFn` returns `undefined` — no inspector runs and the
+ * Gate 3 observe-and-discard path is byte-for-byte unchanged. The row-reading inspectors
+ * (`--probe-row-shape` / `--emit-composite-key`) share ONE `readWorkbookRowSample` read.
  *
  * STRICT NON-GOALS: no upload, no DB/status write, no scheduler/`manualSync`, no browser. Both
  * underlying summarisers emit SANITIZED shape only (hashes/buckets/categories/booleans, never a
@@ -20,19 +23,25 @@
  */
 
 import type { CaptureStop, FileStructure } from "./esm-capture-gate";
+import {
+  summarizeCompositeKeys,
+  type ChannelLiteral,
+  type SanitizedCompositeKeySet,
+} from "./esm-review-composite-key";
 import { summarizeRowShape, type SanitizedRowShape } from "./esm-review-row-shape";
 import { summarizeSchemaShape, type SanitizedSchemaShape } from "./esm-review-schema-shape";
-import { readWorkbookRowSample, readWorkbookShape } from "./esm-review-xlsx-reader";
+import { readWorkbookRowSample, readWorkbookShape, type WorkbookRowSample } from "./esm-review-xlsx-reader";
 
 /** Default / bounds for the Gate-5 row sample size. Small cap to minimise PII exposure (Policy A). */
 export const DEFAULT_ROW_SAMPLE_ROWS = 3;
 export const MIN_ROW_SAMPLE_ROWS = 1;
 export const MAX_ROW_SAMPLE_ROWS = 5;
 
-/** The combined, fully-sanitized pre-delete inspection. Either field is null when its flag is off. */
+/** The combined, fully-sanitized pre-delete inspection. Each field is null when its flag is off. */
 export interface CaptureInspection {
   schemaShape: SanitizedSchemaShape | null;
   rowShape: SanitizedRowShape | null;
+  compositeKeys: SanitizedCompositeKeySet | null;
 }
 
 /** Clamp a requested row-sample size into `[MIN, MAX]`, defaulting non-finite input. */
@@ -71,17 +80,33 @@ export function buildCaptureInspectFn(opts: {
   probeRowShape: boolean;
   rowSampleRows: number;
   salt: string | undefined;
+  /** Gate 5 / Slice 5A (dormant by default): emit per-row sanitized composite dedup keys. */
+  emitCompositeKey?: boolean;
+  /** Channel literal namespacing the composite keys (default `esmplus`). */
+  channel?: ChannelLiteral;
+  /** One-way store fingerprint namespacing the keys — NOT a raw store id. */
+  storeFingerprint?: string | undefined;
 }): ((path: string) => Promise<CaptureInspection>) | undefined {
-  if (!opts.inspectSchemaShape && !opts.probeRowShape) return undefined;
+  const emitCompositeKey = opts.emitCompositeKey ?? false;
+  if (!opts.inspectSchemaShape && !opts.probeRowShape && !emitCompositeKey) return undefined;
   const rows = clampRowSampleRows(opts.rowSampleRows);
   return (path: string): Promise<CaptureInspection> => {
     const schemaShape = opts.inspectSchemaShape
       ? summarizeSchemaShape(readWorkbookShape(path), opts.salt)
       : null;
-    const rowShape = opts.probeRowShape
-      ? summarizeRowShape(readWorkbookRowSample(path, rows), opts.salt)
-      : null;
-    return Promise.resolve({ schemaShape, rowShape });
+    // The two row-reading inspectors share ONE workbook read.
+    const sample: WorkbookRowSample | null =
+      opts.probeRowShape || emitCompositeKey ? readWorkbookRowSample(path, rows) : null;
+    const rowShape = opts.probeRowShape && sample ? summarizeRowShape(sample, opts.salt) : null;
+    const compositeKeys =
+      emitCompositeKey && sample
+        ? summarizeCompositeKeys(sample, {
+            ...(opts.channel ? { channel: opts.channel } : {}),
+            storeFingerprint: opts.storeFingerprint,
+            salt: opts.salt,
+          })
+        : null;
+    return Promise.resolve({ schemaShape, rowShape, compositeKeys });
   };
 }
 

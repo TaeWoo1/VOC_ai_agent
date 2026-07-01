@@ -60,6 +60,14 @@ export interface CollectorConfig {
    */
   storageProbeSalt: string | undefined;
   /**
+   * Optional one-way store fingerprint that namespaces the ESM+ REVIEW composite dedup keys
+   * (Gate 5, Slice 5A) per store — a precomputed salted hash, NEVER a raw store id/label. Its
+   * only job is to be CONSTANT across the two overlapping-export captures (so same-store keys
+   * compare) and to separate different stores' keys. Undefined → keys namespaced by channel
+   * only (fine for a single-store overlap run). Never printed to output/status/docs.
+   */
+  esmStoreFingerprint: string | undefined;
+  /**
    * Expected Commerce channel code the account/store resolver matches candidates
    * against (live layer). Defaults to `naverChannelCode` (the user's "use existing
    * channel code if possible") so no extra config is required for the common case.
@@ -117,5 +125,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     esmReviewUrl: env.ESM_REVIEW_URL,
     browserChannel: env.COLLECTOR_BROWSER_CHANNEL,
     storageProbeSalt: env.STORAGE_PROBE_SALT,
+    esmStoreFingerprint: env.ESM_STORE_FINGERPRINT,
   };
 }

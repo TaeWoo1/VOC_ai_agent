@@ -224,6 +224,10 @@ async function main(): Promise<void> {
   // no row-shape probe; combined with --inspect-schema-shape, both inspections run on the one file.
   const probeRowShape = args.includes("--probe-row-shape");
   const rowSampleRows = parseRowSampleRowsArg(args);
+  // Gate 5 / Slice 5A opt-in (dormant by default): when set, the same sampled rows are reduced to
+  // per-row SANITIZED composite dedup keys (L1/L2/L3 + context, salted hashes — never raw values)
+  // so two overlapping exports can be compared offline (`compare-esm-overlap`). Absent → no keys.
+  const emitCompositeKey = args.includes("--emit-composite-key");
 
   const cfg = loadConfig();
   if (!cfg.esmReviewUrl) {
@@ -401,6 +405,9 @@ async function main(): Promise<void> {
       probeRowShape,
       rowSampleRows,
       salt: cfg.storageProbeSalt,
+      emitCompositeKey,
+      channel: "esmplus",
+      storeFingerprint: cfg.esmStoreFingerprint,
     });
     const inspection: SavedDownloadInspection<CaptureInspection> = await saveAndInspectDownload<CaptureInspection>(
       download,
@@ -413,6 +420,7 @@ async function main(): Promise<void> {
     const fileStructure = classifyFileStructure(inspection.savedExtensionCategory, inspection.xlsxReadable);
     const schemaShape = inspection.inspection?.schemaShape ?? null;
     const rowShape = inspection.inspection?.rowShape ?? null;
+    const compositeKeys = inspection.inspection?.compositeKeys ?? null;
 
     // Stop precedence: bad file → (Gate 4) schema inspect failed-closed → (Gate 5) row-shape
     // inspect failed-closed → cleanup could not delete. Encoded in the pure helper.
@@ -450,6 +458,11 @@ async function main(): Promise<void> {
           // schemaMappingConfirmed/dedupKeyConfirmed:false). No raw cell/header value is emitted.
           rowShapeProbed: probeRowShape,
           rowShape,
+          // Gate 5 / Slice 5A (opt-in, dormant) composite dedup KEYS — sanitized per-row L1/L2/L3 +
+          // context (salted hashes only); null when --emit-composite-key is absent. Feeds the offline
+          // two-export overlap comparator. Confirms nothing (dedupKeyConfirmed stays false).
+          compositeKeyEmitted: emitCompositeKey,
+          compositeKeys,
           // Honest non-goal markers — this CLI never uploads, parses rows into records, infers a
           // schema mapping, or claims a dedup key. (`rowShape.minimalRowsInspected` separately
           // reports that cells were shape-read; that is not record parsing.)
@@ -475,6 +488,8 @@ async function main(): Promise<void> {
       schemaWorkbookReadable: schemaShape?.workbookReadable ?? false,
       rowShapeProbed: probeRowShape,
       rowShapeWorkbookReadable: rowShape?.workbookReadable ?? false,
+      compositeKeyEmitted: emitCompositeKey,
+      compositeKeyWorkbookReadable: compositeKeys?.workbookReadable ?? false,
     });
   } finally {
     removeSentinel(sentinelPath);
