@@ -284,3 +284,47 @@ its own backend-scoped approval and review.)*
 
 **Status:** REVIEW remains `NEEDS_DISCOVERY`; dedup remains `NEEDS_VERIFICATION`; the ESM+ REVIEW ingest
 capability recommendation is `NEEDS_VERIFICATION`; **nothing is CONFIRMED.**
+
+---
+
+## 14. Milestone status — ESM+ REVIEW backend ingest validation (executed 2026-07-01)
+
+This records the outcome of the **ESM+ REVIEW backend ingest validation** milestone, which executed the
+smallest backend slice named in §10.3 (ESM+ header aliases + a synthetic ESM+ ingest test) and its
+service/connector-level extensions. **It changes no production behavior, no migration, no `ContentHash`,
+no dedup formula, no `FileParser`, and no channel-aware mapping.** All validation used
+**synthetic ESM+ export-shaped data**; **no real ESM+ cell values** were used (only header labels from the
+prior live capture, already committed under the narrow schema-alias source exception); **no live
+upload / DB / status / capability / scheduler / manualSync action occurred** — the DB is in-memory H2 in
+tests only.
+
+**What was executed:**
+
+- **Grounded aliases (Slice 3, merged).** `ReviewRowMapper` now carries the real ESM+ REVIEW mapped-field
+  headers; `RowMapperTest`'s coverage-gap canary was flipped to the real grounded headers. Body / sku /
+  receipt-date gained grounded aliases; product and rating already matched existing generic aliases;
+  `externalId` stays ungrounded (no ESM+ review-id column → `content_hash`-only dedup); replyStatus,
+  order/buyer/contact-risk, and `unknown` categories remain excluded from identity.
+- **Service-level ingest test — `EsmReviewIngestFlowTest`** (`backend/.../ingest/`, local, uncommitted).
+  A synthetic ESM+ `.xlsx` through the **real** `FileParser → ReviewRowMapper → IngestionService` chain on
+  H2: mapped fields persist; `externalId` null; `content_hash` set; excluded synthetic columns never leak;
+  identical re-ingest skips via the existing `content_hash` behavior.
+- **Connector-level ingest test — `FileUploadConnectorReviewIngestFlowTest`** (`backend/.../connector/`,
+  local, uncommitted). The same synthetic `.xlsx` through the **real `FileUploadConnector.ingest`**
+  entrypoint: the `IngestResult` reports `status = SUCCESS`, correct row tallies, and a recorded
+  `syncJobId`; an all-duplicate re-upload is an idempotent `SUCCESS` that inserts nothing.
+
+**What this establishes (and only this):** *unit-level grounded schema mapping verified*; *backend
+ingest-path mapping verified*; *connector-level ingest orchestration verified*; *synthetic ESM+ REVIEW
+xlsx validation passed*. Duplicate re-upload currently skips through the **existing** `content_hash`
+behavior — observed on the synthetic fixture, **not** a production dedup guarantee.
+
+**Test results (at close):** backend `./gradlew test` green — the two new `@DataJpaTest` files add 4 tests
+(all pass); full suite green with zero failures/errors. Collector regression unchanged and green
+(`typecheck` clean; unit tests pass). No package/lock change.
+
+**Explicitly NOT promoted / NOT done:** `content_hash` v2 and `dedup_key_version` are **not** implemented
+(deferred to §10.4, a separate later milestone); the §2 repeatability gate stays open. **REVIEW remains
+`NEEDS_DISCOVERY`; `schemaMappingConfirmed:false` (no promotion gate accepted); dedup remains
+`NEEDS_VERIFICATION`; `dedupKeyConfirmed:false`; the capability stays `NEEDS_VERIFICATION`; nothing is
+CONFIRMED.**
