@@ -90,13 +90,16 @@ class RowMapperTest {
         assertThat(r.errors().get(0).rowNumber()).isEqualTo(2);
     }
 
-    // --- ESM+ REVIEW (Backend Slice 1: synthetic, test-only) --------------------
-    // We never recorded ESM+'s real REVIEW header strings — Policy A captured only
-    // sanitized category tallies. So EVERY header and value in the ESM+ tests below
-    // is a fake synthetic stand-in, never a real ESM+ header or real review/product/
-    // buyer/order/contact value. These tests add no production alias; they pin the
-    // invariants that hold regardless of the exact strings and document what the
-    // current channel-agnostic alias set already covers. schemaMappingConfirmed:false.
+    // --- ESM+ REVIEW (Slice 3: grounded header aliases) -------------------------
+    // The live Slice 2c capture recorded ESM+'s real REVIEW header strings to a
+    // gitignored local artifact. Under the adopted narrow schema-alias source
+    // exception, only the real MAPPED-field headers (review body / product / sku /
+    // rating / date) are grounded in ReviewRowMapper and exercised by the flipped
+    // canary below. Excluded categories (replyStatus, order/buyer/seller PII,
+    // unknown) stay SYNTHETIC (esm_..._합성) and must never leak into a canonical
+    // field. ESM+ exposes no review-id column, so externalId remains an honest,
+    // documented gap. Real review/product/buyer/order/contact VALUES stay fully
+    // synthetic. schemaMappingConfirmed stays false until an ingest gate confirms it.
 
     @Test
     void mapsEsmSyntheticReviewWhenCategoriesReuseGenericHeaders() {
@@ -147,33 +150,46 @@ class RowMapperTest {
     }
 
     @Test
-    void documentsEsmCoverageGapsWhenNonBodyHeadersUnrecognized() {
-        // Body reuses a recognized generic term (so the row maps), but product /
-        // sku / rating / date / externalId use fake ESM+-specific header names the
-        // CURRENT alias set does not know. Documents the coverage GAPS a future,
-        // capture-grounded alias slice must close: unrecognized non-body categories
-        // fall back to defaults/null. Intentional canaries — adding an alias later
-        // flips these assertions, signalling the gap closed.
+    void mapsGroundedEsmReviewHeadersWhileExcludedColumnsAndAbsentExternalIdStayUnmapped() {
+        // Slice 3 flip of the former coverage-gap canary. The mapped-field columns
+        // now use the REAL captured ESM+ headers (grounded aliases): body / product /
+        // sku / rating / date all map. externalId stays null — ESM+ exposes no
+        // review-id column, a real remaining gap (not a synthetic one). Excluded
+        // columns are kept SYNTHETIC and must never leak into any canonical field.
+        String replyStatus = "REPLY-STATUS-MUST-NOT-PERSIST";
+        String order = "ORDER-MUST-NOT-PERSIST";
+        String buyer = "BUYER-MUST-NOT-PERSIST";
+
         MapResult<CanonicalReview> r = reviewMapper.map(table(
-                List.of("리뷰내용", "esm_상품_합성", "esm_평점_합성",
-                        "esm_등록일_합성", "esm_리뷰번호_합성"),
-                List.of(Map.of(
-                        "리뷰내용", "합성-리뷰-본문",
-                        "esm_상품_합성", "합성-상품-1호",
-                        "esm_평점_합성", "4",
-                        "esm_등록일_합성", "2026-02-03",
-                        "esm_리뷰번호_합성", "RV-합성-1"))));
+                List.of("리뷰 내용", "상품명", "상품 번호", "별점", "접수일시",
+                        "esm_답변상태_합성", "esm_주문번호_합성", "esm_구매자_합성"),
+                List.of(Map.ofEntries(
+                        Map.entry("리뷰 내용", "합성-리뷰-본문"),
+                        Map.entry("상품명", "합성-상품-1호"),
+                        Map.entry("상품 번호", "SKU-합성-1"),
+                        Map.entry("별점", "4"),
+                        Map.entry("접수일시", "2026-02-03"),
+                        Map.entry("esm_답변상태_합성", replyStatus),
+                        Map.entry("esm_주문번호_합성", order),
+                        Map.entry("esm_구매자_합성", buyer)))));
 
         assertThat(r.errors()).isEmpty();
         assertThat(r.ok()).hasSize(1);
         CanonicalReview row = r.ok().get(0);
-        assertThat(row.body()).isEqualTo("합성-리뷰-본문"); // recognized → maps
-        // Gaps: unrecognized headers do not map.
-        assertThat(row.productName()).isEqualTo("(미지정 상품)"); // product+sku unknown → default
-        assertThat(row.sku()).isNull();
-        assertThat(row.rating()).isNull();
-        assertThat(row.receivedAt()).isNull();
+        // Grounded ESM+ headers now map (flip of the former null/default canaries).
+        assertThat(row.body()).isEqualTo("합성-리뷰-본문");
+        assertThat(row.productName()).isEqualTo("합성-상품-1호");
+        assertThat(row.sku()).isEqualTo("SKU-합성-1");
+        assertThat(row.rating()).isEqualTo(4);
+        assertThat(row.receivedAt())
+                .isEqualTo(java.time.Instant.parse("2026-02-03T00:00:00Z"));
+        // ESM+ has no review-id column → externalId remains an honest documented gap.
         assertThat(row.externalId()).isNull();
+        // Exclusion invariant holds: no excluded (synthetic) column reaches a field.
+        assertThat(row.productName()).isNotIn(replyStatus, order, buyer);
+        assertThat(row.sku()).isNotIn(replyStatus, order, buyer);
+        assertThat(row.body()).isNotIn(replyStatus, order, buyer);
+        assertThat(row.externalId()).isNotIn(replyStatus, order, buyer);
     }
 
     @Test
