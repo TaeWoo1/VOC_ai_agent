@@ -90,6 +90,111 @@ class RowMapperTest {
         assertThat(r.errors().get(0).rowNumber()).isEqualTo(2);
     }
 
+    // --- ESM+ REVIEW (Backend Slice 1: synthetic, test-only) --------------------
+    // We never recorded ESM+'s real REVIEW header strings — Policy A captured only
+    // sanitized category tallies. So EVERY header and value in the ESM+ tests below
+    // is a fake synthetic stand-in, never a real ESM+ header or real review/product/
+    // buyer/order/contact value. These tests add no production alias; they pin the
+    // invariants that hold regardless of the exact strings and document what the
+    // current channel-agnostic alias set already covers. schemaMappingConfirmed:false.
+
+    @Test
+    void mapsEsmSyntheticReviewWhenCategoriesReuseGenericHeaders() {
+        // Documents: IF an ESM+ export reuses a generic term already in the alias
+        // set, the current mapper handles it with no production change. Also pins
+        // the exclusion invariant — replyStatus, the order/buyer PII columns, and
+        // the unknown columns have no CanonicalReview slot and never leak.
+        String replyStatus = "REPLY-STATUS-MUST-NOT-PERSIST";
+        String order = "ORDER-MUST-NOT-PERSIST";
+        String buyer = "BUYER-MUST-NOT-PERSIST";
+        String contact = "CONTACT-MUST-NOT-PERSIST";
+        String unknown1 = "UNKNOWN1-MUST-NOT-PERSIST";
+        String unknown2 = "UNKNOWN2-MUST-NOT-PERSIST";
+
+        MapResult<CanonicalReview> r = reviewMapper.map(table(
+                List.of("리뷰내용", "상품명", "상품번호", "평점", "작성일", "review_id",
+                        "esm_답변상태_합성", "esm_주문번호_합성", "esm_구매자_합성",
+                        "esm_연락처_합성", "esm_미상1_합성", "esm_미상2_합성"),
+                List.of(Map.ofEntries(
+                        Map.entry("리뷰내용", "합성-리뷰-본문"),
+                        Map.entry("상품명", "합성-상품-1호"),
+                        Map.entry("상품번호", "SKU-합성-1"),
+                        Map.entry("평점", "4"),
+                        Map.entry("작성일", "2026-02-03"),
+                        Map.entry("review_id", "RV-합성-1"),
+                        Map.entry("esm_답변상태_합성", replyStatus),
+                        Map.entry("esm_주문번호_합성", order),
+                        Map.entry("esm_구매자_합성", buyer),
+                        Map.entry("esm_연락처_합성", contact),
+                        Map.entry("esm_미상1_합성", unknown1),
+                        Map.entry("esm_미상2_합성", unknown2)))));
+
+        assertThat(r.errors()).isEmpty();
+        assertThat(r.ok()).hasSize(1);
+        CanonicalReview row = r.ok().get(0);
+        assertThat(row.body()).isEqualTo("합성-리뷰-본문");
+        assertThat(row.productName()).isEqualTo("합성-상품-1호");
+        assertThat(row.sku()).isEqualTo("SKU-합성-1");
+        assertThat(row.rating()).isEqualTo(4);
+        assertThat(row.receivedAt())
+                .isEqualTo(java.time.Instant.parse("2026-02-03T00:00:00Z"));
+        assertThat(row.externalId()).isEqualTo("RV-합성-1");
+        // Exclusion invariant: no excluded-column value reaches any canonical field.
+        assertThat(row.productName()).isNotIn(replyStatus, order, buyer, contact, unknown1, unknown2);
+        assertThat(row.sku()).isNotIn(replyStatus, order, buyer, contact, unknown1, unknown2);
+        assertThat(row.body()).isNotIn(replyStatus, order, buyer, contact, unknown1, unknown2);
+        assertThat(row.externalId()).isNotIn(replyStatus, order, buyer, contact, unknown1, unknown2);
+    }
+
+    @Test
+    void documentsEsmCoverageGapsWhenNonBodyHeadersUnrecognized() {
+        // Body reuses a recognized generic term (so the row maps), but product /
+        // sku / rating / date / externalId use fake ESM+-specific header names the
+        // CURRENT alias set does not know. Documents the coverage GAPS a future,
+        // capture-grounded alias slice must close: unrecognized non-body categories
+        // fall back to defaults/null. Intentional canaries — adding an alias later
+        // flips these assertions, signalling the gap closed.
+        MapResult<CanonicalReview> r = reviewMapper.map(table(
+                List.of("리뷰내용", "esm_상품_합성", "esm_평점_합성",
+                        "esm_등록일_합성", "esm_리뷰번호_합성"),
+                List.of(Map.of(
+                        "리뷰내용", "합성-리뷰-본문",
+                        "esm_상품_합성", "합성-상품-1호",
+                        "esm_평점_합성", "4",
+                        "esm_등록일_합성", "2026-02-03",
+                        "esm_리뷰번호_합성", "RV-합성-1"))));
+
+        assertThat(r.errors()).isEmpty();
+        assertThat(r.ok()).hasSize(1);
+        CanonicalReview row = r.ok().get(0);
+        assertThat(row.body()).isEqualTo("합성-리뷰-본문"); // recognized → maps
+        // Gaps: unrecognized headers do not map.
+        assertThat(row.productName()).isEqualTo("(미지정 상품)"); // product+sku unknown → default
+        assertThat(row.sku()).isNull();
+        assertThat(row.rating()).isNull();
+        assertThat(row.receivedAt()).isNull();
+        assertThat(row.externalId()).isNull();
+    }
+
+    @Test
+    void esmRowWithBlankBodyFailsClosedWhileOtherRowsMap() {
+        // Body is the only hard-required field: a row whose review-text value is
+        // blank fails closed as a RowError (never silently dropped) while other
+        // rows in the same synthetic export still map.
+        MapResult<CanonicalReview> r = reviewMapper.map(table(
+                List.of("리뷰내용", "상품명", "평점", "작성일", "review_id"),
+                List.of(
+                        Map.of("리뷰내용", "", "상품명", "합성-상품-1호", "평점", "5",
+                                "작성일", "2026-02-03", "review_id", "RV-합성-A"),
+                        Map.of("리뷰내용", "합성-리뷰-본문", "상품명", "합성-상품-1호", "평점", "5",
+                                "작성일", "2026-02-04", "review_id", "RV-합성-B"))));
+
+        assertThat(r.ok()).hasSize(1);
+        assertThat(r.ok().get(0).externalId()).isEqualTo("RV-합성-B");
+        assertThat(r.errors()).hasSize(1);
+        assertThat(r.errors().get(0).rowNumber()).isEqualTo(2); // blank-body row = file row 2
+    }
+
     @Test
     void mapsInquiryStatusFromKorean() {
         MapResult<CanonicalInquiry> r = inquiryMapper.map(table(
