@@ -43,6 +43,33 @@ docs, git diffs, test fixtures/snapshots, and any LLM/chat output.
 - This rule is **non-negotiable and unaffected** by anything in Policy B. The Gate 5
   dry-run, its tests, and its output obey Policy A in full.
 
+### Policy A — narrow header-label carve-out (adopted, one-time, header-labels-only)
+
+To ground `ReviewRowMapper` aliases in the *real* ESM+ REVIEW header strings — which the
+category-tally captures deliberately never recorded — a **single, narrowly scoped exception**
+to Policy A's no-raw-**header** rule is **adopted** here for one future header-label capture.
+It is defined by the header-capture protocol,
+[`esmplus-review-header-capture-design.md`](./esmplus-review-header-capture-design.md), and
+bounded exactly as:
+
+- **Header labels only** — the REVIEW column header strings, and nothing else.
+- **No data rows** (`maxDataRows = 0`), **no cell values**, **no buyer/order/contact values**.
+- Literal labels are written **only** to the gitignored local artifact
+  `collector/findings/esm-review-header-labels.local.md` (operator review only; never staged,
+  never committed).
+- Literal labels are **never** emitted to **logs, terminal summaries, committed docs, git
+  diffs, tests, or chat/LLM output** — those surfaces still get sanitized signals only
+  (count bucket, per-header category, per-header NFC/NFD form, a boolean).
+- The raw **row/cell-value** prohibition above remains **absolute** and untouched — this
+  carve-out narrows *only* the header-text extension of the no-raw rule, and only for header
+  labels, which are schema metadata (column names), not buyer content or PII.
+
+**Scope limits of adopting this here (this doc edit alone):** this is a **policy adoption
+only**. It does **not** run any capture, does **not** add a `--capture-review-headers` flag,
+does **not** write any local artifact, and does **not** grant any schema-mapping or dedup-key
+confirmation. The offline capture code slice and the live capture run are each **separately
+approved** downstream steps.
+
 ## Policy B — Future product storage (DESIGN-LEVEL, privacy-review-gated, NOT this track)
 
 What the *shipped product* may eventually persist for operator value. **Nothing here is
@@ -92,8 +119,10 @@ Stated so later ingest design has a target; none of this is built:
 
 ## Non-goals / status
 
-- This doc **enables nothing** — no raw storage, no ingest, no upload, no DB, no
-  capability change. It is a contract for later slices.
+- This doc **enables no capture, code, or capability** — no raw storage, no ingest, no
+  upload, no DB, no `--capture-review-headers` flag, no local-artifact write, no capability
+  change. It is a contract for later slices. Its **one** substantive change is *adopting* the
+  narrow header-label carve-out above (a policy decision), which by itself still runs nothing.
 - **No schema-mapping or dedup-key confirmation** follows from this doc.
 - **REVIEW remains `NEEDS_DISCOVERY`; dedup remains `NEEDS_VERIFICATION`; nothing is
   CONFIRMED.**
