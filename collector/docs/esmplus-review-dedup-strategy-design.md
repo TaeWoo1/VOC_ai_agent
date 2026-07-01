@@ -152,6 +152,11 @@ This **strengthens** the composite-key direction but confirms nothing: step 4 (t
 larger sample, and a **multi-store fingerprinted** run; the 5B run **waived** the store
 fingerprint) is **still open**, so dedup stays `NEEDS_VERIFICATION`.
 
+> **DB-ingest design (docs-only):** how this working key becomes durable, idempotent review
+> records — by **evolving the existing backend** ingest, not this design's concern — is specified in
+> [`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) (Slice 6). It confirms
+> nothing; dedup stays `NEEDS_VERIFICATION` until the §5.4 repeatability gate passes.
+
 ## 6. Non-goals (hard)
 
 - **No DB ingest**, no upload, no production dedup, no persisted index.
