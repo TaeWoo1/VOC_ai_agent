@@ -57,7 +57,7 @@ The Gate 5 row-shape reader already isolates the header row:
 The header labels are read into **local scope only**, emitted to the quarantine artifact
 (§4), then the export is deleted in `finally`. The workbook is never retained.
 
-## 3. The narrow exception this requires (PROPOSED — not granted here)
+## 3. The narrow exception this requires (ADOPTED as policy; capture still separately approved)
 
 Policy A's **core** rule — *never emit raw row/cell values* (review text, product names,
 buyer/order/contact values, ratings tied to a row, raw dates) — is **absolute and stays
@@ -74,10 +74,11 @@ the literal header labels crosses that header-text extension. So this capture ne
 - **Does NOT relax:** the raw row/cell-value prohibition (still absolute), PII handling, the
   no-raw rule on **all normal surfaces** (logs, terminal, committed docs, git diffs, tests,
   chat) — those still get sanitized signals only (§5).
-- **Requires:** an explicit operator decision to adopt. **This doc proposes the carve-out; it
-  does not enact it.** If adopted, a later one-line reference from
-  [`esmplus-review-data-policy.md`](./esmplus-review-data-policy.md) should record it — that
-  edit is **not** part of this docs slice.
+- **Adopted (2026-07-01):** this carve-out has since been **adopted** as a policy decision in
+  [`esmplus-review-data-policy.md`](./esmplus-review-data-policy.md) → *"Policy A — narrow
+  header-label carve-out"*. Adoption is a **policy decision only**: it still runs no capture,
+  adds no `--capture-review-headers` flag, and writes no artifact — the offline code slice and
+  the live run remain **separately approved** downstream steps.
 
 Rationale for why this is acceptable to *propose*: header labels are low-sensitivity schema
 metadata (column names, identical for every seller using the same export), captured once,
