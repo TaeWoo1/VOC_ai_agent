@@ -791,6 +791,83 @@ component set (product + date + reviewText + rating) with usable distinctness on
 and no single stable id — the precondition a future **two-export overlap validation** slice
 needs, which is **separately approved and not started here**.
 
+## Gate 5 Slice 5B result — live two-export overlap validation (2026-07-01)
+
+> Two **separately-approved**, supervised live captures on a stable IP/environment, over
+> operator-set **overlapping** REVIEW date/filter ranges (Export A = wider, Export B =
+> overlapping subset), followed by the **offline** `compare-esm-overlap` comparator. Each
+> capture: headed browser, human login/navigation/filtering, **one** approved-index click,
+> **one** download, then — before the delete-in-`finally` — schema-shape + minimal row-shape +
+> the Slice-5A **composite dedup keys** were emitted on the first **3** rows
+> (`--row-sample-rows=3`), and the file was deleted. This is the first live use of the dormant
+> `--emit-composite-key` flag. Observe-and-discard; **no raw row/cell/header values were read or
+> reported**; no ingest. `STORAGE_PROBE_SALT` was byte-identical across A and B (the
+> comparability precondition); `ESM_STORE_FINGERPRINT` was **explicitly waived**, so this
+> validates **same-store** A/B overlap only — **not** multi-store production namespacing.
+
+**Capture outcome (sanitized) — both `result: CAPTURED_VALID`, `stop: null`:**
+
+| signal | Export A | Export B |
+|---|---|---|
+| `sessionVerdict` | `LOGGED_IN` | `LOGGED_IN` |
+| approved index / `clicked` | `0` (bound `count() === 1`) / `1` | `0` (bound `count() === 1`) / `1` |
+| `postClickOutcome` | `download-fired` | `download-fired` |
+| `fileStructure` / `xlsxReadable` | `xlsx-valid` / `true` | `xlsx-valid` / `true` |
+| `schemaShapeInspected` / `rowShapeProbed` / `compositeKeyEmitted` | `true` / `true` / `true` | `true` / `true` / `true` |
+| identity slots (reviewDate, product, rating, reviewText) | all set | all set |
+| `totalRowBucket` | `tens` | `few` |
+| `storeFingerprintApplied` | `false` *(single-store waiver)* | `false` *(single-store waiver)* |
+| `rawCellLeak` / `fileRetained` / `deleteFailed` | `false` / `false` / `false` | `false` / `false` / `false` |
+| `uploaded` / `rowsParsed` / `schemaInferred` / `dedupKeyClaimed` | all `false` | all `false` |
+
+Both composite-key sets excluded the same categories from identity —
+`replyStatusCandidate`, `orderOrBuyerRiskCandidate` *(PII)*, `unknown` — with the four
+identity slots (date / product / rating / reviewText) populated on every sampled row.
+`downloads/esm-diagnostic` was re-verified **empty** after each run (files deleted, sentinels
+auto-removed); the sanitized scratch JSONs were deleted after the compare. No DB / status /
+`LAST_SUCCESS` / scheduler / `manualSync` write occurred; `git status` showed only untracked
+`tools/`.
+
+**Offline comparator verdict (sanitized; `compare-esm-overlap`):**
+
+| field | value |
+|---|---|
+| `comparable` / `channelMatch` / `slotProvenanceMatch` / `excludedCategoriesMatch` | `true` / `true` / `true` / `true` |
+| L1 (strong) — `overlap` / `matchRate` / `falseMerge` | `few` / `ALL` / `ZERO` |
+| L2 (fallback) — `overlap` / `matchRate` / `falseMerge` | `few` / `ALL` / `ZERO` |
+| L3 (weak) — `overlap` / `matchRate` / `falseMerge` | `few` / `ALL` / `ZERO` |
+| `replyStatusExcludedFromIdentity` | `true` |
+| `risks` | `[]` (none) |
+| `dedupKeyConfirmed` / `schemaMappingConfirmed` | `false` / `false` |
+
+### What this two-export overlap establishes (sanitized)
+
+- **This strengthens the composite-key direction with real two-export overlap evidence.**
+  **Same-review → same-key was observed at L1/L2/L3 within the sampled overlap** (`matchRate:
+  ALL` at every level), and **no false-merge was observed in-sample** (`falseMerge: ZERO`,
+  including the text-bearing L1). Provenance/exclusion/channel all matched with no `risks`.
+- **replyStatus remained excluded from identity** (`replyStatusExcludedFromIdentity: true`), and
+  **PII / order / buyer / contact-like categories remained excluded from identity** — the key
+  is composed from date / product / rating / reviewText only.
+
+### What it does NOT establish
+
+- **Does not confirm the dedup key** (`dedupKeyConfirmed: false`) and **does not confirm schema
+  mapping** (`schemaMappingConfirmed: false`).
+- **Does not prove uniqueness at scale** — the sampled overlap is small (`few` rows per export);
+  it bounds, not proves, collision behaviour on large populations, edited reviews, or
+  non-adjacent windows.
+- **Does not validate multi-store namespace behaviour** — the store fingerprint was waived
+  (`storeFingerprintApplied: false`), so cross-store key separation is untested here.
+
+**Status unchanged.** No upload, row parsing into records, schema-mapping confirmation, or
+dedup-key confirmation occurred. **REVIEW remains `NEEDS_DISCOVERY`; dedup remains
+`NEEDS_VERIFICATION`; nothing is CONFIRMED.** This satisfies a first in-sample pass of the
+dedup design's **overlap-duplicate check**
+([`esmplus-review-dedup-strategy-design.md`](./esmplus-review-dedup-strategy-design.md) §5.3);
+the **repeatability gate** (§5.4 — repeated overlapping exports incl. a `replyStatus`-changed
+case, larger sample, and a multi-store fingerprinted run) remains open.
+
 ## Keep-open session-TTL probe — result (2026-06-29, no-click)
 
 > Local-only characterization, not a capability claim. One persistent context kept
