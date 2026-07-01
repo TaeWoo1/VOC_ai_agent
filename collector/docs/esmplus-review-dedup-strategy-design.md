@@ -141,6 +141,17 @@ attention/state, but should be **excluded from the identity key** (or only used 
 5. Until then, every artifact records `dedupKeyConfirmed: false`, `schemaMappingConfirmed:
    false`.
 
+**Status (2026-07-01):** step 1 (row-shape dry-run) and step 3's **first in-sample overlap
+pass** are done — a live two-export overlap validation (Gate 5 Slice 5B) captured two
+overlapping same-store exports and the offline comparator reported `comparable: true`,
+`matchRate: ALL` with `falseMerge: ZERO` at **L1/L2/L3**, `replyStatusExcludedFromIdentity:
+true`, `risks: []`, on a small (`few`-row) sampled overlap. Sanitized result:
+[`esmplus-review-export-discovery.md` → *Gate 5 Slice 5B result*](./esmplus-review-export-discovery.md).
+This **strengthens** the composite-key direction but confirms nothing: step 4 (the
+**repeatability gate** — repeated overlapping exports incl. a `replyStatus`-changed case, a
+larger sample, and a **multi-store fingerprinted** run; the 5B run **waived** the store
+fingerprint) is **still open**, so dedup stays `NEEDS_VERIFICATION`.
+
 ## 6. Non-goals (hard)
 
 - **No DB ingest**, no upload, no production dedup, no persisted index.
