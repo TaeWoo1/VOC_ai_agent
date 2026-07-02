@@ -204,6 +204,23 @@ per-run live approval; **R3 promotion** is a further separate decision. dedup st
 `NEEDS_VERIFICATION`; `dedupKeyConfirmed: false`; nothing CONFIRMED. See
 [`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) §16.
 
+**Status (2026-07-02, R2 offline-compared):** the gate's **R2 live stage** has now been run as
+a **strong partial**. Three supervised single captures (A/B/C) of repeated overlapping real
+exports (`capture-esm-review --emit-composite-key`, one approved click + one download each,
+magic-validated then deleted) were compared **offline** under quarantine (`compare-esm-overlap`):
+**captureCount 3, pairCount 3**. **A·B** (same wider 1-year window) is the **primary repeatability
+evidence** — `comparable: true`, `matchRate: all/all/all`, `falseMerge: zero/zero/zero`; **B·C /
+A·C** (C a **narrower 6-month subset**) matched cleanly as **subset / window-scale** evidence, not
+full-population equality. All pairs: `slotProvenanceMatch: true`, `excludedCategoriesMatch: true`,
+`replyStatusExcludedFromIdentity: true`, `risks: []`, `rawCellLeak: false`, `uploaded: false`,
+`dbWritten: false`. **Limitations:** no `replyStatus`-changed overlap was observed (the exclusion
+is **structural**, not an observed mutable-state-change pass); sample scale stays small (`few`);
+`instrumentKeyNotProductionHash: true` (the salted instrument key, not the production
+`content_hash`); `multiStoreLiveCaptured: false` (multi-store isolation covered only by the R1
+synthetic `(org_id, channel_id)` test). This is **R2 strong-partial evidence, not a full R2 pass**;
+**R3 promotion is deferred**. dedup stays `NEEDS_VERIFICATION`; `dedupKeyConfirmed: false`; nothing
+CONFIRMED. See [`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) §17.
+
 > **DB-ingest design (docs-only):** how this working key becomes durable, idempotent review
 > records — by **evolving the existing backend** ingest, not this design's concern — is specified in
 > [`esmplus-review-db-ingest-design.md`](./esmplus-review-db-ingest-design.md) (Slice 6). It confirms
