@@ -429,3 +429,64 @@ dedup test stays green); collector regression unchanged and green.
 `NEEDS_VERIFICATION`; `dedupKeyConfirmed:false` (only the future R2 live stage + R3 promotion can move
 it); capability/status unchanged (`NEEDS_VERIFICATION`, unseeded); **nothing is CONFIRMED.** No
 live/browser/upload/API/real-DB/status/capability/scheduler/manualSync occurred.
+
+## 17. Milestone status — dedup **repeatability gate**, R2 live multi-export offline-compared (executed 2026-07-02)
+
+Advances the §5.4 repeatability gate from its R1 offline stage to the **R2 empirical stage**: supervised
+live capture of repeated overlapping real ESM+ REVIEW exports, compared **offline** under quarantine. Per
+the evidence ladder this is the *confirming* stage — but it lands here as a **strong partial**, and it
+**moves no flag**; R3 promotion is a separate later decision.
+
+**What was executed (manual, supervised; no production/test/code change):**
+
+- **No-click precondition check (R2-A0)** confirmed a usable surface: `sessionVerdict: LOGGED_IN`, one
+  actionable export control in the **allowlisted-frame** scope, no consent prompt, `capturePreconditionMet:
+  true` — no click, no download, no file.
+- **Three supervised single captures (A, B, C)** via the shipped Gate-3 harness (`capture-esm-review
+  --emit-composite-key`): each fired **exactly one** approved-index click and **one** download,
+  magic-byte-validated the xlsx, extracted **sanitized composite keys** (salted L1/L2/L3 + context) from a
+  small sampled set, then **deleted** the raw file (`fileRetained: false`, `deleteFailed: false`). No
+  upload, no DB, no status/capability write. A and B used the same wider (1-year) window; C used a
+  **narrower (6-month)** window.
+- **Three offline pairwise comparisons** via the shipped `compare-esm-overlap` (strictly offline; salted
+  hashes / buckets only):
+
+  - **captureCount: 3, pairCount: 3.**
+  - **A·B (same 1-year window — primary repeatability evidence):** `comparable: true`, `matchRate:
+    all/all/all` (L1/L2/L3), `falseMerge: zero/zero/zero`.
+  - **B·C and A·C (C = narrower 6-month subset):** `comparable: true`, `matchRate: all/all/all`,
+    `falseMerge: zero/zero/zero` — **subset / window-scale** evidence (C's rows matched cleanly against
+    the wider set), **not full-population equality**.
+  - Across all pairs: `slotProvenanceMatch: true`, `excludedCategoriesMatch: true`,
+    `replyStatusExcludedFromIdentity: true`, `risks: []`, `rawCellLeak: false`, `uploaded: false`,
+    `dbWritten: false`.
+
+**What this establishes (and only this):** on real exports, the instrument key is **repeatable with zero
+false-merge** at the observed (small) scale — the primary repeatability leg (A·B) passes and the
+narrower-window pairs are clean on their overlap. This **strengthens** the dedup direction materially
+beyond synthetic hardening.
+
+**Limitations (why this is a strong partial, not a full R2 pass):**
+
+- **No `replyStatus`-changed overlap was observed.** `replyStatusExcludedFromIdentity: true` is a
+  **structural** property (reply columns are not in the key), **not** an observed mutable-state-change
+  pass — the "identity holds when only the reply changes" leg remains **untested**.
+- **Sample scale remains small (`few`).** The composite-key sampler reads only a small handful of rows (a
+  fixed cap), and Capture C's narrower window sampled fewer still — so repeatability is shown at small
+  scale only.
+- **`instrumentKeyNotProductionHash: true`.** The comparison uses the salted validation-instrument key,
+  **not** the literal production `content_hash` (which additionally binds the DB-resolved `productId` +
+  `(org_id, channel_id)`). Strong **proxy** evidence; R3 must reconcile the proxy-vs-production gap before
+  promoting.
+- **`multiStoreLiveCaptured: false`.** Multi-store isolation is **not** live-captured; it rests on the R1
+  **synthetic** `(org_id, channel_id)` isolation test.
+
+**Explicitly NOT done / NOT promoted:** no further live capture; no compare beyond the three sanitized
+pairs; no L2/L3 tiering, `dedup_tier`, or collision→cluster; no `reply_status` storage/update; no
+capability/status seed; no `ContentHash`/entity/migration/index change; **no `dedupKeyConfirmed` move.**
+
+**Status:** REVIEW remains `NEEDS_DISCOVERY`; `schemaMappingConfirmed: false`; dedup remains
+`NEEDS_VERIFICATION`; `dedupKeyConfirmed: false` (**R2 strong partial does not move it — only R3 can**);
+capability/status unchanged (`NEEDS_VERIFICATION`, unseeded); **nothing is CONFIRMED.** R3 promotion is
+deferred. No upload / DB / status / capability / scheduler / manualSync occurred; the offline comparison
+read only already-sanitized salted-hash inputs.
