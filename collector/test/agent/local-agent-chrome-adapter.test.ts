@@ -1,0 +1,375 @@
+import { describe, expect, it } from "vitest";
+import {
+  LocalAgentChromeAdapter,
+  LocalAgentReconnectService,
+  type GateSignals,
+  type LocalAgentContext,
+  type LocalAgentPage,
+  type RawModeCandidate,
+  type RawPopulation,
+} from "../../src/agent/local-agent-chrome-adapter";
+import {
+  computeFormSignature,
+  computeLoginModeSignature,
+  connectionFromBinding,
+  InMemoryLoginModeBindingStore,
+  type LocalAgentConsents,
+  type LoginModeBinding,
+  type SanitizedFormShape,
+} from "../../src/agent/local-agent-login-mode";
+import { CANDIDATE_SIGNATURE_SCHEMA_VERSION } from "../../src/esm/esm-candidate-signature";
+import type { SanitizedAccountRef } from "../../src/connection/sync-state";
+import type { InspectionVerdict } from "../../src/esm/worker-session-state";
+
+const SALT = "local-agent-c1-salt";
+const NOW = "2026-07-03T00:00:00Z";
+
+const ACCOUNT: SanitizedAccountRef = {
+  connectionId: "conn-agent-c1-0001",
+  boundStoreFingerprintHash: "hash-store-c1",
+  fingerprintSourceCategory: "account-scope",
+};
+
+const GM_TAB: RawModeCandidate = {
+  modeCategory: "GMARKET",
+  interactiveCategory: "tab",
+  visible: true,
+  enabled: true,
+  topFrame: true,
+  rectBucket: "medium",
+  token: "tok-gm",
+};
+
+const ESTABLISHED_FORM: SanitizedFormShape = {
+  idFieldBucket: "one",
+  pwFieldBucket: "one",
+  submitBucket: "one",
+  formPresent: true,
+  gmarketTabActive: false,
+  challengePresent: false,
+};
+
+const ALL_CONSENTS: LocalAgentConsents = {
+  sessionInspectionConsent: true,
+  loginModeAutoSelectionConsent: true,
+  assistedReconnectConsent: true,
+  autoSubmitAfterCredentialSelectionConsent: true,
+  reviewExportConsent: true,
+  uploadConsent: true,
+};
+
+function baseBinding(): LoginModeBinding {
+  return {
+    account: ACCOUNT,
+    loginMode: "GMARKET",
+    loginModeSignatureVersion: CANDIDATE_SIGNATURE_SCHEMA_VERSION,
+    loginModeSignature: computeLoginModeSignature(GM_TAB, SALT),
+    postModeFormSignature: null,
+    reconnectInteractionCategory: "TWO_STEP_FIELD_AND_CREDENTIAL_SELECTION",
+  };
+}
+
+// ── Fake sanitized page ─────────────────────────────────────────────────────────────────────────────
+
+class FakePage implements LocalAgentPage {
+  gate: GateSignals = { https: true, hostAllowlisted: true, challengePresent: false, unexpectedIframe: false };
+  candidates: RawModeCandidate[] = [{ ...GM_TAB }];
+  formShape: SanitizedFormShape = { ...ESTABLISHED_FORM };
+  population: RawPopulation = { usernamePopulated: false, passwordPopulated: false, challengePresent: false };
+  standingVerdict: InspectionVerdict = "LOGGED_IN";
+  verdictQueue: InspectionVerdict[] = [];
+
+  clickModeCalls = 0;
+  focusCalls = 0;
+  submitCalls = 0;
+  verdictCalls = 0;
+  closed = 0;
+
+  async readGateSignals(): Promise<GateSignals> {
+    return this.gate;
+  }
+  async scanLoginModeCandidates(): Promise<RawModeCandidate[]> {
+    return this.candidates;
+  }
+  async readFormShape(): Promise<SanitizedFormShape> {
+    return this.formShape;
+  }
+  async clickModeCandidate(): Promise<void> {
+    this.clickModeCalls += 1;
+  }
+  async focusUsernameField(): Promise<void> {
+    this.focusCalls += 1;
+  }
+  async submitLoginForm(): Promise<void> {
+    this.submitCalls += 1;
+  }
+  async readPopulation(): Promise<RawPopulation> {
+    return this.population;
+  }
+  async classifySessionVerdict(): Promise<InspectionVerdict> {
+    this.verdictCalls += 1;
+    return this.verdictQueue.length > 0 ? this.verdictQueue.shift()! : this.standingVerdict;
+  }
+  async close(): Promise<void> {
+    this.closed += 1;
+  }
+}
+
+interface Harness {
+  service: LocalAgentReconnectService;
+  page: FakePage;
+  store: InMemoryLoginModeBindingStore;
+  binding: LoginModeBinding;
+  connection: ReturnType<typeof connectionFromBinding>;
+}
+
+async function makeHarness(opts: {
+  binding?: LoginModeBinding;
+  consents?: LocalAgentConsents;
+  configurePage?: (p: FakePage) => void;
+} = {}): Promise<Harness> {
+  const page = new FakePage();
+  opts.configurePage?.(page);
+  const binding = opts.binding ?? baseBinding();
+  const store = new InMemoryLoginModeBindingStore();
+  await store.save(binding);
+  const context: LocalAgentContext = {
+    id: "ctx-1",
+    page,
+    async close() {
+      await page.close();
+    },
+  };
+  const adapter = new LocalAgentChromeAdapter({
+    account: ACCOUNT,
+    salt: SALT,
+    bindingStore: store,
+    pageFactory: async () => context,
+  });
+  const service = new LocalAgentReconnectService(adapter, {
+    salt: SALT,
+    interactionCategory: binding.reconnectInteractionCategory,
+  });
+  const connection = connectionFromBinding(binding, opts.consents ?? ALL_CONSENTS);
+  return { service, page, store, binding, connection };
+}
+
+/** Start a logged-out session (verify verdict later comes from the standing/queue config). */
+async function startLoggedOut(h: Harness): Promise<void> {
+  h.page.verdictQueue = ["NOT_LOGGED_IN", ...h.page.verdictQueue];
+  await h.service.start(h.connection, NOW);
+}
+
+// ── Mode-signature gate ──────────────────────────────────────────────────────────────────────────
+
+describe("adapter — login-mode signature gate", () => {
+  it("[7] an exact GMARKET mode signature allows exactly one mode click → WAITING", async () => {
+    const h = await makeHarness();
+    await startLoggedOut(h);
+    expect(h.page.clickModeCalls).toBe(1);
+    expect(h.service.getState(ACCOUNT)).toBe("WAITING_FOR_CREDENTIAL_SELECTION");
+  });
+
+  it("[8] an index/candidate alone cannot authorize a click — signature must match (zero clicks)", async () => {
+    // A GMARKET·tab candidate exists, but its sanitized shape differs → signature mismatch.
+    const h = await makeHarness({
+      configurePage: (p) => {
+        p.candidates = [{ ...GM_TAB, rectBucket: "large" }]; // different shape → different signature
+      },
+    });
+    await startLoggedOut(h);
+    expect(h.page.clickModeCalls).toBe(0);
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("[9] duplicate matching GMARKET·tab candidates fail closed (zero clicks)", async () => {
+    const h = await makeHarness({
+      configurePage: (p) => {
+        p.candidates = [{ ...GM_TAB }, { ...GM_TAB, token: "tok-gm-2" }];
+      },
+    });
+    await startLoggedOut(h);
+    expect(h.page.clickModeCalls).toBe(0);
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("(extra) a non-HTTPS / non-allowlisted / challenge / unexpected-iframe gate fails closed", async () => {
+    for (const gate of [
+      { https: false, hostAllowlisted: true, challengePresent: false, unexpectedIframe: false },
+      { https: true, hostAllowlisted: false, challengePresent: false, unexpectedIframe: false },
+      { https: true, hostAllowlisted: true, challengePresent: true, unexpectedIframe: false },
+      { https: true, hostAllowlisted: true, challengePresent: false, unexpectedIframe: true },
+    ] as GateSignals[]) {
+      const h = await makeHarness({ configurePage: (p) => (p.gate = gate) });
+      await startLoggedOut(h);
+      expect(h.page.clickModeCalls).toBe(0);
+      expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+    }
+  });
+});
+
+// ── Form gate + handoff ──────────────────────────────────────────────────────────────────────────
+
+describe("adapter — post-click form gate + human handoff", () => {
+  it("[10] a post-click form-signature drift fails closed (mode click fired, no handoff)", async () => {
+    const binding = { ...baseBinding(), postModeFormSignature: computeFormSignature(ESTABLISHED_FORM, SALT) };
+    const h = await makeHarness({
+      binding,
+      configurePage: (p) => {
+        // live form differs from the stored post-mode signature → drift
+        p.formShape = { ...ESTABLISHED_FORM, submitBucket: "many" };
+      },
+    });
+    await startLoggedOut(h);
+    expect(h.page.clickModeCalls).toBe(1);
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+    expect(h.service.userActionRequests).toHaveLength(0);
+  });
+
+  it("[11] the user-action request (CLICK_USERNAME_FIELD_AND_SELECT_SAVED_CREDENTIAL) is emitted exactly once", async () => {
+    const h = await makeHarness();
+    await startLoggedOut(h);
+    expect(h.service.userActionRequests).toHaveLength(1);
+    expect(h.service.userActionRequests[0]!.action).toBe("CLICK_USERNAME_FIELD_AND_SELECT_SAVED_CREDENTIAL");
+    expect(h.service.userActionRequests[0]!.interactionCategory).toBe("TWO_STEP_FIELD_AND_CREDENTIAL_SELECTION");
+    expect(h.page.focusCalls).toBe(1); // the one agent-driven username field-focus click
+  });
+});
+
+// ── Submit gate ────────────────────────────────────────────────────────────────────────────────────
+
+describe("adapter — credential-population submit gate", () => {
+  it("[12] state stays WAITING before both fields populate", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: false, challengePresent: false }) });
+    await startLoggedOut(h);
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.disposition).toBe("AWAITING_POPULATION");
+    expect(h.service.getState(ACCOUNT)).toBe("WAITING_FOR_CREDENTIAL_SELECTION");
+  });
+
+  it("[13] username-only population causes zero submit", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: false, challengePresent: false }) });
+    await startLoggedOut(h);
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(h.page.submitCalls).toBe(0);
+  });
+
+  it("[14] password-only population causes zero submit", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: false, passwordPopulated: true, challengePresent: false }) });
+    await startLoggedOut(h);
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(h.page.submitCalls).toBe(0);
+  });
+
+  it("[15] a challenge causes zero submit + human reconnect", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: true }) });
+    await startLoggedOut(h);
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.disposition).toBe("CHALLENGE");
+    expect(h.page.submitCalls).toBe(0);
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("[16] a post-population form drift causes zero submit", async () => {
+    const h = await makeHarness();
+    await startLoggedOut(h); // binds the form signature during prepare
+    h.page.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false };
+    h.page.formShape = { ...ESTABLISHED_FORM, idFieldBucket: "many" }; // drift after population
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.disposition).toBe("FORM_DRIFT");
+    expect(h.page.submitCalls).toBe(0);
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("[17] both fields populated + consent allows exactly one submit", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    await startLoggedOut(h);
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.submitted).toBe(true);
+    expect(h.page.submitCalls).toBe(1);
+  });
+
+  it("(extra) both populated but missing auto-submit consent → zero submit", async () => {
+    const h = await makeHarness({
+      consents: { ...ALL_CONSENTS, autoSubmitAfterCredentialSelectionConsent: false },
+      configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }),
+    });
+    await startLoggedOut(h);
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.disposition).toBe("NO_SUBMIT_CONSENT");
+    expect(h.page.submitCalls).toBe(0);
+  });
+
+  it("[18] duplicate population observations do not double-submit", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    await startLoggedOut(h);
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    const dup = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(dup.disposition).toBe("IGNORED_NOT_WAITING");
+    expect(h.page.submitCalls).toBe(1);
+  });
+});
+
+// ── Verification / catch-up / separation ───────────────────────────────────────────────────────────
+
+describe("adapter — verification, catch-up, separation", () => {
+  it("[19] a successful post-submit verification enters READY", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    h.page.standingVerdict = "LOGGED_IN"; // post-submit verify
+    await startLoggedOut(h);
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(h.service.getState(ACCOUNT)).toBe("READY");
+  });
+
+  it("[20] a successful verification emits exactly one catch-up request (not executed)", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    h.page.standingVerdict = "LOGGED_IN";
+    await startLoggedOut(h);
+    expect(h.service.catchUpRequests).toHaveLength(0); // not READY yet
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(h.service.catchUpRequests).toHaveLength(1);
+  });
+
+  it("[21] a failed post-submit verification causes no retry", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    await startLoggedOut(h);
+    h.page.standingVerdict = "NOT_LOGGED_IN"; // verify fails
+    const verdictCallsBefore = h.page.verdictCalls;
+    const r = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(r.disposition).toBe("VERIFY_FAILED");
+    expect(h.page.submitCalls).toBe(1); // one submit, never retried
+    expect(h.page.verdictCalls).toBe(verdictCallsBefore + 1); // one verification, no retry loop
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("[22] emitted data carries only sanitized enums/booleans + a hash-only account ref", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    h.page.standingVerdict = "LOGGED_IN";
+    await startLoggedOut(h);
+    const result = await h.service.probeCredentialSelection(ACCOUNT, NOW);
+
+    const accountKeys = ["boundStoreFingerprintHash", "connectionId", "fingerprintSourceCategory"];
+    for (const req of h.service.userActionRequests) {
+      expect(Object.keys(req).sort()).toEqual(["account", "action", "interactionCategory"]);
+      expect(Object.keys(req.account).sort()).toEqual(accountKeys);
+    }
+    const blob = JSON.stringify({
+      userActionRequests: h.service.userActionRequests,
+      operationalStates: h.service.operationalStates,
+      result,
+    });
+    // No raw leak artifacts: URLs, profile paths, DOM selectors, or the internal click token.
+    // (The action ENUM legitimately contains the word "USERNAME" — that is a sanitized code, not a value.)
+    expect(blob).not.toMatch(/https?:\/\//i);
+    expect(blob).not.toMatch(/\/Users\/|data-la-|tok-gm|querySelector|\.click\(|eyJ[A-Za-z0-9_-]/);
+  });
+
+  it("[23] CapabilityStatus is never changed by the reconnect flow", async () => {
+    const h = await makeHarness({ configurePage: (p) => (p.population = { usernamePopulated: true, passwordPopulated: true, challengePresent: false }) });
+    h.page.standingVerdict = "LOGGED_IN";
+    await startLoggedOut(h);
+    await h.service.probeCredentialSelection(ACCOUNT, NOW);
+    expect(h.service.getOperationalState(ACCOUNT)?.capabilityStatus).toBe("NEEDS_DISCOVERY");
+    for (const s of h.service.operationalStates) expect(s.capabilityStatus).toBe("NEEDS_DISCOVERY");
+  });
+});
