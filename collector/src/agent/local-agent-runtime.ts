@@ -62,7 +62,7 @@ import type {
   WorkerContext,
 } from "../esm/esm-worker-runtime";
 import { applySyncOutcome, type SyncOutcome } from "../connection/sync-state-reduce";
-import type { ConnectorSyncState } from "../connection/sync-state";
+import type { ConnectorSyncState, SyncErrorCategory } from "../connection/sync-state";
 
 // ── Net-new injected interfaces (sanitized values only; no real browser) ──────────────────────────
 
@@ -211,6 +211,47 @@ interface AgentLifecycle {
   // Per-logged-in-session flags (reset when leaving the logged-in session).
   catchUpRequested: boolean;
   catchUpAcknowledged: boolean;
+  /** True once this session's single catch-up has run (success or failure) — one-shot. */
+  catchUpConsumed: boolean;
+}
+
+// ── Catch-up (M-Agent-1C2) seam types ──────────────────────────────────────────────────────────────
+
+/** A SANITIZED catch-up sync outcome from the injected existing-ESM-sync executor. NO raw data. */
+export type CatchUpSyncOutcomeKind = "SUCCEEDED" | "FAILED_RECOVERABLE" | "SESSION_LOST";
+
+export interface CatchUpSyncOutcome {
+  kind: CatchUpSyncOutcomeKind;
+  /** Coarse failure class for `FAILED_RECOVERABLE` (sanitized); ignored for other kinds. */
+  errorCategory?: SyncErrorCategory;
+}
+
+/**
+ * The existing-ESM-review-sync seam: runs ONE capture→upload cycle into the held
+ * context and returns a sanitized outcome. Injected — the Local Agent never embeds
+ * capture/upload logic. (Adapters composing the existing `SyntheticCycle` capture/
+ * upload boundary live in `local-agent-catch-up.ts`.)
+ */
+export interface CatchUpSyncExecutor {
+  execute(context: WorkerContext, account: SanitizedAccountRef): Promise<CatchUpSyncOutcome>;
+}
+
+/** Why a catch-up attempt ended — a fixed sanitized enum. */
+export type CatchUpDisposition =
+  | "CATCH_UP_SUCCEEDED"
+  | "CATCH_UP_FAILED"
+  | "SESSION_LOST"
+  | "SKIPPED_NOT_READY"
+  | "SKIPPED_CATCH_UP_NOT_ACKNOWLEDGED"
+  | "SKIPPED_BUSY"
+  | "SKIPPED_ALREADY_CONSUMED";
+
+/** The sanitized outcome of one catch-up attempt. Only enums/booleans. */
+export interface CatchUpResult {
+  disposition: CatchUpDisposition;
+  state: LocalAgentState;
+  /** Whether the injected sync executor was actually invoked (exactly-once proof). */
+  syncExecuted: boolean;
 }
 
 const DEFAULT_CADENCE_MIN = 120;
@@ -333,6 +374,7 @@ export class LocalAgentRuntime {
       submitFired: false,
       catchUpRequested: false,
       catchUpAcknowledged: false,
+      catchUpConsumed: false,
     };
     this.lifecycles.set(key, lifecycle);
     this.reduce(lifecycle, { kind: "START" }); // STOPPED → STARTING (the reducer is the single source of truth)
@@ -466,6 +508,78 @@ export class LocalAgentRuntime {
   }
 
   /**
+   * Run the ONE acknowledged catch-up sync (M-Agent-1C2) through the injected
+   * existing-ESM-sync `executor`, mapping its sanitized outcome to the Local Agent
+   * state: `SUCCEEDED → READY`, `FAILED_RECOVERABLE → DEGRADED`, `SESSION_LOST →
+   * HUMAN_RECONNECT_REQUIRED`. Held under the account single-flight; **one-shot**
+   * (consumed up-front so no path double-runs this session's catch-up); NO automatic
+   * retry (a thrown executor becomes a recoverable failure). A successful catch-up
+   * does NOT emit a new catch-up request. Never writes CapabilityStatus/schema/dedup.
+   */
+  async runCatchUp(
+    account: SanitizedAccountRef,
+    now: Date | string,
+    executor: CatchUpSyncExecutor,
+  ): Promise<CatchUpResult> {
+    const lifecycle = this.requireLifecycle(account);
+
+    const handle = this.singleFlight.tryAcquire(this.key(account));
+    if (handle === null) {
+      return { disposition: "SKIPPED_BUSY", state: lifecycle.state, syncExecuted: false };
+    }
+    try {
+      // No sync while reconnecting or from any non-`READY` state.
+      if (isReconnectState(lifecycle.state) || !mayScheduleSync(lifecycle.state)) {
+        return { disposition: "SKIPPED_NOT_READY", state: lifecycle.state, syncExecuted: false };
+      }
+      if (!lifecycle.catchUpAcknowledged) {
+        return { disposition: "SKIPPED_CATCH_UP_NOT_ACKNOWLEDGED", state: lifecycle.state, syncExecuted: false };
+      }
+      if (lifecycle.catchUpConsumed) {
+        return { disposition: "SKIPPED_ALREADY_CONSUMED", state: lifecycle.state, syncExecuted: false };
+      }
+
+      // Consume up-front — this session's single catch-up can never double-run.
+      lifecycle.catchUpConsumed = true;
+      this.reduce(lifecycle, { kind: "SYNC_STARTED" }); // → SYNCING
+
+      let outcome: CatchUpSyncOutcome;
+      try {
+        outcome = await executor.execute(lifecycle.context, lifecycle.connection.account);
+      } catch {
+        // A thrown executor is a recoverable failure — no auto-retry; enter DEGRADED.
+        outcome = { kind: "FAILED_RECOVERABLE", errorCategory: "UNKNOWN" };
+      }
+
+      switch (outcome.kind) {
+        case "SUCCEEDED":
+          this.reduce(lifecycle, { kind: "SYNC_FINISHED" }); // → READY (no new catch-up request)
+          await this.applyCatchUpOperational(lifecycle, { kind: "SUCCEEDED" }, now);
+          return { disposition: "CATCH_UP_SUCCEEDED", state: lifecycle.state, syncExecuted: true };
+        case "SESSION_LOST":
+          this.reduce(lifecycle, { kind: "SYNC_SESSION_LOST" }); // → HUMAN_RECONNECT_REQUIRED
+          await this.applyCatchUpOperational(
+            lifecycle,
+            { kind: "AUTH_RECONNECT_REQUIRED", authStatus: "RECONNECT_REQUIRED" },
+            now,
+          );
+          return { disposition: "SESSION_LOST", state: lifecycle.state, syncExecuted: true };
+        case "FAILED_RECOVERABLE":
+        default:
+          this.reduce(lifecycle, { kind: "DEGRADE" }); // → DEGRADED (manual retry only)
+          await this.applyCatchUpOperational(
+            lifecycle,
+            { kind: "FAILED", errorCategory: outcome.errorCategory ?? "UNKNOWN" },
+            now,
+          );
+          return { disposition: "CATCH_UP_FAILED", state: lifecycle.state, syncExecuted: true };
+      }
+    } finally {
+      handle.release();
+    }
+  }
+
+  /**
    * Restart: a BRAND-NEW lifecycle. Closes the current context (once), relaunches a
    * fresh context and re-inspects. It can NEVER inherit `READY` without a new
    * inspection — a restart is a potential session break.
@@ -540,6 +654,7 @@ export class LocalAgentRuntime {
     lifecycle.submitFired = false;
     lifecycle.catchUpRequested = false;
     lifecycle.catchUpAcknowledged = false;
+    lifecycle.catchUpConsumed = false;
 
     const conn = lifecycle.connection;
 
@@ -619,6 +734,17 @@ export class LocalAgentRuntime {
     now: Date | string,
   ): Promise<void> {
     const next = applySyncOutcome(lifecycle.operational, operationalOutcomeFor(outcome), now);
+    lifecycle.operational = next;
+    await this.deps.operationalSink.record(next);
+  }
+
+  /** Fold a catch-up's mapped `SyncOutcome` into operational state and notify the sink. */
+  private async applyCatchUpOperational(
+    lifecycle: AgentLifecycle,
+    syncOutcome: SyncOutcome,
+    now: Date | string,
+  ): Promise<void> {
+    const next = applySyncOutcome(lifecycle.operational, syncOutcome, now);
     lifecycle.operational = next;
     await this.deps.operationalSink.record(next);
   }

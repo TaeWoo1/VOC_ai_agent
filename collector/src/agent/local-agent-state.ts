@@ -147,6 +147,8 @@ export type LocalAgentEvent =
   | { kind: "SYNC_STARTED" }
   /** A workday sync cycle finished (the operational axis records its outcome). */
   | { kind: "SYNC_FINISHED" }
+  /** The session dropped mid-sync — a human must re-authenticate; NO automatic retry. */
+  | { kind: "SYNC_SESSION_LOST" }
   /** Repeated soft failures crossed a degrade threshold (still alive; operational only). */
   | { kind: "DEGRADE" }
   /** Operator (or unusable auth) intentionally halts scheduling. */
@@ -250,6 +252,8 @@ export function reduceLocalAgent(state: LocalAgentState, event: LocalAgentEvent)
       // failure here auto-triggers a second cycle.
       if (event.kind === "SYNC_FINISHED") return accept("READY");
       if (event.kind === "DEGRADE") return accept("DEGRADED");
+      // A catch-up that discovers the session dropped mid-sync → human reconnect, no retry.
+      if (event.kind === "SYNC_SESSION_LOST") return accept("HUMAN_RECONNECT_REQUIRED");
       return reject(state);
 
     case "PAUSED":

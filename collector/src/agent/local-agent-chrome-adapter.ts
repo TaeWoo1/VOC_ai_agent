@@ -30,6 +30,8 @@ import type {
 import {
   LocalAgentRuntime,
   type CatchUpRequestSink,
+  type CatchUpResult,
+  type CatchUpSyncExecutor,
   type CredentialObservationResult,
   type LocalAgentNotification,
   type LocalAgentNotifier,
@@ -300,19 +302,31 @@ const EXPORT_DISABLED_CYCLE: SyntheticCycle = {
  * `start` launches + inspects (assisted reconnect on a logged-out session);
  * `probeCredentialSelection` is the EXPLICIT/MANUAL poll (no background timer) that
  * reads the sanitized population and feeds the single-submit gate + verification.
- * Review export / download / upload / workday scheduling are NOT wired (out of scope).
+ *
+ * M-Agent-1C2: catch-up is exposed through this same boundary. An optional
+ * `catchUpExecutor` (the existing-ESM-sync seam, e.g. `syntheticCycleCatchUpExecutor`)
+ * is injected ONCE here; callers `acknowledgeCatchUp` + `runAcknowledgedCatchUp`
+ * without ever touching the private runtime, constructing capture/upload logic, or
+ * bypassing the runtime's state gates. Workday scheduling stays deferred (no timer).
  */
 export class LocalAgentReconnectService {
   private readonly runtime: LocalAgentRuntime;
   private readonly catchUpRecorder = new CatchUpRecorder();
   private readonly operationalRecorder = new OperationalRecorder();
+  private readonly catchUpExecutor: CatchUpSyncExecutor | null;
   readonly notifier: LocalAgentUserActionNotifier;
 
   constructor(
     private readonly adapter: LocalAgentChromeAdapter,
-    opts: { salt: string; interactionCategory: ReconnectInteractionCategory },
+    opts: {
+      salt: string;
+      interactionCategory: ReconnectInteractionCategory;
+      /** The existing-ESM-sync seam, injected ONCE — never passed per call. */
+      catchUpExecutor?: CatchUpSyncExecutor;
+    },
   ) {
     this.notifier = new LocalAgentUserActionNotifier(opts.interactionCategory);
+    this.catchUpExecutor = opts.catchUpExecutor ?? null;
     this.runtime = new LocalAgentRuntime({
       launcher: adapter,
       inspector: adapter,
@@ -339,6 +353,39 @@ export class LocalAgentReconnectService {
   async probeCredentialSelection(account: SanitizedAccountRef, now: Date | string): Promise<CredentialObservationResult> {
     const observation = await this.adapter.observeCredentialPopulation();
     return this.runtime.submitCredentialObservation(account, observation, now);
+  }
+
+  /**
+   * Acknowledge the single pending catch-up emitted on reaching `READY` (M-Agent-1C2).
+   * Idempotent — a duplicate acknowledgement is a safe no-op and never double-runs a sync.
+   */
+  acknowledgeCatchUp(account: SanitizedAccountRef): void {
+    this.runtime.acknowledgeCatchUp(account);
+  }
+
+  /** Whether the pending catch-up has been acknowledged. */
+  hasAcknowledgedCatchUp(account: SanitizedAccountRef): boolean {
+    return this.runtime.hasAcknowledgedCatchUp(account);
+  }
+
+  /**
+   * Execute the one acknowledged catch-up through the injected existing-ESM-sync
+   * executor, returning a sanitized `CatchUpResult`. All gating (ack, one-shot
+   * consumption, single-flight, READY-only, no-retry) + the state mapping
+   * (SUCCEEDED→READY / FAILED_RECOVERABLE→DEGRADED / SESSION_LOST→HUMAN_RECONNECT_REQUIRED)
+   * happen inside the runtime — the caller never bypasses them. Throws only if no
+   * executor was injected at construction.
+   *
+   * Retry semantics (M-Agent-1C2): the catch-up is consumed BEFORE the executor runs,
+   * so a `FAILED_RECOVERABLE`→`DEGRADED` result CANNOT be retried in the same session.
+   * There is NO automatic retry and NO same-session manual-retry API in this slice;
+   * an explicit operator recovery flow is deferred.
+   */
+  async runAcknowledgedCatchUp(account: SanitizedAccountRef, now: Date | string): Promise<CatchUpResult> {
+    if (this.catchUpExecutor === null) {
+      throw new Error("LocalAgentReconnectService: no catch-up sync executor was injected");
+    }
+    return this.runtime.runCatchUp(account, now, this.catchUpExecutor);
   }
 
   reinspect(account: SanitizedAccountRef, now: Date | string): Promise<LocalAgentState> {

@@ -17,6 +17,9 @@ import {
   type LoginModeBinding,
   type SanitizedFormShape,
 } from "../../src/agent/local-agent-login-mode";
+import { syntheticCycleCatchUpExecutor } from "../../src/agent/local-agent-catch-up";
+import type { CatchUpSyncExecutor } from "../../src/agent/local-agent-runtime";
+import type { SyntheticCycle, SyntheticCycleOutcome } from "../../src/esm/esm-worker-runtime";
 import { CANDIDATE_SIGNATURE_SCHEMA_VERSION } from "../../src/esm/esm-candidate-signature";
 import type { SanitizedAccountRef } from "../../src/connection/sync-state";
 import type { InspectionVerdict } from "../../src/esm/worker-session-state";
@@ -371,5 +374,183 @@ describe("adapter — verification, catch-up, separation", () => {
     await h.service.probeCredentialSelection(ACCOUNT, NOW);
     expect(h.service.getOperationalState(ACCOUNT)?.capabilityStatus).toBe("NEEDS_DISCOVERY");
     for (const s of h.service.operationalStates) expect(s.capabilityStatus).toBe("NEEDS_DISCOVERY");
+  });
+});
+
+// ── Service-level catch-up integration (M-Agent-1C2) ─────────────────────────────────────────────
+
+/** Models the existing capture→upload leg as ONE SyntheticCycle with counted sub-steps. */
+class FakeCaptureUploadCycle implements SyntheticCycle {
+  captureCalls = 0;
+  uploadCalls = 0;
+  outcome: SyntheticCycleOutcome = "SUCCESS";
+  async run(): Promise<SyntheticCycleOutcome> {
+    this.captureCalls += 1; // the capture/export leg
+    this.uploadCalls += 1; // the upload leg
+    return this.outcome;
+  }
+}
+
+interface CatchUpHarness {
+  service: LocalAgentReconnectService;
+  page: FakePage;
+}
+
+/** Build a service wired with an injected catch-up executor; a LOGGED_IN startup reaches READY. */
+function makeCatchUpHarness(executor: CatchUpSyncExecutor): CatchUpHarness {
+  const page = new FakePage(); // standingVerdict defaults to LOGGED_IN
+  const binding = baseBinding();
+  const store = new InMemoryLoginModeBindingStore();
+  const context: LocalAgentContext = {
+    id: "ctx-cu",
+    page,
+    async close() {
+      await page.close();
+    },
+  };
+  const adapter = new LocalAgentChromeAdapter({
+    account: ACCOUNT,
+    salt: SALT,
+    bindingStore: store,
+    pageFactory: async () => context,
+  });
+  const service = new LocalAgentReconnectService(adapter, {
+    salt: SALT,
+    interactionCategory: binding.reconnectInteractionCategory,
+    catchUpExecutor: executor,
+  });
+  void store.save(binding);
+  return { service, page };
+}
+
+const CONNECTION = connectionFromBinding(baseBinding(), ALL_CONSENTS);
+
+describe("service — catch-up integration (M-Agent-1C2)", () => {
+  it("[S1] service reaches READY and exposes one pending catch-up", async () => {
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(new FakeCaptureUploadCycle()));
+    const state = await h.service.start(CONNECTION, NOW);
+    expect(state).toBe("READY");
+    expect(h.service.catchUpRequests).toHaveLength(1);
+  });
+
+  it("[S2] service acknowledgement is idempotent", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    expect(h.service.hasAcknowledgedCatchUp(ACCOUNT)).toBe(true);
+    await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(cycle.captureCalls).toBe(1);
+  });
+
+  it("[S3]/[S4]/[S5] executes the injected existing-cycle adapter once — capture once, upload once", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.disposition).toBe("CATCH_UP_SUCCEEDED");
+    expect(r.syncExecuted).toBe(true);
+    expect(cycle.captureCalls).toBe(1);
+    expect(cycle.uploadCalls).toBe(1);
+  });
+
+  it("[S6] duplicate service calls do not invoke capture/upload again", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    const dup = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(dup.disposition).toBe("SKIPPED_ALREADY_CONSUMED");
+    expect(cycle.captureCalls).toBe(1);
+    expect(cycle.uploadCalls).toBe(1);
+  });
+
+  it("[S7] success returns READY", async () => {
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(new FakeCaptureUploadCycle()));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.state).toBe("READY");
+    expect(h.service.getState(ACCOUNT)).toBe("READY");
+  });
+
+  it("[S8] recoverable failure returns DEGRADED", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    cycle.outcome = "UPLOAD_FAILED";
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.disposition).toBe("CATCH_UP_FAILED");
+    expect(h.service.getState(ACCOUNT)).toBe("DEGRADED");
+  });
+
+  it("[S9] session loss returns HUMAN_RECONNECT_REQUIRED", async () => {
+    const sessionLostExecutor: CatchUpSyncExecutor = { async execute() { return { kind: "SESSION_LOST" }; } };
+    const h = makeCatchUpHarness(sessionLostExecutor);
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.disposition).toBe("SESSION_LOST");
+    expect(h.service.getState(ACCOUNT)).toBe("HUMAN_RECONNECT_REQUIRED");
+  });
+
+  it("[S10] no caller can execute catch-up before acknowledgement", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.disposition).toBe("SKIPPED_CATCH_UP_NOT_ACKNOWLEDGED");
+    expect(cycle.captureCalls).toBe(0);
+  });
+
+  it("[S11] catch-up cannot run while reconnecting", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    h.page.standingVerdict = "NOT_LOGGED_IN"; // startup → assisted reconnect
+    h.page.verdictQueue = ["NOT_LOGGED_IN"];
+    await h.service.start(CONNECTION, NOW); // → WAITING_FOR_CREDENTIAL_SELECTION
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const r = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(r.disposition).toBe("SKIPPED_NOT_READY");
+    expect(cycle.captureCalls).toBe(0);
+  });
+
+  it("[S12] CapabilityStatus (and schema/dedup) remain unchanged through the service catch-up", async () => {
+    const cycle = new FakeCaptureUploadCycle();
+    cycle.outcome = "DOWNLOAD_FAILED";
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(cycle));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    expect(h.service.getOperationalState(ACCOUNT)?.capabilityStatus).toBe("NEEDS_DISCOVERY");
+    for (const s of h.service.operationalStates) expect(s.capabilityStatus).toBe("NEEDS_DISCOVERY");
+  });
+
+  it("[S13] public catch-up results + emitted operational states stay sanitized", async () => {
+    const h = makeCatchUpHarness(syntheticCycleCatchUpExecutor(new FakeCaptureUploadCycle()));
+    await h.service.start(CONNECTION, NOW);
+    h.service.acknowledgeCatchUp(ACCOUNT);
+    const result = await h.service.runAcknowledgedCatchUp(ACCOUNT, NOW);
+    const blob = JSON.stringify({ result, operational: h.service.operationalStates });
+    expect(blob).not.toMatch(/https?:\/\//i);
+    expect(blob).not.toMatch(/\/Users\/|\.xlsx|data-la-|querySelector|리뷰글번호|eyJ[A-Za-z0-9_-]/);
+    for (const s of h.service.operationalStates) {
+      expect(Object.keys(s.accountRef).sort()).toEqual(["boundStoreFingerprintHash", "connectionId", "fingerprintSourceCategory"]);
+    }
+  });
+
+  it("(extra) runAcknowledgedCatchUp throws if no executor was injected", async () => {
+    const page = new FakePage();
+    const store = new InMemoryLoginModeBindingStore();
+    const context: LocalAgentContext = { id: "ctx-x", page, async close() { await page.close(); } };
+    const adapter = new LocalAgentChromeAdapter({ account: ACCOUNT, salt: SALT, bindingStore: store, pageFactory: async () => context });
+    const service = new LocalAgentReconnectService(adapter, { salt: SALT, interactionCategory: "TWO_STEP_FIELD_AND_CREDENTIAL_SELECTION" });
+    await service.start(CONNECTION, NOW);
+    service.acknowledgeCatchUp(ACCOUNT);
+    await expect(service.runAcknowledgedCatchUp(ACCOUNT, NOW)).rejects.toThrow(/no catch-up sync executor/);
   });
 });
