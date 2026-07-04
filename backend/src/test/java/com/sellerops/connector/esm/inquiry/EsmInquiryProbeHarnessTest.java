@@ -10,16 +10,15 @@ import org.junit.jupiter.api.Test;
 /**
  * Tests the two-lock guard on the read-only probe driver. The transport is the
  * recording fake, so no live HTTP is reachable; {@code AUTH} is synthetic (no real
- * credential). A refused run must perform <b>no</b> HTTP call. INQUIRY remains
- * NEEDS_VERIFICATION.
+ * credential). A refused run must perform <b>no</b> HTTP call. INQUIRY is
+ * official-doc confirmed but live-response unverified.
  */
 class EsmInquiryProbeHarnessTest {
 
     private static final String BASE_URL = "https://example.test";
     private static final String AUTH = "Bearer test-token"; // synthetic, not a real credential
     private static final String OK_PAGE = """
-            {"items":[{"status":"처리완료","regDate":"2026-06-03T09:00:00+09:00"}],
-             "totalCount":1,"page":1,"pageSize":1}
+            [{"informStatus":"처리완료","receiveDate":"2026-06-03T09:00:00+09:00"}]
             """;
 
     private final RecordingEsmHttpClient http = new RecordingEsmHttpClient();
@@ -32,7 +31,7 @@ class EsmInquiryProbeHarnessTest {
 
         assertThatThrownBy(() -> harness.runOnce(
                         EsmInquiryProbeHarness.LIVE_PROBE_CONFIRMATION,
-                        LocalDate.of(2026, 6, 1), null, "처리완료", AUTH))
+                        LocalDate.of(2026, 6, 1), null, 2, null, AUTH))
                 .isInstanceOf(IllegalStateException.class);
 
         // The guard is the first lock: no HTTP call may have been attempted.
@@ -44,7 +43,7 @@ class EsmInquiryProbeHarnessTest {
         EsmInquiryProbeHarness harness = new EsmInquiryProbeHarness(client, reporter, () -> true);
 
         assertThatThrownBy(() -> harness.runOnce(
-                        "not-the-phrase", LocalDate.of(2026, 6, 1), null, "처리완료", AUTH))
+                        "not-the-phrase", LocalDate.of(2026, 6, 1), null, 2, null, AUTH))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(http.sent).isEmpty();
@@ -57,7 +56,7 @@ class EsmInquiryProbeHarnessTest {
 
         assertThatThrownBy(() -> harness.runOnce(
                         EsmInquiryProbeHarness.LIVE_PROBE_CONFIRMATION,
-                        LocalDate.of(2026, 6, 1), null, "처리완료", AUTH))
+                        LocalDate.of(2026, 6, 1), null, 2, null, AUTH))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(http.sent).isEmpty();
@@ -70,12 +69,14 @@ class EsmInquiryProbeHarnessTest {
 
         EsmInquiryProbeReport report = harness.runOnce(
                 EsmInquiryProbeHarness.LIVE_PROBE_CONFIRMATION,
-                LocalDate.of(2026, 6, 1), "PRODUCT", "처리완료", AUTH);
+                LocalDate.of(2026, 6, 1), 1, 2, null, AUTH);
 
         assertThat(http.sent).hasSize(1);
         assertThat(report.statusClass()).isEqualTo(StatusClass.SUCCESS);
         assertThat(report.statusTokens()).containsExactly("처리완료");
-        // The single call was the bounded probe: page=1, pageSize=1.
-        assertThat(http.sent.get(0).jsonBody()).contains("\"page\":1").contains("\"pageSize\":1");
+        // The single call is a single-day window with no pagination fields.
+        assertThat(http.sent.get(0).jsonBody())
+                .contains("\"fromDate\":\"2026-06-01\"").contains("\"toDate\":\"2026-06-01\"")
+                .doesNotContain("page").doesNotContain("pageSize");
     }
 }

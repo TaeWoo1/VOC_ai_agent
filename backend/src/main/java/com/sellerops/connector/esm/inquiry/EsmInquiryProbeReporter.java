@@ -4,9 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.connector.esm.EsmHttpClient;
 import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.CountBucket;
-import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.EnvelopePresence;
 import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.FieldPresence;
-import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.RegDateShape;
+import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.ReceiveDateShape;
 import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.RetryAfterForm;
 import com.sellerops.connector.esm.inquiry.EsmInquiryProbeReport.StatusClass;
 import java.util.LinkedHashSet;
@@ -15,17 +14,19 @@ import java.util.Set;
 
 /**
  * Turns one raw ESM+ INQUIRY probe {@link EsmHttpClient.Response} into a sanitized
- * {@link EsmInquiryProbeReport}: status class, parse/JSON booleans, envelope &amp;
- * field presence booleans, a coarse count bucket, the reply-status label set, the
- * {@code regDate} shape, and the {@code Retry-After} form. It is the redaction
- * boundary for a read-only probe — the raw body is read here and <b>never</b>
- * leaves: no body, identifier, buyer/product value, inquiry text, exact count, or
- * exact timestamp is ever copied into the report.
+ * {@link EsmInquiryProbeReport}: status class, parse/array booleans, field-presence
+ * booleans, a coarse count bucket, the reply-status label set, and the {@code
+ * receiveDate} shape. It is the redaction boundary for a read-only probe — the raw
+ * body is read here and <b>never</b> leaves: no body, identifier, buyer/product
+ * value, inquiry text, reply token, exact count, or exact timestamp is ever copied
+ * into the report.
  *
- * <p>A non-success body is <b>not</b> parsed or inspected at all (status/headers
- * only). On 429 the standard {@code Retry-After} form is classified by reusing
- * {@link EsmInquiryRateLimitedException#fromResponse} (no clock read, no literal).
- * INQUIRY remains NEEDS_VERIFICATION; nothing here changes connector capabilities.
+ * <p>The success body is a top-level JSON array of {@link EsmInquiryItem}. A
+ * non-success body is <b>not</b> parsed or inspected at all (status/headers only).
+ * On 429 the standard {@code Retry-After} form is classified by reusing {@link
+ * EsmInquiryRateLimitedException#fromResponse} (no clock read, no literal). INQUIRY
+ * is official-doc confirmed but live-response unverified; nothing here enables live
+ * inquiry ingestion or changes connector capabilities.
  */
 public class EsmInquiryProbeReporter {
 
@@ -40,25 +41,19 @@ public class EsmInquiryProbeReporter {
         if (status != 200) {
             // Never parse or inspect a non-success body: status/headers only.
             return new EsmInquiryProbeReport(status, statusClass, false, false,
-                    EnvelopePresence.absent(), FieldPresence.absent(), CountBucket.ZERO,
-                    Set.of(), RegDateShape.NONE, retryForm);
+                    FieldPresence.absent(), CountBucket.ZERO, Set.of(), ReceiveDateShape.NONE, retryForm);
         }
 
-        boolean validJson = isJsonObject(response.body());
-        EsmInquiryResponse parsed = tryParse(response.body());
-        if (parsed == null) {
-            return new EsmInquiryProbeReport(status, statusClass, false, validJson,
-                    EnvelopePresence.absent(), FieldPresence.absent(), CountBucket.ZERO,
-                    Set.of(), RegDateShape.NONE, retryForm);
+        boolean isArray = isJsonArray(response.body());
+        List<EsmInquiryItem> items = tryParse(response.body());
+        if (items == null) {
+            return new EsmInquiryProbeReport(status, statusClass, false, isArray,
+                    FieldPresence.absent(), CountBucket.ZERO, Set.of(), ReceiveDateShape.NONE, retryForm);
         }
 
-        List<EsmInquiryResponse.Item> items = parsed.items() == null ? List.of() : parsed.items();
-        EnvelopePresence env = new EnvelopePresence(
-                parsed.items() != null, parsed.totalCount() != null,
-                parsed.page() != null, parsed.pageSize() != null);
-        return new EsmInquiryProbeReport(status, statusClass, true, validJson, env,
+        return new EsmInquiryProbeReport(status, statusClass, true, isArray,
                 fieldPresence(items), bucket(items.size()), statusTokens(items),
-                regDateShape(items), retryForm);
+                receiveDateShape(items), retryForm);
     }
 
     private static StatusClass classify(int status) {
@@ -92,78 +87,81 @@ public class EsmInquiryProbeReporter {
         return RetryAfterForm.NONE;
     }
 
-    private boolean isJsonObject(String body) {
+    /** True iff the body parses as a JSON array (the success shape). */
+    private boolean isJsonArray(String body) {
         if (body == null) {
             return false;
         }
         try {
             JsonNode node = mapper.readTree(body);
-            return node != null && node.isObject();
+            return node != null && node.isArray();
         } catch (Exception e) {
             return false;
         }
     }
 
-    private EsmInquiryResponse tryParse(String body) {
+    private List<EsmInquiryItem> tryParse(String body) {
         try {
-            return parser.parse(body);
+            return parser.parseItems(body);
         } catch (RuntimeException e) {
             // Parse failure is a recorded boolean; the body is never echoed.
             return null;
         }
     }
 
-    private static FieldPresence fieldPresence(List<EsmInquiryResponse.Item> items) {
-        boolean inquiryId = false, qnaType = false, itemName = false, itemNo = false;
-        boolean buyerId = false, contents = false, status = false, regDate = false;
-        for (EsmInquiryResponse.Item it : items) {
-            inquiryId |= present(it.inquiryId());
-            qnaType |= present(it.qnaType());
-            itemName |= present(it.itemName());
-            itemNo |= present(it.itemNo());
-            buyerId |= present(it.buyerId());
-            contents |= present(it.contents());
-            status |= present(it.status());
-            regDate |= present(it.regDate());
+    private static FieldPresence fieldPresence(List<EsmInquiryItem> items) {
+        boolean messageNo = false, qnaType = false, goodsNo = false, informStatus = false;
+        boolean receiveDate = false, title = false, details = false, token = false, reAsking = false;
+        for (EsmInquiryItem it : items) {
+            messageNo |= present(it.messageNo());
+            qnaType |= it.qnaType() != null;
+            goodsNo |= present(it.goodsNo());
+            informStatus |= present(it.informStatus());
+            receiveDate |= present(it.receiveDate());
+            title |= present(it.title());
+            details |= present(it.details());
+            token |= present(it.token());
+            reAsking |= it.reAsking() != null;
         }
-        return new FieldPresence(inquiryId, qnaType, itemName, itemNo, buyerId, contents, status, regDate);
+        return new FieldPresence(messageNo, qnaType, goodsNo, informStatus, receiveDate,
+                title, details, token, reAsking);
     }
 
     /** The distinct reply-status labels observed (schema vocabulary, not row content). */
-    private static Set<String> statusTokens(List<EsmInquiryResponse.Item> items) {
+    private static Set<String> statusTokens(List<EsmInquiryItem> items) {
         Set<String> tokens = new LinkedHashSet<>();
-        for (EsmInquiryResponse.Item it : items) {
-            if (present(it.status())) {
-                tokens.add(it.status().strip());
+        for (EsmInquiryItem it : items) {
+            if (present(it.informStatus())) {
+                tokens.add(it.informStatus().strip());
             }
         }
         return Set.copyOf(tokens);
     }
 
-    private static RegDateShape regDateShape(List<EsmInquiryResponse.Item> items) {
+    private static ReceiveDateShape receiveDateShape(List<EsmInquiryItem> items) {
         boolean offset = false;
         boolean tzless = false;
-        for (EsmInquiryResponse.Item it : items) {
-            if (!present(it.regDate())) {
+        for (EsmInquiryItem it : items) {
+            if (!present(it.receiveDate())) {
                 continue;
             }
             // Offset-bearing iff it resolves without assuming a zone; never keep the value.
-            if (EsmInquiryParser.parseReceivedAt(it.regDate()) != null) {
+            if (EsmInquiryParser.parseReceivedAt(it.receiveDate()) != null) {
                 offset = true;
             } else {
                 tzless = true;
             }
         }
         if (offset && tzless) {
-            return RegDateShape.MIXED;
+            return ReceiveDateShape.MIXED;
         }
         if (offset) {
-            return RegDateShape.OFFSET_BEARING;
+            return ReceiveDateShape.OFFSET_BEARING;
         }
         if (tzless) {
-            return RegDateShape.TIMEZONE_LESS;
+            return ReceiveDateShape.TIMEZONE_LESS;
         }
-        return RegDateShape.NONE;
+        return ReceiveDateShape.NONE;
     }
 
     private static CountBucket bucket(int n) {

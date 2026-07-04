@@ -22,6 +22,10 @@ import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
@@ -58,6 +62,9 @@ class SyncRunExecutorTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -71,7 +78,7 @@ class SyncRunExecutorTest {
     void setUp() {
         mock = new MockApiConnector();
         ConnectorRegistry registry = new ConnectorRegistry(List.of(mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
     }
 
@@ -226,7 +233,7 @@ class SyncRunExecutorTest {
             }
         };
         ConnectorRegistry registry = new ConnectorRegistry(List.of(flaky));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor flakyExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -256,7 +263,7 @@ class SyncRunExecutorTest {
                 new NaverOrdersClient(http, FIXED_CLOCK, "https://fake.naver.test", 100),
                 vault);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         return new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
     }
@@ -292,7 +299,7 @@ class SyncRunExecutorTest {
         com.sellerops.connector.coupang.CoupangApiConnector coupang =
                 new com.sellerops.connector.coupang.CoupangApiConnector(neverCalled, null);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(coupang, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor coupangExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -333,7 +340,7 @@ class SyncRunExecutorTest {
                         new com.sellerops.connector.cafe24.Cafe24BoardArticlesClient(neverCalled),
                         java.time.Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -357,7 +364,7 @@ class SyncRunExecutorTest {
         com.sellerops.connector.esm.EsmApiConnector esm =
                 new com.sellerops.connector.esm.EsmApiConnector(neverCalled, null);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(esm, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor esmExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -381,7 +388,7 @@ class SyncRunExecutorTest {
         com.sellerops.connector.elevenst.ElevenstApiConnector elevenst =
                 new com.sellerops.connector.elevenst.ElevenstApiConnector(neverCalled, null);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(elevenst, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor elevenstExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -405,7 +412,7 @@ class SyncRunExecutorTest {
         com.sellerops.connector.ssg.SsgApiConnector ssg =
                 new com.sellerops.connector.ssg.SsgApiConnector(neverCalled, null);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(ssg, mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor ssgExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -523,7 +530,7 @@ class SyncRunExecutorTest {
             }
         };
         ConnectorRegistry registry = new ConnectorRegistry(List.of(endless));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor endlessExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 
@@ -559,7 +566,7 @@ class SyncRunExecutorTest {
             }
         };
         ConnectorRegistry registry = new ConnectorRegistry(List.of(endlessAfterData));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor endlessExecutor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
 

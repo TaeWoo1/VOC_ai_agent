@@ -13,6 +13,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummary;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.Product;
@@ -56,16 +57,25 @@ public class IngestionService {
     private final ProductService productService;
     private final Cafe24CommunityArticleRepository communityArticles;
     private final ChannelRepository channels;
+    /**
+     * Required, non-null. Writes the atomic (inquiry + OPEN work item + audit) unit
+     * for connector inquiries. Whether a work item is opened is decided solely by
+     * the presence of a {@code sellerAccountId} (the exact connection) — never by
+     * whether this collaborator is wired.
+     */
+    private final InquiryWorkItemWriter workItemWriter;
 
     public IngestionService(ReviewRepository reviews, InquiryRepository inquiries,
                             OrderDailySummaryRepository orderSummaries, ProductService productService,
-                            Cafe24CommunityArticleRepository communityArticles, ChannelRepository channels) {
+                            Cafe24CommunityArticleRepository communityArticles, ChannelRepository channels,
+                            InquiryWorkItemWriter workItemWriter) {
         this.reviews = reviews;
         this.inquiries = inquiries;
         this.orderSummaries = orderSummaries;
         this.productService = productService;
         this.communityArticles = communityArticles;
         this.channels = channels;
+        this.workItemWriter = workItemWriter;
     }
 
     public IngestOutcome ingestReviews(UUID orgId, UUID channelId, List<CanonicalReview> rows) {
@@ -109,7 +119,28 @@ public class IngestionService {
         return tally.toOutcome();
     }
 
+    /**
+     * File-upload / legacy path: ingest inquiries with <b>no</b> seller-connection
+     * identity, so no work item is opened (a bare {@code channelId} is not the exact
+     * connection). Delegates with a {@code null} {@code sellerAccountId}.
+     */
     public IngestOutcome ingestInquiries(UUID orgId, UUID channelId, List<CanonicalInquiry> rows) {
+        return ingestInquiries(orgId, channelId, null, rows);
+    }
+
+    /**
+     * Connector path: ingest inquiries for a specific seller connection. When {@code
+     * sellerAccountId} is non-null and the work-item writer is wired, each newly
+     * inserted (non-duplicate) inquiry atomically opens exactly one OPEN work item
+     * bound to that exact connection plus a WORK_ITEM_OPENED audit — inquiry, work
+     * item, and audit commit or roll back together. A {@code null} {@code
+     * sellerAccountId} (the file-upload / legacy path) never opens a work item.
+     *
+     * <p>Buyer PII is not persisted: {@code author} is deliberately never written.
+     */
+    public IngestOutcome ingestInquiries(UUID orgId, UUID channelId, UUID sellerAccountId,
+                                         List<CanonicalInquiry> rows) {
+        boolean openWorkItem = sellerAccountId != null;
         Tally tally = new Tally();
         Set<String> seen = new HashSet<>();
         for (CanonicalInquiry row : rows) {
@@ -130,14 +161,18 @@ public class IngestionService {
                 entity.setOrgId(orgId);
                 entity.setChannelId(channelId);
                 entity.setProductId(product.getId());
-                entity.setAuthor(row.author());
+                // Buyer PII (row.author()) is intentionally NOT persisted.
+                entity.setTitle(row.title());
                 entity.setBody(row.body());
                 entity.setStatus(row.status());
+                entity.setInformStatus(row.informStatus());
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
                 trySave(tally, row.sourceRow(),
-                        () -> inquiries.save(entity).getId(),
+                        () -> openWorkItem
+                                ? workItemWriter.openConnectorInquiry(entity, sellerAccountId)
+                                : inquiries.save(entity).getId(),
                         () -> existsInquiry(orgId, channelId, hasExternal, row.externalId(), hash));
             } catch (Exception e) {
                 tally.fail(row.sourceRow(), "처리 실패: " + e.getMessage());

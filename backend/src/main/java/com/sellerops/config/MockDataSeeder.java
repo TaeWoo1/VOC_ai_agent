@@ -235,7 +235,7 @@ public class MockDataSeeder implements ApplicationRunner {
             q.setOrgId(orgId);
             q.setChannelId(c.getId());
             q.setProductId(p.getId());
-            q.setAuthor("구매자" + (i + 1));
+            // Buyer PII (author) is no longer persisted; leave it null like the ingest paths.
             q.setBody(bodies[i % bodies.length]);
             q.setStatus(i < 6 ? "UNANSWERED" : "ANSWERED");
             q.setReceivedAt(Instant.now().minus(Duration.ofHours(i * 11L)));

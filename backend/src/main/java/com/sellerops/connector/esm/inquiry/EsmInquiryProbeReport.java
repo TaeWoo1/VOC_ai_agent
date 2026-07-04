@@ -7,23 +7,25 @@ import java.util.Set;
  * It is the <b>only</b> output a probe is allowed to produce: every field here is
  * a status code, a boolean, a coarse enum/bucket, or the reply-status label set —
  * <b>never</b> a raw body, identifier, buyer/customer value, product name, inquiry
- * text, exact count, exact timestamp, URL, or credential. The status-label set is
- * the inquiry <i>reply-status vocabulary</i> (schema), not row content.
+ * text, reply token, exact count, exact timestamp, URL, or credential. The
+ * status-label set is the inquiry <i>reply-status vocabulary</i> (schema), not row
+ * content.
  *
- * <p>Produced by {@link EsmInquiryProbeReporter}; consult that class for how each
- * signal is derived. Carrying only these fields, the record's generated
- * {@code toString} cannot leak response content. INQUIRY remains NEEDS_VERIFICATION.
+ * <p>The success body is a top-level JSON array, so {@code bodyIsJsonArray} records
+ * whether the body parsed as an array (there is no pagination envelope). Produced by
+ * {@link EsmInquiryProbeReporter}; carrying only these fields, the record's generated
+ * {@code toString} cannot leak response content. INQUIRY is official-doc confirmed
+ * but live-response unverified (not yet checked against a captured live response).
  */
 public record EsmInquiryProbeReport(
         int statusCode,
         StatusClass statusClass,
         boolean parseOk,
-        boolean bodyIsValidJson,
-        EnvelopePresence envelope,
+        boolean bodyIsJsonArray,
         FieldPresence itemFields,
         CountBucket itemCountBucket,
         Set<String> statusTokens,
-        RegDateShape regDateShape,
+        ReceiveDateShape receiveDateShape,
         RetryAfterForm retryAfterForm) {
 
     /** Coarse HTTP outcome class — never the raw status text. */
@@ -32,25 +34,23 @@ public record EsmInquiryProbeReport(
     /** Coarse returned-row count — never an exact count. */
     public enum CountBucket { ZERO, ONE, FEW, TENS, HUNDREDS, THOUSANDS_PLUS }
 
-    /** Shape of the {@code regDate} field across rows — never an actual timestamp. */
-    public enum RegDateShape { NONE, OFFSET_BEARING, TIMEZONE_LESS, MIXED }
+    /** Shape of the {@code receiveDate} field across rows — never an actual timestamp. */
+    public enum ReceiveDateShape { NONE, OFFSET_BEARING, TIMEZONE_LESS, MIXED }
 
     /** Form of the standard {@code Retry-After} hint on a 429 — never the literal value. */
     public enum RetryAfterForm { NONE, SECONDS, HTTP_DATE }
 
-    /** Which envelope keys were present (booleans only). */
-    public record EnvelopePresence(boolean itemsPresent, boolean totalCountPresent,
-                                   boolean pagePresent, boolean pageSizePresent) {
-        static EnvelopePresence absent() {
-            return new EnvelopePresence(false, false, false, false);
-        }
-    }
-
-    /** Which item fields appeared with a non-blank value (booleans only — never the values). */
-    public record FieldPresence(boolean inquiryId, boolean qnaType, boolean itemName, boolean itemNo,
-                                boolean buyerId, boolean contents, boolean status, boolean regDate) {
+    /**
+     * Which confirmed item fields appeared with a non-blank/non-null value (booleans
+     * only — never the values). {@code token} tracks presence of the reply-secret
+     * handle without ever copying it. Buyer identity is not modeled, so it has no
+     * flag; {@code qnaType} (numeric) and {@code reAsking} (boolean) track non-null.
+     */
+    public record FieldPresence(boolean messageNo, boolean qnaType, boolean goodsNo,
+                                boolean informStatus, boolean receiveDate, boolean title,
+                                boolean details, boolean token, boolean reAsking) {
         static FieldPresence absent() {
-            return new FieldPresence(false, false, false, false, false, false, false, false);
+            return new FieldPresence(false, false, false, false, false, false, false, false, false);
         }
     }
 }

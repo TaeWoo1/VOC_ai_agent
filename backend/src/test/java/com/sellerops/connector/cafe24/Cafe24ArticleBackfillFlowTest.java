@@ -17,6 +17,10 @@ import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
@@ -70,6 +74,9 @@ class Cafe24ArticleBackfillFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -112,7 +119,7 @@ class Cafe24ArticleBackfillFlowTest {
                 null, null, null);
 
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders,
-                new ProductService(products), communityArticles, channels);
+                new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         Cafe24ApiConnector connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
                 new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));

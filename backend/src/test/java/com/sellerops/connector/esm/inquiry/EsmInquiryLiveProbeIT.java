@@ -18,8 +18,8 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * <p>Two further locks still apply inside {@link EsmInquiryProbeHarness}: this
  * driver arms the guard system property for the single call (and clears it after)
  * and passes the exact {@link EsmInquiryProbeHarness#LIVE_PROBE_CONFIRMATION}
- * phrase. It fires <b>exactly one</b> request (page=1, pageSize=1, one historical
- * day) and prints <b>only</b> the sanitized {@link EsmInquiryProbeReport} — never
+ * phrase. It fires <b>exactly one</b> request (a single historical day, no
+ * pagination) and prints <b>only</b> the sanitized {@link EsmInquiryProbeReport} — never
  * the raw body, the {@code Authorization}/JWT/token, credentials, seller/Master
  * ids, buyer identifiers, inquiry text, exact counts, or exact timestamps.
  *
@@ -29,16 +29,17 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * {@code ESM_AUCTION_SELLER_ID} (optional); {@code ESM_BASE_URL}
  * (default {@code https://sa2.esmplus.com}); {@code ESM_INQUIRY_PROBE_DAY}
  * (required, ISO date — one historical day); {@code ESM_INQUIRY_PROBE_STATUS}
- * (default {@code 처리완료}, the resolved/answered filter — provisional,
- * NEEDS_VERIFICATION); {@code ESM_INQUIRY_PROBE_QNA_TYPE} (optional). No DB, no
- * vault, no scheduler/manual-sync, no capability change. To see the report, run
- * with {@code --info} (Gradle captures stdout).
+ * (numeric reply-status filter, default {@code 2} — the resolved/answered code,
+ * official-doc confirmed but live-response unverified); {@code
+ * ESM_INQUIRY_PROBE_QNA_TYPE} and {@code ESM_INQUIRY_PROBE_TYPE} (optional numeric).
+ * No DB, no vault, no scheduler/manual-sync, no capability change, no live
+ * ingestion. To see the report, run with {@code --info} (Gradle captures stdout).
  */
 @EnabledIfEnvironmentVariable(named = "RUN_ESM_INQUIRY_PROBE", matches = "true")
 class EsmInquiryLiveProbeIT {
 
     private static final String DEFAULT_BASE_URL = "https://sa2.esmplus.com";
-    private static final String DEFAULT_STATUS_FILTER = "처리완료"; // resolved/answered (provisional)
+    private static final int DEFAULT_STATUS_CODE = 2; // resolved/answered (provisional numeric code)
 
     @Test
     void fireOneReadOnlyProbeAndPrintSanitizedReport() {
@@ -51,8 +52,9 @@ class EsmInquiryLiveProbeIT {
 
         EsmInquiryLiveProbe.Params params = new EsmInquiryLiveProbe.Params(
                 LocalDate.parse(requireEnv("ESM_INQUIRY_PROBE_DAY")),
-                blankToNull(System.getenv("ESM_INQUIRY_PROBE_QNA_TYPE")),
-                envOrDefault("ESM_INQUIRY_PROBE_STATUS", DEFAULT_STATUS_FILTER));
+                envInt(System.getenv("ESM_INQUIRY_PROBE_QNA_TYPE"), null),
+                envInt(System.getenv("ESM_INQUIRY_PROBE_STATUS"), DEFAULT_STATUS_CODE),
+                envInt(System.getenv("ESM_INQUIRY_PROBE_TYPE"), null));
 
         String baseUrl = envOrDefault("ESM_BASE_URL", DEFAULT_BASE_URL);
 
@@ -92,5 +94,10 @@ class EsmInquiryLiveProbeIT {
 
     private static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value;
+    }
+
+    /** Parse a numeric env value; blank/unset yields {@code fallback} (may be null). */
+    private static Integer envInt(String value, Integer fallback) {
+        return (value == null || value.isBlank()) ? fallback : Integer.valueOf(value.strip());
     }
 }

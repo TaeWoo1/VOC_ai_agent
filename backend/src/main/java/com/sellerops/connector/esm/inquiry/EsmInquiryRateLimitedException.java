@@ -12,8 +12,9 @@ import java.util.Optional;
  * <b>HTTP-standard hardening only</b>: it reads the standard {@code Retry-After}
  * response header and exposes a safe retry hint. It deliberately does <b>not</b>
  * classify the cause from an ESM-specific error code — that taxonomy is
- * unverified (the INQUIRY error envelope is NEEDS_VERIFICATION), so inventing
- * one would be a guess. No request/response body ever appears in the message.
+ * live-response unverified (the {@code { resultCode, message }} failure shape is
+ * doc-level, not yet checked against a captured live response), so inventing one
+ * would be a guess. No request/response body ever appears in the message.
  *
  * <p>{@code Retry-After} has two standard forms (RFC 9110 §10.2.3):
  * <ul>
