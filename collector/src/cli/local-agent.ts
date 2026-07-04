@@ -1,15 +1,18 @@
 /**
- * **Local Agent startup CLI** — the device-local production entrypoint that boots the progressive
- * reconnect ladder for the configured connections.
+ * **Local Agent startup CLI** — the device-local production entrypoint that boots the configured
+ * connections through the multi-channel **Connector Orchestrator**.
  *
  *   tsx src/cli/local-agent.ts --connections <path.json> [--i-understand-this-launches-local-agent-chrome]
  *
- * This is the thin LIVE wrapper around the pure {@link LocalAgentStartup} composition root: it loads the
- * sanitized device connection config, resolves the live-service config from the environment, boots each
- * connection through ONE {@link createLocalAgentStartup} (never the legacy reconnect runtime), prints the
- * sanitized per-connection outcome, and shuts everything down cleanly on SIGINT/SIGTERM.
+ * This is the thin LIVE wrapper around the pure {@link LocalAgentConnectorStartup} composition root: it
+ * loads the sanitized MIXED device connection config (browser channels NAVER/ESM, API Cafe24, and the
+ * discovery-required channels), resolves the live-service config from the environment, boots each
+ * connection through ONE {@link createLocalAgentConnectorStartup} — every connection settled by the single
+ * `ChannelConnector.ensureReady()` operation, with Progressive Reconnect as the browser-auth subcomponent
+ * — prints the sanitized per-connection outcome + any generated (never executed) sync intent, and shuts
+ * everything down cleanly on SIGINT/SIGTERM.
  *
- * **Live-launch gate.** Booting launches a local Chrome per connection (a live action). Without the
+ * **Live-launch gate.** Booting launches a local Chrome per browser connection (a live action). Without the
  * explicit approval flag — or without the required live config — the CLI performs a DRY RUN: it validates
  * + counts the configured connections and prints the plan, launching nothing and creating no profile.
  * The launch decision is the pure {@link decideRun}; only a `LIVE_BOOT` decision ever constructs the
@@ -17,7 +20,8 @@
  * launch a browser.
  *
  * Local-device only: no tray UI, no installer, no OS auto-start, no Device Vault, no catch-up execution,
- * no backend write, no migration. Every printed value is a sanitized enum / boolean / count.
+ * no backend write, no migration. Cafe24 (API) is NOT implemented — it settles `SKIPPED`. Every printed
+ * value is a sanitized enum / boolean / count.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,18 +29,19 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import {
-  createLocalAgentStartup,
-  parseProgressiveConnections,
-  type ParsedProgressiveConnections,
-  type LocalAgentStartupConfig,
-  type LocalAgentStartupObserver,
-  type LocalAgentStartupResult,
-} from "../agent/local-agent-startup";
+  createLocalAgentConnectorStartup,
+  parseConnectorConnections,
+  isRunnableBrowserConnection,
+  type ParsedConnectorConnections,
+  type LocalAgentConnectorStartupConfig,
+  type LocalAgentBrowserRuntimeConfig,
+} from "../agent/local-agent-connector-startup";
+import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
 
-/** Explicit per-run approval: booting launches a local Chrome per connection. */
+/** Explicit per-run approval: booting a runnable browser connection launches a local Chrome. */
 export const LOCAL_AGENT_APPROVAL_FLAG = "--i-understand-this-launches-local-agent-chrome";
 
 function flagValue(args: readonly string[], name: string): string | undefined {
@@ -46,10 +51,14 @@ function flagValue(args: readonly string[], name: string): string | undefined {
   return v !== undefined && !v.startsWith("--") ? v : undefined;
 }
 
-/** Resolve the live startup config from the environment, reporting any missing required categories. */
-export function resolveStartupConfig(
+/**
+ * Resolve the BROWSER runtime config from the environment, reporting any missing required categories. Only
+ * relevant when the boot contains a runnable browser connection — an API-only / discovery-only config never
+ * calls this, so its browser environment values are never required.
+ */
+export function resolveBrowserRuntimeConfig(
   env: NodeJS.ProcessEnv,
-): { ok: true; config: LocalAgentStartupConfig } | { ok: false; missing: string[] } {
+): { ok: true; config: LocalAgentBrowserRuntimeConfig } | { ok: false; missing: string[] } {
   const authSurfaceUrl = env.ESM_AUTH_SURFACE_URL;
   const salt = env.STORAGE_PROBE_SALT;
   const missing: string[] = [];
@@ -72,38 +81,51 @@ export function resolveStartupConfig(
 
 /**
  * PURE launch decision — no filesystem, no browser, no exit. Parses the connections config and decides
- * between a `DRY_RUN` (launch nothing, create no profile) and a `LIVE_BOOT`. A `LIVE_BOOT` is returned
- * ONLY when the operator approved AND the live config is complete; anything short of that is a `DRY_RUN`.
+ * between a `DRY_RUN` (launch nothing, create no profile) and a `LIVE_BOOT`.
+ *
+ * **Strategy-aware gating.** The Chrome approval flag and the browser environment values are required ONLY
+ * when the parsed set contains a runnable browser connection (`BROWSER` + `AVAILABLE`). A config with no
+ * runnable browser connection (API-only or discovery-only) boots directly with an EMPTY browser config —
+ * every such connection settles `SKIPPED`, no browser service is constructed, and no approval is needed.
  */
 export type LocalAgentRunDecision =
   | { mode: "PARSE_ERROR"; errorCategory: "invalid-json" | "not-an-array" | "empty" }
   | {
       mode: "DRY_RUN";
-      parsed: ParsedProgressiveConnections;
+      parsed: ParsedConnectorConnections;
       approved: boolean;
       missingConfig: string[];
     }
   | {
       mode: "LIVE_BOOT";
-      parsed: ParsedProgressiveConnections;
-      config: LocalAgentStartupConfig;
+      parsed: ParsedConnectorConnections;
+      config: LocalAgentConnectorStartupConfig;
+      /** True when at least one runnable browser connection will launch Chrome; false for an all-SKIPPED boot. */
+      requiresBrowser: boolean;
     };
 
 export function decideRun(args: readonly string[], connectionsRaw: string, env: NodeJS.ProcessEnv): LocalAgentRunDecision {
-  const parseResult = parseProgressiveConnections(connectionsRaw);
+  const parseResult = parseConnectorConnections(connectionsRaw);
   if (!parseResult.ok) return { mode: "PARSE_ERROR", errorCategory: parseResult.errorCategory };
+  const parsed = parseResult.value;
 
+  // No runnable browser connection → API-only / discovery-only: boot directly, no browser env, no approval.
+  if (!parsed.connections.some(isRunnableBrowserConnection)) {
+    return { mode: "LIVE_BOOT", parsed, config: {}, requiresBrowser: false };
+  }
+
+  // A runnable browser connection exists → require the approval flag AND the browser environment values.
   const approved = args.includes(LOCAL_AGENT_APPROVAL_FLAG);
-  const configResolution = resolveStartupConfig(env);
+  const configResolution = resolveBrowserRuntimeConfig(env);
   if (!approved || !configResolution.ok) {
     return {
       mode: "DRY_RUN",
-      parsed: parseResult.value,
+      parsed,
       approved,
       missingConfig: configResolution.ok ? [] : configResolution.missing,
     };
   }
-  return { mode: "LIVE_BOOT", parsed: parseResult.value, config: configResolution.config };
+  return { mode: "LIVE_BOOT", parsed, config: { browser: configResolution.config }, requiresBrowser: true };
 }
 
 /**
@@ -120,17 +142,21 @@ export function createSignalShutdown(shutdown: () => Promise<unknown>): () => Pr
 }
 
 /** A sanitized printer for each settled connection — enums / booleans / counts only. */
-const printingObserver: LocalAgentStartupObserver = {
-  onConnectionSettled(result: LocalAgentStartupResult): void {
+const printingObserver: ConnectorOrchestratorObserver = {
+  onConnectionSettled(result: ConnectorStartupResult): void {
     console.log(
       JSON.stringify({
         connectionId: result.connectionId,
-        started: result.started,
-        localAgentState: result.localAgentState,
+        channel: result.channel,
+        strategy: result.strategy,
+        implementationStatus: result.implementationStatus,
+        outcome: result.outcome,
+        authStatus: result.authStatus,
+        capabilityStatus: result.capabilityStatus,
         reconnectPath: result.reconnectPath,
         pendingUserAction: result.pendingUserAction,
-        userActions: result.userActions,
-        pendingCatchUp: result.pendingCatchUp,
+        // Surface that a sync intent exists WITHOUT executing it — mechanism enum only, never a run.
+        syncIntentMechanism: result.syncIntent?.mechanism ?? null,
       }),
     );
   },
@@ -178,7 +204,8 @@ async function main(): Promise<void> {
       JSON.stringify({
         mode: "DRY_RUN",
         connectionCount: decision.parsed.connections.length,
-        loginModes: decision.parsed.connections.map((c) => c.loginMode),
+        channels: decision.parsed.connections.map((c) => c.channel),
+        strategies: decision.parsed.connections.map((c) => c.strategy),
         rejectedEntryIndexes: decision.parsed.rejectedEntryIndexes,
         duplicateConnectionIds: decision.parsed.duplicateConnectionIds,
         approved: decision.approved,
@@ -193,8 +220,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // LIVE BOOT — one local Chrome per connection.
-  const startup = createLocalAgentStartup(decision.config, printingObserver);
+  // LIVE BOOT — one local Chrome per runnable browser connection (API/discovery channels settle SKIPPED,
+  // constructing no browser service).
+  const startup = createLocalAgentConnectorStartup(decision.config, printingObserver);
 
   const guardedShutdown = createSignalShutdown(async () => {
     const report = await startup.shutdown();
@@ -205,7 +233,15 @@ async function main(): Promise<void> {
   process.on("SIGTERM", onSignal);
 
   await startup.boot(decision.parsed.connections);
-  // The connections stay resident (browsers held for the WAITING/HUMAN handoff) until a signal
+
+  if (startup.managedConnectionIds().length === 0) {
+    // Nothing runnable is held (an all-SKIPPED / API-only / discovery-only boot) — there is no browser to
+    // keep resident for a WAITING/HUMAN handoff, so shut down cleanly and exit instead of hanging.
+    await guardedShutdown();
+    process.exit(0);
+    return;
+  }
+  // Otherwise the browser connections stay resident (held for the WAITING/HUMAN handoff) until a signal
   // triggers a clean shutdown; the process stays alive on the registered signal handlers.
 }
 
