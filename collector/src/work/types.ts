@@ -63,11 +63,24 @@ export interface SignalShareable {
 }
 
 /**
- * Seller-private references — order/customer identity, withheld from a manufacturer unless the grant
- * explicitly includes seller-private fields. Even here the values are ONE-WAY hashes, never raw ids.
+ * Seller-private data — the raw operational values an operator/executor needs later (draft a reply,
+ * reconcile an order, execute a channel action), plus optional one-way hashes for matching. Withheld from a
+ * manufacturer unless the grant explicitly includes seller-private fields; the projection layer
+ * (`access.ts`) strips this WHOLE object to `null` otherwise, so the raw values never cross the boundary
+ * without an explicit grant. Hashes are retained ADDITIONALLY, never as the sole retained value.
  */
 export interface SignalSellerPrivate {
+  /** Raw source content (e.g. the inquiry/review/claim text). */
+  sourceText: string | null;
+  /** Raw order reference. */
+  orderRef: string | null;
+  /** The channel-side source reference needed for later execution (e.g. the channel inquiry id). */
+  channelSourceRef: string | null;
+  /** Response deadline (epoch ms) when present. */
+  responseDeadlineAt: number | null;
+  /** One-way hash of the order reference, kept additionally for matching/dedup. */
   orderRefHash: string | null;
+  /** One-way hash of any customer reference, kept additionally for matching/dedup. */
   customerRefHash: string | null;
 }
 
