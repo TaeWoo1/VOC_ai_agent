@@ -182,8 +182,16 @@ export interface ActionIntent {
   actionIntentId: string;
   workItemId: string;
   actionKind: ActionKind;
+  /** The proposal this intent was derived from — links the action lifecycle back to what was approved. */
+  proposalId: string;
   /** Coarse category of the (sanitized) parameters — never raw content. */
   paramsCategory: string;
+  /**
+   * A deterministic fingerprint of the (sanitized) approved parameters — e.g. a hash of the normalized
+   * approved reply. Binds the intent to the EXACT approved payload; a reused command id with a different
+   * fingerprint is a `CONFLICT`. Never raw content. Null when the action carries no parameter payload.
+   */
+  paramsFingerprint: string | null;
 }
 
 /** The recorded outcome of executing an action intent (the side effect itself is out of this domain). */
@@ -243,6 +251,11 @@ export interface AppliedCommand {
   type: AuditEventType;
   /** The primary artifact id the command created (proposal/intent/execution/verification id), or null. */
   artifactId: string | null;
+  /**
+   * An optional parameter fingerprint the command bound (e.g. the approved-reply hash on an action intent).
+   * Two commands with the same id + artifact but a DIFFERENT fingerprint are a `CONFLICT`, not a replay.
+   */
+  fingerprint?: string | null;
 }
 
 /**

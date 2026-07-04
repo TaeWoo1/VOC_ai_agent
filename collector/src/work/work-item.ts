@@ -78,6 +78,8 @@ export interface CreateActionIntentCommand {
   actionIntentId: string;
   actor: Party;
   paramsCategory: string;
+  /** Deterministic fingerprint of the approved parameters (e.g. approved-reply hash); binds the intent. */
+  paramsFingerprint?: string | null;
   atMs: number;
 }
 export interface RecordExecutionCommand {
@@ -108,13 +110,12 @@ export interface GrantAuthzContext {
 const fail = (code: TransitionErrorCode, message: string): TransitionOutcome => ({ ok: false, error: { code, message } });
 const idempotent = (aggregate: WorkItemAggregate): TransitionOutcome => ({ ok: true, aggregate, emitted: null, idempotent: true });
 
-/** Command-id gate: replay → idempotent no-op; reused id for a different transition → CONFLICT; else proceed. */
+/** Command-id gate: replay → idempotent no-op; reused id for a different transition/fingerprint → CONFLICT. */
 function precheckCommand(agg: WorkItemAggregate, commandId: string, intended: AppliedCommand): TransitionOutcome | null {
   const prior = agg.appliedCommands[commandId];
   if (prior === undefined) return null;
-  return prior.type === intended.type && prior.artifactId === intended.artifactId
-    ? idempotent(agg)
-    : fail("CONFLICT", "command id reused for a different transition");
+  const same = prior.type === intended.type && prior.artifactId === intended.artifactId && (prior.fingerprint ?? null) === (intended.fingerprint ?? null);
+  return same ? idempotent(agg) : fail("CONFLICT", "command id reused for a different transition or parameter fingerprint");
 }
 
 /** Deterministic, clock-free audit id keyed by command (not by index): work item + command id + type. */
@@ -284,7 +285,8 @@ export function reject(agg: WorkItemAggregate, cmd: ApprovalCommand): Transition
 // ── Action intent (only after approval; authority + grant re-checked) ─────────────────────────────────
 
 export function createActionIntent(agg: WorkItemAggregate, cmd: CreateActionIntentCommand, authz?: GrantAuthzContext): TransitionOutcome {
-  const gate = precheckCommand(agg, cmd.commandId, { type: "ACTION_INTENT_CREATED", artifactId: cmd.actionIntentId });
+  const fingerprint = cmd.paramsFingerprint ?? null;
+  const gate = precheckCommand(agg, cmd.commandId, { type: "ACTION_INTENT_CREATED", artifactId: cmd.actionIntentId, fingerprint });
   if (gate) return gate;
   if (agg.workItem.phase === "PROPOSED") return fail("APPROVAL_REQUIRED", "the work item must be approved before an action intent");
   if (agg.workItem.phase !== "APPROVED") return fail("WRONG_PHASE", `cannot create an action intent from phase ${agg.workItem.phase}`);
@@ -300,9 +302,11 @@ export function createActionIntent(agg: WorkItemAggregate, cmd: CreateActionInte
     actionIntentId: cmd.actionIntentId,
     workItemId: agg.workItem.workItemId,
     actionKind: agg.proposal.actionKind,
+    proposalId: agg.proposal.proposalId,
     paramsCategory: cmd.paramsCategory,
+    paramsFingerprint: fingerprint,
   };
-  return transition(agg, { actionIntent }, { phase: "ACTION_PENDING" }, auditFor(agg, cmd.commandId, "ACTION_INTENT_CREATED", "APPROVED", "ACTION_PENDING", cmd.actor, cmd.atMs), { type: "ACTION_INTENT_CREATED", artifactId: cmd.actionIntentId });
+  return transition(agg, { actionIntent }, { phase: "ACTION_PENDING" }, auditFor(agg, cmd.commandId, "ACTION_INTENT_CREATED", "APPROVED", "ACTION_PENDING", cmd.actor, cmd.atMs), { type: "ACTION_INTENT_CREATED", artifactId: cmd.actionIntentId, fingerprint });
 }
 
 // ── Execution (success ≠ completion) ─────────────────────────────────────────────────────────────────
