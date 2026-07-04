@@ -35,7 +35,7 @@ export function signal(overrides: Partial<CommerceSignal> = {}): CommerceSignal 
     sellerId: "seller-1",
     productRef: { productId: "prod-1" },
     shareable: { severityBucket: "mid", topicCategory: "sizing", recencyBucket: "recent_1_3d" },
-    sellerPrivate: { orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" },
+    sellerPrivate: { sourceText: "raw inquiry body", orderRef: "ORDER-9", channelSourceRef: "INQ-1", responseDeadlineAt: null, orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" },
     ...overrides,
   };
 }

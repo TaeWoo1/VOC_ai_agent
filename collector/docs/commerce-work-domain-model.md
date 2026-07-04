@@ -40,7 +40,7 @@ the wrong phase is refused (`WRONG_PHASE`). Commands also carry `atMs`
 
 | type                 | role                                                                   |
 | -------------------- | ---------------------------------------------------------------------- |
-| `CommerceSignal`     | sanitized observation from a seller's channel data; owns `sellerId`, splits `shareable` (grantable) from `sellerPrivate` (order/customer hashes) |
+| `CommerceSignal`     | sanitized observation from a seller's channel data; owns `sellerId`, splits `shareable` (grantable) from `sellerPrivate` (raw operational data + hashes, stripped at the manufacturer boundary) |
 | `WorkItem`           | the owned unit of work a signal rolls up into; carries `owner`, `phase` |
 | `AgentProposal`      | a suggested action — **advisory only, never executes**; carries `requiresApproval` |
 | `ApprovalPolicy`     | data deciding whether a proposal needs a human sign-off (`approval-policy.ts`) |
@@ -67,9 +67,10 @@ to act.
   `evaluateGrant(grant, request, referenceTimeMs)` checks, in order: presence,
   party match, revocation, validity window `[notBeforeMs, notAfterMs)`, then each
   scope axis (channel, product, signal kind), then the seller-private field gate.
-- Seller-private order/customer fields are withheld unless
-  `includeSellerPrivateFields` is set — `projectSignalForViewer` /
-  `projectWorkItemForViewer` (`access.ts`) strip them (or redact the whole view)
+- Seller-private fields (raw operational data — source text, order/customer refs —
+  plus hashes) are withheld unless `includeSellerPrivateFields` is set —
+  `projectSignalForViewer` / `projectWorkItemForViewer` (`access.ts`) strip the
+  whole compartment (or redact the whole view)
   otherwise.
 
 **Authority — `authorizeAction` (`action-authority.ts`), acts only:**

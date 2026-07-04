@@ -16,7 +16,7 @@ describe("projectSignalForViewer", () => {
     const view = projectSignalForViewer(signal(), seller("seller-1"), null, 1_000);
     expect(view.visible).toBe(true);
     if (!view.visible) return;
-    expect(view.signal.sellerPrivate).toEqual({ orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" });
+    expect(view.signal.sellerPrivate).toEqual({ sourceText: "raw inquiry body", orderRef: "ORDER-9", channelSourceRef: "INQ-1", responseDeadlineAt: null, orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" });
     expect(view.signal.shareable.topicCategory).toBe("sizing");
   });
 
@@ -38,7 +38,7 @@ describe("projectSignalForViewer", () => {
     const view = projectSignalForViewer(signal(), manufacturer("maker-1"), g, 1_000);
     expect(view.visible).toBe(true);
     if (!view.visible) return;
-    expect(view.signal.sellerPrivate).toEqual({ orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" });
+    expect(view.signal.sellerPrivate).toEqual({ sourceText: "raw inquiry body", orderRef: "ORDER-9", channelSourceRef: "INQ-1", responseDeadlineAt: null, orderRefHash: "ord-hash-abc", customerRefHash: "cust-hash-xyz" });
   });
 
   it("a manufacturer with no grant sees nothing", () => {
