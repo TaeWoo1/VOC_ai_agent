@@ -32,6 +32,10 @@ import com.sellerops.credential.CredentialMetadata;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.product.ProductRepository;
@@ -76,6 +80,9 @@ class CollectControlServiceTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -93,7 +100,7 @@ class CollectControlServiceTest {
     void setUp() {
         mock = new MockApiConnector();
         registry = new ConnectorRegistry(List.of(mock));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         service = serviceWith(vaultWithKey(randomKeyBase64()));

@@ -17,6 +17,10 @@ import com.sellerops.connector.MockApiConnector;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.product.ProductRepository;
@@ -59,6 +63,9 @@ class SyncScheduleRunnerTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -79,7 +86,7 @@ class SyncScheduleRunnerTest {
 
     private SyncScheduleRunner runnerWith(PullConnector connector) {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
-        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels);
+        IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         return new SyncScheduleRunner(

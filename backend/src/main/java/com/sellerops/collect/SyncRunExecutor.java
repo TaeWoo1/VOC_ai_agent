@@ -224,7 +224,8 @@ public class SyncRunExecutor {
         }
         return switch (page.dataType()) {
             case REVIEW -> ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
-            case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, typed(page, CanonicalInquiry.class));
+            case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, sellerAccountId,
+                    typed(page, CanonicalInquiry.class));
             case ORDER_SUMMARY -> ingestionService.ingestOrderSummaries(orgId, channelId, typed(page, CanonicalOrderSummary.class));
             // No canonical type yet; the mock returns empty pages. Routing is deferred.
             case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());

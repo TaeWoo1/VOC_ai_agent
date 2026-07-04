@@ -14,6 +14,10 @@ import com.sellerops.ingest.map.OrderSummaryRowMapper;
 import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.itemanalysis.ItemAnalysisService;
 import com.sellerops.itemanalysis.RuleBasedInboxItemAnalyzer;
@@ -63,6 +67,9 @@ class FileUploadConnectorReviewIngestFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired ItemAnalysisRepository analyses;
     @Autowired SyncJobRepository syncJobs;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -86,7 +93,7 @@ class FileUploadConnectorReviewIngestFlowTest {
     void setUp() {
         ProductService productService = new ProductService(products);
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, productService,
-                communityArticles, channels);
+                communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         CollectionRunService runs = new CollectionRunService(syncJobs, connectionStatus, sellerAccounts);
         ItemAnalysisService analysis = new ItemAnalysisService(inquiries, reviews, analyses,
                 new RuleBasedInboxItemAnalyzer());

@@ -8,6 +8,9 @@ import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
@@ -23,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -34,6 +38,9 @@ class IngestionServiceTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired ChannelRepository channels;
 
     private IngestionService service;
@@ -43,7 +50,7 @@ class IngestionServiceTest {
     @BeforeEach
     void setUp() {
         service = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles, channels);
+                communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
     }
 
     private static Instant at(String date) {

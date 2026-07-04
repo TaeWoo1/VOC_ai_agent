@@ -10,6 +10,10 @@ import com.sellerops.ingest.map.ReviewRowMapper;
 import com.sellerops.ingest.parse.FileParser;
 import com.sellerops.ingest.parse.ParsedTable;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
@@ -51,6 +55,9 @@ class EsmReviewIngestFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired ChannelRepository channels;
 
     private final FileParser parser = new FileParser();
@@ -73,7 +80,7 @@ class EsmReviewIngestFlowTest {
     @BeforeEach
     void setUp() {
         service = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles, channels);
+                communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
     }
 
     @Test

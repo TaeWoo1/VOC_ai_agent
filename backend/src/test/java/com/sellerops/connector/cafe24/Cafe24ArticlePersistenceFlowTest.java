@@ -15,6 +15,10 @@ import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
@@ -54,6 +58,9 @@ class Cafe24ArticlePersistenceFlowTest {
     @Autowired OrderDailySummaryRepository orders;
     @Autowired ProductRepository products;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
+    @Autowired InquiryWorkItemRepository workItems;
+    @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired PlatformTransactionManager txManager;
     @Autowired ChannelRepository channels;
     @Autowired ConnectorCredentialRepository credentials;
 
@@ -77,7 +84,7 @@ class Cafe24ArticlePersistenceFlowTest {
                         "refresh_token", "old-refresh-token"),
                 null, null, null);
         ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
-                communityArticles, channels);
+                communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault, new Cafe24OrdersClient(http),
                 new Cafe24BoardArticlesClient(http), Clock.systemUTC());
     }
