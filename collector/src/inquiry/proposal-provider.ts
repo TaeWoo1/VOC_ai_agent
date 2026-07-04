@@ -21,6 +21,8 @@ export interface SellerInquiryContext {
   productId: string;
   orderRef: string | null;
   inquiryText: string;
+  /** Optional raw inquiry title — seller-visible, for the seller's own drafting. */
+  title?: string;
   category: InquiryCategoryMeta;
   responseDeadlineAt: number | null;
 }

@@ -38,10 +38,12 @@ export interface SourceAdapterRef {
 
 /** Raw operational data — logically seller-private. Never surfaced in a sanitized result. */
 export interface SellerPrivatePayload {
-  /** Raw inquiry text — seller-private. */
+  /** Raw inquiry body text — seller-private. */
   inquiryText: string;
   /** Optional raw order reference — seller-private. */
   orderRef: string | null;
+  /** Optional raw inquiry title — seller-private (preserved alongside the body when the source has one). */
+  title?: string;
 }
 
 /**

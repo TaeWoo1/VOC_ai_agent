@@ -38,6 +38,8 @@ export interface InquiryObservation {
   orderRef: string | null;
   /** Raw inquiry text — seller-private; NEVER enters the shareable projection. */
   inquiryText: string;
+  /** Optional raw inquiry title — seller-private; NEVER enters the shareable projection. */
+  title?: string;
   /** Caller-supplied epoch-ms the inquiry was observed. */
   observedAt: number;
   /** Optional caller-supplied epoch-ms response deadline. */

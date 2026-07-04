@@ -59,6 +59,7 @@ function envelopeToObservation(envelope: InquiryIngestionEnvelope): InquiryObser
     productId: envelope.productId,
     orderRef: envelope.sellerPrivatePayload.orderRef,
     inquiryText: envelope.sellerPrivatePayload.inquiryText,
+    title: envelope.sellerPrivatePayload.title,
     observedAt: envelope.sourceObservedAt,
     responseDeadlineAt: envelope.responseDeadlineAt,
     category: envelope.category,
