@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Test;
  * guarded harness → sanitized report. The transport is the recording fake and the
  * credentials are synthetic (a {@code synthetic-secret-9999} sentinel guards
  * against any token/secret leak), so no live HTTP and no real credential are
- * exercised. INQUIRY remains NEEDS_VERIFICATION.
+ * exercised. INQUIRY is official-doc confirmed but live-response unverified.
  */
 class EsmInquiryLiveProbeTest {
 
@@ -27,10 +27,9 @@ class EsmInquiryLiveProbeTest {
                     "synthetic-master", "synthetic-secret-9999", "probe.example.test",
                     null, "synthetic-gmarket-seller");
     private static final EsmInquiryLiveProbe.Params PARAMS =
-            new EsmInquiryLiveProbe.Params(LocalDate.of(2026, 6, 1), "PRODUCT", "처리완료");
+            new EsmInquiryLiveProbe.Params(LocalDate.of(2026, 6, 1), 1, 2, null);
     private static final String OK_PAGE = """
-            {"items":[{"status":"처리완료","regDate":"2026-06-03T09:00:00+09:00"}],
-             "totalCount":1,"page":1,"pageSize":1}
+            [{"informStatus":"처리완료","receiveDate":"2026-06-03T09:00:00+09:00"}]
             """;
 
     private final RecordingEsmHttpClient http = new RecordingEsmHttpClient();
@@ -55,8 +54,9 @@ class EsmInquiryLiveProbeTest {
         assertThat(auth).startsWith("Bearer ");
         // The header is a signed token, never the raw secret key.
         assertThat(auth).doesNotContain("synthetic-secret-9999");
-        // The single call is the bounded probe: page=1, pageSize=1.
-        assertThat(http.sent.get(0).jsonBody()).contains("\"page\":1").contains("\"pageSize\":1");
+        // The single call is a single-day window with no pagination fields.
+        assertThat(http.sent.get(0).jsonBody())
+                .contains("\"fromDate\":\"2026-06-01\"").doesNotContain("page").doesNotContain("pageSize");
         assertThat(report.statusClass()).isEqualTo(StatusClass.SUCCESS);
         assertThat(report.statusTokens()).containsExactly("처리완료");
         // No token/secret material reaches the sanitized report.

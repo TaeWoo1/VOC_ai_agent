@@ -9,12 +9,12 @@ package com.sellerops.connector.esm.inquiry;
  * vocabulary explicit for evidence/verification while {@link #toCanonicalStatus()}
  * collapses it to the canonical pair.
  *
- * <p><b>Status: NEEDS_VERIFICATION.</b> The exact raw tokens / status codes the
- * official INQUIRY API returns are not yet confirmed against a captured live
- * response — {@link #from(String)} therefore matches on the doc-level Korean
- * labels and tolerant aliases, and falls back to {@link #UNKNOWN} for anything it
- * does not recognize (it never throws). Nothing here marks INQUIRY CONFIRMED or
- * changes connector capabilities.
+ * <p><b>Verification: official-doc confirmed, live-response unverified.</b> The
+ * exact raw tokens / status codes the official INQUIRY API returns are not yet
+ * checked against a captured live response — {@link #from(String)} therefore
+ * matches on the doc-level Korean labels and tolerant aliases, and falls back to
+ * {@link #UNKNOWN} for anything it does not recognize (it never throws). Nothing
+ * here enables live inquiry ingestion or changes connector capabilities.
  *
  * <p><b>Collapse rule:</b> {@code 처리중} (in progress) collapses to {@code
  * UNANSWERED}, not {@code ANSWERED} — an in-progress inquiry still needs operator

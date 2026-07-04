@@ -23,7 +23,8 @@ import java.util.function.BooleanSupplier;
  *
  * <p>No credentials live here: {@code authorization} is the caller-assembled header
  * value (the vault/JWT assembly is intentionally out of scope and supplied only by
- * a separately-approved runner). INQUIRY remains NEEDS_VERIFICATION; capabilities
+ * a separately-approved runner). INQUIRY is official-doc confirmed but
+ * live-response unverified; live inquiry ingestion is not enabled and capabilities
  * are unchanged.
  */
 public final class EsmInquiryProbeHarness {
@@ -58,8 +59,8 @@ public final class EsmInquiryProbeHarness {
      * both the guard flag is on and {@code confirmation} equals
      * {@link #LIVE_PROBE_CONFIRMATION}. Otherwise throws before any HTTP call.
      */
-    public EsmInquiryProbeReport runOnce(String confirmation, LocalDate day, String qnaType,
-                                         String statusFilter, String authorization) {
+    public EsmInquiryProbeReport runOnce(String confirmation, LocalDate day, Integer qnaType,
+                                         Integer status, Integer type, String authorization) {
         if (!liveProbeGuard.getAsBoolean()) {
             throw new IllegalStateException(
                     "ESM INQUIRY 라이브 프로브가 차단되었습니다: 가드 플래그("
@@ -71,7 +72,7 @@ public final class EsmInquiryProbeHarness {
         }
         // One call; the raw response is consumed by the reporter and discarded here.
         EsmHttpClient.Response response =
-                client.probeSinglePage(day, qnaType, statusFilter, authorization);
+                client.probeSinglePage(day, qnaType, status, type, authorization);
         return reporter.report(response);
     }
 }

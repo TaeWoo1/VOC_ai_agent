@@ -146,7 +146,9 @@ public class MockApiConnector implements PullConnector {
                     i % 2 == 0 ? "UNANSWERED" : "ANSWERED",
                     BASE_INSTANT.minusSeconds((long) i * 3600),
                     externalId(channelCode, dataTypeName(DataType.INQUIRY), i),
-                    i + 1));
+                    i + 1,
+                    channelCode + " 문의 제목 " + i,
+                    i % 2 == 0 ? "미처리" : "처리완료"));
         }
         return out;
     }

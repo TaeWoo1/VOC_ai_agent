@@ -34,7 +34,10 @@ public class InquiryRowMapper {
                 Instant receivedAt = dateRaw == null ? null : DateParse.instantAtStartOfDay(dateRaw);
                 String externalId =
                         HeaderAliases.pick(row, "문의id", "문의아이디", "inquiry_id", "external_id", "id");
-                ok.add(new CanonicalInquiry(product, sku, author, body, status, receivedAt, externalId, rowNumber));
+                String title = HeaderAliases.pick(row, "제목", "문의제목", "title", "subject");
+                // Upload path carries no raw source reply-status token; informStatus stays null.
+                ok.add(new CanonicalInquiry(product, sku, author, body, status, receivedAt, externalId,
+                        rowNumber, title, null));
             } catch (Exception e) {
                 errors.add(new RowError(rowNumber, e.getMessage()));
             }

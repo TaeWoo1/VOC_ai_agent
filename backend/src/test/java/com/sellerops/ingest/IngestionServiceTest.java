@@ -98,9 +98,9 @@ class IngestionServiceTest {
     void dedupsInquiriesAndMapsStatus() {
         IngestOutcome counts = service.ingestInquiries(org, channel, List.of(
                 new CanonicalInquiry("전선몰딩", "SKU1", "구매자1", "곡면 가능?", "UNANSWERED",
-                        at("2026-06-01"), "Q-1", 2),
+                        at("2026-06-01"), "Q-1", 2, "곡면 문의", "미처리"),
                 new CanonicalInquiry("전선몰딩", "SKU1", "구매자1", "곡면 가능?", "UNANSWERED",
-                        at("2026-06-01"), "Q-1", 3)));
+                        at("2026-06-01"), "Q-1", 3, "곡면 문의", "미처리")));
 
         assertThat(counts.success()).isEqualTo(1);
         assertThat(counts.skipped()).isEqualTo(1);
@@ -150,7 +150,7 @@ class IngestionServiceTest {
     void returnsInsertedIdsForNewlyPersistedInquiries() {
         IngestOutcome outcome = service.ingestInquiries(org, channel, List.of(
                 new CanonicalInquiry("전선몰딩", "SKU1", "구매자1", "곡면 가능?", "UNANSWERED",
-                        at("2026-06-01"), "QNEW-1", 2)));
+                        at("2026-06-01"), "QNEW-1", 2, "곡면 문의", "미처리")));
 
         assertThat(outcome.success()).isEqualTo(1);
         assertThat(outcome.insertedIds()).hasSize(1);

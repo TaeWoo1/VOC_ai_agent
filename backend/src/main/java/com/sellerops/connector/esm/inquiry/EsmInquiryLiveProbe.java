@@ -19,8 +19,8 @@ import java.time.LocalDate;
  * <p><b>Safety.</b> The token is built here and handed straight to the harness;
  * it is never logged, stored, or returned. The harness's two locks (guard flag +
  * exact confirmation phrase) still gate every call — a refused run sends no
- * request. No DB write, no scheduler/manual-sync, no capability change; INQUIRY
- * remains NEEDS_VERIFICATION.
+ * request. No DB write, no scheduler/manual-sync, no capability change, no live
+ * inquiry ingestion; INQUIRY is official-doc confirmed but live-response unverified.
  */
 public final class EsmInquiryLiveProbe {
 
@@ -29,8 +29,11 @@ public final class EsmInquiryLiveProbe {
                               String auctionSellerId, String gmarketSellerId) {
     }
 
-    /** The single probe query: one historical day, optional type, optional status filter. */
-    public record Params(LocalDate day, String qnaType, String statusFilter) {
+    /**
+     * The single probe query: one historical day plus the optional numeric filters
+     * {@code qnaType}, {@code status}, and {@code type} (any may be null).
+     */
+    public record Params(LocalDate day, Integer qnaType, Integer status, Integer type) {
     }
 
     private final EsmInquiryProbeHarness harness;
@@ -52,6 +55,6 @@ public final class EsmInquiryLiveProbe {
                 credentials.issuer(), credentials.auctionSellerId(), credentials.gmarketSellerId());
         String authorization = "Bearer " + token;
         return harness.runOnce(confirmation, params.day(), params.qnaType(),
-                params.statusFilter(), authorization);
+                params.status(), params.type(), authorization);
     }
 }
