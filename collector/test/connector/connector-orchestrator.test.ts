@@ -372,14 +372,14 @@ describe("channel registry", () => {
     expect(() => createConnectorHandle("NAVER", "n1", {})).toThrow(/requires browser deps/);
   });
 
-  it("Cafe24 WITH a port builds a runnable connector that still yields no sync intent", async () => {
+  it("Cafe24 WITH a production port is promoted to AVAILABLE and generates a sync intent", async () => {
     const port = new FakeApiPort({ authStatus: "CONNECTED" });
     const handle = createConnectorHandle("CAFE24", "c-live", { api: { port } });
     expect(handle.status).toBe("READY_TO_START");
     const [r] = await new ConnectorOrchestrator().boot([handle]);
     expect(r!.outcome).toBe("READY");
-    expect(r!.implementationStatus).toBe("NOT_IMPLEMENTED");
-    expect(r!.syncIntent).toBeNull();
+    expect(r!.implementationStatus).toBe("AVAILABLE"); // deps-driven promotion from the NOT_IMPLEMENTED default
+    expect(r!.syncIntent).toMatchObject({ mechanism: "API_FETCH" }); // surfaced, not executed
   });
 });
 
