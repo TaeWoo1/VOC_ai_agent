@@ -100,6 +100,7 @@ export function toInquirySignal(obs: InquiryObservation, ids: InquirySourceIds):
       responseDeadlineAt: obs.responseDeadlineAt,
       orderRefHash: obs.orderRef !== null ? hash16(["order", obs.channel, obs.connectionId, obs.orderRef]) : null,
       customerRefHash: null,
+      title: obs.title,
     },
   };
 }
@@ -122,6 +123,8 @@ export function sellerContextFromSignal(signal: CommerceSignal): SellerInquiryCo
     productId,
     orderRef: sp.orderRef,
     inquiryText: sp.sourceText,
+    // Include `title` only when present, so the seller context's key set stays minimal when there is none.
+    ...(sp.title !== undefined ? { title: sp.title } : {}),
     category: { topicCategory: view.signal.shareable.topicCategory, severityBucket: view.signal.shareable.severityBucket },
     responseDeadlineAt: sp.responseDeadlineAt,
   };

@@ -82,6 +82,8 @@ export interface SignalSellerPrivate {
   orderRefHash: string | null;
   /** One-way hash of any customer reference, kept additionally for matching/dedup. */
   customerRefHash: string | null;
+  /** Optional raw source title (e.g. the inquiry title) — seller-private, alongside `sourceText`. */
+  title?: string;
 }
 
 /**

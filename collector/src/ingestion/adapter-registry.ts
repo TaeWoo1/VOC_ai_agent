@@ -17,8 +17,12 @@ export interface RegisteredAdapter {
   channel: CommerceChannel;
 }
 
-/** The channel-neutral registry. The ESM inquiry producer is the first (and only) registered adapter today. */
+/**
+ * The channel-neutral registry. `esm-trading-cs-api` is the official ESM Trading CS API producer (Cloud API
+ * track); `esm-inquiry` is the earlier provisional producer seam. Both are ESM-channel adapters.
+ */
 export const INQUIRY_ADAPTER_REGISTRY: readonly RegisteredAdapter[] = [
+  { name: "esm-trading-cs-api", versions: ["0.1.0"], channel: "ESM" },
   { name: "esm-inquiry", versions: ["0.1.0"], channel: "ESM" },
 ];
 
