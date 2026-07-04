@@ -8,7 +8,7 @@ import {
   type LocalAgentStartupResult,
   type ProgressiveSnapshot,
 } from "../../src/agent/local-agent-startup";
-import { decideRun, resolveStartupConfig, createSignalShutdown, LOCAL_AGENT_APPROVAL_FLAG } from "../../src/cli/local-agent";
+import { decideRun, resolveBrowserRuntimeConfig, createSignalShutdown, LOCAL_AGENT_APPROVAL_FLAG } from "../../src/cli/local-agent";
 import {
   LocalAgentProgressiveService,
   type ProgressiveReconnectRuntimeLike,
@@ -433,7 +433,7 @@ describe("parseProgressiveConnections", () => {
 // ── CLI launch decision — dry run launches no browser and creates no profile ─────────────────────
 describe("decideRun (pure launch decision)", () => {
   const oneConn = JSON.stringify([
-    { connectionId: "A", loginMode: "GMARKET", autoReconnectConsent: true, autoSubmitConsent: true, assistedReconnectConsent: true },
+    { connectionId: "A", channel: "ESM", loginMode: "GMARKET", autoReconnectConsent: true, autoSubmitConsent: true, assistedReconnectConsent: true },
   ]);
   const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", STORAGE_PROBE_SALT: "salt" };
 
@@ -466,7 +466,7 @@ describe("decideRun (pure launch decision)", () => {
       const d = decideRun([], oneConn, env);
       expect(d.mode).toBe("DRY_RUN");
       if (d.mode === "DRY_RUN") {
-        const profileId = d.parsed.connections[0]!.dedicatedProfileId;
+        const profileId = d.parsed.connections[0]!.browserConnection!.dedicatedProfileId;
         expect(existsSync(join(baseDir, profileId))).toBe(false); // no per-connection profile created
       }
       expect(readdirSync(baseDir)).toEqual(before); // the dir is untouched — no browser, no profile
@@ -475,9 +475,50 @@ describe("decideRun (pure launch decision)", () => {
     }
   });
 
-  it("resolveStartupConfig reports the two required live-config categories when absent", () => {
-    const r = resolveStartupConfig({});
+  it("resolveBrowserRuntimeConfig reports the two required browser-config categories when absent", () => {
+    const r = resolveBrowserRuntimeConfig({});
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.missing.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "STORAGE_PROBE_SALT"]);
+  });
+});
+
+// ── decideRun strategy-aware gating (browser env/approval required only for runnable browser) ─────
+describe("decideRun strategy-aware live-config gating", () => {
+  const noEnv: NodeJS.ProcessEnv = {}; // deliberately no ESM_AUTH_SURFACE_URL / STORAGE_PROBE_SALT
+  const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", STORAGE_PROBE_SALT: "salt" };
+  const browserEntry = { connectionId: "b", channel: "ESM", loginMode: "ESM_PLUS", autoReconnectConsent: true, autoSubmitConsent: true, assistedReconnectConsent: true };
+
+  it("an API-only config does NOT require ESM browser config — it boots directly with no browser config", () => {
+    // No approval flag, no browser env at all — an API-only device must still reach LIVE_BOOT.
+    const d = decideRun([], JSON.stringify([{ connectionId: "a", channel: "CAFE24" }]), noEnv);
+    expect(d.mode).toBe("LIVE_BOOT");
+    if (d.mode !== "LIVE_BOOT") return;
+    expect(d.requiresBrowser).toBe(false);
+    expect(d.config.browser).toBeUndefined(); // never demands browser environment values
+  });
+
+  it("a discovery-only config launches no browser — LIVE_BOOT with no browser config, unapproved", () => {
+    const d = decideRun([], JSON.stringify([{ connectionId: "d", channel: "COUPANG" }]), noEnv);
+    expect(d.mode).toBe("LIVE_BOOT");
+    if (d.mode !== "LIVE_BOOT") return;
+    expect(d.requiresBrowser).toBe(false);
+    expect(d.config.browser).toBeUndefined();
+  });
+
+  it("a mixed (browser + API) config REQUIRES the browser config + approval — DRY_RUN when missing", () => {
+    const mixed = JSON.stringify([browserEntry, { connectionId: "a", channel: "CAFE24" }]);
+    // Unapproved and no browser env → DRY_RUN surfacing the missing browser categories.
+    const dry = decideRun([], mixed, noEnv);
+    expect(dry.mode).toBe("DRY_RUN");
+    if (dry.mode === "DRY_RUN") {
+      expect(dry.missingConfig.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "STORAGE_PROBE_SALT"]);
+    }
+    // Approved AND browser env present → LIVE_BOOT with a browser config, flagged as requiring the browser.
+    const live = decideRun([LOCAL_AGENT_APPROVAL_FLAG], mixed, liveEnv);
+    expect(live.mode).toBe("LIVE_BOOT");
+    if (live.mode === "LIVE_BOOT") {
+      expect(live.requiresBrowser).toBe(true);
+      expect(live.config.browser).toBeDefined();
+    }
   });
 });
