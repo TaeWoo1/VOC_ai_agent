@@ -93,9 +93,14 @@ export interface ConnectorCreationDeps {
 /**
  * Build a {@link ConnectorHandle} for one (channel × connection):
  *  - unknown / `DISCOVERY_REQUIRED` channel → `SKIPPED` (no connector).
- *  - declared strategy WITH its deps → `READY_TO_START` (carries `implementationStatus`).
+ *  - declared strategy WITH its deps → `READY_TO_START`.
  *  - `NOT_IMPLEMENTED` strategy WITHOUT deps → `SKIPPED` (nothing to run yet; not an error).
  *  - `AVAILABLE` strategy WITHOUT deps → a configuration error (throws).
+ *
+ * **API availability is deps-driven.** An `API` channel whose static descriptor is `NOT_IMPLEMENTED` (e.g.
+ * Cafe24) is promoted to `AVAILABLE` — and thus runnable, sync-intent-eligible — ONLY when a real
+ * production `ApiConnectorPort` is supplied. Without a port it stays `NOT_IMPLEMENTED` and settles
+ * `SKIPPED`. This is how "AVAILABLE only when the port actually exists" is modeled without a live wire.
  */
 export function createConnectorHandle(
   channel: KnownChannel,
@@ -133,9 +138,11 @@ export function createConnectorHandle(
     if (impl === "NOT_IMPLEMENTED") return { status: "SKIPPED", channel, connectionId, implementationStatus: impl };
     throw new Error(`createConnectorHandle: AVAILABLE API strategy for ${channel} requires api deps`);
   }
+  // A real production port was supplied → the API channel is operationally AVAILABLE (promoted even from a
+  // NOT_IMPLEMENTED default), so it is runnable and its READY sync intent will be generated.
   return {
     status: "READY_TO_START",
-    implementationStatus: impl,
+    implementationStatus: "AVAILABLE",
     connector: new ApiChannelConnector(
       commerceChannel,
       connectionId,
