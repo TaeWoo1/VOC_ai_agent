@@ -8,31 +8,66 @@ import {
   canGenerateProposal,
   classifyProposeError,
   detailErrorMessage,
+  INQUIRY_TABS,
+  PROPOSAL_SUCCESS_GUIDANCE,
   phaseLabel,
   proposalCategoryLabel,
   provenanceText,
   queueRowView,
   receivedDateLabel,
+  resetForTab,
   statusLabel,
+  tabFor,
+  type InquiryTabKey,
 } from "../lib/inquiryWorkflow";
 
 const PAGE_SIZE = 20;
 
-// Seller inquiry workflow: paged OPEN queue → select → seller-only detail →
-// generate a response-type proposal → PROPOSED. Strict reads only (no mock
-// fallback); the queue never exposes body/details/author, and the proposal is
-// shown as a response-category suggestion, never a reply draft. There are no
-// approval or send controls here.
+// Seller inquiry workflow: OPEN / PROPOSED tabs over the paged work queue →
+// select → seller-only detail → generate a response-type proposal (OPEN only).
+// Strict reads only (no mock fallback); the queue never exposes body/details/
+// author, and the proposal is shown as a response-category suggestion, never a
+// reply draft. There are no approval or send controls here.
 export function Inquiries() {
+  const [tab, setTab] = useState<InquiryTabKey>("OPEN");
   const [page, setPage] = useState(0);
   const [queueKey, setQueueKey] = useState(0);
-  const { data, loading, error } = useApiData(
-    () => api.getInquiryQueueStrict({ phase: "OPEN", page, size: PAGE_SIZE }),
-    [page, queueKey],
-  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const activeTab = tabFor(tab);
+  // Phase-specific queue: re-runs (and clears its own loading/error) whenever the
+  // tab, page, or refresh key changes.
+  const { data, loading, error } = useApiData(
+    () => api.getInquiryQueueStrict({ phase: activeTab.phase, page, size: PAGE_SIZE }),
+    [tab, page, queueKey],
+  );
 
   const refreshQueue = () => setQueueKey((k) => k + 1);
+
+  function changeTab(next: InquiryTabKey) {
+    if (next === tab) {
+      return;
+    }
+    // Reset page, selection/detail, and any transient success message on tab change.
+    const reset = resetForTab(next);
+    setTab(reset.tab);
+    setPage(reset.page);
+    setSelectedId(reset.selectedId);
+    setSuccessMessage(reset.successMessage);
+  }
+
+  function selectItem(id: string) {
+    setSelectedId(id);
+    setSuccessMessage(null); // clear guidance once the seller drills into an item
+  }
+
+  // Successful generate: stay on the 응답 대기 tab, let the queue refresh drop the
+  // item, and guide the seller to 제안 생성됨. The tab is NOT auto-switched.
+  function onProposeSuccess() {
+    refreshQueue();
+    setSuccessMessage(PROPOSAL_SUCCESS_GUIDANCE);
+  }
 
   return (
     <div className="space-y-6">
@@ -43,8 +78,27 @@ export function Inquiries() {
         </p>
       </header>
 
+      <div className="flex gap-2">
+        {INQUIRY_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => changeTab(t.key)}
+            className={`rounded-xl px-4 py-2 text-base font-semibold transition ${
+              t.key === tab ? "bg-brand/10 text-brand-700" : "text-ink hover:bg-canvas"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {successMessage ? (
+        <div className="rounded-xl bg-good/10 px-4 py-3 text-good">{successMessage}</div>
+      ) : null}
+
       <Section
-        title="응답 대기 문의"
+        title={activeTab.label}
         action={
           <button type="button" onClick={refreshQueue} className="btn-ghost px-3 py-1.5 text-sm">
             새로고침
@@ -66,8 +120,8 @@ export function Inquiries() {
           </div>
         ) : data.content.length === 0 ? (
           <div className="rounded-xl border border-dashed border-line py-12 text-center">
-            <p className="text-lg font-medium text-ink">응답 대기 중인 문의가 없습니다.</p>
-            <p className="mt-1 text-base text-muted">새 문의가 수집되면 여기에 표시됩니다.</p>
+            <p className="text-lg font-medium text-ink">{activeTab.emptyCopy}</p>
+            <p className="mt-1 text-base text-muted">{activeTab.emptySubCopy}</p>
           </div>
         ) : (
           <>
@@ -77,7 +131,7 @@ export function Inquiries() {
                   <QueueRow
                     item={item}
                     selected={item.workItemId === selectedId}
-                    onSelect={() => setSelectedId(item.workItemId)}
+                    onSelect={() => selectItem(item.workItemId)}
                   />
                 </li>
               ))}
@@ -114,6 +168,7 @@ export function Inquiries() {
           workItemId={selectedId}
           onClose={() => setSelectedId(null)}
           onProposed={refreshQueue}
+          onProposeSuccess={onProposeSuccess}
         />
       ) : null}
     </div>
@@ -159,10 +214,12 @@ function InquiryDetailPanel({
   workItemId,
   onClose,
   onProposed,
+  onProposeSuccess,
 }: {
   workItemId: string;
   onClose: () => void;
   onProposed: () => void;
+  onProposeSuccess: () => void;
 }) {
   const [detail, setDetail] = useState<InquiryDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -209,6 +266,7 @@ function InquiryDetailPanel({
       await api.generateInquiryProposal(workItemId);
       reloadDetail(); // detail refetch → PROPOSED + proposal
       onProposed(); // queue refresh → the item leaves the OPEN list
+      onProposeSuccess(); // page shows the "find it under 제안 생성됨" guidance
     } catch (e) {
       const info = classifyProposeError(isAxiosError(e) ? e.response?.status : undefined);
       setProposeError(info.message);
