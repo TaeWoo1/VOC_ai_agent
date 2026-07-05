@@ -134,7 +134,7 @@ public class MockDataSeeder implements ApplicationRunner {
         list.add(channel("SSG닷컴", "SSG", ChannelStatus.PREPARING, false, true, true, true, true, order));
         list.add(channel("오늘의집", "OHOUSE", ChannelStatus.REQUEST_AVAILABLE, false, true, false, false, true, order));
         list.add(channel("카카오톡스토어", "KAKAO", ChannelStatus.REQUEST_AVAILABLE, true, true, true, false, true, order));
-        list.add(channel("카페24 자사몰", "CAFE24", ChannelStatus.AVAILABLE, false, false, true, true, true, order));
+        list.add(channel("카페24 자사몰", "CAFE24", ChannelStatus.AVAILABLE, true, false, true, true, true, order));
         list.add(channel("메이크샵", "MAKESHOP", ChannelStatus.REQUEST_AVAILABLE, false, false, true, true, true, order));
         list.add(channel("아임웹", "IMWEB", ChannelStatus.REQUEST_AVAILABLE, false, false, true, true, true, order));
         list.add(channel("자사몰/기타", "CUSTOM", ChannelStatus.FILE_UPLOAD_SUPPORTED, true, true, true, true, true, order));

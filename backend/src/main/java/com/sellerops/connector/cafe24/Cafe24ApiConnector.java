@@ -9,6 +9,7 @@ import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.credential.DecryptedCredential;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -124,15 +125,17 @@ public class Cafe24ApiConnector implements PullConnector {
                         DataType.REVIEW, "CONFIRMED",
                         DataType.INQUIRY, "CONFIRMED"),
                 "Cafe24 Admin orders → daily ORDER_SUMMARY (payment_amount summed by order_date, KST),"
-                        + " CONFIRMED by a gated live run. REVIEW (board 4 구매후기) and INQUIRY (board 6"
-                        + " 문의사항, PRODUCT_INQUIRY) collect community board articles into"
-                        + " CanonicalCommunityArticle — read-only, via date-window backfill through the"
-                        + " production runtime (sync_job/sync_cursor, board-4/6-only routing,"
-                        + " natural-key/source_hash dedupe). CONFIRMED by live runtime backfill runs"
-                        + " (REVIEW no-op path; INQUIRY multi-page fresh insert + no-op). Board 9 1:1"
-                        + " 맞춤상담 stays excluded (PII + endpoint uncertainty). reply_status maps"
-                        + " N → PENDING; the answered token is unobserved so unknown tokens stay UNKNOWN."
-                        + " Product/sales remain deferred.");
+                        + " CONFIRMED by a gated live run. REVIEW (board 4 구매후기) collects community"
+                        + " board articles into CanonicalCommunityArticle (community/VOC store). INQUIRY"
+                        + " (board 6 문의사항, the mall's native inquiry board) maps to CanonicalInquiry so"
+                        + " the shared ingestion path opens one OPEN InquiryWorkItem bound to the seller"
+                        + " connection (the seller-confirmed reply lifecycle). Read-only, via date-window"
+                        + " backfill through the production runtime (sync_job/sync_cursor, board-4/6-only"
+                        + " routing, dedupe). CONFIRMED by live runtime backfill runs. Board 9 1:1 맞춤상담"
+                        + " stays excluded (PII + endpoint uncertainty). reply_status: the confirmed"
+                        + " unanswered N maps to UNANSWERED; the answered token is unobserved, so any"
+                        + " not-yet-seen token also stays UNANSWERED (conservative, never guessed as"
+                        + " answered). Product/sales remain deferred.");
     }
 
     @Override
@@ -142,7 +145,10 @@ public class Cafe24ApiConnector implements PullConnector {
         }
         return switch (request.dataType()) {
             case ORDER_SUMMARY -> fetchOrderSummary(request);
-            case REVIEW, INQUIRY -> fetchArticles(request);
+            // REVIEW (board 4) stays a community article; INQUIRY (board 6) becomes a
+            // canonical inquiry so it opens an OPEN work item on the shared reply path.
+            case REVIEW -> fetchReviewArticles(request);
+            case INQUIRY -> fetchInquiries(request);
             case PRODUCT, SALES -> throw new UnsupportedDataTypeException(
                     request.channelCode(), request.dataType());
         };
@@ -182,15 +188,33 @@ public class Cafe24ApiConnector implements PullConnector {
     }
 
     /**
-     * REVIEW/INQUIRY: one page of community board articles mapped to
-     * {@link CanonicalCommunityArticle}. The board is fixed by data type
-     * ({@link #primaryBoard}); the opaque {@link Cafe24ArticleCursor} carries the
-     * offset across runs and the executor pages while {@code hasMore}. A row
-     * missing {@code article_no} cannot be keyed and is dropped. CONFIRMED for
-     * boards 4/6 by live runtime backfill runs; the answered {@code reply_status}
-     * token stays UNKNOWN until observed.
+     * REVIEW: one page of board-4 (구매후기) articles mapped to
+     * {@link CanonicalCommunityArticle} — the richer, upsertable community/VOC asset.
      */
-    private FetchPage fetchArticles(FetchRequest request) {
+    private FetchPage fetchReviewArticles(FetchRequest request) {
+        return fetchArticlePage(request, Cafe24BoardArticleMapper::toCanonical);
+    }
+
+    /**
+     * INQUIRY: one page of board-6 (문의사항) articles mapped to
+     * {@link CanonicalInquiry}, so the shared ingestion path opens exactly one OPEN
+     * {@code InquiryWorkItem} bound to the seller connection (the reply lifecycle).
+     * Board 6 is the mall's <b>native</b> inquiry board — no external-marketplace
+     * origin is read or assumed; board 9 (1:1 맞춤상담) is never collected.
+     */
+    private FetchPage fetchInquiries(FetchRequest request) {
+        return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry);
+    }
+
+    /**
+     * Shared board-article page fetch: the board is fixed by data type
+     * ({@link #primaryBoard}); the opaque {@link Cafe24ArticleCursor} carries the
+     * offset across runs and the executor pages while {@code hasMore}. A row missing
+     * {@code article_no} cannot be keyed and is dropped. The {@code mapper} decides
+     * the canonical record type (community article for REVIEW, inquiry for INQUIRY);
+     * paging, the windowed backfill cursor, and rate-limit handling are identical.
+     */
+    private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper) {
         int boardNo = primaryBoard(request.dataType());
         Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
         try {
@@ -201,14 +225,14 @@ public class Cafe24ApiConnector implements PullConnector {
                     auth.accessToken(), auth.mallId(), boardNo,
                     cursor.windowStart(), cursor.windowEnd(), request.limit(), cursor.offset());
 
-            List<CanonicalCommunityArticle> records = new ArrayList<>();
+            List<Object> records = new ArrayList<>();
             int position = 0;
             for (Cafe24BoardArticleRow row : rows) {
                 position++;
                 if (row.articleNo() == null) {
                     continue; // cannot dedupe/store without the natural-key article number
                 }
-                records.add(Cafe24BoardArticleMapper.toCanonical(boardNo, row, position));
+                records.add(mapper.map(boardNo, row, position));
             }
             boolean hasMore = rows.size() == request.limit();
             String nextCursor = cursor.advance(rows.size()).encode();
@@ -217,6 +241,12 @@ public class Cafe24ApiConnector implements PullConnector {
             // Cursor unchanged → the next run re-requests the same offset.
             return rateLimited(request, e);
         }
+    }
+
+    /** Maps one board-article row to its canonical record (community article or inquiry). */
+    @FunctionalInterface
+    private interface ArticleRecordMapper {
+        Object map(int boardNo, Cafe24BoardArticleRow row, int sourceRow);
     }
 
     /**

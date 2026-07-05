@@ -14,6 +14,7 @@ import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestionService;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
@@ -147,13 +148,18 @@ class Cafe24ArticlePersistenceFlowTest {
     }
 
     @Test
-    void inquiryArticlesRouteToBoard6NeverBoard9() {
-        IngestOutcome outcome = runPass(DataType.INQUIRY, 6, 3001L, "곡면 가능?", "N");
+    void inquiryFetchRoutesToBoard6NeverBoard9AndLeavesTheCommunityStore() {
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 77L, null, null, "N")));
+        String cursor = Cafe24ArticleCursor.window(6, START, END).encode();
+        FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 3));
 
-        assertThat(outcome.success()).isEqualTo(1);
-        Cafe24CommunityArticle a = communityArticles.findAllByOrgId(org).get(0);
-        assertThat(a.getBoardNo()).isEqualTo(6);
-        assertThat(a.getSourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        // INQUIRY now produces canonical inquiries, not community articles — the
+        // community/VOC store is never written for board 6; the inquiry flows to the
+        // OPEN work-queue path instead (covered by Cafe24InquiryIngestionFlowTest).
+        assertThat(page.records().get(0)).isInstanceOf(CanonicalInquiry.class);
+        assertThat(communityArticles.findAllByOrgId(org)).isEmpty();
         // INQUIRY fans out to board 6 only — board 9 is never requested.
         assertThat(http.sent.get(1).uri().toString())
                 .contains("/api/v2/admin/boards/6/articles?")
