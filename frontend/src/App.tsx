@@ -10,6 +10,8 @@ import { Inquiries } from "./pages/Inquiries";
 import { Orders } from "./pages/Orders";
 import { Channels } from "./pages/Channels";
 import { ChannelDetail } from "./pages/ChannelDetail";
+import { Cafe24Connect } from "./pages/Cafe24Connect";
+import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { Upload } from "./pages/Upload";
 import { ProductIssues } from "./pages/ProductIssues";
 import { AiSearch } from "./pages/AiSearch";
@@ -51,6 +53,8 @@ export function App() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/channels" element={<Channels />} />
         <Route path="/channels/:accountId" element={<ChannelDetail />} />
+        <Route path="/connect/cafe24" element={<Cafe24Connect />} />
+        <Route path="/connect/cafe24/result" element={<Cafe24ConnectResult />} />
         <Route path="/upload" element={<Upload />} />
         <Route path="/alerts" element={<AlertSettings />} />
       </Route>

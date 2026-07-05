@@ -8,6 +8,7 @@ import { useApiData } from "../lib/useApiData";
 import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
 import { channelSupportDisplay } from "../lib/channelSupport";
+import { CAFE24_CONNECT_ROUTE } from "../lib/cafe24Connect";
 import { relativeTime } from "../lib/format";
 import type {
   ChannelResponse,
@@ -138,6 +139,11 @@ function ChannelCard({
   function handleAction() {
     if (account) {
       navigate(`/channels/${account.id}`);
+      return;
+    }
+    // Cafe24 connects through the OAuth flow (enter mall id → consent), not a key form.
+    if (channel.code === "CAFE24") {
+      navigate(CAFE24_CONNECT_ROUTE);
       return;
     }
     if (canUpload) {
