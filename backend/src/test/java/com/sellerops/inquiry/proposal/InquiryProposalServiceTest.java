@@ -44,6 +44,7 @@ class InquiryProposalServiceTest {
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryProposalRepository proposals;
     @Autowired InquiryWorkItemAuditRepository audits;
+    @Autowired com.sellerops.inquiry.reply.InquiryReplyDraftRepository drafts;
     @Autowired PlatformTransactionManager txManager;
 
     private InquiryProposalWriter writer;
@@ -76,7 +77,7 @@ class InquiryProposalServiceTest {
     }
 
     private InquiryProposalService service(InquiryProposalProvider provider) {
-        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer);
+        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts);
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {

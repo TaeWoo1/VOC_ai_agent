@@ -8,6 +8,8 @@ import com.sellerops.inquiry.proposal.InquiryProposalProvider.SellerInquiryConte
 import com.sellerops.inquiry.proposal.dto.InquiryDetail;
 import com.sellerops.inquiry.proposal.dto.ProposalResult;
 import com.sellerops.inquiry.proposal.dto.ProposalView;
+import com.sellerops.inquiry.reply.InquiryReplyDraftRepository;
+import com.sellerops.inquiry.reply.dto.ReplyDraftView;
 import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
@@ -48,15 +50,17 @@ public class InquiryProposalService {
     private final InquiryRepository inquiries;
     private final InquiryProposalProvider provider;
     private final InquiryProposalWriter writer;
+    private final InquiryReplyDraftRepository drafts;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
-                                  InquiryProposalWriter writer) {
+                                  InquiryProposalWriter writer, InquiryReplyDraftRepository drafts) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
         this.provider = provider;
         this.writer = writer;
+        this.drafts = drafts;
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -64,6 +68,8 @@ public class InquiryProposalService {
         InquiryWorkItem workItem = loadWorkItem(orgId, workItemId);
         Inquiry inquiry = loadInquiry(orgId, workItem.getInquiryId());
         ProposalView proposal = proposals.findByWorkItemId(workItemId).map(this::toView).orElse(null);
+        ReplyDraftView draft = drafts.findTopByWorkItemIdOrderByVersionDesc(workItemId)
+                .map(ReplyDraftView::of).orElse(null);
         return new InquiryDetail(
                 workItem.getId(),
                 inquiry.getId(),
@@ -75,7 +81,8 @@ public class InquiryProposalService {
                 inquiry.getTitle(),
                 inquiry.getBody(),
                 inquiry.getReceivedAt(),
-                proposal);
+                proposal,
+                draft);
     }
 
     /** Generate a proposal and move the work item OPEN &rarr; PROPOSED. */
