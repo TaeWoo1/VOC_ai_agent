@@ -16,7 +16,10 @@ import type {
   DashboardSummaryResponse,
   IngestResult,
   InboxResponse,
+  InquiryDetail,
+  InquiryQueueResponse,
   ItemAnalysis,
+  ProposalResult,
   OperatorAttentionSummary,
   OperatorVocItemPage,
   OrderSummaryResponse,
@@ -307,6 +310,47 @@ export const api = {
     const { data } = await http.post<ItemAnalysis[]>("/api/item-analysis/lookup", { items });
     return data;
   },
+
+  // --- Seller inquiry workflow (OPEN queue → detail → proposal → PROPOSED) ---
+  // All three are strict and have NO mock fallback: the workflow must never render
+  // a fabricated queue, detail, or PROPOSED state, so a dead/wrong backend fails
+  // closed (throws) and the page shows an honest error/retry.
+
+  // Paged, org-scoped work queue. Defaults to the OPEN phase. Sanitized rows only
+  // (title, no details/body/author).
+  async getInquiryQueueStrict(
+    params: { phase?: string; page?: number; size?: number } = {},
+  ): Promise<InquiryQueueResponse> {
+    const search = new URLSearchParams();
+    if (params.phase) {
+      search.set("phase", params.phase);
+    }
+    if (params.page != null) {
+      search.set("page", String(params.page));
+    }
+    if (params.size != null) {
+      search.set("size", String(params.size));
+    }
+    const query = search.toString();
+    const { data } = await http.get<InquiryQueueResponse>(
+      `/api/inquiries${query ? `?${query}` : ""}`,
+    );
+    return data;
+  },
+  // Seller-only detail for one work item: exposes title/details (never author),
+  // and the attached proposal once PROPOSED. A 404 (foreign/unknown id) throws.
+  async getInquiryDetailStrict(workItemId: string): Promise<InquiryDetail> {
+    const { data } = await http.get<InquiryDetail>(`/api/inquiries/${workItemId}`);
+    return data;
+  },
+  // Mutating: seller-initiated proposal generation (OPEN → PROPOSED). No mock.
+  // The caller classifies 404 (unavailable) / 409 (phase changed) / 503
+  // (generation unavailable) from the thrown axios error.
+  async generateInquiryProposal(workItemId: string): Promise<ProposalResult> {
+    const { data } = await http.post<ProposalResult>(`/api/inquiries/${workItemId}/proposal`);
+    return data;
+  },
+
   getOrdersSummary: (): Promise<OrderSummaryResponse> =>
     getOrMock("/api/orders/summary", mockOrders),
   // Strict variant for the order/sales dashboard (Orders page): no silent mock

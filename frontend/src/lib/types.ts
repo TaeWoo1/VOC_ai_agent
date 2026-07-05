@@ -447,3 +447,66 @@ export interface OperatorVocItemPage {
   total: number;
   items: OperatorVocItem[];
 }
+
+// --- Seller inquiry workflow (OPEN queue → detail → proposal → PROPOSED) ---
+
+// Mirrors com.sellerops.inquiry.queue.dto.InquiryQueueItem. Sanitized queue row:
+// carries the seller-visible title but deliberately NO details/body and NO author.
+export interface InquiryQueueItem {
+  workItemId: string;
+  inquiryId: string;
+  sellerAccountId: string;
+  channelId: string;
+  phase: string; // OPEN | PROPOSED | ... (server lifecycle)
+  status: string; // UNANSWERED | ANSWERED
+  title: string | null;
+  receivedAt: string; // ISO instant
+}
+
+// Mirrors com.sellerops.inquiry.queue.dto.InquiryQueueResponse.
+export interface InquiryQueueResponse {
+  content: InquiryQueueItem[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
+// Mirrors com.sellerops.inquiry.proposal.dto.ProposalView. Coarse decision
+// metadata + provider provenance only — never a reply body, buyer identity, or
+// audit internals.
+export interface ProposalView {
+  proposalId: string;
+  workItemId: string;
+  inquiryId: string;
+  actionKind: string;
+  summaryCategory: string;
+  requiresApproval: boolean;
+  proposedBy: string;
+  providerKind: string;
+  providerName: string;
+  providerVersion: string;
+}
+
+// Mirrors com.sellerops.inquiry.proposal.dto.InquiryDetail. Seller-only: exposes
+// the raw title/details (the seller owns them) but never the author.
+export interface InquiryDetail {
+  workItemId: string;
+  inquiryId: string;
+  sellerAccountId: string;
+  channelId: string;
+  phase: string;
+  status: string;
+  informStatus: string | null;
+  title: string | null;
+  details: string | null;
+  receivedAt: string;
+  proposal: ProposalView | null;
+}
+
+// Mirrors com.sellerops.inquiry.proposal.dto.ProposalResult (POST response).
+export interface ProposalResult {
+  workItemId: string;
+  phase: string;
+  proposal: ProposalView;
+}

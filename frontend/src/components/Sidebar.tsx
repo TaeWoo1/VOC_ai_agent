@@ -4,6 +4,7 @@ import { useOpenAlerts } from "../lib/openAlerts";
 const MENUS: Array<{ to: string; label: string; icon: string }> = [
   { to: "/", label: "홈", icon: "🏠" },
   { to: "/inbox", label: "인박스", icon: "📥" },
+  { to: "/inquiries", label: "문의 응답", icon: "✉️" },
   { to: "/upload", label: "자료 업로드", icon: "⬆️" },
   { to: "/orders", label: "주문·매출", icon: "📦" },
   { to: "/issues", label: "상품 이슈", icon: "⚠️" },
