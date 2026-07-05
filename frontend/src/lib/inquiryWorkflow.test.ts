@@ -4,14 +4,19 @@ import {
   canGenerateProposal,
   classifyProposeError,
   detailErrorMessage,
+  emptyCopyForTab,
+  INQUIRY_TABS,
   isProposed,
+  PROPOSAL_SUCCESS_GUIDANCE,
   phaseLabel,
   proposalCategoryLabel,
   provenanceText,
   providerKindLabel,
   queueRowView,
   receivedDateLabel,
+  resetForTab,
   statusLabel,
+  tabFor,
 } from "./inquiryWorkflow";
 
 function queueItem(over: Partial<InquiryQueueItem> = {}): InquiryQueueItem {
@@ -137,5 +142,43 @@ describe("detailErrorMessage", () => {
   it("distinguishes 404 (unavailable) from a generic load error", () => {
     expect(detailErrorMessage(404)).toContain("찾을 수 없습니다");
     expect(detailErrorMessage(500)).toContain("불러오지 못했습니다");
+  });
+});
+
+describe("phase tabs", () => {
+  it("has exactly OPEN and PROPOSED tabs with the right labels + phase mapping", () => {
+    expect(INQUIRY_TABS.map((t) => t.key)).toEqual(["OPEN", "PROPOSED"]);
+    expect(tabFor("OPEN")).toMatchObject({ phase: "OPEN", label: "응답 대기" });
+    expect(tabFor("PROPOSED")).toMatchObject({ phase: "PROPOSED", label: "제안 생성됨" });
+  });
+
+  it("uses distinct empty-state copy per tab", () => {
+    const open = emptyCopyForTab("OPEN");
+    const proposed = emptyCopyForTab("PROPOSED");
+    expect(open).toBe("응답 대기 중인 문의가 없습니다.");
+    expect(proposed).toBe("생성된 제안이 없습니다.");
+    expect(open).not.toBe(proposed);
+    // Sub-copy also differs between the tabs.
+    expect(tabFor("OPEN").emptySubCopy).not.toBe(tabFor("PROPOSED").emptySubCopy);
+  });
+
+  it("resetForTab clears page, selection, and success message and scopes to the new tab", () => {
+    expect(resetForTab("PROPOSED")).toEqual({
+      tab: "PROPOSED",
+      page: 0,
+      selectedId: null,
+      successMessage: null,
+    });
+    expect(resetForTab("OPEN")).toEqual({
+      tab: "OPEN",
+      page: 0,
+      selectedId: null,
+      successMessage: null,
+    });
+  });
+
+  it("proposal-success guidance points the seller to the 제안 생성됨 tab", () => {
+    expect(PROPOSAL_SUCCESS_GUIDANCE).toContain("제안 생성됨");
+    expect(PROPOSAL_SUCCESS_GUIDANCE).toContain("생성되었습니다");
   });
 });
