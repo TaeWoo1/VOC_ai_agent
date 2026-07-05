@@ -39,6 +39,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/**", "/actuator/health", "/health").permitAll()
+                        // Cafe24 OAuth redirect target: a top-level browser navigation from
+                        // cafe24.com carries no JWT — identity is recovered from the single-use,
+                        // tenant-bound state inside the handler. The /start endpoint stays authed.
+                        .requestMatchers(HttpMethod.GET, "/api/connect/cafe24/callback").permitAll()
                         .anyRequest().authenticated())
                 // Return 401 (not the default 403) when no valid token is present.
                 .exceptionHandling(e -> e.authenticationEntryPoint(

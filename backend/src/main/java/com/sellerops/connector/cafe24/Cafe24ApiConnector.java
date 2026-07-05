@@ -95,15 +95,24 @@ public class Cafe24ApiConnector implements PullConnector {
     private final Cafe24OrdersClient ordersClient;
     private final Cafe24BoardArticlesClient articlesClient;
     private final Clock clock;
+    /**
+     * App-level OAuth credentials of the ONE registered SellerOps Cafe24 app — server
+     * configuration, identical for every mall, NEVER per-seller vault material. The
+     * vault holds only seller-connection values (mall_id, refresh_token).
+     */
+    private final String appClientId;
+    private final String appClientSecret;
 
     public Cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault,
                               Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
-                              Clock clock) {
+                              Clock clock, String appClientId, String appClientSecret) {
         this.tokenClient = tokenClient;
         this.vault = vault;
         this.ordersClient = ordersClient;
         this.articlesClient = articlesClient;
         this.clock = clock;
+        this.appClientId = appClientId;
+        this.appClientSecret = appClientSecret;
     }
 
     @Override
@@ -305,15 +314,19 @@ public class Cafe24ApiConnector implements PullConnector {
     private Authorized authorize(FetchRequest request) {
         DecryptedCredential credential = vault.open(request.orgId(), request.sellerAccountId());
         String mallId = credential.secrets().get("mall_id");
-        String clientId = credential.secrets().get("client_id");
-        String clientSecret = credential.secrets().get("client_secret");
         String refreshToken = credential.secrets().get("refresh_token");
-        if (isBlank(mallId) || isBlank(clientId) || isBlank(clientSecret) || isBlank(refreshToken)) {
+        if (isBlank(mallId) || isBlank(refreshToken)) {
             throw new IllegalStateException(
-                    "카페24 자격 증명에 mall_id, client_id, client_secret 또는 refresh_token이 없습니다.");
+                    "카페24 자격 증명에 mall_id 또는 refresh_token이 없습니다.");
+        }
+        if (isBlank(appClientId) || isBlank(appClientSecret)) {
+            // App-level OAuth credentials are server configuration — a run cannot
+            // proceed without them, and they are never read from the vault.
+            throw new IllegalStateException(
+                    "카페24 앱 자격 증명(client_id/client_secret)이 설정되지 않았습니다.");
         }
 
-        Cafe24TokenResult token = tokenClient.refresh(mallId, clientId, clientSecret, refreshToken);
+        Cafe24TokenResult token = tokenClient.refresh(mallId, appClientId, appClientSecret, refreshToken);
 
         // Single-use rotation: persist the replacement before anything else can
         // fail. rotateSecrets re-encrypts the payload only — connector class, auth

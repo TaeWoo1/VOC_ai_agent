@@ -51,10 +51,10 @@ class CredentialTemplatesTest {
 
     @Test
     void cafe24ShapeMatchesConnector() {
-        assertThat(keys("CAFE24"))
-                .containsExactly("mall_id", "client_id", "client_secret", "refresh_token");
-        assertThat(requiredKeys("CAFE24"))
-                .containsExactly("mall_id", "client_id", "client_secret", "refresh_token");
+        // Seller-connection values only — app client_id/client_secret are server config,
+        // not per-seller credential material.
+        assertThat(keys("CAFE24")).containsExactly("mall_id", "refresh_token");
+        assertThat(requiredKeys("CAFE24")).containsExactly("mall_id", "refresh_token");
     }
 
     @Test
