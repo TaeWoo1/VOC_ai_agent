@@ -30,12 +30,18 @@ describe("channelCardAction — driven by real account status", () => {
     });
   });
 
-  it("PENDING → 연결 중 with duplicate actions blocked", () => {
-    expect(channelCardAction(cafe24, acc({ connectionStatus: "PENDING" }), false, false)).toEqual({
-      label: "연결 중",
-      intent: "pending",
-      disabled: true,
-    });
+  it("PENDING → 연결 계속하기, enabled, routes through the OAuth flow (resume a stale attempt)", () => {
+    const a = channelCardAction(cafe24, acc({ connectionStatus: "PENDING" }), false, false);
+    expect(a).toEqual({ label: "연결 계속하기", intent: "reconnect", disabled: false });
+    // "reconnect" is the intent Channels.tsx routes to /connect/cafe24, reusing the account.
+    expect(a.disabled).toBe(false);
+  });
+
+  it("PENDING on a non-Cafe24 account → manage (no Cafe24 OAuth route)", () => {
+    const a = channelCardAction(naver, acc({ connectionStatus: "PENDING" }), false, false);
+    expect(a.label).toBe("연결 계속하기");
+    expect(a.intent).toBe("manage");
+    expect(a.disabled).toBe(false);
   });
 
   it("RECONNECT_REQUIRED (Cafe24) → 다시 연결하기 through the OAuth flow", () => {
