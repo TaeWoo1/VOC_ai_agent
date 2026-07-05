@@ -4,6 +4,7 @@ import type {
   ArticleListResponse,
   AuthResponse,
   BackfillRequest,
+  Cafe24ConnectStartView,
   CapabilityView,
   ChannelCapabilityOverview,
   ChannelResponse,
@@ -220,6 +221,16 @@ export const api = {
     const { data } = await http.post<ConnectionTestResultView>(
       `/api/seller-accounts/${accountId}/test-connection`,
     );
+    return data;
+  },
+  // Mutating-intent: begin the Cafe24 OAuth connect flow. NO mock fallback — this
+  // requires a live backend, and a dead endpoint must fail closed (never a fake
+  // success). The caller redirects the browser to authorizationUrl. The response
+  // carries only the pending account + consent URL: no code, state, token, or secret.
+  async startCafe24Connect(mallId: string): Promise<Cafe24ConnectStartView> {
+    const { data } = await http.post<Cafe24ConnectStartView>("/api/connect/cafe24/start", {
+      mallId,
+    });
     return data;
   },
   // Strict variant for the connection-alert list (Alerts page): no silent mock

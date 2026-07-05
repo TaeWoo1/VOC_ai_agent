@@ -106,6 +106,10 @@ function actionLabel(status: ChannelStatus): string {
       return "준비 중";
     case "REQUEST_AVAILABLE":
       return "요청하기";
+    case "PENDING":
+      return "연결 중";
+    case "RECONNECT_REQUIRED":
+      return "재연결 필요";
   }
 }
 

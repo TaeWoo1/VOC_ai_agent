@@ -5,7 +5,10 @@ export type ChannelStatus =
   | "AVAILABLE"
   | "FILE_UPLOAD_SUPPORTED"
   | "PREPARING"
-  | "REQUEST_AVAILABLE";
+  | "REQUEST_AVAILABLE"
+  // Account-connection states from the OAuth onboarding flow (SellerAccount.connectionStatus).
+  | "PENDING"
+  | "RECONNECT_REQUIRED";
 
 export interface UserView {
   id: string;
@@ -41,6 +44,17 @@ export interface ChannelResponse {
   lastSyncedAt: string | null;
   actionLabel: string;
   support: ChannelSupport;
+}
+
+/**
+ * Sanitized result of POST /api/connect/cafe24/start. Carries only the pending
+ * account, its status, and the Cafe24 consent URL the browser is redirected to —
+ * never a code, state, token, or secret.
+ */
+export interface Cafe24ConnectStartView {
+  sellerAccountId: string;
+  connectionStatus: ChannelStatus;
+  authorizationUrl: string;
 }
 
 export interface SellerAccountResponse {

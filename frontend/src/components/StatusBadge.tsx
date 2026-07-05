@@ -6,6 +6,8 @@ const MAP: Record<ChannelStatus, { label: string; cls: string }> = {
   FILE_UPLOAD_SUPPORTED: { label: "파일 업로드 지원", cls: "bg-ink/5 text-ink" },
   PREPARING: { label: "준비 중", cls: "bg-muted/15 text-muted" },
   REQUEST_AVAILABLE: { label: "요청 가능", cls: "bg-warn/10 text-warn" },
+  PENDING: { label: "연결 중", cls: "bg-brand/10 text-brand-700" },
+  RECONNECT_REQUIRED: { label: "재연결 필요", cls: "bg-warn/10 text-warn" },
 };
 
 export function StatusBadge({ status }: { status: ChannelStatus }) {
