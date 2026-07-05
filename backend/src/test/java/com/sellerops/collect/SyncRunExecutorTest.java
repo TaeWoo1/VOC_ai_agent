@@ -338,7 +338,7 @@ class SyncRunExecutorTest {
                         new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null,
                         new com.sellerops.connector.cafe24.Cafe24OrdersClient(neverCalled),
                         new com.sellerops.connector.cafe24.Cafe24BoardArticlesClient(neverCalled),
-                        java.time.Clock.systemUTC());
+                        java.time.Clock.systemUTC(), "app-client-id", "app-client-secret");
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(

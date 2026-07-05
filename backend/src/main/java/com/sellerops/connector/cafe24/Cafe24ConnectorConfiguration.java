@@ -2,6 +2,7 @@ package com.sellerops.connector.cafe24;
 
 import com.sellerops.credential.CredentialVault;
 import java.time.Clock;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,11 +40,15 @@ public class Cafe24ConnectorConfiguration {
     }
 
     @Bean
-    Cafe24ApiConnector cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault,
-                                          Cafe24OrdersClient ordersClient,
-                                          Cafe24BoardArticlesClient articlesClient) {
+    Cafe24ApiConnector cafe24ApiConnector(
+            Cafe24TokenClient tokenClient, CredentialVault vault,
+            Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
+            @Value("${sellerops.connector.cafe24.oauth.client-id:}") String appClientId,
+            @Value("${sellerops.connector.cafe24.oauth.client-secret:}") String appClientSecret) {
         // System UTC clock; the connector applies the explicit KST zone for date math.
-        return new Cafe24ApiConnector(tokenClient, vault, ordersClient, articlesClient, Clock.systemUTC());
+        // App OAuth credentials are server config, shared across malls, never vaulted.
+        return new Cafe24ApiConnector(tokenClient, vault, ordersClient, articlesClient,
+                Clock.systemUTC(), appClientId, appClientSecret);
     }
 
     // Board Discovery (community read) infrastructure — wired behind the same

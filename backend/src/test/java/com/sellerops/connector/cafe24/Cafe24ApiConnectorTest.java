@@ -64,9 +64,13 @@ class Cafe24ApiConnectorTest {
         connector = connectorWith(vault);
     }
 
+    // App OAuth credentials are server config (constructor), not per-seller vault data.
+    private static final String APP_CLIENT_ID = "test-app-client-id";
+    private static final String APP_CLIENT_SECRET = "test-app-client-secret";
+
     private Cafe24ApiConnector connectorWith(CredentialVault v) {
         return new Cafe24ApiConnector(new Cafe24TokenClient(http), v, new Cafe24OrdersClient(http),
-                new Cafe24BoardArticlesClient(http), CLOCK);
+                new Cafe24BoardArticlesClient(http), CLOCK, APP_CLIENT_ID, APP_CLIENT_SECRET);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -80,11 +84,9 @@ class Cafe24ApiConnectorTest {
     }
 
     private void storeCafe24Credential() {
+        // Seller-connection values only — app creds are constructor config.
         vault.store(org, account, "API", "OAUTH2",
-                Map.of("mall_id", "samplemall",
-                        "client_id", "test-client-id",
-                        "client_secret", "test-client-secret",
-                        "refresh_token", "old-refresh-token"),
+                Map.of("mall_id", "samplemall", "refresh_token", "old-refresh-token"),
                 null, null, null);
     }
 
@@ -185,9 +187,7 @@ class Cafe24ApiConnectorTest {
         // separate refresh-token slot must fail the shape check closed with a
         // message naming the missing key — not silently read the other slot.
         vault.store(org, account, "API", "OAUTH2",
-                Map.of("mall_id", "samplemall",
-                        "client_id", "test-client-id",
-                        "client_secret", "test-client-secret"),
+                Map.of("mall_id", "samplemall"),
                 "slot-refresh-token", null, null);
 
         assertThatThrownBy(() -> connector.fetch(request(DataType.ORDER_SUMMARY, null)))
@@ -198,15 +198,26 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
+    void missingAppCredentialsFailClosedWithZeroHttp() {
+        // The app client_id/client_secret are server config; absent config must fail
+        // closed before any token grant — never read from the vault.
+        storeCafe24Credential();
+        Cafe24ApiConnector noAppCreds = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK, "", "");
+
+        assertThatThrownBy(() -> noAppCreds.fetch(request(DataType.ORDER_SUMMARY, null)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("앱 자격 증명");
+        assertThat(http.sent).isEmpty();
+    }
+
+    @Test
     void rotationNeverTouchesTheDedicatedRefreshTokenSlot() {
         // A credential stored with BOTH locations populated: the connector
         // refreshes from the secrets map and rotation rewrites only the
         // secrets payload — the separate slot keeps its original value.
         vault.store(org, account, "API", "OAUTH2",
-                Map.of("mall_id", "samplemall",
-                        "client_id", "test-client-id",
-                        "client_secret", "test-client-secret",
-                        "refresh_token", "old-refresh-token"),
+                Map.of("mall_id", "samplemall", "refresh_token", "old-refresh-token"),
                 "slot-refresh-token", null, null);
         http.enqueue(FakeCafe24HttpClient.tokenOk("at-new", "rotated-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.ordersOk());
@@ -232,12 +243,12 @@ class Cafe24ApiConnectorTest {
 
         var reopened = vault.open(org, account);
         assertThat(reopened.secrets().get("refresh_token")).isEqualTo("rotated-refresh-token");
-        // Only the payload rotated: class/type and the other keys are intact.
+        // Only the payload rotated: class/type and the seller-connection keys are intact.
         assertThat(reopened.connectorClass()).isEqualTo("API");
         assertThat(reopened.authType()).isEqualTo("OAUTH2");
         assertThat(reopened.secrets().get("mall_id")).isEqualTo("samplemall");
-        assertThat(reopened.secrets().get("client_id")).isEqualTo("test-client-id");
-        assertThat(reopened.secrets().get("client_secret")).isEqualTo("test-client-secret");
+        // App creds are never in the vault — only mall_id + refresh_token.
+        assertThat(reopened.secrets()).containsOnlyKeys("mall_id", "refresh_token");
         assertThat(vault.readMasked(org, account).lastRotatedAt()).isNotNull();
     }
 

@@ -63,13 +63,12 @@ public final class CredentialTemplates {
                     "쿠팡 윙(판매자센터) OPEN API에서 발급한 API 인증 키로 연결합니다."),
 
             "CAFE24",
+            // Seller-connection values only. The app client_id/client_secret are
+            // server configuration (one registered app for every mall), never stored
+            // per seller — the "Connect Cafe24" OAuth flow captures the refresh token.
             new CredentialTemplate("CAFE24", API, "OAUTH2", List.of(
                     new CredentialField("mall_id", "몰 ID", true, false,
                             "카페24 자사몰의 상점 아이디입니다."),
-                    new CredentialField("client_id", "앱 클라이언트 ID", true, false,
-                            "카페24 개발자센터 앱의 클라이언트 ID입니다."),
-                    new CredentialField("client_secret", "앱 클라이언트 시크릿", true, true,
-                            "앱 클라이언트 ID와 함께 발급되는 시크릿 키입니다."),
                     new CredentialField("refresh_token", "리프레시 토큰", true, true,
                             "앱 연동(OAuth) 과정에서 발급된 리프레시 토큰입니다.")),
                     "카페24 자사몰 관리자에서 앱 연동(OAuth)으로 연결합니다."),

@@ -81,13 +81,12 @@ class Cafe24ArticlePersistenceFlowTest {
         vault = new CredentialVault(credentials, new ObjectMapper(), Base64.getEncoder().encodeToString(key),
                 "local-test-1");
         vault.store(org, account, "API", "OAUTH2",
-                Map.of("mall_id", "samplemall", "client_id", "cid", "client_secret", "secret",
-                        "refresh_token", "old-refresh-token"),
+                Map.of("mall_id", "samplemall", "refresh_token", "old-refresh-token"),
                 null, null, null);
         ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
                 communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault, new Cafe24OrdersClient(http),
-                new Cafe24BoardArticlesClient(http), Clock.systemUTC());
+                new Cafe24BoardArticlesClient(http), Clock.systemUTC(), "app-client-id", "app-client-secret");
     }
 
     /** Drive one bounded pass through the normal path: windowed fetch → ingest. */

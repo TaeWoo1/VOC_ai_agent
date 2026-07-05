@@ -118,14 +118,14 @@ class Cafe24ArticleBackfillFlowTest {
         CredentialVault vault = new CredentialVault(credentials, new ObjectMapper(),
                 Base64.getEncoder().encodeToString(key), "local-test-1");
         vault.store(org, account.getId(), "API", "OAUTH2",
-                Map.of("mall_id", "samplemall", "client_id", "cid", "client_secret", "secret",
-                        "refresh_token", "old-refresh-token"),
+                Map.of("mall_id", "samplemall", "refresh_token", "old-refresh-token"),
                 null, null, null);
 
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders,
                 new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         Cafe24ApiConnector connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
-                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC(),
+                "app-client-id", "app-client-secret");
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
         executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion,
                 syncJobs, cursors, connectionStatus);

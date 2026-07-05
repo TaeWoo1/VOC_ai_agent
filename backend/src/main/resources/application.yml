@@ -80,6 +80,18 @@ sellerops:
       # IP may be flagged abnormal (verified 2026-06-12). Reserved for request
       # pacing in later collection slices.
       rate-limit-rps: ${SELLEROPS_CONNECTOR_CAFE24_RATE_LIMIT_RPS:2}
+      # "Connect Cafe24" OAuth onboarding (behind the same enabled flag). The
+      # client-id/secret are the ONE registered SellerOps Cafe24 app's — app-level
+      # config, never per-seller vault material; empty by default (flow unusable
+      # until an operator supplies them, never committed). Scopes are READ-ONLY by
+      # contract — a value containing "write" fails the service closed at startup.
+      oauth:
+        client-id: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_ID:}
+        client-secret: ${SELLEROPS_CONNECTOR_CAFE24_CLIENT_SECRET:}
+        redirect-uri: ${SELLEROPS_CONNECTOR_CAFE24_REDIRECT_URI:http://localhost:8080/api/connect/cafe24/callback}
+        scopes: ${SELLEROPS_CONNECTOR_CAFE24_SCOPES:mall.read_community,mall.read_order}
+        result-redirect-url: ${SELLEROPS_CONNECTOR_CAFE24_RESULT_URL:http://localhost:3000/connect/cafe24/result}
+        state-ttl-seconds: ${SELLEROPS_CONNECTOR_CAFE24_STATE_TTL_SECONDS:600}
     esm:
       # ESM Trading API connector for G마켓/옥션 (Phase 3D-4 auth skeleton).
       # Off by default — beans absent, GMARKET keeps resolving to the mock
