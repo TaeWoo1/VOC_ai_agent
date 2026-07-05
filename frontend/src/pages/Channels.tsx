@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { StatusBadge } from "../components/StatusBadge";
 import { HealthBadge } from "../components/HealthBadge";
@@ -9,6 +9,7 @@ import { useOpenAlerts } from "../lib/openAlerts";
 import { api } from "../lib/apiClient";
 import { channelSupportDisplay } from "../lib/channelSupport";
 import { CAFE24_CONNECT_ROUTE } from "../lib/cafe24Connect";
+import { channelCardAction, selectChannelAccount } from "../lib/channelConnection";
 import { relativeTime } from "../lib/format";
 import type {
   ChannelResponse,
@@ -18,22 +19,17 @@ import type {
 
 export function Channels() {
   const { data } = useApiData(() => api.getChannels());
-  const { data: accounts } = useApiData(() => api.getSellerAccounts());
+  // Real connection state, fail-closed: the strict loader has NO silent mock fallback,
+  // so a dead backend surfaces as `accountsError` instead of faking account status.
+  const {
+    data: accounts,
+    loading: accountsLoading,
+    error: accountsError,
+  } = useApiData(() => api.getSellerAccountsStrict());
   const { openCount } = useOpenAlerts();
   const [notice, setNotice] = useState<string | null>(null);
   const [health, setHealth] = useState<Map<string, ConnectionStatusView>>(new Map());
   const channels = data ?? [];
-
-  // Channel → the org's seller account on it (drives the 연결 관리 entry).
-  const accountByChannel = useMemo(() => {
-    const map = new Map<string, SellerAccountResponse>();
-    for (const acc of accounts ?? []) {
-      if (!acc.fileUpload) {
-        map.set(acc.channelId, acc);
-      }
-    }
-    return map;
-  }, [accounts]);
 
   // Per-account connection health. Strict (no fake fallback in real mode) but
   // fail-soft per account: a failed status fetch just leaves that row showing the
@@ -92,18 +88,27 @@ export function Channels() {
         <div className="rounded-xl bg-brand/10 px-4 py-3 text-brand-700">{notice}</div>
       ) : null}
 
+      {accountsError ? (
+        <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
+          연결 상태를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+        </div>
+      ) : null}
+
       {channels.length === 0 ? (
         <EmptyState message="채널 정보를 불러오지 못했습니다." />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {channels.map((ch) => {
-            const account = accountByChannel.get(ch.id) ?? null;
+            // Real per-account connection state; null while the status load is in flight
+            // or on failure (an honest banner above explains a failed load).
+            const account = selectChannelAccount(accounts, ch.id);
             return (
               <ChannelCard
                 key={ch.id}
                 channel={ch}
                 account={account}
                 health={account ? health.get(account.id) ?? null : null}
+                statusLoading={accountsLoading}
                 onAction={setNotice}
               />
             );
@@ -118,15 +123,16 @@ function ChannelCard({
   channel,
   account,
   health,
+  statusLoading,
   onAction,
 }: {
   channel: ChannelResponse;
   account: SellerAccountResponse | null;
   health: ConnectionStatusView | null;
+  statusLoading: boolean;
   onAction: (msg: string) => void;
 }) {
   const navigate = useNavigate();
-  const disabled = channel.status === "PREPARING";
   const canUpload =
     channel.status === "FILE_UPLOAD_SUPPORTED" || channel.actionLabel === "파일 업로드";
   const support = channelSupportDisplay(channel);
@@ -136,32 +142,49 @@ function ChannelCard({
   const lastCollected = health?.lastSyncedAt ?? channel.lastSyncedAt;
   const failing = !!health && (health.consecutiveFailures > 0 || !!health.lastError);
 
+  // The primary action is driven by the REAL account connection status, not by the
+  // channel catalog or collection history. Disabled while status is still loading so a
+  // stale label can't be clicked.
+  const action = channelCardAction(channel, account, canUpload, failing);
+  const buttonDisabled = action.disabled || statusLoading;
+
   function handleAction() {
-    if (account) {
-      navigate(`/channels/${account.id}`);
-      return;
+    switch (action.intent) {
+      case "pending":
+        return; // connect in progress — no duplicate action
+      case "manage":
+        if (account) {
+          navigate(`/channels/${account.id}`);
+        }
+        return;
+      case "reconnect":
+      case "connect-cafe24":
+        // Reuse the existing account via the OAuth flow (backend upserts, no duplicate).
+        navigate(CAFE24_CONNECT_ROUTE);
+        return;
+      case "upload":
+        navigate(`/upload?channelId=${channel.id}`);
+        return;
+      case "notice":
+        onAction(
+          channel.support.credentialSetupSupported
+            ? `'${channel.nameKo}' 채널은 연결 정보를 등록하면 연결할 수 있습니다.`
+            : `'${channel.nameKo}' 채널은 현재 엑셀 업로드로 수집할 수 있습니다.`,
+        );
+        return;
     }
-    // Cafe24 connects through the OAuth flow (enter mall id → consent), not a key form.
-    if (channel.code === "CAFE24") {
-      navigate(CAFE24_CONNECT_ROUTE);
-      return;
-    }
-    if (canUpload) {
-      navigate(`/upload?channelId=${channel.id}`);
-      return;
-    }
-    onAction(
-      channel.support.credentialSetupSupported
-        ? `'${channel.nameKo}' 채널은 연결 정보를 등록하면 연결할 수 있습니다.`
-        : `'${channel.nameKo}' 채널은 현재 엑셀 업로드로 수집할 수 있습니다.`,
-    );
   }
 
   return (
     <div className="card flex flex-col gap-4 p-5">
       <div className="flex items-start justify-between">
         <span className="text-xl font-bold">{channel.nameKo}</span>
-        {health ? <HealthBadge state={health.state} /> : <StatusBadge status={channel.status} />}
+        {health ? (
+          <HealthBadge state={health.state} />
+        ) : (
+          // Account present → its real connection status; otherwise the channel catalog status.
+          <StatusBadge status={account ? account.connectionStatus : channel.status} />
+        )}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -191,17 +214,17 @@ function ChannelCard({
         </span>
         <button
           type="button"
-          disabled={disabled}
+          disabled={buttonDisabled}
           onClick={handleAction}
           className={
-            account
-              ? "btn-ghost"
-              : disabled
-                ? "btn-ghost cursor-not-allowed opacity-50"
+            buttonDisabled
+              ? "btn-ghost cursor-not-allowed opacity-50"
+              : action.intent === "manage"
+                ? "btn-ghost"
                 : "btn-primary px-4 py-2.5 text-base"
           }
         >
-          {account ? (failing ? "재연결·테스트" : "연결 관리") : channel.actionLabel}
+          {action.label}
         </button>
       </div>
     </div>
