@@ -6,6 +6,7 @@ import { getToken } from "./lib/apiClient";
 import { Login } from "./pages/Login";
 import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
+import { Inquiries } from "./pages/Inquiries";
 import { Orders } from "./pages/Orders";
 import { Channels } from "./pages/Channels";
 import { ChannelDetail } from "./pages/ChannelDetail";
@@ -43,6 +44,7 @@ export function App() {
       >
         <Route path="/" element={<Home />} />
         <Route path="/inbox" element={<Inbox />} />
+        <Route path="/inquiries" element={<Inquiries />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/issues" element={<ProductIssues />} />
         <Route path="/search" element={<AiSearch />} />
