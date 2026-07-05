@@ -10,5 +10,9 @@ package com.sellerops.inquiry.workitem;
  */
 public enum InquiryWorkItemEvent {
     WORK_ITEM_OPENED,
-    PROPOSAL_ADDED
+    PROPOSAL_ADDED,
+    APPROVAL_GRANTED,
+    ACTION_INTENT_CREATED,
+    EXECUTION_RECORDED,
+    VERIFICATION_RECORDED
 }
