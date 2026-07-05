@@ -7,8 +7,7 @@ import type { ChannelResponse, ChannelStatus, SellerAccountResponse } from "./ty
 /** What the card's primary button does when clicked. */
 export type ChannelCardIntent =
   | "manage" // open the connected account's detail
-  | "reconnect" // Cafe24: re-run the OAuth flow, reusing the existing account
-  | "pending" // Cafe24 connect in progress — no action (blocked)
+  | "reconnect" // Cafe24: (re-)run the OAuth flow, reusing the existing account
   | "connect-cafe24" // no account yet: start the Cafe24 OAuth flow
   | "upload" // file-upload channel
   | "notice"; // no auto-connect path: show a guidance notice
@@ -49,8 +48,15 @@ export function channelCardAction(
   if (account) {
     const status: ChannelStatus = account.connectionStatus;
     if (status === "PENDING") {
-      // Connect in progress — block duplicate actions.
-      return { label: "연결 중", intent: "pending", disabled: true };
+      // Connect started but not finished (e.g. the OAuth attempt expired). Keep the
+      // button enabled so the seller can resume through the normal flow; the backend
+      // start() reuses this account and supersedes the stale OAuth state — no new
+      // account, no separate resume endpoint.
+      return {
+        label: "연결 계속하기",
+        intent: channel.code === "CAFE24" ? "reconnect" : "manage",
+        disabled: false,
+      };
     }
     if (status === "RECONNECT_REQUIRED") {
       return {

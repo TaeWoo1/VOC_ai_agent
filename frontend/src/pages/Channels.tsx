@@ -150,8 +150,6 @@ function ChannelCard({
 
   function handleAction() {
     switch (action.intent) {
-      case "pending":
-        return; // connect in progress — no duplicate action
       case "manage":
         if (account) {
           navigate(`/channels/${account.id}`);
