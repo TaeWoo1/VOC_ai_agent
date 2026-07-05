@@ -16,8 +16,11 @@ import com.sellerops.connector.ChannelConnectionStatusRepository;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.IngestionService;
+import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItem;
 import com.sellerops.inquiry.workitem.InquiryWorkItemAuditRepository;
+import com.sellerops.inquiry.workitem.InquiryWorkItemPhase;
 import com.sellerops.inquiry.workitem.InquiryWorkItemRepository;
 import com.sellerops.inquiry.workitem.InquiryWorkItemWriter;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -44,6 +47,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -167,16 +171,34 @@ class Cafe24ArticleBackfillFlowTest {
     }
 
     @Test
-    void seededInquiryBackfillBoundsBoard6WindowNeverBoard9() {
+    void seededInquiryBackfillOpensWorkItemBoundsBoard6WindowNeverBoard9() {
         enqueuePage(FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 88L, null, null, "N"));
 
         SyncJob job = executor.execute(org, account.getId(), DataType.INQUIRY, "MANUAL",
                 BackfillWindow.of(START, END));
 
         assertThat(job.getStatus()).isEqualTo("SUCCESS");
-        Cafe24CommunityArticle a = communityArticles.findAllByOrgId(org).get(0);
-        assertThat(a.getBoardNo()).isEqualTo(6);
-        assertThat(a.getSourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        assertThat(job.getSuccessRows()).isEqualTo(1);
+
+        // Board 6 now flows through the real executor into the common inquiry + OPEN
+        // work-queue path (not the community/VOC store), bound to the exact connection.
+        List<Inquiry> rows = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org);
+        assertThat(rows).hasSize(1);
+        Inquiry q = rows.get(0);
+        assertThat(q.getChannelId()).isEqualTo(account.getChannelId());
+        assertThat(q.getExternalId()).isEqualTo("cafe24:b6:a3001");
+        assertThat(q.getStatus()).isEqualTo("UNANSWERED"); // N → unanswered
+        assertThat(q.getInformStatus()).isEqualTo("N"); // raw reply_status preserved
+        assertThat(q.getAuthor()).isNull(); // no buyer PII
+
+        List<InquiryWorkItem> open = workItems
+                .findByOrgIdAndPhase(org, InquiryWorkItemPhase.OPEN, Pageable.unpaged()).getContent();
+        assertThat(open).hasSize(1);
+        assertThat(open.get(0).getInquiryId()).isEqualTo(q.getId());
+        assertThat(open.get(0).getSellerAccountId()).isEqualTo(account.getId());
+
+        // Board 6 leaves the community/VOC store entirely.
+        assertThat(communityArticles.findAllByOrgId(org)).isEmpty();
 
         assertThat(http.sent.get(1).uri().toString())
                 .contains("/api/v2/admin/boards/6/articles?")

@@ -72,6 +72,22 @@ class ChannelReplyAdapterRegistryTest {
     }
 
     @Test
+    void failsClosedForCafe24WhichHasNoReplyAdapter() {
+        // Cafe24 can be collected (board-6 inquiries open work items) but has no reply
+        // adapter — even with the ESM (GMARKET) adapter present, a Cafe24 work item
+        // resolves to no adapter, so the common publish flow fails closed and never
+        // dispatches or writes anything back to the mall.
+        ChannelRepository channels = mock(ChannelRepository.class);
+        UUID channelId = UUID.randomUUID();
+        when(channels.findById(channelId)).thenReturn(Optional.of(channelWithCode("CAFE24")));
+
+        ChannelReplyAdapterRegistry registry =
+                new ChannelReplyAdapterRegistry(channels, List.of(new FakeAdapter("GMARKET")));
+
+        assertThat(registry.resolve(channelId)).isEmpty();
+    }
+
+    @Test
     void failsClosedForUnknownChannelId() {
         ChannelRepository channels = mock(ChannelRepository.class);
         UUID channelId = UUID.randomUUID();

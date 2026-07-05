@@ -12,6 +12,7 @@ import com.sellerops.connector.UnsupportedDataTypeException;
 import com.sellerops.credential.ConnectorCredentialRepository;
 import com.sellerops.credential.CredentialVault;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
+import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -93,8 +94,8 @@ class Cafe24ApiConnectorTest {
 
     @Test
     void unsupportedDataTypesThrowWithZeroHttp() {
-        // PRODUCT/SALES stay deferred; REVIEW/INQUIRY are now collectable (community
-        // board articles) and no longer throw here.
+        // PRODUCT/SALES stay deferred; REVIEW (community article) and INQUIRY (inquiry
+        // work item) are collectable and no longer throw here.
         for (DataType dataType : new DataType[] {DataType.PRODUCT, DataType.SALES}) {
             assertThatThrownBy(() -> connector.fetch(request(dataType, null)))
                     .isInstanceOf(UnsupportedDataTypeException.class);
@@ -418,19 +419,30 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
-    void inquiryFetchMapsBoard6Articles() {
+    void inquiryFetchMapsBoard6ArticlesToCanonicalInquiries() {
         storeCafe24Credential();
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.articlesOk(
-                FakeCafe24HttpClient.article(3003L, "곡면 가능?", "곡면에도 붙나요", null, null, null, "N")));
+                FakeCafe24HttpClient.article(3003L, "곡면 가능?", "곡면에도 붙나요", 88L, null,
+                        "2026-06-20T10:00:00+09:00", "N")));
 
         FetchPage page = connector.fetch(request(DataType.INQUIRY, null));
 
         assertThat(page.dataType()).isEqualTo(DataType.INQUIRY);
-        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o1");
+        // INQUIRY now leaves the community path — records are canonical inquiries, so
+        // the executor routes them to the OPEN work-queue ingest, not the VOC store.
+        assertThat(page.records().get(0)).isInstanceOf(CanonicalInquiry.class);
+        List<CanonicalInquiry> rows = inquiries(page);
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).boardNo()).isEqualTo(6);
-        assertThat(rows.get(0).sourceKind()).isEqualTo("PRODUCT_INQUIRY");
+        CanonicalInquiry q = rows.get(0);
+        assertThat(q.externalId()).isEqualTo("cafe24:b6:a3003"); // native board+article identity
+        assertThat(q.title()).isEqualTo("곡면 가능?");
+        assertThat(q.body()).isEqualTo("곡면에도 붙나요");
+        assertThat(q.sku()).isEqualTo("88"); // Cafe24 product_no, native only
+        assertThat(q.status()).isEqualTo("UNANSWERED"); // N → unanswered
+        assertThat(q.informStatus()).isEqualTo("N"); // raw reply_status preserved verbatim
+        assertThat(q.author()).isNull(); // no buyer PII
         assertThat(http.sent.get(1).uri().toString()).contains("/api/v2/admin/boards/6/articles?");
     }
 
@@ -529,5 +541,10 @@ class Cafe24ApiConnectorTest {
     @SuppressWarnings("unchecked")
     private static List<CanonicalCommunityArticle> articles(FetchPage page) {
         return (List<CanonicalCommunityArticle>) page.records();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<CanonicalInquiry> inquiries(FetchPage page) {
+        return (List<CanonicalInquiry>) page.records();
     }
 }

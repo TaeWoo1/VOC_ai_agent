@@ -63,8 +63,12 @@ final class Cafe24BoardArticleMapper {
         };
     }
 
-    /** Offset-bearing timestamp → instant; anything else (incl. timezone-less) → null. */
-    private static Instant parseOffsetInstant(String value) {
+    /**
+     * Offset-bearing timestamp → instant; anything else (incl. timezone-less) → null.
+     * Package-visible so the sibling {@link Cafe24InquiryArticleMapper} shares the one
+     * offset-only parse policy (no assumed zone, no clock).
+     */
+    static Instant parseOffsetInstant(String value) {
         if (value == null || value.isBlank()) {
             return null;
         }
