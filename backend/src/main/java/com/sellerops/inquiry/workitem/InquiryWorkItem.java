@@ -52,4 +52,13 @@ public class InquiryWorkItem extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "phase", nullable = false)
     private InquiryWorkItemPhase phase;
+
+    /**
+     * The structured reason the item was dismissed; {@code null} while the item has
+     * never been dismissed. Set only on the {@link InquiryWorkItemPhase#OPEN OPEN}
+     * &rarr; {@link InquiryWorkItemPhase#DISMISSED DISMISSED} transition.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "disposition")
+    private InquiryWorkItemDisposition disposition;
 }
