@@ -175,6 +175,48 @@ class Cafe24InquiryIngestionFlowTest {
         assertThat(theirsOpen.get(0).getSellerAccountId()).isEqualTo(otherAccount);
     }
 
+    @Test
+    void answeredInquiryC_persistsAsAnsweredHistoryButOpensNoWorkItem() {
+        // Cafe24 reply_status 'C' (처리완료): kept as Inquiry history, NOT a seller task.
+        CanonicalInquiry answered =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(283L, "이미 답변된 문의", "C"), 1);
+        IngestOutcome out = ingestion.ingestInquiries(org, channel, account, List.of(answered));
+
+        assertThat(out.success()).isEqualTo(1);
+        List<Inquiry> rows = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getStatus()).isEqualTo("ANSWERED");
+        assertThat(rows.get(0).getInformStatus()).isEqualTo("C"); // raw token preserved
+        assertThat(openWorkItems(org)).isEmpty(); // no OPEN task for an already-answered inquiry
+    }
+
+    @Test
+    void inProgressInquiryP_opensOneOpenWorkItemStillActionable() {
+        // 'P' (처리중) is still actionable → UNANSWERED → opens a work item (channel-neutral,
+        // mirroring ESM 처리중 → UNANSWERED).
+        CanonicalInquiry inProgress =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(284L, "처리중 문의", "P"), 1);
+        IngestOutcome out = ingestion.ingestInquiries(org, channel, account, List.of(inProgress));
+
+        assertThat(out.success()).isEqualTo(1);
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getStatus())
+                .isEqualTo("UNANSWERED");
+        assertThat(openWorkItems(org)).hasSize(1);
+    }
+
+    @Test
+    void blankReplyStatus_staysUnansweredAndOpensWorkItem() {
+        // Blank/unknown stays conservative (UNANSWERED), so it opens a work item.
+        CanonicalInquiry blank =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(285L, "빈 상태 문의", null), 1);
+        IngestOutcome out = ingestion.ingestInquiries(org, channel, account, List.of(blank));
+
+        assertThat(out.success()).isEqualTo(1);
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getStatus())
+                .isEqualTo("UNANSWERED");
+        assertThat(openWorkItems(org)).hasSize(1);
+    }
+
     private static Cafe24BoardArticleRow row(long articleNo, String content, String reply) {
         return new Cafe24BoardArticleRow(articleNo, "제목", content, 77L, null,
                 "2026-06-20T10:00:00+09:00", null, reply);

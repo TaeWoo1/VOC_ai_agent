@@ -27,10 +27,24 @@ class CommunityReplyStatusTest {
     }
 
     @Test
+    void mapsCafe24InProgressTokenPToInProgress() {
+        // "P" (처리중) — official Cafe24 token; case-insensitive.
+        assertThat(CommunityReplyStatus.normalize("P")).isEqualTo(CommunityReplyStatus.IN_PROGRESS);
+        assertThat(CommunityReplyStatus.normalize("p")).isEqualTo(CommunityReplyStatus.IN_PROGRESS);
+    }
+
+    @Test
     void mapsAnsweredSynonyms() {
         assertThat(CommunityReplyStatus.normalize("ANSWERED")).isEqualTo(CommunityReplyStatus.ANSWERED);
         assertThat(CommunityReplyStatus.normalize("complete")).isEqualTo(CommunityReplyStatus.ANSWERED);
         assertThat(CommunityReplyStatus.normalize("done")).isEqualTo(CommunityReplyStatus.ANSWERED);
+    }
+
+    @Test
+    void mapsCafe24CompletedTokenCToAnswered() {
+        // "C" (처리완료) — official Cafe24 token, live-observed on article 283.
+        assertThat(CommunityReplyStatus.normalize("C")).isEqualTo(CommunityReplyStatus.ANSWERED);
+        assertThat(CommunityReplyStatus.normalize("c")).isEqualTo(CommunityReplyStatus.ANSWERED);
     }
 
     @Test

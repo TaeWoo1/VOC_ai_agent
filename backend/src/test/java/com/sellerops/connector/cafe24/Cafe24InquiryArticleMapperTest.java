@@ -62,15 +62,27 @@ class Cafe24InquiryArticleMapperTest {
     }
 
     @Test
-    void onlyARecognizedAnsweredTokenBecomesAnswered() {
-        // The confirmed unanswered token and any not-yet-observed token stay UNANSWERED;
-        // only a recognized answered token flips to ANSWERED (never guessed).
-        assertThat(status("N")).isEqualTo("UNANSWERED");
+    void mapsCafe24ReplyStatusTokensNpcToCanonicalStatus() {
+        // Official Cafe24 tokens: N=답변전, P=처리중, C=처리완료.
+        assertThat(status("N")).isEqualTo("UNANSWERED"); // not yet answered
+        assertThat(status("P")).isEqualTo("UNANSWERED"); // in progress — still needs action
+        assertThat(status("C")).isEqualTo("ANSWERED");   // completed
+        // Aliases still resolve; unknown/blank stays conservative (never guessed answered).
         assertThat(status("answered")).isEqualTo("ANSWERED");
         assertThat(status("COMPLETED")).isEqualTo("ANSWERED");
         assertThat(status("some-unseen-token")).isEqualTo("UNANSWERED");
         assertThat(status(null)).isEqualTo("UNANSWERED");
         assertThat(status("  ")).isEqualTo("UNANSWERED");
+    }
+
+    @Test
+    void liveObservedRawTokenCMapsToAnswered() {
+        // Regression: article 283 returned raw reply_status 'C' (처리완료); it must be
+        // ANSWERED, with the raw token preserved verbatim in informStatus.
+        CanonicalInquiry q =
+                Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(283L, "제목", "본문", 5L, null, "C"), 1);
+        assertThat(q.status()).isEqualTo("ANSWERED");
+        assertThat(q.informStatus()).isEqualTo("C");
     }
 
     @Test
