@@ -3,6 +3,7 @@ package com.sellerops.inquiry.workitem;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -46,6 +47,17 @@ public class InquiryWorkItemWriter {
      * Returns the persisted inquiry id.
      */
     public UUID openConnectorInquiry(Inquiry inquiry, UUID sellerAccountId) {
+        return openConnectorInquiry(inquiry, sellerAccountId, id -> {
+        });
+    }
+
+    /**
+     * As {@link #openConnectorInquiry(Inquiry, UUID)}, but also runs {@code postInsert}
+     * inside the same transaction after the inquiry, work item, and audit are saved —
+     * so a caller can attach a linked child row (e.g. import provenance) that commits
+     * or rolls back together with the inquiry it belongs to.
+     */
+    public UUID openConnectorInquiry(Inquiry inquiry, UUID sellerAccountId, Consumer<UUID> postInsert) {
         return tx.execute(status -> {
             Inquiry savedInquiry = inquiries.save(inquiry);
 
@@ -67,6 +79,21 @@ public class InquiryWorkItemWriter {
             audit.setActor(CONNECTOR_ACTOR);
             audits.save(audit);
 
+            postInsert.accept(savedInquiry.getId());
+            return savedInquiry.getId();
+        });
+    }
+
+    /**
+     * Persist an inquiry as <b>history only</b> (no work item, no audit) inside one
+     * transaction, running {@code postInsert} after the save so a linked child row
+     * (e.g. import provenance) commits atomically with it. Used for already-answered
+     * inquiries, which are stored but open no seller task.
+     */
+    public UUID saveHistoryInquiry(Inquiry inquiry, Consumer<UUID> postInsert) {
+        return tx.execute(status -> {
+            Inquiry savedInquiry = inquiries.save(inquiry);
+            postInsert.accept(savedInquiry.getId());
             return savedInquiry.getId();
         });
     }

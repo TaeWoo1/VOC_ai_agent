@@ -165,6 +165,7 @@ public class IngestionService {
                 Inquiry entity = new Inquiry();
                 entity.setOrgId(orgId);
                 entity.setChannelId(channelId);
+                entity.setSellerAccountId(sellerAccountId);
                 entity.setProductId(product.getId());
                 // Buyer PII (row.author()) is intentionally NOT persisted.
                 entity.setTitle(row.title());

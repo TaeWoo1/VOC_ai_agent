@@ -157,6 +157,22 @@ sellerops:
       # product-update 50,000 calls/hour (notice effective 2025-07-09) — an
       # API family this connector does not implement. Nothing applicable is
       # published; pacing is decided at the first fetch slice.
+  inquiry-import:
+    esm:
+      # Manual ESM (G마켓/옥션) inquiry Excel-import bridge. Off by default — with this
+      # false the controller and all secret-dependent import beans are not registered
+      # (both /api/inquiry-imports/esm routes 404) and the backend starts without a
+      # preview-token secret. Flip on only where the import is wanted; even then it
+      # additionally requires a strong preview-token secret (below) or fails closed.
+      enabled: ${SELLEROPS_INQUIRY_IMPORT_ESM_ENABLED:false}
+    preview-token:
+      # HMAC-SHA256 secret for the ESM inquiry-import preview token (binds a preview to
+      # the exact file+account+marketplace+result+DB-state; 30-minute expiry; confirm
+      # re-verifies server-side). NO committed default — inject a long random value via
+      # SELLEROPS_INQUIRY_IMPORT_PREVIEW_TOKEN_SECRET (OS secret store / env). When unset
+      # the value is empty and the import path fails closed at startup (min length 16);
+      # never commit or log the real secret.
+      secret: ${SELLEROPS_INQUIRY_IMPORT_PREVIEW_TOKEN_SECRET:}
   jwt:
     secret: ${SELLEROPS_JWT_SECRET:change-me-local-dev-only-please-use-a-long-random-string}
     exp-minutes: ${SELLEROPS_JWT_EXP_MINUTES:720}

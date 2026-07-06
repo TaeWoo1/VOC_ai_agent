@@ -75,4 +75,13 @@ public class InquiryWorkItemAudit extends BaseEntity {
      */
     @Column(name = "dismissal_batch_id")
     private UUID dismissalBatchId;
+
+    /**
+     * The ESM import batch that caused this event, for a status-reconciliation
+     * transition ({@link InquiryWorkItemEvent#VERIFICATION_RECORDED} written when a
+     * later ANSWERED export completes an OPEN work item); {@code null} for all other
+     * events. Ties the transition back to the durable import batch that triggered it.
+     */
+    @Column(name = "import_batch_id")
+    private UUID importBatchId;
 }

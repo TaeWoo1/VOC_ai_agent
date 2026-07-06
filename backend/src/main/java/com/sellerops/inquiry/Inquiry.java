@@ -21,6 +21,14 @@ public class Inquiry extends BaseEntity {
     @Column(name = "channel_id", nullable = false)
     private UUID channelId;
 
+    /**
+     * The exact seller connection ({@link com.sellerops.selleraccount.SellerAccount})
+     * this inquiry arrived on, when known. Null on legacy / file-upload rows that
+     * carry no connection identity; set by connector and ESM-import ingestion.
+     */
+    @Column(name = "seller_account_id")
+    private UUID sellerAccountId;
+
     @Column(name = "product_id")
     private UUID productId;
 
