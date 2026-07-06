@@ -63,9 +63,10 @@ final class Cafe24InquiryArticleMapper {
 
     /**
      * Collapse the raw reply token to the canonical binary status through the confirmed
-     * {@link CommunityReplyStatus} vocabulary. Only a recognized answered token maps to
-     * {@code ANSWERED}; the confirmed unanswered {@code N}, and any token not yet
-     * observed live, both stay {@code UNANSWERED}.
+     * {@link CommunityReplyStatus} vocabulary (Cafe24: {@code N}=답변전, {@code P}=처리중,
+     * {@code C}=처리완료). {@code C} → {@code ANSWERED}; {@code N} and {@code P} (in
+     * progress — still needs action) → {@code UNANSWERED}; blank/unrecognized stays
+     * {@code UNANSWERED} (never guessed as answered).
      */
     private static String toCanonicalStatus(String rawReplyStatus) {
         return CommunityReplyStatus.normalize(rawReplyStatus) == CommunityReplyStatus.ANSWERED

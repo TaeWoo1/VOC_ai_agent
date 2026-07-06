@@ -129,18 +129,23 @@ public class IngestionService {
     }
 
     /**
-     * Connector path: ingest inquiries for a specific seller connection. When {@code
-     * sellerAccountId} is non-null and the work-item writer is wired, each newly
-     * inserted (non-duplicate) inquiry atomically opens exactly one OPEN work item
-     * bound to that exact connection plus a WORK_ITEM_OPENED audit — inquiry, work
-     * item, and audit commit or roll back together. A {@code null} {@code
-     * sellerAccountId} (the file-upload / legacy path) never opens a work item.
+     * Connector path: ingest inquiries for a specific seller connection. A work item
+     * is opened only for an <b>actionable</b> inquiry — a non-null {@code
+     * sellerAccountId} (the exact connection) <em>and</em> canonical status {@code
+     * UNANSWERED}. Each such newly inserted (non-duplicate) inquiry atomically opens
+     * exactly one OPEN work item bound to that connection plus a WORK_ITEM_OPENED
+     * audit — inquiry, work item, and audit commit or roll back together.
+     *
+     * <p>An already-{@code ANSWERED} inquiry (e.g. Cafe24 {@code reply_status=C}
+     * 처리완료) is persisted as Inquiry <b>history</b> but opens <b>no</b> OPEN seller
+     * task — it is not actionable. This is channel-neutral: ESM ingests only 미처리
+     * (UNANSWERED) inquiries, and the file-upload / legacy path ({@code
+     * sellerAccountId == null}) never opens a work item regardless of status.
      *
      * <p>Buyer PII is not persisted: {@code author} is deliberately never written.
      */
     public IngestOutcome ingestInquiries(UUID orgId, UUID channelId, UUID sellerAccountId,
                                          List<CanonicalInquiry> rows) {
-        boolean openWorkItem = sellerAccountId != null;
         Tally tally = new Tally();
         Set<String> seen = new HashSet<>();
         for (CanonicalInquiry row : rows) {
@@ -169,6 +174,11 @@ public class IngestionService {
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
+                // A work item is a seller task: open one only for an actionable
+                // (UNANSWERED) inquiry on an exact connection. Already-answered
+                // inquiries are stored as history without opening a task.
+                boolean openWorkItem =
+                        sellerAccountId != null && "UNANSWERED".equals(entity.getStatus());
                 trySave(tally, row.sourceRow(),
                         () -> openWorkItem
                                 ? workItemWriter.openConnectorInquiry(entity, sellerAccountId)
