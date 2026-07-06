@@ -5,7 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-/** Determinism, scoping, and normalization of the v1 inquiry fingerprint. */
+/**
+ * Determinism, scoping, and normalization of the v1 inquiry fingerprint. The timestamp
+ * argument is the <b>canonical</b> received time ({@code yyyy-MM-dd HH:mm:ss}, produced by
+ * {@link EsmInquiryTimestamp#canonical}), not a lexical raw string — the vectors below use
+ * the dash form, which is already canonical. Separator equivalence (dot vs dash producing
+ * one fingerprint) is proven end-to-end in {@code EsmInquiryRowMapperTest}.
+ */
 class EsmInquiryFingerprintTest {
 
     private static final UUID ACCT = UUID.fromString("11111111-1111-1111-1111-111111111111");
@@ -40,6 +46,7 @@ class EsmInquiryFingerprintTest {
 
     @Test
     void usesFullTimestampNotDayLevel() {
+        // Canonical second-precision times: two distinct instants must not collide.
         String morning = EsmInquiryFingerprint.compute(EsmMarketplace.GMARKET, ACCT, "배송",
                 "O", "P", "2026-07-01 09:00:00", "본문");
         String evening = EsmInquiryFingerprint.compute(EsmMarketplace.GMARKET, ACCT, "배송",
