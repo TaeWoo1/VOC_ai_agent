@@ -3,6 +3,7 @@ package com.sellerops.inquiry.esmimport;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.parse.ParsedTable;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,9 +54,14 @@ public class EsmInquiryRowMapper {
         if (receivedAtRaw == null) {
             return EsmClassifiedRow.invalid(sourceRow, EsmImportReasonCode.MISSING_RECEIVED_AT, sellerId);
         }
+        // Parse once (dash or dot, strict): derive both the stored UTC instant and the
+        // separator-independent canonical form that feeds the fingerprint.
         Instant receivedAt;
+        String receivedAtCanonical;
         try {
-            receivedAt = EsmInquiryTimestamp.toInstant(receivedAtRaw);
+            LocalDateTime receivedLocal = EsmInquiryTimestamp.parseLocal(receivedAtRaw);
+            receivedAt = receivedLocal.atZone(EsmInquiryTimestamp.ESM_ZONE).toInstant();
+            receivedAtCanonical = EsmInquiryTimestamp.canonical(receivedAtRaw);
         } catch (Exception e) {
             return EsmClassifiedRow.invalid(sourceRow, EsmImportReasonCode.BAD_TIMESTAMP, sellerId);
         }
@@ -63,7 +69,7 @@ public class EsmInquiryRowMapper {
         String processedAtRaw = blankToNull(row.get(EsmInquiryImportHeaders.PROCESSED_AT));
         if (processedAtRaw != null) {
             try {
-                EsmInquiryTimestamp.toInstant(processedAtRaw);
+                EsmInquiryTimestamp.parseLocal(processedAtRaw);
             } catch (Exception e) {
                 return EsmClassifiedRow.invalid(sourceRow, EsmImportReasonCode.BAD_TIMESTAMP, sellerId);
             }
@@ -86,7 +92,7 @@ public class EsmInquiryRowMapper {
         String productName = blankToNull(row.get(EsmInquiryImportHeaders.PRODUCT_NAME));
 
         String fingerprint = EsmInquiryFingerprint.compute(
-                marketplace, sellerAccountId, inquiryType, orderRef, productRef, receivedAtRaw, body);
+                marketplace, sellerAccountId, inquiryType, orderRef, productRef, receivedAtCanonical, body);
         String externalId = EsmInquiryFingerprint.externalId(marketplace, sellerAccountId, fingerprint);
 
         // Product is optional; resolve by name+ref, defaulting like the legacy upload path.

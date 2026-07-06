@@ -91,6 +91,49 @@ class EsmInquiryRowMapperTest {
     }
 
     @Test
+    void dotSeparatedReceivedTimestampParses() {
+        Map<String, String> r = baseRow();
+        r.put(EsmInquiryImportHeaders.RECEIVED_AT, "2026.07.01 09:00:00");   // real ESM export shape
+        EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
+        assertThat(row.valid()).isTrue();
+        assertThat(row.canonical().receivedAt().toString()).isEqualTo("2026-07-01T00:00:00Z");
+        // The verbatim raw string (dots) is preserved in provenance.
+        assertThat(row.provenance().receivedAtRaw()).isEqualTo("2026.07.01 09:00:00");
+    }
+
+    @Test
+    void dotSeparatedProcessedTimestampParses() {
+        Map<String, String> r = baseRow();
+        r.put(EsmInquiryImportHeaders.STATUS, "처리완료");
+        r.put(EsmInquiryImportHeaders.ANSWER, "답변 드렸습니다");
+        r.put(EsmInquiryImportHeaders.RECEIVED_AT, "2026.07.01 09:00:00");
+        r.put(EsmInquiryImportHeaders.PROCESSED_AT, "2026.07.02 10:30:00");
+        EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
+        assertThat(row.valid()).isTrue();
+        assertThat(row.status()).isEqualTo("ANSWERED");
+        assertThat(row.provenance().processedAtRaw()).isEqualTo("2026.07.02 10:30:00");
+    }
+
+    @Test
+    void dotAndDashRowsProduceSameFingerprintButKeepDistinctRawProvenance() {
+        Map<String, String> dash = baseRow();
+        dash.put(EsmInquiryImportHeaders.RECEIVED_AT, "2026-07-01 09:00:00");
+        Map<String, String> dot = baseRow();
+        dot.put(EsmInquiryImportHeaders.RECEIVED_AT, "2026.07.01 09:00:00");
+
+        EsmClassifiedRow dashRow = mapper.classify(table(dash), EsmMarketplace.GMARKET, account).get(0);
+        EsmClassifiedRow dotRow = mapper.classify(table(dot), EsmMarketplace.GMARKET, account).get(0);
+
+        // Same identity: canonical timestamp collapses the two separators to one fingerprint.
+        assertThat(dotRow.fingerprint()).isEqualTo(dashRow.fingerprint());
+        assertThat(dotRow.canonical().externalId()).isEqualTo(dashRow.canonical().externalId());
+        // But the exact source strings remain distinct and unchanged in provenance.
+        assertThat(dashRow.provenance().receivedAtRaw()).isEqualTo("2026-07-01 09:00:00");
+        assertThat(dotRow.provenance().receivedAtRaw()).isEqualTo("2026.07.01 09:00:00");
+        assertThat(dotRow.provenance().receivedAtRaw()).isNotEqualTo(dashRow.provenance().receivedAtRaw());
+    }
+
+    @Test
     void headerContractMatchesRealWorkbookAndPreservesLeadingZeros() {
         String[] data = EsmInquiryWorkbooks.unanswered("SELLER123", "본문", "2026-07-01 09:00:00");
         data[EsmInquiryWorkbooks.PRODUCT_REF] = "0007";   // must survive as text

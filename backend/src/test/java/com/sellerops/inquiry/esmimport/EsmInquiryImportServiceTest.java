@@ -136,6 +136,32 @@ class EsmInquiryImportServiceTest {
     }
 
     @Test
+    void dotSeparatedThreeRowSampleShapePreviewsAsThreeNewUnansweredAndWritesNothing() {
+        // Mirrors the real ESM export shape: three unanswered rows, dot-separated
+        // timestamps, same selling id, distinct content, no processed time / no answer.
+        byte[] bytes = EsmInquiryWorkbooks.build(List.of(
+                EsmInquiryWorkbooks.unanswered(SELLER, "배송 언제 오나요", "2026.07.01 09:00:00"),
+                EsmInquiryWorkbooks.unanswered(SELLER, "재고 있나요", "2026.07.02 10:15:30"),
+                EsmInquiryWorkbooks.unanswered(SELLER, "환불 가능한가요", "2026.07.03 11:45:05")));
+
+        EsmInquiryPreviewResponse resp = preview(bytes);
+        assertThat(resp.newUnanswered()).isEqualTo(3);
+        assertThat(resp.newAnswered()).isZero();
+        assertThat(resp.statusUpdates()).isZero();
+        assertThat(resp.unchangedDuplicates()).isZero();
+        assertThat(resp.invalid()).isZero();
+        assertThat(resp.previewToken()).isNotBlank();
+
+        // Preview writes nothing across every import-domain repository.
+        assertThat(inquiries.count()).isZero();
+        assertThat(batches.count()).isZero();
+        assertThat(provenances.count()).isZero();
+        assertThat(workItems.count()).isZero();
+        assertThat(products.count()).isZero();
+        assertThat(audits.count()).isZero();
+    }
+
+    @Test
     void fileImportAccountStatusIsAcceptedByPreview() {
         // A truthful file-import account (FILE_UPLOAD_SUPPORTED, not CONNECTED) is selectable.
         SellerAccount acct = sellerAccounts.findByIdAndOrgId(accountId, orgId).orElseThrow();

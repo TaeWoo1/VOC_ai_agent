@@ -8,12 +8,15 @@ import java.util.UUID;
 /**
  * Deterministic identity for an ESM inquiry row, which has <b>no stable source id</b>.
  * The fingerprint (v1) is a SHA-256 over a fixed, labeled, newline-separated,
- * NFC-normalized field list — using the <b>exact</b> raw received timestamp (never
- * reduced to day precision) so two genuinely distinct inquiries never collide. It is
- * marketplace- and seller-account-scoped, so identical text under different accounts
- * (or Gmarket vs Auction) stays distinct. The synthetic external id
+ * NFC-normalized field list — using the <b>canonical</b> received timestamp
+ * ({@code yyyy-MM-dd HH:mm:ss} local KST, second precision, never reduced to day level)
+ * rather than the lexical raw string, so the dot- and dash-separated exports of the same
+ * local time collapse to one identity while two genuinely distinct inquiry times never
+ * collide. It is marketplace- and seller-account-scoped, so identical text under different
+ * accounts (or Gmarket vs Auction) stays distinct. The synthetic external id
  * {@code esm:{marketplace}:{sellerAccountId}:{fingerprint}} carries this into the
- * existing external-id dedup path.
+ * existing external-id dedup path. The exact original raw timestamp string is kept
+ * separately in provenance, not here.
  */
 public final class EsmInquiryFingerprint {
 
@@ -23,21 +26,23 @@ public final class EsmInquiryFingerprint {
     }
 
     /**
-     * @param inquiryType   문의유형 (nullable → empty)
-     * @param orderRef      주문번호 (nullable → empty)
-     * @param productRef    상품번호 (nullable → empty)
-     * @param receivedAtRaw exact 접수일시 string, verbatim
-     * @param body          문의내용
+     * @param inquiryType         문의유형 (nullable → empty)
+     * @param orderRef            주문번호 (nullable → empty)
+     * @param productRef          상품번호 (nullable → empty)
+     * @param receivedAtCanonical canonical 접수일시 ({@code yyyy-MM-dd HH:mm:ss}, KST local,
+     *                            separator-independent — see {@link EsmInquiryTimestamp#canonical}),
+     *                            NOT the lexical raw string
+     * @param body                문의내용
      */
     public static String compute(EsmMarketplace marketplace, UUID sellerAccountId, String inquiryType,
-                                 String orderRef, String productRef, String receivedAtRaw, String body) {
+                                 String orderRef, String productRef, String receivedAtCanonical, String body) {
         String payload = String.join("\n",
                 "marketplace=" + marketplace.name(),
                 "sellerAccountId=" + sellerAccountId,
                 "inquiryType=" + nfc(orEmpty(inquiryType)),
                 "orderRef=" + nfc(orEmpty(orderRef)),
                 "productRef=" + nfc(orEmpty(productRef)),
-                "receivedAtRaw=" + nfc(orEmpty(receivedAtRaw)),
+                "receivedAt=" + nfc(orEmpty(receivedAtCanonical)),
                 "title=",
                 "body=" + normalizeBody(body));
         return sha256Hex(payload);
