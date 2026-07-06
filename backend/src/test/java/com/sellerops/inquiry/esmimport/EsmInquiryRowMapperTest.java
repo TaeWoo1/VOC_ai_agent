@@ -26,6 +26,7 @@ class EsmInquiryRowMapperTest {
         for (String h : EsmInquiryImportHeaders.EXPECTED) {
             r.put(h, "");
         }
+        r.put(EsmInquiryImportHeaders.REGISTRATION_KIND, "상품문의");   // a buyer inquiry kind
         r.put(EsmInquiryImportHeaders.STATUS, "미처리");
         r.put(EsmInquiryImportHeaders.BODY, "배송 문의드립니다");
         r.put(EsmInquiryImportHeaders.INQUIRY_TYPE, "배송");
@@ -88,6 +89,46 @@ class EsmInquiryRowMapperTest {
         EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
         assertThat(row.valid()).isFalse();
         assertThat(row.reason()).isEqualTo(EsmImportReasonCode.BAD_TIMESTAMP);
+    }
+
+    @Test
+    void emergencyMessageRowIsOperationalNoticeNotBuyerInquiry() {
+        Map<String, String> r = baseRow();
+        r.put(EsmInquiryImportHeaders.REGISTRATION_KIND, "긴급메시지");   // shipping-delay emergency
+        EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
+        assertThat(row.operationalNotice()).isTrue();
+        assertThat(row.valid()).isFalse();          // never persists
+        assertThat(row.excluded()).isTrue();
+        assertThat(row.reason()).isNull();           // excluded, NOT a malformed error
+        // No canonical inquiry / status / fingerprint is produced — cannot open a WorkItem.
+        assertThat(row.canonical()).isNull();
+        assertThat(row.status()).isNull();
+        // Selling id is still carried for the file-level cross-check.
+        assertThat(row.sellerId()).isEqualTo("SELLER123");
+    }
+
+    @Test
+    void unknownRegistrationKindIsUnsupportedAndWritesNothing() {
+        Map<String, String> r = baseRow();
+        r.put(EsmInquiryImportHeaders.REGISTRATION_KIND, "알수없는구분");
+        EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
+        assertThat(row.unsupported()).isTrue();
+        assertThat(row.valid()).isFalse();
+        assertThat(row.reason()).isNull();
+        assertThat(row.canonical()).isNull();
+    }
+
+    @Test
+    void operationalNoticeIsClassifiedEvenWithNoBodyOrBadTimestamp() {
+        // Kind is decided from structured columns first: a 긴급메시지 row is an operational
+        // notice regardless of body/timestamp, never a BAD_TIMESTAMP/MISSING_BODY error.
+        Map<String, String> r = baseRow();
+        r.put(EsmInquiryImportHeaders.REGISTRATION_KIND, "긴급메시지");
+        r.put(EsmInquiryImportHeaders.BODY, "");
+        r.put(EsmInquiryImportHeaders.RECEIVED_AT, "2026/99/99");
+        EsmClassifiedRow row = mapper.classify(table(r), EsmMarketplace.GMARKET, account).get(0);
+        assertThat(row.operationalNotice()).isTrue();
+        assertThat(row.reason()).isNull();
     }
 
     @Test

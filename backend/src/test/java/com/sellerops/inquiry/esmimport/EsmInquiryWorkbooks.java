@@ -72,6 +72,24 @@ final class EsmInquiryWorkbooks {
         return r;
     }
 
+    /**
+     * A platform operational notice row as seen in the real export: 등록구분 긴급메시지
+     * (shipping-delay emergency message), 문의유형 배송, 미처리. Carries the selling id so the
+     * file-level cross-check still applies, but is excluded from import.
+     */
+    static String[] operationalNotice(String sellerId, String body, String receivedAt) {
+        String[] r = unanswered(sellerId, body, receivedAt);
+        r[REGISTRATION_KIND] = "긴급메시지";
+        return r;
+    }
+
+    /** A row whose 등록구분 is not a recognized kind — must fail closed (unsupported). */
+    static String[] unsupported(String sellerId, String body, String receivedAt) {
+        String[] r = unanswered(sellerId, body, receivedAt);
+        r[REGISTRATION_KIND] = "알수없는구분";
+        return r;
+    }
+
     static byte[] build(List<String[]> dataRows) {
         return build(HEADERS, dataRows);
     }

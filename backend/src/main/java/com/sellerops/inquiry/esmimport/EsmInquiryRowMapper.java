@@ -45,6 +45,20 @@ public class EsmInquiryRowMapper {
     private EsmClassifiedRow classifyRow(int sourceRow, Map<String, String> row,
                                          EsmMarketplace marketplace, UUID sellerAccountId) {
         String sellerId = blankToNull(row.get(EsmInquiryImportHeaders.SELLER_ID));
+
+        // Semantic message-kind gate (structured columns only) runs BEFORE buyer status
+        // classification. Non-buyer kinds are valid source rows but intentionally excluded:
+        // they never become an Inquiry/WorkItem and are never treated as malformed.
+        String registrationKind = blankToNull(row.get(EsmInquiryImportHeaders.REGISTRATION_KIND));
+        String inquiryType = blankToNull(row.get(EsmInquiryImportHeaders.INQUIRY_TYPE));
+        EsmMessageKind kind = EsmMessageKindClassifier.classify(registrationKind, inquiryType);
+        if (kind == EsmMessageKind.PLATFORM_OPERATIONAL_NOTICE) {
+            return EsmClassifiedRow.operationalNotice(sourceRow, sellerId);
+        }
+        if (kind == EsmMessageKind.UNSUPPORTED_OR_UNKNOWN) {
+            return EsmClassifiedRow.unsupported(sourceRow, sellerId);
+        }
+
         String body = blankToNull(row.get(EsmInquiryImportHeaders.BODY));
         if (body == null) {
             return EsmClassifiedRow.invalid(sourceRow, EsmImportReasonCode.MISSING_BODY, sellerId);
@@ -84,10 +98,8 @@ public class EsmInquiryRowMapper {
             return EsmClassifiedRow.invalid(sourceRow, verdict.reason(), sellerId);
         }
 
-        String inquiryType = blankToNull(row.get(EsmInquiryImportHeaders.INQUIRY_TYPE));
         String productRef = blankToNull(row.get(EsmInquiryImportHeaders.PRODUCT_REF));
         String orderRef = blankToNull(row.get(EsmInquiryImportHeaders.ORDER_REF));
-        String registrationKind = blankToNull(row.get(EsmInquiryImportHeaders.REGISTRATION_KIND));
         String orderType = blankToNull(row.get(EsmInquiryImportHeaders.ORDER_TYPE));
         String productName = blankToNull(row.get(EsmInquiryImportHeaders.PRODUCT_NAME));
 
