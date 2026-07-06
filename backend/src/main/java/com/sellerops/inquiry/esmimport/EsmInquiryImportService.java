@@ -97,13 +97,15 @@ public class EsmInquiryImportService {
                 plan.existingStateHash, now.toEpochMilli(), now.toEpochMilli() + PREVIEW_TTL_MS);
         String token = tokenService.issue(claims);
 
+        // Only malformed buyer rows are errors; excluded (operational/unsupported) rows are not.
         List<EsmInquiryRowErrorDto> errors = p.classified.stream()
-                .filter(r -> !r.valid())
+                .filter(r -> r.reason() != null)
                 .map(r -> new EsmInquiryRowErrorDto(r.sourceRow(), r.reason().name()))
                 .toList();
 
         return new EsmInquiryPreviewResponse(plan.newUnanswered, plan.newAnswered, plan.statusUpdates,
-                plan.unchangedDuplicates, plan.invalid, errors, token);
+                plan.unchangedDuplicates, plan.operationalNotices, plan.unsupported, plan.invalid,
+                errors, token);
     }
 
     // ---- confirm (persists) ----------------------------------------------------
@@ -141,13 +143,20 @@ public class EsmInquiryImportService {
         Plan plan = plan(orgId, p);
         requireMatch(claims.existingStateHash(), plan.existingStateHash);
 
+        // (3) A file with no buyer rows (e.g. only operational notices) writes nothing —
+        //     no batch, no domain rows — and reports the excluded counts.
+        if (!plan.hasBuyerRows()) {
+            return new EsmInquiryConfirmResponse(null, 0, 0, 0, 0,
+                    plan.operationalNotices, plan.unsupported, false);
+        }
+
         EsmImportContext ctx = new EsmImportContext(orgId, sellerAccountId, p.gmarketChannelId,
                 marketplace, filename, p.fileHash, EsmInquiryImportHeaders.signature(),
                 p.canonicalPreviewHash, p.rowCount, uploadedBy);
         try {
             ApplyResult r = writer.apply(ctx, plan.rows);
             return new EsmInquiryConfirmResponse(r.batchId(), r.inserted(), r.statusUpdated(),
-                    r.skipped(), r.rejected(), false);
+                    r.skipped(), r.rejected(), plan.operationalNotices, plan.unsupported, false);
         } catch (DataIntegrityViolationException raced) {
             // A concurrent confirm won the batch unique key and committed first; the whole
             // apply rolled back — return the winner's durable result.
@@ -166,8 +175,15 @@ public class EsmInquiryImportService {
             // return another import's result.
             throw ApiException.conflict("기존 가져오기 배치와 파일 계약이 일치하지 않습니다.");
         }
+        // Operational/unsupported counts are file-intrinsic — recompute from the re-parsed
+        // file (they are never stored in the batch, so no migration is needed).
+        int operationalNotices = (int) p.classified.stream()
+                .filter(EsmClassifiedRow::operationalNotice).count();
+        int unsupported = (int) p.classified.stream()
+                .filter(EsmClassifiedRow::unsupported).count();
         return new EsmInquiryConfirmResponse(batch.getId(), batch.getInserted(),
-                batch.getStatusUpdated(), batch.getSkipped(), batch.getRejected(), true);
+                batch.getStatusUpdated(), batch.getSkipped(), batch.getRejected(),
+                operationalNotices, unsupported, true);
     }
 
     // ---- shared preparation ----------------------------------------------------
@@ -249,9 +265,22 @@ public class EsmInquiryImportService {
         int newAnswered = 0;
         int statusUpdates = 0;
         int unchanged = 0;
+        int operationalNotices = 0;
+        int unsupported = 0;
         int invalid = 0;
 
         for (EsmClassifiedRow row : p.classified) {
+            // Excluded (non-buyer) kinds never persist and are not malformed errors.
+            if (row.operationalNotice()) {
+                rows.add(new PlannedRow(row, EsmRowDisposition.OPERATIONAL_NOTICE, null));
+                operationalNotices++;
+                continue;
+            }
+            if (row.unsupported()) {
+                rows.add(new PlannedRow(row, EsmRowDisposition.UNSUPPORTED, null));
+                unsupported++;
+                continue;
+            }
             if (!row.valid()) {
                 rows.add(new PlannedRow(row, EsmRowDisposition.INVALID, null));
                 invalid++;
@@ -293,7 +322,8 @@ public class EsmInquiryImportService {
         }
         Collections.sort(stateLines);
         String existingStateHash = sha256Hex(String.join("\n", stateLines).getBytes(StandardCharsets.UTF_8));
-        return new Plan(rows, existingStateHash, newUnanswered, newAnswered, statusUpdates, unchanged, invalid);
+        return new Plan(rows, existingStateHash, newUnanswered, newAnswered, statusUpdates, unchanged,
+                operationalNotices, unsupported, invalid);
     }
 
     /**
@@ -305,10 +335,21 @@ public class EsmInquiryImportService {
         StringBuilder sb = new StringBuilder();
         for (EsmClassifiedRow row : classified) {
             sb.append(row.sourceRow()).append('|');
-            sb.append(row.valid() ? row.status() : "INVALID:" + row.reason().name()).append('|');
+            sb.append(rowVerdict(row)).append('|');
             sb.append(row.valid() ? row.fingerprint() : "").append('\n');
         }
         return sha256Hex(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Deterministic per-row verdict marker for the canonical hash (file-intrinsic). */
+    private static String rowVerdict(EsmClassifiedRow row) {
+        if (row.operationalNotice()) {
+            return "OPERATIONAL_NOTICE";
+        }
+        if (row.unsupported()) {
+            return "UNSUPPORTED";
+        }
+        return row.valid() ? row.status() : "INVALID:" + row.reason().name();
     }
 
     UUID gmarketChannelId() {
@@ -343,6 +384,12 @@ public class EsmInquiryImportService {
 
     /** The full plan for a file: per-row dispositions, DB-state binding, and counts. */
     private record Plan(List<PlannedRow> rows, String existingStateHash, int newUnanswered, int newAnswered,
-                        int statusUpdates, int unchangedDuplicates, int invalid) {
+                        int statusUpdates, int unchangedDuplicates, int operationalNotices, int unsupported,
+                        int invalid) {
+
+        /** Buyer rows are the only ones that yield a batch; excluded-only files write nothing. */
+        boolean hasBuyerRows() {
+            return rows.stream().anyMatch(pr -> pr.row().buyerInquiry());
+        }
     }
 }

@@ -5,8 +5,12 @@ package com.sellerops.inquiry.esmimport;
  * Preview reports the buckets; confirm applies them.
  */
 public enum EsmRowDisposition {
-    /** Rejected row — never creates or changes any domain state. */
+    /** Rejected (malformed buyer) row — never creates or changes any domain state. */
     INVALID,
+    /** Platform operational notice — a valid source row, intentionally excluded (no writes). */
+    OPERATIONAL_NOTICE,
+    /** Unrecognized (fail-closed) row — intentionally excluded (no writes). */
+    UNSUPPORTED,
     /** No existing inquiry; insert + open one OPEN work item. */
     NEW_UNANSWERED,
     /** No existing inquiry; insert as answered history (no work item). */

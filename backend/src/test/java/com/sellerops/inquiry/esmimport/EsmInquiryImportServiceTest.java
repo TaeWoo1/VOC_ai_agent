@@ -162,6 +162,83 @@ class EsmInquiryImportServiceTest {
     }
 
     @Test
+    void allOperationalNoticeFilePreviewsAsExcludedAndWritesNothing() {
+        // Mirrors the real sample: three 긴급메시지 shipping-delay emergency messages.
+        byte[] bytes = EsmInquiryWorkbooks.build(List.of(
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 1", "2026.07.01 09:00:00"),
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 2", "2026.07.02 10:15:30"),
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 3", "2026.07.03 11:45:05")));
+
+        EsmInquiryPreviewResponse resp = preview(bytes);
+        assertThat(resp.newUnanswered()).isZero();
+        assertThat(resp.newAnswered()).isZero();
+        assertThat(resp.statusUpdates()).isZero();
+        assertThat(resp.unchangedDuplicates()).isZero();
+        assertThat(resp.operationalNotices()).isEqualTo(3);
+        assertThat(resp.unsupported()).isZero();
+        assertThat(resp.invalid()).isZero();
+        assertThat(resp.rowErrors()).isEmpty();
+        assertThat(resp.previewToken()).isNotBlank();
+
+        assertThat(inquiries.count()).isZero();
+        assertThat(batches.count()).isZero();
+        assertThat(provenances.count()).isZero();
+        assertThat(workItems.count()).isZero();
+        assertThat(products.count()).isZero();
+        assertThat(audits.count()).isZero();
+    }
+
+    @Test
+    void allOperationalNoticeFileConfirmCreatesZeroDomainRows() {
+        byte[] bytes = EsmInquiryWorkbooks.build(List.of(
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 1", "2026.07.01 09:00:00"),
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 2", "2026.07.02 10:15:30"),
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내 3", "2026.07.03 11:45:05")));
+
+        EsmInquiryConfirmResponse resp = confirm(bytes);
+        assertThat(resp.batchId()).isNull();            // no batch for an all-excluded file
+        assertThat(resp.inserted()).isZero();
+        assertThat(resp.statusUpdated()).isZero();
+        assertThat(resp.operationalNotices()).isEqualTo(3);
+        assertThat(resp.unsupported()).isZero();
+        assertThat(resp.idempotentReplay()).isFalse();
+
+        // Zero import-domain writes of any kind.
+        assertThat(batches.count()).isZero();
+        assertThat(inquiries.count()).isZero();
+        assertThat(provenances.count()).isZero();
+        assertThat(workItems.count()).isZero();
+        assertThat(products.count()).isZero();
+        assertThat(audits.count()).isZero();
+    }
+
+    @Test
+    void mixedFileCountsEachCategoryAndPersistsOnlyBuyerInquiries() {
+        byte[] bytes = EsmInquiryWorkbooks.build(List.of(
+                EsmInquiryWorkbooks.unanswered(SELLER, "진짜 상품 문의입니다", "2026-07-01 09:00:00"),
+                EsmInquiryWorkbooks.operationalNotice(SELLER, "긴급 배송지연 안내", "2026-07-02 10:00:00"),
+                EsmInquiryWorkbooks.unsupported(SELLER, "알 수 없는 유형", "2026-07-03 11:00:00")));
+
+        EsmInquiryPreviewResponse preview = preview(bytes);
+        assertThat(preview.newUnanswered()).isEqualTo(1);
+        assertThat(preview.operationalNotices()).isEqualTo(1);
+        assertThat(preview.unsupported()).isEqualTo(1);
+        assertThat(preview.invalid()).isZero();
+
+        EsmInquiryConfirmResponse resp = confirm(bytes);
+        assertThat(resp.batchId()).isNotNull();
+        assertThat(resp.inserted()).isEqualTo(1);       // only the buyer inquiry persists
+        assertThat(resp.operationalNotices()).isEqualTo(1);
+        assertThat(resp.unsupported()).isEqualTo(1);
+
+        // Exactly one buyer inquiry + one OPEN work item; the excluded rows leave no trace.
+        assertThat(inquiries.count()).isEqualTo(1);
+        assertThat(workItems.count()).isEqualTo(1);
+        assertThat(workItems.findAll().get(0).getPhase()).isEqualTo(InquiryWorkItemPhase.OPEN);
+        assertThat(provenances.count()).isEqualTo(1);   // provenance only for the buyer row
+    }
+
+    @Test
     void fileImportAccountStatusIsAcceptedByPreview() {
         // A truthful file-import account (FILE_UPLOAD_SUPPORTED, not CONNECTED) is selectable.
         SellerAccount acct = sellerAccounts.findByIdAndOrgId(accountId, orgId).orElseThrow();
