@@ -57,4 +57,22 @@ public class InquiryWorkItemAudit extends BaseEntity {
     /** Who caused the event (a system/actor tag — no PII). */
     @Column(name = "actor", nullable = false)
     private String actor;
+
+    /**
+     * The structured disposition carried by this event, when it records a dismissal
+     * ({@link InquiryWorkItemEvent#WORK_ITEM_DISMISSED}); {@code null} for all other
+     * events. Keeps the immutable trail self-describing about <i>why</i> the item was
+     * dismissed, independent of the (mutable) current work-item state.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "disposition")
+    private InquiryWorkItemDisposition disposition;
+
+    /**
+     * The dismissal batch that caused this event, for {@link
+     * InquiryWorkItemEvent#WORK_ITEM_DISMISSED} rows; {@code null} for all other
+     * events. Ties each dismissal audit back to the durable, approved batch ledger.
+     */
+    @Column(name = "dismissal_batch_id")
+    private UUID dismissalBatchId;
 }

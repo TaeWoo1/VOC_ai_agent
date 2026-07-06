@@ -37,6 +37,15 @@ sellerops:
     # polls until ops flips this; the file-upload path is unaffected either way.
     scheduler-enabled: ${SELLEROPS_COLLECT_SCHEDULER_ENABLED:false}
     poll-interval-ms: ${SELLEROPS_COLLECT_POLL_INTERVAL_MS:60000}
+  admin:
+    inquiry-dismissal:
+      # Operator-only bulk inquiry-dismissal admin endpoints (audited spam set-aside
+      # from an approved manifest). Off by default — with this false the whole
+      # controller is not registered (both /api/admin/inquiry-dismissals routes 404)
+      # and no SecurityConfig rule changes. Flip on only for a supervised, approved
+      # run; even then it additionally requires the OWNER role and authenticated org
+      # ownership. Never enable in an environment that should not run dismissals.
+      enabled: ${SELLEROPS_ADMIN_INQUIRY_DISMISSAL_ENABLED:false}
   connector:
     naver:
       # Real Naver Commerce API connector (Phase 3C Slice 1a). Off by default —
