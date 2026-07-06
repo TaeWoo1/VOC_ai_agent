@@ -136,6 +136,19 @@ class EsmInquiryImportServiceTest {
     }
 
     @Test
+    void fileImportAccountStatusIsAcceptedByPreview() {
+        // A truthful file-import account (FILE_UPLOAD_SUPPORTED, not CONNECTED) is selectable.
+        SellerAccount acct = sellerAccounts.findByIdAndOrgId(accountId, orgId).orElseThrow();
+        acct.setConnectionStatus(ChannelStatus.FILE_UPLOAD_SUPPORTED);
+        acct.setFileUpload(true);
+        sellerAccounts.save(acct);
+
+        EsmInquiryPreviewResponse resp = preview(oneUnanswered());
+        assertThat(resp.newUnanswered()).isEqualTo(1);
+        assertThat(inquiries.count()).isZero();
+    }
+
+    @Test
     void marketplaceIsRequired() {
         assertThatThrownBy(() -> service.preview(orgId, channelId, accountId, null,
                 "문의 관리.xlsx", oneUnanswered(), now)).isInstanceOf(ApiException.class);
@@ -293,12 +306,13 @@ class EsmInquiryImportServiceTest {
     @Test
     void replayingAnsweredOverlapCreatesNoSecondAudit() {
         confirm(file1Unanswered());
-        EsmInquiryConfirmResponse update = confirm(file2AnsweredSameFingerprint());
+        byte[] answered = file2AnsweredSameFingerprint();   // one file, re-uploaded byte-identically
+        EsmInquiryConfirmResponse update = confirm(answered);
         assertThat(update.statusUpdated()).isEqualTo(1);
         assertThat(reconcileAudits()).isEqualTo(1);
 
         // Re-confirming the same answered file resolves to its batch — no second audit.
-        EsmInquiryConfirmResponse replay = confirm(file2AnsweredSameFingerprint());
+        EsmInquiryConfirmResponse replay = confirm(answered);
         assertThat(replay.idempotentReplay()).isTrue();
         assertThat(replay.batchId()).isEqualTo(update.batchId());
         assertThat(replay.statusUpdated()).isEqualTo(1);   // durable prior total
@@ -339,8 +353,9 @@ class EsmInquiryImportServiceTest {
 
     @Test
     void duplicateConfirmReturnsDurablePriorResultWithNoNewWrites() {
-        EsmInquiryConfirmResponse first = confirm(oneUnanswered());
-        EsmInquiryConfirmResponse replay = confirm(oneUnanswered());   // re-preview + re-confirm
+        byte[] bytes = oneUnanswered();                 // one file, re-uploaded byte-identically
+        EsmInquiryConfirmResponse first = confirm(bytes);
+        EsmInquiryConfirmResponse replay = confirm(bytes);   // re-preview + re-confirm
 
         assertThat(replay.idempotentReplay()).isTrue();
         assertThat(replay.batchId()).isEqualTo(first.batchId());       // same batch

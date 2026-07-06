@@ -47,6 +47,47 @@ class EsmInquiryImportRegistrationTest {
                 .run(ctx -> assertThat(ctx).hasSingleBean(EsmInquiryImportController.class));
     }
 
+    // ---- file-import account controller (BOTH flags required) ------------------
+
+    private static final String PROVISION_FLAG = "sellerops.inquiry-import.esm.account-provisioning.enabled";
+
+    private final ApplicationContextRunner fileImportRunner = new ApplicationContextRunner()
+            .withBean(EsmFileImportAccountService.class, () -> mock(EsmFileImportAccountService.class))
+            .withBean(com.sellerops.user.UserRepository.class,
+                    () -> mock(com.sellerops.user.UserRepository.class))
+            .withUserConfiguration(EsmFileImportAccountController.class);
+
+    @Test
+    void fileImportControllerAbsentByDefault() {
+        fileImportRunner.run(ctx -> assertThat(ctx).doesNotHaveBean(EsmFileImportAccountController.class));
+    }
+
+    @Test
+    void fileImportControllerAbsentWhenOnlyImportEnabled() {
+        // Provisioning must be its own explicit flag — import-enabled alone is not enough.
+        fileImportRunner.withPropertyValues(FLAG + "=true", PROVISION_FLAG + "=false")
+                .run(ctx -> assertThat(ctx).doesNotHaveBean(EsmFileImportAccountController.class));
+    }
+
+    @Test
+    void fileImportControllerAbsentWhenOnlyProvisioningEnabled() {
+        fileImportRunner.withPropertyValues(PROVISION_FLAG + "=true")
+                .run(ctx -> assertThat(ctx).doesNotHaveBean(EsmFileImportAccountController.class));
+    }
+
+    @Test
+    void fileImportControllerPresentOnlyWhenBothFlagsTrue() {
+        fileImportRunner.withPropertyValues(FLAG + "=true", PROVISION_FLAG + "=true")
+                .run(ctx -> assertThat(ctx).hasSingleBean(EsmFileImportAccountController.class));
+    }
+
+    @Test
+    void previewControllerStaysAvailableWhenProvisioningDisabled() {
+        // preview/confirm depend only on esm.enabled — provisioning being off doesn't remove them.
+        controllerRunner.withPropertyValues(FLAG + "=true", PROVISION_FLAG + "=false")
+                .run(ctx -> assertThat(ctx).hasSingleBean(EsmInquiryImportController.class));
+    }
+
     // ---- secret-dependent bean (fail-closed) -----------------------------------
 
     private final ApplicationContextRunner tokenRunner = new ApplicationContextRunner()
