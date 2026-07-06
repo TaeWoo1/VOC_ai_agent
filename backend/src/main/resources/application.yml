@@ -160,11 +160,17 @@ sellerops:
   inquiry-import:
     esm:
       # Manual ESM (G마켓/옥션) inquiry Excel-import bridge. Off by default — with this
-      # false the controller and all secret-dependent import beans are not registered
-      # (both /api/inquiry-imports/esm routes 404) and the backend starts without a
+      # false the controllers and all secret-dependent import beans are not registered
+      # (the /api/inquiry-imports/esm routes 404) and the backend starts without a
       # preview-token secret. Flip on only where the import is wanted; even then it
       # additionally requires a strong preview-token secret (below) or fails closed.
       enabled: ${SELLEROPS_INQUIRY_IMPORT_ESM_ENABLED:false}
+      account-provisioning:
+        # Operator provisioning of file-import GMARKET SellerAccounts. Off by default and
+        # separate from normal import operation: the provisioning controller is registered
+        # ONLY when BOTH this and `esm.enabled` are true, and even then it additionally
+        # requires the OWNER role. Preview/confirm are unaffected by this flag.
+        enabled: ${SELLEROPS_INQUIRY_IMPORT_ESM_ACCOUNT_PROVISIONING_ENABLED:false}
     preview-token:
       # HMAC-SHA256 secret for the ESM inquiry-import preview token (binds a preview to
       # the exact file+account+marketplace+result+DB-state; 30-minute expiry; confirm
