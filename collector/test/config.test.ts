@@ -32,6 +32,16 @@ describe("loadConfig — ESM+ review discovery (model-C)", () => {
     expect(cfg.esmProfileDir).toBe("/some/where/.profile/esm-test");
   });
 
+  it("profileBaseDir is the fixed `.profile` base (the connection-owned ESM profile root) — not env-overridable", () => {
+    const cfg = loadConfig({});
+    expect(cfg.profileBaseDir.endsWith("/.profile")).toBe(true);
+    // The dedicated NAVER/ESM profiles live directly under it.
+    expect(cfg.profileDir.startsWith(cfg.profileBaseDir + "/")).toBe(true);
+    // Deliberately NOT externalized: a COLLECTOR_ESM_PROFILE_DIR override does not move the base.
+    const overridden = loadConfig({ COLLECTOR_ESM_PROFILE_DIR: "/some/where/.profile/esm-test" });
+    expect(overridden.profileBaseDir).toBe(cfg.profileBaseDir);
+  });
+
   it("esmFrameOriginAllowlist is empty by default (fail-closed: no cross-origin scan)", () => {
     expect(loadConfig({}).esmFrameOriginAllowlist).toEqual([]);
   });

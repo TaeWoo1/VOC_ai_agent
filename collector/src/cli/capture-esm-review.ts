@@ -29,10 +29,11 @@
  *
  * LIVE-ONLY — refuses to act without the explicit per-run ESM approval flag.
  */
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { Frame, Page } from "playwright";
 import { loadConfig } from "../config";
+import { resolveCaptureConnectionProfile } from "./esm-capture-connection";
 import {
   capturePreconditionMet,
   captureSessionGate,
@@ -103,6 +104,14 @@ function removeSentinel(path: string): void {
   } catch {
     /* best-effort */
   }
+}
+
+/** Read a `--flag <value>` option; undefined when absent or immediately followed by another flag. */
+function valueArg(args: readonly string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  if (i < 0) return undefined;
+  const v = args[i + 1];
+  return v !== undefined && !v.startsWith("--") ? v : undefined;
 }
 
 async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<boolean> {
@@ -248,11 +257,41 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Connection-explicit profile: a live capture MUST name an ESM connection id and resolve its dedicated
+  // profile through the SAME resolver the local-agent reconnect path uses (so a G0-verified session is
+  // reused, never copied). No implicit `.profile/esm` fallback — every failure fails closed.
+  const connectionId = valueArg(args, "--connection-id");
+  if (connectionId === undefined) {
+    console.error("Live capture requires an explicit ESM connection: --connection-id <id>.");
+    process.exit(5);
+    return;
+  }
+  const connectionsPath = valueArg(args, "--connections");
+  if (connectionsPath === undefined) {
+    console.error("Live capture requires the local connections descriptor: --connections <path.json>.");
+    process.exit(5);
+    return;
+  }
+  let connectionsRaw: string;
+  try {
+    connectionsRaw = readFileSync(resolve(process.cwd(), connectionsPath), "utf8");
+  } catch {
+    console.error("Could not read the connections descriptor (fail closed).");
+    process.exit(5);
+    return;
+  }
+  const resolution = resolveCaptureConnectionProfile({ connectionsRaw, connectionId, profileBaseDir: cfg.profileBaseDir });
+  if (!resolution.ok) {
+    console.error(`Connection did not resolve to a runnable ESM browser profile (fail closed): ${resolution.reason}.`);
+    process.exit(6);
+    return;
+  }
+
   const sentinelPath = esmSentinelPathFor(cfg.statusFile);
   mkdirSync(dirname(sentinelPath), { recursive: true });
   removeSentinel(sentinelPath);
 
-  const ctx = await launchPersistentBrowser(cfg.esmProfileDir, cfg.browserChannel);
+  const ctx = await launchPersistentBrowser(resolution.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
   try {
     await page.goto(cfg.esmReviewUrl, { waitUntil: "domcontentloaded" });

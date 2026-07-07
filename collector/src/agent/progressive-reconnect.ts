@@ -34,6 +34,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import type { LoginMode, SanitizedAccountRef, InspectionVerdict, CredentialPopulationObservation } from "./local-agent-state";
 import type { LocalAgentState } from "./local-agent-state";
 
@@ -102,10 +103,28 @@ export function initialFormStrategyForMode(loginMode: LoginMode): InitialFormStr
  * reaches a filesystem profile name. Output is `esm-agent-<24 hex>` — filesystem-safe, collision-
  * resistant, and non-reversible. (Reuses `node:crypto` `createHash`, an existing project primitive.)
  */
+function dedicatedProfileLeafFor(connectionId: string): string {
+  const digest = createHash("sha256").update(`local-agent-profile ${connectionId}`).digest("hex").slice(0, 24);
+  return `esm-agent-${digest}`;
+}
+
 export function dedicatedProfileIdFor(account: SanitizedAccountRef): string {
   const raw = typeof account.connectionId === "string" ? account.connectionId : "";
-  const digest = createHash("sha256").update(`local-agent-profile ${raw}`).digest("hex").slice(0, 24);
-  return `esm-agent-${digest}`;
+  return dedicatedProfileLeafFor(raw);
+}
+
+/**
+ * The SINGLE production resolver from a (`profileBaseDir`, `connectionId`) pair to the connection-owned
+ * dedicated ESM profile directory: `${profileBaseDir}/${dedicatedProfileLeafFor(connectionId)}`. It reuses
+ * the SAME leaf formula as {@link dedicatedProfileIdFor} (unchanged hash input + `esm-agent-<24 hex>` leaf),
+ * so the local-agent reconnect path and the review-capture path resolve to the exact same directory for a
+ * given connection — the G0-verified session is reused, never copied. Deterministic on `connectionId` alone
+ * (never marketplace, loginMode, capture kind, branch, or cwd); two ids resolve to two directories; the
+ * hashed leaf keeps any path separator / `..` / unsafe input out of the filesystem name. The in-tree guard
+ * (`resolveProfileDir`) still runs at launch, so this stays a pure path computation.
+ */
+export function connectionProfileDirFor(profileBaseDir: string, connectionId: string): string {
+  return resolve(profileBaseDir, dedicatedProfileLeafFor(connectionId));
 }
 
 /**

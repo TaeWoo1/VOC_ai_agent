@@ -28,6 +28,7 @@
 
 import { ProgressiveReconnectRuntime, type ProgressiveReconnectSink } from "./progressive-reconnect-runtime";
 import { ProgressiveReconnectChromeBrowser } from "./progressive-reconnect-chrome";
+import { connectionProfileDirFor } from "./progressive-reconnect";
 import type { ProgressiveReconnectConnection, ProgressiveReconnectState, ReconnectPath, UserActionCategory } from "./progressive-reconnect";
 import type { LocalAgentState, SanitizedAccountRef } from "./local-agent-state";
 
@@ -210,7 +211,9 @@ export function createProgressiveReconnectRuntimeFactory(config: ProgressiveReco
   return {
     create(connection: ProgressiveReconnectConnection, sink: ProgressiveReconnectSink): ProgressiveReconnectRuntimeLike {
       const browser = new ProgressiveReconnectChromeBrowser({
-        profileDir: `${config.profileBaseDir}/${connection.dedicatedProfileId}`,
+        // The SINGLE shared resolver (same leaf as `dedicatedProfileId`), so the review-capture path
+        // resolves this connection to the identical profile — no second path formula.
+        profileDir: connectionProfileDirFor(config.profileBaseDir, connection.account.connectionId),
         authSurfaceUrl: config.authSurfaceUrl,
         sessionProbeUrl: config.sessionProbeUrl,
         allowlist: config.allowlist,

@@ -53,6 +53,43 @@ Each target passes the gates in order; each gate needs its own explicit per-run 
 | **G7** | Cold-restart rerun | Reproduce end-to-end after a clean restart | A cold-start run reaches capture (via assisted reconnect if needed) and reruns dedup-clean | Cold start needs unmodeled steps → record gap |
 | **G8** | Production promotion | Promote the proven procedure to a skill/connector | End-to-end run **and** a successful rerun both green | Anything unproven stays a diagnostic |
 
+### 3.1 Connection-owned Chrome profile (shared across reconnect + capture)
+
+The G0 reconnect path (`local-agent`) and the review-capture path resolve their Chrome profile
+through **one** shared resolver, so a G0-verified session carries straight into capture — never
+copied, never migrated:
+
+- **`connectionProfileDirFor(profileBaseDir, connectionId)`** (`agent/progressive-reconnect.ts`)
+  is the single formula: `${profileBaseDir}/esm-agent-<sha256("local-agent-profile "+connectionId)[:24]>`.
+  It reuses the existing `dedicatedProfileIdFor` leaf unchanged, so the on-disk G0 profile is
+  preserved. `profileBaseDir` is the fixed in-tree `.profile` base (`cfg.profileBaseDir`; not
+  env-overridable in this slice).
+- Profile identity is a function of **`connectionId` only** — never marketplace, `loginMode`, or
+  capture kind. Two connection ids → two profiles; the same id → the same profile across restarts
+  and branches in a worktree.
+- **Live capture is connection-explicit.** `capture-esm-review` requires `--connection-id <id>` and
+  `--connections <path>`; it resolves the profile via `resolveCaptureConnectionProfile`, which fails
+  closed on an invalid descriptor / unknown id / non-ESM channel / non-BROWSER strategy /
+  non-runnable connection. There is **no implicit `.profile/esm` fallback** for a live ESM capture.
+- **One profile, one process at a time.** The same connection profile must never be opened
+  concurrently by `local-agent` and capture — stop the agent (clean shutdown closes its Chrome)
+  before starting capture against the same id.
+- **Shared profile ≠ shared live session in the tested flow (verified 2026-07-08).** A live test
+  confirmed capture opens the identical profile, but in the verified `local-agent` shutdown → separate
+  capture launch flow, the authenticated ESM session was **not reusable after the browser restart,
+  despite using the identical profile directory** (the review surface showed a login page). This is
+  scoped to that tested flow — not a general claim that ESM never persists a session across every
+  restart. Profile alignment is therefore **necessary but, in this flow, not sufficient** for live
+  session reuse. Reusing a G0 session in capture requires **same-browser continuity** (capture executes
+  through the still-running `local-agent` browser, no restart) or a fresh login — a separate
+  product/architecture decision, not delivered by this resolver slice.
+
+  **Deferred next slice (design note, not implemented here):** `local-agent` should remain the sole owner
+  of the live browser; future capture work should execute through the live `local-agent` browser/context
+  rather than launching a second Chrome against the same profile. Do **not** solve this by opening a
+  second Chrome on the same profile, copying profiles, or exposing raw cookies/credentials. Browser task
+  ownership, serialization, per-run approval, and shutdown behavior all require their own reviewed slice.
+
 ## 4. Explicit pass/fail summary
 
 - **Selector verified** (G2) requires **two independent sanitized signals** agreeing on the

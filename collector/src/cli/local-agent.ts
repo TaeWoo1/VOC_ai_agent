@@ -25,8 +25,8 @@
  */
 
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import {
   createLocalAgentConnectorStartup,
@@ -109,9 +109,6 @@ async function waitForHumanCompletions(
   }
 }
 
-const here = dirname(fileURLToPath(import.meta.url));
-const collectorRoot = resolve(here, "..", "..");
-
 /** Explicit per-run approval: booting a runnable browser connection launches a local Chrome. */
 export const LOCAL_AGENT_APPROVAL_FLAG = "--i-understand-this-launches-local-agent-chrome";
 
@@ -146,7 +143,7 @@ export function resolveBrowserRuntimeConfig(
   return {
     ok: true,
     config: {
-      profileBaseDir: resolve(collectorRoot, ".profile"),
+      profileBaseDir: base.profileBaseDir,
       authSurfaceUrl: authSurfaceUrl!,
       sessionProbeUrl: sessionProbeUrl!,
       allowlist: base.esmFrameOriginAllowlist,
