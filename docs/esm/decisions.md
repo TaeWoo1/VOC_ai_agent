@@ -40,3 +40,21 @@ do not guess from hostname, `loginMode`, or channel code.
 Reaching a session uses the established dedicated-profile + assisted-reconnect flow
 (`collector/src/agent/progressive-reconnect*`, `naver/reconnect-resolve`), not a one-off
 tool. A challenge (CAPTCHA/2FA/login) always stops to manual; never bypass auth.
+**Scope:** D8 governs *reconnect/session handling only* — it does **not** mandate that `local-agent`
+own the browser for every capture path (see D9).
+
+## D9 — The established successful capture lifecycle is capture-owned, supervised, and same-process
+The proven ESM+ REVIEW capture path (2026-06-30 → 2026-07-02, `collector/docs/esmplus-review-export-discovery.md`)
+is **`capture-esm-review` owning one supervised browser lifecycle**: the operator logs in inside that same
+browser when needed, and the approved capture/export runs **without closing it**. This flow used **no**
+`local-agent` and **no** session hand-off. Routing capture through a `local-agent` browser (same-browser
+continuity) remains an **optional future architecture for unattended runs — not a current requirement, and
+not the only solution.** The one measured limitation is scoped: *in the tested `local-agent` shutdown →
+separately launched capture flow, the authenticated session was not reusable, even though both launches
+used the same profile.* That does not invalidate the capture-owned lifecycle.
+
+## D10 — Live capture must be connection-explicit (PR #207)
+A live ESM capture must name an explicit ESM connection (`--connection-id` + `--connections`) and resolve
+its dedicated profile via the shared `connectionProfileDirFor` resolver (fail-closed on invalid / unknown /
+non-ESM / non-BROWSER / non-runnable). There is **no** implicit `.profile/esm` fallback for a live capture.
+This is an additive attribution/safety requirement layered on the D9 lifecycle — it does not replace it.

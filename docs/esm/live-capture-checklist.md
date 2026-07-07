@@ -24,12 +24,13 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
   - The two-disconnect root cause (below) was resolved by the A+B slice: (A) `inspectSession()` now
     classifies the seller-center `ESM_SESSION_PROBE_URL` (login page can never yield `LOGGED_IN`);
     (B) a production `humanCompleted` trigger wired into `local-agent` via a per-connection sentinel.
-  - **Profile alignment — CODE COMPLETE; live session hand-off found INSUFFICIENT (2026-07-08, branch
-    `ops/esm-profile-alignment`, uncommitted slice).**
+  - **Profile alignment — SHIPPED as an additive safety improvement (PR #207, feature commit `19e04c7`,
+    merge `58ceb9f`, 2026-07-08).**
     The capture path and `local-agent` now resolve the SAME connection-owned profile via one shared
     resolver `connectionProfileDirFor(profileBaseDir, connectionId)` (see
     [`live-capture-plan.md` §3.1](./live-capture-plan.md)); capture is connection-explicit
-    (`--connection-id` + `--connections`, fail-closed, no `.profile/esm` fallback).
+    (`--connection-id` + `--connections`, fail-closed, no `.profile/esm` fallback). This is an **additive
+    attribution/safety layer** — it does not change the proven capture lifecycle below.
     - **Deterministic identity equality PROVEN:** for `esm-live-g0`, `resolveCaptureConnectionProfile`
       and the local-agent resolver both yield leaf `esm-agent-53b946f1c770dddb0b83890d`
       (`identityEqual: true`).
@@ -48,19 +49,25 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
       export click, no download, no read, no profile copy/alter. (Scope of the claim: this one tested
       shutdown → separate-launch flow — not a general assertion that ESM never persists a session across
       every browser restart.)
-    - **Conclusion:** profile alignment is **necessary**, but **alone insufficient in this tested flow**
-      for live session reuse. Carrying a G0 session into capture requires **same-browser continuity**
-      (capture executes through the live `local-agent` browser instead of launching a fresh one) — or a
-      fresh login. This is a **product/architecture decision** for a separate slice, not something to
-      resolve by expanding this one.
-    - **G2 re-verification — SKIPPED:** no authenticated review surface was reachable in capture (login
-      shown), so marketplace verification could not run without a re-login / slice expansion. Still pending.
+    - **Conclusion:** this finding is scoped to the `local-agent` shutdown → separate-launch restart flow
+      and does **not** invalidate the proven capture-owned lifecycle. The reliable, historically proven
+      path for supervised capture is a **single browser lifecycle owned by `capture-esm-review`** in which
+      the operator logs in and the approved export runs without closing that browser — that flow used
+      **no** local-agent and **no** session hand-off (see the 2026-06-30 → 2026-07-02 successes in
+      [`collector/docs/esmplus-review-export-discovery.md`](../../collector/docs/esmplus-review-export-discovery.md)
+      and [`…-db-ingest-design.md`](../../collector/docs/esmplus-review-db-ingest-design.md)). Same-browser
+      continuity through `local-agent` is **one optional future architecture for unattended runs — not a
+      requirement and not the only solution.**
+    - **G2 re-verification — SKIPPED:** no authenticated review surface was reachable in this particular
+      test (login shown because it was the restart flow, not the capture-owned flow); marketplace
+      verification could not run without re-login. Still pending — reachable via the proven capture-owned
+      flow.
     - verification: collector `typecheck` green; full suite **130 files, 2238 passed, 1 skipped**;
-      `git diff --check` clean. Uncommitted (HOLD).
-  - Next single action: **product/architecture decision on session hand-off** — decide whether capture
-    should attach to the live `local-agent` browser (same-browser hand-off, no restart) so the G0 session
-    is reused, vs. keeping separate launches (which require a fresh login per the finding above). Do not
-    expand the slice or start G3 without that decision.
+      `git diff --check` clean. Merged in PR #207.
+  - Next single action: **run marketplace-verified capture via the proven capture-owned lifecycle** —
+    `capture-esm-review --connection-id esm-live-g0 --connections <descriptor> --approved-index N`, operator
+    logs in **in the capture window**, verify GMARKET selection (D1/D2/D7), then a bounded populated capture
+    that carries marketplace attribution into the result. No same-browser hand-off is required.
   - Historical context (dedicated profile / prior blocker):
   - Gap: these diagnostic launches bypassed the established reconnect orchestration
     (`progressive-reconnect*`); the durable path is promoted in skill `esm-session-reconnect`.
@@ -134,12 +141,30 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
     **met** (tab `selected` + selected-label `GMARKET`)
   - note: badge index 0 = GMARKET is a **this-run** fact, not a durable selector; every run
     re-discovers via the candidate-index probe
-  - next single action: **G3 — bounded capture (≤5 records), presence-only** (not yet run)
-- `[ ]` **Bounded capture (G3)** — NOT started (no review records have been read)
-- `[ ]` **Stable identity (G4)**
-- `[ ]` **Field mapping (G4)**
-- `[ ]` **Deduplication (G5)**
-- `[ ]` **Persistence (G6)**
+  - next single action: **carry GMARKET attribution into a bounded capture result** (see G3)
+
+> **Prior proven capture (discovery lineage, 2026-06-30 → 2026-07-02).** A live supervised review
+> capture **was** performed successfully and repeatedly via `capture-esm-review` (capture-owned single
+> browser lifecycle, operator login in-session, no local-agent, no browser restart): one approved-index
+> click → **one valid 14-column `.xlsx` download** → **populated first-three-row shape signals** read →
+> overlap captures (Export A/B) → **three repeatability captures A/B/C** → **observe-and-discard** (magic-byte
+> validate, then delete). **No** backend ingest, **no** persistent status success. Evidence:
+> [`collector/docs/esmplus-review-export-discovery.md`](../../collector/docs/esmplus-review-export-discovery.md),
+> [`…-db-ingest-design.md`](../../collector/docs/esmplus-review-db-ingest-design.md). Terminology: those rows
+> were **shape-read** (presence / value-class / salted hashes), **not** parsed into canonical ingestable
+> review records — canonical ingestion is **not** complete.
+
+- `[~]` **Bounded capture (G3)** — **populated capture proven on the discovery lineage** (download fired,
+  populated rows shape-read, observe-and-discard). **Pending on this (marketplace-attributed) track:**
+  carrying verified GMARKET/AUCTION attribution (D1/D2/D7) into the capture result. Not "no records read" —
+  rows were shape-read; what is unstarted is *marketplace-verified* bounded capture.
+- `[~]` **Stable identity (G4)** — no obvious stable source review-id / dedup-key column was detected even
+  on a populated export (discovery lineage); **source review-id verification still pending.**
+- `[~]` **Field mapping (G4)** — schema-SHAPE explored (14-column shape, offline mapper aliases grounded);
+  **canonical record mapping not finalized.**
+- `[~]` **Deduplication (G5)** — composite-key overlap + repeatability exercised offline on shape signals;
+  **marketplace-aware canonical dedup contract still pending.**
+- `[ ]` **Persistence / backend ingestion (G6)** — no live ingest performed.
 - `[ ]` **Cold-restart rerun (G7)**
 - `[ ]` **Production promotion (G8)**
 
@@ -172,6 +197,8 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
 
 ## Current single next action (whole track)
 
-**Target 1 / G3 — bounded review capture (≤5 records, presence-only) for GMARKET × REVIEW**,
-under explicit per-run approval, after G0 is re-established through the reconnect
-orchestration.
+**Target 1 / G3 — marketplace-attributed bounded review capture for GMARKET × REVIEW**, via the proven
+**capture-owned single browser lifecycle** (`capture-esm-review --connection-id … --connections … --approved-index N`;
+operator logs in in the capture window; no local-agent hand-off needed), under explicit per-run approval.
+The new work versus the 2026-06-30 → 07-02 discovery-lineage successes is carrying **verified GMARKET/AUCTION
+attribution** (D1/D2/D7) into the capture result — not re-proving that a download fires.

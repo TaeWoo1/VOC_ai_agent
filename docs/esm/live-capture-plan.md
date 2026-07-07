@@ -56,8 +56,10 @@ Each target passes the gates in order; each gate needs its own explicit per-run 
 ### 3.1 Connection-owned Chrome profile (shared across reconnect + capture)
 
 The G0 reconnect path (`local-agent`) and the review-capture path resolve their Chrome profile
-through **one** shared resolver, so a G0-verified session carries straight into capture — never
-copied, never migrated:
+through **one** shared resolver, so both address the **same** connection-owned profile directory
+(attribution + fail-closed safety) — never copied, never migrated. Sharing the profile directory is
+a safety/attribution improvement; it does **not** by itself hand a live session from one process to
+another (see the tested-flow note below):
 
 - **`connectionProfileDirFor(profileBaseDir, connectionId)`** (`agent/progressive-reconnect.ts`)
   is the single formula: `${profileBaseDir}/esm-agent-<sha256("local-agent-profile "+connectionId)[:24]>`.
@@ -74,21 +76,27 @@ copied, never migrated:
 - **One profile, one process at a time.** The same connection profile must never be opened
   concurrently by `local-agent` and capture — stop the agent (clean shutdown closes its Chrome)
   before starting capture against the same id.
-- **Shared profile ≠ shared live session in the tested flow (verified 2026-07-08).** A live test
-  confirmed capture opens the identical profile, but in the verified `local-agent` shutdown → separate
-  capture launch flow, the authenticated ESM session was **not reusable after the browser restart,
-  despite using the identical profile directory** (the review surface showed a login page). This is
-  scoped to that tested flow — not a general claim that ESM never persists a session across every
-  restart. Profile alignment is therefore **necessary but, in this flow, not sufficient** for live
-  session reuse. Reusing a G0 session in capture requires **same-browser continuity** (capture executes
-  through the still-running `local-agent` browser, no restart) or a fresh login — a separate
-  product/architecture decision, not delivered by this resolver slice.
+- **Shared profile directory ≠ shared live session in the tested flow (verified 2026-07-08).**
+  Precise tested fact: **in the tested `local-agent` shutdown → separately launched capture flow, the
+  authenticated session was not reusable, even though both launches used the same profile.** The review
+  surface showed a login page. This is scoped to that one restart flow — **not** a general claim that
+  ESM sessions universally never survive a browser restart, and **not** a defect in the resolver (the
+  profile resolved exactly right).
 
-  **Deferred next slice (design note, not implemented here):** `local-agent` should remain the sole owner
-  of the live browser; future capture work should execute through the live `local-agent` browser/context
-  rather than launching a second Chrome against the same profile. Do **not** solve this by opening a
-  second Chrome on the same profile, copying profiles, or exposing raw cookies/credentials. Browser task
-  ownership, serialization, per-run approval, and shutdown behavior all require their own reviewed slice.
+- **The historically proven capture lifecycle (2026-06-30 → 2026-07-02) does not restart the browser.**
+  `capture-esm-review` can own **one supervised browser lifecycle** in which the operator logs in and the
+  approved capture/export runs **without closing that browser** — this is how the prior successful review
+  captures fired (see `collector/docs/esmplus-review-export-discovery.md`). That flow used **no**
+  local-agent and **no** session hand-off. So for supervised capture, the reliable path is the
+  single-lifecycle, capture-owned, in-session-login flow — connection-explicit profile resolution from
+  the resolver slice is an **additive safety improvement** layered on top of it, not a replacement.
+
+- **Optional future architecture (not required, not implemented).** If *unattended* runs are ever
+  pursued, one option is for capture to execute through a still-running `local-agent` browser/context
+  (same-browser continuity) so a reconnect session is reused without a restart. This is **one option, not
+  a requirement or the only solution**, and it is out of scope here: browser task ownership,
+  serialization, per-run approval, and shutdown behavior would need their own reviewed slice. Do **not**
+  reach for a second Chrome on the same profile, profile copying, or exposing raw cookies/credentials.
 
 ## 4. Explicit pass/fail summary
 

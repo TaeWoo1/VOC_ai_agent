@@ -98,13 +98,13 @@ using the project's established orchestration — not a one-off tool. This is ga
 - No data capture, no export, no upload, no DB write, no `LAST_SUCCESS`/status write in G0.
 - Cold restart may require re-login; treat cold-restart persistence as unproven (record it
   as a gap, do not assert it).
-- **Shared profile ≠ shared live session in the tested flow (verified 2026-07-08).** In the verified
-  `local-agent` shutdown → separate capture launch flow, the authenticated ESM session was not reusable
-  after the browser restart, despite using the identical profile directory (capture showed a login
-  page). Scoped to that flow — not a general claim that ESM never persists a session across every
-  restart. Aligning the profile is necessary but, in this flow, NOT sufficient to carry a session from
-  `local-agent` into a separately-launched capture. Live session reuse needs same-browser continuity
-  (capture executes through the running reconnect browser), not just the same profile dir.
+- **Shared profile directory ≠ shared live session, in one tested flow (2026-07-08).** Tested fact,
+  scoped: *in the `local-agent` shutdown → separately launched capture flow, the authenticated session was
+  not reusable, even though both launches used the same profile* (capture showed a login page). This is
+  **not** a general claim that ESM never persists a session across a restart. This skill covers reaching a
+  session only — it does **not** prescribe how capture obtains its browser: the proven capture path owns
+  its own supervised browser with in-session login (no local-agent hand-off). Do not read this note as a
+  mandate for local-agent task dispatch or capture-through-local-agent.
 - One live run = one explicit per-run approval. Never on a schedule or standing auth.
 
 ## Done when
