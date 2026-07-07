@@ -196,7 +196,10 @@ export class LocalAgentProgressiveService {
 export interface ProgressiveReconnectServiceConfig {
   /** In-tree base dir; each connection gets `${profileBaseDir}/${dedicatedProfileId}`. */
   profileBaseDir: string;
+  /** Login-form / loginMode / credential surface only (never a LOGGED_IN verdict). */
   authSurfaceUrl: string;
+  /** Seller-center session-gated probe surface — the ONLY surface that may yield LOGGED_IN. */
+  sessionProbeUrl: string;
   allowlist: readonly string[];
   salt: string;
   chromePath?: string;
@@ -209,6 +212,7 @@ export function createProgressiveReconnectRuntimeFactory(config: ProgressiveReco
       const browser = new ProgressiveReconnectChromeBrowser({
         profileDir: `${config.profileBaseDir}/${connection.dedicatedProfileId}`,
         authSurfaceUrl: config.authSurfaceUrl,
+        sessionProbeUrl: config.sessionProbeUrl,
         allowlist: config.allowlist,
         salt: config.salt,
         chromePath: config.chromePath,

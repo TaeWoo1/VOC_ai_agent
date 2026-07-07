@@ -24,7 +24,7 @@
  * value is a sanitized enum / boolean / count.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
@@ -32,11 +32,82 @@ import {
   createLocalAgentConnectorStartup,
   parseConnectorConnections,
   isRunnableBrowserConnection,
+  type LocalAgentConnectorStartup,
   type ParsedConnectorConnections,
   type LocalAgentConnectorStartupConfig,
   type LocalAgentBrowserRuntimeConfig,
 } from "../agent/local-agent-connector-startup";
+import { humanSignalPathFor } from "../agent/local-agent-human-signal";
+import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
+
+/** The four browser user-action categories a human can complete (subset of ConnectorUserAction). */
+const BROWSER_USER_ACTIONS: ReadonlySet<string> = new Set<UserActionCategory>([
+  "SELECT_SAVED_CREDENTIAL",
+  "ENTER_MISSING_USERNAME",
+  "COMPLETE_MANUAL_LOGIN",
+  "COMPLETE_ADDITIONAL_AUTHENTICATION",
+]);
+/** Bounded operator-wait for the human-completed signal (consistent with the supervised classify CLIs). */
+const HUMAN_WAIT_MS = 15 * 60_000;
+const HUMAN_POLL_MS = 750;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+function removeIfPresent(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** The only capability the human-completed loop needs from the startup — keeps the loop unit-testable. */
+export interface HumanCompletable {
+  humanCompleted(connectionId: string, action: UserActionCategory): Promise<{ localAgentState: string } | null>;
+}
+
+/**
+ * ONE scan of the pending connections. For each, if its per-connection sentinel exists: CONSUME+DELETE it
+ * first (so one file occurrence yields at most one transition), then run ONE fresh in-session re-inspection
+ * via the retained service. A connection that reaches READY (verified LOGGED_IN) drops out of `pending`;
+ * otherwise it stays pending for a later signal. A connection's sentinel never triggers another connection
+ * (paths are per-connection). Pure of timing — the bounded wait is the caller's concern.
+ */
+export async function pollHumanCompletionsOnce(
+  startup: HumanCompletable,
+  statusFile: string,
+  pending: Map<string, UserActionCategory>,
+): Promise<void> {
+  for (const [connectionId, action] of [...pending]) {
+    const sig = humanSignalPathFor(statusFile, connectionId);
+    if (!existsSync(sig)) continue;
+    removeIfPresent(sig); // consume + delete BEFORE handling
+    const snap = await startup.humanCompleted(connectionId, action);
+    console.log(
+      JSON.stringify({
+        event: "HUMAN_COMPLETED_REVERIFY",
+        connectionId,
+        localAgentState: snap?.localAgentState ?? null,
+      }),
+    );
+    if (snap && snap.localAgentState === "READY") pending.delete(connectionId); // verified LOGGED_IN
+  }
+}
+
+/** Bounded (no busy-loop) operator wait: re-scan every `HUMAN_POLL_MS` until every connection settles or the timeout. */
+async function waitForHumanCompletions(
+  startup: HumanCompletable,
+  statusFile: string,
+  pending: Map<string, UserActionCategory>,
+): Promise<void> {
+  const maxChecks = Math.max(1, Math.ceil(HUMAN_WAIT_MS / HUMAN_POLL_MS));
+  for (let i = 0; i < maxChecks && pending.size > 0; i += 1) {
+    await pollHumanCompletionsOnce(startup, statusFile, pending);
+    if (pending.size === 0) break;
+    await sleep(HUMAN_POLL_MS);
+  }
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
@@ -60,9 +131,14 @@ export function resolveBrowserRuntimeConfig(
   env: NodeJS.ProcessEnv,
 ): { ok: true; config: LocalAgentBrowserRuntimeConfig } | { ok: false; missing: string[] } {
   const authSurfaceUrl = env.ESM_AUTH_SURFACE_URL;
+  // The session-probe URL is a SEPARATE required setting (the only surface allowed to yield LOGGED_IN).
+  // It must never silently fall back to the auth/login URL, and is not derived from loginMode/marketplace/
+  // hostname/channel. A missing value fails closed here → decideRun degrades to DRY_RUN (no browser).
+  const sessionProbeUrl = env.ESM_SESSION_PROBE_URL;
   const salt = env.STORAGE_PROBE_SALT;
   const missing: string[] = [];
   if (!authSurfaceUrl) missing.push("ESM_AUTH_SURFACE_URL");
+  if (!sessionProbeUrl) missing.push("ESM_SESSION_PROBE_URL");
   if (!salt) missing.push("STORAGE_PROBE_SALT");
   if (missing.length > 0) return { ok: false, missing };
 
@@ -72,6 +148,7 @@ export function resolveBrowserRuntimeConfig(
     config: {
       profileBaseDir: resolve(collectorRoot, ".profile"),
       authSurfaceUrl: authSurfaceUrl!,
+      sessionProbeUrl: sessionProbeUrl!,
       allowlist: base.esmFrameOriginAllowlist,
       salt: salt!,
       chromePath: env.COLLECTOR_CHROME_PATH,
@@ -223,8 +300,14 @@ async function main(): Promise<void> {
   // LIVE BOOT — one local Chrome per runnable browser connection (API/discovery channels settle SKIPPED,
   // constructing no browser service).
   const startup = createLocalAgentConnectorStartup(decision.config, printingObserver);
+  const statusFile = loadConfig(process.env).statusFile;
+  const signalPaths = new Map<string, string>(); // connectionId → its per-connection sentinel path
+  const clearSignals = (): void => {
+    for (const p of signalPaths.values()) removeIfPresent(p);
+  };
 
   const guardedShutdown = createSignalShutdown(async () => {
+    clearSignals(); // never leave a stale human-completed signal behind
     const report = await startup.shutdown();
     console.log(JSON.stringify({ event: "SHUTDOWN", ...report }));
   });
@@ -232,7 +315,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  await startup.boot(decision.parsed.connections);
+  const results = await startup.boot(decision.parsed.connections);
 
   if (startup.managedConnectionIds().length === 0) {
     // Nothing runnable is held (an all-SKIPPED / API-only / discovery-only boot) — there is no browser to
@@ -241,8 +324,29 @@ async function main(): Promise<void> {
     process.exit(0);
     return;
   }
-  // Otherwise the browser connections stay resident (held for the WAITING/HUMAN handoff) until a signal
-  // triggers a clean shutdown; the process stays alive on the registered signal handlers.
+
+  // Same-process human-completed re-verification: for every browser connection that settled
+  // NEEDS_USER_ACTION, keep the SAME process/browser/profile alive and wait (bounded) for an explicit
+  // per-connection operator signal, then run ONE fresh in-session re-inspection — no cold restart.
+  const pending = new Map<string, UserActionCategory>();
+  for (const r of results) {
+    if (r.outcome === "NEEDS_USER_ACTION" && r.pendingUserAction && BROWSER_USER_ACTIONS.has(r.pendingUserAction)) {
+      const p = humanSignalPathFor(statusFile, r.connectionId);
+      signalPaths.set(r.connectionId, p);
+      removeIfPresent(p); // clear any stale sentinel at startup
+      pending.set(r.connectionId, r.pendingUserAction as UserActionCategory);
+    }
+  }
+  if (pending.size > 0) {
+    let n = 0;
+    for (const p of signalPaths.values()) {
+      console.error(`human-completed signal #${n++}: create this file when the operator has completed login → ${p}`);
+    }
+    await waitForHumanCompletions(startup, statusFile, pending);
+  }
+  clearSignals();
+  // The browser connections stay resident (held for the WAITING/HUMAN handoff) until a signal triggers a
+  // clean shutdown; the process stays alive on the registered signal handlers.
 }
 
 // Run only when executed directly (e.g. `tsx src/cli/local-agent.ts`), NEVER on import — importing

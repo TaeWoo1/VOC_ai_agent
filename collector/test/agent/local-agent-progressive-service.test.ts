@@ -177,11 +177,11 @@ describe("local agent progressive service — delegation", () => {
     expect(svc.isBrowserRetained("conn-A")).toBe(false);
   });
   it("the production factory yields a real runtime (structurally a ProgressiveReconnectRuntime)", () => {
-    const factory = createProgressiveReconnectRuntimeFactory({ profileBaseDir: ".profile", authSurfaceUrl: "x", allowlist: ["esmplus.com"], salt: "s" });
+    const factory = createProgressiveReconnectRuntimeFactory({ profileBaseDir: ".profile", authSurfaceUrl: "x", sessionProbeUrl: "y", allowlist: ["esmplus.com"], salt: "s" });
     const rt = factory.create(conn(), { requestCatchUp() {}, emitUserAction() {} });
     expect(rt).toBeInstanceOf(ProgressiveReconnectRuntime);
     // and the composition helper returns a wired service
-    expect(createLocalAgentProgressiveService({ profileBaseDir: ".profile", authSurfaceUrl: "x", allowlist: ["esmplus.com"], salt: "s" }))
+    expect(createLocalAgentProgressiveService({ profileBaseDir: ".profile", authSurfaceUrl: "x", sessionProbeUrl: "y", allowlist: ["esmplus.com"], salt: "s" }))
       .toBeInstanceOf(LocalAgentProgressiveService);
   });
 });

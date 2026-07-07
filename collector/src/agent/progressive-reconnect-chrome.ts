@@ -36,8 +36,13 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export interface ProgressiveReconnectChromeOptions {
   /** Dedicated in-tree profile dir (guarded by `resolveProfileDir`). */
   profileDir: string;
-  /** ESM auth-surface URL (config-supplied; never committed). */
+  /** ESM auth-surface URL (config-supplied). Login-form navigation + loginMode establishment
+   * + credential population/submission ONLY — never a LOGGED_IN verdict surface. */
   authSurfaceUrl: string;
+  /** ESM session-probe URL (config-supplied): the seller-center, session-gated surface that is the
+   * ONLY navigation allowed to produce a LOGGED_IN verdict. Distinct from authSurfaceUrl; never falls
+   * back to it. */
+  sessionProbeUrl: string;
   /** ESM-family cross-origin frame allowlist (hostnames). */
   allowlist: readonly string[];
   /** `STORAGE_PROBE_SALT` for the form signature. */
@@ -182,13 +187,18 @@ export class ProgressiveReconnectChromeBrowser implements ProgressiveReconnectBr
   async inspectSession(): Promise<InspectionVerdict> {
     await this.ensureLaunched();
     const page = this.requirePage();
-    await page.goto(this.opts.authSurfaceUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    // LOGGED_IN may ONLY be produced from the session-probe (seller-center) surface — never the login
+    // page, whose "login" URL category makes a LOGGED_IN verdict structurally unreachable.
+    await page.goto(this.opts.sessionProbeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
     const cls = await classifyOpenEsmReviewPage(page, this.opts.allowlist);
     return cls.signals.sessionVerdict === "LOGGED_IN" ? "LOGGED_IN" : "NOT_LOGGED_IN";
   }
 
   async establishLoginMode(strategy: InitialFormStrategy): Promise<CredentialPopulationObservation> {
     const page = this.requirePage();
+    // inspectSession left the page on the session-probe surface; bring it to the auth/login surface —
+    // loginMode establishment + credential population use the auth URL only.
+    await page.goto(this.opts.authSurfaceUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
     if (strategy === "DOCUMENT_START_BOOTSTRAP") {
       const plan = boundedBootstrapPlan(strategy);
       const added = await this.client!.send("Page.addScriptToEvaluateOnNewDocument", { source: bootstrapSource(plan.maxAttempts) });
@@ -235,6 +245,8 @@ export class ProgressiveReconnectChromeBrowser implements ProgressiveReconnectBr
     await page.click('[data-la-submit="1"]', { timeout: 8000 });
     this.submitClickCount++;
     await sleep(1500);
+    // Verify the post-submit logged-in state ONLY from the session-probe surface, never the login page.
+    await page.goto(this.opts.sessionProbeUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
     const cls = await classifyOpenEsmReviewPage(page, this.opts.allowlist);
     return cls.signals.sessionVerdict === "LOGGED_IN" ? "LOGGED_IN" : "NOT_LOGGED_IN";
   }
