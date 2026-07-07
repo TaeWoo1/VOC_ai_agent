@@ -1,0 +1,88 @@
+/**
+ * Test-only helpers for driving the bridge with the real `ws` client, so tests exercise the actual
+ * library handshake/framing and can fully control the handshake headers (Origin) and observe 101-vs-rejection.
+ */
+import WebSocket from "ws";
+
+export interface ConnectResult {
+  status: number;
+  ws?: WebSocket;
+}
+
+/**
+ * Open a WS connection with an explicit Origin. Resolves 101 (+ the open socket) on success, or the HTTP
+ * rejection status the server returned (bad origin / bad ticket) on failure.
+ */
+export function connect(opts: { port: number; path: string; origin?: string }): Promise<ConnectResult> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${opts.port}${opts.path}`, {
+      origin: opts.origin,
+      // `ws` also accepts headers; origin above sets the Origin header.
+    });
+    // Attach the reader NOW (not on open) — the server sends hello+snapshot synchronously right after the
+    // handshake, before this promise resolves, so a later listener would miss them.
+    ensureReader(ws);
+    let settled = false;
+    ws.on("open", () => { if (!settled) { settled = true; resolve({ status: 101, ws }); } });
+    ws.on("unexpected-response", (_req, res) => {
+      if (!settled) { settled = true; resolve({ status: res.statusCode ?? 0 }); }
+      res.resume();
+      ws.terminate();
+    });
+    ws.on("error", (err) => {
+      // A handshake rejection surfaces as 'unexpected-response' (handled above); a raw connection error only
+      // rejects if we haven't already settled.
+      if (!settled) { settled = true; reject(err); }
+    });
+  });
+}
+
+interface Reader {
+  queue: Record<string, unknown>[];
+  waiter?: { count: number; resolve: (m: Record<string, unknown>[]) => void };
+}
+const readers = new WeakMap<WebSocket, Reader>();
+
+function tryResolve(r: Reader): void {
+  if (r.waiter && r.queue.length >= r.waiter.count) {
+    const msgs = r.queue.splice(0, r.waiter.count);
+    const w = r.waiter;
+    r.waiter = undefined;
+    w.resolve(msgs);
+  }
+}
+
+/** Attach the single persistent 'message' listener + shared queue for a socket (idempotent). */
+function ensureReader(ws: WebSocket): Reader {
+  let r = readers.get(ws);
+  if (!r) {
+    const reader: Reader = { queue: [] };
+    ws.on("message", (data: WebSocket.RawData, isBinary: boolean) => {
+      if (isBinary) return;
+      try { reader.queue.push(JSON.parse(data.toString())); } catch { /* ignore non-JSON */ }
+      tryResolve(reader);
+    });
+    readers.set(ws, reader);
+    r = reader;
+  }
+  return r;
+}
+
+/**
+ * Read the next `count` server→client JSON messages (cumulative). ONE persistent 'message' listener per
+ * socket feeds a shared queue, so sequential reads never drop frames that arrive between calls.
+ */
+export function readMessages(ws: WebSocket, count: number, timeoutMs = 8000): Promise<Record<string, unknown>[]> {
+  const reader = ensureReader(ws);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { reader.waiter = undefined; reject(new Error(`timeout: queued ${reader.queue.length}/${count}`)); }, timeoutMs);
+    reader.waiter = { count, resolve: (m) => { clearTimeout(timer); resolve(m); } };
+    tryResolve(reader);
+  });
+}
+
+/** Fixed injected clock helper for deterministic pairing tests. */
+export function fixedClock(startMs = 1_000_000): { now: () => number; advance: (ms: number) => void } {
+  let t = startMs;
+  return { now: () => t, advance: (ms: number) => { t += ms; } };
+}

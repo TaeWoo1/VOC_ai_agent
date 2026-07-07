@@ -25,13 +25,18 @@
     "diagnose-selection-state-same-session": "tsx src/cli/diagnose-selection-state-same-session.ts",
     "classify-account-store-same-session": "tsx src/cli/classify-account-store-same-session.ts",
     "continue-account-store-same-session": "tsx src/cli/continue-account-store-same-session.ts",
-    "local-agent": "tsx src/cli/local-agent.ts"
+    "local-agent": "tsx src/cli/local-agent.ts",
+    "bridge": "tsx src/cli/bridge.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/ws": "^8.18.1",
     "playwright": "^1.49.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
   }
 }

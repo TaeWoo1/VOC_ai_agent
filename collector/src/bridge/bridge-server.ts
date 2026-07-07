@@ -1,0 +1,465 @@
+/**
+ * **Local Agent Bridge server (loopback transport shell).** Wraps the pure pairing/event/origin security
+ * core in a minimal `node:http` server that listens ONLY on loopback and speaks the bridge protocol (slice
+ * §0, §5, §11). The WebSocket transport is the mature **`ws`** library (no hand-rolled RFC6455 framing):
+ * `ws` handles the handshake, framing, ping/pong, close, malformed clients, and abrupt disconnects, with an
+ * explicit `maxPayload` cap and compression disabled. Binary payloads are rejected — G1 is JSON text only.
+ *
+ * The security decisions stay OURS and run BEFORE `ws` ever sees the socket: loopback-only bind, explicit
+ * origin allow (never wildcard), single-use ticket consume with replay protection, and an unauthenticated
+ * health surface that carries no pairing/connection detail. G1 is pairing + observability only — there are
+ * NO marketplace-workflow / browser-control / click / credential commands.
+ */
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
+import { WebSocketServer, WebSocket, type RawData } from "ws";
+import { log } from "../log";
+import {
+  AGENT_CAPABILITIES,
+  BRIDGE_PROTOCOL_VERSION,
+  SUPPORTED_EVENT_CATEGORIES,
+  isProtocolCompatible,
+  type BridgeConnectionState,
+  type BridgeConnectionView,
+  type BridgeHealth,
+  type BridgeSnapshot,
+  type ClientMessage,
+  type ServerMessage,
+} from "./protocol";
+import { isOriginAllowed } from "./origin-policy";
+import type { FilePairingStore } from "./pairing-store";
+import { renderConfirmationPage } from "./confirmation-page";
+import type { BridgeEventPort } from "./event-adapter";
+
+const LOOPBACK = "127.0.0.1";
+const MAX_BODY_BYTES = 16 * 1024;
+/** Cap a single WS message. G1 messages are tiny JSON control frames; `ws` closes 1009 on excess. */
+const MAX_MESSAGE_BYTES = 64 * 1024;
+
+export interface BridgeServerDeps {
+  store: FilePairingStore;
+  allowedOrigins: string[];
+  agentVersion: string;
+  host?: string;
+  port: number;
+  /**
+   * DEV/TEST ONLY pairing relaxation (slice §0.4): auto-approve pairing requests so no human local
+   * confirmation click is needed. The CLI refuses to set this in production. Loudly logged when active.
+   */
+  autoApprovePairing?: boolean;
+}
+
+export class BridgeServer {
+  private readonly http: Server;
+  private readonly wss: WebSocketServer;
+  private readonly store: FilePairingStore;
+  private readonly allowedOrigins: string[];
+  private readonly agentVersion: string;
+  private readonly host: string;
+  private readonly wantPort: number;
+  private readonly autoApprovePairing: boolean;
+  private boundPort = 0;
+  private readonly clients = new Map<WebSocket, string>(); // ws → pairingId
+  private readonly connections = new Map<string, BridgeConnectionView>();
+
+  constructor(deps: BridgeServerDeps) {
+    this.store = deps.store;
+    this.allowedOrigins = deps.allowedOrigins;
+    this.agentVersion = deps.agentVersion;
+    this.host = deps.host ?? LOOPBACK;
+    this.wantPort = deps.port;
+    this.autoApprovePairing = deps.autoApprovePairing ?? false;
+    if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
+    this.http = createServer((req, res) => void this.onRequest(req, res));
+    // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES, perMessageDeflate: false });
+    this.http.on("upgrade", (req, socket, head) => this.onUpgrade(req, socket as Socket, head));
+  }
+
+  /** Start listening on loopback. Rejects on EADDRINUSE (a duplicate agent is already bound — §10). */
+  listen(): Promise<{ port: number }> {
+    return new Promise((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException): void => {
+        this.http.off("listening", onListening);
+        reject(err);
+      };
+      const onListening = (): void => {
+        this.http.off("error", onError);
+        const addr = this.http.address();
+        this.boundPort = typeof addr === "object" && addr ? addr.port : this.wantPort;
+        log("bridge_listen", { port: this.boundPort, host: this.host });
+        resolve({ port: this.boundPort });
+      };
+      this.http.once("error", onError);
+      this.http.once("listening", onListening);
+      this.http.listen(this.wantPort, this.host);
+    });
+  }
+
+  async close(): Promise<void> {
+    for (const ws of this.clients.keys()) {
+      try { ws.terminate(); } catch { /* already gone */ }
+    }
+    this.clients.clear();
+    await new Promise<void>((resolve) => this.wss.close(() => resolve()));
+    await new Promise<void>((resolve) => this.http.close(() => resolve()));
+  }
+
+  address(): { port: number } {
+    return { port: this.boundPort };
+  }
+
+  /** Seed the configured connections (real connection refs) so the snapshot is populated before settle. */
+  seedConnections(refs: readonly string[]): void {
+    for (const ref of refs) {
+      if (!this.connections.has(ref)) {
+        this.connections.set(ref, { ref, state: "starting", pendingUserAction: null, browserOpen: false });
+      }
+    }
+  }
+
+  private selfOrigins(): string[] {
+    return [`http://127.0.0.1:${this.boundPort}`, `http://localhost:${this.boundPort}`];
+  }
+
+  // ---- HTTP -----------------------------------------------------------------
+
+  private async onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const url = new URL(req.url ?? "/", `http://${LOOPBACK}`);
+    const path = url.pathname;
+    const method = req.method ?? "GET";
+
+    // The SellerOps frontend origin differs from this loopback agent, so cross-origin fetches need CORS.
+    // Echo ONLY an explicitly-allowed origin (never a wildcard). WS handshakes are checked separately.
+    const origin = header(req, "origin");
+    const originAllowed = !!origin && isOriginAllowed(origin, this.allowedOrigins);
+    if (originAllowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin!);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    }
+    if (method === "OPTIONS") {
+      if (originAllowed && header(req, "access-control-request-private-network")) {
+        res.setHeader("Access-Control-Allow-Private-Network", "true");
+      }
+      res.writeHead(originAllowed ? 204 : 403);
+      res.end();
+      return;
+    }
+
+    try {
+      if (method === "GET" && path === "/bridge/health") return this.handleHealth(req, res);
+      if (method === "POST" && path === "/bridge/pair/request") return await this.handlePairRequest(req, res);
+      if (method === "GET" && path === "/bridge/confirm") return this.handleConfirmPage(url, res);
+      if (method === "POST" && path === "/bridge/pair/confirm") return await this.handleConfirm(req, res);
+      if (method === "POST" && path === "/bridge/pair/poll") return await this.handlePoll(req, res);
+      if (method === "POST" && path === "/bridge/ws-ticket") return await this.handleWsTicket(req, res);
+      if (method === "POST" && path === "/bridge/revoke") return await this.handleRevoke(req, res);
+      if (method === "POST" && path === "/bridge/agent/revoke") return await this.handleAgentRevoke(req, res);
+      sendJson(res, 404, { error: "not_found" });
+    } catch {
+      sendJson(res, 500, { error: "internal" });
+    }
+  }
+
+  private handleHealth(req: IncomingMessage, res: ServerResponse): void {
+    // MINIMUM presence + protocol only — no pairing state, no account/connection/marketplace/personal data
+    // (slice §E). A disallowed browser Origin is rejected; curl (no Origin) is fine.
+    const origin = header(req, "origin");
+    if (origin && !isOriginAllowed(origin, this.allowedOrigins)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const body: BridgeHealth = {
+      ok: true,
+      service: "sellerops-local-agent",
+      agentVersion: this.agentVersion,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    };
+    sendJson(res, 200, body);
+  }
+
+  private async handlePairRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const body = await readJson(req);
+    const workspaceLabel = typeof body?.workspaceLabel === "string" ? body.workspaceLabel.slice(0, 80) : "SellerOps";
+    const { requestId, confirmationCode } = this.store.registry.requestPairing(origin!, workspaceLabel);
+    if (this.autoApprovePairing) {
+      // DEV/TEST relaxation only — skip the human local confirmation click (never enabled in production).
+      const r = this.store.registry.confirmPairing(requestId, "allow");
+      if (r.ok) this.store.persist();
+    }
+    log("bridge_pair_requested", { requestId });
+    sendJson(res, 200, {
+      requestId,
+      confirmationCode,
+      confirmUrl: `http://127.0.0.1:${this.boundPort}/bridge/confirm?requestId=${requestId}`,
+    });
+  }
+
+  private handleConfirmPage(url: URL, res: ServerResponse): void {
+    const requestId = url.searchParams.get("requestId") ?? "";
+    const view = this.store.registry.getRequestView(requestId);
+    if (!view) {
+      res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><meta charset=utf-8><p>만료되었거나 알 수 없는 연결 요청입니다.</p>");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderConfirmationPage({ requestId, origin: view.origin, workspaceLabel: view.workspaceLabel, confirmationCode: view.confirmationCode }));
+  }
+
+  private async handleConfirm(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Only the agent-owned confirmation page (same loopback origin) may confirm. A cross-site fetch carries
+    // a foreign Origin and is rejected — preventing a malicious page from auto-approving a pairing.
+    const origin = header(req, "origin");
+    if (origin && !this.selfOrigins().includes(origin)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const body = await readJson(req);
+    const requestId = typeof body?.requestId === "string" ? body.requestId : "";
+    const decision = body?.decision === "allow" ? "allow" : "deny";
+    const result = this.store.registry.confirmPairing(requestId, decision);
+    if (result.ok && decision === "allow") this.store.persist();
+    log("bridge_pair_confirmed", { ok: result.ok, allowed: decision === "allow" });
+    sendJson(res, result.ok ? 200 : 409, { ok: result.ok });
+  }
+
+  private async handlePoll(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const body = await readJson(req);
+    const requestId = typeof body?.requestId === "string" ? body.requestId : "";
+    sendJson(res, 200, this.store.registry.pollPairing(requestId));
+  }
+
+  private async handleWsTicket(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const token = bearer(req);
+    const body = await readJson(req);
+    const clientVersion = typeof body?.clientProtocolVersion === "number" ? body.clientProtocolVersion : -1;
+    if (!token) {
+      sendJson(res, 401, { error: "unpaired" });
+      return;
+    }
+    const pairing = this.store.registry.authenticate(token);
+    if (!pairing) {
+      sendJson(res, 401, { error: "unpaired" });
+      return;
+    }
+    if (!isProtocolCompatible(clientVersion, BRIDGE_PROTOCOL_VERSION)) {
+      sendJson(res, 409, { error: "incompatible_version", agentProtocolVersion: BRIDGE_PROTOCOL_VERSION });
+      return;
+    }
+    const { ticket, expiresInMs } = this.store.registry.mintTicket(pairing.pairingId);
+    // NEVER log the ticket or token — only the opaque pairingId.
+    log("bridge_ticket_minted", { pairingId: pairing.pairingId });
+    sendJson(res, 200, { ticket, expiresInMs });
+  }
+
+  private async handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const token = bearer(req);
+    const result = token ? this.store.registry.revokeByToken(token) : { ok: false };
+    if (result.ok) {
+      this.store.persist();
+      this.dropSocketsWithoutValidPairing();
+    }
+    log("bridge_revoked", { ok: result.ok, initiator: "frontend" });
+    sendJson(res, result.ok ? 200 : 404, { ok: result.ok });
+  }
+
+  private async handleAgentRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Agent-side revoke: callable only from the agent's own loopback surface (self-origin or no browser origin).
+    const origin = header(req, "origin");
+    if (origin && !this.selfOrigins().includes(origin)) {
+      sendJson(res, 403, { error: "bad_origin" });
+      return;
+    }
+    const body = await readJson(req);
+    const pairingId = typeof body?.pairingId === "string" ? body.pairingId : "";
+    const result = this.store.registry.revoke(pairingId);
+    if (result.ok) {
+      this.store.persist();
+      this.dropSocketsWithoutValidPairing();
+    }
+    log("bridge_revoked", { ok: result.ok, initiator: "agent" });
+    sendJson(res, result.ok ? 200 : 404, { ok: result.ok });
+  }
+
+  // ---- WebSocket (via `ws`) -------------------------------------------------
+
+  private onUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
+    const reject = (code: number, reason: string): void => {
+      log("bridge_ws_rejected", { reason });
+      socket.write(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+    };
+    const url = new URL(req.url ?? "/", `http://${LOOPBACK}`);
+    if (url.pathname !== "/bridge/ws") return reject(404, "not_found");
+
+    // Our security checks run BEFORE `ws` upgrades the socket.
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) return reject(403, "bad_origin");
+
+    const ticket = url.searchParams.get("ticket") ?? "";
+    const consumed = this.store.registry.consumeTicket(ticket);
+    if (!consumed.ok) return reject(401, "bad_ticket");
+
+    this.wss.handleUpgrade(req, socket, head, (ws) => this.onWsConnection(ws, consumed.pairingId));
+  }
+
+  private onWsConnection(ws: WebSocket, pairingId: string): void {
+    this.clients.set(ws, pairingId);
+    log("bridge_ws_accepted", { pairingId });
+
+    ws.on("message", (data: RawData, isBinary: boolean) => {
+      if (isBinary) {
+        // G1 is JSON text only — a binary payload is unsupported.
+        ws.close(1003, "binary_unsupported");
+        return;
+      }
+      let msg: ClientMessage | null = null;
+      try { msg = JSON.parse(data.toString()) as ClientMessage; } catch { msg = null; }
+      if (msg?.type === "request_snapshot") this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
+      // {type:"ping"} app-level heartbeat needs no reply beyond keeping the socket alive; `ws` handles
+      // protocol-level ping/pong automatically.
+    });
+    ws.on("close", () => this.clients.delete(ws));
+    ws.on("error", () => { this.clients.delete(ws); try { ws.terminate(); } catch { /* gone */ } });
+
+    // Immediately negotiate + send the current snapshot so a (re)connecting tab restores state.
+    this.sendTo(ws, {
+      type: "hello",
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      agentVersion: this.agentVersion,
+      capabilities: AGENT_CAPABILITIES,
+      supportedEvents: SUPPORTED_EVENT_CATEGORIES,
+    });
+    this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
+  }
+
+  private dropSocketsWithoutValidPairing(): void {
+    for (const [ws, pairingId] of this.clients) {
+      const stillValid = this.store.registry.listPairings().some((p) => p.pairingId === pairingId && !p.revoked);
+      if (!stillValid) ws.close(1000, "revoked");
+    }
+  }
+
+  private sendTo(ws: WebSocket, msg: ServerMessage): void {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  }
+
+  private broadcast(msg: ServerMessage): void {
+    const text = JSON.stringify(msg);
+    for (const ws of this.clients.keys()) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(text);
+    }
+  }
+
+  private snapshot(): BridgeSnapshot {
+    return {
+      agentVersion: this.agentVersion,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      capabilities: AGENT_CAPABILITIES,
+      supportedEvents: SUPPORTED_EVENT_CATEGORIES,
+      connections: [...this.connections.values()],
+    };
+  }
+
+  private upsert(ref: string, mutate: (v: BridgeConnectionView) => void): BridgeConnectionView {
+    const existing = this.connections.get(ref) ?? { ref, state: "starting", pendingUserAction: null, browserOpen: false };
+    mutate(existing);
+    this.connections.set(ref, existing);
+    return existing;
+  }
+
+  /** The transport-neutral event port the runtime/observer calls at execution time (slice §8/§11). */
+  readonly events: BridgeEventPort = {
+    connectionState: (ref, state) => {
+      this.upsert(ref, (v) => { v.state = state; });
+      this.broadcast({ type: "event", category: "connection_lifecycle", ref, payload: { state } });
+    },
+    browserOpen: (ref, open) => {
+      this.upsert(ref, (v) => { v.browserOpen = open; });
+      this.broadcast({ type: "event", category: "browser_lifecycle", ref, payload: { browserOpen: open } });
+    },
+    pendingUserAction: (ref, action) => {
+      this.upsert(ref, (v) => { v.pendingUserAction = action; });
+      this.broadcast({ type: "event", category: "pending_user_action", ref, payload: action ? { pendingUserAction: action } : {} });
+    },
+    collectionProgress: (ref, progress) => {
+      this.broadcast({ type: "event", category: "collection_progress", ref, payload: { progress } });
+    },
+    collectionResult: (ref, result) => {
+      this.broadcast({ type: "event", category: "collection_result", ref, payload: { result } });
+    },
+    recoverableFailure: (ref, reasonCode) => {
+      this.broadcast({ type: "event", category: "recoverable_failure", ref, payload: { failure: "recoverable", ...(reasonCode ? { reasonCode } : {}) } });
+    },
+    terminalFailure: (ref, reasonCode) => {
+      this.broadcast({ type: "event", category: "terminal_failure", ref, payload: { failure: "terminal", ...(reasonCode ? { reasonCode } : {}) } });
+    },
+    agentLifecycle: (state) => {
+      this.broadcast({ type: "event", category: "agent_lifecycle", ref: null, payload: { reasonCode: state } });
+    },
+  };
+}
+
+// ---- small HTTP helpers -----------------------------------------------------
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const v = req.headers[name];
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function bearer(req: IncomingMessage): string | undefined {
+  const auth = header(req, "authorization");
+  if (!auth) return undefined;
+  const m = /^Bearer\s+(.+)$/i.exec(auth);
+  return m ? m[1] : undefined;
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  const text = JSON.stringify(body);
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(text);
+}
+
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    if (total > MAX_BODY_BYTES) return null;
+    chunks.push(chunk as Buffer);
+  }
+  if (chunks.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// `BridgeConnectionState` re-exported for callers seeding real connection state.
+export type { BridgeConnectionState };

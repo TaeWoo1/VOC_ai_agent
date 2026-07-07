@@ -3,6 +3,11 @@ import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { MobileNav } from "./MobileNav";
+import { BridgeStatus } from "./bridge/BridgeStatus";
+
+// The Local Agent Bridge status surface is opt-in (Guided-Connection infra G1). It is absent from the
+// default app and only mounts when the bridge is explicitly enabled — it does not alter navigation.
+const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
 
 export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -25,6 +30,11 @@ export function AppShell() {
           </div>
         </main>
       </div>
+      {AGENT_BRIDGE_ENABLED && (
+        <div className="fixed bottom-4 right-4 z-40 w-80 max-w-[calc(100vw-2rem)]">
+          <BridgeStatus />
+        </div>
+      )}
     </div>
   );
 }

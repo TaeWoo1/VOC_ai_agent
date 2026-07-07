@@ -78,8 +78,9 @@
 ### 3.4 프론트↔에이전트 페어링/이벤트 계약
 - **책임**: 안전한 로컬 페어링(토큰/포트/오리진), 실시간 상태 이벤트(현재 단계·로그인 필요·브라우저
   열림·완료/실패), 브라우저/세션 수명 보고.
-- **현행 증거**: **통신 채널 없음**. 개념적 상태는 존재(`LocalAgentState` 12상태, `ConnectorStartupResult`,
-  `ConnectorOrchestratorObserver` settle 콜백)하나 프론트로 나가는 전송이 없다.
+- **현행 증거**: **통신 채널 없음**. 개념적 상태는 존재(`LocalAgentState` **11상태**
+  (`collector/src/agent/local-agent-state.ts`), `ConnectorStartupResult`, `ConnectorOrchestratorObserver`
+  settle 콜백)하나 프론트로 나가는 전송이 없다. (정정 2026-07-08: 이전 "12상태"는 오기.)
 - **sanitized 계약**: 이벤트는 enum/boolean/coarse bucket/16-hex만(collector `log.ts` safeMeta,
   `connector-orchestrator.ts`). raw URL/좌표/DOM/자격증명 노출 금지 — 프로젝션 코치마크에 좌표/URL이
   필요하면 **로컬 신뢰 채널 예외**를 별도 결정해야 한다(§7 [PO-DECISION]).
