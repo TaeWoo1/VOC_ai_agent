@@ -435,7 +435,7 @@ describe("decideRun (pure launch decision)", () => {
   const oneConn = JSON.stringify([
     { connectionId: "A", channel: "ESM", loginMode: "GMARKET", autoReconnectConsent: true, autoSubmitConsent: true, assistedReconnectConsent: true },
   ]);
-  const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", STORAGE_PROBE_SALT: "salt" };
+  const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", ESM_SESSION_PROBE_URL: "https://example.test/manage", STORAGE_PROBE_SALT: "salt" };
 
   it("without the approval flag → DRY_RUN, no live config surfaced (main never boots)", () => {
     const d = decideRun([], oneConn, liveEnv);
@@ -448,7 +448,7 @@ describe("decideRun (pure launch decision)", () => {
     expect(d.mode).toBe("DRY_RUN");
     if (d.mode !== "DRY_RUN") return;
     expect(d.approved).toBe(true);
-    expect(d.missingConfig.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "STORAGE_PROBE_SALT"]);
+    expect(d.missingConfig.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "ESM_SESSION_PROBE_URL", "STORAGE_PROBE_SALT"]);
   });
 
   it("approved AND live config present → LIVE_BOOT", () => {
@@ -478,14 +478,14 @@ describe("decideRun (pure launch decision)", () => {
   it("resolveBrowserRuntimeConfig reports the two required browser-config categories when absent", () => {
     const r = resolveBrowserRuntimeConfig({});
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "STORAGE_PROBE_SALT"]);
+    if (!r.ok) expect(r.missing.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "ESM_SESSION_PROBE_URL", "STORAGE_PROBE_SALT"]);
   });
 });
 
 // ── decideRun strategy-aware gating (browser env/approval required only for runnable browser) ─────
 describe("decideRun strategy-aware live-config gating", () => {
   const noEnv: NodeJS.ProcessEnv = {}; // deliberately no ESM_AUTH_SURFACE_URL / STORAGE_PROBE_SALT
-  const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", STORAGE_PROBE_SALT: "salt" };
+  const liveEnv: NodeJS.ProcessEnv = { ESM_AUTH_SURFACE_URL: "https://example.test/login", ESM_SESSION_PROBE_URL: "https://example.test/manage", STORAGE_PROBE_SALT: "salt" };
   const browserEntry = { connectionId: "b", channel: "ESM", loginMode: "ESM_PLUS", autoReconnectConsent: true, autoSubmitConsent: true, assistedReconnectConsent: true };
 
   it("an API-only config does NOT require ESM browser config — it boots directly with no browser config", () => {
@@ -511,7 +511,7 @@ describe("decideRun strategy-aware live-config gating", () => {
     const dry = decideRun([], mixed, noEnv);
     expect(dry.mode).toBe("DRY_RUN");
     if (dry.mode === "DRY_RUN") {
-      expect(dry.missingConfig.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "STORAGE_PROBE_SALT"]);
+      expect(dry.missingConfig.sort()).toEqual(["ESM_AUTH_SURFACE_URL", "ESM_SESSION_PROBE_URL", "STORAGE_PROBE_SALT"]);
     }
     // Approved AND browser env present → LIVE_BOOT with a browser config, flagged as requiring the browser.
     const live = decideRun([LOCAL_AGENT_APPROVAL_FLAG], mixed, liveEnv);

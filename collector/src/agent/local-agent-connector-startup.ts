@@ -34,7 +34,8 @@
  */
 
 import { createLocalAgentProgressiveService, type ProgressiveReconnectServiceConfig } from "./local-agent-progressive-service";
-import type { ProgressiveServiceLike } from "./local-agent-startup";
+import type { ProgressiveServiceLike, ProgressiveSnapshot } from "./local-agent-startup";
+import type { UserActionCategory } from "./progressive-reconnect";
 import {
   dedicatedProfileIdFor,
   initialFormStrategyForMode,
@@ -256,13 +257,33 @@ export function buildConnectorHandles(
  */
 export class LocalAgentConnectorStartup {
   private readonly orchestrator: ConnectorOrchestrator;
+  /** The shared browser-auth service, realized at most once (only when a runnable browser connection
+   * exists). Retained so a post-boot `humanCompleted` can re-verify the SAME live browser. */
+  private cachedBrowserService: ProgressiveServiceLike | null = null;
 
   constructor(
     /** Lazy provider of the shared browser-auth service — realized only when a runnable browser connection exists. */
-    private readonly browserService: () => ProgressiveServiceLike,
+    private readonly browserServiceProvider: () => ProgressiveServiceLike,
     observer?: ConnectorOrchestratorObserver,
   ) {
     this.orchestrator = new ConnectorOrchestrator(observer);
+  }
+
+  /** Realize (once) and retain the shared browser-auth service. */
+  private sharedBrowserService(): ProgressiveServiceLike {
+    return (this.cachedBrowserService ??= this.browserServiceProvider());
+  }
+
+  /**
+   * Same-process re-verification: the operator finished the pending fallback action for `connectionId`,
+   * so run exactly ONE fresh in-session inspection on the STILL-OPEN browser (never a cold restart). The
+   * transition reaches READY/LOGGED_IN only when the session-probe inspection verifies it; otherwise it
+   * stays NEEDS_USER_ACTION. Returns the sanitized snapshot, or null when no browser service was realized
+   * (e.g. an API/discovery-only boot) or the connection is unmanaged.
+   */
+  async humanCompleted(connectionId: string, action: UserActionCategory): Promise<ProgressiveSnapshot | null> {
+    if (this.cachedBrowserService === null) return null;
+    return this.cachedBrowserService.humanCompleted(connectionId, action);
   }
 
   /**
@@ -272,7 +293,7 @@ export class LocalAgentConnectorStartup {
    * connection. Returns one sanitized {@link ConnectorStartupResult} per connection.
    */
   async boot(connections: readonly ValidatedConnectorConnection[]): Promise<ConnectorStartupResult[]> {
-    return this.orchestrator.boot(buildConnectorHandles(connections, { browserService: this.browserService }));
+    return this.orchestrator.boot(buildConnectorHandles(connections, { browserService: () => this.sharedBrowserService() }));
   }
 
   /** Stop every started connector exactly once, isolated + idempotent. */
