@@ -24,9 +24,43 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
   - The two-disconnect root cause (below) was resolved by the A+B slice: (A) `inspectSession()` now
     classifies the seller-center `ESM_SESSION_PROBE_URL` (login page can never yield `LOGGED_IN`);
     (B) a production `humanCompleted` trigger wired into `local-agent` via a per-connection sentinel.
-  - Next single action: **profile-alignment check before G3** — verify whether the capture CLI can be
-    pointed at `local-agent`'s resolved `esm-agent-<hash>` profile (deferred; not solved in this slice).
-    Do not proceed to G2/G3 without approval.
+  - **Profile alignment — CODE COMPLETE; live session hand-off found INSUFFICIENT (2026-07-08, branch
+    `ops/esm-profile-alignment`, uncommitted slice).**
+    The capture path and `local-agent` now resolve the SAME connection-owned profile via one shared
+    resolver `connectionProfileDirFor(profileBaseDir, connectionId)` (see
+    [`live-capture-plan.md` §3.1](./live-capture-plan.md)); capture is connection-explicit
+    (`--connection-id` + `--connections`, fail-closed, no `.profile/esm` fallback).
+    - **Deterministic identity equality PROVEN:** for `esm-live-g0`, `resolveCaptureConnectionProfile`
+      and the local-agent resolver both yield leaf `esm-agent-53b946f1c770dddb0b83890d`
+      (`identityEqual: true`).
+    - **G0 assisted login → READY (2026-07-08, live, operator-supervised):** boot settled
+      `NEEDS_USER_ACTION` / `RECONNECT_REQUIRED` / `MANUAL_LOGIN` (overnight expiry); operator completed
+      the ESM_PLUS login in the open browser; one connection-specific human-completed sentinel →
+      same-process re-inspection → `HUMAN_COMPLETED_REVERIFY localAgentState=READY`. No CAPTCHA/2FA
+      bypass, no credentials typed. `local-agent` then stopped cleanly (Chrome released), no cold restart.
+    - **Capture session-reuse — FAILED in the tested flow (KEY FINDING):** with `local-agent` fully
+      stopped, launching `capture-esm-review --connection-id esm-live-g0 …` opened the **identical**
+      profile (`esm-agent-53b946f1c770dddb0b83890d`, confirmed by the live process `--user-data-dir`) but
+      the ESM review surface **presented a login page**. In the verified `local-agent` shutdown → separate
+      capture launch flow, the authenticated ESM session was **not reusable after the browser restart,
+      despite using the identical profile directory**. This is **not** a resolver defect (the profile
+      resolved exactly right). Capture was stopped cleanly at the login screen — no sentinel created, no
+      export click, no download, no read, no profile copy/alter. (Scope of the claim: this one tested
+      shutdown → separate-launch flow — not a general assertion that ESM never persists a session across
+      every browser restart.)
+    - **Conclusion:** profile alignment is **necessary**, but **alone insufficient in this tested flow**
+      for live session reuse. Carrying a G0 session into capture requires **same-browser continuity**
+      (capture executes through the live `local-agent` browser instead of launching a fresh one) — or a
+      fresh login. This is a **product/architecture decision** for a separate slice, not something to
+      resolve by expanding this one.
+    - **G2 re-verification — SKIPPED:** no authenticated review surface was reachable in capture (login
+      shown), so marketplace verification could not run without a re-login / slice expansion. Still pending.
+    - verification: collector `typecheck` green; full suite **130 files, 2238 passed, 1 skipped**;
+      `git diff --check` clean. Uncommitted (HOLD).
+  - Next single action: **product/architecture decision on session hand-off** — decide whether capture
+    should attach to the live `local-agent` browser (same-browser hand-off, no restart) so the G0 session
+    is reused, vs. keeping separate launches (which require a fresh login per the finding above). Do not
+    expand the slice or start G3 without that decision.
   - Historical context (dedicated profile / prior blocker):
   - Gap: these diagnostic launches bypassed the established reconnect orchestration
     (`progressive-reconnect*`); the durable path is promoted in skill `esm-session-reconnect`.

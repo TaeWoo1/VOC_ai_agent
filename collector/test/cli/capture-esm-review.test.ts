@@ -80,10 +80,20 @@ describe("capture-esm-review — exactly-one-click / observe-and-discard boundar
     expect(/from\s+["'][^"']*review-upload[^"']*["']/.test(code)).toBe(false);
   });
 
-  it("uses the separate ESM profile + ESM sentinel (not NAVER's)", () => {
-    expect(/cfg\.esmProfileDir/.test(code)).toBe(true);
-    expect(/esmSentinelPathFor\s*\(/.test(code)).toBe(true);
+  it("is connection-explicit: resolves the ESM profile from a validated --connection-id, no implicit fallback", () => {
+    // Live capture must name an ESM connection and resolve its dedicated profile via the SHARED resolver —
+    // never the unattributed default `.profile/esm`, and never NAVER's profile.
+    expect(/--connection-id/.test(code)).toBe(true);
+    expect(/--connections/.test(code)).toBe(true);
+    expect(/resolveCaptureConnectionProfile\s*\(/.test(code)).toBe(true);
+    expect(/from\s+["']\.\/esm-capture-connection["']/.test(code)).toBe(true);
+    expect(/cfg\.profileBaseDir/.test(code)).toBe(true);
+    // No implicit `.profile/esm` fallback for a live capture, and never NAVER's profile.
+    expect(/cfg\.esmProfileDir/.test(code)).toBe(false);
     expect(/cfg\.profileDir\b/.test(code)).toBe(false);
+    // Fails closed (non-zero exit) when the connection does not resolve.
+    expect(/!resolution\.ok/.test(code)).toBe(true);
+    expect(/esmSentinelPathFor\s*\(/.test(code)).toBe(true);
     expect(/probe-sentinel/.test(code)).toBe(false);
   });
 

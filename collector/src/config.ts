@@ -14,6 +14,14 @@ export interface CollectorConfig {
   naverChannelCode: string;
   /** Persistent browser profile dir (live layer); holds the NAVER session locally only. */
   profileDir: string;
+  /**
+   * In-tree base dir under which every connection-owned dedicated ESM profile lives
+   * (`${profileBaseDir}/esm-agent-<hash>`). The SINGLE base shared by the local-agent reconnect
+   * path and the review-capture path, so both resolve a connection to the identical profile via
+   * `connectionProfileDirFor`. Fixed at `<collectorRoot>/.profile` — deliberately NOT env-overridable
+   * (the profile root is not externalized in this slice).
+   */
+  profileBaseDir: string;
   /** Where captured exports land (live layer). */
   downloadDir: string;
   /** Local status file the collector writes after each run. */
@@ -117,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     naverExpectedStoreFingerprint: env.NAVER_EXPECTED_STORE_FINGERPRINT,
     naverExpectedContinueCardFingerprint: env.NAVER_EXPECTED_CONTINUE_CARD_FINGERPRINT,
     profileDir: env.COLLECTOR_PROFILE_DIR ?? resolve(root, ".profile/naver"),
+    profileBaseDir: resolve(root, ".profile"),
     esmProfileDir: env.COLLECTOR_ESM_PROFILE_DIR ?? resolve(root, ".profile/esm"),
     esmFrameOriginAllowlist: parseHostAllowlist(env.ESM_FRAME_ORIGIN_ALLOWLIST),
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),

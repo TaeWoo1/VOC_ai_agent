@@ -10,9 +10,18 @@ using the project's established orchestration — not a one-off tool. This is ga
 [`docs/esm/live-capture-plan.md`](../../../docs/esm/live-capture-plan.md).
 
 ## Established code (use this, do not reinvent)
-- Dedicated profile: `collector/.profile/esm` (env `COLLECTOR_ESM_PROFILE_DIR`); launched
-  headed via `launchPersistentBrowser` (`collector/src/profile.ts`) — path-guarded to the
-  collector tree.
+- Connection-owned profile (shared by reconnect AND capture): resolve it through the ONE
+  resolver `connectionProfileDirFor(profileBaseDir, connectionId)`
+  (`collector/src/agent/progressive-reconnect.ts`) →
+  `${profileBaseDir}/esm-agent-<sha256("local-agent-profile "+connectionId)[:24]>`, where
+  `profileBaseDir = cfg.profileBaseDir` (the fixed in-tree `.profile` base). Same leaf as
+  `dedicatedProfileIdFor`. `local-agent` and `capture-esm-review` both launch this same dir headed
+  via `launchPersistentBrowser` (`collector/src/profile.ts`), path-guarded to the collector tree.
+  The identity is a function of `connectionId` ONLY (never marketplace/loginMode/kind). The legacy
+  `.profile/esm` default (`COLLECTOR_ESM_PROFILE_DIR`) is no longer used for a live ESM capture —
+  capture is connection-explicit and fails closed with no `.profile/esm` fallback. Never open the
+  same connection profile with `local-agent` and capture at once; stop the agent (clean shutdown
+  closes its Chrome) before starting capture on the same id.
 - Reconnect policy + runtime: `collector/src/agent/progressive-reconnect.ts`,
   `progressive-reconnect-runtime.ts`, `progressive-reconnect-chrome.ts`.
 - Same-session reconnect pre-step: `collector/src/naver/reconnect-resolve.ts`
@@ -89,6 +98,13 @@ using the project's established orchestration — not a one-off tool. This is ga
 - No data capture, no export, no upload, no DB write, no `LAST_SUCCESS`/status write in G0.
 - Cold restart may require re-login; treat cold-restart persistence as unproven (record it
   as a gap, do not assert it).
+- **Shared profile ≠ shared live session in the tested flow (verified 2026-07-08).** In the verified
+  `local-agent` shutdown → separate capture launch flow, the authenticated ESM session was not reusable
+  after the browser restart, despite using the identical profile directory (capture showed a login
+  page). Scoped to that flow — not a general claim that ESM never persists a session across every
+  restart. Aligning the profile is necessary but, in this flow, NOT sufficient to carry a session from
+  `local-agent` into a separately-launched capture. Live session reuse needs same-browser continuity
+  (capture executes through the running reconnect browser), not just the same profile dir.
 - One live run = one explicit per-run approval. Never on a schedule or standing auth.
 
 ## Done when
