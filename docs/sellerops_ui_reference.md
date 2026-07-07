@@ -1,5 +1,12 @@
 # SellerOps AI — Frontend UI Reference & Design Direction
 
+> **⚠️ SUPERSEDED — reference-only (2026-07-07).** 프론트엔드의 정본은
+> `docs/sellerops_frontend_spec.md`다. 본 문서의 유효 원칙(§1 제품 원칙, §5 모션, §6 접근성)은
+> 그 스펙 §9·§14로 흡수되었고, §4 화면별 매핑은 작성 시점 화면 기준이라 현행과 다르다
+> (예: `/inquiries` 부재, `/alerts`를 설정 폼으로 기술, 홈 8카드). 셀러센터 IA 참고(§2)와
+> ReactVibe 블록 후보(§3·§7)는 여전히 참고 자료로 유효하다. 역사 보존을 위해 원문은 수정하지
+> 않는다.
+
 **Mode:** Reference / design planning only. This document is the deliverable.
 No code is written, no UI is redesigned, nothing is installed, nothing is
 committed until approved. It records *where to look* and *what to reuse* when UI

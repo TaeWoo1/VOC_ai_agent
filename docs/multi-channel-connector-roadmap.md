@@ -4,8 +4,13 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 설계·로드맵 문서. **문서이며 구현이 아님** — 아래 어떤 항목도 라이브 접속/브라우저/업로드/DB 변경을
 지시하지 않는다. 실제 작업은 각 PR이 개별 승인될 때 별도로 진행한다.
 
-> Status: DRAFT (planning only). Authoritative code state at time of writing is summarized in
-> §1; 이 문서는 "무엇이 이미 있는가"와 "무엇이 새로 필요한가"를 정직하게 구분한다.
+> Status: **LIVING / CANONICAL (capability truth).** 본 문서의 §4.1 현행표가
+> (채널 × DataType × method × 상태)의 **유일한 현행 선언**이다. 다른 문서(제품 범위,
+> 프론트 스펙, CEO 원페이저, 페이즈 기록)는 채널 capability를 중복 서술하지 않고 이 표를
+> 참조한다. UI의 셀러 표기 문구도 이 표의 "셀러 표기" 열을 따른다.
+>
+> 변경 이력: 2026-07-07 — §1/§4.1/§5/부록 A 갱신(NAVER·Cafe24 라이브 검증 반영, 수집 전략
+> 교정 — 브라우저 자동화를 보편적 최후수단으로 규정하던 표현 폐기, 4단계 상태 모델 도입).
 
 ---
 
@@ -20,23 +25,32 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 - **스케줄 API-pull 파이프라인 존재**: `SyncScheduler → SyncScheduleClaimer → SyncScheduleRunner
   → SyncRunExecutor → PullConnector.fetch`. 기본 비활성(`sellerops.collect.scheduler-enabled=true`
   플래그). cursor/page 기반, rate-limit·backoff·DEGRADED escalation·alert 구현됨.
-- **6개 API 커넥터가 스캐폴드로 존재** — 전부 enable 플래그 뒤, 전부 `ORDER_SUMMARY`만 지원:
+- **API 커넥터 상태** (2026-07-07 갱신 — 상세·증거는 §4.1 현행표가 정본):
 
-  | 채널 | code | 커넥터 | 현재 지원 DataType | REVIEW API |
-  |---|---|---|---|---|
-  | NAVER | `NAVER` | `NaverApiConnector` | ORDER_SUMMARY | **없음** (공식 API 부재, 코드 주석 확인) |
-  | Cafe24 | `CAFE24` | `Cafe24ApiConnector` | ORDER_SUMMARY | 미확인 |
-  | ESM+ (Gmarket/Auction) | `GMARKET` | `EsmApiConnector` | ORDER_SUMMARY | 미확인 |
-  | SSG | `SSG` | `SsgApiConnector` | ORDER_SUMMARY | 미확인 |
-  | Coupang | `COUPANG` | `CoupangApiConnector` | ORDER_SUMMARY | 미확인 |
-  | 11번가 | `ELEVENST` | `ElevenstApiConnector` | ORDER_SUMMARY | 미확인 |
-  | 오늘의집 | `OHOU` *(예정)* | **없음** | — | 미확인 |
+  | 채널 | code | 커넥터 | 수집 구현 상태 |
+  |---|---|---|---|
+  | NAVER | `NAVER` | `NaverApiConnector` | ORDER_SUMMARY **구현 + 라이브 1회 검증**(2026-06-14, `docs/sellerops_phase3c_live_smoke.md` §0). REVIEW 공식 API **없음**(코드 주석 확인) |
+  | Cafe24 | `CAFE24` | `Cafe24ApiConnector` | ORDER_SUMMARY **구현 + 라이브 E2E PASS**(`docs/sellerops_cafe24_live_verification.md`). 게시판(리뷰/문의) discovery **CONFIRMED**(`docs/sellerops_cafe24_community_board_discovery.md`), 아티클 저장 기반 머지(캡처 미실행). OAuth 온보딩(`/api/connect/cafe24`) 구현 |
+  | ESM+ (Gmarket/Auction) | `GMARKET` | `EsmApiConnector` | 인증 골격 + **INQUIRY 오프라인 read 스켈레톤**(unwired, `NEEDS_VERIFICATION`) + INQUIRY **Excel 임포트 백엔드** 구현(FE 미노출) |
+  | SSG | `SSG` | `SsgApiConnector` | 인증 골격만(capability 빈 집합) |
+  | Coupang | `COUPANG` | `CoupangApiConnector` | 인증 골격만(capability 빈 집합) |
+  | 11번가 | `ELEVENST` | `ElevenstApiConnector` | 인증 골격만(capability 빈 집합) |
+  | 오늘의집 | `OHOU` *(예정)* | **없음** | 커넥터 없음(파트너 제한 API) |
 
 **Collector (Node/TS + Playwright)**
 - NAVER 전용 **헤드풀 캡처 에이전트**. 리뷰 수집의 유일한 검증 경로:
   `세션/재연결 → export 클릭 → 시맨틱 확인 → 다운로드 저장+OOXML 검증 → POST /api/uploads → 로컬 status`.
+  감독형 캡처→다운로드 저장까지 라이브 검증됨(2026-06-22 트랙 기록); 백엔드 자동 업로드
+  브리지는 오프라인 머지 상태로 라이브 미검증.
 - 로컬 `.status/naver.json`만 기록, 백엔드 SyncJob/health에는 흔적 없음.
-- 무인 헤드리스 모드 없음. cold-context 재연결 지속성 미해결.
+- 무인 헤드리스 모드 없음. cold-context 재연결 지속성 미해결(ESM도 동일 — `docs/esm/decisions.md` D8).
+- ESM+(Gmarket/Auction) 리뷰 표면은 마켓 선택 탭까지 확인(2026-07-07, `docs/esm/live-capture-plan.md`);
+  캡처는 미실행.
+
+**Frontend**
+- 주요 화면은 fail-closed strict 읽기(`frontend/src/lib/apiClient.ts`의 `*Strict` 계열)로 전환됨.
+  조용한 mock 폴백(`getOrMock`)은 채널 카탈로그·스케줄 등 일부에만 잔존하며, 제품 방향상
+  mock은 명시적 데모 모드로만 분리한다(`docs/sellerops_frontend_spec.md` 참조).
 
 **핵심 비대칭**: ORDER_SUMMARY는 API-pull로 갈 수 있으나, **REVIEW는 대부분 채널에서 공식 API가
 없어 seller-center export(브라우저 collector) 또는 manual upload가 유일 경로**다. 멀티채널 로드맵은
@@ -136,56 +150,86 @@ ChannelCollectionAdapter {
 8. **테넌시/식별** — seller account ↔ 채널 자격증명 바인딩 방식, org 단위 격리 영향.
 9. **위험 등급** — live 접속 시 차단/계정 리스크, 승인 등급(§7) 산정.
 
-### 4.1 채널별 현재 추정 (검증 전 가설 — discovery로 확정 필요)
+### 4.1 채널 × DataType 현행표 (LIVING — capability 진실의 정본)
 
-> 아래 "전략" 칸은 **가설**이다. 4단계 discovery 전에는 어떤 채널도 EXPORT/MANUAL을 "지원"으로
-> 표기하지 않는다(§6).
+> 이 표가 **현행 선언**이다. 상태가 바뀌면(새 검증, 새 구현) 이 표를 갱신하고 증거 문서를
+> 링크한다. UI·다른 문서는 이 표를 참조하며 중복 선언하지 않는다. 상태 4단계의 정의는
+> 부록 A를 따른다: **연결 가능 → 구현됨 → 라이브 검증 → 운영 지원**.
 
-| 채널 | ORDER_SUMMARY | REVIEW | INQUIRY | 비고 |
-|---|---|---|---|---|
-| NAVER | API (스캐폴드 존재) | **EXPORT** (collector 검증됨) | EXPORT 가설 | 리뷰 공식 API 없음 확인 |
-| Cafe24 | API 가설 | discovery 필요 | discovery 필요 | OAuth 앱 등록 전제 |
-| ESM+ (`GMARKET`) | API 가설 | discovery 필요 | discovery 진행 중(스켈레톤+Gate 1) | Gmarket+Auction 통합 |
-| SSG | API 가설 | discovery 필요 | discovery 필요 | |
-| Coupang | API 가설 (서명 기반) | discovery 필요 | discovery 필요 | WING/Open API 서명 |
-| 11번가 (`ELEVENST`) | API 가설 | discovery 필요 | discovery 필요 | |
-| 오늘의집 (`OHOU`) | discovery 필요 | discovery 필요 | discovery 필요 | 커넥터 미존재, 전부 신규 |
+*갱신: 2026-07-07.*
+
+| 채널 | DataType | 방식(method) | 연결 가능 | 구현됨 | 라이브 검증 | 운영 지원 | 증거 | 셀러 표기 |
+|---|---|---|---|---|---|---|---|---|
+| **공통(전 채널)** | REVIEW·INQUIRY·ORDER_SUMMARY | MANUAL(파일 업로드) | ✅ | ✅ | ✅ (E2E 스모크) | **✅** | `docs/sellerops_phase2.md` §Smoke | "엑셀 업로드 지원 (양식 채널별 확인 필요)" |
+| NAVER | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ✅ | ✅ 1회 (2026-06-14) | ❌ (플래그 off, 스케줄 off) | `docs/sellerops_phase3c_live_smoke.md` §0 | "자동 수집 지원: 주문" |
+| NAVER | REVIEW | EXPORT(감독형) + MANUAL | — (브라우저 세션) | ✅ collector | ✅ 캡처→저장 (2026-06-22); 자동 업로드 브리지 미검증 | ❌ | `collector/README.md`, collector 트랙 기록 | "네이버 리뷰 export 업로드 지원" |
+| NAVER | INQUIRY | 미확정 | — | ❌ | ❌ | ❌ | — | 표기하지 않음 (MANUAL만) |
+| Cafe24 | ORDER_SUMMARY | API(OAuth) | ✅ OAuth 연결 플로우 (FE `/connect/cafe24`) | ✅ | ✅ E2E PASS (토큰 회전·금액 대사 포함) | ❌ (플래그 off) | `docs/sellerops_cafe24_live_verification.md` | "자동 수집 지원: 주문·매출" |
+| Cafe24 | REVIEW·INQUIRY | API(게시판) | ✅ (동일 OAuth) | 부분 — 보드 분류 + 저장 기반(아티클 캡처 미구현) | 보드 열람 1회 CONFIRMED; 아티클 수집 ❌ | ❌ | `docs/sellerops_cafe24_community_board_discovery.md`, `docs/sellerops_cafe24_review_inquiry_capture.md` | 검증 전 — "지원" 표기 금지 |
+| ESM+ (`GMARKET`) | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | `docs/sellerops_phase3d_completion_summary.md` §3 | 표기하지 않음 |
+| ESM+ (`GMARKET`) | INQUIRY | API(스켈레톤) + MANUAL(Excel 임포트) | ✅ | 부분 — read 스켈레톤 unwired(`NEEDS_VERIFICATION`) + Excel 임포트 백엔드(FE 미노출) | Gate 1 표면 확인만; API probe ❌ | ❌ | `docs/sellerops_phase0_esm_inquiry_gate1_findings.md` | 검증 전 — 표기 금지 |
+| ESM+ (`GMARKET`/`AUCTION`) | REVIEW | EXPORT(감독형) 후보 | — | ❌ | 표면(마켓 탭)만 확인 (2026-07-07) | ❌ | `docs/esm/live-capture-plan.md` | 표기하지 않음 |
+| Coupang | ORDER_SUMMARY | API(HMAC) | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | `docs/sellerops_phase3d_completion_summary.md` §3 | 표기하지 않음 |
+| Coupang | REVIEW | 공식 API **없음** (확인) — 방식 미확정 | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
+| Coupang | INQUIRY | API 후보(CS API 존재, 스키마 미열람) | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
+| 11번가 | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | 동상 §3 | 표기하지 않음 |
+| 11번가 | REVIEW·Q&A | API 후보 — **세트 내 유일한 공식 리뷰 API**(스펙 로그인 장벽) | — | ❌ | ❌ | ❌ | 동상 §6 | 표기하지 않음 |
+| SSG | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | 동상 §3 | 표기하지 않음 |
+| SSG | REVIEW | 채널 자체 부재 확인 | — | — | — | — | 동상 §6 | 표기하지 않음 |
+| 오늘의집 | 전체 | MANUAL만 (API 파트너 제한) | — | MANUAL만 | — | MANUAL만 ✅ | 동상 §3 | "엑셀 업로드 지원" |
+
+**요약 문장 (다른 문서가 인용할 한 줄):** 운영 지원(production-supported) 수준은 현재
+**파일 업로드(전 채널)뿐**이다. NAVER·Cafe24의 ORDER_SUMMARY와 NAVER 리뷰 감독형 캡처는
+**라이브 검증됨**(상시 운영 아님), 나머지는 구현/골격/후보 단계다.
 
 > **ESM+ INQUIRY 진행 노트.** PR #141로 **offline INQUIRY read 스켈레톤**
 > (`com.sellerops.connector.esm.inquiry` — status 매핑, 7일 date 청킹, request/response DTO, parser, fake-HTTP
 > 클라이언트 오케스트레이션, offline signed seam 테스트)이 존재한다. **아직 unwired**이며 wire shape는
 > `NEEDS_VERIFICATION`(엔드포인트·필드명·페이징 신호 미검증). 사람-관측 **Gate 1**(판매자센터 UI)도 1회 완료되어
 > surface가 확인됐다(결과: `docs/sellerops_phase0_esm_inquiry_gate1_findings.md` — UI는 3개월/최대 1년 범위로,
-> 7일 API 가정과 표면이 다름; 리스트가 data-bearing). 다음 단계는 **제약된 Gate 2 read-only probe(별도 1회성
-> 승인)**다. **capability 변경 없음, INQUIRY는 `NEEDS_VERIFICATION` 유지, nothing CONFIRMED.**
+> 7일 API 가정과 표면이 다름; 리스트가 data-bearing). 이후 INQUIRY **Excel 파일 임포트 백엔드**
+> (`EsmInquiryImportController` preview/confirm + file-import-accounts)와 message-kind 게이트가 머지되었다
+> (프론트 미노출). 다음 단계는 **제약된 Gate 2 read-only probe(별도 1회성 승인)**다.
+> **capability 변경 없음, INQUIRY는 `NEEDS_VERIFICATION` 유지, nothing CONFIRMED.**
 
 ---
 
-## 5. API-first / Export / Manual Fallback 전략
+## 5. 채널 × DataType별 수집 전략 (2026-07-07 교정)
 
-채널 × DataType마다 **아래 우선순위로 단 하나의 1차 수집 방식을 선택**한다. 폴백은 "1차가 구조적으로
-불가/위험할 때"의 대안이지, 동시 운영이 아니다.
+> **교정 노트.** 이전 판(및 `docs/sellerops_phase2.md`의 5단계 사다리)은 브라우저 자동화를
+> "보편적 최후 수단(last resort)"으로 규정했다. 이 규정은 폐기한다. 리뷰·문의처럼 **공식
+> API가 구조적으로 존재하지 않는 데이터**에서는, 판매자가 명시적으로 승인한 브라우저/에이전트
+> 자동화 또는 공식 export 자동화가 **정당한 1차 경로**다. "최후 수단"이라는 보편 서열 대신,
+> 채널 × DataType마다 아래 기준으로 **가장 자동화되고 반복 가능하며 사용자가 동의한 연결**을
+> 선택한다.
 
-```
-1순위  API-first      — 공식 API가 있고 약관 허용 + 해당 DataType 지원
-2순위  Seller-center  — API 부재/미지원이나 판매자센터 export가 있는 경우 (감독형 collector)
-       export
-3순위  Manual upload  — 자동화 불가/위험하거나 export 약관이 자동화를 금지하는 경우 (사람이 내려받아 업로드)
-```
+**목표 함수**: 각 (채널 × DataType)에 대해 *가장 자동화되고(반복 실행 가능), 반복 가능하며
+(스키마·세션이 안정), 사용자가 동의한(판매자 승인·약관 적합)* 연결 방식을 최적화한다.
 
-**선택 기준**
-- **API-first**: 무인 스케줄 가능, rate-limit/backoff는 기존 `SyncRunExecutor`가 처리. 가장 안정적·확장적.
-  → ORDER_SUMMARY는 대부분 여기로 수렴 예상.
-- **Seller-center export (감독형)**: 사람이 로그인/2FA 후 감독하는 1회 캡처. 무인 아님. 리뷰의 기본 경로.
-  → NAVER 리뷰가 이미 이 방식으로 검증됨; 다른 채널은 §6의 EXPERIMENTAL로 시작.
-- **Manual upload**: 가장 보수적·항상 가능한 폴백. 약관/리스크가 불확실할 때의 안전한 시작점.
-  → 모든 채널은 **manual upload부터** 정직하게 시작할 수 있다(기존 `/api/uploads` + 매핑만 필요).
+**방식 선택 기준**
+- **공식 API** — 해당 DataType을 **충분히 완전하고 안정적으로** 제공할 때 사용한다.
+  범위(누락 필드)·약관·rate limit을 discovery(§4)로 확인한 뒤 선택. 무인 스케줄이 가능한
+  유일한 방식이며, ORDER_SUMMARY는 대부분 여기로 수렴한다.
+- **판매자 승인 브라우저/에이전트 자동화 또는 공식 export 자동화** — 리뷰·문의 등 필요한
+  데이터가 API로 제공되지 않거나 불충분할 때의 경로. 감독형(사람이 로그인/2FA, 1회 실행
+  감독)에서 시작해, 세션·스키마 신뢰가 쌓이면 채널별로 자동화 수준을 상향한다.
+  NAVER 리뷰가 이 방식으로 검증된 선례다(§4.1). 채널별 약관·차단 리스크 평가는 discovery
+  항목(§4의 4·9번)으로 수행하며, **평가 결과에 따라 채널별로 채택 여부를 정한다 —
+  일괄 금지도, 일괄 허용도 아니다.**
+- **Manual upload** — **임시 브리지/폴백**이며 제품의 목적지가 아니다. 새 채널을 가장
+  빨리·정직하게 열 수 있는 시작점(기존 `/api/uploads` + 매핑)이고, 자동 경로 장애 시의
+  강등 경로로 항상 유지된다.
 
 **원칙**
-- 새 채널은 가능하면 **manual → export(감독형) → API** 순으로 *상향*한다. 거꾸로 무인 자동화부터
-  시작하지 않는다.
-- 한 채널이 DataType마다 다른 method를 가질 수 있다(예: ORDER_SUMMARY=API, REVIEW=EXPORT).
-- method 강등은 항상 허용(API 실패 시 manual로 안내). 강등은 데이터/UI에 정직하게 표기.
+- 한 채널이 DataType마다 다른 method를 가질 수 있다(예: Cafe24 ORDER_SUMMARY=API,
+  NAVER REVIEW=EXPORT). method는 §4.1 현행표에 선언된 것만 유효하다.
+- 신규 채널 도입 순서는 여전히 **manual(즉시) → 감독형 자동화 → 무인 상향**의 신뢰 사다리를
+  따른다. 단 이는 *도입 순서*이지 방식의 우열이 아니다 — 리뷰류는 EXPORT/에이전트 자동화가
+  종착일 수 있다.
+- method 강등은 항상 허용(자동 경로 실패 시 manual로 안내). 강등은 데이터/UI에 정직하게 표기.
+- **안전·승인 게이트(§7·§8)는 자동화 수준과 무관하게 그대로 적용된다**: 모든 라이브 실행은
+  명시적 1회성 승인, 인증(로그인/2FA/CAPTCHA)은 항상 사람, 무인 스케줄은 cold-context
+  재연결이 풀리기 전 금지(P4 게이트).
 
 ---
 
@@ -293,8 +337,69 @@ ESM+/SSG → 오늘의집(전부 신규). 단 **manual 경로(P3.x-b)는 모든 
 
 ---
 
+## 11. 가이드 셋업 & 연결 모드 (커넥터 레벨 규칙, 2026-07-07)
+
+가이드 연결의 **프론트 화면·상호작용은 Frontend Spec §16이 정본**이며, 런타임 경계는
+`docs/sellerops_local_agent_runtime_adr.md`가 정본이다. 본 절은 그와 중복하지 않고 **커넥터 레벨
+규칙만** 고정한다.
+
+### 11.1 연결 모드 (4단계)
+
+각 (채널 × DataType)의 연결이 어느 정도 자동화되는지를 아래 모드로 선언한다. §4.1 현행표에 채널별
+"가이드 셋업 방식"을 적을 때 이 어휘를 쓴다.
+
+| 모드 | 정의 | 사람의 역할 |
+|---|---|---|
+| **AUTOMATED** | OAuth류로 연결이 거의 자동 완료 | 동의 클릭 |
+| **GUIDED** | SellerOps가 발급/연결 화면을 단계별 안내하고 안전한 편의 단계를 자동 수행 | 발급·로그인·계정 선택 등 사람 통제 단계 |
+| **ASSISTED** | 파일럿 등에서 운영자가 사용자와 함께 진행 | 사람 주도 |
+| **MANUAL** | 파일 업로드 등 사용자가 직접 데이터 투입 | 사람 전담 |
+
+- 모드는 방식(method: API/EXPORT/MANUAL)과 **직교**한다. 예: NAVER ORDER_SUMMARY는 method=API이면서
+  현재 셋업 모드는 GUIDED(파일럿은 ASSISTED)일 수 있다.
+- 현행표에 선언되지 않은 모드를 셀러에게 약속하지 않는다.
+
+### 11.2 자동 로그인 capability는 독립 추적
+
+- **자동 로그인(auto-login) 지원 여부는 (채널 × DataType)의 데이터 수집 capability와 별개 축으로
+  독립 추적**한다. 한 채널이 데이터는 수집 가능(구현/라이브 검증)이어도 자동 로그인은 미지원일 수 있다.
+- 자동 로그인 상태도 4단계(연결 가능/구현됨/라이브 검증/운영 지원, 부록 A)로 표기하며, **현재 어느
+  채널도 자동 로그인은 운영 지원이 아니다** — 기본 경로는 사람 로그인 + 세션 프로필 보존이다.
+
+### 11.3 로컬 세션 vs 미래 클라우드 세션 실행 구분
+
+- 수집 실행이 **로컬 세션**(사용자 PC의 감독형 브라우저/전용 프로필)에서 일어나는지, **미래 클라우드
+  세션**(원격 브라우저, 미구현)에서 일어나는지를 커넥터/실행 기록에서 구분한다.
+- 두 실행지는 동일 `ChannelConnector` 계약·flow 정의를 공유하되(`docs/sellerops_local_agent_runtime_adr.md`),
+  현재 구현·검증된 것은 **로컬 세션뿐**이다. 클라우드 실행은 방향으로만 문서화한다.
+
+### 11.4 셀러 표기 정직성 (가이드 셋업)
+
+- **과대 표기 금지**: 가이드 셋업·자동 로그인·Windows 지원·클라우드 실행을 셀러 대면 문구에서
+  구현·검증 수준을 넘어 표기하지 않는다.
+  - 가이드 셋업은 §4.1 현행표에 GUIDED 이상으로 선언되고 실제 동작하는 채널에만 표기.
+  - 자동 로그인은 §11.2 상태가 최소 라이브 검증인 채널에만, 그리고 "동의 후 시도"로만 표기(자동 보장 아님).
+  - Windows·클라우드는 운영 지원 전까지 "지원"으로 표기 금지.
+- 셋업 모드/자동 로그인/실행지 표기는 프론트 레이아웃 세부와 무관하다(레이아웃은 Frontend Spec 소관).
+
+---
+
 ### 부록 A — 용어
-- **method**: 한 (채널×DataType)의 수집 방식 — `API` | `EXPORT` | `MANUAL`.
-- **status**: 그 방식의 검증 수준 — `CONFIRMED` | `EXPERIMENTAL` | `UNSUPPORTED`.
+- **method**: 한 (채널×DataType)의 수집 방식 — `API` | `EXPORT`(판매자 승인 브라우저/에이전트·공식 export 자동화) | `MANUAL`.
+- **status**: 그 방식의 검증 수준 — `CONFIRMED` | `EXPERIMENTAL` | `UNSUPPORTED` (코드의
+  `verificationStatus`와 대응).
 - **감독형(supervised) 캡처**: 사람이 로그인/2FA를 수행하고 1회 export를 감독하는 collector 실행. 무인 아님.
 - **canonical record**: `CanonicalReview`/`CanonicalInquiry`/`CanonicalOrderSummary` — 채널 무관 적재 단위.
+
+**상태 4단계 (§4.1 현행표의 열 정의 — 반드시 구분해 쓸 것)**
+
+| 단계 | 정의 | 판정 근거 |
+|---|---|---|
+| **연결 가능(connectable)** | 셀러가 제품 안에서 해당 채널의 연결(자격증명 등록/OAuth)을 시작할 수 있다 | 자격증명 템플릿·연결 플로우 존재 |
+| **구현됨(implemented)** | 해당 (채널×DataType)의 수집 코드 경로가 존재하고 오프라인 테스트를 통과했다 | 코드 + 테스트 (라이브 실행 없음) |
+| **라이브 검증(live-verified)** | 감독 하 실제 실행이 1회 이상 성공했고 sanitized 기록이 저장소에 있다 | 검증 기록 문서 링크 필수 |
+| **운영 지원(production-supported)** | 상시 사용을 제품이 약속한다 — 기본 활성, 운영 절차·복구 경로 존재 | 명시적 운영 결정 (현재: 파일 업로드만) |
+
+**UI 표기 규칙**: 셀러에게 "지원"으로 보여줄 수 있는 것은 **운영 지원** 단계뿐이다.
+라이브 검증 단계는 파일럿/감독 하 기능으로만, 구현·골격 단계는 표기하지 않는다
+(§10, `frontend/src/lib/channelSupport.ts`의 보수적 문구 규칙과 정합).

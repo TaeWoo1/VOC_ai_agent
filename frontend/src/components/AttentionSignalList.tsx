@@ -79,7 +79,7 @@ export function AttentionSignalList({
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error || !data ? (
         <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-          확인할 일을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          확인할 일을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       ) : items.length === 0 ? (
         <p className="text-base text-muted">지금 확인할 일이 없습니다.</p>

@@ -80,8 +80,10 @@ describe("classifyStartError", () => {
   });
 
   it("falls back for network / unknown failures", () => {
-    expect(classifyStartError(err(undefined))).toContain("백엔드");
-    expect(classifyStartError(new Error("Network Error"))).toContain("백엔드");
-    expect(classifyStartError(undefined)).toContain("백엔드");
+    // Product Shell slice: developer-facing "백엔드" copy replaced with seller-facing
+    // recovery wording ("잠시 후 다시 시도해 주세요").
+    expect(classifyStartError(err(undefined))).toContain("다시 시도");
+    expect(classifyStartError(new Error("Network Error"))).toContain("다시 시도");
+    expect(classifyStartError(undefined)).toContain("다시 시도");
   });
 });

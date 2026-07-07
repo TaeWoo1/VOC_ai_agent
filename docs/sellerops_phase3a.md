@@ -1,5 +1,10 @@
 # SellerOps AI — Phase 3A: Automatic Collection Strategy & Connector Feasibility
 
+> **⚠️ 시점 기록 — 후속 검증으로 대체됨.** 본 문서의 채널별 추정(❓ 플래그)은 Phase 3D의
+> 공식 문서 검증(`docs/sellerops_phase3d_completion_summary.md`)과
+> `docs/multi-channel-connector-roadmap.md` §4.1 현행표로 대체되었다. 현행 판단에 이 문서를
+> 인용하지 말 것.
+
 **Mode:** Planning / research only. This document is the deliverable. No code,
 no connectors, no browser automation, no credential storage. Nothing committed
 until approved.

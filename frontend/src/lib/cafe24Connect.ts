@@ -62,5 +62,5 @@ export function classifyStartError(err: unknown): string {
   if (status === 404) {
     return "카페24 연결을 사용할 수 없습니다. 관리자에게 문의해 주세요.";
   }
-  return "카페24 연결 시작에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.";
+  return "카페24 연결 시작에 실패했습니다. 잠시 후 다시 시도해 주세요.";
 }
