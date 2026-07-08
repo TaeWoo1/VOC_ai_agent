@@ -1,0 +1,19 @@
+{
+  "case": "06-prohibited-selector",
+  "target": "event",
+  "expect": "PROHIBITED_FIELD",
+  "data": {
+    "protocolVersion": 1,
+    "eventId": "evt_sel",
+    "runId": "run_0001",
+    "sequence": 5,
+    "revision": 5,
+    "type": "TARGET_HIGHLIGHTED",
+    "occurredAt": "2026-07-08T13:05:00Z",
+    "payload": {
+      "stepId": "esm.select_and_download",
+      "targetRef": "a1b2c3d4e5f60718",
+      "selector": "#export-btn > span.download"
+    }
+  }
+}

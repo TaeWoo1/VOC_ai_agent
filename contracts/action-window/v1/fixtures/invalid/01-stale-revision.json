@@ -1,0 +1,15 @@
+{
+  "case": "01-stale-revision",
+  "target": "command-ordering",
+  "expect": "STALE_REVISION",
+  "context": {
+    "currentRevision": 5
+  },
+  "data": {
+    "protocolVersion": 1,
+    "commandId": "cmd_x",
+    "runId": "run_0001",
+    "expectedRevision": 2,
+    "type": "PAUSE_RUN"
+  }
+}

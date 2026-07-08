@@ -1,0 +1,31 @@
+{
+  "protocolVersion": 1,
+  "runId": "run_0001",
+  "revision": 2,
+  "channel": "esm_plus",
+  "title": "리뷰 내보내기",
+  "status": "WAITING_FOR_HUMAN",
+  "executionMode": "HUMAN_ACTION",
+  "currentStep": {
+    "stepId": "esm.prepare_session",
+    "stepNumber": 1,
+    "totalSteps": 4,
+    "title": "로그인 필요",
+    "instruction": "플랫폼에 로그인해 주세요.",
+    "status": "AWAITING_USER"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "REQUEST_STEP_RECHECK",
+    "CANCEL_RUN"
+  ],
+  "blocker": {
+    "code": "LOGIN_REQUIRED",
+    "recoverable": true
+  },
+  "progress": {
+    "completedSteps": 0,
+    "totalSteps": 4
+  },
+  "updatedAt": "2026-07-08T13:02:00Z"
+}

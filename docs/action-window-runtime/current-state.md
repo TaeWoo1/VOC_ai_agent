@@ -3,16 +3,16 @@
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-08
-- **baseline main SHA:** `5a43dcb` (`origin/main`, PR #208 merged; contains ESM foundations + profile resolver, does NOT contain the strategy docs)
-- **current branch:** `feat/action-window-runtime`
-- **current worktree:** `sellerops-runtime` (linked worktree of the shared SellerOps repo)
-- **branch base SHA:** `cf0c845` (`integ/sellerops-main`, PR #209 **OPEN, not merged**) — the reconciled baseline that contains both the strategy docs (`5889a1d`) and the main runtime foundations (`5a43dcb`)
-- **shared contract version/path:** **NONE yet.** No Action Window shared contract exists. Nearest ratified protocol: `collector/src/bridge/protocol.ts` (`BRIDGE_PROTOCOL_VERSION = 1`) + `frontend/src/lib/bridge/bridgeProtocol.ts`. → R0 blocking dependency.
-- **current slice:** pre-R0 (documentation baseline established; no Runtime code)
-- **last completed item:** Runtime documentation baseline (`docs/action-window-runtime/*`)
-- **last verified tests:** none for Action Window (no Runtime code yet)
-- **current blocker:** shared Action Window contract (R0) not authored/merged; PR #209 (reconciled baseline) still open
-- **next single action:** confirm/author the R0 shared contract (states, commands, events, View Model, blocker codes, versioning) extending the Bridge protocol, then build the R1 synthetic proof
+- **baseline main SHA:** `c156c59` (`origin/main`; PR #209 product/runtime integration + PR #210 Runtime docs baseline both merged; contains the strategy docs AND the runtime foundations)
+- **current branch:** `feat/action-window-contract` (R0 slice); Runtime engine work continues on `feat/action-window-runtime`
+- **current worktree:** `sellerops-contract` (linked worktree of the shared SellerOps repo)
+- **branch base SHA:** `c156c59` (`origin/main`, merged)
+- **shared contract version/path:** **DEFINED — `contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** JSON Schema `schema.json` + TS `index.ts`; nested-in-Bridge-v1 transport (Bridge `collector/src/bridge/protocol.ts` unchanged). R0 PR **open, not yet merged.**
+- **current slice:** R0 (contract baseline) — contract + fixtures + conformance tests delivered; PR open
+- **last completed item:** R0 Action Window protocol v1 contract (`contracts/action-window/v1/*`) with 55/55 conformance tests
+- **last verified tests:** `collector/test/contracts/action-window/contract.test.ts` — 55/55 (vitest); contract surface strict `tsc --noEmit` clean
+- **current blocker:** none technical; R0 PR awaiting review/merge before R2 (FE integration) can begin
+- **next single action:** build the **R1 synthetic Action Window engine** against the R0 contract fixtures (do NOT begin R1 until dispatched)
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -30,8 +30,9 @@
   wiring in `collector/src/cli/local-agent.ts`) and is **not a V1 dependency**.
 - The **ESM auto-click marketplace-attribution work is parked**, not completed.
 - **No live Action Window capture is complete.**
-- The **next action is contract confirmation (R0) followed by the R1 synthetic
-  proof.**
+- **R0 (contract) is delivered** as `contracts/action-window/v1/` (protocol v1),
+  PR open; the **next action is the R1 synthetic engine** built against the R0
+  fixtures. R1 is **not** implemented.
 
 ## Existing foundations vs implemented Action Window capability
 
@@ -44,8 +45,8 @@ Bridge protocol, Browser Projection (optional renderer).
 
 ## Baseline / branch caveat
 
-This branch is based on **unmerged PR #209** (`cf0c845`) because it is the only
-tree containing both the canonical strategy docs (to reference) and the runtime
-foundations (to describe). When PR #209 merges to `main`, this branch's base
-becomes an ancestor of `main` (merge-commit workflow; no rebase/squash/force
-expected). If PR #209 changes materially before merge, re-verify this base.
+Resolved: PR #209 (product/runtime integration) and PR #210 (Runtime docs
+baseline) are both **merged**; `main` is now `c156c59` and contains both the
+strategy docs and the runtime foundations. The R0 contract branch
+(`feat/action-window-contract`) is cut directly from that merged `main`, so no
+unmerged-base caveat remains.

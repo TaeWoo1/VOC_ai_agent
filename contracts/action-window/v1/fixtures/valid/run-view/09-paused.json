@@ -1,0 +1,26 @@
+{
+  "protocolVersion": 1,
+  "runId": "run_0001",
+  "revision": 3,
+  "channel": "esm_plus",
+  "title": "리뷰 내보내기",
+  "status": "PAUSED",
+  "executionMode": "AUTOMATIC",
+  "currentStep": {
+    "stepId": "esm.open_surface",
+    "stepNumber": 2,
+    "totalSteps": 4,
+    "title": "화면 열기",
+    "status": "READY"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "RESUME_RUN",
+    "CANCEL_RUN"
+  ],
+  "progress": {
+    "completedSteps": 1,
+    "totalSteps": 4
+  },
+  "updatedAt": "2026-07-08T13:04:00Z"
+}

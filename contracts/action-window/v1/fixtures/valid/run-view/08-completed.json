@@ -1,0 +1,23 @@
+{
+  "protocolVersion": 1,
+  "runId": "run_0001",
+  "revision": 10,
+  "channel": "esm_plus",
+  "title": "리뷰 내보내기",
+  "status": "COMPLETED",
+  "executionMode": "AUTOMATIC",
+  "currentStep": {
+    "stepId": "esm.process_downstream",
+    "stepNumber": 4,
+    "totalSteps": 4,
+    "title": "다운스트림 처리",
+    "status": "COMPLETED"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [],
+  "progress": {
+    "completedSteps": 4,
+    "totalSteps": 4
+  },
+  "updatedAt": "2026-07-08T13:10:00Z"
+}

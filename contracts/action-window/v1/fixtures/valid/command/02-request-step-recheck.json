@@ -1,0 +1,7 @@
+{
+  "protocolVersion": 1,
+  "commandId": "cmd_02-request-step-recheck",
+  "runId": "run_0001",
+  "expectedRevision": 5,
+  "type": "REQUEST_STEP_RECHECK"
+}

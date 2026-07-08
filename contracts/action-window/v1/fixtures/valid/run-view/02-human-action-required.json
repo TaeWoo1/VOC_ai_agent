@@ -1,0 +1,29 @@
+{
+  "protocolVersion": 1,
+  "runId": "run_0001",
+  "revision": 4,
+  "channel": "esm_plus",
+  "title": "리뷰 내보내기",
+  "status": "WAITING_FOR_HUMAN",
+  "executionMode": "HUMAN_ACTION",
+  "currentStep": {
+    "stepId": "esm.select_and_download",
+    "stepNumber": 3,
+    "totalSteps": 4,
+    "title": "마켓 선택 후 다운로드",
+    "instruction": "플랫폼 화면에서 다운로드 버튼을 눌러 주세요.",
+    "status": "AWAITING_USER"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "REQUEST_STEP_RECHECK",
+    "SWITCH_TO_MANUAL",
+    "CANCEL_RUN",
+    "SET_GUIDANCE_ENABLED"
+  ],
+  "progress": {
+    "completedSteps": 2,
+    "totalSteps": 4
+  },
+  "updatedAt": "2026-07-08T13:05:00Z"
+}

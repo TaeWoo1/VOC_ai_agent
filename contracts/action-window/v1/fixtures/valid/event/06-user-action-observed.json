@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "eventId": "evt_0006",
+  "runId": "run_0001",
+  "sequence": 6,
+  "revision": 6,
+  "type": "USER_ACTION_OBSERVED",
+  "occurredAt": "2026-07-08T13:06:00Z",
+  "payload": {
+    "stepId": "esm.select_and_download",
+    "observed": true
+  }
+}

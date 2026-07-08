@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sellerops/contracts/action-window/v1/schema.json",
+  "title": "Action Window Protocol v1",
+  "description": "Normative, language-neutral source of truth for the Action Window protocol. Consumed by the TypeScript frontend and Local Agent runtime (see index.ts) and the basis for future Java backend DTOs. Transported additively inside Local Agent Bridge v1.",
+  "x-protocolVersion": 1,
+  "$defs": {
+    "RunStatus": {
+      "type": "string",
+      "description": "Persisted Run status. IDLE is intentionally NOT a persisted status; it is a UI-only scenario meaning no active Run exists.",
+      "enum": ["PREPARING", "RUNNING", "WAITING_FOR_HUMAN", "PAUSED", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"]
+    },
+    "StepStatus": {
+      "type": "string",
+      "enum": ["PENDING", "PREPARING", "READY", "AWAITING_USER", "OBSERVING", "PROCESSING", "COMPLETED", "FAILED", "SKIPPED"]
+    },
+    "ExecutionMode": {
+      "type": "string",
+      "enum": ["AUTOMATIC", "HUMAN_ACTION", "FILE_IMPORT", "UNAVAILABLE"]
+    },
+    "BlockerCode": {
+      "type": "string",
+      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID"]
+    },
+    "CommandType": {
+      "type": "string",
+      "enum": ["START_RUN", "PAUSE_RUN", "RESUME_RUN", "CANCEL_RUN", "FIND_CURRENT_STEP", "SWITCH_TO_MANUAL", "REQUEST_STEP_RECHECK", "SET_GUIDANCE_ENABLED"]
+    },
+    "EventType": {
+      "type": "string",
+      "enum": ["RUN_STARTED", "RUN_STATUS_CHANGED", "STEP_READY", "HUMAN_ACTION_REQUIRED", "TARGET_HIGHLIGHTED", "USER_ACTION_OBSERVED", "DOWNLOAD_DETECTED", "STEP_COMPLETED", "RUN_BLOCKED", "RUN_COMPLETED", "RUN_FAILED"]
+    },
+    "OpaqueRef": {
+      "type": "string",
+      "description": "Opaque 16-hex signature/reference. NEVER a selector, URL, filename, or path.",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "CommandEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "commandId", "runId", "expectedRevision", "type"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 1 },
+        "commandId": { "type": "string", "minLength": 1, "description": "Idempotency key." },
+        "runId": { "type": "string", "minLength": 1, "description": "Opaque run id." },
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "type": { "$ref": "#/$defs/CommandType" },
+        "payload": {
+          "type": "object",
+          "description": "Typed payload when required. START_RUN requires { channel }, SET_GUIDANCE_ENABLED requires { enabled }.",
+          "properties": {
+            "channel": { "type": "string", "minLength": 1 },
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "eventId", "runId", "sequence", "revision", "type", "occurredAt", "payload"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 1 },
+        "eventId": { "type": "string", "minLength": 1, "description": "De-dupe key." },
+        "runId": { "type": "string", "minLength": 1 },
+        "sequence": { "type": "integer", "minimum": 0, "description": "Monotonic within a Run — ordering authority." },
+        "revision": { "type": "integer", "minimum": 0, "description": "Aggregate revision after this event." },
+        "type": { "$ref": "#/$defs/EventType" },
+        "occurredAt": { "type": "string", "description": "Opaque occurrence marker (display/staleness only; not parsed for elapsed duration)." },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": { "$ref": "#/$defs/RunStatus" },
+            "stepId": { "type": "string" },
+            "stepNumber": { "type": "integer", "minimum": 1 },
+            "totalSteps": { "type": "integer", "minimum": 0 },
+            "stepStatus": { "$ref": "#/$defs/StepStatus" },
+            "targetRef": { "$ref": "#/$defs/OpaqueRef" },
+            "observed": { "type": "boolean" },
+            "artifactRef": { "$ref": "#/$defs/OpaqueRef" },
+            "code": { "$ref": "#/$defs/BlockerCode" },
+            "recoverable": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "ActionWindowRunView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "runId", "revision", "channel", "title", "status", "executionMode", "guidanceEnabled", "allowedCommands", "progress", "updatedAt"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 1 },
+        "runId": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "channel": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/RunStatus" },
+        "executionMode": { "$ref": "#/$defs/ExecutionMode" },
+        "currentStep": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stepId", "stepNumber", "totalSteps", "title", "status"],
+          "properties": {
+            "stepId": { "type": "string", "minLength": 1 },
+            "stepNumber": { "type": "integer", "minimum": 1, "description": "1-based." },
+            "totalSteps": { "type": "integer", "minimum": 1 },
+            "title": { "type": "string", "minLength": 1 },
+            "instruction": { "type": "string", "description": "Concise instruction only; localized copy is FE-owned." },
+            "status": { "$ref": "#/$defs/StepStatus" }
+          }
+        },
+        "guidanceEnabled": { "type": "boolean" },
+        "allowedCommands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CommandType" },
+          "description": "Supplied by Runtime; FE does not infer permissions."
+        },
+        "blocker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "recoverable"],
+          "properties": {
+            "code": { "$ref": "#/$defs/BlockerCode" },
+            "recoverable": { "type": "boolean" }
+          }
+        },
+        "progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["completedSteps", "totalSteps"],
+          "properties": {
+            "completedSteps": { "type": "integer", "minimum": 0 },
+            "totalSteps": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  }
+}

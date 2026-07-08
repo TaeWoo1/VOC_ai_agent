@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 1,
+  "commandId": "cmd_01-start-run",
+  "runId": "run_0001",
+  "expectedRevision": 0,
+  "type": "START_RUN",
+  "payload": {
+    "channel": "esm_plus"
+  }
+}

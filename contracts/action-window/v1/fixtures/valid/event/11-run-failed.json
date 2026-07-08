@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 1,
+  "eventId": "evt_0011",
+  "runId": "run_0001",
+  "sequence": 11,
+  "revision": 11,
+  "type": "RUN_FAILED",
+  "occurredAt": "2026-07-08T13:11:00Z",
+  "payload": {
+    "code": "ARTIFACT_INVALID"
+  }
+}
