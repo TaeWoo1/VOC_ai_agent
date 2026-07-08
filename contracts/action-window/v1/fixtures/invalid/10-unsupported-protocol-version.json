@@ -9,7 +9,7 @@
     "expectedRevision": 0,
     "type": "START_RUN",
     "payload": {
-      "channel": "esm_plus"
+      "channelCode": "esm_plus"
     }
   }
 }

@@ -35,6 +35,21 @@
       "description": "Opaque 16-hex signature/reference. NEVER a selector, URL, filename, or path.",
       "pattern": "^[0-9a-f]{16}$"
     },
+    "SemanticCode": {
+      "type": "string",
+      "description": "Sanitized stable code (e.g. channelCode). An opaque token, never a user-facing title.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "CopyKey": {
+      "type": "string",
+      "description": "Dotted semantic copy key (e.g. actionWindow.review.ready). FE maps it to localized copy. Never final prose.",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$"
+    },
+    "CopyParams": {
+      "type": "object",
+      "description": "Flat bag of sanitized primitive interpolation values; FE owns the final copy.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
     "CommandEnvelope": {
       "type": "object",
       "additionalProperties": false,
@@ -47,9 +62,9 @@
         "type": { "$ref": "#/$defs/CommandType" },
         "payload": {
           "type": "object",
-          "description": "Typed payload when required. START_RUN requires { channel }, SET_GUIDANCE_ENABLED requires { enabled }.",
+          "description": "Typed payload when required. START_RUN requires { channelCode }, SET_GUIDANCE_ENABLED requires { enabled }.",
           "properties": {
-            "channel": { "type": "string", "minLength": 1 },
+            "channelCode": { "$ref": "#/$defs/SemanticCode" },
             "enabled": { "type": "boolean" }
           }
         }
@@ -88,25 +103,26 @@
     "ActionWindowRunView": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["protocolVersion", "runId", "revision", "channel", "title", "status", "executionMode", "guidanceEnabled", "allowedCommands", "progress", "updatedAt"],
+      "required": ["protocolVersion", "runId", "revision", "channelCode", "runCopyKey", "status", "executionMode", "guidanceEnabled", "allowedCommands", "progress", "updatedAt"],
       "properties": {
         "protocolVersion": { "type": "integer", "const": 1 },
         "runId": { "type": "string", "minLength": 1 },
         "revision": { "type": "integer", "minimum": 0 },
-        "channel": { "type": "string", "minLength": 1 },
-        "title": { "type": "string", "minLength": 1 },
+        "channelCode": { "$ref": "#/$defs/SemanticCode" },
+        "runCopyKey": { "$ref": "#/$defs/CopyKey" },
+        "runCopyParams": { "$ref": "#/$defs/CopyParams" },
         "status": { "$ref": "#/$defs/RunStatus" },
         "executionMode": { "$ref": "#/$defs/ExecutionMode" },
         "currentStep": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["stepId", "stepNumber", "totalSteps", "title", "status"],
+          "required": ["stepId", "stepNumber", "totalSteps", "copyKey", "status"],
           "properties": {
             "stepId": { "type": "string", "minLength": 1 },
             "stepNumber": { "type": "integer", "minimum": 1, "description": "1-based." },
             "totalSteps": { "type": "integer", "minimum": 1 },
-            "title": { "type": "string", "minLength": 1 },
-            "instruction": { "type": "string", "description": "Concise instruction only; localized copy is FE-owned." },
+            "copyKey": { "$ref": "#/$defs/CopyKey" },
+            "copyParams": { "$ref": "#/$defs/CopyParams" },
             "status": { "$ref": "#/$defs/StepStatus" }
           }
         },
