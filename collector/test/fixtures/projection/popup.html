@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>projection-popup-fixture</title></head>
+<body style="margin:0;background:#f80;font-family:sans-serif">
+<div style="padding:20px">팝업 대상 화면 (합성)
+<canvas id="c" width="380" height="220"></canvas>
+</div>
+<script>
+// Continuous animation so the popup target also emits steady screencast frames.
+var cx=document.getElementById("c").getContext("2d");var t0=performance.now();
+function loop(now){cx.fillStyle="hsl("+(((now-t0)/10)%360)+",70%,50%)";cx.fillRect(0,0,380,220);requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body></html>

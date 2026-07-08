@@ -17,6 +17,11 @@ generation, the Python bridge.
 
 ## Long-term collection strategy
 
+> **⚠️ 대체됨 (2026-07-07).** 아래 5단계 사다리(특히 "browser automation = last resort")는
+> `docs/multi-channel-connector-roadmap.md` §5의 교정된 전략으로 대체되었다: 리뷰·문의처럼
+> 공식 API가 없는 데이터에서는 판매자 승인 브라우저/에이전트 자동화·공식 export 자동화가
+> 정당한 1차 경로이며, manual upload는 임시 브리지다. 아래 원문은 시점 기록으로만 보존한다.
+
 The product goal is automatic, scheduled collection per channel. File upload is
 deliberately the lowest-priority connector — present from Phase 2 because it is
 the only one we can ship without per-channel integration work, but it is a

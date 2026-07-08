@@ -119,7 +119,7 @@ export function ProductIssues() {
         <p className="text-muted">불러오는 중…</p>
       ) : failed ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          상품 이슈 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          상품 이슈 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : candidates.length === 0 ? (
         <Section title="이슈 후보">
@@ -129,7 +129,7 @@ export function ProductIssues() {
               문의·리뷰 자료를 업로드하고 분석하면 상품별 운영 신호가 여기에 모입니다.
             </p>
             <div className="mt-4 flex justify-center gap-3">
-              <Link to="/upload" className="btn-primary inline-flex">
+              <Link to="/settings/upload" className="btn-primary inline-flex">
                 자료 업로드하기 →
               </Link>
               <Link to="/inbox" className="btn-ghost inline-flex">

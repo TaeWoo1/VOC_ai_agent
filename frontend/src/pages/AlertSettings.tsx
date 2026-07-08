@@ -108,7 +108,7 @@ export function AlertSettings() {
     } catch {
       setList(prev); // roll back the optimistic mark
       syncOpenCount(prev);
-      setAckError("확인 처리에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.");
+      setAckError("확인 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setAckBusyId(null);
     }
@@ -135,7 +135,7 @@ export function AlertSettings() {
         <p className="text-muted">불러오는 중…</p>
       ) : error ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          연결 알림을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          연결 알림을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : list.length === 0 ? (
         <EmptyState message="현재 확인할 연결 알림이 없습니다." />
@@ -200,7 +200,7 @@ function AlertCard({
         ) : null}
         <button
           type="button"
-          onClick={() => navigate(`/channels/${alert.sellerAccountId}`)}
+          onClick={() => navigate(`/settings/channels/${alert.sellerAccountId}`)}
           className="btn-ghost"
         >
           재연결·테스트

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { useAuth } from "./lib/auth";
 import { OpenAlertsProvider } from "./lib/openAlerts";
@@ -14,15 +14,29 @@ import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { Upload } from "./pages/Upload";
 import { ProductIssues } from "./pages/ProductIssues";
-import { AiSearch } from "./pages/AiSearch";
 import { Reports } from "./pages/Reports";
 import { AlertSettings } from "./pages/AlertSettings";
+import { NotFound } from "./pages/NotFound";
 
 function Protected({ children }: { children: JSX.Element }) {
   if (!getToken()) {
     return <Navigate to="/login" replace />;
   }
   return children;
+}
+
+/** Backward-compatible redirect for the old channel-detail route, preserving the
+ *  :accountId param: /channels/:id → /settings/channels/:id. */
+function RedirectChannelDetail() {
+  const { accountId = "" } = useParams();
+  return <Navigate to={`/settings/channels/${accountId}`} replace />;
+}
+
+/** Backward-compatible redirect for /upload, preserving any query string (the
+ *  `?channelId=` deep link the channel cards use). */
+function RedirectUpload() {
+  const { search } = useLocation();
+  return <Navigate to={`/settings/upload${search}`} replace />;
 }
 
 export function App() {
@@ -44,21 +58,34 @@ export function App() {
           </Protected>
         }
       >
+        {/* Frontstage — daily seller operations */}
         <Route path="/" element={<Home />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/inquiries" element={<Inquiries />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/issues" element={<ProductIssues />} />
-        <Route path="/search" element={<AiSearch />} />
         <Route path="/reports" element={<Reports />} />
-        <Route path="/channels" element={<Channels />} />
-        <Route path="/channels/:accountId" element={<ChannelDetail />} />
+
+        {/* Backstage — connection & collection management */}
+        <Route path="/settings/channels" element={<Channels />} />
+        <Route path="/settings/channels/:accountId" element={<ChannelDetail />} />
+        <Route path="/settings/upload" element={<Upload />} />
+        <Route path="/settings/alerts" element={<AlertSettings />} />
+
+        {/* Cafe24 OAuth connect flow (unchanged) */}
         <Route path="/connect/cafe24" element={<Cafe24Connect />} />
         <Route path="/connect/cafe24/result" element={<Cafe24ConnectResult />} />
-        <Route path="/upload" element={<Upload />} />
-        <Route path="/alerts" element={<AlertSettings />} />
+
+        {/* Backward-compatible redirects from the pre-Product-Shell routes */}
+        <Route path="/channels" element={<Navigate to="/settings/channels" replace />} />
+        <Route path="/channels/:accountId" element={<RedirectChannelDetail />} />
+        <Route path="/upload" element={<RedirectUpload />} />
+        <Route path="/alerts" element={<Navigate to="/settings/alerts" replace />} />
+
+        {/* Unknown paths render a real 404 (no silent redirect). An unauthenticated
+            visitor is sent to /login first by <Protected> above. */}
+        <Route path="*" element={<NotFound />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

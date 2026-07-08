@@ -11,6 +11,9 @@ downloads/
 # Local connection registry store (holds connection records — local only)
 .connections/
 
+# Local Agent Bridge pairing store (holds pairing-token hashes — local only, never committed)
+.bridge/
+
 # Environment
 .env
 

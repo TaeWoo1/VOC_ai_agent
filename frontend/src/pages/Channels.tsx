@@ -78,7 +78,7 @@ export function Channels() {
       {openCount > 0 ? (
         <div className="flex items-center justify-between gap-3 rounded-xl bg-warn/10 px-4 py-3 text-warn">
           <span className="font-semibold">확인 필요한 연결 알림 {openCount}건</span>
-          <Link to="/alerts" className="btn-ghost shrink-0">
+          <Link to="/settings/alerts" className="btn-ghost shrink-0">
             확인하기 →
           </Link>
         </div>
@@ -90,7 +90,7 @@ export function Channels() {
 
       {accountsError ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          연결 상태를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          연결 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : null}
 
@@ -152,7 +152,7 @@ function ChannelCard({
     switch (action.intent) {
       case "manage":
         if (account) {
-          navigate(`/channels/${account.id}`);
+          navigate(`/settings/channels/${account.id}`);
         }
         return;
       case "reconnect":
@@ -161,7 +161,7 @@ function ChannelCard({
         navigate(CAFE24_CONNECT_ROUTE);
         return;
       case "upload":
-        navigate(`/upload?channelId=${channel.id}`);
+        navigate(`/settings/upload?channelId=${channel.id}`);
         return;
       case "notice":
         onAction(

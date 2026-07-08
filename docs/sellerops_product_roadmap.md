@@ -1,5 +1,14 @@
 # SellerOps AI — Product Implementation Roadmap
 
+> **⚠️ 시점 기록 (2026-06-15 기준) — 현행 문서 아님.** §0 ground truth(프론트 mock-fallback,
+> "실수집은 Naver뿐"), §4의 Cafe24 이연("Do not run the Cafe24 live API"), §8의 다음 태스크는
+> 이후 실행으로 대체되었다: Cafe24 ORDER_SUMMARY 라이브 E2E PASS
+> (`docs/sellerops_cafe24_live_verification.md`), 프론트 주요 화면의 strict(fail-closed) 전환,
+> Cafe24 OAuth 연결 플로우 구현. §1.1의 수집 사다리("scraping은 최후 수단")도
+> `docs/multi-channel-connector-roadmap.md` §5(2026-07-07 교정)로 대체되었다.
+> **현행 진실**: capability → Connector Roadmap §4.1 · 범위 → `docs/product-scope-v1.md` (v1.1)
+> · 프론트 → `docs/sellerops_frontend_spec.md`. §9(이연 백로그)는 여전히 유효한 아이디어 기록이다.
+
 **Mode:** Planning / sequencing document. No code is written from this file.
 It defines the *order* in which existing scaffolds are turned into a usable
 product, the BE/FE responsibility split per feature, the MVP cut line, and the

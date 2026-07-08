@@ -53,7 +53,7 @@ export function Cafe24ConnectResult() {
         </div>
         <p className="text-base text-muted">{copy.detail}</p>
         <div className="flex items-center gap-3 pt-1">
-          <Link to="/channels" className="btn-ghost">
+          <Link to="/settings/channels" className="btn-ghost">
             채널 연결로 돌아가기
           </Link>
           {copy.retry ? (

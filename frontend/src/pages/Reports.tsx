@@ -12,10 +12,10 @@ export function Reports() {
           <p className="mt-1">현재 연결된 데이터 기준으로 확인 가능한 항목만 표시합니다.</p>
         </div>
         <div className="mt-2 flex flex-wrap justify-center gap-3 text-base">
-          <Link to="/channels" className="btn-ghost">
+          <Link to="/settings/channels" className="btn-ghost">
             채널 연결
           </Link>
-          <Link to="/upload" className="btn-ghost">
+          <Link to="/settings/upload" className="btn-ghost">
             파일 업로드
           </Link>
         </div>

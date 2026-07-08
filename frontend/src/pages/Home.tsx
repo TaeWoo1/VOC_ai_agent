@@ -28,7 +28,7 @@ export function Home() {
         <p className="text-muted">불러오는 중…</p>
       ) : error || !data ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          운영 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          운영 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : (
         <>
@@ -67,7 +67,7 @@ export function Home() {
             <Link to="/orders" className="btn-primary">
               주문·매출 자세히 보기 →
             </Link>
-            <Link to="/channels" className="btn-ghost">
+            <Link to="/settings/channels" className="btn-ghost">
               다른 판매 채널 연결/관리 →
             </Link>
           </div>
