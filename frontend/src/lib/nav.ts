@@ -28,6 +28,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/inquiries", label: "문의 응답", icon: "✉️" },
       { to: "/orders", label: "주문·매출", icon: "📦" },
       { to: "/issues", label: "상품 이슈", icon: "⚠️" },
+      { to: "/operations", label: "리뷰 운영", icon: "🎯" },
       { to: "/reports", label: "리포트", icon: "📄" },
     ],
   },
