@@ -25,8 +25,8 @@
  */
 
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import {
   createLocalAgentConnectorStartup,
@@ -40,6 +40,16 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
+import { createAgentBridge } from "../agent/agent-bridge";
+import { parseAllowedOrigins } from "../bridge/origin-policy";
+
+/**
+ * Collector package root — derived ONLY for the local Bridge pairing-file path (`.bridge/pairings.json`).
+ * ESM connection profiles do NOT use this: they resolve through the shared `base.profileBaseDir`
+ * (`resolveBrowserRuntimeConfig` + the connection profile resolver), preserved from origin-main. Pure
+ * (no I/O) — an `import.meta.url` derivation only, reintroduced solely for the Bridge after the merge.
+ */
+const collectorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** The four browser user-action categories a human can complete (subset of ConnectorUserAction). */
 const BROWSER_USER_ACTIONS: ReadonlySet<string> = new Set<UserActionCategory>([
@@ -111,6 +121,28 @@ async function waitForHumanCompletions(
 
 /** Explicit per-run approval: booting a runnable browser connection launches a local Chrome. */
 export const LOCAL_AGENT_APPROVAL_FLAG = "--i-understand-this-launches-local-agent-chrome";
+
+/** DEV/TEST ONLY: auto-approve bridge pairing (never honored under NODE_ENV=production). */
+const BRIDGE_DEV_AUTO_APPROVE_FLAG = "--dev-insecure-auto-approve";
+const DEFAULT_BRIDGE_PORT = 47615;
+/** Dev-convenience default allow-list (Vite dev server); production MUST set BRIDGE_ALLOWED_ORIGINS. */
+const DEV_DEFAULT_BRIDGE_ORIGINS = "http://localhost:5173 http://127.0.0.1:5173";
+
+/** Resolve the bridge config for the agent-owned bridge (pure; no I/O). */
+export function resolveAgentBridgeConfig(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): { port: number; allowedOrigins: string[]; pairingFile: string; agentVersion: string; refSalt: string; autoApprovePairing: boolean } {
+  const port = env.BRIDGE_PORT ? Number(env.BRIDGE_PORT) : DEFAULT_BRIDGE_PORT;
+  return {
+    port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : DEFAULT_BRIDGE_PORT,
+    allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
+    pairingFile: resolve(collectorRoot, ".bridge", "pairings.json"),
+    agentVersion: "0.0.1-poc",
+    refSalt: env.BRIDGE_REF_SALT ?? env.STORAGE_PROBE_SALT ?? "sellerops-bridge",
+    autoApprovePairing: args.includes(BRIDGE_DEV_AUTO_APPROVE_FLAG) && env.NODE_ENV !== "production",
+  };
+}
 
 function flagValue(args: readonly string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -296,23 +328,45 @@ async function main(): Promise<void> {
 
   // LIVE BOOT — one local Chrome per runnable browser connection (API/discovery channels settle SKIPPED,
   // constructing no browser service).
-  const startup = createLocalAgentConnectorStartup(decision.config, printingObserver);
+
+  // Start the agent-owned Bridge exactly once (pairing + observability; slice §B). Best-effort: if a bridge
+  // is already bound (single-instance), the agent keeps running without a competing one. It stays alive with
+  // the agent, independent of any SellerOps browser tab, and is closed idempotently on shutdown.
+  const bridge = createAgentBridge(resolveAgentBridgeConfig(args, process.env));
+  const bridgeListen = await bridge.listen();
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen }));
+  bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
+
+  // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.
+  const observer: ConnectorOrchestratorObserver = {
+    onConnectionSettled(result: ConnectorStartupResult): void {
+      printingObserver.onConnectionSettled(result);
+      bridge.observer.onConnectionSettled(result);
+    },
+  };
+  const startup = createLocalAgentConnectorStartup(decision.config, observer);
   const statusFile = loadConfig(process.env).statusFile;
   const signalPaths = new Map<string, string>(); // connectionId → its per-connection sentinel path
   const clearSignals = (): void => {
     for (const p of signalPaths.values()) removeIfPresent(p);
   };
 
+  // ONE idempotent shutdown owns BOTH lineages: clear stale human-completed signals, tell the bridge the
+  // agent is stopping, shut the connector runtime down, then close the bridge — on every normal and
+  // signal-driven path (createSignalShutdown makes a double signal a no-op).
   const guardedShutdown = createSignalShutdown(async () => {
     clearSignals(); // never leave a stale human-completed signal behind
+    bridge.markAgentStopping();
     const report = await startup.shutdown();
     console.log(JSON.stringify({ event: "SHUTDOWN", ...report }));
+    await bridge.close();
   });
   const onSignal = (): void => void guardedShutdown().then(() => process.exit(0));
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
   const results = await startup.boot(decision.parsed.connections);
+  bridge.markAgentStarted();
 
   if (startup.managedConnectionIds().length === 0) {
     // Nothing runnable is held (an all-SKIPPED / API-only / discovery-only boot) — there is no browser to
@@ -343,7 +397,8 @@ async function main(): Promise<void> {
   }
   clearSignals();
   // The browser connections stay resident (held for the WAITING/HUMAN handoff) until a signal triggers a
-  // clean shutdown; the process stays alive on the registered signal handlers.
+  // clean shutdown; the process stays alive on the registered signal handlers. The Bridge stays alive with
+  // them — independent of SellerOps browser tabs (closing a tab never stops the agent/bridge).
 }
 
 // Run only when executed directly (e.g. `tsx src/cli/local-agent.ts`), NEVER on import — importing

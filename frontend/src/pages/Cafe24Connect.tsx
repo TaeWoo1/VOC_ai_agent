@@ -74,7 +74,7 @@ export function Cafe24Connect() {
         {error ? <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">{error}</div> : null}
 
         <div className="flex items-center justify-between gap-3">
-          <Link to="/channels" className="btn-ghost">
+          <Link to="/settings/channels" className="btn-ghost">
             채널 연결로 돌아가기
           </Link>
           <button type="submit" disabled={!canSubmit} className="btn-primary">

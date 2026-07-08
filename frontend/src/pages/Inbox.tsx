@@ -70,7 +70,7 @@ export function Inbox() {
         <p className="text-muted">불러오는 중…</p>
       ) : error || !data ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          인박스 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          인박스 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : items.length === 0 ? (
         <Section title="통합 피드">
@@ -79,7 +79,7 @@ export function Inbox() {
             <p className="mt-1 text-base text-muted">
               자료 업로드에서 CSV/XLSX를 올리면 인박스에 표시됩니다.
             </p>
-            <Link to="/upload" className="btn-primary mt-4 inline-flex">
+            <Link to="/settings/upload" className="btn-primary mt-4 inline-flex">
               자료 업로드하기 →
             </Link>
           </div>

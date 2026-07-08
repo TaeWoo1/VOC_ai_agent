@@ -80,7 +80,7 @@ export function Orders() {
         <p className="text-muted">불러오는 중…</p>
       ) : error || !data ? (
         <div className="rounded-xl bg-bad/10 px-4 py-3 text-bad">
-          주문·매출 데이터를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          주문·매출 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </div>
       ) : (
         <>

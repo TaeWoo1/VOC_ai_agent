@@ -77,7 +77,7 @@ export function ChannelSummaryCards({
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error || !data ? (
         <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-          요약 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          요약 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">

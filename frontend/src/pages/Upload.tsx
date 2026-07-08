@@ -128,7 +128,7 @@ export function Upload() {
       setResult(res);
       loadJobs();
     } catch (e) {
-      setError(backendMessage(e) ?? "업로드에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.");
+      setError(backendMessage(e) ?? "업로드에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setBusy(false);
     }
@@ -261,7 +261,7 @@ export function Upload() {
       <Section title="최근 업로드 내역">
         {jobsError ? (
           <p className="text-base text-bad">
-            업로드 내역을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+            업로드 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
           </p>
         ) : jobs.length === 0 ? (
           <p className="text-base text-muted">아직 업로드 내역이 없습니다.</p>

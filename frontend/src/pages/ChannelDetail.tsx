@@ -316,7 +316,7 @@ export function ChannelDetail() {
         // Fail closed: without capability info the controls stay disabled.
         if (active) {
           setCapabilities(null);
-          setError("수집 지원 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.");
+          setError("수집 지원 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
         }
       });
     // Credential field shape (연결에 필요한 정보), loaded independently and fail-soft.
@@ -344,7 +344,7 @@ export function ChannelDetail() {
 
   if (metaError) {
     return (
-      <EmptyState message="채널 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요." />
+      <EmptyState message="채널 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." />
     );
   }
   if (accounts && !account) {
@@ -355,7 +355,7 @@ export function ChannelDetail() {
     <div className="space-y-6">
       <div>
         <p className="text-base text-muted">
-          <Link to="/channels" className="hover:underline">채널 연결</Link> / 자동 수집 관리
+          <Link to="/settings/channels" className="hover:underline">채널 연결</Link> / 자동 수집 관리
         </p>
         <div className="mt-1 flex items-center gap-3">
           <h1 className="text-2xl font-bold">{account?.alias ?? account?.channelNameKo ?? "채널"}</h1>
@@ -389,7 +389,7 @@ export function ChannelDetail() {
           <p className="text-base text-muted">불러오는 중…</p>
         ) : collectionError ? (
           <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-            연결 상태를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+            연결 상태를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
           </p>
         ) : (
           <>
@@ -461,7 +461,7 @@ export function ChannelDetail() {
           <p className="text-base text-muted">불러오는 중…</p>
         ) : collectionError ? (
           <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-            수집 내역을 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+            수집 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
           </p>
         ) : runs.length === 0 ? (
           <p className="text-base text-muted">아직 수집 내역이 없습니다.</p>
@@ -479,7 +479,7 @@ export function ChannelDetail() {
 
       <div className="rounded-xl bg-canvas px-4 py-3 text-base text-muted">
         자동 수집이 어려운 데이터는{" "}
-        <Link to={`/upload?channelId=${account?.channelId ?? ""}`} className="font-semibold text-brand-700 hover:underline">
+        <Link to={`/settings/upload?channelId=${account?.channelId ?? ""}`} className="font-semibold text-brand-700 hover:underline">
           파일 업로드(백업 방식)
         </Link>
         로 채울 수 있습니다. 같은 데이터를 다시 올려도 중복은 자동으로 건너뜁니다.
@@ -556,7 +556,7 @@ function ConnectionInfoSection({
         <p className="text-base text-muted">불러오는 중…</p>
       ) : error ? (
         <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-          연결 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          연결 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       ) : info === null ? (
         <div className="space-y-4">
@@ -605,7 +605,7 @@ function CredentialTemplateBlock({
       <div className="mt-6 border-t border-line pt-6">
         <h3 className="text-base font-bold text-ink">연결에 필요한 정보</h3>
         <p className="mt-2 rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
-          연결에 필요한 정보를 불러오지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.
+          연결에 필요한 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
       </div>
     );
@@ -930,7 +930,7 @@ function ScheduleRow({
       );
       onChanged();
     } catch (e) {
-      onReport(backendMessage(e) ?? "설정 저장에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.", true);
+      onReport(backendMessage(e) ?? "설정 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
     } finally {
       setSaving(false);
     }
@@ -946,7 +946,7 @@ function ScheduleRow({
       );
       onChanged();
     } catch (e) {
-      onReport(backendMessage(e) ?? "수집 실행에 실패했습니다. 백엔드가 실행 중인지 확인해 주세요.", true);
+      onReport(backendMessage(e) ?? "수집 실행에 실패했습니다. 잠시 후 다시 시도해 주세요.", true);
     } finally {
       setSyncing(false);
     }
