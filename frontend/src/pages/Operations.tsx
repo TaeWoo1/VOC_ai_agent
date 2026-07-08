@@ -1,8 +1,7 @@
-import { useState } from "react";
-import type { ActionWindowRunView, CommandType } from "../lib/actionWindow/contract";
-import { SCENARIO_NAMES, UI_SCENARIOS, type ScenarioName } from "../lib/actionWindow/fixtures";
-import { applyCommand } from "../lib/actionWindow/mockAdapter";
+import type { ActionWindowRunView } from "../lib/actionWindow/contract";
+import { SCENARIO_NAMES, type ScenarioName } from "../lib/actionWindow/fixtures";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
+import { useActionWindowController } from "../lib/actionWindow/controller";
 import { blockerView, channelLabel, resolveCopy, runStatusView, type StatusTone } from "../lib/actionWindow/copy";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
@@ -45,23 +44,11 @@ function StatusBadge({ run }: { run: ActionWindowRunView }) {
   );
 }
 
-/** FE-1 Review Operations page — the operations-agent run experience (mock-driven). */
+/** FE-1 Review Operations page — the operations-agent run experience. Data source (contract-backed
+ *  mock vs live local-agent Bridge) is chosen through the dev/runtime boundary; screens/copy are shared. */
 export function Operations() {
-  const [scenario, setScenario] = useState<ScenarioName>("human-action-required");
-  const [run, setRun] = useState<ActionWindowRunView | null>(UI_SCENARIOS["human-action-required"].run);
-  const [note, setNote] = useState<string>("");
-
-  function loadScenario(name: ScenarioName) {
-    setScenario(name);
-    setRun(UI_SCENARIOS[name].run);
-    setNote("");
-  }
-
-  function handleCommand(type: CommandType) {
-    const result = applyCommand(run, type);
-    setRun(result.run);
-    setNote(result.note);
-  }
+  const { run, note, send: handleCommand, scenario, loadScenario } = useActionWindowController();
+  const showScenarioPreview = isFixturePreviewEnabled() && loadScenario !== undefined;
 
   const blocker = run?.blocker ? blockerView(run.blocker.code) : undefined;
 
@@ -81,8 +68,8 @@ export function Operations() {
         )}
       </header>
 
-      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build). */}
-      {isFixturePreviewEnabled() ? (
+      {/* Fixture/demo preview — DEV-ONLY, mock mode only (never rendered in the production build). */}
+      {showScenarioPreview ? (
         <nav
           aria-label="데모 시나리오 (개발용)"
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
@@ -98,7 +85,7 @@ export function Operations() {
                   key={name}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => loadScenario(name)}
+                  onClick={() => loadScenario?.(name)}
                   className={
                     "rounded-lg px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
                     (active ? "bg-ink text-white" : "border border-line bg-surface text-muted hover:bg-surface/70")
