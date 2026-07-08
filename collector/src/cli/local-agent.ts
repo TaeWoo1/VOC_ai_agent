@@ -24,6 +24,7 @@
  * value is a sanitized enum / boolean / count.
  */
 
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,7 +41,8 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig } from "../agent/agent-bridge";
+import { SyntheticProbeDriver } from "../action-window/session";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
 
 /**
@@ -124,6 +126,17 @@ export const LOCAL_AGENT_APPROVAL_FLAG = "--i-understand-this-launches-local-age
 
 /** DEV/TEST ONLY: auto-approve bridge pairing (never honored under NODE_ENV=production). */
 const BRIDGE_DEV_AUTO_APPROVE_FLAG = "--dev-insecure-auto-approve";
+/**
+ * DEV/TEST ONLY: host a SYNTHETIC Action Window run on the Bridge (R2B). Never honored under
+ * NODE_ENV=production — no live channel exists yet, so production hosts no Action Window session.
+ * The synthetic driver opens no browser and the Runtime never clicks anything.
+ */
+export const ACTION_WINDOW_SYNTHETIC_FLAG = "--dev-action-window-synthetic";
+
+/** Pure gate for the dev-only synthetic Action Window hosting (mirrors the auto-approve gating). */
+export function resolveActionWindowSynthetic(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  return args.includes(ACTION_WINDOW_SYNTHETIC_FLAG) && env.NODE_ENV !== "production";
+}
 const DEFAULT_BRIDGE_PORT = 47615;
 /** Dev-convenience default allow-list (Vite dev server); production MUST set BRIDGE_ALLOWED_ORIGINS. */
 const DEV_DEFAULT_BRIDGE_ORIGINS = "http://localhost:5173 http://127.0.0.1:5173";
@@ -332,9 +345,19 @@ async function main(): Promise<void> {
   // Start the agent-owned Bridge exactly once (pairing + observability; slice §B). Best-effort: if a bridge
   // is already bound (single-instance), the agent keeps running without a competing one. It stays alive with
   // the agent, independent of any SellerOps browser tab, and is closed idempotently on shutdown.
-  const bridge = createAgentBridge(resolveAgentBridgeConfig(args, process.env));
+  // DEV/TEST ONLY (R2B): host one synthetic Action Window run over the Bridge opaque passthrough. The
+  // run identity is Runtime-assigned (opaque random suffix — never derived from any account/connection).
+  const actionWindow: AgentActionWindowConfig | undefined = resolveActionWindowSynthetic(args, process.env)
+    ? {
+        runId: `run_${randomBytes(6).toString("hex")}`,
+        channelCode: "synthetic",
+        runCopyKey: "actionWindow.run.synthetic",
+        createDriver: () => new SyntheticProbeDriver(),
+      }
+    : undefined;
+  const bridge = createAgentBridge({ ...resolveAgentBridgeConfig(args, process.env), ...(actionWindow ? { actionWindow } : {}) });
   const bridgeListen = await bridge.listen();
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

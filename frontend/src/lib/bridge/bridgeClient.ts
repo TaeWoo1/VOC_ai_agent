@@ -21,7 +21,13 @@ import {
   type ServerMessage,
 } from "./bridgeProtocol";
 
-const TOKEN_KEY = "sellerops_bridge_token";
+/**
+ * localStorage key holding the long-lived pairing token. Exported (read-only reuse) so the Action
+ * Window WS transport authenticates through the SAME pairing this client established — it never runs
+ * its own pairing flow.
+ */
+export const BRIDGE_TOKEN_KEY = "sellerops_bridge_token";
+const TOKEN_KEY = BRIDGE_TOKEN_KEY;
 
 export type BridgePhase =
   | "connecting"

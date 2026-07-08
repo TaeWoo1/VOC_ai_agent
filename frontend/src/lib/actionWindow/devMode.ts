@@ -2,6 +2,7 @@
 // and must never appear in the production UI: gated on Vite's build-time `DEV`
 // flag, so the production build tree-shakes it out entirely.
 import type { AwClientTransport } from "./contract";
+import { connectAwBridgeSession } from "./wsTransport";
 
 export function isFixturePreviewEnabled(): boolean {
   return import.meta.env.DEV === true;
@@ -14,8 +15,8 @@ export function isFixturePreviewEnabled(): boolean {
  *   - `"bridge"`: the live local-agent Runtime over the Action Window transport.
  *
  * Bridge mode is DEV-only and opt-in (`VITE_AW_BRIDGE=1`) — and even then only takes effect once a
- * real transport is available (see {@link resolveBridgeTransport}). The scenario preview is shown
- * only in mock mode.
+ * live session is actually established (see {@link resolveBridgeSession}); otherwise the controller
+ * falls back to the mock. The scenario preview is shown only in mock mode.
  */
 export type AdapterMode = "mock" | "bridge";
 
@@ -24,27 +25,35 @@ export function isBridgeModeEnabled(): boolean {
   return env.DEV === true && env.VITE_AW_BRIDGE === "1";
 }
 
-/** A live Action Window transport bound to the Operation Run it drives (run identity assigned out-of-band). */
+/** A live Action Window transport bound to the Operation Run the local agent announced. */
 export interface BridgeSession {
   transport: AwClientTransport;
   runId: string;
   channelCode: string;
+  /** Tear down the underlying socket and stop reconnection. */
+  close(): void;
 }
 
 /**
- * The live Action Window transport session, or `null` when none is wired.
+ * Establish the live Action Window session over the Local Agent Bridge (R2B), or resolve `null` when
+ * none is reachable — bridge mode disabled, agent off, unpaired, no hosted run announced, or a
+ * transport-version mismatch. `null` keeps Operations on the mock (the honest fallback), so the screen
+ * degrades to the contract-backed demo instead of a broken live view.
  *
- * The real Bridge-WS transport — Action Window frames carried as opaque payloads inside Local Agent
- * Bridge v1 — plus the run identity assigned during pairing, is a follow-up (a Bridge
- * opaque-passthrough slice). Until it lands there is nothing to connect to, so this returns `null` and
- * Operations stays on the mock. The Bridge *adapter* (`bridgeAdapter.ts`) is complete and
- * transport-injected; only this concrete transport is deferred.
+ * Authentication reuses the pairing the Bridge status client established (`BRIDGE_TOKEN_KEY`); the run
+ * identity comes from the agent's `aw_session` announcement — the FE never invents a runId.
  */
-export function resolveBridgeSession(): BridgeSession | null {
-  return null;
+export function resolveBridgeSession(): Promise<BridgeSession | null> {
+  if (!isBridgeModeEnabled()) return Promise.resolve(null);
+  const env = import.meta.env as Record<string, unknown>;
+  const httpBase = typeof env.VITE_BRIDGE_URL === "string" ? env.VITE_BRIDGE_URL : "http://127.0.0.1:47615";
+  return connectAwBridgeSession({ httpBase, wsBase: httpBase.replace(/^http/, "ws") });
 }
 
-/** Effective mode after accounting for whether a transport actually exists. */
+/**
+ * The INTENDED mode from build-time flags. Bridge mode still falls back to mock at runtime when
+ * {@link resolveBridgeSession} cannot reach a live session (the controller owns that fallback).
+ */
 export function resolveAdapterMode(): AdapterMode {
-  return isBridgeModeEnabled() && resolveBridgeSession() !== null ? "bridge" : "mock";
+  return isBridgeModeEnabled() ? "bridge" : "mock";
 }

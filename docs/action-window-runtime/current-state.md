@@ -3,16 +3,16 @@
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-09
-- **baseline main SHA:** `3dcfff2` (`origin/main`; incl. PR #212 R0, PR #214 canonical contract, PR #213 R1, **PR #215 FE mock-flow**, and **PR #216 R1.1** all merged)
-- **current branch:** `integ/action-window-v1` (R2 — FE↔Bridge↔Runtime synthetic integration)
+- **baseline main SHA:** `dc84546` (`origin/main`; incl. PR #212 R0, PR #214 canonical contract, PR #213 R1, PR #215 FE mock-flow, PR #216 R1.1, and **PR #217 R2A** all merged)
+- **current branch:** `feat/action-window-bridge-transport` (R2B — live Bridge-WS passthrough transport)
 - **current worktree:** `sellerops-action-window-integrate` (linked worktree of the shared SellerOps repo)
-- **branch base SHA:** `3dcfff2` (`origin/main`)
-- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** Canonical message shape set by **PR #214**. R2 adds an **additive** transport sibling `contracts/action-window/v1/transport.ts` (`ACTION_WINDOW_TRANSPORT_VERSION = 1`) — frames that carry the already-normative envelopes/View Model **inside Bridge v1 as opaque payloads**; `index.ts`/`schema.json`/`bridge/protocol.ts` are unchanged (no drift, no message-protocol bump).
-- **current slice:** R2A (offline FE↔Runtime integration) — **VERIFIED** (offline synthetic E2E + headed operator-click browser proof both green); PR #217. **R2B (real Bridge-WS passthrough transport) is reserved for the next PR.**
-- **last completed item:** built the command-driven `ActionWindowSession` + `ProbeDriver` (synthetic + browser), the shared loopback transport, and the FE `bridgeAdapter`/`controller` selected through the dev/runtime boundary (mock default). FE `contract.ts` remains a **zero-drift re-export** of the canonical source (now also re-exporting the transport types).
-- **last verified tests:** collector `session-integration.test.ts` (8, offline) — full loop + stale/dup/pause/resume/cancel/reconnect/privacy; full collector suite **2414 passed / 12 skipped**, `tsc --noEmit` clean. FE `bridgeAdapter.test.ts` (9), full FE suite **192 passed**, `tsc --noEmit` clean, `vite build` OK. **`session-browser.test.ts` RUN under `RUN_INTEGRATION=1`:** automated headless (simulated click) green, and **headed operator proof (`AW_HEADED=1`) with a REAL human click** green — start→checkpoint (overlay visible)→user click (observation ≠ completion)→recheck→verify→downstream→COMPLETED, clean teardown (overlay/observer removed).
-- **current blocker:** none for R2A. Live gaps reserved for **R2B**: the **real Bridge-WS transport** (opaque passthrough — a Bridge slice) + Local Agent startup wiring + Operation Run identity. Until R2B lands, `resolveBridgeSession()` returns `null` and the shipped Operations screen runs the mock.
-- **next single action:** after PR #217 merges, start **R2B** (live Bridge-WS passthrough transport) in a fresh session/branch from updated `main`; then R3 persistence.
+- **branch base SHA:** `dc84546` (`origin/main`)
+- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`, `ACTION_WINDOW_TRANSPORT_VERSION = 1`) — UNCHANGED by R2B.** The R2B wire binding implements the existing `AwClientTransport`/`AwServerTransport` interfaces over the real Bridge WS; frames ride the authenticated `/bridge/ws` socket as opaque `{type:"aw", payload}` carriers plus an agent→client `{type:"aw_session"}` announcement (both defined in `collector/src/bridge/action-window-endpoint.ts` / consumed by `frontend/src/lib/actionWindow/wsTransport.ts`). The typed Bridge v1 `ClientMessage`/`ServerMessage` unions in `bridge/protocol.ts` are untouched — no Bridge version bump.
+- **current slice:** **R2B (live Bridge-WS passthrough) — IMPLEMENTED + offline-VERIFIED** on this branch: FE command → paired/ticketed Bridge WS → `ActionWindowSession` → sanitized events/View Model → Bridge WS → FE, proven over a REAL loopback WebSocket with real pairing/authentication (synthetic driver; no live channel, no browser).
+- **last completed item:** `ActionWindowEndpoint` (collector) binds the R2A `ActionWindowSession` to `/bridge/ws` (broadcast events/views to every paired tab; command/resync results routed to the sender only); `BridgeServer` relays `{type:"aw"}` opaquely and announces the hosted run after hello+snapshot; `createAgentBridge` hosts the session via optional `actionWindow` config; `local-agent` CLI gains the DEV-only `--dev-action-window-synthetic` flag (refused under `NODE_ENV=production`). FE: `wsTransport.ts` implements `AwClientTransport` over the Bridge WS (pairing-token reuse via `BRIDGE_TOKEN_KEY`, single-use ticket, `aw_session` gate, reconnect with fresh ticket + `aw_resync` from 0, run-identity pinning); `resolveBridgeSession()` now really connects (async) and the controller falls back to the mock at runtime when no live session is reachable.
+- **last verified tests:** collector `bridge-transport.test.ts` (10, offline, REAL loopback WS) — announcement, full loop (start→checkpoint→test-driver action→recheck→completed), reconnect replay, stale-revision, duplicate-idempotent, cancel/cleanup, unauthorized/unpaired rejection, malformed-frame drop, broadcast-vs-reply routing, prod-gate; full collector suite **2424 passed / 12 skipped**, `tsc --noEmit` clean. FE `wsTransport.test.ts` (8) + `devMode.test.ts` (3); full FE suite **202 passed**, `tsc --noEmit` clean, `vite build` OK. Wire privacy: `findProhibitedFields` == [] for every frame crossing the real WS.
+- **current blocker:** none for R2B offline scope. Remaining live gaps (deliberate): no live channel (R4), no Operation Run persistence (R3), no browser-driver-over-Bridge QA (synthetic driver only in this slice), production hosts **no** Action Window session (dev flag refused under production).
+- **next single action:** after this R2B PR merges, start **R3** (Operation Run persistence) from updated `main`.
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -39,8 +39,14 @@
   `ActionWindowSession` over a loopback transport — full command/event/View-Model
   loop, reconnect resync, idempotency/revision/ordering, and a privacy scan, all
   green offline AND against real Chromium with a **headed operator (real human)
-  click**. **R2B (real Bridge-WS passthrough transport + Local Agent startup
-  wiring) is reserved for the next PR;** no live channel yet.
+  click**.
+- **R2B (live Bridge-WS passthrough) is IMPLEMENTED + offline-VERIFIED** on
+  `feat/action-window-bridge-transport`: the same session runs behind the REAL
+  Bridge WebSocket — real pairing (request→local confirm→poll), single-use
+  ticket, origin allow-list — with Action Window frames as opaque `{type:"aw"}`
+  carriers and an `aw_session` run announcement. Verified over a real loopback
+  WS with the synthetic driver (10 tests). Still **no live channel**, no
+  persistence, and production hosts no Action Window session.
 
 ## Existing foundations vs implemented Action Window capability
 
@@ -52,8 +58,12 @@ Bridge protocol, Browser Projection (optional renderer).
 **Implemented Action Window capability:** R1 channel-neutral synthetic loop
 (`collector/src/action-window/*`) — pure state engine, target locator, overlay,
 user-action observer, transition verifier, fail-closed blockers, dummy downstream,
-in-memory event sink, `ActionWindowRunView` projection, cleanup. Synthetic-only;
-automated + headed-operator-QA verified. Not live, not FE-integrated.
+in-memory event sink, `ActionWindowRunView` projection, cleanup — plus the R2A
+command-driven `ActionWindowSession`/FE adapter integration and the R2B Bridge-WS
+passthrough (opaque `{type:"aw"}` carriers over the paired/ticketed `/bridge/ws`,
+`aw_session` announcement, reconnect resync). Synthetic-only; automated + headed
+operator-QA + real-loopback-WS verified. **Not live** (no real channel, no
+persistence; production hosts no Action Window session).
 
 ## Baseline / branch caveat
 

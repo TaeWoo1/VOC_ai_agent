@@ -71,3 +71,17 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   technical candidate for the first live pilot, not an irreversible choice.**
   *Rationale:* existing profile/signature/download/upload seams; final channel is
   a product-owner decision.
+
+- **D-017 · ACTIVE** — **Action Window frames ride the EXISTING authenticated
+  `/bridge/ws` socket as opaque carriers** (`{type:"aw", payload:string}` both
+  directions, plus an agent→client `{type:"aw_session", transportVersion, runId,
+  channelCode}` announcement) — NOT a separate socket/ticket (the Projection
+  precedent) and NOT new typed Bridge union variants. Pairing + single-use
+  ticket + origin allow-list are inherited as-is; run identity is assigned by
+  the Runtime and announced, never invented by the FE; reply frames
+  (`aw_command_result`/`aw_resync_result`) route to the sending socket only
+  while events/views broadcast to every paired tab. FE reconnect = fresh ticket
+  + `aw_resync` from sequence 0 (idempotent by eventId/sequence dedupe), pinned
+  to the announced runId. *Rationale:* implements the ratified nested-transport
+  governance (contract README §8) with zero Bridge v1 semantic change and zero
+  contract-dir change; production hosts no session (dev-only synthetic flag).

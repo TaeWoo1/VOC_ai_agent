@@ -17,6 +17,9 @@ import { ProjectionEndpoint } from "../bridge/projection-endpoint";
 import type { ProjectionSource } from "../bridge/projection-hub";
 import type { AdapterFrame } from "../bridge/projection-adapter";
 import type { ProjectionCapabilities } from "../bridge/projection-protocol";
+import { ActionWindowEndpoint } from "../bridge/action-window-endpoint";
+import { ActionWindowEngine } from "../action-window/engine";
+import { ActionWindowSession, type ProbeDriver } from "../action-window/session";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
 
@@ -36,6 +39,22 @@ export interface AgentProjectionConfig {
   leaseIdleMs?: number;
 }
 
+/**
+ * Optional Action Window session hosting (R2B). When present, the agent hosts ONE command-driven
+ * `ActionWindowSession` and relays its frames over the EXISTING authenticated `/bridge/ws` socket as
+ * opaque `{type:"aw"}` carrier payloads (see `bridge/action-window-endpoint.ts`). The driver factory is
+ * injected so the default boot stays synthetic (no browser); the Runtime never clicks the target.
+ */
+export interface AgentActionWindowConfig {
+  /** Opaque run identity announced to paired clients (assigned by the Runtime, never by the FE). */
+  runId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE, e.g. `synthetic`). */
+  channelCode: string;
+  /** Dotted semantic copy key for the run headline; FE owns final copy. */
+  runCopyKey: string;
+  createDriver: () => ProbeDriver;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -47,6 +66,8 @@ export interface AgentBridgeConfig {
   now?: () => number;
   /** When present, mounts the SEPARATE projection transport alongside the G1 status channel. */
   projection?: AgentProjectionConfig;
+  /** When present, hosts one Action Window session over the existing `/bridge/ws` opaque passthrough. */
+  actionWindow?: AgentActionWindowConfig;
 }
 
 export type AgentBridgeListenResult =
@@ -66,6 +87,8 @@ export interface AgentBridge {
   readonly active: boolean;
   /** Test-only access to the underlying server (snapshot inspection). */
   readonly server: BridgeServer;
+  /** Test-only access to the hosted Action Window session (undefined unless configured). */
+  readonly actionWindowSession: ActionWindowSession | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
@@ -80,6 +103,25 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
         onTargetSwitchRequested: cfg.projection.onTargetSwitchRequested,
       })
     : undefined;
+  // Action Window hosting (R2B): endpoint + engine + session are assembled here so the CLI only decides
+  // WHETHER to host a run; the session binds to the endpoint's transport exactly as it binds to the
+  // loopback channel in the offline E2E. The driver is injected (synthetic by default — no browser).
+  const actionWindow = cfg.actionWindow
+    ? new ActionWindowEndpoint({ runId: cfg.actionWindow.runId, channelCode: cfg.actionWindow.channelCode })
+    : undefined;
+  const actionWindowSession =
+    cfg.actionWindow && actionWindow
+      ? new ActionWindowSession(
+          new ActionWindowEngine({
+            runId: cfg.actionWindow.runId,
+            channelCode: cfg.actionWindow.channelCode,
+            runCopyKey: cfg.actionWindow.runCopyKey,
+          }),
+          cfg.actionWindow.createDriver(),
+          actionWindow.transport,
+        )
+      : undefined;
+  actionWindowSession?.attach();
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -87,12 +129,14 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     port: cfg.port,
     autoApprovePairing: cfg.autoApprovePairing,
     projection,
+    actionWindow,
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;
 
   return {
     server,
+    actionWindowSession,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {
