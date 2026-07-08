@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   const browser = await chromium.launch({ headless: false });
   try {
     const page = await browser.newPage();
-    const engine = new ActionWindowEngine({ runId: "qa_run", channel: "synthetic", title: "합성 Action Window" });
+    const engine = new ActionWindowEngine({ runId: "qa_run", channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
     const result = await runSyntheticLoop(page, engine, { mode, observeTimeoutMs: 120_000, guidanceEnabled: true });
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ finalStage: result.finalStage, observed: result.observed, downstream: result.downstream, view: result.view, events: result.events }, null, 2));

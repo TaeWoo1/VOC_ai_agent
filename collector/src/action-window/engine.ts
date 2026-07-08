@@ -16,6 +16,7 @@ import {
   type ActionWindowRunView,
   type BlockerCode,
   type CommandEnvelope,
+  type CopyParams,
   type EventEnvelope,
   type EventPayload,
   type EventType,
@@ -26,8 +27,11 @@ import { type Stage, stageStepIndex, stageToRunStatus, stepMetaByIndex } from ".
 
 export interface RunConfig {
   runId: string;
-  channel: string;
-  title: string;
+  /** Sanitized stable channel identity (SEMANTIC_CODE), e.g. `synthetic` — never a user-facing title. */
+  channelCode: string;
+  /** Dotted semantic copy key for the run headline; FE owns final copy. */
+  runCopyKey: string;
+  runCopyParams?: CopyParams;
   guidanceEnabled?: boolean;
 }
 
@@ -66,8 +70,9 @@ function makeDefaultClock(): Clock {
 
 export class ActionWindowEngine {
   private readonly runId: string;
-  private readonly channel: string;
-  private readonly title: string;
+  private readonly channelCode: string;
+  private readonly runCopyKey: string;
+  private readonly runCopyParams?: CopyParams;
   private readonly clock: Clock;
   readonly sink: InMemoryEventSink;
 
@@ -86,8 +91,9 @@ export class ActionWindowEngine {
 
   constructor(config: RunConfig, opts?: { clock?: Clock; sink?: InMemoryEventSink }) {
     this.runId = config.runId;
-    this.channel = config.channel;
-    this.title = config.title;
+    this.channelCode = config.channelCode;
+    this.runCopyKey = config.runCopyKey;
+    this.runCopyParams = config.runCopyParams;
     this.guidanceEnabled = config.guidanceEnabled ?? true;
     this.clock = opts?.clock ?? makeDefaultClock();
     this.sink = opts?.sink ?? new InMemoryEventSink();
@@ -110,8 +116,9 @@ export class ActionWindowEngine {
   private snapshot(): EngineSnapshot {
     return {
       runId: this.runId,
-      channel: this.channel,
-      title: this.title,
+      channelCode: this.channelCode,
+      runCopyKey: this.runCopyKey,
+      runCopyParams: this.runCopyParams,
       stage: this.stage,
       resumeStage: this.resumeStage,
       activeStepIndex: this.activeStepIndex,
