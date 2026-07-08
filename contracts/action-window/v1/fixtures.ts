@@ -2,8 +2,8 @@
 //
 // The names below are FIXTURE / SCENARIO names for FE rendering — NOT protocol
 // enum values. Each fixture is a real `ActionWindowRunView` built only from the
-// contract's actual RunStatus / StepStatus / ExecutionMode / BlockerCode /
-// CommandType values, so FE-1 can render every state without inventing semantics.
+// contract's actual enums plus SEMANTIC CODES and COPY KEYS (never final prose),
+// so FE-1 can render every state and localize the copy itself.
 
 import type { ActionWindowCommand } from "./command";
 import type { ActionWindowEvent } from "./event";
@@ -17,32 +17,44 @@ import {
   StepStatus,
 } from "./enums";
 import { PROTOCOL_VERSION } from "./protocol";
-import { defaultAllowedCommands, type ActionWindowRunView } from "./view";
+import { defaultAllowedCommands, type ActionWindowRunView, type CopyParams } from "./view";
 
 const TOTAL_STEPS = 5;
 const RUN_ID = "run_esm_review_demo";
-const CHANNEL = "esm";
-const TITLE = "리뷰 내려받기 · ESM(지마켓)";
+const CHANNEL_CODE = "esm";
+const OPERATION_CODE = "review_export";
+const RUN_COPY_KEY = "actionWindow.review.run";
+const RUN_COPY_PARAMS: CopyParams = { marketplace: "gmarket" };
 
-const STEP_TITLES: Record<number, string> = {
-  1: "준비 — 로그인·기간 확인",
-  2: "판매자센터 리뷰 내려받기 화면 열기",
-  3: "기간·범위 지정 후 내려받기",
-  4: "다운로드 감지",
-  5: "가져오기·정리·리포트",
+// Semantic step identity + copy key per semantic step (Runtime owns these; FE
+// localizes the copy key). No user-facing prose lives in the contract.
+const STEP_CODE: Record<number, string> = {
+  1: "prepare",
+  2: "open_export",
+  3: "trigger_export",
+  4: "await_download",
+  5: "ingest",
+};
+const STEP_COPY_KEY: Record<number, string> = {
+  1: "actionWindow.review.ready",
+  2: "actionWindow.review.selectMarketplace",
+  3: "actionWindow.review.triggerExport",
+  4: "actionWindow.review.waitingForDownload",
+  5: "actionWindow.review.processing",
 };
 
 function step(
   stepNumber: number,
   status: StepStatus,
-  instruction?: string,
+  copyParams?: CopyParams,
 ): ActionWindowRunView["currentStep"] {
   return {
     stepId: `step_${stepNumber}`,
     stepNumber,
     totalSteps: TOTAL_STEPS,
-    title: STEP_TITLES[stepNumber] ?? `단계 ${stepNumber}`,
-    ...(instruction !== undefined ? { instruction } : {}),
+    stepCode: STEP_CODE[stepNumber] ?? `step_${stepNumber}`,
+    copyKey: STEP_COPY_KEY[stepNumber] ?? "actionWindow.review.processing",
+    ...(copyParams !== undefined ? { copyParams } : {}),
     status,
   };
 }
@@ -78,14 +90,26 @@ export const SCENARIO_NAMES: readonly ScenarioName[] = [
 
 function base(revision: number, status: RunStatus): Pick<
   ActionWindowRunView,
-  "protocolVersion" | "runId" | "revision" | "channel" | "title" | "status" | "executionMode" | "guidanceEnabled" | "allowedCommands"
+  | "protocolVersion"
+  | "runId"
+  | "revision"
+  | "channelCode"
+  | "operationCode"
+  | "runCopyKey"
+  | "runCopyParams"
+  | "status"
+  | "executionMode"
+  | "guidanceEnabled"
+  | "allowedCommands"
 > {
   return {
     protocolVersion: PROTOCOL_VERSION,
     runId: RUN_ID,
     revision,
-    channel: CHANNEL,
-    title: TITLE,
+    channelCode: CHANNEL_CODE,
+    operationCode: OPERATION_CODE,
+    runCopyKey: RUN_COPY_KEY,
+    runCopyParams: RUN_COPY_PARAMS,
     status,
     executionMode: ExecutionMode.ACTION_WINDOW,
     guidanceEnabled: true,
@@ -96,7 +120,7 @@ function base(revision: number, status: RunStatus): Pick<
 export const ACTION_WINDOW_SCENARIOS: Record<ScenarioName, ActionWindowRunView> = {
   "ready-to-start": {
     ...base(1, RunStatus.IDLE),
-    currentStep: step(1, StepStatus.READY, "‘시작’을 누르면 판매자센터 안내를 시작해요."),
+    currentStep: step(1, StepStatus.READY),
     progress: { completedSteps: 0, totalSteps: TOTAL_STEPS },
   },
   "starting": {
@@ -106,28 +130,28 @@ export const ACTION_WINDOW_SCENARIOS: Record<ScenarioName, ActionWindowRunView> 
   },
   "human-action-required": {
     ...base(3, RunStatus.WAITING_FOR_HUMAN),
-    currentStep: step(3, StepStatus.AWAITING_USER, "기간을 고른 뒤 ‘내려받기’를 눌러 주세요."),
+    currentStep: step(3, StepStatus.AWAITING_USER, { marketplace: "gmarket" }),
     progress: { completedSteps: 2, totalSteps: TOTAL_STEPS },
   },
   "waiting-for-user": {
     ...base(4, RunStatus.WAITING_FOR_HUMAN),
     guidanceEnabled: false,
-    currentStep: step(3, StepStatus.AWAITING_USER, "직접 진행 중이에요. 끝나면 ‘다 했어요’를 눌러 주세요."),
+    currentStep: step(3, StepStatus.AWAITING_USER),
     progress: { completedSteps: 2, totalSteps: TOTAL_STEPS },
   },
   "observing": {
     ...base(5, RunStatus.RUNNING),
-    currentStep: step(3, StepStatus.OBSERVING, "내려받기 버튼을 눌렀는지 확인하고 있어요."),
+    currentStep: step(3, StepStatus.OBSERVING),
     progress: { completedSteps: 2, totalSteps: TOTAL_STEPS },
   },
   "download-detected": {
     ...base(6, RunStatus.RUNNING),
-    currentStep: step(4, StepStatus.PROCESSING, "다운로드를 감지했어요. 파일을 확인하는 중이에요."),
+    currentStep: step(4, StepStatus.PROCESSING),
     progress: { completedSteps: 3, totalSteps: TOTAL_STEPS },
   },
   "processing": {
     ...base(7, RunStatus.PROCESSING),
-    currentStep: step(5, StepStatus.PROCESSING, "리뷰를 가져와 정리·분석하고 있어요."),
+    currentStep: step(5, StepStatus.PROCESSING),
     progress: { completedSteps: 4, totalSteps: TOTAL_STEPS },
   },
   "completed": {
@@ -145,7 +169,6 @@ export const ACTION_WINDOW_SCENARIOS: Record<ScenarioName, ActionWindowRunView> 
     blocker: {
       code: BlockerCode.UI_DRIFT,
       recoverable: defaultBlockerRecoverable(BlockerCode.UI_DRIFT),
-      message: "화면이 바뀐 것 같아요. 지금 화면을 확인해 주세요.",
     },
     progress: { completedSteps: 2, totalSteps: TOTAL_STEPS },
   },
@@ -155,7 +178,6 @@ export const ACTION_WINDOW_SCENARIOS: Record<ScenarioName, ActionWindowRunView> 
     blocker: {
       code: BlockerCode.LOGIN_REQUIRED,
       recoverable: defaultBlockerRecoverable(BlockerCode.LOGIN_REQUIRED),
-      message: "판매자센터에 다시 로그인해 주세요.",
     },
     progress: { completedSteps: 0, totalSteps: TOTAL_STEPS },
   },
@@ -165,7 +187,6 @@ export const ACTION_WINDOW_SCENARIOS: Record<ScenarioName, ActionWindowRunView> 
     blocker: {
       code: BlockerCode.ARTIFACT_INVALID,
       recoverable: defaultBlockerRecoverable(BlockerCode.ARTIFACT_INVALID),
-      message: "받은 파일을 확인할 수 없어요. 다시 시도해 주세요.",
     },
     progress: { completedSteps: 3, totalSteps: TOTAL_STEPS },
   },

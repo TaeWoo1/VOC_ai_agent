@@ -55,6 +55,28 @@ There is **no** `CONFIRM_STEP_COMPLETED` command, by design. The UI can only
 observation, verifies the expected state itself, and is the **only** party that
 marks a step complete, expressed solely through the `STEP_COMPLETED` event.
 
+## Copy ownership (Runtime vs. FE)
+
+Runtime owns **semantic state**; FE owns **final copy**.
+
+- Runtime supplies semantic identifiers only: `channelCode`, `operationCode`,
+  `stepCode`, `runCopyKey`, step `copyKey`, `BlockerCode`, `RunStatus` /
+  `StepStatus`, `allowedCommands`, and sanitized **primitive** `copyParams`
+  (string / number / boolean).
+- FE owns every user-facing string: titles, instructions, button labels, tone,
+  icons, localized wording, progress phrasing, and all blocker wording (derived
+  from `BlockerCode`). FE maps each copy key to localized product copy.
+- **Copy keys are stable dotted identifiers** (e.g. `actionWindow.review.ready`),
+  never sentences. Because they are identifiers, FE can safely tell a copy key
+  apart from final prose. An **unknown** copy key renders a safe FE fallback — it
+  never grants a command or changes Runtime state.
+- Copy keys and copy params carry **no authority**: `allowedCommands` remains the
+  only source of command controls, and Runtime marks completion only via the
+  `STEP_COMPLETED` event — never through a display field.
+- The public parsers are **exact-schema, fail-closed**: unknown fields (including
+  Runtime-authored prose like `title` / `instruction` / `message` / `html` /
+  `displayText`) are rejected, not silently accepted.
+
 ## Sanitization boundary
 
 The View Model, command/event payloads, and fixtures must never contain
@@ -73,6 +95,8 @@ payload that violates it. Opaque handles (`runId`, `eventId`, `commandId`,
 3. Validate untrusted Bridge messages with `parseCommand` / `parseEvent` /
    `validateRunView` before use.
 4. Treat every enum/version you do not recognize as fail-closed.
+5. Map copy keys to localized copy in FE; never send final prose from Runtime,
+   and never let a copy key affect state or command authority.
 
 ## Checks
 

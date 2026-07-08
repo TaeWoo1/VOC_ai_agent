@@ -9,9 +9,21 @@ import {
   isNonNegativeInteger,
   isRecord,
   ok,
+  rejectUnknownKeys,
   type ParseResult,
   type ValidationIssue,
 } from "./result";
+
+const EVENT_ENVELOPE_KEYS: readonly string[] = [
+  "protocolVersion",
+  "eventId",
+  "runId",
+  "sequence",
+  "revision",
+  "type",
+  "occurredAt",
+  "payload",
+];
 
 /** Immutable event envelope. `eventId` supports duplicate suppression. */
 export type ActionWindowEvent = {
@@ -35,6 +47,8 @@ export function parseEvent(input: unknown): ParseResult<ActionWindowEvent> {
   if (!isRecord(input)) {
     return fail([{ path: "(root)", message: "event must be an object" }]);
   }
+
+  rejectUnknownKeys(input, EVENT_ENVELOPE_KEYS, "", issues);
 
   const protocolVersion = input["protocolVersion"];
   if (typeof protocolVersion !== "string" || !isCompatibleProtocolVersion(protocolVersion)) {

@@ -9,7 +9,9 @@ import {
   isNonEmptyString,
   isNonNegativeInteger,
   isRecord,
+  isSemanticCode,
   ok,
+  rejectUnknownKeys,
   type ParseResult,
   type ValidationIssue,
 } from "./result";
@@ -30,7 +32,7 @@ export type ActionWindowCommand = {
 
 /** Expected payload shape per command type (undefined ⇒ no payload). */
 export type CommandPayloadMap = {
-  START_RUN: { channel: string };
+  START_RUN: { channelCode: string };
   PAUSE_RUN: undefined;
   RESUME_RUN: undefined;
   CANCEL_RUN: undefined;
@@ -40,23 +42,39 @@ export type CommandPayloadMap = {
   REQUEST_STEP_RECHECK: { stepId: string };
 };
 
+const COMMAND_ENVELOPE_KEYS: readonly string[] = [
+  "protocolVersion",
+  "commandId",
+  "runId",
+  "expectedRevision",
+  "type",
+  "payload",
+  "issuedAt",
+];
+
 function validatePayload(type: CommandType, payload: unknown, issues: ValidationIssue[]): void {
   switch (type) {
     case CommandType.START_RUN: {
-      if (!isRecord(payload) || !isNonEmptyString(payload["channel"])) {
-        issues.push({ path: "payload.channel", message: "START_RUN requires { channel: string }" });
+      if (!isRecord(payload) || !isSemanticCode(payload["channelCode"])) {
+        issues.push({ path: "payload.channelCode", message: "START_RUN requires { channelCode: string }" });
+      } else {
+        rejectUnknownKeys(payload, ["channelCode"], "payload", issues);
       }
       return;
     }
     case CommandType.SET_GUIDANCE_ENABLED: {
       if (!isRecord(payload) || !isBoolean(payload["enabled"])) {
         issues.push({ path: "payload.enabled", message: "SET_GUIDANCE_ENABLED requires { enabled: boolean }" });
+      } else {
+        rejectUnknownKeys(payload, ["enabled"], "payload", issues);
       }
       return;
     }
     case CommandType.REQUEST_STEP_RECHECK: {
       if (!isRecord(payload) || !isNonEmptyString(payload["stepId"])) {
         issues.push({ path: "payload.stepId", message: "REQUEST_STEP_RECHECK requires { stepId: string }" });
+      } else {
+        rejectUnknownKeys(payload, ["stepId"], "payload", issues);
       }
       return;
     }
@@ -81,6 +99,8 @@ export function parseCommand(input: unknown): ParseResult<ActionWindowCommand> {
   if (!isRecord(input)) {
     return fail([{ path: "(root)", message: "command must be an object" }]);
   }
+
+  rejectUnknownKeys(input, COMMAND_ENVELOPE_KEYS, "", issues);
 
   const protocolVersion = input["protocolVersion"];
   if (typeof protocolVersion !== "string" || !isCompatibleProtocolVersion(protocolVersion)) {

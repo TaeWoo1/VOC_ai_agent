@@ -69,13 +69,20 @@ export const FORBIDDEN_KEY_SUBSTRINGS: readonly string[] = [
   "downloadcontent",
   "rawbytes",
   "screenshot",
+  // Runtime-authored display prose must never appear in the public contract —
+  // FE owns final copy. Exact-schema rejection is the primary guard; these are
+  // defense-in-depth against a prose field slipping into a nested payload.
+  "html",
+  "displaytext",
+  "innertext",
 ];
 
-/** Value-level patterns that indicate a leaked URL, scheme, or absolute path. */
+/** Value-level patterns that indicate a leaked URL, scheme, absolute path, or HTML markup. */
 const FORBIDDEN_VALUE_PATTERNS: readonly RegExp[] = [
   /:\/\//, // any scheme://  (http, https, ws, file, chrome-devtools, …)
   /^[A-Za-z]:\\/, // windows drive path  C:\...
   /(^|\s)\/(?:Users|home|var|tmp|private|etc|Applications)\//, // unix absolute path
+  /<[^>]+>/, // HTML/markup tag — copy params and codes must never carry markup
 ];
 
 function keyIsForbidden(key: string): boolean {

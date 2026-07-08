@@ -49,9 +49,20 @@ describe("command envelope", () => {
     ).toBe(true);
   });
 
+  it("accepts START_RUN with channelCode and rejects unknown payload keys", () => {
+    expect(parseCommand({ ...valid, type: CommandType.START_RUN, payload: { channelCode: "esm" } }).ok).toBe(true);
+    expect(
+      parseCommand({ ...valid, type: CommandType.START_RUN, payload: { channelCode: "esm", extra: 1 } }).ok,
+    ).toBe(false);
+  });
+
   it("rejects forbidden (non-sanitized) fields in the payload", () => {
     expect(
-      parseCommand({ ...valid, type: CommandType.START_RUN, payload: { channel: "esm", cookie: "x" } }).ok,
+      parseCommand({ ...valid, type: CommandType.START_RUN, payload: { channelCode: "esm", cookie: "x" } }).ok,
     ).toBe(false);
+  });
+
+  it("rejects unknown envelope keys (exact schema, fail-closed)", () => {
+    expect(parseCommand({ ...valid, displayText: "arbitrary prose" }).ok).toBe(false);
   });
 });

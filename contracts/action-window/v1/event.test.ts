@@ -30,4 +30,8 @@ describe("event envelope", () => {
     expect(parseEvent({ ...valid, type: "NOPE" }).ok).toBe(false);
     expect(parseEvent({ ...valid, protocolVersion: "9.9.9" }).ok).toBe(false);
   });
+
+  it("rejects unknown envelope keys (exact schema, fail-closed)", () => {
+    expect(parseEvent({ ...valid, html: "<b/>" }).ok).toBe(false);
+  });
 });

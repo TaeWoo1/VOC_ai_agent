@@ -1,5 +1,10 @@
 // The authoritative sanitized FE View Model for one Action Window run, plus its
 // validation rules and revision-apply semantics.
+//
+// Copy ownership: Runtime supplies semantic identifiers (channelCode /
+// operationCode / stepCode / copy keys) and sanitized primitive interpolation
+// params — NEVER final end-user prose. FE maps copy keys to localized product
+// copy, button labels, tone, icons, and derives blocker wording from BlockerCode.
 
 import {
   BlockerCode,
@@ -17,32 +22,42 @@ import {
 import { isCompatibleProtocolVersion } from "./protocol";
 import { findForbiddenFields } from "./privacy";
 import {
-  assertNever,
   fail,
   isBoolean,
+  isCopyKey,
+  isCopyParamValue,
   isNonEmptyString,
   isNonNegativeInteger,
   isPositiveInteger,
   isRecord,
+  isSemanticCode,
   ok,
+  rejectUnknownKeys,
   type ParseResult,
   type ValidationIssue,
 } from "./result";
+
+/** Primitive, interpolation-safe copy parameter value. */
+export type CopyParamValue = string | number | boolean;
+export type CopyParams = Record<string, CopyParamValue>;
 
 export type ActionWindowStepView = {
   stepId: string;
   /** 1-based. */
   stepNumber: number;
   totalSteps: number;
-  title: string;
-  instruction?: string;
+  /** Semantic step identity (opaque code, not a title). */
+  stepCode: string;
+  /** Semantic copy key FE maps to localized step copy. */
+  copyKey: string;
+  copyParams?: CopyParams;
   status: StepStatus;
 };
 
+/** Runtime supplies only the code + recoverability; FE owns all blocker wording. */
 export type ActionWindowBlockerView = {
   code: BlockerCode;
   recoverable: boolean;
-  message?: string;
 };
 
 export type ActionWindowProgress = {
@@ -55,8 +70,14 @@ export type ActionWindowRunView = {
   runId: string;
   revision: number;
 
-  channel: string;
-  title: string;
+  /** Sanitized stable channel identity (e.g. `esm`), not a user-facing title. */
+  channelCode: string;
+  /** Sanitized stable operation identity (e.g. `review_export`). */
+  operationCode: string;
+
+  /** Semantic copy key for the run headline; FE localizes it. */
+  runCopyKey: string;
+  runCopyParams?: CopyParams;
 
   status: RunStatus;
   executionMode: ExecutionMode;
@@ -72,6 +93,34 @@ export type ActionWindowRunView = {
   progress: ActionWindowProgress;
 };
 
+const RUN_VIEW_KEYS: readonly string[] = [
+  "protocolVersion",
+  "runId",
+  "revision",
+  "channelCode",
+  "operationCode",
+  "runCopyKey",
+  "runCopyParams",
+  "status",
+  "executionMode",
+  "currentStep",
+  "guidanceEnabled",
+  "allowedCommands",
+  "blocker",
+  "progress",
+];
+const STEP_KEYS: readonly string[] = [
+  "stepId",
+  "stepNumber",
+  "totalSteps",
+  "stepCode",
+  "copyKey",
+  "copyParams",
+  "status",
+];
+const BLOCKER_KEYS: readonly string[] = ["code", "recoverable"];
+const PROGRESS_KEYS: readonly string[] = ["completedSteps", "totalSteps"];
+
 /** Statuses in which a blocker may legitimately be present. */
 const BLOCKER_ALLOWED_STATUSES: readonly RunStatus[] = [
   RunStatus.RUNNING,
@@ -79,6 +128,18 @@ const BLOCKER_ALLOWED_STATUSES: readonly RunStatus[] = [
   RunStatus.PAUSED,
   RunStatus.FAILED,
 ];
+
+function validateCopyParams(params: unknown, path: string, issues: ValidationIssue[]): void {
+  if (!isRecord(params)) {
+    issues.push({ path, message: "copy params must be an object of primitive values" });
+    return;
+  }
+  for (const [key, value] of Object.entries(params)) {
+    if (!isCopyParamValue(value)) {
+      issues.push({ path: `${path}.${key}`, message: "copy param must be a primitive (string | number | boolean)" });
+    }
+  }
+}
 
 function validateStep(
   step: unknown,
@@ -89,6 +150,7 @@ function validateStep(
     issues.push({ path: "currentStep", message: "currentStep must be an object" });
     return;
   }
+  rejectUnknownKeys(step, STEP_KEYS, "currentStep", issues);
   if (!isNonEmptyString(step["stepId"])) {
     issues.push({ path: "currentStep.stepId", message: "stepId must be a non-empty string" });
   }
@@ -106,11 +168,14 @@ function validateStep(
   if (isPositiveInteger(stepTotal) && progressTotal !== undefined && stepTotal !== progressTotal) {
     issues.push({ path: "currentStep.totalSteps", message: "currentStep.totalSteps must equal progress.totalSteps" });
   }
-  if (!isNonEmptyString(step["title"])) {
-    issues.push({ path: "currentStep.title", message: "title must be a non-empty string" });
+  if (!isSemanticCode(step["stepCode"])) {
+    issues.push({ path: "currentStep.stepCode", message: "stepCode must be a sanitized semantic code, not prose" });
   }
-  if (step["instruction"] !== undefined && typeof step["instruction"] !== "string") {
-    issues.push({ path: "currentStep.instruction", message: "instruction must be a string when present" });
+  if (!isCopyKey(step["copyKey"])) {
+    issues.push({ path: "currentStep.copyKey", message: "copyKey must be a dotted semantic key, not prose" });
+  }
+  if (step["copyParams"] !== undefined) {
+    validateCopyParams(step["copyParams"], "currentStep.copyParams", issues);
   }
   if (!isStepStatus(step["status"])) {
     issues.push({ path: "currentStep.status", message: "unknown step status" });
@@ -122,29 +187,26 @@ function validateBlocker(blocker: unknown, status: RunStatus, issues: Validation
     issues.push({ path: "blocker", message: "blocker must be an object" });
     return;
   }
+  rejectUnknownKeys(blocker, BLOCKER_KEYS, "blocker", issues);
   if (!isBlockerCode(blocker["code"])) {
     issues.push({ path: "blocker.code", message: "unknown blocker code" });
   }
   if (!isBoolean(blocker["recoverable"])) {
     issues.push({ path: "blocker.recoverable", message: "recoverable must be a boolean" });
   }
-  if (blocker["message"] !== undefined && typeof blocker["message"] !== "string") {
-    issues.push({ path: "blocker.message", message: "message must be a string when present" });
-  }
   if (!(BLOCKER_ALLOWED_STATUSES as readonly string[]).includes(status)) {
-    issues.push({
-      path: "blocker",
-      message: `a blocker is not consistent with status ${status}`,
-    });
+    issues.push({ path: "blocker", message: `a blocker is not consistent with status ${status}` });
   }
 }
 
-/** Validate an untrusted run view. Unknown enum / version fail closed. */
+/** Validate an untrusted run view. Unknown enum / version / field fail closed. */
 export function validateRunView(input: unknown): ParseResult<ActionWindowRunView> {
   const issues: ValidationIssue[] = [];
   if (!isRecord(input)) {
     return fail([{ path: "(root)", message: "run view must be an object" }]);
   }
+
+  rejectUnknownKeys(input, RUN_VIEW_KEYS, "", issues);
 
   const protocolVersion = input["protocolVersion"];
   if (typeof protocolVersion !== "string" || !isCompatibleProtocolVersion(protocolVersion)) {
@@ -156,11 +218,17 @@ export function validateRunView(input: unknown): ParseResult<ActionWindowRunView
   if (!isNonNegativeInteger(input["revision"])) {
     issues.push({ path: "revision", message: "revision must be a non-negative integer" });
   }
-  if (!isNonEmptyString(input["channel"])) {
-    issues.push({ path: "channel", message: "channel must be a non-empty string" });
+  if (!isSemanticCode(input["channelCode"])) {
+    issues.push({ path: "channelCode", message: "channelCode must be a sanitized semantic code, not a title" });
   }
-  if (!isNonEmptyString(input["title"])) {
-    issues.push({ path: "title", message: "title must be a non-empty string" });
+  if (!isSemanticCode(input["operationCode"])) {
+    issues.push({ path: "operationCode", message: "operationCode must be a sanitized semantic code, not a title" });
+  }
+  if (!isCopyKey(input["runCopyKey"])) {
+    issues.push({ path: "runCopyKey", message: "runCopyKey must be a dotted semantic key, not prose" });
+  }
+  if (input["runCopyParams"] !== undefined) {
+    validateCopyParams(input["runCopyParams"], "runCopyParams", issues);
   }
 
   const status = input["status"];
@@ -181,6 +249,7 @@ export function validateRunView(input: unknown): ParseResult<ActionWindowRunView
   if (!isRecord(progress)) {
     issues.push({ path: "progress", message: "progress must be an object" });
   } else {
+    rejectUnknownKeys(progress, PROGRESS_KEYS, "progress", issues);
     const completed = progress["completedSteps"];
     const total = progress["totalSteps"];
     if (!isNonNegativeInteger(completed)) {
@@ -226,7 +295,7 @@ export function validateRunView(input: unknown): ParseResult<ActionWindowRunView
     }
   }
 
-  // privacy sweep across the whole view
+  // privacy sweep across the whole view (URLs, HTML, paths, forbidden keys)
   for (const p of findForbiddenFields(input)) {
     issues.push({ path: p, message: "forbidden (non-sanitized) field in run view" });
   }
@@ -285,6 +354,10 @@ export function defaultAllowedCommands(status: RunStatus): CommandType[] {
     case RunStatus.CANCELLED:
       return [];
     default:
-      return assertNever(status);
+      return assertNeverStatus(status);
   }
+}
+
+function assertNeverStatus(x: never): never {
+  throw new Error(`Unexpected run status: ${String(x)}`);
 }
