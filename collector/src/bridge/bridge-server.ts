@@ -31,11 +31,15 @@ import { isOriginAllowed } from "./origin-policy";
 import type { FilePairingStore } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
+import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
+import type { ProjectionEndpoint } from "./projection-endpoint";
 
 const LOOPBACK = "127.0.0.1";
 const MAX_BODY_BYTES = 16 * 1024;
 /** Cap a single WS message. G1 messages are tiny JSON control frames; `ws` closes 1009 on excess. */
 const MAX_MESSAGE_BYTES = 64 * 1024;
+/** How often the server polls projection control-lease expiry (slice §D). */
+const PROJECTION_TICK_MS = 5 * 1000;
 
 export interface BridgeServerDeps {
   store: FilePairingStore;
@@ -48,6 +52,12 @@ export interface BridgeServerDeps {
    * confirmation click is needed. The CLI refuses to set this in production. Loudly logged when active.
    */
   autoApprovePairing?: boolean;
+  /**
+   * Optional Browser Projection V0 endpoint (slice §B). When present, the server mounts a SEPARATE projection
+   * transport (`POST /projection/ticket`, `/projection/ws` binary) alongside — and independent of — the G1
+   * status channel, which keeps its JSON/text/64 KiB boundary untouched.
+   */
+  projection?: ProjectionEndpoint;
 }
 
 export class BridgeServer {
@@ -59,6 +69,9 @@ export class BridgeServer {
   private readonly host: string;
   private readonly wantPort: number;
   private readonly autoApprovePairing: boolean;
+  private readonly projection: ProjectionEndpoint | undefined;
+  private readonly projectionWss: WebSocketServer | undefined;
+  private projectionTimer: NodeJS.Timeout | undefined;
   private boundPort = 0;
   private readonly clients = new Map<WebSocket, string>(); // ws → pairingId
   private readonly connections = new Map<string, BridgeConnectionView>();
@@ -70,10 +83,16 @@ export class BridgeServer {
     this.host = deps.host ?? LOOPBACK;
     this.wantPort = deps.port;
     this.autoApprovePairing = deps.autoApprovePairing ?? false;
+    this.projection = deps.projection;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
     this.wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES, perMessageDeflate: false });
+    // Projection uses its OWN WS server: a small received-payload cap (client sends only tiny control JSON);
+    // server→client image frames are binary and not bounded by maxPayload. Separate from the G1 status WSS.
+    this.projectionWss = this.projection
+      ? new WebSocketServer({ noServer: true, maxPayload: PROJECTION_CLIENT_MAX_BYTES, perMessageDeflate: false })
+      : undefined;
     this.http.on("upgrade", (req, socket, head) => this.onUpgrade(req, socket as Socket, head));
   }
 
@@ -88,6 +107,10 @@ export class BridgeServer {
         this.http.off("error", onError);
         const addr = this.http.address();
         this.boundPort = typeof addr === "object" && addr ? addr.port : this.wantPort;
+        if (this.projection) {
+          this.projectionTimer = setInterval(() => this.projection?.tick(), PROJECTION_TICK_MS);
+          this.projectionTimer.unref?.();
+        }
         log("bridge_listen", { port: this.boundPort, host: this.host });
         resolve({ port: this.boundPort });
       };
@@ -98,11 +121,14 @@ export class BridgeServer {
   }
 
   async close(): Promise<void> {
+    if (this.projectionTimer) { clearInterval(this.projectionTimer); this.projectionTimer = undefined; }
+    if (this.projection) { try { await this.projection.close(); } catch { /* best effort */ } }
     for (const ws of this.clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }
     this.clients.clear();
     await new Promise<void>((resolve) => this.wss.close(() => resolve()));
+    if (this.projectionWss) await new Promise<void>((resolve) => this.projectionWss!.close(() => resolve()));
     await new Promise<void>((resolve) => this.http.close(() => resolve()));
   }
 
@@ -156,6 +182,7 @@ export class BridgeServer {
       if (method === "POST" && path === "/bridge/pair/confirm") return await this.handleConfirm(req, res);
       if (method === "POST" && path === "/bridge/pair/poll") return await this.handlePoll(req, res);
       if (method === "POST" && path === "/bridge/ws-ticket") return await this.handleWsTicket(req, res);
+      if (method === "POST" && path === "/projection/ticket") return await this.handleProjectionTicket(req, res);
       if (method === "POST" && path === "/bridge/revoke") return await this.handleRevoke(req, res);
       if (method === "POST" && path === "/bridge/agent/revoke") return await this.handleAgentRevoke(req, res);
       sendJson(res, 404, { error: "not_found" });
@@ -271,6 +298,30 @@ export class BridgeServer {
     sendJson(res, 200, { ticket, expiresInMs });
   }
 
+  /**
+   * Mint a SEPARATE single-use projection connection ticket from the long-term pairing (slice §0.5, §10):
+   * device pairing is the trust root; projection uses its own short-lived ticket — the bearer is never
+   * elevated to browser control. Only the paired origin + a valid pairing token may request one.
+   */
+  private async handleProjectionTicket(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.projection) { sendJson(res, 404, { error: "not_found" }); return; }
+    const origin = header(req, "origin");
+    if (!isOriginAllowed(origin, this.allowedOrigins)) { sendJson(res, 403, { error: "bad_origin" }); return; }
+    const token = bearer(req);
+    const body = await readJson(req);
+    const clientVersion = typeof body?.clientProjectionVersion === "number" ? body.clientProjectionVersion : -1;
+    if (!token) { sendJson(res, 401, { error: "unpaired" }); return; }
+    const pairing = this.store.registry.authenticate(token);
+    if (!pairing) { sendJson(res, 401, { error: "unpaired" }); return; }
+    if (!this.projection.compatible(clientVersion)) {
+      sendJson(res, 409, { error: "incompatible_version", agentProjectionVersion: 1 });
+      return;
+    }
+    const { ticket, expiresInMs } = this.projection.mintTicket(pairing.pairingId);
+    log("projection_ticket_minted", { pairingId: pairing.pairingId });
+    sendJson(res, 200, { ticket, expiresInMs });
+  }
+
   private async handleRevoke(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = header(req, "origin");
     if (!isOriginAllowed(origin, this.allowedOrigins)) {
@@ -278,10 +329,12 @@ export class BridgeServer {
       return;
     }
     const token = bearer(req);
-    const result = token ? this.store.registry.revokeByToken(token) : { ok: false };
-    if (result.ok) {
+    const pairing = token ? this.store.registry.authenticate(token) : null;
+    const result = pairing ? this.store.registry.revoke(pairing.pairingId) : { ok: false };
+    if (result.ok && pairing) {
       this.store.persist();
       this.dropSocketsWithoutValidPairing();
+      if (this.projection) void this.projection.revokePairing(pairing.pairingId);
     }
     log("bridge_revoked", { ok: result.ok, initiator: "frontend" });
     sendJson(res, result.ok ? 200 : 404, { ok: result.ok });
@@ -300,6 +353,7 @@ export class BridgeServer {
     if (result.ok) {
       this.store.persist();
       this.dropSocketsWithoutValidPairing();
+      if (this.projection) void this.projection.revokePairing(pairingId);
     }
     log("bridge_revoked", { ok: result.ok, initiator: "agent" });
     sendJson(res, result.ok ? 200 : 404, { ok: result.ok });
@@ -314,10 +368,26 @@ export class BridgeServer {
       socket.destroy();
     };
     const url = new URL(req.url ?? "/", `http://${LOOPBACK}`);
+    const origin = header(req, "origin");
+
+    if (url.pathname === "/projection/ws") {
+      if (!this.projection || !this.projectionWss) return reject(404, "not_found");
+      // Same origin discipline as G1, but a SEPARATE single-use projection ticket + a re-check that the
+      // pairing is still valid (revocation invalidates projection sessions — slice §10).
+      if (!isOriginAllowed(origin, this.allowedOrigins)) return reject(403, "bad_origin");
+      const ticket = url.searchParams.get("ticket") ?? "";
+      const consumed = this.projection.consumeTicket(ticket);
+      if (!consumed.ok) return reject(401, "bad_ticket");
+      const stillValid = this.store.registry.listPairings().some((p) => p.pairingId === consumed.pairingId && !p.revoked);
+      if (!stillValid) return reject(401, "bad_ticket");
+      const projection = this.projection;
+      this.projectionWss.handleUpgrade(req, socket, head, (ws) => projection.onViewerConnected(ws, consumed.pairingId));
+      return;
+    }
+
     if (url.pathname !== "/bridge/ws") return reject(404, "not_found");
 
     // Our security checks run BEFORE `ws` upgrades the socket.
-    const origin = header(req, "origin");
     if (!isOriginAllowed(origin, this.allowedOrigins)) return reject(403, "bad_origin");
 
     const ticket = url.searchParams.get("ticket") ?? "";

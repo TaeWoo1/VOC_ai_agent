@@ -6,14 +6,17 @@
 > 새 슬라이스가 끝나거나 상태가 바뀌면 갱신한다.
 
 ## 1. Last updated
-2026-07-08 (Product Shell 커밋 완료 `3006e44`; **Local Agent Bridge G1 계약 승인 + G1 구현 진행 중**, 미커밋).
+2026-07-08 (Product Shell 커밋 `3006e44`; **Local Agent Bridge G1 커밋 완료 `c253dca`**; **Browser
+Projection V0(§17-B G2) = 채널-중립 구현·검증 완료, 미커밋**(로컬 픽스처 전용, E2E QA 통과). **마켓 사용
+미승인**(§20 게이트); Guided Connection·자동 로그인 여전히 미구현).
 
 ## 2. Current product phase
-Seller Track 프론트 리디자인 + **가이드 연결 인프라 G1 착수**. **Product Shell 슬라이스 = 커밋 완료**
-(베이스라인 `3006e447b91de72f5e3627da75f390c74d92bfac`). **Local Agent Bridge(§17-B G1) 계약 = 승인됨**
-(`docs/slices/local-agent-bridge.md` §0, 2026-07-08) → **G1 구현 active**(프론트↔에이전트 안전 페어링 +
-관측 전용 브리지). Browser Projection·Guided Connection·자동 로그인·Device Vault·Windows 패키징·클라우드
-런타임은 **여전히 미구현**(범위 밖 §9·§14). 수집·커넥터 백엔드는 기존 상태 유지(신규 채널 오픈 없음).
+Seller Track 프론트 리디자인 + **가이드 연결 인프라 트랙 진행**. **Product Shell 슬라이스 = 커밋 완료**
+(베이스라인 `3006e447b91de72f5e3627da75f390c74d92bfac`). **Local Agent Bridge(§17-B G1) = 커밋 완료**
+(`c253dcacc979a0c779d9423a6df7dc80cd2ea9be`, 페어링+관측 전용 브리지). **현재 문서 작업 = Browser
+Projection V0(§17-B G2) 실행 계약 초안**(`docs/slices/browser-projection-v0.md`, 제품 오너 리뷰 대기).
+Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection·자동 로그인·Device Vault·Windows
+패키징·클라우드 런타임은 **여전히 미구현**(범위 밖 §9·§14). 수집·커넥터 백엔드는 기존 상태 유지(신규 채널 오픈 없음).
 
 ## 3. Canonical document index
 | 문서 | 역할 |
@@ -58,7 +61,8 @@ Seller Track 프론트 리디자인 + **가이드 연결 인프라 G1 착수**. 
 - ESM INQUIRY read 스켈레톤(unwired), ESM INQUIRY Excel 임포트 백엔드(FE 미노출).
 
 ## 9. Explicitly NOT implemented (표기 금지)
-- **브라우저 프로젝션**(인앱 브라우저 뷰 투사) — 미구현.
+- **브라우저 프로젝션**(인앱 브라우저 뷰 투사) — **채널-중립 V0 구현됨(미커밋, 로컬 픽스처 전용, 마켓
+  사용 미승인 §20)**. 자동 마스킹·코치마크·자동 로그인·다중 동시 타깃·Windows는 여전히 미구현.
 - **OS Device Vault / 자동 자격증명 입력 / 자동 재로그인** — 미구현.
 - **프론트↔로컬 에이전트 통신 채널** — **G1 브리지로 구축됨(페어링+관측 전용, 실제 Local Agent 소유)**.
   단 프로젝션·입력 릴레이·워크플로/브라우저 제어 명령은 여전히 미구현(G1 범위 밖).
@@ -70,9 +74,33 @@ Seller Track 프론트 리디자인 + **가이드 연결 인프라 G1 착수**. 
 - 채널 쓰기(답변 발송/주문 상태 변경), 무인 자동 수집, 자동 제품 매칭, standalone AI 검색.
 
 ## 10. Active slice
-**Local Agent Bridge (Guided-Connection 인프라 G1)** — 계약 `docs/slices/local-agent-bridge.md`
-(**승인됨 2026-07-08 §0**). **상태: 구현·검증 완료, 미커밋, 제품 오너 커밋 승인 대기.** Product Shell은
-`3006e447b91de72f5e3627da75f390c74d92bfac`로 커밋 완료(이전 활성 슬라이스).
+**Browser Projection V0 (Guided-Connection 인프라 G2) — 채널-중립 구현 완료, 미커밋** —
+`docs/slices/browser-projection-v0.md`(§0 PO 결정 인코딩, §19 스파이크, §22 구현 결과). **상태: 구현·검증
+완료, 미커밋, 제품 오너 커밋 승인 대기. 마켓 사용 미승인(§20 게이트).** G2 = G1 브리지 위에 실제 Chrome
+뷰 로컬 투사(`Page.startScreencast` 바이너리 프레임) + 명시적 사람 입력 릴레이(iframe·Electron 아님,
+ADR §6 옵션 C). **프로젝션 전용 바이너리 전송을 G1 상태 채널과 분리**(64KiB JSON 미변경), 페어링=신뢰
+루트·프로젝션 단명 세션·제어 리스 분리, 단일 제어 소유자+다중 관람, 2분 idle 리스, drop-old 큐(depth≤2),
+데스크톱 전용. 마켓 자동화·자동 로그인·자동 클릭·코치마크·다중 동시 타깃은 범위 밖. **Local Agent Bridge
+G1은 커밋 완료**(`c253dcacc979a0c779d9423a6df7dc80cd2ea9be`). Product Shell은
+`3006e447b91de72f5e3627da75f390c74d92bfac`로 커밋 완료.
+
+### 신규/변경 파일 (Browser Projection V0)
+- **collector 신규**: `src/bridge/{projection-protocol,projection-session,projection-input,projection-adapter,
+  projection-hub,projection-endpoint}.ts`; `test/bridge/projection-{session,input,adapter,hub,server,privacy}.test.ts`
+  (46개); `test/fixtures/projection/{minimal,seller-center,popup}.html`(합성·마켓 무관).
+- **collector 변경**: `src/bridge/bridge-server.ts`(프로젝션 엔드포인트/WS/틱/리보크 캐스케이드 — G1 상태
+  채널 미변경), `src/agent/agent-bridge.ts`(선택적 프로젝션 주입 seam).
+- **frontend 신규**: `src/lib/bridge/{projectionProtocol,projectionClient}.ts`(+`projectionClient.test.ts`),
+  `src/hooks/useProjection.ts`, `src/components/bridge/ProjectionView.tsx`.
+- **frontend 변경**: `components/AppShell.tsx`(`VITE_ENABLE_AGENT_PROJECTION` 게이트).
+- **패키지 변경 없음**(collector·frontend package.json/lock 무변경).
+
+### 검증 (2026-07-08)
+- collector: typecheck OK, `npm test` **2299 pass**(1 skip; 프로젝션 46). frontend: typecheck OK,
+  `npm test` **166 pass**(프로젝션 10), `npm run build` OK.
+- E2E QA(실제 Chrome 150 + 실제 전송 + 로컬 픽스처): 제어 획득, **입력→렌더 p95 130ms**, 리사이즈 후
+  좌표 오차 0px, 리보크 시 프레임·입력 중단. 리치 픽스처 프레임 ~36.5KB, everyNth6=7.2fps→시간기반 캡 권장.
+- 프라이버시: 프레임 바이트·입력·URL·티켓 로그 0(소스가드+로그싱크). QA 하니스는 저장소 밖 스크래치패드 1회성.
 
 G1 = 프론트↔로컬 에이전트 **안전 페어링 + 관측 전용** 브리지. **WebSocket 전송 = 성숙한 `ws` 라이브러리**
 (HTTP는 health·페어링·티켓 부트스트랩), loopback 전용, 명시적 오리진 허용(와일드카드 금지), 로컬 확인
@@ -118,19 +146,26 @@ G1 = 프론트↔로컬 에이전트 **안전 페어링 + 관측 전용** 브리
 - (직전 세션의) 정본 문서 변경들(product-scope/frontend-spec/connector-roadmap/ADR)은 `3006e44`로 커밋됨.
 
 ## 13. Next approved work
-- **Local Agent Bridge G1** — 구현·하드닝·검증 완료, **제품 오너 커밋 승인 대기**(미커밋). 남은 한계
-  (정직 표기): 실행-중 이벤트(browser_lifecycle·collection_progress/result 등)는 **예약**이며 실제 방출은
-  G2/라이브 수집의 신뢰 seam이 생겨야 `supportedEvents`로 승격(현재는 날조하지 않고 미노출);
-  Windows/클라우드는 이식 경로만 문서화; LNA 네이티브 프롬프트 승인은 헤드드(사람) 상호작용이라 자동
-  검증 밖; 페어링 토큰 localStorage 저장은 파일럿 임시 방식(고객-PC 전 WebCrypto+PoP 평가).
-- **다음 후보 = Browser Projection V0(§17-B G2)** — **아직 시작하지 않음**(별도 승인 필요; §14).
+- **Local Agent Bridge G1** — 구현·하드닝·검증·**커밋 완료**(`c253dcacc979a0c779d9423a6df7dc80cd2ea9be`).
+  남은 한계(정직 표기): 실행-중 이벤트(browser_lifecycle·collection_progress/result 등)는 **예약**이며
+  실제 방출은 G2/라이브 수집의 신뢰 seam이 생겨야 `supportedEvents`로 승격(현재는 날조하지 않고 미노출);
+  Windows/클라우드는 이식 경로만 문서화; 페어링 토큰 localStorage 저장은 파일럿 임시 방식(고객-PC 전
+  WebCrypto+PoP 평가 — G2 진입 시점 평가 대상).
+- **Browser Projection V0(§17-B G2) = 채널-중립 구현·검증 완료, 미커밋**(§22). 스파이크(§19) 후 §0.7 구현
+  승인 → 구현: 프로젝션 전용 바이너리 전송(G1 상태 채널 분리), CDP 어댑터, 제어 리스, 입력 경계, 프론트
+  렌더러, 합성 픽스처, 46+10 테스트. E2E QA: 입력→렌더 p95 130ms, 리사이즈 후 좌표 0px, 리보크 시
+  프레임·입력 중단. **제품 오너 커밋 승인 대기.** **마켓 사용은 미승인**(§20 게이트: 마켓 약관 허용성 +
+  고객-PC WebCrypto PoP 보안 리뷰 선결). 튜닝 TODO: 시간기반 프레임 캡으로 밀집 페이지 ≥8fps 보장.
+  QA 하니스는 저장소 밖 스크래치패드 1회성(미커밋).
+- **다음 후보 = NAVER Guided Connection(G3) 계약 초안** — **아직 시작하지 않음**(별도 승인 필요).
 - Product Shell은 `3006e44`로 커밋 완료됨.
 
 ## 14. Must NOT be started yet
-- Browser Projection V0, NAVER Guided Connection, Automatic Relogin, Windows Migration (Frontend Spec §17-B G2–G6).
-- 대시보드 재설계, 가입/온보딩, inbox/inquiry 통합, 리포트 구현, 브라우저 프로젝션,
-  자동 로그인, 시각 리브랜딩, 신규 백엔드 능력, 채널 카탈로그 정책 변경.
-  (프론트↔에이전트 통신은 G1으로 구축 완료 — 이 목록에서 제외.)
+- NAVER Guided Connection(G3), Automatic Relogin(G4), Tutorial(G5), Windows Migration(G6) (Frontend Spec §17-B).
+- **Browser Projection V0의 실제 마켓 대상 사용**(§20 게이트: 마켓 약관 허용성 해명 + 고객-PC 보안 리뷰
+  선결); V0 코드 자체는 채널-중립 구현 완료(미커밋).
+- 대시보드 재설계, 가입/온보딩, inbox/inquiry 통합, 리포트 구현, 자동 로그인, 시각 리브랜딩, 신규 백엔드
+  능력, 채널 카탈로그 정책 변경. (프론트↔에이전트 통신 G1·프로젝션 V0 구현은 완료 — 이 목록에서 제외.)
 
 ## 15. Product Shell 검증 결과 (2026-07-07)
 - `npm run typecheck` — 통과(오류 0).

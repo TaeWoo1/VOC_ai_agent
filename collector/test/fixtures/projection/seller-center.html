@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Projection Fixture — Sample Store Center</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f3f5f9;
+    color: #1c2230;
+    font-size: 14px;
+  }
+
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 200px;
+    flex: 0 0 200px;
+    background: #171c28;
+    color: #cfd6e4;
+    padding: 20px 0;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100vh;
+  }
+  .brand {
+    font-weight: 700;
+    font-size: 16px;
+    color: #fff;
+    padding: 0 20px 20px;
+    border-bottom: 1px solid #2a3142;
+    margin-bottom: 12px;
+  }
+  .nav a {
+    display: block;
+    padding: 10px 20px;
+    color: #cfd6e4;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .nav a.active, .nav a:hover { background: #232a3b; color: #fff; }
+
+  /* Main */
+  .main { flex: 1; padding: 24px 28px; min-width: 0; }
+  .page-title { font-size: 20px; font-weight: 700; margin: 0 0 18px; }
+
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .toolbar input, .toolbar select {
+    padding: 8px 10px;
+    border: 1px solid #ccd3e0;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 14px;
+  }
+  .toolbar input[type="text"] { width: 220px; }
+  .btn {
+    padding: 8px 14px;
+    border: 0;
+    border-radius: 6px;
+    background: #4f7cff;
+    color: #fff;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .btn.secondary { background: #e3e8f2; color: #2a3142; }
+
+  .filter-note {
+    margin: 0 0 14px;
+    padding: 8px 12px;
+    background: #eef2fb;
+    border-radius: 6px;
+    color: #445;
+    font-size: 13px;
+  }
+
+  /* Cards row with spinner / skeleton */
+  .cards { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+  .card {
+    background: #fff;
+    border: 1px solid #e5e9f2;
+    border-radius: 10px;
+    padding: 16px;
+    min-width: 160px;
+    flex: 1;
+  }
+  .card .label { color: #7b8497; font-size: 12px; }
+  .card .value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+
+  .spinner {
+    width: 26px; height: 26px;
+    border: 3px solid #dfe5f1;
+    border-top-color: #4f7cff;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .skeleton {
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #e9edf6 25%, #f5f7fc 37%, #e9edf6 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.3s ease-in-out infinite;
+    margin-top: 8px;
+  }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+  /* Order table in a nested scroller */
+  .panel {
+    background: #fff;
+    border: 1px solid #e5e9f2;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .panel-head {
+    padding: 14px 16px;
+    font-weight: 700;
+    border-bottom: 1px solid #eef1f7;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .table-scroll {
+    height: 320px;
+    overflow: auto;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky;
+    top: 0;
+    background: #f7f9fd;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: #56607a;
+    border-bottom: 1px solid #e5e9f2;
+  }
+  tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #f0f2f8;
+    white-space: nowrap;
+  }
+  tbody tr:hover { background: #f7f9ff; }
+  .thumb { width: 34px; height: 34px; border-radius: 6px; display: block; }
+  .status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .s-new { background: #e6f0ff; color: #2a5bd7; }
+  .s-ship { background: #e7f7ee; color: #1f9254; }
+  .s-hold { background: #fdeede; color: #b9791b; }
+  .s-done { background: #ececf2; color: #55607a; }
+
+  /* Tall filler so the page scrolls independently of the table */
+  .filler { display: grid; gap: 12px; margin-bottom: 40px; }
+  .filler .block {
+    background: #fff;
+    border: 1px solid #e5e9f2;
+    border-radius: 10px;
+    padding: 18px;
+  }
+
+  #target {
+    display: inline-block;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, #ff5d73, #ffb45d);
+    color: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 16, 26, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+  }
+  .modal-backdrop.hidden { display: none; }
+  .modal {
+    background: #fff;
+    border-radius: 12px;
+    padding: 22px;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  .modal h3 { margin: 0 0 10px; }
+  .modal p { color: #55607a; margin: 0 0 18px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+</style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">샘플 상점 센터</div>
+      <nav class="nav">
+        <a>대시보드</a>
+        <a class="active">주문</a>
+        <a>상품</a>
+        <a>정산</a>
+        <a>설정</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <h1 class="page-title">주문 관리</h1>
+
+      <div class="toolbar">
+        <input id="search" type="text" placeholder="주문번호 검색">
+        <input id="dateRange" type="date">
+        <input id="memo" type="text" placeholder="메모 입력">
+        <select id="statusFilter">
+          <option value="all">전체 상태</option>
+          <option value="new">신규</option>
+          <option value="ship">배송중</option>
+          <option value="hold">보류</option>
+          <option value="done">완료</option>
+        </select>
+        <button class="btn" type="button" id="openModalBtn">주문 등록</button>
+        <span id="target">좌표 타겟</span>
+      </div>
+
+      <p class="filter-note" id="filterNote">현재 필터: 전체 상태</p>
+
+      <div class="cards">
+        <div class="card">
+          <div class="label">오늘 주문</div>
+          <div class="value">128</div>
+        </div>
+        <div class="card">
+          <div class="label">배송 대기</div>
+          <div class="value">37</div>
+        </div>
+        <div class="card">
+          <div class="label" style="display:flex;align-items:center;gap:8px;">동기화 중 <span class="spinner"></span></div>
+          <div class="skeleton" style="width:80%"></div>
+          <div class="skeleton" style="width:60%"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <span>주문 목록</span>
+          <span style="font-weight:400;color:#7b8497;" id="rowCount"></span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>주문번호</th>
+                <th>상품</th>
+                <th>상태</th>
+                <th>금액</th>
+                <th>날짜</th>
+              </tr>
+            </thead>
+            <tbody id="orderBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="filler">
+        <div class="block"><b>공지</b><div class="skeleton" style="width:70%"></div><div class="skeleton" style="width:50%"></div></div>
+        <div class="block"><b>정산 요약</b><p style="color:#7b8497;margin:8px 0 0;">이번 주 정산 예정 금액은 집계 중입니다.</p></div>
+        <div class="block"><b>배송 현황</b><p style="color:#7b8497;margin:8px 0 0;">최근 배송 지연 건이 없습니다.</p></div>
+        <div class="block"><b>알림</b><p style="color:#7b8497;margin:8px 0 0;">새 문의가 도착하면 여기에 표시됩니다.</p></div>
+        <div class="block"><b>도움말</b><p style="color:#7b8497;margin:8px 0 0;">주문 처리 가이드를 참고하세요.</p></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="modal">
+      <h3>주문 등록</h3>
+      <p>새 주문 정보를 입력하세요. (샘플 다이얼로그)</p>
+      <div class="modal-actions">
+        <button class="btn secondary" type="button" id="modalCancel">취소</button>
+        <button class="btn" type="button" id="modalSave">저장</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  window.__lastClick = null;
+  window.__modalOpen = false;
+
+  // Inline SVG thumbnail as a data URI, tinted per row.
+  function thumb(color) {
+    var svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34">' +
+      '<rect width="34" height="34" rx="6" fill="' + color + '"/>' +
+      '<rect x="7" y="7" width="20" height="20" rx="3" fill="rgba(255,255,255,0.55)"/>' +
+      '</svg>';
+    return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  }
+
+  var colors = ["#4f7cff", "#34d399", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#10b981"];
+  var letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  var statuses = [
+    { key: "new", cls: "s-new", label: "신규" },
+    { key: "ship", cls: "s-ship", label: "배송중" },
+    { key: "hold", cls: "s-hold", label: "보류" },
+    { key: "done", cls: "s-done", label: "완료" }
+  ];
+
+  var body = document.getElementById("orderBody");
+  var rows = [];
+  var ROW_COUNT = 48;
+
+  for (var i = 0; i < ROW_COUNT; i++) {
+    var st = statuses[i % statuses.length];
+    var letter = letters[i % letters.length];
+    var amount = 10000 + ((i * 1373) % 90000);
+    var day = 1 + (i % 28);
+    var order = {
+      id: "SO-" + (100001 + i),
+      product: "상품 " + letter,
+      color: colors[i % colors.length],
+      statusKey: st.key,
+      statusCls: st.cls,
+      statusLabel: st.label,
+      amount: amount,
+      date: "2026-07-" + (day < 10 ? "0" + day : day)
+    };
+    rows.push(order);
+
+    var tr = document.createElement("tr");
+    tr.setAttribute("data-status", order.statusKey);
+    tr.innerHTML =
+      "<td>" + order.id + "</td>" +
+      '<td style="display:flex;align-items:center;gap:8px;">' +
+        '<img class="thumb" alt="" src="' + thumb(order.color) + '">' +
+        order.product +
+      "</td>" +
+      '<td><span class="status ' + order.statusCls + '">' + order.statusLabel + "</span></td>" +
+      "<td>" + order.amount.toLocaleString() + "원</td>" +
+      "<td>" + order.date + "</td>";
+    body.appendChild(tr);
+  }
+
+  function updateRowCount() {
+    var visible = 0;
+    var trs = body.querySelectorAll("tr");
+    for (var j = 0; j < trs.length; j++) {
+      if (trs[j].style.display !== "none") visible++;
+    }
+    document.getElementById("rowCount").textContent = visible + " / " + ROW_COUNT + " 건";
+  }
+  updateRowCount();
+
+  // Dropdown visibly filters rows and updates the note.
+  var statusFilter = document.getElementById("statusFilter");
+  var filterNote = document.getElementById("filterNote");
+  statusFilter.addEventListener("change", function () {
+    var val = statusFilter.value;
+    var label = statusFilter.options[statusFilter.selectedIndex].text;
+    filterNote.textContent = "현재 필터: " + label;
+    var trs = body.querySelectorAll("tr");
+    for (var k = 0; k < trs.length; k++) {
+      var match = val === "all" || trs[k].getAttribute("data-status") === val;
+      trs[k].style.display = match ? "" : "none";
+    }
+    updateRowCount();
+  });
+
+  // Modal wiring + test hooks.
+  var backdrop = document.getElementById("modalBackdrop");
+  window.__openModal = function () {
+    backdrop.classList.remove("hidden");
+    window.__modalOpen = true;
+  };
+  window.__closeModal = function () {
+    backdrop.classList.add("hidden");
+    window.__modalOpen = false;
+  };
+  document.getElementById("openModalBtn").addEventListener("click", window.__openModal);
+  document.getElementById("modalCancel").addEventListener("click", window.__closeModal);
+  document.getElementById("modalSave").addEventListener("click", window.__closeModal);
+  backdrop.addEventListener("click", function (e) {
+    if (e.target === backdrop) window.__closeModal();
+  });
+
+  // Coordinate + click recording.
+  document.addEventListener("click", function (e) {
+    window.__lastClick = {
+      x: e.clientX,
+      y: e.clientY,
+      id: (e.target && e.target.id) || ""
+    };
+  });
+</script>
+</body>
+</html>

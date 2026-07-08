@@ -4,10 +4,13 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { MobileNav } from "./MobileNav";
 import { BridgeStatus } from "./bridge/BridgeStatus";
+import { ProjectionView } from "./bridge/ProjectionView";
 
 // The Local Agent Bridge status surface is opt-in (Guided-Connection infra G1). It is absent from the
 // default app and only mounts when the bridge is explicitly enabled — it does not alter navigation.
 const AGENT_BRIDGE_ENABLED = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
+// Browser Projection V0 (G2) is a separate opt-in surface — desktop-only, channel-neutral, no marketplace use.
+const AGENT_PROJECTION_ENABLED = import.meta.env.VITE_ENABLE_AGENT_PROJECTION === "true";
 
 export function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -25,7 +28,8 @@ export function AppShell() {
         <TopBar onMenu={() => setMenuOpen(true)} />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
         <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div className="mx-auto max-w-6xl">
+          <div className="mx-auto max-w-6xl space-y-6">
+            {AGENT_PROJECTION_ENABLED && <ProjectionView />}
             <Outlet />
           </div>
         </main>
