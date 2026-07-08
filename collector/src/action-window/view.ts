@@ -1,9 +1,10 @@
 /**
- * Projection of internal Runtime state → the normative `ActionWindowRunView` (R1). Pure.
- * This is the ONLY sanitized shape the FE would consume; it exposes no selector, geometry,
- * page content, URL, id, or path — only contract enums, counts, opaque refs, and concise copy.
+ * Projection of internal Runtime state → the normative `ActionWindowRunView` (R1, post-#214 contract).
+ * Pure. This is the ONLY sanitized shape the FE would consume; it exposes no selector, geometry,
+ * page content, URL, id, path, or final user prose — only contract enums, counts, opaque refs, a
+ * sanitized `channelCode`, and dotted semantic copy keys + sanitized primitive params (FE owns copy).
  */
-import type { ActionWindowRunView, BlockerCode } from "../../../contracts/action-window/v1/index";
+import type { ActionWindowRunView, BlockerCode, CopyParams } from "../../../contracts/action-window/v1/index";
 import { ACTION_WINDOW_PROTOCOL_VERSION } from "../../../contracts/action-window/v1/index";
 import {
   type Stage,
@@ -16,8 +17,9 @@ import {
 
 export interface EngineSnapshot {
   runId: string;
-  channel: string;
-  title: string;
+  channelCode: string;
+  runCopyKey: string;
+  runCopyParams?: CopyParams;
   stage: Stage;
   resumeStage: Stage | null;
   activeStepIndex: number;
@@ -38,17 +40,18 @@ export function projectRunView(s: EngineSnapshot): ActionWindowRunView {
     protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION,
     runId: s.runId,
     revision: s.revision,
-    channel: s.channel,
-    title: s.title,
+    channelCode: s.channelCode,
+    runCopyKey: s.runCopyKey,
+    ...(s.runCopyParams ? { runCopyParams: s.runCopyParams } : {}),
     status,
     executionMode: meta.mode,
     currentStep: {
       stepId: meta.stepId,
       stepNumber: meta.stepNumber,
       totalSteps: TOTAL_STEPS,
-      title: meta.title,
+      copyKey: meta.copyKey,
+      ...(meta.copyParams ? { copyParams: meta.copyParams } : {}),
       status: stageToStepStatus(effectiveStage),
-      ...(s.guidanceEnabled && meta.instruction ? { instruction: meta.instruction } : {}),
     },
     guidanceEnabled: s.guidanceEnabled,
     allowedCommands: allowedCommands(s.stage),

@@ -16,6 +16,16 @@ the ratified shared contract, the shared contract wins and this file is updated.
   - Conformance tests: `collector/test/contracts/action-window/contract.test.ts`
     (collector is a *consumer*, not the owner).
 - **Protocol version:** `ACTION_WINDOW_PROTOCOL_VERSION = 1`.
+- **Canonical shape (PR #214 — copy ownership).** Execution modes are
+  `AUTOMATIC_OPERATION`/`ACTION_WINDOW`/`FILE_IMPORT`/`INTEGRATION_PENDING`;
+  `START_RUN` carries `channelCode`; the RunView carries a sanitized `channelCode`
+  plus dotted semantic `runCopyKey`/step `copyKey` and sanitized primitive
+  `copyParams`. **Runtime emits NO final user prose** — `title`/`instruction`/
+  `message`/`html`/`displayText` are prohibited keys; FE owns all localized copy.
+- **Version governance.** PR #214 changed the shape *without* bumping the protocol
+  version — accepted as the final pre-release v1 reconciliation. Any future breaking
+  change MUST bump `ACTION_WINDOW_PROTOCOL_VERSION` or ship an explicit migration.
+  Runtime (R1) was realigned to this shape in `fix/action-window-runtime-contract`.
 - **Transport decision (contract README §8):** Action Window messages are a
   **nested contract with their own version, transported inside Bridge v1** as
   opaque payloads — NOT new variants in the Bridge `ClientMessage`/`ServerMessage`

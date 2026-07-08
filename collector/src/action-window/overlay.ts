@@ -9,7 +9,8 @@ import type { Page } from "playwright";
 export interface OverlayOptions {
   stepNumber: number;
   totalSteps: number;
-  instruction: string;
+  /** Semantic copy key (diagnostic badge label) — Runtime renders no final user prose. */
+  copyKey: string;
   guidanceEnabled: boolean;
 }
 
@@ -41,7 +42,7 @@ export async function mountOverlay(page: Page, opts: OverlayOptions): Promise<vo
     ].join(";");
     const badge = document.createElement("div");
     badge.setAttribute("data-aw-badge", "");
-    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.instruction}`;
+    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.copyKey}`;
     badge.style.cssText = "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap";
     box.appendChild(badge);
     document.body.appendChild(box);

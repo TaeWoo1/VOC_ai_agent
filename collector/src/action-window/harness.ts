@@ -41,6 +41,7 @@ export interface HarnessResult {
 
 export async function runSyntheticLoop(page: Page, engine: ActionWindowEngine, opts: HarnessOptions): Promise<HarnessResult> {
   const runId = engine.view().runId;
+  const channelCode = engine.view().channelCode;
   let cmdSeq = 0;
   const cmd = (type: CommandType, payload?: Record<string, unknown>): CommandEnvelope => ({
     protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION,
@@ -68,14 +69,14 @@ export async function runSyntheticLoop(page: Page, engine: ActionWindowEngine, o
   // main world so those calls resolve in every runtime — vitest and tsx alike.
   await page.evaluate("globalThis.__name = globalThis.__name || function (f) { return f; };");
 
-  engine.command(cmd("START_RUN")); // → PREPARE
+  engine.command(cmd("START_RUN", { channelCode })); // → PREPARE
 
   if (engine.onSurfaceReady(await surfaceIsValid(page)) === "CLEANUP") return finish();
 
   if (engine.onLocated(await locateTarget(page)) === "CLEANUP") return finish();
 
   const humanStep = STEP_PLAN[1]!;
-  await mountOverlay(page, { stepNumber: humanStep.stepNumber, totalSteps: TOTAL_STEPS, instruction: humanStep.instruction ?? "", guidanceEnabled });
+  await mountOverlay(page, { stepNumber: humanStep.stepNumber, totalSteps: TOTAL_STEPS, copyKey: humanStep.copyKey, guidanceEnabled });
   engine.onHighlighted(); // → OBSERVE
   await armObserver(page);
 

@@ -19,7 +19,7 @@ import { mountOverlay, overlayMounted } from "../../src/action-window/overlay";
 
 const RUN = process.env.RUN_INTEGRATION === "1";
 const clickTarget = (page: Page) => page.click("[data-aw-target]"); // TEST-ONLY user simulation
-const engineFor = (id: string) => new ActionWindowEngine({ runId: id, channel: "synthetic", title: "합성 런" });
+const engineFor = (id: string) => new ActionWindowEngine({ runId: id, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
 
 describe.skipIf(!RUN)("action-window browser fixture", () => {
   let browser: Browser;
@@ -66,7 +66,7 @@ describe.skipIf(!RUN)("action-window browser fixture", () => {
   it("overlay is mounted but does NOT intercept the target click", async () => {
     await withPage(async (page) => {
       await page.setContent(fixtureHtml("normal"));
-      await mountOverlay(page, { stepNumber: 2, totalSteps: 3, instruction: "클릭", guidanceEnabled: true });
+      await mountOverlay(page, { stepNumber: 2, totalSteps: 3, copyKey: "actionWindow.step.userTargetAction", guidanceEnabled: true });
       expect(await overlayMounted(page)).toBe(true);
       await clickTarget(page);
       const done = await page.evaluate(() => document.body.getAttribute("data-aw-state") === "done");
@@ -77,7 +77,7 @@ describe.skipIf(!RUN)("action-window browser fixture", () => {
   it("guidance off hides the overlay", async () => {
     await withPage(async (page) => {
       await page.setContent(fixtureHtml("normal"));
-      await mountOverlay(page, { stepNumber: 2, totalSteps: 3, instruction: "클릭", guidanceEnabled: false });
+      await mountOverlay(page, { stepNumber: 2, totalSteps: 3, copyKey: "actionWindow.step.userTargetAction", guidanceEnabled: false });
       const display = await page.evaluate(() => document.getElementById("__aw_overlay__")?.style.display);
       expect(display).toBe("none");
     });

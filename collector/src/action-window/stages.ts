@@ -13,6 +13,7 @@ import type {
   StepStatus,
   ExecutionMode,
   CommandType,
+  CopyParams,
 } from "../../../contracts/action-window/v1/index";
 
 export type Stage =
@@ -30,18 +31,22 @@ export type Stage =
 
 export const TERMINAL_STAGES: readonly Stage[] = ["COMPLETE", "FAILED", "CANCELLED"];
 
-/** The fixed synthetic step plan. Step 2 is the single human-action step. */
+/**
+ * The fixed synthetic step plan. Step 2 is the single human-action (ACTION_WINDOW) step.
+ * Copy ownership: Runtime carries dotted semantic `copyKey`s + sanitized primitive `copyParams`
+ * ONLY — never final user prose. FE maps these keys to localized copy.
+ */
 export interface StepMeta {
   stepNumber: number;
   stepId: string;
-  title: string;
+  copyKey: string;
   mode: ExecutionMode;
-  instruction?: string;
+  copyParams?: CopyParams;
 }
 export const STEP_PLAN: readonly StepMeta[] = [
-  { stepNumber: 1, stepId: "aw.prepare_surface", title: "화면 준비", mode: "AUTOMATIC" },
-  { stepNumber: 2, stepId: "aw.user_target_action", title: "대상 확인 후 직접 클릭", mode: "HUMAN_ACTION", instruction: "강조된 대상을 플랫폼 화면에서 직접 클릭해 주세요." },
-  { stepNumber: 3, stepId: "aw.dummy_downstream", title: "자동 후속 처리", mode: "AUTOMATIC" },
+  { stepNumber: 1, stepId: "aw.prepare_surface", copyKey: "actionWindow.step.prepareSurface", mode: "AUTOMATIC_OPERATION" },
+  { stepNumber: 2, stepId: "aw.user_target_action", copyKey: "actionWindow.step.userTargetAction", mode: "ACTION_WINDOW", copyParams: { targetKind: "primary_action" } },
+  { stepNumber: 3, stepId: "aw.dummy_downstream", copyKey: "actionWindow.step.dummyDownstream", mode: "AUTOMATIC_OPERATION" },
 ];
 export const TOTAL_STEPS = STEP_PLAN.length;
 

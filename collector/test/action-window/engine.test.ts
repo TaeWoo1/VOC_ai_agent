@@ -10,6 +10,8 @@ import { dirname, resolve, join } from "node:path";
 
 import {
   ACTION_WINDOW_PROTOCOL_VERSION,
+  EXECUTION_MODES,
+  validateCommandEnvelope,
   validateEventEnvelope,
   validateRunView,
   findProhibitedFields,
@@ -22,7 +24,10 @@ const SIG = "a1b2c3d4e5f60718";
 const fixedClock = () => "2026-01-01T00:00:00.5Z";
 
 function newEngine() {
-  return new ActionWindowEngine({ runId: "run_t1", channel: "synthetic", title: "합성 런" }, { clock: fixedClock });
+  return new ActionWindowEngine(
+    { runId: "run_t1", channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" },
+    { clock: fixedClock },
+  );
 }
 let cmdN = 0;
 function cmd(engine: ActionWindowEngine, type: CommandType, payload?: Record<string, unknown>, expectedRevision?: number): CommandEnvelope {
@@ -90,7 +95,7 @@ describe("engine — happy path", () => {
     engine.onHighlighted();
     const view = engine.view();
     expect(view.status).toBe("WAITING_FOR_HUMAN");
-    expect(view.executionMode).toBe("HUMAN_ACTION");
+    expect(view.executionMode).toBe("ACTION_WINDOW");
     expect(view.currentStep?.status).toBe("AWAITING_USER");
     expect(view.currentStep?.stepNumber).toBe(2);
     expect(view.currentStep?.totalSteps).toBe(view.progress.totalSteps);
@@ -247,5 +252,36 @@ describe("engine — structural no-click invariant", () => {
       const body = readFileSync(join(srcDir, f), "utf8");
       for (const re of banned) expect(re.test(body), `${f} :: ${re}`).toBe(false);
     }
+  });
+});
+
+describe("engine — canonical (post-#214) contract conformance (regression)", () => {
+  it("uses the canonical ExecutionMode vocabulary, not the pre-#214 placeholders", () => {
+    expect([...EXECUTION_MODES]).toEqual(["AUTOMATIC_OPERATION", "ACTION_WINDOW", "FILE_IMPORT", "INTEGRATION_PENDING"]);
+    const engine = newEngine();
+    driveHappyPath(engine);
+    // every projected view across the run validates AND carries no Runtime prose (title/instruction/channel)
+    expect(validateRunView(engine.view())).toEqual({ ok: true });
+    expect(findProhibitedFields(engine.view())).toEqual([]);
+  });
+
+  it("projects channelCode + dotted copyKey (never a title/instruction)", () => {
+    const engine = newEngine();
+    engine.command(cmd(engine, "START_RUN", { channelCode: "synthetic" }));
+    engine.onSurfaceReady(true);
+    engine.onLocated({ count: 1, sig: SIG });
+    engine.onHighlighted();
+    const view = engine.view();
+    expect(view.channelCode).toBe("synthetic");
+    expect(view.runCopyKey).toMatch(/^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/);
+    expect(view.currentStep?.copyKey).toMatch(/^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/);
+    expect((view as unknown as Record<string, unknown>).title).toBeUndefined();
+    expect((view.currentStep as unknown as Record<string, unknown>).instruction).toBeUndefined();
+    expect(validateRunView(view)).toEqual({ ok: true });
+  });
+
+  it("emits a contract-valid START_RUN command envelope (channelCode payload)", () => {
+    const c = cmd(newEngine(), "START_RUN", { channelCode: "synthetic" });
+    expect(validateCommandEnvelope(c)).toEqual({ ok: true });
   });
 });
