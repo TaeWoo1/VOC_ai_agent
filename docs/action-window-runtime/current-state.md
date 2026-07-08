@@ -3,16 +3,16 @@
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-08
-- **baseline main SHA:** `c156c59` (`origin/main`; PR #209 product/runtime integration + PR #210 Runtime docs baseline both merged; contains the strategy docs AND the runtime foundations)
-- **current branch:** `feat/action-window-contract` (R0 slice); Runtime engine work continues on `feat/action-window-runtime`
-- **current worktree:** `sellerops-contract` (linked worktree of the shared SellerOps repo)
-- **branch base SHA:** `c156c59` (`origin/main`, merged)
-- **shared contract version/path:** **DEFINED — `contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** JSON Schema `schema.json` + TS `index.ts`; nested-in-Bridge-v1 transport (Bridge `collector/src/bridge/protocol.ts` unchanged). R0 PR **open, not yet merged.**
-- **current slice:** R0 (contract baseline) — contract + fixtures + conformance tests delivered; PR open
-- **last completed item:** R0 Action Window protocol v1 contract (`contracts/action-window/v1/*`) with 55/55 conformance tests
-- **last verified tests:** `collector/test/contracts/action-window/contract.test.ts` — 55/55 (vitest); contract surface strict `tsc --noEmit` clean
-- **current blocker:** none technical; R0 PR awaiting review/merge before R2 (FE integration) can begin
-- **next single action:** build the **R1 synthetic Action Window engine** against the R0 contract fixtures (do NOT begin R1 until dispatched)
+- **baseline main SHA:** `026eb77` (`origin/main`; PR #209 + PR #210 + **PR #212 R0 contract** all merged; `contracts/action-window/v1/` present on main)
+- **current branch:** `feat/action-window-runtime-r1` (R1 slice)
+- **current worktree:** `sellerops-runtime` (linked worktree of the shared SellerOps repo)
+- **branch base SHA:** `026eb77` (`origin/main`, merged)
+- **shared contract version/path:** **MERGED — `contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`), R0 PR #212 merge SHA `026eb77`.** nested-in-Bridge-v1 transport (Bridge `collector/src/bridge/protocol.ts` unchanged).
+- **current slice:** R1 (synthetic Action Window loop) — **VERIFIED** (automated + headed operator-click QA passed); PR open
+- **last completed item:** R1 channel-neutral synthetic loop under `collector/src/action-window/*` (engine, locator, overlay, observer, verifier, dummy downstream, sink, view projection, harness) + synthetic fixture + headed QA CLI
+- **last verified tests:** `engine.test.ts` (17, offline) + `fixture-browser.test.ts` (8, `RUN_INTEGRATION=1`); full collector suite **2403 passed / 9 skipped**; `tsc --noEmit` clean. **Headed operator QA:** `normal` → real human click → COMPLETED (13-event loop, `USER_ACTION_OBSERVED` from the human click); `multi-candidate` → failed closed `TARGET_AMBIGUOUS`, no click.
+- **current blocker:** none — R1 verified; awaiting dispatch of R2.
+- **next single action:** proceed to **R2 Runtime/FE synthetic integration** over the real Bridge (do NOT begin R2 until dispatched)
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -30,9 +30,11 @@
   wiring in `collector/src/cli/local-agent.ts`) and is **not a V1 dependency**.
 - The **ESM auto-click marketplace-attribution work is parked**, not completed.
 - **No live Action Window capture is complete.**
-- **R0 (contract) is delivered** as `contracts/action-window/v1/` (protocol v1),
-  PR open; the **next action is the R1 synthetic engine** built against the R0
-  fixtures. R1 is **not** implemented.
+- **R0 (contract) is MERGED** (PR #212, `026eb77`) as `contracts/action-window/v1/`
+  (protocol v1). **R1 (synthetic loop) is VERIFIED** under
+  `collector/src/action-window/*` — automated tests green AND the headed
+  operator-click QA passed end-to-end. No live channel, Bridge transport, or FE
+  screen yet.
 
 ## Existing foundations vs implemented Action Window capability
 
@@ -41,7 +43,11 @@ profile resolver, candidate signature / frame scan, fail-closed gate / sentinel,
 read-only download readiness, upload/ingestion handoff, work/run/audit domain,
 Bridge protocol, Browser Projection (optional renderer).
 
-**Implemented Action Window capability:** none yet.
+**Implemented Action Window capability:** R1 channel-neutral synthetic loop
+(`collector/src/action-window/*`) — pure state engine, target locator, overlay,
+user-action observer, transition verifier, fail-closed blockers, dummy downstream,
+in-memory event sink, `ActionWindowRunView` projection, cleanup. Synthetic-only;
+automated + headed-operator-QA verified. Not live, not FE-integrated.
 
 ## Baseline / branch caveat
 

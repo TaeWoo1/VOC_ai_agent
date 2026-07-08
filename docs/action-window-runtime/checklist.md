@@ -13,18 +13,18 @@ Status vocabulary (only these):
 
 | # | Item | Status | Code evidence | Test evidence | Fixture/live evidence | Commit/PR | Notes / blocker |
 |---|---|---|---|---|---|---|---|
-| 1 | Contract readiness (R0) | `IMPLEMENTED` | `contracts/action-window/v1/index.ts`, `schema.json` | `collector/test/contracts/action-window/contract.test.ts` — 55/55 vitest | 25 valid + 10 negative fixtures under `contracts/action-window/v1/fixtures/` | branch `feat/action-window-contract`; R0 PR open (not merged) | Protocol v1 defined; nested-in-Bridge-v1 transport; schema↔TS consistency test green. `MERGED` pending PR review. |
-| 2 | State engine (R1) | `NOT_STARTED` | — | — | — | — | Channel-neutral synthetic flow; re-author reducer patterns from `esm-capture-gate.ts`. |
-| 3 | Target detection | `NOT_STARTED` | primitive: `collector/src/esm/esm-candidate-signature.ts`, `esm-frame-scan.ts` | — | — | — | Primitives exist; Action Window locator not built. |
-| 4 | Overlay | `NOT_STARTED` | — | — | — | — | Real-window overlay = default renderer. |
-| 5 | Actual user-click observation | `NOT_STARTED` | primitive: `esm-review-live-scan.ts`; parked `esm-marketplace-observe.ts` | — | — | — | Re-author observer; no auto-click. |
-| 6 | Transition verification | `NOT_STARTED` | primitive: `collector/src/work/types.ts` (`VerificationResult`) | — | — | — | Execution ≠ completion. |
-| 7 | Fail-closed cases | `NOT_STARTED` | primitive: `esm-capture-gate.ts`, `esm-sentinel.ts` | — | — | — | Cover TARGET_NOT_FOUND / AMBIGUOUS / CHANGED / UNEXPECTED_STATE / NO_USER_ACTION / SESSION_INVALID. |
-| 8 | Dummy downstream | `NOT_STARTED` | — | — | — | — | One dummy task only; no real volume. |
-| 9 | Bridge events | `NOT_STARTED` | base: `collector/src/bridge/protocol.ts` | — | — | — | Sanitized + ordered; extend contract in R0. |
-| 10 | Cleanup (window/profile/session) | `NOT_STARTED` | primitive: `connectionProfileDirFor` (`collector/src/agent/progressive-reconnect.ts:126`) | — | — | — | Deterministic teardown; no leaked CDP session. |
-| 11 | Privacy / sanitization | `NOT_STARTED` | contract: `collector/src/bridge/protocol.ts` | — | — | — | No prohibited payload (see contract-boundary §3). |
-| 12 | FE integration (R2) | `NOT_STARTED` | — | — | — | — | Depends on #1 (R0). |
+| 1 | Contract readiness (R0) | `MERGED` | `contracts/action-window/v1/index.ts`, `schema.json` | `collector/test/contracts/action-window/contract.test.ts` — 55/55 | 25 valid + 10 negative fixtures | PR #212, merge `026eb77` | Protocol v1; nested-in-Bridge-v1 transport; schema↔TS consistency green. |
+| 2 | State engine (R1) | `VERIFIED` | `collector/src/action-window/engine.ts`, `stages.ts` | `test/action-window/engine.test.ts` — 17 | headed QA `normal` → 13-event loop → COMPLETED | `feat/action-window-runtime-r1` | Channel-neutral pure engine; contract-valid events/view. |
+| 3 | Target detection | `VERIFIED` | `collector/src/action-window/locator.ts`, `signature.ts` | `fixture-browser.test.ts` (RUN_INTEGRATION) | 0/1/many synthetic + headed QA | `feat/action-window-runtime-r1` | In-page 16-hex signature; no selector/text leaves page; fails closed on 0/many. |
+| 4 | Overlay | `VERIFIED` | `collector/src/action-window/overlay.ts` | `fixture-browser.test.ts` — mount + no-intercept + reposition + guidance-off | synthetic + headed QA | `feat/action-window-runtime-r1` | `pointer-events:none` (never intercepts click); repositions on layout move. |
+| 5 | Actual user-click observation | `VERIFIED` | `collector/src/action-window/observer.ts` | `fixture-browser.test.ts` | headed QA: real human click → `USER_ACTION_OBSERVED` | `feat/action-window-runtime-r1` | Records sanitized boolean only; Runtime never clicks; click ≠ completion. |
+| 6 | Transition verification | `VERIFIED` | `collector/src/action-window/verifier.ts` | `engine.test.ts` + `fixture-browser.test.ts` | headed QA: verified → COMPLETED | `feat/action-window-runtime-r1` | Verified transition is the sole completion authority; unchanged → no false completion. |
+| 7 | Fail-closed cases | `VERIFIED` | `engine.ts` (`fail()`), `verifier.ts`, `locator.ts` | `engine.test.ts` + `fixture-browser.test.ts` | headed QA `multi-candidate` → TARGET_AMBIGUOUS, no click | `feat/action-window-runtime-r1` | TARGET_NOT_FOUND / AMBIGUOUS / UI_DRIFT / UNSUPPORTED_STATE; stale-rev + proto-version rejected; cancel cleans up. |
+| 8 | Dummy downstream | `VERIFIED` | `collector/src/action-window/engine.ts` (`runDownstream`) | `engine.test.ts` | headed QA: `downstream.processed=1` | `feat/action-window-runtime-r1` | One deterministic in-memory step; no backend/upload/download. |
+| 9 | Contract events (in-memory sink) | `VERIFIED` | `collector/src/action-window/events.ts`, `engine.ts` | `engine.test.ts` — validate + sequence/revision | headed QA: 13-event ordered loop | `feat/action-window-runtime-r1` | Sanitized + ordered to in-memory sink; **real Bridge transport handlers = R2**. |
+| 10 | Cleanup | `VERIFIED` | `harness.ts` (`finish`), `overlay.ts`, `observer.ts` | `fixture-browser.test.ts` — overlay removed + flag cleared | headed QA: clean process exit | `feat/action-window-runtime-r1` | Overlay/listeners torn down on complete/cancel/fail; browser owned by harness only. |
+| 11 | Privacy / sanitization | `VERIFIED` | `view.ts`, `signature.ts`, engine payloads | `engine.test.ts` + `fixture-browser.test.ts` — `findProhibitedFields` == [] | headed QA: opaque 16-hex `targetRef` only | `feat/action-window-runtime-r1` | Only enums/counts/opaque-16-hex; no selector/text/URL/path in any event or view. |
+| 12 | FE integration (R2) | `NOT_STARTED` | — | — | — | — | Unblocked (R0 merged, R1 verified); real Bridge transport + FE consume next. |
 | 13 | Persistence (R3) | `NOT_STARTED` | seam: `collector/src/work/*`, backend `CollectionRunService`/`SyncJob` | — | — | — | Currently caller-less; wire for refresh/resume. |
 | 14 | First pilot adapter (R4) | `NOT_STARTED` | seams: `export-target-readiness*.ts`, `collector/src/upload.ts` | — | — | — | Channel not final; ESM+ strongest candidate; live requires PO approval + policy clarification. |
 
