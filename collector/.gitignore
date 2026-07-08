@@ -19,3 +19,6 @@ downloads/
 
 # Live-run findings artifacts may contain account-specific notes — keep local
 findings/*.local.md
+
+# Persisted Action Window Operation Runs (agent-local only, never committed)
+.operation-runs/

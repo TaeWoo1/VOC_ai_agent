@@ -55,12 +55,25 @@ export class ActionWindowSession {
   /** True while an automatic drive chain is in flight (not at a rest point). */
   private autoBusy = false;
   private unsubscribe: (() => void) | null = null;
+  /** Optional R3 persistence hook — invoked after every state publication (verified transition). */
+  private readonly onStatePublished: (() => void) | undefined;
 
-  constructor(engine: ActionWindowEngine, driver: ProbeDriver, transport: AwServerTransport) {
+  constructor(
+    engine: ActionWindowEngine,
+    driver: ProbeDriver,
+    transport: AwServerTransport,
+    opts?: { onStatePublished?: () => void },
+  ) {
     this.engine = engine;
     this.driver = driver;
     this.transport = transport;
     this.runId = engine.view().runId;
+    this.onStatePublished = opts?.onStatePublished;
+    // A session over a RESTORED engine (R3) continues, not restarts: the run counts as started, and
+    // only events emitted from now on are pushed — history is served through resync, not re-broadcast.
+    this.started = engine.isStarted();
+    const restored = engine.events();
+    this.publishedSeq = restored.length > 0 ? restored[restored.length - 1]!.sequence : 0;
   }
 
   /** Attach to the transport and begin handling client frames. Returns a detach function. */
@@ -212,6 +225,9 @@ export class ActionWindowSession {
       }
     }
     this.transport.send({ kind: "aw_view", view: this.engine.view() });
+    // R3: every published state is a persisted state (the hook records the run after each verified
+    // transition). Publication order is the persistence order.
+    this.onStatePublished?.();
   }
 
   private highlightedSig(): string {

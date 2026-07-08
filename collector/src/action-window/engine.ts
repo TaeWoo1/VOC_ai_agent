@@ -63,9 +63,40 @@ export type CommandOutcome =
 export type Clock = () => string;
 
 /** Default clock: a synthetic monotonic occurrence marker (NOT wall-clock). occurredAt is opaque. */
-function makeDefaultClock(): Clock {
-  let tick = 0;
+function makeDefaultClock(startTick = 0): Clock {
+  let tick = startTick;
   return () => `2026-01-01T00:00:00.${tick++}Z`;
+}
+
+/**
+ * The COMPLETE serializable engine state (R3). Unlike the read-only `EngineSnapshot` view projection,
+ * this carries everything needed to reconstruct the engine after a process restart: the command
+ * ledger (`appliedCommandIds` — idempotency survives persistence), the ordered event log (the audit
+ * trail), and the internal probe bookkeeping. Every value is already sanitized: enums, booleans,
+ * counts, dotted copy keys, and the opaque 16-hex `targetSig` — no selector/URL/path/credential/page
+ * content exists anywhere in engine state, so none can be persisted.
+ */
+export interface PersistedEngineState {
+  runId: string;
+  channelCode: string;
+  runCopyKey: string;
+  runCopyParams?: CopyParams;
+  guidanceEnabled: boolean;
+  started: boolean;
+  stage: Stage;
+  resumeStage: Stage | null;
+  activeStepIndex: number;
+  revision: number;
+  /** Opaque 16-hex signature of the highlighted target (contract-sanctioned sanitized ref). */
+  targetSig: string | null;
+  observed: boolean;
+  blocker: { code: BlockerCode; recoverable: boolean } | null;
+  completedSteps: number;
+  seq: number;
+  /** The command idempotency ledger — a replayed commandId stays a no-op across restarts. */
+  appliedCommandIds: readonly string[];
+  /** The ordered sanitized event log (sequence-gapless) — the run's audit history. */
+  events: readonly EventEnvelope[];
 }
 
 export class ActionWindowEngine {
@@ -99,9 +130,92 @@ export class ActionWindowEngine {
     this.sink = opts?.sink ?? new InMemoryEventSink();
   }
 
+  /* ── persistence (R3) ── */
+
+  /** Full-fidelity serializable state — the input to {@link ActionWindowEngine.restore}. */
+  runState(): PersistedEngineState {
+    return {
+      runId: this.runId,
+      channelCode: this.channelCode,
+      runCopyKey: this.runCopyKey,
+      ...(this.runCopyParams ? { runCopyParams: this.runCopyParams } : {}),
+      guidanceEnabled: this.guidanceEnabled,
+      started: this.started,
+      stage: this.stage,
+      resumeStage: this.resumeStage,
+      activeStepIndex: this.activeStepIndex,
+      revision: this.revision,
+      targetSig: this.targetSig,
+      observed: this.observed,
+      blocker: this.blocker ? { ...this.blocker } : null,
+      completedSteps: this.completedSteps,
+      seq: this.seq,
+      appliedCommandIds: [...this.appliedCommandIds],
+      events: this.sink.all().map((e) => ({ ...e })),
+    };
+  }
+
+  /**
+   * Reconstruct an engine EXACTLY as persisted (no transition, no event, no revision change).
+   * Restore policy — e.g. re-entering an interrupted run through the PAUSED barrier — is the caller's
+   * concern (see `operation-run.ts` `planRestore` + {@link pauseForRestore}); this method never
+   * invents semantic progress. The default clock resumes strictly after the persisted markers so
+   * `occurredAt` stays a monotonic opaque marker across restarts (ordering authority remains
+   * `sequence`, never the timestamp).
+   */
+  static restore(state: PersistedEngineState, opts?: { clock?: Clock }): ActionWindowEngine {
+    const sink = new InMemoryEventSink();
+    for (const e of state.events) sink.push({ ...e });
+    const engine = new ActionWindowEngine(
+      {
+        runId: state.runId,
+        channelCode: state.channelCode,
+        runCopyKey: state.runCopyKey,
+        runCopyParams: state.runCopyParams,
+        guidanceEnabled: state.guidanceEnabled,
+      },
+      { clock: opts?.clock ?? makeDefaultClock((state.seq + 1) * 1000), sink },
+    );
+    engine.started = state.started;
+    engine.stage = state.stage;
+    engine.resumeStage = state.resumeStage;
+    engine.activeStepIndex = state.activeStepIndex;
+    engine.revision = state.revision;
+    engine.targetSig = state.targetSig;
+    engine.observed = state.observed;
+    engine.blocker = state.blocker ? { ...state.blocker } : null;
+    engine.completedSteps = state.completedSteps;
+    engine.seq = state.seq;
+    for (const id of state.appliedCommandIds) engine.appliedCommandIds.add(id);
+    return engine;
+  }
+
+  /**
+   * R3 restart-recovery barrier: park a restored, resumable run at PAUSED with the given SAFE resume
+   * stage, so nothing runs until an explicit `RESUME_RUN` command (auditable, FE-visible intent — a
+   * restart alone never re-drives anything). Emits a normal `RUN_STATUS_CHANGED` so the pause is part
+   * of the ordered audit history. Clears the blocker: resuming a failed run re-enters the loop through
+   * the same fail-closed probes, which simply fail closed again if the cause persists (zero clicks).
+   * Rejected on terminal-progress states it must never resurrect (COMPLETE/CANCELLED).
+   */
+  pauseForRestore(safeStage: Stage): void {
+    if (this.stage === "COMPLETE" || this.stage === "CANCELLED") {
+      throw new Error(`action-window engine: pauseForRestore is invalid for terminal stage ${this.stage}`);
+    }
+    this.revision += 1;
+    this.resumeStage = safeStage;
+    this.stage = "PAUSED";
+    this.blocker = null;
+    this.emit("RUN_STATUS_CHANGED", { status: "PAUSED" });
+  }
+
   /* ── introspection ── */
   currentStage(): Stage {
     return this.stage;
+  }
+  /** Whether START_RUN was ever accepted (true on an engine restored from a started run). */
+  isStarted(): boolean {
+    return this.started;
   }
   currentRevision(): number {
     return this.revision;
@@ -337,6 +451,10 @@ export class ActionWindowEngine {
         return "HIGHLIGHT";
       case "WAIT_FOR_USER_ACTION":
         return "OBSERVE";
+      case "RUN_DUMMY_DOWNSTREAM":
+        // Resuming a run interrupted after verification re-runs the automatic downstream step. The
+        // step is deterministic and completion is recorded once, so the resume is idempotent.
+        return "DOWNSTREAM";
       default:
         return "NONE";
     }
