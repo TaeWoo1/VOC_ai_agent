@@ -33,6 +33,7 @@ import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
 import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
 import type { ProjectionEndpoint } from "./projection-endpoint";
+import type { ActionWindowEndpoint } from "./action-window-endpoint";
 
 const LOOPBACK = "127.0.0.1";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -58,6 +59,13 @@ export interface BridgeServerDeps {
    * status channel, which keeps its JSON/text/64 KiB boundary untouched.
    */
   projection?: ProjectionEndpoint;
+  /**
+   * Optional Action Window passthrough endpoint (R2B). When present, `{type:"aw"}` carrier messages on
+   * the EXISTING authenticated `/bridge/ws` socket are relayed to it opaquely (payloads are never
+   * inspected here), and each accepted socket receives its `aw_session` announcement. This is additive:
+   * the typed G1 `ClientMessage`/`ServerMessage` unions and their handling are unchanged.
+   */
+  actionWindow?: ActionWindowEndpoint;
 }
 
 export class BridgeServer {
@@ -70,6 +78,7 @@ export class BridgeServer {
   private readonly wantPort: number;
   private readonly autoApprovePairing: boolean;
   private readonly projection: ProjectionEndpoint | undefined;
+  private readonly actionWindow: ActionWindowEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private boundPort = 0;
@@ -84,6 +93,7 @@ export class BridgeServer {
     this.wantPort = deps.port;
     this.autoApprovePairing = deps.autoApprovePairing ?? false;
     this.projection = deps.projection;
+    this.actionWindow = deps.actionWindow;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
@@ -123,6 +133,7 @@ export class BridgeServer {
   async close(): Promise<void> {
     if (this.projectionTimer) { clearInterval(this.projectionTimer); this.projectionTimer = undefined; }
     if (this.projection) { try { await this.projection.close(); } catch { /* best effort */ } }
+    this.actionWindow?.close();
     for (const ws of this.clients.keys()) {
       try { ws.terminate(); } catch { /* already gone */ }
     }
@@ -407,14 +418,25 @@ export class BridgeServer {
         ws.close(1003, "binary_unsupported");
         return;
       }
-      let msg: ClientMessage | null = null;
-      try { msg = JSON.parse(data.toString()) as ClientMessage; } catch { msg = null; }
-      if (msg?.type === "request_snapshot") this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
+      let msg: Record<string, unknown> | null = null;
+      try {
+        const parsed: unknown = JSON.parse(data.toString());
+        msg = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+      } catch { msg = null; }
+      if (msg?.type === "aw") {
+        // Action Window passthrough (R2B): relay the OPAQUE payload string to the endpoint without
+        // inspecting it. Only reachable on an authenticated socket; ignored when no endpoint is mounted
+        // (exactly how unknown client message types were already ignored).
+        if (this.actionWindow && typeof msg.payload === "string") this.actionWindow.onClientPayload(ws, msg.payload);
+        return;
+      }
+      const typed = msg as ClientMessage | null;
+      if (typed?.type === "request_snapshot") this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
       // {type:"ping"} app-level heartbeat needs no reply beyond keeping the socket alive; `ws` handles
       // protocol-level ping/pong automatically.
     });
-    ws.on("close", () => this.clients.delete(ws));
-    ws.on("error", () => { this.clients.delete(ws); try { ws.terminate(); } catch { /* gone */ } });
+    ws.on("close", () => { this.clients.delete(ws); this.actionWindow?.onClientDisconnected(ws); });
+    ws.on("error", () => { this.clients.delete(ws); this.actionWindow?.onClientDisconnected(ws); try { ws.terminate(); } catch { /* gone */ } });
 
     // Immediately negotiate + send the current snapshot so a (re)connecting tab restores state.
     this.sendTo(ws, {
@@ -425,6 +447,8 @@ export class BridgeServer {
       supportedEvents: SUPPORTED_EVENT_CATEGORIES,
     });
     this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
+    // Announce the hosted Action Window run (if any) AFTER the standard hello+snapshot negotiation.
+    this.actionWindow?.onClientConnected(ws);
   }
 
   private dropSocketsWithoutValidPairing(): void {
