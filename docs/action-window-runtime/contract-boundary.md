@@ -5,7 +5,7 @@ This document records **Runtime semantics** at the FE↔Runtime boundary. It doe
 the shared contract source (see §1). If Runtime semantics here ever disagree with
 the ratified shared contract, the shared contract wins and this file is updated.
 
-## 1. Shared-contract source status — DEFINED (R0, PR open)
+## 1. Shared-contract source status — MERGED (R0, PR #212)
 
 - **Normative path:** `contracts/action-window/v1/` — neutral top-level, owned by
   neither `frontend/**` nor `collector/**`.
@@ -22,9 +22,10 @@ the ratified shared contract, the shared contract wins and this file is updated.
   union. This is additive; it does not change the meaning of any existing Bridge
   message and does not force a Bridge major bump. `collector/src/bridge/protocol.ts`
   is unchanged by R0 (no message handling in this slice).
-- **Status:** contract defined + conformance tests green; the R0 PR is **open, not
-  yet merged**. Until it merges, treat the shape as ratified-pending-review; the
-  Runtime engine (R1) builds against the same fixtures.
+- **Status:** contract **MERGED** (PR #212, `026eb77`); conformance tests green.
+  R1 (`collector/src/action-window/*`) consumes it directly — engine emits
+  contract-valid events and projects `ActionWindowRunView`, verified by
+  `collector/test/action-window/*`. Real Bridge transport of these messages is R2.
 - A mechanical consistency test asserts the TS enum arrays equal the `schema.json`
   `$defs.*.enum` arrays, so FE and Runtime consume one non-drifting source.
 
