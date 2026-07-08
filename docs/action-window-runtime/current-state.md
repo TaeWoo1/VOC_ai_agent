@@ -3,16 +3,16 @@
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-09
-- **baseline main SHA:** `377a103` (`origin/main`; incl. PR #212 R0, **PR #214 canonical-contract copy-ownership**, and PR #213 R1 all merged)
-- **current branch:** `fix/action-window-runtime-contract` (R1.1 — align R1 to the post-#214 canonical contract)
-- **current worktree:** `sellerops-runtime` (linked worktree of the shared SellerOps repo)
-- **branch base SHA:** `377a103` (`origin/main`, merged)
-- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** Canonical shape set by **PR #214** (modes `AUTOMATIC_OPERATION`/`ACTION_WINDOW`/`FILE_IMPORT`/`INTEGRATION_PENDING`; `channelCode`; run/step `copyKey`+`copyParams`; `title`/`instruction` prohibited). **Governance:** #214 changed the shape *without* bumping the protocol version — treated as the final pre-release v1 reconciliation; future breaking changes MUST bump the version or ship an explicit migration.
-- **current slice:** R1.1 (contract reconciliation) — **VERIFIED** against the canonical post-#214 contract; PR open
-- **last completed item:** reconciled R1 Runtime/fixture/CLI/tests to the canonical contract (new modes, `channelCode`, `copyKey`/`copyParams`; removed Runtime prose); added a canonical-contract regression test
-- **last verified tests:** `engine.test.ts` (20, offline incl. 3 regression) + `fixture-browser.test.ts` (8, `RUN_INTEGRATION=1`); full collector suite **2406 passed / 9 skipped**; `tsc --noEmit` clean. **Headed operator QA (against canonical contract):** `normal` → real human click → COMPLETED (13-event loop; view uses `channelCode`/`runCopyKey`/`copyKey`, `executionMode` `ACTION_WINDOW`→`AUTOMATIC_OPERATION`, no prose); `multi-candidate` → failed closed `TARGET_AMBIGUOUS`, no click.
-- **current blocker:** R2 prerequisite — **no FE Action Window mock-flow exists yet** (the FE mock adapter + screen that R2 replaces with a Bridge adapter). Runtime side is green on `main` after this fix merges.
-- **next single action:** land this R1.1 fix (restores a green `main`), then build/land the **FE Action Window mock-flow**; only then dispatch **R2** (FE↔Runtime over the Bridge)
+- **baseline main SHA:** `3dcfff2` (`origin/main`; incl. PR #212 R0, PR #214 canonical contract, PR #213 R1, **PR #215 FE mock-flow**, and **PR #216 R1.1** all merged)
+- **current branch:** `integ/action-window-v1` (R2 — FE↔Bridge↔Runtime synthetic integration)
+- **current worktree:** `sellerops-action-window-integrate` (linked worktree of the shared SellerOps repo)
+- **branch base SHA:** `3dcfff2` (`origin/main`)
+- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** Canonical message shape set by **PR #214**. R2 adds an **additive** transport sibling `contracts/action-window/v1/transport.ts` (`ACTION_WINDOW_TRANSPORT_VERSION = 1`) — frames that carry the already-normative envelopes/View Model **inside Bridge v1 as opaque payloads**; `index.ts`/`schema.json`/`bridge/protocol.ts` are unchanged (no drift, no message-protocol bump).
+- **current slice:** R2 (FE↔Runtime over the transport) — **IMPLEMENTED** (offline synthetic E2E green); real-browser + WS transport gated/deferred; PR open
+- **last completed item:** built the command-driven `ActionWindowSession` + `ProbeDriver` (synthetic + browser), the shared loopback transport, and the FE `bridgeAdapter`/`controller` selected through the dev/runtime boundary (mock default). FE `contract.ts` remains a **zero-drift re-export** of the canonical source (now also re-exporting the transport types).
+- **last verified tests:** collector `session-integration.test.ts` (8, offline) — full loop + stale/dup/pause/resume/cancel/reconnect/privacy; full collector suite **2414 passed / 11 skipped**, `tsc --noEmit` clean. FE `bridgeAdapter.test.ts` (9) — command/view/event/resync/rejection/privacy; full FE suite **192 passed**, `tsc --noEmit` clean, `vite build` OK. **`session-browser.test.ts` (RUN_INTEGRATION) written but NOT run** — real-browser click E2E awaits explicit headed approval (standing safety rule).
+- **current blocker:** none for the offline slice. Live gaps (out of R2 scope): the **real Bridge-WS transport** (opaque passthrough — a Bridge slice) and the **headed/real-channel** E2E both remain deferred; until the WS transport lands, `resolveBridgeSession()` returns `null` and the shipped Operations screen runs the mock.
+- **next single action:** land R2 (PR), then either (a) run the gated real-browser E2E under headed approval, or (b) the Bridge opaque-passthrough slice that wires the live WS transport + Operation Run identity (toward R3 persistence).
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -33,8 +33,13 @@
 - **R0 (contract) is MERGED** (PR #212). **R1 (synthetic loop) is VERIFIED against
   the canonical post-#214 contract** under `collector/src/action-window/*` —
   automated tests green AND the headed operator-click QA passed end-to-end using
-  `channelCode`/`copyKey` and the canonical execution modes. No live channel,
-  Bridge transport, or FE screen yet.
+  `channelCode`/`copyKey` and the canonical execution modes.
+- **R2 (FE↔Runtime integration) is IMPLEMENTED, offline** (`integ/action-window-v1`):
+  the FE Bridge adapter drives the real R1 engine through the `ActionWindowSession`
+  over a loopback transport — full command/event/View-Model loop, reconnect resync,
+  idempotency/revision/ordering, and a privacy scan, all green without a browser.
+  **Still not present:** the real Bridge-WS transport (opaque passthrough), the
+  headed/real-browser run of this path (gated), and any live channel.
 
 ## Existing foundations vs implemented Action Window capability
 
