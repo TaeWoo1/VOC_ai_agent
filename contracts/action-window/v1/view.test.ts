@@ -1,0 +1,54 @@
+import { describe, it, expect } from "vitest";
+import { validateRunView, shouldApplyRunView, defaultAllowedCommands } from "./view";
+import { RunStatus, CommandType } from "./enums";
+import { ACTION_WINDOW_SCENARIOS } from "./fixtures";
+
+describe("run view validation & revision semantics", () => {
+  it("terminal states expose no commands (default + validation)", () => {
+    for (const s of [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED]) {
+      expect(defaultAllowedCommands(s)).toHaveLength(0);
+    }
+    const bad = validateRunView({
+      ...ACTION_WINDOW_SCENARIOS["completed"],
+      allowedCommands: [CommandType.START_RUN],
+    });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("rejects non-1-based step numbers", () => {
+    const base = ACTION_WINDOW_SCENARIOS["human-action-required"];
+    const step = base.currentStep;
+    expect(step).toBeDefined();
+    const bad = validateRunView({ ...base, currentStep: { ...step!, stepNumber: 0 } });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("rejects completedSteps exceeding totalSteps", () => {
+    const base = ACTION_WINDOW_SCENARIOS["observing"];
+    const bad = validateRunView({ ...base, progress: { completedSteps: 9, totalSteps: 5 } });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("rejects a blocker on a COMPLETED run", () => {
+    const base = ACTION_WINDOW_SCENARIOS["completed"];
+    const bad = validateRunView({ ...base, blocker: { code: "UI_DRIFT", recoverable: true } });
+    expect(bad.ok).toBe(false);
+  });
+
+  it("never applies an older revision over newer state, and never mixes run ids", () => {
+    const newer = ACTION_WINDOW_SCENARIOS["processing"]; // revision 7
+    const older = ACTION_WINDOW_SCENARIOS["observing"]; // revision 5, same runId
+    expect(shouldApplyRunView(newer, older)).toBe(false);
+    expect(shouldApplyRunView(older, newer)).toBe(true);
+    expect(shouldApplyRunView(undefined, older)).toBe(true);
+
+    const otherRun = { ...newer, runId: "other_run" };
+    expect(shouldApplyRunView(older, otherRun)).toBe(false);
+  });
+
+  it("distinguishes recoverable from non-recoverable blockers", () => {
+    expect(ACTION_WINDOW_SCENARIOS["ui-drift"].blocker?.recoverable).toBe(true);
+    expect(ACTION_WINDOW_SCENARIOS["login-required"].blocker?.recoverable).toBe(true);
+    expect(ACTION_WINDOW_SCENARIOS["failed"].blocker?.recoverable).toBe(false);
+  });
+});

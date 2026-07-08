@@ -1,0 +1,21 @@
+{
+  "name": "@sellerops/action-window-contract",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Shared Action Window protocol contract v1 — TypeScript types, runtime validators, and sanitized fixtures consumed by both frontend and collector. Zero runtime dependencies.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
