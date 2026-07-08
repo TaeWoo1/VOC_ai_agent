@@ -9,8 +9,12 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 > 프론트 스펙, CEO 원페이저, 페이즈 기록)는 채널 capability를 중복 서술하지 않고 이 표를
 > 참조한다. UI의 셀러 표기 문구도 이 표의 "셀러 표기" 열을 따른다.
 >
-> 변경 이력: 2026-07-07 — §1/§4.1/§5/부록 A 갱신(NAVER·Cafe24 라이브 검증 반영, 수집 전략
-> 교정 — 브라우저 자동화를 보편적 최후수단으로 규정하던 표현 폐기, 4단계 상태 모델 도입).
+> 변경 이력:
+> - 2026-07-08 — §5.1(**Action Window = 기본 production 리뷰 수집 모드**)·§5.2(**채널별 연결 결정**
+>   NAVER/Cafe24/Coupang/11번가/ESM+/SSG/오늘의집)·§6(개발 시퀀스) 신설, §11.5(사용자 대면 자율 모드
+>   ↔ 방식/연결 모드 매핑) 추가. 진실 원천은 여전히 §4.1; 파생 뷰는 `docs/channel-capability-registration-matrix.md`.
+> - 2026-07-07 — §1/§4.1/§5/부록 A 갱신(NAVER·Cafe24 라이브 검증 반영, 수집 전략
+>   교정 — 브라우저 자동화를 보편적 최후수단으로 규정하던 표현 폐기, 4단계 상태 모델 도입).
 
 ---
 
@@ -231,12 +235,69 @@ ChannelCollectionAdapter {
   명시적 1회성 승인, 인증(로그인/2FA/CAPTCHA)은 항상 사람, 무인 스케줄은 cold-context
   재연결이 풀리기 전 금지(P4 게이트).
 
+### 5.1 기본 production 리뷰 수집 모드 = ACTION_WINDOW (2026-07-08)
+
+공식 리뷰 API가 없는(또는 불충분한) 채널에서, **모든 마켓 채널의 기본 production 리뷰 수집 모드는
+ACTION_WINDOW**다(제품 결정 `docs/product-scope-v1.md` §1.5, 계약 `docs/slices/action-window-v1.md`).
+**이는 승인된 기본 production 설계이며 아직 구현·라이브 검증되지 않았다(approved default production design,
+not yet implemented or live-verified)** — 현재 운영 검증 수집은 §4.1이 말하는 것(운영 지원=파일 업로드)뿐이다.
+- SellerOps가 **로컬 에이전트 소유의 실제 전용 Chrome 창을 열거나 앞으로 가져와**, 실제 마켓 페이지를
+  사용자가 직접 제어하게 하고, 그 위에 **선택적 게임-튜토리얼 오버레이**(다음 요소 하이라이트·다음 행동
+  설명·의미 진행 추적)를 얹는다. **사용자가 실제 마켓 요소를 직접 클릭**하며 **SellerOps는 한 사용자
+  행동을 몰래 마켓 클릭 시퀀스로 번역하지 않는다.** 신뢰 부족 시 **fail-closed**(수동 진행).
+- **공식 다운로드가 시작된 뒤** SellerOps가 자동으로 감지·검증·임포트(기존 `/api/uploads`·`IngestionService`)·
+  dedup·매핑·분석·리포트한다 — **신규 인입 스키마·백엔드 능력 없음.** 결과는 기존 `SyncJob`(0건=SUCCESS).
+- **Browser Projection과의 관계**: 프로젝션(§collector/G2, 커밋 `a0e4f6f`)은 **제거·폐기되지 않으며**
+  채널-중립 로컬 뷰/입력 인프라로 유지되나 **라이브 마켓 리뷰 수집의 기본 모드가 아니다.** "Projected
+  Direct Action"은 채널별 정책·제품 리뷰 후 이후에 활성화될 수 있다. **같은 가이드 상태 엔진이 두
+  렌더러(Action Window·Projection)를 지탱**한다.
+- **정직성·게이트**: Action Window는 §4.1 현행표에 EXPORT 방식이 선언·검증된 채널에만 실제 배정하며,
+  **실제 마켓 사용은 정책 해명(마켓 약관상 셀러-통제 오버레이·다운로드 감지 허용 범위) + 제품 오너 승인**
+  선결(§8). **어떤 마켓의 승인도 받지 않았다**(§10). 첫 라이브 보정 후보 = **ESM+(Gmarket/Auction) 리뷰
+  export**(별도 승인).
+
+### 5.2 채널별 연결 결정 (2026-07-08, 보수적 — 구현/문서/라이브 검증/미래 분리)
+
+아래는 §4.1 현행표를 **재정의하지 않고**, 채널별 **연결 방향·등록 전략·리뷰 수집 모드**를 결정으로 못박는다.
+capability 진실은 §4.1, 자율 모드 배정은 `docs/channel-capability-registration-matrix.md`.
+
+- **NAVER** — 단기: **셀러 소유 커머스 API 앱(type=SELF) 발급**을 SellerOps가 가이드(발급 튜토리얼 + 안전
+  등록) + 연결 테스트 + 첫 실주문 sync로 온보딩 완료(`docs/slices/naver-guided-connection.md`). 주문·문의:
+  구현·인가된 범위에서 **공식 API**. 리뷰: **판매자센터 export를 ACTION_WINDOW로**(사용자 직접 수행).
+  장기: **커머스 솔루션 마켓**은 제품·고객 검증 후 고려하되 현 파일럿의 선결이 아니다. 마켓 라이브-사용·정책
+  게이트는 정직 유지.
+- **Cafe24** — 이미 연동됨. **고객 자기 소유 Cafe24 몰에만** 사용. **Cafe24/Market Plus를 타 마켓의
+  프록시·허브로 쓰지 않는다.** 리뷰·게시판·주문·문의 자동화는 **실제 Cafe24 앱·게시판·스코프·라이브 검증된
+  계정 능력에 의존**한다. **모든 Cafe24 몰이 동일한 리뷰 구조를 지원한다고 일반화하지 않는다.**
+- **Coupang** — 셀러가 **자체개발/셀러 소유 경로로 Open API 키를 발급**할 수 있을 가능성. 공식 계정 동작이
+  검증된 곳에서 **가이드 키 발급·연결 흐름을 구축·계획**한다. **가능한 충돌 기록**: 한 셀러 계정이 동일
+  API-키 구성에서 SellerOps와 다른 연결된 셀러툴을 동시에 쓰지 못할 수 있다. 고객 기반 성장에 따라
+  **SellerOps 통합사업자/셀러툴 등록을 병행**한다. 공식 API는 **검증된 capability에만**. 리뷰는 공식 리뷰
+  경로가 검증되기 전까지 **ACTION_WINDOW 또는 INTEGRATION_PENDING**.
+- **11번가** — **셀러 발급 API 키를 현재 쓸 수 있다고 주장하지 않는다.** 자체개발/직접-키 경로가 SellerOps에
+  현재 가용한지 **검증**한다. 공식 셀러툴/제공자 등록 문의는 **병행**. 권한·API 범위 검증 전까지: API capability =
+  **INTEGRATION_PENDING**; 공식 리뷰 export는 라이브 검증 시 **ACTION_WINDOW** 가능.
+- **ESM+ / Gmarket / Auction** — 거래/API capability는 존재할 수 있으나 **SellerOps 제공자 온보딩·권한이
+  아직 미검증**. 공식 제공자/셀러툴 등록 문의는 **사업자등록 후**. 그때까지: 리뷰·문의 export는 **ACTION_WINDOW**;
+  사용자가 **Gmarket/Auction 선택·다운로드를 직접** 수행, 이후 다운로드 처리 자동. **Gmarket·Auction 귀속
+  분리.** **안전 상태 감지·정책 리뷰 전 숨은 드롭다운 선택을 자동화하지 않는다.**
+- **SSG · 오늘의집** — API·제공자 capability는 공식 파트너 접근이 검증되기 전까지 **INTEGRATION_PENDING**.
+  실제 공식 export 흐름이 검증된 뒤에만 **ACTION_WINDOW** 사용. 그 외에는 **FILE_IMPORT** 제공 또는 미지원
+  유지. **사설 파트너·타 솔루션 벤더의 존재로 API 접근을 추정하지 않는다.**
+
 ---
 
 ## 6. PR 단위 로드맵
 
 각 PR은 작고 독립 머지 가능하며, **문서/스캐폴드 PR과 라이브 PR을 분리**한다. 라이브 검증은 별도 승인(§7).
 번호는 권장 순서이며 채널 추가(P3.x)는 병렬 가능.
+
+> **현재 개발 시퀀스 (2026-07-08, 제품 오너 결정 — 각 단계 별도 승인·구현 미착수):**
+> 1. **정본 문서 갱신**(이 작업). 2. **Action Window V1 계약 리뷰**(`docs/slices/action-window-v1.md`).
+> 3. **Action Window 공통 엔진 + 합성 픽스처**(라이브 없음). 4. **ESM+를 첫 실제 Action Window 보정
+> 후보**로(별도 승인). 5. **NAVER 셀러 소유 API 가이드 연결**(G3). 6. **Coupang 가이드 키 발급**(공식
+> 검증된 곳). 7. **제공자 등록 문의 병행**(사업자등록 후). 8. **Operation Run Engine**(실행 모드·체크포인트
+> 안정 후). 이 시퀀스는 아래 P0–P4와 병렬로 진행하되 라이브·구현은 단계별 승인.
 
 **P0 — 계약·관측 토대 (문서/오프라인, 라이브 없음)**
 - **P0.1** 본 로드맵 문서화 (이 PR). 구현 없음.
@@ -381,6 +442,22 @@ ESM+/SSG → 오늘의집(전부 신규). 단 **manual 경로(P3.x-b)는 모든 
   - 자동 로그인은 §11.2 상태가 최소 라이브 검증인 채널에만, 그리고 "동의 후 시도"로만 표기(자동 보장 아님).
   - Windows·클라우드는 운영 지원 전까지 "지원"으로 표기 금지.
 - 셋업 모드/자동 로그인/실행지 표기는 프론트 레이아웃 세부와 무관하다(레이아웃은 Frontend Spec 소관).
+
+### 11.5 사용자 대면 자율 모드 ↔ 방식/연결 모드 매핑 (2026-07-08)
+
+`docs/product-scope-v1.md` §1.4의 **사용자 대면 자율 모드**(AUTOMATIC_OPERATION/ACTION_WINDOW/FILE_IMPORT/
+INTEGRATION_PENDING)는 셀러 **표현 계층**이며, 본 로드맵의 **방식(method)**·**연결 모드(§11.1)**와 아래처럼
+느슨하게 대응한다(직교 축 — 강제 1:1 아님). 배정 진실은 `docs/channel-capability-registration-matrix.md`.
+
+| 자율 모드(셀러 대면) | 방식(method §4.1) | 연결 모드(§11.1) | 사람의 역할 |
+|---|---|---|---|
+| **AUTOMATIC_OPERATION** | API | AUTOMATED/GUIDED | 최초 연결·동의만 |
+| **ACTION_WINDOW** | EXPORT(판매자센터, 실제 창 직접 행동) | GUIDED | 로그인·범위·**export 클릭 직접** |
+| **FILE_IMPORT** | MANUAL(파일 업로드) | MANUAL | 파일 직접 선택 |
+| **INTEGRATION_PENDING** | 미확정/미검증 | — | (표기: 미지원/확인 중) |
+
+- **마켓 전체가 아니라 (채널 × DataType × 조작) 단위 배정**(§1.4). §4.1에 선언·검증되지 않은 모드를
+  셀러에게 약속하지 않는다.
 
 ---
 

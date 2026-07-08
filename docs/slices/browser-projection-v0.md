@@ -1,10 +1,19 @@
 # Slice Contract — Browser Projection V0 (Guided-Connection 인프라 G2)
 
-> Status: **APPROVED FOR CHANNEL-NEUTRAL V0 IMPLEMENTATION (2026-07-08).** §0·§20의 제품 오너 결정과
-> §19 스파이크 증거에 근거해 **채널-중립 V0 구현이 승인**됐다(로컬 픽스처 전용). **구현 승인 ≠ 마켓
-> 사용 승인**: 실제 마켓(NAVER 등) 대상 사용은 **미승인**이며 §20 릴리스 게이트의 선결을 요구한다. 실제
-> 마켓 접속·테스트, NAVER Guided Connection, 자동 로그인, 자동 클릭, 코치마크는 **이 슬라이스에 없다**.
-> 커밋은 별도 지시로만.
+> Status: **IMPLEMENTED & COMMITTED (채널-중립 V0, `a0e4f6f`), 마켓 미승인·비-기본 렌더러, production-runtime
+> 미배선(State B, §22.8).** §0·§20의 제품 오너 결정과 §19 스파이크 증거에 근거해 **채널-중립 V0 구현이
+> 승인·커밋**됐다(로컬 픽스처 전용). **정상 Local Agent 제품 부팅은 프로젝션 소스를 생성·주입하지 않는다**
+> (구현 seam만) — "코드 존재"와 "정상 부팅 지원"을 혼동하지 않는다(§22.8).
+> **구현 승인 ≠ 마켓 사용 승인**: 실제 마켓(NAVER 등) 대상 사용은 **미승인**이며 §20 릴리스 게이트의
+> 선결을 요구한다. 실제 마켓 접속·테스트, NAVER Guided Connection, 자동 로그인, 자동 클릭, 코치마크는
+> **이 슬라이스에 없다**.
+>
+> **기본 모드 관계(2026-07-08 제품 결정).** **라이브 마켓 리뷰 수집의 기본 production 모드는 Browser
+> Projection이 아니라 Action Window**(실제 창 직접 행동 + 오버레이 — `docs/product-scope-v1.md` §1.5,
+> `docs/slices/action-window-v1.md`)다. Browser Projection V0은 **제거·폐기되지 않으며** 채널-중립 로컬
+> 뷰/입력 인프라로 유지되나 **비-기본 렌더러**다. "Projected Direct Action"(투사 화면 위 직접 행동)은
+> **채널별 정책·제품 리뷰 후 이후에 활성화될 수 있다.** **같은 가이드 상태 엔진이 두 렌더러(Action Window·
+> Projection)를 지탱**한다(마켓 로직 중복 금지, §17).
 >
 > 상위 계약: 제품 원칙 `docs/product-scope-v1.md` §1.2·§6.1, 프론트 화면·보안 `docs/sellerops_frontend_spec.md`
 > §16.8·§16.9·§17-B G2, 런타임 경계 `docs/sellerops_local_agent_runtime_adr.md`(Runtime ADR)
@@ -531,6 +540,10 @@ V0 요구 평가:
 ## 17. 마이그레이션 경로 (Migration path)
 
 V0가 **이후** 지탱하는 것(지금 끌어오지 않음):
+- **Action Window(기본 리뷰 수집 모드)와의 렌더러 공유**: Action Window는 **실제 창 직접 행동**이 기본
+  렌더러(`docs/slices/action-window-v1.md`)이고, Projection은 **비-기본 렌더러("Projected Direct Action",
+  채널별 정책·제품 리뷰 후 활성화 가능)**다. **두 렌더러가 같은 가이드 상태 엔진을 공유**하므로 마켓
+  로직을 중복하지 않는다. V0는 Projection 렌더러의 시각·입력 토대만 제공한다.
 - **NAVER Guided Connection(G3)**: 프로젝션 뷰 + G1 "사용자 행동 필요" 이벤트가 단계 패널을 구동
   (§16.10 6단계). V0는 시각 토대만 제공, 단계 정의·발급 화면은 G3.
 - **타깃 하이라이트·코치마크(G5)**: 좌표/URL 오버레이가 필요 → **로컬 신뢰 채널 예외**([PO-DECISION],
@@ -786,6 +799,34 @@ V0가 **이후** 지탱하는 것(지금 끌어오지 않음):
   차단 추정). 팝업 announce→명시적 전환 **전송 로직은 단위·통합 테스트로 검증**(hub·client)됨.
 - **(편차)** E2E "렌더"는 viewer의 프레임-도착·디코드 기준(실제 브라우저 페인트 photon 아님).
 - **(미해결, §20 게이트)** 마켓 약관 허용성·고객-PC WebCrypto PoP 보안 리뷰는 여전히 production 사용 선결.
+
+### 22.8 제품-런타임 배선 상태 — **State B (구현 seam만, production-runtime 미배선)**
+
+> **정직성(코드 근거).** "코드가 존재한다"와 "정상 제품 부팅이 지원한다"를 **혼동하지 않는다.**
+
+**State B: Projection V0은 구현·커밋(`a0e4f6f`)·픽스처/통합 하니스로 검증됐으나, 정상 Local Agent 제품
+부팅은 프로젝션 소스를 생성·주입하지 않으며 production-runtime에 배선되지 않았다.** 마켓 사용 미승인·비-기본
+렌더러(§20, §기본 모드 관계).
+
+정상 승인 `local-agent` 부팅 기준 5개 질문(read-only 코드 정찰, 2026-07-08):
+1. **실제 프로젝션 소스를 생성하는가? — 아니오.** `collector/src/cli/local-agent.ts:253`은
+   `createAgentBridge(resolveAgentBridgeConfig(args, process.env))`를 호출하고, `resolveAgentBridgeConfig`
+   (`:56-69`)는 `{port,allowedOrigins,pairingFile,agentVersion,refSalt,autoApprovePairing}`만 반환한다 —
+   **`projection`/`createSource` 필드 없음.**
+2. **소스를 브리지에 주입하는가? — 아니오.** `collector/src/agent/agent-bridge.ts:74`
+   `cfg.projection ? new ProjectionEndpoint(...) : undefined` → 정상 부팅에서 **undefined**.
+3. **프로젝션 WebSocket 엔드포인트를 시작하는가? — 아니오.** `collector/src/bridge/bridge-server.ts:93`
+   `projectionWss = this.projection ? ... : undefined`; `:307` `/projection/ticket`은 projection 없으면 404;
+   `:373-374` `/projection/ws` 업그레이드도 404.
+4. **production 프론트 기능 플래그가 별도 QA 하니스 없이 그 엔드포인트에 연결할 수 있는가? — 아니오.**
+   엔드포인트가 장착되지 않아 404이며, 실제 CDP 소스 `ProjectionAdapter`는 **`test/bridge/projection-adapter.test.ts:25`
+   에서만** 생성된다(제품 `src/` 부팅 경로 아님).
+5. **에이전트 종료가 프로젝션 소스·엔드포인트를 닫는가? — 배선 시에는 예(`bridge-server.ts:125,131`이
+   `projection.close()` + `projectionWss.close()` 캐스케이드), 정상 부팅에는 닫을 것이 없음(undefined).**
+
+**결론**: 정상 제품 부팅으로 프로젝션을 올리려면 `resolveAgentBridgeConfig`가 `projection`(실제 Chrome/CDP
+페이지 위 `ProjectionAdapter` `createSource`)을 채워 주입하는 **별도 배선 작업**이 필요하다. 그 작업은
+이 슬라이스 범위 밖이며(계약은 "선택적 주입 seam"까지), 마켓 사용 승인·정책 게이트와도 별개다.
 
 ---
 

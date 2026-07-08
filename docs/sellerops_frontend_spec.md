@@ -2,6 +2,13 @@
 
 > Status: **CANONICAL (frontend).** SellerOps 프론트엔드 리디자인의 단일 source of truth.
 > 작성 2026-07-07. 근거: 프론트 정찰(코드 전수 열람)·문서 감사(2026-07-07 세션) + 제품 결정.
+>
+> 2026-07-08 갱신(제품 오너 결정 반영): ① **frontstage 초점 재정의** — 에이전트 활동·완료된 자동 작업·
+> 사람 체크포인트·긴급 운영 신호·실패/정체 연결·제안 다음 행동·운영 결과 중심(§3·§9). 셀러가 제품을
+> 커넥터-관리 콘솔로 경험하지 않게 하고, 연결·자격증명·브라우저 프로필·등록은 backstage 설정으로 유지.
+> ② **Action Window(실제 창 직접 행동) 프론트 정본 신설**(§18) + 리뷰 운영 화면(자동/Action Window/File
+> Import/Integration Pending·마지막 성공·정체/실패·다운스트림 분석 완료). 근거: `docs/product-scope-v1.md`
+> §1.2·§1.4·§1.5·§1.6, `docs/slices/action-window-v1.md`.
 > 상위 계약은 `docs/product-scope-v1.md`(범위), 채널 capability 진실은
 > `docs/multi-channel-connector-roadmap.md` §4.1(현행표)이 정본이며 본 문서는 이를 중복 선언하지
 > 않는다. `docs/sellerops_ui_reference.md`의 유효 원칙(§1·§5·§6)은 본 문서로 흡수되었고, 그 문서는
@@ -42,9 +49,12 @@
 
 `product-scope-v1.md` §1.1의 2층 구조를 프론트 IA의 최상위 원리로 삼는다.
 
-- **Frontstage — 매일의 커머스 운영**: 대시보드 / 주문·매출 / 고객 응대(문의+리뷰) / 상품 이슈 / 리포트.
-- **Backstage — 연결·수집 관리**: 채널 연결, 자격증명, 동기화 설정, 수집 이력, 기간 지정 수집,
-  파일 업로드, 연결 알림·복구.
+- **Frontstage — 매일의 커머스 운영(운영 에이전트 표면)**: 대시보드 / 주문·매출 / 고객 응대(문의+리뷰) /
+  상품 이슈 / 리포트. **초점(2026-07-08)**: 에이전트 활동 · **완료된 자동 작업** · **사람 체크포인트** ·
+  **긴급 운영 신호** · **실패/정체된 채널 연결** · **제안된 다음 행동** · **운영 결과**. 셀러가 제품을
+  **커넥터-관리 콘솔로 경험하지 않게** 한다.
+- **Backstage — 연결·설정**: 채널 연결, **자격증명, 브라우저 프로필, 등록 세부**, 동기화 설정, 수집 이력,
+  기간 지정 수집, 파일 업로드, 연결 알림·복구. 연결·자격증명·프로필·등록은 **backstage 설정으로 유지**한다.
 - 규칙:
   1. Frontstage가 1차 내비게이션이다. Backstage는 "설정/연결 관리" 성격의 2차 위계로 묶는다.
   2. **기존 커넥터·수집 화면은 버리지 않고 Backstage로 재배치해 재사용**한다 — `/channels`,
@@ -52,6 +62,9 @@
   3. Frontstage 화면에는 수집 파이프라인 용어(트리거, 커서, capability 등)가 노출되지 않는다(§12).
   4. Backstage 상태(연결 장애·수집 실패)는 Frontstage에 **요약 신호**(배지·배너)로만 올라오고,
      처리 동선은 Backstage로 이어진다.
+  5. **운영 에이전트 프레이밍**: Frontstage는 "무엇이 자동으로 처리됐고, 지금 사람이 결정할 것은 무엇이며,
+     어떤 운영 결과가 나왔는가"를 1차로 답한다(운영 루프 `product-scope-v1.md` §1.6). Action Window·File
+     Import 같은 사람-개입 수집 작업은 **체크포인트로 노출**하되, 완료 후 다운스트림 자동 진행을 함께 보인다.
 
 ## 4. 사용자 여정
 
@@ -178,8 +191,11 @@ Backstage (2차 위계 — "연결·설정")
 
 ## 9. 대시보드 원칙
 
-1. **"오늘 무엇을 확인해야 하는가"가 첫 화면의 답**이다. 확인 필요 항목(미답변 문의, 부정 리뷰,
-   연결 장애, 주문 급변)이 지표 카드보다 위이거나 동급 최상단.
+1. **"오늘 무엇을 확인해야 하는가 + 에이전트가 무엇을 이미 처리했는가"가 첫 화면의 답**이다. 확인 필요
+   항목(미답변 문의, 부정 리뷰, 연결 장애, 주문 급변)과 **사람 체크포인트**(Action Window·File Import 대기
+   작업)가 지표 카드보다 위이거나 동급 최상단. 함께 **완료된 자동 작업**(수집·정규화·분석 완료)·**긴급 운영
+   신호**·**실패/정체된 채널 연결**·**제안된 다음 행동**·**운영 결과**를 표면화한다(§3 규칙 5, 운영 루프
+   `product-scope-v1.md` §1.6). 커넥터 관리 화면이 아니라 **운영 에이전트 활동 화면**으로 읽혀야 한다.
 2. **정직한 수치 사다리**: 라이브 소스가 있는 지표만 수치로 올린다(현행 `Home.tsx` 원칙 계승).
    소스가 없으면 카드 자체를 만들지 않는다 — "0" 또는 가짜 시드로 채우지 않는다.
    지표별 편입 시점은 커넥터 현행표의 상태를 따른다.
@@ -395,6 +411,13 @@ Backstage (2차 위계 — "연결·설정")
 | G5 | 튜토리얼 강화 | 타깃 하이라이트, 클릭 검증, 자동 이동, UI 드리프트 복구, 재사용 다채널 flow 정의 | G3 |
 | G6 | Windows 마이그레이션 | Windows Chrome 런타임, Windows 자격증명 저장소, 자동시작/백그라운드, 패키징·설치·업데이트·회사 PC 검증 | G1–G5; OS 어댑터(Runtime ADR) |
 
+> **Action Window 트랙(2026-07-08 신설, G2와 구분).** **라이브 마켓 리뷰 수집의 기본 production 모드는
+> Action Window**(실제 창 직접 행동 + 오버레이, §18)이며, **G2 Browser Projection은 비-기본 렌더러**로
+> 유지된다(제거·폐기 아님). Action Window 슬라이스(AW-1 계약 리뷰 → AW-2 공통 엔진+합성 → AW-3 ESM+ 어댑터
+> → AW-4 ESM+ 라이브 보정(별도 승인) → AW-5 채널 확장)는 `docs/slices/action-window-v1.md`가 정본이며,
+> **G3 가이드 상태 엔진을 공유**한다(마켓 로직 중복 금지). "Projected Direct Action"은 채널별 정책·제품
+> 리뷰 후 이후에 활성화될 수 있다.
+
 이연(별도 승인): 리포트 데이터 연동, 운영 메모리 패널, 답변 워크플로 노출, 주문 목록/상세,
 클라우드 관리형 런타임.
 
@@ -409,9 +432,52 @@ Backstage (2차 위계 — "연결·설정")
 
 ---
 
+## 18. Action Window · 리뷰 운영 화면 (프론트 정본, 미구현)
+
+**Action Window = 라이브 마켓 리뷰 수집의 기본 production 모드**(제품 결정 `docs/product-scope-v1.md`
+§1.5, 계약 `docs/slices/action-window-v1.md`). **승인된 기본 production 설계이며 아직 구현·라이브 검증되지
+않았다(approved default production design, not yet implemented or live-verified)** — 화면·문구로 셀러에게
+"이미 제공"으로 보이게 하지 않는다. 본 절은 그 위의 **프론트 화면·상호작용 정본**이며 §16(가이드 연결)과
+같은 정직성 경계·셀러 언어를 계승한다. **시각 세부(스포트라이트 모양·색·애니메이션·문구)는
+[UX-DECISION]** — 확정하지 않는다.
+
+> **정직성 경계.** 실제 마켓 페이지 위 오버레이·다운로드 완료 감지는 **미구현**이다. 화면·문구로 구현·마켓
+> 승인된 것처럼 보이게 하지 않는다. 실제 마켓 사용은 **정책 게이트** 뒤에 있다(계약 §15·§17).
+
+### 18.1 Action Window 필수 UX
+실제 마켓 창을 사용자가 직접 조작하며, SellerOps는 그 위에 안내 오버레이를 얹는다. 필수 요소:
+- **올바른 Chrome 탭/창을 앞으로 가져오기**(bring-to-front) · **현재 단계 / 총 단계** · **실제 대상 위
+  스포트라이트/배지** · **간결한 지시** · **안내 on/off** · **현재 단계 다시 찾기** · **수동 모드** ·
+  **일시정지·재개** · **"이 단계를 완료했어요" 폴백** · **recoverable UI-drift 상태**(마켓 UI 변경 시
+  0행동 + 사용자 확인) · **다운로드 완료 감지 표시** · **SellerOps로 안전 핸드오프**(수집→분석 자동 진행).
+- **사용자가 실제 마켓 요소를 직접 클릭**한다 — SellerOps가 한 행동을 클릭 시퀀스로 확장하지 않는다.
+  감독형 후보-인덱스·fail-closed 원칙 계승(§16.4, collector `review-usage-confirm.ts`·`esm-candidate-signature.ts`).
+- 오버레이를 꺼도 **다운로드 감지·인입은 유지**(가이드 없이도 수집 성립).
+
+### 18.2 리뷰 운영 화면 (고객 응대 워크스페이스 §10 확장)
+리뷰 운영 화면은 채널별 수집 상태를 **정직한 자율 모드로** 노출한다(진실: `docs/channel-capability-registration-matrix.md`):
+- **자동 채널**(AUTOMATIC_OPERATION) — 배경 자동 수집.
+- **Action Window 작업**(ACTION_WINDOW) — 사람 체크포인트(사용자가 실제 창에서 export 수행 대기/진행).
+- **File Import 작업**(FILE_IMPORT) — 파일 업로드 대기/진행.
+- **Integration Pending 채널**(INTEGRATION_PENDING) — "미지원/확인 중"(로드맵 문구 금지, §15).
+- **마지막 성공 수집**(last successful acquisition) · **정체/실패 수집**(stale/failed) · **다운스트림 분석
+  완료**(수집 후 정규화·분석·리포트 완료 여부).
+- 셀러 언어·부분 데이터 고지(§4.6·§13) 계승. 각 상태에 **다음 행동 CTA 1개**.
+
+### 18.3 반응형·프라이버시
+- **데스크톱 우선**(로컬 에이전트 데스크톱 런타임 — §16.8). 모바일은 진행·완료 열람만, 실제 조작은 데스크톱 안내.
+- 프레임·입력·페이지 내용·다운로드 원문 **비영속·비로깅·백엔드 미경유**(§16.9, G2 §9 계승). raw URL/DOM/
+  식별자 미표시. **자동 클립보드·페이지-비밀 추출 없음.** 로컬-전용 프라이버시 고지 상시 노출.
+
+---
+
 ### 부록 — 근거 문서
-- 범위·Track·frontstage/backstage·가이드 연결 원칙: `docs/product-scope-v1.md` (v1.1) §1.2·§6.1
-- 채널 capability 현행표·수집 전략·가이드 셋업 방식: `docs/multi-channel-connector-roadmap.md` §4.1·§5·§11·부록 A
+- 범위·Track·frontstage/backstage·가이드 연결·운영 에이전트·자율 모드·Action Window 기본:
+  `docs/product-scope-v1.md` (v1.2) §1.2·§1.4·§1.5·§1.6·§6.1
+- 채널 capability 현행표·수집 전략·Action Window 기본·채널 결정: `docs/multi-channel-connector-roadmap.md`
+  §4.1·§5·§5.1·§5.2·§11·부록 A
+- Action Window 계약·리뷰 운영 화면: `docs/slices/action-window-v1.md`
+- 채널 capability × 자율 모드 × 등록 매트릭스: `docs/channel-capability-registration-matrix.md`
 - 런타임 경계(BrowserRuntime/CredentialVault/AgentLifecycle·프론트-에이전트 페어링·프로젝션):
   `docs/sellerops_local_agent_runtime_adr.md` (Runtime ADR)
 - 검증 기록: `docs/sellerops_phase3c_live_smoke.md`, `docs/sellerops_cafe24_live_verification.md`

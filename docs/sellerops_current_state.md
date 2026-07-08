@@ -6,9 +6,12 @@
 > 새 슬라이스가 끝나거나 상태가 바뀌면 갱신한다.
 
 ## 1. Last updated
-2026-07-08 (Product Shell 커밋 `3006e44`; **Local Agent Bridge G1 커밋 완료 `c253dca`**; **Browser
-Projection V0(§17-B G2) = 채널-중립 구현·검증 완료, 미커밋**(로컬 픽스처 전용, E2E QA 통과). **마켓 사용
-미승인**(§20 게이트); Guided Connection·자동 로그인 여전히 미구현).
+2026-07-08 (Product Shell 커밋 `3006e44`; Local Agent Bridge G1 `c253dca`; **Browser Projection V0(§17-B G2)
+커밋 완료 `a0e4f6f`**; **NAVER Guided Connection G3(§17-B) 계약 초안** — 문서 전용, 구현 미착수;
+**정본 문서에 최종 제품·채널 전략 인코딩(문서 전용, 미커밋)** — SellerOps=SME 멀티채널 커머스 운영
+에이전트 재정의(운영 루프 OBSERVE→…→RESUME), 사용자 대면 자율 모드 4종, **기본 리뷰 수집 모드=ACTION_WINDOW**,
+사업자·등록 결정, OperationRun 방향, 신규 문서 `channel-capability-registration-matrix.md`·`slices/action-window-v1.md`).
+**마켓 라이브-사용 게이트 유지(닫힘)**; 자동 로그인 여전히 미구현.
 
 ## 2. Current product phase
 Seller Track 프론트 리디자인 + **가이드 연결 인프라 트랙 진행**. **Product Shell 슬라이스 = 커밋 완료**
@@ -21,12 +24,14 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 ## 3. Canonical document index
 | 문서 | 역할 |
 |---|---|
-| `docs/product-scope-v1.md` (v1.1) | 제품 범위 계약, Track, frontstage/backstage, 가이드 연결·런타임 원칙 |
-| `docs/sellerops_frontend_spec.md` | 프론트 IA·화면·여정·가이드 연결·슬라이스 정본 |
-| `docs/multi-channel-connector-roadmap.md` | 수집 전략 + §4.1 채널 현행표(capability 진실) + §11 연결 모드 |
+| `docs/product-scope-v1.md` (v1.2) | 제품 범위 계약, 운영 에이전트 정의·운영 루프·자율 모드·Action Window 기본·사업자 결정, Track, frontstage/backstage, 가이드 연결 원칙 |
+| `docs/sellerops_frontend_spec.md` | 프론트 IA·화면·여정·가이드 연결·Action Window 화면(§18)·슬라이스 정본 |
+| `docs/multi-channel-connector-roadmap.md` | 수집 전략 + §4.1 채널 현행표(capability 진실) + §5.1 Action Window 기본 + §5.2 채널 결정 + §11 연결 모드 |
+| `docs/channel-capability-registration-matrix.md` | (파생 뷰) 채널×capability × 자율 모드 × 셀러키/제공자 등록 × 사업자 조치 × 블로커 |
 | `docs/sellerops_local_agent_runtime_adr.md` | 로컬 에이전트 런타임 경계·프로젝션 방향 ADR |
+| `docs/slices/action-window-v1.md` | Action Window(기본 리뷰 수집 모드) 실행 계약 초안 |
+| `docs/slices/{local-agent-bridge,browser-projection-v0,naver-guided-connection}.md` | 가이드 연결 인프라 G1·G2·G3 슬라이스 계약 |
 | `docs/sellerops_phase3c_live_smoke.md`, `docs/sellerops_cafe24_live_verification.md` | 라이브 검증 기록 |
-| `docs/slices/product-shell.md` | 현재 활성 슬라이스 실행 계약 |
 
 ## 4. Current frontend state
 - React 18 + TS + Vite + Tailwind SPA(`frontend/`). 라우팅 react-router-dom, 상태는 자체 `useApiData` + axios.
@@ -61,11 +66,19 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - ESM INQUIRY read 스켈레톤(unwired), ESM INQUIRY Excel 임포트 백엔드(FE 미노출).
 
 ## 9. Explicitly NOT implemented (표기 금지)
-- **브라우저 프로젝션**(인앱 브라우저 뷰 투사) — **채널-중립 V0 구현됨(미커밋, 로컬 픽스처 전용, 마켓
-  사용 미승인 §20)**. 자동 마스킹·코치마크·자동 로그인·다중 동시 타깃·Windows는 여전히 미구현.
+- **Action Window(기본 리뷰 수집 모드)** — 계약 초안만(`docs/slices/action-window-v1.md`, DRAFT). 실제 창
+  오버레이·다운로드 완료 감지 seam **미구현**. 실제 마켓 사용은 정책 게이트 뒤. 자율 모드=ACTION_WINDOW.
+- **브라우저 프로젝션**(인앱 브라우저 뷰 투사) — **채널-중립 V0 구현·커밋됨**(`a0e4f6f`, 로컬 픽스처 전용,
+  **마켓 사용 미승인·비-기본 렌더러** §20). **production-runtime 미배선 (State B)**: 정상 Local Agent 제품
+  부팅은 프로젝션 소스를 생성·주입하지 않는다(`resolveAgentBridgeConfig`가 `projection` 미설정 → `/projection/ws`
+  404); 실제 CDP 소스 `ProjectionAdapter`는 테스트/QA 하니스에서만 생성(browser-projection-v0 §22.8). 프론트
+  프로젝션 클라이언트·기능 플래그는 구현·커밋됐으나 별도 QA 하니스 없이는 연결 불가. 자동 마스킹·코치마크·
+  자동 로그인·다중 동시 타깃·Windows는 여전히 미구현.
 - **OS Device Vault / 자동 자격증명 입력 / 자동 재로그인** — 미구현.
 - **프론트↔로컬 에이전트 통신 채널** — **G1 브리지로 구축됨(페어링+관측 전용, 실제 Local Agent 소유)**.
-  단 프로젝션·입력 릴레이·워크플로/브라우저 제어 명령은 여전히 미구현(G1 범위 밖).
+  **G1 자체에는** 프로젝션·입력 릴레이·워크플로/브라우저 제어 명령이 없다(G1 범위 밖·§0.5). 그중 **프로젝션 +
+  제한된 입력 릴레이는 G2로 구현·커밋**(`a0e4f6f`; 단 마켓 미승인·**production-runtime 미배선 State B**);
+  **마켓 워크플로/브라우저 제어·자동 클릭·자격증명 입력 명령은 여전히 미구현**(설계상 영구 제외 계열).
 - **실행-중 이벤트(browser_lifecycle·collection_progress/result·auth_session·terminal_failure)** — **예약**
   (스키마만; 실제 방출 seam 없음, `supportedEvents`에서 제외). 실제 배선 = agent/bridge lifecycle·
   connection_lifecycle·pending_user_action·recoverable_failure·capability.
@@ -74,9 +87,21 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - 채널 쓰기(답변 발송/주문 상태 변경), 무인 자동 수집, 자동 제품 매칭, standalone AI 검색.
 
 ## 10. Active slice
-**Browser Projection V0 (Guided-Connection 인프라 G2) — 채널-중립 구현 완료, 미커밋** —
-`docs/slices/browser-projection-v0.md`(§0 PO 결정 인코딩, §19 스파이크, §22 구현 결과). **상태: 구현·검증
-완료, 미커밋, 제품 오너 커밋 승인 대기. 마켓 사용 미승인(§20 게이트).** G2 = G1 브리지 위에 실제 Chrome
+**NAVER Guided Connection (Guided-Connection G3) — 계약 초안 작성 중** — `docs/slices/naver-guided-connection.md`
+(**DRAFT, 제품 오너 리뷰 대기 2026-07-08**). **문서 전용; 구현 미착수.** G3 = G1(페어링)·G2(프로젝션) 위에
+**셀러 소유 NAVER 커머스 API 앱 발급(type=SELF) 가이드 + 첫 실주문 수집**(Frontend Spec §16.10 6단계).
+셀러 소유 파일럿 경로이며 **솔루션-제공자 모델 아님**(product-scope §6.1). 가이드 상태 엔진·행위자 경계
+(USER_REQUIRED/…/UNSUPPORTED)·fail-closed 상태 감지·안전 자격증명 등록(Secret은 백엔드 Vault 경계로만·
+프론트/로그/프레임 미기록)·기존 `test-connection`/`sync` 합성·재개/복구 규정. **자동 로그인·자동 클릭·자동
+Secret 추출·클립보드·2FA 처리 제외.** 슬라이스: G3-A(상태엔진+합성)·G3-B(자격증명/테스트/sync 합성)·
+**G3-C(라이브 정찰 — 별도 승인+정책 게이트)**·G3-D(하드닝). **마켓 라이브-사용 게이트 유지(닫힘, §14).**
+관찰: 백엔드 NAVER 커넥터(`NaverTokenClient`/`NaverApiConnector`)는 **구현됐으나 플래그 OFF 기본**(라이브
+검증은 플래그 활성+승인 후). **Browser Projection V0은 커밋 완료**(`a0e4f6f099c9d898142ef24b9f0d22ce9dc40f0f`).
+
+### 이전 활성 슬라이스 (참고) — Browser Projection V0 (G2), 커밋 `a0e4f6f`
+`docs/slices/browser-projection-v0.md`(§0 PO 결정 인코딩, §19 스파이크, §22 구현 결과·§22.8 State B). **상태:
+구현·검증·커밋 완료(`a0e4f6f`), 마켓 사용 미승인(§20 게이트), 비-기본 렌더러, production-runtime 미배선
+(State B — 정상 부팅이 프로젝션 소스를 생성·주입하지 않음, §22.8).** G2 = G1 브리지 위에 실제 Chrome
 뷰 로컬 투사(`Page.startScreencast` 바이너리 프레임) + 명시적 사람 입력 릴레이(iframe·Electron 아님,
 ADR §6 옵션 C). **프로젝션 전용 바이너리 전송을 G1 상태 채널과 분리**(64KiB JSON 미변경), 페어링=신뢰
 루트·프로젝션 단명 세션·제어 리스 분리, 단일 제어 소유자+다중 관람, 2분 idle 리스, drop-old 큐(depth≤2),
@@ -146,26 +171,42 @@ G1 = 프론트↔로컬 에이전트 **안전 페어링 + 관측 전용** 브리
 - (직전 세션의) 정본 문서 변경들(product-scope/frontend-spec/connector-roadmap/ADR)은 `3006e44`로 커밋됨.
 
 ## 13. Next approved work
+- **정본 문서 전략 인코딩(2026-07-08) — 문서 전용, 미커밋.** SellerOps=SME 멀티채널 커머스 운영 에이전트
+  재정의, 운영 루프(OBSERVE→…→RESUME), 자율 모드 4종, **기본 리뷰 수집=ACTION_WINDOW**(Projection은 비-기본
+  렌더러), 사업자·등록 결정, OperationRun 방향. 갱신: `product-scope-v1.md`(v1.2)·`sellerops_frontend_spec.md`(§18)·
+  `multi-channel-connector-roadmap.md`(§5.1·§5.2·§11.5). 신규: `channel-capability-registration-matrix.md`·
+  `slices/action-window-v1.md`. **구현 없음.**
+- **현재 개발 시퀀스(제품 오너 결정 — 각 단계 별도 승인, 미착수):** 1. 정본 문서 갱신(이 작업) → 2. Action
+  Window V1 계약 리뷰 → 3. Action Window 공통 엔진+합성 픽스처 → 4. ESM+ 첫 라이브 Action Window 보정(별도
+  승인) → 5. NAVER 셀러 소유 API 가이드 연결(G3) → 6. Coupang 가이드 키 발급(공식 검증된 곳) → 7. 제공자
+  등록 문의 병행(사업자등록 후) → 8. Operation Run Engine(실행 모드·체크포인트 안정 후).
 - **Local Agent Bridge G1** — 구현·하드닝·검증·**커밋 완료**(`c253dcacc979a0c779d9423a6df7dc80cd2ea9be`).
   남은 한계(정직 표기): 실행-중 이벤트(browser_lifecycle·collection_progress/result 등)는 **예약**이며
   실제 방출은 G2/라이브 수집의 신뢰 seam이 생겨야 `supportedEvents`로 승격(현재는 날조하지 않고 미노출);
   Windows/클라우드는 이식 경로만 문서화; 페어링 토큰 localStorage 저장은 파일럿 임시 방식(고객-PC 전
   WebCrypto+PoP 평가 — G2 진입 시점 평가 대상).
-- **Browser Projection V0(§17-B G2) = 채널-중립 구현·검증 완료, 미커밋**(§22). 스파이크(§19) 후 §0.7 구현
-  승인 → 구현: 프로젝션 전용 바이너리 전송(G1 상태 채널 분리), CDP 어댑터, 제어 리스, 입력 경계, 프론트
-  렌더러, 합성 픽스처, 46+10 테스트. E2E QA: 입력→렌더 p95 130ms, 리사이즈 후 좌표 0px, 리보크 시
-  프레임·입력 중단. **제품 오너 커밋 승인 대기.** **마켓 사용은 미승인**(§20 게이트: 마켓 약관 허용성 +
-  고객-PC WebCrypto PoP 보안 리뷰 선결). 튜닝 TODO: 시간기반 프레임 캡으로 밀집 페이지 ≥8fps 보장.
-  QA 하니스는 저장소 밖 스크래치패드 1회성(미커밋).
-- **다음 후보 = NAVER Guided Connection(G3) 계약 초안** — **아직 시작하지 않음**(별도 승인 필요).
+- **Browser Projection V0(§17-B G2) = 커밋 완료**(`a0e4f6f099c9d898142ef24b9f0d22ce9dc40f0f`, 25파일
+  +4024/−24). 채널-중립·로컬 픽스처 전용, E2E QA(입력→렌더 p95 130ms·리사이즈 좌표 0px·리보크 중단)·
+  10분 소크(−38.8 MB/min) 통과. **마켓 사용 미승인**(§20 게이트). 튜닝 TODO: 시간기반 프레임 캡으로 밀집
+  페이지 ≥8fps.
+- **현재 문서 작업 = NAVER Guided Connection(G3) 실행 계약 초안**(`docs/slices/naver-guided-connection.md`,
+  DRAFT). 문서 전용, **구현 미착수.** 셀러 소유 앱 발급(type=SELF)+첫 수집 가이드; 기존 백엔드 경계
+  (`credentials`/`test-connection`/`sync`)·G1/G2 위 합성; 자동 로그인·Secret 추출·클립보드·2FA 처리 제외.
+  **제품 오너 리뷰·구현(G3-A) 착수 승인 대기.** **마켓 라이브-사용 게이트 유지(닫힘)** — G3-C 라이브 정찰은
+  별도 승인+정책 해명 선결.
 - Product Shell은 `3006e44`로 커밋 완료됨.
 
 ## 14. Must NOT be started yet
+- **Action Window 구현(AW-2 이후) 및 실제 마켓 Action Window/Projected Direct Action 사용** — 계약 리뷰
+  전 구현 금지; 실제 마켓 사용은 정책 해명 + 제품 오너 승인 게이트 뒤(`slices/action-window-v1.md` §17).
+- **OperationRun 도메인 구현** — 방향 기록만(product-scope §1.7); 실행 모드·체크포인트 안정 전 착수 금지.
 - NAVER Guided Connection(G3), Automatic Relogin(G4), Tutorial(G5), Windows Migration(G6) (Frontend Spec §17-B).
 - **Browser Projection V0의 실제 마켓 대상 사용**(§20 게이트: 마켓 약관 허용성 해명 + 고객-PC 보안 리뷰
-  선결); V0 코드 자체는 채널-중립 구현 완료(미커밋).
+  선결); V0 코드 자체는 채널-중립 구현·**커밋 완료**(`a0e4f6f`), 단 **production-runtime 미배선(State B, §9·§22.8)**.
+- **Browser Projection의 정상-부팅 배선**(`resolveAgentBridgeConfig`에 프로젝션 소스 주입) — 별도 배선 작업, 미착수.
 - 대시보드 재설계, 가입/온보딩, inbox/inquiry 통합, 리포트 구현, 자동 로그인, 시각 리브랜딩, 신규 백엔드
-  능력, 채널 카탈로그 정책 변경. (프론트↔에이전트 통신 G1·프로젝션 V0 구현은 완료 — 이 목록에서 제외.)
+  능력, 채널 카탈로그 정책 변경. (프론트↔에이전트 통신 G1·프로젝션 V0 **구현·커밋 완료** — 이 목록에서 제외;
+  단 프로젝션 정상-부팅 배선은 별도 미착수 작업, State B §9.)
 
 ## 15. Product Shell 검증 결과 (2026-07-07)
 - `npm run typecheck` — 통과(오류 0).

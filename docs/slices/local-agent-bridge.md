@@ -9,8 +9,11 @@
 > **브리지(전송·페어링·이벤트) 계약**을 소유하며 그들의 결정을 중복 선언하지 않는다.
 >
 > **정직성 경계.** 프론트↔에이전트 통신 채널은 이 G1 슬라이스로 **처음 구축**된다(그 전에는 부재 —
-> Runtime ADR §1·§3.4, 정찰 §3). Browser Projection·자동 로그인·Device Vault·Windows·클라우드는 이
-> 슬라이스 범위 밖이며(§4) 여전히 미구현이다.
+> Runtime ADR §1·§3.4, 정찰 §3). 자동 로그인·Device Vault·Windows·클라우드는 이 슬라이스 범위 밖이며(§4)
+> 여전히 미구현이다. Browser Projection(G2)은 **이후 채널-중립 V0로 구현·커밋**됐고(`a0e4f6f`, 마켓 미승인·
+> 비-기본 렌더러·production-runtime 미배선 State B — `docs/slices/browser-projection-v0.md`) **이 G1
+> 슬라이스 범위 밖**이다. **G1 자체는 페어링·관측(observability) 전용**이며 마켓 워크플로/브라우저 제어
+> 명령을 포함하지 않는다(§0.5).
 
 베이스라인: Product Shell 커밋 `3006e447b91de72f5e3627da75f390c74d92bfac` (커밋됨). 이 슬라이스는
 Product Shell(§17-A)과 **분리된 트랙**(§17-B)이며 프론트 IA 재편에 의존하지 않는다.
