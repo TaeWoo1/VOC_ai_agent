@@ -5,24 +5,28 @@ This document records **Runtime semantics** at the FE↔Runtime boundary. It doe
 the shared contract source (see §1). If Runtime semantics here ever disagree with
 the ratified shared contract, the shared contract wins and this file is updated.
 
-## 1. Shared-contract source status — BLOCKING DEPENDENCY
+## 1. Shared-contract source status — DEFINED (R0, PR open)
 
-- A dedicated **Action Window shared contract** (states, commands, events, View
-  Model, blocker codes, versioning) **does not exist yet** in the repository.
-- The closest existing, ratified protocol is the generic **Bridge protocol**:
-  - Runtime side: `collector/src/bridge/protocol.ts`
-    (`BRIDGE_PROTOCOL_VERSION = 1`, `BridgeEventPayload`, `BridgeEventCategory`,
-    `BridgePendingUserAction`, `BridgeConnectionView`, `ServerMessage` /
-    `ClientMessage`).
-  - FE side: `frontend/src/lib/bridge/bridgeProtocol.ts`.
-- **Therefore R0 (contract baseline) is a blocking dependency** for R2
-  (Runtime/FE integration) and for any FE work that consumes Action Window state.
-  The Action Window contract is expected to **extend / version alongside** the
-  Bridge protocol, not replace it.
-- Until R0 is merged, the Runtime engine (R1) is built against **internal
-  fixtures**, and any FE-facing shape is provisional.
-
-Record the shared-contract path + protocol version here once it exists.
+- **Normative path:** `contracts/action-window/v1/` — neutral top-level, owned by
+  neither `frontend/**` nor `collector/**`.
+  - Language-neutral source: `contracts/action-window/v1/schema.json` (JSON Schema,
+    also the basis for future Java DTOs).
+  - TypeScript surface: `contracts/action-window/v1/index.ts` (enums, envelopes, FE
+    Run View Model, pure validators).
+  - Conformance tests: `collector/test/contracts/action-window/contract.test.ts`
+    (collector is a *consumer*, not the owner).
+- **Protocol version:** `ACTION_WINDOW_PROTOCOL_VERSION = 1`.
+- **Transport decision (contract README §8):** Action Window messages are a
+  **nested contract with their own version, transported inside Bridge v1** as
+  opaque payloads — NOT new variants in the Bridge `ClientMessage`/`ServerMessage`
+  union. This is additive; it does not change the meaning of any existing Bridge
+  message and does not force a Bridge major bump. `collector/src/bridge/protocol.ts`
+  is unchanged by R0 (no message handling in this slice).
+- **Status:** contract defined + conformance tests green; the R0 PR is **open, not
+  yet merged**. Until it merges, treat the shape as ratified-pending-review; the
+  Runtime engine (R1) builds against the same fixtures.
+- A mechanical consistency test asserts the TS enum arrays equal the `schema.json`
+  `$defs.*.enum` arrays, so FE and Runtime consume one non-drifting source.
 
 ## 2. Runtime semantics at the boundary
 

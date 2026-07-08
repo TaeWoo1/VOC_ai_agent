@@ -1,0 +1,25 @@
+{
+  "protocolVersion": 1,
+  "runId": "run_0001",
+  "revision": 6,
+  "channel": "esm_plus",
+  "title": "리뷰 내보내기",
+  "status": "RUNNING",
+  "executionMode": "HUMAN_ACTION",
+  "currentStep": {
+    "stepId": "esm.select_and_download",
+    "stepNumber": 3,
+    "totalSteps": 4,
+    "title": "마켓 선택 후 다운로드",
+    "status": "OBSERVING"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "CANCEL_RUN"
+  ],
+  "progress": {
+    "completedSteps": 2,
+    "totalSteps": 4
+  },
+  "updatedAt": "2026-07-08T13:07:00Z"
+}

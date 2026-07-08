@@ -1,0 +1,7 @@
+{
+  "protocolVersion": 1,
+  "commandId": "cmd_05-cancel-run",
+  "runId": "run_0001",
+  "expectedRevision": 3,
+  "type": "CANCEL_RUN"
+}

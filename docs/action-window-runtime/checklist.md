@@ -13,7 +13,7 @@ Status vocabulary (only these):
 
 | # | Item | Status | Code evidence | Test evidence | Fixture/live evidence | Commit/PR | Notes / blocker |
 |---|---|---|---|---|---|---|---|
-| 1 | Contract readiness (R0) | `BLOCKED` | — | — | — | — | Shared Action Window contract does not exist; blocks R2. Bridge protocol `collector/src/bridge/protocol.ts` exists as the extension base. |
+| 1 | Contract readiness (R0) | `IMPLEMENTED` | `contracts/action-window/v1/index.ts`, `schema.json` | `collector/test/contracts/action-window/contract.test.ts` — 55/55 vitest | 25 valid + 10 negative fixtures under `contracts/action-window/v1/fixtures/` | branch `feat/action-window-contract`; R0 PR open (not merged) | Protocol v1 defined; nested-in-Bridge-v1 transport; schema↔TS consistency test green. `MERGED` pending PR review. |
 | 2 | State engine (R1) | `NOT_STARTED` | — | — | — | — | Channel-neutral synthetic flow; re-author reducer patterns from `esm-capture-gate.ts`. |
 | 3 | Target detection | `NOT_STARTED` | primitive: `collector/src/esm/esm-candidate-signature.ts`, `esm-frame-scan.ts` | — | — | — | Primitives exist; Action Window locator not built. |
 | 4 | Overlay | `NOT_STARTED` | — | — | — | — | Real-window overlay = default renderer. |

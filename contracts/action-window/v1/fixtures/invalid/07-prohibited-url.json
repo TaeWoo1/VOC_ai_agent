@@ -1,0 +1,31 @@
+{
+  "case": "07-prohibited-url",
+  "target": "runView",
+  "expect": "PROHIBITED_FIELD",
+  "data": {
+    "protocolVersion": 1,
+    "runId": "run_0001",
+    "revision": 2,
+    "channel": "esm_plus",
+    "title": "리뷰 내보내기",
+    "status": "WAITING_FOR_HUMAN",
+    "executionMode": "HUMAN_ACTION",
+    "currentStep": {
+      "stepId": "esm.prepare_session",
+      "stepNumber": 1,
+      "totalSteps": 4,
+      "title": "로그인",
+      "instruction": "https://seller.example.com/login 로 이동",
+      "status": "AWAITING_USER"
+    },
+    "guidanceEnabled": true,
+    "allowedCommands": [
+      "CANCEL_RUN"
+    ],
+    "progress": {
+      "completedSteps": 0,
+      "totalSteps": 4
+    },
+    "updatedAt": "2026-07-08T13:02:00Z"
+  }
+}

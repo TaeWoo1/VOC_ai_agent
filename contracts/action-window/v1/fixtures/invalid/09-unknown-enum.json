@@ -1,0 +1,21 @@
+{
+  "case": "09-unknown-enum",
+  "target": "runView",
+  "expect": "UNKNOWN_ENUM",
+  "data": {
+    "protocolVersion": 1,
+    "runId": "run_0001",
+    "revision": 1,
+    "channel": "esm_plus",
+    "title": "리뷰 내보내기",
+    "status": "DONE",
+    "executionMode": "AUTOMATIC",
+    "guidanceEnabled": true,
+    "allowedCommands": [],
+    "progress": {
+      "completedSteps": 0,
+      "totalSteps": 4
+    },
+    "updatedAt": "2026-07-08T13:01:00Z"
+  }
+}
