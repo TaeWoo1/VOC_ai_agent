@@ -5,7 +5,7 @@
   "channelCode": "esm_plus",
   "runCopyKey": "actionWindow.review.run",
   "status": "PAUSED",
-  "executionMode": "AUTOMATIC",
+  "executionMode": "AUTOMATIC_OPERATION",
   "currentStep": {
     "stepId": "esm.open_surface",
     "stepNumber": 2,

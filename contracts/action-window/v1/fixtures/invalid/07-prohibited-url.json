@@ -9,7 +9,7 @@
     "channelCode": "esm_plus",
     "runCopyKey": "actionWindow.review.run",
     "status": "WAITING_FOR_HUMAN",
-    "executionMode": "HUMAN_ACTION",
+    "executionMode": "ACTION_WINDOW",
     "currentStep": {
       "stepId": "esm.prepare_session",
       "stepNumber": 1,

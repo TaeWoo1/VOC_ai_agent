@@ -5,7 +5,7 @@
   "channelCode": "esm_plus",
   "runCopyKey": "actionWindow.review.run",
   "status": "PREPARING",
-  "executionMode": "AUTOMATIC",
+  "executionMode": "AUTOMATIC_OPERATION",
   "currentStep": {
     "stepId": "esm.prepare_session",
     "stepNumber": 1,

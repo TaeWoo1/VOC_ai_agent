@@ -56,7 +56,7 @@ export const STEP_STATUSES = [
 ] as const;
 export type StepStatus = (typeof STEP_STATUSES)[number];
 
-export const EXECUTION_MODES = ["AUTOMATIC", "HUMAN_ACTION", "FILE_IMPORT", "UNAVAILABLE"] as const;
+export const EXECUTION_MODES = ["AUTOMATIC_OPERATION", "ACTION_WINDOW", "FILE_IMPORT", "INTEGRATION_PENDING"] as const;
 export type ExecutionMode = (typeof EXECUTION_MODES)[number];
 
 export const BLOCKER_CODES = [
@@ -452,7 +452,7 @@ export function validateRunView(input: unknown): ValidationResult {
   // cross-field semantics
   if (input.status === "COMPLETED" && blocker) e.push(err("CONSTRAINT_VIOLATION", "$.blocker")); // COMPLETED cannot expose an active blocker
   if (input.status === "WAITING_FOR_HUMAN") {
-    const hasHumanContext = input.executionMode === "HUMAN_ACTION" && step?.status === "AWAITING_USER";
+    const hasHumanContext = input.executionMode === "ACTION_WINDOW" && step?.status === "AWAITING_USER";
     if (!hasHumanContext) e.push(err("CONSTRAINT_VIOLATION", "$.status")); // WAITING_FOR_HUMAN requires a human-action context
   }
 

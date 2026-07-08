@@ -32,7 +32,7 @@ live channel behavior.
   active Run exists.
 - **StepStatus:** `PENDING · PREPARING · READY · AWAITING_USER · OBSERVING · PROCESSING ·
   COMPLETED · FAILED · SKIPPED`.
-- **ExecutionMode:** `AUTOMATIC · HUMAN_ACTION · FILE_IMPORT · UNAVAILABLE`.
+- **ExecutionMode:** `AUTOMATIC_OPERATION · ACTION_WINDOW · FILE_IMPORT · INTEGRATION_PENDING`.
 - **BlockerCode:** `LOGIN_REQUIRED · UI_DRIFT · TARGET_NOT_FOUND · TARGET_AMBIGUOUS ·
   SESSION_EXPIRED · UNSUPPORTED_STATE · DOWNLOAD_TIMEOUT · ARTIFACT_INVALID`. Blocker codes are
   **not** Run statuses.
@@ -66,7 +66,7 @@ event.
 
 `ActionWindowRunView` (see `index.ts`). Invariants enforced by `validateRunView`: `stepNumber` is
 1-based; `completedSteps ≤ totalSteps`; `currentStep.totalSteps` agrees with `progress.totalSteps`;
-`WAITING_FOR_HUMAN` requires a human-action context (`HUMAN_ACTION` + a step `AWAITING_USER`);
+`WAITING_FOR_HUMAN` requires a human-action context (`ACTION_WINDOW` + a step `AWAITING_USER`);
 `COMPLETED` cannot expose an active blocker; `allowedCommands` is supplied by Runtime (FE does not
 infer permissions).
 

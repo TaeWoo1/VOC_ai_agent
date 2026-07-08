@@ -8,7 +8,7 @@
     "marketplace": "esm_plus"
   },
   "status": "WAITING_FOR_HUMAN",
-  "executionMode": "HUMAN_ACTION",
+  "executionMode": "ACTION_WINDOW",
   "currentStep": {
     "stepId": "esm.select_and_download",
     "stepNumber": 3,

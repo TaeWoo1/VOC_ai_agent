@@ -16,7 +16,7 @@
     },
     "ExecutionMode": {
       "type": "string",
-      "enum": ["AUTOMATIC", "HUMAN_ACTION", "FILE_IMPORT", "UNAVAILABLE"]
+      "enum": ["AUTOMATIC_OPERATION", "ACTION_WINDOW", "FILE_IMPORT", "INTEGRATION_PENDING"]
     },
     "BlockerCode": {
       "type": "string",

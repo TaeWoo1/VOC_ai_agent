@@ -9,7 +9,7 @@
     "channelCode": "esm_plus",
     "runCopyKey": "actionWindow.review.run",
     "status": "COMPLETED",
-    "executionMode": "AUTOMATIC",
+    "executionMode": "AUTOMATIC_OPERATION",
     "guidanceEnabled": true,
     "allowedCommands": [],
     "blocker": {
