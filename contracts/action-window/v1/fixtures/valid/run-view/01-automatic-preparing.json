@@ -2,19 +2,25 @@
   "protocolVersion": 1,
   "runId": "run_0001",
   "revision": 1,
-  "channel": "esm_plus",
-  "title": "리뷰 내보내기",
+  "channelCode": "esm_plus",
+  "runCopyKey": "actionWindow.review.run",
   "status": "PREPARING",
-  "executionMode": "AUTOMATIC",
+  "executionMode": "AUTOMATIC_OPERATION",
   "currentStep": {
     "stepId": "esm.prepare_session",
     "stepNumber": 1,
     "totalSteps": 4,
-    "title": "세션 준비",
+    "copyKey": "actionWindow.review.prepare",
     "status": "PREPARING"
   },
   "guidanceEnabled": true,
-  "allowedCommands": ["PAUSE_RUN", "CANCEL_RUN"],
-  "progress": { "completedSteps": 0, "totalSteps": 4 },
+  "allowedCommands": [
+    "PAUSE_RUN",
+    "CANCEL_RUN"
+  ],
+  "progress": {
+    "completedSteps": 0,
+    "totalSteps": 4
+  },
   "updatedAt": "2026-07-08T13:00:00Z"
 }

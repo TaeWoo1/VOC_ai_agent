@@ -14,10 +14,16 @@
  * **Scope.** Pure types + pure validators. NO Chrome, overlay, DOM detection, user-click observation,
  * download detection, React, backend persistence, or live commerce behavior.
  *
+ * **Copy ownership (README §6).** Runtime supplies semantic identifiers only — a sanitized
+ * `channelCode`, dotted semantic copy keys (`runCopyKey` / step `copyKey`), and sanitized
+ * *primitive* copy params. FE owns ALL final end-user copy and localization. Runtime never sends
+ * final prose (`title`/`instruction`/`message`).
+ *
  * **Privacy invariant (README §6).** Every value that crosses this boundary is an enum, a boolean,
- * a count, an opaque id, or concise human-facing copy (`title`/`instruction`). Never a selector,
- * arbitrary page text, raw account/connection id, frame/page URL, CDP target id, local absolute
- * path, credential, token, cookie, session content, or downloaded review content.
+ * a count, an opaque id, a semantic code, or a dotted copy key + sanitized primitive params. Never
+ * final end-user prose, a selector, arbitrary page text, raw account/connection id, frame/page URL,
+ * CDP target id, local absolute path, credential, token, cookie, session content, or downloaded
+ * review content.
  */
 
 export const ACTION_WINDOW_PROTOCOL_VERSION = 1;
@@ -50,7 +56,7 @@ export const STEP_STATUSES = [
 ] as const;
 export type StepStatus = (typeof STEP_STATUSES)[number];
 
-export const EXECUTION_MODES = ["AUTOMATIC", "HUMAN_ACTION", "FILE_IMPORT", "UNAVAILABLE"] as const;
+export const EXECUTION_MODES = ["AUTOMATIC_OPERATION", "ACTION_WINDOW", "FILE_IMPORT", "INTEGRATION_PENDING"] as const;
 export type ExecutionMode = (typeof EXECUTION_MODES)[number];
 
 export const BLOCKER_CODES = [
@@ -107,7 +113,7 @@ export interface CommandEnvelope {
 }
 
 export type CommandPayload =
-  | { channel: string } // START_RUN
+  | { channelCode: string } // START_RUN
   | { enabled: boolean } // SET_GUIDANCE_ENABLED
   | Record<string, never>; // commands with no payload
 
@@ -142,13 +148,20 @@ export interface EventPayload {
   recoverable?: boolean;
 }
 
+/** Primitive, interpolation-safe copy parameter value (FE owns final copy). */
+export type CopyParamValue = string | number | boolean;
+export type CopyParams = Record<string, CopyParamValue>;
+
 export interface ActionWindowRunView {
   protocolVersion: number;
   runId: string;
   revision: number;
 
-  channel: string;
-  title: string;
+  /** Sanitized stable channel identity (e.g. `esm_plus`), never a user-facing title. */
+  channelCode: string;
+  /** Dotted semantic copy key for the run headline; FE maps it to localized copy. */
+  runCopyKey: string;
+  runCopyParams?: CopyParams;
 
   status: RunStatus;
   executionMode: ExecutionMode;
@@ -157,8 +170,9 @@ export interface ActionWindowRunView {
     stepId: string;
     stepNumber: number; // 1-based
     totalSteps: number;
-    title: string;
-    instruction?: string;
+    /** Dotted semantic copy key for the step; FE maps it to localized copy. */
+    copyKey: string;
+    copyParams?: CopyParams;
     status: StepStatus;
   };
 
@@ -201,6 +215,12 @@ export type ValidationErrorCode = (typeof VALIDATION_ERROR_CODES)[number];
 
 /** Keys that must never appear anywhere in a contract message (privacy boundary, README §6). */
 export const PROHIBITED_KEYS: readonly string[] = [
+  // Runtime-authored end-user prose — FE owns all copy (localize via copy keys).
+  "title",
+  "instruction",
+  "message",
+  "html",
+  "displayText",
   "selector",
   "xpath",
   "css",
@@ -228,6 +248,10 @@ export const PROHIBITED_KEYS: readonly string[] = [
 
 const REF_KEYS: readonly string[] = ["targetRef", "artifactRef"];
 const HEX16 = /^[0-9a-f]{16}$/;
+/** A dotted semantic copy key (e.g. `actionWindow.review.ready`) — never final prose. */
+const COPY_KEY = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/;
+/** A sanitized semantic code (channelCode) — an opaque token, never a user-facing title. */
+const SEMANTIC_CODE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ISO_LIKE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const URL_OR_ABS_PATH = /(^|["'\s])(https?:\/\/|wss?:\/\/|file:\/\/|\/Users\/|\/home\/|[A-Za-z]:\\)/;
 
@@ -261,6 +285,22 @@ export function findProhibitedFields(value: unknown, path = "$"): ValidationErro
   return out;
 }
 
+/** Copy params are a flat bag of sanitized primitives (FE interpolates them). No prose objects, no markup. */
+function checkCopyParams(v: unknown, path: string): ValidationError[] {
+  if (v === undefined) return [];
+  if (!isRecord(v)) return [err("WRONG_TYPE", path)];
+  const out: ValidationError[] = [];
+  for (const [k, val] of Object.entries(v)) {
+    const t = typeof val;
+    if (t !== "string" && t !== "number" && t !== "boolean") {
+      out.push(err("CONSTRAINT_VIOLATION", `${path}.${k}`));
+    } else if (t === "string" && /[<>]/.test(val as string)) {
+      out.push(err("PROHIBITED_FIELD", `${path}.${k}`)); // no markup in copy params
+    }
+  }
+  return out;
+}
+
 /** Pure: are two Action Window protocol versions compatible? v1 is a single major — exact match. */
 export function isActionWindowProtocolCompatible(a: number, b: number): boolean {
   return Number.isInteger(a) && a === b;
@@ -278,7 +318,7 @@ function checkEnvelopeCommon(obj: Record<string, unknown>): ValidationError[] {
 }
 
 const COMMAND_PAYLOAD_REQUIRED: Partial<Record<CommandType, (p: Record<string, unknown>) => ValidationError[]>> = {
-  START_RUN: (p) => (typeof p.channel === "string" && p.channel.length > 0 ? [] : [err("MISSING_FIELD", "$.payload.channel")]),
+  START_RUN: (p) => (typeof p.channelCode === "string" && SEMANTIC_CODE.test(p.channelCode) ? [] : [err("MISSING_FIELD", "$.payload.channelCode")]),
   SET_GUIDANCE_ENABLED: (p) => (typeof p.enabled === "boolean" ? [] : [err("MISSING_FIELD", "$.payload.enabled")]),
 };
 
@@ -348,9 +388,19 @@ export function validateRunView(input: unknown): ValidationResult {
   if (!isRecord(input)) return { ok: false, errors: [err("WRONG_TYPE", "$")] };
   const e = checkEnvelopeCommon(input);
   if (!Number.isInteger(input.revision)) e.push(err("MISSING_FIELD", "$.revision"));
-  for (const k of ["channel", "title", "updatedAt"]) {
-    if (typeof input[k] !== "string" || (input[k] as string).length === 0) e.push(err("MISSING_FIELD", `$.${k}`));
+  if (typeof input.updatedAt !== "string" || (input.updatedAt as string).length === 0) e.push(err("MISSING_FIELD", "$.updatedAt"));
+  // Runtime supplies a sanitized channel CODE + a dotted copy KEY, never a user-facing title.
+  if (typeof input.channelCode !== "string" || (input.channelCode as string).length === 0) {
+    e.push(err("MISSING_FIELD", "$.channelCode"));
+  } else if (!SEMANTIC_CODE.test(input.channelCode as string)) {
+    e.push(err("CONSTRAINT_VIOLATION", "$.channelCode"));
   }
+  if (typeof input.runCopyKey !== "string" || (input.runCopyKey as string).length === 0) {
+    e.push(err("MISSING_FIELD", "$.runCopyKey"));
+  } else if (!COPY_KEY.test(input.runCopyKey as string)) {
+    e.push(err("CONSTRAINT_VIOLATION", "$.runCopyKey"));
+  }
+  e.push(...checkCopyParams(input.runCopyParams, "$.runCopyParams"));
   if (!(RUN_STATUSES as readonly string[]).includes(input.status as string)) e.push(err("UNKNOWN_ENUM", "$.status"));
   if (!(EXECUTION_MODES as readonly string[]).includes(input.executionMode as string)) e.push(err("UNKNOWN_ENUM", "$.executionMode"));
   if (typeof input.guidanceEnabled !== "boolean") e.push(err("MISSING_FIELD", "$.guidanceEnabled"));
@@ -376,7 +426,12 @@ export function validateRunView(input: unknown): ValidationResult {
     if (typeof step.stepId !== "string" || step.stepId.length === 0) e.push(err("MISSING_FIELD", "$.currentStep.stepId"));
     if (!Number.isInteger(step.stepNumber) || (step.stepNumber as number) < 1) e.push(err("CONSTRAINT_VIOLATION", "$.currentStep.stepNumber"));
     if (!Number.isInteger(step.totalSteps)) e.push(err("MISSING_FIELD", "$.currentStep.totalSteps"));
-    if (typeof step.title !== "string" || step.title.length === 0) e.push(err("MISSING_FIELD", "$.currentStep.title"));
+    if (typeof step.copyKey !== "string" || step.copyKey.length === 0) {
+      e.push(err("MISSING_FIELD", "$.currentStep.copyKey"));
+    } else if (!COPY_KEY.test(step.copyKey as string)) {
+      e.push(err("CONSTRAINT_VIOLATION", "$.currentStep.copyKey"));
+    }
+    e.push(...checkCopyParams(step.copyParams, "$.currentStep.copyParams"));
     if (!(STEP_STATUSES as readonly string[]).includes(step.status as string)) e.push(err("UNKNOWN_ENUM", "$.currentStep.status"));
     if (progress && Number.isInteger(step.totalSteps) && (step.totalSteps as number) !== (progress.totalSteps as number)) {
       e.push(err("CONSTRAINT_VIOLATION", "$.currentStep.totalSteps")); // must agree with progress.totalSteps
@@ -397,7 +452,7 @@ export function validateRunView(input: unknown): ValidationResult {
   // cross-field semantics
   if (input.status === "COMPLETED" && blocker) e.push(err("CONSTRAINT_VIOLATION", "$.blocker")); // COMPLETED cannot expose an active blocker
   if (input.status === "WAITING_FOR_HUMAN") {
-    const hasHumanContext = input.executionMode === "HUMAN_ACTION" && step?.status === "AWAITING_USER";
+    const hasHumanContext = input.executionMode === "ACTION_WINDOW" && step?.status === "AWAITING_USER";
     if (!hasHumanContext) e.push(err("CONSTRAINT_VIOLATION", "$.status")); // WAITING_FOR_HUMAN requires a human-action context
   }
 
