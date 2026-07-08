@@ -63,6 +63,10 @@ export async function runSyntheticLoop(page: Page, engine: ActionWindowEngine, o
   };
 
   await page.setContent(fixtureHtml(opts.mode));
+  // Some bundlers (e.g. tsx/esbuild with keepNames) inject a `__name(...)` helper into serialized
+  // evaluate bodies. Define an identity shim (as a raw string, itself un-transformed) in the page's
+  // main world so those calls resolve in every runtime — vitest and tsx alike.
+  await page.evaluate("globalThis.__name = globalThis.__name || function (f) { return f; };");
 
   engine.command(cmd("START_RUN")); // → PREPARE
 
