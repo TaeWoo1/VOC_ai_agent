@@ -8,11 +8,11 @@
 - **current worktree:** `sellerops-action-window-integrate` (linked worktree of the shared SellerOps repo)
 - **branch base SHA:** `3dcfff2` (`origin/main`)
 - **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`).** Canonical message shape set by **PR #214**. R2 adds an **additive** transport sibling `contracts/action-window/v1/transport.ts` (`ACTION_WINDOW_TRANSPORT_VERSION = 1`) — frames that carry the already-normative envelopes/View Model **inside Bridge v1 as opaque payloads**; `index.ts`/`schema.json`/`bridge/protocol.ts` are unchanged (no drift, no message-protocol bump).
-- **current slice:** R2 (FE↔Runtime over the transport) — **IMPLEMENTED** (offline synthetic E2E green); real-browser + WS transport gated/deferred; PR open
+- **current slice:** R2A (offline FE↔Runtime integration) — **VERIFIED** (offline synthetic E2E + headed operator-click browser proof both green); PR #217. **R2B (real Bridge-WS passthrough transport) is reserved for the next PR.**
 - **last completed item:** built the command-driven `ActionWindowSession` + `ProbeDriver` (synthetic + browser), the shared loopback transport, and the FE `bridgeAdapter`/`controller` selected through the dev/runtime boundary (mock default). FE `contract.ts` remains a **zero-drift re-export** of the canonical source (now also re-exporting the transport types).
-- **last verified tests:** collector `session-integration.test.ts` (8, offline) — full loop + stale/dup/pause/resume/cancel/reconnect/privacy; full collector suite **2414 passed / 11 skipped**, `tsc --noEmit` clean. FE `bridgeAdapter.test.ts` (9) — command/view/event/resync/rejection/privacy; full FE suite **192 passed**, `tsc --noEmit` clean, `vite build` OK. **`session-browser.test.ts` (RUN_INTEGRATION) written but NOT run** — real-browser click E2E awaits explicit headed approval (standing safety rule).
-- **current blocker:** none for the offline slice. Live gaps (out of R2 scope): the **real Bridge-WS transport** (opaque passthrough — a Bridge slice) and the **headed/real-channel** E2E both remain deferred; until the WS transport lands, `resolveBridgeSession()` returns `null` and the shipped Operations screen runs the mock.
-- **next single action:** land R2 (PR), then either (a) run the gated real-browser E2E under headed approval, or (b) the Bridge opaque-passthrough slice that wires the live WS transport + Operation Run identity (toward R3 persistence).
+- **last verified tests:** collector `session-integration.test.ts` (8, offline) — full loop + stale/dup/pause/resume/cancel/reconnect/privacy; full collector suite **2414 passed / 12 skipped**, `tsc --noEmit` clean. FE `bridgeAdapter.test.ts` (9), full FE suite **192 passed**, `tsc --noEmit` clean, `vite build` OK. **`session-browser.test.ts` RUN under `RUN_INTEGRATION=1`:** automated headless (simulated click) green, and **headed operator proof (`AW_HEADED=1`) with a REAL human click** green — start→checkpoint (overlay visible)→user click (observation ≠ completion)→recheck→verify→downstream→COMPLETED, clean teardown (overlay/observer removed).
+- **current blocker:** none for R2A. Live gaps reserved for **R2B**: the **real Bridge-WS transport** (opaque passthrough — a Bridge slice) + Local Agent startup wiring + Operation Run identity. Until R2B lands, `resolveBridgeSession()` returns `null` and the shipped Operations screen runs the mock.
+- **next single action:** after PR #217 merges, start **R2B** (live Bridge-WS passthrough transport) in a fresh session/branch from updated `main`; then R3 persistence.
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -34,12 +34,13 @@
   the canonical post-#214 contract** under `collector/src/action-window/*` —
   automated tests green AND the headed operator-click QA passed end-to-end using
   `channelCode`/`copyKey` and the canonical execution modes.
-- **R2 (FE↔Runtime integration) is IMPLEMENTED, offline** (`integ/action-window-v1`):
-  the FE Bridge adapter drives the real R1 engine through the `ActionWindowSession`
-  over a loopback transport — full command/event/View-Model loop, reconnect resync,
-  idempotency/revision/ordering, and a privacy scan, all green without a browser.
-  **Still not present:** the real Bridge-WS transport (opaque passthrough), the
-  headed/real-browser run of this path (gated), and any live channel.
+- **R2A (offline FE↔Runtime integration) is VERIFIED** (`integ/action-window-v1`,
+  PR #217): the FE Bridge adapter drives the real R1 engine through the
+  `ActionWindowSession` over a loopback transport — full command/event/View-Model
+  loop, reconnect resync, idempotency/revision/ordering, and a privacy scan, all
+  green offline AND against real Chromium with a **headed operator (real human)
+  click**. **R2B (real Bridge-WS passthrough transport + Local Agent startup
+  wiring) is reserved for the next PR;** no live channel yet.
 
 ## Existing foundations vs implemented Action Window capability
 

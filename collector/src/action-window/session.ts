@@ -76,8 +76,11 @@ export class ActionWindowSession {
    * action (which mutates state synchronously). Test-facing determinism hook; production doesn't need it.
    */
   async whenSettled(): Promise<void> {
+    // Yield to the MACROTASK queue each turn (not just microtasks): a real BrowserProbeDriver awaits
+    // genuine I/O, which a microtask-only drain would starve. Microtasks still flush before each timer,
+    // so a just-observed user action is included. Resolves as soon as no auto-drive is in flight.
     for (let i = 0; i < 100_000; i++) {
-      await Promise.resolve();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (!this.autoBusy) return;
     }
     throw new Error("action-window session: whenSettled did not converge");
