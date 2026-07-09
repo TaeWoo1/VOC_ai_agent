@@ -65,6 +65,19 @@ export interface IngestResult {
   /** Sanitized count of processed items (0 is a legitimate all-duplicates outcome, not a failure). */
   processed: number;
 }
+/** The already-reserved contract codes a failed surface probe may carry. Never a new code. */
+export type SurfaceBlockerCode = Extract<BlockerCode, "SESSION_EXPIRED" | "LOGIN_REQUIRED" | "UNSUPPORTED_STATE">;
+/**
+ * Rich surface-probe result (R4 channel adapters). Lets a driver report the SEMANTIC fail-closed
+ * cause of a failed surface preparation using an already-reserved contract code — e.g. a reconnect
+ * interstitial → `SESSION_EXPIRED`, a login form / auth challenge → `LOGIN_REQUIRED`. A bare
+ * boolean stays accepted (existing drivers) and a failure without a code maps to
+ * `UNSUPPORTED_STATE`, so this is purely additive.
+ */
+export interface SurfaceProbeResult {
+  ok: boolean;
+  blockerCode?: SurfaceBlockerCode;
+}
 
 /** What the harness should do next after a transition. Unit tests may ignore it. */
 export type Effect =
@@ -384,10 +397,11 @@ export class ActionWindowEngine {
   }
 
   /** Probe result: is the opened surface the expected seller-center surface? */
-  onSurfaceReady(ok: boolean): Effect {
+  onSurfaceReady(res: boolean | SurfaceProbeResult): Effect {
     this.expect("PREPARE_SESSION");
     this.revision += 1;
-    if (!ok) return this.fail("UNSUPPORTED_STATE");
+    const surface = typeof res === "boolean" ? { ok: res } : res;
+    if (!surface.ok) return this.fail(surface.blockerCode ?? "UNSUPPORTED_STATE");
     this.completedSteps = 1; // step 1 (prepare) done
     this.activeStepIndex = 2;
     this.stage = "LOCATE_TARGET";
