@@ -21,6 +21,7 @@ import {
 import { ActionWindowEngine } from "../../src/action-window/engine";
 
 const SIG = "a1b2c3d4e5f60718";
+const ARTIFACT = "0f1e2d3c4b5a6978";
 const fixedClock = () => "2026-01-01T00:00:00.5Z";
 
 function newEngine() {
@@ -40,8 +41,8 @@ function cmd(engine: ActionWindowEngine, type: CommandType, payload?: Record<str
     ...(payload ? { payload: payload as CommandEnvelope["payload"] } : {}),
   };
 }
-/** Drive the engine to a verified COMPLETE via fake probe results. */
-function driveHappyPath(engine: ActionWindowEngine) {
+/** Drive the engine to the verified human step via fake probe results (downstream not yet run). */
+function driveToVerified(engine: ActionWindowEngine) {
   engine.command(cmd(engine, "START_RUN"));
   engine.onSurfaceReady(true);
   engine.onLocated({ count: 1, sig: SIG });
@@ -49,15 +50,21 @@ function driveHappyPath(engine: ActionWindowEngine) {
   engine.onUserActionObserved();
   engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
   engine.onVerified({ verified: true, drift: false });
-  return engine.runDownstream();
+}
+/** Drive the engine to a verified COMPLETE via fake probe results (incl. the downstream chain). */
+function driveHappyPath(engine: ActionWindowEngine) {
+  driveToVerified(engine);
+  engine.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
+  engine.onArtifactValidated({ valid: true });
+  return engine.onIngested({ ok: true, processed: 1 });
 }
 
 describe("engine — happy path", () => {
   it("completes the loop and emits a valid, ordered, sanitized event sequence", () => {
     const engine = newEngine();
-    const ds = driveHappyPath(engine);
+    const effect = driveHappyPath(engine);
     expect(engine.currentStage()).toBe("COMPLETE");
-    expect(ds.result).toEqual({ processed: 1 });
+    expect(effect).toBe("CLEANUP");
 
     const view = engine.view();
     expect(view.status).toBe("COMPLETED");
@@ -71,7 +78,7 @@ describe("engine — happy path", () => {
       "RUN_STARTED", "RUN_STATUS_CHANGED", "RUN_STATUS_CHANGED", "STEP_READY",
       "HUMAN_ACTION_REQUIRED", "TARGET_HIGHLIGHTED", "RUN_STATUS_CHANGED",
       "USER_ACTION_OBSERVED", "RUN_STATUS_CHANGED", "STEP_COMPLETED",
-      "RUN_STATUS_CHANGED", "STEP_COMPLETED", "RUN_COMPLETED",
+      "RUN_STATUS_CHANGED", "DOWNLOAD_DETECTED", "STEP_COMPLETED", "RUN_COMPLETED",
     ]);
     // monotonic sequence 1..n, non-decreasing revision, unique eventIds
     expect(events.map((e) => e.sequence)).toEqual(events.map((_, i) => i + 1));
@@ -85,6 +92,9 @@ describe("engine — happy path", () => {
     // the highlighted target ref is an opaque 16-hex, never a selector
     const hi = events.find((e) => e.type === "TARGET_HIGHLIGHTED")!;
     expect(hi.payload.targetRef).toMatch(/^[0-9a-f]{16}$/);
+    // the detected artifact ref is an opaque 16-hex, never a filename/path
+    const dl = events.find((e) => e.type === "DOWNLOAD_DETECTED")!;
+    expect(dl.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it("the waiting view satisfies the human-action contract invariant", () => {
@@ -125,6 +135,41 @@ describe("engine — fail-closed cases", () => {
       e.command(cmd(e, "START_RUN")); e.onSurfaceReady(true); e.onLocated({ count: 1, sig: SIG }); e.onHighlighted();
       e.onUserActionObserved(); e.command(cmd(e, "REQUEST_STEP_RECHECK")); e.onVerified({ verified: false, drift: true });
     }, "UI_DRIFT"));
+
+  it("no download detected → DOWNLOAD_TIMEOUT", () =>
+    failAt((e) => { driveToVerified(e); e.onDownloadDetected({ detected: false }); }, "DOWNLOAD_TIMEOUT"));
+  it("detected download with a non-opaque artifact ref → DOWNLOAD_TIMEOUT (never emitted)", () => {
+    failAt((e) => { driveToVerified(e); e.onDownloadDetected({ detected: true, artifactRef: "report.xlsx" }); }, "DOWNLOAD_TIMEOUT");
+    const engine = newEngine();
+    driveToVerified(engine);
+    engine.onDownloadDetected({ detected: true, artifactRef: "report.xlsx" });
+    // The malformed ref never reaches the event log — nothing non-opaque can be emitted.
+    expect(engine.events().some((e) => e.type === "DOWNLOAD_DETECTED")).toBe(false);
+    expect(JSON.stringify(engine.events())).not.toContain("report.xlsx");
+  });
+  it("invalid artifact → ARTIFACT_INVALID (never ingested)", () =>
+    failAt((e) => {
+      driveToVerified(e);
+      e.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
+      e.onArtifactValidated({ valid: false });
+    }, "ARTIFACT_INVALID"));
+  it("failed ingestion handoff → fails closed (no reserved ingest blocker; generic UNSUPPORTED_STATE)", () => {
+    const engine = newEngine();
+    driveToVerified(engine);
+    engine.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
+    engine.onArtifactValidated({ valid: true });
+    engine.onIngested({ ok: false, processed: 0 });
+    expect(engine.currentStage()).toBe("FAILED");
+    expect(engine.view().blocker?.code).toBe("UNSUPPORTED_STATE");
+    expect(engine.events().some((e) => e.type === "RUN_COMPLETED")).toBe(false);
+  });
+  it("downstream failure never counts step 3 as completed", () => {
+    const engine = newEngine();
+    driveToVerified(engine);
+    engine.onDownloadDetected({ detected: false });
+    expect(engine.view().progress).toEqual({ completedSteps: 2, totalSteps: 3 });
+    expect(engine.events().filter((e) => e.type === "STEP_COMPLETED")).toHaveLength(1); // step 2 only
+  });
 
   it("unchanged expected state → NO false completion, remains waiting", () => {
     const engine = newEngine();

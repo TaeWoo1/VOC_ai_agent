@@ -205,12 +205,11 @@ describe("Operation Run persistence & resume (R3)", () => {
     expect(after.opened.engine.view().status).toBe("PAUSED"); // unchanged
   });
 
-  it("resumes downstream processing idempotently after an interruption between verify and completion", async () => {
-    const dir = tmpDir();
-    // Capture the exact mid-flight record: verified (step 2 done) but downstream not yet run.
+  /** Drive one full run while snapshotting every published transition (the crash-point source). */
+  async function snapshotFullRun(runId: string): Promise<OperationRun[]> {
     const channel = createLoopbackChannel();
     const driver = new SyntheticProbeDriver();
-    const engine = new ActionWindowEngine({ runId: "run_mid", channelCode: CHANNEL, runCopyKey: RUN_COPY });
+    const engine = new ActionWindowEngine({ runId, channelCode: CHANNEL, runCopyKey: RUN_COPY });
     const snapshots: OperationRun[] = [];
     const session = new ActionWindowSession(engine, driver, channel.server, {
       onStatePublished: () => snapshots.push(operationRunFrom(engine)),
@@ -223,7 +222,15 @@ describe("Operation Run persistence & resume (R3)", () => {
     await session.whenSettled();
     fe.send("REQUEST_STEP_RECHECK");
     await session.whenSettled();
-    const midFlight = snapshots.find((s) => s.engine.stage === "RUN_DUMMY_DOWNSTREAM");
+    expect(engine.view().status).toBe("COMPLETED");
+    return snapshots;
+  }
+
+  it("resumes downstream processing idempotently after an interruption between verify and detection", async () => {
+    const dir = tmpDir();
+    // The exact mid-flight record: verified (step 2 done) but the downstream chain not yet run.
+    const snapshots = await snapshotFullRun("run_mid");
+    const midFlight = snapshots.find((s) => s.engine.stage === "DETECT_DOWNLOAD");
     expect(midFlight).toBeDefined();
     expect(midFlight!.engine.completedSteps).toBe(2); // verified, not yet processed
     saveOperationRun(dir, midFlight!); // the state at the moment the "crash" hit
@@ -240,6 +247,76 @@ describe("Operation Run persistence & resume (R3)", () => {
     after.fe.send("RESUME_RUN");
     await after.opened.session.whenSettled();
     expect(after.fe.lastResult()).toMatchObject({ accepted: false, reason: "INVALID_FOR_STATE" });
+  });
+
+  it("re-enters the downstream chain from detection when interrupted mid-chain (validated but not ingested)", async () => {
+    const dir = tmpDir();
+    // Crash-point: artifact already validated, ingestion handoff not yet run.
+    const snapshots = await snapshotFullRun("run_mid2");
+    const midFlight = snapshots.find((s) => s.engine.stage === "INGEST_HANDOFF");
+    expect(midFlight).toBeDefined();
+    expect(midFlight!.engine.completedSteps).toBe(2);
+    saveOperationRun(dir, midFlight!);
+
+    const after = boot(dir, { runId: "run_mid2" });
+    expect(after.opened.resumeState).toBe("RESUME_DOWNSTREAM");
+    after.fe.send("RESUME_RUN");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("COMPLETED");
+    // The resume re-established the artifact (a SECOND detection event) rather than trusting the
+    // stale pre-crash chain position; ingestion stays idempotent (dedup-safe), completion once.
+    expect(after.opened.engine.events().filter((e) => e.type === "DOWNLOAD_DETECTED").length).toBeGreaterThanOrEqual(2);
+    expect(after.opened.engine.events().filter((e) => e.type === "RUN_COMPLETED")).toHaveLength(1);
+  });
+
+  it("a DOWNLOAD_TIMEOUT failure resumes through the human checkpoint (the export must happen again)", async () => {
+    const dir = tmpDir();
+    // The user's click verified, but no download ever arrived → fail closed with DOWNLOAD_TIMEOUT.
+    const broken = boot(dir, { runId: "run_dl_timeout", driver: new SyntheticProbeDriver({ detect: { detected: false } }) });
+    broken.fe.send("START_RUN", { channelCode: CHANNEL });
+    await broken.opened.session.whenSettled();
+    broken.driver.completeUserAction(true);
+    await broken.opened.session.whenSettled();
+    broken.fe.send("REQUEST_STEP_RECHECK");
+    await broken.opened.session.whenSettled();
+    expect(broken.opened.engine.view().status).toBe("FAILED");
+    expect(broken.opened.engine.view().blocker?.code).toBe("DOWNLOAD_TIMEOUT");
+    expect(loadOperationRun(dir, "run_dl_timeout")!.resumeState).toBe("RESUME_FROM_FAILURE");
+
+    // Restart with a healthy driver: the failed run re-enters from PREPARE_SESSION — the download
+    // never existed, so the run must land back at the checkpoint and the USER must act again.
+    const after = boot(dir, { runId: "run_dl_timeout" });
+    expect(after.opened.resumeState).toBe("RESUME_FROM_FAILURE");
+    after.fe.send("RESUME_RUN");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+    after.driver.completeUserAction(true);
+    await after.opened.session.whenSettled();
+    after.fe.send("REQUEST_STEP_RECHECK");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("COMPLETED");
+  });
+
+  it("an ARTIFACT_INVALID failure persists FAILED and never records step 3 as completed", async () => {
+    const dir = tmpDir();
+    const p = boot(dir, { runId: "run_bad_artifact", driver: new SyntheticProbeDriver({ validate: { valid: false } }) });
+    p.fe.send("START_RUN", { channelCode: CHANNEL });
+    await p.opened.session.whenSettled();
+    p.driver.completeUserAction(true);
+    await p.opened.session.whenSettled();
+    p.fe.send("REQUEST_STEP_RECHECK");
+    await p.opened.session.whenSettled();
+    expect(p.opened.engine.view().status).toBe("FAILED");
+    expect(p.opened.engine.view().blocker?.code).toBe("ARTIFACT_INVALID");
+
+    const record = loadOperationRun(dir, "run_bad_artifact")!;
+    expect(record.latestView.status).toBe("FAILED");
+    expect(record.tasks.map((t) => [t.stepNumber, t.status])).toEqual([
+      [1, "COMPLETED"],
+      [2, "COMPLETED"], // the human step WAS verified — only downstream failed
+      [3, "FAILED"],
+    ]);
+    expect(findProhibitedFields(record)).toEqual([]);
   });
 
   it("resumes a failed run; a persistent cause fails closed again, a fixed cause completes", async () => {
@@ -323,13 +400,18 @@ describe("Operation Run persistence & resume (R3)", () => {
     const before = await toCheckpoint(dir, "run_privacy");
     before.driver.completeUserAction(true);
     await before.opened.session.whenSettled();
+    before.fe.send("REQUEST_STEP_RECHECK"); // run the full downstream chain so the artifact is persisted too
+    await before.opened.session.whenSettled();
+    expect(before.opened.engine.view().status).toBe("COMPLETED");
 
     const record = loadOperationRun(dir, "run_privacy")!;
     expect(findProhibitedFields(record)).toEqual([]);
-    // Only the opaque 16-hex ref identifies the target — nothing else could even be stored.
+    // Only opaque 16-hex refs identify the target and the artifact — nothing else could even be stored.
     expect(record.humanCheckpoint.targetRef).toMatch(/^[0-9a-f]{16}$/);
+    const detected = record.engine.events.find((e) => e.type === "DOWNLOAD_DETECTED")!;
+    expect(detected.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
     const raw = JSON.stringify(record);
-    for (const needle of ["selector", "http://", "https://", "cookie", "password", "Authorization", "/Users/"]) {
+    for (const needle of ["selector", "http://", "https://", "cookie", "password", "Authorization", "/Users/", ".xlsx", "file://", "filename"]) {
       expect(raw).not.toContain(needle);
     }
   });

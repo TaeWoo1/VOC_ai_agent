@@ -8,8 +8,8 @@
  * and the driver only observes.
  */
 import type { Page } from "playwright";
-import type { LocateResult, VerifyResult } from "./engine";
-import type { ProbeDriver } from "./session";
+import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, VerifyResult } from "./engine";
+import { SYNTHETIC_ARTIFACT_REF, type ProbeDriver } from "./session";
 import { STEP_PLAN, TOTAL_STEPS } from "./stages";
 import { fixtureHtml, type FixtureMode } from "./fixture";
 import { locateTarget, surfaceIsValid } from "./locator";
@@ -23,6 +23,16 @@ export interface BrowserProbeOptions {
   /** TEST-ONLY: performs the real click on the target. Undefined in headed/production use. */
   simulateUserAction?: (page: Page) => Promise<void>;
   observeTimeoutMs?: number;
+  /**
+   * SYNTHETIC downstream results for the fixture page (which produces no real download). Real
+   * read-only download detection / artifact validation / ingestion arrive with the channel-adapter
+   * slice; overriding these lets fixtures exercise the downstream fail-closed paths.
+   */
+  downstream?: {
+    detect?: DownloadDetectResult;
+    validate?: ArtifactValidateResult;
+    ingest?: IngestResult;
+  };
 }
 
 export class BrowserProbeDriver implements ProbeDriver {
@@ -66,6 +76,17 @@ export class BrowserProbeDriver implements ProbeDriver {
 
   verify(expectedSig: string): Promise<VerifyResult> {
     return verifyTransition(this.page, { expectedSig });
+  }
+
+  /* Synthetic downstream (fixture pages fire no real download; see BrowserProbeOptions.downstream). */
+  detectDownload(): Promise<DownloadDetectResult> {
+    return Promise.resolve(this.opts.downstream?.detect ?? { detected: true, artifactRef: SYNTHETIC_ARTIFACT_REF });
+  }
+  validateArtifact(_artifactRef: string): Promise<ArtifactValidateResult> {
+    return Promise.resolve(this.opts.downstream?.validate ?? { valid: true });
+  }
+  ingest(_artifactRef: string): Promise<IngestResult> {
+    return Promise.resolve(this.opts.downstream?.ingest ?? { ok: true, processed: 1 });
   }
 
   async cleanup(): Promise<void> {

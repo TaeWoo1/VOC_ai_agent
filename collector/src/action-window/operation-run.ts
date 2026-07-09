@@ -31,15 +31,22 @@ import {
 import type { ActionWindowEngine, PersistedEngineState } from "./engine";
 import { STEP_PLAN, type Stage, stageToStepStatus } from "./stages";
 
-/** Bump on any breaking change to the persisted record shape. */
-export const OPERATION_RUN_SCHEMA_VERSION = 1;
+/**
+ * Bump on any breaking change to the persisted record shape.
+ * v2: the dummy downstream stage (`RUN_DUMMY_DOWNSTREAM`) was replaced by the real downstream chain
+ * (`DETECT_DOWNLOAD` → `VALIDATE_ARTIFACT` → `INGEST_HANDOFF`), changing the persisted stage
+ * vocabulary. v1 records no longer load (fail closed as `WRONG_SCHEMA_VERSION`) — the store was
+ * dev-only synthetic runs, deliberately not migrated.
+ */
+export const OPERATION_RUN_SCHEMA_VERSION = 2;
 
 /**
  * How a loaded record may re-enter execution. Computed at plan time from persisted state only.
  * - `RESUME_AT_CHECKPOINT` — interrupted before/at the human step: resume re-drives the read-only
  *   automatic chain (prepare → locate → highlight) back to `WAITING_FOR_HUMAN`.
  * - `RESUME_DOWNSTREAM` — verified but interrupted before downstream completed: resume re-runs the
- *   automatic downstream step idempotently.
+ *   automatic downstream chain (detect → validate → ingest) from detection; ingestion is dedup-safe,
+ *   so the re-run is idempotent.
  * - `RESUME_FROM_FAILURE` — the run failed closed: resume re-enters the same chain; if the cause
  *   persists it fails closed again.
  * - `TERMINAL` — COMPLETED/CANCELLED: restore is read-only; the run can never restart.
@@ -111,10 +118,12 @@ export function resumeStateFor(state: PersistedEngineState): ResumeState {
  * The SAFE stage a resumable run re-enters at. Steps 1–2 restart their read-only automatic chain
  * from PREPARE_SESSION (a fresh process has no prepared surface, located target, or overlay — the
  * chain re-verifies all of it and lands back at the human checkpoint). Step 3 re-runs the automatic
- * downstream step. Verified progress (`completedSteps`) is preserved either way.
+ * downstream chain from DETECT_DOWNLOAD — always from detection, never mid-chain: a restarted
+ * process must re-establish that the artifact exists before validating or ingesting anything.
+ * Verified progress (`completedSteps`) is preserved either way.
  */
 export function safeResumeStageFor(state: PersistedEngineState): Stage {
-  return resumeStateFor(state) === "RESUME_DOWNSTREAM" ? "RUN_DUMMY_DOWNSTREAM" : "PREPARE_SESSION";
+  return resumeStateFor(state) === "RESUME_DOWNSTREAM" ? "DETECT_DOWNLOAD" : "PREPARE_SESSION";
 }
 
 /** Per-task persisted status, derived from verified progress + the current stage. */
@@ -195,7 +204,9 @@ const STAGES: readonly Stage[] = [
   "HIGHLIGHT_TARGET",
   "WAIT_FOR_USER_ACTION",
   "VERIFY_TRANSITION",
-  "RUN_DUMMY_DOWNSTREAM",
+  "DETECT_DOWNLOAD",
+  "VALIDATE_ARTIFACT",
+  "INGEST_HANDOFF",
   "COMPLETE",
   "FAILED",
   "CANCELLED",
