@@ -16,6 +16,8 @@ export type FixtureMode =
   | "unchanged"
   | "session-required"
   | "download"
+  | "download-xlsx"
+  | "download-badmagic"
   | "download-none";
 
 const TARGET_BUTTON = (label: string, extra = ""): string =>
@@ -25,13 +27,22 @@ const TARGET_BUTTON = (label: string, extra = ""): string =>
  * The download-mode target: an anchor with the `download` attribute, so the USER's real click
  * natively fires a browser download of the synthetic blob — no programmatic click exists anywhere
  * (the page merely prepares the href on load). Models a platform export control that downloads
- * directly. The payload is generic synthetic bytes: no marketplace content, no seller data.
+ * directly. Payloads are generic synthetic bytes: no marketplace content, no seller data.
  */
-const TARGET_DOWNLOAD_ANCHOR = `<a data-aw-target data-aw-role="primary-action" data-aw-label="export-download" download="synthetic-export.txt" href="#">내보내기</a>`;
-const DOWNLOAD_HREF_SCRIPT = `
+const TARGET_DOWNLOAD_ANCHOR = (filename: string): string =>
+  `<a data-aw-target data-aw-role="primary-action" data-aw-label="export-download" download="${filename}" href="#">내보내기</a>`;
+/** Plain synthetic text payload (as a JS string-literal expression for the fixture script). */
+const TEXT_PAYLOAD = `'sellerops synthetic fixture artifact\\n'`;
+/**
+ * Structurally OOXML-shaped payload: the ZIP local-header magic (`PK…`, all
+ * single-byte code points so the Blob's UTF-8 bytes keep the magic intact) followed by the
+ * content-types entry name — enough for the quarantine sniff, not a real workbook.
+ */
+const XLSX_PAYLOAD = `'PK\\u0003\\u0004\\u0014\\u0000\\u0000\\u0000\\u0008\\u0000[Content_Types].xml (sellerops synthetic fixture)'`;
+const DOWNLOAD_HREF_SCRIPT = (payloadLiteral: string): string => `
   (function(){
     var t = document.querySelector('a[data-aw-target][download]');
-    if (t) t.setAttribute('href', URL.createObjectURL(new Blob(['sellerops synthetic fixture artifact\\n'], { type: 'application/octet-stream' })));
+    if (t) t.setAttribute('href', URL.createObjectURL(new Blob([${payloadLiteral}], { type: 'application/octet-stream' })));
   })();`;
 
 /** A click handler that flips the page into the verified post-state. Omitted in "unchanged" mode. */
@@ -52,7 +63,7 @@ const HOOKS_SCRIPT = `
     if (t) t.setAttribute('data-aw-label', 'changed-after-highlight');
   };`;
 
-function page(body: string, opts: { surface: boolean; state: boolean; downloadHref?: boolean }): string {
+function page(body: string, opts: { surface: boolean; state: boolean; downloadPayload?: string }): string {
   const surfaceAttr = opts.surface ? ' data-aw-surface="seller-center"' : "";
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{font-family:system-ui;margin:0;padding:24px}
@@ -63,7 +74,7 @@ function page(body: string, opts: { surface: boolean; state: boolean; downloadHr
     <div id="aw-spacer"></div>
     <main>${body}</main>
     <p id="aw-result"></p>
-    <script>${opts.state ? STATE_SCRIPT : ""}${opts.downloadHref ? DOWNLOAD_HREF_SCRIPT : ""}${HOOKS_SCRIPT}</script>
+    <script>${opts.state ? STATE_SCRIPT : ""}${opts.downloadPayload ? DOWNLOAD_HREF_SCRIPT(opts.downloadPayload) : ""}${HOOKS_SCRIPT}</script>
   </body></html>`;
 }
 
@@ -85,7 +96,14 @@ export function fixtureHtml(mode: FixtureMode): string {
     case "download":
       // The user's click on the anchor natively fires a REAL synthetic-blob download (and flips the
       // post-state). Pairs with the browser driver's read-only real download detection.
-      return page(TARGET_DOWNLOAD_ANCHOR, { surface: true, state: true, downloadHref: true });
+      return page(TARGET_DOWNLOAD_ANCHOR("synthetic-export.txt"), { surface: true, state: true, downloadPayload: TEXT_PAYLOAD });
+    case "download-xlsx":
+      // Same native user-click download, but the payload is structurally OOXML-shaped and the name
+      // is xlsx — the quarantine validation happy path.
+      return page(TARGET_DOWNLOAD_ANCHOR("synthetic-export.xlsx"), { surface: true, state: true, downloadPayload: XLSX_PAYLOAD });
+    case "download-badmagic":
+      // xlsx-NAMED but structurally NOT OOXML — the quarantine validation fail-closed path.
+      return page(TARGET_DOWNLOAD_ANCHOR("synthetic-export.xlsx"), { surface: true, state: true, downloadPayload: TEXT_PAYLOAD });
     case "download-none":
       // The verified action fires NO download → exercises the DOWNLOAD_TIMEOUT fail-closed path.
       return page(TARGET_BUTTON("export-download"), { surface: true, state: true });

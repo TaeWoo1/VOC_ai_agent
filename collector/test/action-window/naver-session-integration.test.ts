@@ -12,7 +12,7 @@
  * free of the fixture's planted canaries, its page wording, and any platform token.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -34,8 +34,14 @@ import {
 } from "../../../contracts/action-window/v1/transport";
 import { ActionWindowEngine } from "../../src/action-window/engine";
 import { ActionWindowSession } from "../../src/action-window/session";
-import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY, NaverFixtureProbeDriver } from "../../src/action-window/naver-driver";
+import {
+  NAVER_CHANNEL_CODE,
+  NAVER_RUN_COPY_KEY,
+  NaverFixtureProbeDriver,
+  type NaverFixtureDriverOptions,
+} from "../../src/action-window/naver-driver";
 import { NAVER_FIXTURE_CANARIES, type NaverFixtureMode } from "../../src/action-window/naver-fixture";
+import type { QuarantineIo } from "../../src/action-window/quarantine";
 import { loadOperationRun } from "../../src/action-window/run-store";
 import { openOrResumeRunSession, type OpenedRunSession } from "../../src/action-window/run-lifecycle";
 
@@ -58,6 +64,13 @@ const FORBIDDEN_NEEDLES = [
   "리뷰 관리",
   "<button",
   "password",
+  // downstream slice: no quarantine naming, artifact extension, OOXML marker, or fs path fragment
+  "aw-quarantine",
+  ".xlsx",
+  ".html",
+  "[content_types]",
+  "downloads/",
+  tmpdir(),
 ];
 
 function expectNoNeedle(value: unknown, label: string): void {
@@ -108,10 +121,13 @@ class FeClient {
   }
 }
 
-function wire(mode: NaverFixtureMode): { fe: FeClient; session: ActionWindowSession; driver: NaverFixtureProbeDriver } {
+function wire(
+  mode: NaverFixtureMode,
+  driverOpts: NaverFixtureDriverOptions = {},
+): { fe: FeClient; session: ActionWindowSession; driver: NaverFixtureProbeDriver } {
   const channel = createLoopbackChannel();
   const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY });
-  const driver = new NaverFixtureProbeDriver(mode);
+  const driver = new NaverFixtureProbeDriver(mode, driverOpts);
   const session = new ActionWindowSession(engine, driver, channel.server);
   session.attach();
   const fe = new FeClient(channel.client, RUN_ID);
@@ -128,8 +144,8 @@ function assertSanitized(fe: FeClient, label: string): void {
   expectNoNeedle(fe.allServerFrames, label);
 }
 
-async function startRun(mode: NaverFixtureMode) {
-  const wired = wire(mode);
+async function startRun(mode: NaverFixtureMode, driverOpts: NaverFixtureDriverOptions = {}) {
+  const wired = wire(mode, driverOpts);
   wired.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
   await wired.session.whenSettled();
   return wired;
@@ -221,6 +237,103 @@ describe("NAVER fixture session E2E — fail-closed hostile shapes", () => {
   });
 });
 
+describe("NAVER fixture session E2E — REAL downstream (detect + quarantine validate)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tmpQuarantine(): string {
+    const dir = mkdtempSync(join(tmpdir(), `aw-naver-q-${randomUUID()}-`));
+    dirs.push(dir);
+    return dir;
+  }
+  function realOpts(shape: "xlsx-valid" | "wrong-extension" | "bad-magic" | "none", dir: string, io?: QuarantineIo): NaverFixtureDriverOptions {
+    return { downloadShape: shape, downstream: { real: { quarantineDir: dir, ...(io ? { io } : {}) } } };
+  }
+
+  it("happy path: real detect → quarantine validate → COMPLETED; dir empty; wire clean", async () => {
+    const dir = tmpQuarantine();
+    const { fe, session, driver } = await startRun("normal", realOpts("xlsx-valid", dir));
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 }); // observation ≠ completion
+
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+    expect(fe.view?.status).toBe("COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    expect(driver.lastQuarantine()).toEqual({ saved: true, extensionOk: true, magicOk: true, deleted: true, valid: true });
+
+    const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+    expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+    expect(readdirSync(dir)).toEqual([]); // nothing lingers in quarantine
+    assertSanitized(fe, "real-happy");
+    expectNoNeedle(fe.allServerFrames, "real-happy-dir-fragment");
+    expect(JSON.stringify(fe.allServerFrames).includes(dir)).toBe(false);
+  });
+
+  it("no download after the verified action → FAILED DOWNLOAD_TIMEOUT (validate/ingest never run)", async () => {
+    const dir = tmpQuarantine();
+    const { fe, session, driver } = await startRun("normal", realOpts("none", dir));
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("FAILED");
+    expect(fe.view?.blocker?.code).toBe("DOWNLOAD_TIMEOUT");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 0, ingest: 0 });
+    expect(readdirSync(dir)).toEqual([]);
+    assertSanitized(fe, "real-none");
+  });
+
+  it.each([["wrong-extension"], ["bad-magic"]] as const)(
+    "%s artifact → FAILED ARTIFACT_INVALID after DOWNLOAD_DETECTED; ingest never runs; dir empty",
+    async (shape) => {
+      const dir = tmpQuarantine();
+      const { fe, session, driver } = await startRun("normal", realOpts(shape, dir));
+      driver.completeUserAction(true);
+      await session.whenSettled();
+      fe.send("REQUEST_STEP_RECHECK");
+      await session.whenSettled();
+
+      expect(fe.view?.status).toBe("FAILED");
+      expect(fe.view?.blocker?.code).toBe("ARTIFACT_INVALID");
+      expect(fe.eventTypes()).toContain("DOWNLOAD_DETECTED"); // detection succeeded, validation failed
+      expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+      expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 0 });
+      expect(driver.lastQuarantine()?.valid).toBe(false);
+      expect(driver.lastQuarantine()?.deleted).toBe(true); // hostile artifact still cleaned up
+      expect(readdirSync(dir)).toEqual([]);
+      assertSanitized(fe, `real-${shape}`);
+    },
+  );
+
+  it("cleanup failure fails closed: a valid artifact whose quarantine delete fails → ARTIFACT_INVALID", async () => {
+    const dir = tmpQuarantine();
+    const lockedIo: QuarantineIo = {
+      ensureDir: (d) => mkdirSync(d, { recursive: true }),
+      writeFile: (p, b) => writeFileSync(p, b),
+      readHead: (p, n) => readFileSync(p).subarray(0, n),
+      removeFile: () => {
+        throw new Error("simulated locked quarantine file");
+      },
+      listDir: () => [],
+    };
+    const { fe, session, driver } = await startRun("normal", realOpts("xlsx-valid", dir, lockedIo));
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("FAILED");
+    expect(fe.view?.blocker?.code).toBe("ARTIFACT_INVALID"); // deleted:false ⇒ valid:false (posture lock)
+    expect(driver.lastQuarantine()).toEqual({ saved: true, extensionOk: true, magicOk: true, deleted: false, valid: false });
+    assertSanitized(fe, "real-cleanup-failure");
+  });
+});
+
 describe("NAVER fixture session — Operation Run persistence & resume (channelCode naver)", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -232,9 +345,13 @@ describe("NAVER fixture session — Operation Run persistence & resume (channelC
     return dir;
   }
 
-  function boot(dir: string): { opened: OpenedRunSession; fe: FeClient; driver: NaverFixtureProbeDriver } {
+  function boot(
+    dir: string,
+    driverOpts: NaverFixtureDriverOptions = {},
+    mode: NaverFixtureMode = "normal",
+  ): { opened: OpenedRunSession; fe: FeClient; driver: NaverFixtureProbeDriver } {
     const channel = createLoopbackChannel();
-    const driver = new NaverFixtureProbeDriver("normal");
+    const driver = new NaverFixtureProbeDriver(mode, driverOpts);
     const opened = openOrResumeRunSession(
       { dir, transport: channel.server, driver },
       { runId: RUN_ID, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
@@ -280,6 +397,78 @@ describe("NAVER fixture session — Operation Run persistence & resume (channelC
     expect(findProhibitedFields(final)).toEqual([]);
     expectNoNeedle(final, "persisted-final-record");
     assertSanitized(after.fe, "resumed-run");
+  });
+
+  it("a restart at the checkpoint resumes and completes through the REAL downstream", async () => {
+    const dir = tmpDir();
+    const quarantineDir = tmpDir();
+    const real: NaverFixtureDriverOptions = { downloadShape: "xlsx-valid", downstream: { real: { quarantineDir } } };
+
+    const before = boot(dir, real);
+    before.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+    await before.opened.session.whenSettled();
+    expect(before.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    // Process "dies" at the checkpoint; the fresh process restores, resumes, and the USER acts —
+    // the fixture produces a fresh artifact, so the real detect → quarantine chain runs post-restart.
+    const after = boot(dir, real);
+    expect(after.opened.origin).toBe("RESUMED");
+    after.fe.send("RESUME_RUN");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    after.driver.completeUserAction(true);
+    await after.opened.session.whenSettled();
+    after.fe.send("REQUEST_STEP_RECHECK");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("COMPLETED");
+    expect(after.driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    expect(after.driver.lastQuarantine()?.valid).toBe(true);
+    expect(readdirSync(quarantineDir)).toEqual([]);
+
+    const final = loadOperationRun(dir, RUN_ID)!;
+    expect(final.resumeState).toBe("TERMINAL");
+    expect(findProhibitedFields(final)).toEqual([]);
+    expectNoNeedle(final, "persisted-real-downstream-record");
+    expect(JSON.stringify(final).includes(quarantineDir)).toBe(false);
+    assertSanitized(after.fe, "resumed-real-downstream");
+  });
+
+  it("an ARTIFACT_INVALID failure resumes THROUGH the human checkpoint; a fixed artifact completes", async () => {
+    const dir = tmpDir();
+    const quarantineDir = tmpDir();
+
+    // First life: the user's action produces an xlsx-NAMED but non-OOXML artifact → fail closed.
+    const broken = boot(dir, { downloadShape: "bad-magic", downstream: { real: { quarantineDir } } });
+    broken.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+    await broken.opened.session.whenSettled();
+    broken.driver.completeUserAction(true);
+    await broken.opened.session.whenSettled();
+    broken.fe.send("REQUEST_STEP_RECHECK");
+    await broken.opened.session.whenSettled();
+    expect(broken.opened.engine.view().status).toBe("FAILED");
+    expect(broken.opened.engine.view().blocker?.code).toBe("ARTIFACT_INVALID");
+
+    const persisted = loadOperationRun(dir, RUN_ID)!;
+    expect(persisted.latestView.blocker?.code).toBe("ARTIFACT_INVALID");
+    expect(findProhibitedFields(persisted)).toEqual([]);
+    expectNoNeedle(persisted, "persisted-artifact-invalid-record");
+
+    // Second life: resume re-enters THROUGH the checkpoint (the export must happen again); this
+    // time the user's action produces a valid artifact and the run completes.
+    const fixed = boot(dir, { downloadShape: "xlsx-valid", downstream: { real: { quarantineDir } } });
+    expect(fixed.opened.origin).toBe("RESUMED");
+    fixed.fe.send("RESUME_RUN");
+    await fixed.opened.session.whenSettled();
+    expect(fixed.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    fixed.driver.completeUserAction(true);
+    await fixed.opened.session.whenSettled();
+    fixed.fe.send("REQUEST_STEP_RECHECK");
+    await fixed.opened.session.whenSettled();
+    expect(fixed.opened.engine.view().status).toBe("COMPLETED");
+    expect(readdirSync(quarantineDir)).toEqual([]);
+    assertSanitized(fixed.fe, "resumed-after-artifact-invalid");
   });
 
   it("a run failed on a reconnect-shaped surface persists only the semantic blocker code", async () => {

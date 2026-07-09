@@ -5,11 +5,16 @@
  * session-verdict classifier, the export-target readiness gate, the no-click export-layout planner,
  * and the pure export-candidate finder — over the synthetic NAVER-shaped fixture
  * (`./naver-fixture.ts`). Upstream stages (prepare/locate/highlight/observe/verify) are real
- * compositions of those seams; the downstream stages (detect/validate/ingest) remain SYNTHETIC in
- * this slice — no real download, no quarantine save, no ingestion.
+ * compositions of those seams. Downstream, `downstream.real` opts into the REAL detect + validate
+ * chain against the fixture's byte-carrying artifact: detect consumes the artifact the user's
+ * action produced (absence → the timeout shape) and reports a nonce-seeded opaque 16-hex
+ * `artifactRef` (the artifact's filename never influences the ref); validate runs the ratified
+ * quarantine posture (`./quarantine.ts`: temporary save → extension + OOXML magic sniff → DELETE,
+ * fail-closed when the delete fails). Ingest remains SYNTHETIC in this slice — no backend handoff.
  *
  * HARD BOUNDARIES (enforced by source-guard + privacy tests):
- *   - No live contact: no browser, no network, no fs — the driver only reads the fixture object.
+ *   - No live contact: no browser, no network, no direct fs — the driver reads the fixture object;
+ *     only the quarantine module (injectable io) persists the temporary validation file.
  *   - No click path: the user acts; the driver observes a REPORTED action (`completeUserAction`,
  *     test-only, mirroring `SyntheticProbeDriver`). `runExport` / any click-capable NAVER code is
  *     never imported.
@@ -25,12 +30,13 @@
  *   - 0 / many / non-sync layout at locate → engine fails `TARGET_NOT_FOUND` / `TARGET_AMBIGUOUS`
  *   - post-action target identity change → `verify` reports drift → engine fails `UI_DRIFT`
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { classifySessionVerdict, type SessionVerdict } from "../naver/session-verdict";
 import { planExportAction } from "../naver/export-classify";
 import { evaluateExportTargetReadiness, type ExportTargetReadiness } from "../naver/export-target-readiness";
 import { findExportCandidates } from "../naver/review-export";
 import { artifactRefFor } from "./artifact";
+import { quarantineValidateBytes, sweepQuarantine, type QuarantineIo, type QuarantineVerdict } from "./quarantine";
 import type {
   ArtifactValidateResult,
   DownloadDetectResult,
@@ -41,7 +47,12 @@ import type {
   VerifyResult,
 } from "./engine";
 import type { ProbeDriver } from "./session";
-import { NaverReviewExportSurfaceFixture, type NaverFixtureMode } from "./naver-fixture";
+import {
+  NaverReviewExportSurfaceFixture,
+  type NaverFixtureDownload,
+  type NaverFixtureDownloadShape,
+  type NaverFixtureMode,
+} from "./naver-fixture";
 
 /** Sanitized semantic channel code for NAVER runs (contract `SEMANTIC_CODE`, never a title). */
 export const NAVER_CHANNEL_CODE = "naver";
@@ -86,12 +97,25 @@ export interface NaverPrepareDiagnostic {
   readinessReason?: ExportTargetReadiness["reason"];
 }
 
+/** Opt-in REAL detect + quarantine-validate configuration (ingest stays synthetic). */
+export interface NaverRealDownstreamOptions {
+  /** The gitignored quarantine directory for the temporary validation save. */
+  quarantineDir: string;
+  /** Injectable quarantine filesystem (tests exercise cleanup-failure shapes through it). */
+  io?: QuarantineIo;
+  headBytes?: number;
+}
+
 export interface NaverFixtureDriverOptions {
-  /** Synthetic downstream overrides (this slice never detects/saves/ingests anything real). */
+  /** The artifact shape the user's action produces (forwarded to the fixture). */
+  downloadShape?: NaverFixtureDownloadShape;
   downstream?: {
+    /** Synthetic overrides — used only when `real` is NOT configured. */
     detect?: DownloadDetectResult;
     validate?: ArtifactValidateResult;
     ingest?: IngestResult;
+    /** Opt-in REAL detect + quarantine validate over the fixture artifact. */
+    real?: NaverRealDownstreamOptions;
   };
 }
 
@@ -103,21 +127,30 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
   private readonly detectResult: DownloadDetectResult;
   private readonly validateResult: ArtifactValidateResult;
   private readonly ingestOutcome: IngestResult;
+  private readonly real: NaverRealDownstreamOptions | undefined;
   private lastDiagnostic: NaverPrepareDiagnostic | null = null;
+  private retainedDownload: NaverFixtureDownload | null = null;
+  private lastQuarantineVerdict: QuarantineVerdict | null = null;
 
   private userActionResolve: ((observed: boolean) => void) | null = null;
   private pendingUserAction: boolean | null = null;
 
   constructor(mode: NaverFixtureMode, opts: NaverFixtureDriverOptions = {}) {
-    this.fixture = new NaverReviewExportSurfaceFixture(mode);
+    this.fixture = new NaverReviewExportSurfaceFixture(mode, opts.downloadShape ?? "xlsx-valid");
     this.detectResult = opts.downstream?.detect ?? { detected: true, artifactRef: NAVER_FIXTURE_ARTIFACT_REF };
     this.validateResult = opts.downstream?.validate ?? { valid: true };
     this.ingestOutcome = opts.downstream?.ingest ?? { ok: true, processed: 1 };
+    this.real = opts.downstream?.real;
   }
 
   /** Sanitized enums describing the last surface probe (test introspection only). */
   prepareDiagnostic(): NaverPrepareDiagnostic | null {
     return this.lastDiagnostic;
+  }
+
+  /** Sanitized booleans of the last quarantine validation (test introspection only — never wired). */
+  lastQuarantine(): QuarantineVerdict | null {
+    return this.lastQuarantineVerdict;
   }
 
   /**
@@ -191,15 +224,44 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
     return Promise.resolve({ verified: this.fixture.completionSignalPresent(), drift: false });
   }
 
-  /* ── downstream: SYNTHETIC in this slice (no real download, no quarantine save, no ingest) ── */
+  /* ── downstream: REAL detect + quarantine validate when `downstream.real` is set (opt-in);
+        synthetic results otherwise. Ingest stays SYNTHETIC in this slice — no backend handoff. ── */
+
+  /**
+   * REAL path: consume the artifact the user's action produced. Absence is the offline model of
+   * DOWNLOAD_TIMEOUT. The emitted ref is seeded from a detection-local NONCE only — the artifact's
+   * filename never influences it and never leaves the driver.
+   */
   detectDownload(): Promise<DownloadDetectResult> {
     this.downstreamCalls.detect += 1;
-    return Promise.resolve(this.detectResult);
+    if (!this.real) return Promise.resolve(this.detectResult);
+    const pending = this.fixture.takePendingDownload();
+    if (!pending) return Promise.resolve({ detected: false });
+    this.retainedDownload = pending;
+    return Promise.resolve({ detected: true, artifactRef: artifactRefFor(["aw-naver-download", randomUUID()]) });
   }
-  validateArtifact(_artifactRef: string): Promise<ArtifactValidateResult> {
+
+  /**
+   * REAL path: the ratified quarantine posture over the retained artifact — temporary save,
+   * extension + OOXML magic sniff, then DELETE; a failed delete fails closed (verdict invalid).
+   * Only the sanitized boolean crosses back to the engine.
+   */
+  async validateArtifact(artifactRef: string): Promise<ArtifactValidateResult> {
     this.downstreamCalls.validate += 1;
-    return Promise.resolve(this.validateResult);
+    if (!this.real) return this.validateResult;
+    const retained = this.retainedDownload;
+    this.retainedDownload = null;
+    if (!retained) return { valid: false };
+    const verdict = await quarantineValidateBytes(retained, {
+      dir: this.real.quarantineDir,
+      artifactRef,
+      ...(this.real.io ? { io: this.real.io } : {}),
+      ...(this.real.headBytes !== undefined ? { headBytes: this.real.headBytes } : {}),
+    });
+    this.lastQuarantineVerdict = verdict;
+    return { valid: verdict.valid };
   }
+
   ingest(_artifactRef: string): Promise<IngestResult> {
     this.downstreamCalls.ingest += 1;
     return Promise.resolve(this.ingestOutcome);
@@ -208,6 +270,9 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
   cleanup(): Promise<void> {
     this.userActionResolve = null;
     this.pendingUserAction = null;
+    this.retainedDownload = null;
+    // Crash-window hygiene: nothing this driver quarantined may outlive the run.
+    if (this.real) sweepQuarantine(this.real.quarantineDir, this.real.io ?? undefined);
     return Promise.resolve();
   }
 

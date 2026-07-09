@@ -6,8 +6,9 @@
  * the module source-guard (no click / no live / no save path), and the privacy boundary (fixture
  * canaries and platform tokens never appear in any driver output).
  */
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -19,6 +20,7 @@ import {
 import {
   NAVER_FIXTURE_CANARIES,
   NaverReviewExportSurfaceFixture,
+  type NaverFixtureDownloadShape,
   type NaverFixtureMode,
 } from "../../src/action-window/naver-fixture";
 
@@ -71,6 +73,33 @@ describe("NAVER fixture — shape & privacy of the fixture itself", () => {
         expect(html.includes(canary), `fixture[${mode}] missing canary "${canary}"`).toBe(true);
       }
     }
+  });
+
+  it("the user action produces the shaped artifact; consuming it is one-shot; re-acting re-arms", () => {
+    const fx = new NaverReviewExportSurfaceFixture("normal", "xlsx-valid");
+    expect(fx.takePendingDownload()).toBeNull(); // nothing before the action
+    fx.applyUserAction();
+    const download = fx.takePendingDownload()!;
+    expect(download.suggestedFilename()).toBe(NAVER_FIXTURE_CANARIES[2]); // the filename canary
+    const bytes = download.bytes();
+    expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]); // ZIP/OOXML magic
+    const text = new TextDecoder().decode(bytes);
+    for (const canary of NAVER_FIXTURE_CANARIES) expect(text).toContain(canary); // content canaries planted
+    expect(fx.takePendingDownload()).toBeNull(); // consumed
+    fx.applyUserAction();
+    expect(fx.takePendingDownload()).not.toBeNull(); // a retry produces a fresh artifact
+
+    const bad = new NaverReviewExportSurfaceFixture("normal", "bad-magic");
+    bad.applyUserAction();
+    expect([...bad.takePendingDownload()!.bytes().subarray(0, 4)]).not.toEqual([0x50, 0x4b, 0x03, 0x04]);
+
+    const wrongExt = new NaverReviewExportSurfaceFixture("normal", "wrong-extension");
+    wrongExt.applyUserAction();
+    expect(wrongExt.takePendingDownload()!.suggestedFilename().endsWith(".html")).toBe(true);
+
+    const none = new NaverReviewExportSurfaceFixture("normal", "none");
+    none.applyUserAction();
+    expect(none.takePendingDownload()).toBeNull();
   });
 
   it("the user action transitions state; the completion signal is absent in unchanged mode", () => {
@@ -180,7 +209,7 @@ describe("NaverFixtureProbeDriver — upstream stages", () => {
   });
 });
 
-describe("NaverFixtureProbeDriver — synthetic downstream", () => {
+describe("NaverFixtureProbeDriver — synthetic downstream (default, no `real` option)", () => {
   it("returns deterministic synthetic results and counts every call", async () => {
     const driver = new NaverFixtureProbeDriver("normal");
     expect(await driver.detectDownload()).toEqual({ detected: true, artifactRef: NAVER_FIXTURE_ARTIFACT_REF });
@@ -193,6 +222,117 @@ describe("NaverFixtureProbeDriver — synthetic downstream", () => {
   it("accepts synthetic overrides (fail-shape rehearsal without any real artifact)", async () => {
     const driver = new NaverFixtureProbeDriver("normal", { downstream: { detect: { detected: false } } });
     expect(await driver.detectDownload()).toEqual({ detected: false });
+  });
+});
+
+describe("NaverFixtureProbeDriver — REAL downstream (detect + quarantine validate)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tmpQuarantine(): string {
+    const dir = mkdtempSync(join(tmpdir(), "aw-naver-quarantine-"));
+    dirs.push(dir);
+    return dir;
+  }
+  function realDriver(shape: NaverFixtureDownloadShape, dir = tmpQuarantine()): NaverFixtureProbeDriver {
+    return new NaverFixtureProbeDriver("normal", { downloadShape: shape, downstream: { real: { quarantineDir: dir } } });
+  }
+  async function act(driver: NaverFixtureProbeDriver): Promise<void> {
+    driver.completeUserAction(true);
+    await driver.waitForUserAction();
+  }
+
+  it("detect consumes the user-produced artifact and reports a FRESH nonce ref (never the synthetic constant)", async () => {
+    const driver = realDriver("xlsx-valid");
+    await act(driver);
+    const first = await driver.detectDownload();
+    expect(first.detected).toBe(true);
+    expect(first.artifactRef).toMatch(HEX16);
+    expect(first.artifactRef).not.toBe(NAVER_FIXTURE_ARTIFACT_REF);
+
+    const other = realDriver("xlsx-valid");
+    await act(other);
+    const second = await other.detectDownload();
+    // Nonce-seeded: two detections never share a ref (nothing content- or name-derived).
+    expect(second.artifactRef).not.toBe(first.artifactRef);
+  });
+
+  it("no user action yet → nothing pending → the timeout shape ({detected:false})", async () => {
+    const driver = realDriver("xlsx-valid");
+    expect(await driver.detectDownload()).toEqual({ detected: false });
+  });
+
+  it("shape none: the action fires no artifact → {detected:false}", async () => {
+    const driver = realDriver("none");
+    await act(driver);
+    expect(await driver.detectDownload()).toEqual({ detected: false });
+  });
+
+  it("happy path: valid xlsx-shaped artifact validates, quarantine dir is empty afterwards", async () => {
+    const dir = tmpQuarantine();
+    const driver = realDriver("xlsx-valid", dir);
+    await act(driver);
+    const detected = await driver.detectDownload();
+    expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: true });
+    expect(driver.lastQuarantine()).toEqual({ saved: true, extensionOk: true, magicOk: true, deleted: true, valid: true });
+    expect(readdirSync(dir)).toEqual([]);
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 0 });
+  });
+
+  it("wrong-extension and bad-magic artifacts fail validation (still saved-then-deleted)", async () => {
+    for (const [shape, failing] of [
+      ["wrong-extension", "extensionOk"],
+      ["bad-magic", "magicOk"],
+    ] as const) {
+      const dir = tmpQuarantine();
+      const driver = realDriver(shape, dir);
+      await act(driver);
+      const detected = await driver.detectDownload();
+      expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: false });
+      expect(driver.lastQuarantine()?.[failing]).toBe(false);
+      expect(driver.lastQuarantine()?.deleted).toBe(true);
+      expect(readdirSync(dir)).toEqual([]);
+    }
+  });
+
+  it("validate without a prior successful detect fails closed", async () => {
+    const driver = realDriver("xlsx-valid");
+    await act(driver);
+    // No detectDownload() call — nothing retained.
+    expect(await driver.validateArtifact("0123456789abcdef")).toEqual({ valid: false });
+  });
+
+  it("cleanup drops any retained artifact and sweeps quarantine leftovers", async () => {
+    const dir = tmpQuarantine();
+    // A leftover from a hypothetical crashed prior run:
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(dir, "aw-quarantine-deadbeefdeadbeef.xlsx"), "leftover");
+    const driver = realDriver("xlsx-valid", dir);
+    await act(driver);
+    await driver.detectDownload(); // retained, never validated
+    await driver.cleanup();
+    expect(readdirSync(dir)).toEqual([]);
+    // After cleanup nothing is retained: validate fails closed.
+    expect(await driver.validateArtifact("0123456789abcdef")).toEqual({ valid: false });
+  });
+
+  it("real-path outputs and the quarantine verdict never leak fixture content or platform tokens", async () => {
+    for (const shape of ["xlsx-valid", "wrong-extension", "bad-magic", "none"] as const) {
+      const dir = tmpQuarantine();
+      const driver = realDriver(shape, dir);
+      const outputs: unknown[] = [];
+      outputs.push(await driver.prepareSurface(), await driver.locate());
+      await act(driver);
+      const detected = await driver.detectDownload();
+      outputs.push(detected);
+      if (detected.detected) outputs.push(await driver.validateArtifact(detected.artifactRef!));
+      outputs.push(driver.lastQuarantine());
+      const serialized = JSON.stringify(outputs);
+      expectNoNeedle(serialized, PLATFORM_NEEDLES, `real-driver[${shape}]`);
+      expectNoNeedle(serialized, FIXTURE_CONTENT_NEEDLES, `real-driver[${shape}]`);
+      expectNoNeedle(serialized, [dir, "aw-quarantine", ".xlsx", ".html", "[content_types]"], `real-driver[${shape}]`);
+    }
   });
 });
 
