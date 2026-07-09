@@ -3,21 +3,20 @@
 > Update this document before stopping in every FE task.
 
 - **Workstream:** UI/UX + Frontend
-- **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 COMMITTED and REBASED onto the
-  R2-carrying `main` (now `d08ef4f` + `ead80ac`, not pushed). FE-3 (Bridge-backed
-  `ActionWindowSource`, reconciliation with the integration workstream's R2 FE code)
-  IMPLEMENTED (this slice).**
+- **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 + FE-3 COMMITTED
+  (`9f656ca` / `5d54dee` / `39d885b`), PUSHED, and open for review as PR #223.**
 
 ## Base
 
 - **Worktree:** `/Users/taewookang/Downloads/workspace/sellerops-fe3`
 - **Branch:** `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
-  `8d61d2f` (carries Runtime R2 Bridge transport PR #218, the FE/Runtime
-  integration PRs #216–217, run persistence #219, R4 prep #220–221).
-- **Local commits:** FE-2 `d08ef4f`, FE-2.5 `ead80ac` (pre-rebase `a7a43f4` /
-  `7dd97fb`). One rebase conflict (`pages/Operations.tsx`, both lines rewrote the
-  FE-1 page) resolved in favor of our store-based version per product decision.
-- **This slice (uncommitted):** FE-3 implementation (`frontend/**`) + workstream docs.
+  `8d61d2f` (Runtime R2 Bridge transport PR #218, FE/Runtime integration PRs
+  #216–217, run persistence #219, R4 prep #220–221), then a final conflict-free
+  rebase onto `f0d57f4` (PR #222, collector/runtime-docs only) before push.
+- **Commits (current hashes):** FE-2 `9f656ca`, FE-2.5 `5d54dee`, FE-3 `39d885b`.
+  (Earlier hashes across the two rebases: `a7a43f4`/`7dd97fb` → `d08ef4f`/`ead80ac`.)
+  One rebase conflict (`pages/Operations.tsx`, both lines rewrote the FE-1 page)
+  resolved in favor of our store-based version per product decision.
 
 ## Gate check
 
@@ -26,12 +25,12 @@
 - FE branch based on the merged contract commit: ✅ (`6440cfb`)
 - FE-1 (Review Operations mock flow) merged: ✅ (PR #215)
 - FE-2 gates (FE-1 merged + contract merged) satisfied; plan entry added and
-  implemented (mock-driven, R2-independent): ✅ (committed `a7a43f4`)
+  implemented (mock-driven, R2-independent): ✅ (committed `9f656ca`)
 - FE-2.5 (adapter seam + UI resilience prep) planned and implemented: ✅ (committed
-  `ead80ac`; mock/simulated only, R2-independent)
+  `5d54dee`; mock/simulated only, R2-independent)
 - Runtime R2 (AW transport over Bridge v1) merged into `main`: ✅ (PR #218 + the
   ratified transport framing in `contracts/action-window/v1/transport.ts`)
-- FE-3 (Bridge-backed source) implemented: ✅ (this slice, uncommitted)
+- FE-3 (Bridge-backed source) implemented: ✅ (committed `39d885b`; in PR #223)
 
 ## FE-3 readiness re-audit (2026-07-09, on `main` `8d61d2f`) — READY
 
@@ -73,7 +72,7 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-3 Bridge-backed source + reconciliation (one FE slice, uncommitted):
+FE-3 Bridge-backed source + reconciliation (one FE slice, committed `39d885b`):
 
 - Rebased the branch onto `origin/main` `8d61d2f`; resolved the one conflict
   (`Operations.tsx`) in favor of our store-based IA (home + detail).
@@ -100,7 +99,7 @@ FE-3 Bridge-backed source + reconciliation (one FE slice, uncommitted):
   client-side disallow, resync hydration, no revision regression, teardown paths,
   env-off fallback. Total **245**.
 
-FE-2.5 Adapter seam + UI resilience prep (mock-driven, committed `ead80ac`):
+FE-2.5 Adapter seam + UI resilience prep (mock-driven, committed `5d54dee`):
 
 - FE-owned seam `lib/actionWindow/source.ts`: `ActionWindowSource` (+ `SourceCommand`
   with `commandId`/`expectedRevision`, `SourceUpdate`, `SourceConnection`,
@@ -126,7 +125,7 @@ FE-2.5 Adapter seam + UI resilience prep (mock-driven, committed `ead80ac`):
   h1 now "진행 중 작업"; `RECENT_LIMIT` → pure, tested `appendRecentRun` helper.
 - Tests: `simulatedSource.test.ts` (11), `homeFixtures.test.ts` +2, store +1 → 216.
 
-FE-2 Operations-agent home (mock-driven, committed `a7a43f4`):
+FE-2 Operations-agent home (mock-driven, committed `9f656ca`):
 
 - IA move: `/operations` = operations-agent home (`pages/OperationsHome.tsx`);
   FE-1 run detail moved to `/operations/current` (`App.tsx` routes); nav label stays
@@ -225,14 +224,14 @@ browser screenshot pass can be run separately with approval.
 
 ## Last meaningful commit
 
-- FE-2.5 `ead80ac` "feat: add FE-owned source seam and UI resilience prep" and FE-2
-  `d08ef4f` — both on this branch, rebased onto `main` `8d61d2f`, not pushed.
-  (Pre-rebase hashes were `7dd97fb` / `a7a43f4`.)
+- FE-3 `39d885b` "feat: reconcile FE line with R2 and add Bridge-backed source",
+  on top of FE-2.5 `5d54dee` and FE-2 `9f656ca` — all pushed to
+  `origin/feat/action-window-fe3` (PR #223).
 
 ## Current PR
 
-- None open. FE-2 + FE-2.5 committed on this branch (rebased), FE-3 implemented and
-  uncommitted — PR/merge waits for explicit approval after the FE-3 slice lands.
+- **PR #223 open** (`feat/action-window-fe3` → `main`, 3 commits:
+  `9f656ca` + `5d54dee` + `39d885b`). Merge waits for explicit approval.
 
 ## Decisions made in this workstream
 
@@ -279,11 +278,11 @@ browser screenshot pass can be run separately with approval.
 
 ## Exact steps for the next session
 
-1. On approval, stage and commit the FE-3 slice (`frontend/**` changes incl. the
-   `controller.ts` removal + the two workstream docs) as one meaningful commit.
-2. Otherwise iterate on FE-3 per review; keep consuming the shared contract only.
-3. PR/merge only when explicitly approved (branch carries rebased FE-2 `d08ef4f` +
-   FE-2.5 `ead80ac` + the FE-3 slice).
-4. Live verification (`VITE_AW_BRIDGE=1` against a running local agent) is a separate,
+1. Address PR #223 review feedback (iterate on this branch; keep consuming the
+   shared contract only). Merge only on explicit approval.
+2. Live verification (`VITE_AW_BRIDGE=1` against a running local agent) is a separate,
    environment-dependent follow-up; do not claim it from node-env tests.
-5. Do not modify the contract or canonical docs from this workstream.
+3. Candidate next FE slices after merge: connection-status callback from
+   `wsTransport` into the resilience UI; DEV boot-retry ergonomics; jsdom/RTL
+   decision.
+4. Do not modify the contract or canonical docs from this workstream.
