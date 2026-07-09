@@ -2,8 +2,10 @@
  * **Action Window R2 browser E2E (RUN_INTEGRATION=1).** The synthetic loopback E2E
  * (`session-integration.test.ts`) proven against a REAL Chromium page via `BrowserProbeDriver`, so
  * the same `ActionWindowSession` + transport drives an actual DOM: prepare → locate → highlight →
- * observe a click → verify → downstream → completed. Gated so the default offline `npm test` never
- * launches a browser.
+ * observe a click → verify → downstream → completed. Includes the R4 fixture download ladder: the
+ * user's click fires a REAL synthetic-blob download that is detected read-only (opaque ref only,
+ * artifact discarded), the no-download → DOWNLOAD_TIMEOUT path, and an operator-cancel abort drill.
+ * Gated so the default offline `npm test` never launches a browser.
  *
  *   # automated (TEST-ONLY simulated click), headless:
  *   RUN_INTEGRATION=1 npx vitest run test/action-window/session-browser.test.ts
@@ -67,6 +69,34 @@ class FeClient {
   }
 }
 
+/** Headed-only wait for the REAL human click (was 120s; raised after an operator-visibility miss). */
+const HEADED_CLICK_WAIT_MS = 240_000;
+
+/**
+ * TEST-ONLY headed ergonomics: title the window and pin a fixed, non-interactive banner so the
+ * operator can tell WHICH proof window they are looking at. `pointer-events:none` + `position:fixed`
+ * — the banner can never intercept the click or shift the target/overlay layout.
+ */
+async function announceHeadedWindow(page: Page, windowLabel: string, proofTitle: string, instruction: string): Promise<void> {
+  // eslint-disable-next-line no-console
+  console.log(`\n${"=".repeat(72)}\n[${windowLabel}] ${proofTitle}\n👉 ${instruction}\n${"=".repeat(72)}\n`);
+  await page.evaluate(
+    (args: { title: string; text: string }) => {
+      document.title = args.title;
+      const banner = document.createElement("div");
+      banner.id = "aw-headed-banner";
+      banner.textContent = args.text;
+      banner.setAttribute(
+        "style",
+        "position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#b91c1c;color:#fff;" +
+          "font:700 15px/1.5 system-ui;padding:10px 16px;text-align:center;pointer-events:none;",
+      );
+      document.body.appendChild(banner);
+    },
+    { title: `${windowLabel} — ${proofTitle}`, text: `${windowLabel} · ${proofTitle} — ${instruction}` },
+  );
+}
+
 /** Poll until `predicate` holds or the timeout elapses (used to await a real human click). */
 async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = timeoutMs;
@@ -122,6 +152,102 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
     }
   });
 
+  it("detects a REAL fixture download read-only and completes with an opaque artifact ref only", async () => {
+    const page = await browser.newPage();
+    try {
+      const channel = createLoopbackChannel();
+      const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+      const driver = new BrowserProbeDriver(page, {
+        mode: "download",
+        simulateUserAction: clickTarget, // TEST-ONLY: the user's click is what fires the download
+        observeTimeoutMs: 5000,
+        downstream: { realDetection: { timeoutMs: 10_000 } },
+      });
+      const session = new ActionWindowSession(engine, driver, channel.server);
+      session.attach();
+      const fe = new FeClient(channel.client);
+
+      fe.send("START_RUN", { channelCode: "synthetic" });
+      await session.whenSettled();
+      expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+      expect(await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), 10_000)).toBe(true);
+
+      fe.send("REQUEST_STEP_RECHECK");
+      expect(await waitFor(() => fe.view?.status === "COMPLETED", 15_000)).toBe(true);
+
+      // A REAL browser download fired and was observed read-only: opaque 16-hex ref, nothing else.
+      const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+      expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+      const wire = JSON.stringify(fe.frames);
+      for (const needle of ["synthetic-export", ".txt", "blob:", "data:", "filename", "suggested", "http://", "https://", "file://", "/Users/", "/home/", "selector"]) {
+        expect(wire).not.toContain(needle);
+      }
+      for (const f of fe.frames) expect(findProhibitedFields(f)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("fails closed with DOWNLOAD_TIMEOUT when the verified action fires no download", async () => {
+    const page = await browser.newPage();
+    try {
+      const channel = createLoopbackChannel();
+      const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+      const driver = new BrowserProbeDriver(page, {
+        mode: "download-none",
+        simulateUserAction: clickTarget,
+        observeTimeoutMs: 5000,
+        downstream: { realDetection: { timeoutMs: 1500 } },
+      });
+      const session = new ActionWindowSession(engine, driver, channel.server);
+      session.attach();
+      const fe = new FeClient(channel.client);
+
+      fe.send("START_RUN", { channelCode: "synthetic" });
+      await session.whenSettled();
+      expect(await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), 10_000)).toBe(true);
+      fe.send("REQUEST_STEP_RECHECK");
+      expect(await waitFor(() => fe.view?.status === "FAILED", 15_000)).toBe(true);
+
+      expect(fe.view?.blocker?.code).toBe("DOWNLOAD_TIMEOUT");
+      expect(fe.types()).not.toContain("DOWNLOAD_DETECTED");
+      expect(fe.types()).not.toContain("RUN_COMPLETED");
+      expect(fe.view?.progress).toEqual({ completedSteps: 2, totalSteps: 3 }); // human step verified, downstream failed
+      for (const f of fe.frames) expect(findProhibitedFields(f)).toEqual([]);
+      // Fail-closed cleanup: no overlay or observer left behind.
+      expect(await overlayMounted(page)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("abort drill: an operator cancel at the checkpoint tears down cleanly (no click ever issued)", async () => {
+    const page = await browser.newPage();
+    try {
+      const channel = createLoopbackChannel();
+      const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+      const driver = new BrowserProbeDriver(page, { mode: "download", observeTimeoutMs: 60_000, downstream: { realDetection: {} } });
+      const session = new ActionWindowSession(engine, driver, channel.server);
+      session.attach();
+      const fe = new FeClient(channel.client);
+
+      fe.send("START_RUN", { channelCode: "synthetic" });
+      await session.whenSettled();
+      expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+      expect(await overlayMounted(page)).toBe(true);
+
+      fe.send("CANCEL_RUN"); // the operator walks away — no user action ever happens
+      expect(await waitFor(() => fe.view?.status === "CANCELLED", 10_000)).toBe(true);
+      expect(fe.types()).not.toContain("USER_ACTION_OBSERVED");
+      expect(fe.types()).not.toContain("DOWNLOAD_DETECTED");
+      expect(fe.view?.allowedCommands).toEqual([]);
+      expect(await overlayMounted(page)).toBe(false);
+      expect(await page.evaluate(() => "__aw_observed__" in window)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("fails closed on an ambiguous target (no user step reached)", async () => {
     const page = await browser.newPage();
     try {
@@ -149,7 +275,7 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
     try {
       const channel = createLoopbackChannel();
       const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
-      const driver = new BrowserProbeDriver(page, { mode: "normal", observeTimeoutMs: 120_000 }); // no simulateUserAction
+      const driver = new BrowserProbeDriver(page, { mode: "normal", observeTimeoutMs: HEADED_CLICK_WAIT_MS }); // no simulateUserAction
       const session = new ActionWindowSession(engine, driver, channel.server);
       session.attach();
       const fe = new FeClient(channel.client);
@@ -160,11 +286,10 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
       expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
       expect(fe.view?.currentStep?.status).toBe("AWAITING_USER");
       expect(await overlayMounted(page)).toBe(true);
-      // eslint-disable-next-line no-console
-      console.log("\n[R2A headed] 👉 Click the highlighted target in the browser window now…\n");
+      await announceHeadedWindow(page, "window 1 of 2", "R2A NORMAL PROOF", "Click the highlighted 내보내기 button in THIS window now.");
 
       // 2) Wait for the REAL user action (no Runtime click). Observation must NOT complete the step.
-      const observed = await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), 120_000);
+      const observed = await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), HEADED_CLICK_WAIT_MS);
       expect(observed).toBe(true);
       expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
       expect(fe.types()).not.toContain("STEP_COMPLETED");
@@ -187,5 +312,43 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
     } finally {
       await page.close();
     }
-  }, 140_000);
+  }, HEADED_CLICK_WAIT_MS + 60_000);
+
+  // Headed download proof: the HUMAN's click on the highlighted control fires a REAL browser
+  // download; the Runtime only observes it (read-only), reports an opaque ref, and discards it.
+  it.skipIf(!HEADED)("headed: a REAL human click fires a real download, detected read-only", async () => {
+    const page = await browser.newPage();
+    try {
+      const channel = createLoopbackChannel();
+      const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+      const driver = new BrowserProbeDriver(page, {
+        mode: "download",
+        observeTimeoutMs: HEADED_CLICK_WAIT_MS, // no simulateUserAction — only the human clicks
+        downstream: { realDetection: { timeoutMs: 30_000 } },
+      });
+      const session = new ActionWindowSession(engine, driver, channel.server);
+      session.attach();
+      const fe = new FeClient(channel.client);
+
+      fe.send("START_RUN", { channelCode: "synthetic" });
+      await session.whenSettled();
+      expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+      expect(await overlayMounted(page)).toBe(true);
+      await announceHeadedWindow(page, "window 2 of 2", "R4 DOWNLOAD PROOF", "Click the highlighted 내보내기 control — your click fires the download.");
+
+      expect(await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), HEADED_CLICK_WAIT_MS)).toBe(true);
+      expect(fe.view?.status).toBe("WAITING_FOR_HUMAN"); // observation ≠ completion
+
+      fe.send("REQUEST_STEP_RECHECK");
+      expect(await waitFor(() => fe.view?.status === "COMPLETED", 40_000)).toBe(true);
+      const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+      expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+      const wire = JSON.stringify(fe.frames);
+      for (const needle of ["synthetic-export", ".txt", "blob:", "data:", "filename", "suggested", "http://", "file://", "/Users/"]) expect(wire).not.toContain(needle);
+      for (const f of fe.frames) expect(findProhibitedFields(f)).toEqual([]);
+      expect(await overlayMounted(page)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  }, HEADED_CLICK_WAIT_MS + 100_000);
 });

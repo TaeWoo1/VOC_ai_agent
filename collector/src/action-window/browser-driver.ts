@@ -7,7 +7,9 @@
  * (which clicks from TEST code) exactly as R1's harness did; in headed/production use it is undefined
  * and the driver only observes.
  */
-import type { Page } from "playwright";
+import { randomUUID } from "node:crypto";
+import type { Download, Page } from "playwright";
+import { artifactRefFor } from "./artifact";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, VerifyResult } from "./engine";
 import { SYNTHETIC_ARTIFACT_REF, type ProbeDriver } from "./session";
 import { STEP_PLAN, TOTAL_STEPS } from "./stages";
@@ -24,20 +26,26 @@ export interface BrowserProbeOptions {
   simulateUserAction?: (page: Page) => Promise<void>;
   observeTimeoutMs?: number;
   /**
-   * SYNTHETIC downstream results for the fixture page (which produces no real download). Real
-   * read-only download detection / artifact validation / ingestion arrive with the channel-adapter
-   * slice; overriding these lets fixtures exercise the downstream fail-closed paths.
+   * Downstream behavior against the fixture page. By default every downstream probe returns a
+   * SYNTHETIC deterministic result. `realDetection` switches `detectDownload()` to REAL read-only
+   * observation of the browser's download event (armed alongside the click observer, raced against
+   * `timeoutMs`): the download is observed, reported as a nonce-seeded opaque ref (no filename/
+   * path/URL influences the ref), and immediately DISCARDED — never saved, read, or ingested.
+   * Artifact validation/ingestion stay synthetic in this slice.
    */
   downstream?: {
     detect?: DownloadDetectResult;
     validate?: ArtifactValidateResult;
     ingest?: IngestResult;
+    realDetection?: { timeoutMs?: number };
   };
 }
 
 export class BrowserProbeDriver implements ProbeDriver {
   private readonly page: Page;
   private readonly opts: BrowserProbeOptions;
+  /** Armed BEFORE the user acts (a download can fire the instant they click); resolved lazily. */
+  private pendingDownload: Promise<Download | null> | null = null;
 
   constructor(page: Page, opts: BrowserProbeOptions) {
     this.page = page;
@@ -66,6 +74,11 @@ export class BrowserProbeDriver implements ProbeDriver {
   }
 
   armObserve(): Promise<void> {
+    if (this.opts.downstream?.realDetection && !this.pendingDownload) {
+      // Listen from the moment the user may act — a later subscription could miss a fast download.
+      // timeout: 0 disables Playwright's own timeout; detectDownload() races the deadline instead.
+      this.pendingDownload = this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
+    }
     return armObserver(this.page);
   }
 
@@ -78,9 +91,30 @@ export class BrowserProbeDriver implements ProbeDriver {
     return verifyTransition(this.page, { expectedSig });
   }
 
-  /* Synthetic downstream (fixture pages fire no real download; see BrowserProbeOptions.downstream). */
-  detectDownload(): Promise<DownloadDetectResult> {
-    return Promise.resolve(this.opts.downstream?.detect ?? { detected: true, artifactRef: SYNTHETIC_ARTIFACT_REF });
+  /* Downstream (synthetic by default; real read-only detection via downstream.realDetection). */
+  async detectDownload(): Promise<DownloadDetectResult> {
+    const real = this.opts.downstream?.realDetection;
+    if (!real) {
+      return this.opts.downstream?.detect ?? { detected: true, artifactRef: SYNTHETIC_ARTIFACT_REF };
+    }
+    const timeoutMs = real.timeoutMs ?? 5_000;
+    const armed = this.pendingDownload ?? this.page.waitForEvent("download", { timeout: timeoutMs }).catch(() => null);
+    let timer: NodeJS.Timeout | undefined;
+    const download = await Promise.race([
+      armed,
+      new Promise<null>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(null), timeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!download) return { detected: false };
+    // Observed and DISCARDED. The ref is seeded from a detection-local NONCE only — no filename,
+    // path, or URL from the download object ever influences the emitted ref or leaves this scope —
+    // and cancel() drops the file: nothing is saved, read, or ingested in this slice.
+    const artifactRef = artifactRefFor(["aw-browser-download", randomUUID()]);
+    await download.cancel().catch(() => {});
+    this.pendingDownload = null;
+    return { detected: true, artifactRef };
   }
   validateArtifact(_artifactRef: string): Promise<ArtifactValidateResult> {
     return Promise.resolve(this.opts.downstream?.validate ?? { valid: true });
@@ -90,6 +124,7 @@ export class BrowserProbeDriver implements ProbeDriver {
   }
 
   async cleanup(): Promise<void> {
+    this.pendingDownload = null; // the armed listener promise carries its own catch; just drop it
     await unmountOverlay(this.page).catch(() => {});
     await disarmObserver(this.page).catch(() => {});
   }

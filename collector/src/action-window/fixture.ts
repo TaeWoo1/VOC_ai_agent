@@ -14,10 +14,25 @@ export type FixtureMode =
   | "multi-candidate"
   | "replaced"
   | "unchanged"
-  | "session-required";
+  | "session-required"
+  | "download"
+  | "download-none";
 
 const TARGET_BUTTON = (label: string, extra = ""): string =>
   `<button data-aw-target data-aw-role="primary-action" data-aw-label="${label}" ${extra}>내보내기</button>`;
+
+/**
+ * The download-mode target: an anchor with the `download` attribute, so the USER's real click
+ * natively fires a browser download of the synthetic blob — no programmatic click exists anywhere
+ * (the page merely prepares the href on load). Models a platform export control that downloads
+ * directly. The payload is generic synthetic bytes: no marketplace content, no seller data.
+ */
+const TARGET_DOWNLOAD_ANCHOR = `<a data-aw-target data-aw-role="primary-action" data-aw-label="export-download" download="synthetic-export.txt" href="#">내보내기</a>`;
+const DOWNLOAD_HREF_SCRIPT = `
+  (function(){
+    var t = document.querySelector('a[data-aw-target][download]');
+    if (t) t.setAttribute('href', URL.createObjectURL(new Blob(['sellerops synthetic fixture artifact\\n'], { type: 'application/octet-stream' })));
+  })();`;
 
 /** A click handler that flips the page into the verified post-state. Omitted in "unchanged" mode. */
 const STATE_SCRIPT = `
@@ -37,18 +52,18 @@ const HOOKS_SCRIPT = `
     if (t) t.setAttribute('data-aw-label', 'changed-after-highlight');
   };`;
 
-function page(body: string, opts: { surface: boolean; state: boolean }): string {
+function page(body: string, opts: { surface: boolean; state: boolean; downloadHref?: boolean }): string {
   const surfaceAttr = opts.surface ? ' data-aw-surface="seller-center"' : "";
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     body{font-family:system-ui;margin:0;padding:24px}
     #aw-spacer{height:40px;transition:none}
-    button{font-size:16px;padding:10px 18px}
+    button,a[data-aw-target]{font-size:16px;padding:10px 18px;display:inline-block}
   </style></head><body${surfaceAttr}>
     <h1>운영 작업</h1>
     <div id="aw-spacer"></div>
     <main>${body}</main>
     <p id="aw-result"></p>
-    <script>${opts.state ? STATE_SCRIPT : ""}${HOOKS_SCRIPT}</script>
+    <script>${opts.state ? STATE_SCRIPT : ""}${opts.downloadHref ? DOWNLOAD_HREF_SCRIPT : ""}${HOOKS_SCRIPT}</script>
   </body></html>`;
 }
 
@@ -67,5 +82,12 @@ export function fixtureHtml(mode: FixtureMode): string {
     case "session-required":
       // No surface marker → the Runtime treats this as an invalid/unsupported surface.
       return page(`<section id="login-gate"><p>로그인이 필요합니다.</p></section>`, { surface: false, state: false });
+    case "download":
+      // The user's click on the anchor natively fires a REAL synthetic-blob download (and flips the
+      // post-state). Pairs with the browser driver's read-only real download detection.
+      return page(TARGET_DOWNLOAD_ANCHOR, { surface: true, state: true, downloadHref: true });
+    case "download-none":
+      // The verified action fires NO download → exercises the DOWNLOAD_TIMEOUT fail-closed path.
+      return page(TARGET_BUTTON("export-download"), { surface: true, state: true });
   }
 }
