@@ -6,7 +6,7 @@ import {
   dispatchOperationsCommand,
   loadRunScenario,
 } from "../lib/actionWindow/operationsStore";
-import { useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
+import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
@@ -36,7 +36,9 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
  *  that renders command controls from `allowedCommands`. State is shared with the
  *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
 export function Operations() {
-  const { run, runScenario, connection, simulation, simulationRemaining } = useOperationsStore();
+  useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
+  const { run, runScenario, connection, sourceMode, simulation, simulationRemaining } =
+    useOperationsStore();
   const note = useOperationsNote();
   const connected = connection === "connected";
 
@@ -62,8 +64,9 @@ export function Operations() {
         )}
       </header>
 
-      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build). */}
-      {isFixturePreviewEnabled() ? (
+      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
+          hidden while a live Bridge source is active (fixture world only). */}
+      {isFixturePreviewEnabled() && sourceMode === "fixture" ? (
         <nav
           aria-label="데모 시나리오 (개발용)"
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"

@@ -1,9 +1,10 @@
-import { useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   getOperationsState,
   subscribeOperationsState,
   type OperationsState,
 } from "../lib/actionWindow/operationsStore";
+import { connectBridgeIfEnabled } from "../lib/actionWindow/bridgeSource";
 
 /** React binding for the shared Action Window mock store (home + run detail). */
 export function useOperationsStore(): OperationsState {
@@ -17,4 +18,13 @@ export function useOperationsNote(): string {
   const state = useOperationsStore();
   const mountNoteId = useRef(state.noteId);
   return state.noteId === mountNoteId.current ? "" : state.note;
+}
+
+/** FE-3: attempt the opt-in live Bridge connection once per app session. A
+ *  no-op unless `VITE_AW_BRIDGE=1` in DEV and a live agent session resolves —
+ *  otherwise the fixture source stays (honest fallback). */
+export function useBridgeBoot(): void {
+  useEffect(() => {
+    void connectBridgeIfEnabled();
+  }, []);
 }

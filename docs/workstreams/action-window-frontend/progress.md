@@ -3,19 +3,21 @@
 > Update this document before stopping in every FE task.
 
 - **Workstream:** UI/UX + Frontend
-- **Status:** **FE-1 MERGED (PR #215, merge `6440cfb`). FE-2 COMMITTED (`a7a43f4`, on
-  this branch, not pushed). FE-2.5 (adapter seam + UI resilience prep) IMPLEMENTED
-  (this slice). FE-3 audited on `main` → BLOCKED on Runtime R2 (real Bridge
-  transport). FE-3 NOT started.**
+- **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 COMMITTED and REBASED onto the
+  R2-carrying `main` (now `d08ef4f` + `ead80ac`, not pushed). FE-3 (Bridge-backed
+  `ActionWindowSource`, reconciliation with the integration workstream's R2 FE code)
+  IMPLEMENTED (this slice).**
 
 ## Base
 
 - **Worktree:** `/Users/taewookang/Downloads/workspace/sellerops-fe3`
-- **Branch:** `feat/action-window-fe3` (FE-3 readiness audit + FE-2 implementation).
-- **Base / HEAD SHA:** `6440cfb9d88442bfa9f71ab5cf480198d009a4c2` (`origin/main`; carries
-  FE-1 PR #215, Runtime R1 PR #213, and the merged contract).
-- **This slice:** FE-2.5 implementation (`frontend/**`) + workstream docs. FE-2
-  already committed as `a7a43f4`. No FE-3 code (gated).
+- **Branch:** `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
+  `8d61d2f` (carries Runtime R2 Bridge transport PR #218, the FE/Runtime
+  integration PRs #216–217, run persistence #219, R4 prep #220–221).
+- **Local commits:** FE-2 `d08ef4f`, FE-2.5 `ead80ac` (pre-rebase `a7a43f4` /
+  `7dd97fb`). One rebase conflict (`pages/Operations.tsx`, both lines rewrote the
+  FE-1 page) resolved in favor of our store-based version per product decision.
+- **This slice (uncommitted):** FE-3 implementation (`frontend/**`) + workstream docs.
 
 ## Gate check
 
@@ -25,10 +27,24 @@
 - FE-1 (Review Operations mock flow) merged: ✅ (PR #215)
 - FE-2 gates (FE-1 merged + contract merged) satisfied; plan entry added and
   implemented (mock-driven, R2-independent): ✅ (committed `a7a43f4`)
-- FE-2.5 (adapter seam + UI resilience prep) planned and implemented: ✅ (this slice;
-  mock/simulated only, R2-independent)
+- FE-2.5 (adapter seam + UI resilience prep) planned and implemented: ✅ (committed
+  `ead80ac`; mock/simulated only, R2-independent)
+- Runtime R2 (AW transport over Bridge v1) merged into `main`: ✅ (PR #218 + the
+  ratified transport framing in `contracts/action-window/v1/transport.ts`)
+- FE-3 (Bridge-backed source) implemented: ✅ (this slice, uncommitted)
 
-## FE-3 readiness audit (2026-07-09, on `main` `6440cfb`)
+## FE-3 readiness re-audit (2026-07-09, on `main` `8d61d2f`) — READY
+
+All three seams now exist, verified from `frontend/**` on `main` (FE-side consumers):
+**event delivery** (`aw_event`/`aw_view` frames over `/bridge/ws`, nested opaque in
+Bridge v1), **command transport** (`CommandEnvelope` via `aw_command`, acked by
+`aw_command_result`), **reconnect restore** (`aw_resync`/`aw_resync_result` — replay
+from sequence 0, idempotent dedupe; snapshot-equivalent). NOTE: the integration
+workstream (PRs #216–218) also landed FE code (`wsTransport`, `bridgeAdapter`, a
+`controller.ts` hook, edits to the old FE-1 `Operations.tsx`) **without updating this
+workstream's docs** — reconciled in this slice per product decisions (see below).
+
+## Original FE-3 readiness audit (2026-07-09, on `main` `6440cfb`) — superseded
 
 **Verdict: NOT READY — FE-3 blocked on Runtime R2 (real Bridge transport).** Runtime R1
 (PR #213, `collector/src/action-window/*`) proves a synthetic loop in-process only; its own
@@ -57,7 +73,34 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-2.5 Adapter seam + UI resilience prep (mock-driven, one FE slice):
+FE-3 Bridge-backed source + reconciliation (one FE slice, uncommitted):
+
+- Rebased the branch onto `origin/main` `8d61d2f`; resolved the one conflict
+  (`Operations.tsx`) in favor of our store-based IA (home + detail).
+- **Kept from main (untouched):** `wsTransport.ts` (+test), `bridgeAdapter.ts`
+  (+test), the expanded `devMode.ts` boundary (`AdapterMode`, `isBridgeModeEnabled`
+  `VITE_AW_BRIDGE=1` DEV-only opt-in, `resolveBridgeSession` honest fallback) and its
+  test, `bridgeClient.ts` tweak, contract transport re-export.
+- **Retired from main:** `controller.ts` (orphaned `useActionWindowController` — its
+  role is our `operationsStore`; two stale doc comments in `devMode.ts` updated).
+- **New `lib/actionWindow/bridgeSource.ts`:** `createBridgeSource(client)` — thin
+  translation from the R2 `BridgeClient` to the FE-2.5 `ActionWindowSource` seam
+  (client owns envelopes/dedupe/highest-revision/resync; frames re-sequenced +1
+  locally so the store's rules see a clean stream). `connectBridgeIfEnabled()` boots
+  the live connection once per session (DEV + env opt-in + live session, else
+  fixture stays — honest fallback).
+- **Store:** `sourceMode: "fixture" | "bridge"`, `adoptBridgeSource` (state-first so
+  synchronous loopback frames land on the fresh bridge world), bridge teardown on
+  any fixture load / simulation start / reset.
+- **Pages:** `useBridgeBoot()` on home + detail; DEV fixture/simulation panels hidden
+  while a live Bridge source is active (fixture world only).
+- **Tests:** `bridgeSource.test.ts` (10, node-env) driving the full FE stack below
+  the seam over the contract's `createLoopbackChannel` — resync-on-adopt, view flow,
+  real envelopes with `expectedRevision`, safe rejection notes, no view mutation,
+  client-side disallow, resync hydration, no revision regression, teardown paths,
+  env-off fallback. Total **245**.
+
+FE-2.5 Adapter seam + UI resilience prep (mock-driven, committed `ead80ac`):
 
 - FE-owned seam `lib/actionWindow/source.ts`: `ActionWindowSource` (+ `SourceCommand`
   with `commandId`/`expectedRevision`, `SourceUpdate`, `SourceConnection`,
@@ -116,20 +159,15 @@ FE-1 Review Operations mock flow (merged earlier as PR #215):
 
 ## In progress
 
-- None. FE-2.5 implemented (this slice).
+- None. FE-3 implemented (this slice); FE-2/FE-2.5 committed and rebased.
 
 ## Next single task
 
-**Land FE-2.5**: review and commit this slice as one commit. Then FE-3 stays gated as
-below — when Runtime R2 lands, FE-3 implements a Bridge-backed `ActionWindowSource`;
-the store, resilience rules, UI states, and tests from this slice carry over unchanged.
-
-**FE-3 stays blocked on Runtime R2.** Do not start FE-3 until R2 lands the nested Action
-Window transport over Bridge v1 (AW event delivery + AW command message + AW reconnect
-snapshot). When R2 is merged, re-run the readiness audit; if the three transport seams are
-present, implement FE-3 (real Bridge-backed adapter, mock/real boundary, duplicate +
-stale-update protection, `commandId` + `expectedRevision` dispatch, reconnect snapshot
-handling, safe offline/error state) while preserving the dev fixture mode.
+**Land FE-3**: review and commit this slice as one commit. The branch then carries the
+complete FE line (FE-2 home IA + FE-2.5 seam/resilience + FE-3 Bridge source) rebased on
+the R2 `main` — ready for a PR **only on explicit approval**. Follow-ups after landing:
+verify against a live local agent (`VITE_AW_BRIDGE=1` + running agent — a real
+environment, out of node-env test reach), and revisit jsdom/RTL.
 
 ## Files owned by this workstream
 
@@ -162,15 +200,16 @@ handling, safe offline/error state) while preserving the dev fixture mode.
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
-## Validation results (FE-2.5 session, 2026-07-09)
+## Validation results (FE-3 session, 2026-07-09)
 
-- `frontend typecheck`: passed.
-- `frontend tests`: **216 passed** (202 FE-2-era + `simulatedSource.test.ts` 11 +
-  `homeFixtures.test.ts` +2 + `operationsStore.test.ts` +1).
+- `frontend typecheck`: passed (post-rebase, incl. main's transport/adapter code).
+- `frontend tests`: **245 passed** (216 FE-2.5-era + 19 from main's integration tests
+  [`wsTransport`, `bridgeAdapter`, expanded `devMode`] + `bridgeSource.test.ts` 10).
 - `frontend build`: passed; production bundle checked — dev/simulation code absent
   (grep "데모 미리보기" / "시뮬레이션" / "sim-duplicate" / "수신 안정성" → 0 each);
-  production resilience + home copy present ("연결이 끊겼어요", "운영 에이전트" → 1
-  each).
+  resilience + home copy present ("연결이 끊겼어요", "운영 에이전트" → 1 each);
+  transport code present as production-intended (`aw_resync` → 1, same as `main`);
+  the `VITE_AW_BRIDGE` check compiles away in production (grep → 0).
 - `git diff --check`: clean.
 - No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
   contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration.
@@ -186,14 +225,14 @@ browser screenshot pass can be run separately with approval.
 
 ## Last meaningful commit
 
-- FE-2 `a7a43f4` "feat: add operations-agent home for FE-2" — on this branch, not
-  pushed. (FE-1 `5ccf4ae` merged into `main` via PR #215, merge `6440cfb`.)
+- FE-2.5 `ead80ac` "feat: add FE-owned source seam and UI resilience prep" and FE-2
+  `d08ef4f` — both on this branch, rebased onto `main` `8d61d2f`, not pushed.
+  (Pre-rebase hashes were `7dd97fb` / `a7a43f4`.)
 
 ## Current PR
 
-- None open. FE-1 (PR #215) merged. FE-2 committed on this branch (`a7a43f4`), not
-  pushed — PR/merge waits until the next large slice (FE-2.5) is complete and
-  explicitly approved. FE-3 not started (blocked on R2).
+- None open. FE-2 + FE-2.5 committed on this branch (rebased), FE-3 implemented and
+  uncommitted — PR/merge waits for explicit approval after the FE-3 slice lands.
 
 ## Decisions made in this workstream
 
@@ -217,6 +256,14 @@ browser screenshot pass can be run separately with approval.
   the store never imports the simulation module — the DEV panel constructs the
   simulated source and hands it in (`SteppableSource`), keeping simulation code out
   of the production bundle.
+- FE-3 reconciliation decisions (2026-07-09, product-owner): rebase the unpushed
+  branch onto the R2 `main`; keep our IA (home + detail) and single state owner
+  (`operationsStore` + `ActionWindowSource`); keep main's transport stack
+  (`wsTransport`/`bridgeAdapter`) untouched; retire main's duplicate `controller.ts`;
+  FE-3 = a thin Bridge-backed source (`bridgeSource.ts`) only; `fixtureSource`
+  stays the default/dev-safe source; DEV fixture + simulation panels preserved
+  (hidden while a live Bridge source is active); env-driven switch reuses main's
+  `isBridgeModeEnabled` (`VITE_AW_BRIDGE=1`, DEV-only, honest fallback).
 
 ## Open FE-only questions
 
@@ -232,10 +279,11 @@ browser screenshot pass can be run separately with approval.
 
 ## Exact steps for the next session
 
-1. On approval, stage and commit the FE-2.5 slice (`frontend/**` changes + the two
-   workstream docs) as one meaningful commit.
-2. Otherwise iterate on FE-2.5 per review; keep consuming the shared contract only.
-3. PR/merge only when explicitly approved (branch carries FE-2 `a7a43f4` + FE-2.5).
-4. Do not modify the contract or canonical docs from this workstream; FE-3 stays blocked
-   on Runtime R2 (re-run the readiness audit when R2 merges; FE-3 = Bridge-backed
-   `ActionWindowSource` implementation only).
+1. On approval, stage and commit the FE-3 slice (`frontend/**` changes incl. the
+   `controller.ts` removal + the two workstream docs) as one meaningful commit.
+2. Otherwise iterate on FE-3 per review; keep consuming the shared contract only.
+3. PR/merge only when explicitly approved (branch carries rebased FE-2 `d08ef4f` +
+   FE-2.5 `ead80ac` + the FE-3 slice).
+4. Live verification (`VITE_AW_BRIDGE=1` against a running local agent) is a separate,
+   environment-dependent follow-up; do not claim it from node-env tests.
+5. Do not modify the contract or canonical docs from this workstream.

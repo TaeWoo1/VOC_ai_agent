@@ -256,8 +256,35 @@ and tests carry over unchanged.
    whole slice once, on approval. PR/merge only after the full slice is complete and
    explicitly approved.
 
-## FE-3 — Real Bridge adapter (future)
+## FE-3 — Bridge-backed source + reconciliation (DONE)
 
-Not implemented. Replace the FE-1 mock adapter with a Bridge-backed source once Runtime
-emits the contract View Model over the Local Agent Bridge; FE contract consumption stays
-identical, only the adapter source changes.
+Runtime R2 landed on `main` (Bridge transport PR #218, ratified framing in
+`contracts/action-window/v1/transport.ts`), and the integration workstream also landed
+FE-side code (PRs #216–217: `wsTransport.ts`, `bridgeAdapter.ts`, a `controller.ts`
+hook, edits to the old FE-1 `Operations.tsx`) without updating this workstream's docs.
+FE-3 therefore became a **reconciliation slice** (product-owner decisions, 2026-07-09):
+
+- **Rebase** the unpushed branch onto the R2 `main` (`8d61d2f`); the one conflict
+  (`Operations.tsx`) resolved in favor of our store-based IA.
+- **Keep from main:** the transport stack — `wsTransport.ts` (Bridge-WS, opaque
+  `{type:"aw", payload}` frames, `aw_resync` reconnect) and `bridgeAdapter.ts`
+  (real `CommandEnvelope`s, event dedupe/ordering, highest-revision views) — plus the
+  `devMode.ts` boundary (`VITE_AW_BRIDGE=1`, DEV-only, honest fallback).
+- **Keep from our branch:** the IA (home `/operations` + detail `/operations/current`),
+  the single state owner (`operationsStore` + `ActionWindowSource` seam), the
+  resilience rules, offline/reconnecting UI, DEV fixture + simulation panels.
+- **Retire from main:** `controller.ts` (duplicated the store's role; orphaned after
+  the rebase).
+- **New:** `bridgeSource.ts` — a thin `ActionWindowSource` over the R2 `BridgeClient`
+  (frames re-sequenced locally; client owns all wire concerns), plus
+  `connectBridgeIfEnabled()` (once-per-session opt-in boot; fixture source stays
+  unless a live agent session actually resolves) and `useBridgeBoot()` on both pages.
+  DEV panels hide while a live Bridge source is active (`sourceMode`).
+- **Tests:** `bridgeSource.test.ts` (10, node-env) over the contract's
+  `createLoopbackChannel` — the full FE stack below the seam, no real socket.
+
+Acceptance: FE-1/FE-2/FE-2.5 mock behavior unchanged under the default fixture source
+(all prior tests pass unmodified); no new protocol types; commands still render only
+from `allowedCommands`; recheck never completes locally (Runtime verifies); production
+bundle carries no DEV/simulation code. Live-agent verification (`VITE_AW_BRIDGE=1`
+against a running local agent) is a separate environment-dependent follow-up.

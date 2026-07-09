@@ -3,7 +3,7 @@ import {
   dispatchOperationsCommand,
   loadHomeScenario,
 } from "../lib/actionWindow/operationsStore";
-import { useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
+import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
@@ -26,7 +26,8 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
  * via the operations store.
  */
 export function OperationsHome() {
-  const { run, recentRuns, connection, homeScenario, simulation, simulationRemaining } =
+  useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
+  const { run, recentRuns, connection, sourceMode, homeScenario, simulation, simulationRemaining } =
     useOperationsStore();
   const note = useOperationsNote();
   const connected = connection === "connected";
@@ -42,8 +43,9 @@ export function OperationsHome() {
         </p>
       </header>
 
-      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build). */}
-      {isFixturePreviewEnabled() ? (
+      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
+          hidden while a live Bridge source is active (fixture world only). */}
+      {isFixturePreviewEnabled() && sourceMode === "fixture" ? (
         <nav
           aria-label="데모 시나리오 (개발용)"
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"

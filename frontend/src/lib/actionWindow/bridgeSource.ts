@@ -1,0 +1,102 @@
+// FE-3 — Bridge-backed ActionWindowSource.
+//
+// Thin translation between the R2 `BridgeClient` (bridgeAdapter/wsTransport,
+// landed via the integration workstream, PRs #216–218) and the FE-2.5 source
+// seam. The client owns every wire concern — real `CommandEnvelope`s with
+// commandId/expectedRevision/runId, event dedupe + ordering, highest-revision
+// view adoption, resync — so this file only reframes its state changes as
+// `SourceUpdate` frames. The store, its resilience rules, the UI states, and
+// the tests are identical across the fixture, simulated, and Bridge sources.
+
+import { createBridgeClient, type BridgeClient } from "./bridgeAdapter";
+import { resolveBridgeSession } from "./devMode";
+import { adoptBridgeSource } from "./operationsStore";
+import type { ActionWindowSource, SourceCommand, SourceUpdate } from "./source";
+
+export interface BridgeBackedSource extends ActionWindowSource {
+  /** Detach from the client and close it (the WS session is closed separately). */
+  close(): void;
+}
+
+export function createBridgeSource(client: BridgeClient): BridgeBackedSource {
+  let sequence = 0;
+  let lastNote = "";
+  let listener: ((update: SourceUpdate) => void) | null = null;
+  let detach: (() => void) | null = null;
+
+  // The client already dedupes/orders at the wire level and only adopts equal-
+  // or-higher-revision views, so frames here are locally sequenced (+1 each) —
+  // the store's transport rules see a clean stream and its revision guard is a
+  // second belt, never the primary defense.
+  function push(): void {
+    if (!listener) return;
+    const note = client.getNote();
+    const noteChanged = note !== "" && note !== lastNote;
+    lastNote = note;
+    listener({
+      kind: "view",
+      sequence: ++sequence,
+      run: client.getView(),
+      ...(noteChanged ? { note } : {}),
+    });
+  }
+
+  return {
+    subscribe(next) {
+      listener = next;
+      detach = client.subscribe(push);
+      client.connect(); // attach to the transport + hydrate via resync
+      return () => {
+        if (listener === next) listener = null;
+        detach?.();
+        detach = null;
+      };
+    },
+    dispatch(command: SourceCommand) {
+      // The client mints the real CommandEnvelope; the seam's FE-owned
+      // commandId/expectedRevision fields are only advisory for mock sources.
+      client.send(command.type);
+    },
+    requestSnapshot() {
+      client.resync();
+    },
+    close() {
+      detach?.();
+      detach = null;
+      client.close();
+    },
+  };
+}
+
+// ── Boot: opt-in live connection, honest fallback ────────────────────────────
+
+let bootAttempted = false;
+
+/**
+ * Try once per app session to go live over the Local Agent Bridge. Resolves
+ * false — leaving the fixture source untouched — unless bridge mode is enabled
+ * (DEV + `VITE_AW_BRIDGE=1`) AND a live agent session is actually established
+ * (`resolveBridgeSession` → non-null). This is R2's honest-fallback rule: the
+ * screen degrades to the contract-backed demo, never to a broken live view.
+ */
+export async function connectBridgeIfEnabled(): Promise<boolean> {
+  if (bootAttempted) return false;
+  bootAttempted = true;
+  const session = await resolveBridgeSession();
+  if (!session) return false;
+  const client = createBridgeClient(session.transport, {
+    runId: session.runId,
+    channelCode: session.channelCode,
+  });
+  const source = createBridgeSource(client);
+  adoptBridgeSource(source, () => {
+    source.close();
+    session.close();
+  });
+  return true;
+}
+
+/** Test-only: allow another boot attempt. */
+export function resetBridgeBootForTests(): void {
+  bootAttempted = false;
+}
