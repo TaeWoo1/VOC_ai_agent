@@ -1,0 +1,304 @@
+/**
+ * **NAVER pilot adapter — session E2E over the fixture driver (R4, D-021, fixture-only).** Runs the
+ * real `ActionWindowSession` + engine with `channelCode: "naver"` and the `NaverFixtureProbeDriver`
+ * through the loopback transport. Offline and hermetic: no browser, no Bridge server, no backend,
+ * no live NAVER contact anywhere.
+ *
+ * Proves per fixture mode: the happy loop completes; every hostile shape fails closed with the
+ * expected already-reserved code BEFORE the human checkpoint (or via drift after it); an observed
+ * action without the verified transition never completes; the SYNTHETIC downstream never runs
+ * unless verification succeeded; Operation Run persistence/restore carries `channelCode: "naver"`;
+ * and the privacy boundary holds — every wire frame and persisted record is contract-sanitized and
+ * free of the fixture's planted canaries, its page wording, and any platform token.
+ */
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+  ACTION_WINDOW_PROTOCOL_VERSION,
+  findProhibitedFields,
+  validateEventEnvelope,
+  validateRunView,
+  type ActionWindowRunView,
+  type BlockerCode,
+  type CommandEnvelope,
+  type CommandType,
+  type EventEnvelope,
+} from "../../../contracts/action-window/v1/index";
+import {
+  createLoopbackChannel,
+  type AwClientTransport,
+  type AwServerFrame,
+} from "../../../contracts/action-window/v1/transport";
+import { ActionWindowEngine } from "../../src/action-window/engine";
+import { ActionWindowSession } from "../../src/action-window/session";
+import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY, NaverFixtureProbeDriver } from "../../src/action-window/naver-driver";
+import { NAVER_FIXTURE_CANARIES, type NaverFixtureMode } from "../../src/action-window/naver-fixture";
+import { loadOperationRun } from "../../src/action-window/run-store";
+import { openOrResumeRunSession, type OpenedRunSession } from "../../src/action-window/run-lifecycle";
+
+const RUN_ID = "run_naver_fx";
+
+/** Nothing NAVER-real and nothing fixture-raw may ever cross the wire or reach the store. */
+const FORBIDDEN_NEEDLES = [
+  ...NAVER_FIXTURE_CANARIES,
+  "smartstore",
+  "스마트스토어",
+  "naver.com",
+  "sell.naver",
+  "네이버",
+  "storefarm",
+  "엑셀",
+  "다운로드",
+  "내려받기",
+  "합성",
+  "fx-export",
+  "리뷰 관리",
+  "<button",
+  "password",
+];
+
+function expectNoNeedle(value: unknown, label: string): void {
+  const lower = JSON.stringify(value).toLowerCase();
+  for (const needle of FORBIDDEN_NEEDLES) {
+    expect(lower.includes(needle.toLowerCase()), `${label} leaked "${needle}"`).toBe(false);
+  }
+}
+
+/** Minimal frame-level FE client (same shape as the synthetic R2 E2E suite). */
+class FeClient {
+  view: ActionWindowRunView | null = null;
+  events: EventEnvelope[] = [];
+  allServerFrames: AwServerFrame[] = [];
+  private cmdSeq = 0;
+
+  constructor(
+    private readonly transport: AwClientTransport,
+    private readonly runId: string,
+    /** Restored runs bump the revision before any frame reaches the FE (R3 suite pattern). */
+    private readonly revisionOf?: () => number,
+  ) {
+    transport.subscribe((frame) => {
+      this.allServerFrames.push(frame);
+      if (frame.kind === "aw_event") this.events.push(frame.event);
+      if (frame.kind === "aw_view") this.view = frame.view;
+    });
+  }
+
+  send(type: CommandType, payload?: CommandEnvelope["payload"]): void {
+    this.transport.send({
+      kind: "aw_command",
+      command: {
+        protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION,
+        // Random suffix: the idempotency ledger persists across simulated restarts (R3), so a
+        // counter alone would collide with the previous process's commandIds.
+        commandId: `${this.runId}-c${++this.cmdSeq}-${randomUUID().slice(0, 8)}`,
+        runId: this.runId,
+        expectedRevision: this.revisionOf?.() ?? this.view?.revision ?? 0,
+        type,
+        ...(payload ? { payload } : {}),
+      },
+    });
+  }
+
+  eventTypes(): string[] {
+    return this.events.map((e) => e.type);
+  }
+}
+
+function wire(mode: NaverFixtureMode): { fe: FeClient; session: ActionWindowSession; driver: NaverFixtureProbeDriver } {
+  const channel = createLoopbackChannel();
+  const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY });
+  const driver = new NaverFixtureProbeDriver(mode);
+  const session = new ActionWindowSession(engine, driver, channel.server);
+  session.attach();
+  const fe = new FeClient(channel.client, RUN_ID);
+  return { fe, session, driver };
+}
+
+/** Every frame the FE ever received must be contract-valid, prohibited-field-free, needle-free. */
+function assertSanitized(fe: FeClient, label: string): void {
+  for (const frame of fe.allServerFrames) {
+    expect(findProhibitedFields(frame)).toEqual([]);
+    if (frame.kind === "aw_event") expect(validateEventEnvelope(frame.event)).toEqual({ ok: true });
+    if (frame.kind === "aw_view") expect(validateRunView(frame.view)).toEqual({ ok: true });
+  }
+  expectNoNeedle(fe.allServerFrames, label);
+}
+
+async function startRun(mode: NaverFixtureMode) {
+  const wired = wire(mode);
+  wired.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+  await wired.session.whenSettled();
+  return wired;
+}
+
+describe("NAVER fixture session E2E — happy path", () => {
+  it("runs the full loop to COMPLETED with channelCode naver", async () => {
+    const { fe, session, driver } = await startRun("normal");
+
+    expect(fe.view?.channelCode).toBe(NAVER_CHANNEL_CODE);
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(fe.view?.currentStep?.status).toBe("AWAITING_USER");
+    const highlight = fe.events.find((e) => e.type === "TARGET_HIGHLIGHTED");
+    expect(highlight?.payload.targetRef).toMatch(/^[0-9a-f]{16}$/);
+
+    // The USER acts (test-reported); observation alone never completes.
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+    expect(fe.view?.status).toBe("COMPLETED");
+    expect(fe.view?.progress).toEqual({ completedSteps: 3, totalSteps: 3 });
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+    expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+    // Gapless ordered audit.
+    const seqs = fe.events.map((e) => e.sequence);
+    expect(seqs).toEqual(seqs.map((_, i) => i + 1));
+
+    assertSanitized(fe, "happy-path");
+  });
+});
+
+describe("NAVER fixture session E2E — fail-closed hostile shapes", () => {
+  const failsBeforeCheckpoint: ReadonlyArray<[NaverFixtureMode, BlockerCode]> = [
+    ["reconnect-required", "SESSION_EXPIRED"],
+    ["login-required", "LOGIN_REQUIRED"],
+    ["empty-target", "UNSUPPORTED_STATE"],
+    ["ambiguous-readiness", "UNSUPPORTED_STATE"],
+    ["no-target", "TARGET_NOT_FOUND"],
+    ["multi-target", "TARGET_AMBIGUOUS"],
+    ["async-affordance", "TARGET_NOT_FOUND"],
+  ];
+
+  it.each(failsBeforeCheckpoint)("%s fails closed with %s before the human checkpoint", async (mode, code) => {
+    const { fe, driver } = await startRun(mode);
+    expect(fe.view?.status).toBe("FAILED");
+    expect(fe.view?.blocker?.code).toBe(code);
+    // The human checkpoint was never reached and the downstream never ran.
+    expect(fe.eventTypes()).not.toContain("HUMAN_ACTION_REQUIRED");
+    expect(fe.eventTypes()).not.toContain("USER_ACTION_OBSERVED");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+    assertSanitized(fe, mode);
+  });
+
+  it("drift: a post-action target change fails closed with UI_DRIFT (downstream never runs)", async () => {
+    const { fe, session, driver } = await startRun("drift");
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("FAILED");
+    expect(fe.view?.blocker?.code).toBe("UI_DRIFT");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+    assertSanitized(fe, "drift");
+  });
+
+  it("unchanged: no verified transition → back to the checkpoint, never completed, no downstream", async () => {
+    const { fe, session, driver } = await startRun("unchanged");
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN"); // honest non-completion, not a failure
+    expect(fe.eventTypes()).not.toContain("STEP_COMPLETED");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+    assertSanitized(fe, "unchanged");
+  });
+});
+
+describe("NAVER fixture session — Operation Run persistence & resume (channelCode naver)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tmpDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), `aw-naver-${randomUUID()}-`));
+    dirs.push(dir);
+    return dir;
+  }
+
+  function boot(dir: string): { opened: OpenedRunSession; fe: FeClient; driver: NaverFixtureProbeDriver } {
+    const channel = createLoopbackChannel();
+    const driver = new NaverFixtureProbeDriver("normal");
+    const opened = openOrResumeRunSession(
+      { dir, transport: channel.server, driver },
+      { runId: RUN_ID, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    return { opened, fe: new FeClient(channel.client, RUN_ID, () => opened.engine.view().revision), driver };
+  }
+
+  it("persists channelCode naver, survives a restart, and completes after RESUME_RUN", async () => {
+    const dir = tmpDir();
+    const before = boot(dir);
+    before.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+    await before.opened.session.whenSettled();
+    expect(before.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    const persisted = loadOperationRun(dir, RUN_ID)!;
+    expect(persisted.channelCode).toBe(NAVER_CHANNEL_CODE);
+    expect(persisted.resumeState).toBe("RESUME_AT_CHECKPOINT");
+    expect(findProhibitedFields(persisted)).toEqual([]);
+    expectNoNeedle(persisted, "persisted-checkpoint-record");
+
+    // Process "dies"; a fresh process restores and parks at the PAUSED barrier.
+    const after = boot(dir);
+    expect(after.opened.origin).toBe("RESUMED");
+    expect(after.opened.engine.view().status).toBe("PAUSED");
+    expect(after.opened.engine.view().channelCode).toBe(NAVER_CHANNEL_CODE);
+
+    // Explicit RESUME_RUN re-drives the read-only chain over the restored NAVER driver: the
+    // deterministic content-derived signature re-locates the SAME target after the restart.
+    after.fe.send("RESUME_RUN");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    after.driver.completeUserAction(true);
+    await after.opened.session.whenSettled();
+    after.fe.send("REQUEST_STEP_RECHECK");
+    await after.opened.session.whenSettled();
+    expect(after.opened.engine.view().status).toBe("COMPLETED");
+
+    const final = loadOperationRun(dir, RUN_ID)!;
+    expect(final.channelCode).toBe(NAVER_CHANNEL_CODE);
+    expect(final.resumeState).toBe("TERMINAL");
+    expect(findProhibitedFields(final)).toEqual([]);
+    expectNoNeedle(final, "persisted-final-record");
+    assertSanitized(after.fe, "resumed-run");
+  });
+
+  it("a run failed on a reconnect-shaped surface persists only the semantic blocker code", async () => {
+    const dir = tmpDir();
+    const channel = createLoopbackChannel();
+    const driver = new NaverFixtureProbeDriver("reconnect-required");
+    const opened = openOrResumeRunSession(
+      { dir, transport: channel.server, driver },
+      { runId: RUN_ID, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    const fe = new FeClient(channel.client, RUN_ID);
+    fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+    await opened.session.whenSettled();
+
+    expect(opened.engine.view().status).toBe("FAILED");
+    const persisted = loadOperationRun(dir, RUN_ID)!;
+    expect(persisted.latestView.blocker?.code).toBe("SESSION_EXPIRED");
+    expect(findProhibitedFields(persisted)).toEqual([]);
+    expectNoNeedle(persisted, "persisted-failed-record");
+  });
+});

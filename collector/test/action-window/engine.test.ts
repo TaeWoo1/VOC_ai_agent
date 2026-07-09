@@ -128,6 +128,19 @@ describe("engine — fail-closed cases", () => {
   };
 
   it("invalid surface → UNSUPPORTED_STATE", () => failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady(false); }, "UNSUPPORTED_STATE"));
+  // R4: a driver may report the SEMANTIC cause of a failed surface probe (reserved codes only).
+  it("surface probe result without a code → UNSUPPORTED_STATE", () =>
+    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false }); }, "UNSUPPORTED_STATE"));
+  it("reconnect-shaped surface probe → SESSION_EXPIRED", () =>
+    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false, blockerCode: "SESSION_EXPIRED" }); }, "SESSION_EXPIRED"));
+  it("login-shaped surface probe → LOGIN_REQUIRED", () =>
+    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false, blockerCode: "LOGIN_REQUIRED" }); }, "LOGIN_REQUIRED"));
+  it("a rich OK surface probe proceeds exactly like the boolean form", () => {
+    const engine = newEngine();
+    engine.command(cmd(engine, "START_RUN"));
+    expect(engine.onSurfaceReady({ ok: true })).toBe("LOCATE");
+    expect(engine.currentStage()).toBe("LOCATE_TARGET");
+  });
   it("zero candidates → TARGET_NOT_FOUND", () => failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady(true); e.onLocated({ count: 0 }); }, "TARGET_NOT_FOUND"));
   it("multiple candidates → TARGET_AMBIGUOUS", () => failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady(true); e.onLocated({ count: 3 }); }, "TARGET_AMBIGUOUS"));
   it("signature changed after highlight → UI_DRIFT", () =>

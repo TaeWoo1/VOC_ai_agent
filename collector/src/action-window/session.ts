@@ -28,16 +28,21 @@ import {
   type Effect,
   type IngestResult,
   type LocateResult,
+  type SurfaceProbeResult,
   type VerifyResult,
 } from "./engine";
 
 /**
- * The side-effecting probes the session drives. Two implementations exist: `SyntheticProbeDriver`
- * (below, offline/deterministic) and `BrowserProbeDriver` (`./browser-driver.ts`, RUN_INTEGRATION).
+ * The side-effecting probes the session drives. Implementations: `SyntheticProbeDriver` (below,
+ * offline/deterministic), `BrowserProbeDriver` (`./browser-driver.ts`, RUN_INTEGRATION), and the
+ * fixture-only `NaverFixtureProbeDriver` (`./naver-driver.ts`).
  */
 export interface ProbeDriver {
-  /** Open/verify the expected surface. Resolves true when it is the expected seller-center surface. */
-  prepareSurface(): Promise<boolean>;
+  /**
+   * Open/verify the expected surface. A bare boolean means ready/not-ready; a `SurfaceProbeResult`
+   * may additionally carry the SEMANTIC fail-closed cause (an already-reserved contract code).
+   */
+  prepareSurface(): Promise<boolean | SurfaceProbeResult>;
   /** Find the single actionable target. `count`/`sig` feed the engine's fail-closed 0/1/many logic. */
   locate(): Promise<LocateResult>;
   /** Spotlight the located target (never intercepts the click). */
@@ -165,8 +170,8 @@ export class ActionWindowSession {
   private async drive(effect: Effect): Promise<void> {
     switch (effect) {
       case "PREPARE": {
-        const ok = await this.driver.prepareSurface();
-        const next = this.engine.onSurfaceReady(ok);
+        const res = await this.driver.prepareSurface();
+        const next = this.engine.onSurfaceReady(res);
         this.publishState();
         return this.drive(next);
       }
