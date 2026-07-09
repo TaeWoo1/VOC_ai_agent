@@ -103,3 +103,29 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   assumed here.** The record re-authors the `work/*` invariants (non-positional
   commandId ledger, verification-only completion, append-only ordered audit)
   rather than force-fitting the WorkItem aggregate.
+
+- **D-019 · ACTIVE** — **Platform-policy clarification and provider registration run in
+  PARALLEL with R4 pilot preparation** (product-owner ruling, 2026-07-09). They are
+  **required before** claiming formal integration, unattended automation, provider
+  privileges, scheduled browser operation, or any SellerOps-generated platform click.
+  They are **not an indefinite blocker** for a supervised, seller-consented, user-direct
+  Action Window pilot in which the seller uses their own account, views the real
+  platform, and directly clicks platform controls; SellerOps only prepares, highlights,
+  observes, detects completion, and continues downstream; no credentials are typed by
+  SellerOps; no CAPTCHA/2FA is bypassed; fail-closed and the audit trail are enforced.
+  *Rationale:* explicit product-owner decision in the R4-preparation task; consistent
+  with ADR §4 invariants and slice §17's policy gate, which gate REAL-market automation
+  claims, not seller-performed actions on the seller's own session. See
+  `r4-preparation.md` §4–§5.
+
+- **D-020 · ACTIVE** — **The first real channel is NOT automatically ESM+.** Final
+  selection follows, in weight order: (1) the first pilot company's actual channel
+  usage, (2) an official seller-center export path, (3) a clear user-direct action,
+  (4) compatibility with the current ingestion pipeline, (5) the shortest repeatable
+  end-to-end path (product-owner ruling, 2026-07-09; refines — does not supersede —
+  D-016, which already recorded ESM+ as "strongest candidate, not an irreversible
+  choice"). Current-evidence scoring lives in `r4-preparation.md` §2: NAVER review
+  export leads on criteria 2–5; ESM+ review export is the strong second; criterion 1
+  is an unresolved product-owner input and is decisive. *Rationale:* the pilot must
+  remove real operational work for a real seller, not exercise the technically most
+  convenient adapter.
