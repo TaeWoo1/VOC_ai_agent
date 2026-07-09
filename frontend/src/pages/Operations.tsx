@@ -5,8 +5,14 @@ import {
   canStartNewRun,
   dispatchOperationsCommand,
   loadRunScenario,
+  returnToFixtureForDev,
 } from "../lib/actionWindow/operationsStore";
-import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
+import {
+  useBridgeBoot,
+  useBridgeReconnect,
+  useOperationsNote,
+  useOperationsStore,
+} from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
 import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
@@ -38,9 +44,10 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
  *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
 export function Operations() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
-  const { run, runScenario, connection, sourceMode, simulation, simulationRemaining } =
+  const { run, runScenario, connection, retryPending, sourceMode, simulation, simulationRemaining } =
     useOperationsStore();
   const note = useOperationsNote();
+  const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
 
   function handleCommand(type: CommandType) {
@@ -109,11 +116,33 @@ export function Operations() {
         </nav>
       ) : null}
 
+      {/* DEV-only: leave a live/offline Bridge world back to the fixture world
+          without a reload (the fixture scenario panel above is hidden in bridge
+          mode). Never rendered in the production build. */}
+      {isFixturePreviewEnabled() && sourceMode === "bridge" ? (
+        <div className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+            🔌 라이브 연결 중 · 개발용
+          </p>
+          <button
+            type="button"
+            onClick={() => returnToFixtureForDev()}
+            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+          >
+            픽스처로 돌아가기 (개발용)
+          </button>
+        </div>
+      ) : null}
+
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">
         {note}
       </p>
 
-      <ConnectionBanner connection={connection} />
+      <ConnectionBanner
+        connection={connection}
+        retryPending={retryPending}
+        onReconnect={sourceMode === "bridge" ? reconnect : undefined}
+      />
 
       {run === null ? (
         <section aria-label="시작하기" className="rounded-2xl bg-surface p-6 text-center shadow-card">

@@ -6,13 +6,17 @@
 - **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 + FE-3 MERGED into `main`
   via PR #223 (merge `6ed03f2`, 2026-07-09): FE-2 `9f656ca`, FE-2.5 `5d54dee`,
   FE-3 `39d885b`, docs sync `cce9547`. FE-3.5 (connection-status callback + DEV
-  boot retry) IMPLEMENTED (this slice). Remaining follow-ups: live-agent
-  verification, jsdom/RTL decision.**
+  boot retry) COMMITTED `c4b98d5` on `feat/action-window-connection-status` (not
+  pushed). FE-4 (reconnect & recovery UX) IMPLEMENTED (this slice, uncommitted on
+  the same branch). Remaining follow-ups: live-agent verification, jsdom/RTL
+  decision.**
 
 ## Base
 
 - **Worktree:** `/Users/taewookang/Downloads/workspace/sellerops-fe3`
-- **Branch:** `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
+- **Branch:** `feat/action-window-connection-status` (FE-3.5 `c4b98d5` + FE-4
+  uncommitted), branched off the merged tip `6ed03f2`. Earlier FE-2/2.5/3 work
+  was on `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
   `8d61d2f` (Runtime R2 Bridge transport PR #218, FE/Runtime integration PRs
   #216–217, run persistence #219, R4 prep #220–221), then a final conflict-free
   rebase onto `f0d57f4` (PR #222, collector/runtime-docs only) before push.
@@ -20,9 +24,9 @@
   (Earlier hashes across the two rebases: `a7a43f4`/`7dd97fb` → `d08ef4f`/`ead80ac`.)
   One rebase conflict (`pages/Operations.tsx`, both lines rewrote the FE-1 page)
   resolved in favor of our store-based version per product decision.
-- **This slice (uncommitted, on `main` content `6ed03f2`):** FE-3.5 connection-status
-  callback + DEV boot retry (`frontend/**`) + workstream docs (bundling the
-  post-merge housekeeping edit).
+- **This slice (uncommitted, on `feat/action-window-connection-status` at
+  `c4b98d5`):** FE-4 reconnect & recovery UX (`frontend/**`) + workstream docs.
+  FE-3.5 was committed as `c4b98d5` (not pushed).
 
 ## Gate check
 
@@ -79,7 +83,35 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-3.5 Connection-status callback + DEV boot retry (one FE slice, uncommitted):
+FE-4 Reconnect & recovery UX for the live Bridge connection (one FE slice, uncommitted):
+
+- Product gap closed: FE-3.5 made real drops *visible* but left the terminal
+  `offline` state a dead end (auto-retry gives up → only a page reload recovered).
+  The one manual re-attempt lived in the DEV panel, which both pages hide in
+  bridge mode — unreachable exactly when a live connection can drop.
+- **Reconnect action on the offline banner** (`ConnectionBanner`): on a live
+  Bridge `offline`, the page passes `onReconnect` → a "다시 연결" button that runs
+  `retryBridgeBoot()` (fresh bridge world / resync from 0 on success; honest
+  fallback + safe note otherwise). Shown only on `offline` (not `reconnecting`)
+  and only when `sourceMode === "bridge"`; allowed on mobile (read-only-safe).
+- **In-flight guard**: UI-only `retryPending` flag (NOT a 4th `SourceConnection`
+  literal). `beginBridgeRetry`/`endBridgeRetry(succeeded)` in the store toggle it
+  and surface `CONNECTION_RETRY_FAILED_NOTE` on failure; `useBridgeReconnect()`
+  hook owns `retryBridgeBoot()` so the store never imports the Bridge modules.
+- Offline body copy corrected (no longer promises an automatic retry — it's the
+  terminal state; recovery is the manual action).
+- **DEV return-to-fixture** strip (bridge mode only; absent from prod bundle):
+  "픽스처로 돌아가기 (개발용)" → `returnToFixtureForDev()`, so the full
+  fixture → live → drop → offline → reconnect/return loop is drivable without a
+  reload. The FE-3.5 boot-retry button is KEPT (covers the distinct
+  boot-fell-back case, `sourceMode === "fixture"`; the two never co-occur).
+- Tests (node-env, +5 → 257): copy action/pending/failure strings; store
+  `retryPending` + `returnToFixtureForDev`; `bridgeSource` offline → fresh
+  re-adopt resyncs from zero and closes the dead source.
+- Docs: FE-4 plan entry; this handoff; the stale FE-3.5 "uncommitted" note fixed
+  (FE-3.5 is committed `c4b98d5`).
+
+FE-3.5 Connection-status callback + DEV boot retry (one FE slice, committed `c4b98d5`):
 
 - Product behavior: real Bridge drops/reconnects now drive the EXISTING
   offline/reconnecting banner and command suppression — the seller can no longer
@@ -186,15 +218,18 @@ FE-1 Review Operations mock flow (merged earlier as PR #215):
 
 ## In progress
 
-- None. FE-3 implemented (this slice); FE-2/FE-2.5 committed and rebased.
+- FE-4 (reconnect & recovery UX) implemented this slice, uncommitted on
+  `feat/action-window-connection-status`. FE-3.5 committed `c4b98d5` (not pushed).
 
 ## Next single task
 
-**Land FE-3**: review and commit this slice as one commit. The branch then carries the
-complete FE line (FE-2 home IA + FE-2.5 seam/resilience + FE-3 Bridge source) rebased on
-the R2 `main` — ready for a PR **only on explicit approval**. Follow-ups after landing:
-verify against a live local agent (`VITE_AW_BRIDGE=1` + running agent — a real
-environment, out of node-env test reach), and revisit jsdom/RTL.
+**Land FE-4**: on explicit approval, commit this slice as one commit onto
+`feat/action-window-connection-status` (after the FE-3.5 commit `c4b98d5`). The
+branch then carries FE-3.5 (real connection status) + FE-4 (reconnect/recovery
+UX). Push/PR **only on explicit approval**. Follow-ups: live-agent verification
+(`VITE_AW_BRIDGE=1` + running paired agent — now also covers real drop →
+reconnecting → offline → manual reconnect → fresh resync), and the jsdom/RTL
+decision (still deferred, separate approval).
 
 ## Files owned by this workstream
 
@@ -227,15 +262,17 @@ environment, out of node-env test reach), and revisit jsdom/RTL.
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
-## Validation results (FE-3.5 session, 2026-07-09)
+## Validation results (FE-4 session, 2026-07-09)
 
 - `frontend typecheck`: passed.
-- `frontend tests`: **252 passed** (245 FE-3-era + `wsTransport` status suite 5 +
-  `bridgeSource` forwarding/boot-retry 2).
-- `frontend build`: passed; production bundle checked — dev/simulation code absent
-  (grep "데모 미리보기" / "시뮬레이션" / "sim-" / "다시 연결 (개발용)" → 0 each);
-  resilience copy present ("연결이 끊겼어요" → 1); the `VITE_AW_BRIDGE` check
-  compiles away in production (grep → 0).
+- `frontend tests`: **257 passed** (252 FE-3.5-era + copy 2 + store 2 +
+  `bridgeSource` re-adopt 1).
+- `frontend build`: passed (347.73 kB / 109.30 kB gzip); production bundle
+  checked — DEV code absent (grep "데모 미리보기" / "픽스처로 돌아가기" /
+  "라이브 연결 중" / "개발용" / "sim-" / "다시 연결 (개발용)" → 0 each);
+  user-facing resilience copy present ("연결이 끊겼어요" → 2, "다시 연결" → 5,
+  "다시 연결하는 중" → 2, failure note → 1); the `VITE_AW_BRIDGE` check compiles
+  away in production (grep → 0).
 - `git diff --check`: clean.
 - No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
   contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration.
@@ -301,15 +338,18 @@ browser screenshot pass can be run separately with approval.
   `ActionWindowSource` name; drop-until-snapshot (no buffering); simulations on both
   home and detail DEV panels; no jsdom/RTL.
 - Whether to add jsdom + React Testing Library for DOM/a11y unit tests (new dependency —
-  deferred by product decision; revisit before FE-3).
+  deferred again through FE-4; the reconnect button would be the first strong
+  candidate for a click-through DOM test when adopted).
 
 ## Exact steps for the next session
 
-1. On approval, commit the FE-3.5 slice (`frontend/**` + these docs, incl. the
-   bundled post-merge housekeeping) as one commit; push/PR only when explicitly
-   approved.
+1. On approval, commit the FE-4 slice (`frontend/**` + these docs) as one commit
+   onto `feat/action-window-connection-status` (after `c4b98d5`); push/PR only
+   when explicitly approved.
 2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
    hosting a run) — environment-dependent follow-up; do not claim it from node-env
-   tests. It now also covers the real disconnect → banner → restore path.
-3. Remaining candidates afterwards: jsdom/RTL decision (needs approval).
+   tests. It now covers real drop → reconnecting → offline → manual reconnect →
+   fresh resync.
+3. Remaining candidates afterwards: jsdom/RTL decision (needs approval); the
+   sanitized connection/evidence readout (deferred with the live-agent slice).
 4. Do not modify the contract or canonical docs from this workstream.

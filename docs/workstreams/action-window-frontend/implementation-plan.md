@@ -323,3 +323,53 @@ Acceptance: all 245 prior tests pass unmodified; no protocol types; production
 bundle carries no DEV code (grep-verified); the "real disconnects are silent"
 caveat is now closed at the FE level. Live-agent verification of the full path
 remains the environment-dependent follow-up.
+
+## FE-4 — Reconnect & recovery UX for the live Bridge connection (DONE)
+
+Product goal: FE-3.5 made real drops *visible* (offline/reconnecting banner +
+command suppression) but left the terminal `offline` state a dead end — the
+transport auto-retries while it can (`reconnecting`), then gives up (`offline`),
+and the seller's only recovery was a full page reload. The one manual re-attempt
+(`retryBridgeBoot`) lived inside the DEV scenario panel, which both pages hide in
+bridge mode — unreachable exactly when a live connection can drop. This slice adds
+the recovery half.
+
+Decisions (product-owner, 2026-07-09): scope = reconnect action + in-flight state
++ DEV return-to-fixture loop; the sanitized diagnostics/evidence readout is
+deferred to a later live-agent-verification slice; **no jsdom/RTL** this slice
+(tests stay node-env; the jsdom decision remains separate).
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **Reconnect action on the offline banner** (`ConnectionBanner`): when the source
+  is a live Bridge that has gone `offline`, the page passes `onReconnect` so the
+  banner renders a "다시 연결" button (with a `🔌` glyph). It re-attempts the live
+  session via `retryBridgeBoot()` — a fresh bridge world (resync from sequence 0)
+  on success, or an honest fallback (banner stays offline + safe note) when the
+  agent is still unreachable. Shown only on `offline` (not `reconnecting`, which
+  is already auto-retrying) and only when `sourceMode === "bridge"` — never for the
+  fixture/simulated offline preview. Allowed on mobile (read-only-safe recovery,
+  not a run command).
+- **In-flight guard**: a UI-only `retryPending` flag on `OperationsState` (NOT a
+  fourth `SourceConnection` literal — those stay the stable three). `beginBridgeRetry`
+  / `endBridgeRetry(succeeded)` in the store toggle it and, on failure, surface a
+  safe note (`CONNECTION_RETRY_FAILED_NOTE`); the button disables + reads "다시
+  연결하는 중…" while pending. The bridge import stays out of the store — the
+  `useBridgeReconnect()` hook owns `retryBridgeBoot()` and drives the flag.
+- **Offline copy correction**: the offline body no longer promises an automatic
+  retry (it is the terminal state); recovery is the manual action.
+- **DEV return-to-fixture**: a DEV-only strip (`isFixturePreviewEnabled() &&
+  sourceMode === "bridge"`, absent from the production bundle) with a "픽스처로
+  돌아가기 (개발용)" button (`returnToFixtureForDev()`), so a dev can drive the
+  whole loop — fixture → live → drop → offline → reconnect / return — without a
+  reload. The FE-3.5 boot-retry button is **kept** (it covers the distinct
+  boot-fell-back case, `sourceMode === "fixture"`; the two never show together).
+- Tests (node-env, +5 → 257): copy action/pending/failure strings; store
+  `retryPending` transitions + `returnToFixtureForDev`; `bridgeSource` offline →
+  fresh re-adopt resyncs from zero and closes the dead source.
+
+Acceptance: all 252 prior tests pass unmodified; no protocol types; connection
+literals unchanged; production bundle carries no DEV code (grep-verified — the new
+"픽스처로 돌아가기"/"라이브 연결 중"/"개발용" strings → 0; user-facing "다시 연결"
+copy present; `VITE_AW_BRIDGE` compiled away). Live-agent verification now also
+covers the manual reconnect path; it remains the environment-dependent follow-up.

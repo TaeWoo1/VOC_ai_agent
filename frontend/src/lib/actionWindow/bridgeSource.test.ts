@@ -144,6 +144,24 @@ describe("Action Window FE-3 bridge source (loopback wire)", () => {
     expect(getOperationsState().connection).toBe("connected");
   });
 
+  it("FE-4: re-adopting after offline restores a fresh connected world and resyncs from zero", () => {
+    const first = adoptLiveBridge();
+    first.server.send({ kind: "aw_view", view: UI_SCENARIOS["observing"].run! });
+    first.source.notifyStatus("offline"); // transport gave up (retries exhausted / dormant)
+    expect(getOperationsState().connection).toBe("offline");
+
+    // A successful manual reconnect adopts a FRESH bridge world — exactly what
+    // `retryBridgeBoot()` does on success: the offline source is closed, the world
+    // is reset to connected, and the new session resyncs from sequence 0.
+    const second = adoptLiveBridge();
+    expect(first.isClosed()).toBe(true);
+    const s = getOperationsState();
+    expect(s.connection).toBe("connected");
+    expect(s.sourceMode).toBe("bridge");
+    expect(s.run).toBeNull();
+    expect(second.received[0]).toEqual({ kind: "aw_resync", runId: RUN_ID, sinceSequence: 0 });
+  });
+
   it("retryBridgeBoot permits another opt-in attempt after a failed boot", async () => {
     expect(await connectBridgeIfEnabled()).toBe(false); // first attempt (env off)
     expect(await connectBridgeIfEnabled()).toBe(false); // guarded: once per session

@@ -128,12 +128,21 @@ export interface ConnectionView {
   icon: string;
   title: string;
   body: string;
+  /** Reconnect button label — offline only (the terminal state where the
+   *  transport has stopped auto-retrying); reconnecting has no manual action. */
+  action?: string;
+  /** Reconnect button label while a manual attempt is in flight. */
+  actionPending?: string;
 }
 export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, ConnectionView> = {
   offline: {
     icon: "🔌",
     title: "연결이 끊겼어요",
-    body: "로컬 도우미와 연결이 끊겼어요. 자동으로 다시 연결을 시도해요. 화면은 마지막 상태를 보여주고 있어요.",
+    // Offline is terminal (auto-retry exhausted / dormant), so we do NOT promise
+    // another automatic attempt — recovery is the manual action below.
+    body: "로컬 도우미와 연결이 끊겼어요. 화면은 마지막 상태를 보여주고 있어요.",
+    action: "다시 연결",
+    actionPending: "다시 연결하는 중…",
   },
   reconnecting: {
     icon: "⏳",
@@ -141,6 +150,12 @@ export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, Con
     body: "연결되면 최신 상태를 다시 불러와요. 잠시만 기다려 주세요.",
   },
 };
+
+/** Safe FE note when a manual reconnect attempt fails to reach a live session
+ *  (agent still off / unpaired) — surfaced via the note channel, never a raw
+ *  transport reason. */
+export const CONNECTION_RETRY_FAILED_NOTE =
+  "아직 연결할 수 없어요. 로컬 에이전트가 실행 중인지 확인해 주세요.";
 
 // Safe FE copy when a source rejects a command — never a raw reason code.
 export const COMMAND_REJECTED_COPY: Record<CommandRejectionReason, string> = {

@@ -10,6 +10,8 @@ import {
   stepStatusView,
   channelLabel,
   CHANNEL_FALLBACK,
+  CONNECTION_VIEW,
+  CONNECTION_RETRY_FAILED_NOTE,
 } from "./copy";
 
 describe("FE-owned copy registry", () => {
@@ -40,5 +42,20 @@ describe("FE-owned copy registry", () => {
     expect(channelLabel("esm_plus")).toContain("ESM");
     expect(channelLabel("unknown_code")).toBe(CHANNEL_FALLBACK);
     expect(channelLabel("unknown_code")).not.toContain("unknown_code");
+  });
+
+  it("offline connection view carries a manual reconnect action; reconnecting has none", () => {
+    expect(CONNECTION_VIEW.offline.action?.length).toBeGreaterThan(0);
+    expect(CONNECTION_VIEW.offline.actionPending?.length).toBeGreaterThan(0);
+    // Offline is terminal — its body no longer promises an automatic retry.
+    expect(CONNECTION_VIEW.offline.body).not.toContain("자동");
+    // Reconnecting is auto-retrying, so it offers no manual button.
+    expect(CONNECTION_VIEW.reconnecting.action).toBeUndefined();
+  });
+
+  it("has a safe manual-reconnect failure note (never a raw transport reason)", () => {
+    expect(CONNECTION_RETRY_FAILED_NOTE.length).toBeGreaterThan(0);
+    expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("aw_");
+    expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("offline");
   });
 });

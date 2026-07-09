@@ -38,7 +38,7 @@ import {
   type HomeScenarioName,
   type RecentRunItem,
 } from "./homeFixtures";
-import { COMMAND_REJECTED_COPY } from "./copy";
+import { COMMAND_REJECTED_COPY, CONNECTION_RETRY_FAILED_NOTE } from "./copy";
 import { createFixtureSource, type FixtureSource } from "./fixtureSource";
 import type { ActionWindowSource, SourceConnection, SourceUpdate, SteppableSource } from "./source";
 import type { SimScenarioName } from "./simulatedSource";
@@ -58,6 +58,10 @@ export interface OperationsState {
   noteId: number;
   /** UI resilience state reported by the source. */
   connection: SourceConnection;
+  /** A manual live-Bridge reconnect (FE-4) is in flight — disables the offline
+   *  banner's reconnect button so it can't be double-fired. UI-only; NOT a
+   *  fourth `SourceConnection` literal (those stay the stable three). */
+  retryPending: boolean;
   sourceMode: SourceMode;
   /** Last-loaded fixture names — used only to highlight the DEV selectors. */
   runScenario: ScenarioName;
@@ -78,6 +82,7 @@ function initialState(): OperationsState {
     note: "",
     noteId: 0,
     connection: "connected",
+    retryPending: false,
     sourceMode: "fixture",
     runScenario: "human-action-required",
     homeScenario: INITIAL_HOME,
@@ -220,6 +225,7 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
     note: "",
     noteId: state.noteId + 1,
     connection: "connected",
+    retryPending: false,
     sourceMode: "bridge",
     simulation: null,
     simulationRemaining: 0,
@@ -227,6 +233,41 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
   bridgeCleanup = cleanup;
   switchSource(bridge);
   for (const listener of listeners) listener();
+}
+
+// ── Manual reconnect (FE-4) ──────────────────────────────────────────────────
+//    The offline banner's reconnect action runs through the hook/page layer
+//    (`useBridgeReconnect`), which owns the bridge import and calls
+//    `retryBridgeBoot()`; the store only tracks the in-flight flag and the safe
+//    outcome note, so it never imports the Bridge modules (architecture rule).
+
+/** Mark a manual live-Bridge reconnect as in flight (disables the banner button). */
+export function beginBridgeRetry(): void {
+  setState({ ...state, retryPending: true });
+}
+
+/** Clear the in-flight flag when the attempt resolves. A successful attempt has
+ *  already re-adopted a fresh bridge world via `adoptBridgeSource`; a failed one
+ *  leaves the offline source in place and surfaces a safe note. */
+export function endBridgeRetry(succeeded: boolean): void {
+  if (succeeded) {
+    setState({ ...state, retryPending: false });
+    return;
+  }
+  setState({
+    ...state,
+    retryPending: false,
+    note: CONNECTION_RETRY_FAILED_NOTE,
+    noteId: state.noteId + 1,
+  });
+}
+
+/** DEV-only escape hatch: leave a live/offline Bridge world and return to the
+ *  fixture world without a page reload (the fixture scenario panel is hidden in
+ *  bridge mode, so this is the way back). Reuses the existing fixture-load
+ *  teardown path. */
+export function returnToFixtureForDev(): void {
+  loadHomeScenario(INITIAL_HOME);
 }
 
 // ── DEV fixture loads — wholesale previews, so no archiving. Loading a fixture
@@ -253,6 +294,7 @@ export function loadRunScenario(name: ScenarioName): void {
     note: "",
     noteId: state.noteId + 1,
     connection: "connected",
+    retryPending: false,
     sourceMode: "fixture",
     runScenario: name,
     simulation: null,
@@ -270,6 +312,7 @@ export function loadHomeScenario(name: HomeScenarioName): void {
     note: "",
     noteId: state.noteId + 1,
     connection: "connected",
+    retryPending: false,
     sourceMode: "fixture",
     homeScenario: name,
     simulation: null,
@@ -293,6 +336,7 @@ export function activateSimulation(name: SimScenarioName, sim: SteppableSource):
     note: "",
     noteId: state.noteId + 1,
     connection: "connected",
+    retryPending: false,
     sourceMode: "fixture",
     simulation: name,
     simulationRemaining: sim.remaining(),
@@ -315,6 +359,7 @@ export function stopSimulation(): void {
     note: "",
     noteId: state.noteId + 1,
     connection: "connected",
+    retryPending: false,
     sourceMode: "fixture",
     simulation: null,
     simulationRemaining: 0,

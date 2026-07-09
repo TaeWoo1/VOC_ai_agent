@@ -1,14 +1,28 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  adoptBridgeSource,
+  beginBridgeRetry,
   canStartNewRun,
   dispatchOperationsCommand,
+  endBridgeRetry,
   getOperationsState,
   loadHomeScenario,
   loadRunScenario,
   resetOperationsStateForTests,
+  returnToFixtureForDev,
   subscribeOperationsState,
 } from "./operationsStore";
 import { UI_SCENARIOS } from "./fixtures";
+import type { ActionWindowSource } from "./source";
+
+/** Minimal inert source standing in for a live Bridge source (no wire, no emits). */
+function fakeBridgeSource(): ActionWindowSource {
+  return {
+    subscribe: () => () => {},
+    dispatch: () => {},
+    requestSnapshot: () => {},
+  };
+}
 
 describe("Action Window FE-2 shared operations store", () => {
   beforeEach(() => {
@@ -115,6 +129,40 @@ describe("Action Window FE-2 shared operations store", () => {
     expect(afterReject).toBeGreaterThan(before);
     dispatchOperationsCommand("REQUEST_STEP_RECHECK"); // applied → note set
     expect(getOperationsState().noteId).toBeGreaterThan(afterReject);
+  });
+
+  it("FE-4: begin/endBridgeRetry toggle the in-flight flag; failure surfaces a safe note", () => {
+    expect(getOperationsState().retryPending).toBe(false);
+    beginBridgeRetry();
+    expect(getOperationsState().retryPending).toBe(true);
+
+    endBridgeRetry(true); // success: pending cleared, no failure note
+    expect(getOperationsState().retryPending).toBe(false);
+
+    const noteIdBefore = getOperationsState().noteId;
+    beginBridgeRetry();
+    endBridgeRetry(false); // failure: pending cleared + safe note on the note channel
+    const s = getOperationsState();
+    expect(s.retryPending).toBe(false);
+    expect(s.note.length).toBeGreaterThan(0);
+    expect(s.note).not.toContain("aw_");
+    expect(s.noteId).toBeGreaterThan(noteIdBefore);
+  });
+
+  it("FE-4: returnToFixtureForDev leaves a bridge world back to the fixture world", () => {
+    let closed = false;
+    adoptBridgeSource(fakeBridgeSource(), () => {
+      closed = true;
+    });
+    expect(getOperationsState().sourceMode).toBe("bridge");
+
+    returnToFixtureForDev();
+    const s = getOperationsState();
+    expect(closed).toBe(true); // the live source was torn down
+    expect(s.sourceMode).toBe("fixture");
+    expect(s.connection).toBe("connected");
+    expect(s.retryPending).toBe(false);
+    expect(s.run?.status).toBe("WAITING_FOR_HUMAN"); // back on the initial checkpoint demo
   });
 
   it("notifies subscribers on change and stops after unsubscribe", () => {
