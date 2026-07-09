@@ -42,6 +42,7 @@ import {
 } from "../../src/action-window/naver-driver";
 import { NAVER_FIXTURE_CANARIES, type NaverFixtureMode } from "../../src/action-window/naver-fixture";
 import type { QuarantineIo } from "../../src/action-window/quarantine";
+import type { AwIngestUploadFn } from "../../src/action-window/ingest-handoff";
 import { loadOperationRun } from "../../src/action-window/run-store";
 import { openOrResumeRunSession, type OpenedRunSession } from "../../src/action-window/run-lifecycle";
 
@@ -334,6 +335,67 @@ describe("NAVER fixture session E2E — REAL downstream (detect + quarantine val
   });
 });
 
+describe("NAVER fixture session E2E — REAL ingest handoff (injected upload)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tmpQuarantine(): string {
+    const dir = mkdtempSync(join(tmpdir(), `aw-naver-ingest-${randomUUID()}-`));
+    dirs.push(dir);
+    return dir;
+  }
+  function ingestOpts(dir: string, upload: AwIngestUploadFn): NaverFixtureDriverOptions {
+    return { downloadShape: "xlsx-valid", downstream: { real: { quarantineDir: dir, ingest: { upload } } } };
+  }
+  async function toCompletionAttempt(
+    fe: FeClient,
+    session: ActionWindowSession,
+    driver: NaverFixtureProbeDriver,
+  ): Promise<void> {
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+  }
+
+  it("hands the validated artifact to the injected upload and COMPLETES", async () => {
+    const dir = tmpQuarantine();
+    const seen: string[] = [];
+    const upload: AwIngestUploadFn = (src) => {
+      seen.push(src.artifactRef);
+      return Promise.resolve({ ok: true, processed: 3 });
+    };
+    const { fe, session, driver } = await startRun("normal", ingestOpts(dir, upload));
+    await toCompletionAttempt(fe, session, driver);
+
+    expect(fe.view?.status).toBe("COMPLETED");
+    expect(fe.view?.progress).toEqual({ completedSteps: 3, totalSteps: 3 });
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    // The upload was invoked with exactly the opaque ref the FE saw as DOWNLOAD_DETECTED.
+    const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+    expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+    expect(seen).toEqual([detected?.payload.artifactRef]);
+    expect(readdirSync(dir)).toEqual([]);
+    assertSanitized(fe, "real-ingest-happy");
+  });
+
+  it("a non-ok ingest outcome FAILS the run closed with the generic UNSUPPORTED_STATE", async () => {
+    const dir = tmpQuarantine();
+    const upload: AwIngestUploadFn = () => Promise.resolve({ ok: false, processed: 0 });
+    const { fe, session, driver } = await startRun("normal", ingestOpts(dir, upload));
+    await toCompletionAttempt(fe, session, driver);
+
+    expect(fe.view?.status).toBe("FAILED");
+    expect(fe.view?.blocker?.code).toBe("UNSUPPORTED_STATE"); // no ingest-specific code (deferred)
+    expect(fe.eventTypes()).toContain("DOWNLOAD_DETECTED"); // detect + validate succeeded; ingest failed
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    expect(readdirSync(dir)).toEqual([]);
+    assertSanitized(fe, "real-ingest-fail");
+  });
+});
+
 describe("NAVER fixture session — Operation Run persistence & resume (channelCode naver)", () => {
   const dirs: string[] = [];
   afterEach(() => {
@@ -432,6 +494,49 @@ describe("NAVER fixture session — Operation Run persistence & resume (channelC
     expectNoNeedle(final, "persisted-real-downstream-record");
     expect(JSON.stringify(final).includes(quarantineDir)).toBe(false);
     assertSanitized(after.fe, "resumed-real-downstream");
+  });
+
+  it("a restart resumes and completes THROUGH the real ingest handoff (injected upload)", async () => {
+    const dir = tmpDir();
+    const quarantineDir = tmpDir();
+    const refs: string[] = [];
+    const upload: AwIngestUploadFn = (src) => {
+      refs.push(src.artifactRef);
+      return Promise.resolve({ ok: true, processed: 2 });
+    };
+    const real: NaverFixtureDriverOptions = {
+      downloadShape: "xlsx-valid",
+      downstream: { real: { quarantineDir, ingest: { upload } } },
+    };
+
+    const before = boot(dir, real);
+    before.fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
+    await before.opened.session.whenSettled();
+    expect(before.opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
+
+    // Process "dies" at the checkpoint; the fresh process restores and resumes; the USER acts and the
+    // fresh artifact runs the full detect → validate → INGEST chain over the restored driver.
+    const after = boot(dir, real);
+    expect(after.opened.origin).toBe("RESUMED");
+    after.fe.send("RESUME_RUN");
+    await after.opened.session.whenSettled();
+    after.driver.completeUserAction(true);
+    await after.opened.session.whenSettled();
+    after.fe.send("REQUEST_STEP_RECHECK");
+    await after.opened.session.whenSettled();
+
+    expect(after.opened.engine.view().status).toBe("COMPLETED");
+    expect(after.driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    expect(refs.length).toBe(1); // the injected upload fired exactly once, post-restart
+    expect(readdirSync(quarantineDir)).toEqual([]);
+
+    const final = loadOperationRun(dir, RUN_ID)!;
+    expect(final.resumeState).toBe("TERMINAL");
+    expect(findProhibitedFields(final)).toEqual([]);
+    expectNoNeedle(final, "persisted-real-ingest-record");
+    // The ingest processed-count never survives into persistence.
+    expect(JSON.stringify(final)).not.toContain("processed");
+    assertSanitized(after.fe, "resumed-real-ingest");
   });
 
   it("an ARTIFACT_INVALID failure resumes THROUGH the human checkpoint; a fixed artifact completes", async () => {

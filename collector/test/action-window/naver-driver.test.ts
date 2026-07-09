@@ -336,6 +336,80 @@ describe("NaverFixtureProbeDriver — REAL downstream (detect + quarantine valid
   });
 });
 
+describe("NaverFixtureProbeDriver — REAL ingest handoff (injected upload)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  function tmpQuarantine(): string {
+    const dir = mkdtempSync(join(tmpdir(), "aw-naver-ingest-"));
+    dirs.push(dir);
+    return dir;
+  }
+  async function act(driver: NaverFixtureProbeDriver): Promise<void> {
+    driver.completeUserAction(true);
+    await driver.waitForUserAction();
+  }
+  type Captured = { bytesHead: number[]; artifactRef: string; keys: string[] };
+  function driverWithUpload(outcome: { ok: boolean; processed: number }, dir = tmpQuarantine()) {
+    const box: { captured: Captured | null } = { captured: null };
+    const upload = (src: { bytes(): Uint8Array; artifactRef: string }): Promise<{ ok: boolean; processed: number }> => {
+      const bytes = src.bytes();
+      box.captured = { bytesHead: Array.from(bytes.slice(0, 4)), artifactRef: src.artifactRef, keys: Object.keys(src) };
+      return Promise.resolve(outcome);
+    };
+    const driver = new NaverFixtureProbeDriver("normal", {
+      downloadShape: "xlsx-valid",
+      downstream: { real: { quarantineDir: dir, ingest: { upload } } },
+    });
+    return { driver, dir, box };
+  }
+  async function runDownstream(driver: NaverFixtureProbeDriver) {
+    await act(driver);
+    const detected = await driver.detectDownload();
+    const validated = await driver.validateArtifact(detected.artifactRef!);
+    const ingested = await driver.ingest(detected.artifactRef!);
+    return { detected, validated, ingested };
+  }
+
+  it("hands the validated bytes to the injected upload and returns its sanitized outcome", async () => {
+    const h = driverWithUpload({ ok: true, processed: 3 });
+    const { detected, validated, ingested } = await runDownstream(h.driver);
+    expect(validated).toEqual({ valid: true });
+    expect(ingested).toEqual({ ok: true, processed: 3 });
+    expect(h.driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
+    // The quarantine file is still deleted after validate — the ingest reuses the in-memory bytes.
+    expect(readdirSync(h.dir)).toEqual([]);
+    // The upload saw the artifact bytes (ZIP-shaped) + the opaque ref — and NO filename field.
+    expect(h.box.captured!.artifactRef).toBe(detected.artifactRef);
+    expect(h.box.captured!.artifactRef).toMatch(HEX16);
+    expect(h.box.captured!.bytesHead).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    expect(h.box.captured!.keys).toEqual(["bytes", "artifactRef"]);
+    expect(h.box.captured!.keys).not.toContain("suggestedFilename");
+  });
+
+  it("a non-ok upload outcome fails the ingest closed", async () => {
+    const h = driverWithUpload({ ok: false, processed: 0 });
+    const { ingested } = await runDownstream(h.driver);
+    expect(ingested).toEqual({ ok: false, processed: 0 });
+    expect(h.driver.downstreamCalls.ingest).toBe(1);
+  });
+
+  it("ingest with nothing retained (no detect) fails closed and never calls the upload", async () => {
+    const h = driverWithUpload({ ok: true, processed: 9 });
+    expect(await h.driver.ingest("0123456789abcdef")).toEqual({ ok: false, processed: 0 });
+    expect(h.box.captured).toBeNull();
+  });
+
+  it("the injected upload metadata (ref + shape) carries no filename or platform token", async () => {
+    const h = driverWithUpload({ ok: true, processed: 1 });
+    await runDownstream(h.driver);
+    const meta = JSON.stringify({ ref: h.box.captured!.artifactRef, keys: h.box.captured!.keys });
+    expectNoNeedle(meta, PLATFORM_NEEDLES, "ingest-upload-meta");
+    expectNoNeedle(meta, FIXTURE_CONTENT_NEEDLES, "ingest-upload-meta");
+  });
+});
+
 describe("NaverFixtureProbeDriver — privacy of driver outputs", () => {
   it("no fixture content, canary, or platform token ever appears in any driver output", async () => {
     for (const mode of ALL_MODES) {

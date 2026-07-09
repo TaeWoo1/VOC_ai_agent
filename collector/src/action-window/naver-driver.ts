@@ -10,7 +10,11 @@
  * action produced (absence → the timeout shape) and reports a nonce-seeded opaque 16-hex
  * `artifactRef` (the artifact's filename never influences the ref); validate runs the ratified
  * quarantine posture (`./quarantine.ts`: temporary save → extension + OOXML magic sniff → DELETE,
- * fail-closed when the delete fails). Ingest remains SYNTHETIC in this slice — no backend handoff.
+ * fail-closed when the delete fails). Ingest is real when `downstream.real.ingest` is configured: the
+ * validated bytes are handed to an INJECTED upload callback (`AwIngestUploadFn`) that reaches the
+ * existing `/api/uploads` path outside this module — the driver stays network-free (it never imports
+ * `../upload`); only the sanitized `{ ok, processed }` crosses back. Absent that callback, ingest is
+ * SYNTHETIC (a call counter) exactly as before.
  *
  * HARD BOUNDARIES (enforced by source-guard + privacy tests):
  *   - No live contact: no browser, no network, no direct fs — the driver reads the fixture object;
@@ -37,6 +41,7 @@ import { evaluateExportTargetReadiness, type ExportTargetReadiness } from "../na
 import { findExportCandidates } from "../naver/review-export";
 import { artifactRefFor } from "./artifact";
 import { quarantineValidateBytes, sweepQuarantine, type QuarantineIo, type QuarantineVerdict } from "./quarantine";
+import type { AwIngestUploadFn } from "./ingest-handoff";
 import type {
   ArtifactValidateResult,
   DownloadDetectResult,
@@ -97,13 +102,19 @@ export interface NaverPrepareDiagnostic {
   readinessReason?: ExportTargetReadiness["reason"];
 }
 
-/** Opt-in REAL detect + quarantine-validate configuration (ingest stays synthetic). */
+/** Opt-in REAL detect + quarantine-validate (+ optional real ingest handoff) configuration. */
 export interface NaverRealDownstreamOptions {
   /** The gitignored quarantine directory for the temporary validation save. */
   quarantineDir: string;
   /** Injectable quarantine filesystem (tests exercise cleanup-failure shapes through it). */
   io?: QuarantineIo;
   headBytes?: number;
+  /**
+   * Opt-in real ingest handoff. When set, `ingest()` hands the validated bytes to this INJECTED
+   * upload callback (which reaches `/api/uploads` outside this module) instead of returning a
+   * synthetic result. The driver never imports the upload client — the capability is injected.
+   */
+  ingest?: { upload: AwIngestUploadFn };
 }
 
 export interface NaverFixtureDriverOptions {
@@ -250,7 +261,9 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
     this.downstreamCalls.validate += 1;
     if (!this.real) return this.validateResult;
     const retained = this.retainedDownload;
-    this.retainedDownload = null;
+    // Keep the bytes for the ingest handoff when a real upload is configured; otherwise consume now
+    // (byte-identical to the validate-only slice — the retained artifact is single-use).
+    if (!this.real.ingest) this.retainedDownload = null;
     if (!retained) return { valid: false };
     const verdict = await quarantineValidateBytes(retained, {
       dir: this.real.quarantineDir,
@@ -262,9 +275,21 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
     return { valid: verdict.valid };
   }
 
-  ingest(_artifactRef: string): Promise<IngestResult> {
+  /**
+   * REAL path (when `downstream.real.ingest` is set): hand the validated bytes to the injected upload
+   * callback under the opaque `artifactRef` — the platform's suggested filename is never passed. Only
+   * the sanitized `{ ok, processed }` crosses back; a non-`ok` outcome fails the run closed
+   * (`UNSUPPORTED_STATE`, per the engine). Absent the callback, ingest stays SYNTHETIC.
+   */
+  async ingest(artifactRef: string): Promise<IngestResult> {
     this.downstreamCalls.ingest += 1;
-    return Promise.resolve(this.ingestOutcome);
+    const upload = this.real?.ingest?.upload;
+    if (!upload) return this.ingestOutcome;
+    const retained = this.retainedDownload;
+    this.retainedDownload = null;
+    if (!retained) return { ok: false, processed: 0 };
+    const outcome = await upload({ bytes: () => retained.bytes(), artifactRef });
+    return { ok: outcome.ok, processed: outcome.processed };
   }
 
   cleanup(): Promise<void> {

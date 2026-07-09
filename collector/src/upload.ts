@@ -97,13 +97,58 @@ export async function fetchItemAnalysisCount(
 }
 
 /**
- * Upload a captured review export to the existing `/api/uploads` endpoint as a
- * REVIEW file. The backend runs the existing ReviewRowMapper → dedup →
- * item-analysis; re-uploading the same file is idempotent (리뷰글번호 dedup).
+ * Upload in-memory review bytes to the existing `/api/uploads` endpoint as a
+ * REVIEW file, under an explicit `filename`. The backend runs the existing
+ * ReviewRowMapper → dedup → item-analysis; re-uploading the same rows is
+ * idempotent (리뷰글번호 dedup).
+ *
+ * This is the single place that composes the multipart `filename` on the wire.
+ * Callers that must not leak a platform-supplied name (e.g. the Action Window
+ * ingest handoff) pass an opaque, caller-controlled `filename` here; the bytes
+ * never carry a name of their own.
  *
  * When `method` is supplied it is sent as the source provenance (the collector's
  * capture paths pass `SELLER_CENTER_EXPORT`); omitting it preserves the original
  * wire shape, so the backend records the default `MANUAL_UPLOAD`.
+ */
+export async function uploadReviewBytes(
+  baseUrl: string,
+  token: string,
+  channelId: string,
+  bytes: Uint8Array,
+  filename: string,
+  fetchImpl: FetchImpl = fetch,
+  method?: UploadMethod,
+): Promise<IngestResult> {
+  const form = new FormData();
+  form.append("channelId", channelId);
+  form.append("uploadType", "REVIEW");
+  if (method !== undefined) form.append("method", method);
+  form.append("file", new Blob([new Uint8Array(bytes)]), filename);
+
+  const res = await fetchImpl(`${baseUrl}/api/uploads`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new UploadError("upload failed", "upload", res.status);
+  const result = (await res.json()) as IngestResult;
+  log("upload.done", {
+    filename,
+    status: result.status,
+    totalRows: result.totalRows,
+    successRows: result.successRows,
+    skippedRows: result.skippedRows,
+    failedRows: result.failedRows,
+  });
+  return result;
+}
+
+/**
+ * Upload a captured review export FILE to the existing `/api/uploads` endpoint as
+ * a REVIEW file. Thin wrapper over {@link uploadReviewBytes} that reads the file
+ * and sends its `basename` as the wire filename. See `uploadReviewBytes` for the
+ * dedup/idempotency and `method` provenance semantics.
  */
 export async function uploadReviewFile(
   baseUrl: string,
@@ -114,26 +159,5 @@ export async function uploadReviewFile(
   method?: UploadMethod,
 ): Promise<IngestResult> {
   const bytes = await readFile(filePath);
-  const form = new FormData();
-  form.append("channelId", channelId);
-  form.append("uploadType", "REVIEW");
-  if (method !== undefined) form.append("method", method);
-  form.append("file", new Blob([new Uint8Array(bytes)]), basename(filePath));
-
-  const res = await fetchImpl(`${baseUrl}/api/uploads`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}` },
-    body: form,
-  });
-  if (!res.ok) throw new UploadError("upload failed", "upload", res.status);
-  const result = (await res.json()) as IngestResult;
-  log("upload.done", {
-    filename: basename(filePath),
-    status: result.status,
-    totalRows: result.totalRows,
-    successRows: result.successRows,
-    skippedRows: result.skippedRows,
-    failedRows: result.failedRows,
-  });
-  return result;
+  return uploadReviewBytes(baseUrl, token, channelId, new Uint8Array(bytes), basename(filePath), fetchImpl, method);
 }
