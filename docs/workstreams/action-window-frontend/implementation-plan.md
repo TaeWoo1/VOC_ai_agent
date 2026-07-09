@@ -288,3 +288,38 @@ Acceptance: FE-1/FE-2/FE-2.5 mock behavior unchanged under the default fixture s
 from `allowedCommands`; recheck never completes locally (Runtime verifies); production
 bundle carries no DEV/simulation code. Live-agent verification (`VITE_AW_BRIDGE=1`
 against a running local agent) is a separate environment-dependent follow-up.
+
+## FE-3.5 — Connection-status callback + DEV boot retry (DONE)
+
+Product goal: when the local SellerOps agent / Bridge connection drops or
+reconnects, the Operations UI shows the existing offline/reconnecting banner and
+temporarily suppresses action buttons, so the seller does not click commands while
+SellerOps is not actually connected. Before this slice those UI states existed but
+were reachable only through the DEV simulations — real disconnects were silent.
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- `wsTransport.ts`: **additive, optional** `onStatus` callback on `AwWsDeps`
+  (`AwConnectionStatus = "connected" | "reconnecting" | "offline"` — same literals
+  as the seam's `SourceConnection`). Fired, deduped, at: session established /
+  restored → `connected`; socket drop starting the retry loop → `reconnecting`;
+  retries exhausted or different-run dormancy → `offline`. Never fires after
+  `close()`. **With no callback, behavior is byte-identical** — all pre-existing
+  transport tests run unchanged without one.
+- `devMode.ts`: `resolveBridgeSession(onStatus?)` threads the callback through the
+  existing construction path (old zero-arg calls still compile).
+- `bridgeSource.ts`: `notifyStatus()` forwards real transport status into the seam
+  as existing `connection` frames — the store, `ConnectionBanner`, and command
+  suppression react with **zero changes** (same path the simulations drive).
+  `connectBridgeIfEnabled` wires the relay; teardown stops forwarding.
+- DEV boot retry: `retryBridgeBoot()` + a DEV-only "🔌 로컬 에이전트 다시 연결"
+  button in both pages' preview panels, visible only when bridge mode is enabled
+  but the boot fell back to the fixture. Absent from the production bundle.
+- Tests (node-env, +7 → 252): transport status transitions (established, drop →
+  reconnecting, restore → connected, exhaustion → offline, different-run →
+  offline, silent after close) and store forwarding + boot retry.
+
+Acceptance: all 245 prior tests pass unmodified; no protocol types; production
+bundle carries no DEV code (grep-verified); the "real disconnects are silent"
+caveat is now closed at the FE level. Live-agent verification of the full path
+remains the environment-dependent follow-up.

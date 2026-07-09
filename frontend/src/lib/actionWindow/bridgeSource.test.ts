@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createLoopbackChannel, type AwClientFrame } from "./contract";
 import { UI_SCENARIOS } from "./fixtures";
 import { createBridgeClient } from "./bridgeAdapter";
-import { connectBridgeIfEnabled, createBridgeSource, resetBridgeBootForTests } from "./bridgeSource";
+import {
+  connectBridgeIfEnabled,
+  createBridgeSource,
+  resetBridgeBootForTests,
+  retryBridgeBoot,
+} from "./bridgeSource";
 import {
   adoptBridgeSource,
   dispatchOperationsCommand,
@@ -25,7 +30,7 @@ function adoptLiveBridge() {
     source.close();
     closed = true;
   });
-  return { server, received, isClosed: () => closed };
+  return { server, received, source, isClosed: () => closed };
 }
 
 describe("Action Window FE-3 bridge source (loopback wire)", () => {
@@ -120,6 +125,30 @@ describe("Action Window FE-3 bridge source (loopback wire)", () => {
   it("connectBridgeIfEnabled is a no-op without the env opt-in (honest fallback)", async () => {
     const connected = await connectBridgeIfEnabled(); // VITE_AW_BRIDGE unset in tests
     expect(connected).toBe(false);
+    expect(getOperationsState().sourceMode).toBe("fixture");
+  });
+
+  it("real transport status drives the store's connection state (banner + suppression)", () => {
+    const { source, server } = adoptLiveBridge();
+    server.send({ kind: "aw_view", view: UI_SCENARIOS["observing"].run! });
+    expect(getOperationsState().connection).toBe("connected");
+
+    source.notifyStatus("reconnecting"); // socket dropped, retry loop running
+    expect(getOperationsState().connection).toBe("reconnecting");
+    expect(getOperationsState().run?.status).toBe("RUNNING"); // last view stays, read-only
+
+    source.notifyStatus("offline"); // retries exhausted / dormant
+    expect(getOperationsState().connection).toBe("offline");
+
+    source.notifyStatus("connected"); // restored (transport already resynced)
+    expect(getOperationsState().connection).toBe("connected");
+  });
+
+  it("retryBridgeBoot permits another opt-in attempt after a failed boot", async () => {
+    expect(await connectBridgeIfEnabled()).toBe(false); // first attempt (env off)
+    expect(await connectBridgeIfEnabled()).toBe(false); // guarded: once per session
+    const retried = await retryBridgeBoot(); // resets the guard and re-attempts
+    expect(retried).toBe(false); // env still off → honest fallback stays
     expect(getOperationsState().sourceMode).toBe("fixture");
   });
 });

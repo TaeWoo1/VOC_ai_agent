@@ -11,11 +11,16 @@
 import { createBridgeClient, type BridgeClient } from "./bridgeAdapter";
 import { resolveBridgeSession } from "./devMode";
 import { adoptBridgeSource } from "./operationsStore";
-import type { ActionWindowSource, SourceCommand, SourceUpdate } from "./source";
+import type { ActionWindowSource, SourceCommand, SourceConnection, SourceUpdate } from "./source";
 
 export interface BridgeBackedSource extends ActionWindowSource {
   /** Detach from the client and close it (the WS session is closed separately). */
   close(): void;
+  /** Forward a REAL transport status into the seam as a `connection` frame, so the
+   *  Operations UI shows the offline/reconnecting banner and suppresses action
+   *  buttons while SellerOps is not actually connected (the transport's
+   *  `AwConnectionStatus` uses the same three literals as `SourceConnection`). */
+  notifyStatus(status: SourceConnection): void;
 }
 
 export function createBridgeSource(client: BridgeClient): BridgeBackedSource {
@@ -65,6 +70,11 @@ export function createBridgeSource(client: BridgeClient): BridgeBackedSource {
       detach = null;
       client.close();
     },
+    notifyStatus(status: SourceConnection) {
+      listener?.({ kind: "connection", connection: status });
+      // On restore, the transport has already resynced from zero; the client's
+      // follow-up view lands through push(). Nothing else to do here.
+    },
   };
 }
 
@@ -82,18 +92,32 @@ let bootAttempted = false;
 export async function connectBridgeIfEnabled(): Promise<boolean> {
   if (bootAttempted) return false;
   bootAttempted = true;
-  const session = await resolveBridgeSession();
+  // Real transport status → seam `connection` frames. The relay is set up before
+  // the session resolves; transitions arriving before adoption are dropped (the
+  // store starts a bridge world as "connected" anyway).
+  let source: BridgeBackedSource | null = null;
+  const session = await resolveBridgeSession((status) => source?.notifyStatus(status));
   if (!session) return false;
   const client = createBridgeClient(session.transport, {
     runId: session.runId,
     channelCode: session.channelCode,
   });
-  const source = createBridgeSource(client);
-  adoptBridgeSource(source, () => {
-    source.close();
+  source = createBridgeSource(client);
+  const adopted = source;
+  adoptBridgeSource(adopted, () => {
+    source = null; // stop forwarding transport status after teardown
+    adopted.close();
     session.close();
   });
   return true;
+}
+
+/** DEV-only boot retry: allow another live-connection attempt (e.g. the local
+ *  agent came online after page load). Same opt-in gating and honest fallback
+ *  as the initial boot. */
+export function retryBridgeBoot(): Promise<boolean> {
+  bootAttempted = false;
+  return connectBridgeIfEnabled();
 }
 
 /** Test-only: allow another boot attempt. */

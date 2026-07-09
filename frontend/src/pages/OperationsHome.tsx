@@ -4,7 +4,8 @@ import {
   loadHomeScenario,
 } from "../lib/actionWindow/operationsStore";
 import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
-import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
+import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
+import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
@@ -75,6 +76,17 @@ export function OperationsHome() {
             })}
           </div>
           <SimulationPreview simulation={simulation} simulationRemaining={simulationRemaining} />
+          {/* DEV boot retry: bridge mode is enabled but the boot fell back to the
+              fixture (agent off / unpaired) — offer another live attempt. */}
+          {isBridgeModeEnabled() ? (
+            <button
+              type="button"
+              onClick={() => void retryBridgeBoot()}
+              className="mt-3 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            >
+              🔌 로컬 에이전트 다시 연결 (개발용)
+            </button>
+          ) : null}
         </nav>
       ) : null}
 
