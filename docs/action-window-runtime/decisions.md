@@ -67,10 +67,11 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   reference canonical docs and describe real code simultaneously. Re-verify if
   PR #209 changes before merge.
 
-- **D-016 · ACTIVE** — **ESM+ review is recorded as the strongest current
+- **D-016 · SUPERSEDED (by D-021)** — **ESM+ review is recorded as the strongest current
   technical candidate for the first live pilot, not an irreversible choice.**
   *Rationale:* existing profile/signature/download/upload seams; final channel is
-  a product-owner decision.
+  a product-owner decision. *(That decision has now been made: D-021 ratifies
+  NAVER SmartStore review export; ESM+ remains a later candidate.)*
 
 - **D-017 · ACTIVE** — **Action Window frames ride the EXISTING authenticated
   `/bridge/ws` socket as opaque carriers** (`{type:"aw", payload:string}` both
@@ -129,3 +130,27 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   is an unresolved product-owner input and is decisive. *Rationale:* the pilot must
   remove real operational work for a real seller, not exercise the technically most
   convenient adapter.
+
+- **D-021 · ACTIVE** — **G1 channel ratification: the first R4 supervised pilot
+  channel is NAVER SmartStore review export** (product-owner ruling, 2026-07-09;
+  resolves `r4-preparation.md` §9 item 2 and the channel half of item 1; supersedes
+  D-016's ESM+-strongest-candidate recording — **ESM+ and Coupang remain later
+  candidates**, not rejected). *Why NAVER:* the strongest existing review-export
+  evidence in this repository — a live-confirmed, visible+enabled seller-center
+  export control (capture→save 2026-06-22) and one full same-session E2E chain
+  (2026-06-20); plus an existing validate/upload diagnostic precedent
+  (`review-download-save.ts` quarantine save + OOXML magic sniff;
+  `review-upload-diagnostic.ts` → `/api/uploads`). *Boundary:* **fixture-only
+  adapter code may start after this G1 entry**; live NAVER contact remains blocked
+  by the §3 gate (G2–G6), the NAVER live-work pause (stable-environment
+  precondition, §9 item 3), and explicit per-run product-owner approval in the
+  dispatching turn — G1 authorizes no live action. *Quarantine-save validation
+  posture (ratified):* the adapter's real `validateArtifact` MAY perform a
+  controlled TEMPORARY quarantine save strictly for validation — extension check +
+  OOXML/ZIP magic sniff, then DELETE (extends the 14d observed-and-discarded
+  detection posture for the adapter slice only); **no filename, path, URL, or file
+  content ever crosses the wire, the persisted store, or logs** — only sanitized
+  enums/booleans/buckets and opaque 16-hex `artifactRef`s. *Rationale:* the D-020
+  criteria applied — NAVER leads §2 criteria 2–5 on repository evidence, and the
+  decisive criterion-1 input was resolved by the product owner in making this
+  ratification; the pilot seller's identity is still to be named for G2 consent.

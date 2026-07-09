@@ -28,8 +28,8 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P2 | R1 synthetic engine verified (incl. headed human-click QA) | ✅ | PR #213/#216, checklist #2–#11 |
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
-| P5 | First channel selected per §2 criteria | ☐ **PO decision** | §2 below |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | — |
+| P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1 ✅ (D-021); G2–G6 open |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ☐ | — |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ☐ | — |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ☐ | — |
@@ -82,6 +82,12 @@ outright. **Final selection is a product-owner decision** (see Unresolved PO dec
 must also weigh the NAVER live-work pause (stable-environment precondition) against ESM+'s
 unverified export surface. This document deliberately selects nothing.
 
+> **Resolved (2026-07-09):** the product owner ratified **NAVER SmartStore review export** as the
+> first pilot channel — G1, recorded as [`decisions.md`](decisions.md) **D-021**. §2 above is
+> retained as the selection-rationale record; ESM+ and Coupang remain later candidates.
+> Fixture-only adapter work may start; live NAVER contact stays blocked by §3 G2–G6, the NAVER
+> live-work pause (§9 item 3), and per-run product-owner approval.
+
 ---
 
 ## 3. Supervised-pilot internal gate
@@ -89,7 +95,9 @@ unverified export surface. This document deliberately selects nothing.
 All of the following, recorded in this directory, before the first live run:
 
 - **G1 — Channel ratified.** PO names the channel + dataType (review export) against §2, in
-  writing (decision entry in [`decisions.md`](decisions.md)).
+  writing (decision entry in [`decisions.md`](decisions.md)). — **✅ RATIFIED 2026-07-09:
+  NAVER SmartStore review export (D-021).** Fixture-only adapter code is unblocked by this
+  entry; G2–G6 remain open and gate any live run.
 - **G2 — Seller consent.** The pilot seller consented to: their own account, their own screen,
   their own clicks; SellerOps observes/verifies only. Consent text references §4 verbatim.
 - **G3 — Environment.** Stable operator environment (network/IP/location stable — the condition
@@ -169,7 +177,9 @@ verified seam — the adapter is composition, not new invention:
 - ☐ **Download detection (read-only)** — detect fired/completed download without triggering
   (reuse: export-target readiness + controlled download save; 0-rows vs failure distinguished).
 - ☐ **Artifact validation** — extension + magic sniff before any ingestion handoff; partial
-  artifacts never ingested.
+  artifacts never ingested. *(Posture ratified in D-021: a controlled TEMPORARY quarantine save
+  is allowed for validation only — extension check + OOXML/ZIP magic sniff, then DELETE; no
+  filename, path, URL, or file content crosses the wire, the persisted store, or logs.)*
 - ☐ **Ingestion handoff** — existing `/api/uploads` → `IngestionService` only; dedup verified with
   unique synthetic data (re-uploading existing fixtures dedups to empty — use fresh synthetic
   rows to prove the positive path).
@@ -219,11 +229,13 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 
 ## 9. Unresolved product-owner decisions (blocking, in order)
 
-1. **Pilot seller/company and its actual channel mix** — decides §2 criterion 1 and therefore the
-   channel (candidates on current evidence: NAVER review export vs ESM+ review export).
-2. **Channel ratification (G1)** after (1).
-3. **NAVER-specific:** lift or keep the live-work pause (stable-environment precondition) if NAVER
-   is selected.
+1. **Pilot seller/company and its actual channel mix** — the channel half is **RESOLVED**
+   (criterion-1 input applied by the PO in D-021); the specific **pilot seller identity is still
+   open** — required for G2 consent.
+2. **Channel ratification (G1)** — ✅ **RESOLVED 2026-07-09: NAVER SmartStore review export**
+   ([`decisions.md`](decisions.md) D-021).
+3. **NAVER-specific:** lift or keep the live-work pause (stable-environment precondition) — now
+   the **active live-blocking decision** (fixture-only adapter work is unaffected).
 4. **ESM+-specific:** approve the constrained read-only export-surface observation (Gate-style,
    one-off) needed to close its §2 criterion-2 gap if ESM+ is selected.
 5. **Backend mirroring of Operation Runs** (carried from D-018 — not blocking the pilot).
@@ -231,5 +243,5 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 ## 10. Related
 
 - Slice sequencing → [`implementation-plan.md`](implementation-plan.md) (R4 section)
-- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020)
+- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021)
 - Current slice state → [`current-state.md`](current-state.md)
