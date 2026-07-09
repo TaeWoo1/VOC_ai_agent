@@ -1,20 +1,21 @@
-import type { ActionWindowRunView } from "../lib/actionWindow/contract";
+import { Link } from "react-router-dom";
+import type { CommandType } from "../lib/actionWindow/contract";
 import { SCENARIO_NAMES, type ScenarioName } from "../lib/actionWindow/fixtures";
+import {
+  canStartNewRun,
+  dispatchOperationsCommand,
+  loadRunScenario,
+} from "../lib/actionWindow/operationsStore";
+import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
-import { useActionWindowController } from "../lib/actionWindow/controller";
-import { blockerView, channelLabel, resolveCopy, runStatusView, type StatusTone } from "../lib/actionWindow/copy";
+import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
+import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
+import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
+import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
 import { CompletedResult } from "../components/actionWindow/CompletedResult";
-
-const TONE_CLASS: Record<StatusTone, string> = {
-  active: "bg-brand-50 text-brand-700",
-  human: "bg-warn/10 text-warn",
-  neutral: "bg-canvas text-muted",
-  good: "bg-good/10 text-good",
-  bad: "bg-bad/10 text-bad",
-};
 
 const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "ready-to-start": "시작 전",
@@ -31,24 +32,19 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "failed": "실패",
 };
 
-function StatusBadge({ run }: { run: ActionWindowRunView }) {
-  const view = runStatusView(run.status);
-  return (
-    <span
-      role="status"
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${TONE_CLASS[view.tone]}`}
-    >
-      <span aria-hidden="true">{view.icon}</span>
-      {view.label}
-    </span>
-  );
-}
-
-/** FE-1 Review Operations page — the operations-agent run experience. Data source (contract-backed
- *  mock vs live local-agent Bridge) is chosen through the dev/runtime boundary; screens/copy are shared. */
+/** FE-1 Review Operations run detail (/operations/current) — the single surface
+ *  that renders command controls from `allowedCommands`. State is shared with the
+ *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
 export function Operations() {
-  const { run, note, send: handleCommand, scenario, loadScenario } = useActionWindowController();
-  const showScenarioPreview = isFixturePreviewEnabled() && loadScenario !== undefined;
+  useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
+  const { run, runScenario, connection, sourceMode, simulation, simulationRemaining } =
+    useOperationsStore();
+  const note = useOperationsNote();
+  const connected = connection === "connected";
+
+  function handleCommand(type: CommandType) {
+    dispatchOperationsCommand(type);
+  }
 
   const blocker = run?.blocker ? blockerView(run.blocker.code) : undefined;
 
@@ -57,9 +53,9 @@ export function Operations() {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-2xl font-bold text-ink">
-            {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "리뷰 운영"}
+            {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "진행 중 작업"}
           </h1>
-          {run ? <StatusBadge run={run} /> : null}
+          {run ? <RunStatusBadge status={run.status} /> : null}
         </div>
         {run ? (
           <p className="text-muted">채널: {channelLabel(run.channelCode)}</p>
@@ -68,8 +64,9 @@ export function Operations() {
         )}
       </header>
 
-      {/* Fixture/demo preview — DEV-ONLY, mock mode only (never rendered in the production build). */}
-      {showScenarioPreview ? (
+      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
+          hidden while a live Bridge source is active (fixture world only). */}
+      {isFixturePreviewEnabled() && sourceMode === "fixture" ? (
         <nav
           aria-label="데모 시나리오 (개발용)"
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
@@ -79,13 +76,13 @@ export function Operations() {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {SCENARIO_NAMES.map((name) => {
-              const active = name === scenario;
+              const active = name === runScenario && simulation === null;
               return (
                 <button
                   key={name}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => loadScenario?.(name)}
+                  onClick={() => loadRunScenario(name)}
                   className={
                     "rounded-lg px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
                     (active ? "bg-ink text-white" : "border border-line bg-surface text-muted hover:bg-surface/70")
@@ -96,6 +93,7 @@ export function Operations() {
               );
             })}
           </div>
+          <SimulationPreview simulation={simulation} simulationRemaining={simulationRemaining} />
         </nav>
       ) : null}
 
@@ -103,17 +101,21 @@ export function Operations() {
         {note}
       </p>
 
+      <ConnectionBanner connection={connection} />
+
       {run === null ? (
         <section aria-label="시작하기" className="rounded-2xl bg-surface p-6 text-center shadow-card">
           <p className="text-lg text-ink">리뷰 내려받기를 시작할 수 있어요.</p>
           <p className="mt-1 text-muted">시작하면 판매자센터 화면에서 단계별로 안내해요.</p>
-          <button
-            type="button"
-            onClick={() => handleCommand("START_RUN")}
-            className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
-          >
-            시작
-          </button>
+          {connected ? (
+            <button
+              type="button"
+              onClick={() => handleCommand("START_RUN")}
+              className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+            >
+              시작
+            </button>
+          ) : null}
           <p className="mt-4 text-sm text-muted sm:hidden">
             시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.
           </p>
@@ -144,16 +146,49 @@ export function Operations() {
 
           <OperationRunTimeline run={run} />
 
-          {run.status === "WAITING_FOR_HUMAN" ? (
+          {connected && run.status === "WAITING_FOR_HUMAN" ? (
             <HumanCheckpointCard run={run} onCommand={handleCommand} />
           ) : null}
 
           {run.status === "COMPLETED" ? <CompletedResult run={run} /> : null}
 
-          {/* Interactive controls are desktop-only; mobile stays read-only. */}
-          <div className="hidden sm:block">
-            <ActionWindowControlPanel run={run} onCommand={handleCommand} />
-          </div>
+          {/* Terminal run: offer the next step here too (start-new is the idle
+              affordance, not a run command; navigation works even offline). */}
+          {canStartNewRun(run) ? (
+            <section aria-label="다음 작업" className="rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-ink">
+                이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {connected ? (
+                  <button
+                    type="button"
+                    onClick={() => handleCommand("START_RUN")}
+                    className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+                  >
+                    새 작업 시작
+                  </button>
+                ) : null}
+                <Link
+                  to="/operations"
+                  className="rounded-xl border border-line bg-surface px-4 py-2.5 font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                >
+                  홈으로
+                </Link>
+              </div>
+              <p className="mt-2 text-sm text-muted sm:hidden">
+                새 작업 시작은 데스크톱에서 할 수 있어요.
+              </p>
+            </section>
+          ) : null}
+
+          {/* Interactive controls are desktop-only; mobile stays read-only; all
+              commands are suppressed while the source is offline/reconnecting. */}
+          {connected ? (
+            <div className="hidden sm:block">
+              <ActionWindowControlPanel run={run} onCommand={handleCommand} />
+            </div>
+          ) : null}
         </>
       )}
     </div>

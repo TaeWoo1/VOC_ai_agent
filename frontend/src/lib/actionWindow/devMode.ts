@@ -15,8 +15,9 @@ export function isFixturePreviewEnabled(): boolean {
  *   - `"bridge"`: the live local-agent Runtime over the Action Window transport.
  *
  * Bridge mode is DEV-only and opt-in (`VITE_AW_BRIDGE=1`) — and even then only takes effect once a
- * live session is actually established (see {@link resolveBridgeSession}); otherwise the controller
- * falls back to the mock. The scenario preview is shown only in mock mode.
+ * live session is actually established (see {@link resolveBridgeSession}); otherwise the operations
+ * store stays on the fixture source (`connectBridgeIfEnabled` owns that fallback). The scenario
+ * preview is shown only in the fixture world.
  */
 export type AdapterMode = "mock" | "bridge";
 
@@ -51,8 +52,9 @@ export function resolveBridgeSession(): Promise<BridgeSession | null> {
 }
 
 /**
- * The INTENDED mode from build-time flags. Bridge mode still falls back to mock at runtime when
- * {@link resolveBridgeSession} cannot reach a live session (the controller owns that fallback).
+ * The INTENDED mode from build-time flags. Bridge mode still falls back to the fixture source at
+ * runtime when {@link resolveBridgeSession} cannot reach a live session (`connectBridgeIfEnabled`
+ * in bridgeSource.ts owns that fallback).
  */
 export function resolveAdapterMode(): AdapterMode {
   return isBridgeModeEnabled() ? "bridge" : "mock";
