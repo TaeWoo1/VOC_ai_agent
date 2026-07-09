@@ -15,6 +15,7 @@ import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { Upload } from "./pages/Upload";
 import { ProductIssues } from "./pages/ProductIssues";
 import { Operations } from "./pages/Operations";
+import { OperationsHome } from "./pages/OperationsHome";
 import { Reports } from "./pages/Reports";
 import { AlertSettings } from "./pages/AlertSettings";
 import { NotFound } from "./pages/NotFound";
@@ -65,7 +66,9 @@ export function App() {
         <Route path="/inquiries" element={<Inquiries />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/issues" element={<ProductIssues />} />
-        <Route path="/operations" element={<Operations />} />
+        {/* FE-2 IA: /operations = operations-agent home, /operations/current = run detail. */}
+        <Route path="/operations" element={<OperationsHome />} />
+        <Route path="/operations/current" element={<Operations />} />
         <Route path="/reports" element={<Reports />} />
 
         {/* Backstage — connection & collection management */}

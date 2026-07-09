@@ -1,20 +1,17 @@
-import type { ActionWindowRunView } from "../lib/actionWindow/contract";
+import type { CommandType } from "../lib/actionWindow/contract";
 import { SCENARIO_NAMES, type ScenarioName } from "../lib/actionWindow/fixtures";
+import {
+  dispatchOperationsCommand,
+  loadRunScenario,
+} from "../lib/actionWindow/operationsStore";
+import { useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
-import { useActionWindowController } from "../lib/actionWindow/controller";
-import { blockerView, channelLabel, resolveCopy, runStatusView, type StatusTone } from "../lib/actionWindow/copy";
+import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
+import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
 import { CompletedResult } from "../components/actionWindow/CompletedResult";
-
-const TONE_CLASS: Record<StatusTone, string> = {
-  active: "bg-brand-50 text-brand-700",
-  human: "bg-warn/10 text-warn",
-  neutral: "bg-canvas text-muted",
-  good: "bg-good/10 text-good",
-  bad: "bg-bad/10 text-bad",
-};
 
 const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "ready-to-start": "시작 전",
@@ -31,24 +28,15 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "failed": "실패",
 };
 
-function StatusBadge({ run }: { run: ActionWindowRunView }) {
-  const view = runStatusView(run.status);
-  return (
-    <span
-      role="status"
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${TONE_CLASS[view.tone]}`}
-    >
-      <span aria-hidden="true">{view.icon}</span>
-      {view.label}
-    </span>
-  );
-}
-
-/** FE-1 Review Operations page — the operations-agent run experience. Data source (contract-backed
- *  mock vs live local-agent Bridge) is chosen through the dev/runtime boundary; screens/copy are shared. */
+/** FE-1 Review Operations run detail (/operations/current) — the single surface
+ *  that renders command controls from `allowedCommands`. State is shared with the
+ *  operations home (/operations) via the operations store (FE-2). */
 export function Operations() {
-  const { run, note, send: handleCommand, scenario, loadScenario } = useActionWindowController();
-  const showScenarioPreview = isFixturePreviewEnabled() && loadScenario !== undefined;
+  const { run, note, runScenario } = useOperationsStore();
+
+  function handleCommand(type: CommandType) {
+    dispatchOperationsCommand(type);
+  }
 
   const blocker = run?.blocker ? blockerView(run.blocker.code) : undefined;
 
@@ -59,7 +47,7 @@ export function Operations() {
           <h1 className="text-2xl font-bold text-ink">
             {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "리뷰 운영"}
           </h1>
-          {run ? <StatusBadge run={run} /> : null}
+          {run ? <RunStatusBadge status={run.status} /> : null}
         </div>
         {run ? (
           <p className="text-muted">채널: {channelLabel(run.channelCode)}</p>
@@ -68,8 +56,8 @@ export function Operations() {
         )}
       </header>
 
-      {/* Fixture/demo preview — DEV-ONLY, mock mode only (never rendered in the production build). */}
-      {showScenarioPreview ? (
+      {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build). */}
+      {isFixturePreviewEnabled() ? (
         <nav
           aria-label="데모 시나리오 (개발용)"
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
@@ -79,13 +67,13 @@ export function Operations() {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {SCENARIO_NAMES.map((name) => {
-              const active = name === scenario;
+              const active = name === runScenario;
               return (
                 <button
                   key={name}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => loadScenario?.(name)}
+                  onClick={() => loadRunScenario(name)}
                   className={
                     "rounded-lg px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
                     (active ? "bg-ink text-white" : "border border-line bg-surface text-muted hover:bg-surface/70")
