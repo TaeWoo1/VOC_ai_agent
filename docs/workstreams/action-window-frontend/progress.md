@@ -3,9 +3,10 @@
 > Update this document before stopping in every FE task.
 
 - **Workstream:** UI/UX + Frontend
-- **Status:** **FE-1 MERGED (PR #215, merge `6440cfb`). FE-2 (operations-agent home)
-  IMPLEMENTED (this slice). FE-3 audited on `main` →
-  BLOCKED on Runtime R2 (real Bridge transport). FE-3 NOT started.**
+- **Status:** **FE-1 MERGED (PR #215, merge `6440cfb`). FE-2 COMMITTED (`a7a43f4`, on
+  this branch, not pushed). FE-2.5 (adapter seam + UI resilience prep) IMPLEMENTED
+  (this slice). FE-3 audited on `main` → BLOCKED on Runtime R2 (real Bridge
+  transport). FE-3 NOT started.**
 
 ## Base
 
@@ -13,8 +14,8 @@
 - **Branch:** `feat/action-window-fe3` (FE-3 readiness audit + FE-2 implementation).
 - **Base / HEAD SHA:** `6440cfb9d88442bfa9f71ab5cf480198d009a4c2` (`origin/main`; carries
   FE-1 PR #215, Runtime R1 PR #213, and the merged contract).
-- **This slice:** FE-2 implementation (`frontend/**`) + workstream docs
-  (`progress.md`, `implementation-plan.md`). No FE-3 code (gated).
+- **This slice:** FE-2.5 implementation (`frontend/**`) + workstream docs. FE-2
+  already committed as `a7a43f4`. No FE-3 code (gated).
 
 ## Gate check
 
@@ -23,7 +24,9 @@
 - FE branch based on the merged contract commit: ✅ (`6440cfb`)
 - FE-1 (Review Operations mock flow) merged: ✅ (PR #215)
 - FE-2 gates (FE-1 merged + contract merged) satisfied; plan entry added and
-  implemented (mock-driven, R2-independent): ✅ (this slice)
+  implemented (mock-driven, R2-independent): ✅ (committed `a7a43f4`)
+- FE-2.5 (adapter seam + UI resilience prep) planned and implemented: ✅ (this slice;
+  mock/simulated only, R2-independent)
 
 ## FE-3 readiness audit (2026-07-09, on `main` `6440cfb`)
 
@@ -54,7 +57,33 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-2 Operations-agent home (mock-driven, one FE slice):
+FE-2.5 Adapter seam + UI resilience prep (mock-driven, one FE slice):
+
+- FE-owned seam `lib/actionWindow/source.ts`: `ActionWindowSource` (+ `SourceCommand`
+  with `commandId`/`expectedRevision`, `SourceUpdate`, `SourceConnection`,
+  `SteppableSource`) — an FE-only TypeScript interface, not a wire protocol.
+- `lib/actionWindow/fixtureSource.ts` — default source wrapping the FE-1 mock adapter;
+  all FE-1/FE-2 behavior preserved (existing tests unchanged and green).
+- `lib/actionWindow/simulatedSource.ts` — DEV-only simulated stream, 6 scenarios
+  (duplicate, stale view, out-of-order, snapshot restore, stale command,
+  offline/reconnect) — UI resilience simulations, not Runtime behavior.
+- `operationsStore` refactor: consumes a source; resilience rules — duplicates/late
+  frames dropped via the contract's `isOutOfOrderEvent`; sequence gap → drop-until-
+  snapshot (requests an authoritative snapshot, no buffering); a live run's `revision`
+  never regresses; snapshots replace wholesale; rejected commands surface safe FE
+  copy (`COMMAND_REJECTED_COPY`) and never mutate the view. The store never imports
+  the simulation module (DEV panel hands the source in) → production bundle carries
+  no simulation code.
+- Offline/error UI: `ConnectionBanner` (FE-owned copy `CONNECTION_VIEW`); both pages
+  suppress ALL command controls while offline/reconnecting (navigation stays).
+- DEV `SimulationPreview` panel on both home and detail (step-driven, deterministic).
+- FE-2 polish bundled: `canStartNewRun` now used by `ActiveRunCard`; terminal-run
+  "다음 작업" section on the detail page (새 작업 시작 + 홈으로); per-surface note
+  scoping via `noteId` + `useOperationsNote` (no cross-page stale note); detail idle
+  h1 now "진행 중 작업"; `RECENT_LIMIT` → pure, tested `appendRecentRun` helper.
+- Tests: `simulatedSource.test.ts` (11), `homeFixtures.test.ts` +2, store +1 → 216.
+
+FE-2 Operations-agent home (mock-driven, committed `a7a43f4`):
 
 - IA move: `/operations` = operations-agent home (`pages/OperationsHome.tsx`);
   FE-1 run detail moved to `/operations/current` (`App.tsx` routes); nav label stays
@@ -87,12 +116,13 @@ FE-1 Review Operations mock flow (merged earlier as PR #215):
 
 ## In progress
 
-- None. FE-2 implemented (this slice).
+- None. FE-2.5 implemented (this slice).
 
 ## Next single task
 
-**Land FE-2**: review and commit this slice as one commit (FE-2 `frontend/**` changes +
-the workstream docs, which also carry the FE-3 audit). Then FE-3 stays gated as below.
+**Land FE-2.5**: review and commit this slice as one commit. Then FE-3 stays gated as
+below — when Runtime R2 lands, FE-3 implements a Bridge-backed `ActionWindowSource`;
+the store, resilience rules, UI states, and tests from this slice carry over unchanged.
 
 **FE-3 stays blocked on Runtime R2.** Do not start FE-3 until R2 lands the nested Action
 Window transport over Bridge v1 (AW event delivery + AW command message + AW reconnect
@@ -132,14 +162,15 @@ handling, safe offline/error state) while preserving the dev fixture mode.
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
-## Validation results (FE-2 session, 2026-07-09)
+## Validation results (FE-2.5 session, 2026-07-09)
 
 - `frontend typecheck`: passed.
-- `frontend tests`: **202 passed** (183 FE-1-era + `homeFixtures.test.ts` 7 +
-  `operationsStore.test.ts` 12).
-- `frontend build`: passed; production bundle checked — dev selector label absent
-  (grep "데모 미리보기" → 0); home copy present ("운영 에이전트", "최근 활동",
-  "확인하러 가기", mobile guidance → 1 each).
+- `frontend tests`: **216 passed** (202 FE-2-era + `simulatedSource.test.ts` 11 +
+  `homeFixtures.test.ts` +2 + `operationsStore.test.ts` +1).
+- `frontend build`: passed; production bundle checked — dev/simulation code absent
+  (grep "데모 미리보기" / "시뮬레이션" / "sim-duplicate" / "수신 안정성" → 0 each);
+  production resilience + home copy present ("연결이 끊겼어요", "운영 에이전트" → 1
+  each).
 - `git diff --check`: clean.
 - No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
   contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration.
@@ -155,13 +186,14 @@ browser screenshot pass can be run separately with approval.
 
 ## Last meaningful commit
 
-- FE-1 `5ccf4ae` "feat: add Action Window review operations flow" — merged into `main` via
-  PR #215 (merge `6440cfb`).
+- FE-2 `a7a43f4` "feat: add operations-agent home for FE-2" — on this branch, not
+  pushed. (FE-1 `5ccf4ae` merged into `main` via PR #215, merge `6440cfb`.)
 
 ## Current PR
 
-- None open. FE-1 (PR #215) merged. FE-3 not started (blocked on R2). This slice
-  carries the FE-2 implementation + workstream docs (incl. the FE-3 audit).
+- None open. FE-1 (PR #215) merged. FE-2 committed on this branch (`a7a43f4`), not
+  pushed — PR/merge waits until the next large slice (FE-2.5) is complete and
+  explicitly approved. FE-3 not started (blocked on R2).
 
 ## Decisions made in this workstream
 
@@ -178,6 +210,13 @@ browser screenshot pass can be run separately with approval.
   stays in the active zone until the next run starts (store archive rule, one recent
   entry per runId, capped at 5); shared mock-state module between home and detail;
   no jsdom/RTL in this slice.
+- FE-2.5 decisions (2026-07-09, product-owner): source interface named
+  `ActionWindowSource` (FE-only TypeScript seam, not a wire protocol); out-of-order
+  policy is drop-until-snapshot (no buffering/reordering); resilience simulations
+  reachable from both home and detail DEV panels; no jsdom/RTL. Implementation note:
+  the store never imports the simulation module — the DEV panel constructs the
+  simulated source and hands it in (`SteppableSource`), keeping simulation code out
+  of the production bundle.
 
 ## Open FE-only questions
 
@@ -185,13 +224,18 @@ browser screenshot pass can be run separately with approval.
   FE-2 IA decision (home at `/operations`, detail at `/operations/current`, nav label
   unchanged). See "Decisions made".
 - ~~FE-2 pre-implementation choices~~ — **resolved 2026-07-09** (see "Decisions made").
+- ~~FE-2.5 pre-implementation choices~~ — **resolved 2026-07-09** (product-owner):
+  `ActionWindowSource` name; drop-until-snapshot (no buffering); simulations on both
+  home and detail DEV panels; no jsdom/RTL.
 - Whether to add jsdom + React Testing Library for DOM/a11y unit tests (new dependency —
-  deferred out of the FE-2 slice by product decision; revisit before FE-3).
+  deferred by product decision; revisit before FE-3).
 
 ## Exact steps for the next session
 
-1. On approval, stage and commit the FE-2 slice (`frontend/**` changes + the two
-   workstream docs, which also carry the FE-3 audit) as one meaningful commit.
-2. Otherwise iterate on FE-2 per review; keep consuming the shared contract only.
-3. Do not modify the contract or canonical docs from this workstream; FE-3 stays blocked
-   on Runtime R2 (re-run the readiness audit when R2 merges).
+1. On approval, stage and commit the FE-2.5 slice (`frontend/**` changes + the two
+   workstream docs) as one meaningful commit.
+2. Otherwise iterate on FE-2.5 per review; keep consuming the shared contract only.
+3. PR/merge only when explicitly approved (branch carries FE-2 `a7a43f4` + FE-2.5).
+4. Do not modify the contract or canonical docs from this workstream; FE-3 stays blocked
+   on Runtime R2 (re-run the readiness audit when R2 merges; FE-3 = Bridge-backed
+   `ActionWindowSource` implementation only).

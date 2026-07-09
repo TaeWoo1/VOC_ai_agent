@@ -5,10 +5,25 @@ import { hasCopy } from "./copy";
 import {
   HOME_SCENARIO_NAMES,
   HOME_SCENARIOS,
+  RECENT_RUN_LIMIT,
   TERMINAL_RUN_STATUSES,
+  appendRecentRun,
   isTerminalRunStatus,
   toRecentRunItem,
+  type RecentRunItem,
 } from "./homeFixtures";
+
+function mkItem(n: number): RecentRunItem {
+  return {
+    runId: `run_test_${n}`,
+    runCopyKey: "actionWindow.review.run",
+    channelCode: "esm_plus",
+    status: "COMPLETED",
+    completedSteps: 4,
+    totalSteps: 4,
+    finishedAt: `2026-07-0${n}T00:00:00Z`,
+  };
+}
 
 describe("Action Window FE-2 home fixtures (UI-only projections)", () => {
   it("covers exactly the 6 home scenarios", () => {
@@ -57,6 +72,25 @@ describe("Action Window FE-2 home fixtures (UI-only projections)", () => {
   it("home-completed-just-now keeps the completed run in the active zone", () => {
     const run = HOME_SCENARIOS["home-completed-just-now"].view.activeRun;
     expect(run?.status).toBe("COMPLETED");
+  });
+
+  it("appendRecentRun caps the list at RECENT_RUN_LIMIT (oldest drops off)", () => {
+    let list: RecentRunItem[] = [];
+    for (let n = 1; n <= RECENT_RUN_LIMIT + 2; n += 1) {
+      list = appendRecentRun(mkItem(n), list);
+    }
+    expect(list).toHaveLength(RECENT_RUN_LIMIT);
+    expect(list[0]!.runId).toBe(`run_test_${RECENT_RUN_LIMIT + 2}`); // newest first
+    expect(list.some((i) => i.runId === "run_test_1")).toBe(false); // oldest dropped
+  });
+
+  it("appendRecentRun keeps one entry per runId (replace, never duplicate)", () => {
+    let list = appendRecentRun(mkItem(1), [mkItem(2), mkItem(3)].map((i) => i));
+    list = appendRecentRun({ ...mkItem(1), completedSteps: 3 }, list);
+    expect(list).toHaveLength(3);
+    expect(list[0]!.runId).toBe("run_test_1");
+    expect(list[0]!.completedSteps).toBe(3); // replaced with the newer projection
+    expect(list.filter((i) => i.runId === "run_test_1")).toHaveLength(1);
   });
 
   it("toRecentRunItem projects a terminal run and rejects a live run", () => {

@@ -55,6 +55,15 @@ export function toRecentRunItem(run: ActionWindowRunView): RecentRunItem | null 
   };
 }
 
+/** UI-only cap on the recent-activity list; oldest items drop off. */
+export const RECENT_RUN_LIMIT = 5;
+
+/** Prepend a finished run to recent activity. One entry per runId (re-archiving
+ *  replaces the older entry), capped at RECENT_RUN_LIMIT. Pure. */
+export function appendRecentRun(item: RecentRunItem, list: RecentRunItem[]): RecentRunItem[] {
+  return [item, ...list.filter((i) => i.runId !== item.runId)].slice(0, RECENT_RUN_LIMIT);
+}
+
 export type HomeScenarioName =
   | "home-empty"
   | "home-active-running"

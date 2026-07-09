@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import type { ActionWindowRunView } from "../../lib/actionWindow/contract";
 import { channelLabel, resolveCopy } from "../../lib/actionWindow/copy";
-import { isTerminalRunStatus } from "../../lib/actionWindow/homeFixtures";
+import { canStartNewRun } from "../../lib/actionWindow/operationsStore";
 import { RunStatusBadge } from "./RunStatusBadge";
 
 /**
@@ -9,17 +9,20 @@ import { RunStatusBadge } from "./RunStatusBadge";
  * detail. Summary + navigation only: command controls render exclusively on
  * /operations/current (the single `allowedCommands` surface). The one exception is
  * the start-new affordance on a terminal run, which is the idle start affordance —
- * not a run command.
+ * not a run command. `actionsEnabled` is false while the source is offline /
+ * reconnecting — navigation stays, command affordances hide.
  */
 export function ActiveRunCard({
   run,
   onStartNew,
+  actionsEnabled = true,
 }: {
   run: ActionWindowRunView;
   onStartNew: () => void;
+  actionsEnabled?: boolean;
 }) {
   const needsHuman = run.status === "WAITING_FOR_HUMAN";
-  const terminal = isTerminalRunStatus(run.status);
+  const terminal = canStartNewRun(run);
 
   return (
     <section aria-label="현재 작업" className="rounded-2xl bg-surface p-5 shadow-card">
@@ -66,7 +69,7 @@ export function ActiveRunCard({
         >
           {needsHuman ? "확인하러 가기" : "자세히 보기"}
         </Link>
-        {terminal ? (
+        {terminal && actionsEnabled ? (
           <button
             type="button"
             onClick={onStartNew}
@@ -76,7 +79,7 @@ export function ActiveRunCard({
           </button>
         ) : null}
       </div>
-      {terminal ? (
+      {terminal && actionsEnabled ? (
         <p className="mt-2 text-sm text-muted sm:hidden">
           새 작업 시작은 데스크톱에서 할 수 있어요.
         </p>

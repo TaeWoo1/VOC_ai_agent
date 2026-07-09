@@ -1,13 +1,17 @@
+import { Link } from "react-router-dom";
 import type { CommandType } from "../lib/actionWindow/contract";
 import { SCENARIO_NAMES, type ScenarioName } from "../lib/actionWindow/fixtures";
 import {
+  canStartNewRun,
   dispatchOperationsCommand,
   loadRunScenario,
 } from "../lib/actionWindow/operationsStore";
-import { useOperationsStore } from "../hooks/useOperationsStore";
+import { useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
+import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
+import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
@@ -30,9 +34,11 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
 
 /** FE-1 Review Operations run detail (/operations/current) — the single surface
  *  that renders command controls from `allowedCommands`. State is shared with the
- *  operations home (/operations) via the operations store (FE-2). */
+ *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
 export function Operations() {
-  const { run, note, runScenario } = useOperationsStore();
+  const { run, runScenario, connection, simulation, simulationRemaining } = useOperationsStore();
+  const note = useOperationsNote();
+  const connected = connection === "connected";
 
   function handleCommand(type: CommandType) {
     dispatchOperationsCommand(type);
@@ -45,7 +51,7 @@ export function Operations() {
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-2xl font-bold text-ink">
-            {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "리뷰 운영"}
+            {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "진행 중 작업"}
           </h1>
           {run ? <RunStatusBadge status={run.status} /> : null}
         </div>
@@ -67,7 +73,7 @@ export function Operations() {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {SCENARIO_NAMES.map((name) => {
-              const active = name === runScenario;
+              const active = name === runScenario && simulation === null;
               return (
                 <button
                   key={name}
@@ -84,6 +90,7 @@ export function Operations() {
               );
             })}
           </div>
+          <SimulationPreview simulation={simulation} simulationRemaining={simulationRemaining} />
         </nav>
       ) : null}
 
@@ -91,17 +98,21 @@ export function Operations() {
         {note}
       </p>
 
+      <ConnectionBanner connection={connection} />
+
       {run === null ? (
         <section aria-label="시작하기" className="rounded-2xl bg-surface p-6 text-center shadow-card">
           <p className="text-lg text-ink">리뷰 내려받기를 시작할 수 있어요.</p>
           <p className="mt-1 text-muted">시작하면 판매자센터 화면에서 단계별로 안내해요.</p>
-          <button
-            type="button"
-            onClick={() => handleCommand("START_RUN")}
-            className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
-          >
-            시작
-          </button>
+          {connected ? (
+            <button
+              type="button"
+              onClick={() => handleCommand("START_RUN")}
+              className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+            >
+              시작
+            </button>
+          ) : null}
           <p className="mt-4 text-sm text-muted sm:hidden">
             시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.
           </p>
@@ -132,16 +143,49 @@ export function Operations() {
 
           <OperationRunTimeline run={run} />
 
-          {run.status === "WAITING_FOR_HUMAN" ? (
+          {connected && run.status === "WAITING_FOR_HUMAN" ? (
             <HumanCheckpointCard run={run} onCommand={handleCommand} />
           ) : null}
 
           {run.status === "COMPLETED" ? <CompletedResult run={run} /> : null}
 
-          {/* Interactive controls are desktop-only; mobile stays read-only. */}
-          <div className="hidden sm:block">
-            <ActionWindowControlPanel run={run} onCommand={handleCommand} />
-          </div>
+          {/* Terminal run: offer the next step here too (start-new is the idle
+              affordance, not a run command; navigation works even offline). */}
+          {canStartNewRun(run) ? (
+            <section aria-label="다음 작업" className="rounded-2xl bg-surface p-5 shadow-card">
+              <p className="text-ink">
+                이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {connected ? (
+                  <button
+                    type="button"
+                    onClick={() => handleCommand("START_RUN")}
+                    className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+                  >
+                    새 작업 시작
+                  </button>
+                ) : null}
+                <Link
+                  to="/operations"
+                  className="rounded-xl border border-line bg-surface px-4 py-2.5 font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                >
+                  홈으로
+                </Link>
+              </div>
+              <p className="mt-2 text-sm text-muted sm:hidden">
+                새 작업 시작은 데스크톱에서 할 수 있어요.
+              </p>
+            </section>
+          ) : null}
+
+          {/* Interactive controls are desktop-only; mobile stays read-only; all
+              commands are suppressed while the source is offline/reconnecting. */}
+          {connected ? (
+            <div className="hidden sm:block">
+              <ActionWindowControlPanel run={run} onCommand={handleCommand} />
+            </div>
+          ) : null}
         </>
       )}
     </div>

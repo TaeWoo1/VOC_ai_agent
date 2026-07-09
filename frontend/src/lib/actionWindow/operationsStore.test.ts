@@ -108,6 +108,15 @@ describe("Action Window FE-2 shared operations store", () => {
     expect(getOperationsState().note).toBe("");
   });
 
+  it("notes carry a monotonically increasing id (per-surface scoping)", () => {
+    const before = getOperationsState().noteId;
+    dispatchOperationsCommand("PAUSE_RUN"); // rejected → note set
+    const afterReject = getOperationsState().noteId;
+    expect(afterReject).toBeGreaterThan(before);
+    dispatchOperationsCommand("REQUEST_STEP_RECHECK"); // applied → note set
+    expect(getOperationsState().noteId).toBeGreaterThan(afterReject);
+  });
+
   it("notifies subscribers on change and stops after unsubscribe", () => {
     let calls = 0;
     const unsubscribe = subscribeOperationsState(() => {

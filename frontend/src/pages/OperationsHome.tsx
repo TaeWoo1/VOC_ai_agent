@@ -3,9 +3,11 @@ import {
   dispatchOperationsCommand,
   loadHomeScenario,
 } from "../lib/actionWindow/operationsStore";
-import { useOperationsStore } from "../hooks/useOperationsStore";
+import { useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
 import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
+import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
+import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
@@ -24,7 +26,10 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
  * via the operations store.
  */
 export function OperationsHome() {
-  const { run, recentRuns, note, homeScenario } = useOperationsStore();
+  const { run, recentRuns, connection, homeScenario, simulation, simulationRemaining } =
+    useOperationsStore();
+  const note = useOperationsNote();
+  const connected = connection === "connected";
 
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 pb-16">
@@ -48,7 +53,7 @@ export function OperationsHome() {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {HOME_SCENARIO_NAMES.map((name) => {
-              const active = name === homeScenario;
+              const active = name === homeScenario && simulation === null;
               return (
                 <button
                   key={name}
@@ -67,12 +72,15 @@ export function OperationsHome() {
               );
             })}
           </div>
+          <SimulationPreview simulation={simulation} simulationRemaining={simulationRemaining} />
         </nav>
       ) : null}
 
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">
         {note}
       </p>
+
+      <ConnectionBanner connection={connection} />
 
       {run === null ? (
         <section
@@ -81,19 +89,25 @@ export function OperationsHome() {
         >
           <p className="text-lg text-ink">리뷰 내려받기를 시작할 수 있어요.</p>
           <p className="mt-1 text-muted">시작하면 판매자센터 화면에서 단계별로 안내해요.</p>
-          <button
-            type="button"
-            onClick={() => dispatchOperationsCommand("START_RUN")}
-            className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
-          >
-            시작
-          </button>
+          {connected ? (
+            <button
+              type="button"
+              onClick={() => dispatchOperationsCommand("START_RUN")}
+              className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+            >
+              시작
+            </button>
+          ) : null}
           <p className="mt-4 text-sm text-muted sm:hidden">
             시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.
           </p>
         </section>
       ) : (
-        <ActiveRunCard run={run} onStartNew={() => dispatchOperationsCommand("START_RUN")} />
+        <ActiveRunCard
+          run={run}
+          onStartNew={() => dispatchOperationsCommand("START_RUN")}
+          actionsEnabled={connected}
+        />
       )}
 
       <RecentActivityList items={recentRuns} />

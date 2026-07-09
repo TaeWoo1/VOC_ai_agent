@@ -2,33 +2,60 @@
 // detail (/operations/current) — FE-2 product decision: one small store instead of
 // per-page state, so a command dispatched on either surface is reflected on both.
 //
-// Runtime semantics stay in the FE-1 mock adapter (`applyCommand`); this store adds
-// only UI-only rules:
-//  - a terminal run (COMPLETED/FAILED/CANCELLED view) stays in the active zone and
-//    moves to recent activity when it is replaced (product decision);
-//  - starting over a terminal run first clears the active zone — the idle start
-//    affordance, never a bypass of `allowedCommands` on a live run.
-// Recheck-never-completes is inherited from `applyCommand`, not re-implemented.
+// FE-2.5: the store consumes an FE-owned `ActionWindowSource` (see source.ts).
+// The fixture source is the default and preserves all FE-1/FE-2 behavior; the
+// DEV-only simulated source exercises the resilience rules below. FE-3 (blocked
+// on Runtime R2) will swap in a Bridge-backed source; nothing here changes then.
+//
+// Resilience rules (UI-side consumption discipline, not Runtime behavior):
+//  - transport ordering: frames with `sequence` ≤ last seen are duplicates/late —
+//    dropped via the contract's `isOutOfOrderEvent`;
+//  - sequence gap: drop-until-snapshot policy (product decision) — the gapped
+//    frame is dropped and an authoritative snapshot is requested instead of
+//    buffering/reordering;
+//  - content staleness: a live run's rendered `revision` never regresses
+//    (a terminal run may be legitimately replaced by a fresh run);
+//  - snapshots replace the view wholesale (no merge, no archiving);
+//  - rejected commands surface a safe FE note and never mutate the view locally.
+//
+// UI-only rules carried from FE-2: a terminal run stays in the active zone and
+// moves to recent activity when replaced (one entry per runId, capped — see
+// `appendRecentRun`). Recheck-never-completes is inherited from the FE-1 mock
+// adapter, not re-implemented.
 
 import type { ActionWindowRunView, CommandType } from "./contract";
-import { applyCommand } from "./mockAdapter";
+import { isOutOfOrderEvent } from "./contract";
 import { UI_SCENARIOS, type ScenarioName } from "./fixtures";
 import {
   HOME_SCENARIOS,
+  appendRecentRun,
   isTerminalRunStatus,
   toRecentRunItem,
   type HomeScenarioName,
   type RecentRunItem,
 } from "./homeFixtures";
+import { COMMAND_REJECTED_COPY } from "./copy";
+import { createFixtureSource, type FixtureSource } from "./fixtureSource";
+import type { ActionWindowSource, SourceConnection, SourceUpdate, SteppableSource } from "./source";
+import type { SimScenarioName } from "./simulatedSource";
 
 export interface OperationsState {
   run: ActionWindowRunView | null;
   recentRuns: RecentRunItem[];
-  /** Sanitized, FE-authored note describing the last mock transition (demo only). */
+  /** Sanitized, FE-authored note describing the last transition (demo only). */
   note: string;
+  /** Monotonic id for `note` — lets each surface ignore notes issued before it
+   *  mounted (no cross-page stale note). */
+  noteId: number;
+  /** UI resilience state reported by the source. */
+  connection: SourceConnection;
   /** Last-loaded fixture names — used only to highlight the DEV selectors. */
   runScenario: ScenarioName;
   homeScenario: HomeScenarioName;
+  /** Active DEV simulation, if any (never set in production UX). */
+  simulation: SimScenarioName | null;
+  /** Scripted simulation updates left to step through (DEV UI). */
+  simulationRemaining: number;
 }
 
 const INITIAL_HOME: HomeScenarioName = "home-active-checkpoint";
@@ -39,8 +66,12 @@ function initialState(): OperationsState {
     run: view.activeRun,
     recentRuns: view.recentRuns,
     note: "",
+    noteId: 0,
+    connection: "connected",
     runScenario: "human-action-required",
     homeScenario: INITIAL_HOME,
+    simulation: null,
+    simulationRemaining: 0,
   };
 }
 
@@ -63,56 +94,186 @@ export function subscribeOperationsState(listener: () => void): () => void {
   };
 }
 
-/** UI-only cap on the mock recent-activity list; oldest items drop off. */
-const RECENT_LIMIT = 5;
-
 /** True when the start affordance applies: no active run, or a terminal one (which
  *  moves to recent activity when the new run starts). */
 export function canStartNewRun(run: ActionWindowRunView | null): boolean {
   return run === null || isTerminalRunStatus(run.status);
 }
 
-export function dispatchOperationsCommand(type: CommandType): void {
-  const prev = state.run;
-  const effective =
-    type === "START_RUN" && prev !== null && isTerminalRunStatus(prev.status) ? null : prev;
-  const result = applyCommand(effective, type);
-  if (!result.applied) {
-    setState({ ...state, note: result.note });
-    return;
-  }
-  const archived =
-    prev !== null && isTerminalRunStatus(prev.status) && result.run !== prev
-      ? toRecentRunItem(prev)
-      : null;
-  // A run appears once in recent activity: re-archiving the same runId (the demo
-  // fixtures reuse one id) replaces the older entry instead of duplicating it.
-  const recentRuns = archived
-    ? [archived, ...state.recentRuns.filter((i) => i.runId !== archived.runId)].slice(
-        0,
-        RECENT_LIMIT,
-      )
-    : state.recentRuns;
-  setState({ ...state, run: result.run, recentRuns, note: result.note });
+// ── Source management ────────────────────────────────────────────────────────
+
+let fixtureSource: FixtureSource = createFixtureSource(state.run);
+let source: ActionWindowSource = fixtureSource;
+let activeSim: SteppableSource | null = null;
+let unsubscribeSource: () => void = source.subscribe(handleUpdate);
+let lastSequence = 0;
+let commandCounter = 0;
+
+function switchSource(next: ActionWindowSource): void {
+  unsubscribeSource();
+  source = next;
+  lastSequence = 0;
+  unsubscribeSource = source.subscribe(handleUpdate);
 }
 
-// DEV fixture loads — wholesale previews, so no archiving.
+function applyView(nextRun: ActionWindowRunView | null, note?: string): void {
+  const prev = state.run;
+  const archived =
+    prev !== null && isTerminalRunStatus(prev.status) && nextRun !== prev
+      ? toRecentRunItem(prev)
+      : null;
+  const recentRuns = archived ? appendRecentRun(archived, state.recentRuns) : state.recentRuns;
+  setState({
+    ...state,
+    run: nextRun,
+    recentRuns,
+    ...(note !== undefined ? { note, noteId: state.noteId + 1 } : {}),
+  });
+}
+
+function handleUpdate(update: SourceUpdate): void {
+  switch (update.kind) {
+    case "view": {
+      if (isOutOfOrderEvent(update.sequence, lastSequence)) return; // duplicate / late frame
+      if (update.sequence > lastSequence + 1) {
+        // Sequence gap: drop-until-snapshot (no buffering/reordering).
+        source.requestSnapshot();
+        return;
+      }
+      lastSequence = update.sequence;
+      const prev = state.run;
+      const staleContent =
+        update.run !== null &&
+        prev !== null &&
+        update.run.runId === prev.runId &&
+        !isTerminalRunStatus(prev.status) &&
+        update.run.revision < prev.revision;
+      if (staleContent) return; // never regress a live run's rendered revision
+      applyView(update.run, update.note);
+      return;
+    }
+    case "snapshot": {
+      // Authoritative restore: replaces the view wholesale (no merge, no archive).
+      lastSequence = update.sequence;
+      setState({ ...state, run: update.run });
+      return;
+    }
+    case "connection": {
+      setState({ ...state, connection: update.connection });
+      return;
+    }
+    case "command-rejected": {
+      setState({
+        ...state,
+        note: COMMAND_REJECTED_COPY[update.reason],
+        noteId: state.noteId + 1,
+      });
+      return;
+    }
+  }
+}
+
+export function dispatchOperationsCommand(type: CommandType): void {
+  commandCounter += 1;
+  source.dispatch({
+    commandId: `cmd_${commandCounter}`,
+    type,
+    expectedRevision: state.run?.revision ?? null,
+  });
+}
+
+// ── DEV fixture loads — wholesale previews, so no archiving. Loading a fixture
+//    while a simulation is active ends the simulation and returns to the fixture
+//    source seeded with the loaded scenario. ─────────────────────────────────
+
+function ensureFixtureSource(run: ActionWindowRunView | null): void {
+  if (activeSim) {
+    activeSim = null;
+    fixtureSource = createFixtureSource(run);
+    switchSource(fixtureSource);
+  } else {
+    fixtureSource.setRun(run);
+  }
+}
+
 export function loadRunScenario(name: ScenarioName): void {
-  setState({ ...state, run: UI_SCENARIOS[name].run, note: "", runScenario: name });
+  const run = UI_SCENARIOS[name].run;
+  ensureFixtureSource(run);
+  setState({
+    ...state,
+    run,
+    note: "",
+    noteId: state.noteId + 1,
+    connection: "connected",
+    runScenario: name,
+    simulation: null,
+    simulationRemaining: 0,
+  });
 }
 
 export function loadHomeScenario(name: HomeScenarioName): void {
   const view = HOME_SCENARIOS[name].view;
+  ensureFixtureSource(view.activeRun);
   setState({
     ...state,
     run: view.activeRun,
     recentRuns: view.recentRuns,
     note: "",
+    noteId: state.noteId + 1,
+    connection: "connected",
     homeScenario: name,
+    simulation: null,
+    simulationRemaining: 0,
   });
 }
 
-/** Test-only: full reset to the initial demo state. */
+// ── DEV simulation control (FE-2.5). The store never imports the simulation
+//    module — the DEV preview panel (or a test) constructs the source and hands
+//    it in, so production builds carry no simulation code. ───────────────────
+
+export function activateSimulation(name: SimScenarioName, sim: SteppableSource): void {
+  activeSim = sim;
+  switchSource(sim);
+  // Fresh preview stream: clear the active run so scripted revisions never fight
+  // the previously displayed fixture. Recent activity is kept for context.
+  setState({
+    ...state,
+    run: null,
+    note: "",
+    noteId: state.noteId + 1,
+    connection: "connected",
+    simulation: name,
+    simulationRemaining: sim.remaining(),
+  });
+}
+
+export function stepSimulation(): void {
+  if (!activeSim) return;
+  activeSim.step();
+  setState({ ...state, simulationRemaining: activeSim.remaining() });
+}
+
+export function stopSimulation(): void {
+  if (!activeSim) return;
+  activeSim = null;
+  fixtureSource = createFixtureSource(state.run);
+  switchSource(fixtureSource);
+  setState({
+    ...state,
+    note: "",
+    noteId: state.noteId + 1,
+    connection: "connected",
+    simulation: null,
+    simulationRemaining: 0,
+  });
+}
+
+/** Test-only: full reset to the initial demo state (fixture source, no sim). */
 export function resetOperationsStateForTests(): void {
-  setState(initialState());
+  activeSim = null;
+  state = initialState();
+  fixtureSource = createFixtureSource(state.run);
+  switchSource(fixtureSource);
+  commandCounter = 0;
+  for (const listener of listeners) listener();
 }

@@ -6,6 +6,7 @@
 // never surface raw identifiers as if they were prose.
 
 import type { BlockerCode, CommandType, CopyParams, RunStatus, StepStatus } from "./contract";
+import type { CommandRejectionReason, SourceConnection } from "./source";
 
 /** Shown when a copy key has no FE mapping yet. Never the raw key. */
 export const COPY_FALLBACK = "안내를 준비하고 있어요";
@@ -120,3 +121,29 @@ const BLOCKER_VIEW: Record<BlockerCode, BlockerView> = {
 export function blockerView(code: BlockerCode): BlockerView {
   return BLOCKER_VIEW[code];
 }
+
+// Connection resilience states (FE-2.5) — FE-owned copy for UI states the source
+// reports; "connected" needs no banner so it has no entry here.
+export interface ConnectionView {
+  icon: string;
+  title: string;
+  body: string;
+}
+export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, ConnectionView> = {
+  offline: {
+    icon: "🔌",
+    title: "연결이 끊겼어요",
+    body: "로컬 도우미와 연결이 끊겼어요. 자동으로 다시 연결을 시도해요. 화면은 마지막 상태를 보여주고 있어요.",
+  },
+  reconnecting: {
+    icon: "⏳",
+    title: "다시 연결하는 중이에요",
+    body: "연결되면 최신 상태를 다시 불러와요. 잠시만 기다려 주세요.",
+  },
+};
+
+// Safe FE copy when a source rejects a command — never a raw reason code.
+export const COMMAND_REJECTED_COPY: Record<CommandRejectionReason, string> = {
+  "not-allowed": "지금은 할 수 없는 동작이라 무시했어요.",
+  "stale-revision": "상태가 바뀌어 있어서 최신 화면으로 다시 맞췄어요. 확인 후 다시 시도해 주세요.",
+};
