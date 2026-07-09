@@ -43,6 +43,7 @@ import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
 import { createAgentBridge, type AgentActionWindowConfig } from "../agent/agent-bridge";
 import { SyntheticProbeDriver } from "../action-window/session";
+import { defaultOperationRunDirFor } from "../action-window/run-store";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
 
 /**
@@ -347,12 +348,15 @@ async function main(): Promise<void> {
   // the agent, independent of any SellerOps browser tab, and is closed idempotently on shutdown.
   // DEV/TEST ONLY (R2B): host one synthetic Action Window run over the Bridge opaque passthrough. The
   // run identity is Runtime-assigned (opaque random suffix — never derived from any account/connection).
+  // R3: runs persist under the agent-owned `.operation-runs/` dot-dir (gitignored), so an interrupted
+  // run is resumed — parked at the PAUSED barrier — instead of silently replaced on restart.
   const actionWindow: AgentActionWindowConfig | undefined = resolveActionWindowSynthetic(args, process.env)
     ? {
         runId: `run_${randomBytes(6).toString("hex")}`,
         channelCode: "synthetic",
         runCopyKey: "actionWindow.run.synthetic",
         createDriver: () => new SyntheticProbeDriver(),
+        persistDir: defaultOperationRunDirFor(collectorRoot),
       }
     : undefined;
   const bridge = createAgentBridge({ ...resolveAgentBridgeConfig(args, process.env), ...(actionWindow ? { actionWindow } : {}) });

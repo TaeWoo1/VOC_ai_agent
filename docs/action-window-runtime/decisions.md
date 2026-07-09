@@ -85,3 +85,21 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   to the announced runId. *Rationale:* implements the ratified nested-transport
   governance (contract README §8) with zero Bridge v1 semantic change and zero
   contract-dir change; production hosts no session (dev-only synthetic flag).
+
+- **D-018 · ACTIVE** — **Operation Run persistence (R3) is agent-LOCAL and
+  file-backed** (`.operation-runs/` dot-dir, atomic schema-versioned records,
+  prohibited-content gate on save AND load); **no backend Operation Run tables
+  or endpoints are added**. Restore policy: a resumable run re-enters ONLY
+  through the PAUSED barrier at a safe stage (steps 1–2 → re-drive the
+  read-only automatic chain from `PREPARE_SESSION`; verified-but-unprocessed →
+  re-run downstream idempotently) on an explicit `RESUME_RUN`; COMPLETED and
+  CANCELLED runs are terminal-protected (restore is read-only, never restarts);
+  FAILED runs are resumable and simply fail closed again if the cause persists.
+  *Rationale:* local-agent runs must survive restarts offline; the R3 plan rules
+  "new backend capability surface" out of scope; and the plan's "caller-less
+  `CollectionRunService`" premise is stale (it is upload-wired and models only a
+  flat `sync_jobs` row — no step/checkpoint/audit tables). **Mirroring Operation
+  Runs into the backend is an open product-owner decision, deliberately not
+  assumed here.** The record re-authors the `work/*` invariants (non-positional
+  commandId ledger, verification-only completion, append-only ordered audit)
+  rather than force-fitting the WorkItem aggregate.

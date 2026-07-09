@@ -20,6 +20,7 @@ import type { ProjectionCapabilities } from "../bridge/projection-protocol";
 import { ActionWindowEndpoint } from "../bridge/action-window-endpoint";
 import { ActionWindowEngine } from "../action-window/engine";
 import { ActionWindowSession, type ProbeDriver } from "../action-window/session";
+import { createPersistentRunSession, findResumableRun, resumePersistedRunSession } from "../action-window/run-lifecycle";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
 
@@ -53,6 +54,13 @@ export interface AgentActionWindowConfig {
   /** Dotted semantic copy key for the run headline; FE owns final copy. */
   runCopyKey: string;
   createDriver: () => ProbeDriver;
+  /**
+   * Optional R3 persistence directory. When set, the hosted run is persisted after every verified
+   * transition, and an interrupted (non-terminal) persisted run is RESUMED on boot — parked at the
+   * PAUSED barrier until an explicit `RESUME_RUN` — instead of minting a new run. The resumed run's
+   * identity replaces `runId` in the `aw_session` announcement.
+   */
+  persistDir?: string;
 }
 
 export interface AgentBridgeConfig {
@@ -103,24 +111,34 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
         onTargetSwitchRequested: cfg.projection.onTargetSwitchRequested,
       })
     : undefined;
-  // Action Window hosting (R2B): endpoint + engine + session are assembled here so the CLI only decides
-  // WHETHER to host a run; the session binds to the endpoint's transport exactly as it binds to the
-  // loopback channel in the offline E2E. The driver is injected (synthetic by default — no browser).
-  const actionWindow = cfg.actionWindow
-    ? new ActionWindowEndpoint({ runId: cfg.actionWindow.runId, channelCode: cfg.actionWindow.channelCode })
-    : undefined;
-  const actionWindowSession =
-    cfg.actionWindow && actionWindow
-      ? new ActionWindowSession(
-          new ActionWindowEngine({
-            runId: cfg.actionWindow.runId,
-            channelCode: cfg.actionWindow.channelCode,
-            runCopyKey: cfg.actionWindow.runCopyKey,
-          }),
-          cfg.actionWindow.createDriver(),
-          actionWindow.transport,
-        )
-      : undefined;
+  // Action Window hosting (R2B + R3 persistence): endpoint + engine + session are assembled here so
+  // the CLI only decides WHETHER to host a run. With a persistDir, an interrupted persisted run is
+  // resumed (its identity wins the announcement); otherwise a new run is created — persisted after
+  // every verified transition. The driver is injected (synthetic by default — no browser).
+  let actionWindow: ActionWindowEndpoint | undefined;
+  let actionWindowSession: ActionWindowSession | undefined;
+  if (cfg.actionWindow) {
+    const aw = cfg.actionWindow;
+    const resumable = aw.persistDir ? findResumableRun(aw.persistDir) : null;
+    actionWindow = new ActionWindowEndpoint({
+      runId: resumable?.runId ?? aw.runId,
+      channelCode: resumable?.channelCode ?? aw.channelCode,
+    });
+    if (aw.persistDir) {
+      const deps = { dir: aw.persistDir, transport: actionWindow.transport, driver: aw.createDriver() };
+      const opened = resumable
+        ? resumePersistedRunSession(deps, resumable)
+        : createPersistentRunSession(deps, { runId: aw.runId, channelCode: aw.channelCode, runCopyKey: aw.runCopyKey });
+      actionWindowSession = opened.session;
+      log("aw_run_hosted", { origin: opened.origin, ...(opened.resumeState ? { resumeState: opened.resumeState } : {}) });
+    } else {
+      actionWindowSession = new ActionWindowSession(
+        new ActionWindowEngine({ runId: aw.runId, channelCode: aw.channelCode, runCopyKey: aw.runCopyKey }),
+        aw.createDriver(),
+        actionWindow.transport,
+      );
+    }
+  }
   actionWindowSession?.attach();
   const server = new BridgeServer({
     store,

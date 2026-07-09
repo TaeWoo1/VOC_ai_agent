@@ -3,16 +3,16 @@
 <!-- Update this file when starting or changing the active slice. Fixed top section below. -->
 
 - **updated at:** 2026-07-09
-- **baseline main SHA:** `dc84546` (`origin/main`; incl. PR #212 R0, PR #214 canonical contract, PR #213 R1, PR #215 FE mock-flow, PR #216 R1.1, and **PR #217 R2A** all merged)
-- **current branch:** `feat/action-window-bridge-transport` (R2B — live Bridge-WS passthrough transport)
-- **current worktree:** `sellerops-action-window-integrate` (linked worktree of the shared SellerOps repo)
-- **branch base SHA:** `dc84546` (`origin/main`)
-- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`, `ACTION_WINDOW_TRANSPORT_VERSION = 1`) — UNCHANGED by R2B.** The R2B wire binding implements the existing `AwClientTransport`/`AwServerTransport` interfaces over the real Bridge WS; frames ride the authenticated `/bridge/ws` socket as opaque `{type:"aw", payload}` carriers plus an agent→client `{type:"aw_session"}` announcement (both defined in `collector/src/bridge/action-window-endpoint.ts` / consumed by `frontend/src/lib/actionWindow/wsTransport.ts`). The typed Bridge v1 `ClientMessage`/`ServerMessage` unions in `bridge/protocol.ts` are untouched — no Bridge version bump.
-- **current slice:** **R2B (live Bridge-WS passthrough) — IMPLEMENTED + offline-VERIFIED** on this branch: FE command → paired/ticketed Bridge WS → `ActionWindowSession` → sanitized events/View Model → Bridge WS → FE, proven over a REAL loopback WebSocket with real pairing/authentication (synthetic driver; no live channel, no browser).
-- **last completed item:** `ActionWindowEndpoint` (collector) binds the R2A `ActionWindowSession` to `/bridge/ws` (broadcast events/views to every paired tab; command/resync results routed to the sender only); `BridgeServer` relays `{type:"aw"}` opaquely and announces the hosted run after hello+snapshot; `createAgentBridge` hosts the session via optional `actionWindow` config; `local-agent` CLI gains the DEV-only `--dev-action-window-synthetic` flag (refused under `NODE_ENV=production`). FE: `wsTransport.ts` implements `AwClientTransport` over the Bridge WS (pairing-token reuse via `BRIDGE_TOKEN_KEY`, single-use ticket, `aw_session` gate, reconnect with fresh ticket + `aw_resync` from 0, run-identity pinning); `resolveBridgeSession()` now really connects (async) and the controller falls back to the mock at runtime when no live session is reachable.
-- **last verified tests:** collector `bridge-transport.test.ts` (10, offline, REAL loopback WS) — announcement, full loop (start→checkpoint→test-driver action→recheck→completed), reconnect replay, stale-revision, duplicate-idempotent, cancel/cleanup, unauthorized/unpaired rejection, malformed-frame drop, broadcast-vs-reply routing, prod-gate; full collector suite **2424 passed / 12 skipped**, `tsc --noEmit` clean. FE `wsTransport.test.ts` (8) + `devMode.test.ts` (3); full FE suite **202 passed**, `tsc --noEmit` clean, `vite build` OK. Wire privacy: `findProhibitedFields` == [] for every frame crossing the real WS.
-- **current blocker:** none for R2B offline scope. Remaining live gaps (deliberate): no live channel (R4), no Operation Run persistence (R3), no browser-driver-over-Bridge QA (synthetic driver only in this slice), production hosts **no** Action Window session (dev flag refused under production).
-- **next single action:** after this R2B PR merges, start **R3** (Operation Run persistence) from updated `main`.
+- **baseline main SHA:** `115582a` (`origin/main`; incl. PR #212 R0, PR #214 canonical contract, PR #213 R1, PR #215 FE mock-flow, PR #216 R1.1, PR #217 R2A, and **PR #218 R2B** all merged)
+- **current branch:** `feat/operation-run-persistence` (R3 — Operation Run persistence)
+- **current worktree:** `sellerops-runtime` (linked worktree of the shared SellerOps repo)
+- **branch base SHA:** `115582a` (`origin/main`)
+- **shared contract version/path:** **`contracts/action-window/v1/` (`ACTION_WINDOW_PROTOCOL_VERSION = 1`, `ACTION_WINDOW_TRANSPORT_VERSION = 1`) — UNCHANGED by R3.** Persistence is a Runtime-internal record (`OPERATION_RUN_SCHEMA_VERSION = 1`, `collector/src/action-window/operation-run.ts`) that stores contract-valid events/views verbatim; nothing new crosses the FE↔Runtime boundary.
+- **current slice:** **R3 (Operation Run persistence) — IMPLEMENTED + offline-VERIFIED** on this branch: every published (verified) transition persists an `OperationRun` (ordered `OperationTask`s, `HumanCheckpoint`, `ResumeState`, revision, command ledger, gapless ordered audit events, latest View Model, full engine restore state) to the agent-owned gitignored `.operation-runs/` store; a restarted agent restores the latest safe state and resumes through the PAUSED barrier on an explicit `RESUME_RUN`.
+- **last completed item:** engine gained a full-fidelity `runState()` + `ActionWindowEngine.restore()` + the `pauseForRestore(safeStage)` barrier (refuses terminal stages); `operation-run.ts` (pure domain: record projection, resume classification, restore planning, strict allow-list parse incl. gapless-audit + prohibited-content checks); `run-store.ts` (atomic tmp+rename writes, 0700/0600 perms, sanitized error categories, prohibited-content gate on SAVE and load, safe runId filenames); `run-lifecycle.ts` (create/resume/open-or-resume composition; resumable runs parked PAUSED and the barrier itself persisted; terminal runs restore read-only and are never resumed on boot); `ActionWindowSession` gained the optional `onStatePublished` persistence hook and now continues (not restarts) over a restored engine; `agent-bridge`/`local-agent` host the synthetic run with `persistDir` so a restarted dev agent resumes its interrupted run (announced under its original runId).
+- **last verified tests:** collector `operation-run-persistence.test.ts` (9) — create/load, restart→checkpoint restore→full completion, duplicate-commandId no-op ACROSS restart, stale-revision after restore, idempotent downstream resume (+ second resume rejected), failed-run resume (persistent cause fails closed again; fixed cause completes), terminal-state protection (completed/cancelled never restart; restore read-only; barrier refuses terminal), gapless audit ordering across restart (barrier event recorded), privacy boundary; `run-store.test.ts` (10) — round-trip, corrupt/tampered/schema/gap rejection, prohibited-content refusal on save AND load, unsafe runId rejection, idempotent delete. Full collector suite **2443 passed / 12 skipped**, `tsc --noEmit` clean. Backend untouched and re-verified offline: `./gradlew compileJava` + `./gradlew test` → **984 tests, 0 failed** (H2 in-memory).
+- **current blocker:** none for R3 offline scope. **Reported doc-staleness conflict (not silently resolved):** the R3 plan's "wire the currently caller-less backend `CollectionRunService`" premise is stale — it is already wired for the upload path (`FileUploadConnector` → `/api/uploads`) and models only a flat `sync_jobs` row (no step/checkpoint/audit tables). Since the plan simultaneously rules "new backend capability surface" out of scope and local-agent runs must survive restarts offline, R3 persists agent-locally; mirroring Operation Runs into the backend is a **product-owner decision**, not assumed here (see D-018).
+- **next single action:** after this R3 PR merges, prepare **R4** (one supervised real-channel adapter) — which starts with platform-policy clarification + PO channel confirmation, not code.
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 
@@ -45,8 +45,17 @@
   Bridge WebSocket — real pairing (request→local confirm→poll), single-use
   ticket, origin allow-list — with Action Window frames as opaque `{type:"aw"}`
   carriers and an `aw_session` run announcement. Verified over a real loopback
-  WS with the synthetic driver (10 tests). Still **no live channel**, no
-  persistence, and production hosts no Action Window session.
+  WS with the synthetic driver (10 tests). Still **no live channel**, and
+  production hosts no Action Window session.
+- **R3 (Operation Run persistence) is IMPLEMENTED + offline-VERIFIED** on
+  `feat/operation-run-persistence`: runs persist after every verified transition
+  (record incl. ordered tasks, human checkpoint, resume state, command ledger,
+  gapless audit event log, latest View Model, full restore state) and survive a
+  process restart — restored runs park at the PAUSED barrier until an explicit
+  `RESUME_RUN`; completed/cancelled runs are terminal-protected; failed runs
+  resume through the same fail-closed probes. Agent-local file store only —
+  **no backend Operation Run tables/endpoints** (reported as a PO decision, see
+  D-018). Still **no live channel**.
 
 ## Existing foundations vs implemented Action Window capability
 
