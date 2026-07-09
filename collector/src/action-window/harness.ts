@@ -11,6 +11,7 @@ import type { Page } from "playwright";
 import type { ActionWindowRunView, CommandEnvelope, CommandType, EventEnvelope } from "../../../contracts/action-window/v1/index";
 import { ACTION_WINDOW_PROTOCOL_VERSION } from "../../../contracts/action-window/v1/index";
 import { ActionWindowEngine } from "./engine";
+import { SYNTHETIC_ARTIFACT_REF } from "./session";
 import type { Stage } from "./stages";
 import { STEP_PLAN, TOTAL_STEPS } from "./stages";
 import { fixtureHtml, type FixtureMode } from "./fixture";
@@ -101,8 +102,17 @@ export async function runSyntheticLoop(page: Page, engine: ActionWindowEngine, o
   const locateSig = firstTargetRef(engine.events());
   engine.command(cmd("REQUEST_STEP_RECHECK")); // → VERIFY
   const effect = engine.onVerified(await verifyTransition(page, { expectedSig: locateSig }));
-  if (effect === "DOWNSTREAM") {
-    downstream = engine.runDownstream().result;
+  if (effect === "DETECT_DOWNLOAD") {
+    // Synthetic downstream: fixture pages fire no real download, so the harness feeds deterministic
+    // in-memory probe results through the same engine transitions. No backend, no upload, no file.
+    const ingest = { ok: true, processed: 1 };
+    if (
+      engine.onDownloadDetected({ detected: true, artifactRef: SYNTHETIC_ARTIFACT_REF }) === "VALIDATE_ARTIFACT" &&
+      engine.onArtifactValidated({ valid: true }) === "INGEST" &&
+      engine.onIngested(ingest) === "CLEANUP"
+    ) {
+      downstream = { processed: ingest.processed };
+    }
   }
   return finish();
 }

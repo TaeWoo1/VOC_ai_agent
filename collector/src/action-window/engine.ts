@@ -46,9 +46,38 @@ export interface VerifyResult {
   /** Target signature changed since highlight → UI drift. */
   drift: boolean;
 }
+/**
+ * Read-only download detection result. The Runtime never triggers the download — it only observes
+ * whether the user's action produced one. `artifactRef` is an opaque 16-hex reference (e.g. a hash
+ * of sanitized metadata) — NEVER a filename or path.
+ */
+export interface DownloadDetectResult {
+  detected: boolean;
+  artifactRef?: string;
+}
+export interface ArtifactValidateResult {
+  /** The detected artifact passed validation (e.g. extension + magic sniff). Partial/corrupt → false. */
+  valid: boolean;
+}
+export interface IngestResult {
+  /** The validated artifact was handed to the existing ingestion path (dedup-safe, idempotent). */
+  ok: boolean;
+  /** Sanitized count of processed items (0 is a legitimate all-duplicates outcome, not a failure). */
+  processed: number;
+}
 
 /** What the harness should do next after a transition. Unit tests may ignore it. */
-export type Effect = "PREPARE" | "LOCATE" | "HIGHLIGHT" | "OBSERVE" | "VERIFY" | "DOWNSTREAM" | "CLEANUP" | "NONE";
+export type Effect =
+  | "PREPARE"
+  | "LOCATE"
+  | "HIGHLIGHT"
+  | "OBSERVE"
+  | "VERIFY"
+  | "DETECT_DOWNLOAD"
+  | "VALIDATE_ARTIFACT"
+  | "INGEST"
+  | "CLEANUP"
+  | "NONE";
 
 export type CommandRejection =
   | "UNSUPPORTED_PROTOCOL_VERSION"
@@ -418,22 +447,54 @@ export class ActionWindowEngine {
     this.completedSteps = 2; // human step verified
     this.emit("STEP_COMPLETED", { stepId: this.stepId() });
     this.activeStepIndex = 3;
-    this.stage = "RUN_DUMMY_DOWNSTREAM";
+    this.stage = "DETECT_DOWNLOAD";
     this.emit("RUN_STATUS_CHANGED", { status: "PROCESSING" });
-    return "DOWNSTREAM";
+    return "DETECT_DOWNLOAD";
   }
 
-  /** One deterministic in-memory automatic step. No backend, no upload, no download. */
-  runDownstream(): { effect: Effect; result: { processed: number } } {
-    this.expect("RUN_DUMMY_DOWNSTREAM");
+  /* ── downstream chain (detect → validate → ingest) ─────────────────────── */
+
+  /**
+   * Probe result: did the user's verified action produce a download? Detection is read-only — the
+   * Runtime never triggers it. No download (timeout) or a non-opaque ref fails closed: the export
+   * did not happen, so the user must perform it again (resume re-enters through the checkpoint).
+   */
+  onDownloadDetected(res: DownloadDetectResult): Effect {
+    this.expect("DETECT_DOWNLOAD");
     this.revision += 1;
-    const result = { processed: TOTAL_STEPS_PROCESSED };
+    if (!res.detected || !res.artifactRef || !/^[0-9a-f]{16}$/.test(res.artifactRef)) {
+      return this.fail("DOWNLOAD_TIMEOUT");
+    }
+    this.emit("DOWNLOAD_DETECTED", { stepId: this.stepId(), artifactRef: res.artifactRef });
+    this.stage = "VALIDATE_ARTIFACT";
+    return "VALIDATE_ARTIFACT";
+  }
+
+  /** Probe result: artifact validation. A partial or unrecognized artifact is never ingested. */
+  onArtifactValidated(res: ArtifactValidateResult): Effect {
+    this.expect("VALIDATE_ARTIFACT");
+    this.revision += 1;
+    if (!res.valid) return this.fail("ARTIFACT_INVALID");
+    this.stage = "INGEST_HANDOFF";
+    return "INGEST";
+  }
+
+  /**
+   * Probe result: the ingestion handoff outcome. Only a verified-and-validated artifact reaches
+   * here, and only success completes the run. A failed handoff fails closed with the generic
+   * `UNSUPPORTED_STATE` — the contract reserves no ingest-specific blocker code, and adding one is
+   * a governed contract change deferred to the channel-adapter slice.
+   */
+  onIngested(res: IngestResult): Effect {
+    this.expect("INGEST_HANDOFF");
+    this.revision += 1;
+    if (!res.ok) return this.fail("UNSUPPORTED_STATE");
     this.completedSteps = 3;
     this.emit("STEP_COMPLETED", { stepId: this.stepId() });
     this.stage = "COMPLETE";
     this.blocker = null;
     this.emit("RUN_COMPLETED", { status: "COMPLETED" });
-    return { effect: "CLEANUP", result };
+    return "CLEANUP";
   }
 
   private resume(): Effect {
@@ -451,10 +512,16 @@ export class ActionWindowEngine {
         return "HIGHLIGHT";
       case "WAIT_FOR_USER_ACTION":
         return "OBSERVE";
-      case "RUN_DUMMY_DOWNSTREAM":
-        // Resuming a run interrupted after verification re-runs the automatic downstream step. The
-        // step is deterministic and completion is recorded once, so the resume is idempotent.
-        return "DOWNSTREAM";
+      case "DETECT_DOWNLOAD":
+        // Resuming a run interrupted after verification re-runs the automatic downstream chain from
+        // detection. Ingestion is dedup-safe and completion is recorded once, so the resume is
+        // idempotent. (The restore barrier always parks downstream resumes here — see
+        // `operation-run.ts` `safeResumeStageFor`.)
+        return "DETECT_DOWNLOAD";
+      case "VALIDATE_ARTIFACT":
+        return "VALIDATE_ARTIFACT";
+      case "INGEST_HANDOFF":
+        return "INGEST";
       default:
         return "NONE";
     }
@@ -475,6 +542,3 @@ export class ActionWindowEngine {
     void stageStepIndex(stage);
   }
 }
-
-/** Deterministic dummy-downstream output size (in-memory only). */
-const TOTAL_STEPS_PROCESSED = 1;

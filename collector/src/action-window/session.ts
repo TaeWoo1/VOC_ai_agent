@@ -21,7 +21,15 @@ import {
   type EventEnvelope,
 } from "../../../contracts/action-window/v1/index";
 import type { AwClientFrame, AwServerFrame, AwServerTransport } from "../../../contracts/action-window/v1/transport";
-import { ActionWindowEngine, type Effect, type LocateResult, type VerifyResult } from "./engine";
+import {
+  ActionWindowEngine,
+  type ArtifactValidateResult,
+  type DownloadDetectResult,
+  type Effect,
+  type IngestResult,
+  type LocateResult,
+  type VerifyResult,
+} from "./engine";
 
 /**
  * The side-effecting probes the session drives. Two implementations exist: `SyntheticProbeDriver`
@@ -40,6 +48,16 @@ export interface ProbeDriver {
   waitForUserAction(): Promise<boolean>;
   /** Check the expected post-action transition. `expectedSig` is the highlighted target's opaque ref. */
   verify(expectedSig: string): Promise<VerifyResult>;
+  /**
+   * Detect (read-only, never trigger) whether the verified user action produced a download.
+   * Resolves `{detected:false}` on timeout; a detected artifact is reported as an OPAQUE 16-hex
+   * `artifactRef` (see `artifact.ts`) — never a filename or path.
+   */
+  detectDownload(): Promise<DownloadDetectResult>;
+  /** Validate the detected artifact (e.g. extension + magic sniff). Partial artifacts → invalid. */
+  validateArtifact(artifactRef: string): Promise<ArtifactValidateResult>;
+  /** Hand the validated artifact to the existing ingestion path (dedup-safe, idempotent). */
+  ingest(artifactRef: string): Promise<IngestResult>;
   /** Tear down overlay/observer. Idempotent. */
   cleanup(): Promise<void>;
 }
@@ -176,20 +194,26 @@ export class ActionWindowSession {
         const res = await this.driver.verify(this.highlightedSig());
         const next = this.engine.onVerified(res);
         this.publishState();
-        if (next === "DOWNSTREAM") {
-          this.engine.runDownstream();
-          this.publishState();
-          await this.driver.cleanup();
-          return;
-        }
-        // Not verified → back to the human-action barrier.
+        // Verified → continue into the downstream chain; not verified → back to the barrier.
         return this.drive(next);
       }
-      case "DOWNSTREAM": {
-        this.engine.runDownstream();
+      case "DETECT_DOWNLOAD": {
+        const res = await this.driver.detectDownload();
+        const next = this.engine.onDownloadDetected(res);
         this.publishState();
-        await this.driver.cleanup();
-        return;
+        return this.drive(next);
+      }
+      case "VALIDATE_ARTIFACT": {
+        const res = await this.driver.validateArtifact(this.detectedArtifactRef());
+        const next = this.engine.onArtifactValidated(res);
+        this.publishState();
+        return this.drive(next);
+      }
+      case "INGEST": {
+        const res = await this.driver.ingest(this.detectedArtifactRef());
+        const next = this.engine.onIngested(res);
+        this.publishState();
+        return this.drive(next);
       }
       case "CLEANUP": {
         await this.driver.cleanup();
@@ -234,6 +258,15 @@ export class ActionWindowSession {
     const e = this.engine.events().find((ev) => ev.type === "TARGET_HIGHLIGHTED");
     return e?.payload.targetRef ?? "";
   }
+
+  /** The LAST detected artifact ref (a resumed run may detect again — the newest one is current). */
+  private detectedArtifactRef(): string {
+    const events = this.engine.events();
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.type === "DOWNLOAD_DETECTED") return events[i]!.payload.artifactRef ?? "";
+    }
+    return "";
+  }
 }
 
 function isDrivingEffect(effect: Effect): boolean {
@@ -252,16 +285,26 @@ export interface SyntheticProbeOptions {
   surfaceOk?: boolean;
   locate?: LocateResult;
   verify?: VerifyResult;
+  detect?: DownloadDetectResult;
+  validate?: ArtifactValidateResult;
+  ingestResult?: IngestResult;
 }
 
+/** Deterministic default synthetic artifact ref (a valid opaque 16-hex, like a real hashed ref). */
+export const SYNTHETIC_ARTIFACT_REF = "0f1e2d3c4b5a6978";
+
 /**
- * Deterministic offline driver. No browser. Surface/locate/verify results are configurable, and the
- * "user action" is delivered explicitly via {@link completeUserAction} — the session never clicks.
+ * Deterministic offline driver. No browser, no download, no backend. Surface/locate/verify and the
+ * downstream (detect/validate/ingest) results are configurable, and the "user action" is delivered
+ * explicitly via {@link completeUserAction} — the session never clicks.
  */
 export class SyntheticProbeDriver implements ProbeDriver {
   private readonly surfaceOk: boolean;
   private readonly locateResult: LocateResult;
   private readonly verifyResult: VerifyResult;
+  private readonly detectResult: DownloadDetectResult;
+  private readonly validateResult: ArtifactValidateResult;
+  private readonly ingestOutcome: IngestResult;
 
   private userActionResolve: ((observed: boolean) => void) | null = null;
   private pendingUserAction: boolean | null = null;
@@ -270,6 +313,9 @@ export class SyntheticProbeDriver implements ProbeDriver {
     this.surfaceOk = opts.surfaceOk ?? true;
     this.locateResult = opts.locate ?? { count: 1, sig: "a1b2c3d4e5f60718" };
     this.verifyResult = opts.verify ?? { verified: true, drift: false };
+    this.detectResult = opts.detect ?? { detected: true, artifactRef: SYNTHETIC_ARTIFACT_REF };
+    this.validateResult = opts.validate ?? { valid: true };
+    this.ingestOutcome = opts.ingestResult ?? { ok: true, processed: 1 };
   }
 
   prepareSurface(): Promise<boolean> {
@@ -296,6 +342,15 @@ export class SyntheticProbeDriver implements ProbeDriver {
   }
   verify(_expectedSig: string): Promise<VerifyResult> {
     return Promise.resolve(this.verifyResult);
+  }
+  detectDownload(): Promise<DownloadDetectResult> {
+    return Promise.resolve(this.detectResult);
+  }
+  validateArtifact(_artifactRef: string): Promise<ArtifactValidateResult> {
+    return Promise.resolve(this.validateResult);
+  }
+  ingest(_artifactRef: string): Promise<IngestResult> {
+    return Promise.resolve(this.ingestOutcome);
   }
   cleanup(): Promise<void> {
     return Promise.resolve();

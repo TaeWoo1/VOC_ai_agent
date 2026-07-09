@@ -99,6 +99,19 @@ describe("action-window run store", () => {
     expect(() => loadOperationRun(dir, run.runId)).toThrowError(/STORE_INVALID_RECORD/);
   });
 
+  it("fails closed on a legacy v1 record (pre-downstream schema) — never half-loads or migrates", async () => {
+    const dir = tmpDir();
+    const run = await checkpointRun("run_legacy_v1");
+    saveOperationRun(dir, run);
+    const path = join(dir, `${run.runId}.json`);
+    // A stale dev record from the R3 era: schemaVersion 1 carrying the retired dummy-downstream stage.
+    const legacy = JSON.parse(readFileSync(path, "utf8")) as { schemaVersion: number; engine: { stage: string } };
+    legacy.schemaVersion = 1;
+    legacy.engine.stage = "RUN_DUMMY_DOWNSTREAM";
+    writeFileSync(path, JSON.stringify(legacy), "utf8");
+    expect(() => loadOperationRun(dir, run.runId)).toThrowError(/STORE_INVALID_RECORD:WRONG_SCHEMA_VERSION/);
+  });
+
   it("rejects an audit log with a sequence gap (order is load-bearing)", async () => {
     const dir = tmpDir();
     const run = await checkpointRun();

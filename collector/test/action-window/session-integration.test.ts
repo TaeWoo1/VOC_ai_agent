@@ -175,6 +175,9 @@ describe("Action Window R2 synthetic E2E (FE ↔ loopback ↔ Runtime)", () => {
     expect(fe.view?.allowedCommands).toEqual([]);
     expect(fe.eventTypes().filter((t) => t === "STEP_COMPLETED")).toHaveLength(2);
     expect(fe.eventTypes()).toContain("RUN_COMPLETED");
+    // The downstream chain ran and reported the artifact as an opaque 16-hex ref only.
+    const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+    expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
 
     // Ordering: strictly monotonic sequence, no gaps, no duplicates.
     const seqs = fe.events.map((e) => e.sequence);

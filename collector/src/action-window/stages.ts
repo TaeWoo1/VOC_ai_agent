@@ -23,7 +23,9 @@ export type Stage =
   | "HIGHLIGHT_TARGET"
   | "WAIT_FOR_USER_ACTION"
   | "VERIFY_TRANSITION"
-  | "RUN_DUMMY_DOWNSTREAM"
+  | "DETECT_DOWNLOAD"
+  | "VALIDATE_ARTIFACT"
+  | "INGEST_HANDOFF"
   | "COMPLETE"
   | "FAILED"
   | "CANCELLED"
@@ -32,7 +34,9 @@ export type Stage =
 export const TERMINAL_STAGES: readonly Stage[] = ["COMPLETE", "FAILED", "CANCELLED"];
 
 /**
- * The fixed synthetic step plan. Step 2 is the single human-action (ACTION_WINDOW) step.
+ * The fixed step plan. Step 2 is the single human-action (ACTION_WINDOW) step. Step 3 is the
+ * automatic downstream chain (detect download → validate artifact → ingest handoff) — one
+ * seller-visible step spanning three internal stages, mirroring how steps 1–2 span their stages.
  * Copy ownership: Runtime carries dotted semantic `copyKey`s + sanitized primitive `copyParams`
  * ONLY — never final user prose. FE maps these keys to localized copy.
  */
@@ -46,7 +50,7 @@ export interface StepMeta {
 export const STEP_PLAN: readonly StepMeta[] = [
   { stepNumber: 1, stepId: "aw.prepare_surface", copyKey: "actionWindow.step.prepareSurface", mode: "AUTOMATIC_OPERATION" },
   { stepNumber: 2, stepId: "aw.user_target_action", copyKey: "actionWindow.step.userTargetAction", mode: "ACTION_WINDOW", copyParams: { targetKind: "primary_action" } },
-  { stepNumber: 3, stepId: "aw.dummy_downstream", copyKey: "actionWindow.step.dummyDownstream", mode: "AUTOMATIC_OPERATION" },
+  { stepNumber: 3, stepId: "aw.downstream", copyKey: "actionWindow.step.downstream", mode: "AUTOMATIC_OPERATION" },
 ];
 export const TOTAL_STEPS = STEP_PLAN.length;
 
@@ -67,7 +71,9 @@ export function stageStepIndex(stage: Stage): number {
     case "WAIT_FOR_USER_ACTION":
     case "VERIFY_TRANSITION":
       return 2;
-    case "RUN_DUMMY_DOWNSTREAM":
+    case "DETECT_DOWNLOAD":
+    case "VALIDATE_ARTIFACT":
+    case "INGEST_HANDOFF":
     case "COMPLETE":
       return 3;
     default:
@@ -86,7 +92,9 @@ export function stageToRunStatus(stage: Stage): RunStatus {
       return "RUNNING";
     case "WAIT_FOR_USER_ACTION":
       return "WAITING_FOR_HUMAN";
-    case "RUN_DUMMY_DOWNSTREAM":
+    case "DETECT_DOWNLOAD":
+    case "VALIDATE_ARTIFACT":
+    case "INGEST_HANDOFF":
       return "PROCESSING";
     case "COMPLETE":
       return "COMPLETED";
@@ -113,7 +121,9 @@ export function stageToStepStatus(stage: Stage): StepStatus {
       return "AWAITING_USER";
     case "VERIFY_TRANSITION":
       return "OBSERVING";
-    case "RUN_DUMMY_DOWNSTREAM":
+    case "DETECT_DOWNLOAD":
+    case "VALIDATE_ARTIFACT":
+    case "INGEST_HANDOFF":
       return "PROCESSING";
     case "COMPLETE":
       return "COMPLETED";
@@ -137,7 +147,9 @@ export function allowedCommands(stage: Stage): CommandType[] {
     case "WAIT_FOR_USER_ACTION":
       return ["REQUEST_STEP_RECHECK", "SET_GUIDANCE_ENABLED", "SWITCH_TO_MANUAL", "PAUSE_RUN", "CANCEL_RUN", "FIND_CURRENT_STEP"];
     case "VERIFY_TRANSITION":
-    case "RUN_DUMMY_DOWNSTREAM":
+    case "DETECT_DOWNLOAD":
+    case "VALIDATE_ARTIFACT":
+    case "INGEST_HANDOFF":
       return ["CANCEL_RUN", "FIND_CURRENT_STEP"];
     case "PAUSED":
       return ["RESUME_RUN", "CANCEL_RUN", "FIND_CURRENT_STEP"];
