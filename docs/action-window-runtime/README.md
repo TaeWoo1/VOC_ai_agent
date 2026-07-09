@@ -118,3 +118,6 @@ redefine product intent — report the conflict** instead.
 - Current verified state and blocker → [`current-state.md`](current-state.md)
 - The next single action → see the **"next single action"** field in
   [`current-state.md`](current-state.md).
+- R4 (first supervised real-channel pilot) readiness, gates, and safety
+  boundary → [`r4-preparation.md`](r4-preparation.md) (read when the active
+  slice is R4 preparation or later).
