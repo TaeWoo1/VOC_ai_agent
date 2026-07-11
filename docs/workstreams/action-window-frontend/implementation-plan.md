@@ -487,3 +487,62 @@ test/vitest/testing-library token leaks into `dist`, user-facing resilience copy
 (`다시 연결`) still ships. Deliberately deferred (named, not started): page-level
 integration tests through the store; jest-axe automated a11y scanning; a frontend CI
 workflow to run these on PRs; live-agent verification.
+
+## FE-7 — page-level DOM integration tests (DONE)
+
+Product goal: FE-6 covered the components in isolation (hand-fed props); nothing
+covered the **wiring between the shared store and the rendered pages**. This is the
+seam that breaks silently — a component can be correct while a page forgets to pass
+`connection`, drops the `sourceMode === "bridge" ? reconnect : undefined` gate, or
+renders a command control that should be hidden while offline. FE-7 adds page-level DOM
+integration tests that drive the real `operationsStore` through its public API and
+assert store-state → rendered-page wiring (offline banner, reconnect action, suppressed
+commands, diagnostics entry point), **not** every visual detail (that stays in FE-6 /
+node-env).
+
+Decisions (product-owner, 2026-07-11): **implement now**; **page-level integration
+tests only**; **zero new dependencies and zero config changes** (jsdom/RTL from FE-6;
+`MemoryRouter` from the existing `react-router-dom`; the `include` glob already matches
+`*.test.tsx`). **Mock the `devMode` boundary to a production-shaped page** by default
+(the diagnostics-entry tests flip bridge-mode on); **add a shared test-helper module**.
+No jest-axe, no FE CI, no live-agent verification, no source change.
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **Shared helpers** `src/test/renderWithRouter.tsx` (a `MemoryRouter` wrapper — the
+  pages need a Router only for `<Link>`; no route config, no navigation mocking) and
+  `src/test/opsStoreHarness.ts` (`resetOps` / `seedRun` / `seedHome` / `seedBridge` /
+  `seedBridgeRun`, plus the `controllableSource()` pattern lifted from
+  `operationsStore.test.ts`) — thin seams over the **real** store API, never a mocked
+  store.
+- **Boundary mocks** (per page-test file, `importOriginal` spread): `devMode` overrides
+  `isFixturePreviewEnabled` / `isBridgeModeEnabled` (default both `false`, so the DEV
+  demo nav does not render — vitest sets `import.meta.env.DEV = true`); `bridgeSource`
+  overrides `connectBridgeIfEnabled` / `retryBridgeBoot` / `isBridgeBootAttempted` so
+  the `useBridgeBoot` mount effect and the reconnect click never touch a real transport
+  (jsdom has no WebSocket). Nothing deeper is mocked.
+- **Tests** (jsdom, +14 → 308), colocated `*.test.tsx`:
+  - `pages/Operations.test.tsx` (9) — production-shaped by default (no DEV nav);
+    connected `WAITING_FOR_HUMAN` → checkpoint + controls + timeline, no banner;
+    connected idle → start region; **offline** (bridge + last-known run) → offline
+    banner + reconnect button, commands suppressed, timeline stays; **reconnecting** →
+    banner, no reconnect button, commands suppressed; reconnect click → invokes the
+    (mocked) bridge boundary only, no real transport; diagnostics entry point renders in
+    bridge-live and fixture-fallback, absent when bridge mode is off.
+  - `pages/OperationsHome.test.tsx` (5) — empty → start region + recent-activity empty
+    message; active checkpoint → active-run card + detail `<Link>` + populated recent
+    list; offline → banner + reconnect, start affordance suppressed; diagnostics entry
+    point on/off.
+- **Assertion discipline** (avoid brittle coupling): query by `role`/accessible-name
+  (`getByRole("region",{name})`) with a few stable FE copy strings for banner identity;
+  `MemoryRouter` only (no navigation assertions); the store is driven, never mocked. The
+  banner is matched by its FE copy (`CONNECTION_VIEW.*.title`) because `RunStatusBadge`
+  also uses `role="status"`.
+
+Acceptance: all 294 prior tests pass unmodified; **no dependency, config, or component
+source change**; typecheck + build clean; production bundle **byte-identical** to the
+FE-6 baseline (`index-DgRPaagd.css` 20.67 kB / `index-CDKl4_D3.js` 347.98 kB — same
+hashes) — a stray `.table` utility that Tailwind's `src/**/*.{ts,tsx}` content scan had
+extracted from the word "table" in a helper comment was removed, so the test files leak
+nothing into `dist`. Deliberately deferred (named, not started): jest-axe automated a11y
+scanning; a frontend CI workflow; live-agent verification.
