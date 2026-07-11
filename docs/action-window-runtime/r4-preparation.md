@@ -32,7 +32,7 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1 ✅ (D-021); G2–G6 open |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ☐ | — |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ☐ | — |
-| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ☐ | — |
+| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ◔ | most §6 items green on NAVER fixtures (session probe, surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225 + D-023); **remaining: the seated `AW_HEADED` operator run (harness delivered) + the abort-drill/evidence pack (§8)** |
 | P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ☐ | — |
 | P11 | Pre-live evidence pack (§8) assembled | ☐ | — |
 | P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization |
@@ -172,8 +172,10 @@ verified seam — the adapter is composition, not new invention:
   patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`).
 - ☐ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks.
-- ☐ **Overlay + observation** — highlight never intercepts the click; the user's real click is
-  observed, not simulated (R1/R2 verified components, re-fixtured for the channel).
+- ☑ **Overlay + observation** — highlight never intercepts the click; the user's real click is
+  observed, not simulated (R1/R2 verified components, re-fixtured for the channel). *(Green on the
+  NAVER fixture: `naver-browser.test.ts` drives a NAVER-shaped review-export surface — automated
+  headless + a delivered-not-run `AW_HEADED` operator proof; D-023.)*
 - ☐ **Download detection (read-only)** — detect fired/completed download without triggering
   (reuse: export-target readiness + controlled download save; 0-rows vs failure distinguished).
 - ☐ **Artifact validation** — extension + magic sniff before any ingestion handoff; partial
@@ -185,8 +187,12 @@ verified seam — the adapter is composition, not new invention:
   rows to prove the positive path).
 - ☐ **Operation Run persistence** — the pilot run records every verified transition; interruption
   parks at PAUSED; resume re-drives read-only (R3 verified; re-run against the channel fixture).
-- ☐ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
-  Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`).
+- ☑ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
+  Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`). *(Green for
+  NAVER: the fixture driver is hosted from the local-agent boot via `createAgentBridge` and drives the
+  full loop to COMPLETED over the real Bridge WS with `channelCode:"naver"`, incl. an agent
+  cold-restart resume-through-downstream — `naver-bridge-transport.test.ts`, `RUN_INTEGRATION` 3/3;
+  D-023.)*
 - ☐ **Privacy sweep** — `findProhibitedFields` empty across wire + store for the channel fixture;
   no channel-specific leakage (marketplace names are sanitized enums/codes only).
 
