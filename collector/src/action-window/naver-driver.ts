@@ -41,13 +41,13 @@ import { evaluateExportTargetReadiness, type ExportTargetReadiness } from "../na
 import { findExportCandidates } from "../naver/review-export";
 import { artifactRefFor } from "./artifact";
 import { quarantineValidateBytes, sweepQuarantine, type QuarantineIo, type QuarantineVerdict } from "./quarantine";
+import { naverSurfaceBlockerFor } from "./naver-session-precondition";
 import type { AwIngestUploadFn } from "./ingest-handoff";
 import type {
   ArtifactValidateResult,
   DownloadDetectResult,
   IngestResult,
   LocateResult,
-  SurfaceBlockerCode,
   SurfaceProbeResult,
   VerifyResult,
 } from "./engine";
@@ -76,18 +76,6 @@ type ExportCandidate = ReturnType<typeof findExportCandidates>[number];
 function targetSigFor(c: ExportCandidate): string {
   const parts = ["aw-naver-fixture-target", c.tag, c.keyword, c.id ?? "", String(c.dataExportReview), String(c.inText), String(c.inAriaLabel), String(c.inTitle)];
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
-}
-
-function surfaceBlockerFor(verdict: SessionVerdict): SurfaceBlockerCode {
-  switch (verdict) {
-    case "RECONNECT_REQUIRED":
-      return "SESSION_EXPIRED";
-    case "ACCOUNT_LOGIN_REQUIRED":
-    case "AUTH_CHALLENGE_REQUIRED":
-      return "LOGIN_REQUIRED";
-    default:
-      return "UNSUPPORTED_STATE";
-  }
 }
 
 /**
@@ -173,7 +161,7 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
     const verdict = classifySessionVerdict(this.fixture.sessionSignals());
     if (verdict !== "LOGGED_IN") {
       this.lastDiagnostic = { verdict };
-      return Promise.resolve({ ok: false, blockerCode: surfaceBlockerFor(verdict) });
+      return Promise.resolve({ ok: false, blockerCode: naverSurfaceBlockerFor(verdict) });
     }
     const readiness = evaluateExportTargetReadiness(this.fixture.html());
     this.lastDiagnostic = {
