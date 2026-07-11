@@ -9,9 +9,10 @@
   boot retry) `aa8ff3c`, FE-4 (reconnect & recovery UX) `82b50bd`, and FE-5
   (sanitized live-bridge diagnostics) `68c7b11` MERGED into `main` via PR #226
   (merge `74d0b37`, 2026-07-11). FE-6 (DOM/a11y component tests — jsdom + RTL
-  adopted) IMPLEMENTED (this slice, uncommitted on
-  `feat/action-window-connection-status`; 294 tests). Remaining follow-ups:
-  live-agent verification; page-level integration tests / jest-axe / FE CI.**
+  adopted) MERGED into `main` via PR #228 (merge `e1d3c40`, 2026-07-11). FE-7
+  (page-level DOM integration tests) IMPLEMENTED (this slice, uncommitted on
+  `feat/action-window-page-dom-tests`; 308 tests). Remaining follow-ups:
+  live-agent verification; jest-axe / FE CI.**
 
 ## Base
 
@@ -86,7 +87,43 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-6 DOM/a11y component tests — jsdom + RTL adopted (one FE slice, uncommitted):
+FE-7 page-level DOM integration tests (one FE slice, uncommitted):
+
+- Product gap closed: FE-6 proved the components in isolation, but nothing verified the
+  **store → page wiring** — that when `operationsStore` reports `offline`, the pages
+  actually render the offline banner, expose the reconnect action, **suppress** the
+  command controls, and (in bridge mode) surface the diagnostics entry point; and show
+  the checkpoint / active-run / start affordances in the connected states. FE-7 drives
+  the real store through its public API and asserts what the pages render.
+- **Decisions** (product-owner, 2026-07-11): implement now; page-level integration
+  tests only; **zero new deps, zero config change** (jsdom/RTL from FE-6; `MemoryRouter`
+  from the existing `react-router-dom`; `include` already matches `*.test.tsx`); mock
+  the `devMode` boundary to a production-shaped page by default (bridge-mode flipped on
+  for the diagnostics-entry tests); add a shared test-helper module. No jest-axe, no FE
+  CI, no live-agent verification, no source change.
+- **Helpers** `src/test/renderWithRouter.tsx` (a `MemoryRouter` wrapper — no route
+  config, no navigation mocking) + `src/test/opsStoreHarness.ts` (`resetOps` / `seedRun`
+  / `seedHome` / `seedBridge` / `seedBridgeRun` + `controllableSource`) — thin seams
+  over the **real** store API, never a mocked store.
+- **Boundary mocks** (`importOriginal` spread, per page-test file): `devMode`
+  (`isFixturePreviewEnabled` / `isBridgeModeEnabled` default false → no DEV demo nav)
+  and `bridgeSource` (`connectBridgeIfEnabled` / `retryBridgeBoot` /
+  `isBridgeBootAttempted` → no real WebSocket from the mount boot or reconnect click).
+- Tests (jsdom, +14 → 308): `pages/Operations.test.tsx` (9 — production-shaped default;
+  connected checkpoint+controls+timeline; idle start; **offline** → banner + reconnect,
+  commands suppressed, timeline stays; **reconnecting** → banner, no reconnect button,
+  commands suppressed; reconnect click → mocked bridge boundary only; diagnostics entry
+  point on/off) and `pages/OperationsHome.test.tsx` (5 — empty → start + empty recent;
+  active → active-run card + detail link + populated recent; offline → banner+reconnect,
+  start suppressed; diagnostics on/off).
+- Verification: 294 prior tests pass unmodified; typecheck + build clean; production
+  bundle **byte-identical** to the FE-6 baseline (removed a stray `.table` utility that
+  Tailwind's content scan had pulled from the word "table" in a helper comment, so the
+  test files leak nothing into `dist`).
+- Docs: FE-7 plan entry; this handoff; the "page-level integration tests" open question
+  resolved; Accessibility notes updated.
+
+FE-6 DOM/a11y component tests — jsdom + RTL adopted (one FE slice, MERGED via PR #228):
 
 - Product gap closed: FE-3.5 → FE-5 shipped the app's first DOM-interactive,
   aria-bearing surfaces (the reconnect button, the `role="status"` offline banner,
@@ -334,6 +371,29 @@ directly), and the jsdom/RTL decision (still deferred, separate approval).
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
+## Validation results (FE-7 session, 2026-07-11)
+
+- `frontend typecheck`: passed.
+- `frontend tests`: **308 passed** (294 prior + 14 jsdom page tests: `Operations`
+  9 + `OperationsHome` 5). 27 test files. All prior tests unchanged; the two new page
+  tests carry the `// @vitest-environment jsdom` pragma; no `*.test.ts` env changed.
+- `frontend build`: passed; production bundle **byte-identical** to the FE-6 baseline
+  (`index-DgRPaagd.css` 20.67 kB / `index-CDKl4_D3.js` 347.98 kB — same content hashes,
+  verified by an isolated with/without-test-files rebuild). A stray `.table` utility
+  (Tailwind's `src/**/*.{ts,tsx}` content scan extracted "table" from the word "route
+  table" in a helper comment) was reworded away, so the test files contribute nothing to
+  `dist`.
+- Dependencies / config: **no change** — `package.json`, `package-lock.json`, and
+  `vitest.config.ts` untouched (jsdom/RTL already present; `MemoryRouter` from the
+  existing `react-router-dom`).
+- `git diff --check`: clean.
+- No component/page **source** changed; the store is driven (never mocked); only the
+  `devMode` + `bridgeSource` boundaries are mocked (no real WebSocket in jsdom); no
+  `collector/**` / `backend/**` / contract / canonical-doc change.
+- Environment note: this slice was interrupted mid-run by an environment-level `EPERM`
+  file-access fault (the whole working tree became unreadable to the toolchain); after
+  access was restored the saved fix was reapplied and all checks re-run green.
+
 ## Validation results (FE-6 session, 2026-07-11)
 
 - `frontend typecheck`: passed (jest-dom matcher types resolve via the
@@ -400,22 +460,25 @@ FE-6 added jsdom + React Testing Library **component-level DOM/a11y tests** over
 new interactive surfaces (reconnect banner `role="status"` + `aria-busy`, command
 buttons by accessible name, blocker status regions, the diagnostics `<section>`/`<dl>`)
 — so role/aria structure and click→callback wiring are now regression-covered in the
-node/jsdom suite. Not covered: real-browser layout/CSS (jsdom applies no stylesheet, so
-Tailwind responsive visibility is not asserted), automated axe scanning (jest-axe not
-adopted), and page-through-store integration; a live browser screenshot pass and a
-paired-agent live verification remain separate, approval-gated follow-ups.
+node/jsdom suite. FE-7 extends this to **page-level DOM integration tests**: driving the
+real store to offline / reconnecting / connected states and asserting the pages render
+the banner + reconnect action, suppress the command regions, and surface the diagnostics
+entry point — all queried by role + accessible name. Not covered: real-browser
+layout/CSS (jsdom applies no stylesheet, so Tailwind responsive visibility is not
+asserted), automated axe scanning (jest-axe not adopted); a live browser screenshot pass
+and a paired-agent live verification remain separate, approval-gated follow-ups.
 
 ## Last meaningful commit
 
-- Merge `74d0b37` — PR #226 merged into `main` (2026-07-11), carrying FE-3.5
-  `aa8ff3c`, FE-4 `82b50bd`, and FE-5 `68c7b11` (real Bridge connection status +
-  reconnect/recovery UX + sanitized live-bridge diagnostics).
+- Merge `e1d3c40` — PR #228 merged into `main` (2026-07-11), carrying FE-6 `c07aa2c`
+  (jsdom + RTL component-level DOM/a11y tests).
 
 ## Current PR
 
-- **None open. PR #226 merged** (`feat/action-window-connection-status` → `main`,
-  merge `74d0b37`). FE-6 (DOM/a11y component tests) is implemented on the same branch,
-  **uncommitted**, awaiting commit approval.
+- **None open. PR #228 merged** (`feat/action-window-connection-status` → `main`,
+  merge `e1d3c40`). FE-7 (page-level DOM integration tests) is implemented on
+  `feat/action-window-page-dom-tests` (branched from `e1d3c40`), **uncommitted**,
+  awaiting commit approval.
 
 ## Decisions made in this workstream
 
@@ -461,20 +524,24 @@ paired-agent live verification remain separate, approval-gated follow-ups.
   **resolved 2026-07-11** (product-owner): adopted in **FE-6**, minimally and
   additively (component-only scope, hand-rolled role/aria assertions, no jest-axe,
   jsdom opted in per-`.test.tsx` so the node-env default is unchanged). The reconnect
-  button was the first click-through DOM test, as anticipated. Still open (named, not
-  started): page-level integration tests through the store, jest-axe automated a11y
-  scanning, and a frontend CI workflow to run these on PRs.
+  button was the first click-through DOM test, as anticipated.
+- ~~Page-level integration tests through the store~~ — **resolved 2026-07-11**
+  (product-owner): adopted in **FE-7** (page-level DOM integration tests only, real
+  store driven via its public API, `devMode` mocked production-shaped by default, shared
+  `src/test/` helper module, zero new deps / config). Still open (named, not started):
+  jest-axe automated a11y scanning, and a frontend CI workflow to run these on PRs.
 
 ## Exact steps for the next session
 
-1. On approval, commit the FE-6 slice (`frontend/**` — the 4 `*.test.tsx`,
-   `src/test/setup.ts`, `vitest.config.ts`, `package.json` + `package-lock.json` — plus
-   these docs) as one commit onto `feat/action-window-connection-status` (after
-   `68c7b11`); push/PR only when explicitly approved.
+1. On approval, commit the FE-7 slice (`frontend/**` — `src/test/renderWithRouter.tsx`,
+   `src/test/opsStoreHarness.ts`, `src/pages/Operations.test.tsx`,
+   `src/pages/OperationsHome.test.tsx` — plus these docs) as one commit onto
+   `feat/action-window-page-dom-tests` (after `e1d3c40`); push/PR only when explicitly
+   approved.
 2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
    hosting a run) — environment-dependent follow-up; do not claim it from node/jsdom
    tests. Covers real drop → reconnecting → offline → manual reconnect → fresh resync,
    and confirming the FE-5 LIVE vs FIXTURE FALLBACK verdict directly.
-3. Remaining test candidates afterwards (named, not started): page-level integration
-   tests through the store; jest-axe automated a11y scanning; a frontend CI workflow.
+3. Remaining test candidates afterwards (named, not started): jest-axe automated a11y
+   scanning; a frontend CI workflow to run typecheck/test/build on PRs.
 4. Do not modify the contract or canonical docs from this workstream.
