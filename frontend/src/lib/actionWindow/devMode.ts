@@ -2,7 +2,7 @@
 // and must never appear in the production UI: gated on Vite's build-time `DEV`
 // flag, so the production build tree-shakes it out entirely.
 import type { AwClientTransport } from "./contract";
-import { connectAwBridgeSession } from "./wsTransport";
+import { connectAwBridgeSession, type AwConnectionStatus } from "./wsTransport";
 
 export function isFixturePreviewEnabled(): boolean {
   return import.meta.env.DEV === true;
@@ -44,11 +44,13 @@ export interface BridgeSession {
  * Authentication reuses the pairing the Bridge status client established (`BRIDGE_TOKEN_KEY`); the run
  * identity comes from the agent's `aw_session` announcement — the FE never invents a runId.
  */
-export function resolveBridgeSession(): Promise<BridgeSession | null> {
+export function resolveBridgeSession(
+  onStatus?: (status: AwConnectionStatus) => void,
+): Promise<BridgeSession | null> {
   if (!isBridgeModeEnabled()) return Promise.resolve(null);
   const env = import.meta.env as Record<string, unknown>;
   const httpBase = typeof env.VITE_BRIDGE_URL === "string" ? env.VITE_BRIDGE_URL : "http://127.0.0.1:47615";
-  return connectAwBridgeSession({ httpBase, wsBase: httpBase.replace(/^http/, "ws") });
+  return connectAwBridgeSession({ httpBase, wsBase: httpBase.replace(/^http/, "ws"), onStatus });
 }
 
 /**

@@ -2,12 +2,20 @@ import { HOME_SCENARIO_NAMES, type HomeScenarioName } from "../lib/actionWindow/
 import {
   dispatchOperationsCommand,
   loadHomeScenario,
+  returnToFixtureForDev,
 } from "../lib/actionWindow/operationsStore";
-import { useBridgeBoot, useOperationsNote, useOperationsStore } from "../hooks/useOperationsStore";
-import { isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
+import {
+  useBridgeBoot,
+  useBridgeReconnect,
+  useOperationsNote,
+  useOperationsStore,
+} from "../hooks/useOperationsStore";
+import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
+import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
+import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
@@ -27,9 +35,19 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
  */
 export function OperationsHome() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
-  const { run, recentRuns, connection, sourceMode, homeScenario, simulation, simulationRemaining } =
-    useOperationsStore();
+  const state = useOperationsStore();
+  const {
+    run,
+    recentRuns,
+    connection,
+    retryPending,
+    sourceMode,
+    homeScenario,
+    simulation,
+    simulationRemaining,
+  } = state;
   const note = useOperationsNote();
+  const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
 
   return (
@@ -75,14 +93,53 @@ export function OperationsHome() {
             })}
           </div>
           <SimulationPreview simulation={simulation} simulationRemaining={simulationRemaining} />
+          {/* DEV boot retry: bridge mode is enabled but the boot fell back to the
+              fixture (agent off / unpaired) — offer another live attempt. */}
+          {isBridgeModeEnabled() ? (
+            <button
+              type="button"
+              onClick={() => void retryBridgeBoot()}
+              className="mt-3 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+            >
+              🔌 로컬 에이전트 다시 연결 (개발용)
+            </button>
+          ) : null}
         </nav>
+      ) : null}
+
+      {/* DEV-only: leave a live/offline Bridge world back to the fixture world
+          without a reload (the fixture scenario panel above is hidden in bridge
+          mode). Never rendered in the production build. */}
+      {isFixturePreviewEnabled() && sourceMode === "bridge" ? (
+        <div className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+            🔌 라이브 연결 중 · 개발용
+          </p>
+          <button
+            type="button"
+            onClick={() => returnToFixtureForDev()}
+            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+          >
+            픽스처로 돌아가기 (개발용)
+          </button>
+        </div>
+      ) : null}
+
+      {/* FE-5 sanitized live-bridge diagnostics — DEV + bridge-mode only (renders
+          in both bridge-live and fixture-fallback), never in the production build. */}
+      {isFixturePreviewEnabled() && isBridgeModeEnabled() ? (
+        <BridgeDiagnostics state={state} />
       ) : null}
 
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">
         {note}
       </p>
 
-      <ConnectionBanner connection={connection} />
+      <ConnectionBanner
+        connection={connection}
+        retryPending={retryPending}
+        onReconnect={sourceMode === "bridge" ? reconnect : undefined}
+      />
 
       {run === null ? (
         <section

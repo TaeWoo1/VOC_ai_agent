@@ -25,6 +25,18 @@ import {
 import { BRIDGE_PROTOCOL_VERSION } from "../bridge/bridgeProtocol";
 import { BRIDGE_TOKEN_KEY, type StorageLike, type WebSocketLike } from "../bridge/bridgeClient";
 
+/**
+ * Connection status of an ESTABLISHED session (FE-owned UI signal, not a wire message).
+ * Product goal: when the local agent / Bridge connection drops or reconnects, the
+ * Operations UI shows the existing offline/reconnecting banner and temporarily
+ * suppresses action buttons, so the seller does not click commands while SellerOps
+ * is not actually connected.
+ *  - "connected"     — live socket adopted (initially, or restored after a drop);
+ *  - "reconnecting"  — the socket dropped and the retry loop is running;
+ *  - "offline"       — dormant: retries exhausted, or the agent now hosts a different run.
+ */
+export type AwConnectionStatus = "connected" | "reconnecting" | "offline";
+
 export interface AwWsDeps {
   httpBase: string;
   wsBase: string;
@@ -37,6 +49,10 @@ export interface AwWsDeps {
   retryDelayMs?: number;
   /** Consecutive failed reconnect attempts before the transport goes dormant. */
   maxReconnectAttempts?: number;
+  /** OPTIONAL status callback (additive): fired on connected/reconnecting/offline
+   *  transitions of an established session, deduped, never after `close()`.
+   *  When omitted, transport behavior is identical to before this hook existed. */
+  onStatus?: (status: AwConnectionStatus) => void;
 }
 
 /** A live Action Window transport bound to the run the local agent announced. */
@@ -57,6 +73,7 @@ interface ResolvedDeps {
   sessionTimeoutMs: number;
   retryDelayMs: number;
   maxReconnectAttempts: number;
+  onStatus?: (status: AwConnectionStatus) => void;
 }
 
 const SERVER_FRAME_KINDS = new Set(["aw_event", "aw_view", "aw_command_result", "aw_resync_result"]);
@@ -71,6 +88,7 @@ function resolveDeps(deps: AwWsDeps): ResolvedDeps {
     sessionTimeoutMs: deps.sessionTimeoutMs ?? 4000,
     retryDelayMs: deps.retryDelayMs ?? 1500,
     maxReconnectAttempts: deps.maxReconnectAttempts ?? 5,
+    onStatus: deps.onStatus,
   };
 }
 
@@ -163,6 +181,14 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
   let active: WebSocketLike | null = null;
   let closed = false;
 
+  // Optional status reporting (additive): deduped transitions, silent after close().
+  let lastStatus: AwConnectionStatus | null = null;
+  const setStatus = (status: AwConnectionStatus): void => {
+    if (closed || status === lastStatus) return;
+    lastStatus = status;
+    d.onStatus?.(status);
+  };
+
   const deliver = (raw: string): void => {
     let msg: unknown;
     try {
@@ -200,6 +226,7 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
     ws.onclose = () => {
       if (!closed && active === ws) {
         active = null;
+        setStatus("reconnecting");
         void reconnect();
       }
     };
@@ -221,16 +248,20 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
         } catch {
           /* already closed */
         }
+        if (!closed) setStatus("offline"); // dormant: different run — never splice
         return;
       }
       adopt(next.ws);
       // Replay from zero: the adapter dedupes by eventId/sequence and keeps the highest-revision view.
       sendFrame({ kind: "aw_resync", runId: first.runId, sinceSequence: 0 });
+      setStatus("connected");
       return;
     }
+    setStatus("offline"); // dormant: retries exhausted (setStatus is a no-op after close())
   };
 
   adopt(first.ws);
+  setStatus("connected");
 
   return {
     runId: first.runId,

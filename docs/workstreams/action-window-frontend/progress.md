@@ -3,13 +3,22 @@
 > Update this document before stopping in every FE task.
 
 - **Workstream:** UI/UX + Frontend
-- **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 + FE-3 COMMITTED
-  (`9f656ca` / `5d54dee` / `39d885b`), PUSHED, and open for review as PR #223.**
+- **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 + FE-3 MERGED into `main`
+  via PR #223 (merge `6ed03f2`, 2026-07-09): FE-2 `9f656ca`, FE-2.5 `5d54dee`,
+  FE-3 `39d885b`, docs sync `cce9547`. FE-3.5 (connection-status callback + DEV
+  boot retry) COMMITTED `c4b98d5` and FE-4 (reconnect & recovery UX) COMMITTED
+  `4807600` on `feat/action-window-connection-status` (not pushed). FE-5
+  (sanitized live-bridge diagnostics) IMPLEMENTED (this slice, uncommitted on the
+  same branch). Remaining follow-ups: live-agent verification, jsdom/RTL
+  decision.**
 
 ## Base
 
 - **Worktree:** `/Users/taewookang/Downloads/workspace/sellerops-fe3`
-- **Branch:** `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
+- **Branch:** `feat/action-window-connection-status` (FE-3.5 `c4b98d5` + FE-4
+  `4807600` committed; FE-5 uncommitted), branched off the merged tip `6ed03f2`.
+  Earlier FE-2/2.5/3 work
+  was on `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
   `8d61d2f` (Runtime R2 Bridge transport PR #218, FE/Runtime integration PRs
   #216–217, run persistence #219, R4 prep #220–221), then a final conflict-free
   rebase onto `f0d57f4` (PR #222, collector/runtime-docs only) before push.
@@ -17,6 +26,9 @@
   (Earlier hashes across the two rebases: `a7a43f4`/`7dd97fb` → `d08ef4f`/`ead80ac`.)
   One rebase conflict (`pages/Operations.tsx`, both lines rewrote the FE-1 page)
   resolved in favor of our store-based version per product decision.
+- **This slice (uncommitted, on `feat/action-window-connection-status` at
+  `4807600`):** FE-5 sanitized live-bridge diagnostics (`frontend/**`) + workstream
+  docs. FE-3.5 (`c4b98d5`) and FE-4 (`4807600`) are committed (not pushed).
 
 ## Gate check
 
@@ -30,7 +42,8 @@
   `5d54dee`; mock/simulated only, R2-independent)
 - Runtime R2 (AW transport over Bridge v1) merged into `main`: ✅ (PR #218 + the
   ratified transport framing in `contracts/action-window/v1/transport.ts`)
-- FE-3 (Bridge-backed source) implemented: ✅ (committed `39d885b`; in PR #223)
+- FE-3 (Bridge-backed source) implemented: ✅ (committed `39d885b`; merged via
+  PR #223, merge `6ed03f2`)
 
 ## FE-3 readiness re-audit (2026-07-09, on `main` `8d61d2f`) — READY
 
@@ -71,6 +84,90 @@ adapter + mock/real boundary + dedupe/stale protection + reconnect snapshot hand
 offline/error state) become implementable.
 
 ## Completed (this session)
+
+FE-5 Sanitized live-bridge diagnostics for verification (one FE slice, uncommitted):
+
+- Product gap closed: with a real paired agent later, the live-Bridge screen and the
+  fixture fallback look nearly identical — there was no safe way to tell which one is
+  actually driving Operations. FE-5 adds a **DEV-only, bridge-mode-only** diagnostics
+  panel that answers it directly (verdict: `라이브 브리지 사용 중` / `픽스처로 폴백됨`
+  / `픽스처 데모`).
+- **Pure formatter** `lib/actionWindow/diagnostics.ts` (`describeBridgeDiagnostics`):
+  takes explicit **sanitized primitives** — source mode, connection literal,
+  booleans, a plain integer revision, and the channel **display label** — never the
+  raw `ActionWindowRunView`, so it structurally cannot leak a runId, raw channelCode,
+  URL, token, or wire frame. Fields: source mode, connection state, bridge mode,
+  boot attempted, retry pending, last safe transition (`prev → current`, timeless),
+  connection change counter, revision (int), channel label, run-bound (bool).
+- **Component** `components/actionWindow/BridgeDiagnostics.tsx`: dashed DEV panel on
+  both pages, rendered only inside the page-level `isFixturePreviewEnabled() &&
+  isBridgeModeEnabled()` dead-branch gate (same tree-shaking pattern as
+  `SimulationPreview`), so it appears in both bridge-live and bridge-fallback but is
+  absent from the production build. Renders in both by living outside the two
+  existing `sourceMode`-scoped DEV strips.
+- **Store**: a **timestamp-free** `connectionTrail` (capped at 6; only the three
+  `SourceConnection` literals) + `connectionChangeCount`, updated on an actual
+  connection transition (a repeated same-state frame is not counted) and reset to a
+  fresh connected session on every world switch (adopt / fixture load / simulation /
+  reset). The store still imports **no** bridge transport module.
+- **Getter** `bridgeSource.ts` `isBridgeBootAttempted()` — read-only boot-flag view
+  so the panel distinguishes "never tried" from "tried and fell back".
+- Tests (node-env, +14 → 271): `diagnostics.test.ts` (9 — verdict logic, field
+  formatting, last-transition, dash-for-empty, channel label not raw code, a
+  **leak-guard** proving no field exposes a raw id/url/token/wire frame, and a
+  bounded-vocabulary assertion); `operationsStore.test.ts` (+5 — trail/counter
+  transitions, same-state not counted, cap enforced, world-switch reset).
+- Docs: FE-5 plan entry; this handoff; the stale FE-4 "uncommitted" note corrected
+  (FE-4 is committed `4807600`).
+
+FE-4 Reconnect & recovery UX for the live Bridge connection (one FE slice, committed `4807600`):
+
+- Product gap closed: FE-3.5 made real drops *visible* but left the terminal
+  `offline` state a dead end (auto-retry gives up → only a page reload recovered).
+  The one manual re-attempt lived in the DEV panel, which both pages hide in
+  bridge mode — unreachable exactly when a live connection can drop.
+- **Reconnect action on the offline banner** (`ConnectionBanner`): on a live
+  Bridge `offline`, the page passes `onReconnect` → a "다시 연결" button that runs
+  `retryBridgeBoot()` (fresh bridge world / resync from 0 on success; honest
+  fallback + safe note otherwise). Shown only on `offline` (not `reconnecting`)
+  and only when `sourceMode === "bridge"`; allowed on mobile (read-only-safe).
+- **In-flight guard**: UI-only `retryPending` flag (NOT a 4th `SourceConnection`
+  literal). `beginBridgeRetry`/`endBridgeRetry(succeeded)` in the store toggle it
+  and surface `CONNECTION_RETRY_FAILED_NOTE` on failure; `useBridgeReconnect()`
+  hook owns `retryBridgeBoot()` so the store never imports the Bridge modules.
+- Offline body copy corrected (no longer promises an automatic retry — it's the
+  terminal state; recovery is the manual action).
+- **DEV return-to-fixture** strip (bridge mode only; absent from prod bundle):
+  "픽스처로 돌아가기 (개발용)" → `returnToFixtureForDev()`, so the full
+  fixture → live → drop → offline → reconnect/return loop is drivable without a
+  reload. The FE-3.5 boot-retry button is KEPT (covers the distinct
+  boot-fell-back case, `sourceMode === "fixture"`; the two never co-occur).
+- Tests (node-env, +5 → 257): copy action/pending/failure strings; store
+  `retryPending` + `returnToFixtureForDev`; `bridgeSource` offline → fresh
+  re-adopt resyncs from zero and closes the dead source.
+- Docs: FE-4 plan entry; this handoff; the stale FE-3.5 "uncommitted" note fixed
+  (FE-3.5 is committed `c4b98d5`).
+
+FE-3.5 Connection-status callback + DEV boot retry (one FE slice, committed `c4b98d5`):
+
+- Product behavior: real Bridge drops/reconnects now drive the EXISTING
+  offline/reconnecting banner and command suppression — the seller can no longer
+  click commands while SellerOps is not actually connected. Previously those UI
+  states were reachable only via the DEV simulations ("real disconnects are
+  silent" caveat — now closed at the FE level).
+- `wsTransport.ts`: additive optional `onStatus` (`AwConnectionStatus`), deduped,
+  fired at established/restored → connected, drop → reconnecting, exhaustion or
+  different-run dormancy → offline; never after `close()`; behavior identical
+  when omitted (all pre-existing transport tests run unchanged without one).
+- `devMode.ts` `resolveBridgeSession(onStatus?)`; `bridgeSource.ts`
+  `notifyStatus()` forwards status as existing `connection` frames — store,
+  `ConnectionBanner`, and suppression react with zero changes.
+- DEV boot retry: `retryBridgeBoot()` + "🔌 로컬 에이전트 다시 연결 (개발용)"
+  button on both pages (visible only when bridge mode enabled but boot fell back;
+  absent from the production bundle).
+- Tests +7 (node-env, existing harnesses): transport transitions incl.
+  silent-after-close, store forwarding, boot retry. Total **252**.
+- Docs: FE-3.5 plan entry; post-merge PR #223 housekeeping bundled here.
 
 FE-3 Bridge-backed source + reconciliation (one FE slice, committed `39d885b`):
 
@@ -158,15 +255,19 @@ FE-1 Review Operations mock flow (merged earlier as PR #215):
 
 ## In progress
 
-- None. FE-3 implemented (this slice); FE-2/FE-2.5 committed and rebased.
+- FE-5 (sanitized live-bridge diagnostics) implemented this slice, uncommitted on
+  `feat/action-window-connection-status`. FE-3.5 (`c4b98d5`) + FE-4 (`4807600`)
+  committed (not pushed).
 
 ## Next single task
 
-**Land FE-3**: review and commit this slice as one commit. The branch then carries the
-complete FE line (FE-2 home IA + FE-2.5 seam/resilience + FE-3 Bridge source) rebased on
-the R2 `main` — ready for a PR **only on explicit approval**. Follow-ups after landing:
-verify against a live local agent (`VITE_AW_BRIDGE=1` + running agent — a real
-environment, out of node-env test reach), and revisit jsdom/RTL.
+**Land FE-5** (and the accumulated FE-3.5/FE-4 line): on explicit approval, commit
+this slice as one commit onto `feat/action-window-connection-status` (after the
+FE-4 commit `4807600`). The branch then carries FE-3.5 (real connection status) +
+FE-4 (reconnect/recovery UX) + FE-5 (live-bridge diagnostics). Push/PR **only on
+explicit approval**. Follow-ups: live-agent verification (`VITE_AW_BRIDGE=1` +
+running paired agent — now also confirms the LIVE vs FIXTURE FALLBACK verdict
+directly), and the jsdom/RTL decision (still deferred, separate approval).
 
 ## Files owned by this workstream
 
@@ -199,16 +300,36 @@ environment, out of node-env test reach), and revisit jsdom/RTL.
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
-## Validation results (FE-3 session, 2026-07-09)
+## Validation results (FE-5 session, 2026-07-11)
 
-- `frontend typecheck`: passed (post-rebase, incl. main's transport/adapter code).
-- `frontend tests`: **245 passed** (216 FE-2.5-era + 19 from main's integration tests
-  [`wsTransport`, `bridgeAdapter`, expanded `devMode`] + `bridgeSource.test.ts` 10).
-- `frontend build`: passed; production bundle checked — dev/simulation code absent
-  (grep "데모 미리보기" / "시뮬레이션" / "sim-duplicate" / "수신 안정성" → 0 each);
-  resilience + home copy present ("연결이 끊겼어요", "운영 에이전트" → 1 each);
-  transport code present as production-intended (`aw_resync` → 1, same as `main`);
-  the `VITE_AW_BRIDGE` check compiles away in production (grep → 0).
+- `frontend typecheck`: passed.
+- `frontend tests`: **271 passed** (257 prior + `diagnostics` 9 + store 5).
+- `frontend build`: passed (347.98 kB / 109.39 kB gzip); production bundle
+  checked — DEV/diagnostics code absent (grep "브리지 진단" / "소스 모드" /
+  "연결 변경 횟수" / "라이브 브리지 사용 중" / "픽스처로 폴백됨" / "픽스처 데모" /
+  "부트 시도됨" / "마지막 전이" / "데모 미리보기" / "픽스처로 돌아가기" /
+  "라이브 연결 중" / "개발용" → 0 each); user-facing copy present ("연결이 끊겼어요"
+  → 2, "다시 연결" → 5, "다시 연결하는 중" → 2, "리뷰 운영" → 2,
+  "ESM (지마켓·옥션)" → 1); `VITE_AW_BRIDGE` compiled away (grep → 0).
+- Bundle note: `esm_plus` / `run_demo_esm` remain in the bundle as **pre-existing
+  fixture demo data** (the default fixture source ships the demo run); `fixtures.ts`
+  is untouched by this slice and the tree-shaken diagnostics module emits neither.
+- `git diff --check`: clean.
+- No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
+  contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration;
+  the store still imports no bridge transport module.
+
+## Validation results (FE-4 session, 2026-07-09)
+
+- `frontend typecheck`: passed.
+- `frontend tests`: **257 passed** (252 FE-3.5-era + copy 2 + store 2 +
+  `bridgeSource` re-adopt 1).
+- `frontend build`: passed (347.73 kB / 109.30 kB gzip); production bundle
+  checked — DEV code absent (grep "데모 미리보기" / "픽스처로 돌아가기" /
+  "라이브 연결 중" / "개발용" / "sim-" / "다시 연결 (개발용)" → 0 each);
+  user-facing resilience copy present ("연결이 끊겼어요" → 2, "다시 연결" → 5,
+  "다시 연결하는 중" → 2, failure note → 1); the `VITE_AW_BRIDGE` check compiles
+  away in production (grep → 0).
 - `git diff --check`: clean.
 - No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
   contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration.
@@ -224,14 +345,14 @@ browser screenshot pass can be run separately with approval.
 
 ## Last meaningful commit
 
-- FE-3 `39d885b` "feat: reconcile FE line with R2 and add Bridge-backed source",
-  on top of FE-2.5 `5d54dee` and FE-2 `9f656ca` — all pushed to
-  `origin/feat/action-window-fe3` (PR #223).
+- Merge `6ed03f2` — PR #223 merged into `main` (2026-07-09), carrying FE-2
+  `9f656ca`, FE-2.5 `5d54dee`, FE-3 `39d885b`, and the docs sync `cce9547`.
 
 ## Current PR
 
-- **PR #223 open** (`feat/action-window-fe3` → `main`, 3 commits:
-  `9f656ca` + `5d54dee` + `39d885b`). Merge waits for explicit approval.
+- **None open. PR #223 merged** (`feat/action-window-fe3` → `main`, merge
+  `6ed03f2`). The complete FE line (home IA + source seam/resilience +
+  Bridge-backed source) is on `main`.
 
 ## Decisions made in this workstream
 
@@ -274,15 +395,18 @@ browser screenshot pass can be run separately with approval.
   `ActionWindowSource` name; drop-until-snapshot (no buffering); simulations on both
   home and detail DEV panels; no jsdom/RTL.
 - Whether to add jsdom + React Testing Library for DOM/a11y unit tests (new dependency —
-  deferred by product decision; revisit before FE-3).
+  deferred again through FE-4; the reconnect button would be the first strong
+  candidate for a click-through DOM test when adopted).
 
 ## Exact steps for the next session
 
-1. Address PR #223 review feedback (iterate on this branch; keep consuming the
-   shared contract only). Merge only on explicit approval.
-2. Live verification (`VITE_AW_BRIDGE=1` against a running local agent) is a separate,
-   environment-dependent follow-up; do not claim it from node-env tests.
-3. Candidate next FE slices after merge: connection-status callback from
-   `wsTransport` into the resilience UI; DEV boot-retry ergonomics; jsdom/RTL
-   decision.
+1. On approval, commit the FE-5 slice (`frontend/**` + these docs) as one commit
+   onto `feat/action-window-connection-status` (after `4807600`); push/PR only
+   when explicitly approved.
+2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
+   hosting a run) — environment-dependent follow-up; do not claim it from node-env
+   tests. It now covers real drop → reconnecting → offline → manual reconnect →
+   fresh resync, and confirming the FE-5 LIVE vs FIXTURE FALLBACK verdict directly.
+3. Remaining candidates afterwards: jsdom/RTL decision (needs approval); the
+   sanitized connection/evidence readout (deferred with the live-agent slice).
 4. Do not modify the contract or canonical docs from this workstream.

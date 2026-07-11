@@ -288,3 +288,149 @@ Acceptance: FE-1/FE-2/FE-2.5 mock behavior unchanged under the default fixture s
 from `allowedCommands`; recheck never completes locally (Runtime verifies); production
 bundle carries no DEV/simulation code. Live-agent verification (`VITE_AW_BRIDGE=1`
 against a running local agent) is a separate environment-dependent follow-up.
+
+## FE-3.5 — Connection-status callback + DEV boot retry (DONE)
+
+Product goal: when the local SellerOps agent / Bridge connection drops or
+reconnects, the Operations UI shows the existing offline/reconnecting banner and
+temporarily suppresses action buttons, so the seller does not click commands while
+SellerOps is not actually connected. Before this slice those UI states existed but
+were reachable only through the DEV simulations — real disconnects were silent.
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- `wsTransport.ts`: **additive, optional** `onStatus` callback on `AwWsDeps`
+  (`AwConnectionStatus = "connected" | "reconnecting" | "offline"` — same literals
+  as the seam's `SourceConnection`). Fired, deduped, at: session established /
+  restored → `connected`; socket drop starting the retry loop → `reconnecting`;
+  retries exhausted or different-run dormancy → `offline`. Never fires after
+  `close()`. **With no callback, behavior is byte-identical** — all pre-existing
+  transport tests run unchanged without one.
+- `devMode.ts`: `resolveBridgeSession(onStatus?)` threads the callback through the
+  existing construction path (old zero-arg calls still compile).
+- `bridgeSource.ts`: `notifyStatus()` forwards real transport status into the seam
+  as existing `connection` frames — the store, `ConnectionBanner`, and command
+  suppression react with **zero changes** (same path the simulations drive).
+  `connectBridgeIfEnabled` wires the relay; teardown stops forwarding.
+- DEV boot retry: `retryBridgeBoot()` + a DEV-only "🔌 로컬 에이전트 다시 연결"
+  button in both pages' preview panels, visible only when bridge mode is enabled
+  but the boot fell back to the fixture. Absent from the production bundle.
+- Tests (node-env, +7 → 252): transport status transitions (established, drop →
+  reconnecting, restore → connected, exhaustion → offline, different-run →
+  offline, silent after close) and store forwarding + boot retry.
+
+Acceptance: all 245 prior tests pass unmodified; no protocol types; production
+bundle carries no DEV code (grep-verified); the "real disconnects are silent"
+caveat is now closed at the FE level. Live-agent verification of the full path
+remains the environment-dependent follow-up.
+
+## FE-4 — Reconnect & recovery UX for the live Bridge connection (DONE)
+
+Product goal: FE-3.5 made real drops *visible* (offline/reconnecting banner +
+command suppression) but left the terminal `offline` state a dead end — the
+transport auto-retries while it can (`reconnecting`), then gives up (`offline`),
+and the seller's only recovery was a full page reload. The one manual re-attempt
+(`retryBridgeBoot`) lived inside the DEV scenario panel, which both pages hide in
+bridge mode — unreachable exactly when a live connection can drop. This slice adds
+the recovery half.
+
+Decisions (product-owner, 2026-07-09): scope = reconnect action + in-flight state
++ DEV return-to-fixture loop; the sanitized diagnostics/evidence readout is
+deferred to a later live-agent-verification slice; **no jsdom/RTL** this slice
+(tests stay node-env; the jsdom decision remains separate).
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **Reconnect action on the offline banner** (`ConnectionBanner`): when the source
+  is a live Bridge that has gone `offline`, the page passes `onReconnect` so the
+  banner renders a "다시 연결" button (with a `🔌` glyph). It re-attempts the live
+  session via `retryBridgeBoot()` — a fresh bridge world (resync from sequence 0)
+  on success, or an honest fallback (banner stays offline + safe note) when the
+  agent is still unreachable. Shown only on `offline` (not `reconnecting`, which
+  is already auto-retrying) and only when `sourceMode === "bridge"` — never for the
+  fixture/simulated offline preview. Allowed on mobile (read-only-safe recovery,
+  not a run command).
+- **In-flight guard**: a UI-only `retryPending` flag on `OperationsState` (NOT a
+  fourth `SourceConnection` literal — those stay the stable three). `beginBridgeRetry`
+  / `endBridgeRetry(succeeded)` in the store toggle it and, on failure, surface a
+  safe note (`CONNECTION_RETRY_FAILED_NOTE`); the button disables + reads "다시
+  연결하는 중…" while pending. The bridge import stays out of the store — the
+  `useBridgeReconnect()` hook owns `retryBridgeBoot()` and drives the flag.
+- **Offline copy correction**: the offline body no longer promises an automatic
+  retry (it is the terminal state); recovery is the manual action.
+- **DEV return-to-fixture**: a DEV-only strip (`isFixturePreviewEnabled() &&
+  sourceMode === "bridge"`, absent from the production bundle) with a "픽스처로
+  돌아가기 (개발용)" button (`returnToFixtureForDev()`), so a dev can drive the
+  whole loop — fixture → live → drop → offline → reconnect / return — without a
+  reload. The FE-3.5 boot-retry button is **kept** (it covers the distinct
+  boot-fell-back case, `sourceMode === "fixture"`; the two never show together).
+- Tests (node-env, +5 → 257): copy action/pending/failure strings; store
+  `retryPending` transitions + `returnToFixtureForDev`; `bridgeSource` offline →
+  fresh re-adopt resyncs from zero and closes the dead source.
+
+Acceptance: all 252 prior tests pass unmodified; no protocol types; connection
+literals unchanged; production bundle carries no DEV code (grep-verified — the new
+"픽스처로 돌아가기"/"라이브 연결 중"/"개발용" strings → 0; user-facing "다시 연결"
+copy present; `VITE_AW_BRIDGE` compiled away). Live-agent verification now also
+covers the manual reconnect path; it remains the environment-dependent follow-up.
+
+## FE-5 — Sanitized live-bridge diagnostics for verification (DONE)
+
+Product goal: when we later run a real paired local agent, the Operations screen
+should let us confirm at a glance whether it is **truly using the live Bridge** or
+has quietly fallen back to the fixture source — today the two look nearly identical
+on screen. This slice adds a **DEV-only, bridge-mode-only** sanitized diagnostics
+panel that states the source mode, connection state, whether a live boot was
+attempted, the last safe connection transition, and whether a reconnect is pending.
+
+Decisions (product-owner, 2026-07-11): **gating = bridge-mode only** (rendered only
+when `isFixturePreviewEnabled() && isBridgeModeEnabled()`, so it appears in both the
+bridge-live and the bridge-fallback states but never in the plain fixture-demo dev
+view or the production build); include revision (plain int), the channel **display
+label** only, and a run-bound boolean; **no jsdom/RTL** (tests stay node-env).
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **Pure formatter** `lib/actionWindow/diagnostics.ts` — `describeBridgeDiagnostics`
+  takes explicit sanitized primitives (source mode, connection literal, booleans, a
+  plain integer revision, an already-resolved channel label) and returns a verdict
+  (`live` / `fixture-fallback` / `fixture-demo`) plus labelled rows. It **never
+  receives the raw `ActionWindowRunView`**, so it structurally cannot reach a runId,
+  raw channelCode, URL, token, or wire frame. Every value is drawn from a bounded
+  vocabulary (the three connection literals, the two source-mode literals, 예/아니오,
+  integers, "—", and the channel label).
+- **Component** `components/actionWindow/BridgeDiagnostics.tsx` — dashed DEV panel
+  reused on both pages, rendered only inside the page-level bridge-mode dead-branch
+  gate (same tree-shaking pattern as `SimulationPreview`).
+- **Store** `operationsStore.ts` — a **timestamp-free** `connectionTrail`
+  (capped at 6, only the three connection literals — no timing, no ids) and a
+  `connectionChangeCount`; both updated on an actual connection transition (a
+  repeated same-state frame is not counted) and reset to a fresh connected session
+  whenever the world is replaced (adopt / fixture load / simulation / reset). The
+  store still imports **no** bridge transport module.
+- **Getter** `bridgeSource.ts` `isBridgeBootAttempted()` — read-only view of the
+  once-per-session boot flag, so the panel distinguishes "never tried" from "tried
+  and fell back".
+- **Pages** — `Operations.tsx` + `OperationsHome.tsx` render the panel in the DEV
+  bridge-mode area (visible in both bridge-live and fixture-fallback).
+- **Tests** (node-env, +14 → 271): `diagnostics.test.ts` (verdict logic, field
+  formatting, last-transition rendering, dash for empty run fields, channel label
+  not raw code, a **leak-guard** asserting no field exposes a raw id/url/token/wire
+  frame, and a bounded-vocabulary assertion); `operationsStore.test.ts` (trail +
+  counter transitions, same-state not counted, cap enforced, reset on world switch).
+
+Never shown (privacy invariant, enforced by the primitives-only formatter and the
+leak-guard test): raw runId, raw channelCode, tokens, tickets, URLs/host/port, raw
+WS frames/payloads, account ids, selectors, CDP ids, cookies, secrets, local paths,
+timestamps, or elapsed durations.
+
+Acceptance: all 257 prior tests pass unmodified; no protocol types; connection
+literals unchanged; production bundle carries no DEV/diagnostics code (grep-verified
+— "브리지 진단"/"소스 모드"/"라이브 브리지 사용 중"/"부트 시도됨"/… → 0;
+`VITE_AW_BRIDGE` compiled away; user-facing resilience copy still present). The
+`esm_plus`/`run_demo_esm` strings that remain in the bundle are the **pre-existing
+fixture demo data** (the default fixture source ships the demo run) — unchanged by
+this slice and not emitted by the tree-shaken diagnostics module. Live-agent
+verification (`VITE_AW_BRIDGE=1` against a running paired agent — now confirming the
+LIVE vs FIXTURE FALLBACK verdict directly) remains the environment-dependent
+follow-up.

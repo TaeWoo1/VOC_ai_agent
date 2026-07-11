@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { serializeFrame, deserializeFrame, ACTION_WINDOW_TRANSPORT_VERSION, type AwServerFrame } from "./contract";
 import { UI_SCENARIOS } from "./fixtures";
-import { connectAwBridgeSession, type AwWsDeps } from "./wsTransport";
+import { connectAwBridgeSession, type AwConnectionStatus, type AwWsDeps } from "./wsTransport";
 import type { StorageLike, WebSocketLike } from "../bridge/bridgeClient";
 
 const RUN_ID = "run_ws_test";
@@ -206,5 +206,62 @@ describe("actionWindow/wsTransport", () => {
     expect(h.sockets).toHaveLength(1); // no reconnect attempt after an explicit close
     expect(h.ticketCalls).toBe(1);
     session.transport.send({ kind: "aw_resync", runId: RUN_ID, sinceSequence: 0 }); // dropped, no throw
+  });
+});
+
+// Optional connection-status callback (additive). Product goal: when the agent /
+// Bridge connection drops or reconnects, the Operations UI shows the existing
+// offline/reconnecting banner and suppresses action buttons. With no callback,
+// behavior is unchanged — every test above runs without one.
+describe("actionWindow/wsTransport — onStatus callback", () => {
+  function statusHarness() {
+    const h = harness();
+    const statuses: AwConnectionStatus[] = [];
+    h.deps.onStatus = (s) => statuses.push(s);
+    return { h, statuses };
+  }
+
+  it("fires connected when the session is established", async () => {
+    const { h, statuses } = statusHarness();
+    await connected(h);
+    expect(statuses).toEqual(["connected"]);
+  });
+
+  it("reports reconnecting on a drop and connected again after a successful restore", async () => {
+    const { h, statuses } = statusHarness();
+    await connected(h);
+    h.sockets[0]!.drop();
+    const ws2 = await until(() => h.sockets[1]);
+    expect(statuses).toEqual(["connected", "reconnecting"]);
+    ws2.receive(ANNOUNCEMENT);
+    await until(() => statuses.length === 3);
+    expect(statuses).toEqual(["connected", "reconnecting", "connected"]);
+  });
+
+  it("goes offline when reconnect attempts are exhausted", async () => {
+    const { h, statuses } = statusHarness();
+    h.deps.sessionTimeoutMs = 20; // announcement never arrives on retry sockets
+    await connected(h);
+    h.sockets[0]!.drop();
+    await until(() => statuses[statuses.length - 1] === "offline");
+    expect(statuses).toEqual(["connected", "reconnecting", "offline"]);
+  });
+
+  it("goes offline (dormant) when the agent announces a different run", async () => {
+    const { h, statuses } = statusHarness();
+    await connected(h);
+    h.sockets[0]!.drop();
+    const ws2 = await until(() => h.sockets[1]);
+    ws2.receive({ ...ANNOUNCEMENT, runId: "run_other" });
+    await until(() => statuses[statuses.length - 1] === "offline");
+    expect(statuses).toEqual(["connected", "reconnecting", "offline"]);
+  });
+
+  it("never fires after close()", async () => {
+    const { h, statuses } = statusHarness();
+    const { session } = await connected(h);
+    session.close(); // the client-initiated close must not report reconnecting/offline
+    await new Promise((r) => setTimeout(r, 30));
+    expect(statuses).toEqual(["connected"]);
   });
 });
