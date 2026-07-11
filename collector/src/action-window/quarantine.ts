@@ -23,12 +23,21 @@
  * ever captured, returned, or logged — a failure only flips the corresponding boolean.
  */
 import { mkdirSync, openSync, readSync, closeSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { sniffXlsxReadable } from "../naver/review-download-save";
 import { extensionCategory } from "../naver/review-export";
 
 /** Every quarantine file this module creates carries this prefix — the sweep removes only these. */
 export const QUARANTINE_PREFIX = "aw-quarantine-" as const;
+
+/**
+ * Default gitignored quarantine directory for the agent-owned temporary validation saves
+ * (`<collector>/.aw-quarantine/`, mirroring the `.operation-runs/` dot-dir). Agent-local only,
+ * never committed; the delete-after-validate posture leaves it empty between runs.
+ */
+export function defaultQuarantineDirFor(rootDir: string): string {
+  return resolve(rootDir, ".aw-quarantine");
+}
 /** The ratified retention posture (D-021): the saved file exists only for the validation window. */
 export const QUARANTINE_RETENTION_POLICY = "delete-after-validate" as const;
 

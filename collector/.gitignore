@@ -22,3 +22,6 @@ findings/*.local.md
 
 # Persisted Action Window Operation Runs (agent-local only, never committed)
 .operation-runs/
+
+# Action Window artifact quarantine (temporary validation saves, delete-after-validate; local only)
+.aw-quarantine/

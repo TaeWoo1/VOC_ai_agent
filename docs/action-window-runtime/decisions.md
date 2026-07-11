@@ -179,3 +179,34 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   and the §4.2 honesty boundary — a real ingest is a real DB state change, reported honestly, but the
   sanitization/injection boundary keeps every raw identifier off the wire and the persisted store.
   Live NAVER remains blocked by the §3 gate (G2–G6), the live-work pause, and per-run PO approval.
+
+- **D-023 · ACTIVE** — **The NAVER *fixture* channel is wired into the local-agent Action Window boot
+  behind a dev-only flag; production still hosts no session** (implemented fixture-only, 2026-07-11;
+  extends D-017 hosting + D-021/D-022 downstream). The D-017 Bridge nested transport was already
+  boot-wired end-to-end (`local-agent.ts` → `agent-bridge.ts` → endpoint → engine → session → R3
+  persistence) but only ever injected `SyntheticProbeDriver`. This entry adds a **driver-selection**
+  seam, not a new transport: `resolveActionWindowChannel(args, env)` returns `synthetic |
+  naver-fixture | null` (both flags **dev-only**, never under `NODE_ENV=production`), and
+  `buildActionWindowConfig` injects `createDriver: () => new NaverFixtureProbeDriver("normal", …)` for
+  the NAVER channel via the SAME already-injected `AgentActionWindowConfig.createDriver` — `agent-bridge.ts`
+  is unchanged. *Boundaries (ratified):* (1) the NAVER-fixture boot is **still fixture-only** — no
+  browser, no live NAVER, no marketplace; it runs the real detect + quarantine-validate chain OFFLINE
+  over the fixture's byte-carrying artifact (gitignored `.aw-quarantine/`, new `defaultQuarantineDirFor`)
+  and its **ingest stays SYNTHETIC** (`{ok:true,processed:1}`) so the loop completes with zero network.
+  (2) The real `/api/uploads` ingest is **opt-in** behind a SEPARATE `--dev-action-window-ingest-local`
+  flag (dev-only) that injects `buildBackendIngestUpload` against a **LOCAL dev backend** using the
+  SellerOps dev creds from `loadConfig(env)` — never a live marketplace, never the default. (3) The run
+  identity stays Runtime-assigned (opaque `run_<hex>`); R3 persistence is always on; a cold agent
+  restart resumes the persisted NAVER run (parked at PAUSED) and completes through downstream — proven
+  over the REAL Bridge WS via `createAgentBridge` (the actual boot composition). (4) The **headed
+  operator proof** (a real human review-export click in a visible Chromium over a NAVER-*shaped*
+  synthetic fixture page → detect → quarantine → completion) is **delivered as a gated harness**
+  (`naver-browser.test.ts`, `RUN_INTEGRATION=1 AW_HEADED=1`) but is **operator-present only** — run in a
+  separate seated turn, never during implementation or CI. *Deferred:* a real NAVER-driver ingest over a
+  real Playwright `Download`; full fixture-xlsx → real-POI E2E (no xlsx-writer dep); a dedicated
+  `INGEST_FAILED` contract code; FE copy mapping for `actionWindow.step.downstream` /
+  `actionWindow.run.naver`. *Rationale:* the D-020 shortest-repeatable-E2E criterion and slice §14-11
+  (synthetic-first) — the remaining runtime code gap before a supervised pilot was connecting the
+  ratified adapter to a drivable session, and that seam is now closed fixture-only. Live NAVER remains
+  blocked by the §3 gate (G2–G6), the live-work pause, and per-run PO approval; production hosts no
+  Action Window session (the flags are dev-only).

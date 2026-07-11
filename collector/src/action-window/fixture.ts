@@ -18,7 +18,8 @@ export type FixtureMode =
   | "download"
   | "download-xlsx"
   | "download-badmagic"
-  | "download-none";
+  | "download-none"
+  | "naver-review-export-xlsx";
 
 const TARGET_BUTTON = (label: string, extra = ""): string =>
   `<button data-aw-target data-aw-role="primary-action" data-aw-label="${label}" ${extra}>내보내기</button>`;
@@ -31,6 +32,30 @@ const TARGET_BUTTON = (label: string, extra = ""): string =>
  */
 const TARGET_DOWNLOAD_ANCHOR = (filename: string): string =>
   `<a data-aw-target data-aw-role="primary-action" data-aw-label="export-download" download="${filename}" href="#">내보내기</a>`;
+/**
+ * A review-export-shaped download control: an Excel-download anchor whose accessible wording resembles a
+ * seller-center review export button (the R4/NAVER pilot surface shape). Still fully synthetic — NO
+ * marketplace trademark, HTML, or seller data; only its structure/wording models the review-export case.
+ */
+const REVIEW_EXPORT_ANCHOR = (filename: string): string =>
+  `<a data-aw-target data-aw-role="primary-action" data-aw-label="review-excel-download" download="${filename}" href="#">엑셀 다운로드</a>`;
+/**
+ * A NAVER-*shaped* review-management surface: a synthetic review list plus the review-export control.
+ * Models the pilot channel's export surface structurally (review table + Excel download) with zero
+ * marketplace trademark/markup/seller data — every row is synthetic fixture text.
+ */
+const REVIEW_EXPORT_SURFACE = (anchor: string): string => `
+    <section data-aw-scope="review-export">
+      <h2>리뷰 관리</h2>
+      <table>
+        <thead><tr><th>상품</th><th>별점</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>합성 상품 A</td><td>★★★★★</td><td>합성 리뷰 본문 1</td></tr>
+          <tr><td>합성 상품 B</td><td>★★★★☆</td><td>합성 리뷰 본문 2</td></tr>
+        </tbody>
+      </table>
+      <div class="aw-toolbar">${anchor}</div>
+    </section>`;
 /** Plain synthetic text payload (as a JS string-literal expression for the fixture script). */
 const TEXT_PAYLOAD = `'sellerops synthetic fixture artifact\\n'`;
 /**
@@ -107,5 +132,14 @@ export function fixtureHtml(mode: FixtureMode): string {
     case "download-none":
       // The verified action fires NO download → exercises the DOWNLOAD_TIMEOUT fail-closed path.
       return page(TARGET_BUTTON("export-download"), { surface: true, state: true });
+    case "naver-review-export-xlsx":
+      // NAVER-*shaped* review-export surface: a synthetic review list + an Excel-download control whose
+      // click natively fires the OOXML-shaped blob — the R4 headed operator proof surface. Same
+      // quarantine happy path as download-xlsx, but structured like a review export (single target).
+      return page(REVIEW_EXPORT_SURFACE(REVIEW_EXPORT_ANCHOR("synthetic-review-export.xlsx")), {
+        surface: true,
+        state: true,
+        downloadPayload: XLSX_PAYLOAD,
+      });
   }
 }

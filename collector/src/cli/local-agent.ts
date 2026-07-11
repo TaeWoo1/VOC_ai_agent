@@ -43,7 +43,10 @@ import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
 import { createAgentBridge, type AgentActionWindowConfig } from "../agent/agent-bridge";
 import { SyntheticProbeDriver } from "../action-window/session";
+import { NaverFixtureProbeDriver, NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY, type NaverRealDownstreamOptions } from "../action-window/naver-driver";
+import { buildBackendIngestUpload } from "../action-window/ingest-handoff";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
+import { defaultQuarantineDirFor } from "../action-window/quarantine";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
 
 /**
@@ -134,9 +137,83 @@ const BRIDGE_DEV_AUTO_APPROVE_FLAG = "--dev-insecure-auto-approve";
  */
 export const ACTION_WINDOW_SYNTHETIC_FLAG = "--dev-action-window-synthetic";
 
-/** Pure gate for the dev-only synthetic Action Window hosting (mirrors the auto-approve gating). */
+/**
+ * DEV/TEST ONLY: host the NAVER *fixture* Action Window channel on the Bridge (R4, D-023). Never
+ * honored under NODE_ENV=production. The `NaverFixtureProbeDriver` composes the read-only NAVER seams
+ * over a synthetic NAVER-shaped fixture (no browser, no network, no live NAVER); it runs the real
+ * detect + quarantine-validate chain offline over the fixture's byte-carrying artifact, and its ingest
+ * stays SYNTHETIC unless {@link ACTION_WINDOW_INGEST_LOCAL_FLAG} opts into a LOCAL dev backend. The
+ * Runtime never clicks the target.
+ */
+export const ACTION_WINDOW_NAVER_FIXTURE_FLAG = "--dev-action-window-naver-fixture";
+
+/**
+ * DEV/TEST ONLY: route the NAVER-fixture ingest handoff to a LOCAL dev backend (`/api/uploads`) using
+ * the SellerOps dev credentials from the environment — NEVER a live marketplace. Only meaningful with
+ * {@link ACTION_WINDOW_NAVER_FIXTURE_FLAG}; absent it, ingest stays synthetic (no network).
+ */
+export const ACTION_WINDOW_INGEST_LOCAL_FLAG = "--dev-action-window-ingest-local";
+
+/** Which Action Window channel (if any) the dev flags select. */
+export type ActionWindowChannel = "synthetic" | "naver-fixture";
+
+/**
+ * Pure gate for the dev-only Action Window hosting: which channel to host, or `null` for none. Never
+ * honored under NODE_ENV=production (mirrors the auto-approve gating). The NAVER-fixture flag wins over
+ * the synthetic flag if both are present.
+ */
+export function resolveActionWindowChannel(args: readonly string[], env: NodeJS.ProcessEnv): ActionWindowChannel | null {
+  if (env.NODE_ENV === "production") return null;
+  if (args.includes(ACTION_WINDOW_NAVER_FIXTURE_FLAG)) return "naver-fixture";
+  if (args.includes(ACTION_WINDOW_SYNTHETIC_FLAG)) return "synthetic";
+  return null;
+}
+
+/** Back-compat predicate for the synthetic-only hosting flag (delegates to the channel resolver). */
 export function resolveActionWindowSynthetic(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
-  return args.includes(ACTION_WINDOW_SYNTHETIC_FLAG) && env.NODE_ENV !== "production";
+  return resolveActionWindowChannel(args, env) === "synthetic";
+}
+
+/**
+ * Build the {@link AgentActionWindowConfig} for the resolved channel — pure aside from reading the
+ * SellerOps dev config only when the local-ingest opt-in is present. The run identity is Runtime-assigned
+ * (opaque random suffix, never derived from any account). R3 persistence is always on (`.operation-runs/`).
+ * NAVER-fixture: real detect + quarantine-validate (gitignored `.aw-quarantine/`), synthetic ingest by
+ * default; the local-ingest opt-in injects the real `/api/uploads` upload against the LOCAL dev backend.
+ */
+export function buildActionWindowConfig(
+  channel: ActionWindowChannel,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): AgentActionWindowConfig {
+  const runId = `run_${randomBytes(6).toString("hex")}`;
+  const persistDir = defaultOperationRunDirFor(collectorRoot);
+  if (channel === "naver-fixture") {
+    const ingestLocal = args.includes(ACTION_WINDOW_INGEST_LOCAL_FLAG) && env.NODE_ENV !== "production";
+    const real: NaverRealDownstreamOptions = {
+      quarantineDir: defaultQuarantineDirFor(collectorRoot),
+      ...(ingestLocal
+        ? (() => {
+            const cfg = loadConfig(env);
+            return { ingest: { upload: buildBackendIngestUpload({ baseUrl: cfg.baseUrl, email: cfg.email, password: cfg.password, channelCode: "NAVER" }) } };
+          })()
+        : {}),
+    };
+    return {
+      runId,
+      channelCode: NAVER_CHANNEL_CODE,
+      runCopyKey: NAVER_RUN_COPY_KEY,
+      createDriver: () => new NaverFixtureProbeDriver("normal", { downstream: { real } }),
+      persistDir,
+    };
+  }
+  return {
+    runId,
+    channelCode: "synthetic",
+    runCopyKey: "actionWindow.run.synthetic",
+    createDriver: () => new SyntheticProbeDriver(),
+    persistDir,
+  };
 }
 const DEFAULT_BRIDGE_PORT = 47615;
 /** Dev-convenience default allow-list (Vite dev server); production MUST set BRIDGE_ALLOWED_ORIGINS. */
@@ -346,22 +423,20 @@ async function main(): Promise<void> {
   // Start the agent-owned Bridge exactly once (pairing + observability; slice §B). Best-effort: if a bridge
   // is already bound (single-instance), the agent keeps running without a competing one. It stays alive with
   // the agent, independent of any SellerOps browser tab, and is closed idempotently on shutdown.
-  // DEV/TEST ONLY (R2B): host one synthetic Action Window run over the Bridge opaque passthrough. The
-  // run identity is Runtime-assigned (opaque random suffix — never derived from any account/connection).
-  // R3: runs persist under the agent-owned `.operation-runs/` dot-dir (gitignored), so an interrupted
-  // run is resumed — parked at the PAUSED barrier — instead of silently replaced on restart.
-  const actionWindow: AgentActionWindowConfig | undefined = resolveActionWindowSynthetic(args, process.env)
-    ? {
-        runId: `run_${randomBytes(6).toString("hex")}`,
-        channelCode: "synthetic",
-        runCopyKey: "actionWindow.run.synthetic",
-        createDriver: () => new SyntheticProbeDriver(),
-        persistDir: defaultOperationRunDirFor(collectorRoot),
-      }
+  // DEV/TEST ONLY: host one Action Window run over the Bridge opaque passthrough — the SYNTHETIC channel
+  // (R2B) or the NAVER *fixture* channel (R4, D-023); production hosts none. The run identity is
+  // Runtime-assigned (opaque random suffix — never derived from any account/connection). R3: runs persist
+  // under the agent-owned `.operation-runs/` dot-dir (gitignored), so an interrupted run is resumed —
+  // parked at the PAUSED barrier — instead of silently replaced on restart. The NAVER-fixture channel is
+  // still fixture-only (no browser, no live NAVER); its ingest reaches a LOCAL dev backend only under the
+  // explicit ingest opt-in.
+  const awChannel = resolveActionWindowChannel(args, process.env);
+  const actionWindow: AgentActionWindowConfig | undefined = awChannel
+    ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
   const bridge = createAgentBridge({ ...resolveAgentBridgeConfig(args, process.env), ...(actionWindow ? { actionWindow } : {}) });
   const bridgeListen = await bridge.listen();
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.
