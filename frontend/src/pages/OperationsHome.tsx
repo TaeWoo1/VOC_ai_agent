@@ -15,6 +15,7 @@ import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
+import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
@@ -34,6 +35,7 @@ const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
  */
 export function OperationsHome() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
+  const state = useOperationsStore();
   const {
     run,
     recentRuns,
@@ -43,7 +45,7 @@ export function OperationsHome() {
     homeScenario,
     simulation,
     simulationRemaining,
-  } = useOperationsStore();
+  } = state;
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
@@ -121,6 +123,12 @@ export function OperationsHome() {
             픽스처로 돌아가기 (개발용)
           </button>
         </div>
+      ) : null}
+
+      {/* FE-5 sanitized live-bridge diagnostics — DEV + bridge-mode only (renders
+          in both bridge-live and fixture-fallback), never in the production build. */}
+      {isFixturePreviewEnabled() && isBridgeModeEnabled() ? (
+        <BridgeDiagnostics state={state} />
       ) : null}
 
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">

@@ -13,7 +13,7 @@ import {
   subscribeOperationsState,
 } from "./operationsStore";
 import { UI_SCENARIOS } from "./fixtures";
-import type { ActionWindowSource } from "./source";
+import type { ActionWindowSource, SourceUpdate } from "./source";
 
 /** Minimal inert source standing in for a live Bridge source (no wire, no emits). */
 function fakeBridgeSource(): ActionWindowSource {
@@ -21,6 +21,25 @@ function fakeBridgeSource(): ActionWindowSource {
     subscribe: () => () => {},
     dispatch: () => {},
     requestSnapshot: () => {},
+  };
+}
+
+/** A source whose single subscriber can be driven from the test — used to push
+ *  `connection` frames into the store (the FE-5 diagnostics trail). */
+function controllableSource(): { source: ActionWindowSource; emit: (u: SourceUpdate) => void } {
+  let listener: (u: SourceUpdate) => void = () => {};
+  return {
+    source: {
+      subscribe: (next) => {
+        listener = next;
+        return () => {
+          listener = () => {};
+        };
+      },
+      dispatch: () => {},
+      requestSnapshot: () => {},
+    },
+    emit: (u) => listener(u),
   };
 }
 
@@ -163,6 +182,65 @@ describe("Action Window FE-2 shared operations store", () => {
     expect(s.connection).toBe("connected");
     expect(s.retryPending).toBe(false);
     expect(s.run?.status).toBe("WAITING_FOR_HUMAN"); // back on the initial checkpoint demo
+  });
+
+  it("FE-5: the initial state carries a fresh, connected diagnostics trail", () => {
+    const s = getOperationsState();
+    expect(s.connection).toBe("connected");
+    expect(s.connectionTrail).toEqual(["connected"]);
+    expect(s.connectionChangeCount).toBe(0);
+  });
+
+  it("FE-5: connection changes append to the trail and bump the change counter", () => {
+    const { source, emit } = controllableSource();
+    adoptBridgeSource(source, () => {}); // fresh bridge world: trail ["connected"], count 0
+    expect(getOperationsState().connectionTrail).toEqual(["connected"]);
+
+    emit({ kind: "connection", connection: "reconnecting" });
+    emit({ kind: "connection", connection: "offline" });
+    emit({ kind: "connection", connection: "connected" });
+    const s = getOperationsState();
+    expect(s.connection).toBe("connected");
+    expect(s.connectionTrail).toEqual(["connected", "reconnecting", "offline", "connected"]);
+    expect(s.connectionChangeCount).toBe(3);
+  });
+
+  it("FE-5: a repeated same-state connection frame is not counted as a transition", () => {
+    const { source, emit } = controllableSource();
+    adoptBridgeSource(source, () => {});
+    emit({ kind: "connection", connection: "reconnecting" });
+    emit({ kind: "connection", connection: "reconnecting" }); // duplicate, no transition
+    const s = getOperationsState();
+    expect(s.connectionTrail).toEqual(["connected", "reconnecting"]);
+    expect(s.connectionChangeCount).toBe(1);
+  });
+
+  it("FE-5: the trail is capped (holds only the most recent transitions)", () => {
+    const { source, emit } = controllableSource();
+    adoptBridgeSource(source, () => {});
+    const cycle: Array<"reconnecting" | "connected"> = [];
+    for (let i = 0; i < 10; i += 1) cycle.push(i % 2 === 0 ? "reconnecting" : "connected");
+    for (const c of cycle) emit({ kind: "connection", connection: c });
+    const s = getOperationsState();
+    expect(s.connectionTrail.length).toBeLessThanOrEqual(6);
+    expect(s.connectionChangeCount).toBe(10); // every alternation counted
+    // Only ever the three known literals — no timing, no ids.
+    for (const c of s.connectionTrail) {
+      expect(["connected", "reconnecting", "offline"]).toContain(c);
+    }
+  });
+
+  it("FE-5: switching worlds resets the diagnostics trail to a fresh session", () => {
+    const { source, emit } = controllableSource();
+    adoptBridgeSource(source, () => {});
+    emit({ kind: "connection", connection: "reconnecting" });
+    emit({ kind: "connection", connection: "offline" });
+    expect(getOperationsState().connectionChangeCount).toBe(2);
+
+    loadRunScenario("observing"); // back to the fixture world
+    const s = getOperationsState();
+    expect(s.connectionTrail).toEqual(["connected"]);
+    expect(s.connectionChangeCount).toBe(0);
   });
 
   it("notifies subscribers on change and stops after unsubscribe", () => {

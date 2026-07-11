@@ -58,6 +58,15 @@ export interface OperationsState {
   noteId: number;
   /** UI resilience state reported by the source. */
   connection: SourceConnection;
+  /** FE-5 sanitized diagnostics: a timestamp-free trail of connection literals
+   *  (oldest → newest), capped at `CONNECTION_TRAIL_LIMIT`, for the DEV-only
+   *  live-bridge diagnostics panel. Reset whenever the world is replaced (adopt /
+   *  fixture load / simulation / reset) so it reflects the current session only.
+   *  Only ever holds the three `SourceConnection` literals — no timing, no ids. */
+  connectionTrail: SourceConnection[];
+  /** Count of actual connection transitions in the current session (dedup-safe:
+   *  a repeated same-state frame does not bump it). Sanitized integer. */
+  connectionChangeCount: number;
   /** A manual live-Bridge reconnect (FE-4) is in flight — disables the offline
    *  banner's reconnect button so it can't be double-fired. UI-only; NOT a
    *  fourth `SourceConnection` literal (those stay the stable three). */
@@ -74,6 +83,18 @@ export interface OperationsState {
 
 const INITIAL_HOME: HomeScenarioName = "home-active-checkpoint";
 
+/** How many recent connection literals the diagnostics trail retains. */
+const CONNECTION_TRAIL_LIMIT = 6;
+
+/** The diagnostics fields reset to a fresh, connected session (no transitions
+ *  yet). Used at every point the world is replaced. */
+function freshConnectionDiagnostics(): Pick<
+  OperationsState,
+  "connection" | "connectionTrail" | "connectionChangeCount"
+> {
+  return { connection: "connected", connectionTrail: ["connected"], connectionChangeCount: 0 };
+}
+
 function initialState(): OperationsState {
   const view = HOME_SCENARIOS[INITIAL_HOME].view;
   return {
@@ -81,7 +102,7 @@ function initialState(): OperationsState {
     recentRuns: view.recentRuns,
     note: "",
     noteId: 0,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "fixture",
     runScenario: "human-action-required",
@@ -175,7 +196,21 @@ function handleUpdate(update: SourceUpdate): void {
       return;
     }
     case "connection": {
-      setState({ ...state, connection: update.connection });
+      const changed = update.connection !== state.connection;
+      setState({
+        ...state,
+        connection: update.connection,
+        // Record the transition for the FE-5 diagnostics trail only when the state
+        // actually changes (a repeated same-state frame is not a transition).
+        ...(changed
+          ? {
+              connectionTrail: [...state.connectionTrail, update.connection].slice(
+                -CONNECTION_TRAIL_LIMIT,
+              ),
+              connectionChangeCount: state.connectionChangeCount + 1,
+            }
+          : {}),
+      });
       return;
     }
     case "command-rejected": {
@@ -224,7 +259,7 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
     run: null,
     note: "",
     noteId: state.noteId + 1,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "bridge",
     simulation: null,
@@ -293,7 +328,7 @@ export function loadRunScenario(name: ScenarioName): void {
     run,
     note: "",
     noteId: state.noteId + 1,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "fixture",
     runScenario: name,
@@ -311,7 +346,7 @@ export function loadHomeScenario(name: HomeScenarioName): void {
     recentRuns: view.recentRuns,
     note: "",
     noteId: state.noteId + 1,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "fixture",
     homeScenario: name,
@@ -335,7 +370,7 @@ export function activateSimulation(name: SimScenarioName, sim: SteppableSource):
     run: null,
     note: "",
     noteId: state.noteId + 1,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "fixture",
     simulation: name,
@@ -358,7 +393,7 @@ export function stopSimulation(): void {
     ...state,
     note: "",
     noteId: state.noteId + 1,
-    connection: "connected",
+    ...freshConnectionDiagnostics(),
     retryPending: false,
     sourceMode: "fixture",
     simulation: null,

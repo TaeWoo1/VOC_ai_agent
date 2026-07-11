@@ -19,6 +19,7 @@ import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
+import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
@@ -44,8 +45,9 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
  *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
 export function Operations() {
   useBridgeBoot(); // FE-3: opt-in live Bridge connection (no-op without VITE_AW_BRIDGE=1)
+  const state = useOperationsStore();
   const { run, runScenario, connection, retryPending, sourceMode, simulation, simulationRemaining } =
-    useOperationsStore();
+    state;
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
@@ -132,6 +134,12 @@ export function Operations() {
             픽스처로 돌아가기 (개발용)
           </button>
         </div>
+      ) : null}
+
+      {/* FE-5 sanitized live-bridge diagnostics — DEV + bridge-mode only (renders
+          in both bridge-live and fixture-fallback), never in the production build. */}
+      {isFixturePreviewEnabled() && isBridgeModeEnabled() ? (
+        <BridgeDiagnostics state={state} />
       ) : null}
 
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">

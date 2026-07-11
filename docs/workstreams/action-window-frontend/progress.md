@@ -6,16 +6,18 @@
 - **Status:** **FE-1 MERGED (PR #215). FE-2 + FE-2.5 + FE-3 MERGED into `main`
   via PR #223 (merge `6ed03f2`, 2026-07-09): FE-2 `9f656ca`, FE-2.5 `5d54dee`,
   FE-3 `39d885b`, docs sync `cce9547`. FE-3.5 (connection-status callback + DEV
-  boot retry) COMMITTED `c4b98d5` on `feat/action-window-connection-status` (not
-  pushed). FE-4 (reconnect & recovery UX) IMPLEMENTED (this slice, uncommitted on
-  the same branch). Remaining follow-ups: live-agent verification, jsdom/RTL
+  boot retry) COMMITTED `c4b98d5` and FE-4 (reconnect & recovery UX) COMMITTED
+  `4807600` on `feat/action-window-connection-status` (not pushed). FE-5
+  (sanitized live-bridge diagnostics) IMPLEMENTED (this slice, uncommitted on the
+  same branch). Remaining follow-ups: live-agent verification, jsdom/RTL
   decision.**
 
 ## Base
 
 - **Worktree:** `/Users/taewookang/Downloads/workspace/sellerops-fe3`
 - **Branch:** `feat/action-window-connection-status` (FE-3.5 `c4b98d5` + FE-4
-  uncommitted), branched off the merged tip `6ed03f2`. Earlier FE-2/2.5/3 work
+  `4807600` committed; FE-5 uncommitted), branched off the merged tip `6ed03f2`.
+  Earlier FE-2/2.5/3 work
   was on `feat/action-window-fe3`, rebased 2026-07-09 onto `origin/main`
   `8d61d2f` (Runtime R2 Bridge transport PR #218, FE/Runtime integration PRs
   #216–217, run persistence #219, R4 prep #220–221), then a final conflict-free
@@ -25,8 +27,8 @@
   One rebase conflict (`pages/Operations.tsx`, both lines rewrote the FE-1 page)
   resolved in favor of our store-based version per product decision.
 - **This slice (uncommitted, on `feat/action-window-connection-status` at
-  `c4b98d5`):** FE-4 reconnect & recovery UX (`frontend/**`) + workstream docs.
-  FE-3.5 was committed as `c4b98d5` (not pushed).
+  `4807600`):** FE-5 sanitized live-bridge diagnostics (`frontend/**`) + workstream
+  docs. FE-3.5 (`c4b98d5`) and FE-4 (`4807600`) are committed (not pushed).
 
 ## Gate check
 
@@ -83,7 +85,42 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-4 Reconnect & recovery UX for the live Bridge connection (one FE slice, uncommitted):
+FE-5 Sanitized live-bridge diagnostics for verification (one FE slice, uncommitted):
+
+- Product gap closed: with a real paired agent later, the live-Bridge screen and the
+  fixture fallback look nearly identical — there was no safe way to tell which one is
+  actually driving Operations. FE-5 adds a **DEV-only, bridge-mode-only** diagnostics
+  panel that answers it directly (verdict: `라이브 브리지 사용 중` / `픽스처로 폴백됨`
+  / `픽스처 데모`).
+- **Pure formatter** `lib/actionWindow/diagnostics.ts` (`describeBridgeDiagnostics`):
+  takes explicit **sanitized primitives** — source mode, connection literal,
+  booleans, a plain integer revision, and the channel **display label** — never the
+  raw `ActionWindowRunView`, so it structurally cannot leak a runId, raw channelCode,
+  URL, token, or wire frame. Fields: source mode, connection state, bridge mode,
+  boot attempted, retry pending, last safe transition (`prev → current`, timeless),
+  connection change counter, revision (int), channel label, run-bound (bool).
+- **Component** `components/actionWindow/BridgeDiagnostics.tsx`: dashed DEV panel on
+  both pages, rendered only inside the page-level `isFixturePreviewEnabled() &&
+  isBridgeModeEnabled()` dead-branch gate (same tree-shaking pattern as
+  `SimulationPreview`), so it appears in both bridge-live and bridge-fallback but is
+  absent from the production build. Renders in both by living outside the two
+  existing `sourceMode`-scoped DEV strips.
+- **Store**: a **timestamp-free** `connectionTrail` (capped at 6; only the three
+  `SourceConnection` literals) + `connectionChangeCount`, updated on an actual
+  connection transition (a repeated same-state frame is not counted) and reset to a
+  fresh connected session on every world switch (adopt / fixture load / simulation /
+  reset). The store still imports **no** bridge transport module.
+- **Getter** `bridgeSource.ts` `isBridgeBootAttempted()` — read-only boot-flag view
+  so the panel distinguishes "never tried" from "tried and fell back".
+- Tests (node-env, +14 → 271): `diagnostics.test.ts` (9 — verdict logic, field
+  formatting, last-transition, dash-for-empty, channel label not raw code, a
+  **leak-guard** proving no field exposes a raw id/url/token/wire frame, and a
+  bounded-vocabulary assertion); `operationsStore.test.ts` (+5 — trail/counter
+  transitions, same-state not counted, cap enforced, world-switch reset).
+- Docs: FE-5 plan entry; this handoff; the stale FE-4 "uncommitted" note corrected
+  (FE-4 is committed `4807600`).
+
+FE-4 Reconnect & recovery UX for the live Bridge connection (one FE slice, committed `4807600`):
 
 - Product gap closed: FE-3.5 made real drops *visible* but left the terminal
   `offline` state a dead end (auto-retry gives up → only a page reload recovered).
@@ -218,18 +255,19 @@ FE-1 Review Operations mock flow (merged earlier as PR #215):
 
 ## In progress
 
-- FE-4 (reconnect & recovery UX) implemented this slice, uncommitted on
-  `feat/action-window-connection-status`. FE-3.5 committed `c4b98d5` (not pushed).
+- FE-5 (sanitized live-bridge diagnostics) implemented this slice, uncommitted on
+  `feat/action-window-connection-status`. FE-3.5 (`c4b98d5`) + FE-4 (`4807600`)
+  committed (not pushed).
 
 ## Next single task
 
-**Land FE-4**: on explicit approval, commit this slice as one commit onto
-`feat/action-window-connection-status` (after the FE-3.5 commit `c4b98d5`). The
-branch then carries FE-3.5 (real connection status) + FE-4 (reconnect/recovery
-UX). Push/PR **only on explicit approval**. Follow-ups: live-agent verification
-(`VITE_AW_BRIDGE=1` + running paired agent — now also covers real drop →
-reconnecting → offline → manual reconnect → fresh resync), and the jsdom/RTL
-decision (still deferred, separate approval).
+**Land FE-5** (and the accumulated FE-3.5/FE-4 line): on explicit approval, commit
+this slice as one commit onto `feat/action-window-connection-status` (after the
+FE-4 commit `4807600`). The branch then carries FE-3.5 (real connection status) +
+FE-4 (reconnect/recovery UX) + FE-5 (live-bridge diagnostics). Push/PR **only on
+explicit approval**. Follow-ups: live-agent verification (`VITE_AW_BRIDGE=1` +
+running paired agent — now also confirms the LIVE vs FIXTURE FALLBACK verdict
+directly), and the jsdom/RTL decision (still deferred, separate approval).
 
 ## Files owned by this workstream
 
@@ -261,6 +299,25 @@ decision (still deferred, separate approval).
   start button) are `hidden sm:*`; a `sm:hidden` note explains real work happens on
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
+
+## Validation results (FE-5 session, 2026-07-11)
+
+- `frontend typecheck`: passed.
+- `frontend tests`: **271 passed** (257 prior + `diagnostics` 9 + store 5).
+- `frontend build`: passed (347.98 kB / 109.39 kB gzip); production bundle
+  checked — DEV/diagnostics code absent (grep "브리지 진단" / "소스 모드" /
+  "연결 변경 횟수" / "라이브 브리지 사용 중" / "픽스처로 폴백됨" / "픽스처 데모" /
+  "부트 시도됨" / "마지막 전이" / "데모 미리보기" / "픽스처로 돌아가기" /
+  "라이브 연결 중" / "개발용" → 0 each); user-facing copy present ("연결이 끊겼어요"
+  → 2, "다시 연결" → 5, "다시 연결하는 중" → 2, "리뷰 운영" → 2,
+  "ESM (지마켓·옥션)" → 1); `VITE_AW_BRIDGE` compiled away (grep → 0).
+- Bundle note: `esm_plus` / `run_demo_esm` remain in the bundle as **pre-existing
+  fixture demo data** (the default fixture source ships the demo run); `fixtures.ts`
+  is untouched by this slice and the tree-shaken diagnostics module emits neither.
+- `git diff --check`: clean.
+- No duplicated contract enums in `frontend/**`; no `collector/**` / `backend/**` /
+  contract / canonical-doc change; no real Bridge/Runtime/Chrome/Backend integration;
+  the store still imports no bridge transport module.
 
 ## Validation results (FE-4 session, 2026-07-09)
 
@@ -343,13 +400,13 @@ browser screenshot pass can be run separately with approval.
 
 ## Exact steps for the next session
 
-1. On approval, commit the FE-4 slice (`frontend/**` + these docs) as one commit
-   onto `feat/action-window-connection-status` (after `c4b98d5`); push/PR only
+1. On approval, commit the FE-5 slice (`frontend/**` + these docs) as one commit
+   onto `feat/action-window-connection-status` (after `4807600`); push/PR only
    when explicitly approved.
 2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
    hosting a run) — environment-dependent follow-up; do not claim it from node-env
    tests. It now covers real drop → reconnecting → offline → manual reconnect →
-   fresh resync.
+   fresh resync, and confirming the FE-5 LIVE vs FIXTURE FALLBACK verdict directly.
 3. Remaining candidates afterwards: jsdom/RTL decision (needs approval); the
    sanitized connection/evidence readout (deferred with the live-agent slice).
 4. Do not modify the contract or canonical docs from this workstream.

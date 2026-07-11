@@ -373,3 +373,64 @@ literals unchanged; production bundle carries no DEV code (grep-verified — the
 "픽스처로 돌아가기"/"라이브 연결 중"/"개발용" strings → 0; user-facing "다시 연결"
 copy present; `VITE_AW_BRIDGE` compiled away). Live-agent verification now also
 covers the manual reconnect path; it remains the environment-dependent follow-up.
+
+## FE-5 — Sanitized live-bridge diagnostics for verification (DONE)
+
+Product goal: when we later run a real paired local agent, the Operations screen
+should let us confirm at a glance whether it is **truly using the live Bridge** or
+has quietly fallen back to the fixture source — today the two look nearly identical
+on screen. This slice adds a **DEV-only, bridge-mode-only** sanitized diagnostics
+panel that states the source mode, connection state, whether a live boot was
+attempted, the last safe connection transition, and whether a reconnect is pending.
+
+Decisions (product-owner, 2026-07-11): **gating = bridge-mode only** (rendered only
+when `isFixturePreviewEnabled() && isBridgeModeEnabled()`, so it appears in both the
+bridge-live and the bridge-fallback states but never in the plain fixture-demo dev
+view or the production build); include revision (plain int), the channel **display
+label** only, and a run-bound boolean; **no jsdom/RTL** (tests stay node-env).
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **Pure formatter** `lib/actionWindow/diagnostics.ts` — `describeBridgeDiagnostics`
+  takes explicit sanitized primitives (source mode, connection literal, booleans, a
+  plain integer revision, an already-resolved channel label) and returns a verdict
+  (`live` / `fixture-fallback` / `fixture-demo`) plus labelled rows. It **never
+  receives the raw `ActionWindowRunView`**, so it structurally cannot reach a runId,
+  raw channelCode, URL, token, or wire frame. Every value is drawn from a bounded
+  vocabulary (the three connection literals, the two source-mode literals, 예/아니오,
+  integers, "—", and the channel label).
+- **Component** `components/actionWindow/BridgeDiagnostics.tsx` — dashed DEV panel
+  reused on both pages, rendered only inside the page-level bridge-mode dead-branch
+  gate (same tree-shaking pattern as `SimulationPreview`).
+- **Store** `operationsStore.ts` — a **timestamp-free** `connectionTrail`
+  (capped at 6, only the three connection literals — no timing, no ids) and a
+  `connectionChangeCount`; both updated on an actual connection transition (a
+  repeated same-state frame is not counted) and reset to a fresh connected session
+  whenever the world is replaced (adopt / fixture load / simulation / reset). The
+  store still imports **no** bridge transport module.
+- **Getter** `bridgeSource.ts` `isBridgeBootAttempted()` — read-only view of the
+  once-per-session boot flag, so the panel distinguishes "never tried" from "tried
+  and fell back".
+- **Pages** — `Operations.tsx` + `OperationsHome.tsx` render the panel in the DEV
+  bridge-mode area (visible in both bridge-live and fixture-fallback).
+- **Tests** (node-env, +14 → 271): `diagnostics.test.ts` (verdict logic, field
+  formatting, last-transition rendering, dash for empty run fields, channel label
+  not raw code, a **leak-guard** asserting no field exposes a raw id/url/token/wire
+  frame, and a bounded-vocabulary assertion); `operationsStore.test.ts` (trail +
+  counter transitions, same-state not counted, cap enforced, reset on world switch).
+
+Never shown (privacy invariant, enforced by the primitives-only formatter and the
+leak-guard test): raw runId, raw channelCode, tokens, tickets, URLs/host/port, raw
+WS frames/payloads, account ids, selectors, CDP ids, cookies, secrets, local paths,
+timestamps, or elapsed durations.
+
+Acceptance: all 257 prior tests pass unmodified; no protocol types; connection
+literals unchanged; production bundle carries no DEV/diagnostics code (grep-verified
+— "브리지 진단"/"소스 모드"/"라이브 브리지 사용 중"/"부트 시도됨"/… → 0;
+`VITE_AW_BRIDGE` compiled away; user-facing resilience copy still present). The
+`esm_plus`/`run_demo_esm` strings that remain in the bundle are the **pre-existing
+fixture demo data** (the default fixture source ships the demo run) — unchanged by
+this slice and not emitted by the tree-shaken diagnostics module. Live-agent
+verification (`VITE_AW_BRIDGE=1` against a running paired agent — now confirming the
+LIVE vs FIXTURE FALLBACK verdict directly) remains the environment-dependent
+follow-up.

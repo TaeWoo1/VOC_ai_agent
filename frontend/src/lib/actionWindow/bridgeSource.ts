@@ -112,6 +112,14 @@ export async function connectBridgeIfEnabled(): Promise<boolean> {
   return true;
 }
 
+/** FE-5 diagnostics: whether a live-Bridge boot has been attempted this session
+ *  (the flag flips synchronously at the start of `connectBridgeIfEnabled`, before
+ *  the async resolve). Lets the DEV panel distinguish "never tried" from "tried
+ *  and fell back to the fixture". Read-only; no wire state. */
+export function isBridgeBootAttempted(): boolean {
+  return bootAttempted;
+}
+
 /** DEV-only boot retry: allow another live-connection attempt (e.g. the local
  *  agent came online after page load). Same opt-in gating and honest fallback
  *  as the initial boot. */
