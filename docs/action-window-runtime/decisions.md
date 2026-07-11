@@ -154,3 +154,28 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   criteria applied — NAVER leads §2 criteria 2–5 on repository evidence, and the
   decisive criterion-1 input was resolved by the product owner in making this
   ratification; the pilot seller's identity is still to be named for G2 consent.
+
+- **D-022 · ACTIVE** — **The R4 downstream ingest handoff rides the EXISTING upload/ingestion
+  path; the driver never touches the network** (implemented fixture-only, 2026-07-10; extends the
+  D-021 downstream posture). After quarantine validation, the verified artifact is handed to the
+  already-shipped `POST /api/uploads` → `IngestionService` → `ReviewRowMapper` → dedup →
+  item-analysis path (dedup key = `리뷰글번호` = `external_id`, scoped by org+channel). **No backend
+  capability is added.** *Boundaries (ratified):* (1) the upload capability is **injected** into the
+  driver as an `AwIngestUploadFn` callback — the `NaverFixtureProbeDriver` never imports `../upload`
+  and stays network-free (source guard unchanged); the real `login → resolveChannelId →
+  uploadReviewBytes` hookup lives in a separate channel-neutral `ingest-handoff.ts`. (2) Only the
+  sanitized `{ ok, processed }` crosses back to the engine — the rich backend `IngestResult` (status
+  text, `syncJobId`, `errorMessage`, `sampleErrors`, exact counts) is reduced in `ingest-handoff.ts`
+  and never reaches the driver, the wire, or the persisted Operation Run; `onIngested` reads only
+  `ok`, and `processed` is persisted nowhere. (3) The multipart filename on the wire is an opaque
+  `aw-<artifactRef>.xlsx` derived only from the engine's 16-hex ref — the platform's suggested
+  filename is never uploaded. (4) A non-`ok` outcome fails the run closed with the **generic reserved
+  `UNSUPPORTED_STATE`** — a dedicated `INGEST_FAILED` code touches `contracts/**` + `schema.json` +
+  the drift test + FE copy mapping and stays a **deferred governed contract change** (PO decision
+  2026-07-10: keep generic for this slice). *Deferred:* browser-driver real ingest over a real
+  Playwright `Download`; a full fixture-xlsx → real-POI end-to-end (blocked by the no-new-dependency
+  rule — the fixture emits fake OOXML-shaped bytes, and a real backend-parseable workbook needs an
+  xlsx-writer). *Rationale:* D-020 criterion 4 (compatibility with the current ingestion pipeline)
+  and the §4.2 honesty boundary — a real ingest is a real DB state change, reported honestly, but the
+  sanitization/injection boundary keeps every raw identifier off the wire and the persisted store.
+  Live NAVER remains blocked by the §3 gate (G2–G6), the live-work pause, and per-run PO approval.

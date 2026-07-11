@@ -4,7 +4,9 @@
  * the same `ActionWindowSession` + transport drives an actual DOM: prepare → locate → highlight →
  * observe a click → verify → downstream → completed. Includes the R4 fixture download ladder: the
  * user's click fires a REAL synthetic-blob download that is detected read-only (opaque ref only,
- * artifact discarded), the no-download → DOWNLOAD_TIMEOUT path, and an operator-cancel abort drill.
+ * artifact discarded), the no-download → DOWNLOAD_TIMEOUT path, an operator-cancel abort drill,
+ * and the D-021 quarantine-validate proof (real download → TEMPORARY quarantine save → OOXML
+ * sniff → DELETE; bad magic fails closed; nothing lingers, nothing crosses the wire).
  * Gated so the default offline `npm test` never launches a browser.
  *
  *   # automated (TEST-ONLY simulated click), headless:
@@ -16,7 +18,10 @@
  * The ONLY click on the target is either the TEST-ONLY `page.click(...)` (automated case) or the real
  * human click (headed case). No production Action Window code clicks — the Runtime only observes.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   ACTION_WINDOW_PROTOCOL_VERSION,
@@ -221,12 +226,100 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
     }
   });
 
+  describe("D-021 quarantine validate (real download → temporary save → sniff → delete)", () => {
+    const dirs: string[] = [];
+    afterEach(() => {
+      while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+    });
+    function tmpQuarantine(): string {
+      const dir = mkdtempSync(join(tmpdir(), "aw-browser-quarantine-"));
+      dirs.push(dir);
+      return dir;
+    }
+
+    it("a REAL OOXML-shaped download quarantine-validates and completes; the dir is empty after", async () => {
+      const page = await browser.newPage();
+      const quarantineDir = tmpQuarantine();
+      try {
+        const channel = createLoopbackChannel();
+        const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+        const driver = new BrowserProbeDriver(page, {
+          mode: "download-xlsx",
+          simulateUserAction: clickTarget,
+          observeTimeoutMs: 5000,
+          downstream: { realDetection: { timeoutMs: 10_000 }, quarantine: { dir: quarantineDir } },
+        });
+        const session = new ActionWindowSession(engine, driver, channel.server);
+        session.attach();
+        const fe = new FeClient(channel.client);
+
+        fe.send("START_RUN", { channelCode: "synthetic" });
+        await session.whenSettled();
+        expect(await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), 10_000)).toBe(true);
+
+        fe.send("REQUEST_STEP_RECHECK");
+        expect(await waitFor(() => fe.view?.status === "COMPLETED", 20_000)).toBe(true);
+
+        const detected = fe.events.find((e) => e.type === "DOWNLOAD_DETECTED");
+        expect(detected?.payload.artifactRef).toMatch(/^[0-9a-f]{16}$/);
+        // delete-after-validate held on the REAL filesystem: nothing lingers.
+        expect(readdirSync(quarantineDir)).toEqual([]);
+        // The wire never carries the quarantine location, artifact naming, or OOXML structure.
+        const wire = JSON.stringify(fe.frames);
+        for (const needle of [quarantineDir, "aw-quarantine", "synthetic-export", ".xlsx", "Content_Types", "blob:", "data:", "filename", "suggested", "/Users/", "/home/", "file://"]) {
+          expect(wire.includes(needle), `wire leaked "${needle}"`).toBe(false);
+        }
+        for (const f of fe.frames) expect(findProhibitedFields(f)).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    });
+
+    it("an xlsx-NAMED download without OOXML magic fails closed with ARTIFACT_INVALID; dir empty", async () => {
+      const page = await browser.newPage();
+      const quarantineDir = tmpQuarantine();
+      try {
+        const channel = createLoopbackChannel();
+        const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
+        const driver = new BrowserProbeDriver(page, {
+          mode: "download-badmagic",
+          simulateUserAction: clickTarget,
+          observeTimeoutMs: 5000,
+          downstream: { realDetection: { timeoutMs: 10_000 }, quarantine: { dir: quarantineDir } },
+        });
+        const session = new ActionWindowSession(engine, driver, channel.server);
+        session.attach();
+        const fe = new FeClient(channel.client);
+
+        fe.send("START_RUN", { channelCode: "synthetic" });
+        await session.whenSettled();
+        expect(await waitFor(() => fe.types().includes("USER_ACTION_OBSERVED"), 10_000)).toBe(true);
+        fe.send("REQUEST_STEP_RECHECK");
+        expect(await waitFor(() => fe.view?.status === "FAILED", 20_000)).toBe(true);
+
+        expect(fe.view?.blocker?.code).toBe("ARTIFACT_INVALID");
+        expect(fe.types()).toContain("DOWNLOAD_DETECTED"); // detection succeeded; validation failed closed
+        expect(fe.types()).not.toContain("RUN_COMPLETED");
+        expect(readdirSync(quarantineDir)).toEqual([]); // the hostile artifact was still deleted
+        for (const f of fe.frames) expect(findProhibitedFields(f)).toEqual([]);
+        expect(await overlayMounted(page)).toBe(false);
+      } finally {
+        await page.close();
+      }
+    });
+  });
+
   it("abort drill: an operator cancel at the checkpoint tears down cleanly (no click ever issued)", async () => {
     const page = await browser.newPage();
+    const quarantineDir = mkdtempSync(join(tmpdir(), "aw-abort-quarantine-"));
     try {
       const channel = createLoopbackChannel();
       const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: "synthetic", runCopyKey: "actionWindow.run.synthetic" });
-      const driver = new BrowserProbeDriver(page, { mode: "download", observeTimeoutMs: 60_000, downstream: { realDetection: {} } });
+      const driver = new BrowserProbeDriver(page, {
+        mode: "download",
+        observeTimeoutMs: 60_000,
+        downstream: { realDetection: {}, quarantine: { dir: quarantineDir } },
+      });
       const session = new ActionWindowSession(engine, driver, channel.server);
       session.attach();
       const fe = new FeClient(channel.client);
@@ -243,8 +336,11 @@ describe.skipIf(!RUN)("Action Window R2 browser E2E (FE ↔ loopback ↔ Runtime
       expect(fe.view?.allowedCommands).toEqual([]);
       expect(await overlayMounted(page)).toBe(false);
       expect(await page.evaluate(() => "__aw_observed__" in window)).toBe(false);
+      // Nothing was ever quarantined and the cleanup sweep leaves the dir empty.
+      expect(readdirSync(quarantineDir)).toEqual([]);
     } finally {
       await page.close();
+      rmSync(quarantineDir, { recursive: true, force: true });
     }
   });
 

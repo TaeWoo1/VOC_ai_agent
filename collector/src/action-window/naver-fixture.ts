@@ -32,6 +32,22 @@ export type NaverFixtureMode =
   | "async-affordance";
 
 /**
+ * The artifact shape the user's action produces (downstream slice): a structurally valid
+ * OOXML/xlsx-shaped payload, a wrong-extension artifact, an xlsx-named payload without the OOXML
+ * magic, or no download at all (the timeout shape — absence models elapsed time offline).
+ */
+export type NaverFixtureDownloadShape = "xlsx-valid" | "wrong-extension" | "bad-magic" | "none";
+
+/**
+ * Minimal byte-carrying synthetic download — deliberately NO save capability (the fixture stays a
+ * pure data object; only the quarantine module persists anything, via its injectable io).
+ */
+export interface NaverFixtureDownload {
+  suggestedFilename(): string;
+  bytes(): Uint8Array;
+}
+
+/**
  * Clearly-synthetic hostile strings planted in every fixture page. Privacy tests assert none of
  * them ever appears in a wire frame, persisted record, or driver output.
  */
@@ -55,6 +71,47 @@ const REVIEW_ROWS = `<table><tbody>
 </tbody></table>`;
 /** A results container that is present but has ZERO data rows (the benign empty-target shape). */
 const EMPTY_RESULTS = `<table><tbody></tbody></table>`;
+
+const BYTE_ENCODER = new TextEncoder();
+
+/** ZIP local-file-header magic + minimal header tail — the OOXML structural prefix. */
+const ZIP_MAGIC_PREFIX = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00]);
+
+/**
+ * Structurally OOXML-shaped synthetic bytes: the ZIP magic, the content-types entry name, and the
+ * planted canaries — so the content-leak proof covers the artifact BYTES, not just page text. This
+ * is not a real workbook; only the sniffed structural prefix matters.
+ */
+function xlsxShapedBytes(): Uint8Array {
+  const tail = BYTE_ENCODER.encode(
+    `[Content_Types].xml (합성 픽스처) ${NAVER_FIXTURE_CANARIES[0]} ${NAVER_FIXTURE_CANARIES[1]} ${NAVER_FIXTURE_CANARIES[2]}`,
+  );
+  const out = new Uint8Array(ZIP_MAGIC_PREFIX.length + tail.length);
+  out.set(ZIP_MAGIC_PREFIX, 0);
+  out.set(tail, ZIP_MAGIC_PREFIX.length);
+  return out;
+}
+
+/** Hostile payload: xlsx-named but structurally NOT OOXML (an error-page-like body, canaried). */
+function badMagicBytes(): Uint8Array {
+  return BYTE_ENCODER.encode(
+    `<html><body>오류 안내 (합성) ${NAVER_FIXTURE_CANARIES[0]} ${NAVER_FIXTURE_CANARIES[1]} ${NAVER_FIXTURE_CANARIES[2]}</body></html>`,
+  );
+}
+
+function downloadFor(shape: NaverFixtureDownloadShape): NaverFixtureDownload | null {
+  switch (shape) {
+    case "xlsx-valid":
+      // The suggested filename is the planted export-filename canary — proving it never leaks.
+      return { suggestedFilename: () => NAVER_FIXTURE_CANARIES[2]!, bytes: xlsxShapedBytes };
+    case "wrong-extension":
+      return { suggestedFilename: () => "리뷰내보내기_0000.html", bytes: xlsxShapedBytes };
+    case "bad-magic":
+      return { suggestedFilename: () => NAVER_FIXTURE_CANARIES[2]!, bytes: badMagicBytes };
+    case "none":
+      return null;
+  }
+}
 
 /** Generic page frame. Every page carries the canaries so leak tests cover all modes. */
 function surfacePage(main: string): string {
@@ -85,10 +142,13 @@ const LOGGED_IN_SIGNALS: SessionVerdictInput = {
  */
 export class NaverReviewExportSurfaceFixture {
   readonly mode: NaverFixtureMode;
+  readonly downloadShape: NaverFixtureDownloadShape;
   private acted = false;
+  private pendingDownload: NaverFixtureDownload | null = null;
 
-  constructor(mode: NaverFixtureMode) {
+  constructor(mode: NaverFixtureMode, downloadShape: NaverFixtureDownloadShape = "xlsx-valid") {
     this.mode = mode;
+    this.downloadShape = downloadShape;
   }
 
   /** Coarse, already-sanitized session signals (what the real adapter derives from its probes). */
@@ -155,10 +215,23 @@ export class NaverReviewExportSurfaceFixture {
 
   /**
    * TEST-ONLY: the USER's real platform action (never performed by the Runtime). Flips the surface
-   * into its post-action state, exactly as the browser fixture's click handler does.
+   * into its post-action state, exactly as the browser fixture's click handler does, and (per the
+   * download shape) makes the resulting artifact available — RE-SET on every action, so a
+   * resume-through-checkpoint retry produces a fresh one.
    */
   applyUserAction(): void {
     this.acted = true;
+    this.pendingDownload = downloadFor(this.downloadShape);
+  }
+
+  /**
+   * Consume the pending artifact the user's action produced (the driver's detect stage). `null`
+   * models the no-download timeout shape — offline, absence stands in for elapsed time.
+   */
+  takePendingDownload(): NaverFixtureDownload | null {
+    const pending = this.pendingDownload;
+    this.pendingDownload = null;
+    return pending;
   }
 
   hasActed(): boolean {
