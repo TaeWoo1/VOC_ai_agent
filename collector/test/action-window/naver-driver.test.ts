@@ -441,7 +441,7 @@ describe("NAVER driver modules — source guard (no click, no live, no save path
       .filter((line) => !/^\s*(\/\/|\*)/.test(line))
       .join("\n");
 
-  const MODULES = ["naver-driver.ts", "naver-fixture.ts"];
+  const MODULES = ["naver-driver.ts", "naver-fixture.ts", "naver-session-precondition.ts"];
   const BANNED_TOKENS = [
     /\.click\s*\(/,
     /dispatchEvent\s*\(/,
