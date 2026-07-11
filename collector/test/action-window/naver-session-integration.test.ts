@@ -238,6 +238,26 @@ describe("NAVER fixture session E2E — fail-closed hostile shapes", () => {
   });
 });
 
+describe("NAVER fixture session E2E — operator abort (CANCEL_RUN)", () => {
+  it("an operator cancel at the human checkpoint cancels cleanly — no click, no downstream", async () => {
+    const { fe, session, driver } = await startRun("normal");
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(fe.view?.channelCode).toBe(NAVER_CHANNEL_CODE);
+
+    // The operator walks away and cancels — no user action is ever reported (the Runtime never clicks).
+    fe.send("CANCEL_RUN");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("CANCELLED");
+    expect(fe.view?.allowedCommands).toEqual([]); // terminal: no further commands
+    expect(fe.eventTypes()).not.toContain("USER_ACTION_OBSERVED");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+    assertSanitized(fe, "operator-abort");
+  });
+});
+
 describe("NAVER fixture session E2E — REAL downstream (detect + quarantine validate)", () => {
   const dirs: string[] = [];
   afterEach(() => {
