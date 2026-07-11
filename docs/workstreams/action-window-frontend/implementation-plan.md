@@ -434,3 +434,56 @@ this slice and not emitted by the tree-shaken diagnostics module. Live-agent
 verification (`VITE_AW_BRIDGE=1` against a running paired agent — now confirming the
 LIVE vs FIXTURE FALLBACK verdict directly) remains the environment-dependent
 follow-up.
+
+## FE-6 — DOM/a11y component tests (DONE)
+
+Product goal: FE-3.5 → FE-5 added the first genuinely **DOM-interactive,
+accessibility-bearing** surfaces — the FE-4 manual **reconnect** button, the offline
+banner's `role="status"` live region + `aria-busy` state, the checkpoint/control
+command buttons rendered from `allowedCommands`, and the FE-5 diagnostics
+`<section aria-label>`/`<dl>`. The node-env suite proves the store/formatter logic but
+**never renders the button, clicks it, or asserts the aria structure** — a broken
+`onReconnect`, a lost `role="status"`, or a regressed `<dl>` would pass every test.
+This slice resolves the long-deferred jsdom/RTL question by adding component-level
+DOM/a11y tests over exactly those surfaces.
+
+Decisions (product-owner, 2026-07-11): **adopt now**, minimally and additively.
+**Component-only** scope (the four new-surface components; **no** page-through-store
+integration tests). **Hand-rolled role/aria assertions** (Testing Library queries;
+**no** jest-axe). jsdom is opted into **per-file** via a `// @vitest-environment jsdom`
+pragma, so the default stays node and every existing `*.test.ts` is untouched.
+
+Delivered (FE-only; `frontend/**` + this workstream's docs):
+
+- **DevDeps** (the sole dependency change): `jsdom`, `@testing-library/react`,
+  `@testing-library/dom`, `@testing-library/jest-dom`, `@testing-library/user-event`
+  — devDependencies only; runtime `dependencies` and `scripts` unchanged.
+- **Harness** — `vitest.config.ts` `include` broadened to `src/**/*.test.{ts,tsx}` and
+  a `setupFiles: ["src/test/setup.ts"]` (jest-dom matchers + explicit RTL
+  `afterEach(cleanup)`, since `globals` stays `false`). No global `environment` set;
+  the jsdom env is per-`.test.tsx` only.
+- **Tests** (jsdom, +23 → 294), all `*.test.tsx` under `components/actionWindow/`:
+  - `ConnectionBanner.test.tsx` (8) — null render when connected; `role="status"` for
+    reconnecting/offline; reconnect-button presence matrix (offline + `onReconnect`
+    only; absent for reconnecting and for offline without a handler); `disabled` +
+    `aria-busy` under `retryPending`; a click fires `onReconnect` once; a disabled
+    button does not.
+  - `ActionWindowControlPanel.test.tsx` (4) — one button per `allowedCommand` with the
+    right accessible name (`commandLabel`); empty-state copy + no buttons when none;
+    click dispatches the exact `CommandType`.
+  - `HumanCheckpointCard.test.tsx` (6) — labelled section + heading; recheck/manual
+    buttons gated by `allowedCommands`; per-button `CommandType` dispatch; conditional
+    blocker `role="status"` with recoverable vs non-recoverable copy.
+  - `BridgeDiagnostics.test.tsx` (5) — DOM structure only (the two env helpers are
+    mocked to drive the verdict): labelled `<section>` + a 10-row `<dl>`; the three
+    verdict labels (live / fixture-fallback / fixture-demo); channel **display label**
+    in the DOM, never the raw code. Verdict logic + the leak-guard stay in the node-env
+    `diagnostics.test.ts` (no duplication).
+
+Acceptance: all 271 prior node-env tests pass unmodified (still node env — no pragma
+added to any `*.test.ts`); typecheck + build clean; production bundle unchanged
+(no component source touched) — diagnostics-unique DEV labels still grep to 0, no
+test/vitest/testing-library token leaks into `dist`, user-facing resilience copy
+(`다시 연결`) still ships. Deliberately deferred (named, not started): page-level
+integration tests through the store; jest-axe automated a11y scanning; a frontend CI
+workflow to run these on PRs; live-agent verification.
