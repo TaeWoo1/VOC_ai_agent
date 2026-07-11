@@ -32,9 +32,9 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1 ✅ (D-021); G2–G6 open |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ☐ | — |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ☐ | — |
-| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ◔ | most §6 items green on NAVER fixtures (session probe, surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225 + D-023); **remaining: the seated `AW_HEADED` operator run (harness delivered) + the abort-drill/evidence pack (§8)** |
-| P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ☐ | — |
-| P11 | Pre-live evidence pack (§8) assembled | ☐ | — |
+| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
+| P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ✅ | every fail-closed exit + a NAVER operator-abort (`CANCEL_RUN`) drill, all recovering per §7 — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-6 |
+| P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; **live still gated by G2–G6 + the live-work pause** |
 | P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization |
 
 ---
@@ -248,6 +248,7 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 
 ## 10. Related
 
+- **Pre-live evidence pack (§8) → [`r4-evidence-pack.md`](r4-evidence-pack.md)** (assembled 2026-07-11)
 - Slice sequencing → [`implementation-plan.md`](implementation-plan.md) (R4 section)
-- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021)
+- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021, D-022, D-023)
 - Current slice state → [`current-state.md`](current-state.md)
