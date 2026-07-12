@@ -12,9 +12,11 @@
   adopted) MERGED into `main` via PR #228 (merge `e1d3c40`, 2026-07-11). FE-7
   (page-level DOM integration tests) `849f690` MERGED into `main` via PR #230
   (merge `9958197`, 2026-07-11; 308 tests). FE-8 (frontend CI workflow —
-  typecheck/test/build on PRs) IMPLEMENTED (this slice, uncommitted on
-  `chore/frontend-ci-plan`). Remaining follow-ups: live-agent verification;
-  jest-axe.**
+  typecheck/test/build on PRs) `d0f381a` MERGED into `main` via PR #233
+  (merge `335db59`, 2026-07-12; ran green on its own PR). FE-9 (jest-axe a11y
+  scanning of the two Operations pages) IMPLEMENTED (this slice, uncommitted on
+  `chore/action-window-jest-axe-plan`; 317 tests). Remaining follow-ups:
+  live-agent verification; component-level / full-document axe scans.**
 
 ## Base
 
@@ -88,6 +90,32 @@ adapter + mock/real boundary + dedupe/stale protection + reconnect snapshot hand
 offline/error state) become implementable.
 
 ## Completed (this session)
+
+FE-9 jest-axe a11y scanning of the Operations pages (one FE slice, uncommitted):
+
+- Product gap closed: FE-6/FE-7 encode a11y intent only through the role/accessible-name
+  queries the author explicitly wrote. FE-9 adds automated **axe-core** scans that catch
+  the structural/ARIA class those queries never assert (invalid/duplicate ARIA, duplicate
+  `id`s, unlabeled controls, roles missing required states, heading/list structure) on the
+  two highest-value surfaces.
+- **Decisions** (product-owner, 2026-07-12): adopt now, scoped to the **two Operations
+  pages** across their already-seeded rendered states; axe assertions in **dedicated
+  `*.a11y.test.tsx` files** (separate from FE-7); FE-6 component scans deferred. Assert on
+  `results.violations` directly (no `expect.extend`, no `setup.ts`/`vitest.config.ts`
+  change). Rules `region` + `landmark-one-main` disabled (pages render as a body fragment;
+  `AppShell` owns `<main>`/nav) and `color-contrast` disabled (jsdom can't lay out/paint).
+- **Delivered**: `frontend/src/test/axe.ts` (shared `AXE_OPTIONS` + `expectNoAxeViolations`
+  with a readable rule-by-rule failure summary); `frontend/src/pages/Operations.a11y.test.tsx`
+  (5 scans) and `frontend/src/pages/OperationsHome.a11y.test.tsx` (4 scans), reusing the
+  existing `renderWithRouter` + `opsStoreHarness` harness and mirroring the FE-7 boundary
+  mocks — one `axe()` per distinct rendered state.
+- **Dependencies (in-scope)**: `jest-axe ^10.0.0` (+ transitive `axe-core 4.10.2`) **and**
+  `@types/jest-axe ^3.5.9` — a plan-deviation: the planned assumption that jest-axe ships
+  its own types was wrong (v10 ships no `.d.ts`), so the types-only devDep was added. Both
+  are test-tooling, never in the shipped bundle. (npm audit reports advisories in jest-axe's
+  transitive tree; not acted on — dev-only, `audit fix` would churn the lockfile out of scope.)
+- **Enforcement**: the scans run under the existing `npm test`, so FE-8 CI runs them with
+  **no CI change**.
 
 FE-8 frontend CI workflow (one FE slice, uncommitted):
 
@@ -396,6 +424,26 @@ directly), and the jsdom/RTL decision (still deferred, separate approval).
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
+## Validation results (FE-9 session, 2026-07-12)
+
+- `npm run typecheck` — clean (required adding `@types/jest-axe`; jest-axe v10 ships no
+  bundled `.d.ts`).
+- `npm test` — **317 passed** (308 prior + 9 new axe scans), **29 files**. New files:
+  `src/pages/Operations.a11y.test.tsx` (5) + `src/pages/OperationsHome.a11y.test.tsx` (4).
+- `npm run build` — passes; production bundle **byte-identical** to the prior baseline
+  (`index-DgRPaagd.css` 20.67 kB / `index-CDKl4_D3.js` 347.98 kB, same content hashes) —
+  the test files contribute nothing to `dist`.
+- **Axe-has-teeth** proven: a throwaway `<img>`-without-alt render made
+  `expectNoAxeViolations` fail with `image-alt [critical]`, confirming the scan isn't a
+  silent no-op; the throwaway was then deleted.
+- `git diff --check` clean. Working tree scope: `frontend/package.json` +
+  `frontend/package-lock.json` (2 devDeps) + 3 new files
+  (`src/test/axe.ts`, `src/pages/Operations.a11y.test.tsx`,
+  `src/pages/OperationsHome.a11y.test.tsx`) + these docs. No source/config/CI change.
+- Config scope confirmed correct: the three disabled rules (`region`,
+  `landmark-one-main`, `color-contrast`) produce no false positives, and all other axe
+  rules pass on every seeded state.
+
 ## Validation results (FE-8 session, 2026-07-12)
 
 - `.github/workflows/frontend-ci.yml`: YAML parses clean (`yaml.safe_load`); structure
@@ -517,9 +565,10 @@ and a paired-agent live verification remain separate, approval-gated follow-ups.
 
 ## Current PR
 
-- **None open. PR #230 merged** (`feat/action-window-page-dom-tests` → `main`, merge
-  `9958197`). FE-8 (frontend CI workflow) is implemented on `chore/frontend-ci-plan`
-  (branched from `9958197`), **uncommitted**, awaiting commit approval.
+- **None open. PR #233 merged** (`chore/frontend-ci-plan` → `main`, merge `335db59`,
+  2026-07-12), carrying FE-8 `d0f381a` (frontend CI workflow); it ran green on its own PR.
+  FE-9 (jest-axe a11y scanning) is implemented on `chore/action-window-jest-axe-plan`
+  (branched from `335db59`), **uncommitted**, awaiting commit approval.
 
 ## Decisions made in this workstream
 
@@ -573,20 +622,27 @@ and a paired-agent live verification remain separate, approval-gated follow-ups.
 - ~~A frontend CI workflow to run typecheck/test/build on PRs~~ — **resolved 2026-07-12**
   (product-owner): adopted in **FE-8** (`.github/workflows/frontend-ci.yml`, PR-only,
   path-filtered to `frontend/**` + `contracts/action-window/v1/**`, Node 20, npm cache,
-  `npm ci` → typecheck → test → build). Still open (named, not started): jest-axe
-  automated a11y scanning; making `frontend` a required status check (repo settings);
-  `collector`/`backend` CI.
+  `npm ci` → typecheck → test → build).
+- ~~jest-axe automated accessibility scanning~~ — **resolved 2026-07-12** (product-owner):
+  adopted in **FE-9**, scoped to the two Operations pages via dedicated `*.a11y.test.tsx`
+  files reusing the FE-7 harness, asserting on `results.violations` directly (no
+  `expect.extend`, no config change), with `region`/`landmark-one-main`/`color-contrast`
+  disabled for the fragment/jsdom limits. Still open (named, not started): axe scans of the
+  FE-6 components / other pages and full-document (AppShell-level) scans; making `frontend`
+  a required status check (repo settings); `collector`/`backend` CI; live-agent verification.
 
 ## Exact steps for the next session
 
-1. On approval, commit the FE-8 slice (`.github/workflows/frontend-ci.yml` + these docs)
-   as one commit onto `chore/frontend-ci-plan` (after `9958197`); push/PR only when
-   explicitly approved. After merge, make `frontend` a **required** status check in the
-   repo's branch-protection settings (GitHub UI — not a file change).
+1. On approval, commit the FE-9 slice (`frontend/package.json` + `frontend/package-lock.json`
+   + `frontend/src/test/axe.ts` + the two `*.a11y.test.tsx` files + these docs) as one commit
+   onto `chore/action-window-jest-axe-plan` (after `335db59`); push/PR only when explicitly
+   approved.
 2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
    hosting a run) — environment-dependent follow-up; do not claim it from node/jsdom
    tests. Covers real drop → reconnecting → offline → manual reconnect → fresh resync,
    and confirming the FE-5 LIVE vs FIXTURE FALLBACK verdict directly.
-3. Remaining candidates afterwards (named, not started): jest-axe automated a11y
-   scanning; `collector`/`backend` CI workflows.
+3. Remaining candidates afterwards (named, not started): extend axe scans to the FE-6
+   components / other pages and full-document (AppShell-level) scans; making `frontend` a
+   **required** status check (repo branch-protection settings, GitHub UI — not a file
+   change); `collector`/`backend` CI workflows.
 4. Do not modify the contract or canonical docs from this workstream.
