@@ -197,22 +197,59 @@ happy loop, every hostile shape, resume, and the operator-abort.
 
 ---
 
-## §8-8 — Export pilot result — RESERVED (not yet run; authorizes no live action)
+## §8-8 — Export pilot result — RUN 1 EXECUTED 2026-07-13 · FAILED (fail-closed, zero clicks)
 
-**No export pilot has run.** This slot is reserved for the sanitized result of the first supervised NAVER
-export pilot, to be filled **only after** an actual dispatched run per the export-pilot pre-dispatch
-runbook ([`r4-gate-record.md`](r4-gate-record.md) §5 post-run checklist). Until then it records nothing
-and grants nothing.
+**The first supervised NAVER export pilot ran on 2026-07-13** under the export-scoped G6 filled that
+session ([`r4-export-dispatch-record.md`](r4-export-dispatch-record.md); operator (PO), one-run scope on
+`NAVER_DEV_SELLER_SELF_01`). The seated operator logged in and reached the export surface, then signalled
+readiness. **The run fail-closed at the session/surface precondition — before any highlight and before any
+click.** Sanitized result (enums/booleans/counts/SHA only):
 
-When filled, record enums/booleans/counts/SHA only (per §8-7 / `findProhibitedFields`; **never** URL,
-filename, path, selector, page content, credentials, cookies, tokens, or `eventTimeMs`):
+- ☑ **G6 instance:** export-scoped, filled 2026-07-13, operator (PO), ONE run — now **CONSUMED / spent**
+  (single-use; fail-closed does not refund it).
+- ☑ **Final run view:** `{ status: FAILED, progress: { completedSteps: 0, totalSteps: 3 },
+  channelCode: naver, blockerCode: UNSUPPORTED_STATE }`.
+- ☑ **Tasks:** `[FAILED, SKIPPED, SKIPPED]`. **Human checkpoint:** `{ reached: false, observed: false }`
+  — the human barrier was never reached, so **no control was highlighted, no action observed, no click**.
+- ☑ **Engine events:** `RUN_STARTED → RUN_STATUS_CHANGED → RUN_BLOCKED → RUN_FAILED` — **no
+  `DOWNLOAD_DETECTED`, no observed user action.**
+- ☑ **Ingest outcome:** not reached — no artifact produced (`processed: 0`).
+- ☑ **Quarantine:** dir empty (0 files); `downloads/` unchanged (0) — **nothing captured, saved, or
+  uploaded.**
+- ☑ **No-leak:** teardown clean — process exited, sentinel removed, browser context closed; nothing on
+  the wire or in the store beyond the sanitized view above.
+- ☑ **Operation Run id:** `run_f81fc0b19fdd` (`resumeState: RESUME_FROM_FAILURE`, resumable per R3).
 
-- ☐ Export-scoped G6 instance (dispatching turn, date, operator, scope) — [`r4-gate-record.md`](r4-gate-record.md) §G6.
-- ☐ Final run view: `{ status, progress, channelCode, blockerCode? }`.
-- ☐ Ingest outcome `{ ok, processed }`.
-- ☐ Quarantine validate result + dir-emptied confirmation.
-- ☐ No-leak assertion (`findProhibitedFields == []` across wire + store).
-- ☐ Operation Run id (`run_…`) for the audit trail.
+**Diagnosis (honest — not resolved here).** `UNSUPPORTED_STATE` at the precondition maps to exactly two
+branches of `naverSurfaceDecision`, and the diagnostic that distinguishes them is **test-visible only,
+never persisted** (`naver-surface.ts` `NaverPrepareDiagnostic`), so the persisted record cannot say which:
+
+1. **Session verdict `UNKNOWN`** — the reached page did not classify cleanly as seller-center `LOGGED_IN`,
+   yet was not a recognized reconnect/login/auth-challenge screen (those map to `SESSION_EXPIRED` /
+   `LOGIN_REQUIRED`, not `UNSUPPORTED_STATE`). Ambiguous → never proceed.
+2. **`LOGGED_IN` but export-target readiness `≠ READY`** — a HALT on empty (`EXPORT_TARGET_EMPTY`) or
+   ambiguous/range (`EXPORT_TARGET_UNKNOWN`); the same false-positive-empty family as the Milestone-D
+   hidden-SPA-placeholder finding.
+
+Determining which requires a **separate read-only surface probe** (`probe-export-same-session` /
+`probe-same-session`, no click / no download) — itself a live launch needing its **own fresh per-run G6**.
+No retry was performed; the consumed G6 authorized exactly one run.
+
+**Fix follow-up (2026-07-13, offline — commit `e2be2e0`).** The likely branch-2 cause has a fix
+implemented and hermetically proven, **not yet live-verified**: `NaverLiveProbeDriver` is now
+**frame-aware**. `prepareSurface` reads the session verdict from the top document (the proven §8-4 seam,
+unchanged), then `resolveSurfaceFrame` scores the top document + every child frame with the same shared
+`naverSurfaceDecision` / `naverLocateDecision` decisions and evaluates **readiness on the frame that hosts
+the export surface** (falling back to the top document); `locate` / `highlight` / `armObserve` /
+`waitForUserAction` / `verify` / the in-page tag now run against that frame, while **download detection
+stays page-level**. `overlay.ts` / `observer.ts` params widened to `Page | Frame` (backward-compatible).
+Six new hermetic tests over a fake multi-frame page cover: the pre-fix baseline halt, a child-frame ready
+surface → `ok`, a genuinely-empty child grid → honest `EXPORT_TARGET_EMPTY` halt (no false-positive),
+picking the actionable frame among several, skipping a detached frame, and binding the tag in the child
+frame only. `npm test` **2646 passed / 32 skipped**, typecheck clean. **The top-document path is unchanged
+(fallback), so every existing test and the synthetic browser proofs are unaffected.** This is hermetic
+only — confirming it against the REAL NAVER frame structure still needs the read-only frame-aware probe
+(or the export re-run) under a **fresh G3-export + G6**.
 
 ---
 
@@ -234,15 +271,18 @@ quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-c
 proof that the live driver is **wired into a persistent session** (loopback channel — **not** the Bridge
 WS).
 
-**Status: ✅ automated cases PASSED (2026-07-12), headless.** Command:
+**Status: ✅ automated PASSED (2026-07-12) + headed PASSED (2026-07-13), headless-launched.** Command:
 `RUN_INTEGRATION=1 npx vitest run test/cli/run-action-window-live-naver-browser.test.ts` → **3 passed / 1
 skipped** (the 3 automated cases; the `AW_HEADED` human-click case skipped) in ~1.3s. The happy case drove
 the full engine chain through the real driver — session gate `prepareSurface` (LOGGED_IN over the
 synthetic seller-center URL) → locate/tag → highlight → observed click → read-only detect → quarantine
 validate (dir emptied) → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted
 TERMINAL**; both fail-closed cases persisted **FAILED** with the sanitized `blocker.code` only; no-leak +
-`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case remains
-delivered-not-run** (needs a seated operator, a separate approved step). **No live NAVER, no network, no
+`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case also PASSED
+(2026-07-13):** with `… -t "headed"` (→ **1 passed / 3 skipped**, ~8.9s) a seated operator clicked the
+highlighted synthetic "엑셀 다운로드" once — the click was **observed** (the Runtime never clicked) → verify
+→ detect → quarantine validate → injected-fake ingest → **COMPLETED**, Operation Run **persisted TERMINAL**,
+`findProhibitedFields == []` clean. **No live NAVER, no network, no
 backend.**
 
 ---
@@ -260,9 +300,9 @@ backend.**
 - **Live driver core (PR #242, `cf509a5`):** ✅ **MERGED (2026-07-12)** — `NaverLiveProbeDriver` proves the
   NAVER-specific §6 seams on the live driver itself, hermetically + over a real browser on a **synthetic
   DOM** (see §8-2 note). **No live NAVER.** Session-wiring: the gated live entrypoint's `assembleLiveRun`
-  seam is now **proven** by a synthetic-browser integration test (automated cases PASSED 2026-07-12,
-  headless) with real Operation Run persistence (§8-9); the headed human-click case is delivered-not-run;
-  the live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
+  seam is now **proven** by a synthetic-browser integration test with real Operation Run persistence
+  (§8-9) — automated cases PASSED 2026-07-12 + the headed real-human-click case PASSED 2026-07-13; the
+  live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
   match P9/§8-2 accordingly (fixture / synthetic-browser green; live still gated).
 - **Live-driver headed synthetic proof (2026-07-12):** ✅ **PASSED with a real seated-operator click** (§8-3
   addendum) — proves the live driver's real-browser observe → download-detect → quarantine-validate →

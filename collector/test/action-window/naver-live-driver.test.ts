@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import {
   NaverLiveProbeDriver,
   EXPORT_TARGET_KEYWORDS,
@@ -23,9 +23,57 @@ import type { AwIngestUploadFn } from "../../src/action-window/ingest-handoff";
 
 const HEX16 = /^[0-9a-f]{16}$/;
 
-/** A minimal read-only page double — only `url()` + `content()` are touched by prepare/verify. */
+/**
+ * A read-only frame double. `content()` returns the fixture; `evaluate` is a stub whose call log is
+ * captured so a test can prove WHICH frame received the tag/overlay/observer work. For a `string` body
+ * (the `NAME_SHIM`) it returns undefined; for a function body (the in-page tagger) it returns
+ * `taggerCount`, standing in for the real DOM match count. `content()` may be forced to reject to model
+ * a detached / cross-navigating frame.
+ */
+function fakeFrame(
+  html: string,
+  opts: { url?: string; taggerCount?: number; rejectContent?: boolean; calls?: string[] } = {},
+): Frame {
+  return {
+    url: () => opts.url ?? "",
+    content: () => (opts.rejectContent ? Promise.reject(new Error("detached")) : Promise.resolve(html)),
+    evaluate: (body: unknown) => {
+      opts.calls?.push(typeof body === "string" ? "shim" : "fn");
+      return Promise.resolve(typeof body === "string" ? undefined : (opts.taggerCount ?? 0));
+    },
+    waitForFunction: () => Promise.resolve(undefined),
+  } as unknown as Frame;
+}
+
+/** A minimal read-only page double: a single top-document frame (no child frames). */
 function fakePage(url: string, html: string): Page {
-  return { url: () => url, content: () => Promise.resolve(html) } as unknown as Page;
+  const main = fakeFrame(html, { url });
+  return {
+    url: () => url,
+    content: () => Promise.resolve(html),
+    mainFrame: () => main,
+    frames: () => [main],
+  } as unknown as Page;
+}
+
+/** A page double with a top-document shell plus one or more child frames (an iframe/SPA surface). */
+function fakePageWithFrames(
+  main: { url: string; html: string; calls?: string[] },
+  children: Array<{ html: string; url?: string; taggerCount?: number; rejectContent?: boolean; calls?: string[] }>,
+): Page {
+  const mainFrame = fakeFrame(main.html, { url: main.url, ...(main.calls ? { calls: main.calls } : {}) });
+  const childFrames = children.map((c) => fakeFrame(c.html, c));
+  const all = [mainFrame, ...childFrames];
+  return {
+    url: () => main.url,
+    content: () => Promise.resolve(main.html),
+    mainFrame: () => mainFrame,
+    frames: () => all,
+  } as unknown as Page;
+}
+
+function driverForPage(page: Page, opts: Partial<NaverLiveProbeDriverOptions> = {}): NaverLiveProbeDriver {
+  return new NaverLiveProbeDriver(page, { quarantineDir: "/tmp/unused", ingest: neverIngest, ...opts });
 }
 
 const neverIngest: AwIngestUploadFn = () => Promise.resolve({ ok: false, processed: 0 });
@@ -78,6 +126,72 @@ describe("NaverLiveProbeDriver — prepareSurface over the §8-4 session seam", 
     const driver = driverFor(SELLER_URL, LOGGED_IN_EMPTY);
     expect(await driver.prepareSurface()).toEqual({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
     expect(driver.prepareDiagnostic()).toMatchObject({ readinessState: "EXPORT_TARGET_EMPTY" });
+  });
+});
+
+// --- frame surfaces: the review grid + export control render inside a child frame (iframe / SPA) ------
+// A logged-in top-document SHELL (strong seller-center signal, but NO rows and NO export control) …
+const SHELL_LOGGED_IN = `<html><body>
+  <nav id="seller-gnb">메뉴</nav><button>로그아웃</button><div id="app"></div>
+</body></html>`;
+// … while the actual export surface (rows + the one sync control) lives in a child frame.
+const FRAME_GRID_READY = `<html><body>
+  <table><tbody><tr><td>합성 행 A</td></tr><tr><td>합성 행 B</td></tr></tbody></table>
+  <button id="exp">엑셀 다운로드</button>
+</body></html>`;
+const FRAME_GRID_EMPTY = `<html><body>
+  <table><tbody></tbody></table><button id="exp">엑셀 다운로드</button>
+</body></html>`;
+const FRAME_NOISE = `<html><body><div>광고 배너 (무관 프레임)</div></body></html>`;
+
+describe("NaverLiveProbeDriver — frame-aware surface resolution (iframe / SPA readiness)", () => {
+  it("the SAME shell alone (top document only) fails closed — the pre-fix behavior", async () => {
+    // Baseline: a bare SPA shell with the grid NOT in the top document halts UNKNOWN — exactly the
+    // Run-1 UNSUPPORTED_STATE. This is what the frame-aware resolution below is designed to fix.
+    const driver = driverFor(SELLER_URL, SHELL_LOGGED_IN);
+    expect(await driver.prepareSurface()).toEqual({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    expect(driver.prepareDiagnostic()).toMatchObject({ verdict: "LOGGED_IN", readinessState: "EXPORT_TARGET_UNKNOWN" });
+  });
+
+  it("resolves the child frame that hosts the ready export surface → ok", async () => {
+    const driver = driverForPage(fakePageWithFrames({ url: SELLER_URL, html: SHELL_LOGGED_IN }, [{ html: FRAME_GRID_READY }]));
+    expect(await driver.prepareSurface()).toEqual({ ok: true });
+    expect(driver.prepareDiagnostic()).toMatchObject({ verdict: "LOGGED_IN", readinessDecision: "READY" });
+  });
+
+  it("a genuinely EMPTY grid in the child frame still halts honestly (no false-positive) → UNSUPPORTED_STATE", async () => {
+    const driver = driverForPage(fakePageWithFrames({ url: SELLER_URL, html: SHELL_LOGGED_IN }, [{ html: FRAME_GRID_EMPTY }]));
+    expect(await driver.prepareSurface()).toEqual({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    expect(driver.prepareDiagnostic()).toMatchObject({ readinessState: "EXPORT_TARGET_EMPTY" });
+  });
+
+  it("picks the actionable grid frame among several child frames, ignoring an unrelated one", async () => {
+    const driver = driverForPage(
+      fakePageWithFrames({ url: SELLER_URL, html: SHELL_LOGGED_IN }, [{ html: FRAME_NOISE }, { html: FRAME_GRID_READY }]),
+    );
+    expect(await driver.prepareSurface()).toEqual({ ok: true });
+  });
+
+  it("skips a child frame whose content() rejects (detached) rather than failing the whole probe", async () => {
+    const driver = driverForPage(
+      fakePageWithFrames({ url: SELLER_URL, html: SHELL_LOGGED_IN }, [{ html: "", rejectContent: true }, { html: FRAME_GRID_READY }]),
+    );
+    expect(await driver.prepareSurface()).toEqual({ ok: true });
+  });
+
+  it("binds the export control IN the resolved child frame — the top document is never tagged", async () => {
+    const mainCalls: string[] = [];
+    const childCalls: string[] = [];
+    const page = fakePageWithFrames(
+      { url: SELLER_URL, html: SHELL_LOGGED_IN, calls: mainCalls },
+      [{ html: FRAME_GRID_READY, taggerCount: 1, calls: childCalls }],
+    );
+    const driver = driverForPage(page);
+    expect(await driver.prepareSurface()).toEqual({ ok: true });
+    expect(await driver.locate()).toMatchObject({ count: 1, sig: expect.stringMatching(HEX16) });
+    // The NAME_SHIM + in-page tagger both ran in the CHILD frame; the top document was never touched.
+    expect(childCalls).toEqual(["shim", "fn"]);
+    expect(mainCalls).toEqual([]);
   });
 });
 
