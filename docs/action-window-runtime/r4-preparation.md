@@ -32,7 +32,7 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); read-only §8-4 probe complete under a **consumed** one-run G6; **the export-pilot per-run G6 is still open** — gate not fully signed until that approval |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
-| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
+| P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)**; **the live driver core (`NaverLiveProbeDriver`) is now MERGED (PR #242, `cf509a5`)** — its NAVER-specific seams are proven hermetically + over a real browser on a **synthetic DOM** (`naver-surface`/`naver-live-driver`/`naver-live-browser` tests). **Green here means synthetic-fixture / synthetic-browser only — no live NAVER has ever run, and the live driver is not yet wired into a session/Bridge/persistence loop.** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
 | P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ✅ | every fail-closed exit + a NAVER operator-abort (`CANCEL_RUN`) drill, all recovering per §7 — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-6 |
 | P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; read-only §8-4 probe result recorded 2026-07-12 (`ready:true`/`LOGGED_IN`); **live export still gated by a fresh per-run G6** (G2/G3/G5 recorded 2026-07-12) |
 | P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization; one read-only-probe G6 was **consumed 2026-07-12** (§8-4), an **export pilot needs a new per-run approval** under §4 |
@@ -171,36 +171,58 @@ outside the repo):
 Everything below green on **synthetic fixtures** before G4 sign-off; each item maps to an existing
 verified seam — the adapter is composition, not new invention:
 
-- ☐ **Session precondition probe** — reach/verify a valid seller-center session in the dedicated
+> **Scope of every ☑ below:** green on **synthetic fixtures** and/or a **real browser over a synthetic
+> DOM** — **never on live NAVER**. A checked box certifies the seam is built and proven offline/synthetic;
+> it does not assert any live-channel run. Live contact stays gated by §3 G6 and §1 P6/P12.
+
+- ☑ **Session precondition probe** — reach/verify a valid seller-center session in the dedicated
   connection profile (reuse: connection profile resolver, assisted reconnect; honest states:
-  READY vs RECONNECT_REQUIRED — never inherit READY across a restart).
-- ☐ **Surface probe** — confirm the export surface read-only (reuse: frame-aware export probe
-  patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`).
-- ☐ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
-  signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks.
+  READY vs RECONNECT_REQUIRED — never inherit READY across a restart). *(Green on the NAVER fixture
+  — §8-2; the live driver's `prepareSurface` over the §8-4 session seam is proven hermetically —
+  PR #242 `naver-live-driver.test.ts`.)*
+- ☑ **Surface probe** — confirm the export surface read-only (reuse: frame-aware export probe
+  patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`). *(Green on the NAVER fixture — §8-2;
+  the live driver's readiness gate (empty/ambiguous → `UNSUPPORTED_STATE`) is proven hermetically —
+  PR #242.)*
+- ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
+  signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
+  the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are
+  proven hermetically + over a real browser on a synthetic DOM — PR #242 `naver-live-browser.test.ts`.)*
 - ☑ **Overlay + observation** — highlight never intercepts the click; the user's real click is
   observed, not simulated (R1/R2 verified components, re-fixtured for the channel). *(Green on the
   NAVER fixture: `naver-browser.test.ts` drives a NAVER-shaped review-export surface — automated
   headless + a delivered-not-run `AW_HEADED` operator proof; D-023.)*
-- ☐ **Download detection (read-only)** — detect fired/completed download without triggering
+- ☑ **Download detection (read-only)** — detect fired/completed download without triggering
   (reuse: export-target readiness + controlled download save; 0-rows vs failure distinguished).
-- ☐ **Artifact validation** — extension + magic sniff before any ingestion handoff; partial
+  *(Green on the NAVER fixture — §8-2; a real browser download via the live driver is detected
+  read-only over a synthetic DOM — PR #242 `naver-live-browser.test.ts`.)*
+- ☑ **Artifact validation** — extension + magic sniff before any ingestion handoff; partial
   artifacts never ingested. *(Posture ratified in D-021: a controlled TEMPORARY quarantine save
   is allowed for validation only — extension check + OOXML/ZIP magic sniff, then DELETE; no
-  filename, path, URL, or file content crosses the wire, the persisted store, or logs.)*
-- ☐ **Ingestion handoff** — existing `/api/uploads` → `IngestionService` only; dedup verified with
+  filename, path, URL, or file content crosses the wire, the persisted store, or logs. Green on the
+  NAVER fixture — §8-2; the live driver's quarantine-validate + bad-magic fail-closed are proven over
+  a real browser on a synthetic DOM — PR #242.)*
+- ☑ **Ingestion handoff** — existing `/api/uploads` → `IngestionService` only; dedup verified with
   unique synthetic data (re-uploading existing fixtures dedups to empty — use fresh synthetic
-  rows to prove the positive path).
-- ☐ **Operation Run persistence** — the pilot run records every verified transition; interruption
+  rows to prove the positive path). *(Green on the NAVER fixture / injected upload — §8-2; the live
+  driver's injected ingest (opaque ref, no filename) is proven over a real browser on a synthetic DOM
+  — PR #242.)*
+- ☑ **Operation Run persistence** — the pilot run records every verified transition; interruption
   parks at PAUSED; resume re-drives read-only (R3 verified; re-run against the channel fixture).
+  *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. **PR #242 does not
+  strengthen this: the live driver is not yet wired into a session — deferred to the (unbuilt,
+  stop-and-ask) live entrypoint slice.**)*
 - ☑ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
   Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`). *(Green for
   NAVER: the fixture driver is hosted from the local-agent boot via `createAgentBridge` and drives the
   full loop to COMPLETED over the real Bridge WS with `channelCode:"naver"`, incl. an agent
   cold-restart resume-through-downstream — `naver-bridge-transport.test.ts`, `RUN_INTEGRATION` 3/3;
-  D-023.)*
-- ☐ **Privacy sweep** — `findProhibitedFields` empty across wire + store for the channel fixture;
-  no channel-specific leakage (marketplace names are sanitized enums/codes only).
+  D-023. **This ☑ is the fixture driver over the real WS; the live driver is not yet Bridge-wired.**)*
+- ☑ **Privacy sweep** — `findProhibitedFields` empty across wire + store for the channel fixture;
+  no channel-specific leakage (marketplace names are sanitized enums/codes only). *(Green on the
+  NAVER fixture — §8-2/§8-7; the live driver adds needle scans + `findProhibitedFields == []` + a
+  module source guard (no click / no legacy capture / no upload import), hermetic + synthetic browser
+  — PR #242.)*
 
 ## 7. Rollback / abort criteria
 

@@ -64,6 +64,17 @@ Offline hermetic suite at the baseline: **`npm test` → 2556 passed / 25 skippe
 `local-agent-action-window-channel.test.ts` 10 · `naver-bridge-transport.test.ts` 3 (gated) ·
 `naver-browser.test.ts` 3 (gated: 2 automated + 1 `AW_HEADED`).
 
+**Live driver core (added post-pack, PR #242 `cf509a5`, 2026-07-12).** The `NaverLiveProbeDriver`
+proves the NAVER-specific §6 seams on the LIVE driver itself — still **synthetic only, no live NAVER**:
+`naver-surface.test.ts` (26) + `naver-live-driver.test.ts` (11) hermetic (session precondition/surface/
+locate/verify/privacy over a fake page); `naver-live-browser.test.ts` (`RUN_INTEGRATION` — 2 automated
+passed / 1 `AW_HEADED` skipped) drives locate-tag → overlay → observe → real download → quarantine
+validate → injected ingest over a **real Chromium page with a synthetic DOM** (no marketplace markup/
+tokens/seller data). This strengthens the §6 boxes for session/surface probe, target locator, download
+detection, artifact validation, ingestion handoff, and privacy sweep; it does **not** wire the live driver
+into a session/engine/Bridge/persistence loop (Operation-Run persistence and Bridge/FE loop stay on their
+**fixture-driver** evidence). Authorizes no live action.
+
 ---
 
 ## §8-3 — Channel-fixture full loop, headed with a REAL human click
@@ -179,6 +190,11 @@ happy loop, every hostile shape, resume, and the operator-abort.
 - **Read-only §8-4 probe:** ✅ **complete (2026-07-12)** — session verified `ready:true` / `LOGGED_IN`
   under a consumed one-run G6. This was the first and only permitted pre-pilot live contact; it is
   strictly less than an Action Window run (no click/export/download/downstream).
+- **Live driver core (PR #242, `cf509a5`):** ✅ **MERGED (2026-07-12)** — `NaverLiveProbeDriver` proves the
+  NAVER-specific §6 seams on the live driver itself, hermetically + over a real browser on a **synthetic
+  DOM** (see §8-2 note). **No live NAVER; not yet session/Bridge-wired.** The §6 checklist body in
+  [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to match P9/§8-2 accordingly (fixture /
+  synthetic-browser green; live still gated).
 - **Remaining before an export pilot:** a **fresh per-run G6 approval** in the dispatching turn under the
   **full §4 boundary** (the recorded pause lift and consumed G6 were scoped to the read-only probe only),
   plus the environment/live-work-pause posture re-affirmed for an actual export run. G2 (seller consent),
