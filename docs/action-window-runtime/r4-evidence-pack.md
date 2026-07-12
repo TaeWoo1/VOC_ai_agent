@@ -68,12 +68,29 @@ Offline hermetic suite at the baseline: **`npm test` → 2556 passed / 25 skippe
 proves the NAVER-specific §6 seams on the LIVE driver itself — still **synthetic only, no live NAVER**:
 `naver-surface.test.ts` (26) + `naver-live-driver.test.ts` (11) hermetic (session precondition/surface/
 locate/verify/privacy over a fake page); `naver-live-browser.test.ts` (`RUN_INTEGRATION` — 2 automated
-passed / 1 `AW_HEADED` skipped) drives locate-tag → overlay → observe → real download → quarantine
+passed) drives locate-tag → overlay → observe → real download → quarantine
 validate → injected ingest over a **real Chromium page with a synthetic DOM** (no marketplace markup/
 tokens/seller data). This strengthens the §6 boxes for session/surface probe, target locator, download
 detection, artifact validation, ingestion handoff, and privacy sweep; it does **not** wire the live driver
 into a session/engine/Bridge/persistence loop (Operation-Run persistence and Bridge/FE loop stay on their
 **fixture-driver** evidence). Authorizes no live action.
+
+**Live-driver headed synthetic operator proof (2026-07-12).** The `naver-live-browser.test.ts` **headed**
+case (previously skipped) **PASSED with a REAL seated-operator human click**. Command:
+`RUN_INTEGRATION=1 AW_HEADED=1 npx vitest run test/action-window/naver-live-browser.test.ts -t "headed"`
+→ **1 passed / 2 skipped** (the automated cases excluded by `-t`). The operator clicked the highlighted
+synthetic "엑셀 다운로드" control **once** in the visible Chromium window; the Runtime never clicked. Sanitized
+outcome: `waitForUserAction` observed the real click (run advanced only on the human action), `detectDownload`
+fired a real download (opaque 16-hex ref), `validateArtifact` = `valid:true` with the quarantine dir emptied,
+the **injected fake** ingest returned `{ok:true, processed:1}` (no backend, no network), and the no-leak sweep
++ `findProhibitedFields == []` were clean (no synthetic page string reached any result or the ingest ref).
+**Synthetic-only: no live NAVER, no marketplace, no network, no seller data.** It proves the live driver's
+real-browser **observe → download-detect → quarantine-validate → fake-ingest** seams; it **does not** exercise
+the live session gate (`prepareSurface`, covered hermetically), the gated CLI's loopback/session/persistence
+orchestration (covered hermetically in `test/cli/run-action-window-live-naver.test.ts`), or any live export —
+it **does not prove live export readiness**. The headed test now carries an explicit per-test timeout
+(`HEADED_TEST_TIMEOUT_MS`) so this command works without an ad-hoc `--testTimeout` flag; it stays skipped
+unless `AW_HEADED=1`.
 
 ---
 
@@ -180,6 +197,56 @@ happy loop, every hostile shape, resume, and the operator-abort.
 
 ---
 
+## §8-8 — Export pilot result — RESERVED (not yet run; authorizes no live action)
+
+**No export pilot has run.** This slot is reserved for the sanitized result of the first supervised NAVER
+export pilot, to be filled **only after** an actual dispatched run per the export-pilot pre-dispatch
+runbook ([`r4-gate-record.md`](r4-gate-record.md) §5 post-run checklist). Until then it records nothing
+and grants nothing.
+
+When filled, record enums/booleans/counts/SHA only (per §8-7 / `findProhibitedFields`; **never** URL,
+filename, path, selector, page content, credentials, cookies, tokens, or `eventTimeMs`):
+
+- ☐ Export-scoped G6 instance (dispatching turn, date, operator, scope) — [`r4-gate-record.md`](r4-gate-record.md) §G6.
+- ☐ Final run view: `{ status, progress, channelCode, blockerCode? }`.
+- ☐ Ingest outcome `{ ok, processed }`.
+- ☐ Quarantine validate result + dir-emptied confirmation.
+- ☐ No-leak assertion (`findProhibitedFields == []` across wire + store).
+- ☐ Operation Run id (`run_…`) for the audit trail.
+
+---
+
+## §8-9 — Live-entrypoint assembly integration test (DELIVERED offline; execution pending approval)
+
+**Purpose:** close the last offline seam — `assembleLiveRun(page, deps)`, the ONLY place a real
+Playwright `Page` meets the engine, previously had **zero coverage** (the entrypoint was proven only
+hermetically with a `FakeProbeDriver`; the real `NaverLiveProbeDriver` only standalone, §8-2/§8-3).
+
+**Delivered:** `collector/test/cli/run-action-window-live-naver-browser.test.ts` — drives the entrypoint's
+own `assembleLiveRun` + `driveOneRun` over a REAL Chromium page (100% synthetic, route-fulfilled locally
+from a synthetic `commerce.localhost` host so the §8-4 session gate's seller-center URL check passes with
+**no NAVER contact, no network**). Cases: automated happy loop (session gate → observed click → detect →
+quarantine-validate → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted TERMINAL**
+via `loadOperationRun`); a hostile login page failing closed at the gate (`LOGIN_REQUIRED`, zero clicks,
+no download, persisted FAILED); a non-OOXML download failing closed (`ARTIFACT_INVALID`, not ingested,
+quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-click case. No-leak +
+`findProhibitedFields == []` across frames, the persisted record, and the ingest ref. This is the first
+proof that the live driver is **wired into a persistent session** (loopback channel — **not** the Bridge
+WS).
+
+**Status: ✅ automated cases PASSED (2026-07-12), headless.** Command:
+`RUN_INTEGRATION=1 npx vitest run test/cli/run-action-window-live-naver-browser.test.ts` → **3 passed / 1
+skipped** (the 3 automated cases; the `AW_HEADED` human-click case skipped) in ~1.3s. The happy case drove
+the full engine chain through the real driver — session gate `prepareSurface` (LOGGED_IN over the
+synthetic seller-center URL) → locate/tag → highlight → observed click → read-only detect → quarantine
+validate (dir emptied) → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted
+TERMINAL**; both fail-closed cases persisted **FAILED** with the sanitized `blocker.code` only; no-leak +
+`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case remains
+delivered-not-run** (needs a seated operator, a separate approved step). **No live NAVER, no network, no
+backend.**
+
+---
+
 ## Readiness summary
 
 - **Technical adapter readiness (§1 P9):** substantially green — every §6 item verified on NAVER fixtures
@@ -192,9 +259,15 @@ happy loop, every hostile shape, resume, and the operator-abort.
   strictly less than an Action Window run (no click/export/download/downstream).
 - **Live driver core (PR #242, `cf509a5`):** ✅ **MERGED (2026-07-12)** — `NaverLiveProbeDriver` proves the
   NAVER-specific §6 seams on the live driver itself, hermetically + over a real browser on a **synthetic
-  DOM** (see §8-2 note). **No live NAVER; not yet session/Bridge-wired.** The §6 checklist body in
-  [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to match P9/§8-2 accordingly (fixture /
-  synthetic-browser green; live still gated).
+  DOM** (see §8-2 note). **No live NAVER.** Session-wiring: the gated live entrypoint's `assembleLiveRun`
+  seam is now **proven** by a synthetic-browser integration test (automated cases PASSED 2026-07-12,
+  headless) with real Operation Run persistence (§8-9); the headed human-click case is delivered-not-run;
+  the live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
+  match P9/§8-2 accordingly (fixture / synthetic-browser green; live still gated).
+- **Live-driver headed synthetic proof (2026-07-12):** ✅ **PASSED with a real seated-operator click** (§8-3
+  addendum) — proves the live driver's real-browser observe → download-detect → quarantine-validate →
+  fake-ingest seams, synthetic-only. **Does not prove live export readiness**; P6/P12/fresh-G6/live export
+  pilot remain gated.
 - **Remaining before an export pilot:** a **fresh per-run G6 approval** in the dispatching turn under the
   **full §4 boundary** (the recorded pause lift and consumed G6 were scoped to the read-only probe only),
   plus the environment/live-work-pause posture re-affirmed for an actual export run. G2 (seller consent),

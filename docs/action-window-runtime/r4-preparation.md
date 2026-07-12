@@ -29,7 +29,7 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
 | P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); read-only §8-4 probe complete under a **consumed** one-run G6; **the export-pilot per-run G6 is still open** — gate not fully signed until that approval |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); read-only §8-4 probe complete under a **consumed** one-run G6; **the export-pilot per-run G6 is still open** — gate not fully signed until that approval. **Sign-off requirements itemized in the export-pilot pre-dispatch runbook** ([`r4-gate-record.md`](r4-gate-record.md)) — signed only in the dispatching turn |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)**; **the live driver core (`NaverLiveProbeDriver`) is now MERGED (PR #242, `cf509a5`)** — its NAVER-specific seams are proven hermetically + over a real browser on a **synthetic DOM** (`naver-surface`/`naver-live-driver`/`naver-live-browser` tests). **Green here means synthetic-fixture / synthetic-browser only — no live NAVER has ever run, and the live driver is not yet wired into a session/Bridge/persistence loop.** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
@@ -209,9 +209,11 @@ verified seam — the adapter is composition, not new invention:
   — PR #242.)*
 - ☑ **Operation Run persistence** — the pilot run records every verified transition; interruption
   parks at PAUSED; resume re-drives read-only (R3 verified; re-run against the channel fixture).
-  *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. **PR #242 does not
-  strengthen this: the live driver is not yet wired into a session — deferred to the (unbuilt,
-  stop-and-ask) live entrypoint slice.**)*
+  *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. The **live driver** is now
+  wired into a persistent session via the gated entrypoint's `assembleLiveRun`, **proven** by a
+  synthetic-browser integration test asserting a persisted TERMINAL run + fail-closed FAILED persistence
+  (§8-9, automated cases PASSED 2026-07-12 headless; headed human-click case delivered-not-run) —
+  **loopback channel, not the Bridge WS; no live NAVER**.)*
 - ☑ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
   Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`). *(Green for
   NAVER: the fixture driver is hosted from the local-agent boot via `createAgentBridge` and drives the
@@ -260,6 +262,10 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 6. The abort drill: one fixture run deliberately driven into each fail-closed exit, plus one
    operator-abort, all recovering per §7.
 7. Privacy sweep outputs (wire + persisted store scans) for the channel fixture.
+
+**Evidence to record _after_ an export run** is defined as the sanitized post-run checklist in the
+export-pilot pre-dispatch runbook ([`r4-gate-record.md`](r4-gate-record.md) §5), captured into
+[`r4-evidence-pack.md`](r4-evidence-pack.md) §8-8 (reserved; not yet run).
 
 ## 9. Unresolved product-owner decisions (blocking, in order)
 
