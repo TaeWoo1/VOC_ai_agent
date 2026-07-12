@@ -210,3 +210,26 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   ratified adapter to a drivable session, and that seam is now closed fixture-only. Live NAVER remains
   blocked by the §3 gate (G2–G6), the live-work pause, and per-run PO approval; production hosts no
   Action Window session (the flags are dev-only).
+
+- **D-024 · ACTIVE** — **G2 pilot-seller ratification: the first R4 supervised pilot runs on the
+  operator's OWN development NAVER seller account, recorded only as the sanitized label
+  `NAVER_DEV_SELLER_SELF_01`** (product-owner decision, 2026-07-12; resolves the still-open
+  seller-identity half of `r4-preparation.md` §9 item 1, complementing D-021's channel half). *Why:*
+  a user-owned test/dev account is the §4-compliant pilot subject — the operator is both the
+  product-owner and the operating seller, so consent is self-consent and no third-party data is ever
+  touched. *Privacy (ratified):* the seller is referenced ONLY as `NAVER_DEV_SELLER_SELF_01`
+  throughout the repo — no raw account ID, email, username, raw URL, credential, cookie, token, or
+  profile path is ever recorded (same sanitization contract the adapter enforces on the wire and the
+  persisted store). *Gate effect:* records **G2 (seller consent) ✅** — self-consent acknowledging the
+  §4 boundary verbatim, with the first authorized live run scoped to the **read-only
+  session-precondition probe only** (no locate/click/export/download); and **G5 (policy track) ✅
+  logged** — per §5, a seller-owned export on the seller's own session requires no platform grant
+  (Solution Market stays a long-term option, not a prerequisite; no platform marked "approved"). This
+  flips `r4-preparation.md` §1 **P7** and **P8** to ✅. *Boundary:* **this entry authorizes NO live
+  action.** **G3 (stable environment + the NAVER live-work pause lift) and G6 (explicit per-run
+  approval in the dispatching turn) remain the only live gates** — both operator/PO-owned, neither
+  Runtime code; §3's internal-gate sign-off (P6) and the per-run approval (P12) stay open until they
+  clear. Register: [`r4-gate-record.md`](r4-gate-record.md). *Rationale:* slice §4/§14 (supervised,
+  seller-consented, user-direct pilot on a user-owned account) and the §3 gate order — the recordable
+  gates (G2/G5) are now closed against a named-but-sanitized seller; the environment and per-run
+  gates stay with the operator.
