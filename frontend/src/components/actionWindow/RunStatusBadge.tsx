@@ -14,7 +14,6 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
   const view = runStatusView(status);
   return (
     <span
-      role="status"
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${TONE_CLASS[view.tone]}`}
     >
       <span aria-hidden="true">{view.icon}</span>

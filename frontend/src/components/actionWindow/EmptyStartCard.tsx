@@ -14,7 +14,7 @@ export function EmptyStartCard({
 }) {
   return (
     <section aria-label="시작하기" className="rounded-2xl bg-surface p-6 text-center shadow-card">
-      <p className="text-lg text-ink">{EMPTY_START_COPY.title}</p>
+      <h2 className="text-lg font-semibold text-ink">{EMPTY_START_COPY.title}</h2>
       <p className="mt-1 text-muted">{EMPTY_START_COPY.body}</p>
       {connected ? (
         <button

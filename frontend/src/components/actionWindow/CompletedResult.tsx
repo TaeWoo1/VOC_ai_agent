@@ -17,7 +17,7 @@ export function CompletedResult({ run }: { run: ActionWindowRunView }) {
       <p className="mt-2 text-ink">
         {channelLabel(run.channelCode)} 리뷰를 가져와 정리·분석까지 끝냈어요.
       </p>
-      <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+      <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-xl bg-surface p-3">
           <dt className="text-muted">완료 단계</dt>
           <dd className="mt-0.5 font-semibold text-ink">

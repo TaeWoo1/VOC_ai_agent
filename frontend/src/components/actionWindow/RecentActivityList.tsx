@@ -20,21 +20,23 @@ export function RecentActivityList({ items }: { items: RecentRunItem[] }) {
             return (
               <li
                 key={item.runId}
-                className="flex items-center gap-3 rounded-xl border border-line bg-canvas px-4 py-3"
+                className="flex flex-col gap-1 rounded-xl border border-line bg-canvas px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
               >
-                <span aria-hidden="true" className="w-5 shrink-0 text-center text-lg">
-                  {status.icon}
-                </span>
-                <span className="min-w-0 flex-1 break-keep">
-                  <span className="block font-medium text-ink">
-                    {resolveCopy(item.runCopyKey)}
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span aria-hidden="true" className="w-5 shrink-0 text-center text-lg">
+                    {status.icon}
                   </span>
-                  <span className="block text-sm text-muted">
-                    {channelLabel(item.channelCode)} · {item.completedSteps} /{" "}
-                    {item.totalSteps} 단계
+                  <span className="min-w-0 flex-1 break-keep">
+                    <span className="block font-medium text-ink">
+                      {resolveCopy(item.runCopyKey)}
+                    </span>
+                    <span className="block text-sm text-muted">
+                      {channelLabel(item.channelCode)} · {item.completedSteps} /{" "}
+                      {item.totalSteps} 단계
+                    </span>
                   </span>
-                </span>
-                <span className="shrink-0 text-right text-sm text-muted">
+                </div>
+                <span className="shrink-0 pl-8 text-sm text-muted sm:pl-0 sm:text-right">
                   <span className="block">{status.label}</span>
                   <span className="block">{shortDate(item.finishedAt)}</span>
                 </span>
