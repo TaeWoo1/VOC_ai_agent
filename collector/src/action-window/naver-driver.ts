@@ -34,14 +34,16 @@
  *   - 0 / many / non-sync layout at locate → engine fails `TARGET_NOT_FOUND` / `TARGET_AMBIGUOUS`
  *   - post-action target identity change → `verify` reports drift → engine fails `UI_DRIFT`
  */
-import { createHash, randomUUID } from "node:crypto";
-import { classifySessionVerdict, type SessionVerdict } from "../naver/session-verdict";
-import { planExportAction } from "../naver/export-classify";
-import { evaluateExportTargetReadiness, type ExportTargetReadiness } from "../naver/export-target-readiness";
-import { findExportCandidates } from "../naver/review-export";
+import { randomUUID } from "node:crypto";
+import { classifySessionVerdict } from "../naver/session-verdict";
 import { artifactRefFor } from "./artifact";
 import { quarantineValidateBytes, sweepQuarantine, type QuarantineIo, type QuarantineVerdict } from "./quarantine";
-import { naverSurfaceBlockerFor } from "./naver-session-precondition";
+import {
+  naverLocateDecision,
+  naverSurfaceDecision,
+  naverVerifyDecision,
+  type NaverPrepareDiagnostic,
+} from "./naver-surface";
 import type { AwIngestUploadFn } from "./ingest-handoff";
 import type {
   ArtifactValidateResult,
@@ -59,36 +61,10 @@ import {
   type NaverFixtureMode,
 } from "./naver-fixture";
 
-/** Sanitized semantic channel code for NAVER runs (contract `SEMANTIC_CODE`, never a title). */
-export const NAVER_CHANNEL_CODE = "naver";
-/** Dotted semantic copy key for NAVER runs — FE owns the final copy. */
-export const NAVER_RUN_COPY_KEY = "actionWindow.run.naver";
+/** Re-exported from the shared surface core so existing importers keep working. */
+export { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY, type NaverPrepareDiagnostic } from "./naver-surface";
 /** Deterministic synthetic artifact ref for the (still synthetic) downstream chain. */
 export const NAVER_FIXTURE_ARTIFACT_REF = artifactRefFor(["aw-naver-fixture-artifact"]);
-
-type ExportCandidate = ReturnType<typeof findExportCandidates>[number];
-
-/**
- * One-way 16-hex signature of the single located export control, following the collector's
- * deterministic-ID convention (SHA-256 over the JSON array form). The candidate's raw identity
- * (element id, wording keyword) feeds the hash and can never be recovered from it.
- */
-function targetSigFor(c: ExportCandidate): string {
-  const parts = ["aw-naver-fixture-target", c.tag, c.keyword, c.id ?? "", String(c.dataExportReview), String(c.inText), String(c.inAriaLabel), String(c.inTitle)];
-  return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
-}
-
-/**
- * TEST-VISIBLE sanitized diagnostic of the last `prepareSurface` — fixed enums only. It preserves
- * the readiness distinction the wire deliberately flattens (benign EXPORT_TARGET_EMPTY vs the
- * conservative EXPORT_TARGET_UNKNOWN halt). Never transported, never persisted, never logged.
- */
-export interface NaverPrepareDiagnostic {
-  verdict: SessionVerdict;
-  readinessDecision?: ExportTargetReadiness["decision"];
-  readinessState?: Extract<ExportTargetReadiness, { decision: "HALT" }>["state"];
-  readinessReason?: ExportTargetReadiness["reason"];
-}
 
 /** Opt-in REAL detect + quarantine-validate (+ optional real ingest handoff) configuration. */
 export interface NaverRealDownstreamOptions {
@@ -159,21 +135,9 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
    */
   prepareSurface(): Promise<SurfaceProbeResult> {
     const verdict = classifySessionVerdict(this.fixture.sessionSignals());
-    if (verdict !== "LOGGED_IN") {
-      this.lastDiagnostic = { verdict };
-      return Promise.resolve({ ok: false, blockerCode: naverSurfaceBlockerFor(verdict) });
-    }
-    const readiness = evaluateExportTargetReadiness(this.fixture.html());
-    this.lastDiagnostic = {
-      verdict,
-      readinessDecision: readiness.decision,
-      readinessReason: readiness.reason,
-      ...(readiness.decision === "HALT" ? { readinessState: readiness.state } : {}),
-    };
-    if (readiness.decision !== "READY") {
-      return Promise.resolve({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
-    }
-    return Promise.resolve({ ok: true });
+    const { result, diagnostic } = naverSurfaceDecision(verdict, this.fixture.html());
+    this.lastDiagnostic = diagnostic;
+    return Promise.resolve(result);
   }
 
   /**
@@ -182,11 +146,7 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
    * engine's fail-closed 0/1/many logic. The single candidate's identity is one-way hashed.
    */
   locate(): Promise<LocateResult> {
-    const html = this.fixture.html();
-    if (planExportAction(html).layout !== "SYNC_DOWNLOAD") return Promise.resolve({ count: 0 });
-    const candidates = findExportCandidates(html);
-    if (candidates.length !== 1) return Promise.resolve({ count: candidates.length });
-    return Promise.resolve({ count: 1, sig: targetSigFor(candidates[0]!) });
+    return Promise.resolve(naverLocateDecision(this.fixture.html()));
   }
 
   /** No DOM to spotlight in the data fixture — the highlight is a no-op rest point. */
@@ -216,11 +176,7 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
    * not-verified (back to the checkpoint — never a false completion).
    */
   verify(expectedSig: string): Promise<VerifyResult> {
-    const candidates = findExportCandidates(this.fixture.html());
-    if (candidates.length !== 1 || targetSigFor(candidates[0]!) !== expectedSig) {
-      return Promise.resolve({ verified: false, drift: true });
-    }
-    return Promise.resolve({ verified: this.fixture.completionSignalPresent(), drift: false });
+    return Promise.resolve(naverVerifyDecision(this.fixture.html(), expectedSig, this.fixture.completionSignalPresent()));
   }
 
   /* ── downstream: REAL detect + quarantine validate when `downstream.real` is set (opt-in);
