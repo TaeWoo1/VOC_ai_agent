@@ -22,26 +22,28 @@ export function HumanCheckpointCard({
   return (
     <section
       aria-label="확인이 필요한 작업"
-      className="rounded-2xl border border-brand-50 bg-brand-50/40 p-5 shadow-card"
+      className="rounded-2xl border-2 border-brand/40 bg-brand-50/60 p-5 shadow-card"
     >
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="text-xl">
           🙋
         </span>
-        <h2 className="text-lg font-semibold text-ink">지금 해주실 일이 있어요</h2>
+        <h2 className="text-lg font-semibold text-brand-700">지금 해주실 일이 있어요</h2>
       </div>
 
       {step ? (
-        <p className="mt-2 text-ink">{resolveCopy(step.copyKey, step.copyParams)}</p>
+        <p className="mt-2 break-keep text-xl font-semibold text-ink">
+          {resolveCopy(step.copyKey, step.copyParams)}
+        </p>
       ) : null}
-      <p className="mt-1 text-sm text-muted">
+      <p className="mt-1.5 text-sm text-muted">
         실제 판매자센터 화면에서 직접 진행해 주세요. SellerOps가 대신 클릭하지 않아요.
       </p>
 
       {blocker ? (
         <div
           role="status"
-          className="mt-3 rounded-xl border border-warn/30 bg-warn/5 p-3"
+          className="mt-3 rounded-xl border border-bad/30 bg-bad/5 p-3"
         >
           <p className="font-medium text-ink">
             <span aria-hidden="true">⚠ </span>

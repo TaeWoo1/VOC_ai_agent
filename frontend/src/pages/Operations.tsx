@@ -193,11 +193,13 @@ export function Operations() {
             </div>
           ) : null}
 
-          <OperationRunTimeline run={run} />
-
+          {/* Act-now first: the checkpoint the operator must handle leads, with the
+              timeline below as supporting progress context. */}
           {connected && run.status === "WAITING_FOR_HUMAN" ? (
             <HumanCheckpointCard run={run} onCommand={handleCommand} />
           ) : null}
+
+          <OperationRunTimeline run={run} />
 
           {run.status === "COMPLETED" ? <CompletedResult run={run} /> : null}
 

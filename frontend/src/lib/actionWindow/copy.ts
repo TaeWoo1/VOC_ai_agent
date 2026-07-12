@@ -62,7 +62,7 @@ export interface StatusView {
 const RUN_STATUS_VIEW: Record<RunStatus, StatusView> = {
   PREPARING: { label: "준비 중", icon: "⏳", tone: "active" },
   RUNNING: { label: "진행 중", icon: "▶", tone: "active" },
-  WAITING_FOR_HUMAN: { label: "확인이 필요해요", icon: "🙋", tone: "human" },
+  WAITING_FOR_HUMAN: { label: "확인 필요", icon: "🙋", tone: "human" },
   PAUSED: { label: "일시정지", icon: "⏸", tone: "neutral" },
   PROCESSING: { label: "처리 중", icon: "⚙", tone: "active" },
   COMPLETED: { label: "완료", icon: "✓", tone: "good" },

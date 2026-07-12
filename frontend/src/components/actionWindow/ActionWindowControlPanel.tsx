@@ -14,6 +14,32 @@ export function ActionWindowControlPanel({
   onCommand: (type: CommandType) => void;
 }) {
   const commands = run.allowedCommands;
+  // Keep the destructive command (cancel) out of the normal action row so it can
+  // never be tapped by reflex alongside benign commands.
+  const normal = commands.filter((type) => type !== "CANCEL_RUN");
+  const destructive = commands.filter((type) => type === "CANCEL_RUN");
+
+  function commandButton(type: CommandType, variant: "primary" | "secondary" | "destructive") {
+    const style =
+      variant === "primary"
+        ? "bg-brand text-white hover:bg-brand-600"
+        : variant === "destructive"
+          ? "border border-bad/40 bg-surface text-bad hover:bg-bad/5"
+          : "border border-line bg-surface text-ink hover:bg-canvas";
+    return (
+      <button
+        key={type}
+        type="button"
+        onClick={() => onCommand(type)}
+        className={
+          "rounded-xl px-4 py-2.5 font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
+          style
+        }
+      >
+        {commandLabel(type)}
+      </button>
+    );
+  }
 
   return (
     <section aria-label="가능한 동작" className="rounded-2xl bg-surface p-5 shadow-card">
@@ -21,26 +47,27 @@ export function ActionWindowControlPanel({
       {commands.length === 0 ? (
         <p className="text-muted">지금은 할 수 있는 동작이 없어요.</p>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {commands.map((type) => {
-            const primary = type === "REQUEST_STEP_RECHECK" || type === "START_RUN";
-            return (
-              <button
-                key={type}
-                type="button"
-                onClick={() => onCommand(type)}
-                aria-label={commandLabel(type)}
-                className={
-                  "rounded-xl px-4 py-2.5 font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 " +
-                  (primary
-                    ? "bg-brand text-white hover:bg-brand-600"
-                    : "border border-line bg-surface text-ink hover:bg-canvas")
-                }
-              >
-                {commandLabel(type)}
-              </button>
-            );
-          })}
+        <div className="flex flex-col gap-3">
+          {normal.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {normal.map((type) =>
+                commandButton(
+                  type,
+                  type === "REQUEST_STEP_RECHECK" || type === "START_RUN" ? "primary" : "secondary",
+                ),
+              )}
+            </div>
+          ) : null}
+          {destructive.length > 0 ? (
+            <div
+              className={
+                "flex flex-wrap gap-2" +
+                (normal.length > 0 ? " border-t border-line pt-3" : "")
+              }
+            >
+              {destructive.map((type) => commandButton(type, "destructive"))}
+            </div>
+          ) : null}
         </div>
       )}
     </section>
