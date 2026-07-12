@@ -28,7 +28,7 @@
  *     path, filename, page content, cookie, or token ever leaves this module.
  */
 import { randomUUID } from "node:crypto";
-import type { Download, Page } from "playwright";
+import type { Download, Frame, Page } from "playwright";
 import { artifactRefFor } from "./artifact";
 import {
   quarantineValidateBytes,
@@ -97,10 +97,65 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private pendingDownload: Promise<Download | null> | null = null;
   /** The detected artifact buffered in memory (bytes re-readable for validate + ingest). */
   private retained: ByteDownloadLike | null = null;
+  /**
+   * The frame that actually hosts the export surface, resolved once in `prepareSurface`. NAVER's
+   * review-management grid + export control can render inside a child frame (iframe/SPA) rather than the
+   * top document — the Run-1 fail-closed (`UNSUPPORTED_STATE`) finding. All surface work (readiness read,
+   * locate, tag, overlay, observer, verify) runs against THIS context; download detection stays
+   * page-level (a download event is delivered to the page regardless of the originating frame). `null`
+   * until `prepareSurface` runs → the getter falls back to the main frame, so a surface entirely in the
+   * top document behaves exactly as before.
+   */
+  private surfaceFrame: Frame | null = null;
 
   constructor(page: Page, opts: NaverLiveProbeDriverOptions) {
     this.page = page;
     this.opts = opts;
+  }
+
+  /**
+   * The execution context for all surface work: the resolved export-hosting frame, or the top document
+   * (main frame) before/without resolution. `Page | Frame` because the overlay/observer seams accept
+   * either; the fallback keeps the top-document path byte-for-byte identical to the pre-frame behavior.
+   */
+  private ctx(): Page | Frame {
+    return this.surfaceFrame ?? this.page.mainFrame();
+  }
+
+  /**
+   * Pick the frame that hosts the export surface. Scores the top document + every child frame with the
+   * SAME shared decisions used downstream (`naverSurfaceDecision` for session+readiness, `naverLocateDecision`
+   * for the single export control), so the choice can never disagree with what `prepareSurface`/`locate`
+   * then decide. Preference: (1) a fully actionable frame (surface OK *and* exactly one export control),
+   * else (2) any frame exposing exactly one export control (readiness may legitimately HALT there — an
+   * honest empty), else (3) the top document — preserving today's diagnostics when nothing frame-hosts the
+   * surface. A frame whose content can't be read (detached/racing) is skipped, never fatal. NO click, NO
+   * navigation — read-only `content()` per frame.
+   */
+  private async resolveSurfaceFrame(
+    verdict: Parameters<typeof naverSurfaceDecision>[0],
+    topHtml: string,
+  ): Promise<{ frame: Frame; html: string }> {
+    const scored: Array<{ frame: Frame; html: string; ok: boolean; count: number }> = [];
+    for (const frame of this.page.frames()) {
+      let html: string;
+      try {
+        html = await frame.content();
+      } catch {
+        continue; // detached / cross-navigating frame — not a usable surface
+      }
+      scored.push({
+        frame,
+        html,
+        ok: naverSurfaceDecision(verdict, html).result.ok === true,
+        count: naverLocateDecision(html).count,
+      });
+    }
+    return (
+      scored.find((s) => s.ok && s.count === 1) ??
+      scored.find((s) => s.count === 1) ??
+      scored[0] ?? { frame: this.page.mainFrame(), html: topHtml }
+    );
   }
 
   /** Sanitized enums describing the last surface probe (test introspection only). */
@@ -120,8 +175,14 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * closed with its reserved contract code BEFORE any surface work.
    */
   async prepareSurface(): Promise<SurfaceProbeResult> {
-    const html = await this.page.content();
-    const verdict = sessionVerdictFromContent(html, this.page.url());
+    // Session is a page-level property (login / reconnect / auth interstitials replace the whole page),
+    // so the verdict is read from the top document — the exact §8-4 seam already proven live.
+    const topHtml = await this.page.content();
+    const verdict = sessionVerdictFromContent(topHtml, this.page.url());
+    // Readiness + the export control can live in a child frame, so decide the surface on the frame that
+    // hosts it (falling back to the top document). The chosen frame is cached for locate/highlight/verify.
+    const { frame, html } = await this.resolveSurfaceFrame(verdict, topHtml);
+    this.surfaceFrame = frame;
     const { result, diagnostic } = naverSurfaceDecision(verdict, html);
     this.lastDiagnostic = diagnostic;
     return result;
@@ -134,9 +195,9 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * disagreement fails closed (returns the divergent count, no tag left behind).
    */
   async locate(): Promise<LocateResult> {
-    const decision = naverLocateDecision(await this.page.content());
+    const decision = naverLocateDecision(await this.ctx().content());
     if (decision.count !== 1) return decision;
-    await this.page.evaluate(NAME_SHIM);
+    await this.ctx().evaluate(NAME_SHIM);
     const tagged = await this.markExportTarget();
     if (tagged !== 1) return { count: tagged };
     return decision;
@@ -144,9 +205,9 @@ export class NaverLiveProbeDriver implements ProbeDriver {
 
   /** Spotlight the bound target (pointer-events:none overlay — it can never intercept the click). */
   async highlight(): Promise<void> {
-    await this.page.evaluate(NAME_SHIM);
+    await this.ctx().evaluate(NAME_SHIM);
     const humanStep = STEP_PLAN[1]!;
-    await mountOverlay(this.page, {
+    await mountOverlay(this.ctx(), {
       stepNumber: humanStep.stepNumber,
       totalSteps: TOTAL_STEPS,
       copyKey: humanStep.copyKey,
@@ -158,15 +219,17 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   async armObserve(): Promise<void> {
     if (!this.pendingDownload) {
       // timeout: 0 disables Playwright's own timeout; detectDownload() races the deadline instead.
+      // Download detection stays PAGE-level: the event is delivered to the page no matter which frame
+      // originated it, so a control in a child frame still yields the download here.
       this.pendingDownload = this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
     }
-    await this.page.evaluate(NAME_SHIM);
-    await armObserver(this.page);
+    await this.ctx().evaluate(NAME_SHIM);
+    await armObserver(this.ctx());
   }
 
   /** Wait for the SELLER's own action on the target — the driver NEVER clicks or simulates it. */
   waitForUserAction(): Promise<boolean> {
-    return waitForUserAction(this.page, { timeoutMs: this.opts.observeTimeoutMs ?? 15_000 });
+    return waitForUserAction(this.ctx(), { timeoutMs: this.opts.observeTimeoutMs ?? 15_000 });
   }
 
   /**
@@ -176,7 +239,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * the actual artifact evidence and fails closed (`DOWNLOAD_TIMEOUT`) when the action produced none.
    */
   async verify(expectedSig: string): Promise<VerifyResult> {
-    return naverVerifyDecision(await this.page.content(), expectedSig, true);
+    return naverVerifyDecision(await this.ctx().content(), expectedSig, true);
   }
 
   /**
@@ -247,9 +310,12 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     }
     // Crash-window hygiene: nothing this driver quarantined may outlive the run.
     sweepQuarantine(this.opts.quarantineDir, this.opts.io ?? undefined);
-    await unmountOverlay(this.page).catch(() => {});
-    await disarmObserver(this.page).catch(() => {});
+    // Tear the overlay/observer/tag down in the SAME frame they were mounted in.
+    const ctx = this.ctx();
+    await unmountOverlay(ctx).catch(() => {});
+    await disarmObserver(ctx).catch(() => {});
     await this.unmarkExportTarget().catch(() => {});
+    this.surfaceFrame = null;
   }
 
   /**
@@ -260,7 +326,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * only — it NEVER clicks. Proven against synthetic pages; real-NAVER behavior is a live-run finding.
    */
   private markExportTarget(): Promise<number> {
-    return this.page.evaluate((keywords: readonly string[]) => {
+    return this.ctx().evaluate((keywords: readonly string[]) => {
       const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration };
       document.querySelectorAll("[data-aw-target]").forEach((el) => {
         el.removeAttribute("data-aw-target");
@@ -298,7 +364,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   private unmarkExportTarget(): Promise<void> {
-    return this.page
+    return this.ctx()
       .evaluate(() => {
         document.querySelectorAll("[data-aw-target]").forEach((el) => {
           el.removeAttribute("data-aw-target");

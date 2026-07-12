@@ -4,7 +4,15 @@
  * the user's click on the target. Runtime owns geometry / positioning / mount-unmount; it does not
  * recreate the Product Shell design system, and it never clicks.
  */
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
+
+/**
+ * `Page | Frame`: the overlay only calls `.evaluate`, which a `Frame` exposes identically to a `Page`.
+ * Accepting either lets the live driver mount the spotlight inside the exact frame that hosts the export
+ * control (an iframe/SPA surface). Every existing caller passes a `Page` (assignable), so no behavior
+ * changes for the top-document case.
+ */
+type PageOrFrame = Page | Frame;
 
 export interface OverlayOptions {
   stepNumber: number;
@@ -16,7 +24,7 @@ export interface OverlayOptions {
 
 const OVERLAY_ID = "__aw_overlay__";
 
-export async function mountOverlay(page: Page, opts: OverlayOptions): Promise<void> {
+export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Promise<void> {
   await page.evaluate((o) => {
     const target = document.querySelector("[data-aw-target]");
     const prev = document.getElementById("__aw_overlay__");
@@ -50,7 +58,7 @@ export async function mountOverlay(page: Page, opts: OverlayOptions): Promise<vo
 }
 
 /** Recompute the overlay position after layout movement. */
-export async function refreshOverlay(page: Page): Promise<void> {
+export async function refreshOverlay(page: PageOrFrame): Promise<void> {
   await page.evaluate(() => {
     const box = document.getElementById("__aw_overlay__");
     const target = document.querySelector("[data-aw-target]");
@@ -63,14 +71,14 @@ export async function refreshOverlay(page: Page): Promise<void> {
   });
 }
 
-export async function setOverlayGuidance(page: Page, enabled: boolean): Promise<void> {
+export async function setOverlayGuidance(page: PageOrFrame, enabled: boolean): Promise<void> {
   await page.evaluate((en) => {
     const box = document.getElementById("__aw_overlay__");
     if (box) box.style.display = en ? "block" : "none";
   }, enabled);
 }
 
-export async function unmountOverlay(page: Page): Promise<void> {
+export async function unmountOverlay(page: PageOrFrame): Promise<void> {
   await page.evaluate(() => {
     const box = document.getElementById("__aw_overlay__");
     if (box) box.remove();
@@ -78,12 +86,12 @@ export async function unmountOverlay(page: Page): Promise<void> {
 }
 
 /** Test/QA helper: is the overlay currently mounted? (sanitized boolean) */
-export async function overlayMounted(page: Page): Promise<boolean> {
+export async function overlayMounted(page: PageOrFrame): Promise<boolean> {
   return page.evaluate(() => !!document.getElementById("__aw_overlay__"));
 }
 
 /** Test/QA helper: overlay top offset (px) — used only to prove repositioning, never in the contract. */
-export async function overlayTop(page: Page): Promise<number> {
+export async function overlayTop(page: PageOrFrame): Promise<number> {
   return page.evaluate(() => {
     const box = document.getElementById("__aw_overlay__");
     return box ? Math.round(box.getBoundingClientRect().top) : -1;
