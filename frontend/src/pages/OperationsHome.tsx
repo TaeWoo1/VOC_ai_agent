@@ -12,8 +12,8 @@ import {
 } from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
-import { DESKTOP_ONLY_COPY, EMPTY_START_COPY } from "../lib/actionWindow/copy";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
+import { EmptyStartCard } from "../components/actionWindow/EmptyStartCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
@@ -143,23 +143,10 @@ export function OperationsHome() {
       />
 
       {run === null ? (
-        <section
-          aria-label="시작하기"
-          className="rounded-2xl bg-surface p-6 text-center shadow-card"
-        >
-          <p className="text-lg text-ink">{EMPTY_START_COPY.title}</p>
-          <p className="mt-1 text-muted">{EMPTY_START_COPY.body}</p>
-          {connected ? (
-            <button
-              type="button"
-              onClick={() => dispatchOperationsCommand("START_RUN")}
-              className="mt-4 hidden rounded-xl bg-brand px-5 py-3 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
-            >
-              시작
-            </button>
-          ) : null}
-          <p className="mt-4 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.start}</p>
-        </section>
+        <EmptyStartCard
+          connected={connected}
+          onStart={() => dispatchOperationsCommand("START_RUN")}
+        />
       ) : (
         <ActiveRunCard
           run={run}
