@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ActionWindowRunView } from "../../lib/actionWindow/contract";
-import { channelLabel, resolveCopy } from "../../lib/actionWindow/copy";
+import { channelLabel, resolveCopy, DESKTOP_ONLY_COPY } from "../../lib/actionWindow/copy";
 import { canStartNewRun } from "../../lib/actionWindow/operationsStore";
 import { RunStatusBadge } from "./RunStatusBadge";
 
@@ -80,9 +80,7 @@ export function ActiveRunCard({
         ) : null}
       </div>
       {terminal && actionsEnabled ? (
-        <p className="mt-2 text-sm text-muted sm:hidden">
-          새 작업 시작은 데스크톱에서 할 수 있어요.
-        </p>
+        <p className="mt-2 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.startNew}</p>
       ) : null}
     </section>
   );

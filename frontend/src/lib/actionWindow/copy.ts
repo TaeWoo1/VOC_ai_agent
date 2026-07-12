@@ -162,3 +162,21 @@ export const COMMAND_REJECTED_COPY: Record<CommandRejectionReason, string> = {
   "not-allowed": "지금은 할 수 없는 동작이라 무시했어요.",
   "stale-revision": "상태가 바뀌어 있어서 최신 화면으로 다시 맞췄어요. 확인 후 다시 시도해 주세요.",
 };
+
+// Desktop = act / mobile = read-only. Single source for the repeated "do it on
+// desktop" guidance so the wording never drifts across surfaces. Each variant is
+// context-specific (start / start-new / act / read-only banner) and kept distinct.
+export const DESKTOP_ONLY_COPY = {
+  start: "시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.",
+  startNew: "새 작업 시작은 데스크톱에서 할 수 있어요.",
+  act: "실제 진행과 확인은 데스크톱에서 해주세요. 휴대폰에서는 진행 상황만 볼 수 있어요.",
+  readOnlyBanner: "휴대폰에서는 진행 상황만 볼 수 있어요. 시작·확인 등 실제 작업은 데스크톱에서 진행해요.",
+} as const;
+
+// Shared empty-start copy (both /operations and /operations/current). The block
+// component itself is deferred to a later slice (<EmptyStartCard>); only the copy
+// is single-sourced here now.
+export const EMPTY_START_COPY = {
+  title: "리뷰 내려받기를 시작할 수 있어요.",
+  body: "시작하면 판매자센터 화면에서 단계별로 안내해요.",
+} as const;

@@ -1,5 +1,5 @@
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { blockerView, commandLabel, resolveCopy } from "../../lib/actionWindow/copy";
+import { blockerView, commandLabel, resolveCopy, DESKTOP_ONLY_COPY } from "../../lib/actionWindow/copy";
 
 /**
  * Human Checkpoint card — shown when the run is waiting on the person. The user
@@ -77,9 +77,7 @@ export function HumanCheckpointCard({
         ) : null}
       </div>
 
-      <p className="mt-3 text-sm text-muted sm:hidden">
-        실제 진행과 확인은 데스크톱에서 해주세요. 휴대폰에서는 진행 상황만 볼 수 있어요.
-      </p>
+      <p className="mt-3 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.act}</p>
 
       <p className="mt-3 hidden text-xs text-muted sm:block">
         ‘다 했어요’를 누르면 SellerOps가 화면을 다시 확인해요. 단계 완료는 SellerOps가 직접 확인한
