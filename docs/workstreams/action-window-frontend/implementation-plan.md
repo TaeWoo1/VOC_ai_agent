@@ -581,3 +581,52 @@ dependency, or lockfile change; scope limited to `.github/**` + these docs. Live
 confirmation lands on the first frontend PR. Deferred (named, not started): making
 `frontend` a **required** status check (repo settings); `collector`/`backend` CI;
 jest-axe; live-agent verification.
+
+## FE-9 — jest-axe a11y scanning (Operations pages) (DONE)
+
+Product goal: FE-6/FE-7 encode a strong a11y baseline through role + accessible-name
+queries (`getByRole(..., { name })`, `aria-*` asserts), but those queries only check what
+the author explicitly wrote. `jest-axe` runs the axe-core rule engine over the rendered
+DOM and automatically catches the structural/ARIA class the queries never assert — invalid
+or duplicate ARIA, duplicate `id`s, unlabeled controls, roles missing required states,
+heading/list structure — on the two highest-value surfaces.
+
+Decisions (product-owner, 2026-07-12): **adopt now**, scoped to the **two Operations
+pages** (`Operations` + `OperationsHome`) across their already-seeded rendered states;
+axe assertions live in **dedicated `*.a11y.test.tsx` files** (kept separate from the FE-7
+pure DOM-integration tests); FE-6 component scans **deferred**. A shared helper asserts on
+`results.violations` directly rather than `expect.extend`-ing jest-axe's matcher, so
+`vitest.config.ts` / `setup.ts` are untouched (`globals: false` matcher-typing friction
+avoided). Three rules are disabled with rationale: `region` and `landmark-one-main`
+(pages render as a body fragment — `AppShell` owns `<main>`/nav in the real app, so
+landmark rules false-positive on the isolated fragment) and `color-contrast` (jsdom never
+lays out or paints, so contrast can't be computed). Every other rule stays on.
+
+Dependencies (in-scope for this slice): `jest-axe ^10.0.0` (brings `axe-core 4.10.2`
+transitively) **plus** `@types/jest-axe ^3.5.9` — the planned assumption that jest-axe
+ships its own types was wrong (v10 ships no `.d.ts`), so the types-only devDep was added.
+Both are test-tooling, never in the shipped bundle.
+
+Delivered (`frontend/**` tests + this workstream's docs):
+
+- **`frontend/src/test/axe.ts`** — shared `AXE_OPTIONS` (the three disabled rules, with the
+  jsdom/AppShell rationale) + `expectNoAxeViolations(container)`, which fails with a
+  readable rule-by-rule summary (`id [impact] help (N nodes)`).
+- **`frontend/src/pages/Operations.a11y.test.tsx`** (5 scans) — connected checkpoint;
+  connected idle; offline; reconnecting; diagnostics-entry world.
+- **`frontend/src/pages/OperationsHome.a11y.test.tsx`** (4 scans) — empty; active
+  checkpoint; offline; diagnostics-entry world. Both reuse the existing `renderWithRouter`
+  + `opsStoreHarness` harness and mirror the FE-7 boundary mocks (`devMode` production-
+  shaped, `bridgeSource` off the wire) — one `axe()` per distinct rendered state, no new
+  infrastructure.
+
+Acceptance: `npm run typecheck` clean; `npm test` — **317 passed** (308 prior + 9 new
+scans), 29 files; `npm run build` passes, production bundle **byte-identical**
+(`index-DgRPaagd.css` 20.67 kB / `index-CDKl4_D3.js` 347.98 kB — test files add nothing to
+`dist`); `git diff --check` clean. The scans run under the existing `npm test`, so the
+FE-8 CI enforces them with **no CI change**. Axe was proven to actually fire via a
+throwaway `image-alt` violation (detected, then reverted). Honest ceiling: this is a
+structural/ARIA net, **not** a full WCAG audit — no contrast, no real focus-visibility.
+Deferred (named, not started): axe scans of the FE-6 components / other pages;
+full-document scans rendering pages inside `AppShell` (re-enables landmark/region rules);
+contrast/visual a11y via a real browser (Playwright axe).
