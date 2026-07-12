@@ -235,6 +235,22 @@ Determining which requires a **separate read-only surface probe** (`probe-export
 `probe-same-session`, no click / no download) — itself a live launch needing its **own fresh per-run G6**.
 No retry was performed; the consumed G6 authorized exactly one run.
 
+**Fix follow-up (2026-07-13, offline — commit `e2be2e0`).** The likely branch-2 cause has a fix
+implemented and hermetically proven, **not yet live-verified**: `NaverLiveProbeDriver` is now
+**frame-aware**. `prepareSurface` reads the session verdict from the top document (the proven §8-4 seam,
+unchanged), then `resolveSurfaceFrame` scores the top document + every child frame with the same shared
+`naverSurfaceDecision` / `naverLocateDecision` decisions and evaluates **readiness on the frame that hosts
+the export surface** (falling back to the top document); `locate` / `highlight` / `armObserve` /
+`waitForUserAction` / `verify` / the in-page tag now run against that frame, while **download detection
+stays page-level**. `overlay.ts` / `observer.ts` params widened to `Page | Frame` (backward-compatible).
+Six new hermetic tests over a fake multi-frame page cover: the pre-fix baseline halt, a child-frame ready
+surface → `ok`, a genuinely-empty child grid → honest `EXPORT_TARGET_EMPTY` halt (no false-positive),
+picking the actionable frame among several, skipping a detached frame, and binding the tag in the child
+frame only. `npm test` **2646 passed / 32 skipped**, typecheck clean. **The top-document path is unchanged
+(fallback), so every existing test and the synthetic browser proofs are unaffected.** This is hermetic
+only — confirming it against the REAL NAVER frame structure still needs the read-only frame-aware probe
+(or the export re-run) under a **fresh G3-export + G6**.
+
 ---
 
 ## §8-9 — Live-entrypoint assembly integration test (DELIVERED offline; execution pending approval)
