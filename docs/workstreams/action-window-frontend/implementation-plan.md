@@ -546,3 +546,38 @@ hashes) — a stray `.table` utility that Tailwind's `src/**/*.{ts,tsx}` content
 extracted from the word "table" in a helper comment was removed, so the test files leak
 nothing into `dist`. Deliberately deferred (named, not started): jest-axe automated a11y
 scanning; a frontend CI workflow; live-agent verification.
+
+## FE-8 — frontend CI workflow (DONE)
+
+Product goal: FE-6/FE-7 added real frontend test coverage, but it only ran **locally** —
+the repo had **no CI of any kind** (no `.github/`), so a PR could regress typecheck, the
+308-test suite, or the build and still merge green. FE-8 adds a minimal GitHub Actions
+workflow that runs the frontend `typecheck` + `test` + `build` on every PR, so the safety
+net is enforced automatically and can be made a required status check.
+
+Decisions (product-owner, 2026-07-12): **PR-only** trigger (`pull_request` → `main`; no
+`push`); **path-filtered** to `frontend/**` + `contracts/action-window/v1/**` + the
+workflow file; **frontend-only** scope (collector/backend are separate packages → their
+own future workflows); Node **20**; no `frontend/**` source/config change, no new
+dependency.
+
+Delivered (`.github/**` + this workstream's docs):
+
+- **Workflow** `.github/workflows/frontend-ci.yml` — one job on `ubuntu-latest`,
+  `defaults.run.working-directory: frontend`, `permissions: contents: read`, and
+  `concurrency` cancel-in-progress per PR ref. Steps: `actions/checkout@v4` →
+  `actions/setup-node@v4` (`node-version: '20'`, `cache: 'npm'`,
+  `cache-dependency-path: frontend/package-lock.json`) → `npm ci` → `npm run typecheck` →
+  `npm test` → `npm run build`. Three explicit steps give an independent signal per stage.
+- **Path filter includes `contracts/action-window/v1/**`** because the frontend consumes
+  the contract via `frontend/src/lib/actionWindow/contract.ts`
+  (`export * from "../../../../contracts/action-window/v1/index"` + `/transport`) — the
+  only cross-dir import the frontend has — so a contract change re-runs this check.
+
+Acceptance: greenfield CI (no prior workflow); the workflow YAML parses; the exact
+commands it runs pass on a clean install (`npm ci && npm run typecheck && npm test &&
+npm run build` — 308 tests, build byte-identical); no `frontend/**` source/config,
+dependency, or lockfile change; scope limited to `.github/**` + these docs. Live
+confirmation lands on the first frontend PR. Deferred (named, not started): making
+`frontend` a **required** status check (repo settings); `collector`/`backend` CI;
+jest-axe; live-agent verification.

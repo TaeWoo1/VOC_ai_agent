@@ -10,9 +10,11 @@
   (sanitized live-bridge diagnostics) `68c7b11` MERGED into `main` via PR #226
   (merge `74d0b37`, 2026-07-11). FE-6 (DOM/a11y component tests — jsdom + RTL
   adopted) MERGED into `main` via PR #228 (merge `e1d3c40`, 2026-07-11). FE-7
-  (page-level DOM integration tests) IMPLEMENTED (this slice, uncommitted on
-  `feat/action-window-page-dom-tests`; 308 tests). Remaining follow-ups:
-  live-agent verification; jest-axe / FE CI.**
+  (page-level DOM integration tests) `849f690` MERGED into `main` via PR #230
+  (merge `9958197`, 2026-07-11; 308 tests). FE-8 (frontend CI workflow —
+  typecheck/test/build on PRs) IMPLEMENTED (this slice, uncommitted on
+  `chore/frontend-ci-plan`). Remaining follow-ups: live-agent verification;
+  jest-axe.**
 
 ## Base
 
@@ -87,7 +89,30 @@ offline/error state) become implementable.
 
 ## Completed (this session)
 
-FE-7 page-level DOM integration tests (one FE slice, uncommitted):
+FE-8 frontend CI workflow (one FE slice, uncommitted):
+
+- Product gap closed: FE-6/FE-7 test coverage only ran **locally** — the repo had **no
+  CI at all** (no `.github/`), so a PR could regress typecheck, the 308-test suite, or
+  the build and still merge green. FE-8 adds a minimal GitHub Actions workflow that runs
+  the frontend typecheck/test/build on every PR, so the safety net is enforced
+  automatically (and can be made a required status check).
+- **Decisions** (product-owner, 2026-07-12): PR-only trigger (`pull_request` → `main`,
+  no `push`); path-filtered to `frontend/**` + `contracts/action-window/v1/**` + the
+  workflow file; frontend-only scope (collector/backend get their own future workflows);
+  Node 20; no `frontend/**` source/config change, no new dependency.
+- **Workflow** `.github/workflows/frontend-ci.yml`: one `ubuntu-latest` job,
+  `working-directory: frontend`, `permissions: contents: read`, `concurrency`
+  cancel-in-progress per PR ref; `checkout@v4` → `setup-node@v4` (Node 20, npm cache on
+  `frontend/package-lock.json`) → `npm ci` → `npm run typecheck` → `npm test` →
+  `npm run build`. The `contracts/action-window/v1/**` path entry is included because the
+  frontend imports the contract via `src/lib/actionWindow/contract.ts`
+  (`../../../../contracts/action-window/v1`) — the only cross-dir import it has.
+- Verification: YAML parses; the exact CI commands pass on a clean install (`npm ci` →
+  308 tests → build byte-identical); no frontend source/config/dependency/lockfile change;
+  scope limited to `.github/**` + these docs; `git diff --check` clean.
+- Docs: FE-8 plan entry; this handoff; the "frontend CI workflow" open question resolved.
+
+FE-7 page-level DOM integration tests (one FE slice, MERGED via PR #230):
 
 - Product gap closed: FE-6 proved the components in isolation, but nothing verified the
   **store → page wiring** — that when `operationsStore` reports `offline`, the pages
@@ -371,6 +396,23 @@ directly), and the jsdom/RTL decision (still deferred, separate approval).
   desktop. Timeline + status + blocker + completed remain visible read-only.
 - Overflow guards on the timeline (`min-w-0`, `break-keep`, `shrink-0`).
 
+## Validation results (FE-8 session, 2026-07-12)
+
+- `.github/workflows/frontend-ci.yml`: YAML parses clean (`yaml.safe_load`); structure
+  is `on.pull_request` (branches `[main]`, paths `frontend/**` +
+  `contracts/action-window/v1/**` + the workflow file), `concurrency` cancel-in-progress,
+  `permissions: contents: read`, one `ubuntu-latest` job (`working-directory: frontend`)
+  running checkout → setup-node@v4 (Node 20 + npm cache) → `npm ci` → typecheck → test →
+  build.
+- Local mirror of the CI commands from a clean install (`npm ci`, then the three scripts):
+  typecheck passed; **308 tests passed** (27 files); build passed, bundle byte-identical
+  (`index-DgRPaagd.css` 20.67 kB / `index-CDKl4_D3.js` 347.98 kB).
+- No `frontend/**` source/config change; no dependency or lockfile change; `git diff
+  --check` clean; scope limited to `.github/**` + these docs.
+- Live CI confirmation lands on the first PR touching the filtered paths (this branch's
+  own PR will exercise it). Making `frontend` a **required** status check is a repo-
+  settings follow-up for the owner.
+
 ## Validation results (FE-7 session, 2026-07-11)
 
 - `frontend typecheck`: passed.
@@ -470,15 +512,14 @@ and a paired-agent live verification remain separate, approval-gated follow-ups.
 
 ## Last meaningful commit
 
-- Merge `e1d3c40` — PR #228 merged into `main` (2026-07-11), carrying FE-6 `c07aa2c`
-  (jsdom + RTL component-level DOM/a11y tests).
+- Merge `9958197` — PR #230 merged into `main` (2026-07-11), carrying FE-7 `849f690`
+  (page-level DOM integration tests).
 
 ## Current PR
 
-- **None open. PR #228 merged** (`feat/action-window-connection-status` → `main`,
-  merge `e1d3c40`). FE-7 (page-level DOM integration tests) is implemented on
-  `feat/action-window-page-dom-tests` (branched from `e1d3c40`), **uncommitted**,
-  awaiting commit approval.
+- **None open. PR #230 merged** (`feat/action-window-page-dom-tests` → `main`, merge
+  `9958197`). FE-8 (frontend CI workflow) is implemented on `chore/frontend-ci-plan`
+  (branched from `9958197`), **uncommitted**, awaiting commit approval.
 
 ## Decisions made in this workstream
 
@@ -528,20 +569,24 @@ and a paired-agent live verification remain separate, approval-gated follow-ups.
 - ~~Page-level integration tests through the store~~ — **resolved 2026-07-11**
   (product-owner): adopted in **FE-7** (page-level DOM integration tests only, real
   store driven via its public API, `devMode` mocked production-shaped by default, shared
-  `src/test/` helper module, zero new deps / config). Still open (named, not started):
-  jest-axe automated a11y scanning, and a frontend CI workflow to run these on PRs.
+  `src/test/` helper module, zero new deps / config).
+- ~~A frontend CI workflow to run typecheck/test/build on PRs~~ — **resolved 2026-07-12**
+  (product-owner): adopted in **FE-8** (`.github/workflows/frontend-ci.yml`, PR-only,
+  path-filtered to `frontend/**` + `contracts/action-window/v1/**`, Node 20, npm cache,
+  `npm ci` → typecheck → test → build). Still open (named, not started): jest-axe
+  automated a11y scanning; making `frontend` a required status check (repo settings);
+  `collector`/`backend` CI.
 
 ## Exact steps for the next session
 
-1. On approval, commit the FE-7 slice (`frontend/**` — `src/test/renderWithRouter.tsx`,
-   `src/test/opsStoreHarness.ts`, `src/pages/Operations.test.tsx`,
-   `src/pages/OperationsHome.test.tsx` — plus these docs) as one commit onto
-   `feat/action-window-page-dom-tests` (after `e1d3c40`); push/PR only when explicitly
-   approved.
+1. On approval, commit the FE-8 slice (`.github/workflows/frontend-ci.yml` + these docs)
+   as one commit onto `chore/frontend-ci-plan` (after `9958197`); push/PR only when
+   explicitly approved. After merge, make `frontend` a **required** status check in the
+   repo's branch-protection settings (GitHub UI — not a file change).
 2. Live-agent verification (`VITE_AW_BRIDGE=1` against a running, paired local agent
    hosting a run) — environment-dependent follow-up; do not claim it from node/jsdom
    tests. Covers real drop → reconnecting → offline → manual reconnect → fresh resync,
    and confirming the FE-5 LIVE vs FIXTURE FALLBACK verdict directly.
-3. Remaining test candidates afterwards (named, not started): jest-axe automated a11y
-   scanning; a frontend CI workflow to run typecheck/test/build on PRs.
+3. Remaining candidates afterwards (named, not started): jest-axe automated a11y
+   scanning; `collector`/`backend` CI workflows.
 4. Do not modify the contract or canonical docs from this workstream.
