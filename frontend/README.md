@@ -12,6 +12,13 @@ npm run dev            # http://localhost:5173
 With no backend running, set `VITE_USE_MOCKS=true` (or just leave the backend
 down — read GETs fall back to seeded mock data so the UI is never blank).
 
+To run the Action Window UI against a **paired local agent** over the Bridge, use
+`npm run dev:bridge` (= `VITE_AW_BRIDGE=1 vite`; optional `VITE_BRIDGE_URL`, default
+`http://127.0.0.1:47615`). With no agent reachable it stays on fixtures and the dev
+diagnostics panel reads `픽스처로 폴백됨`. See
+`docs/workstreams/action-window-frontend/live-verification-protocol.md` for the manual
+verification protocol.
+
 ## Build
 ```bash
 npm run build      # tsc --noEmit + vite build → dist/
