@@ -14,6 +14,8 @@ describe("FE-10 EmptyStartCard (DOM/a11y)", () => {
     render(<EmptyStartCard connected onStart={() => {}} />);
     const region = screen.getByRole("region", { name: "시작하기" });
     expect(region).toBeInTheDocument();
+    // FE-10 Slice 4: the title is a real heading (was a styled <p>).
+    expect(screen.getByRole("heading", { name: EMPTY_START_COPY.title })).toBeInTheDocument();
     expect(region).toHaveTextContent(EMPTY_START_COPY.title);
     expect(region).toHaveTextContent(EMPTY_START_COPY.body);
     expect(region).toHaveTextContent(DESKTOP_ONLY_COPY.start);
