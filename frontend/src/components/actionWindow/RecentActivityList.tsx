@@ -1,5 +1,5 @@
 import type { RecentRunItem } from "../../lib/actionWindow/homeFixtures";
-import { channelLabel, resolveCopy, runStatusView } from "../../lib/actionWindow/copy";
+import { channelLabel, resolveCopy, runStatusView, SECTION_TITLE } from "../../lib/actionWindow/copy";
 import { shortDate } from "../../lib/format";
 
 /**
@@ -8,8 +8,8 @@ import { shortDate } from "../../lib/format";
  */
 export function RecentActivityList({ items }: { items: RecentRunItem[] }) {
   return (
-    <section aria-label="최근 활동" className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="mb-1 text-lg font-semibold text-ink">최근 활동</h2>
+    <section aria-label={SECTION_TITLE.recentActivity} className="rounded-2xl bg-surface p-5 shadow-card">
+      <h2 className="mb-1 text-lg font-semibold text-ink">{SECTION_TITLE.recentActivity}</h2>
       <p className="mb-3 text-sm text-muted">완료되거나 실패한 작업이 여기에 보여요.</p>
       {items.length === 0 ? (
         <p className="text-muted">아직 완료된 작업이 없어요.</p>

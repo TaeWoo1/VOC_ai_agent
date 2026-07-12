@@ -1,5 +1,5 @@
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { commandLabel } from "../../lib/actionWindow/copy";
+import { commandLabel, SECTION_TITLE } from "../../lib/actionWindow/copy";
 
 /**
  * Action Window control panel. Renders a control ONLY for each command in
@@ -42,8 +42,8 @@ export function ActionWindowControlPanel({
   }
 
   return (
-    <section aria-label="가능한 동작" className="rounded-2xl bg-surface p-5 shadow-card">
-      <h2 className="mb-3 text-lg font-semibold text-ink">가능한 동작</h2>
+    <section aria-label={SECTION_TITLE.controls} className="rounded-2xl bg-surface p-5 shadow-card">
+      <h2 className="mb-3 text-lg font-semibold text-ink">{SECTION_TITLE.controls}</h2>
       {commands.length === 0 ? (
         <p className="text-muted">지금은 할 수 있는 동작이 없어요.</p>
       ) : (
