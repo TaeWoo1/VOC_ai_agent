@@ -197,22 +197,43 @@ happy loop, every hostile shape, resume, and the operator-abort.
 
 ---
 
-## §8-8 — Export pilot result — RESERVED (not yet run; authorizes no live action)
+## §8-8 — Export pilot result — RUN 1 EXECUTED 2026-07-13 · FAILED (fail-closed, zero clicks)
 
-**No export pilot has run.** This slot is reserved for the sanitized result of the first supervised NAVER
-export pilot, to be filled **only after** an actual dispatched run per the export-pilot pre-dispatch
-runbook ([`r4-gate-record.md`](r4-gate-record.md) §5 post-run checklist). Until then it records nothing
-and grants nothing.
+**The first supervised NAVER export pilot ran on 2026-07-13** under the export-scoped G6 filled that
+session ([`r4-export-dispatch-record.md`](r4-export-dispatch-record.md); operator (PO), one-run scope on
+`NAVER_DEV_SELLER_SELF_01`). The seated operator logged in and reached the export surface, then signalled
+readiness. **The run fail-closed at the session/surface precondition — before any highlight and before any
+click.** Sanitized result (enums/booleans/counts/SHA only):
 
-When filled, record enums/booleans/counts/SHA only (per §8-7 / `findProhibitedFields`; **never** URL,
-filename, path, selector, page content, credentials, cookies, tokens, or `eventTimeMs`):
+- ☑ **G6 instance:** export-scoped, filled 2026-07-13, operator (PO), ONE run — now **CONSUMED / spent**
+  (single-use; fail-closed does not refund it).
+- ☑ **Final run view:** `{ status: FAILED, progress: { completedSteps: 0, totalSteps: 3 },
+  channelCode: naver, blockerCode: UNSUPPORTED_STATE }`.
+- ☑ **Tasks:** `[FAILED, SKIPPED, SKIPPED]`. **Human checkpoint:** `{ reached: false, observed: false }`
+  — the human barrier was never reached, so **no control was highlighted, no action observed, no click**.
+- ☑ **Engine events:** `RUN_STARTED → RUN_STATUS_CHANGED → RUN_BLOCKED → RUN_FAILED` — **no
+  `DOWNLOAD_DETECTED`, no observed user action.**
+- ☑ **Ingest outcome:** not reached — no artifact produced (`processed: 0`).
+- ☑ **Quarantine:** dir empty (0 files); `downloads/` unchanged (0) — **nothing captured, saved, or
+  uploaded.**
+- ☑ **No-leak:** teardown clean — process exited, sentinel removed, browser context closed; nothing on
+  the wire or in the store beyond the sanitized view above.
+- ☑ **Operation Run id:** `run_f81fc0b19fdd` (`resumeState: RESUME_FROM_FAILURE`, resumable per R3).
 
-- ☐ Export-scoped G6 instance (dispatching turn, date, operator, scope) — [`r4-gate-record.md`](r4-gate-record.md) §G6.
-- ☐ Final run view: `{ status, progress, channelCode, blockerCode? }`.
-- ☐ Ingest outcome `{ ok, processed }`.
-- ☐ Quarantine validate result + dir-emptied confirmation.
-- ☐ No-leak assertion (`findProhibitedFields == []` across wire + store).
-- ☐ Operation Run id (`run_…`) for the audit trail.
+**Diagnosis (honest — not resolved here).** `UNSUPPORTED_STATE` at the precondition maps to exactly two
+branches of `naverSurfaceDecision`, and the diagnostic that distinguishes them is **test-visible only,
+never persisted** (`naver-surface.ts` `NaverPrepareDiagnostic`), so the persisted record cannot say which:
+
+1. **Session verdict `UNKNOWN`** — the reached page did not classify cleanly as seller-center `LOGGED_IN`,
+   yet was not a recognized reconnect/login/auth-challenge screen (those map to `SESSION_EXPIRED` /
+   `LOGIN_REQUIRED`, not `UNSUPPORTED_STATE`). Ambiguous → never proceed.
+2. **`LOGGED_IN` but export-target readiness `≠ READY`** — a HALT on empty (`EXPORT_TARGET_EMPTY`) or
+   ambiguous/range (`EXPORT_TARGET_UNKNOWN`); the same false-positive-empty family as the Milestone-D
+   hidden-SPA-placeholder finding.
+
+Determining which requires a **separate read-only surface probe** (`probe-export-same-session` /
+`probe-same-session`, no click / no download) — itself a live launch needing its **own fresh per-run G6**.
+No retry was performed; the consumed G6 authorized exactly one run.
 
 ---
 

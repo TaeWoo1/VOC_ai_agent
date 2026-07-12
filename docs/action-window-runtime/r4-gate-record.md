@@ -175,6 +175,13 @@ pre-flight checklist.
 > for the first supervised export pilot so a future dispatching turn has a single honest reference. Live
 > is granted **only** by a filled export-scoped G6 (above) in that turn, under the full §4 boundary. No
 > box below being present or checked implies live-ready; every gate here is still ☐.
+>
+> **Dispatch record:** [`r4-export-dispatch-record.md`](r4-export-dispatch-record.md) — the single
+> G3/G6/P6 sheet for the export run. **Run 1 was EXECUTED 2026-07-13 and FAILED fail-closed
+> (`UNSUPPORTED_STATE`, zero clicks, nothing captured; [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-8).**
+> That one-run G6 is now **CONSUMED**; a new G3-export + G6 is required for any further live contact
+> (including a read-only diagnostic of the failed surface). No gate here is flipped to passing — the pilot
+> did not succeed.
 
 ### Scope of the first authorized export pilot
 
