@@ -216,6 +216,37 @@ filename, path, selector, page content, credentials, cookies, tokens, or `eventT
 
 ---
 
+## §8-9 — Live-entrypoint assembly integration test (DELIVERED offline; execution pending approval)
+
+**Purpose:** close the last offline seam — `assembleLiveRun(page, deps)`, the ONLY place a real
+Playwright `Page` meets the engine, previously had **zero coverage** (the entrypoint was proven only
+hermetically with a `FakeProbeDriver`; the real `NaverLiveProbeDriver` only standalone, §8-2/§8-3).
+
+**Delivered:** `collector/test/cli/run-action-window-live-naver-browser.test.ts` — drives the entrypoint's
+own `assembleLiveRun` + `driveOneRun` over a REAL Chromium page (100% synthetic, route-fulfilled locally
+from a synthetic `commerce.localhost` host so the §8-4 session gate's seller-center URL check passes with
+**no NAVER contact, no network**). Cases: automated happy loop (session gate → observed click → detect →
+quarantine-validate → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted TERMINAL**
+via `loadOperationRun`); a hostile login page failing closed at the gate (`LOGIN_REQUIRED`, zero clicks,
+no download, persisted FAILED); a non-OOXML download failing closed (`ARTIFACT_INVALID`, not ingested,
+quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-click case. No-leak +
+`findProhibitedFields == []` across frames, the persisted record, and the ingest ref. This is the first
+proof that the live driver is **wired into a persistent session** (loopback channel — **not** the Bridge
+WS).
+
+**Status: ✅ automated cases PASSED (2026-07-12), headless.** Command:
+`RUN_INTEGRATION=1 npx vitest run test/cli/run-action-window-live-naver-browser.test.ts` → **3 passed / 1
+skipped** (the 3 automated cases; the `AW_HEADED` human-click case skipped) in ~1.3s. The happy case drove
+the full engine chain through the real driver — session gate `prepareSurface` (LOGGED_IN over the
+synthetic seller-center URL) → locate/tag → highlight → observed click → read-only detect → quarantine
+validate (dir emptied) → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted
+TERMINAL**; both fail-closed cases persisted **FAILED** with the sanitized `blocker.code` only; no-leak +
+`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case remains
+delivered-not-run** (needs a seated operator, a separate approved step). **No live NAVER, no network, no
+backend.**
+
+---
+
 ## Readiness summary
 
 - **Technical adapter readiness (§1 P9):** substantially green — every §6 item verified on NAVER fixtures
@@ -228,9 +259,11 @@ filename, path, selector, page content, credentials, cookies, tokens, or `eventT
   strictly less than an Action Window run (no click/export/download/downstream).
 - **Live driver core (PR #242, `cf509a5`):** ✅ **MERGED (2026-07-12)** — `NaverLiveProbeDriver` proves the
   NAVER-specific §6 seams on the live driver itself, hermetically + over a real browser on a **synthetic
-  DOM** (see §8-2 note). **No live NAVER; not yet session/Bridge-wired.** The §6 checklist body in
-  [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to match P9/§8-2 accordingly (fixture /
-  synthetic-browser green; live still gated).
+  DOM** (see §8-2 note). **No live NAVER.** Session-wiring: the gated live entrypoint's `assembleLiveRun`
+  seam is now **proven** by a synthetic-browser integration test (automated cases PASSED 2026-07-12,
+  headless) with real Operation Run persistence (§8-9); the headed human-click case is delivered-not-run;
+  the live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
+  match P9/§8-2 accordingly (fixture / synthetic-browser green; live still gated).
 - **Live-driver headed synthetic proof (2026-07-12):** ✅ **PASSED with a real seated-operator click** (§8-3
   addendum) — proves the live driver's real-browser observe → download-detect → quarantine-validate →
   fake-ingest seams, synthetic-only. **Does not prove live export readiness**; P6/P12/fresh-G6/live export

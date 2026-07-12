@@ -209,9 +209,11 @@ verified seam — the adapter is composition, not new invention:
   — PR #242.)*
 - ☑ **Operation Run persistence** — the pilot run records every verified transition; interruption
   parks at PAUSED; resume re-drives read-only (R3 verified; re-run against the channel fixture).
-  *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. **PR #242 does not
-  strengthen this: the live driver is not yet wired into a session — deferred to the (unbuilt,
-  stop-and-ask) live entrypoint slice.**)*
+  *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. The **live driver** is now
+  wired into a persistent session via the gated entrypoint's `assembleLiveRun`, **proven** by a
+  synthetic-browser integration test asserting a persisted TERMINAL run + fail-closed FAILED persistence
+  (§8-9, automated cases PASSED 2026-07-12 headless; headed human-click case delivered-not-run) —
+  **loopback channel, not the Bridge WS; no live NAVER**.)*
 - ☑ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
   Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`). *(Green for
   NAVER: the fixture driver is hosted from the local-agent boot via `createAgentBridge` and drives the
