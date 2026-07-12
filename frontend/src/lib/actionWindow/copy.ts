@@ -180,3 +180,22 @@ export const EMPTY_START_COPY = {
   title: "리뷰 내려받기를 시작할 수 있어요.",
   body: "시작하면 판매자센터 화면에서 단계별로 안내해요.",
 } as const;
+
+// The human-checkpoint prompt title ("there's something for you to do now"). Shown
+// as the checkpoint card heading (/operations/current) and echoed in the home
+// active-run summary — single-sourced so the two surfaces never drift.
+export const CHECKPOINT_PROMPT_TITLE = "지금 해주실 일이 있어요";
+
+// Section titles that render BOTH as a section `aria-label` and its visible `<h2>`.
+// Single-sourced here so the two copies in each card can never drift. Section names
+// that appear only as an aria-label (no matching heading) stay inline at their site.
+export const SECTION_TITLE = {
+  recentActivity: "최근 활동",
+  controls: "가능한 동작",
+  timeline: "진행 단계",
+  nextRun: "다음 작업",
+} as const;
+
+// Start-new-run affordance label. Rendered on both the home active-run card and the
+// run-detail terminal "다음 작업" section — single-sourced so they stay in step.
+export const START_NEW_RUN_LABEL = "새 작업 시작";

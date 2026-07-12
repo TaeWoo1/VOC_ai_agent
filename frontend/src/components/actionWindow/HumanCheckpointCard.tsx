@@ -1,5 +1,12 @@
 import type { ActionWindowRunView, CommandType } from "../../lib/actionWindow/contract";
-import { blockerView, commandLabel, resolveCopy, DESKTOP_ONLY_COPY } from "../../lib/actionWindow/copy";
+import {
+  blockerView,
+  commandLabel,
+  resolveCopy,
+  CHECKPOINT_PROMPT_TITLE,
+  DESKTOP_ONLY_COPY,
+} from "../../lib/actionWindow/copy";
+import { BlockerNotice } from "./BlockerNotice";
 
 /**
  * Human Checkpoint card — shown when the run is waiting on the person. The user
@@ -28,7 +35,7 @@ export function HumanCheckpointCard({
         <span aria-hidden="true" className="text-xl">
           🙋
         </span>
-        <h2 className="text-lg font-semibold text-brand-700">지금 해주실 일이 있어요</h2>
+        <h2 className="text-lg font-semibold text-brand-700">{CHECKPOINT_PROMPT_TITLE}</h2>
       </div>
 
       {step ? (
@@ -41,19 +48,12 @@ export function HumanCheckpointCard({
       </p>
 
       {blocker ? (
-        <div
-          role="status"
-          className="mt-3 rounded-xl border border-bad/30 bg-bad/5 p-3"
-        >
-          <p className="font-medium text-ink">
-            <span aria-hidden="true">⚠ </span>
-            {blocker.title}
-            <span className="ml-2 align-middle text-xs text-muted">
-              {run.blocker?.recoverable ? "다시 시도할 수 있어요" : "복구할 수 없어요"}
-            </span>
-          </p>
-          <p className="mt-0.5 text-sm text-muted">{blocker.body}</p>
-        </div>
+        <BlockerNotice
+          title={blocker.title}
+          body={blocker.body}
+          recoverable={!!run.blocker?.recoverable}
+          variant="nested"
+        />
       ) : null}
 
       <div className="mt-4 hidden flex-wrap gap-2 sm:flex">
