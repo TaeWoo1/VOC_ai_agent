@@ -197,6 +197,25 @@ happy loop, every hostile shape, resume, and the operator-abort.
 
 ---
 
+## §8-8 — Export pilot result — RESERVED (not yet run; authorizes no live action)
+
+**No export pilot has run.** This slot is reserved for the sanitized result of the first supervised NAVER
+export pilot, to be filled **only after** an actual dispatched run per the export-pilot pre-dispatch
+runbook ([`r4-gate-record.md`](r4-gate-record.md) §5 post-run checklist). Until then it records nothing
+and grants nothing.
+
+When filled, record enums/booleans/counts/SHA only (per §8-7 / `findProhibitedFields`; **never** URL,
+filename, path, selector, page content, credentials, cookies, tokens, or `eventTimeMs`):
+
+- ☐ Export-scoped G6 instance (dispatching turn, date, operator, scope) — [`r4-gate-record.md`](r4-gate-record.md) §G6.
+- ☐ Final run view: `{ status, progress, channelCode, blockerCode? }`.
+- ☐ Ingest outcome `{ ok, processed }`.
+- ☐ Quarantine validate result + dir-emptied confirmation.
+- ☐ No-leak assertion (`findProhibitedFields == []` across wire + store).
+- ☐ Operation Run id (`run_…`) for the audit trail.
+
+---
+
 ## Readiness summary
 
 - **Technical adapter readiness (§1 P9):** substantially green — every §6 item verified on NAVER fixtures

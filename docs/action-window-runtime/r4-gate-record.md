@@ -143,6 +143,114 @@ This instance is **spent**. Each subsequent live run — **including any export 
 G6 instance filled in that dispatching turn under the full §4 boundary. Goal pressure, prior approvals,
 or this consumed instance never carry over.
 
+**Export-pilot G6 — ☐ BLANK TEMPLATE (a blank template grants nothing; fill in the dispatching turn).**
+The read-only-probe instance above does **not** carry over to an export run. To authorize the first
+export pilot, fill and record a fresh instance of this shape in that turn:
+
+```
+R4 live-run approval — EXPORT PILOT (fill in the dispatching turn)
+- channel:            NAVER SmartStore review export
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               <YYYY-MM-DD>
+- operator:           <operator>
+- run scope:          export pilot (seller clicks the real export control; Runtime observes/detects/
+                      validates/ingests read-only — full §4 boundary; NOT read-only, NOT unattended)
+- §7 abort criteria:  acknowledged (ambiguous/missing/drifted target, unexpected post-state, session
+                      invalid, artifact-validation failure → fail closed, zero clicks; operator abort
+                      on withdrawn consent / unrecognized dialog / anti-abuse challenge)
+- G2/G3/G5 state:     G2 ✅ recorded · G3 ✅ RE-AFFIRMED for an EXPORT run (§9-3 pause lift under full §4,
+                      not the read-only scope) · G5 ✅ logged
+- P6 state:           signed for this run (see the pre-dispatch runbook §P6 requirements)
+```
+
+This template, unfilled, **authorizes nothing** — it grants no live NAVER contact until an operator
+records a filled instance in the dispatching turn. See the pre-dispatch runbook below for the full
+pre-flight checklist.
+
+---
+
+## Export-pilot pre-dispatch runbook — NOT YET AUTHORIZED (grants nothing)
+
+> **This runbook authorizes NO live NAVER contact.** It assembles, in one place, the pre-flight checklist
+> for the first supervised export pilot so a future dispatching turn has a single honest reference. Live
+> is granted **only** by a filled export-scoped G6 (above) in that turn, under the full §4 boundary. No
+> box below being present or checked implies live-ready; every gate here is still ☐.
+
+### Scope of the first authorized export pilot
+
+ONE supervised, seller-consented, **user-direct** export run on `NAVER_DEV_SELLER_SELF_01`. The **seller
+(human)** logs in, completes 2FA/CAPTCHA/account-lock, selects account/store/marketplace/period, and
+**clicks the real export/download control**. The **Runtime only** prepares/validates the session
+precondition → highlights the one control → **observes** (never simulates) the click → verifies the
+transition → **detects** the download read-only → quarantine-validates the artifact (temporary save →
+magic sniff → delete) → hands it to the existing ingestion path → persists the audited Operation Run.
+Governed verbatim by [`r4-preparation.md`](r4-preparation.md) §4. **Not** in scope: unattended/scheduled
+operation, multiple runs, or any SellerOps-performed click.
+
+### 1 · G3 environment + pause re-affirmation for an EXPORT run (operator's "P4")
+
+> **Label note:** the operator's shorthand "P4 environment/pause" maps here to **G3 + §9 item 3**. In the
+> repo, **P4 = R3 Operation Run persistence (✅ merged, PR #219)** — a different, already-satisfied row —
+> and is **not** what an export run re-affirms. This block does not touch P4.
+
+The existing **G3 ✅** (above) is scoped to the **read-only §8-4 probe only**; it does **not** carry over.
+Before an export run, re-affirm the following **under the full §4 scope** (all ☐ until the dispatching turn):
+
+- ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
+- ☐ Dedicated Chrome connection profile intact; Bridge paired; Operation Run persistence enabled.
+- ☐ **§9 item 3 pause lift re-affirmed for an EXPORT run** — a fresh, export-scoped lift; the recorded
+  read-only ☑ (§G3) does **not** carry over.
+
+### 2 · P6 supervised-pilot internal sign-off requirements
+
+P6 ([`r4-preparation.md`](r4-preparation.md) §1) is signed **only** when, for this export run:
+
+- ☐ G1–G5 all ✅ (already: D-021/D-024; G4 synthetic ladder green).
+- ☐ An **export-scoped G6** recorded in the dispatching turn (§G6 template above, filled).
+- ☐ **G3 re-affirmed for export** (block 1 above).
+- ☐ **§7 abort criteria acknowledged** for this run (block 3 below).
+
+**P6 stays ☐ until an actual dispatching turn records the export-scoped G6 + the G3 re-affirmation. This
+runbook does not sign P6.**
+
+### 3 · Abort criteria
+
+Full definitions in [`r4-preparation.md`](r4-preparation.md) §7 (not re-authored here). Summary:
+
+- **Operator-immediate:** withdrawn consent; any unrecognized prompt/dialog; any anti-abuse signal
+  (CAPTCHA storm / lockout warning); any on-screen data the seller did not expect to share. The human
+  completes or walks away; the Runtime never retries around it.
+- **Automatic fail-closed:** ambiguous/missing/drifted target, unexpected post-state, invalid session,
+  or artifact-validation failure → blocker code, **zero clicks**, run persisted FAILED (resumable per R3).
+- **Before a run drives:** Ctrl-C aborts; a sentinel timeout aborts without driving a run.
+
+### 4 · Live entrypoint command — DO NOT RUN (future dispatch documentation only)
+
+```
+# NAVER live work is PAUSED. Run ONLY in a dispatching turn with a filled export-scoped G6 (§G6 above).
+set -a && . ./.env && set +a          # loads NAVER_REVIEW_URL + COLLECTOR_BROWSER_CHANNEL (never echo values)
+npx tsx src/cli/run-action-window-live-naver.ts -- --i-understand-this-opens-live-naver
+```
+
+Built-in refusals (defense-in-depth): missing approval flag → exit 3; `NODE_ENV=production` → exit 4;
+missing `NAVER_REVIEW_URL` → exit 2. **Sentinel handshake:** the CLI opens the window and waits — the
+seller logs in and reaches the export surface, then signals readiness (in Claude Code, say "ready") only
+**before** touching the control; the Runtime then highlights and waits for the seller's real export click.
+No raw URL / path / credential value appears here — only the env-load idiom and the safety flag.
+
+### 5 · Post-run evidence to record (sanitized)
+
+After the run, record in [`r4-evidence-pack.md`](r4-evidence-pack.md) **§8-8** — enums/booleans/counts/SHA
+only, per §4 and `findProhibitedFields` (**never** URL, filename, path, selector, page content,
+credentials, cookies, tokens, or `eventTimeMs`):
+
+- ☐ The filled export-scoped G6 instance (dispatching turn, date, operator, scope).
+- ☐ Final run view: `{ status, progress, channelCode, blockerCode? }` only.
+- ☐ Ingest outcome `{ ok, processed }`.
+- ☐ Quarantine validate result + dir-emptied confirmation.
+- ☐ No-leak assertion (`findProhibitedFields == []` across wire + store).
+- ☐ The Operation Run id (`run_…`) for the audit trail.
+
 ---
 
 ## Gate summary
