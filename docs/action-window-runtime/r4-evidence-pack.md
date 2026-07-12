@@ -3,10 +3,12 @@
 **Assembled:** 2026-07-11 · **Channel:** NAVER SmartStore review export (ratified G1, [`decisions.md`](decisions.md) D-021).
 **Code baseline under test:** `origin/main` `3cda125` (merge of PR #227 — the fixture-only NAVER
 downstream + Bridge/local-agent boot wiring); the §8-6 NAVER operator-abort drill is added by this pack slice.
-**Status:** ASSEMBLED (technical readiness). **This pack authorizes NO live action** — it records readiness
-evidence only. Live NAVER remains blocked by the §3 gate — now **G6** only (G2/G5 recorded 2026-07-12, G3 confirmed
-2026-07-12, [`r4-gate-record.md`](r4-gate-record.md), D-024). The G3 pause lift is scoped to the first
-read-only session-precondition probe only.
+**Status:** ASSEMBLED (technical readiness); the read-only §8-4 probe result is recorded 2026-07-12.
+**This pack authorizes NO live action** — it records readiness evidence only. The **read-only
+session-precondition probe was completed 2026-07-12 (§8-4)** under a **consumed one-run G6** approval;
+any live **export** remains blocked pending a **fresh per-run G6** in the dispatching turn under §4
+(G2/G5 recorded 2026-07-12, G3 confirmed 2026-07-12, [`r4-gate-record.md`](r4-gate-record.md), D-024).
+The G3 pause lift is scoped to that first read-only session-precondition probe only.
 
 **Sanitization discipline (self-applied):** every value below is an enum, boolean, coarse count, test name,
 or commit SHA. No raw review/inquiry content, reviewer/seller/account identity, reference codes, exact
@@ -27,13 +29,14 @@ evidence for §1 P9/P10/P11.
 | **G3** | Environment | ✅ | **Confirmed 2026-07-12** — stable env (network/IP/location) + dedicated Chrome profile + paired Bridge + Operation Run persistence, and the **NAVER live-work pause lift scoped to the first read-only session-precondition probe only** (§9 item 3; not a general lift). Checklist in [`r4-gate-record.md`](r4-gate-record.md) §G3; operator-owned. |
 | **G4** | Synthetic ladder green | ✅ | **This pack, §8-2** — every §6 adapter-readiness item green on NAVER fixtures. |
 | **G5** | Policy track open | ✅ | **Logged 2026-07-12** — none required for the NAVER seller-owned export per §5; no platform "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, §8-5. |
-| **G6** | Per-run approval | ☐ OPEN | Explicit product-owner approval **in the dispatching turn** (channel, seller-account owner, date, operator, run scope, §7 abort criteria). Template in [`r4-gate-record.md`](r4-gate-record.md) §G6; never standing; not given. |
+| **G6** | Per-run approval | ☐ per-run | Explicit product-owner approval **in the dispatching turn** (channel, seller-account owner, date, operator, run scope, §7 abort criteria). **One read-only-probe instance was approved + consumed 2026-07-12** (result §8-4) — **never standing**; an export pilot needs a **new** instance under §4. CONSUMED instance in [`r4-gate-record.md`](r4-gate-record.md) §G6. |
 
 **Gate summary:** G1/G2/G3/G4/G5 ✅ (G2/G5 recorded 2026-07-12, G3 confirmed 2026-07-12 →
 [`r4-gate-record.md`](r4-gate-record.md), [`decisions.md`](decisions.md) D-024; the G3 pause lift is
-scoped to the first read-only session-precondition probe only). **G6 (per-run approval) remains the only
-OPEN gate** — operator/product-owner-owned, given in the dispatching turn, not Runtime code. This pack
-records no live action.
+scoped to the first read-only session-precondition probe only). **G6 is a per-run gate** — a
+read-only-probe instance was approved and **consumed 2026-07-12** (the §8-4 probe is complete), but G6 is
+never standing: an **export pilot still requires a fresh per-run G6** in the dispatching turn, not Runtime
+code. This pack records no live export action.
 
 ---
 
@@ -83,11 +86,24 @@ Sanitized outcome of the headed case (NAVER-shaped synthetic review-export surfa
 
 ## §8-4 — Session-precondition LIVE probe
 
-**N/A — deferred.** No live NAVER contact is permitted yet — still blocked by **G6** (per-run approval in the
-dispatching turn). G2/G3/G5 are satisfied (G3 confirmed 2026-07-12 for this read-only probe path). Fixture-level
-session probing is covered under §8-2 (Session precondition probe). A read-only live probe is the ONLY permitted
-pre-pilot live contact and only **if the gate requires it** — to be produced separately, under explicit G6
-approval in the dispatching turn.
+**✅ COMPLETED 2026-07-12.** One human-attended read-only run, executed under a **consumed one-run G6
+read-only-probe approval** (the CONSUMED §G6 instance in [`r4-gate-record.md`](r4-gate-record.md)). It is
+the ONLY permitted pre-pilot live contact; it answered its one question and stopped.
+
+**Sanitized result** (verbatim fields only): `ready: true` · `verdict: LOGGED_IN` ·
+`urlCategory: seller-center` (coarse sanitized category enum — not a raw URL) · **no `blockerCode`**
+(absent when ready).
+
+**Read-only guarantee held:** a human logged in; the probe read only the session precondition and
+stopped. **No** locate/highlight, click, export, download, quarantine, ingest/upload/downstream, status
+write, backend start, or DB touch occurred; nothing was sent to SellerOps; no raw URL/HTML/page
+content/identity/credential/cookie/token/path was emitted (the same §8-7 sanitization contract).
+Post-run side-effect check clean — probe process ended, sentinel removed, no download/quarantine
+artifact, no tracked-file change. Fixture-level session probing remains covered under §8-2.
+
+**Scope guard:** this **consumed the single G6 read-only-probe approval and is NOT an export pilot**. An
+export pilot performs a real seller click + download + downstream and requires a **separate per-run G6
+approval under the full §4 boundary**, given in that dispatching turn — this record grants none.
 
 ---
 
@@ -160,12 +176,16 @@ happy loop, every hostile shape, resume, and the operator-abort.
   abort with recovery (§8-6), and the privacy sweep is clean on wire + store (§8-7).
 - **P10 (rollback/abort reviewed; abort path tested on fixtures):** ✅ — §8-6.
 - **P11 (pre-live evidence pack assembled):** ✅ — this document.
-- **Remaining before any live run:** the operator/product-owner gate **G6** (per-run approval in the
-  dispatching turn). G2 (seller consent), G3 (stable environment + the read-only-probe-scoped live-work
-  pause lift), and G5 (policy-track log) are recorded 2026-07-12. On G6, and only then, a separately-approved
-  read-only live session probe (§8-4) is the first permitted live contact. None of these are Runtime code.
+- **Read-only §8-4 probe:** ✅ **complete (2026-07-12)** — session verified `ready:true` / `LOGGED_IN`
+  under a consumed one-run G6. This was the first and only permitted pre-pilot live contact; it is
+  strictly less than an Action Window run (no click/export/download/downstream).
+- **Remaining before an export pilot:** a **fresh per-run G6 approval** in the dispatching turn under the
+  **full §4 boundary** (the recorded pause lift and consumed G6 were scoped to the read-only probe only),
+  plus the environment/live-work-pause posture re-affirmed for an actual export run. G2 (seller consent),
+  G3 (stable environment + read-only-probe-scoped pause lift), and G5 (policy-track log) are recorded
+  2026-07-12. None of these are Runtime code.
 
-**This pack authorizes no live NAVER contact.**
+**This pack authorizes no live NAVER export contact.**
 
 ---
 

@@ -4,9 +4,11 @@
 **Pilot seller:** `NAVER_DEV_SELLER_SELF_01` — the operator's **own development NAVER seller account**
 ([`decisions.md`](decisions.md) D-024). **Status:** LIVING register of the §3 supervised-pilot gate.
 
-> **This record authorizes NO live NAVER contact.** It records the gate state only. Live NAVER stays
-> blocked until **G3** (stable environment + the NAVER live-work pause lift) and **G6** (explicit
-> per-run approval in the dispatching turn) are both satisfied.
+> **This record authorizes NO live NAVER contact beyond what a filled per-run G6 grants.** It records the
+> gate state only. A **read-only session-precondition probe was completed 2026-07-12** under a **consumed
+> one-run G6** (§G6 below, §8-4 result). **Live export stays blocked** — it needs **G3** (stable
+> environment + a live-work pause lift under the full §4 scope) and a **fresh per-run G6** in the
+> dispatching turn; the consumed read-only-probe instance carries over to nothing.
 
 **Sanitization discipline (self-applied):** every value here is a label, enum, boolean, date, or SHA.
 No raw seller/account ID, email, username, raw URL, credential, cookie, token, or profile path
@@ -118,7 +120,28 @@ R4 live-run approval
 - G2/G3/G5 state:     G2 ✅ recorded · G3 ✅ confirmed (checklist above all ☑, pause lifted) · G5 ✅ logged
 ```
 
-*Approvals recorded:* **none.** G6 is not satisfied by this record.
+*Approvals recorded:* one **CONSUMED** read-only-probe instance (below). G6 is a **per-run** gate — it is
+never permanently satisfied, and this record grants nothing beyond the single run it describes.
+
+```
+R4 live-run approval — CONSUMED (authorizes nothing further)
+- channel:            NAVER SmartStore review export
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-12
+- operator:           self
+- run scope:          read-only session-precondition probe (no click/export/download)
+- §7 abort criteria:  acknowledged
+- G2/G3/G5 state:     G2 ✅ · G3 ✅ (read-only probe path) · G5 ✅
+- outcome:            CONSUMED — one read-only probe executed 2026-07-12; sanitized result in
+                      r4-evidence-pack.md §8-4 (ready / LOGGED_IN / seller-center; no blocker).
+                      Read-only held: no click/locate/highlight/export/download/quarantine/
+                      ingest/downstream/status write. Authorized ONLY this one read-only probe.
+                      NOT an export pilot.
+```
+
+This instance is **spent**. Each subsequent live run — **including any export pilot** — requires a **NEW**
+G6 instance filled in that dispatching turn under the full §4 boundary. Goal pressure, prior approvals,
+or this consumed instance never carry over.
 
 ---
 
@@ -126,11 +149,13 @@ R4 live-run approval
 
 - **G1 ✅ · G2 ✅ · G3 ✅ · G4 ✅ · G5 ✅.** (G3 confirmed 2026-07-12 for the read-only probe path;
   pause lift is scoped to that probe only.)
-- **G6 ☐** (per-run approval) is the **only remaining live gate** — operator/PO-owned, given in the
-  dispatching turn, not Runtime code.
-- The first authorized live contact is the **read-only session-precondition probe**; its sanitized
-  `{ ready, verdict, blockerCode }` result is then recorded into
-  [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4.
+- **G6 is a per-run gate** — a **read-only-probe instance was approved and consumed 2026-07-12** (the
+  §8-4 probe is complete). G6 is **never standing**: an **export pilot still requires a fresh per-run G6**
+  in the dispatching turn, operator/PO-owned, not Runtime code.
+- The first authorized live contact — the **read-only session-precondition probe** — **was completed
+  2026-07-12**; its sanitized `{ ready, verdict }` result (`ready:true` / `LOGGED_IN`, no blocker) is
+  recorded in [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4. The next live step (export pilot) needs a
+  **new** G6 under the full §4 boundary.
 
 ## Related
 
