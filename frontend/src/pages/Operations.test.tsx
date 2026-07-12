@@ -40,7 +40,7 @@ const TIMELINE = "진행 단계"; // OperationRunTimeline section (last-known vi
 const RECONNECT = "다시 연결"; // ConnectionBanner reconnect button (offline)
 const DIAGNOSTICS = "브리지 진단 (개발용)"; // FE-5 BridgeDiagnostics section
 // The banner is identified by its own FE-owned copy — a `role="status"` query would
-// be ambiguous because RunStatusBadge also uses role="status".
+// be ambiguous because the blocker notice (BlockerNotice) is also a role="status" region.
 const OFFLINE_BANNER = CONNECTION_VIEW.offline.title;
 const RECONNECTING_BANNER = CONNECTION_VIEW.reconnecting.title;
 

@@ -20,6 +20,8 @@ import {
   channelLabel,
   resolveCopy,
   DESKTOP_ONLY_COPY,
+  SECTION_TITLE,
+  START_NEW_RUN_LABEL,
 } from "../lib/actionWindow/copy";
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
 import { EmptyStartCard } from "../components/actionWindow/EmptyStartCard";
@@ -30,6 +32,7 @@ import { OperationRunTimeline } from "../components/actionWindow/OperationRunTim
 import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
 import { CompletedResult } from "../components/actionWindow/CompletedResult";
+import { BlockerNotice } from "../components/actionWindow/BlockerNotice";
 
 const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "ready-to-start": "시작 전",
@@ -172,16 +175,12 @@ export function Operations() {
           </p>
 
           {blocker && run.status !== "WAITING_FOR_HUMAN" ? (
-            <div role="status" className="rounded-2xl border border-bad/30 bg-bad/5 p-4">
-              <p className="font-medium text-ink">
-                <span aria-hidden="true">⚠ </span>
-                {blocker.title}
-                <span className="ml-2 align-middle text-xs text-muted">
-                  {run.blocker?.recoverable ? "다시 시도할 수 있어요" : "복구할 수 없어요"}
-                </span>
-              </p>
-              <p className="mt-0.5 text-sm text-muted">{blocker.body}</p>
-            </div>
+            <BlockerNotice
+              title={blocker.title}
+              body={blocker.body}
+              recoverable={!!run.blocker?.recoverable}
+              variant="standalone"
+            />
           ) : null}
 
           {/* Act-now first: the checkpoint the operator must handle leads, with the
@@ -197,8 +196,9 @@ export function Operations() {
           {/* Terminal run: offer the next step here too (start-new is the idle
               affordance, not a run command; navigation works even offline). */}
           {canStartNewRun(run) ? (
-            <section aria-label="다음 작업" className="rounded-2xl bg-surface p-5 shadow-card">
-              <p className="text-ink">
+            <section aria-label={SECTION_TITLE.nextRun} className="rounded-2xl bg-surface p-5 shadow-card">
+              <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.nextRun}</h2>
+              <p className="mt-1 text-ink">
                 이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -208,7 +208,7 @@ export function Operations() {
                     onClick={() => handleCommand("START_RUN")}
                     className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
                   >
-                    새 작업 시작
+                    {START_NEW_RUN_LABEL}
                   </button>
                 ) : null}
                 <Link

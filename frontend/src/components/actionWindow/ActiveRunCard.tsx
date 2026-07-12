@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
 import type { ActionWindowRunView } from "../../lib/actionWindow/contract";
-import { channelLabel, resolveCopy, DESKTOP_ONLY_COPY } from "../../lib/actionWindow/copy";
+import {
+  channelLabel,
+  resolveCopy,
+  CHECKPOINT_PROMPT_TITLE,
+  DESKTOP_ONLY_COPY,
+  START_NEW_RUN_LABEL,
+} from "../../lib/actionWindow/copy";
 import { canStartNewRun } from "../../lib/actionWindow/operationsStore";
 import { RunStatusBadge } from "./RunStatusBadge";
 
@@ -27,7 +33,7 @@ export function ActiveRunCard({
   return (
     <section aria-label="현재 작업" className="rounded-2xl bg-surface p-5 shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-ink">
+        <h2 className="min-w-0 break-keep text-lg font-semibold text-ink">
           {resolveCopy(run.runCopyKey, run.runCopyParams)}
         </h2>
         <RunStatusBadge status={run.status} />
@@ -41,7 +47,7 @@ export function ActiveRunCard({
         <div className="mt-3 rounded-xl border border-warn/30 bg-warn/5 p-3">
           <p className="font-medium text-ink">
             <span aria-hidden="true">🙋 </span>
-            지금 해주실 일이 있어요
+            {CHECKPOINT_PROMPT_TITLE}
           </p>
           {run.currentStep ? (
             <p className="mt-0.5 text-sm text-muted">
@@ -75,7 +81,7 @@ export function ActiveRunCard({
             onClick={onStartNew}
             className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
           >
-            새 작업 시작
+            {START_NEW_RUN_LABEL}
           </button>
         ) : null}
       </div>

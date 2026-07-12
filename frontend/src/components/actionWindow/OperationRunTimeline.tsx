@@ -1,5 +1,5 @@
 import type { ActionWindowRunView } from "../../lib/actionWindow/contract";
-import { resolveCopy, stepStatusView } from "../../lib/actionWindow/copy";
+import { resolveCopy, stepStatusView, SECTION_TITLE } from "../../lib/actionWindow/copy";
 
 /** Operation Run timeline — the run's semantic step progress. */
 export function OperationRunTimeline({ run }: { run: ActionWindowRunView }) {
@@ -8,9 +8,9 @@ export function OperationRunTimeline({ run }: { run: ActionWindowRunView }) {
   const currentNumber = run.currentStep?.stepNumber;
 
   return (
-    <section aria-label="진행 단계" className="rounded-2xl bg-surface p-5 shadow-card">
+    <section aria-label={SECTION_TITLE.timeline} className="rounded-2xl bg-surface p-5 shadow-card">
       <div className="mb-4 flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold text-ink">진행 단계</h2>
+        <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.timeline}</h2>
         <span className="text-muted" aria-hidden="true">
           {completed} / {total}
         </span>
