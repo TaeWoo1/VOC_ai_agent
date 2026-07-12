@@ -54,19 +54,22 @@ affirmed by ratifying D-024 and this record. Satisfies [`r4-preparation.md`](r4-
 
 ---
 
-## G3 — Environment · ☐ PENDING (operator confirms before the pause lift)
+## G3 — Environment · ✅ CONFIRMED 2026-07-12 (read-only probe path only)
 
-The §3 G3 preconditions. The operator confirms **each, in a stable environment**, before lifting the
-NAVER live-work pause ([`r4-preparation.md`](r4-preparation.md) §9 item 3). Until then, all remain ☐
-and no live run is authorized.
+The §3 G3 preconditions, confirmed by the operator **in a stable environment**. The pause lift below
+is **scoped to the first read-only session-precondition probe only** ([`r4-preparation.md`](r4-preparation.md)
+§9 item 3) — it is **not** a blanket lift of the NAVER live-work pause.
 
-- ☐ Stable network / IP / location (the condition that paused NAVER live work).
-- ☐ Dedicated Chrome profile for the connection.
-- ☐ Bridge paired.
-- ☐ Operation Run persistence enabled.
-- ☐ **NAVER live-work pause LIFTED** for this specific run (the operator action that turns G3 green).
+- ☑ Stable network / IP / location (the condition that paused NAVER live work).
+- ☑ Dedicated Chrome profile for the connection.
+- ☑ Bridge paired.
+- ☑ Operation Run persistence enabled.
+- ☑ **NAVER live-work pause LIFTED** — **for the first read-only session-precondition probe only**
+  (no click / export / download); not a general lift.
 
-*Owner:* operator. G3 is not satisfied by this record.
+*Owner:* operator. *Confirmed:* 2026-07-12 — G3 satisfied **for the read-only probe path**. This alone
+authorizes **no live contact**: G6 per-run approval is still required in the dispatching turn before any
+probe.
 
 ---
 
@@ -121,9 +124,10 @@ R4 live-run approval
 
 ## Gate summary
 
-- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅.**
-- **G3 ☐** (stable environment + NAVER live-work pause lift) and **G6 ☐** (per-run approval) are the
-  **only remaining live gates** — both operator/PO-owned, neither Runtime code.
+- **G1 ✅ · G2 ✅ · G3 ✅ · G4 ✅ · G5 ✅.** (G3 confirmed 2026-07-12 for the read-only probe path;
+  pause lift is scoped to that probe only.)
+- **G6 ☐** (per-run approval) is the **only remaining live gate** — operator/PO-owned, given in the
+  dispatching turn, not Runtime code.
 - The first authorized live contact is the **read-only session-precondition probe**; its sanitized
   `{ ready, verdict, blockerCode }` result is then recorded into
   [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4.

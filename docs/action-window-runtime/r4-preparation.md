@@ -29,12 +29,12 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
 | P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1/G2/G4/G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md)); **G3/G6 open** — gate not fully signed |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); **G6 open** — gate not fully signed until per-run approval |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
 | P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ✅ | every fail-closed exit + a NAVER operator-abort (`CANCEL_RUN`) drill, all recovering per §7 — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-6 |
-| P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; **live still gated by G2–G6 + the live-work pause** |
+| P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; **live still gated by G6** (G2/G3/G5 recorded 2026-07-12) |
 | P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization |
 
 ---
