@@ -191,7 +191,7 @@ verified seam — the adapter is composition, not new invention:
 - ☑ **Overlay + observation** — highlight never intercepts the click; the user's real click is
   observed, not simulated (R1/R2 verified components, re-fixtured for the channel). *(Green on the
   NAVER fixture: `naver-browser.test.ts` drives a NAVER-shaped review-export surface — automated
-  headless + a delivered-not-run `AW_HEADED` operator proof; D-023.)*
+  headless + an `AW_HEADED` operator proof PASSED 2026-07-11 (§8-3); D-023.)*
 - ☑ **Download detection (read-only)** — detect fired/completed download without triggering
   (reuse: export-target readiness + controlled download save; 0-rows vs failure distinguished).
   *(Green on the NAVER fixture — §8-2; a real browser download via the live driver is detected
@@ -212,7 +212,7 @@ verified seam — the adapter is composition, not new invention:
   *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. The **live driver** is now
   wired into a persistent session via the gated entrypoint's `assembleLiveRun`, **proven** by a
   synthetic-browser integration test asserting a persisted TERMINAL run + fail-closed FAILED persistence
-  (§8-9, automated cases PASSED 2026-07-12 headless; headed human-click case delivered-not-run) —
+  (§8-9, automated cases PASSED 2026-07-12 + headed real-human-click case PASSED 2026-07-13) —
   **loopback channel, not the Bridge WS; no live NAVER**.)*
 - ☑ **Bridge/FE loop** — start → checkpoint → user click → recheck → completed over the real
   Bridge WS with the channel fixture (R2B verified; re-run with channel `channelCode`). *(Green for

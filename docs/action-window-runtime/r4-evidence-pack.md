@@ -234,15 +234,18 @@ quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-c
 proof that the live driver is **wired into a persistent session** (loopback channel — **not** the Bridge
 WS).
 
-**Status: ✅ automated cases PASSED (2026-07-12), headless.** Command:
+**Status: ✅ automated PASSED (2026-07-12) + headed PASSED (2026-07-13), headless-launched.** Command:
 `RUN_INTEGRATION=1 npx vitest run test/cli/run-action-window-live-naver-browser.test.ts` → **3 passed / 1
 skipped** (the 3 automated cases; the `AW_HEADED` human-click case skipped) in ~1.3s. The happy case drove
 the full engine chain through the real driver — session gate `prepareSurface` (LOGGED_IN over the
 synthetic seller-center URL) → locate/tag → highlight → observed click → read-only detect → quarantine
 validate (dir emptied) → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted
 TERMINAL**; both fail-closed cases persisted **FAILED** with the sanitized `blocker.code` only; no-leak +
-`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case remains
-delivered-not-run** (needs a seated operator, a separate approved step). **No live NAVER, no network, no
+`findProhibitedFields == []` clean throughout. **The headed (`AW_HEADED=1`) human-click case also PASSED
+(2026-07-13):** with `… -t "headed"` (→ **1 passed / 3 skipped**, ~8.9s) a seated operator clicked the
+highlighted synthetic "엑셀 다운로드" once — the click was **observed** (the Runtime never clicked) → verify
+→ detect → quarantine validate → injected-fake ingest → **COMPLETED**, Operation Run **persisted TERMINAL**,
+`findProhibitedFields == []` clean. **No live NAVER, no network, no
 backend.**
 
 ---
@@ -260,9 +263,9 @@ backend.**
 - **Live driver core (PR #242, `cf509a5`):** ✅ **MERGED (2026-07-12)** — `NaverLiveProbeDriver` proves the
   NAVER-specific §6 seams on the live driver itself, hermetically + over a real browser on a **synthetic
   DOM** (see §8-2 note). **No live NAVER.** Session-wiring: the gated live entrypoint's `assembleLiveRun`
-  seam is now **proven** by a synthetic-browser integration test (automated cases PASSED 2026-07-12,
-  headless) with real Operation Run persistence (§8-9); the headed human-click case is delivered-not-run;
-  the live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
+  seam is now **proven** by a synthetic-browser integration test with real Operation Run persistence
+  (§8-9) — automated cases PASSED 2026-07-12 + the headed real-human-click case PASSED 2026-07-13; the
+  live driver is **not** Bridge-wired (the entrypoint uses a loopback channel). The §6 checklist body in [`r4-preparation.md`](r4-preparation.md) §6 is reconciled to
   match P9/§8-2 accordingly (fixture / synthetic-browser green; live still gated).
 - **Live-driver headed synthetic proof (2026-07-12):** ✅ **PASSED with a real seated-operator click** (§8-3
   addendum) — proves the live driver's real-browser observe → download-detect → quarantine-validate →
