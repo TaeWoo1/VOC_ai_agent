@@ -29,13 +29,13 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
 | P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); **G6 open** — gate not fully signed until per-run approval |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); read-only §8-4 probe complete under a **consumed** one-run G6; **the export-pilot per-run G6 is still open** — gate not fully signed until that approval |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
 | P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ✅ | every fail-closed exit + a NAVER operator-abort (`CANCEL_RUN`) drill, all recovering per §7 — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-6 |
-| P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; **live still gated by G6** (G2/G3/G5 recorded 2026-07-12) |
-| P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization |
+| P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; read-only §8-4 probe result recorded 2026-07-12 (`ready:true`/`LOGGED_IN`); **live export still gated by a fresh per-run G6** (G2/G3/G5 recorded 2026-07-12) |
+| P12 | **Per-run product-owner approval in the dispatching turn** of the live run | ☐ | standing rule — never standing authorization; one read-only-probe G6 was **consumed 2026-07-12** (§8-4), an **export pilot needs a new per-run approval** under §4 |
 
 ---
 
@@ -233,7 +233,7 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 3. The channel fixture demonstrating the full loop headed with a REAL human click (R1/R2A
    precedent: automated + headed operator proof).
 4. Session-precondition live probe result (read-only; separately approved) — the only permitted
-   pre-pilot live contact, and only if the gate requires it.
+   pre-pilot live contact, and only if the gate requires it. — **✅ completed 2026-07-12** ([`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4; consumed one-run G6).
 5. Policy-track log state (§5) for the channel: question sent, response pending/received.
 6. The abort drill: one fixture run deliberately driven into each fail-closed exit, plus one
    operator-abort, all recovering per §7.
@@ -254,7 +254,7 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 
 ## 10. Related
 
-- **Supervised-pilot gate record (§3) → [`r4-gate-record.md`](r4-gate-record.md)** (living; G2/G5 ✅, G3/G6 open)
+- **Supervised-pilot gate record (§3) → [`r4-gate-record.md`](r4-gate-record.md)** (living; G1–G5 ✅; G6 per-run — read-only-probe instance consumed 2026-07-12; export pilot needs a fresh per-run G6)
 - **Pre-live evidence pack (§8) → [`r4-evidence-pack.md`](r4-evidence-pack.md)** (assembled 2026-07-11)
 - Slice sequencing → [`implementation-plan.md`](implementation-plan.md) (R4 section)
 - Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021, D-022, D-023, D-024)
