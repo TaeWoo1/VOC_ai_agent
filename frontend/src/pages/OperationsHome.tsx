@@ -12,6 +12,7 @@ import {
 } from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
+import { DESKTOP_ONLY_COPY, EMPTY_START_COPY } from "../lib/actionWindow/copy";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
@@ -146,8 +147,8 @@ export function OperationsHome() {
           aria-label="시작하기"
           className="rounded-2xl bg-surface p-6 text-center shadow-card"
         >
-          <p className="text-lg text-ink">리뷰 내려받기를 시작할 수 있어요.</p>
-          <p className="mt-1 text-muted">시작하면 판매자센터 화면에서 단계별로 안내해요.</p>
+          <p className="text-lg text-ink">{EMPTY_START_COPY.title}</p>
+          <p className="mt-1 text-muted">{EMPTY_START_COPY.body}</p>
           {connected ? (
             <button
               type="button"
@@ -157,9 +158,7 @@ export function OperationsHome() {
               시작
             </button>
           ) : null}
-          <p className="mt-4 text-sm text-muted sm:hidden">
-            시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.
-          </p>
+          <p className="mt-4 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.start}</p>
         </section>
       ) : (
         <ActiveRunCard

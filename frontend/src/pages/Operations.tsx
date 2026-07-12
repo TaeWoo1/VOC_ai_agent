@@ -15,7 +15,13 @@ import {
 } from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
-import { blockerView, channelLabel, resolveCopy } from "../lib/actionWindow/copy";
+import {
+  blockerView,
+  channelLabel,
+  resolveCopy,
+  DESKTOP_ONLY_COPY,
+  EMPTY_START_COPY,
+} from "../lib/actionWindow/copy";
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
@@ -154,8 +160,8 @@ export function Operations() {
 
       {run === null ? (
         <section aria-label="시작하기" className="rounded-2xl bg-surface p-6 text-center shadow-card">
-          <p className="text-lg text-ink">리뷰 내려받기를 시작할 수 있어요.</p>
-          <p className="mt-1 text-muted">시작하면 판매자센터 화면에서 단계별로 안내해요.</p>
+          <p className="text-lg text-ink">{EMPTY_START_COPY.title}</p>
+          <p className="mt-1 text-muted">{EMPTY_START_COPY.body}</p>
           {connected ? (
             <button
               type="button"
@@ -165,9 +171,7 @@ export function Operations() {
               시작
             </button>
           ) : null}
-          <p className="mt-4 text-sm text-muted sm:hidden">
-            시작은 데스크톱에서 할 수 있어요. 휴대폰에서는 진행 상황만 볼 수 있어요.
-          </p>
+          <p className="mt-4 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.start}</p>
         </section>
       ) : (
         <>
@@ -177,7 +181,7 @@ export function Operations() {
             className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted sm:hidden"
           >
             <span aria-hidden="true">📱 </span>
-            휴대폰에서는 진행 상황만 볼 수 있어요. 시작·확인 등 실제 작업은 데스크톱에서 진행해요.
+            {DESKTOP_ONLY_COPY.readOnlyBanner}
           </p>
 
           {blocker && run.status !== "WAITING_FOR_HUMAN" ? (
@@ -227,9 +231,7 @@ export function Operations() {
                   홈으로
                 </Link>
               </div>
-              <p className="mt-2 text-sm text-muted sm:hidden">
-                새 작업 시작은 데스크톱에서 할 수 있어요.
-              </p>
+              <p className="mt-2 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.startNew}</p>
             </section>
           ) : null}
 
