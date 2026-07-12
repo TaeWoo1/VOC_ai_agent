@@ -43,6 +43,13 @@ const EXPORT_WORDING: ReadonlyArray<{ re: RegExp; keyword: string }> = [
   { re: /csv/i, keyword: "csv" },
 ];
 
+/**
+ * The plain export-wording keywords (single source of truth, derived from `EXPORT_WORDING`). Exposed
+ * so a live in-page target tagger can apply the SAME confirmed accessible-name rule inside the page
+ * without re-deriving the list — string matching only, no regex serialization across the boundary.
+ */
+export const EXPORT_WORDING_KEYWORDS: readonly string[] = EXPORT_WORDING.map((w) => w.keyword);
+
 /** A top-document interactive element that looks like an actionable export trigger. */
 interface ExportCandidate {
   tag: string;
