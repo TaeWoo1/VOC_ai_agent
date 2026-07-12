@@ -31,6 +31,14 @@ const RUN = process.env.RUN_INTEGRATION === "1";
 const HEADED = process.env.AW_HEADED === "1";
 const HEX16 = /^[0-9a-f]{16}$/;
 const HEADED_CLICK_WAIT_MS = 240_000;
+/**
+ * Per-test timeout for the headed case. It MUST exceed the driver's human-click wait
+ * (`HEADED_CLICK_WAIT_MS`) plus the overlay/detect/validate margin, otherwise vitest's default 5s cap
+ * kills the window before a seated human can click. Given as the `it(...)` timeout so the documented
+ * `AW_HEADED=1` command works without an ad-hoc `--testTimeout` CLI flag. Only ever reached when the
+ * headed test runs (RUN_INTEGRATION=1 && AW_HEADED=1); the automated cases keep the default timeout.
+ */
+const HEADED_TEST_TIMEOUT_MS = HEADED_CLICK_WAIT_MS + 60_000;
 
 /** OOXML-shaped synthetic blob (ZIP magic all single-byte, so UTF-8 keeps the magic) — not a real book. */
 const XLSX_BLOB = `'PK\\u0003\\u0004\\u0014\\u0000\\u0000\\u0000\\u0008\\u0000[Content_Types].xml (sellerops synthetic)'`;
@@ -183,5 +191,5 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver real-DOM seams (locate-tag → overl
     expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: true, processed: 1 });
     await driver.cleanup();
     await page.close();
-  });
+  }, HEADED_TEST_TIMEOUT_MS);
 });
