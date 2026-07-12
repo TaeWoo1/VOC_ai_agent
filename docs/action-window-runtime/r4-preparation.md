@@ -29,9 +29,9 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
 | P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1 ✅ (D-021); G2–G6 open |
-| P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ☐ | — |
-| P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ☐ | — |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1/G2/G4/G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md)); **G3/G6 open** — gate not fully signed |
+| P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
+| P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
 | P10 | Rollback/abort criteria (§7) reviewed; abort path tested on fixtures | ✅ | every fail-closed exit + a NAVER operator-abort (`CANCEL_RUN`) drill, all recovering per §7 — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-6 |
 | P11 | Pre-live evidence pack (§8) assembled | ✅ | [`r4-evidence-pack.md`](r4-evidence-pack.md) (2026-07-11) — §8 items 1–7; **live still gated by G2–G6 + the live-work pause** |
@@ -99,7 +99,10 @@ All of the following, recorded in this directory, before the first live run:
   NAVER SmartStore review export (D-021).** Fixture-only adapter code is unblocked by this
   entry; G2–G6 remain open and gate any live run.
 - **G2 — Seller consent.** The pilot seller consented to: their own account, their own screen,
-  their own clicks; SellerOps observes/verifies only. Consent text references §4 verbatim.
+  their own clicks; SellerOps observes/verifies only. Consent text references §4 verbatim. — **✅
+  RECORDED 2026-07-12: self-consent for `NAVER_DEV_SELLER_SELF_01`** (the operator's own dev account;
+  seller = operator), first authorized live run scoped to the read-only session-precondition probe —
+  [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024.
 - **G3 — Environment.** Stable operator environment (network/IP/location stable — the condition
   that paused NAVER live work); dedicated Chrome profile for the connection; paired Bridge;
   Operation Run persistence enabled.
@@ -107,7 +110,9 @@ All of the following, recorded in this directory, before the first live run:
   live is never the first execution of any code path (slice §14-11: live action is not required
   for implementation verification).
 - **G5 — Policy track open.** §5 checklist opened and logged for the selected channel (parallel
-  track; see boundary in §5 for what it does and does not gate).
+  track; see boundary in §5 for what it does and does not gate). — **✅ LOGGED 2026-07-12: none
+  required** for the NAVER seller-owned export pilot per §5; no platform marked "approved" —
+  [`r4-gate-record.md`](r4-gate-record.md) §G5.
 - **G6 — Per-run approval.** Explicit product-owner approval in the dispatching turn of the live
   run, naming: channel, seller account owner, date, operator, and the §7 abort criteria. Goal
   pressure, prior approvals, or standing plans are never authorization.
@@ -156,8 +161,9 @@ outside the repo):
 - ☐ Coupang-specific: resolve the possible one-seller-tool-at-a-time constraint before any
   Coupang pilot.
 - ☐ ESM+-specific: provider onboarding/permission model inquiry (after business registration).
-- ☐ NAVER-specific: none required for the seller-owned export pilot; Solution Market remains a
-  long-term option, not a prerequisite.
+- ☑ NAVER-specific: none required for the seller-owned export pilot; Solution Market remains a
+  long-term option, not a prerequisite. **Logged 2026-07-12** ([`r4-gate-record.md`](r4-gate-record.md)
+  §G5, D-024) — this is the G5/P8 evidence; it authorizes no live action.
 - ☐ Never mark any platform "승인됨/approved" without the actual recorded grant (matrix §3 rule).
 
 ## 6. Technical adapter readiness checklist (per selected channel)
@@ -235,9 +241,9 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 
 ## 9. Unresolved product-owner decisions (blocking, in order)
 
-1. **Pilot seller/company and its actual channel mix** — the channel half is **RESOLVED**
-   (criterion-1 input applied by the PO in D-021); the specific **pilot seller identity is still
-   open** — required for G2 consent.
+1. **Pilot seller/company and its actual channel mix** — ✅ **RESOLVED**: the channel half in D-021,
+   and the **pilot seller identity 2026-07-12 in D-024** — the operator's own dev account, recorded
+   as the sanitized label `NAVER_DEV_SELLER_SELF_01` (G2 self-consent, [`r4-gate-record.md`](r4-gate-record.md)).
 2. **Channel ratification (G1)** — ✅ **RESOLVED 2026-07-09: NAVER SmartStore review export**
    ([`decisions.md`](decisions.md) D-021).
 3. **NAVER-specific:** lift or keep the live-work pause (stable-environment precondition) — now
@@ -248,7 +254,8 @@ Assembled as a dated evidence pack in this directory (sanitized; enums/booleans/
 
 ## 10. Related
 
+- **Supervised-pilot gate record (§3) → [`r4-gate-record.md`](r4-gate-record.md)** (living; G2/G5 ✅, G3/G6 open)
 - **Pre-live evidence pack (§8) → [`r4-evidence-pack.md`](r4-evidence-pack.md)** (assembled 2026-07-11)
 - Slice sequencing → [`implementation-plan.md`](implementation-plan.md) (R4 section)
-- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021, D-022, D-023)
+- Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021, D-022, D-023, D-024)
 - Current slice state → [`current-state.md`](current-state.md)

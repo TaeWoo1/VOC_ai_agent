@@ -4,7 +4,8 @@
 **Code baseline under test:** `origin/main` `3cda125` (merge of PR #227 — the fixture-only NAVER
 downstream + Bridge/local-agent boot wiring); the §8-6 NAVER operator-abort drill is added by this pack slice.
 **Status:** ASSEMBLED (technical readiness). **This pack authorizes NO live action** — it records readiness
-evidence only. Live NAVER remains blocked by the §3 gate (G2, G3, G5, G6) and the NAVER live-work pause.
+evidence only. Live NAVER remains blocked by the §3 gate — now **G3 and G6** (G2/G5 recorded 2026-07-12,
+[`r4-gate-record.md`](r4-gate-record.md), D-024) — and the NAVER live-work pause.
 
 **Sanitization discipline (self-applied):** every value below is an enum, boolean, coarse count, test name,
 or commit SHA. No raw review/inquiry content, reviewer/seller/account identity, reference codes, exact
@@ -21,14 +22,15 @@ evidence for §1 P9/P10/P11.
 | Gate | Item | Status | Evidence / what it still needs |
 |---|---|---|---|
 | **G1** | Channel ratified | ✅ | **NAVER SmartStore review export** — [`decisions.md`](decisions.md) D-021 (2026-07-09); §2 selection rationale. |
-| **G2** | Seller consent | ☐ OPEN | Needs the **pilot seller identity** ([`r4-preparation.md`](r4-preparation.md) §9 item 1) + consent text referencing §4 verbatim. Product-owner / operator-owned; not obtained. |
-| **G3** | Environment | ☐ OPEN | Stable operator environment (network/IP/location) + dedicated Chrome profile + paired Bridge + Operation Run persistence enabled. Tied to the **NAVER live-work pause** (§9 item 3). Operator-owned; pending. |
+| **G2** | Seller consent | ✅ | **Self-consent recorded 2026-07-12** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim; first live run scoped to the read-only session-precondition probe — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024. |
+| **G3** | Environment | ☐ OPEN | Stable env (network/IP/location) + dedicated Chrome profile + paired Bridge + Operation Run persistence, and the **NAVER live-work pause lift** (§9 item 3). Checklist in [`r4-gate-record.md`](r4-gate-record.md) §G3; operator-owned, pending. |
 | **G4** | Synthetic ladder green | ✅ | **This pack, §8-2** — every §6 adapter-readiness item green on NAVER fixtures. |
-| **G5** | Policy track open | ☐ OPEN | See §8-5. NAVER seller-owned export pilot requires none per §5, but the log state is recorded, not closed. Product-owner-owned. |
-| **G6** | Per-run approval | ☐ OPEN | Explicit product-owner approval **in the dispatching turn** of the live run (channel, seller-account owner, date, operator, §7 abort criteria). Never standing; not given. |
+| **G5** | Policy track open | ✅ | **Logged 2026-07-12** — none required for the NAVER seller-owned export per §5; no platform "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, §8-5. |
+| **G6** | Per-run approval | ☐ OPEN | Explicit product-owner approval **in the dispatching turn** (channel, seller-account owner, date, operator, run scope, §7 abort criteria). Template in [`r4-gate-record.md`](r4-gate-record.md) §G6; never standing; not given. |
 
-**Gate summary:** G1 ✅, G4 ✅ (technical). G2/G3/G5/G6 remain OPEN and are **operator/product-owner-owned**,
-not Runtime code. This pack does not resolve them.
+**Gate summary:** G1/G2/G4/G5 ✅ (G2/G5 recorded 2026-07-12 → [`r4-gate-record.md`](r4-gate-record.md),
+[`decisions.md`](decisions.md) D-024). **G3 (stable env + live-work pause lift) and G6 (per-run approval)
+remain the only OPEN gates** — operator/product-owner-owned, not Runtime code. This pack records no live action.
 
 ---
 
@@ -97,6 +99,8 @@ if and when G2/G3 are satisfied.
 | **NAVER-specific** | **None required** for the seller-owned export pilot per §5; Solution Market remains a long-term option, not a prerequisite. |
 
 Product-owner-owned; tracked outside the repo (D-019 parallel track). No platform is marked "approved" (matrix §3 rule).
+**Logged 2026-07-12** as the G5/P8 evidence — the NAVER seller-owned export pilot requires no platform grant; see the
+living register [`r4-gate-record.md`](r4-gate-record.md) §G5 ([`decisions.md`](decisions.md) D-024). Logging authorizes no live action.
 
 ---
 
