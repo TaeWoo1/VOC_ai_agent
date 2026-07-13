@@ -52,39 +52,39 @@ export function channelLabel(code: string): string {
 }
 
 export type StatusTone = "active" | "human" | "neutral" | "good" | "bad";
+// Status is rendered as a text-only tone chip (admin-console style) — no glyph.
 export interface StatusView {
   label: string;
-  icon: string;
   tone: StatusTone;
 }
 
 // Exhaustive: every RunStatus must have a view (a missing key is a compile error).
 const RUN_STATUS_VIEW: Record<RunStatus, StatusView> = {
-  PREPARING: { label: "준비 중", icon: "⏳", tone: "active" },
-  RUNNING: { label: "진행 중", icon: "▶", tone: "active" },
-  WAITING_FOR_HUMAN: { label: "확인 필요", icon: "🙋", tone: "human" },
-  PAUSED: { label: "일시정지", icon: "⏸", tone: "neutral" },
-  PROCESSING: { label: "처리 중", icon: "⚙", tone: "active" },
-  COMPLETED: { label: "완료", icon: "✓", tone: "good" },
-  FAILED: { label: "실패", icon: "⚠", tone: "bad" },
-  CANCELLED: { label: "취소됨", icon: "⛔", tone: "neutral" },
+  PREPARING: { label: "준비 중", tone: "active" },
+  RUNNING: { label: "진행 중", tone: "active" },
+  WAITING_FOR_HUMAN: { label: "확인 필요", tone: "human" },
+  PAUSED: { label: "일시정지", tone: "neutral" },
+  PROCESSING: { label: "처리 중", tone: "active" },
+  COMPLETED: { label: "완료", tone: "good" },
+  FAILED: { label: "실패", tone: "bad" },
+  CANCELLED: { label: "취소됨", tone: "neutral" },
 };
 export function runStatusView(status: RunStatus): StatusView {
   return RUN_STATUS_VIEW[status];
 }
 
-const STEP_STATUS_VIEW: Record<StepStatus, { label: string; icon: string }> = {
-  PENDING: { label: "대기", icon: "○" },
-  PREPARING: { label: "준비 중", icon: "⏳" },
-  READY: { label: "준비됨", icon: "▸" },
-  AWAITING_USER: { label: "내 차례", icon: "🙋" },
-  OBSERVING: { label: "확인 중", icon: "👀" },
-  PROCESSING: { label: "처리 중", icon: "⚙" },
-  COMPLETED: { label: "완료", icon: "✓" },
-  FAILED: { label: "실패", icon: "⚠" },
-  SKIPPED: { label: "건너뜀", icon: "↷" },
+const STEP_STATUS_VIEW: Record<StepStatus, { label: string }> = {
+  PENDING: { label: "대기" },
+  PREPARING: { label: "준비 중" },
+  READY: { label: "준비됨" },
+  AWAITING_USER: { label: "확인 필요" },
+  OBSERVING: { label: "확인 중" },
+  PROCESSING: { label: "처리 중" },
+  COMPLETED: { label: "완료" },
+  FAILED: { label: "실패" },
+  SKIPPED: { label: "건너뜀" },
 };
-export function stepStatusView(status: StepStatus): { label: string; icon: string } {
+export function stepStatusView(status: StepStatus): { label: string } {
   return STEP_STATUS_VIEW[status];
 }
 
@@ -96,7 +96,7 @@ const COMMAND_LABEL: Record<CommandType, string> = {
   CANCEL_RUN: "취소",
   FIND_CURRENT_STEP: "현재 단계 다시 찾기",
   SWITCH_TO_MANUAL: "직접 진행",
-  REQUEST_STEP_RECHECK: "다 했어요",
+  REQUEST_STEP_RECHECK: "확인 완료",
   SET_GUIDANCE_ENABLED: "안내 켜기·끄기",
 };
 export function commandLabel(type: CommandType): string {
@@ -125,7 +125,6 @@ export function blockerView(code: BlockerCode): BlockerView {
 // Connection resilience states (FE-2.5) — FE-owned copy for UI states the source
 // reports; "connected" needs no banner so it has no entry here.
 export interface ConnectionView {
-  icon: string;
   title: string;
   body: string;
   /** Reconnect button label — offline only (the terminal state where the
@@ -136,7 +135,6 @@ export interface ConnectionView {
 }
 export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, ConnectionView> = {
   offline: {
-    icon: "🔌",
     title: "연결이 끊겼어요",
     // Offline is terminal (auto-retry exhausted / dormant), so we do NOT promise
     // another automatic attempt — recovery is the manual action below.
@@ -145,7 +143,6 @@ export const CONNECTION_VIEW: Record<Exclude<SourceConnection, "connected">, Con
     actionPending: "다시 연결하는 중…",
   },
   reconnecting: {
-    icon: "⏳",
     title: "다시 연결하는 중이에요",
     body: "연결되면 최신 상태를 다시 불러와요. 잠시만 기다려 주세요.",
   },
@@ -181,15 +178,44 @@ export const EMPTY_START_COPY = {
   body: "시작하면 판매자센터 화면에서 단계별로 안내해요.",
 } as const;
 
-// The human-checkpoint prompt title ("there's something for you to do now"). Shown
-// as the checkpoint card heading (/operations/current) and echoed in the home
-// active-run summary — single-sourced so the two surfaces never drift.
-export const CHECKPOINT_PROMPT_TITLE = "지금 해주실 일이 있어요";
+// First-run review-work surface (/operations home empty state, FE-12). A state-driven
+// current-task card modeled on a seller-center worklist (SmartStore / Wing / Cafe24): it shows
+// ONLY the one actionable step for this state — task title, overall status, the current step,
+// and its action. It is not an onboarding explainer and not a preview: later steps and results
+// are revealed by <ActiveRunCard> once a run exists (progressive disclosure at the page level),
+// never previewed here. The task title reuses the run copy key ("actionWindow.review.run" →
+// "리뷰 내려받기") so the name matches the run / checkpoint / completed surfaces. "시작 전" is a
+// UI-only status label, never a wire RunStatus. 채널 stays omitted (no value before a run exists).
+export const REVIEW_WORK_COPY = {
+  statusLabel: "시작 전",
+  currentStepLabel: "현재 단계",
+  currentStepText: "판매자센터 화면에서 리뷰 파일을 단계별로 내려받아요.",
+  actionLabel: "내려받기 시작",
+} as const;
+
+// Home "리뷰 운영" activity strip (seller-center overhaul, Slice 2). A read-only
+// summary of the current review run shown on the Home dashboard that deep-links
+// into the operations workbench — it never starts or commands a run. "리뷰 운영"
+// matches the nav label and the /operations page title so the surface name never
+// drifts. The empty body is a calm honest state (shown when there is no live run).
+export const HOME_REVIEW_OPS_COPY = {
+  sectionTitle: "리뷰 운영",
+  emptyBody: "진행 중인 리뷰 작업이 없어요.",
+  open: "리뷰 운영 열기",
+  goToCheckpoint: "확인하러 가기",
+} as const;
+
+// The human-checkpoint action title — a seller-center task label ("do this step in
+// the seller center"), distinct from the "확인 필요" run-status chip. Shown as the
+// checkpoint card heading (/operations/current) and echoed in the home active-run
+// summary — single-sourced so the two surfaces never drift.
+export const CHECKPOINT_PROMPT_TITLE = "판매자센터에서 진행";
 
 // Section titles that render BOTH as a section `aria-label` and its visible `<h2>`.
 // Single-sourced here so the two copies in each card can never drift. Section names
 // that appear only as an aria-label (no matching heading) stay inline at their site.
 export const SECTION_TITLE = {
+  reviewWork: "리뷰 업무 현황",
   recentActivity: "최근 활동",
   controls: "가능한 동작",
   timeline: "진행 단계",

@@ -23,6 +23,8 @@ import {
   SECTION_TITLE,
   START_NEW_RUN_LABEL,
 } from "../lib/actionWindow/copy";
+import { PageHeader } from "../components/PageHeader";
+import { WorkbenchLayout } from "../components/WorkbenchLayout";
 import { RunStatusBadge } from "../components/actionWindow/RunStatusBadge";
 import { EmptyStartCard } from "../components/actionWindow/EmptyStartCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
@@ -49,6 +51,35 @@ const SCENARIO_LABEL: Record<ScenarioName, string> = {
   "failed": "실패",
 };
 
+/** Compact run-progress bar for the run header band. Accessible (role=progressbar
+ *  with an explicit name + value range); the fill width is the only inline style. */
+function RunProgressBar({
+  completedSteps,
+  totalSteps,
+}: {
+  completedSteps: number;
+  totalSteps: number;
+}) {
+  const pct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        role="progressbar"
+        aria-label="진행 단계"
+        aria-valuemin={0}
+        aria-valuemax={totalSteps}
+        aria-valuenow={completedSteps}
+        className="block h-2 w-32 overflow-hidden rounded-full bg-line"
+      >
+        <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+      </span>
+      <span className="text-sm text-muted">
+        진행 {completedSteps} / {totalSteps} 단계
+      </span>
+    </span>
+  );
+}
+
 /** FE-1 Review Operations run detail (/operations/current) — the single surface
  *  that renders command controls from `allowedCommands`. State is shared with the
  *  operations home (/operations) via the operations store (FE-2/FE-2.5). */
@@ -68,20 +99,27 @@ export function Operations() {
   const blocker = run?.blocker ? blockerView(run.blocker.code) : undefined;
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 pb-16">
-      <header className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h1 className="text-2xl font-bold text-ink">
-            {run ? resolveCopy(run.runCopyKey, run.runCopyParams) : "진행 중 작업"}
-          </h1>
-          {run ? <RunStatusBadge status={run.status} /> : null}
-        </div>
-        {run ? (
-          <p className="text-muted">채널: {channelLabel(run.channelCode)}</p>
-        ) : (
-          <p className="text-muted">아직 진행 중인 작업이 없어요. 새로 시작할 수 있어요.</p>
-        )}
-      </header>
+    <div className="flex flex-col gap-4">
+      {run ? (
+        <PageHeader
+          title={resolveCopy(run.runCopyKey, run.runCopyParams)}
+          action={<RunStatusBadge status={run.status} />}
+          meta={
+            <>
+              <span className="text-sm text-muted">채널: {channelLabel(run.channelCode)}</span>
+              <RunProgressBar
+                completedSteps={run.progress.completedSteps}
+                totalSteps={run.progress.totalSteps}
+              />
+            </>
+          }
+        />
+      ) : (
+        <PageHeader
+          title="진행 중 작업"
+          description="아직 진행 중인 작업이 없어요. 새로 시작할 수 있어요."
+        />
+      )}
 
       {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
           hidden while a live Bridge source is active (fixture world only). */}
@@ -91,7 +129,7 @@ export function Operations() {
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
         >
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            🧪 데모 미리보기 · 개발용 · 실제 화면에는 표시되지 않아요
+            <span aria-hidden="true">🧪 </span>데모 미리보기 · 개발용 · 실제 화면에는 표시되지 않아요
           </p>
           <div className="flex flex-wrap gap-1.5">
             {SCENARIO_NAMES.map((name) => {
@@ -121,7 +159,7 @@ export function Operations() {
               onClick={() => void retryBridgeBoot()}
               className="mt-3 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
             >
-              🔌 로컬 에이전트 다시 연결 (개발용)
+              <span aria-hidden="true">🔌 </span>로컬 에이전트 다시 연결 (개발용)
             </button>
           ) : null}
         </nav>
@@ -133,7 +171,7 @@ export function Operations() {
       {isFixturePreviewEnabled() && sourceMode === "bridge" ? (
         <div className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            🔌 라이브 연결 중 · 개발용
+            <span aria-hidden="true">🔌 </span>라이브 연결 중 · 개발용
           </p>
           <button
             type="button"
@@ -164,72 +202,86 @@ export function Operations() {
       {run === null ? (
         <EmptyStartCard connected={connected} onStart={() => handleCommand("START_RUN")} />
       ) : (
-        <>
-          {/* Mobile: read-only. The real operation runs on desktop (local agent + browser). */}
-          <p
-            role="note"
-            className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted sm:hidden"
-          >
-            <span aria-hidden="true">📱 </span>
-            {DESKTOP_ONLY_COPY.readOnlyBanner}
-          </p>
-
-          {blocker && run.status !== "WAITING_FOR_HUMAN" ? (
-            <BlockerNotice
-              title={blocker.title}
-              body={blocker.body}
-              recoverable={!!run.blocker?.recoverable}
-              variant="standalone"
-            />
-          ) : null}
-
-          {/* Act-now first: the checkpoint the operator must handle leads, with the
-              timeline below as supporting progress context. */}
-          {connected && run.status === "WAITING_FOR_HUMAN" ? (
-            <HumanCheckpointCard run={run} onCommand={handleCommand} />
-          ) : null}
-
-          <OperationRunTimeline run={run} />
-
-          {run.status === "COMPLETED" ? <CompletedResult run={run} /> : null}
-
-          {/* Terminal run: offer the next step here too (start-new is the idle
-              affordance, not a run command; navigation works even offline). */}
-          {canStartNewRun(run) ? (
-            <section aria-label={SECTION_TITLE.nextRun} className="rounded-2xl bg-surface p-5 shadow-card">
-              <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.nextRun}</h2>
-              <p className="mt-1 text-ink">
-                이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
+        /* Run workbench: the work area (required action + timeline + result) is the
+           body; the persistent controls and next-step live in the action rail
+           (beside the body on lg, stacked below on mobile). */
+        <WorkbenchLayout
+          body={
+            <>
+              {/* Mobile: read-only. The real operation runs on desktop (local agent + browser). */}
+              <p
+                role="note"
+                className="rounded-2xl border border-line bg-canvas px-4 py-3 text-sm text-muted sm:hidden"
+              >
+                {DESKTOP_ONLY_COPY.readOnlyBanner}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {connected ? (
-                  <button
-                    type="button"
-                    onClick={() => handleCommand("START_RUN")}
-                    className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
-                  >
-                    {START_NEW_RUN_LABEL}
-                  </button>
-                ) : null}
-                <Link
-                  to="/operations"
-                  className="rounded-xl border border-line bg-surface px-4 py-2.5 font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
-                >
-                  홈으로
-                </Link>
-              </div>
-              <p className="mt-2 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.startNew}</p>
-            </section>
-          ) : null}
 
-          {/* Interactive controls are desktop-only; mobile stays read-only; all
-              commands are suppressed while the source is offline/reconnecting. */}
-          {connected ? (
-            <div className="hidden sm:block">
-              <ActionWindowControlPanel run={run} onCommand={handleCommand} />
-            </div>
-          ) : null}
-        </>
+              {blocker && run.status !== "WAITING_FOR_HUMAN" ? (
+                <BlockerNotice
+                  title={blocker.title}
+                  body={blocker.body}
+                  recoverable={!!run.blocker?.recoverable}
+                  variant="standalone"
+                />
+              ) : null}
+
+              {/* Act-now first: the checkpoint the operator must handle leads the work
+                  area on every viewport, with the timeline below as progress context. */}
+              {connected && run.status === "WAITING_FOR_HUMAN" ? (
+                <HumanCheckpointCard run={run} onCommand={handleCommand} />
+              ) : null}
+
+              <OperationRunTimeline run={run} />
+
+              {run.status === "COMPLETED" ? <CompletedResult run={run} /> : null}
+            </>
+          }
+          rail={
+            connected || canStartNewRun(run) ? (
+              <>
+                {/* Interactive controls are desktop-only; mobile stays read-only; all
+                    commands are suppressed while the source is offline/reconnecting. */}
+                {connected ? (
+                  <div className="hidden sm:block">
+                    <ActionWindowControlPanel run={run} onCommand={handleCommand} />
+                  </div>
+                ) : null}
+
+                {/* Terminal run: offer the next step here too (start-new is the idle
+                    affordance, not a run command; navigation works even offline). */}
+                {canStartNewRun(run) ? (
+                  <section
+                    aria-label={SECTION_TITLE.nextRun}
+                    className="rounded-2xl bg-surface p-5 shadow-card"
+                  >
+                    <h2 className="text-lg font-semibold text-ink">{SECTION_TITLE.nextRun}</h2>
+                    <p className="mt-1 text-ink">
+                      이 작업은 끝났어요. 새 작업을 시작하거나 홈에서 전체 현황을 볼 수 있어요.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {connected ? (
+                        <button
+                          type="button"
+                          onClick={() => handleCommand("START_RUN")}
+                          className="hidden rounded-xl bg-brand px-4 py-2.5 font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 sm:inline-block"
+                        >
+                          {START_NEW_RUN_LABEL}
+                        </button>
+                      ) : null}
+                      <Link
+                        to="/operations"
+                        className="rounded-xl border border-line bg-surface px-4 py-2.5 font-medium text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
+                      >
+                        홈으로
+                      </Link>
+                    </div>
+                    <p className="mt-2 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.startNew}</p>
+                  </section>
+                ) : null}
+              </>
+            ) : undefined
+          }
+        />
       )}
     </div>
   );

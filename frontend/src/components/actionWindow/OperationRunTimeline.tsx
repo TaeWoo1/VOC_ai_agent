@@ -61,8 +61,8 @@ export function OperationRunTimeline({ run }: { run: ActionWindowRunView }) {
                 )}
               </div>
               <div
-                className={`mb-2 flex min-w-0 flex-1 items-center gap-3 rounded-xl border px-4 py-2.5 ${tone} ${
-                  isLast ? "mb-0" : ""
+                className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl border px-4 py-2.5 ${tone} ${
+                  isLast ? "" : "mb-2"
                 }`}
               >
                 <span className="min-w-0 flex-1 break-keep font-medium">{label}</span>

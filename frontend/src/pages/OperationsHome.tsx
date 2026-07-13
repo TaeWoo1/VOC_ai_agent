@@ -12,8 +12,10 @@ import {
 } from "../hooks/useOperationsStore";
 import { isBridgeModeEnabled, isFixturePreviewEnabled } from "../lib/actionWindow/devMode";
 import { retryBridgeBoot } from "../lib/actionWindow/bridgeSource";
+import { PageHeader } from "../components/PageHeader";
+import { WorkbenchLayout } from "../components/WorkbenchLayout";
 import { ActiveRunCard } from "../components/actionWindow/ActiveRunCard";
-import { EmptyStartCard } from "../components/actionWindow/EmptyStartCard";
+import { ReviewWorkCard } from "../components/actionWindow/ReviewWorkCard";
 import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
@@ -52,15 +54,12 @@ export function OperationsHome() {
   const connected = connection === "connected";
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 pb-16">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-ink">리뷰 운영</h1>
-        {/* "운영 에이전트" wording lives in page copy only (IA decision) — nav keeps 리뷰 운영. */}
-        <p className="text-muted">
-          운영 에이전트가 리뷰 내려받기 같은 반복 작업을 단계별로 대신 진행해요. 꼭 필요한
-          순간에만 확인을 요청해요.
-        </p>
-      </header>
+    <div className="flex flex-col gap-4">
+      {/* "운영 에이전트" wording lives in page copy only (IA decision) — nav keeps 리뷰 운영. */}
+      <PageHeader
+        title="리뷰 운영"
+        description="운영 에이전트가 리뷰 내려받기 같은 반복 작업을 단계별로 대신 진행해요. 꼭 필요한 순간에만 확인을 요청해요."
+      />
 
       {/* Fixture/demo preview — DEV-ONLY (never rendered in the production build);
           hidden while a live Bridge source is active (fixture world only). */}
@@ -70,7 +69,7 @@ export function OperationsHome() {
           className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
         >
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            🧪 데모 미리보기 · 개발용 · 실제 화면에는 표시되지 않아요
+            <span aria-hidden="true">🧪 </span>데모 미리보기 · 개발용 · 실제 화면에는 표시되지 않아요
           </p>
           <div className="flex flex-wrap gap-1.5">
             {HOME_SCENARIO_NAMES.map((name) => {
@@ -102,7 +101,7 @@ export function OperationsHome() {
               onClick={() => void retryBridgeBoot()}
               className="mt-3 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-muted transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2"
             >
-              🔌 로컬 에이전트 다시 연결 (개발용)
+              <span aria-hidden="true">🔌 </span>로컬 에이전트 다시 연결 (개발용)
             </button>
           ) : null}
         </nav>
@@ -114,7 +113,7 @@ export function OperationsHome() {
       {isFixturePreviewEnabled() && sourceMode === "bridge" ? (
         <div className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-            🔌 라이브 연결 중 · 개발용
+            <span aria-hidden="true">🔌 </span>라이브 연결 중 · 개발용
           </p>
           <button
             type="button"
@@ -142,20 +141,26 @@ export function OperationsHome() {
         onReconnect={sourceMode === "bridge" ? reconnect : undefined}
       />
 
-      {run === null ? (
-        <EmptyStartCard
-          connected={connected}
-          onStart={() => dispatchOperationsCommand("START_RUN")}
-        />
-      ) : (
-        <ActiveRunCard
-          run={run}
-          onStartNew={() => dispatchOperationsCommand("START_RUN")}
-          actionsEnabled={connected}
-        />
-      )}
-
-      <RecentActivityList items={recentRuns} />
+      {/* Review-ops workbench: the current task/state on the left, recent activity
+          as a side rail (stacks below on mobile). Progressive disclosure stays at
+          the page level — the no-run start card vs. the active-run summary. */}
+      <WorkbenchLayout
+        body={
+          run === null ? (
+            <ReviewWorkCard
+              connected={connected}
+              onStart={() => dispatchOperationsCommand("START_RUN")}
+            />
+          ) : (
+            <ActiveRunCard
+              run={run}
+              onStartNew={() => dispatchOperationsCommand("START_RUN")}
+              actionsEnabled={connected}
+            />
+          )
+        }
+        rail={<RecentActivityList items={recentRuns} />}
+      />
     </div>
   );
 }

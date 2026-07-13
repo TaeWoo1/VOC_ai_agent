@@ -30,7 +30,7 @@ import { resetOps, seedHome, seedBridge } from "../test/opsStoreHarness";
 
 const ACTIVE = "현재 작업"; // ActiveRunCard section
 const RECENT = "최근 활동"; // RecentActivityList section
-const START = "시작하기"; // idle start section
+const REVIEW_WORK = "리뷰 업무 현황"; // idle review-work section (FE-12)
 const RECONNECT = "다시 연결"; // ConnectionBanner reconnect button
 const DIAGNOSTICS = "브리지 진단 (개발용)";
 
@@ -47,10 +47,10 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     expect(screen.queryByRole("navigation", { name: "데모 시나리오 (개발용)" })).toBeNull();
   });
 
-  it("empty state: start region + the recent-activity empty message", () => {
+  it("empty state: review-work region + the recent-activity empty message", () => {
     seedHome("home-empty"); // run null, no history, connected
     renderWithRouter(<OperationsHome />);
-    expect(screen.getByRole("region", { name: START })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: REVIEW_WORK })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: ACTIVE })).toBeNull(); // no active card
     const recent = screen.getByRole("region", { name: RECENT });
     expect(recent).toHaveTextContent("아직 완료된 작업이 없어요.");
@@ -72,8 +72,8 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     seedBridge()({ kind: "connection", connection: "offline" }); // run null, offline
     renderWithRouter(<OperationsHome />);
     expect(screen.getByRole("button", { name: RECONNECT })).toBeInTheDocument();
-    // idle start button is gated on connected → suppressed while offline
-    expect(screen.queryByRole("button", { name: "시작" })).toBeNull();
+    // idle start action is gated on connected → suppressed while offline
+    expect(screen.queryByRole("button", { name: "내려받기 시작" })).toBeNull();
   });
 
   it("diagnostics entry point renders when bridge mode is on, absent otherwise", () => {

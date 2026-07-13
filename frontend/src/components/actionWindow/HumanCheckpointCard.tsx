@@ -10,7 +10,7 @@ import { BlockerNotice } from "./BlockerNotice";
 
 /**
  * Human Checkpoint card — shown when the run is waiting on the person. The user
- * performs the action on the real marketplace page; pressing "다 했어요" sends
+ * performs the action on the real marketplace page; pressing "확인 완료" sends
  * REQUEST_STEP_RECHECK (Runtime then verifies). It NEVER marks the step complete
  * on the client — completion is shown only after Runtime confirms.
  */
@@ -31,12 +31,7 @@ export function HumanCheckpointCard({
       aria-label="확인이 필요한 작업"
       className="rounded-2xl border-2 border-brand/40 bg-brand-50/60 p-5 shadow-card"
     >
-      <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-xl">
-          🙋
-        </span>
-        <h2 className="text-lg font-semibold text-brand-700">{CHECKPOINT_PROMPT_TITLE}</h2>
-      </div>
+      <h2 className="text-lg font-semibold text-brand-700">{CHECKPOINT_PROMPT_TITLE}</h2>
 
       {step ? (
         <p className="mt-2 break-keep text-xl font-semibold text-ink">
@@ -80,7 +75,7 @@ export function HumanCheckpointCard({
       <p className="mt-3 text-sm text-muted sm:hidden">{DESKTOP_ONLY_COPY.act}</p>
 
       <p className="mt-3 hidden text-xs text-muted sm:block">
-        ‘다 했어요’를 누르면 SellerOps가 화면을 다시 확인해요. 단계 완료는 SellerOps가 직접 확인한
+        ‘확인 완료’를 누르면 SellerOps가 화면을 다시 확인해요. 단계 완료는 SellerOps가 직접 확인한
         뒤에만 표시돼요.
       </p>
     </section>

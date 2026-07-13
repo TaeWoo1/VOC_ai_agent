@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { MobileNav } from "./MobileNav";
+import { BottomTabBar } from "./BottomTabBar";
 import { BridgeStatus } from "./bridge/BridgeStatus";
 import { ProjectionView } from "./bridge/ProjectionView";
 
@@ -27,12 +28,14 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar onMenu={() => setMenuOpen(true)} />
         <MobileNav open={menuOpen} onClose={() => setMenuOpen(false)} />
-        <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
+        {/* pb-24 on mobile keeps content clear of the fixed bottom tab bar. */}
+        <main className="flex-1 overflow-y-auto px-4 pb-24 pt-6 md:px-8 md:pb-8">
           <div className="mx-auto max-w-6xl space-y-6">
             {AGENT_PROJECTION_ENABLED && <ProjectionView />}
             <Outlet />
           </div>
         </main>
+        <BottomTabBar onMore={() => setMenuOpen(true)} />
       </div>
       {AGENT_BRIDGE_ENABLED && (
         <div className="fixed bottom-4 right-4 z-40 w-80 max-w-[calc(100vw-2rem)]">
