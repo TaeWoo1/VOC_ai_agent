@@ -7,7 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p test/crossstack/tsconfig.json",
     "connection": "tsx src/cli/connection.ts",
     "upload": "tsx src/cli/upload-file.ts",
     "discover": "tsx src/cli/discover-export.ts",
