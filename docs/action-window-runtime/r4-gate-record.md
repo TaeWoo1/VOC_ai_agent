@@ -143,6 +143,13 @@ This instance is **spent**. Each subsequent live run — **including any export 
 G6 instance filled in that dispatching turn under the full §4 boundary. Goal pressure, prior approvals,
 or this consumed instance never carry over.
 
+> **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
+> ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
+> the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a
+> **false-positive-empty readiness verdict** (rows visible on screen but not counted;
+> [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-10). No P6 / no export boundary applied. No gate flipped to
+> passing; a fresh G6 is required for any further live contact.
+
 **Export-pilot G6 — ☐ BLANK TEMPLATE (a blank template grants nothing; fill in the dispatching turn).**
 The read-only-probe instance above does **not** carry over to an export run. To authorize the first
 export pilot, fill and record a fresh instance of this shape in that turn:
