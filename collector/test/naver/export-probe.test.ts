@@ -322,6 +322,15 @@ describe("extractExportProbeSignals — readiness signal is the gate's verbatim 
     expect(s.readinessBranch).toBe("empty_state_marker"); // …but the marker wins → HALT
   });
 
+  it("emits READY when a populated grid coexists with an empty marker (§8-14 fix, via the gate)", () => {
+    // The probe re-emits the gate verbatim, so the precedence fix flows through: real rows +
+    // a coexisting empty-state marker now read READY, not HALT.
+    const rows = "<tr><td>진짜 리뷰</td></tr>".repeat(4);
+    const s = probe(`<div class="empty-notice">검색 결과가 없습니다</div><table><tbody>${rows}</tbody></table>`);
+    expect(s.readiness).toEqual({ decision: "READY", rowCountBucket: "few", reason: "positive_rows" });
+    expect(s.readinessBranch).toBe("data_rows_present");
+  });
+
   it("the readiness object leaks no content (enums/bucket only) even on PII-laden rows", () => {
     const s = probe(
       `<table><tbody><tr><td>행복마켓 홍길동 정말 최악이에요 환불해주세요</td></tr></tbody></table>`,

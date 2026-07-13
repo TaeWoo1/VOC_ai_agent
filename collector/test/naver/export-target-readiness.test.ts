@@ -119,6 +119,96 @@ describe("evaluateExportTargetReadiness — date-range and ambiguity", () => {
   });
 });
 
+describe("evaluateExportTargetReadiness — positive evidence outranks empty-state markers (§8-14 fix)", () => {
+  const bodyRows = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `<tr><td>진짜 리뷰 ${i}</td></tr>`).join("");
+
+  it("a populated grid + a coexisting hidden empty-state marker → READY / positive_rows (the fix)", () => {
+    // The exact §8-14 live shape: a hidden "검색 결과가 없습니다" node lingers in the DOM while the
+    // grid is populated. Old order HALTed on the marker; now the real rows win.
+    const html = `<div class="empty-notice" style="display:none">검색 결과가 없습니다</div>
+      <table class="review-grid"><thead><tr><th>리뷰</th></tr></thead>
+      <tbody>${bodyRows(3)}</tbody></table>`;
+    const t = traceExportTargetReadiness(html);
+    expect(t.readiness).toEqual({ decision: "READY", rowCountBucket: "few", reason: "positive_rows" });
+    expect(t.branch).toBe("data_rows_present");
+  });
+
+  it("the live 'many rows + hidden empty marker' shape → READY / positive_rows (branch data_rows_present)", () => {
+    // Mirrors the probe reading: semanticRowCount `many` alongside an empty_state marker.
+    const html = `<div class="empty-notice">검색 결과가 없습니다</div>
+      <table><tbody>${bodyRows(25)}</tbody></table>`;
+    const t = traceExportTargetReadiness(html);
+    expect(t.readiness).toEqual({ decision: "READY", rowCountBucket: "many", reason: "positive_rows" });
+    expect(t.branch).toBe("data_rows_present");
+  });
+
+  it("a positive labeled count + a coexisting empty-state marker → READY / positive_count", () => {
+    const html = `<div class="empty-notice">검색 결과가 없습니다</div><div>전체 <strong>128</strong>건</div>`;
+    expect(evaluateExportTargetReadiness(html)).toEqual({
+      decision: "READY",
+      rowCountBucket: "many",
+      reason: "positive_count",
+    });
+  });
+
+  it("real rows also outrank the specific no-export-target notice", () => {
+    const html = `<div>엑셀다운로드 대상인 리뷰가 없습니다</div><table><tbody>${bodyRows(2)}</tbody></table>`;
+    expect(evaluateExportTargetReadiness(html).reason).toBe("positive_rows");
+  });
+
+  it("a role=grid with real rows + a marker → READY / positive_rows (semantic role rows win)", () => {
+    const html = `<div class="empty-notice">검색 결과가 없습니다</div>
+      <div role="grid">
+        <div role="row"><div role="columnheader">별점</div></div>
+        <div role="row"><div role="cell">좋아요</div></div>
+        <div role="row"><div role="cell">굿</div></div>
+      </div>`;
+    // 3 role=row minus 1 header = 2 data rows; the marker div is not a row, so it is not subtracted.
+    expect(evaluateExportTargetReadiness(html)).toEqual({
+      decision: "READY",
+      rowCountBucket: "few",
+      reason: "positive_rows",
+    });
+  });
+
+  it("an in-table placeholder row is subtracted: 1 real row + 1 placeholder row → READY, bucket 'one'", () => {
+    // Without placeholder subtraction the count would be 2 (`few`); the placeholder must not inflate it.
+    const html = `<table><tbody>
+      <tr><td>진짜 리뷰</td></tr>
+      <tr><td colspan="6">검색 결과가 없습니다</td></tr>
+    </tbody></table>`;
+    expect(evaluateExportTargetReadiness(html)).toEqual({
+      decision: "READY",
+      rowCountBucket: "one",
+      reason: "positive_rows",
+    });
+  });
+
+  it("a LONE empty-state placeholder row (no real data) still HALTs — subtraction floors at zero", () => {
+    // Contrast with the case above: nothing but the placeholder → no positive evidence → marker HALT.
+    const html = `<table><tbody><tr><td colspan="6">검색 결과가 없습니다</td></tr></tbody></table>`;
+    expect(traceExportTargetReadiness(html)).toEqual({
+      readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" },
+      branch: "empty_state_marker",
+    });
+  });
+
+  it("genuinely empty surfaces (marker only, no real rows) STILL HALT — the fix does not weaken emptiness", () => {
+    const cases: Array<[string, string]> = [
+      [`<div>검색 결과가 없습니다</div>`, "empty_state"],
+      [`<div>엑셀다운로드 대상인 리뷰가 없습니다</div>`, "no_export_target"],
+      [`<div>총 0건</div>`, "empty_state"],
+      [`<table class="review-grid"><tbody></tbody></table>`, "zero_rows"],
+    ];
+    for (const [html, reason] of cases) {
+      const r = evaluateExportTargetReadiness(html);
+      expect(r.decision).toBe("HALT");
+      expect(r.reason).toBe(reason);
+    }
+  });
+});
+
 describe("evaluateExportTargetReadiness — sanitized output (no leak)", () => {
   /** Hostile rows: store, Commerce id, reviewer, raw review text — none may appear. */
   const PII = `<table class="review-grid"><tbody>

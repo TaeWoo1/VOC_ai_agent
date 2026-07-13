@@ -163,15 +163,50 @@ function countDataRows(html: string): number {
 }
 
 /**
+ * Pure: count body `<tr>` rows that are themselves an empty-state / no-export placeholder — the
+ * conventional in-table "검색 결과가 없습니다" colspan row. `countDataRows` counts these as rows, but
+ * they are NOT real data: they carry the very emptiness marker that says the result is empty. We
+ * subtract them so a lone placeholder row can never masquerade as positive evidence that outranks
+ * its own marker, while a genuinely populated grid (real rows beyond any placeholder) still wins.
+ * Best-effort and coarse: only `<tbody>`-block rows are inspected (the common placeholder shape); a
+ * placeholder rendered as a bare `role="row"` is not subtracted here and stays covered by the
+ * fail-closed download step downstream.
+ */
+function countPlaceholderBodyRows(html: string): number {
+  let placeholders = 0;
+  for (const block of html.matchAll(TBODY_BLOCK_RE)) {
+    const body = block[1] ?? "";
+    // Segment the body into per-<tr> chunks (each chunk starts at a <tr>), then count the chunks
+    // whose own text is an emptiness marker.
+    for (const chunk of body.split(/(?=<tr[\s>])/i)) {
+      if (!/<tr[\s>]/i.test(chunk)) continue; // non-global test — no lastIndex state
+      if (anyMatch(NO_EXPORT_TARGET_MARKERS, chunk) || anyMatch(EMPTY_STATE_MARKERS, chunk)) {
+        placeholders += 1;
+      }
+    }
+  }
+  return placeholders;
+}
+
+/**
  * Pure: decide whether the current export surface has exportable review targets.
  *
- * Precedence (conservative — ambiguity NEVER clicks):
- *  1. explicit no-export-target / generic empty-state marker → EXPORT_TARGET_EMPTY
- *  2. labeled result-count > 0 → READY (positive_count); a count of exactly 0 → EMPTY
- *  3. data rows present in the HTML → READY (positive_rows)
- *  4. a results container exists but has zero data rows → EXPORT_TARGET_EMPTY (zero_rows)
- *  5. a positive "must pick a period" marker AND no detectable selected range → DATE_RANGE_REQUIRED
- *  6. otherwise → EXPORT_TARGET_UNKNOWN (halt)
+ * Precedence — **positive row/count evidence outranks empty-state markers** (corrected from the
+ * §8-14 live finding: a hidden/off-screen "검색 결과가 없습니다" placeholder coexists in the DOM with a
+ * fully populated review grid; the old marker-first order HALTed a genuinely-exportable surface):
+ *  1. labeled result-count > 0 → READY (positive_count) — an authoritative numeric counter
+ *  2. real data rows present (rows beyond any in-table empty-state placeholder) → READY (positive_rows)
+ *  3. explicit no-export-target notice → EXPORT_TARGET_EMPTY (no_export_target)
+ *  4. generic empty-state placeholder → EXPORT_TARGET_EMPTY (empty_state)
+ *  5. labeled result-count of exactly 0 → EXPORT_TARGET_EMPTY (empty_state)
+ *  6. a results container exists but has zero data rows → EXPORT_TARGET_EMPTY (zero_rows)
+ *  7. a positive "must pick a period" marker AND no detectable selected range → DATE_RANGE_REQUIRED
+ *  8. otherwise → EXPORT_TARGET_UNKNOWN (halt)
+ *
+ * Still conservative: ambiguity NEVER clicks. A lone empty-state placeholder row is subtracted
+ * before rung 2 (see `countPlaceholderBodyRows`), so the marker rungs (3–6) still HALT a genuinely
+ * empty surface; only real data beyond the placeholder — or a positive labeled count — proceeds. A
+ * false READY that clicks into nothing is caught fail-closed by download detection downstream.
  */
 export function evaluateExportTargetReadiness(rawHtml: string): ExportTargetReadiness {
   return traceExportTargetReadiness(rawHtml).readiness;
@@ -187,14 +222,37 @@ export function evaluateExportTargetReadiness(rawHtml: string): ExportTargetRead
  */
 export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadinessTrace {
   const html = stripComments(rawHtml);
+  const count = parseResultCount(html);
+  // Real data rows = counted rows minus any in-table empty-state placeholder row, so a lone
+  // "검색 결과가 없습니다" colspan row can never outrank the very marker it carries.
+  const realDataRows = Math.max(0, countDataRows(html) - countPlaceholderBodyRows(html));
 
-  // 1) Explicit emptiness wins — the most likely, benign cause of the no-download alert.
+  // 1) An authoritative labeled positive count is the strongest positive evidence — it outranks a
+  //    coexisting empty-state placeholder (§8-14). (A count of exactly 0 is handled at rung 5.)
+  if (count !== null && count > 0) {
+    return {
+      readiness: { decision: "READY", rowCountBucket: bucket(count), reason: "positive_count" },
+      branch: "labeled_count_positive",
+    };
+  }
+
+  // 2) A genuinely populated grid (real rows beyond any placeholder) outranks a coexisting
+  //    empty-state marker — the §8-14 fix. The placeholder row itself is already excluded above.
+  if (realDataRows > 0) {
+    return {
+      readiness: { decision: "READY", rowCountBucket: bucket(realDataRows), reason: "positive_rows" },
+      branch: "data_rows_present",
+    };
+  }
+
+  // 3) No positive evidence → an explicit no-export-target notice is the most specific emptiness.
   if (anyMatch(NO_EXPORT_TARGET_MARKERS, html)) {
     return {
       readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "no_export_target" },
       branch: "no_export_target_marker",
     };
   }
+  // 4) …or a generic empty-state placeholder.
   if (anyMatch(EMPTY_STATE_MARKERS, html)) {
     return {
       readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" },
@@ -202,31 +260,15 @@ export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadine
     };
   }
 
-  // 2) A labeled positive count is strong positive evidence; an explicit 0 is emptiness.
-  const count = parseResultCount(html);
+  // 5) A labeled result-count of exactly 0 is an explicit emptiness statement.
   if (count !== null) {
-    if (count > 0) {
-      return {
-        readiness: { decision: "READY", rowCountBucket: bucket(count), reason: "positive_count" },
-        branch: "labeled_count_positive",
-      };
-    }
     return {
       readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" },
       branch: "labeled_count_zero",
     };
   }
 
-  // 3) Data rows actually present in the static HTML.
-  const dataRows = countDataRows(html);
-  if (dataRows > 0) {
-    return {
-      readiness: { decision: "READY", rowCountBucket: bucket(dataRows), reason: "positive_rows" },
-      branch: "data_rows_present",
-    };
-  }
-
-  // 4) A results container exists but is empty → concretely zero rows.
+  // 6) A results container exists but is empty → concretely zero rows.
   if (anyMatch(RESULTS_CONTAINER_MARKERS, html)) {
     return {
       readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "zero_rows" },
@@ -234,7 +276,7 @@ export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadine
     };
   }
 
-  // 5) Only a POSITIVE required-range instruction with no selected range is date-range-missing.
+  // 7) Only a POSITIVE required-range instruction with no selected range is date-range-missing.
   //    Reuse the existing pre-click range reader rather than re-deriving the heuristic.
   const { selectedRangePresent } = diagnosePreClickSignals(rawHtml);
   if (anyMatch(REQUIRED_RANGE_MARKERS, html) && !selectedRangePresent) {
@@ -244,7 +286,7 @@ export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadine
     };
   }
 
-  // 6) Can't distinguish safely (e.g. SPA rows not in static HTML) → conservative halt, no click.
+  // 8) Can't distinguish safely (e.g. SPA rows not in static HTML) → conservative halt, no click.
   return {
     readiness: { decision: "HALT", state: "EXPORT_TARGET_UNKNOWN", reason: "ambiguous" },
     branch: "ambiguous_no_signal",
