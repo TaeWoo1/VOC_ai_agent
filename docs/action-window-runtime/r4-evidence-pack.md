@@ -381,11 +381,48 @@ and countable **once the SPA has rendered them**. Run 1's live driver most likel
 zero rows at that instant → `EXPORT_TARGET_EMPTY`. The probe read **after** the operator confirmed the list
 was on screen, so it saw the settled DOM. This is a **render-timing** gap, not a row-shape gap.
 
-**Next (not yet done; needs explicit kickoff; still §6 evidence-not-speculation):** an offline readiness
-**wait/timing** slice — before evaluating readiness, wait for the row grid to actually render (row-appearance
-/ network-idle / a bounded settle) and re-evaluate, rather than widening the row counter. A further read-only
-probe (fresh G6) could confirm the timing hypothesis directly (e.g. observe the semantic row count transition
-none → many after render) before any driver change. **No** readiness-gate code was changed by this evidence.
+**Next (DELIVERED offline — see §8-12):** the offline readiness **wait/timing** slice is now implemented —
+before deciding readiness, the live driver waits for the row grid to render (a bounded read-only settle) and
+re-evaluates, rather than widening the row counter. A further read-only probe (fresh G6) to confirm the
+none → many transition on the real surface remains a **future** step (not required for the offline fix).
+**No** readiness-gate (`export-target-readiness.ts`) code was changed.
+
+---
+
+## §8-12 — Readiness render-timing settle (DELIVERED offline; live confirmation pending a fresh G6)
+
+The §8-11 render-timing hypothesis is now addressed **offline**. A NEW pure read-only primitive
+`settleExportSurface` ([`export-surface-settle.ts`](../../collector/src/naver/export-surface-settle.ts)) polls
+the resolved surface frame read-only on a bounded cadence and resolves as soon as the surface **DECIDES**:
+
+- **rows rendered** (readiness `READY`, or a positive labeled count) → proceed;
+- an **EXPLICIT** empty-state / no-export-target marker, or a "select a date range" instruction → halt now
+  (a trustworthy empty — NAVER rendered a real "리뷰가 없습니다" / range prompt, not a mid-hydration blank);
+- a **bare empty container** (`EXPORT_TARGET_EMPTY / zero_rows`) **or** an ambiguous surface → **PENDING**:
+  keep polling. Trusting a bare empty container here is EXACTLY the Run-1 false-positive-empty, so it
+  deliberately does not. At timeout the last observation is returned, so the driver **fails closed honestly**
+  (waited the full window, rows never rendered → halt).
+
+Wired into `NaverLiveProbeDriver.prepareSurface` on a **`LOGGED_IN`** session only (login/reconnect
+interstitials never hydrate into a surface → decided immediately, no wasted window). The shared
+`naverSurfaceDecision` **and** the readiness gate `export-target-readiness.ts` are **unchanged**, so the
+sanitization contract and the fixture driver's single-shot path are byte-identical; only the live driver
+gains the settle. Defaults: an 8 s window / 500 ms cadence, both injectable (with an instant `sleepFn`) for
+hermetic tests.
+
+**Hermetic proof (no browser, no live NAVER):**
+[`export-surface-settle.test.ts`](../../collector/test/naver/export-surface-settle.test.ts) (20 tests) —
+classify mapping across the full readiness union, an empty→rows hydration settling `READY` mid-window, an
+explicit marker halting on check 1 (no polling), a bare-empty/ambiguous surface failing closed only at
+timeout, read-error recovery, and dependency injection; `naver-live-driver.test.ts` (+3 tests) — a surface
+that reads empty then renders rows now settles to `ok` (was `UNSUPPORTED_STATE`), a persistently-empty
+surface still fails closed, and an unusable session decides without polling. `typecheck` clean; offline
+`npx vitest run` **2677 passed / 32 skipped**; no readiness-gate / contract / FE / backend / package change.
+
+**STILL OFFLINE — not live-verified.** This closes the offline half of the §8-11 diagnosis. A live
+confirmation — that the settle actually flips `none → READY` on the real NAVER surface within the window
+(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** and is out of
+scope here. Local commit `b2f3604` (HELD, unpushed).
 
 ---
 
