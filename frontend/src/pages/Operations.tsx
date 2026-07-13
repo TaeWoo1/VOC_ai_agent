@@ -31,7 +31,10 @@ import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { OperationRunTimeline } from "../components/actionWindow/OperationRunTimeline";
-import { HumanCheckpointCard } from "../components/actionWindow/HumanCheckpointCard";
+import {
+  HumanCheckpointCard,
+  CHECKPOINT_COMMANDS,
+} from "../components/actionWindow/HumanCheckpointCard";
 import { ActionWindowControlPanel } from "../components/actionWindow/ActionWindowControlPanel";
 import { CompletedResult } from "../components/actionWindow/CompletedResult";
 import { BlockerNotice } from "../components/actionWindow/BlockerNotice";
@@ -65,7 +68,7 @@ function RunProgressBar({
     <span className="flex items-center gap-2">
       <span
         role="progressbar"
-        aria-label="진행 단계"
+        aria-label="단계 진행률"
         aria-valuemin={0}
         aria-valuemax={totalSteps}
         aria-valuenow={completedSteps}
@@ -97,6 +100,15 @@ export function Operations() {
   }
 
   const blocker = run?.blocker ? blockerView(run.blocker.code) : undefined;
+
+  // Dedup: when the human-checkpoint card is shown it already renders the recheck /
+  // switch-to-manual actions, so the action rail omits those (and hides entirely if
+  // nothing else remains) — no command is offered twice on the same screen.
+  const checkpointShown = !!run && connected && run.status === "WAITING_FOR_HUMAN";
+  const railControlCommands = run
+    ? run.allowedCommands.filter((t) => !(checkpointShown && CHECKPOINT_COMMANDS.includes(t)))
+    : [];
+  const showControlPanel = connected && (checkpointShown ? railControlCommands.length > 0 : true);
 
   return (
     <div className="flex flex-col gap-4">
@@ -237,13 +249,18 @@ export function Operations() {
             </>
           }
           rail={
-            connected || canStartNewRun(run) ? (
+            showControlPanel || canStartNewRun(run) ? (
               <>
                 {/* Interactive controls are desktop-only; mobile stays read-only; all
-                    commands are suppressed while the source is offline/reconnecting. */}
-                {connected ? (
+                    commands are suppressed while offline. Checkpoint actions are
+                    excluded here while the checkpoint card renders them. */}
+                {showControlPanel ? (
                   <div className="hidden sm:block">
-                    <ActionWindowControlPanel run={run} onCommand={handleCommand} />
+                    <ActionWindowControlPanel
+                      run={run}
+                      onCommand={handleCommand}
+                      exclude={checkpointShown ? CHECKPOINT_COMMANDS : undefined}
+                    />
                   </div>
                 ) : null}
 

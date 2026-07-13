@@ -29,10 +29,10 @@ vi.mock("../lib/actionWindow/bridgeSource", async (importOriginal) => ({
 }));
 
 import { Operations } from "./Operations";
-import { renderWithRouter, screen, waitFor, userEvent } from "../test/renderWithRouter";
+import { renderWithRouter, screen, within, waitFor, userEvent } from "../test/renderWithRouter";
 import { resetOps, seedRun, seedBridge, seedBridgeRun } from "../test/opsStoreHarness";
 import { UI_SCENARIOS } from "../lib/actionWindow/fixtures";
-import { CONNECTION_VIEW } from "../lib/actionWindow/copy";
+import { CONNECTION_VIEW, commandLabel } from "../lib/actionWindow/copy";
 
 const CHECKPOINT = "확인이 필요한 작업"; // HumanCheckpointCard section
 const CONTROLS = "가능한 동작"; // ActionWindowControlPanel section
@@ -68,6 +68,22 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
     // connected → no resilience banner (neither offline nor reconnecting copy)
     expect(screen.queryByText(OFFLINE_BANNER)).toBeNull();
     expect(screen.queryByText(RECONNECTING_BANNER)).toBeNull();
+  });
+
+  it("checkpoint dedup: the recheck action renders once (checkpoint card), not again in the rail", () => {
+    seedRun("human-action-required"); // WAITING_FOR_HUMAN, allows recheck + manual + guidance + cancel
+    renderWithRouter(<Operations />);
+    const recheck = commandLabel("REQUEST_STEP_RECHECK");
+    // Exactly one recheck button on the whole page (the checkpoint card's).
+    expect(screen.getAllByRole("button", { name: recheck })).toHaveLength(1);
+    const checkpoint = screen.getByRole("region", { name: CHECKPOINT });
+    const controls = screen.getByRole("region", { name: CONTROLS });
+    expect(within(checkpoint).getByRole("button", { name: recheck })).toBeInTheDocument();
+    expect(within(controls).queryByRole("button", { name: recheck })).toBeNull();
+    // The rail still surfaces the non-checkpoint commands (e.g. cancel).
+    expect(
+      within(controls).getByRole("button", { name: commandLabel("CANCEL_RUN") }),
+    ).toBeInTheDocument();
   });
 
   it("connected idle (no run): shows the start region", () => {

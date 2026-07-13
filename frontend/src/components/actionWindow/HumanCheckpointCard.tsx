@@ -9,6 +9,13 @@ import {
 import { BlockerNotice } from "./BlockerNotice";
 
 /**
+ * The commands the checkpoint card surfaces itself (recheck + switch-to-manual).
+ * The run-detail action rail excludes these while the checkpoint is shown so they
+ * are never offered twice. Keep in sync with the buttons rendered below.
+ */
+export const CHECKPOINT_COMMANDS: CommandType[] = ["REQUEST_STEP_RECHECK", "SWITCH_TO_MANUAL"];
+
+/**
  * Human Checkpoint card — shown when the run is waiting on the person. The user
  * performs the action on the real marketplace page; pressing "확인 완료" sends
  * REQUEST_STEP_RECHECK (Runtime then verifies). It NEVER marks the step complete
