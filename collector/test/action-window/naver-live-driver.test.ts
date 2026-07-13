@@ -72,14 +72,25 @@ function fakePageWithFrames(
   } as unknown as Page;
 }
 
+/**
+ * Fast, deterministic readiness-settle defaults for the hermetic driver tests: an INSTANT sleep and a
+ * 2-check window, so a still-hydrating (pending) fixture resolves in microtasks instead of the live
+ * ~8s poll. Individual tests override these to exercise multi-cycle hydration.
+ */
+const FAST_SETTLE: Partial<NaverLiveProbeDriverOptions> = {
+  readinessSettleTimeoutMs: 40,
+  readinessSettleIntervalMs: 20,
+  sleepFn: () => Promise.resolve(),
+};
+
 function driverForPage(page: Page, opts: Partial<NaverLiveProbeDriverOptions> = {}): NaverLiveProbeDriver {
-  return new NaverLiveProbeDriver(page, { quarantineDir: "/tmp/unused", ingest: neverIngest, ...opts });
+  return new NaverLiveProbeDriver(page, { quarantineDir: "/tmp/unused", ingest: neverIngest, ...FAST_SETTLE, ...opts });
 }
 
 const neverIngest: AwIngestUploadFn = () => Promise.resolve({ ok: false, processed: 0 });
 
 function driverFor(url: string, html: string, opts: Partial<NaverLiveProbeDriverOptions> = {}): NaverLiveProbeDriver {
-  return new NaverLiveProbeDriver(fakePage(url, html), { quarantineDir: "/tmp/unused", ingest: neverIngest, ...opts });
+  return new NaverLiveProbeDriver(fakePage(url, html), { quarantineDir: "/tmp/unused", ingest: neverIngest, ...FAST_SETTLE, ...opts });
 }
 
 // --- surface fixtures (TEST inputs only; the driver never emits any of this) ---------------------
@@ -192,6 +203,61 @@ describe("NaverLiveProbeDriver — frame-aware surface resolution (iframe / SPA 
     // The NAME_SHIM + in-page tagger both ran in the CHILD frame; the top document was never touched.
     expect(childCalls).toEqual(["shim", "fn"]);
     expect(mainCalls).toEqual([]);
+  });
+});
+
+// --- readiness SETTLE: the review grid renders client-side AFTER we reach the surface (§8-11) --------
+/**
+ * A page whose surface frame HYDRATES: `content()` yields each html in `seq` in turn (the last value
+ * repeats), so the same read-only frame reads empty first and then rows — modelling a NAVER SPA that
+ * renders the review grid a beat after the driver arrives. `page.content()` returns a STABLE logged-in
+ * shell so the §8-4 session verdict is fixed while the surface settles.
+ */
+function hydratingPage(url: string, shellHtml: string, seq: string[]): Page {
+  let i = 0;
+  const nextHtml = (): string => {
+    const html = seq[Math.min(i, seq.length - 1)] ?? "";
+    i += 1;
+    return html;
+  };
+  const frame = {
+    url: () => url,
+    content: () => Promise.resolve(nextHtml()),
+    evaluate: (body: unknown) => Promise.resolve(typeof body === "string" ? undefined : 1),
+    waitForFunction: () => Promise.resolve(undefined),
+  } as unknown as Frame;
+  return {
+    url: () => url,
+    content: () => Promise.resolve(shellHtml),
+    mainFrame: () => frame,
+    frames: () => [frame],
+  } as unknown as Page;
+}
+
+describe("NaverLiveProbeDriver — prepareSurface readiness settle (render-timing fix, §8-11)", () => {
+  it("a surface that reads EMPTY first then renders rows settles to READY (no false-positive-empty)", async () => {
+    // The exact Run-1 shape: a bare empty container on arrival (would have failed closed single-shot),
+    // then the grid hydrates. The settle poll re-reads read-only and proceeds once rows render.
+    const page = hydratingPage(SELLER_URL, SHELL_LOGGED_IN, [FRAME_GRID_EMPTY, FRAME_GRID_READY]);
+    const driver = driverForPage(page);
+    expect(await driver.prepareSurface()).toEqual({ ok: true });
+    expect(driver.prepareDiagnostic()).toMatchObject({ verdict: "LOGGED_IN", readinessDecision: "READY" });
+  });
+
+  it("a surface that stays a bare empty container through the window still fails closed → UNSUPPORTED_STATE", async () => {
+    // Rows never render: the settle polls to timeout and halts on the last (zero-rows) observation.
+    const page = hydratingPage(SELLER_URL, SHELL_LOGGED_IN, [FRAME_GRID_EMPTY]);
+    const driver = driverForPage(page);
+    expect(await driver.prepareSurface()).toEqual({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    expect(driver.prepareDiagnostic()).toMatchObject({ verdict: "LOGGED_IN", readinessState: "EXPORT_TARGET_EMPTY" });
+  });
+
+  it("does NOT poll when the session itself is unusable — a login page decides immediately", async () => {
+    // A non-LOGGED_IN verdict never hydrates into a surface; settle is skipped (would waste the window).
+    // The 2nd sequence value is rows, but it is never read because the login verdict short-circuits.
+    const page = hydratingPage(LOGIN_URL, LOGIN_PAGE, [LOGIN_PAGE, FRAME_GRID_READY]);
+    const driver = driverForPage(page);
+    expect(await driver.prepareSurface()).toEqual({ ok: false, blockerCode: "LOGIN_REQUIRED" });
   });
 });
 
