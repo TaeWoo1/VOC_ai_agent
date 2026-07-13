@@ -9,11 +9,15 @@ import { commandLabel, SECTION_TITLE } from "../../lib/actionWindow/copy";
 export function ActionWindowControlPanel({
   run,
   onCommand,
+  exclude = [],
 }: {
   run: ActionWindowRunView;
   onCommand: (type: CommandType) => void;
+  /** Commands to omit here because another surface already renders them (e.g. the
+   *  checkpoint card). Still a subset of `allowedCommands` — nothing is invented. */
+  exclude?: CommandType[];
 }) {
-  const commands = run.allowedCommands;
+  const commands = run.allowedCommands.filter((type) => !exclude.includes(type));
   // Keep the destructive command (cancel) out of the normal action row so it can
   // never be tapped by reflex alongside benign commands.
   const normal = commands.filter((type) => type !== "CANCEL_RUN");
