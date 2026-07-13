@@ -183,15 +183,17 @@ verified seam — the adapter is composition, not new invention:
 - ☑ **Surface probe** — confirm the export surface read-only (reuse: frame-aware export probe
   patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`). *(Green on the NAVER fixture — §8-2;
   the live driver's readiness gate (empty/ambiguous → `UNSUPPORTED_STATE`) is proven hermetically —
-  PR #242. **Render-timing gap STILL OPEN — the settle fix did NOT close it live (walked back 2026-07-14).**
-  The Run-1 `UNSUPPORTED_STATE` false-positive-empty was hypothesised as a render-timing miss; a bounded
-  read-only settle (`settleExportSurface`, PR #250, §8-12) was added so `prepareSurface` waits for rows to
-  render before deciding, and it is green offline. **But live Run 2 (§8-13, observe-only) reproduced Run 1's
-  `UNSUPPORTED_STATE` at `prepareSurface` — the settle is refuted as the fix.** Leading (unproven) cause: the
-  gate checks empty-state markers **before** counting rows, and the settle trusts a marker as a halt, so a
-  hidden empty phrase halts regardless of rendered rows (§8-13). The settle stays a valid offline robustness
-  primitive; the live gap is **not** closed. Next: a read-only probe of the live `evaluateExportTargetReadiness`
-  **decision/reason** before any gate change (§6 evidence-not-speculation).)*
+  PR #242. **ROOT CAUSE CONFIRMED (2026-07-14, §8-14): empty-state-marker precedence — NOT a render-timing
+  gap.** The Run-1 `UNSUPPORTED_STATE` was first hypothesised as a render-timing miss; a bounded read-only
+  settle (`settleExportSurface`, PR #250, §8-12) was added and is green offline, **but live Run 2 (§8-13,
+  observe-only) reproduced the failure — the settle is refuted as the fix.** The read-only readiness-branch
+  probe (§8-14) then observed the live cause directly: on the export-surface frame the gate HALTs at
+  `empty_state_marker` (rung 1) **while its own `semanticRowCount` is `many`** — a "no results" placeholder
+  coexists with a fully populated grid and the marker precedence masks a would-be-`READY / positive_rows`
+  surface (rung 3). The surface was never row-empty, which is why the settle could not help. **Fix
+  (offline slice, not yet started):** make positive row/count evidence outrank the empty-state marker (or
+  require the marker node to be the *visible* state); design + hermetic tests, then re-verify live under a
+  fresh G6. The settle stays a general robustness primitive; it is not this fix.)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are

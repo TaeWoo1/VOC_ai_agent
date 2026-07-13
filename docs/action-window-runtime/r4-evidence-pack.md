@@ -464,6 +464,54 @@ likely wrong.
 Only then correct the gate/settle from that evidence. Requires an offline probe extension + a fresh
 read-only G6.
 
+> **✔ RESOLVED (2026-07-14, §8-14).** That probe ran. The leading hypothesis above is **CONFIRMED**: the
+> live surface HALTed at `empty_state_marker` while its own `semanticRowCount` was `many` — a marker masks a
+> populated grid. See §8-14 for the sanitized evidence and the evidence-based fix direction.
+
+---
+
+## §8-14 — Read-only readiness-branch probe (Run-2 cause) — EXECUTED 2026-07-14 · ROOT CAUSE CONFIRMED
+
+**The probe from §8-13's "Next" ran** under a fresh read-only G3 lift + single-use G6 (dispatch record:
+[`r4-readiness-branch-probe-dispatch-record.md`](r4-readiness-branch-probe-dispatch-record.md)). It uses the
+readiness-branch instrumentation (commit `fa5c931`): the read-only frame-aware probe now emits, per frame,
+the gate's verbatim `readiness` (decision / state / reason) **plus `readinessBranch`** (which precedence rung
+fired). The seller logged in and reached the review-export surface with the list rendered; the probe read the
+top document + every child frame once and emitted sanitized signals. `sessionVerdict: LOGGED_IN`.
+
+- **Export-surface frame** (top document — the frame with the visible + enabled export candidate,
+  `exportCandidateCount: one`, `excelLike`/`downloadLike` true):
+  - `readinessBranch: empty_state_marker`
+  - `readiness: HALT · EXPORT_TARGET_EMPTY · empty_state`
+  - `semanticRowCount: many` · `dataRowLikeCount: many`
+- **Child frame (`other`):** a non-export utility frame — no candidates, `readinessBranch:
+  ambiguous_no_signal`. Not the surface.
+
+**Finding — CONFIRMED root cause: `empty_state_marker` precedence.** The gate's own row counter sees `many`
+rows on the surface frame (rung 3 would return `READY / positive_rows`) but **never reaches rung 3**: rung 1's
+empty-state marker short-circuits and HALTs. A "no results"-style placeholder coexists in the DOM with a
+**fully populated** review grid, and the marker precedence wrongly outranks the positive row evidence. This is
+the Run-1 (§8-8) and Run-2 (§8-13) `UNSUPPORTED_STATE` cause, now observed live.
+
+**Competing explanations ruled out by the same read:**
+- NOT div-grid / virtualized rows the gate can't count — `semanticRowCount` is `many`, not `none`.
+- NOT a frame-resolution bug — the surface frame IS the top document and carries both the rows and the
+  candidate.
+- NOT the render-timing gap — the surface was never row-empty, which is exactly why the settle (§8-13) could
+  not fix it: it waited for rows that were already present while a marker masked them.
+
+**Non-mutation:** read-only frame reads only; no click / download / validate / ingest / backend / DB / status
+/ `LAST_SUCCESS`. Clean teardown (sentinel auto-removed, `.status/` empty, no `downloads/`, context closed,
+git clean). G6 consumed.
+
+**Next (evidence-based offline slice — NOT a speculative patch, per §6).** Correct
+`evaluateExportTargetReadiness` so positive row/count evidence **outranks** the empty-state marker: either
+move the row/labeled-count checks ahead of the marker rung, or require the empty-state node to be the
+**visible** state (the placeholder is almost certainly present-but-hidden while the grid is populated — a
+common SPA pattern). Design + hermetic tests offline (incl. a marker-coexists-with-populated-grid fixture,
+the exact live shape), then re-verify live under a fresh G6. The settle stays a general robustness primitive
+but is not this fix.
+
 ---
 
 ## Readiness summary
