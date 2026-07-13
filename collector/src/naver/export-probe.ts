@@ -69,6 +69,13 @@ export interface SanitizedExportProbeSignals {
   downloadAttributeCount: CountBucket;
   dateInputCount: CountBucket;
   tableGridListCount: CountBucket;
+  // Row-shape signals — the diagnostic pair for the Run-1 false-positive-empty finding.
+  // `semanticRowCount` mirrors EXACTLY what the readiness gate's `countDataRows` sees
+  // (`<tbody><tr>` + `role="row"`); `dataRowLikeCount` is a strict superset that also
+  // counts div-based / virtualized / ARIA-attribute grid rows the readiness counter
+  // misses. A gap (semantic `none`, dataRowLike `some`/`many`) is a false-positive-empty.
+  semanticRowCount: CountBucket;
+  dataRowLikeCount: CountBucket;
   // Generic export-intent keyword categories (presence only; never the matched text).
   excelLike: boolean;
   downloadLike: boolean;
@@ -96,6 +103,8 @@ export const SANITIZED_EXPORT_PROBE_KEYS: ReadonlyArray<keyof SanitizedExportPro
   "downloadAttributeCount",
   "dateInputCount",
   "tableGridListCount",
+  "semanticRowCount",
+  "dataRowLikeCount",
   "excelLike",
   "downloadLike",
   "exportLike",
@@ -129,6 +138,22 @@ const DOWNLOAD_ATTR_RE = /\sdownload(?=[\s=>/])/gi;
 const DATE_INPUT_RE = /type=["']date["']|date[-_]?picker|calendar|달력|날짜\s*선택/gi;
 const TABLE_GRID_LIST_RE = /<table\b|role=["'](?:grid|table|row|list)["']|<ul\b|<ol\b/gi;
 
+// --- row-shape markers (drive only bucketed counts; matched text is never returned) ---
+// Semantic rows — exactly what the readiness gate's `countDataRows` counts.
+const TBODY_BLOCK_RE = /<tbody\b[^>]*>([\s\S]*?)<\/tbody>/gi;
+const TR_RE = /<tr[\s>]/gi;
+const ROLE_ROW_RE = /role=["']row["']/gi;
+const ROLE_COLHEADER_RE = /role=["']columnheader["']/gi;
+// Broad div-grid / virtualized row estimators (each ≈ one row; used via MAX, not summed,
+// so a row carrying several markers is not double-counted). Deliberately targeted to
+// data-row semantics — bare layout utilities like `flex-row` are excluded to avoid
+// inflating the count on every page.
+const ARIA_ROWINDEX_RE = /\baria-rowindex\s*=/gi;
+const DATA_ROW_ATTR_RE = /\bdata-(?:row-?key|row-?index|rowindex|row-?id|rowid|index)\s*=/gi;
+const ROLE_LISTITEM_RE = /role=["']listitem["']/gi;
+const ROW_CLASS_RE =
+  /class\s*=\s*["'][^"']*(?:list[-_]?item|table[-_]?row|grid[-_]?row|data[-_]?row|row[-_]?item|__row\b|--row\b)[^"']*["']/gi;
+
 const anyMatch = (markers: RegExp[], html: string): boolean => markers.some((re) => re.test(html));
 const countMatches = (re: RegExp, html: string): number => (html.match(re) ?? []).length;
 
@@ -143,6 +168,40 @@ function bucket(n: number): CountBucket {
 function optionalBucket(n?: number): OptionalCountBucket {
   if (n === undefined || n < 0) return "unknown";
   return bucket(n);
+}
+
+/**
+ * Pure: count SEMANTIC data rows — the exact shape the readiness gate's `countDataRows`
+ * sees (`<tbody><tr>` + `role="row"` minus a header row). Kept structurally identical so
+ * the probe's `semanticRowCount` bucket faithfully reflects what the gate would count.
+ */
+function countSemanticRows(html: string): number {
+  let bodyRows = 0;
+  for (const block of html.matchAll(TBODY_BLOCK_RE)) {
+    bodyRows += countMatches(TR_RE, block[1] ?? "");
+  }
+  const roleRows = countMatches(ROLE_ROW_RE, html);
+  const headerRows = countMatches(ROLE_COLHEADER_RE, html) > 0 ? 1 : 0;
+  return bodyRows + Math.max(0, roleRows - headerRows);
+}
+
+/**
+ * Pure: broad "data-row-like" estimate — a strict SUPERSET of `countSemanticRows` that
+ * also recognizes div-based / virtualized / ARIA-attribute grid rows (the shape the Run-1
+ * probe confirmed NAVER renders and the readiness gate misses). Each estimator independently
+ * approximates the row count; we take the MAX (not the sum) so a single row carrying several
+ * markers is not double-counted, and the result is `>= countSemanticRows` by construction.
+ * Observational only — this signal informs a later readiness correction; it does not itself
+ * decide anything (per collector §6, correct the gate from observed findings, never guess-tune).
+ */
+function countDataRowLike(html: string): number {
+  return Math.max(
+    countSemanticRows(html),
+    countMatches(ARIA_ROWINDEX_RE, html),
+    countMatches(DATA_ROW_ATTR_RE, html),
+    countMatches(ROLE_LISTITEM_RE, html),
+    countMatches(ROW_CLASS_RE, html),
+  );
 }
 
 /** Categorize live frame URLs, dedupe, and sort — order-independent, sanitized. */
@@ -177,6 +236,8 @@ export function extractExportProbeSignals(input: RawExportProbeInput): Sanitized
     downloadAttributeCount: bucket(countMatches(DOWNLOAD_ATTR_RE, html)),
     dateInputCount: bucket(countMatches(DATE_INPUT_RE, html)),
     tableGridListCount: bucket(countMatches(TABLE_GRID_LIST_RE, html)),
+    semanticRowCount: bucket(countSemanticRows(html)),
+    dataRowLikeCount: bucket(countDataRowLike(html)),
     excelLike: anyMatch(EXCEL_MARKERS, html),
     downloadLike: anyMatch(DOWNLOAD_MARKERS, html),
     exportLike: anyMatch(EXPORT_MARKERS, html),
