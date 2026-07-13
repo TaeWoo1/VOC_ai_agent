@@ -183,7 +183,15 @@ verified seam — the adapter is composition, not new invention:
 - ☑ **Surface probe** — confirm the export surface read-only (reuse: frame-aware export probe
   patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`). *(Green on the NAVER fixture — §8-2;
   the live driver's readiness gate (empty/ambiguous → `UNSUPPORTED_STATE`) is proven hermetically —
-  PR #242.)*
+  PR #242. **Render-timing gap CLOSED (offline).** The Run-1 `UNSUPPORTED_STATE` false-positive-empty —
+  readiness read on a single snapshot **before** NAVER's SPA rendered the review grid — was refuted as a
+  row-shape miss by the read-only row-shape probe (both row estimators `many`, zero gap; §8-10/§8-11) and
+  pinned to **render timing**; `prepareSurface` now waits (a bounded read-only settle) for rows to render,
+  or for an **explicit** empty-state / no-export-target / date-range marker to appear, **before** deciding
+  readiness — a still-hydrating bare container is never mistaken for empty, and a genuinely-empty surface
+  still fails closed at timeout (`settleExportSurface`, PR #250, §8-12). The readiness gate itself is
+  unchanged. **Still offline / not live-verified** — a live confirmation that the settle flips
+  `none → READY` on the real surface within the window needs a fresh export-scoped §3 G6.)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are
