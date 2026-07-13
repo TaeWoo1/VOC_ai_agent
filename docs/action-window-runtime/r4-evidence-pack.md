@@ -251,6 +251,13 @@ frame only. `npm test` **2646 passed / 32 skipped**, typecheck clean. **The top-
 only — confirming it against the REAL NAVER frame structure still needs the read-only frame-aware probe
 (or the export re-run) under a **fresh G3-export + G6**.
 
+> **⚠ CORRECTION (2026-07-13, §8-10) — the frame-aware fix does NOT address Run 1.** The read-only
+> frame-aware probe (§8-10) **refuted** the child-frame hypothesis: NAVER's review grid **and** the single
+> visible+enabled export control render in the **top document**; the one child frame is unrelated. So the
+> readiness read was on the right document all along. `e2be2e0` remains a valid **general** robustness
+> improvement (multi-frame surfaces do occur), but it is **not** the fix for the Run-1 `UNSUPPORTED_STATE`.
+> The actual cause is a **false-positive empty readiness verdict** — see §8-10.
+
 ---
 
 ## §8-9 — Live-entrypoint assembly integration test (DELIVERED offline; execution pending approval)
@@ -284,6 +291,138 @@ highlighted synthetic "엑셀 다운로드" once — the click was **observed** 
 → detect → quarantine validate → injected-fake ingest → **COMPLETED**, Operation Run **persisted TERMINAL**,
 `findProhibitedFields == []` clean. **No live NAVER, no network, no
 backend.**
+
+---
+
+## §8-10 — Read-only frame-aware surface probe (Run-1 diagnosis) — EXECUTED 2026-07-13
+
+**The read-only frame-aware probe (`probe-export-same-session`) ran once on 2026-07-13** under an
+in-session read-only-scoped G6 ([`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md); operator (PO)),
+to diagnose the Run-1 `UNSUPPORTED_STATE` (§8-8). Structurally read-only: **no click / export / download /
+status write** (source-guarded); the seller logged in and reached the review-management export surface, then
+signalled readiness; the probe read sanitized per-frame signals over the top document + every child frame.
+Clean teardown (process exited, sentinel removed, `downloads/` + quarantine empty). Sanitized result
+(enums/booleans/coarse buckets only — no URL, content, selector, or count):
+
+- **Session:** `sessionVerdict: LOGGED_IN`. **Frames:** `frameCount: few`, one child frame.
+- **Top document** (`urlCategory: seller-center`, `reviewRouteLike: true`): **`exportCandidateCount: one`,
+  `visibleExportCandidateCount: one`, `enabledExportCandidateCount: one`** — the single export control is
+  in the top document, visible + enabled. `tableGridListCount: many`, `dateInputCount: some`,
+  `excelLike: true`, `downloadLike: true`, `iframeCount: one`, `shadowRootHostCount: none`.
+- **The one child frame:** `frameUrlCategory: other`, every export/grid/review signal `none`/`false` —
+  an **unrelated** frame (not the review surface).
+
+**Finding — the child-frame hypothesis is REFUTED.** The review grid + export control are in the **top
+document**, not a child frame. The frame-aware fix `e2be2e0` therefore does **not** address Run 1 (it stays
+a valid general robustness improvement; see the §8-8 correction).
+
+**Root cause of Run 1 — a FALSE-POSITIVE empty readiness verdict (operator-confirmed).** The operator
+confirmed **review rows were visibly listed on screen**, yet `evaluateExportTargetReadiness` halted. Its
+`countDataRows` matches **only** `<tbody><tr>` + `role="row"` and found zero — so NAVER's visible rows are
+**neither** (a div-based / virtualized grid the counter doesn't recognize), while grid containers *are*
+present (`tableGridListCount: many`). Readiness returned `EXPORT_TARGET_EMPTY (zero_rows)` /
+`EXPORT_TARGET_UNKNOWN` → `UNSUPPORTED_STATE`, despite real exportable rows. This is the Milestone-D
+"false-positive empty on a hidden/SPA grid" family, now pinned to the **row-shape recognition** in the
+readiness gate — **not** frames, not session.
+
+**Next (not yet done; §6 forbids speculative marker tuning — correct from evidence only):** (1) offline —
+extend the sanitized probe with a coarse **data-row-like** signal recognizing more row structures
+(`role="row"` / grouped `role="gridcell"` / repeated row-children under a grid/list container), distinct
+from `tableGridListCount`; (2) one read-only live probe (fresh G6) to identify NAVER's actual row shape;
+(3) offline — correct `export-target-readiness.ts` row detection from that observed shape. **Design choice
+(PO decision):** alternatively **relax** the readiness gate (accept a visible+enabled export control + grid
+container as READY and rely on the existing download-detection fail-closed for a genuinely-empty click).
+The read-only G6 for this probe is **consumed**; any further live contact needs a fresh G6.
+
+> **⚠ CORRECTION (2026-07-13, §8-11) — the row-shape-miss root cause is REFUTED.** The offline
+> **data-row-like** signal from step (1) was implemented (commit `802f0a0`) and the read-only row-shape probe
+> from step (2) was run (§8-11). It found `semanticRowCount: many` **and** `dataRowLikeCount: many` on the
+> top document — **zero gap**. `countDataRows` (which `semanticRowCount` mirrors exactly) **would** have
+> counted rows at that moment, so Run 1's empty verdict was **not** a div/virtualized row-shape the counter
+> misses. The diagnosis widens to a **render-timing** issue — see §8-11. Step (3) (correct row detection) is
+> therefore **not** the Run-1 fix.
+
+---
+
+## §8-11 — Read-only row-shape probe (Run-1 row-shape hypothesis) — EXECUTED 2026-07-13 · hypothesis REFUTED
+
+**The read-only frame-aware probe (`probe-export-same-session`, unchanged CLI) ran once on 2026-07-13** under
+a **fresh in-session read-only-scoped G6** (now consumed;
+[`r4-rowshape-probe-dispatch-record.md`](r4-rowshape-probe-dispatch-record.md); operator (PO)), to measure the
+row-shape gap the §8-10 "false-positive-empty" diagnosis predicted. The probe now emits two additional
+sanitized signals (commit `802f0a0`): **`semanticRowCount`** (a coarse bucket that mirrors the readiness
+gate's `countDataRows` — `<tbody><tr>` / `role="row"` only) and **`dataRowLikeCount`** (a **superset** also
+recognizing `aria-rowindex`, `data-row*` attrs, `role="listitem"`, and row/list-item class tokens). A **gap**
+(`semanticRowCount` low, `dataRowLikeCount` high) would have confirmed a div/virtualized row shape the gate
+misses. Structurally read-only (**no click / export / download / status write**, source-guarded); the seller
+logged in and reached the review-management export surface with the review list rendered on screen, then
+signalled readiness. Clean teardown (process exited, sentinel removed, `downloads/` + quarantine empty).
+Sanitized result (enums/booleans/coarse buckets only — no URL, content, selector, or count):
+
+- **Session:** `sessionVerdict: LOGGED_IN`. **Frames:** `frameCount: few`, one child frame.
+- **Top document** (`urlCategory: seller-center`): **`semanticRowCount: many`** and **`dataRowLikeCount: many`
+  — a ZERO gap.** Both row estimators saw many rows. Context (consistent with §8-10): `tableGridListCount:
+  many`, `exportCandidateCount: one` / visible `one` / enabled `one`, `dateInputCount: some`,
+  `downloadAttributeCount: none`, `shadowRootHostCount: none`, `excelLike/downloadLike/reviewLike/searchLike:
+  true`.
+- **The one child frame:** `frameUrlCategory: other`, row signals `none`/`none` — the same **unrelated** frame
+  as §8-10.
+
+**Finding — the row-shape-miss hypothesis is REFUTED.** Because `semanticRowCount` mirrors `countDataRows`
+exactly and it read **`many`**, the readiness gate **would have counted rows at this moment** — it would have
+returned READY, not `EXPORT_TARGET_EMPTY`. So Run 1's false-positive-empty was **not** caused by NAVER
+rendering div-based / virtualized rows the counter can't see (the §8-10 root cause). The offline row-shape
+signal (`802f0a0`) stays a **valid general robustness signal** — and it is exactly what let us measure and
+**refute** this hypothesis — but, echoing the §8-8 frame-fix correction, it is **not** the Run-1 fix target.
+
+**Widened diagnosis — a readiness TIMING issue (leading hypothesis, not yet proven).** The rows are semantic
+and countable **once the SPA has rendered them**. Run 1's live driver most likely evaluated
+`evaluateExportTargetReadiness` on the surface HTML **before** the client-side grid finished rendering →
+zero rows at that instant → `EXPORT_TARGET_EMPTY`. The probe read **after** the operator confirmed the list
+was on screen, so it saw the settled DOM. This is a **render-timing** gap, not a row-shape gap.
+
+**Next (DELIVERED offline — see §8-12):** the offline readiness **wait/timing** slice is now implemented —
+before deciding readiness, the live driver waits for the row grid to render (a bounded read-only settle) and
+re-evaluates, rather than widening the row counter. A further read-only probe (fresh G6) to confirm the
+none → many transition on the real surface remains a **future** step (not required for the offline fix).
+**No** readiness-gate (`export-target-readiness.ts`) code was changed.
+
+---
+
+## §8-12 — Readiness render-timing settle (DELIVERED offline; live confirmation pending a fresh G6)
+
+The §8-11 render-timing hypothesis is now addressed **offline**. A NEW pure read-only primitive
+`settleExportSurface` ([`export-surface-settle.ts`](../../collector/src/naver/export-surface-settle.ts)) polls
+the resolved surface frame read-only on a bounded cadence and resolves as soon as the surface **DECIDES**:
+
+- **rows rendered** (readiness `READY`, or a positive labeled count) → proceed;
+- an **EXPLICIT** empty-state / no-export-target marker, or a "select a date range" instruction → halt now
+  (a trustworthy empty — NAVER rendered a real "리뷰가 없습니다" / range prompt, not a mid-hydration blank);
+- a **bare empty container** (`EXPORT_TARGET_EMPTY / zero_rows`) **or** an ambiguous surface → **PENDING**:
+  keep polling. Trusting a bare empty container here is EXACTLY the Run-1 false-positive-empty, so it
+  deliberately does not. At timeout the last observation is returned, so the driver **fails closed honestly**
+  (waited the full window, rows never rendered → halt).
+
+Wired into `NaverLiveProbeDriver.prepareSurface` on a **`LOGGED_IN`** session only (login/reconnect
+interstitials never hydrate into a surface → decided immediately, no wasted window). The shared
+`naverSurfaceDecision` **and** the readiness gate `export-target-readiness.ts` are **unchanged**, so the
+sanitization contract and the fixture driver's single-shot path are byte-identical; only the live driver
+gains the settle. Defaults: an 8 s window / 500 ms cadence, both injectable (with an instant `sleepFn`) for
+hermetic tests.
+
+**Hermetic proof (no browser, no live NAVER):**
+[`export-surface-settle.test.ts`](../../collector/test/naver/export-surface-settle.test.ts) (20 tests) —
+classify mapping across the full readiness union, an empty→rows hydration settling `READY` mid-window, an
+explicit marker halting on check 1 (no polling), a bare-empty/ambiguous surface failing closed only at
+timeout, read-error recovery, and dependency injection; `naver-live-driver.test.ts` (+3 tests) — a surface
+that reads empty then renders rows now settles to `ok` (was `UNSUPPORTED_STATE`), a persistently-empty
+surface still fails closed, and an unusable session decides without polling. `typecheck` clean; offline
+`npx vitest run` **2677 passed / 32 skipped**; no readiness-gate / contract / FE / backend / package change.
+
+**STILL OFFLINE — not live-verified.** This closes the offline half of the §8-11 diagnosis. A live
+confirmation — that the settle actually flips `none → READY` on the real NAVER surface within the window
+(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** and is out of
+scope here. Local commit `b2f3604` (HELD, unpushed).
 
 ---
 

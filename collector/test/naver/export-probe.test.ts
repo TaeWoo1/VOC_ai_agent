@@ -45,6 +45,8 @@ const ALLOWED_VALUES: Record<string, ReadonlyArray<unknown> | "number" | "boolea
   downloadAttributeCount: COUNT_BUCKETS,
   dateInputCount: COUNT_BUCKETS,
   tableGridListCount: COUNT_BUCKETS,
+  semanticRowCount: COUNT_BUCKETS,
+  dataRowLikeCount: COUNT_BUCKETS,
   excelLike: "boolean",
   downloadLike: "boolean",
   exportLike: "boolean",
@@ -182,6 +184,71 @@ describe("extractExportProbeSignals — count bucketing", () => {
     expect(make(4).buttonCount).toBe("few");
     expect(make(12).buttonCount).toBe("some");
     expect(make(30).buttonCount).toBe("many");
+  });
+});
+
+describe("extractExportProbeSignals — row-shape signal (Run-1 false-positive-empty diagnostic)", () => {
+  const rows = (n: number, one: string): string => one.repeat(n);
+  const probe = (html: string) => extractExportProbeSignals({ url: SELLER_URL, html });
+
+  it("semantic <tbody><tr> rows are counted by BOTH signals", () => {
+    const html = `<table><tbody>${rows(4, "<tr><td>x</td></tr>")}</tbody></table>`;
+    const s = probe(html);
+    expect(s.semanticRowCount).toBe("few"); // 4 body rows
+    expect(s.dataRowLikeCount).toBe("few"); // superset agrees when rows are semantic
+  });
+
+  it("role=row grid rows are counted; a role=columnheader header row is excluded", () => {
+    // 1 header (role=row + role=columnheader) + 3 data rows, all role=row → 3 data rows.
+    const header = `<div role="row"><div role="columnheader">별점</div></div>`;
+    const html = `<div role="grid">${header}${rows(3, '<div role="row"><div role="cell">x</div></div>')}</div>`;
+    const s = probe(html);
+    expect(s.semanticRowCount).toBe("few"); // 4 role=row minus 1 header = 3
+    expect(s.dataRowLikeCount).toBe("few");
+  });
+
+  it("DIV-GRID with NO <tr>/role=row: semantic sees none, dataRowLike catches the rows", () => {
+    // The Run-1 shape — rows visible on screen but rendered as class/data-attr divs.
+    // The readiness gate (semantic) would report EMPTY; the broad signal quantifies the gap.
+    const one = '<div class="ReviewList__row" data-rowindex="0"><span>리뷰</span></div>';
+    const s = probe(`<div class="ReviewList">${rows(12, one)}</div>`);
+    expect(s.semanticRowCount).toBe("none"); // <-- the false-positive-empty
+    expect(s.dataRowLikeCount).toBe("some"); // <-- 12 div rows detected
+  });
+
+  it("virtualized grid keyed only by aria-rowindex is detected", () => {
+    const one = '<div aria-rowindex="1"><span>x</span></div>';
+    const s = probe(`<div role="presentation">${rows(8, one)}</div>`);
+    expect(s.semanticRowCount).toBe("none");
+    expect(s.dataRowLikeCount).toBe("some"); // 8 aria-rowindex rows
+  });
+
+  it("dataRowLike is a strict superset: semantic rows PLUS extra div rows", () => {
+    // 2 real table rows + 5 div rows → semantic=2 (few), broad=max(2,5)=5 (few) but ≥ semantic.
+    const html =
+      `<table><tbody>${rows(2, "<tr><td>x</td></tr>")}</tbody></table>` +
+      `<div>${rows(5, '<div class="grid-row" data-row-key="k"></div>')}</div>`;
+    const s = probe(html);
+    expect(s.semanticRowCount).toBe("few"); // 2
+    expect(s.dataRowLikeCount).toBe("few"); // 5 ≥ 2
+  });
+
+  it("a bare layout utility (flex-row) does NOT inflate the row signal", () => {
+    // `flex-row` is a layout class, not a data row — deliberately excluded.
+    const s = probe(`<div class="d-flex flex-row"><button>엑셀다운로드</button></div>`);
+    expect(s.semanticRowCount).toBe("none");
+    expect(s.dataRowLikeCount).toBe("none");
+  });
+
+  it("no rows anywhere → both signals are none", () => {
+    const s = probe("<div><p>표시할 리뷰가 없습니다</p></div>");
+    expect(s.semanticRowCount).toBe("none");
+    expect(s.dataRowLikeCount).toBe("none");
+  });
+
+  it("row markers inside an HTML comment do not count (comments are stripped)", () => {
+    const s = probe('<!-- <div class="table-row" data-rowindex="9"></div> --><div>없음</div>');
+    expect(s.dataRowLikeCount).toBe("none");
   });
 });
 

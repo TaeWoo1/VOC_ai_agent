@@ -41,6 +41,7 @@ import { mountOverlay, unmountOverlay } from "./overlay";
 import { armObserver, disarmObserver, waitForUserAction } from "./observer";
 import { STEP_PLAN, TOTAL_STEPS } from "./stages";
 import { sessionVerdictFromContent } from "../naver/session-check";
+import { settleExportSurface } from "../naver/export-surface-settle";
 import {
   naverLocateDecision,
   naverSurfaceDecision,
@@ -80,10 +81,25 @@ export interface NaverLiveProbeDriverOptions {
   observeTimeoutMs?: number;
   downloadTimeoutMs?: number;
   guidanceEnabled?: boolean;
+  /**
+   * Bounded window to let the review grid render before readiness is decided (§8-11 render-timing
+   * fix). `prepareSurface` re-reads the resolved surface read-only until rows render or an explicit
+   * empty/range marker appears; a bare empty container / ambiguous surface polls to this timeout and
+   * then fails closed honestly. Defaults to `DEFAULT_READINESS_SETTLE_TIMEOUT_MS`.
+   */
+  readinessSettleTimeoutMs?: number;
+  /** Poll cadence for the readiness settle. Defaults to `DEFAULT_READINESS_SETTLE_INTERVAL_MS`. */
+  readinessSettleIntervalMs?: number;
+  /** Injectable sleep for the readiness settle — hermetic tests pass an instant resolver. */
+  sleepFn?: (ms: number) => Promise<void>;
 }
 
 /** Some bundlers inject `__name(...)` into serialized evaluate bodies — a harmless identity shim. */
 const NAME_SHIM = "globalThis.__name = globalThis.__name || function (f) { return f; };";
+
+/** Default bounded window / cadence for the readiness settle (live path; tests override to instant). */
+export const DEFAULT_READINESS_SETTLE_TIMEOUT_MS = 8_000;
+export const DEFAULT_READINESS_SETTLE_INTERVAL_MS = 500;
 
 export class NaverLiveProbeDriver implements ProbeDriver {
   private readonly page: Page;
@@ -183,9 +199,26 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     // hosts it (falling back to the top document). The chosen frame is cached for locate/highlight/verify.
     const { frame, html } = await this.resolveSurfaceFrame(verdict, topHtml);
     this.surfaceFrame = frame;
-    const { result, diagnostic } = naverSurfaceDecision(verdict, html);
+    // §8-11 render-timing fix: on a usable session, the review grid can render client-side AFTER we
+    // reach the surface, so a single-shot read can see empty. Re-read the resolved frame read-only
+    // until rows render (READY) or an explicit empty/range marker appears, within a bounded window;
+    // a still-hydrating (bare empty container / ambiguous) surface polls to timeout and then fails
+    // closed on that last observation. Non-usable sessions never hydrate into a surface — decide now.
+    const surfaceHtml = verdict === "LOGGED_IN" ? await this.settleSurface(frame) : html;
+    const { result, diagnostic } = naverSurfaceDecision(verdict, surfaceHtml);
     this.lastDiagnostic = diagnostic;
     return result;
+  }
+
+  /** Read-only bounded poll for the export grid to render before readiness is decided (§8-11). */
+  private async settleSurface(frame: Frame): Promise<string> {
+    const settled = await settleExportSurface({
+      timeoutMs: this.opts.readinessSettleTimeoutMs ?? DEFAULT_READINESS_SETTLE_TIMEOUT_MS,
+      intervalMs: this.opts.readinessSettleIntervalMs ?? DEFAULT_READINESS_SETTLE_INTERVAL_MS,
+      readHtml: () => frame.content(),
+      ...(this.opts.sleepFn ? { sleepFn: this.opts.sleepFn } : {}),
+    });
+    return settled.html;
   }
 
   /**
