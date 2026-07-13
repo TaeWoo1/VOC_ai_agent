@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateExportTargetReadiness,
   EXPORT_TARGET_READINESS_KEYS,
+  traceExportTargetReadiness,
 } from "../../src/naver/export-target-readiness";
 
 // --- realistic fixtures -------------------------------------------------------
@@ -143,6 +144,59 @@ describe("evaluateExportTargetReadiness — sanitized output (no leak)", () => {
         expect(EXPORT_TARGET_READINESS_KEYS).toContain(k);
       }
     }
+  });
+});
+
+describe("traceExportTargetReadiness — records WHICH precedence rung fired", () => {
+  // The decision + the branch label for every rung. Two rows deliberately share the same
+  // `readiness` (EXPORT_TARGET_EMPTY / empty_state) but differ in branch — the exact ambiguity
+  // the trace exists to resolve for the live diagnostic.
+  const cases: Array<[string, string, string]> = [
+    [NO_EXPORT_TARGET, "no_export_target_marker", "no_export_target"],
+    [EMPTY_STATE, "empty_state_marker", "empty_state"],
+    [ZERO_COUNT, "labeled_count_zero", "empty_state"],
+    [POSITIVE_COUNT, "labeled_count_positive", "positive_count"],
+    [POSITIVE_ROWS, "data_rows_present", "positive_rows"],
+    [ZERO_ROWS, "results_container_zero_rows", "zero_rows"],
+    [DATE_RANGE_MISSING, "date_range_required", "date_range_missing"],
+    [AMBIGUOUS, "ambiguous_no_signal", "ambiguous"],
+  ];
+
+  for (const [html, branch, reason] of cases) {
+    it(`branch=${branch} (reason=${reason})`, () => {
+      const t = traceExportTargetReadiness(html);
+      expect(t.branch).toBe(branch);
+      expect(t.readiness.reason).toBe(reason);
+    });
+  }
+
+  it("distinguishes the two empty_state sources that `reason` alone conflates", () => {
+    // A marker-driven empty vs. a labeled count of 0 return the IDENTICAL readiness…
+    const marker = traceExportTargetReadiness(EMPTY_STATE);
+    const zeroCount = traceExportTargetReadiness(ZERO_COUNT);
+    expect(marker.readiness).toEqual(zeroCount.readiness);
+    // …but the trace separates them — this is what the live probe needs to test the Run-2
+    // "empty-marker precedence short-circuits before rows" hypothesis.
+    expect(marker.branch).toBe("empty_state_marker");
+    expect(zeroCount.branch).toBe("labeled_count_zero");
+    expect(marker.branch).not.toBe(zeroCount.branch);
+  });
+
+  it("evaluateExportTargetReadiness is exactly traceExportTargetReadiness(...).readiness (no drift)", () => {
+    const samples = [POSITIVE_ROWS, POSITIVE_COUNT, ZERO_COUNT, ZERO_ROWS, EMPTY_STATE, NO_EXPORT_TARGET, DATE_RANGE_MISSING, AMBIGUOUS];
+    for (const html of samples) {
+      expect(evaluateExportTargetReadiness(html)).toEqual(traceExportTargetReadiness(html).readiness);
+    }
+  });
+
+  it("the branch is a fixed label — it never echoes input content (no leak)", () => {
+    const t = traceExportTargetReadiness(
+      `<table class="review-grid"><tbody><tr><td>행복마켓 홍길동 정말 최악이에요</td></tr></tbody></table>`,
+    );
+    expect(t.branch).toBe("data_rows_present");
+    const json = JSON.stringify(t);
+    for (const s of ["행복마켓", "홍길동", "정말 최악이에요"]) expect(json.includes(s)).toBe(false);
+    expect(/[<>]/.test(json)).toBe(false);
   });
 });
 

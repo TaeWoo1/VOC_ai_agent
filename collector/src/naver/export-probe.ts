@@ -1,6 +1,11 @@
 import { urlCategory } from "./session-check";
 import type { UrlCategory } from "./session-probe";
 import type { SessionVerdict } from "./session-verdict";
+import {
+  traceExportTargetReadiness,
+  type ExportTargetReadiness,
+  type ExportTargetReadinessBranch,
+} from "./export-target-readiness";
 
 /**
  * Debug-safe EXPORT-AREA structural probe — PURE + SANITIZED.
@@ -22,9 +27,10 @@ import type { SessionVerdict } from "./session-verdict";
  *
  * SAFETY CONTRACT: identical to `session-probe.ts`. Every field of
  * `SanitizedExportProbeSignals` is a boolean, a small bucketed number, a fixed
- * category enum, or an array of fixed category enums. No field is derived by
- * copying a substring of the input — they are all match/no-match booleans,
- * counts bucketed to a category, or URL categories. So
+ * category enum, an array of fixed category enums, or the readiness gate's own
+ * sanitized result object (itself only enums + one coarse bucket). No field is
+ * derived by copying a substring of the input — they are all match/no-match
+ * booleans, counts bucketed to a category, or URL/decision categories. So
  * `JSON.stringify(extractExportProbeSignals(x))` can never contain a store name,
  * account, product, review text, id, token, label, selector, or raw URL from the
  * input. This is asserted by an offline hostile-fixture test.
@@ -76,6 +82,15 @@ export interface SanitizedExportProbeSignals {
   // misses. A gap (semantic `none`, dataRowLike `some`/`many`) is a false-positive-empty.
   semanticRowCount: CountBucket;
   dataRowLikeCount: CountBucket;
+  // The REAL readiness-gate decision for this document, emitted verbatim. `semanticRowCount`
+  // above is only a row-count proxy — this pair is what `evaluateExportTargetReadiness` (the
+  // gate the live driver actually consults) DECIDES on the same HTML: `readiness` is its exact
+  // sanitized output (enums/coarse bucket only) and `readinessBranch` records which precedence
+  // rung fired (e.g. an empty MARKER short-circuiting before rows are counted vs. `zero_rows`).
+  // Added so the read-only probe OBSERVES the gate's live decision instead of inferring it from
+  // row proxies — the §8-11/Run-2 diagnostic gap.
+  readiness: ExportTargetReadiness;
+  readinessBranch: ExportTargetReadinessBranch;
   // Generic export-intent keyword categories (presence only; never the matched text).
   excelLike: boolean;
   downloadLike: boolean;
@@ -105,6 +120,8 @@ export const SANITIZED_EXPORT_PROBE_KEYS: ReadonlyArray<keyof SanitizedExportPro
   "tableGridListCount",
   "semanticRowCount",
   "dataRowLikeCount",
+  "readiness",
+  "readinessBranch",
   "excelLike",
   "downloadLike",
   "exportLike",
@@ -225,6 +242,10 @@ export function extractExportProbeSignals(input: RawExportProbeInput): Sanitized
   // marker words inside a comment (e.g. "excel"/"disabled" in a doc note) would
   // otherwise inflate the keyword booleans and disabled-control count.
   const html = input.html.replace(/<!--[\s\S]*?-->/g, " ");
+  // Feed the gate the RAW html (not `html`): `traceExportTargetReadiness` does its own
+  // comment-stripping AND passes the raw string to the pre-click range reader, so this mirrors
+  // EXACTLY what the live driver's readiness call decides on the same page.
+  const readinessTrace = traceExportTargetReadiness(input.html);
   return {
     urlCategory: urlCategory(url),
     reviewRouteLike: /review/i.test(url) || /#\/review/i.test(url) || /리뷰|review/i.test(html),
@@ -238,6 +259,8 @@ export function extractExportProbeSignals(input: RawExportProbeInput): Sanitized
     tableGridListCount: bucket(countMatches(TABLE_GRID_LIST_RE, html)),
     semanticRowCount: bucket(countSemanticRows(html)),
     dataRowLikeCount: bucket(countDataRowLike(html)),
+    readiness: readinessTrace.readiness,
+    readinessBranch: readinessTrace.branch,
     excelLike: anyMatch(EXCEL_MARKERS, html),
     downloadLike: anyMatch(DOWNLOAD_MARKERS, html),
     exportLike: anyMatch(EXPORT_MARKERS, html),

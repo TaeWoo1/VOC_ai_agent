@@ -40,6 +40,32 @@ export type ExportTargetReadiness =
 /** Exact set of keys any readiness result may carry — used by the offline allow-list test. */
 export const EXPORT_TARGET_READINESS_KEYS: readonly string[] = ["decision", "rowCountBucket", "reason", "state"];
 
+/**
+ * Which precedence rung of `evaluateExportTargetReadiness` actually fired. This is a
+ * DIAGNOSTIC label — it never changes the decision, it only records the path taken. It exists
+ * because the `reason` field alone cannot distinguish the two ways `empty_state` can arise: an
+ * explicit empty MARKER (rung 1) vs. a labeled result-count of exactly 0 (rung 2). The Run-2
+ * negative result turned on exactly that distinction — did an empty MARKER short-circuit the gate
+ * before rows were ever counted, or did the surface fall through to `zero_rows`/`ambiguous`? A
+ * read-only probe emitting this branch answers that from observed evidence instead of a guess.
+ * It is a fixed enum — never any input text — so it is safe to emit in a sanitized probe.
+ */
+export type ExportTargetReadinessBranch =
+  | "no_export_target_marker" // rung 1a — an explicit "…대상인 리뷰가 없습니다" export-empty notice
+  | "empty_state_marker" // rung 1b — a generic "결과가 없습니다" empty placeholder
+  | "labeled_count_positive" // rung 2  — a labeled result-count > 0
+  | "labeled_count_zero" // rung 2  — a labeled result-count of exactly 0 (distinct from the marker)
+  | "data_rows_present" // rung 3  — data rows counted in the static HTML
+  | "results_container_zero_rows" // rung 4 — a results container exists but holds zero rows
+  | "date_range_required" // rung 5  — a positive "pick a period" instruction, no selected range
+  | "ambiguous_no_signal"; // rung 6  — nothing decidable (e.g. SPA rows not in static HTML)
+
+/** The gate's decision plus the precedence rung that produced it. `readiness` is verbatim. */
+export interface ExportTargetReadinessTrace {
+  readiness: ExportTargetReadiness;
+  branch: ExportTargetReadinessBranch;
+}
+
 // --- markers (presence-only; matched text is never returned) ------------------
 
 /**
@@ -148,41 +174,79 @@ function countDataRows(html: string): number {
  *  6. otherwise → EXPORT_TARGET_UNKNOWN (halt)
  */
 export function evaluateExportTargetReadiness(rawHtml: string): ExportTargetReadiness {
+  return traceExportTargetReadiness(rawHtml).readiness;
+}
+
+/**
+ * Pure: the same decision as `evaluateExportTargetReadiness`, plus the precedence rung that
+ * produced it (`branch`). Single source of truth — `evaluateExportTargetReadiness` is defined as
+ * `traceExportTargetReadiness(rawHtml).readiness`, so the decision can never drift from the trace.
+ * The read-only export-readiness probe emits this so a live run OBSERVES which rung fired instead
+ * of inferring it from row-count proxies (the §8-11/Run-2 gap). The `branch` is a fixed enum and
+ * carries no input text — safe to include in a sanitized probe.
+ */
+export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadinessTrace {
   const html = stripComments(rawHtml);
 
   // 1) Explicit emptiness wins — the most likely, benign cause of the no-download alert.
   if (anyMatch(NO_EXPORT_TARGET_MARKERS, html)) {
-    return { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "no_export_target" };
+    return {
+      readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "no_export_target" },
+      branch: "no_export_target_marker",
+    };
   }
   if (anyMatch(EMPTY_STATE_MARKERS, html)) {
-    return { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" };
+    return {
+      readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" },
+      branch: "empty_state_marker",
+    };
   }
 
   // 2) A labeled positive count is strong positive evidence; an explicit 0 is emptiness.
   const count = parseResultCount(html);
   if (count !== null) {
-    if (count > 0) return { decision: "READY", rowCountBucket: bucket(count), reason: "positive_count" };
-    return { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" };
+    if (count > 0) {
+      return {
+        readiness: { decision: "READY", rowCountBucket: bucket(count), reason: "positive_count" },
+        branch: "labeled_count_positive",
+      };
+    }
+    return {
+      readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "empty_state" },
+      branch: "labeled_count_zero",
+    };
   }
 
   // 3) Data rows actually present in the static HTML.
   const dataRows = countDataRows(html);
   if (dataRows > 0) {
-    return { decision: "READY", rowCountBucket: bucket(dataRows), reason: "positive_rows" };
+    return {
+      readiness: { decision: "READY", rowCountBucket: bucket(dataRows), reason: "positive_rows" },
+      branch: "data_rows_present",
+    };
   }
 
   // 4) A results container exists but is empty → concretely zero rows.
   if (anyMatch(RESULTS_CONTAINER_MARKERS, html)) {
-    return { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "zero_rows" };
+    return {
+      readiness: { decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "zero_rows" },
+      branch: "results_container_zero_rows",
+    };
   }
 
   // 5) Only a POSITIVE required-range instruction with no selected range is date-range-missing.
   //    Reuse the existing pre-click range reader rather than re-deriving the heuristic.
   const { selectedRangePresent } = diagnosePreClickSignals(rawHtml);
   if (anyMatch(REQUIRED_RANGE_MARKERS, html) && !selectedRangePresent) {
-    return { decision: "HALT", state: "EXPORT_DATE_RANGE_REQUIRED", reason: "date_range_missing" };
+    return {
+      readiness: { decision: "HALT", state: "EXPORT_DATE_RANGE_REQUIRED", reason: "date_range_missing" },
+      branch: "date_range_required",
+    };
   }
 
   // 6) Can't distinguish safely (e.g. SPA rows not in static HTML) → conservative halt, no click.
-  return { decision: "HALT", state: "EXPORT_TARGET_UNKNOWN", reason: "ambiguous" };
+  return {
+    readiness: { decision: "HALT", state: "EXPORT_TARGET_UNKNOWN", reason: "ambiguous" },
+    branch: "ambiguous_no_signal",
+  };
 }
