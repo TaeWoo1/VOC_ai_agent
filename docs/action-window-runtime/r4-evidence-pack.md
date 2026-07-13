@@ -334,6 +334,59 @@ from `tableGridListCount`; (2) one read-only live probe (fresh G6) to identify N
 container as READY and rely on the existing download-detection fail-closed for a genuinely-empty click).
 The read-only G6 for this probe is **consumed**; any further live contact needs a fresh G6.
 
+> **⚠ CORRECTION (2026-07-13, §8-11) — the row-shape-miss root cause is REFUTED.** The offline
+> **data-row-like** signal from step (1) was implemented (commit `802f0a0`) and the read-only row-shape probe
+> from step (2) was run (§8-11). It found `semanticRowCount: many` **and** `dataRowLikeCount: many` on the
+> top document — **zero gap**. `countDataRows` (which `semanticRowCount` mirrors exactly) **would** have
+> counted rows at that moment, so Run 1's empty verdict was **not** a div/virtualized row-shape the counter
+> misses. The diagnosis widens to a **render-timing** issue — see §8-11. Step (3) (correct row detection) is
+> therefore **not** the Run-1 fix.
+
+---
+
+## §8-11 — Read-only row-shape probe (Run-1 row-shape hypothesis) — EXECUTED 2026-07-13 · hypothesis REFUTED
+
+**The read-only frame-aware probe (`probe-export-same-session`, unchanged CLI) ran once on 2026-07-13** under
+a **fresh in-session read-only-scoped G6** (now consumed;
+[`r4-rowshape-probe-dispatch-record.md`](r4-rowshape-probe-dispatch-record.md); operator (PO)), to measure the
+row-shape gap the §8-10 "false-positive-empty" diagnosis predicted. The probe now emits two additional
+sanitized signals (commit `802f0a0`): **`semanticRowCount`** (a coarse bucket that mirrors the readiness
+gate's `countDataRows` — `<tbody><tr>` / `role="row"` only) and **`dataRowLikeCount`** (a **superset** also
+recognizing `aria-rowindex`, `data-row*` attrs, `role="listitem"`, and row/list-item class tokens). A **gap**
+(`semanticRowCount` low, `dataRowLikeCount` high) would have confirmed a div/virtualized row shape the gate
+misses. Structurally read-only (**no click / export / download / status write**, source-guarded); the seller
+logged in and reached the review-management export surface with the review list rendered on screen, then
+signalled readiness. Clean teardown (process exited, sentinel removed, `downloads/` + quarantine empty).
+Sanitized result (enums/booleans/coarse buckets only — no URL, content, selector, or count):
+
+- **Session:** `sessionVerdict: LOGGED_IN`. **Frames:** `frameCount: few`, one child frame.
+- **Top document** (`urlCategory: seller-center`): **`semanticRowCount: many`** and **`dataRowLikeCount: many`
+  — a ZERO gap.** Both row estimators saw many rows. Context (consistent with §8-10): `tableGridListCount:
+  many`, `exportCandidateCount: one` / visible `one` / enabled `one`, `dateInputCount: some`,
+  `downloadAttributeCount: none`, `shadowRootHostCount: none`, `excelLike/downloadLike/reviewLike/searchLike:
+  true`.
+- **The one child frame:** `frameUrlCategory: other`, row signals `none`/`none` — the same **unrelated** frame
+  as §8-10.
+
+**Finding — the row-shape-miss hypothesis is REFUTED.** Because `semanticRowCount` mirrors `countDataRows`
+exactly and it read **`many`**, the readiness gate **would have counted rows at this moment** — it would have
+returned READY, not `EXPORT_TARGET_EMPTY`. So Run 1's false-positive-empty was **not** caused by NAVER
+rendering div-based / virtualized rows the counter can't see (the §8-10 root cause). The offline row-shape
+signal (`802f0a0`) stays a **valid general robustness signal** — and it is exactly what let us measure and
+**refute** this hypothesis — but, echoing the §8-8 frame-fix correction, it is **not** the Run-1 fix target.
+
+**Widened diagnosis — a readiness TIMING issue (leading hypothesis, not yet proven).** The rows are semantic
+and countable **once the SPA has rendered them**. Run 1's live driver most likely evaluated
+`evaluateExportTargetReadiness` on the surface HTML **before** the client-side grid finished rendering →
+zero rows at that instant → `EXPORT_TARGET_EMPTY`. The probe read **after** the operator confirmed the list
+was on screen, so it saw the settled DOM. This is a **render-timing** gap, not a row-shape gap.
+
+**Next (not yet done; needs explicit kickoff; still §6 evidence-not-speculation):** an offline readiness
+**wait/timing** slice — before evaluating readiness, wait for the row grid to actually render (row-appearance
+/ network-idle / a bounded settle) and re-evaluate, rather than widening the row counter. A further read-only
+probe (fresh G6) could confirm the timing hypothesis directly (e.g. observe the semantic row count transition
+none → many after render) before any driver change. **No** readiness-gate code was changed by this evidence.
+
 ---
 
 ## Readiness summary
