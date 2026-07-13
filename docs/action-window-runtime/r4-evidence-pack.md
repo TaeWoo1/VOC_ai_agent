@@ -421,8 +421,48 @@ surface still fails closed, and an unusable session decides without polling. `ty
 
 **STILL OFFLINE — not live-verified.** This closes the offline half of the §8-11 diagnosis. A live
 confirmation — that the settle actually flips `none → READY` on the real NAVER surface within the window
-(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** and is out of
-scope here. Local commit `b2f3604` (HELD, unpushed).
+(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** (merged as PR #250).
+
+> **⚠ CORRECTION (2026-07-14, §8-13) — the live confirmation FAILED; the settle is NOT the Run-1 fix.**
+> Run 2 (§8-13) ran the settle live and reproduced Run 1's `UNSUPPORTED_STATE` at `prepareSurface`. The
+> settle is a valid offline robustness primitive (and all its hermetic tests stand), but it does **not**
+> resolve the live false-positive-empty. See §8-13 for the leading cause (empty-marker precedence).
+
+---
+
+## §8-13 — Live Run 2 (settle verification) — EXECUTED 2026-07-14 · FAILED · settle NOT the fix
+
+**Run 2 ran the settle fix live** under a fresh export-scoped G3/P6/G6 in an **observe-only, no-click**
+posture (operator/PO decision — [`r4-run2-settle-verification-dispatch-record.md`](r4-run2-settle-verification-dispatch-record.md)):
+the seller logged in and reached the review-export surface with the review list rendered; the Runtime ran
+`prepareSurface` (settle active, 8 s default window) and would have highlighted the control and parked at
+`WAITING_FOR_HUMAN` **iff** readiness passed. It did not.
+
+- **Sanitized result:** `status: FAILED` · `progress: { completedSteps: 0, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: UNSUPPORTED_STATE` — **identical to Run 1** (§8-8). The highlight
+  never appeared; the run failed closed at `prepareSurface`.
+- **Non-mutation (as scoped):** failed at step 0 → **no click, no download, no validate, no ingest, no
+  backend contact, no DB write, no status/`LAST_SUCCESS`**. Clean teardown (sentinel removed, `downloads/`
+  + `.aw-quarantine` empty, browser closed, git clean). G6 consumed.
+
+**Finding — the settle fix is REFUTED as the Run-1 fix.** It passed every offline/hermetic test (§8-12) but
+did **not** flip the live failure. Echoing the §8-8 frame-fix correction: a green offline seam is not a live
+fix. The settle stays a valid general robustness primitive; it is **not** the Run-1 solution.
+
+**Leading hypothesis (UNPROVEN — §6 forbids a speculative patch).** The §8-11 probe and the readiness gate
+run **different** logic. §8-11 measured only row buckets (`semanticRowCount`/`dataRowLikeCount` via
+`extractExportProbeSignals`) and inferred READY. But `evaluateExportTargetReadiness` checks empty-state /
+no-export-target **markers first (precedence 1)**, *before* counting rows — and the settle treats an
+explicit marker as a **trusted halt** (resolves on check 1). So a hidden / off-screen empty phrase on the
+live surface would halt `prepareSurface` immediately **regardless of rendered rows**, which fits the fast
+fail. §8-11's "`countDataRows` would have counted rows → READY" inference never measured this branch and was
+likely wrong.
+
+**Next (needs kickoff; evidence-not-speculation):** a read-only probe that emits the sanitized **live
+`evaluateExportTargetReadiness` decision + reason + state** (which branch fired — `empty_state` /
+`no_export_target` / `zero_rows` / `ambiguous`), so the *actual* cause is observed before any gate change.
+Only then correct the gate/settle from that evidence. Requires an offline probe extension + a fresh
+read-only G6.
 
 ---
 

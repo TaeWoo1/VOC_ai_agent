@@ -183,15 +183,15 @@ verified seam — the adapter is composition, not new invention:
 - ☑ **Surface probe** — confirm the export surface read-only (reuse: frame-aware export probe
   patterns); unknown layout → fail closed (`UNSUPPORTED_STATE`). *(Green on the NAVER fixture — §8-2;
   the live driver's readiness gate (empty/ambiguous → `UNSUPPORTED_STATE`) is proven hermetically —
-  PR #242. **Render-timing gap CLOSED (offline).** The Run-1 `UNSUPPORTED_STATE` false-positive-empty —
-  readiness read on a single snapshot **before** NAVER's SPA rendered the review grid — was refuted as a
-  row-shape miss by the read-only row-shape probe (both row estimators `many`, zero gap; §8-10/§8-11) and
-  pinned to **render timing**; `prepareSurface` now waits (a bounded read-only settle) for rows to render,
-  or for an **explicit** empty-state / no-export-target / date-range marker to appear, **before** deciding
-  readiness — a still-hydrating bare container is never mistaken for empty, and a genuinely-empty surface
-  still fails closed at timeout (`settleExportSurface`, PR #250, §8-12). The readiness gate itself is
-  unchanged. **Still offline / not live-verified** — a live confirmation that the settle flips
-  `none → READY` on the real surface within the window needs a fresh export-scoped §3 G6.)*
+  PR #242. **Render-timing gap STILL OPEN — the settle fix did NOT close it live (walked back 2026-07-14).**
+  The Run-1 `UNSUPPORTED_STATE` false-positive-empty was hypothesised as a render-timing miss; a bounded
+  read-only settle (`settleExportSurface`, PR #250, §8-12) was added so `prepareSurface` waits for rows to
+  render before deciding, and it is green offline. **But live Run 2 (§8-13, observe-only) reproduced Run 1's
+  `UNSUPPORTED_STATE` at `prepareSurface` — the settle is refuted as the fix.** Leading (unproven) cause: the
+  gate checks empty-state markers **before** counting rows, and the settle trusts a marker as a halt, so a
+  hidden empty phrase halts regardless of rendered rows (§8-13). The settle stays a valid offline robustness
+  primitive; the live gap is **not** closed. Next: a read-only probe of the live `evaluateExportTargetReadiness`
+  **decision/reason** before any gate change (§6 evidence-not-speculation).)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are
