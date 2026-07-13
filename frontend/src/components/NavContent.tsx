@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useOpenAlerts } from "../lib/openAlerts";
 import { ALERTS_ROUTE, NAV_GROUPS } from "../lib/nav";
+import { NavIcon } from "./icons/NavIcon";
 
 /** The grouped navigation body, shared by the desktop sidebar and the mobile
  *  drawer. `onNavigate` lets the mobile drawer close itself after a route change. */
@@ -30,9 +31,7 @@ export function NavContent({ onNavigate }: { onNavigate?: () => void }) {
                   }`
                 }
               >
-                <span className="text-xl" aria-hidden>
-                  {m.icon}
-                </span>
+                <NavIcon name={m.icon} className="h-5 w-5 shrink-0" />
                 {m.label}
                 {/* Open connector-alert count: action-needed, only on the alerts
                     route and only when > 0. A bare numeric pill — never "장애". */}

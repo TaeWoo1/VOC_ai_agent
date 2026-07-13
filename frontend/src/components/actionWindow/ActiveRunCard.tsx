@@ -45,10 +45,7 @@ export function ActiveRunCard({
 
       {needsHuman ? (
         <div className="mt-3 rounded-xl border border-warn/30 bg-warn/5 p-3">
-          <p className="font-medium text-ink">
-            <span aria-hidden="true">🙋 </span>
-            {CHECKPOINT_PROMPT_TITLE}
-          </p>
+          <p className="font-medium text-ink">{CHECKPOINT_PROMPT_TITLE}</p>
           {run.currentStep ? (
             <p className="mt-0.5 text-sm text-muted">
               {resolveCopy(run.currentStep.copyKey, run.currentStep.copyParams)}

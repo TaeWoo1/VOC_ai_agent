@@ -45,7 +45,7 @@ export function BridgeDiagnostics({ state }: { state: OperationsState }) {
       className="rounded-2xl border-2 border-dashed border-line bg-canvas p-3"
     >
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-        🔎 브리지 진단 · 개발용 · 실제 화면에는 표시되지 않아요
+        <span aria-hidden="true">🔎 </span>브리지 진단 · 개발용 · 실제 화면에는 표시되지 않아요
       </p>
       <p
         className={

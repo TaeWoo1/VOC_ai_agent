@@ -9,14 +9,14 @@ const TONE_CLASS: Record<StatusTone, string> = {
   bad: "bg-bad/10 text-bad",
 };
 
-/** Run status pill — icon + label + tone; shared by the home and the run detail. */
+/** Run status chip — a text-only tone pill (admin-console style, no glyph); shared
+ *  by the home and the run detail. */
 export function RunStatusBadge({ status }: { status: RunStatus }) {
   const view = runStatusView(status);
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${TONE_CLASS[view.tone]}`}
+      className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${TONE_CLASS[view.tone]}`}
     >
-      <span aria-hidden="true">{view.icon}</span>
       {view.label}
     </span>
   );

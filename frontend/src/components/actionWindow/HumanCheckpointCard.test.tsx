@@ -15,7 +15,7 @@ describe("FE-6 HumanCheckpointCard (DOM/a11y)", () => {
     const run = UI_SCENARIOS["human-action-required"].run!;
     render(<HumanCheckpointCard run={run} onCommand={() => {}} />);
     expect(screen.getByRole("region", { name: "확인이 필요한 작업" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "지금 해주실 일이 있어요" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "판매자센터에서 진행" })).toBeInTheDocument();
   });
 
   it("renders the recheck + manual buttons when both are allowed; no blocker region", () => {

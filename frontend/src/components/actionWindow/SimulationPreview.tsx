@@ -63,9 +63,9 @@ export function SimulationPreview({
             type="button"
             onClick={stepSimulation}
             disabled={simulationRemaining === 0}
-            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:opacity-40"
+            className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink transition hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            다음 이벤트 ▶ ({simulationRemaining})
+            다음 이벤트 <span aria-hidden="true">▶</span> ({simulationRemaining})
           </button>
           <button
             type="button"

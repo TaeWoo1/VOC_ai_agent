@@ -23,9 +23,6 @@ export function RecentActivityList({ items }: { items: RecentRunItem[] }) {
                 className="flex flex-col gap-1 rounded-xl border border-line bg-canvas px-4 py-3 sm:flex-row sm:items-center sm:gap-3"
               >
                 <div className="flex min-w-0 flex-1 items-center gap-3">
-                  <span aria-hidden="true" className="w-5 shrink-0 text-center text-lg">
-                    {status.icon}
-                  </span>
                   <span className="min-w-0 flex-1 break-keep">
                     <span className="block font-medium text-ink">
                       {resolveCopy(item.runCopyKey)}
