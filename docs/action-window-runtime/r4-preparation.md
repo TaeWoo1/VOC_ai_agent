@@ -191,9 +191,11 @@ verified seam — the adapter is composition, not new invention:
   `empty_state_marker` (rung 1) **while its own `semanticRowCount` is `many`** — a "no results" placeholder
   coexists with a fully populated grid and the marker precedence masks a would-be-`READY / positive_rows`
   surface (rung 3). The surface was never row-empty, which is why the settle could not help. **Fix
-  (offline slice, not yet started):** make positive row/count evidence outrank the empty-state marker (or
-  require the marker node to be the *visible* state); design + hermetic tests, then re-verify live under a
-  fresh G6. The settle stays a general robustness primitive; it is not this fix.)*
+  DELIVERED offline (§8-15, local commit `0ee3b6e`) — NOT yet live-verified:** `evaluateExportTargetReadiness`
+  now ranks a positive labeled count / real data rows ahead of the empty-state markers, with an in-table
+  placeholder-row guard (`countPlaceholderBodyRows` subtracts the marker-bearing row so a lone placeholder
+  still HALTs). Hermetic-only (2702 passed); **a fresh-G6 live re-run is still required before this gap is
+  closed.** The settle stays a general robustness primitive; it is not this fix.)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are

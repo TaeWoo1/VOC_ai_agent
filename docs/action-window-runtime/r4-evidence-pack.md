@@ -512,6 +512,42 @@ common SPA pattern). Design + hermetic tests offline (incl. a marker-coexists-wi
 the exact live shape), then re-verify live under a fresh G6. The settle stays a general robustness primitive
 but is not this fix.
 
+> **✔ DELIVERED offline (2026-07-14, §8-15).** The precedence fix is implemented + hermetically tested
+> (local commit `0ee3b6e`). **OFFLINE-verified only — NOT yet live-verified**; a fresh-G6 live re-run is
+> still required before this gap is closed. See §8-15.
+
+---
+
+## §8-15 — Readiness precedence fix (positive evidence outranks markers) — DELIVERED offline 2026-07-14 · NOT live-verified
+
+**The §8-14 fix is implemented** (local commit `0ee3b6e`, HELD): `traceExportTargetReadiness` /
+`evaluateExportTargetReadiness` were reordered so **positive row/count evidence outranks the empty-state
+markers**. New precedence: (1) labeled count > 0 → `READY / positive_count`; (2) **real data rows present →
+`READY / positive_rows`** (the fix); (3) no-export-target notice → HALT; (4) empty-state marker → HALT; (5)
+labeled count == 0 → HALT; (6) results container / zero rows → HALT; (7) required-range → HALT; (8)
+ambiguous → HALT.
+
+- **Placeholder guard (`countPlaceholderBodyRows`).** An in-table empty-state row
+  (`<tr><td colspan>…없습니다</td></tr>`) is itself counted as a row, so marker-bearing `<tbody>` rows are
+  subtracted: `realDataRows = countDataRows − placeholderRows`. A populated grid + hidden marker now reads
+  READY; a **lone placeholder row still HALTs** (subtraction floors at 0 → falls through to the marker
+  rung); no arbitrary threshold, and a single-review store still reads READY. A latent stateful-regex bug
+  was fixed en route (a non-global inline `<tr>` test; the shared `TR_RE` is `/g`).
+- **Blast radius:** `export-probe.ts` is UNCHANGED — it re-emits the gate verbatim, so the fix flows
+  through the read-only probe with no probe-code change. Still conservative: ambiguity never clicks, and a
+  false READY that clicks into nothing is caught **fail-closed** by download detection downstream.
+- **Offline verification:** `typecheck` clean; offline suite **2702 passed / 32 skipped** (+9 net tests) —
+  new cases cover populated-grid-plus-hidden-marker → READY, the live "many rows + marker" shape → READY
+  `many`, positive count + marker → READY, role=grid rows + marker → READY, placeholder subtraction (1 real
+  + 1 placeholder → bucket `one`), a lone placeholder → HALT, and a regression loop proving genuinely-empty
+  surfaces (all marker/count/zero-rows shapes) **still HALT**.
+- **Status: OFFLINE-verified only — NOT live-verified.** This does **not** close the §8-14 gap. The fix
+  must be re-verified on the real surface under a **fresh export-scoped/read-only G6** before the false-empty
+  can be called resolved live. No live NAVER was run for this slice.
+- **PO design choice (still open, now optional):** this targeted gate-precedence fix vs. fully **relaxing**
+  the gate to trust a visible+enabled export control + grid container (relying on download-detection
+  fail-closed for a genuinely-empty click). This fix does not preclude the relax route.
+
 ---
 
 ## Readiness summary
