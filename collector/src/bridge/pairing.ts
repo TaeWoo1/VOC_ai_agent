@@ -60,6 +60,12 @@ export interface PairingRegistryOptions {
 
 export type TicketRejection = "not_found" | "expired" | "used";
 
+/** Counts from one bounded-cleanup pass — the safe, coarse timeout-eviction signal (numbers only). */
+export interface SweepResult {
+  requestsEvicted: number;
+  ticketsEvicted: number;
+}
+
 const DEFAULT_REQUEST_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_TICKET_TTL_MS = 10 * 1000;
 
@@ -109,9 +115,16 @@ export class PairingRegistry {
     return this.exportPairings();
   }
 
-  /** Step 1: the frontend requests pairing for its origin. Returns a short human-verifiable code. */
-  requestPairing(origin: string, workspaceLabel: string): { requestId: string; confirmationCode: string } {
-    this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
+  /**
+   * Step 1: the frontend requests pairing for its origin. Returns a short human-verifiable code, plus the
+   * `swept` counts from the opportunistic bounded cleanup this call ran first — so the I/O shell can make the
+   * silent timeout-eviction of stale requests/tickets observable without this pure core touching a logger.
+   */
+  requestPairing(
+    origin: string,
+    workspaceLabel: string,
+  ): { requestId: string; confirmationCode: string; swept: SweepResult } {
+    const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
     const requestId = this.randomHex(8); // 16 hex
     const raw = this.randomHex(3).toUpperCase(); // 6 hex chars
     const confirmationCode = `${raw.slice(0, 3)}-${raw.slice(3, 6)}`;
@@ -123,7 +136,7 @@ export class PairingRegistry {
       createdAtMs: this.now(),
       status: "pending",
     });
-    return { requestId, confirmationCode };
+    return { requestId, confirmationCode, swept };
   }
 
   getRequestView(
@@ -184,9 +197,13 @@ export class PairingRegistry {
     return null;
   }
 
-  /** Mint a short-lived, single-use WS ticket for an authenticated pairing. */
-  mintTicket(pairingId: string): { ticket: string; expiresInMs: number } {
-    this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
+  /**
+   * Mint a short-lived, single-use WS ticket for an authenticated pairing. Also returns the `swept` counts
+   * from the opportunistic cleanup this call ran first (see {@link requestPairing}), so timeout-eviction stays
+   * observable at the transport shell.
+   */
+  mintTicket(pairingId: string): { ticket: string; expiresInMs: number; swept: SweepResult } {
+    const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
     const ticket = this.randomHex(24); // 48 hex
     this.tickets.set(sha256Hex(ticket), {
       ticketHash: sha256Hex(ticket),
@@ -194,7 +211,7 @@ export class PairingRegistry {
       expiresAtMs: this.now() + this.ticketTtlMs,
       used: false,
     });
-    return { ticket, expiresInMs: this.ticketTtlMs };
+    return { ticket, expiresInMs: this.ticketTtlMs, swept };
   }
 
   /** Consume a WS ticket exactly once. Rejects expired/replayed/unknown tickets and revoked pairings. */
@@ -232,7 +249,7 @@ export class PairingRegistry {
    * never merely because it was used — a used-but-unexpired ticket is kept so a replay still reports `used`.
    * Pairings are never touched here (they are valid until explicitly revoked). Returns the eviction counts.
    */
-  sweep(): { requestsEvicted: number; ticketsEvicted: number } {
+  sweep(): SweepResult {
     const now = this.now();
     let requestsEvicted = 0;
     for (const [id, r] of this.requests) {
