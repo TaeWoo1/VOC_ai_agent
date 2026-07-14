@@ -142,7 +142,14 @@ describe("FE-7 Operations run-detail page (store → DOM wiring)", () => {
       expect(screen.getByRole("region", { name: DIAGNOSTICS })).toBeInTheDocument();
     });
 
-    it("is absent when bridge mode is off", () => {
+    it("renders in the bridge-OFF (fixture-demo) world too, so the 브리지 꺼짐 verdict is observable", () => {
+      devModeMock.isBridgeModeEnabled.mockReturnValue(false); // preview on, bridge mode off
+      seedRun("human-action-required");
+      renderWithRouter(<Operations />);
+      expect(screen.getByRole("region", { name: DIAGNOSTICS })).toBeInTheDocument();
+    });
+
+    it("is absent when the DEV preview is off", () => {
       devModeMock.isFixturePreviewEnabled.mockReturnValue(false);
       devModeMock.isBridgeModeEnabled.mockReturnValue(false);
       seedRun("human-action-required");

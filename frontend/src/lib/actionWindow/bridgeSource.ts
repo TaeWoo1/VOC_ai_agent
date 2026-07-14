@@ -10,7 +10,7 @@
 
 import { createBridgeClient, type BridgeClient } from "./bridgeAdapter";
 import { resolveBridgeSession } from "./devMode";
-import { adoptBridgeSource } from "./operationsStore";
+import { adoptBridgeSource, setBridgeBootAttempted } from "./operationsStore";
 import type { ActionWindowSource, SourceCommand, SourceConnection, SourceUpdate } from "./source";
 
 export interface BridgeBackedSource extends ActionWindowSource {
@@ -92,6 +92,7 @@ let bootAttempted = false;
 export async function connectBridgeIfEnabled(): Promise<boolean> {
   if (bootAttempted) return false;
   bootAttempted = true;
+  setBridgeBootAttempted(true); // mirror into reactive store so the DEV panel re-renders (incl. the fixture-fallback path)
   // Real transport status → seam `connection` frames. The relay is set up before
   // the session resolves; transitions arriving before adoption are dropped (the
   // store starts a bridge world as "connected" anyway).
@@ -115,7 +116,10 @@ export async function connectBridgeIfEnabled(): Promise<boolean> {
 /** FE-5 diagnostics: whether a live-Bridge boot has been attempted this session
  *  (the flag flips synchronously at the start of `connectBridgeIfEnabled`, before
  *  the async resolve). Lets the DEV panel distinguish "never tried" from "tried
- *  and fell back to the fixture". Read-only; no wire state. */
+ *  and fell back to the fixture". Read-only; no wire state.
+ *  NOTE: the DEV panel reads the REACTIVE mirror `state.bootAttempted` (set via
+ *  `setBridgeBootAttempted`) so it re-renders on the fixture-fallback path; this
+ *  getter remains for the module guard and any non-React caller. */
 export function isBridgeBootAttempted(): boolean {
   return bootAttempted;
 }
@@ -131,4 +135,5 @@ export function retryBridgeBoot(): Promise<boolean> {
 /** Test-only: allow another boot attempt. */
 export function resetBridgeBootForTests(): void {
   bootAttempted = false;
+  setBridgeBootAttempted(false);
 }

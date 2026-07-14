@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:bridge": "VITE_AW_BRIDGE=1 vite",
+    "dev:bridge": "VITE_ENABLE_AGENT_BRIDGE=true VITE_AW_BRIDGE=1 vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
