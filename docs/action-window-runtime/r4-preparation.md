@@ -190,12 +190,15 @@ verified seam — the adapter is composition, not new invention:
   probe (§8-14) then observed the live cause directly: on the export-surface frame the gate HALTs at
   `empty_state_marker` (rung 1) **while its own `semanticRowCount` is `many`** — a "no results" placeholder
   coexists with a fully populated grid and the marker precedence masks a would-be-`READY / positive_rows`
-  surface (rung 3). The surface was never row-empty, which is why the settle could not help. **Fix
-  DELIVERED offline (§8-15, local commit `0ee3b6e`) — NOT yet live-verified:** `evaluateExportTargetReadiness`
+  surface (rung 3). The surface was never row-empty, which is why the settle could not help. **Fix DELIVERED
+  offline (§8-15, `0ee3b6e`) AND LIVE-VERIFIED (§8-16, Run 3, 2026-07-14):** `evaluateExportTargetReadiness`
   now ranks a positive labeled count / real data rows ahead of the empty-state markers, with an in-table
   placeholder-row guard (`countPlaceholderBodyRows` subtracts the marker-bearing row so a lone placeholder
-  still HALTs). Hermetic-only (2702 passed); **a fresh-G6 live re-run is still required before this gap is
-  closed.** The settle stays a general robustness primitive; it is not this fix.)*
+  still HALTs). Run 3 drove it on the real surface — `prepareSurface` PASSED readiness and reached the human
+  barrier (`progress 2-of-3`, highlight on the Excel control; observe-only, benign `DOWNLOAD_TIMEOUT`, no
+  click/download/ingest), vs. the Run-1/Run-2 `UNSUPPORTED_STATE` at `0-of-3`. **The readiness false-empty is
+  resolved live.** Not yet proven end-to-end: the click → download → validate → ingest legs remain a separate
+  full-pilot authorization. The settle stays a general robustness primitive; it is not this fix.)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are

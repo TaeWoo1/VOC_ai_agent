@@ -512,13 +512,14 @@ common SPA pattern). Design + hermetic tests offline (incl. a marker-coexists-wi
 the exact live shape), then re-verify live under a fresh G6. The settle stays a general robustness primitive
 but is not this fix.
 
-> **✔ DELIVERED offline (2026-07-14, §8-15).** The precedence fix is implemented + hermetically tested
-> (local commit `0ee3b6e`). **OFFLINE-verified only — NOT yet live-verified**; a fresh-G6 live re-run is
-> still required before this gap is closed. See §8-15.
+> **✔ DELIVERED offline (2026-07-14, §8-15) → ✔ LIVE-VERIFIED (2026-07-14, §8-16).** The precedence fix is
+> implemented + hermetically tested (local commit `0ee3b6e`) AND confirmed on the real surface by Run 3:
+> `prepareSurface` passed readiness and reached the human barrier. The §8-14 readiness false-empty is
+> resolved live. See §8-15 (fix) and §8-16 (live verification).
 
 ---
 
-## §8-15 — Readiness precedence fix (positive evidence outranks markers) — DELIVERED offline 2026-07-14 · NOT live-verified
+## §8-15 — Readiness precedence fix (positive evidence outranks markers) — DELIVERED offline 2026-07-14 · LIVE-VERIFIED (§8-16)
 
 **The §8-14 fix is implemented** (local commit `0ee3b6e`, HELD): `traceExportTargetReadiness` /
 `evaluateExportTargetReadiness` were reordered so **positive row/count evidence outranks the empty-state
@@ -541,12 +542,43 @@ ambiguous → HALT.
   `many`, positive count + marker → READY, role=grid rows + marker → READY, placeholder subtraction (1 real
   + 1 placeholder → bucket `one`), a lone placeholder → HALT, and a regression loop proving genuinely-empty
   surfaces (all marker/count/zero-rows shapes) **still HALT**.
-- **Status: OFFLINE-verified only — NOT live-verified.** This does **not** close the §8-14 gap. The fix
-  must be re-verified on the real surface under a **fresh export-scoped/read-only G6** before the false-empty
-  can be called resolved live. No live NAVER was run for this slice.
-- **PO design choice (still open, now optional):** this targeted gate-precedence fix vs. fully **relaxing**
-  the gate to trust a visible+enabled export control + grid container (relying on download-detection
-  fail-closed for a genuinely-empty click). This fix does not preclude the relax route.
+- **Status: LIVE-VERIFIED for the readiness gate (2026-07-14, §8-16).** ~~OFFLINE-verified only.~~ Run 3
+  drove the fix on the real surface: `prepareSurface` PASSED readiness and reached the human barrier
+  (`progress 2-of-3`, highlight on the Excel control), replacing the Run-1/Run-2 `UNSUPPORTED_STATE`
+  (`0-of-3`). The §8-14 **readiness false-empty is resolved live.** (The click → download → validate →
+  ingest legs remain unproven — a separate full-pilot authorization; see §8-16.)
+- **PO design choice (resolved by evidence):** the targeted gate-precedence fix is confirmed live and
+  adopted; the alternative "fully relax the gate" route is not needed. (It remains available if a future
+  surface shows the precedence fix insufficient.)
+
+---
+
+## §8-16 — Live Run 3 (precedence-fix verification) — EXECUTED 2026-07-14 · FIX CONFIRMED LIVE
+
+**Run 3 drove the §8-15 precedence fix on the real surface** under fresh G3/P6/G6 in an **observe-only,
+no-click** posture ([`r4-run3-precedence-fix-verification-dispatch-record.md`](r4-run3-precedence-fix-verification-dispatch-record.md)):
+the seller logged in and reached the review-export surface with the list rendered; the Runtime ran
+`prepareSurface` (fixed readiness) → `locate` → `highlight` and reached the human barrier. The seller did
+**not** act on the export control.
+
+- **Sanitized terminal result:** `status: FAILED` · `progress: { completedSteps: 2, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: DOWNLOAD_TIMEOUT`.
+- **The discriminator (vs. §8-8 Run 1 / §8-13 Run 2):** `completedSteps` rose **0 → 2** and the blocker moved
+  from the readiness gate (`UNSUPPORTED_STATE`) to the benign no-click download-detect step
+  (`DOWNLOAD_TIMEOUT`). **`prepareSurface` no longer halts on the populated-grid-with-marker surface** — the
+  precedence fix reads it `READY / positive_rows`. Operator-confirmed corroboration: the **guide/highlight
+  overlay appeared on the Excel download control** (Runs 1–2 never reached highlight).
+- **`DOWNLOAD_TIMEOUT` is the expected, benign observe-only terminal.** `driveOneRun` auto-arms the download
+  observer after the barrier; with no click → no download, detect fails closed (~60 s). A `FAILED` terminal
+  is correct — the run *should* fail closed when the seller does not click; the target was "does readiness
+  stop blocking?", not "COMPLETED".
+- **Non-mutation:** `DOWNLOAD_TIMEOUT` at detect ⇒ no download captured → no validate → no ingest → no
+  backend / DB / status / `LAST_SUCCESS`. Clean teardown (sentinel auto-removed, `.status/` empty, no
+  `downloads/`, no `.aw-quarantine/`, browser closed, process exited, git clean). G6 consumed.
+- **What this proves / does NOT prove.** PROVES: the §8-14 readiness false-empty is **resolved live** — the
+  fix advances a genuinely-populated surface past the readiness gate to the human barrier. Does NOT prove:
+  the click → download → quarantine-validate → **real `/api/uploads` ingest** path — deliberately out of
+  scope (observe-only). A full export pilot needs a **new P6 + export-scoped G6** under the full §4 boundary.
 
 ---
 
