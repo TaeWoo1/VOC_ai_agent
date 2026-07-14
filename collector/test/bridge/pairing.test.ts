@@ -188,3 +188,59 @@ describe("pairing registry", () => {
     expect(reg.exportPairings()[0]!.tokenHash).toHaveLength(64); // sha256 hex
   });
 });
+
+describe("pairing registry — persist-then-commit rollback primitives", () => {
+  it("undoConfirm restores the exact pre-confirm state: no pairing, no token, request back to pending", () => {
+    const { reg } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    reg.confirmPairing(requestId, "allow"); // optimistically minted before a (failed) durable persist
+    expect(reg.hasActivePairing()).toBe(true);
+
+    expect(reg.undoConfirm(requestId)).toEqual({ ok: true });
+    expect(reg.hasActivePairing()).toBe(false); // minted pairing removed
+    expect(reg.exportPairings()).toHaveLength(0); // not even a revoked tombstone lingers
+    // The request is confirmable again and poll surrenders NO inert token in the meantime.
+    expect(reg.pollPairing(requestId).status).toBe("pending");
+    expect(reg.getRequestView(requestId)?.status).toBe("pending");
+  });
+
+  it("after undoConfirm, a retry confirms for real and delivers a working token exactly once", () => {
+    const { reg } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    reg.confirmPairing(requestId, "allow");
+    reg.undoConfirm(requestId);
+
+    expect(reg.confirmPairing(requestId, "allow").ok).toBe(true); // retry allowed on the same request
+    const token = reg.pollPairing(requestId).pairingToken;
+    expect(typeof token).toBe("string");
+    expect(reg.authenticate(token!)?.origin).toBe("https://app.example"); // the retried pairing is valid
+  });
+
+  it("undoConfirm is a no-op for a request that is not in the `allowed` state", () => {
+    const { reg } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    expect(reg.undoConfirm(requestId)).toEqual({ ok: false }); // still pending — nothing minted to undo
+    expect(reg.undoConfirm("no-such-request")).toEqual({ ok: false });
+  });
+
+  it("restoreRevoked un-revokes a pairing so the same token authenticates again (retry needs no new credential)", () => {
+    const { reg } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    reg.confirmPairing(requestId, "allow");
+    const token = reg.pollPairing(requestId).pairingToken!;
+    const pairing = reg.authenticate(token)!;
+
+    reg.revoke(pairing.pairingId); // optimistic revoke before a (failed) durable persist
+    expect(reg.authenticate(token)).toBeNull();
+
+    expect(reg.restoreRevoked(pairing.pairingId)).toEqual({ ok: true });
+    expect(reg.authenticate(token)?.pairingId).toBe(pairing.pairingId); // same credential valid again
+    expect(reg.hasActivePairing()).toBe(true);
+  });
+
+  it("restoreRevoked never creates a pairing for an unknown id", () => {
+    const { reg } = make();
+    expect(reg.restoreRevoked("no-such-pairing")).toEqual({ ok: false });
+    expect(reg.hasActivePairing()).toBe(false);
+  });
+});
