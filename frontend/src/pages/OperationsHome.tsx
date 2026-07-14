@@ -125,11 +125,11 @@ export function OperationsHome() {
         </div>
       ) : null}
 
-      {/* FE-5 sanitized live-bridge diagnostics — DEV + bridge-mode only (renders
-          in both bridge-live and fixture-fallback), never in the production build. */}
-      {isFixturePreviewEnabled() && isBridgeModeEnabled() ? (
-        <BridgeDiagnostics state={state} />
-      ) : null}
+      {/* FE-5 sanitized live-bridge diagnostics — DEV preview only, never in the
+          production build. Rendered whenever the DEV preview is on (bridge-live,
+          fixture-fallback, AND bridge-off/fixture-demo) so the "브리지 꺼짐" verdict is
+          observable; the verdict itself distinguishes the three via `isBridgeModeEnabled`. */}
+      {isFixturePreviewEnabled() ? <BridgeDiagnostics state={state} /> : null}
 
       <p aria-live="polite" className="min-h-[1.25rem] text-sm text-brand-700">
         {note}

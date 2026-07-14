@@ -43,8 +43,10 @@ export interface ActionWindowEndpointDeps {
 }
 
 export class ActionWindowEndpoint {
-  private readonly runId: string;
-  private readonly channelCode: string;
+  private runId: string;
+  private channelCode: string;
+  /** When false, a newly attached socket receives NO `aw_session` announcement — see {@link setAnnouncing}. */
+  private announcing = true;
   private readonly sockets = new Set<WebSocket>();
   private readonly listeners = new Set<(frame: AwClientFrame) => void>();
   /**
@@ -72,14 +74,62 @@ export class ActionWindowEndpoint {
   /** Called by the Bridge server once a socket has passed origin + ticket + pairing checks. */
   onClientConnected(ws: WebSocket): void {
     this.sockets.add(ws);
-    const announcement: AwSessionAnnouncement = {
-      type: "aw_session",
-      transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
-      runId: this.runId,
-      channelCode: this.channelCode,
-    };
-    this.sendRaw(ws, JSON.stringify(announcement));
-    log("aw_client_attached", { clients: this.sockets.size });
+    // When announcing is paused (a DEV-harness knob), the client gets no `aw_session`, so the FE's
+    // `openAnnouncedSocket` times out and — after its retry envelope — settles offline. Default is true,
+    // so the production boot and every existing caller announce exactly as before.
+    if (this.announcing) {
+      const announcement: AwSessionAnnouncement = {
+        type: "aw_session",
+        transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
+        runId: this.runId,
+        channelCode: this.channelCode,
+      };
+      this.sendRaw(ws, JSON.stringify(announcement));
+    }
+    log("aw_client_attached", { clients: this.sockets.size, announced: this.announcing });
+  }
+
+  // ── DEV/TEST harness controls ────────────────────────────────────────────────────────────────────
+  // Loopback knobs for the synthetic UI-verification agent (`cli/action-window-ui-harness.ts`) that let
+  // an operator drive the FE's connection states (checkpoint/drop/reconnect/offline/same-vs-different run)
+  // by hand. They are NEVER wired into the production local-agent boot; announcing defaults true so the
+  // default announce/relay behaviour is unchanged. Logs stay sanitized (booleans/counts only, no runId).
+
+  /** DEV: change the run identity announced to the NEXT connecting socket (same/different-run restart). */
+  setHostedRun(runId: string, channelCode?: string): void {
+    this.runId = runId;
+    if (channelCode !== undefined) this.channelCode = channelCode;
+    log("aw_dev_rehost", {});
+  }
+
+  /** DEV: pause/resume the `aw_session` announcement (models the agent being "down"/"up" for the AW channel). */
+  setAnnouncing(on: boolean): void {
+    this.announcing = on;
+    log("aw_dev_announcing", { on });
+  }
+
+  /** DEV: whether the endpoint is currently announcing its hosted run to new sockets. */
+  isAnnouncing(): boolean {
+    return this.announcing;
+  }
+
+  /** DEV: force-close every attached client socket (models a real network drop). Returns how many closed. */
+  dropClientSockets(): number {
+    const count = this.sockets.size;
+    for (const ws of [...this.sockets]) {
+      try {
+        ws.close();
+      } catch {
+        /* already closed */
+      }
+    }
+    log("aw_dev_drop", { count });
+    return count;
+  }
+
+  /** DEV: the currently announced run identity (sanitized opaque synthetic id). */
+  hostedRunId(): string {
+    return this.runId;
   }
 
   onClientDisconnected(ws: WebSocket): void {

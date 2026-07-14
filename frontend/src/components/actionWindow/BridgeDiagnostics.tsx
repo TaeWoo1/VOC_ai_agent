@@ -1,7 +1,6 @@
 import { channelLabel } from "../../lib/actionWindow/copy";
 import { describeBridgeDiagnostics } from "../../lib/actionWindow/diagnostics";
 import { isBridgeModeEnabled } from "../../lib/actionWindow/devMode";
-import { isBridgeBootAttempted } from "../../lib/actionWindow/bridgeSource";
 import type { OperationsState } from "../../lib/actionWindow/operationsStore";
 
 const VERDICT_TONE: Record<string, string> = {
@@ -12,10 +11,11 @@ const VERDICT_TONE: Record<string, string> = {
 
 /**
  * FE-5 DEV-only sanitized live-bridge diagnostics. Rendered on both the operations
- * home and the run detail ONLY inside the page-level
- * `isFixturePreviewEnabled() && isBridgeModeEnabled()` gate — the same dead-branch
- * pattern as `SimulationPreview`, so the production build tree-shakes this
- * component (and `diagnostics.ts`) out entirely.
+ * home and the run detail inside the page-level `isFixturePreviewEnabled()` gate —
+ * the same DEV-preview dead-branch pattern as `SimulationPreview`, so the production
+ * build tree-shakes this component (and `diagnostics.ts`) out entirely. It renders in
+ * ALL DEV worlds (bridge-live, fixture-fallback, and bridge-off) so the three verdicts
+ * — incl. `픽스처 데모 (브리지 꺼짐)` — are each observable; `computeVerdict` picks which.
  *
  * It exists so that, when we run a real paired local agent, we can confirm at a
  * glance whether Operations is truly on the live Bridge or fell back to the
@@ -30,7 +30,7 @@ export function BridgeDiagnostics({ state }: { state: OperationsState }) {
     sourceMode: state.sourceMode,
     connection: state.connection,
     bridgeModeEnabled: isBridgeModeEnabled(),
-    bootAttempted: isBridgeBootAttempted(),
+    bootAttempted: state.bootAttempted,
     retryPending: state.retryPending,
     connectionTrail: state.connectionTrail,
     connectionChangeCount: state.connectionChangeCount,

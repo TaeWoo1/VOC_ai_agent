@@ -7,9 +7,10 @@ can run it yet* and *exactly which runtime-owned pieces are missing*.
 **Bottom line (updated 2026-07-13): the runtime-owned pieces now EXIST, and the wire contract is
 proven hermetically.** When this doc was written the sole blocker was a runtime/collector-owned
 **synthetic paired agent** that both completes the pairing lifecycle *and* announces a synthetic
-`aw_session` over the socket — and it did not exist. It does now: `collector/src/cli/local-agent.ts`
-run with `--dev-insecure-auto-approve --dev-action-window-synthetic` hosts exactly that agent
-(synthetic driver, no browser/network), and the runtime-verification workstream added a **hermetic
+`aw_session` over the socket — and it did not exist. It does now: the dedicated **synthetic
+UI-verification agent** `collector` → `npm run action-window-ui-harness` hosts exactly that agent
+(synthetic driver, no `--connections`, no browser, no marketplace; refused under production) and exposes
+loopback drive controls; and the runtime-verification workstream added a **hermetic
 cross-stack test** — `collector/test/crossstack/fe-transport-real-bridge.test.ts` — that drives the
 FE's OWN transport modules (`wsTransport.ts` → `bridgeAdapter.ts` → `bridgeSource.ts`, unmodified)
 against a **real** `BridgeServer`, proving all six wire behaviours below (pairing→token, ws-ticket,
@@ -27,7 +28,10 @@ This is an **assessment only**: no live run, no FE source/CI/dependency change (
 above is docs-only; the harness and cross-stack test live in `collector/`, owned by the runtime workstream).
 
 ## 1. What is already prepared (frontend)
-- **Run recipe** — `frontend/package.json` `"dev:bridge": "VITE_AW_BRIDGE=1 vite"` (no dep added).
+- **Run recipe** — `frontend/package.json` `"dev:bridge": "VITE_ENABLE_AGENT_BRIDGE=true VITE_AW_BRIDGE=1 vite"`
+  (no dep added). Both flags are needed: `VITE_AW_BRIDGE=1` arms the AW bridge path, and
+  `VITE_ENABLE_AGENT_BRIDGE=true` shows the pairing dock so the FE can store a token — then pair via
+  `연결하기` + hard-reload to reach `라이브 브리지 사용 중` (see the protocol doc's Run recipe).
 - **README note** — `frontend/README.md` documents the paired-agent run, `VITE_BRIDGE_URL`
   default `http://127.0.0.1:47615`, and the honest fixture-fallback behaviour.
 - **Protocol doc** — `live-verification-protocol.md` (run recipe, 8-step observation table,
@@ -63,10 +67,12 @@ provides all of the following. (Citations are to `frontend/src`.)
    **offline, never spliced**.
 
 All six are **runtime/collector-owned and out of frontend ownership.** **(Updated 2026-07-13: the
-runtime workstream now provides this harness — `collector/src/cli/local-agent.ts
---dev-insecure-auto-approve --dev-action-window-synthetic` — and proves all six against the FE's own
-transport modules over a real `BridgeServer` in `collector/test/crossstack/fe-transport-real-bridge.test.ts`.
-This FE workstream still neither creates nor touches it.)**
+runtime workstream now provides the dedicated synthetic UI-verification agent — `collector` →
+`npm run action-window-ui-harness` (`cli/action-window-ui-harness.ts`) — with loopback drive controls,
+and proves all six against the FE's own transport modules over a real `BridgeServer` in
+`collector/test/crossstack/fe-transport-real-bridge.test.ts` and
+`collector/test/crossstack/synthetic-ui-harness-controls.test.ts`. This FE workstream still neither
+creates nor touches it.)**
 
 ## 3. What FE may / may not do during a run
 **May:** start `cd frontend && npm run dev:bridge`, open Operations, open the **브리지 진단 (개발용)**
@@ -83,11 +89,11 @@ canonical docs, or FE source/CI/`setup.ts`; commit evidence, real `runId`s, toke
 ## 4. Go / no-go checklist (all YES to run the full protocol)
 The first five are now satisfied by the runtime harness + the hermetic cross-stack proof (2026-07-13);
 they are no longer blockers. The last two remain per-run gates for the **manual** browser-UI protocol.
-- [x] Runtime-owned **synthetic** paired agent reachable at `VITE_BRIDGE_URL` — `local-agent --dev-insecure-auto-approve --dev-action-window-synthetic`.
+- [x] Runtime-owned **synthetic** paired agent reachable at `VITE_BRIDGE_URL` — `npm run action-window-ui-harness`.
 - [x] Agent serves the pairing lifecycle so the FE holds a valid `sellerops_bridge_token` — proven in `fe-transport-real-bridge.test.ts`.
 - [x] Agent mints WS tickets and announces a synthetic `aw_session` (`transportVersion:1`) < 4 s — proven.
 - [x] Agent streams valid `aw_view`/`aw_event` frames and answers `aw_resync` for a synthetic run — proven.
-- [x] Operator can deterministically drive same-run reconnect and different-run→offline — proven hermetically (test-owned rehosting).
+- [x] Operator can deterministically drive checkpoint / drop / same-run reconnect / different-run→offline — via the harness's loopback control server, proven in `synthetic-ui-harness-controls.test.ts`.
 - [ ] Per-run approval granted; synthetic-only (no real data/credentials). *(manual-run gate)*
 - [ ] Evidence destination is a gitignored scratch path. *(manual-run gate)*
 
@@ -110,11 +116,13 @@ they are no longer blockers. The last two remain per-run gates for the **manual*
 > same-`runId` restart / **different**-`runId` restart on demand. Retry envelope to design around:
 > 4 s session timeout, 1.5 s fixed retry delay, 5 attempts before offline.
 
-**Fulfilled (2026-07-13):** the runtime workstream delivered (1)–(4) via `local-agent.ts`
-(`--dev-insecure-auto-approve --dev-action-window-synthetic`) over the existing `BridgeServer`, and
-verified (1)–(5) hermetically against the FE's own transport in
-`collector/test/crossstack/fe-transport-real-bridge.test.ts` (same-run reconnect + different-run→offline
-covered by test-owned rehosting rather than an interactive operator).
+**Fulfilled (2026-07-13):** the runtime workstream delivered (1)–(4) via the dedicated synthetic
+UI-verification agent `npm run action-window-ui-harness` (`cli/action-window-ui-harness.ts` →
+`agent/synthetic-ui-harness.ts`) over the existing `BridgeServer`, and delivered (5) as a **loopback
+control server** (`/control/complete-user-action`, `/control/drop-socket`, `/control/host {runId?,up?}`).
+All are verified hermetically against the FE's own transport in
+`collector/test/crossstack/fe-transport-real-bridge.test.ts` (test-owned rehosting) and
+`collector/test/crossstack/synthetic-ui-harness-controls.test.ts` (driven through the shipped controls).
 
 ## Status
 Updated 2026-07-13. The runtime-owned synthetic agent now **exists** and the FE↔Bridge **wire contract
