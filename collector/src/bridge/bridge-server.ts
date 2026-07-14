@@ -33,7 +33,7 @@ import {
 } from "./protocol";
 import { isOriginAllowed } from "./origin-policy";
 import type { SweepResult } from "./pairing";
-import type { FilePairingStore } from "./pairing-store";
+import type { FilePairingStore, PairingStorePersistResult } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
 import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
@@ -198,6 +198,19 @@ export class BridgeServer {
     }
   }
 
+  /**
+   * Persist the durable pairings and make a NON-durable write observable. The store never throws — it returns
+   * a sanitized result — so this only forwards the outcome and logs a `bridge_persist_failed` diagnostic (a
+   * coarse `context` + failure category, never a pairingId/path/secret) when the pairing change did not reach
+   * disk. Each caller then decides how to keep memory and disk consistent (roll back a non-durable confirm;
+   * honor a revoke in-session but report it non-durable).
+   */
+  private persistPairings(context: "confirm" | "revoke" | "auto_approve"): PairingStorePersistResult {
+    const result = this.store.persist();
+    if (result.status === "failed") log("bridge_persist_failed", { context, reason: result.reason });
+    return result;
+  }
+
   // ---- HTTP -----------------------------------------------------------------
 
   private async onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -269,8 +282,12 @@ export class BridgeServer {
     this.logSweep(swept, "pair_request");
     if (this.autoApprovePairing) {
       // DEV/TEST relaxation only — skip the human local confirmation click (never enabled in production).
+      // Same persist-then-commit discipline as the human confirm path: a pairing that did not reach disk is
+      // fully undone so poll never hands out an inert token for a pairing that was never stored.
       const r = this.store.registry.confirmPairing(requestId, "allow");
-      if (r.ok) this.store.persist();
+      if (r.ok && this.persistPairings("auto_approve").status === "failed") {
+        this.store.registry.undoConfirm(requestId);
+      }
     }
     log("bridge_pair_requested", { requestId });
     sendJson(res, 200, {
@@ -304,7 +321,18 @@ export class BridgeServer {
     const requestId = typeof body?.requestId === "string" ? body.requestId : "";
     const decision = body?.decision === "allow" ? "allow" : "deny";
     const result = this.store.registry.confirmPairing(requestId, decision);
-    if (result.ok && decision === "allow") this.store.persist();
+    if (result.ok && decision === "allow") {
+      if (this.persistPairings("confirm").status === "failed") {
+        // Persist-then-commit: the pairing takes effect ONLY when durable. Fully undo the confirm — delete the
+        // minted pairing, discard the undelivered token, and return the request to `pending` — so a follow-up
+        // poll reports `pending` and NEVER surrenders an inert token for a pairing that was never stored. The
+        // human may retry the confirmation. Report the write as non-durable, not a 200.
+        this.store.registry.undoConfirm(requestId);
+        log("bridge_pair_confirmed", { ok: false, allowed: true, durable: false });
+        sendJson(res, 500, { ok: false, error: "persist_failed" });
+        return;
+      }
+    }
     log("bridge_pair_confirmed", { ok: result.ok, allowed: decision === "allow" });
     sendJson(res, result.ok ? 200 : 409, { ok: result.ok });
   }
@@ -383,7 +411,17 @@ export class BridgeServer {
     const pairing = token ? this.store.registry.authenticate(token) : null;
     const result = pairing ? this.store.registry.revoke(pairing.pairingId) : { ok: false };
     if (result.ok && pairing) {
-      this.store.persist();
+      if (this.persistPairings("revoke").status === "failed") {
+        // Persist-then-commit: the revoke takes effect ONLY when durable. Roll it back — un-revoke the pairing
+        // — so the credential stays valid and a retry re-attempts the durable write with the SAME token rather
+        // than a now-dead one; memory and disk stay consistent, so a restart cannot resurrect a revoke that was
+        // reported successful. No sockets are dropped (nothing was revoked).
+        this.store.registry.restoreRevoked(pairing.pairingId);
+        log("bridge_revoked", { ok: false, initiator: "frontend", durable: false });
+        sendJson(res, 500, { ok: false, error: "persist_failed" });
+        return;
+      }
+      // Durably revoked — NOW enforce the user's revocation on live sockets + projection sessions.
       this.dropSocketsWithoutValidPairing();
       if (this.projection) void this.projection.revokePairing(pairing.pairingId);
     }
@@ -402,7 +440,15 @@ export class BridgeServer {
     const pairingId = typeof body?.pairingId === "string" ? body.pairingId : "";
     const result = this.store.registry.revoke(pairingId);
     if (result.ok) {
-      this.store.persist();
+      if (this.persistPairings("revoke").status === "failed") {
+        // Same persist-then-commit rollback as the frontend revoke: un-revoke on a failed write so the revoke
+        // takes effect only when durable, memory stays consistent with disk (no restart resurrection), and a
+        // retry does not depend on a now-revoked credential. No sockets are dropped (nothing was revoked).
+        this.store.registry.restoreRevoked(pairingId);
+        log("bridge_revoked", { ok: false, initiator: "agent", durable: false });
+        sendJson(res, 500, { ok: false, error: "persist_failed" });
+        return;
+      }
       this.dropSocketsWithoutValidPairing();
       if (this.projection) void this.projection.revokePairing(pairingId);
     }

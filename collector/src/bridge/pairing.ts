@@ -170,6 +170,38 @@ export class PairingRegistry {
     return { ok: true };
   }
 
+  /**
+   * **Roll back a just-minted {@link confirmPairing} whose durable persist failed** — restoring the exact
+   * pre-confirm state so the confirm takes effect only when it is durable (persist-then-commit). Deletes the
+   * minted pairing, discards the undelivered token, and returns the request to `pending`. After this a
+   * {@link pollPairing} reports `pending` (never a `paired` status carrying an inert token for a pairing that
+   * was never stored), and the human may retry the confirmation. A no-op unless the request is `allowed`.
+   */
+  undoConfirm(requestId: string): { ok: boolean } {
+    const r = this.requests.get(requestId);
+    if (!r || r.status !== "allowed" || r.pairingId === undefined) return { ok: false };
+    this.pairings.delete(r.pairingId);
+    r.status = "pending";
+    r.pairingId = undefined;
+    r.deliverToken = undefined;
+    return { ok: true };
+  }
+
+  /**
+   * **Roll back a {@link revoke} whose durable persist failed** — un-revoking the pairing so the revoke takes
+   * effect only when it is durable (persist-then-commit). This keeps the credential valid, so a retry can
+   * re-attempt the durable write with the SAME still-valid token instead of a dead one, and memory stays
+   * consistent with the (never-written) durable state so a restart cannot resurrect a revoke reported as
+   * successful. Outstanding ephemeral tickets stay cleared (short-lived + single-use — the client re-mints);
+   * that does not affect the restored pairing's validity. Only un-revokes an existing pairing; never creates one.
+   */
+  restoreRevoked(pairingId: string): { ok: boolean } {
+    const p = this.pairings.get(pairingId);
+    if (!p) return { ok: false };
+    p.revoked = false;
+    return { ok: true };
+  }
+
   /** Step 3: the frontend polls to collect the outcome. The plaintext token is handed over exactly once. */
   pollPairing(requestId: string): { status: "pending" | "denied" | "expired" | "paired"; pairingToken?: string } {
     const r = this.requests.get(requestId);
