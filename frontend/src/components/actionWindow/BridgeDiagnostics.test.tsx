@@ -9,22 +9,17 @@ import {
   type OperationsState,
 } from "../../lib/actionWindow/operationsStore";
 
-// The panel reads two env/runtime helpers at render (`isBridgeModeEnabled`,
-// `isBridgeBootAttempted`) — mock just those so the verdict is deterministic
-// without a real DEV/bridge environment. The verdict LOGIC + privacy leak-guard
-// stay covered by the node-env `diagnostics.test.ts`; these tests assert the
-// rendered DOM/aria structure only.
-const { mockBridgeModeEnabled, mockBootAttempted } = vi.hoisted(() => ({
+// The panel reads the env helper `isBridgeModeEnabled` at render — mock just that so
+// the verdict is deterministic without a real DEV/bridge environment. `부트 시도됨` now
+// comes from REACTIVE store state (`state.bootAttempted`), so it is set via the state
+// prop below, not a module mock. The verdict LOGIC + privacy leak-guard stay covered by
+// the node-env `diagnostics.test.ts`; these tests assert the rendered DOM/aria only.
+const { mockBridgeModeEnabled } = vi.hoisted(() => ({
   mockBridgeModeEnabled: vi.fn(() => false),
-  mockBootAttempted: vi.fn(() => false),
 }));
 vi.mock("../../lib/actionWindow/devMode", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/actionWindow/devMode")>()),
   isBridgeModeEnabled: mockBridgeModeEnabled,
-}));
-vi.mock("../../lib/actionWindow/bridgeSource", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/actionWindow/bridgeSource")>()),
-  isBridgeBootAttempted: mockBootAttempted,
 }));
 
 /** A valid OperationsState with a bound run (revision 4, channel esm_plus), built
@@ -46,7 +41,6 @@ function fieldValue(label: string): HTMLElement {
 describe("FE-6 BridgeDiagnostics (DOM/a11y)", () => {
   beforeEach(() => {
     mockBridgeModeEnabled.mockReturnValue(false);
-    mockBootAttempted.mockReturnValue(false);
   });
 
   it("renders a labelled diagnostics section with a definition list of 10 fields", () => {
@@ -69,6 +63,13 @@ describe("FE-6 BridgeDiagnostics (DOM/a11y)", () => {
     render(<BridgeDiagnostics state={bridgeState({ sourceMode: "fixture" })} />);
     expect(screen.getByText("픽스처로 폴백됨")).toBeInTheDocument();
     expect(fieldValue("소스 모드")).toHaveTextContent("fixture");
+  });
+
+  it("renders 부트 시도됨 from REACTIVE store state (예 on the fixture-fallback path)", () => {
+    mockBridgeModeEnabled.mockReturnValue(true);
+    render(<BridgeDiagnostics state={bridgeState({ sourceMode: "fixture", bootAttempted: true })} />);
+    expect(screen.getByText("픽스처로 폴백됨")).toBeInTheDocument();
+    expect(fieldValue("부트 시도됨")).toHaveTextContent("예");
   });
 
   it("verdict FIXTURE DEMO: bridge mode off", () => {

@@ -9,7 +9,9 @@
  *
  * Offline and hermetic: no browser, no backend, no live NAVER; temp `.operation-runs`/quarantine dirs;
  * the "user action" is delivered by the test driver (`completeUserAction`), never by the Runtime.
- * Gated by `RUN_INTEGRATION` — it opens real loopback WebSockets.
+ * Runs by DEFAULT in the hermetic suite: it opens only real LOOPBACK WebSockets (exactly like the
+ * un-gated `bridge-transport.test.ts`), reaches no network/backend/marketplace, and needs no external
+ * service — so the earlier `RUN_INTEGRATION` gate was removed as inconsistent with that sibling suite.
  */
 import { afterEach, describe, it, expect } from "vitest";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -47,7 +49,6 @@ import { NAVER_FIXTURE_CANARIES } from "../../src/action-window/naver-fixture";
 import { loadOperationRun } from "../../src/action-window/run-store";
 import { connect, readMessages } from "../bridge/helpers";
 
-const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
 const APP = "http://localhost:5173";
 
 /** Nothing NAVER-real, fixture-raw, or filesystem-pathy may cross the wire or reach the store. */
@@ -276,7 +277,7 @@ function assertSanitizedWire(client: AwWireClient, label: string): void {
   expectNoNeedle(client.serverFrames, label);
 }
 
-describe.skipIf(!RUN_INTEGRATION)("NAVER fixture channel over the real Bridge WS (R4 boot wiring)", () => {
+describe("NAVER fixture channel over the real Bridge WS (R4 boot wiring)", () => {
   it("announces channelCode naver after hello+snapshot with the transport version", async () => {
     const handle = await bootNaverAwBridge(makeDirs());
     const { client, runId } = await openClient(handle);

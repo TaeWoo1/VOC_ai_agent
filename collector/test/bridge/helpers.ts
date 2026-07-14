@@ -13,10 +13,13 @@ export interface ConnectResult {
  * Open a WS connection with an explicit Origin. Resolves 101 (+ the open socket) on success, or the HTTP
  * rejection status the server returned (bad origin / bad ticket) on failure.
  */
-export function connect(opts: { port: number; path: string; origin?: string }): Promise<ConnectResult> {
+export function connect(opts: { port: number; path: string; origin?: string; autoPong?: boolean }): Promise<ConnectResult> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${opts.port}${opts.path}`, {
       origin: opts.origin,
+      // `autoPong: false` makes the client ignore server pings (no pong reply) — a supported `ws` option that
+      // simulates a half-open/dead peer for the heartbeat-reaping test, without touching private socket internals.
+      ...(opts.autoPong === false ? { autoPong: false } : {}),
       // `ws` also accepts headers; origin above sets the Origin header.
     });
     // Attach the reader NOW (not on open) — the server sends hello+snapshot synchronously right after the

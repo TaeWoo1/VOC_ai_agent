@@ -1,0 +1,12 @@
+{
+  "//": "Dedicated type-check project for the cross-stack test, which imports REAL frontend/src modules alongside collector/src. It is EXCLUDED from the collector root tsconfig (see ../../tsconfig.json `exclude`) so the frontend source — authored under a looser tsconfig (no noUncheckedIndexedAccess, DOM lib) — is not re-checked under the collector's stricter defaults. Vitest runs the test regardless of this project (it does not type-check). Verify with: npx tsc -p test/crossstack/tsconfig.json",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["."],
+  "exclude": []
+}

@@ -101,6 +101,10 @@ export interface AgentBridge {
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
+  // Make durable-pairing restart recovery observable exactly once at boot. Sanitized: a coarse status enum
+  // plus counts only — never a pairingId/origin/token/hash. Lets an operator tell "restored N pairings" from
+  // a corrupt store (re-pair required) from a fresh install.
+  log("bridge_pairing_store_loaded", { ...store.loadResult });
   const now = cfg.now ?? (() => Date.now());
   const projection = cfg.projection
     ? new ProjectionEndpoint({

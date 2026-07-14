@@ -115,6 +115,69 @@ describe("pairing registry", () => {
     expect(reg.confirmPairing(requestId, "allow").ok).toBe(false);
   });
 
+  it("sweep evicts expired requests and expired tickets, retains the pairing, and is idempotent", () => {
+    const { reg, clock } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    reg.confirmPairing(requestId, "allow");
+    const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
+    const { ticket } = reg.mintTicket(pairing.pairingId);
+    clock.advance(300_001); // past the request TTL (and well past the 10s ticket TTL)
+
+    const first = reg.sweep();
+    expect(first).toEqual({ requestsEvicted: 1, ticketsEvicted: 1 });
+    // The ticket is now GONE from the map (evicted), not merely expired-in-place.
+    expect(reg.consumeTicket(ticket)).toEqual({ ok: false, reason: "not_found" });
+    // A second sweep finds nothing to do; the pairing itself survives (valid until revoked).
+    expect(reg.sweep()).toEqual({ requestsEvicted: 0, ticketsEvicted: 0 });
+    expect(reg.hasActivePairing()).toBe(true);
+  });
+
+  it("opportunistically evicts stale entries when a new request is created (bounded growth)", () => {
+    const { reg, clock } = make();
+    reg.requestPairing("https://app.example", "a");
+    clock.advance(300_001);
+    // Creating a new request runs the opportunistic sweep FIRST, evicting the now-stale one.
+    reg.requestPairing("https://app.example", "b");
+    // If eviction were not opportunistic, the stale "a" would still be here and this would report 1.
+    expect(reg.sweep().requestsEvicted).toBe(0);
+  });
+
+  it("keeps a used-but-unexpired ticket so a replay still reports 'used', then evicts it after expiry", () => {
+    const { reg, clock } = make();
+    const { requestId } = reg.requestPairing("https://app.example", "w");
+    reg.confirmPairing(requestId, "allow");
+    const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
+    const { ticket } = reg.mintTicket(pairing.pairingId);
+    expect(reg.consumeTicket(ticket).ok).toBe(true); // used, still within the 10s TTL
+
+    // A sweep while the ticket is unexpired must NOT evict it — a replay still specifically reports "used".
+    expect(reg.sweep().ticketsEvicted).toBe(0);
+    expect(reg.consumeTicket(ticket)).toEqual({ ok: false, reason: "used" });
+
+    // Once the ticket TTL passes, the sweep reclaims it (a later replay degrades to not_found — still rejected).
+    clock.advance(10_001);
+    expect(reg.sweep().ticketsEvicted).toBe(1);
+    expect(reg.consumeTicket(ticket)).toEqual({ ok: false, reason: "not_found" });
+  });
+
+  it("returns the opportunistic-sweep counts from requestPairing and mintTicket (observability seam)", () => {
+    const { reg, clock } = make();
+    // A fresh request evicts nothing.
+    expect(reg.requestPairing("https://app.example", "a").swept).toEqual({ requestsEvicted: 0, ticketsEvicted: 0 });
+
+    // Let the first request age past its TTL; the NEXT requestPairing sweeps it and reports the eviction.
+    clock.advance(300_001);
+    expect(reg.requestPairing("https://app.example", "b").swept).toEqual({ requestsEvicted: 1, ticketsEvicted: 0 });
+
+    // Mint a ticket, let it expire, then a fresh mint sweeps the dead ticket and reports it.
+    const { requestId } = reg.requestPairing("https://app.example", "c");
+    reg.confirmPairing(requestId, "allow");
+    const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
+    reg.mintTicket(pairing.pairingId);
+    clock.advance(10_001); // past the 10s ticket TTL (still within the 300s request TTL)
+    expect(reg.mintTicket(pairing.pairingId).swept).toEqual({ requestsEvicted: 0, ticketsEvicted: 1 });
+  });
+
   it("persists only pairing-token hashes, never a plaintext token", () => {
     const { reg } = make();
     const { requestId } = reg.requestPairing("https://app.example", "w");

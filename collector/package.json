@@ -7,7 +7,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p test/crossstack/tsconfig.json",
     "connection": "tsx src/cli/connection.ts",
     "upload": "tsx src/cli/upload-file.ts",
     "discover": "tsx src/cli/discover-export.ts",
@@ -26,7 +26,8 @@
     "classify-account-store-same-session": "tsx src/cli/classify-account-store-same-session.ts",
     "continue-account-store-same-session": "tsx src/cli/continue-account-store-same-session.ts",
     "local-agent": "tsx src/cli/local-agent.ts",
-    "bridge": "tsx src/cli/bridge.ts"
+    "bridge": "tsx src/cli/bridge.ts",
+    "action-window-ui-harness": "tsx src/cli/action-window-ui-harness.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

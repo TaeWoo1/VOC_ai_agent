@@ -9,7 +9,7 @@
  * frontend and transiently in memory during first delivery.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PairingRegistry, type Pairing, type PairingRegistryOptions } from "./pairing";
 
@@ -25,26 +25,66 @@ function isPairing(value: unknown): value is Pairing {
   );
 }
 
+/**
+ * **Sanitized outcome of loading the durable store at boot** — counts + a coarse status enum ONLY, never a
+ * pairingId, origin, token, or hash. It makes restart recovery of the persisted pairings observable so the
+ * boot shell can log it (mirroring how the pure registry returns sweep COUNTS for the shell to log):
+ * - `absent` — no store file yet (fresh install / never paired).
+ * - `ok` — the store parsed and every entry was a well-formed pairing.
+ * - `recovered_partial` — the store parsed but `dropped` malformed entries were skipped; `restored` survived.
+ * - `corrupt` — the file was unparseable / not an array; the agent starts with zero pairings (the user re-pairs).
+ */
+export interface PairingStoreLoadResult {
+  status: "absent" | "ok" | "recovered_partial" | "corrupt";
+  restored: number;
+  dropped: number;
+}
+
 export class FilePairingStore {
   readonly registry: PairingRegistry;
+  /** How the durable store loaded at construction — a sanitized restart-recovery signal for the boot shell. */
+  readonly loadResult: PairingStoreLoadResult;
   private readonly filePath: string;
 
   constructor(filePath: string, opts: PairingRegistryOptions) {
     this.filePath = filePath;
     this.registry = new PairingRegistry(opts);
-    this.registry.load(this.readFromDisk());
+    this.removeStaleTmp(); // a crash mid-persist can leave `${filePath}.tmp` behind — never inherit it
+    const { pairings, result } = this.readFromDisk();
+    this.registry.load(pairings);
+    this.loadResult = result;
   }
 
-  private readFromDisk(): Pairing[] {
-    if (!existsSync(this.filePath)) return [];
+  /** Best-effort startup cleanup of an orphaned atomic-write temp file (interrupted {@link persist}). */
+  private removeStaleTmp(): void {
+    const tmp = `${this.filePath}.tmp`;
     try {
-      const parsed: unknown = JSON.parse(readFileSync(this.filePath, "utf8"));
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter(isPairing);
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      /* best-effort: an un-removable orphan is harmless — the next persist overwrites it */
+    }
+  }
+
+  private readFromDisk(): { pairings: Pairing[]; result: PairingStoreLoadResult } {
+    if (!existsSync(this.filePath)) {
+      return { pairings: [], result: { status: "absent", restored: 0, dropped: 0 } };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
       // A corrupt store must not crash the agent; start with no pairings (the user re-pairs).
-      return [];
+      return { pairings: [], result: { status: "corrupt", restored: 0, dropped: 0 } };
     }
+    if (!Array.isArray(parsed)) {
+      return { pairings: [], result: { status: "corrupt", restored: 0, dropped: 0 } };
+    }
+    const pairings = parsed.filter(isPairing);
+    const dropped = parsed.length - pairings.length;
+    return {
+      pairings,
+      result: { status: dropped > 0 ? "recovered_partial" : "ok", restored: pairings.length, dropped },
+    };
   }
 
   /** Persist the current durable pairings atomically with 0600 perms. Call after confirm/revoke. */

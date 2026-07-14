@@ -7,6 +7,10 @@
  * - The long-lived **pairing token** is a secret; at rest we keep only its SHA-256 hash. The plaintext is
  *   returned exactly once (right after local confirmation) for the frontend to store — never persisted.
  * - Pairing is valid **until revoked** (no expiry). Tickets DO expire and are **single-use** (replay-safe).
+ * - The ephemeral **requests/tickets maps are bounded**: {@link PairingRegistry.sweep} (run opportunistically
+ *   on each new request/ticket, and callable directly) evicts entries past their TTL using the injected clock,
+ *   so neither map grows without bound on a long-lived agent. A used-but-unexpired ticket is deliberately KEPT
+ *   until it expires, so a replay within its validity window still reports `used` (never a weaker `not_found`).
  * - Token/ticket comparison is constant-time.
  * - All time + randomness is injected, so this module is deterministic and hermetically testable (no
  *   wall-clock, no ambient RNG). The default adapters use `node:crypto`.
@@ -55,6 +59,12 @@ export interface PairingRegistryOptions {
 }
 
 export type TicketRejection = "not_found" | "expired" | "used";
+
+/** Counts from one bounded-cleanup pass — the safe, coarse timeout-eviction signal (numbers only). */
+export interface SweepResult {
+  requestsEvicted: number;
+  ticketsEvicted: number;
+}
 
 const DEFAULT_REQUEST_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_TICKET_TTL_MS = 10 * 1000;
@@ -105,8 +115,16 @@ export class PairingRegistry {
     return this.exportPairings();
   }
 
-  /** Step 1: the frontend requests pairing for its origin. Returns a short human-verifiable code. */
-  requestPairing(origin: string, workspaceLabel: string): { requestId: string; confirmationCode: string } {
+  /**
+   * Step 1: the frontend requests pairing for its origin. Returns a short human-verifiable code, plus the
+   * `swept` counts from the opportunistic bounded cleanup this call ran first — so the I/O shell can make the
+   * silent timeout-eviction of stale requests/tickets observable without this pure core touching a logger.
+   */
+  requestPairing(
+    origin: string,
+    workspaceLabel: string,
+  ): { requestId: string; confirmationCode: string; swept: SweepResult } {
+    const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
     const requestId = this.randomHex(8); // 16 hex
     const raw = this.randomHex(3).toUpperCase(); // 6 hex chars
     const confirmationCode = `${raw.slice(0, 3)}-${raw.slice(3, 6)}`;
@@ -118,7 +136,7 @@ export class PairingRegistry {
       createdAtMs: this.now(),
       status: "pending",
     });
-    return { requestId, confirmationCode };
+    return { requestId, confirmationCode, swept };
   }
 
   getRequestView(
@@ -179,8 +197,13 @@ export class PairingRegistry {
     return null;
   }
 
-  /** Mint a short-lived, single-use WS ticket for an authenticated pairing. */
-  mintTicket(pairingId: string): { ticket: string; expiresInMs: number } {
+  /**
+   * Mint a short-lived, single-use WS ticket for an authenticated pairing. Also returns the `swept` counts
+   * from the opportunistic cleanup this call ran first (see {@link requestPairing}), so timeout-eviction stays
+   * observable at the transport shell.
+   */
+  mintTicket(pairingId: string): { ticket: string; expiresInMs: number; swept: SweepResult } {
+    const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
     const ticket = this.randomHex(24); // 48 hex
     this.tickets.set(sha256Hex(ticket), {
       ticketHash: sha256Hex(ticket),
@@ -188,7 +211,7 @@ export class PairingRegistry {
       expiresAtMs: this.now() + this.ticketTtlMs,
       used: false,
     });
-    return { ticket, expiresInMs: this.ticketTtlMs };
+    return { ticket, expiresInMs: this.ticketTtlMs, swept };
   }
 
   /** Consume a WS ticket exactly once. Rejects expired/replayed/unknown tickets and revoked pairings. */
@@ -217,6 +240,26 @@ export class PairingRegistry {
     const p = this.authenticate(pairingToken);
     if (!p) return { ok: false };
     return this.revoke(p.pairingId);
+  }
+
+  /**
+   * Evict stale ephemeral state so the `requests`/`tickets` maps stay bounded on a long-lived agent. Uses the
+   * injected clock — deterministic and hermetically testable. A request past its confirmation TTL is dead
+   * (it can no longer be confirmed/polled to any live outcome); a ticket is evicted only once it has EXPIRED,
+   * never merely because it was used — a used-but-unexpired ticket is kept so a replay still reports `used`.
+   * Pairings are never touched here (they are valid until explicitly revoked). Returns the eviction counts.
+   */
+  sweep(): SweepResult {
+    const now = this.now();
+    let requestsEvicted = 0;
+    for (const [id, r] of this.requests) {
+      if (now - r.createdAtMs > this.requestTtlMs) { this.requests.delete(id); requestsEvicted += 1; }
+    }
+    let ticketsEvicted = 0;
+    for (const [hash, t] of this.tickets) {
+      if (now > t.expiresAtMs) { this.tickets.delete(hash); ticketsEvicted += 1; }
+    }
+    return { requestsEvicted, ticketsEvicted };
   }
 
   private requestExpired(r: PendingRequest): boolean {

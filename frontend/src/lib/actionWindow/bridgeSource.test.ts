@@ -169,4 +169,12 @@ describe("Action Window FE-3 bridge source (loopback wire)", () => {
     expect(retried).toBe(false); // env still off → honest fallback stays
     expect(getOperationsState().sourceMode).toBe("fixture");
   });
+
+  it("records bootAttempted in the REACTIVE store even on the fixture-fallback path", async () => {
+    expect(getOperationsState().bootAttempted).toBe(false); // reset in beforeEach → never tried yet
+    expect(await connectBridgeIfEnabled()).toBe(false); // env off → fixture fallback (no adopt, no other store change)
+    // The boot-attempted flag still reaches reactive state, so the DEV panel re-renders (no stale "아니오").
+    expect(getOperationsState().bootAttempted).toBe(true);
+    expect(getOperationsState().sourceMode).toBe("fixture");
+  });
 });

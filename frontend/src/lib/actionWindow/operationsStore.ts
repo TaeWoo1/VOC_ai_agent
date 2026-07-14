@@ -71,6 +71,11 @@ export interface OperationsState {
    *  banner's reconnect button so it can't be double-fired. UI-only; NOT a
    *  fourth `SourceConnection` literal (those stay the stable three). */
   retryPending: boolean;
+  /** FE-5 diagnostics (reactive): whether a live-Bridge boot has been attempted this
+   *  session. Mirrors `bridgeSource`'s boot guard into the store so the DEV panel
+   *  RE-RENDERS when it flips — even on the fixture-fallback path, which otherwise
+   *  changes no store field and would leave the panel showing a stale "아니오". */
+  bootAttempted: boolean;
   sourceMode: SourceMode;
   /** Last-loaded fixture names — used only to highlight the DEV selectors. */
   runScenario: ScenarioName;
@@ -104,6 +109,7 @@ function initialState(): OperationsState {
     noteId: 0,
     ...freshConnectionDiagnostics(),
     retryPending: false,
+    bootAttempted: false,
     sourceMode: "fixture",
     runScenario: "human-action-required",
     homeScenario: INITIAL_HOME,
@@ -275,6 +281,15 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
 //    (`useBridgeReconnect`), which owns the bridge import and calls
 //    `retryBridgeBoot()`; the store only tracks the in-flight flag and the safe
 //    outcome note, so it never imports the Bridge modules (architecture rule).
+
+/** FE-5 diagnostics: record whether a live-Bridge boot has been attempted, as REACTIVE
+ *  store state. `bridgeSource.connectBridgeIfEnabled` calls this so the DEV panel
+ *  re-renders when the flag flips — the fixture-fallback path changes no other store
+ *  field, so without this the panel would keep showing a stale "부트 시도됨 = 아니오". */
+export function setBridgeBootAttempted(value: boolean): void {
+  if (state.bootAttempted === value) return;
+  setState({ ...state, bootAttempted: value });
+}
 
 /** Mark a manual live-Bridge reconnect as in flight (disables the banner button). */
 export function beginBridgeRetry(): void {

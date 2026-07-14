@@ -76,16 +76,24 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     expect(screen.queryByRole("button", { name: "내려받기 시작" })).toBeNull();
   });
 
-  it("diagnostics entry point renders when bridge mode is on, absent otherwise", () => {
-    // off by default
+  it("diagnostics entry point renders whenever the DEV preview is on (incl. bridge OFF), absent otherwise", () => {
+    // preview off by default → absent
     seedHome("home-active-checkpoint");
     const first = renderWithRouter(<OperationsHome />);
     expect(screen.queryByRole("region", { name: DIAGNOSTICS })).toBeNull();
     first.unmount();
 
-    // on
+    // preview on + bridge mode on → present
     devModeMock.isFixturePreviewEnabled.mockReturnValue(true);
     devModeMock.isBridgeModeEnabled.mockReturnValue(true);
+    resetOps();
+    seedHome("home-active-checkpoint");
+    const second = renderWithRouter(<OperationsHome />);
+    expect(screen.getByRole("region", { name: DIAGNOSTICS })).toBeInTheDocument();
+    second.unmount();
+
+    // preview on + bridge mode OFF → still present, so the 브리지 꺼짐 verdict is observable
+    devModeMock.isBridgeModeEnabled.mockReturnValue(false);
     resetOps();
     seedHome("home-active-checkpoint");
     renderWithRouter(<OperationsHome />);
