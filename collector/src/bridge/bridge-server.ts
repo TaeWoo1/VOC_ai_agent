@@ -2,8 +2,12 @@
  * **Local Agent Bridge server (loopback transport shell).** Wraps the pure pairing/event/origin security
  * core in a minimal `node:http` server that listens ONLY on loopback and speaks the bridge protocol (slice
  * §0, §5, §11). The WebSocket transport is the mature **`ws`** library (no hand-rolled RFC6455 framing):
- * `ws` handles the handshake, framing, ping/pong, close, malformed clients, and abrupt disconnects, with an
- * explicit `maxPayload` cap and compression disabled. Binary payloads are rejected — G1 is JSON text only.
+ * `ws` handles the handshake, framing, protocol ping/pong replies, close frames, malformed clients, and
+ * TCP-level disconnects, with an explicit `maxPayload` cap and compression disabled. Binary payloads are
+ * rejected — G1 is JSON text only. `ws` does NOT proactively probe liveness, so a server-side heartbeat
+ * (see {@link BridgeServer.beat}) pings each status socket and reaps half-open peers that vanished without
+ * a close frame (laptop sleep, network drop with no FIN) — otherwise they would linger in `clients` and be
+ * broadcast to forever, and `liveClientCount` would over-report.
  *
  * The security decisions stay OURS and run BEFORE `ws` ever sees the socket: loopback-only bind, explicit
  * origin allow (never wildcard), single-use ticket consume with replay protection, and an unauthenticated
@@ -41,6 +45,11 @@ const MAX_BODY_BYTES = 16 * 1024;
 const MAX_MESSAGE_BYTES = 64 * 1024;
 /** How often the server polls projection control-lease expiry (slice §D). */
 const PROJECTION_TICK_MS = 5 * 1000;
+/**
+ * How often the server pings each G1 status socket to detect half-open (dead) peers. A socket that misses
+ * the pong for one full interval is reaped on the next beat, so a vanished peer clears within ≤2 intervals.
+ */
+const HEARTBEAT_MS = 30 * 1000;
 
 export interface BridgeServerDeps {
   store: FilePairingStore;
@@ -53,6 +62,13 @@ export interface BridgeServerDeps {
    * confirmation click is needed. The CLI refuses to set this in production. Loudly logged when active.
    */
   autoApprovePairing?: boolean;
+  /**
+   * G1 status-socket liveness probe interval (ms). Each interval the server pings every `/bridge/ws` client
+   * and terminates any that did not answer the previous ping — reaping half-open sockets (a peer that
+   * vanished with no close frame) so `clients`/`liveClientCount` stay honest. Injectable for deterministic
+   * tests; defaults to {@link HEARTBEAT_MS}. A non-positive value disables the heartbeat.
+   */
+  heartbeatMs?: number;
   /**
    * Optional Browser Projection V0 endpoint (slice §B). When present, the server mounts a SEPARATE projection
    * transport (`POST /projection/ticket`, `/projection/ws` binary) alongside — and independent of — the G1
@@ -77,12 +93,16 @@ export class BridgeServer {
   private readonly host: string;
   private readonly wantPort: number;
   private readonly autoApprovePairing: boolean;
+  private readonly heartbeatMs: number;
   private readonly projection: ProjectionEndpoint | undefined;
   private readonly actionWindow: ActionWindowEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
+  private heartbeatTimer: NodeJS.Timeout | undefined;
   private boundPort = 0;
   private readonly clients = new Map<WebSocket, string>(); // ws → pairingId
+  /** Per-socket liveness for the heartbeat: `true` once the last ping was answered, `false` while awaiting one. */
+  private readonly alive = new WeakMap<WebSocket, boolean>();
   private readonly connections = new Map<string, BridgeConnectionView>();
 
   constructor(deps: BridgeServerDeps) {
@@ -92,6 +112,7 @@ export class BridgeServer {
     this.host = deps.host ?? LOOPBACK;
     this.wantPort = deps.port;
     this.autoApprovePairing = deps.autoApprovePairing ?? false;
+    this.heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
     this.projection = deps.projection;
     this.actionWindow = deps.actionWindow;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
@@ -121,6 +142,10 @@ export class BridgeServer {
           this.projectionTimer = setInterval(() => this.projection?.tick(), PROJECTION_TICK_MS);
           this.projectionTimer.unref?.();
         }
+        if (this.heartbeatMs > 0) {
+          this.heartbeatTimer = setInterval(() => this.beat(), this.heartbeatMs);
+          this.heartbeatTimer.unref?.();
+        }
         log("bridge_listen", { port: this.boundPort, host: this.host });
         resolve({ port: this.boundPort });
       };
@@ -132,6 +157,7 @@ export class BridgeServer {
 
   async close(): Promise<void> {
     if (this.projectionTimer) { clearInterval(this.projectionTimer); this.projectionTimer = undefined; }
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = undefined; }
     if (this.projection) { try { await this.projection.close(); } catch { /* best effort */ } }
     this.actionWindow?.close();
     for (const ws of this.clients.keys()) {
@@ -410,8 +436,12 @@ export class BridgeServer {
 
   private onWsConnection(ws: WebSocket, pairingId: string): void {
     this.clients.set(ws, pairingId);
+    this.alive.set(ws, true);
     log("bridge_ws_accepted", { pairingId });
 
+    // Heartbeat liveness: `ws` answers our ping automatically, so any live peer flips back to alive here.
+    // A half-open peer never pongs, so `beat()` reaps it on the next interval.
+    ws.on("pong", () => this.alive.set(ws, true));
     ws.on("message", (data: RawData, isBinary: boolean) => {
       if (isBinary) {
         // G1 is JSON text only — a binary payload is unsupported.
@@ -456,6 +486,28 @@ export class BridgeServer {
       const stillValid = this.store.registry.listPairings().some((p) => p.pairingId === pairingId && !p.revoked);
       if (!stillValid) ws.close(1000, "revoked");
     }
+  }
+
+  /**
+   * One heartbeat sweep of the G1 status sockets. A socket that did NOT answer the previous ping (still
+   * `alive === false`) is a dead half-open peer and is terminated — its `close` handler prunes `clients`.
+   * Every survivor is marked awaiting-pong and pinged; a real peer's automatic pong flips it back to alive
+   * before the next beat, so only a vanished peer (no close frame) is ever reaped.
+   */
+  private beat(): void {
+    for (const ws of this.clients.keys()) {
+      if (this.alive.get(ws) === false) {
+        try { ws.terminate(); } catch { /* already gone; close handler prunes */ }
+        continue;
+      }
+      this.alive.set(ws, false);
+      try { ws.ping(); } catch { /* send failed on a dying socket — reaped next beat */ }
+    }
+  }
+
+  /** Number of currently-connected G1 status sockets (post-reap). Lifecycle-visibility surface for tests/ops. */
+  liveClientCount(): number {
+    return this.clients.size;
   }
 
   private sendTo(ws: WebSocket, msg: ServerMessage): void {
