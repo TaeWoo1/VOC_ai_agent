@@ -32,6 +32,7 @@ import {
   type ServerMessage,
 } from "./protocol";
 import { isOriginAllowed } from "./origin-policy";
+import type { SweepResult } from "./pairing";
 import type { FilePairingStore } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
@@ -186,6 +187,17 @@ export class BridgeServer {
     return [`http://127.0.0.1:${this.boundPort}`, `http://localhost:${this.boundPort}`];
   }
 
+  /**
+   * Make the registry's bounded timeout-eviction observable. The pure core sweeps stale pairing requests and
+   * expired tickets opportunistically but returns only coarse COUNTS; we log them (never the evicted ids or any
+   * secret) so an operator can see that requests/tickets are ageing out. Silent when nothing was evicted.
+   */
+  private logSweep(swept: SweepResult, trigger: "pair_request" | "ws_ticket"): void {
+    if (swept.requestsEvicted > 0 || swept.ticketsEvicted > 0) {
+      log("bridge_pairing_swept", { trigger, requestsEvicted: swept.requestsEvicted, ticketsEvicted: swept.ticketsEvicted });
+    }
+  }
+
   // ---- HTTP -----------------------------------------------------------------
 
   private async onRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -253,7 +265,8 @@ export class BridgeServer {
     }
     const body = await readJson(req);
     const workspaceLabel = typeof body?.workspaceLabel === "string" ? body.workspaceLabel.slice(0, 80) : "SellerOps";
-    const { requestId, confirmationCode } = this.store.registry.requestPairing(origin!, workspaceLabel);
+    const { requestId, confirmationCode, swept } = this.store.registry.requestPairing(origin!, workspaceLabel);
+    this.logSweep(swept, "pair_request");
     if (this.autoApprovePairing) {
       // DEV/TEST relaxation only — skip the human local confirmation click (never enabled in production).
       const r = this.store.registry.confirmPairing(requestId, "allow");
@@ -329,7 +342,8 @@ export class BridgeServer {
       sendJson(res, 409, { error: "incompatible_version", agentProtocolVersion: BRIDGE_PROTOCOL_VERSION });
       return;
     }
-    const { ticket, expiresInMs } = this.store.registry.mintTicket(pairing.pairingId);
+    const { ticket, expiresInMs, swept } = this.store.registry.mintTicket(pairing.pairingId);
+    this.logSweep(swept, "ws_ticket");
     // NEVER log the ticket or token — only the opaque pairingId.
     log("bridge_ticket_minted", { pairingId: pairing.pairingId });
     sendJson(res, 200, { ticket, expiresInMs });
@@ -399,8 +413,11 @@ export class BridgeServer {
   // ---- WebSocket (via `ws`) -------------------------------------------------
 
   private onUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
-    const reject = (code: number, reason: string): void => {
-      log("bridge_ws_rejected", { reason });
+    // `reason` is the client-facing HTTP status text (a stable `BridgeErrorCode`); the optional `detail` is a
+    // sanitized enum that stays in the LOG only — it distinguishes a benign timeout (`expired`) from a replay
+    // (`used`) or a forged ticket (`not_found`) without changing the wire response or exposing the ticket.
+    const reject = (code: number, reason: string, detail?: string): void => {
+      log("bridge_ws_rejected", { reason, ...(detail ? { detail } : {}) });
       socket.write(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
     };
@@ -429,7 +446,9 @@ export class BridgeServer {
 
     const ticket = url.searchParams.get("ticket") ?? "";
     const consumed = this.store.registry.consumeTicket(ticket);
-    if (!consumed.ok) return reject(401, "bad_ticket");
+    // Surface the granular rejection reason the pure core already computed (`used`/`expired`/`not_found`)
+    // instead of flattening every failure to an opaque `bad_ticket`. The wire response stays `bad_ticket`.
+    if (!consumed.ok) return reject(401, "bad_ticket", consumed.reason);
 
     this.wss.handleUpgrade(req, socket, head, (ws) => this.onWsConnection(ws, consumed.pairingId));
   }
