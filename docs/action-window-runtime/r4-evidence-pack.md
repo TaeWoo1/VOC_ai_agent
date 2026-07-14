@@ -421,8 +421,164 @@ surface still fails closed, and an unusable session decides without polling. `ty
 
 **STILL OFFLINE — not live-verified.** This closes the offline half of the §8-11 diagnosis. A live
 confirmation — that the settle actually flips `none → READY` on the real NAVER surface within the window
-(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** and is out of
-scope here. Local commit `b2f3604` (HELD, unpushed).
+(and does not merely wait out genuinely-empty pages) — needs a **fresh export-scoped G6** (merged as PR #250).
+
+> **⚠ CORRECTION (2026-07-14, §8-13) — the live confirmation FAILED; the settle is NOT the Run-1 fix.**
+> Run 2 (§8-13) ran the settle live and reproduced Run 1's `UNSUPPORTED_STATE` at `prepareSurface`. The
+> settle is a valid offline robustness primitive (and all its hermetic tests stand), but it does **not**
+> resolve the live false-positive-empty. See §8-13 for the leading cause (empty-marker precedence).
+
+---
+
+## §8-13 — Live Run 2 (settle verification) — EXECUTED 2026-07-14 · FAILED · settle NOT the fix
+
+**Run 2 ran the settle fix live** under a fresh export-scoped G3/P6/G6 in an **observe-only, no-click**
+posture (operator/PO decision — [`r4-run2-settle-verification-dispatch-record.md`](r4-run2-settle-verification-dispatch-record.md)):
+the seller logged in and reached the review-export surface with the review list rendered; the Runtime ran
+`prepareSurface` (settle active, 8 s default window) and would have highlighted the control and parked at
+`WAITING_FOR_HUMAN` **iff** readiness passed. It did not.
+
+- **Sanitized result:** `status: FAILED` · `progress: { completedSteps: 0, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: UNSUPPORTED_STATE` — **identical to Run 1** (§8-8). The highlight
+  never appeared; the run failed closed at `prepareSurface`.
+- **Non-mutation (as scoped):** failed at step 0 → **no click, no download, no validate, no ingest, no
+  backend contact, no DB write, no status/`LAST_SUCCESS`**. Clean teardown (sentinel removed, `downloads/`
+  + `.aw-quarantine` empty, browser closed, git clean). G6 consumed.
+
+**Finding — the settle fix is REFUTED as the Run-1 fix.** It passed every offline/hermetic test (§8-12) but
+did **not** flip the live failure. Echoing the §8-8 frame-fix correction: a green offline seam is not a live
+fix. The settle stays a valid general robustness primitive; it is **not** the Run-1 solution.
+
+**Leading hypothesis (UNPROVEN — §6 forbids a speculative patch).** The §8-11 probe and the readiness gate
+run **different** logic. §8-11 measured only row buckets (`semanticRowCount`/`dataRowLikeCount` via
+`extractExportProbeSignals`) and inferred READY. But `evaluateExportTargetReadiness` checks empty-state /
+no-export-target **markers first (precedence 1)**, *before* counting rows — and the settle treats an
+explicit marker as a **trusted halt** (resolves on check 1). So a hidden / off-screen empty phrase on the
+live surface would halt `prepareSurface` immediately **regardless of rendered rows**, which fits the fast
+fail. §8-11's "`countDataRows` would have counted rows → READY" inference never measured this branch and was
+likely wrong.
+
+**Next (needs kickoff; evidence-not-speculation):** a read-only probe that emits the sanitized **live
+`evaluateExportTargetReadiness` decision + reason + state** (which branch fired — `empty_state` /
+`no_export_target` / `zero_rows` / `ambiguous`), so the *actual* cause is observed before any gate change.
+Only then correct the gate/settle from that evidence. Requires an offline probe extension + a fresh
+read-only G6.
+
+> **✔ RESOLVED (2026-07-14, §8-14).** That probe ran. The leading hypothesis above is **CONFIRMED**: the
+> live surface HALTed at `empty_state_marker` while its own `semanticRowCount` was `many` — a marker masks a
+> populated grid. See §8-14 for the sanitized evidence and the evidence-based fix direction.
+
+---
+
+## §8-14 — Read-only readiness-branch probe (Run-2 cause) — EXECUTED 2026-07-14 · ROOT CAUSE CONFIRMED
+
+**The probe from §8-13's "Next" ran** under a fresh read-only G3 lift + single-use G6 (dispatch record:
+[`r4-readiness-branch-probe-dispatch-record.md`](r4-readiness-branch-probe-dispatch-record.md)). It uses the
+readiness-branch instrumentation (commit `fa5c931`): the read-only frame-aware probe now emits, per frame,
+the gate's verbatim `readiness` (decision / state / reason) **plus `readinessBranch`** (which precedence rung
+fired). The seller logged in and reached the review-export surface with the list rendered; the probe read the
+top document + every child frame once and emitted sanitized signals. `sessionVerdict: LOGGED_IN`.
+
+- **Export-surface frame** (top document — the frame with the visible + enabled export candidate,
+  `exportCandidateCount: one`, `excelLike`/`downloadLike` true):
+  - `readinessBranch: empty_state_marker`
+  - `readiness: HALT · EXPORT_TARGET_EMPTY · empty_state`
+  - `semanticRowCount: many` · `dataRowLikeCount: many`
+- **Child frame (`other`):** a non-export utility frame — no candidates, `readinessBranch:
+  ambiguous_no_signal`. Not the surface.
+
+**Finding — CONFIRMED root cause: `empty_state_marker` precedence.** The gate's own row counter sees `many`
+rows on the surface frame (rung 3 would return `READY / positive_rows`) but **never reaches rung 3**: rung 1's
+empty-state marker short-circuits and HALTs. A "no results"-style placeholder coexists in the DOM with a
+**fully populated** review grid, and the marker precedence wrongly outranks the positive row evidence. This is
+the Run-1 (§8-8) and Run-2 (§8-13) `UNSUPPORTED_STATE` cause, now observed live.
+
+**Competing explanations ruled out by the same read:**
+- NOT div-grid / virtualized rows the gate can't count — `semanticRowCount` is `many`, not `none`.
+- NOT a frame-resolution bug — the surface frame IS the top document and carries both the rows and the
+  candidate.
+- NOT the render-timing gap — the surface was never row-empty, which is exactly why the settle (§8-13) could
+  not fix it: it waited for rows that were already present while a marker masked them.
+
+**Non-mutation:** read-only frame reads only; no click / download / validate / ingest / backend / DB / status
+/ `LAST_SUCCESS`. Clean teardown (sentinel auto-removed, `.status/` empty, no `downloads/`, context closed,
+git clean). G6 consumed.
+
+**Next (evidence-based offline slice — NOT a speculative patch, per §6).** Correct
+`evaluateExportTargetReadiness` so positive row/count evidence **outranks** the empty-state marker: either
+move the row/labeled-count checks ahead of the marker rung, or require the empty-state node to be the
+**visible** state (the placeholder is almost certainly present-but-hidden while the grid is populated — a
+common SPA pattern). Design + hermetic tests offline (incl. a marker-coexists-with-populated-grid fixture,
+the exact live shape), then re-verify live under a fresh G6. The settle stays a general robustness primitive
+but is not this fix.
+
+> **✔ DELIVERED offline (2026-07-14, §8-15) → ✔ LIVE-VERIFIED (2026-07-14, §8-16).** The precedence fix is
+> implemented + hermetically tested (local commit `0ee3b6e`) AND confirmed on the real surface by Run 3:
+> `prepareSurface` passed readiness and reached the human barrier. The §8-14 readiness false-empty is
+> resolved live. See §8-15 (fix) and §8-16 (live verification).
+
+---
+
+## §8-15 — Readiness precedence fix (positive evidence outranks markers) — DELIVERED offline 2026-07-14 · LIVE-VERIFIED (§8-16)
+
+**The §8-14 fix is implemented** (local commit `0ee3b6e`, HELD): `traceExportTargetReadiness` /
+`evaluateExportTargetReadiness` were reordered so **positive row/count evidence outranks the empty-state
+markers**. New precedence: (1) labeled count > 0 → `READY / positive_count`; (2) **real data rows present →
+`READY / positive_rows`** (the fix); (3) no-export-target notice → HALT; (4) empty-state marker → HALT; (5)
+labeled count == 0 → HALT; (6) results container / zero rows → HALT; (7) required-range → HALT; (8)
+ambiguous → HALT.
+
+- **Placeholder guard (`countPlaceholderBodyRows`).** An in-table empty-state row
+  (`<tr><td colspan>…없습니다</td></tr>`) is itself counted as a row, so marker-bearing `<tbody>` rows are
+  subtracted: `realDataRows = countDataRows − placeholderRows`. A populated grid + hidden marker now reads
+  READY; a **lone placeholder row still HALTs** (subtraction floors at 0 → falls through to the marker
+  rung); no arbitrary threshold, and a single-review store still reads READY. A latent stateful-regex bug
+  was fixed en route (a non-global inline `<tr>` test; the shared `TR_RE` is `/g`).
+- **Blast radius:** `export-probe.ts` is UNCHANGED — it re-emits the gate verbatim, so the fix flows
+  through the read-only probe with no probe-code change. Still conservative: ambiguity never clicks, and a
+  false READY that clicks into nothing is caught **fail-closed** by download detection downstream.
+- **Offline verification:** `typecheck` clean; offline suite **2702 passed / 32 skipped** (+9 net tests) —
+  new cases cover populated-grid-plus-hidden-marker → READY, the live "many rows + marker" shape → READY
+  `many`, positive count + marker → READY, role=grid rows + marker → READY, placeholder subtraction (1 real
+  + 1 placeholder → bucket `one`), a lone placeholder → HALT, and a regression loop proving genuinely-empty
+  surfaces (all marker/count/zero-rows shapes) **still HALT**.
+- **Status: LIVE-VERIFIED for the readiness gate (2026-07-14, §8-16).** ~~OFFLINE-verified only.~~ Run 3
+  drove the fix on the real surface: `prepareSurface` PASSED readiness and reached the human barrier
+  (`progress 2-of-3`, highlight on the Excel control), replacing the Run-1/Run-2 `UNSUPPORTED_STATE`
+  (`0-of-3`). The §8-14 **readiness false-empty is resolved live.** (The click → download → validate →
+  ingest legs remain unproven — a separate full-pilot authorization; see §8-16.)
+- **PO design choice (resolved by evidence):** the targeted gate-precedence fix is confirmed live and
+  adopted; the alternative "fully relax the gate" route is not needed. (It remains available if a future
+  surface shows the precedence fix insufficient.)
+
+---
+
+## §8-16 — Live Run 3 (precedence-fix verification) — EXECUTED 2026-07-14 · FIX CONFIRMED LIVE
+
+**Run 3 drove the §8-15 precedence fix on the real surface** under fresh G3/P6/G6 in an **observe-only,
+no-click** posture ([`r4-run3-precedence-fix-verification-dispatch-record.md`](r4-run3-precedence-fix-verification-dispatch-record.md)):
+the seller logged in and reached the review-export surface with the list rendered; the Runtime ran
+`prepareSurface` (fixed readiness) → `locate` → `highlight` and reached the human barrier. The seller did
+**not** act on the export control.
+
+- **Sanitized terminal result:** `status: FAILED` · `progress: { completedSteps: 2, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: DOWNLOAD_TIMEOUT`.
+- **The discriminator (vs. §8-8 Run 1 / §8-13 Run 2):** `completedSteps` rose **0 → 2** and the blocker moved
+  from the readiness gate (`UNSUPPORTED_STATE`) to the benign no-click download-detect step
+  (`DOWNLOAD_TIMEOUT`). **`prepareSurface` no longer halts on the populated-grid-with-marker surface** — the
+  precedence fix reads it `READY / positive_rows`. Operator-confirmed corroboration: the **guide/highlight
+  overlay appeared on the Excel download control** (Runs 1–2 never reached highlight).
+- **`DOWNLOAD_TIMEOUT` is the expected, benign observe-only terminal.** `driveOneRun` auto-arms the download
+  observer after the barrier; with no click → no download, detect fails closed (~60 s). A `FAILED` terminal
+  is correct — the run *should* fail closed when the seller does not click; the target was "does readiness
+  stop blocking?", not "COMPLETED".
+- **Non-mutation:** `DOWNLOAD_TIMEOUT` at detect ⇒ no download captured → no validate → no ingest → no
+  backend / DB / status / `LAST_SUCCESS`. Clean teardown (sentinel auto-removed, `.status/` empty, no
+  `downloads/`, no `.aw-quarantine/`, browser closed, process exited, git clean). G6 consumed.
+- **What this proves / does NOT prove.** PROVES: the §8-14 readiness false-empty is **resolved live** — the
+  fix advances a genuinely-populated surface past the readiness gate to the human barrier. Does NOT prove:
+  the click → download → quarantine-validate → **real `/api/uploads` ingest** path — deliberately out of
+  scope (observe-only). A full export pilot needs a **new P6 + export-scoped G6** under the full §4 boundary.
 
 ---
 
