@@ -48,7 +48,18 @@ import org.springframework.test.context.ActiveProfiles;
 /**
  * Slice 4: claiming due schedules, outcome-aware rescheduling (cadence /
  * rate-limit delay / bounded backoff), DEGRADED escalation, and alert rows —
- * over a real (H2) DB. Time is passed in, never read from the wall clock.
+ * over a real (H2) DB.
+ *
+ * <p>Scheduler time is fixture-controlled: {@code runDueSchedules} takes the
+ * instant as a parameter, and the cadence / backoff / escalation assertions all
+ * derive from the {@link #now} field. One path is NOT fixture-controlled —
+ * {@code SyncRunExecutor} stamps a rate-limit retry hint from its own live
+ * {@code Instant.now()} (SyncRunExecutor:208), which {@code resolveNextRun}
+ * prefers whenever it falls after {@code now + MIN_RATE_LIMIT_DELAY}. The
+ * rate-limit tests therefore depend on {@link #now} tracking real time, which is
+ * why it is truncated rather than pinned to a literal. Making that executor clock
+ * injectable would close the gap; until then, "no wall clock" holds for the
+ * scheduler but not for the retry hint.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
