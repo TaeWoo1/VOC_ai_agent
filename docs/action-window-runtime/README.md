@@ -83,7 +83,7 @@ When sources conflict, this order wins:
 3. `../sellerops_frontend_spec.md`
 4. `../sellerops_local_agent_runtime_adr.md`
 5. capability truth table `../multi-channel-connector-roadmap.md` §4.1
-6. the shared FE↔Runtime contract (once it exists — see `contract-boundary.md`)
+6. the shared FE↔Runtime contract (`contracts/action-window/v1/`)
 7. these Runtime execution docs
 8. current implementation evidence
 

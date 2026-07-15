@@ -7,20 +7,15 @@
 **Updated:** 2026-07-15 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
-**Discovery:** the root `CLAUDE.md` reading order points here, and the `r4-runtime-handoff` skill
-(`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. `docs/sellerops_current_state.md` — the reading
-order's own §6 "living handoff state" — **was corrected by the product owner on 2026-07-15** and its §9 now
-records Run 4 and routes here. **This directory remains status-of-record for Runtime detail;** §9 is a
-scoped summary, not a substitute. That doc is otherwise still a 2026-07-08 snapshot — only the Action
-Window entry was refreshed.
+**Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
+skill (`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. **Both carry paths only** — they
+deliberately restate no status, so a fact landing in this workstream should never require editing them.
+**This directory is status-of-record for Runtime detail** and wins over any status claim in a router or
+in `docs/sellerops_current_state.md`, whose Action Window entries are a scoped summary, not a substitute.
 
-**`docs/multi-channel-connector-roadmap.md` §4.1** (the capability table — *higher* in the conflict priority
-than `current_state`) **was corrected on 2026-07-15**: NAVER REVIEW now reads export→ingest end-to-end
-라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원 stays ❌ and the 셀러 표기
-cell is unchanged** — no seller-facing claim moved.
-
-`docs/sellerops_current_state.md` §7 was aligned on 2026-07-15 and now records the Run 4 export→ingest run
-with the same scope bounds.
+**`docs/multi-channel-connector-roadmap.md` §4.1** — the capability table — outranks this file (conflict
+priority #5) and is *not* mirrored here. Runtime evidence may show it stale; **report that, do not edit
+it from this branch.**
 
 ⚠ **Still stale, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still says the
 overlay / download-detection seams are 미구현. That is a product-owner decision, deliberately not taken
@@ -35,7 +30,10 @@ here. Report it; do not silently edit it.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
-5. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
+5. [`r4-operator-runbook.md`](r4-operator-runbook.md) — **the only operator-facing doc here**; the other
+   entries are engineering records. Read it if a human is about to run an export: Phase A prep, the
+   **~60 s** click+confirm window, what a lapse costs, when to abort. **Grants nothing.**
+6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
 
 ## State in one line
 
@@ -61,45 +59,127 @@ here. Report it; do not silently edit it.
 raises an **expected NAVER confirmation dialog** the operator must manually confirm; the download fires only
 on that confirmation. Both steps must land inside the ~60 s detect window. That dialog is **expected and is
 NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" still stands for everything else.
+Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3; normative:
+`r4-preparation.md` §7.
+
+**Two timing facts a cold session re-derives WRONG (verified in code 2026-07-15, not by a run):**
+
+- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min is COSMETIC on this path — never quote it as the human budget.**
+  `waitForUserAction` runs un-awaited and its result is discarded once the stage has moved on
+  (`session.ts:236`), because `driveOneRun` auto-sends `REQUEST_STEP_RECHECK` the moment the run parks.
+  So `detectDownload` is already racing its 60 s timer ~1 s after the highlight appears. **The only number
+  that can fail a run is ~60 s** (`DOWNLOAD_TIMEOUT_MS`), and it covers click **+** confirm. The early
+  `timeout: 0` arming (`naver-live-driver.ts`) means an early click is never missed.
+- ⚠ **The Runtime never observes the confirmation.** `observer.ts` listens only on the tagged export
+  control; the dialog is outside it. **The download firing is the sole evidence of step 2.**
+  ❓ **Open, NOT determinable from code or docs:** whether `USER_ACTION_OBSERVED` /
+  `humanCheckpoint.observed` is therefore ever recorded on a live run — §4 claims the Runtime "observes the
+  user's action" as part of the audit trail. If it is not, that is a **defect, not a doc problem**.
+  Unreviewed; needs engineering + PO.
 
 ## Git state
 
-- **`origin/main` = `23de8d7`** (PR #258 merged). HEAD = **`45ed82c`**.
-- **Exactly ONE local-only commit: `45ed82c`** — `refactor(collector): sanitize upload.done +
-  item-analysis.count logs (§4.3)`. Offline cleanup slice; verified (typecheck clean, 2761 passed /
-  29 skipped); **HELD unpushed by the standing local-accumulation cadence** — it is a cleanup, not a
-  milestone. Do not push/PR it without an explicit operator go.
-- The branch reads "ahead 4" of `origin/feat/r4-supervised-channel-runtime`, but three of those are already
-  on `origin/main` via PR #258. **`git log origin/main..HEAD` is the honest measure — it shows 1.**
-- Recent merges: **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge hardening),
-  #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver core
-  `NaverLiveProbeDriver`), **#246** (gated live entrypoint), **#250** (`settleExportSurface`).
+- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). **`main` is fully merged in** via `d87ec17`
+  (normal merge commit, 2026-07-16) — the branch is **6 ahead, 0 behind**.
+  > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
+  > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
+  > `git log --oneline origin/main..HEAD`**; the commit *list* below is the durable claim.
+- **6 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, **none pushed**:
+  `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
+  expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
+  (README §5 rank 6 — the shared contract exists) · `5667ed4` (this file's git state + last slice) ·
+  `d87ec17` (merge of `main`/#261).
+  - **Docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote **`CONFIRM_PROMPT`** in
+    `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only; no behavior, no
+    timers.** ⚠ **`5667ed4` claimed this batch was "docs/skill only, no `collector/src`" — that was
+    FALSE**, and it contradicted this file's own §"Last slice" detail, which recorded the CLI change
+    correctly all along. Corrected here. **Verify with `git diff --name-only origin/main..HEAD`; never
+    assert the file set from memory.**
+- **#261 is now IN this branch** (`f83be19` — bridge: sanitize untrusted approval fields + bound pending
+  pairings). It landed on `main` mid-batch; the two sides were **disjoint (zero file overlap)**, so the
+  merge was clean. Merge-base was `09f2411`.
+  **Syncing remains an operator decision — do not fetch-and-merge on your own initiative.**
+- The six commits held by the *previous* batch all landed via **#260**: `45ed82c` (upload log
+  sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
+  corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
+  (`current_state` §7), `49dc847` (capability matrix).
+- **`git log origin/main..HEAD` remains the honest measure** — the "ahead N" figure against
+  `origin/feat/r4-supervised-channel-runtime` has repeatedly overcounted work already on `main`.
+  ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
+  compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
+  produced a bogus "1,871 deletions" reading against #259 while preparing #260.
+  **Not currently firing** — `d87ec17` merged `main` in, so `origin/main..HEAD` and `origin/main...HEAD`
+  agree while that holds. **The warning stands: it re-arms the moment `main` moves again.**
+- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **merged into this branch via `d87ec17`**),
+  **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
+  pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
+  landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
+  hardening), #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver
+  core `NaverLiveProbeDriver`), **#246** (gated live entrypoint), **#250** (`settleExportSurface`).
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
   `--ff-only` sync.
 
-## Next slice — planned, NOT started
+## Last slice — docs-governance batch (6 commits, held local, 2026-07-15→16)
 
-**R4 operator guidance** (docs + one CLI string; offline). Run 4 proved the path but there is **no
-operator-facing runbook**: the human choreography is scattered across §4's role list, a sentinel paragraph
-in the gate record, the dispatch records, and `CONFIRM_PROMPT`
-(`collector/src/cli/run-action-window-live-naver.ts:219-231`) — the only text an operator actually reads at
-run time, and it is now stale (it describes the export as one action and never mentions the ~60 s window).
+**No capability claim moved, no gate flipped, no G6 granted, no canonical product doc touched.** The only
+non-docs change in the batch is `4c6d1ac`'s **string-only** `CONFIRM_PROMPT` rewrite (see Git state).
 
-Three files: a new `r4-operator-runbook.md`; a §7 amendment carrying the expected-dialog carve-out into the
-normative section; and the `CONFIRM_PROMPT` text.
+- **`cb081e0`** — refreshed this file's git state + baseline after #260.
+- **`4c6d1ac`** — R4 operator guidance (detailed below); its honesty constraints still bind. **Also the
+  batch's one `collector/src` touch:** `CONFIRM_PROMPT`, string only.
+- **`15e6fe3`** — **routers carry paths, not state.** Root `CLAUDE.md`'s Action Window section became a
+  paths-only routing table; the `r4-runtime-handoff` skill's dated status became durable rules; this
+  file's **Discovery block** stopped mirroring §9/§4.1/§7. The evidence: 3 of the 4 Run 4 commits each
+  had to touch the same 3 routers; the 4th touched 1 file, because 표 B derives from §4.1 **by rule** and
+  no router quotes it. **State docs are exempt — this section is supposed to carry state.**
+- **`1b9f582`** — README §5 rank 6 no longer hedges "(once it exists)"; the contract exists
+  (`contracts/action-window/v1/`, MERGED PR #212). Same pathology as `15e6fe3`: a **precedence list
+  carrying status**, rotted silently.
+- **`5667ed4`** — this file's git state + last slice, after `main` moved mid-batch. **Introduced the
+  false "docs/skill only" claim corrected in Git state above.**
+- **`d87ec17`** — merged `main` (#261) in. Disjoint, clean; baseline 2837 → 2855 (+18).
 
-**Two operator-confirmed honesty constraints — do not violate:**
+⚠ **Corrected in `1b9f582` — previously reported for two sessions and written into `15e6fe3`'s own commit
+message:** "three precedence lists conflict at rank 6" is **OVERSTATED**. Root `CLAUDE.md`'s rank 6 is
+*the active slice*; README §5's rank 6 is *the FE↔Runtime contract* — **different objects.** Neither list
+ranks the other's item: disjoint tails, not a collision. Silence is not contradiction, and
+`CLAUDE.md:139-141` already splits **status** (this directory wins) from **intent** (root wins). **Do not
+re-derive this as a defect.** Also refuted: "nothing cites README §5" — `r4-preparation.md:11` cites it,
+and `SKILL.md:14` calls that file normative.
+
+**PO decision made 2026-07-15, deliberately NOT applied:** workstream precedence lists **defer to root's
+ranks 1-5 and never restate them**. README §5 still mirrors those ranks, so writing the rule now would
+publish one its only instance visibly breaks. **The rule + the §5 dedup are one follow-up slice.** This
+paragraph is currently the decision's only home in the repo.
+
+### The R4 operator guidance (`4c6d1ac`) — DELIVERED 2026-07-15
+
+Run 4 proved the path; the human choreography was scattered and the one text an operator reads at run time
+was stale. Now closed, offline, in one commit:
+
+- **NEW [`r4-operator-runbook.md`](r4-operator-runbook.md)** — the run-time choreography (Phase A prep,
+  the ~60 s window, timeout cost, abort, evidence). Choreography **only**: it links to the gate record for
+  authorization and §8-17 for evidence rather than restating them. **It grants nothing.**
+- **`r4-preparation.md` §7** — the expected-dialog carve-out, now explicit in the normative section, and
+  **narrowed to exactly one dialog**: uncertain ⇒ it is not the expected one ⇒ abort.
+- **`CONFIRM_PROMPT`** (`collector/src/cli/run-action-window-live-naver.ts`) — rewritten for the two-step
+  action + the ~60 s budget. String only; no behavior, no timers.
+- **`r4-gate-record.md`** — its pre-dispatch runbook no longer says "the pilot did not succeed"; still
+  grants nothing, every G6/P6 still consumed.
+
+**The honesty constraints that shaped it still bind any future edit:**
 
 - **The Run 4 confirmation dialog is NOT named.** Write "an expected NAVER confirmation dialog" only.
-  `export-click-signals.ts:233-239` records — in a source comment — an *earlier* live run hitting a
-  copyright/usage consent (`리뷰 다운로드 및 활용` / `저작권자` / `계속하시겠습니까`) misread as
-  `date_range_required`. **Whether that is the same dialog Run 4 hit is not established.** Do not merge the
-  two observations.
+  `export-click-signals.ts` records — in a source comment — an *earlier* live run hitting a copyright/usage
+  consent misread as `date_range_required`. **Whether that is the same dialog Run 4 hit is not
+  established.** Do not merge the two observations.
 - **The period/date step is UNOBSERVED.** It exists only as three words in §4 ("selects period/scope"), one
-  unexplained CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live.
-  Keep the §4 obligation; invent no procedure.
+  CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live. Keep the §4
+  obligation; invent no procedure.
 
-Other deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
+## Next slice — none chosen
+
+Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into
 `collector/src/row-count-bucket.ts`; FE copy mapping for `actionWindow.step.downstream`. **PO decision still
 open:** whether to *relax* the readiness gate (accept a visible+enabled export control + grid container as
@@ -129,7 +209,10 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2761 passed / 29 skipped**.
+- Offline baseline: **2855 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`d87ec17`
+  tree (i.e. **including #261**). Lineage, all accounted for — **no unexplained drift**: 2761 → **2837**
+  (+76 from #259) → **2855** (+18 from #261). The 4 docs-only commits before the merge held 2837 exactly;
+  for a docs slice, **any movement is a red flag, not drift**.
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**

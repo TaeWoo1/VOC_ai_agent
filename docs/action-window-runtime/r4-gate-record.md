@@ -186,9 +186,15 @@ pre-flight checklist.
 > **Dispatch record:** [`r4-export-dispatch-record.md`](r4-export-dispatch-record.md) — the single
 > G3/G6/P6 sheet for the export run. **Run 1 was EXECUTED 2026-07-13 and FAILED fail-closed
 > (`UNSUPPORTED_STATE`, zero clicks, nothing captured; [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-8).**
-> That one-run G6 is now **CONSUMED**; a new G3-export + G6 is required for any further live contact
-> (including a read-only diagnostic of the failed surface). No gate here is flipped to passing — the pilot
-> did not succeed.
+> **Status update 2026-07-15 — the pilot SUCCEEDED in Run 4**: `COMPLETED` 3-of-3, real download →
+> validate → `/api/uploads` ingest, backend `SUCCESS` 55/55/0/0 ([`r4-evidence-pack.md`](r4-evidence-pack.md)
+> §8-17; [`r4-run4-full-export-pilot-dispatch-record.md`](r4-run4-full-export-pilot-dispatch-record.md)).
+> **No gate here is flipped to passing regardless, and this runbook still grants nothing** — every G6 and
+> P6 to date is **CONSUMED**, so *any* further live contact (including a read-only diagnostic) needs a
+> **fresh** G3-export + G6 in its own dispatching turn. A past success is not a standing authorization.
+>
+> **Operator choreography for the run itself:** [`r4-operator-runbook.md`](r4-operator-runbook.md) —
+> what the human does, in order, including the ~60 s click+confirm window. It grants nothing either.
 
 ### Scope of the first authorized export pilot
 
@@ -254,9 +260,11 @@ No raw URL / path / credential value appears here — only the env-load idiom an
 
 ### 5 · Post-run evidence to record (sanitized)
 
-After the run, record in [`r4-evidence-pack.md`](r4-evidence-pack.md) **§8-8** — enums/booleans/counts/SHA
-only, per §4 and `findProhibitedFields` (**never** URL, filename, path, selector, page content,
-credentials, cookies, tokens, or `eventTimeMs`):
+After the run, record in [`r4-evidence-pack.md`](r4-evidence-pack.md) as a new dated **§8-N** section —
+enums/booleans/counts/SHA only, per §4 and `findProhibitedFields` (**never** URL, filename, path,
+selector, page content, credentials, cookies, tokens, or `eventTimeMs`). Run 1 was written up in **§8-8**;
+the export pilot ran through to **§8-17** (Run 4), which is the worked example of a `COMPLETED` run —
+including its mutation note:
 
 - ☐ The filled export-scoped G6 instance (dispatching turn, date, operator, scope).
 - ☐ Final run view: `{ status, progress, channelCode, blockerCode? }` only.

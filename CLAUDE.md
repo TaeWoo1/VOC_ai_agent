@@ -118,27 +118,31 @@ Read the canonical documents before product/frontend work, in this order:
 4. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries
 5. relevant live-verification records (`docs/sellerops_phase3c_live_smoke.md`, `docs/sellerops_cafe24_live_verification.md`)
 6. `docs/sellerops_current_state.md` — living handoff state
-7. the currently active document under `docs/slices/`
+7. the active slice — **named by `docs/sellerops_current_state.md` §10 ("Active slice")**, which resolves
+   this step. Do not infer it from a slice file's own `Status:` line; those self-claims go stale and §10
+   overrides them.
 
 Past phase/roadmap docs are historical evidence, not current status, unless a canonical doc explicitly delegates to them.
 
-### Action Window / R4 NAVER Runtime
+### Workstream routing
 
-For anything touching the Action Window runtime, start at
-`docs/action-window-runtime/HANDOFF.md` — the orientation entry point for that workstream (state,
-live-run history, gates, committed vs. local-only). The `r4-runtime-handoff` skill routes there.
+State lives in each workstream's own home. **This table carries paths only** — for status, read the home,
+never this table.
 
-`docs/sellerops_current_state.md` §9 and §7 were corrected by the product owner on 2026-07-15 and now
-record Run 4 and route here; the rest of that document is still a 2026-07-08 snapshot. **For Action Window
-*status*, the `docs/action-window-runtime/` records win.** Product *intent* still follows the conflict
-priority below.
+| Workstream | Home | Entry point |
+|---|---|---|
+| Action Window / R4 NAVER Runtime | `docs/action-window-runtime/` | `HANDOFF.md` — the `r4-runtime-handoff` skill also routes there |
+| Action Window frontend | `docs/workstreams/action-window-frontend/` | `progress.md` (scoped rules: `frontend/CLAUDE.md`) |
+| ESM Plus live capture | `docs/esm/` | `live-capture-checklist.md` |
+| Everything else | flat `docs/`, `docs/slices/` | no dedicated home — use the reading order above |
 
-`docs/multi-channel-connector-roadmap.md` §4.1 was also corrected on 2026-07-15 — NAVER REVIEW now records
-export→ingest end-to-end 라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원
-stays ❌ and the 셀러 표기 column is unchanged**, so no seller-facing claim moved.
+**For Action Window *status*, the `docs/action-window-runtime/` records win**, including over
+`docs/sellerops_current_state.md`. Product *intent* still follows the conflict priority below.
+`HANDOFF.md` also records which docs are stale **by decision** — report those, do not resolve them.
 
-**Still stale, by decision (2026-07-15) — report, do not silently resolve:**
-`docs/slices/action-window-v1.md` (DRAFT) still calls the overlay / download-detection seams 미구현.
+**Router rule.** A router carries paths, not state. If a status change forces an edit to this table, to a
+skill, or to a HANDOFF's discovery block, that surface was carrying state that belongs in the workstream
+home. Paths rot rarely and break loudly; status rots constantly and silently.
 
 ### Conflict priority
 
