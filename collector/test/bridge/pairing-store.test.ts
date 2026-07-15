@@ -87,6 +87,7 @@ describe("FilePairingStore load recovery", () => {
     const path = storePath();
     const first = new FilePairingStore(path, { now });
     const req = first.registry.requestPairing("http://localhost:5173", "ws");
+    if (!req.ok) throw new Error(`requestPairing rejected: ${req.reason}`); // not what this suite is about
     expect(first.registry.confirmPairing(req.requestId, "allow").ok).toBe(true);
     first.persist();
 

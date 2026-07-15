@@ -35,6 +35,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ApprovalPresentation, ApprovalPresenter, PresentResult } from "./approval-presenter";
+import { DEFAULT_MAX_FIELD_CHARS, sanitizeDisplayField, stripDisplayControls } from "./untrusted-display";
 
 /** The absolute, constant binary path. Never composed from input, never resolved via PATH or a shell. */
 export const OSASCRIPT_PATH = "/usr/bin/osascript";
@@ -51,7 +52,7 @@ const DEFAULT_TIMEOUT_MS = (DEFAULT_DIALOG_SECONDS + 10) * 1000;
  * the approval code — or the "누가 요청했는지 모르면 취소하세요" instruction — off the end of the dialog,
  * leaving a prompt that asks the human to approve something while showing them no code at all.
  */
-const MAX_FIELD_CHARS = 80;
+const MAX_FIELD_CHARS = DEFAULT_MAX_FIELD_CHARS;
 
 export type OsascriptOutcome = { ok: true; stdout: string } | { ok: false; reason: "timeout" | "error" };
 
@@ -85,35 +86,30 @@ export interface MacOsApprovalPresenterOptions {
   timeoutMs?: number;
 }
 
-/** Drop C0 control characters + DEL — they are a syntax error inside an AppleScript string literal. */
-function stripControlChars(value: string): string {
-  return [...value]
-    .filter((ch) => {
-      const code = ch.codePointAt(0) ?? 0;
-      return code >= 0x20 && code !== 0x7f;
-    })
-    .join("");
-}
-
 /**
  * Sanitize and CAP ONE untrusted field for display. Capping is per-field, never on the composed body, so a
  * long or hostile value can only ever truncate ITSELF — it can never displace the approval code or the
  * instructions. An elided value is marked so the human can see it was shortened.
+ *
+ * The rule itself lives in the shared `untrusted-display` leaf, so this dialog and the DEV terminal box
+ * agree on what an untrusted field may render.
  */
 export function sanitizeField(value: string, maxChars: number = MAX_FIELD_CHARS): string {
-  const printable = stripControlChars(value);
-  return printable.length > maxChars ? `${printable.slice(0, maxChars)}…` : printable;
+  return sanitizeDisplayField(value, maxChars);
 }
 
 /**
- * Escape a value into an AppleScript string literal: control characters dropped, then `\` and `"` escaped —
- * backslash FIRST, so the escape character itself cannot be used to re-open the literal.
+ * Escape a value into an AppleScript string literal: renderer-active code points dropped
+ * ({@link stripDisplayControls}), then `\` and `"` escaped — backslash FIRST, so the escape character itself
+ * cannot be used to re-open the literal. The strip and the escape are separate concerns: the strip is about
+ * what the DIALOG renders, this is about AppleScript SYNTAX. Both are needed — a raw control character is a
+ * syntax error inside a literal, and an unescaped quote closes it.
  *
  * Deliberately does NOT cap: untrusted FIELDS are capped by {@link sanitizeField} before composition, while
  * the fixed instruction lines and the approval code must always render in full.
  */
 export function appleScriptLiteral(value: string): string {
-  const escaped = stripControlChars(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const escaped = stripDisplayControls(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return `"${escaped}"`;
 }
 

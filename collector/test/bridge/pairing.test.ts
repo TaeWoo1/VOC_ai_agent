@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PairingRegistry, type PairingRegistryOptions } from "../../src/bridge/pairing";
-import { fixedClock } from "./helpers";
+import { fixedClock, mustRequestPairing } from "./helpers";
 
 /** Deterministic randomness so tokens/ids/tickets are reproducible per test. */
 function seededHex(): (bytes: number) => string {
@@ -20,7 +20,7 @@ function make(overrides: Partial<PairingRegistryOptions> = {}) {
 describe("pairing registry", () => {
   it("request → confirm(allow) → poll delivers the token exactly once", () => {
     const { reg } = make();
-    const { requestId, confirmationCode } = reg.requestPairing("https://app.example", "우리 회사");
+    const { requestId, confirmationCode } = mustRequestPairing(reg, "https://app.example", "우리 회사");
     expect(confirmationCode).toMatch(/^[0-9A-F]{3}-[0-9A-F]{3}$/);
     expect(reg.getRequestView(requestId)?.status).toBe("pending");
 
@@ -36,14 +36,14 @@ describe("pairing registry", () => {
 
   it("cannot pair without confirmation (pending → no token)", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     expect(reg.pollPairing(requestId).status).toBe("pending");
     expect(reg.hasActivePairing()).toBe(false);
   });
 
   it("deny yields a denied poll and no pairing", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     expect(reg.confirmPairing(requestId, "deny").ok).toBe(true);
     expect(reg.pollPairing(requestId).status).toBe("denied");
     expect(reg.hasActivePairing()).toBe(false);
@@ -51,7 +51,7 @@ describe("pairing registry", () => {
 
   it("authenticates a valid token and rejects a wrong one", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     expect(reg.authenticate(token)?.origin).toBe("https://app.example");
@@ -60,7 +60,7 @@ describe("pairing registry", () => {
 
   it("mints a single-use ticket; a replay is rejected", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     const pairing = reg.authenticate(token)!;
@@ -72,7 +72,7 @@ describe("pairing registry", () => {
 
   it("rejects an expired ticket", () => {
     const { reg, clock } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
     const { ticket } = reg.mintTicket(pairing.pairingId);
@@ -87,7 +87,7 @@ describe("pairing registry", () => {
 
   it("revoke invalidates the pairing, its tokens, and its tickets", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     const pairing = reg.authenticate(token)!;
@@ -100,7 +100,7 @@ describe("pairing registry", () => {
 
   it("revoke-by-token works for a frontend-initiated revoke", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     expect(reg.revokeByToken(token).ok).toBe(true);
@@ -109,7 +109,7 @@ describe("pairing registry", () => {
 
   it("expires a stale pairing request before confirmation", () => {
     const { reg, clock } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     clock.advance(300_001);
     expect(reg.getRequestView(requestId)).toBeNull();
     expect(reg.confirmPairing(requestId, "allow").ok).toBe(false);
@@ -117,7 +117,7 @@ describe("pairing registry", () => {
 
   it("sweep evicts expired requests and expired tickets, retains the pairing, and is idempotent", () => {
     const { reg, clock } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
     const { ticket } = reg.mintTicket(pairing.pairingId);
@@ -144,7 +144,7 @@ describe("pairing registry", () => {
 
   it("keeps a used-but-unexpired ticket so a replay still reports 'used', then evicts it after expiry", () => {
     const { reg, clock } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
     const { ticket } = reg.mintTicket(pairing.pairingId);
@@ -170,7 +170,7 @@ describe("pairing registry", () => {
     expect(reg.requestPairing("https://app.example", "b").swept).toEqual({ requestsEvicted: 1, ticketsEvicted: 0 });
 
     // Mint a ticket, let it expire, then a fresh mint sweeps the dead ticket and reports it.
-    const { requestId } = reg.requestPairing("https://app.example", "c");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "c");
     reg.confirmPairing(requestId, "allow");
     const pairing = reg.authenticate(reg.pollPairing(requestId).pairingToken!)!;
     reg.mintTicket(pairing.pairingId);
@@ -180,7 +180,7 @@ describe("pairing registry", () => {
 
   it("persists only pairing-token hashes, never a plaintext token", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     const exported = JSON.stringify(reg.exportPairings());
@@ -192,7 +192,7 @@ describe("pairing registry", () => {
 describe("pairing registry — persist-then-commit rollback primitives", () => {
   it("undoConfirm restores the exact pre-confirm state: no pairing, no token, request back to pending", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow"); // optimistically minted before a (failed) durable persist
     expect(reg.hasActivePairing()).toBe(true);
 
@@ -206,7 +206,7 @@ describe("pairing registry — persist-then-commit rollback primitives", () => {
 
   it("after undoConfirm, a retry confirms for real and delivers a working token exactly once", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     reg.undoConfirm(requestId);
 
@@ -218,14 +218,14 @@ describe("pairing registry — persist-then-commit rollback primitives", () => {
 
   it("undoConfirm is a no-op for a request that is not in the `allowed` state", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     expect(reg.undoConfirm(requestId)).toEqual({ ok: false }); // still pending — nothing minted to undo
     expect(reg.undoConfirm("no-such-request")).toEqual({ ok: false });
   });
 
   it("restoreRevoked un-revokes a pairing so the same token authenticates again (retry needs no new credential)", () => {
     const { reg } = make();
-    const { requestId } = reg.requestPairing("https://app.example", "w");
+    const { requestId } = mustRequestPairing(reg, "https://app.example", "w");
     reg.confirmPairing(requestId, "allow");
     const token = reg.pollPairing(requestId).pairingToken!;
     const pairing = reg.authenticate(token)!;

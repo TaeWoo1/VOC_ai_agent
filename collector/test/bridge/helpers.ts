@@ -4,10 +4,28 @@
  */
 import WebSocket from "ws";
 import type { ApprovalPresentation, ApprovalPresenter } from "../../src/bridge/approval-presenter";
+import type { PairingRegistry } from "../../src/bridge/pairing";
 
 export interface ConnectResult {
   status: number;
   ws?: WebSocket;
+}
+
+/**
+ * `requestPairing` for tests that are not ABOUT the pending cap: assert the request was admitted and narrow
+ * to the success branch. Tests that exercise the cap itself call `requestPairing` directly and inspect the
+ * rejection — this helper deliberately throws on one, so a suite can never silently start asserting against
+ * a rejected request's `undefined` fields.
+ */
+export function mustRequestPairing(
+  reg: PairingRegistry,
+  origin: string,
+  workspaceLabel: string,
+  opts: { requireApproval?: boolean } = {},
+): { requestId: string; confirmationCode: string; approvalCode?: string } {
+  const r = reg.requestPairing(origin, workspaceLabel, opts);
+  if (!r.ok) throw new Error(`requestPairing unexpectedly rejected: ${r.reason} (${r.pendingCount}/${r.limit})`);
+  return r;
 }
 
 /**
