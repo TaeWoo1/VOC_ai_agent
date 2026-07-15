@@ -64,16 +64,23 @@ NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" st
 
 ## Git state
 
-- **`origin/main` = `23de8d7`** (PR #258 merged). HEAD = **`45ed82c`**.
-- **Exactly ONE local-only commit: `45ed82c`** — `refactor(collector): sanitize upload.done +
-  item-analysis.count logs (§4.3)`. Offline cleanup slice; verified (typecheck clean, 2761 passed /
-  29 skipped); **HELD unpushed by the standing local-accumulation cadence** — it is a cleanup, not a
-  milestone. Do not push/PR it without an explicit operator go.
-- The branch reads "ahead 4" of `origin/feat/r4-supervised-channel-runtime`, but three of those are already
-  on `origin/main` via PR #258. **`git log origin/main..HEAD` is the honest measure — it shows 1.**
-- Recent merges: **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge hardening),
-  #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver core
-  `NaverLiveProbeDriver`), **#246** (gated live entrypoint), **#250** (`settleExportSurface`).
+- **`origin/main` = `09f2411`** (PR #260 merged, 2026-07-15). HEAD = **`09f2411`** — the branch is synced,
+  not ahead.
+- **ZERO local-only commits.** `git log origin/main..HEAD` shows **0**; nothing is held unpushed. The six
+  commits previously held by the accumulation cadence all landed via **#260**: `45ed82c` (upload log
+  sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
+  corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
+  (`current_state` §7), `49dc847` (capability matrix).
+- **`git log origin/main..HEAD` remains the honest measure** — the "ahead N" figure against
+  `origin/feat/r4-supervised-channel-runtime` has repeatedly overcounted work already on `main`.
+  ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
+  compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
+  produced a bogus "1,871 deletions" reading against #259 while preparing #260.
+- Recent merges: **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
+  pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
+  landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
+  hardening), #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver
+  core `NaverLiveProbeDriver`), **#246** (gated live entrypoint), **#250** (`settleExportSurface`).
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
   `--ff-only` sync.
 
@@ -129,7 +136,8 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2761 passed / 29 skipped**.
+- Offline baseline: **2837 passed / 29 skipped** (174 files). Measured on the post-#260 sync tree —
+  the jump from 2761 is **+76 tests from #259**, not drift.
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
