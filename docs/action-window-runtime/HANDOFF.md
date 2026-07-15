@@ -7,20 +7,15 @@
 **Updated:** 2026-07-15 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
-**Discovery:** the root `CLAUDE.md` reading order points here, and the `r4-runtime-handoff` skill
-(`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. `docs/sellerops_current_state.md` — the reading
-order's own §6 "living handoff state" — **was corrected by the product owner on 2026-07-15** and its §9 now
-records Run 4 and routes here. **This directory remains status-of-record for Runtime detail;** §9 is a
-scoped summary, not a substitute. That doc is otherwise still a 2026-07-08 snapshot — only the Action
-Window entry was refreshed.
+**Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
+skill (`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. **Both carry paths only** — they
+deliberately restate no status, so a fact landing in this workstream should never require editing them.
+**This directory is status-of-record for Runtime detail** and wins over any status claim in a router or
+in `docs/sellerops_current_state.md`, whose Action Window entries are a scoped summary, not a substitute.
 
-**`docs/multi-channel-connector-roadmap.md` §4.1** (the capability table — *higher* in the conflict priority
-than `current_state`) **was corrected on 2026-07-15**: NAVER REVIEW now reads export→ingest end-to-end
-라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원 stays ❌ and the 셀러 표기
-cell is unchanged** — no seller-facing claim moved.
-
-`docs/sellerops_current_state.md` §7 was aligned on 2026-07-15 and now records the Run 4 export→ingest run
-with the same scope bounds.
+**`docs/multi-channel-connector-roadmap.md` §4.1** — the capability table — outranks this file (conflict
+priority #5) and is *not* mirrored here. Runtime evidence may show it stale; **report that, do not edit
+it from this branch.**
 
 ⚠ **Still stale, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still says the
 overlay / download-detection seams are 미구현. That is a product-owner decision, deliberately not taken

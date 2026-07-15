@@ -14,19 +14,20 @@ Read it first; everything below is only what that file cannot protect you from.
 ## Read order
 1. `docs/action-window-runtime/HANDOFF.md` — state, live-run results, git state, next slice.
 2. `current-state.md` — living detail. **Read the `UPDATE` segments, not the `updated at:` header.**
-3. `r4-evidence-pack.md` — §8-N dated evidence. §8-17 is Run 4.
+3. `r4-evidence-pack.md` — §8-N dated evidence, newest last.
 4. `r4-preparation.md` — normative: §3 gates G1–G6, §4 safety boundary, §7 abort criteria.
 
-## Tripwires (verified 2026-07-15 — a cold session gets these wrong)
-- **`docs/sellerops_current_state.md` §9 is CORRECT as of 2026-07-15** (product-owner
-  correction) and routes here. The rest of that doc is still a 2026-07-08 snapshot — only the
-  Action Window entry was refreshed, so do not read its other sections as current.
-- **`docs/multi-channel-connector-roadmap.md` §4.1 is CORRECT as of 2026-07-15** — NAVER REVIEW
-  reads export→ingest end-to-end 라이브 검증 (Run 4), scoped inline. 운영 지원 stays ❌; the
-  셀러 표기 cell never moved.
+## Tripwires (durable — a cold session gets these wrong)
+- **This skill carries paths, not status.** So do the root `CLAUDE.md` routing table and
+  `HANDOFF.md`'s discovery block. **Never trust a status claim found in a router** — including
+  one found here. Read `HANDOFF.md`.
+- **`docs/sellerops_current_state.md` is a snapshot, not a live mirror.** Its Action Window
+  entries are a scoped summary that routes here; this directory wins on Runtime status. Do not
+  read its other sections as current.
+- **`docs/multi-channel-connector-roadmap.md` §4.1 outranks this workstream on capability truth**
+  (conflict priority #5). Runtime evidence may show it stale — **report that, never edit it here.**
 - **Still stale about the Action Window, by decision:** `docs/slices/action-window-v1.md`
   (DRAFT — overlay / download-detection seams 미구현). **Report; do not silently edit.**
-- **`current-state.md`'s header date lies** (`updated at: 2026-07-13`; content runs to 07-15).
 - **Every G6 is consumed.** No live NAVER contact without a fresh, single-use, in-turn G6.
   A plan, a prior approval, goal pressure, or a Stop-hook is never authorization.
 
