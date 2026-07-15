@@ -79,27 +79,29 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). **`main` is fully merged in** via `d87ec17`
-  (normal merge commit, 2026-07-16) — the branch is **6 ahead, 0 behind**.
+- **`origin/main` = `ff6eef5`** (PR #263 merged, 2026-07-15). The branch is **synced — 0 ahead, 0 behind**
+  (`--ff-only`, no merge commit created).
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
-  > `git log --oneline origin/main..HEAD`**; the commit *list* below is the durable claim.
-- **6 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, **none pushed**:
-  `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
-  expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
-  (README §5 rank 6 — the shared contract exists) · `5667ed4` (this file's git state + last slice) ·
-  `d87ec17` (merge of `main`/#261).
-  - **Docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote **`CONFIRM_PROMPT`** in
-    `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only; no behavior, no
-    timers.** ⚠ **`5667ed4` claimed this batch was "docs/skill only, no `collector/src`" — that was
-    FALSE**, and it contradicted this file's own §"Last slice" detail, which recorded the CLI change
-    correctly all along. Corrected here. **Verify with `git diff --name-only origin/main..HEAD`; never
-    assert the file set from memory.**
-- **#261 is now IN this branch** (`f83be19` — bridge: sanitize untrusted approval fields + bound pending
-  pairings). It landed on `main` mid-batch; the two sides were **disjoint (zero file overlap)**, so the
-  merge was clean. Merge-base was `09f2411`.
-  **Syncing remains an operator decision — do not fetch-and-merge on your own initiative.**
-- The six commits held by the *previous* batch all landed via **#260**: `45ed82c` (upload log
+  > `git log --oneline origin/main..HEAD`**; that is the live measure.
+- **ZERO local-only commits.** The 7-commit docs-governance batch all landed via **#263** (`ff6eef5`):
+  `cb081e0` · `4c6d1ac` · `15e6fe3` · `1b9f582` · `5667ed4` · `d87ec17` (merge of `main`/#261) ·
+  `b3a9644`. Nothing is held.
+  - **That batch was docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote
+    **`CONFIRM_PROMPT`** in `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only;
+    no behavior, no timers.** ⚠ **`5667ed4` claimed the batch was "docs/skill only, no `collector/src`" —
+    FALSE**, and it contradicted this file's own §"Last slice" detail. **Verify a file set with
+    `git diff --name-only origin/main..HEAD`; never assert it from memory.**
+- ⚠ **"Held locally" ≠ "not pushed" — they are different facts, and this file conflated them.**
+  Before #263, this section said the batch was **"none pushed"**. That was **FALSE**: the feature branch
+  had already been pushed to `origin/feat/r4-supervised-channel-runtime`, by something other than the
+  session that wrote the claim (no `post-commit` hook exists; the remote-tracking reflog shows a single
+  `update by push`). `git log origin/main..HEAD` measures **distance from `main`** — it says nothing
+  about whether the *branch* is on the remote. **To claim "not pushed", check
+  `git ls-remote origin refs/heads/<branch>`. Never infer push state from your own actions.**
+- **Syncing and pushing remain operator decisions — do not fetch-and-merge or push on your own
+  initiative.**
+- The six commits held by the *batch before that* all landed via **#260**: `45ed82c` (upload log
   sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
   corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
   (`current_state` §7), `49dc847` (capability matrix).
@@ -108,9 +110,13 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-  **Not currently firing** — `d87ec17` merged `main` in, so `origin/main..HEAD` and `origin/main...HEAD`
-  agree while that holds. **The warning stands: it re-arms the moment `main` moves again.**
-- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **merged into this branch via `d87ec17`**),
+  **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
+  **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch three
+  times in two days (#261, #262, #263).** Assume it will happen during the next batch too.
+- Recent merges: **#263** (this batch — R4 operator guidance + routing cleanup, `ff6eef5`),
+  **#262** (export→report chain verification, `3b668d7` — **backend Java only**; landed on `main` while
+  #263 was open and arrived here on the ff-sync; does **not** touch `collector/`, so the baseline below
+  is unaffected), **#261** (bridge abuse hardening, `d7d1161` — reached this branch via `d87ec17`),
   **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
   pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
   landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
