@@ -148,6 +148,12 @@ export type BridgeErrorCode =
   | "bad_origin"
   | "bad_ticket"
   | "incompatible_version"
+  /** `POST /bridge/pair/request` 503: this agent has no human channel able to show the approval code, so
+   *  pairing fails closed. Additive — an older frontend simply renders it as a generic failure. */
+  | "approval_unavailable"
+  /** `POST /bridge/pair/request` 403: a human WAS shown the request and refused it. Distinct from
+   *  `approval_unavailable` so the frontend can say "거부됨" instead of "연결할 수 없음". */
+  | "approval_declined"
   | "internal";
 
 /** Response of `POST /bridge/pair/request`. `requestId`/`confirmationCode` are short-lived, NOT the secret. */

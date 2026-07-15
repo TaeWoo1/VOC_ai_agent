@@ -6,10 +6,12 @@ import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { BridgeServer } from "../../src/bridge/bridge-server";
 import { FilePairingStore } from "../../src/bridge/pairing-store";
-import { connect, readMessages } from "./helpers";
+import { connect, readMessages, fakeApprovalPresenter } from "./helpers";
 
 const APP = "http://localhost:5173";
 const cleanups: Array<() => Promise<void>> = [];
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter();
 
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!();
@@ -24,6 +26,7 @@ async function startServer(opts: { autoApprove?: boolean; port?: number; allowed
     agentVersion: "test",
     port: opts.port ?? 0,
     autoApprovePairing: opts.autoApprove ?? false,
+    approvalPresenter: approval.presenter,
   });
   const { port } = await server.listen();
   cleanups.push(async () => { await server.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -42,7 +45,7 @@ function post(port: number, path: string, body: unknown, headers: Record<string,
 async function pairToken(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
   // Simulate the human clicking Allow on the agent-owned confirmation page (self-origin).
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   return poll.pairingToken as string;
 }
@@ -77,7 +80,7 @@ describe("bridge server", () => {
     const pending = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
     expect(pending.status).toBe("pending");
     // After local Allow, the token is delivered.
-    await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+    await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
     const paired = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
     expect(paired.status).toBe("paired");
     expect(typeof paired.pairingToken).toBe("string");

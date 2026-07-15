@@ -74,6 +74,53 @@
   HUMAN 핸드오프). **트레이·인스톨러·OS 자동시작은 명시적으로 미구현**(주석). 주기 실행(catch-up)은
   "not-yet-existing slice".
 - **어댑터 축**: OS별 자동시작/설치(전부 미구현).
+- **네이티브 승인 presenter — macOS 지원, 그 외 미구현 (2026-07-15)**: 페어링 승인 비밀은
+  `ApprovalPresenter` 포트로만 사람에게 전달되며(`collector/src/bridge/approval-presenter.ts`,
+  계약은 `docs/slices/local-agent-bridge.md` §0.2.1), 승인은 **모든 환경에서 fail-closed**다 —
+  presenter가 없거나 사람에게 도달함을 증명하지 못하면 브리지는 `503 approval_unavailable`로
+  **페어링을 거절**한다. §1대로 데스크톱 셸(Electron/Tauri)은 여전히 **없다**; 승인 채널은
+  셸 없이 OS 네이티브 다이얼로그로 해결한다.
+  - **어댑터 축 상태**:
+    - **macOS — 구현됨(production)**: `macos-approval-presenter.ts`.
+      `/usr/bin/osascript`를 **절대경로·`shell:false`**로 exec(셸 미개입 → 셸 메타문자 해석 자체가
+      불가능), 스크립트는 **stdin**(`osascript -`)으로 전달. **동적 값(origin·워크스페이스 라벨·
+      승인 코드)은 전부 stdin에만** 실린다 — argv는 프로세스 테이블(`ps`)에서 누구나 읽으므로
+      argv 전달은 이 설계가 막으려는 로컬 프로세스에게 비밀을 그대로 넘겨준다. argv는 상수 `["-"]`뿐.
+      **AppleScript 인젝션 이스케이프 필수**: `workspaceLabel`은 요청 본문에서 오는 **신뢰 불가 입력**이라
+      제어문자 제거 + `\`·`"` 이스케이프(`appleScriptLiteral`) 없이는 리터럴을 닫고 임의 AppleScript가
+      실행된다. **비차단**: `spawn`(≠`spawnSync`) + async `present` — 블로킹 다이얼로그는 에이전트
+      이벤트 루프(전 WS 소켓·하트비트·진행 중 run)를 다이얼로그가 닫힐 때까지 얼린다.
+      **fail-closed**: 비-macOS · osascript 부재 · 다이얼로그 오류/GUI 세션 없음 · 타임아웃 → `unavailable`
+      (요청 롤백). 성공을 관측하지 못한 다이얼로그를 `presented`라고 보고하지 않는다.
+      **라이브 검증 완료(2026-07-15, 운영자 입회)**: 실제 macOS 데스크톱에서 **사람의 세 결말이 모두
+      관측**되었다 — `확인` → `presented`(2.9초) · `Esc` → `declined`(4.5초) · `취소` 버튼 →
+      `declined`(3.7초). 합성 값만 사용, presenter 직접 호출(브리지·커넥터 미기동), 페어링/런타임 상태
+      미기록. **따라서 위 "macOS 구현됨(production)"은 관측된 사실이며 구조적 주장이 아니다.**
+      전체 기록(중간에 발견·수정한 거부 불가 결함 및 본문 렌더링 결함 2건 포함):
+      `docs/slices/local-agent-bridge.md` §0.2.2.
+      거부 경로 계약: `buttons {"취소","확인"} … cancel button 1` + `on error number -128` →
+      `{status:"declined"}` → 브리지는 요청을 **즉시 폐기**하고 `403 approval_declined`
+      (≠ `503 approval_unavailable`)로 응답한다. 무시되어 자동 닫힘(gave up)은 `presented` —
+      코드는 읽힐 시간 동안 표시되었고 사람이 브라우저에 입력 중일 수 있다(설계상 의도, 라이브 미관측).
+    - **Windows — 미구현**: PowerShell MessageBox 등. 동일 규칙(stdin 전용·argv 금지·인젝션 이스케이프) 적용.
+    - **Linux — 미구현**: `zenity`/`kdialog` 등. 동일 규칙 적용.
+    - **DEV 전용**: TTY stderr presenter(`stderr-approval-presenter.ts`) — 리다이렉트된 stderr는
+      사람 채널이 아니므로 unavailable, `NODE_ENV=production`에서 거부.
+  - **귀결**: **macOS production 에이전트는 페어링 가능**하다. **Windows/Linux production 페어링은
+    각 어댑터가 생길 때까지 구조적으로 거절된다** — 회귀가 아니라 정직한 상태다(종전 동작은 임의의
+    로컬 프로세스가 위조 가능했다).
+  - **주입 지점 (결정됨 2026-07-15)**: presenter 선택은 **실제 부트 경로인 `cli/local-agent.ts`에서만**
+    이뤄진다 — 순수 결정 `decideApprovalPresenter(env, platform)` + `createApprovalPresenterFor(kind)`.
+    **`createAgentBridge`의 기본값으로 두지 않는다**: 기본값이 있으면 모든 임베더가 실제 네이티브
+    presenter를 물려받아, 컴포지션 루트를 통해 페어링하는 테스트가 macOS에서 **실제 다이얼로그를
+    띄운다**. 매트릭스: production+darwin → `macos_native` · production+그 외 → `none`(fail-closed) ·
+    DEV → `dev_tty_stderr`(**macOS 포함** — dev/test 부트가 다이얼로그를 띄울 수 없게 하려는 의도).
+    부트는 선택된 **kind(enum)만** stdout에 표기한다(`BRIDGE` 이벤트의 `approvalPresenter`) —
+    코드/오리진/페어링 세부는 절대 표기하지 않는다.
+  - **[PO-DECISION] 미결**: Windows/Linux 어댑터 슬라이스 순서. 각 어댑터가 생기기 전까지 해당 호스트의
+    production 페어링은 **fail-closed로 거절**된다(회귀 아님 — 종전 동작은 임의의 로컬 프로세스가
+    위조 가능했다). 구현 시 macOS와 동일 규칙 필수: **stdin 전용·argv 금지**, 인젝션 이스케이프,
+    **필드별 캡**(조립 본문 전체 캡 금지 — 승인 코드가 밀려날 수 있다), 거부 수단 제공.
 
 ### 3.4 프론트↔에이전트 페어링/이벤트 계약
 - **책임**: 안전한 로컬 페어링(토큰/포트/오리진), 실시간 상태 이벤트(현재 단계·로그인 필요·브라우저

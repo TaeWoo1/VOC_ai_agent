@@ -48,6 +48,9 @@ import { buildBackendIngestUpload } from "../action-window/ingest-handoff";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
 import { defaultQuarantineDirFor } from "../action-window/quarantine";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
+import { nullApprovalPresenter, type ApprovalPresenter } from "../bridge/approval-presenter";
+import { createStderrApprovalPresenter } from "../bridge/stderr-approval-presenter";
+import { createMacOsApprovalPresenter } from "../bridge/macos-approval-presenter";
 
 /**
  * Collector package root — derived ONLY for the local Bridge pairing-file path (`.bridge/pairings.json`).
@@ -233,6 +236,42 @@ export function resolveAgentBridgeConfig(
     refSalt: env.BRIDGE_REF_SALT ?? env.STORAGE_PROBE_SALT ?? "sellerops-bridge",
     autoApprovePairing: args.includes(BRIDGE_DEV_AUTO_APPROVE_FLAG) && env.NODE_ENV !== "production",
   };
+}
+
+/**
+ * Which human channel this boot uses to show the out-of-band pairing approval code.
+ * - `macos_native` — production on macOS: a native `osascript` dialog (no terminal needed).
+ * - `dev_tty_stderr` — DEV: the agent's own terminal. Itself unavailable when stderr is redirected.
+ * - `none` — no human channel exists → the bridge fails closed (`503 approval_unavailable`).
+ */
+export type ApprovalPresenterKind = "macos_native" | "dev_tty_stderr" | "none";
+
+/**
+ * **PURE decision: which approval presenter should this boot wire?** (no I/O, no adapter construction).
+ *
+ * Selection lives HERE — in the real boot path — and deliberately NOT as a `createAgentBridge` default:
+ * a default would silently hand a real native presenter to every embedder, so any test that paired through
+ * the composition root on a macOS machine would pop a real dialog mid-suite. Wiring is opt-in per boot.
+ *
+ * DEV never selects the native dialog for the same reason — a dev/test boot must not be able to put a
+ * dialog on screen. Production off macOS has no adapter yet (Runtime ADR §3.3), so it fails closed rather
+ * than degrading to a confirm any local process could forge.
+ */
+export function decideApprovalPresenter(env: NodeJS.ProcessEnv, platform: string): ApprovalPresenterKind {
+  if (env.NODE_ENV === "production") return platform === "darwin" ? "macos_native" : "none";
+  return "dev_tty_stderr";
+}
+
+/** Build the presenter for a decided kind. `none` yields the always-unavailable fail-closed default. */
+export function createApprovalPresenterFor(kind: ApprovalPresenterKind): ApprovalPresenter {
+  switch (kind) {
+    case "macos_native":
+      return createMacOsApprovalPresenter();
+    case "dev_tty_stderr":
+      return createStderrApprovalPresenter();
+    case "none":
+      return nullApprovalPresenter;
+  }
 }
 
 function flagValue(args: readonly string[], name: string): string | undefined {
@@ -434,9 +473,18 @@ async function main(): Promise<void> {
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
-  const bridge = createAgentBridge({ ...resolveAgentBridgeConfig(args, process.env), ...(actionWindow ? { actionWindow } : {}) });
+  // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
+  // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
+  const approvalKind = decideApprovalPresenter(process.env, process.platform);
+  const bridge = createAgentBridge({
+    ...resolveAgentBridgeConfig(args, process.env),
+    approvalPresenter: createApprovalPresenterFor(approvalKind),
+    ...(actionWindow ? { actionWindow } : {}),
+  });
   const bridgeListen = await bridge.listen();
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
+  // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

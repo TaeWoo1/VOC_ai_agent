@@ -13,6 +13,10 @@ import { afterEach, describe, it, expect } from "vitest";
 import { BridgeServer } from "../../src/bridge/bridge-server";
 import { FilePairingStore, type PairingStoreFs } from "../../src/bridge/pairing-store";
 import { clearLogSink, getLogSink } from "../../src/log";
+import { fakeApprovalPresenter } from "./helpers";
+
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter();
 
 const APP = "http://localhost:5173";
 const PATH = "/store/.bridge/pairings.json";
@@ -63,7 +67,7 @@ class ToggleFs implements PairingStoreFs {
 
 async function startServer(fs: ToggleFs) {
   const store = new FilePairingStore(PATH, { now: () => Date.now() }, fs);
-  const server = new BridgeServer({ store, allowedOrigins: [APP], agentVersion: "test", port: 0, autoApprovePairing: false });
+  const server = new BridgeServer({ store, allowedOrigins: [APP], agentVersion: "test", port: 0, autoApprovePairing: false, approvalPresenter: approval.presenter });
   const { port } = await server.listen();
   cleanups.push(async () => { await server.close(); });
   return { server, store, port };
@@ -82,7 +86,7 @@ const confirmHeaders = (port: number) => ({ Origin: `http://127.0.0.1:${port}` }
 /** Drive request→confirm(self-origin)→poll and return the delivered plaintext token. */
 async function pairToken(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, confirmHeaders(port));
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, confirmHeaders(port));
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   return poll.pairingToken as string;
 }
@@ -98,7 +102,7 @@ describe("bridge write-path transaction semantics", () => {
     const { store, port } = await startServer(fs);
 
     const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-    const confirm = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, confirmHeaders(port));
+    const confirm = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, confirmHeaders(port));
 
     expect(confirm.status).toBe(500);
     expect(await confirm.json()).toEqual({ ok: false, error: "persist_failed" });
@@ -120,10 +124,10 @@ describe("bridge write-path transaction semantics", () => {
     const { store, port } = await startServer(fs);
 
     const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-    expect((await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, confirmHeaders(port))).status).toBe(500);
+    expect((await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, confirmHeaders(port))).status).toBe(500);
 
     fs.failWrites = false; // storage recovers
-    const retry = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, confirmHeaders(port));
+    const retry = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, confirmHeaders(port));
     expect(retry.status).toBe(200);
     expect(await retry.json()).toEqual({ ok: true });
 
@@ -169,7 +173,7 @@ describe("bridge write-path transaction semantics", () => {
     const { store, port } = await startServer(fs);
 
     const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-    const confirm = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, confirmHeaders(port));
+    const confirm = await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, confirmHeaders(port));
     expect(confirm.status).toBe(200);
     expect(store.registry.hasActivePairing()).toBe(true);
     expect(JSON.parse(fs.files.get(PATH)!)[0].revoked).toBe(false);

@@ -34,6 +34,15 @@ interface PendingRequest {
   origin: string;
   workspaceLabel: string;
   confirmationCode: string;
+  /**
+   * In-memory ONLY: the out-of-band approval secret (normalized, no separator). Minted only when the caller
+   * asked for an approval-gated request, and delivered to the human ONLY through an `ApprovalPresenter` —
+   * never returned over HTTP, never rendered into the confirmation page, never persisted, never logged.
+   * `undefined` means this request was minted WITHOUT the approval gate (see {@link requestPairing}).
+   */
+  approvalSecret?: string;
+  /** Remaining wrong-code attempts before the request is burned. Bounds brute force of the short code. */
+  attemptsLeft: number;
   createdAtMs: number;
   status: "pending" | "allowed" | "denied";
   pairingId?: string;
@@ -68,6 +77,12 @@ export interface SweepResult {
 
 const DEFAULT_REQUEST_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_TICKET_TTL_MS = 10 * 1000;
+/**
+ * Wrong approval-code attempts allowed per request before it is burned. The code is short because a human
+ * retypes it, so an attempt cap — not code length alone — is what makes brute force infeasible: 8 hex chars
+ * (32 bits) with 5 attempts inside the 5-minute request TTL bounds forgery odds at ~5/2^32 (~1.2e-9).
+ */
+const DEFAULT_APPROVAL_ATTEMPTS = 5;
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -76,6 +91,20 @@ function sha256Hex(value: string): string {
 function constantTimeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
+}
+
+/** Accept the code as the human might retype it: separators/whitespace stripped, case-insensitive. */
+function normalizeApprovalCode(value: string): string {
+  return value.replace(/[\s-]/g, "").toUpperCase();
+}
+
+/**
+ * Constant-time approval-code comparison. Both sides are SHA-256'd FIRST so the comparison operates on two
+ * fixed-length (64-char) valid-hex digests: attacker-supplied input never reaches `Buffer.from(x,"hex")`,
+ * which silently truncates invalid hex, and no length difference can leak through an early return.
+ */
+function approvalCodeMatches(input: string, secret: string): boolean {
+  return constantTimeEqualHex(sha256Hex(normalizeApprovalCode(input)), sha256Hex(secret));
 }
 
 export class PairingRegistry {
@@ -123,37 +152,98 @@ export class PairingRegistry {
   requestPairing(
     origin: string,
     workspaceLabel: string,
-  ): { requestId: string; confirmationCode: string; swept: SweepResult } {
+    opts: { requireApproval?: boolean } = {},
+  ): { requestId: string; confirmationCode: string; approvalCode?: string; swept: SweepResult } {
     const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
     const requestId = this.randomHex(8); // 16 hex
     const raw = this.randomHex(3).toUpperCase(); // 6 hex chars
     const confirmationCode = `${raw.slice(0, 3)}-${raw.slice(3, 6)}`;
+    // The approval secret is a SEPARATE value from `confirmationCode` on purpose. `confirmationCode` is
+    // returned to the requesting frontend (so it is attacker-known and authenticates nothing — it stays a
+    // visual "is this my request?" match). Only this secret gates `allow`, and it leaves the agent solely
+    // through the ApprovalPresenter.
+    const approvalSecret = opts.requireApproval ? this.randomHex(4).toUpperCase() : undefined; // 8 hex = 32 bits
     this.requests.set(requestId, {
       requestId,
       origin,
       workspaceLabel,
       confirmationCode,
+      ...(approvalSecret !== undefined ? { approvalSecret } : {}),
+      attemptsLeft: DEFAULT_APPROVAL_ATTEMPTS,
       createdAtMs: this.now(),
       status: "pending",
     });
-    return { requestId, confirmationCode, swept };
+    return {
+      requestId,
+      confirmationCode,
+      // Human-formatted for readability; `normalizeApprovalCode` makes the separator irrelevant on the way back.
+      ...(approvalSecret !== undefined
+        ? { approvalCode: `${approvalSecret.slice(0, 4)}-${approvalSecret.slice(4, 8)}` }
+        : {}),
+      swept,
+    };
   }
 
-  getRequestView(
-    requestId: string,
-  ): { origin: string; workspaceLabel: string; confirmationCode: string; status: PendingRequest["status"] } | null {
+  /**
+   * **Drop a just-minted request whose approval presentation failed.** The human never saw the code, so the
+   * request must not linger in a state where it could still be confirmed; discarding it also means a failed
+   * presentation leaves NO ephemeral state behind. Mirrors the persist-then-commit rollback discipline of
+   * {@link undoConfirm}/{@link restoreRevoked}: state takes effect only once its precondition truly held.
+   */
+  discardRequest(requestId: string): { ok: boolean } {
+    return { ok: this.requests.delete(requestId) };
+  }
+
+  /**
+   * The renderable view of a pending request. Exposes `approvalRequired` — whether an approval secret gates
+   * this request — but NEVER the secret itself: the confirmation page is fetchable by anyone holding the
+   * (already-public) `requestId`, so rendering the code there would hand it straight to the attacker and
+   * defeat the entire out-of-band channel.
+   */
+  getRequestView(requestId: string): {
+    origin: string;
+    workspaceLabel: string;
+    confirmationCode: string;
+    approvalRequired: boolean;
+    status: PendingRequest["status"];
+  } | null {
     const r = this.requests.get(requestId);
     if (!r || this.requestExpired(r)) return null;
-    return { origin: r.origin, workspaceLabel: r.workspaceLabel, confirmationCode: r.confirmationCode, status: r.status };
+    return {
+      origin: r.origin,
+      workspaceLabel: r.workspaceLabel,
+      confirmationCode: r.confirmationCode,
+      approvalRequired: r.approvalSecret !== undefined,
+      status: r.status,
+    };
   }
 
-  /** Step 2 (agent-owned confirmation page): the human allows or denies. Allow mints the pairing token. */
-  confirmPairing(requestId: string, decision: "allow" | "deny"): { ok: boolean } {
+  /**
+   * Step 2 (agent-owned confirmation page): the human allows or denies. Allow mints the pairing token.
+   *
+   * **`allow` requires the out-of-band approval secret** whenever the request was minted with one — this is
+   * what makes a human approval unforgeable by a local process. The process may hold `requestId` and
+   * `confirmationCode` (both were returned to the requester) and may spoof any `Origin`, but it cannot read
+   * the code off the human's console, so `allow` fails. Each wrong code burns one of a bounded number of
+   * attempts; exhausting them denies the request terminally rather than letting the short code be brute-forced.
+   *
+   * `deny` deliberately does NOT require the code: denial grants no trust (it fails closed), and a human
+   * clicking 거부 should not have to type anything. Denying someone else's request would anyway require
+   * guessing their 64-bit `requestId`.
+   */
+  confirmPairing(requestId: string, decision: "allow" | "deny", approvalCode = ""): { ok: boolean } {
     const r = this.requests.get(requestId);
     if (!r || r.status !== "pending" || this.requestExpired(r)) return { ok: false };
     if (decision === "deny") {
       r.status = "denied";
       return { ok: true };
+    }
+    if (r.approvalSecret !== undefined && !approvalCodeMatches(approvalCode, r.approvalSecret)) {
+      r.attemptsLeft -= 1;
+      // Burned: a request that ran out of attempts is terminally denied, so the correct code no longer
+      // works either and the attacker cannot simply keep guessing within the request TTL.
+      if (r.attemptsLeft <= 0) r.status = "denied";
+      return { ok: false };
     }
     const pairingId = this.randomHex(8);
     const token = this.randomHex(32); // 64 hex, long-lived secret
@@ -176,6 +266,10 @@ export class PairingRegistry {
    * minted pairing, discards the undelivered token, and returns the request to `pending`. After this a
    * {@link pollPairing} reports `pending` (never a `paired` status carrying an inert token for a pairing that
    * was never stored), and the human may retry the confirmation. A no-op unless the request is `allowed`.
+   *
+   * `approvalSecret` and `attemptsLeft` are deliberately PRESERVED: the human retries with the same code they
+   * are still reading off the console, and a repeated persist failure must not reset the attempt cap (which
+   * would hand an attacker unlimited guesses through a persist-failure loop).
    */
   undoConfirm(requestId: string): { ok: boolean } {
     const r = this.requests.get(requestId);

@@ -38,7 +38,10 @@ import { ActionWindowEndpoint } from "../../src/bridge/action-window-endpoint";
 import { ActionWindowEngine, type LocateResult } from "../../src/action-window/engine";
 import { ActionWindowSession, SyntheticProbeDriver } from "../../src/action-window/session";
 import { resolveActionWindowSynthetic, ACTION_WINDOW_SYNTHETIC_FLAG } from "../../src/cli/local-agent";
-import { connect, readMessages } from "../bridge/helpers";
+import { connect, readMessages, fakeApprovalPresenter } from "../bridge/helpers";
+
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter();
 
 const APP = "http://localhost:5173";
 const RUN_ID = "run_bridge_e2e";
@@ -64,6 +67,9 @@ async function startAwServer(opts: { locate?: LocateResult } = {}) {
     agentVersion: "test",
     port: 0,
     actionWindow: endpoint,
+    // Pairing is fail-closed in every environment: without an injected presenter the bridge refuses to pair.
+    // This suite drives a real request→confirm→poll, so it stands in for the human console.
+    approvalPresenter: approval.presenter,
   });
   const { port } = await server.listen();
   cleanups.push(async () => {
@@ -84,7 +90,7 @@ function post(port: number, path: string, body: unknown, headers: Record<string,
 /** Drive a full request→confirm→poll pairing and return the plaintext token. */
 async function pairToken(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   return poll.pairingToken as string;
 }
