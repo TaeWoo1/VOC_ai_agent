@@ -62,3 +62,19 @@ jobs:
 
       - name: Test
         run: ./gradlew test --no-daemon
+
+      # Only on failure: Gradle prints just "AssertionFailedError at Foo.java:203" to
+      # the console, so a red run is undiagnosable from the log alone. The XML/HTML
+      # reports carry the expected/actual diff and the stack trace. Not uploaded on
+      # green runs — nobody reads them, and they are pure storage cost.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          # Paths are repo-relative: `uses:` steps ignore defaults.run.working-directory.
+          path: |
+            backend/build/reports/tests/test/
+            backend/build/test-results/test/
+          retention-days: 7
+          if-no-files-found: warn
