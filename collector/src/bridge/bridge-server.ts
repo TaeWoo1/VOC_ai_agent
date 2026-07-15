@@ -33,7 +33,7 @@ import {
 } from "./protocol";
 import { isOriginAllowed } from "./origin-policy";
 import { nullApprovalPresenter, type ApprovalPresenter } from "./approval-presenter";
-import type { SweepResult } from "./pairing";
+import type { PairingRequestRejection, SweepResult } from "./pairing";
 import type { FilePairingStore, PairingStorePersistResult } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
@@ -282,6 +282,25 @@ export class BridgeServer {
     sendJson(res, 200, body);
   }
 
+  /**
+   * Refuse a pairing request the registry would not admit because too many are already pending. `503` (not
+   * `429`): this is the agent's own global capacity for human consent, not a per-caller rate limit — there is
+   * no caller identity here to rate-limit against, and a paired-but-busy agent is temporarily unable to take
+   * a NEW pairing, which is exactly what 503 means. The body carries a distinct `pairing_busy` code so the
+   * frontend can say "잠시 후 다시 시도" rather than the fail-closed "연결할 수 없음" of `approval_unavailable`.
+   *
+   * The log records COUNTS only — never an origin, a requestId, or a code. The counts are what an operator
+   * needs to tell a flood from a person retrying; the identifiers would add nothing and are exactly what the
+   * sanitization contract keeps out of the sink.
+   */
+  private refusePairingAtCapacity(
+    res: ServerResponse,
+    rejected: { reason: PairingRequestRejection; pendingCount: number; limit: number },
+  ): void {
+    log("bridge_pair_refused", { reason: rejected.reason, pending: rejected.pendingCount, limit: rejected.limit });
+    sendJson(res, 503, { error: "pairing_busy" });
+  }
+
   private async handlePairRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const origin = header(req, "origin");
     if (!isOriginAllowed(origin, this.allowedOrigins)) {
@@ -300,8 +319,13 @@ export class BridgeServer {
       // secret is minted. It must be injected EXPLICITLY — it is never a fallback for a missing presenter.
       // Same persist-then-commit discipline as the human confirm path: a pairing that did not reach disk is
       // fully undone so poll never hands out an inert token for a pairing that was never stored.
-      const { requestId, confirmationCode, swept } = this.store.registry.requestPairing(origin!, workspaceLabel);
-      this.logSweep(swept, "pair_request");
+      const minted = this.store.registry.requestPairing(origin!, workspaceLabel);
+      this.logSweep(minted.swept, "pair_request");
+      // In practice the cap never binds here: auto-approve confirms immediately, so a request is never left
+      // `pending` and there is no human to shield from a flood. Handled anyway — the registry owns the rule,
+      // and this path must not assume the rule's current shape.
+      if (!minted.ok) return this.refusePairingAtCapacity(res, minted);
+      const { requestId, confirmationCode } = minted;
       const r = this.store.registry.confirmPairing(requestId, "allow");
       if (r.ok && this.persistPairings("auto_approve").status === "failed") {
         this.store.registry.undoConfirm(requestId);
@@ -321,6 +345,10 @@ export class BridgeServer {
     }
     const minted = this.store.registry.requestPairing(origin!, workspaceLabel, { requireApproval: true });
     this.logSweep(minted.swept, "pair_request");
+    // At capacity: refuse BEFORE presenting. This is where the cap earns its keep — the presenter is the
+    // scarce resource (each call interrupts the human with a dialog/console block), so a flood must be
+    // stopped on this side of it, not after N dialogs have already been thrown at the person.
+    if (!minted.ok) return this.refusePairingAtCapacity(res, minted);
     // Awaited: a native presenter drives an OS dialog asynchronously so the agent's event loop keeps serving
     // every other socket while the human reads the code.
     const shown = await this.approvalPresenter.present({

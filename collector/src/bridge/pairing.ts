@@ -65,9 +65,28 @@ export interface PairingRegistryOptions {
   requestTtlMs?: number;
   /** How long a minted WS ticket is valid. */
   ticketTtlMs?: number;
+  /**
+   * Global cap on SIMULTANEOUSLY-PENDING pairing requests (see {@link PairingRegistry.requestPairing}).
+   * Injectable so the abuse behaviour is hermetically testable at a cap of 1–2 instead of by minting the
+   * default in a loop.
+   */
+  maxPendingRequests?: number;
 }
 
 export type TicketRejection = "not_found" | "expired" | "used";
+
+/** Why a pairing request was not minted. Coarse and caller-safe — it names a capacity limit, nothing more. */
+export type PairingRequestRejection = "pending_limit";
+
+/**
+ * The outcome of {@link PairingRegistry.requestPairing}. A discriminated union rather than an optional field:
+ * a rejected request has NO requestId and NO code, so the type must make that unrepresentable instead of
+ * leaving a caller to destructure `requestId` off a rejection and present `undefined` to a human. `swept` is
+ * on BOTH branches — the opportunistic cleanup ran either way, and the shell should log it either way.
+ */
+export type PairingRequestResult =
+  | { ok: true; requestId: string; confirmationCode: string; approvalCode?: string; swept: SweepResult }
+  | { ok: false; reason: PairingRequestRejection; pendingCount: number; limit: number; swept: SweepResult };
 
 /** Counts from one bounded-cleanup pass — the safe, coarse timeout-eviction signal (numbers only). */
 export interface SweepResult {
@@ -83,6 +102,14 @@ const DEFAULT_TICKET_TTL_MS = 10 * 1000;
  * (32 bits) with 5 attempts inside the 5-minute request TTL bounds forgery odds at ~5/2^32 (~1.2e-9).
  */
 const DEFAULT_APPROVAL_ATTEMPTS = 5;
+/**
+ * How many pairing requests may be pending AT ONCE, across all origins. One pending request is one human
+ * consent in flight, so more than a couple at a time is already abnormal; 8 leaves room for a person who
+ * retries a few times (each retry mints a new request, and the old one stays pending for the rest of its
+ * 5-minute TTL) while keeping the bound low enough to matter. Injectable via
+ * {@link PairingRegistryOptions.maxPendingRequests}.
+ */
+const DEFAULT_MAX_PENDING_REQUESTS = 8;
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -112,6 +139,7 @@ export class PairingRegistry {
   private readonly randomHex: (bytes: number) => string;
   private readonly requestTtlMs: number;
   private readonly ticketTtlMs: number;
+  private readonly maxPendingRequests: number;
 
   private readonly requests = new Map<string, PendingRequest>();
   private readonly pairings = new Map<string, Pairing>();
@@ -122,6 +150,7 @@ export class PairingRegistry {
     this.randomHex = opts.randomHex ?? ((bytes) => randomBytes(bytes).toString("hex"));
     this.requestTtlMs = opts.requestTtlMs ?? DEFAULT_REQUEST_TTL_MS;
     this.ticketTtlMs = opts.ticketTtlMs ?? DEFAULT_TICKET_TTL_MS;
+    this.maxPendingRequests = opts.maxPendingRequests ?? DEFAULT_MAX_PENDING_REQUESTS;
   }
 
   /** Seed durable pairings loaded from disk (store use only). */
@@ -145,16 +174,52 @@ export class PairingRegistry {
   }
 
   /**
+   * How many requests are pending RIGHT NOW. Counts only `pending` — an `allowed`/`denied` request reached a
+   * terminal outcome and no longer holds anyone's attention; it lingers only until the TTL sweep reclaims it.
+   * Counting terminal entries would make the flood below EASIER, not harder: a caller could park the registry
+   * at its cap with requests nobody is waiting on.
+   *
+   * Assumes {@link sweep} ran first, so nothing counted here is already expired.
+   */
+  private pendingRequestCount(): number {
+    let n = 0;
+    for (const r of this.requests.values()) if (r.status === "pending") n += 1;
+    return n;
+  }
+
+  /**
    * Step 1: the frontend requests pairing for its origin. Returns a short human-verifiable code, plus the
    * `swept` counts from the opportunistic bounded cleanup this call ran first — so the I/O shell can make the
    * silent timeout-eviction of stale requests/tickets observable without this pure core touching a logger.
+   *
+   * **Bounded by a global pending cap.** Each pending request costs a human interruption: the shell presents
+   * every one through the `ApprovalPresenter`, so an unbounded surface lets any local process (the threat
+   * model here — it can spoof `Origin` freely) spray requests and bury the person in approval prompts until
+   * they dismiss one blind. The cap bounds how many can be in flight at once.
+   *
+   * **Expired requests are swept first; live ones are never evicted — new requests are refused instead.** The
+   * sweep is what keeps this from being brittle: capacity that has genuinely aged out is reclaimed before the
+   * cap is applied, so the limit only ever binds on requests that are actually still live. When it does bind,
+   * the choice of who loses matters. Evicting the oldest live request to admit a new one would make the flood
+   * STRONGER than doing nothing: an attacker could push out the very request a human is mid-way through
+   * approving — reading the code off their console — and their confirm would then fail for no visible reason,
+   * or worse, land on an attacker's request that took the slot. Refusing the newcomer instead means a flood
+   * can only ever deny NEW pairings (visible, self-healing as the TTL drains, and pairing is not a
+   * safety-critical path), never corrupt or steal a consent already under way. Fail-closed, as everywhere
+   * else in this flow.
    */
   requestPairing(
     origin: string,
     workspaceLabel: string,
     opts: { requireApproval?: boolean } = {},
-  ): { requestId: string; confirmationCode: string; approvalCode?: string; swept: SweepResult } {
+  ): PairingRequestResult {
     const swept = this.sweep(); // opportunistic bounded cleanup of stale requests/tickets before we add another
+    // Sweep FIRST, then measure: the cap must bind on live consent-in-flight, never on dead entries.
+    const pendingCount = this.pendingRequestCount();
+    if (pendingCount >= this.maxPendingRequests) {
+      // Nothing is minted and nothing is evicted — every request already in flight survives untouched.
+      return { ok: false, reason: "pending_limit", pendingCount, limit: this.maxPendingRequests, swept };
+    }
     const requestId = this.randomHex(8); // 16 hex
     const raw = this.randomHex(3).toUpperCase(); // 6 hex chars
     const confirmationCode = `${raw.slice(0, 3)}-${raw.slice(3, 6)}`;
@@ -174,6 +239,7 @@ export class PairingRegistry {
       status: "pending",
     });
     return {
+      ok: true,
       requestId,
       confirmationCode,
       // Human-formatted for readability; `normalizeApprovalCode` makes the separator irrelevant on the way back.
