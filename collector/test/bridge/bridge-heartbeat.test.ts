@@ -14,7 +14,10 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { BridgeServer } from "../../src/bridge/bridge-server";
 import { FilePairingStore } from "../../src/bridge/pairing-store";
-import { connect, readMessages } from "./helpers";
+import { connect, readMessages, fakeApprovalPresenter } from "./helpers";
+
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter();
 
 const APP = "http://localhost:5173";
 const cleanups: Array<() => Promise<void>> = [];
@@ -26,7 +29,7 @@ afterEach(async () => {
 async function startServer(heartbeatMs: number) {
   const dir = mkdtempSync(join(tmpdir(), `bridge-hb-${randomUUID()}-`));
   const store = new FilePairingStore(join(dir, "pairings.json"), { now: () => Date.now() });
-  const server = new BridgeServer({ store, allowedOrigins: [APP], agentVersion: "test", port: 0, heartbeatMs });
+  const server = new BridgeServer({ store, allowedOrigins: [APP], agentVersion: "test", port: 0, heartbeatMs, approvalPresenter: approval.presenter });
   const { port } = await server.listen();
   cleanups.push(async () => { await server.close(); rmSync(dir, { recursive: true, force: true }); });
   return { server, port };
@@ -43,7 +46,7 @@ function post(port: number, path: string, body: unknown, headers: Record<string,
 /** Drive request→confirm→poll→ws-ticket and return a single-use WS ticket ready for the `/bridge/ws` handshake. */
 async function freshTicket(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   const r = await (await post(port, "/bridge/ws-ticket", { clientProtocolVersion: 1 }, { Authorization: `Bearer ${poll.pairingToken}` })).json();
   return r.ticket as string;

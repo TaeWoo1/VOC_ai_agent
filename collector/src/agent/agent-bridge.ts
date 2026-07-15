@@ -11,6 +11,7 @@
 
 import { BridgeServer } from "../bridge/bridge-server";
 import { FilePairingStore } from "../bridge/pairing-store";
+import type { ApprovalPresenter } from "../bridge/approval-presenter";
 import { settleObserverToPort, refFor } from "../bridge/event-adapter";
 import { ProjectionRegistry } from "../bridge/projection-session";
 import { ProjectionEndpoint } from "../bridge/projection-endpoint";
@@ -71,6 +72,13 @@ export interface AgentBridgeConfig {
   /** Stable per-agent salt so a raw connectionId never crosses the wire (only its 16-hex ref). */
   refSalt: string;
   autoApprovePairing?: boolean;
+  /**
+   * The human channel for the out-of-band pairing approval secret. Left unset by the default boot, which is
+   * deliberate and fail-closed: the repo has NO native desktop/tray host (Runtime ADR §1), so a production
+   * agent has no way to show a human the code and therefore refuses to pair (`503 approval_unavailable`)
+   * rather than accepting a confirm any local process could forge.
+   */
+  approvalPresenter?: ApprovalPresenter;
   now?: () => number;
   /** When present, mounts the SEPARATE projection transport alongside the G1 status channel. */
   projection?: AgentProjectionConfig;
@@ -150,6 +158,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     agentVersion: cfg.agentVersion,
     port: cfg.port,
     autoApprovePairing: cfg.autoApprovePairing,
+    ...(cfg.approvalPresenter ? { approvalPresenter: cfg.approvalPresenter } : {}),
     projection,
     actionWindow,
   });

@@ -26,6 +26,7 @@ import { log } from "../log";
 import { FilePairingStore } from "../bridge/pairing-store";
 import { BridgeServer } from "../bridge/bridge-server";
 import { parseAllowedOrigins } from "../bridge/origin-policy";
+import { createStderrApprovalPresenter } from "../bridge/stderr-approval-presenter";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const collectorRoot = resolve(here, "..", "..");
@@ -90,6 +91,9 @@ async function main(): Promise<void> {
     agentVersion: AGENT_VERSION,
     port: config.port,
     autoApprovePairing: config.autoApprovePairing,
+    // DEV human channel: shows the out-of-band approval code on THIS terminal. Unavailable (so pairing fails
+    // closed) when stderr is redirected or under production — see `bridge/stderr-approval-presenter.ts`.
+    approvalPresenter: createStderrApprovalPresenter(),
   });
 
   try {

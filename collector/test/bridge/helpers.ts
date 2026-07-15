@@ -3,10 +3,44 @@
  * library handshake/framing and can fully control the handshake headers (Origin) and observe 101-vs-rejection.
  */
 import WebSocket from "ws";
+import type { ApprovalPresentation, ApprovalPresenter } from "../../src/bridge/approval-presenter";
 
 export interface ConnectResult {
   status: number;
   ws?: WebSocket;
+}
+
+/**
+ * **Test stand-in for the human console.** Pairing is fail-closed in every environment: without an injected
+ * presenter the bridge refuses to pair (`503 approval_unavailable`), so any suite that drives a real
+ * request→confirm→poll must inject one. This always-available fake records what WOULD have been shown, so a
+ * test can act as the human who read the code off the terminal.
+ *
+ * Test-only: a real presenter must prove it reaches a human (see `stderr-approval-presenter.ts`, which
+ * refuses a redirected stderr). This one asserts nothing of the sort — never wire it into production source.
+ */
+export function fakeApprovalPresenter(): {
+  presenter: ApprovalPresenter;
+  shown: ApprovalPresentation[];
+  /** The approval code from the most recent presentation — what the human would type in. */
+  lastCode: () => string;
+} {
+  const shown: ApprovalPresentation[] = [];
+  return {
+    shown,
+    lastCode: () => {
+      const last = shown[shown.length - 1];
+      if (!last) throw new Error("fakeApprovalPresenter: nothing presented yet");
+      return last.approvalCode;
+    },
+    presenter: {
+      available: () => true,
+      present: (p) => {
+        shown.push(p);
+        return { status: "presented" };
+      },
+    },
+  };
 }
 
 /**

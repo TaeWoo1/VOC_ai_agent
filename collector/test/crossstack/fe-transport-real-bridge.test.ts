@@ -37,6 +37,7 @@ import WebSocket from "ws";
 
 // ── collector (runtime + bridge) — the REAL server side ──────────────────────
 import { BridgeServer } from "../../src/bridge/bridge-server";
+import { fakeApprovalPresenter } from "../bridge/helpers";
 import { FilePairingStore } from "../../src/bridge/pairing-store";
 import { ActionWindowEndpoint } from "../../src/bridge/action-window-endpoint";
 import { ActionWindowEngine } from "../../src/action-window/engine";
@@ -50,7 +51,9 @@ import { createBridgeSource, type BridgeBackedSource } from "../../../frontend/s
 import { BRIDGE_TOKEN_KEY, type StorageLike, type WebSocketLike } from "../../../frontend/src/lib/bridge/bridgeClient";
 import type { SourceConnection, SourceUpdate } from "../../../frontend/src/lib/actionWindow/source";
 
-const APP = "http://localhost:5173"; // the Vite dev origin the browser would send (allowlisted below)
+const APP = "http://localhost:5173";
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter(); // the Vite dev origin the browser would send (allowlisted below)
 const RUN_ID = "run_crossstack_e2e";
 const RUN_ID_B = "run_crossstack_e2e_b"; // a DIFFERENT hosted run, for the never-splice case
 const CHANNEL = "synthetic";
@@ -68,7 +71,9 @@ async function startAwServerOn(opts: { runId: string; store: FilePairingStore })
   const engine = new ActionWindowEngine({ runId: opts.runId, channelCode: CHANNEL, runCopyKey: RUN_COPY });
   const session = new ActionWindowSession(engine, driver, endpoint.transport);
   session.attach();
-  const server = new BridgeServer({ store: opts.store, allowedOrigins: [APP], agentVersion: "test", port: 0, actionWindow: endpoint });
+  // Pairing is fail-closed in every environment: without an injected presenter the bridge refuses to pair.
+  // This suite drives a real request→confirm→poll, so it stands in for the human console.
+  const server = new BridgeServer({ store: opts.store, allowedOrigins: [APP], agentVersion: "test", port: 0, actionWindow: endpoint, approvalPresenter: approval.presenter });
   const { port } = await server.listen();
   cleanups.push(async () => server.close());
   return { server, port, driver, session, endpoint };
@@ -143,7 +148,7 @@ function post(port: number, path: string, body: unknown, headers: Record<string,
 }
 async function pairToken(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "crossstack" })).json();
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   return poll.pairingToken as string;
 }

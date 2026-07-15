@@ -32,6 +32,7 @@ import {
   type ServerMessage,
 } from "./protocol";
 import { isOriginAllowed } from "./origin-policy";
+import { nullApprovalPresenter, type ApprovalPresenter } from "./approval-presenter";
 import type { SweepResult } from "./pairing";
 import type { FilePairingStore, PairingStorePersistResult } from "./pairing-store";
 import { renderConfirmationPage } from "./confirmation-page";
@@ -71,6 +72,15 @@ export interface BridgeServerDeps {
    */
   heartbeatMs?: number;
   /**
+   * The human channel for the out-of-band pairing approval secret (see `./approval-presenter`). Defaults to
+   * {@link nullApprovalPresenter} — always unavailable — so an agent whose presenter was never wired FAILS
+   * CLOSED (`503 approval_unavailable`) in EVERY environment rather than falling back to an unauthenticated
+   * confirm that any local process could forge. There is no environment in which a missing human channel
+   * silently degrades: the only bypass is {@link autoApprovePairing}, which must be injected explicitly and
+   * is refused under `NODE_ENV=production` by `cli/bridge.ts`.
+   */
+  approvalPresenter?: ApprovalPresenter;
+  /**
    * Optional Browser Projection V0 endpoint (slice §B). When present, the server mounts a SEPARATE projection
    * transport (`POST /projection/ticket`, `/projection/ws` binary) alongside — and independent of — the G1
    * status channel, which keeps its JSON/text/64 KiB boundary untouched.
@@ -94,6 +104,7 @@ export class BridgeServer {
   private readonly host: string;
   private readonly wantPort: number;
   private readonly autoApprovePairing: boolean;
+  private readonly approvalPresenter: ApprovalPresenter;
   private readonly heartbeatMs: number;
   private readonly projection: ProjectionEndpoint | undefined;
   private readonly actionWindow: ActionWindowEndpoint | undefined;
@@ -113,6 +124,7 @@ export class BridgeServer {
     this.host = deps.host ?? LOOPBACK;
     this.wantPort = deps.port;
     this.autoApprovePairing = deps.autoApprovePairing ?? false;
+    this.approvalPresenter = deps.approvalPresenter ?? nullApprovalPresenter;
     this.heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
     this.projection = deps.projection;
     this.actionWindow = deps.actionWindow;
@@ -278,22 +290,68 @@ export class BridgeServer {
     }
     const body = await readJson(req);
     const workspaceLabel = typeof body?.workspaceLabel === "string" ? body.workspaceLabel.slice(0, 80) : "SellerOps";
-    const { requestId, confirmationCode, swept } = this.store.registry.requestPairing(origin!, workspaceLabel);
-    this.logSweep(swept, "pair_request");
+
+    const confirmUrlFor = (id: string): string => `http://127.0.0.1:${this.boundPort}/bridge/confirm?requestId=${id}`;
+
     if (this.autoApprovePairing) {
-      // DEV/TEST relaxation only — skip the human local confirmation click (never enabled in production).
+      // DEV/TEST relaxation only — skip the human local confirmation click (never enabled in production;
+      // `cli/bridge.ts` refuses the flag there). This and the human approval channel are mutually exclusive
+      // by definition: auto-approve means no human is involved, so no presenter is consulted and no approval
+      // secret is minted. It must be injected EXPLICITLY — it is never a fallback for a missing presenter.
       // Same persist-then-commit discipline as the human confirm path: a pairing that did not reach disk is
       // fully undone so poll never hands out an inert token for a pairing that was never stored.
+      const { requestId, confirmationCode, swept } = this.store.registry.requestPairing(origin!, workspaceLabel);
+      this.logSweep(swept, "pair_request");
       const r = this.store.registry.confirmPairing(requestId, "allow");
       if (r.ok && this.persistPairings("auto_approve").status === "failed") {
         this.store.registry.undoConfirm(requestId);
       }
+      log("bridge_pair_requested", { requestId, autoApproved: true });
+      sendJson(res, 200, { requestId, confirmationCode, confirmUrl: confirmUrlFor(requestId) });
+      return;
     }
-    log("bridge_pair_requested", { requestId });
+
+    // FAIL-CLOSED, in EVERY environment: ask BEFORE minting. A presenter that cannot reach a human means the
+    // human could never learn the code, so pairing refuses rather than minting a secret that goes nowhere —
+    // there is no un-gated confirm to degrade to. Nothing is minted here: no requestId, no code, no entry.
+    if (!this.approvalPresenter.available()) {
+      log("bridge_pair_refused", { reason: "approval_unavailable" });
+      sendJson(res, 503, { error: "approval_unavailable" });
+      return;
+    }
+    const minted = this.store.registry.requestPairing(origin!, workspaceLabel, { requireApproval: true });
+    this.logSweep(minted.swept, "pair_request");
+    // Awaited: a native presenter drives an OS dialog asynchronously so the agent's event loop keeps serving
+    // every other socket while the human reads the code.
+    const shown = await this.approvalPresenter.present({
+      requestId: minted.requestId,
+      origin: origin!,
+      workspaceLabel,
+      approvalCode: minted.approvalCode!,
+    });
+    if (shown.status === "declined") {
+      // A human was reached and REFUSED. Discard immediately — an actively-refused request must not linger
+      // until its TTL. Reported distinctly from `approval_unavailable` (no channel) so the frontend can say
+      // "거부됨" rather than "연결할 수 없음". This tells the caller only that a human said no — nothing it
+      // did not already learn from not being paired.
+      this.store.registry.discardRequest(minted.requestId);
+      log("bridge_pair_refused", { reason: "declined" });
+      sendJson(res, 403, { error: "approval_declined" });
+      return;
+    }
+    if (shown.status !== "presented") {
+      // The human never saw the code — roll the request back so it can never be confirmed, and refuse.
+      this.store.registry.discardRequest(minted.requestId);
+      log("bridge_pair_refused", { reason: shown.reason });
+      sendJson(res, 503, { error: "approval_unavailable" });
+      return;
+    }
+    log("bridge_pair_requested", { requestId: minted.requestId, approvalGated: true });
+    // NOTE: `approvalCode` is deliberately absent from this response — that is the whole point of the slice.
     sendJson(res, 200, {
-      requestId,
-      confirmationCode,
-      confirmUrl: `http://127.0.0.1:${this.boundPort}/bridge/confirm?requestId=${requestId}`,
+      requestId: minted.requestId,
+      confirmationCode: minted.confirmationCode,
+      confirmUrl: confirmUrlFor(minted.requestId),
     });
   }
 
@@ -306,12 +364,18 @@ export class BridgeServer {
       return;
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderConfirmationPage({ requestId, origin: view.origin, workspaceLabel: view.workspaceLabel, confirmationCode: view.confirmationCode }));
+    res.end(renderConfirmationPage({
+      requestId,
+      origin: view.origin,
+      workspaceLabel: view.workspaceLabel,
+      confirmationCode: view.confirmationCode,
+      approvalRequired: view.approvalRequired,
+    }));
   }
 
   private async handleConfirm(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // Only the agent-owned confirmation page (same loopback origin) may confirm. A cross-site fetch carries
-    // a foreign Origin and is rejected — preventing a malicious page from auto-approving a pairing.
+    // Defence in depth ONLY: this Origin check is trivially spoofable by a non-browser local caller (and an
+    // absent Origin passes), so it is NOT what secures this endpoint. The out-of-band `approvalCode` below is.
     const origin = header(req, "origin");
     if (origin && !this.selfOrigins().includes(origin)) {
       sendJson(res, 403, { error: "bad_origin" });
@@ -320,7 +384,9 @@ export class BridgeServer {
     const body = await readJson(req);
     const requestId = typeof body?.requestId === "string" ? body.requestId : "";
     const decision = body?.decision === "allow" ? "allow" : "deny";
-    const result = this.store.registry.confirmPairing(requestId, decision);
+    // The human retypes this off the agent's console. A caller confined to the HTTP surface cannot read it.
+    const approvalCode = typeof body?.approvalCode === "string" ? body.approvalCode : "";
+    const result = this.store.registry.confirmPairing(requestId, decision, approvalCode);
     if (result.ok && decision === "allow") {
       if (this.persistPairings("confirm").status === "failed") {
         // Persist-then-commit: the pairing takes effect ONLY when durable. Fully undo the confirm — delete the

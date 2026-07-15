@@ -47,7 +47,10 @@ import {
 } from "../../src/action-window/naver-driver";
 import { NAVER_FIXTURE_CANARIES } from "../../src/action-window/naver-fixture";
 import { loadOperationRun } from "../../src/action-window/run-store";
-import { connect, readMessages } from "../bridge/helpers";
+import { connect, readMessages, fakeApprovalPresenter } from "../bridge/helpers";
+
+/** Stands in for the human console — pairing is fail-closed without a presenter. One shared instance per file: `lastCode()` is the most recent presentation, and request→confirm is sequential. */
+const approval = fakeApprovalPresenter();
 
 const APP = "http://localhost:5173";
 
@@ -109,6 +112,9 @@ async function bootNaverAwBridge(dirs: { persistDir: string; quarantineDir: stri
     refSalt: "test-salt",
     now: () => Date.now(),
     actionWindow,
+    // Pairing is fail-closed in every environment: the real composition root wires no presenter (there is no
+    // native host yet), so this suite injects one to stand in for the human console.
+    approvalPresenter: approval.presenter,
   });
   const listen = await bridge.listen();
   if (!listen.ok) throw new Error("bridge failed to listen");
@@ -139,7 +145,7 @@ function post(port: number, path: string, body: unknown, headers: Record<string,
 
 async function pairToken(port: number): Promise<string> {
   const req = await (await post(port, "/bridge/pair/request", { workspaceLabel: "테스트" })).json();
-  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow" }, { Origin: `http://127.0.0.1:${port}` });
+  await post(port, "/bridge/pair/confirm", { requestId: req.requestId, decision: "allow", approvalCode: approval.lastCode() }, { Origin: `http://127.0.0.1:${port}` });
   const poll = await (await post(port, "/bridge/pair/poll", { requestId: req.requestId })).json();
   return poll.pairingToken as string;
 }
