@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { log } from "./log";
+import { rowCountBucket } from "./row-count-bucket";
 
 /** Mirror of the backend `IngestResult` record (only the fields the collector reads). */
 export interface IngestResult {
@@ -92,7 +93,8 @@ export async function fetchItemAnalysisCount(
   });
   if (!res.ok) throw new UploadError("item-analysis fetch failed", "itemAnalysis", res.status);
   const rows = (await res.json()) as unknown[];
-  log("item-analysis.count", { count: rows.length });
+  // Bucketed in the log (§4.3 — never an exact count); the exact count is still RETURNED to the caller.
+  log("item-analysis.count", { countBucket: rowCountBucket(rows.length) });
   return rows.length;
 }
 
@@ -133,13 +135,16 @@ export async function uploadReviewBytes(
   });
   if (!res.ok) throw new UploadError("upload failed", "upload", res.status);
   const result = (await res.json()) as IngestResult;
+  // Sanitized per §4.3: coarse buckets, never the exact counts, and never the `filename` — it is opaque
+  // only on the Action Window path (`aw-<ref>.xlsx`); `uploadReviewFile` passes a real export basename,
+  // which can carry store/date identity. The exact counts are still RETURNED to the caller, which folds
+  // them itself (`sanitizeBackendIngest` → `{ ok, processed }`, `sanitizeIngest` → buckets).
   log("upload.done", {
-    filename,
     status: result.status,
-    totalRows: result.totalRows,
-    successRows: result.successRows,
-    skippedRows: result.skippedRows,
-    failedRows: result.failedRows,
+    totalRowsBucket: rowCountBucket(result.totalRows),
+    successRowsBucket: rowCountBucket(result.successRows),
+    skippedRowsBucket: rowCountBucket(result.skippedRows),
+    failedRowsBucket: rowCountBucket(result.failedRows),
   });
   return result;
 }

@@ -616,9 +616,30 @@ started via `cd backend && ./gradlew bootRun` against the existing Flyway-migrat
 readiness live-verified 2-of-3 (§8-16) → **full export→ingest `COMPLETED` 3-of-3 (§8-17)**. The NAVER
 supervised export pilot is **proven end-to-end on the real surface**.
 
-**Follow-up noted (separate slice, not changed here):** the `upload.done` dev log carries exact row counts;
-the engine/AW view correctly reduce to `{ ok, processed }`, but exact counts in a log sit awkwardly against
-the §3 sanitization contract.
+**Follow-up RESOLVED (offline slice, 2026-07-15).** The §8-17 note — `upload.done` carrying exact row counts —
+is closed. Scope was narrower than the note implied, and one part of it was **mis-stated**:
+
+- **Never reached the wire.** `upload.done` is not a contract event (absent from `contracts/action-window/v1/`);
+  it is a **dev log line** with one emission site. The sanitization boundary (`sanitizeBackendIngest` →
+  `{ ok, processed }`) sits one layer *downstream*, so the exposure was terminal/log output only. The engine
+  and AW view were correct throughout, and Run 4's `COMPLETED` result is unaffected.
+- **Correct citation:** the binding rule is **`collector/CLAUDE.md` §4 item 3** ("never … exact amounts/
+  counts"), not "§3" — `r4-preparation.md` §3 is the G1–G6 gate section. §4 item 4 explicitly names "log" as a
+  bound surface.
+- **Correction to §8-17's wording:** the note said the log carried "exact row counts **+ the opaque filename**".
+  The filename is opaque **only on the Action Window path** (`neutralUploadName(artifactRef)` → `aw-<hex>.xlsx`).
+  The `uploadReviewFile` wrapper passes `basename(filePath)`, so the capture / diagnostic / manual CLIs logged a
+  **real seller-center export basename** (store/date identity) — a sharper §4.3 concern than the counts.
+
+**Fix (offline-verified only; no live re-run, no wire/behavior change):** `upload.done` now emits the backend
+status enum + four `RowCountBucket`s and **no filename**; the sibling `item-analysis.count` emits a bucket. Both
+functions still **return** exact counts — callers fold them themselves. The bucket definition moved to a new
+zero-import leaf `collector/src/row-count-bucket.ts` (`upload.ts` cannot import `review-upload-diagnostic.ts`,
+which imports `../upload` — that edge would be a cycle); `review-upload-diagnostic.ts` re-exports it as
+`countBucket`, so its public surface is unchanged. `esm/esm-review-schema-shape.ts` keeps an identical private
+copy — folding the esm family in is a separate slice. The old test asserted the counts were *present*; it is
+replaced by an exact key allow-list (a `toContain("successRows")` sweep would have passed against
+`successRowsBucket` and proved nothing).
 
 ---
 
