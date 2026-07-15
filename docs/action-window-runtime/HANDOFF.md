@@ -35,7 +35,10 @@ here. Report it; do not silently edit it.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
-5. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
+5. [`r4-operator-runbook.md`](r4-operator-runbook.md) — **the only operator-facing doc here**; the other
+   entries are engineering records. Read it if a human is about to run an export: Phase A prep, the
+   **~60 s** click+confirm window, what a lapse costs, when to abort. **Grants nothing.**
+6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
 
 ## State in one line
 
@@ -61,6 +64,23 @@ here. Report it; do not silently edit it.
 raises an **expected NAVER confirmation dialog** the operator must manually confirm; the download fires only
 on that confirmation. Both steps must land inside the ~60 s detect window. That dialog is **expected and is
 NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" still stands for everything else.
+Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3; normative:
+`r4-preparation.md` §7.
+
+**Two timing facts a cold session re-derives WRONG (verified in code 2026-07-15, not by a run):**
+
+- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min is COSMETIC on this path — never quote it as the human budget.**
+  `waitForUserAction` runs un-awaited and its result is discarded once the stage has moved on
+  (`session.ts:236`), because `driveOneRun` auto-sends `REQUEST_STEP_RECHECK` the moment the run parks.
+  So `detectDownload` is already racing its 60 s timer ~1 s after the highlight appears. **The only number
+  that can fail a run is ~60 s** (`DOWNLOAD_TIMEOUT_MS`), and it covers click **+** confirm. The early
+  `timeout: 0` arming (`naver-live-driver.ts`) means an early click is never missed.
+- ⚠ **The Runtime never observes the confirmation.** `observer.ts` listens only on the tagged export
+  control; the dialog is outside it. **The download firing is the sole evidence of step 2.**
+  ❓ **Open, NOT determinable from code or docs:** whether `USER_ACTION_OBSERVED` /
+  `humanCheckpoint.observed` is therefore ever recorded on a live run — §4 claims the Runtime "observes the
+  user's action" as part of the audit trail. If it is not, that is a **defect, not a doc problem**.
+  Unreviewed; needs engineering + PO.
 
 ## Git state
 
@@ -84,29 +104,34 @@ NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" st
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
   `--ff-only` sync.
 
-## Next slice — planned, NOT started
+## Last slice — R4 operator guidance, DELIVERED 2026-07-15
 
-**R4 operator guidance** (docs + one CLI string; offline). Run 4 proved the path but there is **no
-operator-facing runbook**: the human choreography is scattered across §4's role list, a sentinel paragraph
-in the gate record, the dispatch records, and `CONFIRM_PROMPT`
-(`collector/src/cli/run-action-window-live-naver.ts:219-231`) — the only text an operator actually reads at
-run time, and it is now stale (it describes the export as one action and never mentions the ~60 s window).
+Run 4 proved the path; the human choreography was scattered and the one text an operator reads at run time
+was stale. Now closed, offline, in one commit:
 
-Three files: a new `r4-operator-runbook.md`; a §7 amendment carrying the expected-dialog carve-out into the
-normative section; and the `CONFIRM_PROMPT` text.
+- **NEW [`r4-operator-runbook.md`](r4-operator-runbook.md)** — the run-time choreography (Phase A prep,
+  the ~60 s window, timeout cost, abort, evidence). Choreography **only**: it links to the gate record for
+  authorization and §8-17 for evidence rather than restating them. **It grants nothing.**
+- **`r4-preparation.md` §7** — the expected-dialog carve-out, now explicit in the normative section, and
+  **narrowed to exactly one dialog**: uncertain ⇒ it is not the expected one ⇒ abort.
+- **`CONFIRM_PROMPT`** (`collector/src/cli/run-action-window-live-naver.ts`) — rewritten for the two-step
+  action + the ~60 s budget. String only; no behavior, no timers.
+- **`r4-gate-record.md`** — its pre-dispatch runbook no longer says "the pilot did not succeed"; still
+  grants nothing, every G6/P6 still consumed.
 
-**Two operator-confirmed honesty constraints — do not violate:**
+**The honesty constraints that shaped it still bind any future edit:**
 
 - **The Run 4 confirmation dialog is NOT named.** Write "an expected NAVER confirmation dialog" only.
-  `export-click-signals.ts:233-239` records — in a source comment — an *earlier* live run hitting a
-  copyright/usage consent (`리뷰 다운로드 및 활용` / `저작권자` / `계속하시겠습니까`) misread as
-  `date_range_required`. **Whether that is the same dialog Run 4 hit is not established.** Do not merge the
-  two observations.
+  `export-click-signals.ts` records — in a source comment — an *earlier* live run hitting a copyright/usage
+  consent misread as `date_range_required`. **Whether that is the same dialog Run 4 hit is not
+  established.** Do not merge the two observations.
 - **The period/date step is UNOBSERVED.** It exists only as three words in §4 ("selects period/scope"), one
-  unexplained CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live.
-  Keep the §4 obligation; invent no procedure.
+  CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live. Keep the §4
+  obligation; invent no procedure.
 
-Other deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
+## Next slice — none chosen
+
+Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into
 `collector/src/row-count-bucket.ts`; FE copy mapping for `actionWindow.step.downstream`. **PO decision still
 open:** whether to *relax* the readiness gate (accept a visible+enabled export control + grid container as

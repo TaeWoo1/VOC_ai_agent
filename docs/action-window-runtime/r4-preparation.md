@@ -258,6 +258,23 @@ does not recognize; any sign of platform anti-abuse challenge (CAPTCHA storm, lo
 the human completes or walks away, the Runtime never retries around it; any observation of data
 on screen the seller did not expect to share.
 
+**Carve-out — the NAVER export confirmation dialog is EXPECTED and is NOT an abort trigger.**
+Observed in Run 4 ([`r4-evidence-pack.md`](r4-evidence-pack.md) §8-17): the NAVER review export is a
+**two-step** human action — acting on the highlighted export control raises an **expected NAVER
+confirmation dialog**, and the download fires **only** when the seller manually confirms it. That dialog
+is *recognized*, so the "does not recognize" clause above never applied to it; this states so explicitly
+rather than leaving an operator to abort on a normal part of the flow. **Both steps must land inside the
+~60 s download-detect window**; operator choreography is in
+[`r4-operator-runbook.md`](r4-operator-runbook.md) §3. The Runtime performs **neither** step.
+
+**This carve-out is exactly one dialog wide, and narrows nothing else.** Everything unrecognized still
+aborts immediately — any *other* prompt or dialog, 2FA/CAPTCHA storms, lockout or account warnings,
+unexpected on-screen data, withdrawn consent. **Uncertain whether a dialog is the expected one ⇒ it is
+not ⇒ abort.** The identity of the dialog is deliberately **not** recorded here: a *different* live run
+once hit a copyright/usage consent (see the comment at `collector/src/naver/export-click-signals.ts`),
+and **whether that is the same dialog Run 4 hit is NOT established** — the two observations must not be
+merged into a "known dialog" the operator is told to expect by name.
+
 **Slice-level rollback:** the pilot leaves no platform-side state (read-only observation + a
 seller-initiated export the platform already offers). Rollback = delete the local artifact if not
 yet ingested; if ingested, the existing dedup-safe ingestion makes re-runs non-destructive; the
