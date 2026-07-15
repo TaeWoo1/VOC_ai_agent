@@ -79,17 +79,26 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). HEAD = **`1b9f582`**.
-- ⚠ **The branch has DIVERGED — 4 ahead AND 2 behind.** It is *not* merely ahead. Both halves matter:
-  - **4 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, none pushed:
-    `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
-    expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
-    (README §5 rank 6 — the shared contract exists). **All four are docs/skill only** — no
-    `collector/src` change.
-  - **2 commits behind** (`git log HEAD..origin/main`): `f83be19` (bridge — sanitize untrusted approval
-    fields + bound pending pairings) and its merge `d7d1161` = **PR #261, which landed on `main` after
-    this batch started.** Not synced here. **Syncing is an operator decision; do not fetch-and-merge
-    on your own initiative.**
+- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). **`main` is fully merged in** via `d87ec17`
+  (normal merge commit, 2026-07-16) — the branch is **6 ahead, 0 behind**.
+  > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
+  > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
+  > `git log --oneline origin/main..HEAD`**; the commit *list* below is the durable claim.
+- **6 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, **none pushed**:
+  `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
+  expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
+  (README §5 rank 6 — the shared contract exists) · `5667ed4` (this file's git state + last slice) ·
+  `d87ec17` (merge of `main`/#261).
+  - **Docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote **`CONFIRM_PROMPT`** in
+    `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only; no behavior, no
+    timers.** ⚠ **`5667ed4` claimed this batch was "docs/skill only, no `collector/src`" — that was
+    FALSE**, and it contradicted this file's own §"Last slice" detail, which recorded the CLI change
+    correctly all along. Corrected here. **Verify with `git diff --name-only origin/main..HEAD`; never
+    assert the file set from memory.**
+- **#261 is now IN this branch** (`f83be19` — bridge: sanitize untrusted approval fields + bound pending
+  pairings). It landed on `main` mid-batch; the two sides were **disjoint (zero file overlap)**, so the
+  merge was clean. Merge-base was `09f2411`.
+  **Syncing remains an operator decision — do not fetch-and-merge on your own initiative.**
 - The six commits held by the *previous* batch all landed via **#260**: `45ed82c` (upload log
   sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
   corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
@@ -99,9 +108,9 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-  ⚠ **That hazard is LIVE right now: `main` has moved (#261).** Two-dot previews of this batch will
-  misrender #261's work as deletions.
-- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **on `main`, NOT in this branch**),
+  **Not currently firing** — `d87ec17` merged `main` in, so `origin/main..HEAD` and `origin/main...HEAD`
+  agree while that holds. **The warning stands: it re-arms the moment `main` moves again.**
+- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **merged into this branch via `d87ec17`**),
   **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
   pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
   landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
@@ -110,12 +119,14 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
   `--ff-only` sync.
 
-## Last slice — docs-governance batch (4 commits, held local, 2026-07-15→16)
+## Last slice — docs-governance batch (6 commits, held local, 2026-07-15→16)
 
-**No capability claim moved, no gate flipped, no G6 granted, no canonical product doc touched.**
+**No capability claim moved, no gate flipped, no G6 granted, no canonical product doc touched.** The only
+non-docs change in the batch is `4c6d1ac`'s **string-only** `CONFIRM_PROMPT` rewrite (see Git state).
 
 - **`cb081e0`** — refreshed this file's git state + baseline after #260.
-- **`4c6d1ac`** — R4 operator guidance (detailed below); its honesty constraints still bind.
+- **`4c6d1ac`** — R4 operator guidance (detailed below); its honesty constraints still bind. **Also the
+  batch's one `collector/src` touch:** `CONFIRM_PROMPT`, string only.
 - **`15e6fe3`** — **routers carry paths, not state.** Root `CLAUDE.md`'s Action Window section became a
   paths-only routing table; the `r4-runtime-handoff` skill's dated status became durable rules; this
   file's **Discovery block** stopped mirroring §9/§4.1/§7. The evidence: 3 of the 4 Run 4 commits each
@@ -124,6 +135,9 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 - **`1b9f582`** — README §5 rank 6 no longer hedges "(once it exists)"; the contract exists
   (`contracts/action-window/v1/`, MERGED PR #212). Same pathology as `15e6fe3`: a **precedence list
   carrying status**, rotted silently.
+- **`5667ed4`** — this file's git state + last slice, after `main` moved mid-batch. **Introduced the
+  false "docs/skill only" claim corrected in Git state above.**
+- **`d87ec17`** — merged `main` (#261) in. Disjoint, clean; baseline 2837 → 2855 (+18).
 
 ⚠ **Corrected in `1b9f582` — previously reported for two sessions and written into `15e6fe3`'s own commit
 message:** "three precedence lists conflict at rank 6" is **OVERSTATED**. Root `CLAUDE.md`'s rank 6 is
@@ -195,11 +209,10 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2837 passed / 29 skipped** (174 files). Measured on the post-#260 sync tree —
-  the jump from 2761 is **+76 tests from #259**, not drift. **Re-confirmed 2026-07-16** across the
-  4-commit local batch (docs-only; every run matched exactly — for a docs slice any movement is a red
-  flag, not drift). ⚠ **This number predates #261** (`f83be19`, not synced here); expect it to move once
-  that lands.
+- Offline baseline: **2855 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`d87ec17`
+  tree (i.e. **including #261**). Lineage, all accounted for — **no unexplained drift**: 2761 → **2837**
+  (+76 from #259) → **2855** (+18 from #261). The 4 docs-only commits before the merge held 2837 exactly;
+  for a docs slice, **any movement is a red flag, not drift**.
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
