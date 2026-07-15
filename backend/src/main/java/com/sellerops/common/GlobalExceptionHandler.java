@@ -8,6 +8,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -31,6 +32,14 @@ public class GlobalExceptionHandler {
         // Malformed query/path param (e.g. a non-ISO date or non-UUID) — a client
         // error, not a server fault. Echo only the parameter name, never the value.
         return body(HttpStatus.BAD_REQUEST, "요청 파라미터 형식이 올바르지 않습니다: " + ex.getName());
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<Map<String, Object>> handleMissingPart(MissingServletRequestPartException ex) {
+        // A multipart request without the expected part (e.g. a renamed `file`) — a
+        // client error, not a server fault, which the catch-all would otherwise report
+        // as 500. Echo only the part NAME, never the part's content.
+        return body(HttpStatus.BAD_REQUEST, "필수 파일 항목이 없습니다: " + ex.getRequestPartName());
     }
 
     @ExceptionHandler(Exception.class)
