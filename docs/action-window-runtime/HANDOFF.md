@@ -14,11 +14,17 @@ records Run 4 and routes here. **This directory remains status-of-record for Run
 scoped summary, not a substitute. That doc is otherwise still a 2026-07-08 snapshot — only the Action
 Window entry was refreshed.
 
-⚠ **Still stale elsewhere, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still
-says the overlay / download-detection seams are 미구현, and `docs/multi-channel-connector-roadmap.md` §4.1
-(the capability table — *higher* in the conflict priority than `current_state`) still marks NAVER REVIEW's
-자동 업로드 브리지 as 미검증. Both are product-owner decisions, deliberately not taken here. Report them;
-do not silently edit them.
+**`docs/multi-channel-connector-roadmap.md` §4.1** (the capability table — *higher* in the conflict priority
+than `current_state`) **was corrected on 2026-07-15**: NAVER REVIEW now reads export→ingest end-to-end
+라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원 stays ❌ and the 셀러 표기
+cell is unchanged** — no seller-facing claim moved.
+
+⚠ **Still stale, by decision, not oversight:**
+- `docs/slices/action-window-v1.md` (DRAFT) still says the overlay / download-detection seams are 미구현.
+- `docs/sellerops_current_state.md:72` (§7) still says the 자동 업로드 브리지 is 미검증 — it contradicts that
+  doc's own corrected §9. Scoped out of the §4.1 slice; a known follow-up.
+
+Both are product-owner decisions, deliberately not taken here. Report them; do not silently edit them.
 
 ## Where to read first
 

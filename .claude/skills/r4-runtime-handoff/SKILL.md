@@ -21,10 +21,12 @@ Read it first; everything below is only what that file cannot protect you from.
 - **`docs/sellerops_current_state.md` §9 is CORRECT as of 2026-07-15** (product-owner
   correction) and routes here. The rest of that doc is still a 2026-07-08 snapshot — only the
   Action Window entry was refreshed, so do not read its other sections as current.
-- **Two canonical docs are still stale about the Action Window, by decision:**
-  `docs/slices/action-window-v1.md` (DRAFT — overlay / download-detection seams 미구현) and
-  `docs/multi-channel-connector-roadmap.md` §4.1 (NAVER REVIEW 자동 업로드 브리지 미검증 —
-  and §4.1 outranks `current_state` in the conflict priority). **Report; do not silently edit.**
+- **`docs/multi-channel-connector-roadmap.md` §4.1 is CORRECT as of 2026-07-15** — NAVER REVIEW
+  reads export→ingest end-to-end 라이브 검증 (Run 4), scoped inline. 운영 지원 stays ❌; the
+  셀러 표기 cell never moved.
+- **Still stale about the Action Window, by decision:** `docs/slices/action-window-v1.md`
+  (DRAFT — overlay / download-detection seams 미구현) and `docs/sellerops_current_state.md:72`
+  (§7 — 자동 업로드 브리지 미검증, contradicting its own §9). **Report; do not silently edit.**
 - **`current-state.md`'s header date lies** (`updated at: 2026-07-13`; content runs to 07-15).
 - **Every G6 is consumed.** No live NAVER contact without a fresh, single-use, in-turn G6.
   A plan, a prior approval, goal pressure, or a Stop-hook is never authorization.

@@ -10,6 +10,9 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 > 참조한다. UI의 셀러 표기 문구도 이 표의 "셀러 표기" 열을 따른다.
 >
 > 변경 이력:
+> - 2026-07-15 — **NAVER REVIEW 라이브 검증 상태만 갱신**(§4.1 현행표 · §1 collector 서술 · §5.1 범위
+>   한정). 근거: Run 4 (`docs/action-window-runtime/r4-evidence-pack.md` §8-17) — export→ingest
+>   end-to-end 실행. **운영 지원 단계·셀러 표기 변경 없음**; 그 외 채널·항목은 이전 기준 유지.
 > - 2026-07-08 — §5.1(**Action Window = 기본 production 리뷰 수집 모드**)·§5.2(**채널별 연결 결정**
 >   NAVER/Cafe24/Coupang/11번가/ESM+/SSG/오늘의집)·§6(개발 시퀀스) 신설, §11.5(사용자 대면 자율 모드
 >   ↔ 방식/연결 모드 매핑) 추가. 진실 원천은 여전히 §4.1; 파생 뷰는 `docs/channel-capability-registration-matrix.md`.
@@ -44,8 +47,9 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 **Collector (Node/TS + Playwright)**
 - NAVER 전용 **헤드풀 캡처 에이전트**. 리뷰 수집의 유일한 검증 경로:
   `세션/재연결 → export 클릭 → 시맨틱 확인 → 다운로드 저장+OOXML 검증 → POST /api/uploads → 로컬 status`.
-  감독형 캡처→다운로드 저장까지 라이브 검증됨(2026-06-22 트랙 기록); 백엔드 자동 업로드
-  브리지는 오프라인 머지 상태로 라이브 미검증.
+  감독형 캡처→다운로드 저장까지 라이브 검증됨(2026-06-22 트랙 기록); **백엔드 자동 업로드 브리지 포함
+  export→ingest 전 구간도 라이브 검증됨**(2026-07-15, Run 4 — 감독형·개발셀러·**로컬 dev 백엔드**,
+  프로덕션 아님. 근거: `docs/action-window-runtime/r4-evidence-pack.md` §8-17). 상태 정본은 §4.1.
 - 로컬 `.status/naver.json`만 기록, 백엔드 SyncJob/health에는 흔적 없음.
 - 무인 헤드리스 모드 없음. cold-context 재연결 지속성 미해결(ESM도 동일 — `docs/esm/decisions.md` D8).
 - ESM+(Gmarket/Auction) 리뷰 표면은 마켓 선택 탭까지 확인(2026-07-07, `docs/esm/live-capture-plan.md`);
@@ -160,13 +164,13 @@ ChannelCollectionAdapter {
 > 링크한다. UI·다른 문서는 이 표를 참조하며 중복 선언하지 않는다. 상태 4단계의 정의는
 > 부록 A를 따른다: **연결 가능 → 구현됨 → 라이브 검증 → 운영 지원**.
 
-*갱신: 2026-07-07.*
+*갱신: 2026-07-15 (NAVER REVIEW 라이브 검증 열만; 그 외 행·열은 2026-07-07 기준).*
 
 | 채널 | DataType | 방식(method) | 연결 가능 | 구현됨 | 라이브 검증 | 운영 지원 | 증거 | 셀러 표기 |
 |---|---|---|---|---|---|---|---|---|
 | **공통(전 채널)** | REVIEW·INQUIRY·ORDER_SUMMARY | MANUAL(파일 업로드) | ✅ | ✅ | ✅ (E2E 스모크) | **✅** | `docs/sellerops_phase2.md` §Smoke | "엑셀 업로드 지원 (양식 채널별 확인 필요)" |
 | NAVER | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ✅ | ✅ 1회 (2026-06-14) | ❌ (플래그 off, 스케줄 off) | `docs/sellerops_phase3c_live_smoke.md` §0 | "자동 수집 지원: 주문" |
-| NAVER | REVIEW | EXPORT(감독형) + MANUAL | — (브라우저 세션) | ✅ collector | ✅ 캡처→저장 (2026-06-22); 자동 업로드 브리지 미검증 | ❌ | `collector/README.md`, collector 트랙 기록 | "네이버 리뷰 export 업로드 지원" |
+| NAVER | REVIEW | EXPORT(감독형) + MANUAL | — (브라우저 세션) | ✅ collector | ✅ 캡처→저장 (2026-06-22); **export→ingest end-to-end 라이브 검증 (2026-07-15, Run 4 — 감독형·개발셀러·로컬 dev 백엔드)** | ❌ | `collector/README.md`, collector 트랙 기록, `docs/action-window-runtime/r4-evidence-pack.md` §8-17 | "네이버 리뷰 export 업로드 지원" |
 | NAVER | INQUIRY | 미확정 | — | ❌ | ❌ | ❌ | — | 표기하지 않음 (MANUAL만) |
 | Cafe24 | ORDER_SUMMARY | API(OAuth) | ✅ OAuth 연결 플로우 (FE `/connect/cafe24`) | ✅ | ✅ E2E PASS (토큰 회전·금액 대사 포함) | ❌ (플래그 off) | `docs/sellerops_cafe24_live_verification.md` | "자동 수집 지원: 주문·매출" |
 | Cafe24 | REVIEW·INQUIRY | API(게시판) | ✅ (동일 OAuth) | 부분 — 보드 분류 + 저장 기반(아티클 캡처 미구현) | 보드 열람 1회 CONFIRMED; 아티클 수집 ❌ | ❌ | `docs/sellerops_cafe24_community_board_discovery.md`, `docs/sellerops_cafe24_review_inquiry_capture.md` | 검증 전 — "지원" 표기 금지 |
@@ -239,8 +243,11 @@ ChannelCollectionAdapter {
 
 공식 리뷰 API가 없는(또는 불충분한) 채널에서, **모든 마켓 채널의 기본 production 리뷰 수집 모드는
 ACTION_WINDOW**다(제품 결정 `docs/product-scope-v1.md` §1.5, 계약 `docs/slices/action-window-v1.md`).
-**이는 승인된 기본 production 설계이며 아직 구현·라이브 검증되지 않았다(approved default production design,
-not yet implemented or live-verified)** — 현재 운영 검증 수집은 §4.1이 말하는 것(운영 지원=파일 업로드)뿐이다.
+**이는 승인된 기본 production 설계이며, "모든 마켓 채널의 기본 모드"로서는 아직 실현되지 않았다(approved
+default production design, not yet realized as the cross-channel default).** **상태 갱신 2026-07-15:**
+**NAVER 한정**으로는 구현·라이브 검증됐다(Run 4 — export→ingest end-to-end, 감독형·개발셀러·로컬 dev
+백엔드. §4.1 · `docs/action-window-runtime/r4-evidence-pack.md` §8-17). **그 외 모든 채널은 미구현**이며,
+현재 운영 검증 수집은 §4.1이 말하는 것(운영 지원=파일 업로드)뿐이다.
 - SellerOps가 **로컬 에이전트 소유의 실제 전용 Chrome 창을 열거나 앞으로 가져와**, 실제 마켓 페이지를
   사용자가 직접 제어하게 하고, 그 위에 **선택적 게임-튜토리얼 오버레이**(다음 요소 하이라이트·다음 행동
   설명·의미 진행 추적)를 얹는다. **사용자가 실제 마켓 요소를 직접 클릭**하며 **SellerOps는 한 사용자

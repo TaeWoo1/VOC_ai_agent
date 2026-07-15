@@ -133,12 +133,14 @@ Run 4 and routes here; the rest of that document is still a 2026-07-08 snapshot.
 *status*, the `docs/action-window-runtime/` records win.** Product *intent* still follows the conflict
 priority below.
 
+`docs/multi-channel-connector-roadmap.md` §4.1 was also corrected on 2026-07-15 — NAVER REVIEW now records
+export→ingest end-to-end 라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원
+stays ❌ and the 셀러 표기 column is unchanged**, so no seller-facing claim moved.
+
 **Still stale, by decision (2026-07-15) — report, do not silently resolve:**
 `docs/slices/action-window-v1.md` (DRAFT) still calls the overlay / download-detection seams 미구현, and
-`docs/multi-channel-connector-roadmap.md` §4.1 still marks NAVER REVIEW's 자동 업로드 브리지 미검증 —
-Run 4 exercised it, but §4.1 is capability truth for seller-facing claims and outranks
-`sellerops_current_state.md` here, so whether a dev-seller pilot into a local dev backend clears its bar
-is a product-owner decision.
+`docs/sellerops_current_state.md:72` (§7) still marks the 자동 업로드 브리지 미검증, contradicting that
+document's own corrected §9.
 
 ### Conflict priority
 
