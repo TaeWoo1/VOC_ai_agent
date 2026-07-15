@@ -47,10 +47,15 @@ function capturingPresenter(opts: { available?: boolean; failWith?: PresenterUna
 async function startServer(opts: {
   presenter?: ApprovalPresenter;
   autoApprove?: boolean;
+  /** Pending-request cap. Injected small so a flood is a handful of calls, not the default in a loop. */
+  maxPendingRequests?: number;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), `bridge-approval-${randomUUID()}-`));
   const pairingFile = join(dir, "pairings.json");
-  const store = new FilePairingStore(pairingFile, { now: () => Date.now() });
+  const store = new FilePairingStore(pairingFile, {
+    now: () => Date.now(),
+    ...(opts.maxPendingRequests !== undefined ? { maxPendingRequests: opts.maxPendingRequests } : {}),
+  });
   const server = new BridgeServer({
     store,
     allowedOrigins: [APP],
@@ -257,6 +262,73 @@ describe("pairing approval — privacy of the secret", () => {
     // 3. Not on disk after a successful pairing.
     await confirmNoOrigin(port, { requestId: req.requestId, decision: "allow", approvalCode: shown[0]!.approvalCode });
     expect(readFileSync(pairingFile, "utf8")).not.toContain(bare);
+  });
+
+  it("a flooded agent refuses NEW pairings without disturbing the one already in flight", async () => {
+    const { shown, presenter } = capturingPresenter();
+    const { port } = await startServer({ presenter, maxPendingRequests: 2 });
+
+    // The human's real request — they are reading this code off the console right now.
+    const real = await (await post(port, "/bridge/pair/request", { workspaceLabel: "우리 회사" })).json();
+    const realCode = shown[0]!.approvalCode;
+    await post(port, "/bridge/pair/request", { workspaceLabel: "filler" });
+    const presentedBeforeFlood = shown.length;
+
+    // A local process sprays requests, spoofing the allowed Origin as it pleases.
+    for (let i = 0; i < 10; i += 1) {
+      const res = await post(port, "/bridge/pair/request", { workspaceLabel: `flood-${i}` });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "pairing_busy" });
+    }
+
+    // The cap is enforced BEFORE the presenter: the flood put not one extra prompt in front of the human.
+    // Without that ordering the refusal would still leak 10 interruptions, which is most of the attack.
+    expect(shown).toHaveLength(presentedBeforeFlood);
+
+    // And the in-flight consent is untouched: the code the human is holding still pairs.
+    const ok = await confirmNoOrigin(port, { requestId: real.requestId, decision: "allow", approvalCode: realCode });
+    expect(ok.status).toBe(200);
+    const poll = await (await post(port, "/bridge/pair/poll", { requestId: real.requestId })).json();
+    expect(poll.status).toBe("paired");
+    expect(typeof poll.pairingToken).toBe("string");
+  });
+
+  it("the busy refusal is distinct from the fail-closed one, and leaks nothing about the flood", async () => {
+    const { presenter } = capturingPresenter();
+    const { port } = await startServer({ presenter, maxPendingRequests: 1 });
+    clearLogSink();
+
+    await post(port, "/bridge/pair/request", { workspaceLabel: "real" });
+    const res = await post(port, "/bridge/pair/request", { workspaceLabel: "flood" });
+
+    // `pairing_busy` (temporary, retryable) must not be confused with `approval_unavailable` (no human
+    // channel exists at all) — they call for different words in the frontend.
+    const body = await res.json();
+    expect(body).toEqual({ error: "pairing_busy" });
+    // The response tells the caller nothing it did not already know: no id, no code, no capacity numbers.
+    expect(Object.keys(body)).toEqual(["error"]);
+
+    const refusals = getLogSink().filter((e) => e.event === "bridge_pair_refused");
+    expect(refusals).toHaveLength(1);
+    // Counts are what an operator needs to tell a flood from a person retrying; identifiers are not, and the
+    // sanitization contract keeps them out of the sink.
+    expect(refusals[0]!.meta).toEqual({ reason: "pending_limit", pending: 1, limit: 1 });
+    expect(JSON.stringify(refusals[0])).not.toContain("flood");
+    expect(JSON.stringify(refusals[0])).not.toContain(APP);
+  });
+
+  it("a resolved request frees its slot — busy is temporary, not a wedged-shut agent", async () => {
+    const { presenter } = capturingPresenter();
+    const { port } = await startServer({ presenter, maxPendingRequests: 1 });
+
+    const a = await (await post(port, "/bridge/pair/request", { workspaceLabel: "a" })).json();
+    expect((await post(port, "/bridge/pair/request", { workspaceLabel: "b" })).status).toBe(503);
+
+    // The human clicks 거부. That request is resolved, so it is no longer live consent holding the slot.
+    // (Recovery via TTL expiry is the same sweep, covered hermetically in pairing-approval.test.ts — this
+    // server drives a real clock and cannot advance it.)
+    expect((await confirmNoOrigin(port, { requestId: a.requestId, decision: "deny" })).status).toBe(200);
+    expect((await post(port, "/bridge/pair/request", { workspaceLabel: "c" })).status).toBe(200);
   });
 
   it("the durable store schema is unchanged (no approval field persisted)", async () => {

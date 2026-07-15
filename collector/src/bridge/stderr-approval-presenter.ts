@@ -21,12 +21,22 @@
  * `getLogSink()` array, and `safeMeta`'s forbidden-key list would not drop a key like `approvalCode`. This
  * adapter writes to the injected stderr directly and only.
  *
+ * **The terminal is a renderer, so untrusted fields are sanitized before they reach it.** `origin` and
+ * `workspaceLabel` are arbitrary caller-supplied strings, and a terminal EXECUTES the escape sequences in
+ * whatever it is handed. Written raw, a crafted `workspaceLabel` could move the cursor back up over the
+ * 승인 코드 line and rewrite it with an attacker-chosen code, clear the box away entirely, or bidi-reorder the
+ * origin so it reads as a domain the human trusts — turning this channel from "the human reads the real code"
+ * into "the human reads whatever the caller drew". Both fields therefore go through the shared
+ * `untrusted-display` leaf, which is also what the macOS dialog uses. The `approvalCode` is server-minted hex
+ * and renders in full — it is never capped.
+ *
  * Implementation note for FUTURE native adapters (macOS `osascript`, Windows PowerShell, Linux
  * `zenity`/`kdialog`): pass the code via **stdin, never argv** — argv is world-readable in the process table,
  * which would hand the secret straight to the local process this defends against.
  */
 
 import type { ApprovalPresentation, ApprovalPresenter, PresentResult } from "./approval-presenter";
+import { sanitizeDisplayField } from "./untrusted-display";
 
 /** The minimal stderr surface this adapter needs, injected so the TTY/write behaviour is hermetically testable. */
 export interface ApprovalStderr {
@@ -42,15 +52,21 @@ export interface StderrApprovalPresenterOptions {
   nodeEnv?: string | undefined;
 }
 
-/** The console block the human reads the code from. Untrusted inputs are shown as-is (plain text, no markup). */
+/**
+ * The console block the human reads the code from. Untrusted inputs are sanitized to inert, bounded text
+ * FIRST (see the module header): a terminal acts on escape sequences, so an unsanitized field could redraw
+ * this box — including the code line — however the caller liked. Each field is capped independently, so a
+ * long value truncates only itself and can never scroll the code or the warning out of view.
+ */
 function render(p: ApprovalPresentation): string {
   return [
     "",
     "  ┌─ SellerOps 로컬 에이전트 연결 승인 ─────────────────────",
     "  │",
-    `  │  요청 출처 : ${p.origin}`,
-    `  │  워크스페이스: ${p.workspaceLabel}`,
+    `  │  요청 출처 : ${sanitizeDisplayField(p.origin)}`,
+    `  │  워크스페이스: ${sanitizeDisplayField(p.workspaceLabel)}`,
     "  │",
+    // The code is server-minted hex, not caller input — it renders in full, never capped.
     `  │  승인 코드 : ${p.approvalCode}`,
     "  │",
     "  │  이 코드를 브라우저의 연결 확인 화면에 입력하세요.",

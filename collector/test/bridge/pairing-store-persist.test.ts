@@ -93,6 +93,7 @@ const DIR = dirname(PATH);
 function storeWithPairing(fs: FakeFs): FilePairingStore {
   const store = new FilePairingStore(PATH, { now }, fs);
   const req = store.registry.requestPairing("http://localhost:5173", "ws");
+  if (!req.ok) throw new Error(`requestPairing rejected: ${req.reason}`); // not what this suite is about
   expect(store.registry.confirmPairing(req.requestId, "allow").ok).toBe(true);
   return store;
 }
