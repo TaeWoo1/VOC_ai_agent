@@ -122,6 +122,20 @@ Read the canonical documents before product/frontend work, in this order:
 
 Past phase/roadmap docs are historical evidence, not current status, unless a canonical doc explicitly delegates to them.
 
+### Action Window / R4 NAVER Runtime
+
+For anything touching the Action Window runtime, start at
+`docs/action-window-runtime/HANDOFF.md` — the orientation entry point for that workstream (state,
+live-run history, gates, committed vs. local-only). The `r4-runtime-handoff` skill routes there.
+
+**Known conflict (2026-07-15, unresolved by design):** `docs/sellerops_current_state.md` (§6 above)
+predates the R4 live runs and still describes the Action Window as `계약만(미구현)` / `구현 없음`.
+That is stale — Run 4 proved the NAVER export path end-to-end on the real surface on 2026-07-15
+(`docs/action-window-runtime/r4-evidence-pack.md` §8-17). **For Action Window *status*, the
+`docs/action-window-runtime/` records win.** Product *intent* still follows the conflict priority
+below. Correcting `sellerops_current_state.md` is a product-owner decision, deliberately not taken
+here — report the conflict, do not silently resolve it.
+
 ### Conflict priority
 
 When sources conflict, this order wins:
