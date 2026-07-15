@@ -49,29 +49,32 @@ The collector opens a real Chrome window on NAVER and **waits**. In that same wi
 If the 10 minutes lapse, the run **aborts without ever driving** — nothing happens, and nothing is
 written. Ctrl-C also aborts safely at any point before the run drives.
 
-## 3. Phase B — the export action (you have ~60 seconds)
+## 3. Phase B — the export action (two windows)
 
-Budget: **`DOWNLOAD_TIMEOUT_MS` = 60_000` — about 60 seconds.** Once you signal ready, the collector
-prepares the surface, locates and **highlights** the one export control, and parks. **The 60-second clock
-starts about 1 second after the highlight appears** — the run auto-requests its recheck the moment it
-parks, so download detection is already listening.
+Once you signal ready, the collector prepares the surface, locates and **highlights** the one export
+control, and parks — **and now genuinely waits for you.**
 
-**⚠ The export is TWO human steps, not one** (observed in Run 4, §8-17). Inside those ~60 seconds you must:
+**⚠ The export is TWO human steps, not one** (observed in Run 4, §8-17):
 
 1. **Act on the highlighted export control** yourself. This opens an **expected NAVER confirmation
-   dialog** — a normal part of the flow.
-2. **Manually confirm that dialog.** **The download only fires on this confirmation.**
+   dialog** — a normal part of the flow. Budget: **`OBSERVE_TIMEOUT_MS` = 10 min.** The run waits.
+2. **Manually confirm that dialog.** **The download only fires on this confirmation.** Budget:
+   **`DOWNLOAD_TIMEOUT_MS` ≈ 60 s, starting at your click** — this is the tight one.
 
-**Do both without hesitation.** The Runtime performs neither step.
+**Do step 2 without hesitation.** The Runtime performs neither step.
 
-### Two things about this window that are easy to get wrong
+### Three things about this window that are easy to get wrong
 
-- **10 minutes is NOT your budget.** `OBSERVE_TIMEOUT_MS` is 10 minutes and appears in the code and in
-  older notes, but on this path it is **cosmetic** — the run does not wait on it. **The honest number is
-  ~60 seconds**, and it is the only one that can fail your run.
+- ⚠ **This changed on 2026-07-16, and Run 4 ran under the OLD behaviour.** Run 4's seller had ~60 s for
+  **click + confirm combined**, because the run did not really wait — it rechecked ~1 s after the
+  highlight. That was a defect (the Runtime never recorded your action). It is fixed, so the click is no
+  longer racing a clock. **The fix has not yet run against live NAVER.** If you are reading this before
+  the first run on the new behaviour, treat the old ~60 s as your safe assumption and click promptly.
+- **~60 seconds still governs step 2.** The generous window is for reaching and clicking the control.
+  Once you click, the dialog confirmation is on the short clock.
 - **The Runtime does not see your confirmation.** It observes your action on the highlighted control
   only; the dialog is outside what it watches. **The download firing is the sole evidence you
-  confirmed** — which is exactly why step 2 must land inside the window.
+  confirmed** — which is exactly why step 2 must land inside its window.
 
 ## 4. If the window lapses
 

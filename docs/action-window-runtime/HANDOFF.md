@@ -62,20 +62,37 @@ NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" st
 Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3; normative:
 `r4-preparation.md` §7.
 
-**Two timing facts a cold session re-derives WRONG (verified in code 2026-07-15, not by a run):**
+**Timing facts a cold session re-derives WRONG (code-verified, not run-verified):**
 
-- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min is COSMETIC on this path — never quote it as the human budget.**
-  `waitForUserAction` runs un-awaited and its result is discarded once the stage has moved on
-  (`session.ts:236`), because `driveOneRun` auto-sends `REQUEST_STEP_RECHECK` the moment the run parks.
-  So `detectDownload` is already racing its 60 s timer ~1 s after the highlight appears. **The only number
-  that can fail a run is ~60 s** (`DOWNLOAD_TIMEOUT_MS`), and it covers click **+** confirm. The early
-  `timeout: 0` arming (`naver-live-driver.ts`) means an early click is never missed.
+- ✅ **RESOLVED 2026-07-16 — the open `USER_ACTION_OBSERVED` question is ANSWERED, and it was a defect.**
+  `humanCheckpoint.observed` was **`false` on every live run to date, including Run 4.** The chain:
+  `session.ts:195` voids `watchUserAction()` (untracked by `autoBusy`, so `whenSettled()` returns at
+  once) → `driveOneRun` sent `REQUEST_STEP_RECHECK` **~1 s after the highlight** → `beginVerify()`
+  (`engine.ts:444-448`) left `WAIT_FOR_USER_ACTION` without requiring `observed` → when the seller acted
+  20–40 s later, `session.ts:236`'s stage guard dropped it. **Fixed OFFLINE this slice** (`driveOneRun`
+  now waits on the run's own `USER_ACTION_OBSERVED` event before rechecking). **The engine/session/
+  persistence wiring was always correct — only the CLI's FE stand-in mis-timed.**
+  ⚠ **Offline-fixed ≠ live-proven. The fix has never run against live NAVER; it needs a fresh G6.**
+- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min WAS cosmetic; after the fix it is load-bearing.** The human budget is
+  now **two windows, not one**: the seller acts on the highlighted control within the observe window,
+  **then** confirms the dialog within ~60 s (`DOWNLOAD_TIMEOUT_MS`), which now starts at the click rather
+  than at the highlight. **Strictly more generous than Run 4's combined ~60 s** — so Run 4's timing is no
+  longer the live truth, and the operator must be told before the next run.
+- ⚠ **Observation is an audit record, NOT the completion authority — keep it that way.** `driveOneRun`
+  rechecks **anyway** on observe-timeout, deliberately: the in-page listener (`observer.ts:21-28`) has
+  never fired on a live run, and `armObserve`'s `timeout: 0` arming means an already-fired download is
+  still detected. A lost observation costs latency, never the run. **Do not gate `beginVerify()` on
+  `observed`** — that would make completion depend on an unproven live mechanism and contradict
+  "observation ≠ completion".
+- ⚠ **Why the tests missed it — the transferable part.** `SyntheticProbeDriver.completeUserAction()`
+  reports the action **while the run is still parked**, a timing the live path cannot reproduce, so
+  `run-action-window-live-naver-browser.test.ts:202`'s `observed: true` passed against a path that never
+  worked. **Green tests certified an impossible ordering.** The new
+  `DeferredActionProbeDriver` reports it late, as a real seller does; that test fails against everything
+  before this slice.
 - ⚠ **The Runtime never observes the confirmation.** `observer.ts` listens only on the tagged export
-  control; the dialog is outside it. **The download firing is the sole evidence of step 2.**
-  ❓ **Open, NOT determinable from code or docs:** whether `USER_ACTION_OBSERVED` /
-  `humanCheckpoint.observed` is therefore ever recorded on a live run — §4 claims the Runtime "observes the
-  user's action" as part of the audit trail. If it is not, that is a **defect, not a doc problem**.
-  Unreviewed; needs engineering + PO.
+  control; the dialog is outside it. **The download firing is the sole evidence of step 2** — unchanged
+  by the fix, which only makes step 1 observable.
 
 ## Git state
 
