@@ -1,4 +1,4 @@
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -212,7 +212,58 @@ describe("metadata-only logging", () => {
     expect(serialized.toLowerCase()).not.toContain("cookie");
     // but it should still carry useful metadata
     expect(serialized).toContain("upload.done");
-    expect(serialized).toContain("successRows");
+  });
+
+  /**
+   * §4.3: the log may carry only the backend's own status enum + coarse row buckets. An exact count or
+   * the source filename must never reach it. Asserted as an EXACT key allow-list rather than a substring
+   * sweep — `toContain("successRows")` would pass against `successRowsBucket` and prove nothing.
+   */
+  it("upload.done carries only the status enum and coarse row buckets — no exact counts, no filename", async () => {
+    const fakeFetch = async () =>
+      jsonResponse({
+        syncJobId: "j",
+        uploadType: "REVIEW",
+        status: "SUCCESS",
+        totalRows: 55,
+        successRows: 55,
+        skippedRows: 0,
+        failedRows: 0,
+      });
+    await uploadReviewFile("http://x", "t", "chan-1", SAMPLE_FILE, fakeFetch as typeof fetch);
+
+    const entry = getLogSink().find((e) => e.event === "upload.done");
+    expect(entry).toBeDefined();
+    expect(Object.keys(entry!.meta).sort()).toEqual([
+      "failedRowsBucket",
+      "skippedRowsBucket",
+      "status",
+      "successRowsBucket",
+      "totalRowsBucket",
+    ]);
+    // The Run-4 shape (55/55/0/0) reduces to buckets; no exact count survives as a value.
+    expect(entry!.meta).toMatchObject({
+      status: "SUCCESS",
+      totalRowsBucket: "tens",
+      successRowsBucket: "tens",
+      skippedRowsBucket: "zero",
+      failedRowsBucket: "zero",
+    });
+    expect(Object.values(entry!.meta)).not.toContain(55);
+    // The source basename never reaches the log (opaque only on the AW path; a real export name here).
+    expect(JSON.stringify(getLogSink())).not.toContain(basename(SAMPLE_FILE));
+  });
+
+  it("item-analysis.count carries only a coarse bucket, never the exact count", async () => {
+    const fakeFetch = async () => jsonResponse([{ id: "a" }, { id: "b" }, { id: "c" }]);
+    const count = await fetchItemAnalysisCount("http://x", "t", fakeFetch as typeof fetch);
+
+    // The caller still gets the exact count; only the log is narrowed.
+    expect(count).toBe(3);
+    const entry = getLogSink().find((e) => e.event === "item-analysis.count");
+    expect(entry).toBeDefined();
+    expect(Object.keys(entry!.meta)).toEqual(["countBucket"]);
+    expect(entry!.meta.countBucket).toBe("few");
   });
 });
 

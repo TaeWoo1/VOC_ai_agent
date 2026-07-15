@@ -162,8 +162,19 @@ the Run-3 lift/P6/G6 were **observe-only** and do **NOT** authorize this mutatin
 - ☑ **P6 + export-scoped G6 consumed** (single-use, spent). Any further live contact needs **new** ones.
 - ☑ **Recorded** in [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-17; §6 / current-state updated.
 
-## Follow-up noted (not a blocker, separate slice)
+## Follow-up — RESOLVED 2026-07-15 (offline slice)
 
-- The `upload.done` dev log line carries **exact row counts** + the opaque filename. The engine/AW view
-  correctly reduce the ingest to `{ ok, processed }`, but exact counts in a log sit awkwardly against the §3
-  sanitization contract ("never … exact amounts/counts"). Worth a look as its own slice; **not** changed here.
+- ~~The `upload.done` dev log line carries **exact row counts** + the opaque filename.~~ **Closed.** The log
+  now carries the backend status enum + four coarse `RowCountBucket`s and **no filename**; the sibling
+  `item-analysis.count` is bucketed too. Both functions still **return** exact counts to their callers — only
+  the log is narrowed. Offline-verified; **no live re-run needed** and this run's `COMPLETED` result stands.
+- **Two corrections to the note above, for the record:**
+  1. The binding rule is **`collector/CLAUDE.md` §4 item 3**, not "§3" (which is this file's G1–G6 gate
+     section). §4 item 4 explicitly names "log" as a bound surface, so the rule did apply.
+  2. **"the opaque filename" was wrong.** It is opaque only on the Action Window path
+     (`neutralUploadName(artifactRef)` → `aw-<hex>.xlsx`, which is what this run used). The `uploadReviewFile`
+     wrapper passes `basename(filePath)`, so the capture / diagnostic / manual CLIs were logging a **real
+     seller-center export basename** — arguably a sharper concern than the counts, now dropped.
+- Nothing leaked on the wire at any point: `upload.done` is a dev log, not a contract event, and the
+  sanitization boundary (`{ ok, processed }`) sits downstream of it. See [`r4-evidence-pack.md`](r4-evidence-pack.md)
+  §8-17 for the full write-up.

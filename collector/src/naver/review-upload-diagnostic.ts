@@ -22,14 +22,20 @@
  * The network is injectable (`fetchImpl`, threaded through the real `upload.ts` functions) so the
  * full login→channel→upload cycle is hermetically testable with an in-memory fake `fetch`.
  */
+import { rowCountBucket as countBucket, type RowCountBucket } from "../row-count-bucket";
 import { login, resolveChannelId, uploadReviewFile, type IngestResult } from "../upload";
 import { messageFingerprint } from "./export-click-signals";
 
 /** Sanitized category of the backend ingest status — never the raw status string. */
 export type IngestStatusCategory = "COMPLETED" | "PARTIAL" | "FAILED" | "UNKNOWN";
 
-/** Coarse row-count bucket — never the exact count. */
-export type RowCountBucket = "zero" | "one" | "few" | "tens" | "hundreds" | "thousands_plus";
+/**
+ * Coarse row-count bucket — never the exact count. Re-exported under this module's established names;
+ * the definition now lives in the shared `../row-count-bucket` leaf so `upload.ts` can bucket its own
+ * logs without importing this module (which imports `../upload`, so that edge would be a cycle).
+ */
+export type { RowCountBucket };
+export { countBucket };
 
 /** Sanitized inspection of a backend ingest. Every leaf is non-sensitive. */
 export interface UploadInspection {
@@ -71,16 +77,6 @@ export interface UploadSavedReviewOpts {
   salt?: string;
   /** Injected network; default is the global `fetch`. Threaded through the real `upload.ts`. */
   fetchImpl?: typeof fetch;
-}
-
-/** Pure: coarse row-count bucket (never the exact count). */
-export function countBucket(n: number): RowCountBucket {
-  if (!Number.isFinite(n) || n <= 0) return "zero";
-  if (n === 1) return "one";
-  if (n <= 9) return "few";
-  if (n <= 99) return "tens";
-  if (n <= 999) return "hundreds";
-  return "thousands_plus";
 }
 
 /** Pure: map the backend's raw status string to a fixed category — never echoes the string. */
