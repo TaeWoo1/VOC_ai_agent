@@ -197,8 +197,10 @@ verified seam — the adapter is composition, not new invention:
   still HALTs). Run 3 drove it on the real surface — `prepareSurface` PASSED readiness and reached the human
   barrier (`progress 2-of-3`, highlight on the Excel control; observe-only, benign `DOWNLOAD_TIMEOUT`, no
   click/download/ingest), vs. the Run-1/Run-2 `UNSUPPORTED_STATE` at `0-of-3`. **The readiness false-empty is
-  resolved live.** Not yet proven end-to-end: the click → download → validate → ingest legs remain a separate
-  full-pilot authorization. The settle stays a general robustness primitive; it is not this fix.)*
+  resolved live.** **END-TO-END PROVEN 2026-07-15 (§8-17, Run 4):** the full pilot then ran the remaining legs
+  — real seller click + expected confirmation dialog → real download → quarantine-validate → real
+  `/api/uploads` ingest → **`COMPLETED` 3-of-3** (55/55 rows, local dev backend). The settle stays a general
+  robustness primitive; it is not this fix.)*
 - ☑ **Target locator** — exactly one export control found and signature-bound (reuse: candidate
   signature); 0/many/drift → `TARGET_NOT_FOUND`/`TARGET_AMBIGUOUS`/`UI_DRIFT`, zero clicks. *(Green on
   the NAVER fixture — §8-2; the live driver's `locate` (0/1/many/drift) + real-DOM in-page binding are
@@ -210,18 +212,22 @@ verified seam — the adapter is composition, not new invention:
 - ☑ **Download detection (read-only)** — detect fired/completed download without triggering
   (reuse: export-target readiness + controlled download save; 0-rows vs failure distinguished).
   *(Green on the NAVER fixture — §8-2; a real browser download via the live driver is detected
-  read-only over a synthetic DOM — PR #242 `naver-live-browser.test.ts`.)*
+  read-only over a synthetic DOM — PR #242 `naver-live-browser.test.ts`. **LIVE-PROVEN 2026-07-15
+  (§8-17, Run 4):** a REAL NAVER export download was detected read-only end-to-end.)*
 - ☑ **Artifact validation** — extension + magic sniff before any ingestion handoff; partial
   artifacts never ingested. *(Posture ratified in D-021: a controlled TEMPORARY quarantine save
   is allowed for validation only — extension check + OOXML/ZIP magic sniff, then DELETE; no
   filename, path, URL, or file content crosses the wire, the persisted store, or logs. Green on the
   NAVER fixture — §8-2; the live driver's quarantine-validate + bad-magic fail-closed are proven over
-  a real browser on a synthetic DOM — PR #242.)*
+  a real browser on a synthetic DOM — PR #242. **LIVE-PROVEN 2026-07-15 (§8-17, Run 4):** a REAL export
+  file passed the OOXML sniff and was deleted post-ingest — quarantine empty afterwards.)*
 - ☑ **Ingestion handoff** — existing `/api/uploads` → `IngestionService` only; dedup verified with
   unique synthetic data (re-uploading existing fixtures dedups to empty — use fresh synthetic
   rows to prove the positive path). *(Green on the NAVER fixture / injected upload — §8-2; the live
   driver's injected ingest (opaque ref, no filename) is proven over a real browser on a synthetic DOM
-  — PR #242.)*
+  — PR #242. **LIVE-PROVEN 2026-07-15 (§8-17, Run 4):** a REAL export ingested to the **local dev**
+  backend — `SUCCESS`, 55/55 rows, 0 skipped (clean first ingest), under the opaque
+  `aw-<artifactRef>.xlsx` wire name; the platform filename was never uploaded.)*
 - ☑ **Operation Run persistence** — the pilot run records every verified transition; interruption
   parks at PAUSED; resume re-drives read-only (R3 verified; re-run against the channel fixture).
   *(Green on the NAVER **fixture** driver — §8-2 `naver-session-integration`. The **live driver** is now

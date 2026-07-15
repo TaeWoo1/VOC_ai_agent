@@ -582,6 +582,46 @@ the seller logged in and reached the review-export surface with the list rendere
 
 ---
 
+## §8-17 — Live Run 4 (full export pilot) — EXECUTED 2026-07-15 · **COMPLETED · END-TO-END PROVEN**
+
+**Run 4 drove the FULL export path on the real surface** under fresh, full-scope G3 (export **+ ingest**
+lift) / P6 (full pilot) / G6 ([`r4-run4-full-export-pilot-dispatch-record.md`](r4-run4-full-export-pilot-dispatch-record.md)) —
+the one leg §8-16 deliberately left unproven. Preconditions verified read-only first: `baseUrl` →
+`http://localhost:8080` (local dev, **never production**; `NODE_ENV` unset), backend UP (`GET /health` → 200),
+started via `cd backend && ./gradlew bootRun` against the existing Flyway-migrated local `sellerops` DB.
+
+- **Sanitized terminal result:** `status: COMPLETED` · `progress: { completedSteps: 3, totalSteps: 3 }` ·
+  `channelCode: naver` · **no blocker**.
+- **Backend ingest:** `status: SUCCESS` · **totalRows 55 / successRows 55 / skippedRows 0 / failedRows 0** —
+  a clean **first ingest** (+55; not a dedup no-op, so the dedup-awareness precondition held).
+- **The full chain now works live:** `prepareSurface (READY — the §8-15 fix) → locate → highlight → [seller
+  click + confirm dialog] → real download → read-only detect → quarantine-validate (OOXML sniff) → real
+  `/api/uploads` ingest → COMPLETED`.
+- **Privacy posture held under a REAL file:** the wire filename was the opaque `aw-<artifactRef>.xlsx` —
+  NAVER's suggested filename was never uploaded. The AW view emitted only `status`/`progress`/`channelCode`.
+  The quarantined real export was validated then **deleted** (D-021 posture), quarantine empty afterwards.
+- **🔎 Choreography finding (observed, feeds §7 + future runs):** the NAVER export is a **TWO-step** human
+  action — the highlighted-control click raises an **expected confirmation dialog** the operator must
+  manually confirm, and **the download fires only on that confirmation**. Both steps must land inside the
+  ~60 s `detectDownload` window (`DOWNLOAD_TIMEOUT_MS = 60_000`). The dialog is **expected/recognized** and is
+  **NOT** a §7 abort trigger; §7's "unrecognized prompt/dialog → abort" rule still applies to everything else.
+  The Runtime performs neither step — it only observes (no auth bypass, no Runtime-performed export).
+- **⚠ MUTATION (as authorized):** 55 real test-seller review rows are now in the **local dev** backend DB.
+  **Not reversible by the Runtime.** This was the explicit scope of the full-pilot P6 + export-scoped G6,
+  both now **consumed** — any further live contact needs fresh ones.
+- **Teardown:** quarantine + `downloads/` empty, sentinel removed, browser closed, process exited, git clean.
+
+**What the §8-8 → §8-17 arc establishes.** Run 1 `UNSUPPORTED_STATE` 0-of-3 → the settle refuted live (§8-13)
+→ root cause confirmed by observation, `empty_state_marker` precedence (§8-14) → precedence fix (§8-15) →
+readiness live-verified 2-of-3 (§8-16) → **full export→ingest `COMPLETED` 3-of-3 (§8-17)**. The NAVER
+supervised export pilot is **proven end-to-end on the real surface**.
+
+**Follow-up noted (separate slice, not changed here):** the `upload.done` dev log carries exact row counts;
+the engine/AW view correctly reduce to `{ ok, processed }`, but exact counts in a log sit awkwardly against
+the §3 sanitization contract.
+
+---
+
 ## Readiness summary
 
 - **Technical adapter readiness (§1 P9):** substantially green — every §6 item verified on NAVER fixtures
