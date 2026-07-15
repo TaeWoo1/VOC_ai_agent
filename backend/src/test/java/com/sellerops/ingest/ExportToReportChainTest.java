@@ -70,6 +70,15 @@ import org.springframework.transaction.PlatformTransactionManager;
  * and today's-orders cards are wall-clock dependent and are NOT asserted here.
  * {@code negativeReviews}, {@code todoItems} and {@code topProductIssues} are pure
  * functions of the persisted rows and are the reporting contract this test pins.
+ *
+ * <p>Scope of the dedupe assertion: tests run H2 with Flyway disabled and the schema
+ * generated from entities, and {@code Review}/{@code Product} declare no
+ * {@code @UniqueConstraint} — the PARTIAL unique indexes in {@code V2__file_ingest.sql}
+ * are not expressible in JPA and do not exist here. So the re-upload test pins the
+ * app-level pre-check ({@code IngestionService.existsReview}) ONLY. It does not prove
+ * the DB index exists or agrees with the app's key, and {@code trySave}'s
+ * constraint-violation re-probe branch is unreachable under H2. Covering that needs a
+ * Postgres+Flyway harness, which this test deliberately does not attempt.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -104,6 +113,8 @@ class ExportToReportChainTest {
     private static final String SKU_MOLDING = "SKU-합성-77";
     private static final String PRODUCT_CABLE = "합성-케이블타이-2호";
     private static final String SKU_CABLE = "SKU-합성-88";
+    // Same SKU, later export, different 상품명 — proves identity is SKU-first, not name-first.
+    private static final String PRODUCT_CABLE_RENAMED = "합성-케이블타이-2호-개명";
 
     private static final String FILENAME = "review_synthetic_naver.xlsx";
 
@@ -144,6 +155,28 @@ class ExportToReportChainTest {
                 .hasSize(3)
                 .allSatisfy(r -> assertThat(r.getProductId()).isNotNull());
 
+        // 2b. The 리뷰글번호 column really is mapped to external_id: identity comes from
+        //     the export's own review id, so contentHash stays null (IngestionService:91-94).
+        //     Without this, dropping the 리뷰글번호 alias would silently fall back to the
+        //     content hash and every assertion here would still pass.
+        assertThat(reviews.findAllByOrgId(org))
+                .extracting(Review::getExternalId)
+                .containsExactlyInAnyOrder("RV-1001", "RV-1002", "RV-1003");
+        assertThat(reviews.findAllByOrgId(org))
+                .allSatisfy(r -> assertThat(r.getContentHash()).isNull());
+
+        // 2c. The excluded columns have no canonical slot, so their sentinels must not
+        //     appear in any mapped field. Field-specific by design: a JSON-blob sweep
+        //     would pass for the wrong reason.
+        assertThat(reviews.findAllByOrgId(org)).allSatisfy(r -> {
+            assertThat(r.getBody()).doesNotContain(ORDER_NO, REVIEWER);
+            assertThat(r.getExternalId()).doesNotContain(ORDER_NO, REVIEWER);
+        });
+        assertThat(products.findAllByOrgId(org)).allSatisfy(p -> {
+            assertThat(p.getName()).doesNotContain(ORDER_NO, REVIEWER);
+            assertThat(p.getSku()).doesNotContain(ORDER_NO, REVIEWER);
+        });
+
         // 3. Item analysis — triggered on exactly the inserted ids, one row each.
         assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(org)).hasSize(3);
         assertThat(reviews.findAllByOrgId(org))
@@ -177,7 +210,10 @@ class ExportToReportChainTest {
         assertThat(second.syncJobId()).isNotNull().isNotEqualTo(first.syncJobId());
 
         // Nothing inserted → nothing re-analyzed (insertedIds is empty), no product churn,
-        // and the report is byte-for-byte what it was. A duplicate export is inert.
+        // and the report's row-derived fields are unchanged. A duplicate export is inert.
+        // Deliberately compares only negativeReviews + topProductIssues, NOT the whole
+        // response: summary() also carries clock-derived trend dates, so an isEqualTo on
+        // the full DTO would flake across a midnight boundary.
         assertThat(reviews.findAllByOrgId(org)).hasSize(3);
         assertThat(products.findAllByOrgId(org)).hasSize(2);
         assertThat(analysisIds()).containsExactlyInAnyOrderElementsOf(analysisIdsAfterFirst);
@@ -192,24 +228,31 @@ class ExportToReportChainTest {
         assertThat(dashboard.summary(org).topProductIssues())
                 .singleElement()
                 .isEqualTo(new TopProductIssue(PRODUCT_MOLDING, "부정 리뷰", 2L));
+        UUID cableProductId = productIdBySku(SKU_CABLE);
 
-        // A later export: three NEW negatives on the 케이블 SKU. Same product identity
-        // (SKU-first), so they must attach to the EXISTING product row, not a new one.
+        // A later export: three NEW negatives on the 케이블 SKU, carrying a DIFFERENT 상품명
+        // (a rename in the seller's catalog). Identity is the SKU, not the name
+        // (ProductService:49-51), so these must attach to the EXISTING product row. The
+        // differing name is the whole point: with a name-first resolver they would create
+        // a third product and the hasSize(2) below would fail.
         // Three (not two) keeps 케이블 a strict winner — a 2-2 tie would leave the
         // ranking's sort order unpinned and the assertion below arbitrary.
         byte[] followUp = xlsx(new String[][] {
-                {"RV-3001", SKU_CABLE, PRODUCT_CABLE, "1", "합성-리뷰-본문-D", "2026.01.05. 09:08:07"},
-                {"RV-3002", SKU_CABLE, PRODUCT_CABLE, "2", "합성-리뷰-본문-E", "2026.01.06. 09:08:07"},
-                {"RV-3003", SKU_CABLE, PRODUCT_CABLE, "1", "합성-리뷰-본문-F", "2026.01.07. 09:08:07"},
+                {"RV-3001", SKU_CABLE, PRODUCT_CABLE_RENAMED, "1", "합성-리뷰-본문-D", "2026.01.05. 09:08:07"},
+                {"RV-3002", SKU_CABLE, PRODUCT_CABLE_RENAMED, "2", "합성-리뷰-본문-E", "2026.01.06. 09:08:07"},
+                {"RV-3003", SKU_CABLE, PRODUCT_CABLE_RENAMED, "1", "합성-리뷰-본문-F", "2026.01.07. 09:08:07"},
         });
         IngestResult result = connector.ingest(org, channelId, UploadType.REVIEW,
                 FILENAME, new ByteArrayInputStream(followUp));
 
         assertThat(result.successRows()).isEqualTo(3);
-        assertThat(products.findAllByOrgId(org)).hasSize(2); // no new product row
+        assertThat(products.findAllByOrgId(org)).hasSize(2);              // no new product row
+        assertThat(productIdBySku(SKU_CABLE)).isEqualTo(cableProductId);  // same row, stable id
         assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(org)).hasSize(6);
 
-        // 케이블 now has 3 negatives vs 몰딩's 2 → it ranks first, and both appear.
+        // 케이블 now has 3 negatives vs 몰딩's 2 → it ranks first, and both appear. It is
+        // still reported under its ORIGINAL name: resolveOrCreate matches on SKU and does
+        // not rename the existing row, so the report follows the stored product identity.
         DashboardSummaryResponse summary = dashboard.summary(org);
         assertThat(summary.cards().negativeReviews()).isEqualTo(5);
         assertThat(summary.topProductIssues()).containsExactly(
@@ -224,6 +267,14 @@ class ExportToReportChainTest {
 
     private List<UUID> analysisIds() {
         return analyses.findAllByOrgIdOrderByCreatedAtDesc(org).stream().map(ItemAnalysis::getId).toList();
+    }
+
+    private UUID productIdBySku(String sku) {
+        return products.findAllByOrgId(org).stream()
+                .filter(p -> sku.equals(p.getSku()))
+                .map(Product::getId)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no product for sku " + sku));
     }
 
     /** A NAVER channel row — the connector's exists-guard prereq. Non-GMARKET → dedup key v1. */

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,19 +45,21 @@ import org.springframework.test.web.servlet.MockMvc;
  *
  * <p>This is the project's first MockMvc test (the convention to date is
  * {@code @DataJpaTest} + hand-{@code new}ed services). It uses {@code @WebMvcTest}
- * with the REAL {@link SecurityConfig} + {@link JwtAuthFilter} so the 401 path is
- * genuinely exercised rather than simulated; only {@link JwtTokenProvider} (token
- * cryptography — not this contract's concern) and {@link FileUploadConnector} (the
- * ingest chain, covered by {@code ExportToReportChainTest}) are mocked. Hermetic:
- * no datasource, no network, no credentials — the bearer token is a fixed literal
- * whose parse result is stubbed.
+ * with the REAL {@link SecurityConfig} so the 401 path is genuinely exercised rather
+ * than simulated — importing that {@code @Configuration} is what makes Boot's default
+ * filter chain back off. {@link JwtAuthFilter} needs no import: it is a
+ * {@code jakarta.servlet.Filter}, which {@code @WebMvcTest} component-scans by
+ * default. Only {@link JwtTokenProvider} (token cryptography — not this contract's
+ * concern) and {@link FileUploadConnector} (the ingest chain, covered by
+ * {@code ExportToReportChainTest}) are mocked. Hermetic: no datasource, no network,
+ * no credentials — the bearer token is a fixed literal whose parse result is stubbed.
  *
  * <p>Every rejection here is a mapped, sanitized 4xx — an unbound part, an unknown
  * upload type, an empty file, and both unauthenticated paths. None of them reach
  * ingest, and none of the error envelopes echo request content.
  */
 @WebMvcTest(UploadController.class)
-@Import({SecurityConfig.class, JwtAuthFilter.class})
+@Import(SecurityConfig.class)
 @ActiveProfiles("test")
 class UploadControllerContractTest {
 
@@ -150,21 +153,29 @@ class UploadControllerContractTest {
                         .file(xlsxPart("file"))
                         .param("channelId", channelId.toString())
                         .param("uploadType", "REVIEW"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                // Attributes the 401 to THIS project's entry point (SecurityConfig:48-50, a bare
+                // sendError(401)). Boot's default chain would also 401 here, but via
+                // BasicAuthenticationEntryPoint — which sets WWW-Authenticate. Without this
+                // matcher the status alone cannot tell the two apart.
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
 
         verifyNoInteractions(connector);
     }
 
     @Test
     void aBearerTokenThatDoesNotParseIsAlsoRejectedWith401() throws Exception {
-        when(tokenProvider.parse("garbage")).thenReturn(null);
-
+        // JwtTokenProvider.parse returns null (never throws) on any malformed token —
+        // JwtTokenProvider:53-55 is a blanket catch. Mockito's default for an unstubbed
+        // call is already null, so this exercises the real contract: the filter takes the
+        // Bearer branch (JwtAuthFilter:33-35) but leaves the context unauthenticated.
         mockMvc.perform(multipart("/api/uploads")
                         .file(xlsxPart("file"))
                         .param("channelId", channelId.toString())
                         .param("uploadType", "REVIEW")
                         .header("Authorization", "Bearer garbage"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
 
         verifyNoInteractions(connector);
     }
