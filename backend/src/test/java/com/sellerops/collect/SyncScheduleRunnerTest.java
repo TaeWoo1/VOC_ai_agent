@@ -35,6 +35,7 @@ import com.sellerops.sync.SyncSchedule;
 import com.sellerops.sync.SyncScheduleRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -75,8 +76,28 @@ class SyncScheduleRunnerTest {
     private MockApiConnector mock;
     private SyncScheduleRunner runner;
     private final UUID org = UUID.randomUUID();
-    /** Captured once; all cadence/backoff assertions derive from this parameter. */
-    private final Instant now = Instant.now();
+    /**
+     * Captured once at MICROSECOND precision; all cadence/backoff assertions derive
+     * from this parameter.
+     *
+     * <p>The truncation is load-bearing, not cosmetic. A schedule is stored with
+     * {@code nextRunAt = now} and later claimed with {@code next_run_at <= now}.
+     * H2's {@code timestamp(6)} rounds a stored value half-up to microseconds, so on
+     * a host whose clock resolves to nanoseconds (Linux CI — macOS only resolves to
+     * microseconds) a sub-microsecond remainder of >= 500ns rounds the stored instant
+     * PAST the query bound: the schedule is never due, nothing runs, and every
+     * run-dependent assertion fails. That flaked at roughly coin-flip odds per test
+     * on CI while passing 100% locally. Six fractional digits round-trip exactly.
+     *
+     * <p>NOT a fixed constant, deliberately: {@code SyncRunExecutor} derives a
+     * rate-limit hint from its own real {@code Instant.now()} (SyncRunExecutor:208),
+     * and {@code resolveNextRun} takes that hint whenever it falls after
+     * {@code now + MIN_RATE_LIMIT_DELAY}. A constant in the past would let the
+     * real-clock hint win and invert what the rate-limit tests assert. Pinning this
+     * to a literal therefore requires making that executor clock injectable — a
+     * production change, out of scope here.
+     */
+    private final Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
     @BeforeEach
     void setUp() {
