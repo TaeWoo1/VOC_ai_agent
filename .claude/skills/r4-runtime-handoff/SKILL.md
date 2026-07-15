@@ -25,8 +25,7 @@ Read it first; everything below is only what that file cannot protect you from.
   reads export→ingest end-to-end 라이브 검증 (Run 4), scoped inline. 운영 지원 stays ❌; the
   셀러 표기 cell never moved.
 - **Still stale about the Action Window, by decision:** `docs/slices/action-window-v1.md`
-  (DRAFT — overlay / download-detection seams 미구현) and `docs/sellerops_current_state.md:72`
-  (§7 — 자동 업로드 브리지 미검증, contradicting its own §9). **Report; do not silently edit.**
+  (DRAFT — overlay / download-detection seams 미구현). **Report; do not silently edit.**
 - **`current-state.md`'s header date lies** (`updated at: 2026-07-13`; content runs to 07-15).
 - **Every G6 is consumed.** No live NAVER contact without a fresh, single-use, in-turn G6.
   A plan, a prior approval, goal pressure, or a Stop-hook is never authorization.

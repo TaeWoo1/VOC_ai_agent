@@ -19,12 +19,12 @@ than `current_state`) **was corrected on 2026-07-15**: NAVER REVIEW now reads ex
 라이브 검증 (Run 4), scoped inline to 감독형·개발셀러·로컬 dev 백엔드. **운영 지원 stays ❌ and the 셀러 표기
 cell is unchanged** — no seller-facing claim moved.
 
-⚠ **Still stale, by decision, not oversight:**
-- `docs/slices/action-window-v1.md` (DRAFT) still says the overlay / download-detection seams are 미구현.
-- `docs/sellerops_current_state.md:72` (§7) still says the 자동 업로드 브리지 is 미검증 — it contradicts that
-  doc's own corrected §9. Scoped out of the §4.1 slice; a known follow-up.
+`docs/sellerops_current_state.md` §7 was aligned on 2026-07-15 and now records the Run 4 export→ingest run
+with the same scope bounds.
 
-Both are product-owner decisions, deliberately not taken here. Report them; do not silently edit them.
+⚠ **Still stale, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still says the
+overlay / download-detection seams are 미구현. That is a product-owner decision, deliberately not taken
+here. Report it; do not silently edit it.
 
 ## Where to read first
 

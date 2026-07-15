@@ -128,8 +128,8 @@ For anything touching the Action Window runtime, start at
 `docs/action-window-runtime/HANDOFF.md` — the orientation entry point for that workstream (state,
 live-run history, gates, committed vs. local-only). The `r4-runtime-handoff` skill routes there.
 
-`docs/sellerops_current_state.md` §9 was corrected by the product owner on 2026-07-15 and now records
-Run 4 and routes here; the rest of that document is still a 2026-07-08 snapshot. **For Action Window
+`docs/sellerops_current_state.md` §9 and §7 were corrected by the product owner on 2026-07-15 and now
+record Run 4 and route here; the rest of that document is still a 2026-07-08 snapshot. **For Action Window
 *status*, the `docs/action-window-runtime/` records win.** Product *intent* still follows the conflict
 priority below.
 
@@ -138,9 +138,7 @@ export→ingest end-to-end 라이브 검증 (Run 4), scoped inline to 감독형�
 stays ❌ and the 셀러 표기 column is unchanged**, so no seller-facing claim moved.
 
 **Still stale, by decision (2026-07-15) — report, do not silently resolve:**
-`docs/slices/action-window-v1.md` (DRAFT) still calls the overlay / download-detection seams 미구현, and
-`docs/sellerops_current_state.md:72` (§7) still marks the 자동 업로드 브리지 미검증, contradicting that
-document's own corrected §9.
+`docs/slices/action-window-v1.md` (DRAFT) still calls the overlay / download-detection seams 미구현.
 
 ### Conflict priority
 

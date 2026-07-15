@@ -69,7 +69,12 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - 파일 업로드(전 채널) 인입 + dedup (E2E 스모크).
 - NAVER ORDER_SUMMARY API 수집 1회 (2026-06-14).
 - Cafe24 ORDER_SUMMARY API 수집 E2E PASS (토큰 회전·금액 대사).
-- NAVER 리뷰 감독형 캡처→다운로드 저장 (2026-06-22; 자동 업로드 브리지는 미검증).
+- NAVER 리뷰 감독형 캡처→다운로드 저장 (2026-06-22).
+- NAVER 리뷰 감독형 export→ingest **전 구간**(자동 업로드 브리지 포함) 1회 (2026-07-15, Run 4 —
+  `COMPLETED` 3-of-3, 백엔드 `SUCCESS` 55/55/0/0). 범위: **감독형**(사람이 실제 클릭)·**개발 셀러**·
+  **로컬 dev 백엔드**(프로덕션 아님). **셀러 대면 출시·무인 자동 수집·운영 지원 아님** — 상세는 §9,
+  capability 정본은 `docs/multi-channel-connector-roadmap.md` §4.1(운영 지원 ❌ 유지), 근거는
+  `docs/action-window-runtime/r4-evidence-pack.md` §8-17.
 - Cafe24 게시판(리뷰/문의) 열람 discovery 1회 CONFIRMED.
 
 ## 8. Implemented but not live-verified
