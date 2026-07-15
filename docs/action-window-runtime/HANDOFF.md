@@ -79,10 +79,18 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `09f2411`** (PR #260 merged, 2026-07-15). HEAD = **`09f2411`** — the branch is synced,
-  not ahead.
-- **ZERO local-only commits.** `git log origin/main..HEAD` shows **0**; nothing is held unpushed. The six
-  commits previously held by the accumulation cadence all landed via **#260**: `45ed82c` (upload log
+- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). HEAD = **`1b9f582`**.
+- ⚠ **The branch has DIVERGED — 4 ahead AND 2 behind.** It is *not* merely ahead. Both halves matter:
+  - **4 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, none pushed:
+    `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
+    expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
+    (README §5 rank 6 — the shared contract exists). **All four are docs/skill only** — no
+    `collector/src` change.
+  - **2 commits behind** (`git log HEAD..origin/main`): `f83be19` (bridge — sanitize untrusted approval
+    fields + bound pending pairings) and its merge `d7d1161` = **PR #261, which landed on `main` after
+    this batch started.** Not synced here. **Syncing is an operator decision; do not fetch-and-merge
+    on your own initiative.**
+- The six commits held by the *previous* batch all landed via **#260**: `45ed82c` (upload log
   sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
   corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
   (`current_state` §7), `49dc847` (capability matrix).
@@ -91,7 +99,10 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-- Recent merges: **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
+  ⚠ **That hazard is LIVE right now: `main` has moved (#261).** Two-dot previews of this batch will
+  misrender #261's work as deletions.
+- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **on `main`, NOT in this branch**),
+  **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
   pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
   landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
   hardening), #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver
@@ -99,7 +110,35 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
   `--ff-only` sync.
 
-## Last slice — R4 operator guidance, DELIVERED 2026-07-15
+## Last slice — docs-governance batch (4 commits, held local, 2026-07-15→16)
+
+**No capability claim moved, no gate flipped, no G6 granted, no canonical product doc touched.**
+
+- **`cb081e0`** — refreshed this file's git state + baseline after #260.
+- **`4c6d1ac`** — R4 operator guidance (detailed below); its honesty constraints still bind.
+- **`15e6fe3`** — **routers carry paths, not state.** Root `CLAUDE.md`'s Action Window section became a
+  paths-only routing table; the `r4-runtime-handoff` skill's dated status became durable rules; this
+  file's **Discovery block** stopped mirroring §9/§4.1/§7. The evidence: 3 of the 4 Run 4 commits each
+  had to touch the same 3 routers; the 4th touched 1 file, because 표 B derives from §4.1 **by rule** and
+  no router quotes it. **State docs are exempt — this section is supposed to carry state.**
+- **`1b9f582`** — README §5 rank 6 no longer hedges "(once it exists)"; the contract exists
+  (`contracts/action-window/v1/`, MERGED PR #212). Same pathology as `15e6fe3`: a **precedence list
+  carrying status**, rotted silently.
+
+⚠ **Corrected in `1b9f582` — previously reported for two sessions and written into `15e6fe3`'s own commit
+message:** "three precedence lists conflict at rank 6" is **OVERSTATED**. Root `CLAUDE.md`'s rank 6 is
+*the active slice*; README §5's rank 6 is *the FE↔Runtime contract* — **different objects.** Neither list
+ranks the other's item: disjoint tails, not a collision. Silence is not contradiction, and
+`CLAUDE.md:139-141` already splits **status** (this directory wins) from **intent** (root wins). **Do not
+re-derive this as a defect.** Also refuted: "nothing cites README §5" — `r4-preparation.md:11` cites it,
+and `SKILL.md:14` calls that file normative.
+
+**PO decision made 2026-07-15, deliberately NOT applied:** workstream precedence lists **defer to root's
+ranks 1-5 and never restate them**. README §5 still mirrors those ranks, so writing the rule now would
+publish one its only instance visibly breaks. **The rule + the §5 dedup are one follow-up slice.** This
+paragraph is currently the decision's only home in the repo.
+
+### The R4 operator guidance (`4c6d1ac`) — DELIVERED 2026-07-15
 
 Run 4 proved the path; the human choreography was scattered and the one text an operator reads at run time
 was stale. Now closed, offline, in one commit:
@@ -157,7 +196,10 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
 - Offline baseline: **2837 passed / 29 skipped** (174 files). Measured on the post-#260 sync tree —
-  the jump from 2761 is **+76 tests from #259**, not drift.
+  the jump from 2761 is **+76 tests from #259**, not drift. **Re-confirmed 2026-07-16** across the
+  4-commit local batch (docs-only; every run matched exactly — for a docs slice any movement is a red
+  flag, not drift). ⚠ **This number predates #261** (`f83be19`, not synced here); expect it to move once
+  that lands.
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
