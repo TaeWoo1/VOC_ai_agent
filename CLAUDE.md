@@ -128,13 +128,17 @@ For anything touching the Action Window runtime, start at
 `docs/action-window-runtime/HANDOFF.md` — the orientation entry point for that workstream (state,
 live-run history, gates, committed vs. local-only). The `r4-runtime-handoff` skill routes there.
 
-**Known conflict (2026-07-15, unresolved by design):** `docs/sellerops_current_state.md` (§6 above)
-predates the R4 live runs and still describes the Action Window as `계약만(미구현)` / `구현 없음`.
-That is stale — Run 4 proved the NAVER export path end-to-end on the real surface on 2026-07-15
-(`docs/action-window-runtime/r4-evidence-pack.md` §8-17). **For Action Window *status*, the
-`docs/action-window-runtime/` records win.** Product *intent* still follows the conflict priority
-below. Correcting `sellerops_current_state.md` is a product-owner decision, deliberately not taken
-here — report the conflict, do not silently resolve it.
+`docs/sellerops_current_state.md` §9 was corrected by the product owner on 2026-07-15 and now records
+Run 4 and routes here; the rest of that document is still a 2026-07-08 snapshot. **For Action Window
+*status*, the `docs/action-window-runtime/` records win.** Product *intent* still follows the conflict
+priority below.
+
+**Still stale, by decision (2026-07-15) — report, do not silently resolve:**
+`docs/slices/action-window-v1.md` (DRAFT) still calls the overlay / download-detection seams 미구현, and
+`docs/multi-channel-connector-roadmap.md` §4.1 still marks NAVER REVIEW's 자동 업로드 브리지 미검증 —
+Run 4 exercised it, but §4.1 is capability truth for seller-facing claims and outranks
+`sellerops_current_state.md` here, so whether a dev-seller pilot into a local dev backend clears its bar
+is a product-owner decision.
 
 ### Conflict priority
 

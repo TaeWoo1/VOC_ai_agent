@@ -8,10 +8,17 @@
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
 **Discovery:** the root `CLAUDE.md` reading order points here, and the `r4-runtime-handoff` skill
-(`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. ⚠ **`docs/sellerops_current_state.md` — the
-reading order's own §6 "living handoff state" — predates the R4 live runs and still says the Action Window
-is `계약만(미구현)` / `구현 없음`. That is stale. For Action Window status, this directory wins;** correcting
-that doc is a product-owner decision, deliberately not taken (see root `CLAUDE.md` → Action Window / R4).
+(`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. `docs/sellerops_current_state.md` — the reading
+order's own §6 "living handoff state" — **was corrected by the product owner on 2026-07-15** and its §9 now
+records Run 4 and routes here. **This directory remains status-of-record for Runtime detail;** §9 is a
+scoped summary, not a substitute. That doc is otherwise still a 2026-07-08 snapshot — only the Action
+Window entry was refreshed.
+
+⚠ **Still stale elsewhere, by decision, not oversight:** `docs/slices/action-window-v1.md` (DRAFT) still
+says the overlay / download-detection seams are 미구현, and `docs/multi-channel-connector-roadmap.md` §4.1
+(the capability table — *higher* in the conflict priority than `current_state`) still marks NAVER REVIEW's
+자동 업로드 브리지 as 미검증. Both are product-owner decisions, deliberately not taken here. Report them;
+do not silently edit them.
 
 ## Where to read first
 

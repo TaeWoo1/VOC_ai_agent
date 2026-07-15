@@ -13,12 +13,18 @@
 사업자·등록 결정, OperationRun 방향, 신규 문서 `channel-capability-registration-matrix.md`·`slices/action-window-v1.md`).
 **마켓 라이브-사용 게이트 유지(닫힘)**; 자동 로그인 여전히 미구현.
 
+> **⚠ 2026-07-15 부분 갱신 — Action Window / R4 Runtime 상태만.** 이 날짜에 갱신된 것은 §9의 Action
+> Window 항목뿐이다. **나머지 모든 항목은 여전히 2026-07-08 기준**이며 그 이후를 반영하지 않는다.
+> Action Window Runtime 상태의 정본은 `docs/action-window-runtime/`이며, 진입점은
+> [`docs/action-window-runtime/HANDOFF.md`](action-window-runtime/HANDOFF.md)다.
+
 > **통합 상태(integ/sellerops-main).** origin/main(`5a43dcb`)에 sellerops/main(`5889a1d`)을 non-fast-forward
 > 병합한 통합 브랜치. 유일 충돌 `collector/src/cli/local-agent.ts`을 두 계보 보존으로 해소(Bridge + same-process
 > human-completion 결합; ESM 프로필은 origin의 `base.profileBaseDir` 유지, Bridge pairing-file 전용 `collectorRoot`
 > 재도입). **병합 트리가 진실로 포함하는 것**: Product Shell · CLI에 배선된 Local Agent Bridge · 채널-중립
 > Browser Projection(**State B — 정상 부팅 미배선**) · same-process ESM reconnect · connection-explicit ESM
-> capture · 공유 전용-프로필 해석 · 운영-에이전트 전략 문서 · **Action Window는 계약만(미구현)**. 검증:
+> capture · 공유 전용-프로필 해석 · 운영-에이전트 전략 문서 · **Action Window는 계약만(미구현)**
+> *(2026-07-08 병합 트리 기준의 사실 기록. 현재 상태는 §9 — 이후 NAVER 한정으로 구현·라이브 검증됨)*. 검증:
 > collector typecheck OK·`npm test` 2331 pass(1 skip), frontend typecheck OK·166 pass·build OK. 푸시·PR 없음.
 
 ## 2. Current product phase
@@ -74,8 +80,19 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - ESM INQUIRY read 스켈레톤(unwired), ESM INQUIRY Excel 임포트 백엔드(FE 미노출).
 
 ## 9. Explicitly NOT implemented (표기 금지)
-- **Action Window(기본 리뷰 수집 모드)** — 계약 초안만(`docs/slices/action-window-v1.md`, DRAFT). 실제 창
-  오버레이·다운로드 완료 감지 seam **미구현**. 실제 마켓 사용은 정책 게이트 뒤. 자율 모드=ACTION_WINDOW.
+- **Action Window(기본 리뷰 수집 모드)** — **⚠ 상태 갱신 2026-07-15: 더 이상 "미구현"이 아니다.**
+  **NAVER 한정**으로 창 오버레이·감독형 export·다운로드 완료 감지·검증·백엔드 ingest가 구현됐고, **실제
+  NAVER 화면에서 end-to-end 라이브 검증됐다**(Run 4, 2026-07-15 — `COMPLETED` 3-of-3, 백엔드 `SUCCESS`
+  55/55/0/0). 근거: `docs/action-window-runtime/r4-evidence-pack.md` §8-17. **Runtime 상태의 정본 =
+  `docs/action-window-runtime/`**(진입점 [`HANDOFF.md`](action-window-runtime/HANDOFF.md)); 본 문서는
+  그것을 참조만 한다.
+  **그럼에도 §9(표기 금지)에 남는 이유 — 아래는 여전히 사실이며 셀러 대면 표기를 금지한다:**
+  검증 범위는 **감독형(사람이 실제 클릭) NAVER 파일럿 1회**다 — **개발 셀러 + 로컬 dev 백엔드**
+  (`localhost:8080`, 프로덕션 아님). **타 채널 미구현**, **무인 자동 수집 아님**, **셀러 대면 기능으로
+  출시된 바 없음**. 실제 마켓 사용은 여전히 **건별 승인 게이트** 뒤다(§14 · `docs/action-window-runtime/`
+  `r4-preparation.md` §3 G1–G6 — §14의 G6=Windows Migration과는 **다른 번호 체계**). 계약 문서
+  `docs/slices/action-window-v1.md`는 아직 DRAFT이며 자체 §미구현 서술이 갱신되지 않았다(제품 오너 판단
+  대기). 자율 모드=ACTION_WINDOW는 제품 의도로 유지.
 - **브라우저 프로젝션**(인앱 브라우저 뷰 투사) — **채널-중립 V0 구현·커밋됨**(`a0e4f6f`, 로컬 픽스처 전용,
   **마켓 사용 미승인·비-기본 렌더러** §20). **production-runtime 미배선 (State B)**: 정상 Local Agent 제품
   부팅은 프로젝션 소스를 생성·주입하지 않는다(`resolveAgentBridgeConfig`가 `projection` 미설정 → `/projection/ws`

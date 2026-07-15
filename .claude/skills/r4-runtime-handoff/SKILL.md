@@ -18,12 +18,13 @@ Read it first; everything below is only what that file cannot protect you from.
 4. `r4-preparation.md` — normative: §3 gates G1–G6, §4 safety boundary, §7 abort criteria.
 
 ## Tripwires (verified 2026-07-15 — a cold session gets these wrong)
-- **`docs/sellerops_current_state.md` is WRONG about the Action Window.** It is the root
-  `CLAUDE.md` reading order's designated handoff doc but predates Run 1 (last touched
-  2026-07-08) and asserts `Action Window는 계약만(미구현)` / `구현 없음`. **Run 4 proved the
-  NAVER export path end-to-end on the real surface on 2026-07-15** (§8-17). For Action Window
-  status, `docs/action-window-runtime/` wins. Report the conflict; do not silently edit that
-  canonical doc — correcting it is a product-owner decision.
+- **`docs/sellerops_current_state.md` §9 is CORRECT as of 2026-07-15** (product-owner
+  correction) and routes here. The rest of that doc is still a 2026-07-08 snapshot — only the
+  Action Window entry was refreshed, so do not read its other sections as current.
+- **Two canonical docs are still stale about the Action Window, by decision:**
+  `docs/slices/action-window-v1.md` (DRAFT — overlay / download-detection seams 미구현) and
+  `docs/multi-channel-connector-roadmap.md` §4.1 (NAVER REVIEW 자동 업로드 브리지 미검증 —
+  and §4.1 outranks `current_state` in the conflict priority). **Report; do not silently edit.**
 - **`current-state.md`'s header date lies** (`updated at: 2026-07-13`; content runs to 07-15).
 - **Every G6 is consumed.** No live NAVER contact without a fresh, single-use, in-turn G6.
   A plan, a prior approval, goal pressure, or a Stop-hook is never authorization.
@@ -34,4 +35,4 @@ Nothing in this skill permits a browser launch, a commit, a push, or a live run.
 
 ## Done when
 You can state the current R4 state, which commits are local-only, and what the next slice is —
-from `HANDOFF.md`, not from memory or from `docs/sellerops_current_state.md`.
+from `HANDOFF.md`, not from memory.
