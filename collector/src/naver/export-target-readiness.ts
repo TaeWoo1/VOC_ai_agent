@@ -44,21 +44,21 @@ export const EXPORT_TARGET_READINESS_KEYS: readonly string[] = ["decision", "row
  * Which precedence rung of `evaluateExportTargetReadiness` actually fired. This is a
  * DIAGNOSTIC label — it never changes the decision, it only records the path taken. It exists
  * because the `reason` field alone cannot distinguish the two ways `empty_state` can arise: an
- * explicit empty MARKER (rung 1) vs. a labeled result-count of exactly 0 (rung 2). The Run-2
+ * explicit empty MARKER (rung 4) vs. a labeled result-count of exactly 0 (rung 5). The Run-2
  * negative result turned on exactly that distinction — did an empty MARKER short-circuit the gate
  * before rows were ever counted, or did the surface fall through to `zero_rows`/`ambiguous`? A
  * read-only probe emitting this branch answers that from observed evidence instead of a guess.
  * It is a fixed enum — never any input text — so it is safe to emit in a sanitized probe.
  */
 export type ExportTargetReadinessBranch =
-  | "no_export_target_marker" // rung 1a — an explicit "…대상인 리뷰가 없습니다" export-empty notice
-  | "empty_state_marker" // rung 1b — a generic "결과가 없습니다" empty placeholder
-  | "labeled_count_positive" // rung 2  — a labeled result-count > 0
-  | "labeled_count_zero" // rung 2  — a labeled result-count of exactly 0 (distinct from the marker)
-  | "data_rows_present" // rung 3  — data rows counted in the static HTML
-  | "results_container_zero_rows" // rung 4 — a results container exists but holds zero rows
-  | "date_range_required" // rung 5  — a positive "pick a period" instruction, no selected range
-  | "ambiguous_no_signal"; // rung 6  — nothing decidable (e.g. SPA rows not in static HTML)
+  | "no_export_target_marker" // rung 3 — an explicit "…대상인 리뷰가 없습니다" export-empty notice
+  | "empty_state_marker" // rung 4 — a generic "결과가 없습니다" empty placeholder
+  | "labeled_count_positive" // rung 1 — a labeled result-count > 0
+  | "labeled_count_zero" // rung 5 — a labeled result-count of exactly 0 (distinct from the marker)
+  | "data_rows_present" // rung 2 — data rows counted in the static HTML
+  | "results_container_zero_rows" // rung 6 — a results container exists but holds zero rows
+  | "date_range_required" // rung 7 — a positive "pick a period" instruction, no selected range
+  | "ambiguous_no_signal"; // rung 8 — nothing decidable (e.g. SPA rows not in static HTML)
 
 /** The gate's decision plus the precedence rung that produced it. `readiness` is verbatim. */
 export interface ExportTargetReadinessTrace {
@@ -278,6 +278,20 @@ export function traceExportTargetReadiness(rawHtml: string): ExportTargetReadine
 
   // 7) Only a POSITIVE required-range instruction with no selected range is date-range-missing.
   //    Reuse the existing pre-click range reader rather than re-deriving the heuristic.
+  //
+  //    ⚠ DORMANT ON ANY GRID-BEARING SURFACE (D-025, recorded 2026-07-16 — do not "fix" by
+  //    reordering). Reaching here needs a SEVEN-way conjunction: no labeled count (rungs 1+5), zero
+  //    real rows (rung 2), no no-target notice (rung 3), no empty-state marker (rung 4 — whose
+  //    /\bempty\b/i alone matches any `class="empty-notice"`), AND — the binding clause — NO
+  //    results container at all (rung 6: no <table>/<tbody>/role=grid|table|rowgroup ANYWHERE).
+  //    A review grid halts at rung 6 even at ZERO rows, so a real export surface never arrives
+  //    here. Run 5 (§8-18) merely observed the rung-1 path; rung 6 is the structural bound.
+  //    RETAINED, not deleted: a fail-closed HALT costs nothing dormant, it preserves the §8-14
+  //    lineage, and `selectedRangePresent` is an UNPROVEN placeholder (never observed `true` on any
+  //    surface; see `export-click-signals.ts` on why it may be structurally blind). Promoting this
+  //    rung above rungs 1/2 would re-invert the §8-14 fix and would also silently disable the §8-11
+  //    settle window, which treats this state as a trusted terminal halt (`export-surface-settle.ts`).
+  //    `export-target-readiness.test.ts` locks the unreachability — a reorder trips it.
   const { selectedRangePresent } = diagnosePreClickSignals(rawHtml);
   if (anyMatch(REQUIRED_RANGE_MARKERS, html) && !selectedRangePresent) {
     return {

@@ -233,3 +233,62 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   seller-consented, user-direct pilot on a user-owned account) and the §3 gate order — the recordable
   gates (G2/G5) are now closed against a named-but-sanitized seller; the environment and per-run
   gates stay with the operator.
+
+- **D-025 · ACTIVE** — **Period/scope is a GUIDANCE-ONLY §4 human precondition. The export-target
+  readiness gate answers *exportability* and never *scope*; the Runtime observes and logs the
+  period/scope state but never gates on it** (product-owner decision, 2026-07-16; resolves the OPEN
+  question Run 5 raised — is the unreachable `EXPORT_DATE_RANGE_REQUIRED` rung a defect or
+  correct-by-design? **Answer: correct-by-design, for a reason that is NOT the one Run 5 suggests**).
+  *What is decided:* selecting the review period/scope stays the seller's own §4 obligation
+  ([`r4-gate-record.md`](r4-gate-record.md) §4, "selects period/scope"), carried by the operator-facing
+  CLI prompt. The Runtime **observes** it (`action-window/naver-surface.ts` — the Run 5 seam reads the
+  range signals independently of the readiness ladder) and **logs** it (`aw.live.readiness`, fixed
+  enums/booleans only). It does **not** gate, does **not** block, and does **not** model it as a step.
+  *Rationale — the CATEGORY argument, deliberately NOT Run 5:* the gate's chartered question is "does
+  the current result contain exportable review targets" (`naver/export-target-readiness.ts` module
+  docblock). A labeled positive count over a populated grid is direct evidence that the filter state —
+  default or seller-chosen — **already resolved to exportable rows**. *"Is there something to export"*
+  and *"is the scope what the seller meant"* are different propositions: the first is a platform
+  mechanism, the second is product intent. Putting product intent into a mechanism gate is a category
+  error. **This argument needs no live run and is unaffected by anything Run 5 did or did not show.**
+  ⚠ *What Run 5 does NOT establish (recorded so this decision is never re-derived from it):* Run 5
+  (§8-18) is **silent** on whether NAVER requires a period. `action-window/observer.ts` installs a plain
+  DOM `click` listener, so `observed: true` means **a human acted on the highlighted control** — never
+  that the platform accepted the request. `action-window/naver-live-driver.ts` passes verify's
+  `completionSignalPresent` as a hardcoded `true` (documented deliberately: there is no proven
+  post-action DOM completion marker for live NAVER, so **the download is the only artifact evidence**),
+  and Run 5 had no download. `dialogMatchesRecordedConsentMarkers` was `NOT_OBSERVED`. So Run 5's
+  `DOWNLOAD_TIMEOUT` is **equally consistent with consent-declined, range-refused, and click-no-op**.
+  It establishes only that *our own gate* does not require a range — knowable by inspection, needing no
+  run. **Do not cite Run 5 as evidence that the platform tolerates an unselected period.**
+  *(b) READINESS BLOCKER — rejected:* making the gate require a selected range would put a **negative**
+  condition ahead of **positive** row/count evidence — structurally the same mistake as the pre-§8-14
+  marker-first order, which "HALTed a genuinely-exportable surface", and against **strictly weaker**
+  evidence (the empty-state marker at least matched real text on the real page; `selectedRangePresent`
+  has never been observed `true` on any surface, live or fixture). Hidden second half of the blast
+  radius: `naver/export-surface-settle.ts` treats `EXPORT_DATE_RANGE_REQUIRED` as a **trusted terminal
+  halt**, so an early-firing date condition would return `halt` on the first pre-hydration read and
+  **silently disable the §8-11 settle window**, re-opening the Run-1 false-positive-empty. Revert cost
+  is **a G6** (the §8-8 → §8-15 arc cost five live runs), not a line of code.
+  *(c) SEPARATE OBSERVED STEP — rejected:* its premise expired on 2026-07-16 — the Run 5 seam already
+  observes period/scope, so (c) buys what is already shipped. Its only completion oracle would be (b)'s
+  detector. `action-window/stages.ts`'s `STEP_PLAN` is channel-neutral, and `totalSteps` is on the wire
+  **and persisted**, so a 3→4 change would ride protocol v1 silently past the exact-match compatibility
+  check and force a migration of already-persisted runs.
+  ⚠ *Why the detector cannot be promoted on today's evidence:* `naver/export-click-signals.ts`'s
+  filled-range regex matches the `value` **attribute** in serialized HTML, but every live read is
+  `page.content()` and a user- or JS-set input value updates the IDL **property**, leaving the
+  attribute untouched. On an SPA date picker the detector may be **structurally incapable of ever
+  returning `true`** — which would make (b) a **100% halt rate**, discoverable only by spending a G6.
+  Per `collector/CLAUDE.md` §4 item 6 the markers stay **placeholders**; this decision promotes nothing.
+  *Falsifier (this decision is designed to be reversible):* a future click run whose operator **does**
+  select a period, reporting `selectedRangePresent`. `true` → the detector is validated and (b) may be
+  revisited **on evidence**. `false` → the attribute/property blindness is confirmed, and (b) and (c)
+  are both off the table until a **different** detector exists. **It costs nothing — it rides any
+  future click run.** *Boundary:* **this entry authorizes NO live action.** The `naver-surface.ts`
+  "logged, as fixed enums only" relaxation stays **log-only** — never extended to transport or
+  persistence; `BLOCKER_CODES` stays the **fixed 8** (no period/scope blocker code — that would be a
+  governed contract change). The date rung and `EXPORT_DATE_RANGE_REQUIRED` are **retained, not
+  deleted**: they are fail-closed HALTs that cost nothing dormant, they preserve the §8-14 lineage, and
+  an offline test now locks their unreachability so a future rung reorder trips a test rather than
+  silently waking a gate on an unproven detector.

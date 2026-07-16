@@ -242,6 +242,54 @@ describe("diagnosePreClickSignals — sanitized pre-click snapshot", () => {
   });
 });
 
+describe("selectedRangePresent — the KNOWN blind spots (D-025; placeholder, do not promote)", () => {
+  // WHY THIS BLOCK EXISTS. Run 5 (§8-18) produced the detector's first live reading —
+  // `selectedRangePresent: false`, agreeing with an operator who had selected nothing. That is one
+  // TRUE NEGATIVE. The positive direction has never been observed on any real surface: the ONLY
+  // `true` anywhere in this repo is the one-line string above, authored to satisfy the regex.
+  //
+  // The mechanism that predicts it may NEVER read `true` live: the regex matches the `value`
+  // ATTRIBUTE in serialized HTML, but every live read is `page.content()` serialization, and a
+  // user- or JS-set input value updates the IDL PROPERTY and leaves the attribute untouched. So an
+  // SPA date picker — which live `dateRangeControlPresence: "some"` (6-20 date-ish controls)
+  // suggests — can be fully populated and still serialize as `value=""`.
+  //
+  // These cases pin the boundary honestly. They assert `false` NOT because false is desirable, but
+  // because that is what the detector does today, and D-025 turns on knowing exactly how far it can
+  // see. Each is a plausible real shape. If a live run ever reports `true` with a range selected,
+  // the detector is validated and these expectations should be revisited against that evidence —
+  // per `collector/CLAUDE.md` §4 item 6, corrected from observed findings, never guess-tuned.
+  const BLIND_SPOTS: Array<[string, string]> = [
+    ["a date input with no value attribute (the property-set shape)", `<input type="date">`],
+    ["a picker whose value attribute stays empty after selection", `<input type="text" class="date-picker" value="">`],
+    ["a range rendered as text rather than an input value", `<span class="date-display">2026-06-01 ~ 2026-06-30</span>`],
+    ["a range held in a sibling element, not the control", `<input type="date"><div class="selected-range">2026-06-01 ~ 2026-06-30</div>`],
+    ["value BEFORE the type attribute (the regex requires type first)", `<input value="2026-06-01" type="date">`],
+  ];
+
+  for (const [label, html] of BLIND_SPOTS) {
+    it(`reads false for: ${label}`, () => {
+      expect(diagnosePreClickSignals(html).selectedRangePresent).toBe(false);
+    });
+  }
+
+  it("is NOT hardwired to false — the class= branch and the type= branch both fire", () => {
+    // Offline we KNOW the detector is not stuck at false; earlier notes claimed "a hardwired false
+    // would look identical" to Run 5's reading, and that is not true. What is unknown is only
+    // whether NAVER's real surface ever serializes into a shape the regex can see.
+    expect(diagnosePreClickSignals(`<input type="date" value="2026-06-01">`).selectedRangePresent).toBe(true);
+    expect(diagnosePreClickSignals(`<input class="x date-picker y" value="2026-06-01">`).selectedRangePresent).toBe(true);
+  });
+
+  it("a populated range does not disturb the date-control count bucket", () => {
+    // The two fields are independent regexes: presence counts controls, selected reads a value.
+    // Run 5's `some` + `false` pairing is therefore internally consistent, not contradictory.
+    const s = diagnosePreClickSignals(`<input type="date"><input type="date"><div class="calendar"></div>`);
+    expect(s.dateRangeControlPresence).toBe("few");
+    expect(s.selectedRangePresent).toBe(false);
+  });
+});
+
 describe("decideSupervisedExportReady — light readiness for the supervised-fast path", () => {
   const base: PreClickSignals = {
     exportLayout: "LAYOUT_UNRECOGNIZED",

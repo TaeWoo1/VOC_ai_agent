@@ -90,12 +90,15 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   longer the live truth, and the operator must be told before the next run.
   ✅ **LIVE-CONFIRMED 2026-07-16 (Run 5, §8-18):** the timeout fired **~60 s after the barrier observation**,
   not after the highlight. The two-window budget is real, not just intended.
-- ⚠ **`CONFIRM_PROMPT` — the one text an operator reads at run time — is STALE, and Run 5 hit it live.**
-  It still says "manually confirm the expected NAVER confirmation dialog" and "from the moment the highlight
-  appears you have about 60 SECONDS" for **both** steps. The first contradicts any non-confirming run outright;
-  the second was made false by `40d7c53` (see above). It was rewritten in `4c6d1ac` **before** the barrier fix
-  landed and never revisited. **Reported, not fixed** (§8-18) — fixing it mid-dispatch would have invalidated
-  the offline verification the G6 rested on. **Warn the operator, or fix it in an offline slice first.**
+- ✅ **`CONFIRM_PROMPT` — the one text an operator reads at run time — WAS STALE; FIXED 2026-07-16 (D-025).**
+  Run 5 hit it live: it said "manually confirm the expected NAVER confirmation dialog" (contradicting that
+  run's own non-confirming scope) and "from the moment the highlight appears you have about 60 SECONDS" for
+  **both** steps (made false by `40d7c53`). It had been rewritten in `4c6d1ac` **before** the barrier fix
+  landed and never revisited; §8-18 reported it rather than fixing it mid-dispatch, which would have
+  invalidated the offline verification the G6 rested on. **Now:** both windows are **interpolated from
+  `OBSERVE_TIMEOUT_MS` / `DOWNLOAD_TIMEOUT_MS`** — the prose cannot restate a stale number again — and the
+  confirm/do-not-confirm choice is **deferred to the run's approved scope** rather than hardcoded, because the
+  prompt is shared across scopes. **Root cause of the rot: it was unexported and unasserted.** It is now both.
 - ⚠ **Observation is an audit record, NOT the completion authority — keep it that way.** `driveOneRun`
   rechecks **anyway** on observe-timeout, deliberately: the in-page listener (`observer.ts:21-28`) has
   never fired on a live run, and `armObserve`'s `timeout: 0` arming means an already-fired download is
@@ -244,11 +247,20 @@ was stale. Now closed, offline, in one commit:
   **Readiness passed without requiring a selected range**, and the branch shows why: rung 1 fired on a labeled
   positive row count and **short-circuited before any date-range rung could evaluate**. So
   `EXPORT_DATE_RANGE_REQUIRED` is dead for a **structural** reason — on any surface with countable rows the date
-  rung is **unreachable**, not merely unused. **Whether that is a defect or correct-by-design is an OPEN
-  product-owner decision.**
-  ⚠ **The detector is UNPROVEN in the positive direction** — one true negative is not validation; a hardwired
-  `false` would look identical. Whether it reports `true` when a range **is** selected is untested live, so the
-  markers stay placeholders (`collector/CLAUDE.md` §6). **Still: invent no procedure until a run reports one.**
+  rung is **unreachable**, not merely unused.
+  **✅ DECIDED 2026-07-16 → [D-025](decisions.md): correct-by-design.** Period/scope is a **guidance-only §4 human
+  precondition** — the gate answers *exportability*, never *scope*. The Runtime observes and logs it; it never
+  gates. ⚠ **The rung-1 story is narrower than the truth:** rung 1 explains Run 5's *path*, but the **structural
+  bound is rung 6** (`results_container_zero_rows`) — the date rung needs **no `<table>`/`<tbody>`/`role=grid|
+  table|rowgroup` anywhere**, so a review grid halts before it even at **zero** rows. Now locked by test.
+  ⚠ **The detector is UNPROVEN in the positive direction** — one true negative is not validation. Whether it
+  reports `true` when a range **is** selected is untested live, so the markers stay placeholders
+  (`collector/CLAUDE.md` §6). **Still: invent no procedure until a run reports one.**
+  **↳ CORRECTION 2026-07-16 (D-025):** this bullet used to say *"a hardwired `false` would look identical"* —
+  **false, withdrawn.** Offline we know it is not hardwired. The real, stronger concern: the regex reads the
+  `value` **attribute**, but live reads are `page.content()` serialization and a JS/user-set value updates the
+  IDL **property** only — so on an SPA picker the detector may be **incapable of ever returning `true`**. That is
+  why promoting it to a blocker risks a **100% halt rate**, not a rare miss.
 - ⚠ **The Run 4 dialog's identity is STILL OPEN — Run 5 did not close it.** The
   `dialogMatchesRecordedConsentMarkers` eyeball was **NOT_OBSERVED** (not returned by the operator), so whether
   Run 4's dialog is the copyright/usage consent recorded in `export-click-signals.ts` remains established in
@@ -272,23 +284,40 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
   enums only; **never extend it to transport or persistence** (the FE has no period/scope blocker code;
   giving it one is a governed contract change).
 
-## Next — three OPEN product-owner decisions from Run 5, and one offline slice
+## Next — two OPEN product-owner decisions from Run 5
 
 **No Runtime blocker is open.** What follows is decisions and polish, not work the code is waiting on.
 
-- **PO DECISION — is the unreachable date rung a defect?** Run 5 showed readiness passes with **no selected
-  range**, because rung 1 (`labeled_count_positive`) short-circuits before any date rung evaluates. So
-  `EXPORT_DATE_RANGE_REQUIRED` is **structurally unreachable** on any surface with countable rows. Correct-by-
-  design, or a gap? **Not resolved here.**
+- **✅ DECIDED 2026-07-16 → [D-025](decisions.md) — the unreachable date rung is CORRECT-BY-DESIGN.**
+  Period/scope is a **guidance-only §4 human precondition**: the readiness gate answers *exportability*, never
+  *scope*. The Runtime observes + logs it and never gates. The rung and `EXPORT_DATE_RANGE_REQUIRED` are
+  **retained, not deleted** (fail-closed HALTs cost nothing dormant; they preserve the §8-14 lineage), with the
+  unreachability now **locked by test**. ⚠ **The rationale is the CATEGORY argument, NOT Run 5** — Run 5 is
+  *silent* on whether NAVER requires a period (see the timing/verify note below). **Do not re-derive D-025 from
+  Run 5's `observed: true`.**
+- **✅ DONE 2026-07-16 — the stale `CONFIRM_PROMPT` is fixed** (same slice as D-025). It no longer hardcodes
+  "confirm the dialog" (that is the run scope's call, not the prompt's), its two-window budget is
+  **interpolated from the timers** so it cannot restate a stale number, the period/scope line is lifted to
+  prominence as the operator's own unenforced step, and it now warns that a validated download is ingested
+  unconditionally. It is **exported and test-locked** — being unexported and unasserted is how it rotted.
 - **OPEN — `selectedRangePresent` is unproven in the positive direction.** Run 5 produced one **true negative**
-  (operator selected nothing, detector said nothing). A hardwired `false` would look identical. A future run
-  that **does** select a range settles it for free.
+  (operator selected nothing, detector said nothing). ⚠ The stronger concern is **not** "hardwired `false`"
+  (withdrawn as false — see the correction above) but that the regex reads the `value` **attribute** while live
+  reads are `page.content()` serialization: a JS/user-set value updates the IDL **property** only, so on an SPA
+  picker the detector may be **incapable of ever returning `true`**. The blind spots are now characterized by
+  offline test. **A future run that does select a range settles the direction for free** — and it is D-025's
+  named falsifier: `true` → revisit a blocker **on evidence**; `false` → confirms the blindness and a blocker
+  stays off the table until a **different** detector exists.
 - **OPEN — the Run 4 dialog's identity.** Run 5's `dialogMatchesRecordedConsentMarkers` was **NOT_OBSERVED**;
   the question is open in **neither direction**. Also free to settle on any future click run.
-- **OFFLINE SLICE — fix the stale `CONFIRM_PROMPT`** (see Timing facts above). It tells the operator to confirm
-  the dialog and states a one-window ~60 s budget; both are now wrong. **This is the text a human reads mid-run.**
 - **The `COMPLETED` path under the new timing is still unproven** — it rests on Run 4's **old-timing** evidence.
   Re-proving it needs a **separate mutating run with a fresh export-scoped G6**.
+- ⚠ **Run 5 cannot speak to platform acceptance, and no future record should claim it does.**
+  `action-window/observer.ts` is a plain DOM click listener, so `observed: true` means **a human acted** — not
+  that NAVER accepted the request. `naver-live-driver.ts` passes verify's `completionSignalPresent` as a
+  hardcoded `true` (deliberate: no proven post-action DOM completion marker exists, so **the download is the
+  only artifact evidence**), and Run 5 had none. Its `DOWNLOAD_TIMEOUT` is **equally consistent with
+  consent-declined, range-refused, and click-no-op.**
 
 Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into

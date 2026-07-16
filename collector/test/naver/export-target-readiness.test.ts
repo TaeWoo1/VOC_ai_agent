@@ -290,6 +290,67 @@ describe("traceExportTargetReadiness — records WHICH precedence rung fired", (
   });
 });
 
+describe("the date rung is DORMANT on any grid-bearing surface (D-025)", () => {
+  // Rung 7 (`date_range_required`) has never fired on a live run, and this locks WHY — the reason
+  // is structural, not incidental. `DATE_RANGE_MISSING` above reaches rung 7 only because it is
+  // deliberately grid-free; that is proof-by-construction which nothing previously stated.
+  //
+  // The binding clause is rung 6 (`RESULTS_CONTAINER_MARKERS`), NOT rung 1's short-circuit: a
+  // results container ANYWHERE halts at `results_container_zero_rows` even with ZERO rows and a
+  // loud "pick a period" instruction. Run 5 (§8-18) observed the rung-1 path and the docs first
+  // recorded that as the cause; rung 6 is the wider bound.
+  //
+  // Why this test exists: D-025 keeps the rung dormant ON PURPOSE (see the decision record —
+  // promoting it would re-invert §8-14 and disable the §8-11 settle window). If someone later
+  // reorders the rungs to "fix" the dead branch, this fails and sends them to D-025 first.
+  const RANGE_INSTRUCTIONS = [
+    "조회 기간을 선택해 주세요.",
+    "검색 기간은 반드시 지정해 주세요.",
+    "기간을 반드시 설정하세요.",
+    "Please select a date range",
+    "A date range is required",
+  ];
+  const CONTAINERS: Array<[string, string]> = [
+    ["<table>", `<table class="g"><tbody></tbody></table>`],
+    ["<tbody>", `<tbody></tbody>`],
+    ["role=grid", `<div role="grid"></div>`],
+    ["role=table", `<div role="table"></div>`],
+    ["role=rowgroup", `<div role="rowgroup"></div>`],
+  ];
+
+  for (const instruction of RANGE_INSTRUCTIONS) {
+    for (const [label, container] of CONTAINERS) {
+      it(`"${instruction}" + ${label} → results_container_zero_rows, never date_range_required`, () => {
+        // An empty date control is present, so `selectedRangePresent` is false — i.e. rung 7's own
+        // condition IS satisfied. It still never fires: rung 6 returns first.
+        const html = `<div class="guide">${instruction}</div><input type="text" name="startDate" value="">${container}`;
+        const t = traceExportTargetReadiness(html);
+        expect(t.branch).toBe("results_container_zero_rows");
+        expect(t.branch).not.toBe("date_range_required");
+        expect(t.readiness).toEqual({ decision: "HALT", state: "EXPORT_TARGET_EMPTY", reason: "zero_rows" });
+      });
+    }
+  }
+
+  it("rung 7 stays reachable ONLY on a container-free surface — remove the grid and it fires", () => {
+    // The control: identical instruction + empty date input, minus the results container. This is
+    // what makes the block above a real property rather than a vacuous assertion.
+    const withGrid = `<div class="guide">조회 기간을 선택해 주세요.</div><input type="text" name="startDate" value=""><table><tbody></tbody></table>`;
+    const withoutGrid = `<div class="guide">조회 기간을 선택해 주세요.</div><input type="text" name="startDate" value="">`;
+    expect(traceExportTargetReadiness(withGrid).branch).toBe("results_container_zero_rows");
+    expect(traceExportTargetReadiness(withoutGrid).branch).toBe("date_range_required");
+  });
+
+  it("a POSITIVE count outranks a range instruction — the Run 5 (§8-18) live shape", () => {
+    // Run 5 observed exactly this: READY / positive_count with NO period selected. Locks that a
+    // populated surface is never gated on period/scope (D-025: the gate answers exportability).
+    const html = `<div class="guide">조회 기간을 선택해 주세요.</div><input type="text" name="startDate" value=""><div class="total">총 128건</div><table><tbody></tbody></table>`;
+    const t = traceExportTargetReadiness(html);
+    expect(t.branch).toBe("labeled_count_positive");
+    expect(t.readiness.decision).toBe("READY");
+  });
+});
+
 describe("export-target-readiness.ts — source guard: pure, offline, no DOM action", () => {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const SRC = join(__dirname, "..", "..", "src", "naver", "export-target-readiness.ts");

@@ -100,9 +100,12 @@ export function naverSurfaceDecision(
     return { result: { ok: false, blockerCode: naverSurfaceBlockerFor(verdict) }, diagnostic: { verdict } };
   }
   const { readiness, branch } = traceExportTargetReadiness(html);
-  // The period/scope seam: rungs 1-3 decide a populated grid before rung 5 ever evaluates a date
-  // range, so the range signals are read independently — otherwise a healthy surface reports nothing
-  // about period/scope and the step stays unobservable.
+  // The period/scope seam: rungs 1-2 decide a populated grid long before rung 7 would evaluate a
+  // date range, so the range signals are read independently — otherwise a healthy surface reports
+  // nothing about period/scope and the step stays unobservable. Per D-025 this is OBSERVATION ONLY:
+  // period/scope is a guidance-only §4 human precondition, so these fields are logged and never
+  // gate. (Rung 7 is in fact dormant on any grid-bearing surface — rung 6 is the binding clause;
+  // see `naver/export-target-readiness.ts`.)
   const preClick = diagnosePreClickSignals(html);
   const diagnostic: NaverPrepareDiagnostic = {
     verdict,
