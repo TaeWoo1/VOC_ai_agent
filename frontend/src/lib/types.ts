@@ -438,10 +438,20 @@ export interface OperatorAttentionSummary {
 // backend VocPreviewSanitizer — never the raw body. It is null when the source was
 // empty or the sanitizer suppressed it. Dates are KST calendar dates;
 // sourceCreatedDate is null when the source value was timezone-less.
+//
+// `productName` is the one product field and is a DISPLAY NAME ONLY — never an
+// identifier. The backend deliberately exposes no productId/sku/productNo/productRef
+// on this surface, and withholds any name that is really its own SKU, so there is no
+// product identity here to render or route on.
+//
+// Its null means "no name is available" — NOT "this row has no product" (a Cafe24
+// community article has a product the store simply cannot name). Rendering it as an
+// absence of product would misread the contract; see productLabel in ./vocItems.
 export interface OperatorVocItem {
   channelCode: string | null;
   channelNameKo: string | null;
   sourceType: string; // REVIEW | INQUIRY
+  productName: string | null; // display name, or null when none can be resolved
   rating: number | null;
   replyStatus: string;
   sourceCreatedDate: string | null;
