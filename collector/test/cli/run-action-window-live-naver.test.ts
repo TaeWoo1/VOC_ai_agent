@@ -297,4 +297,16 @@ describe("run-action-window-live-naver — module source guard", () => {
   it("invokes main() only when run directly (import launches nothing)", () => {
     expect(/import\.meta\.url\s*===\s*pathToFileURL/.test(code)).toBe(true);
   });
+
+  /**
+   * The evidence surface a live run emits. `main()` needs a real browser, so the emission itself is
+   * asserted structurally here; the diagnostic's enums-only SHAPE is proven in `naver-driver.test.ts`.
+   * Without the readiness line every readiness HALT is indistinguishable on the wire (all flatten to
+   * UNSUPPORTED_STATE), which is what left the period/scope step unobservable.
+   */
+  it("emits the barrier + readiness evidence a live run is judged on", () => {
+    expect(/log\("aw\.live\.barrier",\s*\{\s*observed\s*\}\)/.test(code)).toBe(true);
+    expect(/log\("aw\.live\.readiness"/.test(code)).toBe(true);
+    expect(/prepareDiagnostic\(\)/.test(code)).toBe(true);
+  });
 });

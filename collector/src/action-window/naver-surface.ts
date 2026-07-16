@@ -28,7 +28,12 @@
 import { createHash } from "node:crypto";
 import type { SessionVerdict } from "../naver/session-verdict";
 import { planExportAction } from "../naver/export-classify";
-import { evaluateExportTargetReadiness, type ExportTargetReadiness } from "../naver/export-target-readiness";
+import {
+  traceExportTargetReadiness,
+  type ExportTargetReadiness,
+  type ExportTargetReadinessBranch,
+} from "../naver/export-target-readiness";
+import { diagnosePreClickSignals, type PreClickSignals } from "../naver/export-click-signals";
 import { findExportCandidates } from "../naver/review-export";
 import { naverSurfaceBlockerFor } from "./naver-session-precondition";
 import type { LocateResult, SurfaceProbeResult, VerifyResult } from "./engine";
@@ -54,15 +59,31 @@ export function targetSigFor(c: ExportCandidate): string {
 }
 
 /**
- * TEST-VISIBLE sanitized diagnostic of the last `prepareSurface` — fixed enums only. It preserves
- * the readiness distinction the wire deliberately flattens (benign EXPORT_TARGET_EMPTY vs the
- * conservative EXPORT_TARGET_UNKNOWN halt). Never transported, never persisted, never logged.
+ * Sanitized diagnostic of the last `prepareSurface` — fixed enums, booleans, and coarse buckets only.
+ * It preserves the readiness distinction the wire deliberately flattens (benign EXPORT_TARGET_EMPTY vs
+ * the conservative EXPORT_TARGET_UNKNOWN halt), and the precedence rung (`readinessBranch`) that the
+ * wire cannot express at all.
+ *
+ * **Never transported, never persisted — but logged, as fixed enums only, by the gated live CLI.**
+ * The "never logged" clause was relaxed deliberately (2026-07-16, Run 5 preparation): every readiness
+ * HALT flattens to `UNSUPPORTED_STATE` on the wire, so a live run could not distinguish a period/scope
+ * problem from any other and the period/scope step stayed unobservable. These fields are exactly what
+ * the sanitization contract permits (`collector/CLAUDE.md` §4.3 — categories, booleans, coarse
+ * buckets), carry no input text, and stay off the wire and out of the store. **The relaxation is to
+ * the log only; do not extend it to transport or persistence** — the FE has no blocker code for a
+ * period/scope halt, and giving it one is a governed contract change.
  */
 export interface NaverPrepareDiagnostic {
   verdict: SessionVerdict;
   readinessDecision?: ExportTargetReadiness["decision"];
   readinessState?: Extract<ExportTargetReadiness, { decision: "HALT" }>["state"];
   readinessReason?: ExportTargetReadiness["reason"];
+  /** The precedence rung that produced the decision — computed by the gate but previously discarded. */
+  readinessBranch?: ExportTargetReadinessBranch;
+  /** A date/range control already carries a value (best-effort; the period/scope evidence seam). */
+  selectedRangePresent?: boolean;
+  /** Coarse bucket of date/range-style controls present — never an exact count. */
+  dateRangeControlPresence?: PreClickSignals["dateRangeControlPresence"];
 }
 
 /**
@@ -78,11 +99,18 @@ export function naverSurfaceDecision(
   if (verdict !== "LOGGED_IN") {
     return { result: { ok: false, blockerCode: naverSurfaceBlockerFor(verdict) }, diagnostic: { verdict } };
   }
-  const readiness = evaluateExportTargetReadiness(html);
+  const { readiness, branch } = traceExportTargetReadiness(html);
+  // The period/scope seam: rungs 1-3 decide a populated grid before rung 5 ever evaluates a date
+  // range, so the range signals are read independently — otherwise a healthy surface reports nothing
+  // about period/scope and the step stays unobservable.
+  const preClick = diagnosePreClickSignals(html);
   const diagnostic: NaverPrepareDiagnostic = {
     verdict,
     readinessDecision: readiness.decision,
     readinessReason: readiness.reason,
+    readinessBranch: branch,
+    selectedRangePresent: preClick.selectedRangePresent,
+    dateRangeControlPresence: preClick.dateRangeControlPresence,
     ...(readiness.decision === "HALT" ? { readinessState: readiness.state } : {}),
   };
   if (readiness.decision !== "READY") {

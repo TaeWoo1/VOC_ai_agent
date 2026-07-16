@@ -388,6 +388,12 @@ async function main(): Promise<void> {
       status: view?.status,
       ...(view?.blocker ? { blockerCode: view.blocker.code } : {}),
     });
+    // The readiness evidence seam. The wire flattens EVERY readiness HALT to UNSUPPORTED_STATE, so
+    // without this a live run cannot distinguish a period/scope problem from any other cause — the
+    // gap that left the period/scope step unobservable. Fixed enums / booleans / coarse buckets only
+    // (see `NaverPrepareDiagnostic`); never transported, never persisted.
+    const diagnostic = assembled.driver.prepareDiagnostic();
+    if (diagnostic) log("aw.live.readiness", { ...diagnostic });
   } finally {
     try {
       await assembled?.driver.cleanup();

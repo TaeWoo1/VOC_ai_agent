@@ -31,9 +31,12 @@ here. Report it; do not silently edit it.
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
 5. [`r4-operator-runbook.md`](r4-operator-runbook.md) — **the only operator-facing doc here**; the other
-   entries are engineering records. Read it if a human is about to run an export: Phase A prep, the
-   **~60 s** click+confirm window, what a lapse costs, when to abort. **Grants nothing.**
-6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
+   entries are engineering records. Read it if a human is about to run an **export**: Phase A prep, the
+   click and confirm windows, what a lapse costs, when to abort. **Grants nothing.**
+   ⚠ **It describes the EXPORT pilot. Run 5 deliberately inverts its §3** (click, do NOT confirm) — that
+   choreography lives in Run 5's own dispatch record. **Do not reconcile the two.**
+6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`, `r4-run5-…`) for run-specific
+   choreography.
 
 ## State in one line
 
@@ -199,8 +202,38 @@ was stale. Now closed, offline, in one commit:
 - **The period/date step is UNOBSERVED.** It exists only as three words in §4 ("selects period/scope"), one
   CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live. Keep the §4
   obligation; invent no procedure.
+  **UPDATE 2026-07-16 — a measurement seam now exists, but the step is still UNOBSERVED.** The live CLI
+  logs `readinessBranch` / `selectedRangePresent` / `dateRangeControlPresence`, so Run 5 can *record* the
+  live period/scope state for the first time. **That is instrumentation, not observation, and it changes
+  nothing about the procedure rule** — `EXPORT_DATE_RANGE_REQUIRED` remains dead on the AW path (every
+  HALT flattens to `UNSUPPORTED_STATE`) and has still never fired live. **Invent no procedure until a run
+  reports one.**
 
-## Next slice — none chosen
+## Next slice — Run 5 (barrier + observation), PREPARED OFFLINE, awaiting a fresh G6
+
+**The offline half is DONE and held locally; the live half is NOT authorized.**
+[`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md) is the
+choreography + evidence sheet; the Run-5 G6 template is in [`r4-gate-record.md`](r4-gate-record.md).
+
+- **Run 5 is a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click +
+  confirm + ingest**; Run 5 is a real click that **deliberately never confirms**. **NON-MUTATING by
+  construction** (no download → no validate → no ingest), landing on Run 3's benign
+  `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. It still needs the **export-scoped G3 pause re-affirmation** — a
+  real click on a real control — and the read-only ☑ does not carry over.
+- **Why non-mutating is not politeness:** there is **no no-ingest mode**. `buildLiveRunDeps` wires the
+  real uploader unconditionally, `ingest` is non-optional, and the engine runs VALIDATE→INGEST with no
+  gate. **If the seller confirms, ingest is unconditional and irreversible.** Not confirming is the only
+  lever — the one Run 3 used.
+- **It answers two things:** does `USER_ACTION_OBSERVED` fire on a real click (the `40d7c53` fix is
+  offline-proven only, and the in-page listener has **never once fired live**); and what the live
+  period/scope state is. **`observed: false` is a finding, not a failure** — it would mean the listener
+  does not survive live NAVER and the fix is insufficient.
+- **Offline precondition — DONE:** the readiness diagnostic now carries `readinessBranch` (computed and
+  discarded before this slice) plus `selectedRangePresent` / `dateRangeControlPresence`, and the gated
+  live CLI logs it. Without it every readiness HALT flattens to `UNSUPPORTED_STATE` and period/scope
+  stays unobservable. ⚠ **`naver-surface.ts`'s "never logged" clause was relaxed deliberately** — to the
+  **log only**, fixed enums only; **never extend it to transport or persistence** (the FE has no
+  period/scope blocker code; giving it one is a governed contract change).
 
 Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into

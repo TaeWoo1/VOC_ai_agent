@@ -123,6 +123,9 @@ describe("NaverFixtureProbeDriver — upstream stages", () => {
       verdict: "LOGGED_IN",
       readinessDecision: "READY",
       readinessReason: "positive_rows",
+      readinessBranch: "data_rows_present",
+      selectedRangePresent: false,
+      dateRangeControlPresence: "none",
     });
 
     const located = await driver.locate();
@@ -196,6 +199,9 @@ describe("NaverFixtureProbeDriver — upstream stages", () => {
       readinessDecision: "HALT",
       readinessState: "EXPORT_TARGET_EMPTY",
       readinessReason: "zero_rows",
+      readinessBranch: "results_container_zero_rows",
+      selectedRangePresent: false,
+      dateRangeControlPresence: "none",
     });
 
     const ambiguous = new NaverFixtureProbeDriver("ambiguous-readiness");
@@ -205,7 +211,45 @@ describe("NaverFixtureProbeDriver — upstream stages", () => {
       readinessDecision: "HALT",
       readinessState: "EXPORT_TARGET_UNKNOWN",
       readinessReason: "ambiguous",
+      readinessBranch: "ambiguous_no_signal",
+      selectedRangePresent: false,
+      dateRangeControlPresence: "none",
     });
+  });
+
+  /**
+   * The period/scope evidence seam (Run 5). The wire flattens EVERY readiness HALT to
+   * UNSUPPORTED_STATE, so `readinessBranch` is the only thing that can say WHICH rung fired — and it
+   * was computed and discarded before this slice. `selectedRangePresent` is read independently of the
+   * ladder because rungs 1-3 decide a populated grid before the date-range rung ever evaluates.
+   */
+  it("carries the precedence rung and the period/scope signals — the wire cannot express either", async () => {
+    const driver = new NaverFixtureProbeDriver("normal");
+    await driver.prepareSurface();
+    const diagnostic = driver.prepareDiagnostic()!;
+
+    // The rung is a fixed enum and distinguishes causes the blocker code collapses together.
+    expect(diagnostic.readinessBranch).toBe("data_rows_present");
+    expect(diagnostic.readinessDecision).toBe("READY");
+    // Period/scope is reported even though a populated grid decided readiness at rung 3.
+    expect(diagnostic.selectedRangePresent).toBe(false);
+    expect(diagnostic.dateRangeControlPresence).toBe("none");
+  });
+
+  it("every diagnostic field is a fixed enum, boolean, or coarse bucket — never page text", async () => {
+    for (const fixture of ["normal", "empty-target", "ambiguous-readiness"] as const) {
+      const driver = new NaverFixtureProbeDriver(fixture);
+      await driver.prepareSurface();
+      const diagnostic = driver.prepareDiagnostic()!;
+      // The diagnostic is logged by the gated live CLI, so no value may carry surface content.
+      for (const [key, value] of Object.entries(diagnostic)) {
+        expect(["string", "boolean"], `${fixture}.${key}`).toContain(typeof value);
+        if (typeof value === "string") {
+          // Fixed enums are short, lower_snake/UPPER_SNAKE tokens — never markup, wording, or a URL.
+          expect(value, `${fixture}.${key}`).toMatch(/^[A-Za-z_]{1,40}$/);
+        }
+      }
+    }
   });
 });
 
