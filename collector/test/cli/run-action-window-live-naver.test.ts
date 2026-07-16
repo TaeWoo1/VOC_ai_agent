@@ -26,6 +26,7 @@ import { defaultOperationRunDirFor } from "../../src/action-window/run-store";
 import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../../src/action-window/naver-surface";
 import { createLoopbackChannel } from "../../../contracts/action-window/v1/transport";
 import { createPersistentRunSession } from "../../src/action-window/run-lifecycle";
+import { loadOperationRun } from "../../src/action-window/run-store";
 import type { ProbeDriver } from "../../src/action-window/session";
 import type { SurfaceProbeResult } from "../../src/action-window/engine";
 
@@ -114,6 +115,77 @@ class FakeProbeDriver implements ProbeDriver {
     this.calls.push("cleanup");
   }
 }
+
+/**
+ * A driver whose `waitForUserAction` resolves only when the test says so — the REAL live timing, in
+ * which the seller acts SECONDS after the barrier is reached. `FakeProbeDriver` resolves immediately,
+ * i.e. while the run is still parked, and that timing is precisely what hid the observation defect:
+ * every existing test reported the action at a moment the live path can never reproduce.
+ */
+class DeferredActionProbeDriver extends FakeProbeDriver {
+  private resolveAction: ((observed: boolean) => void) | null = null;
+  override async waitForUserAction(): Promise<boolean> {
+    this.calls.push("observe");
+    return new Promise<boolean>((resolve) => {
+      this.resolveAction = resolve;
+    });
+  }
+  /** The seller acts, late. Mirrors a real observation; the Runtime still never simulates the click. */
+  completeUserAction(observed = true): void {
+    this.resolveAction?.(observed);
+    this.resolveAction = null;
+  }
+}
+
+const eventTypes = (client: LiveRunOperatorClient): string[] =>
+  client.serverFrames.flatMap((f) => (f.kind === "aw_event" ? [f.event.type] : []));
+
+describe("run-action-window-live-naver — the human barrier is real (regression: observation was never recorded live)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  const openRun = (driver: ProbeDriver, runId: string) => {
+    const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
+    dirs.push(dir);
+    const channel = createLoopbackChannel();
+    const opened = createPersistentRunSession(
+      { dir, transport: channel.server, driver },
+      { runId, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    return { opened, client: new LiveRunOperatorClient(channel.client, runId), dir, runId };
+  };
+
+  it("an action performed AFTER the barrier is still observed and recorded", async () => {
+    const driver = new DeferredActionProbeDriver();
+    const { opened, client, dir, runId } = openRun(driver, "run_late01late01");
+
+    const run = driveOneRun(opened.session, client, { observeTimeoutMs: 5_000 });
+    // The seller acts late — long after the run parked. Before this fix, driveOneRun had already
+    // rechecked (~1 s live) and the stage had left WAIT_FOR_USER_ACTION, so this was dropped.
+    setTimeout(() => driver.completeUserAction(), 20);
+    const view = await run;
+
+    expect(view?.status).toBe("COMPLETED");
+    expect(eventTypes(client)).toContain("USER_ACTION_OBSERVED");
+    expect(loadOperationRun(dir, runId)!.humanCheckpoint).toMatchObject({ reached: true, observed: true });
+  });
+
+  it("observe-timeout still completes on the armed download — observation never gates completion", async () => {
+    // The seller's action is NEVER reported (e.g. the in-page listener was lost to an SPA re-render),
+    // but the download fired. Verification is the completion authority; observation is an audit record.
+    const driver = new DeferredActionProbeDriver();
+    const { opened, client, dir, runId } = openRun(driver, "run_noobs1noobs1");
+
+    const view = await driveOneRun(opened.session, client, { observeTimeoutMs: 20 });
+
+    expect(view?.status).toBe("COMPLETED");
+    expect(eventTypes(client)).not.toContain("USER_ACTION_OBSERVED");
+    expect(loadOperationRun(dir, runId)!.humanCheckpoint).toMatchObject({ reached: true, observed: false });
+  });
+});
 
 describe("run-action-window-live-naver — driveOneRun orchestration (loopback, fake driver, no browser)", () => {
   const dirs: string[] = [];
@@ -224,5 +296,17 @@ describe("run-action-window-live-naver — module source guard", () => {
 
   it("invokes main() only when run directly (import launches nothing)", () => {
     expect(/import\.meta\.url\s*===\s*pathToFileURL/.test(code)).toBe(true);
+  });
+
+  /**
+   * The evidence surface a live run emits. `main()` needs a real browser, so the emission itself is
+   * asserted structurally here; the diagnostic's enums-only SHAPE is proven in `naver-driver.test.ts`.
+   * Without the readiness line every readiness HALT is indistinguishable on the wire (all flatten to
+   * UNSUPPORTED_STATE), which is what left the period/scope step unobservable.
+   */
+  it("emits the barrier + readiness evidence a live run is judged on", () => {
+    expect(/log\("aw\.live\.barrier",\s*\{\s*observed\s*\}\)/.test(code)).toBe(true);
+    expect(/log\("aw\.live\.readiness"/.test(code)).toBe(true);
+    expect(/prepareDiagnostic\(\)/.test(code)).toBe(true);
   });
 });

@@ -174,6 +174,41 @@ This template, unfilled, **authorizes nothing** — it grants no live NAVER cont
 records a filled instance in the dispatching turn. See the pre-dispatch runbook below for the full
 pre-flight checklist.
 
+**Run-5 G6 (barrier + observation) — ☐ BLANK TEMPLATE (a blank template grants nothing).**
+A **third scope**, distinct from both templates above: the read-only-probe G6 was a **no-click** probe;
+the export-pilot G6 is **click + confirm + ingest**. Run 5 is a real click on a real control that
+**deliberately stops short of producing data**. Because the seller performs a real platform action it
+still requires the **export-scoped G3 pause re-affirmation** under the full §4 boundary — the read-only
+☑ does not carry over. Choreography:
+[`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md).
+
+```
+R4 live-run approval — RUN 5 BARRIER + OBSERVATION (fill in the dispatching turn)
+- channel:            NAVER SmartStore review export
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               <YYYY-MM-DD>
+- operator:           <operator>
+- run scope:          barrier + observation. The seller clicks the real export control and
+                      DELIBERATELY DOES NOT CONFIRM the resulting dialog — the ~60 s detect window is
+                      allowed to lapse. NON-MUTATING by construction: no download → no validate → no
+                      ingest. Full §4 boundary. NOT read-only (a real click occurs), NOT unattended,
+                      NOT an export pilot.
+- expected terminal:  FAILED · DOWNLOAD_TIMEOUT · progress 2-of-3 — the Run 3 (§8-16) shape.
+                      A COMPLETED run means the seller confirmed, the run MUTATED, and the scope was
+                      breached: report it plainly.
+- §7 abort criteria:  acknowledged (ambiguous/missing/drifted target, unexpected post-state, session
+                      invalid → fail closed, zero clicks; operator abort on withdrawn consent /
+                      UNRECOGNIZED dialog / anti-abuse challenge). The expected export confirmation
+                      dialog is NOT an abort trigger (§7 carve-out); NOT confirming it is the SCOPE,
+                      not an abort.
+- G2/G3/G5 state:     G2 ✅ recorded · G3 ☐ RE-AFFIRMED for a real-click run (§9-3 pause lift under
+                      full §4 — the read-only ☑ does NOT carry over) · G5 ✅ logged
+- P6 state:           ☐ signed for this run
+- precondition:       the readiness-diagnostic offline slice merged + verified (G4: live is never a
+                      code path's first execution). Without it the run emits nothing about
+                      period/scope and cannot answer its own second question.
+```
+
 ---
 
 ## Export-pilot pre-dispatch runbook — NOT YET AUTHORIZED (grants nothing)

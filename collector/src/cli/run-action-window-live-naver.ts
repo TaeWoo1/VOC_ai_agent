@@ -49,6 +49,7 @@ import {
   type ActionWindowRunView,
   type CommandEnvelope,
   type CommandType,
+  type EventType,
 } from "../../../contracts/action-window/v1/index";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../action-window/naver-surface";
@@ -138,6 +139,8 @@ export class LiveRunOperatorClient {
   view: ActionWindowRunView | undefined;
   readonly serverFrames: AwServerFrame[] = [];
   private cmdSeq = 0;
+  private readonly seenEvents = new Set<EventType>();
+  private readonly eventWaiters = new Map<EventType, Array<() => void>>();
 
   constructor(
     private readonly transport: AwClientTransport,
@@ -146,6 +149,38 @@ export class LiveRunOperatorClient {
     transport.subscribe((frame) => {
       this.serverFrames.push(frame);
       if (frame.kind === "aw_view") this.view = frame.view;
+      if (frame.kind === "aw_event") this.recordEvent(frame.event.type);
+    });
+  }
+
+  private recordEvent(type: EventType): void {
+    this.seenEvents.add(type);
+    const waiters = this.eventWaiters.get(type);
+    if (!waiters) return;
+    this.eventWaiters.delete(type);
+    for (const resolve of waiters) resolve();
+  }
+
+  /**
+   * Resolve once `type` has been emitted (immediately if it already has), or `false` on deadline.
+   * The FE stand-in waits for the run's own event stream rather than assuming the seller has acted.
+   */
+  awaitEvent(type: EventType, timeoutMs: number): Promise<boolean> {
+    if (this.seenEvents.has(type)) return Promise.resolve(true);
+    return new Promise<boolean>((resolveOuter) => {
+      const timer = setTimeout(() => {
+        const waiters = this.eventWaiters.get(type)?.filter((w) => w !== onEvent);
+        if (waiters?.length) this.eventWaiters.set(type, waiters);
+        else this.eventWaiters.delete(type);
+        resolveOuter(false);
+      }, timeoutMs);
+      const onEvent = (): void => {
+        clearTimeout(timer);
+        resolveOuter(true);
+      };
+      const existing = this.eventWaiters.get(type);
+      if (existing) existing.push(onEvent);
+      else this.eventWaiters.set(type, [onEvent]);
     });
   }
 
@@ -166,18 +201,34 @@ export class LiveRunOperatorClient {
 
 /**
  * Drive exactly ONE supervised run to a terminal/parked state. START_RUN prepares/locates/highlights
- * and then the OBSERVE step blocks (through `whenSettled`) on the SELLER's real action — the live
- * driver never simulates it. Once the run is back at the human barrier with the action observed,
- * REQUEST_STEP_RECHECK runs verify → detect → validate → ingest. A fail-closed START (hostile session,
- * ambiguous/missing target) lands terminal and is never rechecked. Returns the final sanitized view.
+ * and parks at the human barrier; the SELLER then acts on the platform's own control (the live driver
+ * never simulates it) and REQUEST_STEP_RECHECK runs verify → detect → validate → ingest. A fail-closed
+ * START (hostile session, ambiguous/missing target) lands terminal and is never rechecked. Returns the
+ * final sanitized view.
+ *
+ * The barrier wait is the whole point of this function. `whenSettled()` resolves as soon as the drive
+ * chain rests — the observation runs as a separate, untracked task (`session.ts`) — so rechecking on
+ * settle alone would fire ~1 s after the highlight, while the seller is still reading the screen. The
+ * stage would leave WAIT_FOR_USER_ACTION before their action landed, the session's stage guard would
+ * drop the observation, and USER_ACTION_OBSERVED would never be recorded. So we wait on the run's own
+ * event stream instead.
+ *
+ * On observe-timeout we recheck ANYWAY, deliberately: observation is an audit record, NOT the
+ * completion authority (verification is), and the in-page click listener has never been proven on a
+ * live run. `armObserve` arms download detection with `timeout: 0`, so a download that already fired
+ * is still detected here — a missed observation costs latency, never the run.
  */
 export async function driveOneRun(
   session: ActionWindowSession,
   client: LiveRunOperatorClient,
+  opts?: { observeTimeoutMs?: number },
 ): Promise<ActionWindowRunView | undefined> {
   client.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
   await session.whenSettled();
   if (client.view?.status === "WAITING_FOR_HUMAN") {
+    const observed = await client.awaitEvent("USER_ACTION_OBSERVED", opts?.observeTimeoutMs ?? OBSERVE_TIMEOUT_MS);
+    log("aw.live.barrier", { observed });
+    await session.whenSettled();
     client.send("REQUEST_STEP_RECHECK");
     await session.whenSettled();
   }
@@ -337,6 +388,12 @@ async function main(): Promise<void> {
       status: view?.status,
       ...(view?.blocker ? { blockerCode: view.blocker.code } : {}),
     });
+    // The readiness evidence seam. The wire flattens EVERY readiness HALT to UNSUPPORTED_STATE, so
+    // without this a live run cannot distinguish a period/scope problem from any other cause — the
+    // gap that left the period/scope step unobservable. Fixed enums / booleans / coarse buckets only
+    // (see `NaverPrepareDiagnostic`); never transported, never persisted.
+    const diagnostic = assembled.driver.prepareDiagnostic();
+    if (diagnostic) log("aw.live.readiness", { ...diagnostic });
   } finally {
     try {
       await assembled?.driver.cleanup();

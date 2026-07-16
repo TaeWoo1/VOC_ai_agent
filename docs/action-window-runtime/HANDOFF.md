@@ -31,9 +31,12 @@ here. Report it; do not silently edit it.
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
 5. [`r4-operator-runbook.md`](r4-operator-runbook.md) — **the only operator-facing doc here**; the other
-   entries are engineering records. Read it if a human is about to run an export: Phase A prep, the
-   **~60 s** click+confirm window, what a lapse costs, when to abort. **Grants nothing.**
-6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`) for run-specific choreography.
+   entries are engineering records. Read it if a human is about to run an **export**: Phase A prep, the
+   click and confirm windows, what a lapse costs, when to abort. **Grants nothing.**
+   ⚠ **It describes the EXPORT pilot. Run 5 deliberately inverts its §3** (click, do NOT confirm) — that
+   choreography lives in Run 5's own dispatch record. **Do not reconcile the two.**
+6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`, `r4-run5-…`) for run-specific
+   choreography.
 
 ## State in one line
 
@@ -62,44 +65,69 @@ NOT a §7 abort trigger**; §7's "any *unrecognized* prompt/dialog → abort" st
 Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3; normative:
 `r4-preparation.md` §7.
 
-**Two timing facts a cold session re-derives WRONG (verified in code 2026-07-15, not by a run):**
+**Timing facts a cold session re-derives WRONG (code-verified, not run-verified):**
 
-- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min is COSMETIC on this path — never quote it as the human budget.**
-  `waitForUserAction` runs un-awaited and its result is discarded once the stage has moved on
-  (`session.ts:236`), because `driveOneRun` auto-sends `REQUEST_STEP_RECHECK` the moment the run parks.
-  So `detectDownload` is already racing its 60 s timer ~1 s after the highlight appears. **The only number
-  that can fail a run is ~60 s** (`DOWNLOAD_TIMEOUT_MS`), and it covers click **+** confirm. The early
-  `timeout: 0` arming (`naver-live-driver.ts`) means an early click is never missed.
+- ✅ **RESOLVED 2026-07-16 — the open `USER_ACTION_OBSERVED` question is ANSWERED, and it was a defect.**
+  `humanCheckpoint.observed` was **`false` on every live run to date, including Run 4.** The chain:
+  `session.ts:195` voids `watchUserAction()` (untracked by `autoBusy`, so `whenSettled()` returns at
+  once) → `driveOneRun` sent `REQUEST_STEP_RECHECK` **~1 s after the highlight** → `beginVerify()`
+  (`engine.ts:444-448`) left `WAIT_FOR_USER_ACTION` without requiring `observed` → when the seller acted
+  20–40 s later, `session.ts:236`'s stage guard dropped it. **Fixed OFFLINE this slice** (`driveOneRun`
+  now waits on the run's own `USER_ACTION_OBSERVED` event before rechecking). **The engine/session/
+  persistence wiring was always correct — only the CLI's FE stand-in mis-timed.**
+  ⚠ **Offline-fixed ≠ live-proven. The fix has never run against live NAVER; it needs a fresh G6.**
+- ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min WAS cosmetic; after the fix it is load-bearing.** The human budget is
+  now **two windows, not one**: the seller acts on the highlighted control within the observe window,
+  **then** confirms the dialog within ~60 s (`DOWNLOAD_TIMEOUT_MS`), which now starts at the click rather
+  than at the highlight. **Strictly more generous than Run 4's combined ~60 s** — so Run 4's timing is no
+  longer the live truth, and the operator must be told before the next run.
+- ⚠ **Observation is an audit record, NOT the completion authority — keep it that way.** `driveOneRun`
+  rechecks **anyway** on observe-timeout, deliberately: the in-page listener (`observer.ts:21-28`) has
+  never fired on a live run, and `armObserve`'s `timeout: 0` arming means an already-fired download is
+  still detected. A lost observation costs latency, never the run. **Do not gate `beginVerify()` on
+  `observed`** — that would make completion depend on an unproven live mechanism and contradict
+  "observation ≠ completion".
+- ⚠ **Why the tests missed it — the transferable part.** `SyntheticProbeDriver.completeUserAction()`
+  reports the action **while the run is still parked**, a timing the live path cannot reproduce, so
+  `run-action-window-live-naver-browser.test.ts:202`'s `observed: true` passed against a path that never
+  worked. **Green tests certified an impossible ordering.** The new
+  `DeferredActionProbeDriver` reports it late, as a real seller does; that test fails against everything
+  before this slice.
 - ⚠ **The Runtime never observes the confirmation.** `observer.ts` listens only on the tagged export
-  control; the dialog is outside it. **The download firing is the sole evidence of step 2.**
-  ❓ **Open, NOT determinable from code or docs:** whether `USER_ACTION_OBSERVED` /
-  `humanCheckpoint.observed` is therefore ever recorded on a live run — §4 claims the Runtime "observes the
-  user's action" as part of the audit trail. If it is not, that is a **defect, not a doc problem**.
-  Unreviewed; needs engineering + PO.
+  control; the dialog is outside it. **The download firing is the sole evidence of step 2** — unchanged
+  by the fix, which only makes step 1 observable.
 
 ## Git state
 
-- **`origin/main` = `d7d1161`** (PR #261 merged, 2026-07-16). **`main` is fully merged in** via `d87ec17`
-  (normal merge commit, 2026-07-16) — the branch is **6 ahead, 0 behind**.
+- **`origin/main` = `31b3e44`** (PR #264 merged). The branch is **4 ahead / 0 behind** — `origin/main`
+  was merged in on 2026-07-16 as **`fb98f1b`** (normal merge commit; clean, `ort`).
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
-  > `git log --oneline origin/main..HEAD`**; the commit *list* below is the durable claim.
-- **6 local-only commits held** (`git log origin/main..HEAD`), accumulation cadence, **none pushed**:
-  `cb081e0` (this file's git state + baseline after #260) · `4c6d1ac` (R4 operator runbook + §7
-  expected-dialog carve-out) · `15e6fe3` (workstream routers carry paths, not state) · `1b9f582`
-  (README §5 rank 6 — the shared contract exists) · `5667ed4` (this file's git state + last slice) ·
-  `d87ec17` (merge of `main`/#261).
-  - **Docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote **`CONFIRM_PROMPT`** in
-    `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only; no behavior, no
-    timers.** ⚠ **`5667ed4` claimed this batch was "docs/skill only, no `collector/src`" — that was
-    FALSE**, and it contradicted this file's own §"Last slice" detail, which recorded the CLI change
-    correctly all along. Corrected here. **Verify with `git diff --name-only origin/main..HEAD`; never
-    assert the file set from memory.**
-- **#261 is now IN this branch** (`f83be19` — bridge: sanitize untrusted approval fields + bound pending
-  pairings). It landed on `main` mid-batch; the two sides were **disjoint (zero file overlap)**, so the
-  merge was clean. Merge-base was `09f2411`.
-  **Syncing remains an operator decision — do not fetch-and-merge on your own initiative.**
-- The six commits held by the *previous* batch all landed via **#260**: `45ed82c` (upload log
+  > `git log --oneline origin/main..HEAD`**; that is the live measure.
+- **FOUR local-only commits, none pushed** (verified 2026-07-16 via `git ls-remote` — the remote branch
+  is at `b3a9644`, not inferred from this session's actions):
+  `ca4808e` (this file's git state after #263) · `40d7c53` (the human-barrier fix — `driveOneRun` now
+  waits on `USER_ACTION_OBSERVED`) · `5d57fde` (readiness diagnostic + the Run 5 boundary) ·
+  `fb98f1b` (merge of `main`/#264).
+  - **This batch DOES change `collector/src`** — unlike the #263 batch. `40d7c53` changed
+    `cli/run-action-window-live-naver.ts` (behaviour: barrier timing); `5d57fde` changed that file plus
+    `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
+    `git diff --name-only origin/main...HEAD`; never assert it from memory** — the #263 batch's
+    "docs/skill only" claim was FALSE and shipped in `5667ed4`'s own commit message.
+- ⚠ **`main` had ALREADY moved to `31b3e44` before this session fetched** — the local ref knew and
+  nothing surfaced it, so this file's `ff6eef5` was stale *while Run 5 was being planned against it*.
+  A recorded `origin/main` SHA is a snapshot, not a fact. **Re-check with `git fetch` + `git rev-list
+  --left-right --count origin/main...HEAD` before trusting the line above.**
+- ⚠ **"Held locally" ≠ "not pushed" — they are different facts, and this file conflated them.**
+  Before #263, this section said the batch was **"none pushed"**. That was **FALSE**: the feature branch
+  had already been pushed to `origin/feat/r4-supervised-channel-runtime`, by something other than the
+  session that wrote the claim (no `post-commit` hook exists; the remote-tracking reflog shows a single
+  `update by push`). `git log origin/main..HEAD` measures **distance from `main`** — it says nothing
+  about whether the *branch* is on the remote. **To claim "not pushed", check
+  `git ls-remote origin refs/heads/<branch>`. Never infer push state from your own actions.**
+- **Syncing and pushing remain operator decisions — do not fetch-and-merge or push on your own
+  initiative.**
+- The six commits held by the *batch before that* all landed via **#260**: `45ed82c` (upload log
   sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
   corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
   (`current_state` §7), `49dc847` (capability matrix).
@@ -108,9 +136,16 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-  **Not currently firing** — `d87ec17` merged `main` in, so `origin/main..HEAD` and `origin/main...HEAD`
-  agree while that holds. **The warning stands: it re-arms the moment `main` moves again.**
-- Recent merges: **#261** (bridge abuse hardening, `d7d1161` — **merged into this branch via `d87ec17`**),
+  ⚠ **LIVE — this is firing now.** `main` moved to #264 while this batch was held, so the branch is no
+  longer synced and the two forms disagree. **Use the three-dot form for any PR preview.** `main` has now
+  moved mid-batch **four times in three days** (#261, #262, #263, #264). Assume it will happen again.
+- Recent merges: **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision, `31b3e44` —
+  **backend Java + `.github/workflows/` only**; landed on `main` while this batch was held and arrived
+  here via the `fb98f1b` merge; does **not** touch `collector/`, so the baseline below is unaffected),
+  **#263** (R4 operator guidance + routing cleanup, `ff6eef5`),
+  **#262** (export→report chain verification, `3b668d7` — **backend Java only**; landed on `main` while
+  #263 was open and arrived here on the ff-sync; does **not** touch `collector/`, so the baseline below
+  is unaffected), **#261** (bridge abuse hardening, `d7d1161` — reached this branch via `d87ec17`),
   **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
   pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
   landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
@@ -176,8 +211,38 @@ was stale. Now closed, offline, in one commit:
 - **The period/date step is UNOBSERVED.** It exists only as three words in §4 ("selects period/scope"), one
   CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live. Keep the §4
   obligation; invent no procedure.
+  **UPDATE 2026-07-16 — a measurement seam now exists, but the step is still UNOBSERVED.** The live CLI
+  logs `readinessBranch` / `selectedRangePresent` / `dateRangeControlPresence`, so Run 5 can *record* the
+  live period/scope state for the first time. **That is instrumentation, not observation, and it changes
+  nothing about the procedure rule** — `EXPORT_DATE_RANGE_REQUIRED` remains dead on the AW path (every
+  HALT flattens to `UNSUPPORTED_STATE`) and has still never fired live. **Invent no procedure until a run
+  reports one.**
 
-## Next slice — none chosen
+## Next slice — Run 5 (barrier + observation), PREPARED OFFLINE, awaiting a fresh G6
+
+**The offline half is DONE and held locally; the live half is NOT authorized.**
+[`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md) is the
+choreography + evidence sheet; the Run-5 G6 template is in [`r4-gate-record.md`](r4-gate-record.md).
+
+- **Run 5 is a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click +
+  confirm + ingest**; Run 5 is a real click that **deliberately never confirms**. **NON-MUTATING by
+  construction** (no download → no validate → no ingest), landing on Run 3's benign
+  `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. It still needs the **export-scoped G3 pause re-affirmation** — a
+  real click on a real control — and the read-only ☑ does not carry over.
+- **Why non-mutating is not politeness:** there is **no no-ingest mode**. `buildLiveRunDeps` wires the
+  real uploader unconditionally, `ingest` is non-optional, and the engine runs VALIDATE→INGEST with no
+  gate. **If the seller confirms, ingest is unconditional and irreversible.** Not confirming is the only
+  lever — the one Run 3 used.
+- **It answers two things:** does `USER_ACTION_OBSERVED` fire on a real click (the `40d7c53` fix is
+  offline-proven only, and the in-page listener has **never once fired live**); and what the live
+  period/scope state is. **`observed: false` is a finding, not a failure** — it would mean the listener
+  does not survive live NAVER and the fix is insufficient.
+- **Offline precondition — DONE:** the readiness diagnostic now carries `readinessBranch` (computed and
+  discarded before this slice) plus `selectedRangePresent` / `dateRangeControlPresence`, and the gated
+  live CLI logs it. Without it every readiness HALT flattens to `UNSUPPORTED_STATE` and period/scope
+  stays unobservable. ⚠ **`naver-surface.ts`'s "never logged" clause was relaxed deliberately** — to the
+  **log only**, fixed enums only; **never extend it to transport or persistence** (the FE has no
+  period/scope blocker code; giving it one is a governed contract change).
 
 Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into
@@ -209,10 +274,13 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2855 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`d87ec17`
-  tree (i.e. **including #261**). Lineage, all accounted for — **no unexplained drift**: 2761 → **2837**
-  (+76 from #259) → **2855** (+18 from #261). The 4 docs-only commits before the merge held 2837 exactly;
-  for a docs slice, **any movement is a red flag, not drift**.
+- Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`fb98f1b`
+  merged tree (i.e. **including #264**). Lineage, every delta attributed — **no unexplained drift**:
+  2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
+  regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests). **#264 added 0** — it
+  is backend Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the
+  count not at all. **A docs-only or backend-only change that moves this number is a red flag, not
+  drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
