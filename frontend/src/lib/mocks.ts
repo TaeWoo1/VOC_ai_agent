@@ -739,10 +739,21 @@ export function mockAttentionItems(
       "사이즈 문의드려요 [번호] 주문 건입니다",
       null,
     ];
+    // Display names only — never a SKU/상품번호, matching what the backend will send.
+    // One null so the demo exercises the 상품명 미상 placeholder path too; it does not
+    // line up with the null preview (n % 4 vs n % 3), so a row can lack one and not
+    // the other, as in real data.
+    const productNames = [
+      "베이직 코튼 티셔츠 화이트",
+      "가을 니트 가디건 CHARCOAL",
+      null,
+      "리넨 와이드 팬츠 M",
+    ];
     return {
       channelCode: "CAFE24",
       channelNameKo: "카페24",
       sourceType,
+      productName: productNames[n % productNames.length],
       rating,
       replyStatus: isReview ? "UNKNOWN" : replyStatus,
       sourceCreatedDate: `2026-05-${String(28 - (n % 28)).padStart(2, "0")}`,

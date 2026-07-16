@@ -1,15 +1,28 @@
 import type { OperatorVocItem } from "../lib/types";
-import { previewText, replyStatusLabel } from "../lib/vocItems";
+import { previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
 
-// One drill-down row behind an attention signal: reply chip, ★rating, dates, and a
-// sanitized preview line. The preview is produced/redacted by the backend — this
-// only renders it, or a neutral placeholder when none is available. No raw text.
+// One drill-down row behind an attention signal: the product it concerns, a reply
+// chip, ★rating, dates, and a sanitized preview line. The preview is produced/redacted
+// by the backend — this only renders it, or a neutral placeholder when none is
+// available. No raw text.
+//
+// The product is a display NAME only — the backend sends no product identifier here —
+// so it reads as the row's subject and is deliberately not a link or a routing target.
 
 export function VocItemCard({ item }: { item: OperatorVocItem }) {
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
+  const product = productLabel(item.productName);
   return (
     <li className="flex flex-col gap-2 py-3">
+      {/* Subject line. The visually-redundant prefix is sr-only so the placeholder
+          ("상품명 미상") is not announced as a bare, context-free string. */}
+      <p
+        className={`text-sm font-semibold ${product.isPlaceholder ? "text-muted italic font-normal" : "text-ink"}`}
+      >
+        <span className="sr-only">상품: </span>
+        {product.text}
+      </p>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-3">
           <span

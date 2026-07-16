@@ -1,6 +1,6 @@
 // Pure helpers for the attention-signal drill-down. Kept out of the components so
 // the param derivation, list-key stability, and reply-status labeling can be
-// unit-tested without a DOM (the repo has no DOM test harness — see attention.ts).
+// unit-tested as plain functions, independent of any rendering.
 
 import type { AttentionSignal, OperatorVocItem } from "./types";
 
@@ -61,4 +61,33 @@ export function previewText(safePreview: string | null): PreviewText {
     return { text: safePreview, isPlaceholder: false };
   }
   return { text: PREVIEW_PLACEHOLDER, isPlaceholder: true };
+}
+
+/**
+ * Frontend-owned fallback when a VOC row carries no resolvable product name.
+ *
+ * Says the NAME is unknown — not that the product is missing. The backend's null
+ * means "no name is available", never "this row has no product": a Cafe24 community
+ * article has a real product its store simply cannot name. Wording that implied the
+ * product itself was absent (e.g. "상품 미지정") would misreport that as an empty
+ * row and quietly contradict the DTO's contract. Copy is owned here, never sent by
+ * the server.
+ */
+export const PRODUCT_PLACEHOLDER = "상품명 미상";
+
+export interface ProductLabel {
+  text: string;
+  isPlaceholder: boolean;
+}
+
+// Display name → label, mirroring previewText. `productName` is a name and never an
+// identifier (the backend exposes no productId/sku/productNo/productRef here and
+// withholds any name equal to its own SKU), so it is rendered as-is: not truncated,
+// not redacted, not linked. Null OR an empty/whitespace string → the placeholder,
+// since a blank name is no more nameable than a missing one.
+export function productLabel(productName: string | null): ProductLabel {
+  if (productName != null && productName.trim() !== "") {
+    return { text: productName.trim(), isPlaceholder: false };
+  }
+  return { text: PRODUCT_PLACEHOLDER, isPlaceholder: true };
 }
