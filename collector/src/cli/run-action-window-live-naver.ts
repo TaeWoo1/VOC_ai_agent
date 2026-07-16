@@ -268,7 +268,18 @@ export async function driveOneRun(
 ): Promise<ActionWindowRunView | undefined> {
   client.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
   await session.whenSettled();
-  if (client.view?.status === "WAITING_FOR_HUMAN") {
+  // WAITING_FOR_HUMAN is now TWO different barriers, and only one of them is ours to wait on. A recovery
+  // park (login/reconnect) is also WAITING_FOR_HUMAN, but nothing was located, highlighted, or armed —
+  // so USER_ACTION_OBSERVED can never fire there. Waiting anyway would burn the full observe window on
+  // the one failure mode that used to fail fast, AND log an `aw.live.barrier` reading for a barrier the
+  // run never reached. The discriminator is the blocker: a blocker is set only by fail() (→ FAILED) and
+  // park(), and a successful re-probe clears it before LOCATE, so the export barrier always waits
+  // UNBLOCKED. If that ever stops holding, this returns early rather than waiting — the safe direction.
+  //
+  // A parked run simply returns its view. Driving the recovery (prompt → seller logs in → recheck) is
+  // deliberately NOT here: `main()`'s finally closes the browser as soon as this returns.
+  const atExportBarrier = client.view?.status === "WAITING_FOR_HUMAN" && !client.view.blocker;
+  if (atExportBarrier) {
     const observed = await client.awaitEvent("USER_ACTION_OBSERVED", opts?.observeTimeoutMs ?? OBSERVE_TIMEOUT_MS);
     log("aw.live.barrier", { observed });
     await session.whenSettled();

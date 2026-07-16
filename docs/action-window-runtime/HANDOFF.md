@@ -26,7 +26,8 @@ here. Report it; do not silently edit it.
 1. [`current-state.md`](current-state.md) — the living handoff state. ⚠ Its `updated at:` header still says
    **2026-07-13**, but its bullets carry `UPDATE` segments through 2026-07-15. **Trust the UPDATE segments,
    not the header date.** The bullets are long and accrete rather than being rewritten.
-2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4.
+2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4; §8-18 is
+   Run 5 (the last live run); §8-19 (A1) and §8-20 (A2-B) are **offline** slices, live-verified by nothing.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
@@ -293,6 +294,34 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
   enums only; **never extend it to transport or persistence** (the FE has no period/scope blocker code;
   giving it one is a governed contract change).
 
+## Recoverable login parks — A2-B, offline, 2026-07-16 ([D-028](decisions.md), §8-20)
+
+**`LOGIN_REQUIRED` / `SESSION_EXPIRED` no longer kill the run.** They **park**: `WAITING_FOR_HUMAN`,
+`recoverable: true`, `REQUEST_STEP_RECHECK` offered, `0-of-3`, no `RUN_FAILED`. A recheck re-runs the **real**
+`prepareSurface` probe; only that probe clears the blocker — a human saying "I logged in" never does.
+`UNSUPPORTED_STATE` stays terminal **by construction** (exhaustive switch ⇒ a 4th code is a compile error).
+**Zero contract / FE / backend / schema change.**
+
+- ⚠ **`recoverable` was a lie until this slice, and the FE dutifully rendered it.** `recoverable: true` was
+  produced **nowhere** in production code; the field carried exactly one value while `resumeStateFor` separately
+  and correctly classified those runs `RESUME_FROM_FAILURE`. **If a doc or a memory says "recoverable is
+  hardcoded false", that is now stale.**
+- ⚠ **The recovery is proven OFFLINE ONLY, over the loopback.** The **CLI cannot exercise it** — `main()`'s
+  `finally` closes the browser the instant `driveOneRun` returns, so the seller gets no time to log in. Driving
+  the recovery loop from the CLI is **A3**. The FE/Bridge path is the one that works today, and its affordance
+  (`HumanCheckpointCard` + `copy.ts`) was **already built and waiting**.
+- ⚠ **KNOWN, TESTED LIMITATION — a *successful* login can still kill the run.** The driver never navigates, so a
+  recheck probes whatever page login landed on; off the export surface → readiness HALT → `UNSUPPORTED_STATE` →
+  terminal. **Where NAVER lands a seller after login is UNOBSERVED.** Per D-028 "return to the review page
+  before rechecking" is a **guidance-only §4 human precondition** — the D-025 category: observed, never gated.
+  **Free falsifier, rides any future run:** does the operator, after logging in, still see a readiness-`READY`
+  export surface? `true` → the loop closes unaided. `false` → a navigate seam becomes a real PO question.
+- ⚠ **The A2 fork I offered was MIS-FRAMED, and the correction is the durable part.** I presented it as "4-step
+  plan (fixture 10's shape) vs a cheaper blocker that diverges from the fixture". **False.** The contract
+  fixtures are **schema examples, not engine goldens** — no test asserts engine↔fixture agreement, and fixture
+  04, the *live-proven* barrier, already diverges on six fields. A 4-step plan would **not** have made fixture 10
+  projectable (`esm.prepare_session` / `esm_plus`); it buys one integer. **Do not re-derive the fork.**
+
 ## Next — two OPEN product-owner decisions from Run 5
 
 **No Runtime blocker is open.** What follows is decisions and polish, not work the code is waiting on.
@@ -330,9 +359,25 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
 
 Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into
-`collector/src/row-count-bucket.ts`; FE copy mapping for `actionWindow.step.downstream`. **PO decision still
+`collector/src/row-count-bucket.ts`. **PO decision still
 open:** whether to *relax* the readiness gate (accept a visible+enabled export control + grid container as
 `READY`, relying on download-detection fail-closed) — see `current-state.md`.
+
+**⚠ Corrected 2026-07-16 (A2-B) — the FE copy gap is BIGGER than this list said.** It named only
+`actionWindow.step.downstream`. In fact `frontend/src/lib/actionWindow/copy.ts`'s `COPY` map contains **only
+`actionWindow.review.*` keys**, so **every key the Runtime actually emits is unmapped** —
+`actionWindow.step.prepareSurface`, `…userTargetAction`, `…downstream`, and `actionWindow.run.naver` — and all
+of them render `COPY_FALLBACK` ("안내를 준비하고 있어요"). Every engine-driven step headline the FE has ever
+shown was a placeholder. **Reported, not fixed: the FE worktree is forbidden from this branch.** Two further
+findings for the FE workstream, both **pre-existing and neither caused by A2-B**:
+- `bridgeAdapter.ts` mints `${runId}-c${++cmdSeq}` from an **in-memory** counter, so a page reload restarts it
+  at `c1` — an id already in the engine's **persisted** `appliedCommandIds` ledger — and the engine then returns
+  `{ok:true, idempotent:true, effect:"NONE"}`: **the command is silently swallowed and reported as success.**
+  The CLI does not have this bug (it appends a `randomUUID()` suffix). A2-B is the first design that *needs* a
+  long-lived parked run to outlive an FE page session and accept repeated rechecks — exactly the collision case.
+- `Operations.tsx` suppresses the standalone `BlockerNotice` when `WAITING_FOR_HUMAN` and gates the checkpoint
+  card on `connected`, so **a disconnected FE renders a parked run with no blocker at all** — harmless before
+  A2-B (nothing `WAITING_FOR_HUMAN` carried a blocker), now it drops the only explanation the seller gets.
 
 ## Forbidden without explicit, in-turn operator approval
 
@@ -358,14 +403,16 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the synced
-  post-`db45f5a` tree (i.e. **including #264, #265, and #267**); neither ff-sync moved it, as expected —
-  #267 is docs only. Lineage, every delta attributed — **no unexplained drift**:
+- Offline baseline: **2976 passed / 29 skipped** (175 files), measured 2026-07-16 after A2-B. Lineage, every
+  delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
-  regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests). **#264 added 0** — it
-  is backend Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the
-  count not at all. **A docs-only or backend-only change that moves this number is a red flag, not
-  drift.**
+  regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests) → **2899** (the
+  post-#268/#277-branch-point measure) → **2926** (+27 from **A1 / #277**, all new) → **2976** (+50 from
+  **A2-B**, all new: `stage-tables` +32 in a new file · `engine` +12 · `session-integration` +4 ·
+  `run-action-window-live-naver` +2 · `naver-session-integration` **+0**, two rows moved from the terminal
+  table to the park table). **#264 added 0** — it is backend Java + `.github/workflows/` only and touches no
+  `collector/` file, so the merge moved the count not at all. **A docs-only or backend-only change that moves
+  this number is a red flag, not drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**

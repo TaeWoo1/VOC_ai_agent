@@ -93,6 +93,11 @@ executed this session.**
   Runtime never retries around it.
 - **Automatic fail-closed:** ambiguous/missing/drifted target, unexpected post-state, invalid session, or
   artifact-validation failure → blocker code, **zero clicks**, run persisted FAILED (resumable per R3).
+  > ⏩ **Forward-pointer added 2026-07-16 (A2-B / [D-028](decisions.md)) — this record is NOT amended.** An
+  > **invalid session** (`LOGIN_REQUIRED` / `SESSION_EXPIRED`) no longer persists FAILED: it **parks**
+  > recoverable and a recheck re-probes. That was true of the codebase at dispatch and this run was executed
+  > accordingly. **This run's G6 is spent.** Everything else in this clause still holds, including the
+  > zero-clicks guarantee this run relied on.
 - **Before a run drives:** Ctrl-C aborts; a sentinel timeout aborts without driving a run.
 
 ---

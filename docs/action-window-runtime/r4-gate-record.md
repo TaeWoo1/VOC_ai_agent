@@ -315,7 +315,12 @@ Full definitions in [`r4-preparation.md`](r4-preparation.md) §7 (not re-authore
   (CAPTCHA storm / lockout warning); any on-screen data the seller did not expect to share. The human
   completes or walks away; the Runtime never retries around it.
 - **Automatic fail-closed:** ambiguous/missing/drifted target, unexpected post-state, invalid session,
-  or artifact-validation failure → blocker code, **zero clicks**, run persisted FAILED (resumable per R3).
+  or artifact-validation failure → blocker code, **zero clicks**, run persisted and resumable per R3.
+  ⚠ **CORRECTED 2026-07-16 ([D-028](decisions.md)) — this line said "persisted FAILED".** A
+  `LOGIN_REQUIRED` / `SESSION_EXPIRED` session now **parks** recoverable instead (the seller can fix it;
+  a recheck re-probes). Everything else still fails closed to FAILED. **The four guarantees above are
+  unchanged** — blocker code, zero clicks, manual progress, persisted+resumable. Normative text is
+  [`r4-preparation.md`](r4-preparation.md) §7; **this register restates it as a convenience and §7 wins.**
 - **Before a run drives:** Ctrl-C aborts; a sentinel timeout aborts without driving a run.
 
 ### 4 · Live entrypoint command — DO NOT RUN (future dispatch documentation only)

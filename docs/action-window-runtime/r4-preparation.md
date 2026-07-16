@@ -258,7 +258,24 @@ verified seam — the adapter is composition, not new invention:
 
 **In-run abort (automatic, fail-closed — already structural):** ambiguous/missing/drifted target;
 unexpected post-state; session invalid; artifact validation failure. Result: blocker code, zero
-clicks, manual progress remains available, run persisted FAILED (resumable per R3).
+clicks, manual progress remains available, run persisted and resumable per R3.
+
+**⚠ CORRECTED 2026-07-16 ([D-028](decisions.md)) — this clause said "run persisted FAILED".** That is no
+longer true of the *session-invalid* case, and the PO has ruled that "FAILED" here described the only
+mechanism that existed at R3, not a safety requirement. **All four guarantees above still hold verbatim**
+— a blocker code is set, zero clicks, manual progress stays available, and the run persists resumable.
+Only the terminal label changes, and only for the two causes the seller can clear themselves:
+
+- **`LOGIN_REQUIRED` / `SESSION_EXPIRED` → PARKED**, not FAILED: the run stays alive at
+  `WAITING_FOR_HUMAN` with `recoverable: true`, and `REQUEST_STEP_RECHECK` re-probes the session. It
+  changes toward the truth — reporting a login block as unrecoverable was a lie the FE dutifully rendered.
+- **Every other cause still fails closed to `FAILED`**, `recoverable: false`, unchanged — including
+  `UNSUPPORTED_STATE`, which stays terminal by construction.
+- ⚠ **The seller must be back on the review-export surface before rechecking.** The Runtime never
+  navigates, so a recheck probes whatever page they are on; off-surface → `UNSUPPORTED_STATE` → terminal.
+  This is a **guidance-only §4 human precondition** — observed and logged, never gated (as §4 already does
+  for period/scope). Where NAVER lands a seller after login is **unobserved**; any future run that reports
+  it settles this for free.
 
 **In-run abort (operator, immediate):** seller withdraws consent; any prompt/dialog the seller
 does not recognize; any sign of platform anti-abuse challenge (CAPTCHA storm, lockout warning) —
