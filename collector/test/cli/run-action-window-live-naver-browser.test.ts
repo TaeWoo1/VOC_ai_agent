@@ -33,9 +33,14 @@ import {
   driveOneRun,
   type LiveRunDeps,
 } from "../../src/cli/run-action-window-live-naver";
-import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../../src/action-window/naver-surface";
+import {
+  NAVER_CHANNEL_CODE,
+  NAVER_RUN_COPY_KEY,
+  type NaverPrepareDiagnostic,
+} from "../../src/action-window/naver-surface";
 import { loadOperationRun } from "../../src/action-window/run-store";
 import { overlayMounted } from "../../src/action-window/overlay";
+import { getLogSink, clearLogSink, log } from "../../src/log";
 import type { AwIngestSource, AwIngestOutcome } from "../../src/action-window/ingest-handoff";
 
 const RUN = process.env.RUN_INTEGRATION === "1";
@@ -90,6 +95,17 @@ const loginPage = `<!doctype html><html><head><meta charset="utf-8"></head><body
 /** No synthetic page string may ever reach a persisted record, a wire frame, or the injected ingest ref. */
 const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "review-export", ".xlsx", "content_types", "blob:", "commerce.localhost", "exp"];
 
+/**
+ * The needles for the LOG surface — `NEEDLES` minus the fixture's `id="exp"`.
+ *
+ * ⚠ Not a relaxation: `"exp"` is a 3-char substring of the SANITIZED readiness enums the live CLI
+ * legitimately logs (`EXPORT_TARGET_EMPTY`, `no_export_target`, `EXPORT_DATE_RANGE_REQUIRED`, …), so
+ * sweeping the log with it asserts nothing about leakage and fails on a correct diagnostic the moment
+ * readiness HALTs. That is exactly the false-failure class `collector/CLAUDE.md` §5 warns about. Every
+ * needle that could only come from the page — its wording, filename, blob URL, and host — still applies.
+ */
+const LOG_NEEDLES = NEEDLES.filter((n) => n !== "exp");
+
 interface CapturedIngest {
   bytesHead: number[];
   artifactRef: string;
@@ -132,10 +148,23 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     return page;
   }
 
-  /** Serve the synthetic fixture from the seller-center-category host — no network, no live NAVER. */
-  async function serve(page: Page, body: string): Promise<void> {
-    await page.route("**/*", (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body }));
+  /**
+   * Serve a MUTABLE body from the seller-center-category host — no network, no live NAVER.
+   *
+   * The route handler closes over the BOX, not over a string, so a later navigation genuinely fetches
+   * whatever the box holds by then. That is what lets a test model a seller logging in: the recovery
+   * case swaps the body and re-navigates, and the driver's re-probe reads a real, different page.
+   */
+  async function serveBox(page: Page, box: { body: string }): Promise<void> {
+    await page.route("**/*", (route) =>
+      route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: box.body }),
+    );
     await page.goto(SELLER_CENTER_URL, { waitUntil: "domcontentloaded" });
+  }
+
+  /** Serve a FIXED body — a box that never changes. */
+  async function serve(page: Page, body: string): Promise<void> {
+    await serveBox(page, { body });
   }
 
   function makeDeps(
@@ -144,6 +173,8 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     persistDir: string,
     runId: string,
     observeTimeoutMs: number,
+    /** Short only where the case deliberately lets the barrier lapse; the default is the live value. */
+    downloadTimeoutMs = 60_000,
   ): LiveRunDeps {
     return {
       quarantineDir,
@@ -151,10 +182,14 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
       ingest: capturingUpload(box),
       runConfig: { runId, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY, guidanceEnabled: true },
       observeTimeoutMs,
-      downloadTimeoutMs: 60_000,
+      downloadTimeoutMs,
       declineIngest: false, // this suite proves the DEFAULT path: validate → ingest → COMPLETED.
     };
   }
+
+  const logEvents = (): string[] => getLogSink().map((l) => l.event);
+  const recoveryOutcomes = (): unknown[] =>
+    getLogSink().filter((l) => l.event === "aw.live.recovery").map((l) => l.meta.outcome);
 
   it("automated: START_RUN → session gate → observed click → detect → validate → ingest → COMPLETED + persisted TERMINAL", async () => {
     const page = await newPage();
@@ -173,6 +208,14 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
 
     // TEST-ONLY: the seller's own click. The observer was armed during START; the driver never clicks.
     await page.click("[data-aw-target]");
+    // ⚠ Wait for the observation before rechecking — this case USED to race it and lost ~10 times in 11.
+    // `watchUserAction` is untracked, so `whenSettled()` does not wait for it: rechecking immediately left
+    // WAIT_FOR_USER_ACTION before the click landed, the stage guard dropped the observation, and
+    // `humanCheckpoint.observed` below asserted true against a record that honestly said false. That is the
+    // exact defect `40d7c53` fixed for the live path by making `driveOneRun` await this event — but this
+    // case hand-rolls the command sequence, so it never received the fix. Waiting here is not a workaround:
+    // it is what the production path does, so the assertion now tests the barrier instead of the clock.
+    expect(await assembled.client.awaitEvent("USER_ACTION_OBSERVED", 5_000)).toBe(true);
     assembled.client.send("REQUEST_STEP_RECHECK");
     await assembled.session.whenSettled();
 
@@ -283,6 +326,137 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     const persistBlob = JSON.stringify(persisted).toLowerCase();
     for (const needle of NEEDLES) expect(persistBlob.includes(needle.toLowerCase()), `persist leaked "${needle}"`).toBe(false);
   });
+
+  /*
+   * ── A4 — the SESSION RECOVERY rung (§6) ──────────────────────────────────────────────────────────
+   *
+   * A3's loop is already proven hermetically (`run-action-window-live-naver.test.ts` — budget, attempt
+   * cap, `outcomeOf` honesty, rejection, the stale-diagnostic guard). But every one of those cases runs
+   * against `RecoveringProbeDriver`, a FAKE whose "login" is a boolean over an in-process loopback.
+   * Nothing had ever called the REAL `NaverLiveProbeDriver.prepareSurface()` twice across a REAL
+   * navigation — which is what a recovery IS. These two cases are that, and nothing else: they must not
+   * re-prove the loop's semantics.
+   *
+   * They mirror Run 6's choreography deliberately: park while logged out → the seller logs in and returns
+   * to the export surface → re-probe → barrier → CLICK NOTHING. A rehearsal, offline.
+   *
+   * ⚠ SCOPE — what these do NOT cover, so the §6 rung is never read as covering it:
+   *   - `page.content()` MID-navigation. The gate below AWAITS its `page.goto`, so the re-probe reads a
+   *     SETTLED page and the destroyed-context window never opens. The unguarded read in
+   *     `naver-live-driver.ts` stays an accepted, reported risk — live meets it first.
+   *   - `main()`'s own gate closure (`settleSpa` / `awaitFreshSentinel` / the sentinel file). The gate is
+   *     INJECTED here precisely so the test needs no operator; `main()` remains untestable.
+   */
+  it("automated: a login park RECOVERS over a real browser — the re-probe reads the NEW page, the run reaches the export barrier, and with zero clicks it lapses non-mutating", async () => {
+    clearLogSink();
+    const page = await newPage();
+    const box = { body: loginPage };
+    // Served from the seller-center host, unlike the `setContent` park above: a recovery needs a URL to
+    // navigate BACK to. The park still holds because `classifySessionVerdict` decides the password rule
+    // BEFORE the seller-center rule, so a login page on this host is ACCOUNT_LOGIN_REQUIRED regardless.
+    await serveBox(page, box);
+    const quarantineDir = newDir("aw-live-cli-q-");
+    const persistDir = newDir("aw-live-cli-p-");
+    const runId = "run_a4a4b5b5c6c6";
+    const cap: { captured: CapturedIngest | null } = { captured: null };
+    const assembled = assembleLiveRun(page, makeDeps(cap, quarantineDir, persistDir, runId, 500, 500));
+    const diagnostics: Array<NaverPrepareDiagnostic | null> = [];
+
+    const view = await driveOneRun(assembled.session, assembled.client, {
+      observeTimeoutMs: 500,
+      awaitRecovery: async () => {
+        // The seller logs in and returns to the review-export surface, in the same window.
+        box.body = sellerCenterPage(XLSX_BLOB);
+        await page.goto(SELLER_CENTER_URL, { waitUntil: "domcontentloaded" });
+        return { ready: true, waitedMs: 0 };
+      },
+      onRecoveryProbe: (attempt) => {
+        // MIRRORS `main()`'s closure — it does not test it (that wiring is locked by a source guard).
+        // What it does prove is the DATA: the real diagnostic, through the real `log`/`safeMeta`, sanitized.
+        const diagnostic = assembled.driver.prepareDiagnostic();
+        diagnostics.push(diagnostic);
+        if (diagnostic) log("aw.live.readiness", { ...diagnostic, attempt });
+      },
+    });
+
+    // THE headline: the real driver re-probed a real page and cleared the blocker positively.
+    expect(recoveryOutcomes()).toEqual(["recovered"]);
+    // The attempt's diagnostic is the POST-login read — not the pre-login one left behind by a throw.
+    // The hermetic suite cannot assert this: its driver's diagnostic is a fake.
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.verdict).toBe("LOGGED_IN");
+    expect(diagnostics[0]?.readinessDecision).toBe("READY");
+    // `driveOneRun` logs a barrier reading ONLY once past its discriminator, so this IS the proof that
+    // recovery landed the run at the real export barrier — located, highlighted, armed, and unblocked.
+    expect(logEvents()).toContain("aw.live.barrier");
+    expect(getLogSink().find((l) => l.event === "aw.live.barrier")?.meta.observed).toBe(false);
+
+    // Nobody clicked, so the run lapses closed. That is Run 6's success condition, not a fault.
+    expect(view?.status).toBe("FAILED");
+    expect(view?.blocker?.code).toBe("DOWNLOAD_TIMEOUT");
+    // Non-mutating BY CONSTRUCTION: no click ⇒ no download ⇒ detect / validate / ingest unreachable.
+    expect(cap.captured).toBeNull();
+    expect(
+      assembled.client.serverFrames.filter((f) => f.kind === "aw_event" && f.event.type === "DOWNLOAD_DETECTED"),
+    ).toHaveLength(0);
+    expect(readdirSync(quarantineDir)).toEqual([]);
+
+    const persisted = loadOperationRun(persistDir, runId)!;
+    expect(persisted.latestView.status).toBe("FAILED");
+    expect(persisted.humanCheckpoint.observed).toBe(false);
+    expect(findProhibitedFields(persisted)).toEqual([]);
+
+    // The LOG is the surface A3 created, and nothing had ever swept it. `safeMeta` filters KEYS, never
+    // values, so a leak would ride through in a value — which is precisely what this catches.
+    const persistBlob = JSON.stringify(persisted).toLowerCase();
+    const frameBlob = JSON.stringify(assembled.client.serverFrames).toLowerCase();
+    const logBlob = JSON.stringify(getLogSink()).toLowerCase();
+    for (const needle of NEEDLES) {
+      const n = needle.toLowerCase();
+      expect(persistBlob.includes(n), `persist leaked "${needle}"`).toBe(false);
+      expect(frameBlob.includes(n), `frame leaked "${needle}"`).toBe(false);
+    }
+    for (const needle of LOG_NEEDLES) {
+      expect(logBlob.includes(needle.toLowerCase()), `log leaked "${needle}"`).toBe(false);
+    }
+    for (const frame of assembled.client.serverFrames) expect(findProhibitedFields(frame)).toEqual([]);
+  }, 30_000);
+
+  it("automated: a gate that does NOT fix the session never reports 'recovered' — the real re-probe re-parks and the loop stops honestly", async () => {
+    clearLogSink();
+    const page = await newPage();
+    const box = { body: loginPage };
+    await serveBox(page, box);
+    const quarantineDir = newDir("aw-live-cli-q-");
+    const persistDir = newDir("aw-live-cli-p-");
+    const runId = "run_a4a4d7d7e8e8";
+    const cap: { captured: CapturedIngest | null } = { captured: null };
+    const assembled = assembleLiveRun(page, makeDeps(cap, quarantineDir, persistDir, runId, 500, 500));
+
+    const view = await driveOneRun(assembled.session, assembled.client, {
+      observeTimeoutMs: 500,
+      awaitRecovery: async () => {
+        // The seller signals ready but is STILL logged out — the body is deliberately NOT swapped.
+        await page.goto(SELLER_CENTER_URL, { waitUntil: "domcontentloaded" });
+        return { ready: true, waitedMs: 0 };
+      },
+      maxRecoveryAttempts: 2,
+    });
+
+    // Without this, the case above proves nothing: "recovered" could be a value the loop always reaches.
+    expect(recoveryOutcomes()).toEqual(["still-blocked", "still-blocked", "attempts-exhausted"]);
+    expect(view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(view?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    // A parked run never reached the export barrier, and must never claim a reading for one.
+    expect(logEvents()).not.toContain("aw.live.barrier");
+    expect(cap.captured).toBeNull();
+    expect(readdirSync(quarantineDir)).toEqual([]);
+
+    const persisted = loadOperationRun(persistDir, runId)!;
+    expect(persisted.latestView.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(persisted.humanCheckpoint.reached).toBe(false);
+    expect(findProhibitedFields(persisted)).toEqual([]);
+  }, 30_000);
 
   it.skipIf(!HEADED)("headed: a REAL human export click drives assembleLiveRun → COMPLETED + persisted TERMINAL", async () => {
     const page = await newPage();

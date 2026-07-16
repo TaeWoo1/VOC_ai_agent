@@ -27,8 +27,9 @@ here. Report it; do not silently edit it.
    **2026-07-13**, but its bullets carry `UPDATE` segments through 2026-07-15. **Trust the UPDATE segments,
    not the header date.** The bullets are long and accrete rather than being rewritten.
 2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4; §8-18 is
-   Run 5 (**still the last live run**); §8-19 (A1), §8-20 (A2-B) and §8-21 (A3) are **offline** slices —
-   all three on `main`, **live-verified by nothing**. Milestone A shipped a capability, not a live proof.
+   Run 5 (**still the last live run**); §8-19 (A1), §8-20 (A2-B), §8-21 (A3) and §8-22 (A4) are **offline**
+   slices — **live-verified by nothing**. Milestone A shipped a capability, not a live proof; A4 rehearsed
+   it in a browser over a synthetic DOM, which is **not** a live proof either.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
@@ -209,7 +210,30 @@ Plus **#269 / #271 / #274 / #275** — attention + ingest workstreams, **0 `coll
   say-so: `73f027e` has parents `4404b4f` + `cc9aba8`, which is what proves it was neither squashed nor
   rebased.
 
-## Last slice — Milestone A (A1 → A2-B → A3), **all on `main`**, 2026-07-16→17
+## Last slice — A4: the synthetic-browser recovery rung, 2026-07-17 (§8-22) — **not yet on `main`**
+
+**The recovery loop now executes in a browser.** A3's loop was proven only against fake drivers over an
+in-process loopback; A4 drives the REAL live driver through a REAL `prepareSurface` **twice across a real
+navigation**, mirroring Run 6's choreography (park → recover → barrier → **zero clicks**). It adds an 11th
+§6 rung — the ladder had ten and **none of them was recovery**, which is what made live NAVER the first
+browser execution of that path. **Tests + docs only; zero production-code change.**
+
+⚠ **A4 records evidence; it does NOT decide G4.** Whether a green rung means G4 carries for Run 6 is a
+**PO ratification in a dispatching turn** — the Run 6 draft is deliberately untouched.
+
+⚠ **A4 found the gated browser suite RED on `main`** — the pre-existing `COMPLETED` case failed **5/5 on a
+clean checkout**, a race that loses ~10 times in 11. Not A4's doing (identical with and without it), and
+**§8-21's own last line says why nobody knew**: *"the gated browser suite is untouched and still never run."*
+It is the same defect `40d7c53` fixed, in the one place that fix could not reach — the case hand-rolls the
+command sequence instead of using `driveOneRun`, so it kept racing the observation. Fixed by waiting on
+`USER_ACTION_OBSERVED` exactly as the production path does; green 5/5. **The other four gated browser suites
+are green (verified, not assumed).** ⚠ **The lesson is the invisibility, not the bug: a §6 ☑ can cite a suite
+that nothing runs.** Reported, not resolved.
+
+**Baseline: `2996 passed` UNCHANGED / `29 → 31 skipped`** — A4 adds **zero passing tests** to the default
+suite. Its evidence exists only because `RUN_INTEGRATION` was actually run (**PASSED 2026-07-17, 5/5**).
+
+## Earlier slice — Milestone A (A1 → A2-B → A3), **all on `main`**, 2026-07-16→17
 
 **Milestone A is complete and merged.** In one arc it made a live login failure survivable: A1 gave the run
 a way to decline ingest, A2-B made `LOGIN_REQUIRED`/`SESSION_EXPIRED` **park** instead of kill, and A3 gave
@@ -228,7 +252,7 @@ fresh scope-matched G3 + a fresh single-use G6** — see
 [`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md) (**a draft; it
 grants nothing**).
 
-## Earlier slice — the docs-governance batch (2026-07-15→16) — **no longer the last slice**
+## Older slice — the docs-governance batch (2026-07-15→16) — **no longer the last slice**
 
 **Retained for the lessons, which still bind.** All 6 commits are on `main` (#263/#265/#267/#268 — see Git
 state); the "held local" framing this section used to carry is spent.

@@ -253,6 +253,17 @@ verified seam — the adapter is composition, not new invention:
   NAVER fixture — §8-2/§8-7; the live driver adds needle scans + `findProhibitedFields == []` + a
   module source guard (no click / no legacy capture / no upload import), hermetic + synthetic browser
   — PR #242.)*
+- ☑ **Session recovery (park → re-probe)** — a login/session park is driven back into a live run rather
+  than ending it: prompt → the seller fixes the session → a fresh signal → `REQUEST_STEP_RECHECK`
+  re-probes for real; a gate that fixes nothing re-parks and the loop stops honestly, never claiming
+  `"recovered"` (reuse: A2-B's engine park + A3's CLI loop; D-028/D-029). *(Loop semantics green
+  hermetically against fake drivers — §8-21 `run-action-window-live-naver.test.ts`; the REAL live
+  driver's re-probe **across a real navigation** is green over a real browser on a synthetic DOM —
+  §8-22 `run-action-window-live-naver-browser.test.ts`, `RUN_INTEGRATION` **PASSED 2026-07-17**, 5/5.
+  ⚠ **Scope of this ☑, stated because the rung is easy to over-read:** it does **NOT** cover
+  `page.content()` **mid-navigation** — the test's gate awaits its navigation, so the re-probe reads a
+  settled page and the unguarded read in `naver-live-driver.ts` is **still first-executed live** — nor
+  `main()`'s own gate closure (`settleSpa` on the recovery branch), which the injected gate bypasses.)*
 
 ## 7. Rollback / abort criteria
 

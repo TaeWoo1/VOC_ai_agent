@@ -916,6 +916,77 @@ single-use G6, now carrying the longer window recorded above.
 
 ---
 
+## §8-22 — Milestone A4: the synthetic-browser recovery rung — DELIVERED offline 2026-07-17 · **NOT live-verified**
+
+**The A3 recovery loop now executes in a browser.** Two cases in the gated
+`run-action-window-live-naver-browser.test.ts` drive the REAL `NaverLiveProbeDriver` through a REAL
+`prepareSurface` **twice across a real navigation** — a login park → the seller logs in and returns → the
+re-probe reads the NEW page → the run reaches the export barrier. They mirror **Run 6's choreography
+exactly**: zero clicks, let the barrier lapse. **Zero production-code change** — A4 is tests + this record.
+Baseline **2996 passed / 29 → 31 skipped** (175 files, 3025 → 3027): **`passed` is unchanged and +2 skipped
+is the whole delta**, because the new cases are `RUN_INTEGRATION`-gated. `RUN_INTEGRATION` **PASSED
+2026-07-17 — 5 passed / 1 skipped, 5 runs out of 5** (the `AW_HEADED` case stays skipped and is **still
+never run**).
+
+- **What it closes.** §6 (`r4-preparation.md`) had **ten rungs and none of them was recovery** — A2-B's park
+  semantics live in §7, not the ladder. G4 reads *"live is never the first execution of any code path"*, and
+  A3's only proof was fake drivers over an in-process loopback (§8-21), so live NAVER **would have been** the
+  first browser execution of the recovery path. §6 now carries an 11th rung.
+- **⚠ THE FINDING — the gated browser suite was RED on `main`, and §8-21 says why in its own last line.**
+  §8-21 closes *"The gated browser suite is untouched and **still never run**."* A4 ran it, and the
+  pre-existing `COMPLETED + persisted TERMINAL` case **failed 5 of 5 on a clean checkout of `main`** at
+  `humanCheckpoint.observed`. It is a **race that almost always loses** — 1 pass in 11 observed runs — not a
+  hard break, which is exactly why it was never caught. **A4 neither caused nor affected it: identical
+  failure with and without A4.**
+- **It is the SAME defect `40d7c53` fixed, in the one place that fix could not reach.** That commit
+  ("make the human barrier real") touched only the live CLI, the hermetic test, and two docs — **never this
+  suite**. Its fix was to make `driveOneRun` await `USER_ACTION_OBSERVED` before rechecking. This case
+  **hand-rolls the command sequence** (`page.click` → `REQUEST_STEP_RECHECK`, no wait), so it kept racing
+  `watchUserAction`, which `whenSettled()` does not track: the stage left `WAIT_FOR_USER_ACTION`, the stage
+  guard dropped the observation, and the case asserted `observed === true` against a record that honestly
+  said `false`. **The product path was never wrong — the test was.** Fixed by waiting on the event exactly as
+  `driveOneRun` does; green 5/5. **The assertion now tests the barrier instead of the clock.**
+- **⚠ The governance lesson is not the bug, it is the invisibility.** A ☑ in §6 cites suites that **nothing
+  runs** — not in `npm test` (they are gated), not in CI. This one was red across all of Milestone A while
+  §6 read green. **Verified and bounded, not extrapolated:** the other four gated browser suites
+  (`fixture-browser` 8/8, `naver-browser` 2/2, `naver-live-browser` 2/2, `session-browser` 7/7) are **green**,
+  so this was one racing assertion, not systemic rot. Whether §6's ☑ marks should depend on suites no
+  scheduled run ever executes is **reported, not resolved.**
+- **⚠ A4 adds ZERO passing tests to the default suite.** Its evidence exists **only** because the gated
+  command was actually run — which is why the §6 rung carries a real PASSED date, as rung 4 does for its
+  `AW_HEADED` proof. A reader who runs `npm test` sees `+2 skipped` and no more.
+- **Falsification, not assertion.** Three locks were proven to fail before being trusted: (1) the gate stops
+  swapping the body → `["still-blocked" ×3, "attempts-exhausted"]`, never `"recovered"`; (2) the gate swaps
+  the body but **never navigates** → still-blocked, proving the **navigation** recovers the run and not the
+  assignment; (3) assert the pre-login verdict → fails with actual `LOGGED_IN`, proving the diagnostic read
+  is genuinely post-login and not the stale value a thrown probe would leave.
+- **The log surface A3 created is swept for the first time.** `aw.live.recovery` / `aw.live.readiness` are
+  needle-swept (`safeMeta` filters KEYS, never values). ⚠ The `"exp"` needle is **excluded from the log sweep
+  only** and the reason is recorded in-code: it is a substring of the sanitized readiness enums the CLI
+  legitimately logs (`EXPORT_TARGET_EMPTY`, `no_export_target`), so sweeping with it would fail on a **correct**
+  diagnostic — the false-failure class `collector/CLAUDE.md` §5 warns about. Every page-derived needle still applies.
+- **⚠ `§8-2`'s table no longer enumerates every §6 item** (PO, 2026-07-17). `§8-2:50-61` claims "every §6
+  item" but is a dated snapshot (baseline `2556 / 25`) that already omits §8-14→§8-21. A4 adds an 11th rung
+  and **deliberately does not edit it** — the rung's own pointer carries §8-22 instead, exactly as §6 rung 2
+  absorbed every live correction inside its own parenthetical. **Reported, not resolved.**
+
+**What §8-22 does NOT prove:** anything live. **The recovery loop has still never run against NAVER.**
+Specifically, and stated here because a ☑ rung is easy to over-read:
+- **`page.content()` mid-navigation is NOT covered.** The test's gate **awaits** its `page.goto`, so the
+  re-probe reads a **settled** page and the destroyed-context window never opens. The unguarded read in
+  `naver-live-driver.ts` remains an accepted, PO-declined risk, **first-executed live**, with signature
+  `aw.live.recovery { outcome: "driver-error" }` and **no** `aw.live.readiness` for that attempt.
+- **`main()`'s gate closure is NOT covered** — `settleSpa` on the recovery branch is executed by nothing
+  offline. The gate is injected precisely so the test needs no operator; `main()` stays untestable.
+- Real NAVER DOM/SPA behaviour; the export/download/ingest legs after a recovery (zero clicks); the
+  **headed** case, still never run.
+
+**This section authorizes no live NAVER contact and consumes no gate.** A4 records evidence; **it does not
+decide G4.** Whether a green rung means G4 carries for Run 6 is a product-owner ratification in a dispatching
+turn — the Run 6 draft is deliberately untouched by this slice, so that decision stays where it belongs.
+
+---
+
 ## Related
 
 - Gate + readiness source → [`r4-preparation.md`](r4-preparation.md) §1/§3/§6/§7/§8
