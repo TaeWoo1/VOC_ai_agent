@@ -118,10 +118,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      * naming it reads as {@code null} — the same honest "no name available" as a missing
      * link. Ingest is unchanged; this is read-side only.
      *
-     * <p>The string is duplicated from ingest rather than shared: it is a bare literal in
-     * seven main-source sites today and the only named constant for it
-     * ({@code EsmInquiryRowMapper.UNSPECIFIED_PRODUCT}) is private to the ESM inquiry
-     * importer, so there is nothing canonical to reuse and inventing one would mean
+     * <p>The string is duplicated from ingest rather than shared: it appears at seven
+     * main-source sites today — six as a bare literal, the seventh as
+     * {@code EsmInquiryRowMapper.UNSPECIFIED_PRODUCT}, which is private to the ESM inquiry
+     * importer — so there is nothing canonical to reuse and inventing one would mean
      * editing ingest. {@code ExportToAttentionChainTest} pins the duplication by uploading a
      * real nameless export, so changing ingest's literal fails loudly instead of leaving this
      * filter silently matching nothing. It has to be pinned THERE and not against

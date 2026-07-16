@@ -463,14 +463,17 @@ class IngestedReviewVocItemSourceTest {
     void aProductServiceMintedPlaceholderIsFilteredOut() {
         UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
         UUID accountId = seedAccount(channelId);
-        // Drives ProductService's OWN placeholder fallback — the one the inquiry importers
-        // reach by passing a null name (Cafe24InquiryArticleMapper / EsmInquiryParser).
+        // Drives ProductService's OWN placeholder fallback (ProductService:53) — a DEFENSIVE
+        // branch that NO production mapper currently reaches. It needs (name null, sku null),
+        // and every mapper mints the placeholder itself first: ReviewRowMapper/InquiryRowMapper
+        // pass it as a non-null name, while Cafe24InquiryArticleMapper/EsmInquiryParser/
+        // EsmInquiryRowMapper pass a null name only when a sku EXISTS — which routes to the sku
+        // branch instead. resolveOrCreate is public API, so the branch is reachable in
+        // principle; this pins that the filter catches its literal too, nothing more.
         //
-        // SCOPE: this is NOT the review-export path, despite the shape. There, ReviewRowMapper
-        // mints the placeholder and passes it as a NON-NULL name, so this fallback never fires
-        // and the stored literal is the mapper's. ExportToAttentionChainTest pins that one.
-        // Both literals are filtered by the same constant; they are pinned separately because
-        // either could drift alone.
+        // It is therefore NOT evidence for the export path. There the stored literal is
+        // ReviewRowMapper's, and ExportToAttentionChainTest is what pins it. Kept separate
+        // because the two literals can drift independently.
         Product minted = new ProductService(products).resolveOrCreate(org, null, null);
         assertThat(minted.getName()).isEqualTo(IngestedReviewVocItemSource.UNSPECIFIED_PRODUCT_NAME);
 
