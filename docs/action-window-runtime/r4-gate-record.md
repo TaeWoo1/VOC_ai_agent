@@ -312,8 +312,9 @@ including its mutation note:
 
 ## Gate summary
 
-- **G1 ✅ · G2 ✅ · G3 ✅ · G4 ✅ · G5 ✅.** (G3 confirmed 2026-07-12 for the read-only probe path;
-  pause lift is scoped to that probe only.)
+- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅** (static) · **G3 (read-only §8-4 probe path) ✅ — confirmed 2026-07-12.**
+  The §9 item 3 pause lift is scoped to that one probe and does **not** carry over: an export, ingest, or
+  real-click run needs a **fresh, run-scoped G3 re-affirmation** under the full §4 boundary (§G3, runbook §1).
 - **G6 is a per-run gate** — a **read-only-probe instance was approved and consumed 2026-07-12** (the
   §8-4 probe is complete). G6 is **never standing**: an **export pilot still requires a fresh per-run G6**
   in the dispatching turn, operator/PO-owned, not Runtime code.
