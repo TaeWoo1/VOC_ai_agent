@@ -3,12 +3,16 @@
  * NO browser, NO network, NO live NAVER — the read-only decision methods (`prepareSurface` / `verify`)
  * are driven over a fake page that returns controlled `url()` + `content()`. Covers the §8-4 session
  * seam wiring, fail-closed precondition mapping, verify drift/completion, sanitized-output privacy, the
- * export-keyword/no-drift guard, and the module source guard (no click, no legacy capture, no upload
- * import). The real-DOM seams (locate tagging, overlay/observer, download/quarantine) are exercised by
- * the RUN_INTEGRATION browser proof in `naver-live-browser.test.ts` — this file stays browser-free.
+ * export-keyword/no-drift guard, the declined-ingest leak-safety proof (D-027), and the module source
+ * guard (no click, no legacy capture, no upload import). The real-DOM seams (locate tagging,
+ * overlay/observer) are exercised by the RUN_INTEGRATION browser proof in `naver-live-browser.test.ts`
+ * — this file stays browser-free. The download/quarantine seam is covered BOTH ways: hermetically here
+ * (byte-carrying download double + in-memory io, because a declined run's only teardown is `cleanup()`
+ * and that must not rest on an argument) and against a real browser there.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import type { Frame, Page } from "playwright";
@@ -289,6 +293,108 @@ describe("NaverLiveProbeDriver — privacy boundary", () => {
 describe("NaverLiveProbeDriver — the in-page tagger keyword list cannot drift", () => {
   it("EXPORT_TARGET_KEYWORDS equals review-export's confirmed EXPORT_WORDING_KEYWORDS", () => {
     expect([...EXPORT_TARGET_KEYWORDS]).toEqual([...EXPORT_WORDING_KEYWORDS]);
+  });
+});
+
+/**
+ * Leak-safety when the ingest handoff is DECLINED (`--no-ingest`, D-027).
+ *
+ * On the normal path `ingest()` drops the retained bytes itself. A declined run never calls it, so
+ * the ONLY thing standing between a real seller's export and a process that keeps holding it is
+ * `cleanup()`. That has to be a test, not an argument — so this exercises the download/quarantine
+ * seam hermetically (a byte-carrying fake download + an in-memory io), which the RUN_INTEGRATION
+ * browser proof otherwise covers only against a real browser.
+ */
+describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safety)", () => {
+  /**
+   * A structurally OOXML-shaped head — ZIP local-header magic + the content-types entry name. Mirrors
+   * `quarantine.test.ts`'s `ooxmlBytes`: the sniff is dependency-free and wants both, so the bare
+   * magic alone is (correctly) rejected. Synthetic bytes; never a real export.
+   */
+  function ooxmlBytes(): Uint8Array {
+    const tail = new TextEncoder().encode("[Content_Types].xml (synthetic)");
+    const out = new Uint8Array(10 + tail.length);
+    out.set([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00], 0);
+    out.set(tail, 10);
+    return out;
+  }
+
+  /** In-memory QuarantineIo: proves the file is written AND removed without touching a real disk. */
+  function memIo() {
+    const files = new Map<string, Uint8Array>();
+    const written: string[] = [];
+    return {
+      io: {
+        ensureDir: () => {},
+        writeFile: (path: string, bytes: Uint8Array) => {
+          files.set(path, bytes);
+          written.push(path);
+        },
+        readHead: (path: string, maxBytes: number) => (files.get(path) ?? new Uint8Array()).slice(0, maxBytes),
+        removeFile: (path: string) => {
+          files.delete(path);
+        },
+        listDir: () => [...files.keys()].map((p) => p.split("/").pop()!),
+      },
+      files,
+      written,
+    };
+  }
+
+  /** A byte-carrying download double: the minimal surface `bufferDownload` + `detectDownload` use. */
+  function fakeDownload(bytes: Uint8Array, deleted: { count: number }) {
+    return {
+      suggestedFilename: () => "리뷰_목록.xlsx", // a realistic name that must never reach the ref
+      createReadStream: () => Promise.resolve(Readable.from([Buffer.from(bytes)])),
+      delete: () => {
+        deleted.count += 1;
+        return Promise.resolve();
+      },
+    };
+  }
+
+  function downloadingPage(bytes: Uint8Array, deleted: { count: number }): Page {
+    const base = fakePage(SELLER_URL, LOGGED_IN_READY) as unknown as Record<string, unknown>;
+    return { ...base, waitForEvent: () => Promise.resolve(fakeDownload(bytes, deleted)) } as unknown as Page;
+  }
+
+  it("cleanup() drops the retained bytes, so a later ingest has nothing to upload", async () => {
+    const deleted = { count: 0 };
+    const { io } = memIo();
+    const driver = driverForPage(downloadingPage(ooxmlBytes(), deleted), { quarantineDir: "/q", io });
+
+    const detected = await driver.detectDownload();
+    expect(detected.detected).toBe(true);
+    expect(detected.artifactRef).toMatch(HEX16); // the filename never influences the ref
+    expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: true });
+
+    // The declined run's ONLY teardown. On the normal path ingest() would have dropped these bytes.
+    await driver.cleanup();
+
+    // Observable proof the retained bytes are gone: ingest can no longer find anything to send.
+    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: false, processed: 0 });
+  });
+
+  it("the quarantine file is deleted at validate and the dir is swept at cleanup", async () => {
+    const deleted = { count: 0 };
+    const { io, files, written } = memIo();
+    const driver = driverForPage(downloadingPage(ooxmlBytes(), deleted), { quarantineDir: "/q", io });
+
+    const detected = await driver.detectDownload();
+    await driver.validateArtifact(detected.artifactRef!);
+
+    expect(written).toHaveLength(1); // it really was written — this is not a vacuous pass
+    expect(files.size).toBe(0); // …and deleted inside the validation window (D-021)
+    expect(deleted.count).toBe(1); // the browser's own copy was dropped too
+
+    await driver.cleanup();
+    expect(io.listDir()).toEqual([]);
+  });
+
+  it("declining never fabricates a completion — a nothing-retained ingest is not success", async () => {
+    // The invariant behind `ingest` being required on the live path: no synthetic completion.
+    const driver = driverForPage(fakePage(SELLER_URL, LOGGED_IN_READY), { quarantineDir: "/q" });
+    expect(await driver.ingest("0f1e2d3c4b5a6978")).toEqual({ ok: false, processed: 0 });
   });
 });
 

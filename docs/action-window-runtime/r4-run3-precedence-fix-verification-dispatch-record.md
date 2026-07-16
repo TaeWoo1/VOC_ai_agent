@@ -32,6 +32,11 @@ download → no validate → **no ingest / no backend contact / no DB write / no
 Strictly less than a full export pilot. The entrypoint has no no-ingest mode, so the click/download/
 validate/ingest legs are avoided simply by **not clicking** and aborting at the barrier.
 
+> ⏩ **Forward-pointer added 2026-07-16 (A1 / [D-027](decisions.md)) — this record is NOT amended.** A
+> `--no-ingest` mode now exists, so "the entrypoint has no no-ingest mode" is no longer true of the
+> codebase; it was true at dispatch and this run was executed accordingly. **This run's G6 is spent.**
+> The lever this run used — **not clicking** — remains the only one that is non-mutating by construction.
+
 - This run verifies **readiness only** — that the fix flips `prepareSurface` from `UNSUPPORTED_STATE` to
   reaching the barrier. It does **not** exercise (and this record does not authorize) the click → download →
   validate → **real `/api/uploads` ingest** path; that is a separate, irreversible full-pilot authorization

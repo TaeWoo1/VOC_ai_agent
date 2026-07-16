@@ -713,6 +713,10 @@ It answers the one question `40d7c53` could not: **the fix was offline-proven on
   (see the two-window note above). It was rewritten in `4c6d1ac` **before** the barrier fix landed and never revisited.
   The operator was warned pre-launch and ignored it. **Not fixed during the run** — a code change would have invalidated
   the offline verification the G6 rested on.
+  **↳ FIXED 2026-07-16 (D-025 rewrote it; A1/§8-19 made it policy-derived).** The prompt is now
+  `confirmPrompt(declineIngest)`: timings are interpolated from the constants, the confirm choice is deferred to the
+  run's approved scope, and the ingest claim is derived from what THIS run will do. All three are test-locked in both
+  modes, so the next drift fails a suite rather than a seated human holding a single-use approval.
 - **🔎 Finding (reported, NOT fixed): the readiness sentinel path is SHARED across CLIs** —
   `.status/probe-same-session.ready`, not a Run-5-specific path. Harmless here (nothing else was running; the entrypoint
   clears leftovers at startup), but two live CLIs must never run concurrently.
@@ -725,6 +729,47 @@ the live period/scope state is machine-visible for the first time.
 ingest chain is untouched here and still rests on §8-17's **old-timing** evidence. Re-proving it needs a **separate
 mutating run with its own fresh export-scoped G6**. Also unproven: `selectedRangePresent` in the positive direction,
 and the dialog-marker identity (`NOT_OBSERVED`, above).
+
+---
+
+## §8-19 — Milestone A1: the `--no-upload` footgun + a real no-ingest mode — DELIVERED offline 2026-07-16 · **NOT live-verified**
+
+**Offline slice: code + tests + docs. No live NAVER, no browser, no backend, no G6 consumed.** Ratified as
+[D-027](decisions.md). Baseline **2899 → 2926 passed / 29 skipped** (174 files) — **+27, all new; nothing regressed.**
+
+- **The footgun was real and is closed.** `isClassifyOnly` / `CLASSIFY_ONLY_FLAGS` were exported, parsed, and
+  unit-tested — and `run-action-window-live-naver.ts:62` **never imported them**. `--no-upload
+  --i-understand-this-opens-live-naver` performed a **full live run including a real `/api/uploads` write**, with no
+  diagnostic that the flag was ignored. ⚠ **A green unit test on a predicate proved nothing about its caller** — the
+  lesson worth carrying: the flag had *tests*, and was still dead. It is now refused (exit 5) with a model-correcting
+  message, locked by a CLI source guard plus a refusal test that **loops the exported alias array**, so a future third
+  alias is covered without anyone remembering to.
+- **`--no-ingest` exists and declines the handoff:** detect + quarantine-validate run against a real artifact, the
+  bytes are dropped, and the run lands **`CANCELLED` · `{ completedSteps: 2, totalSteps: 3 }` · step `SKIPPED` · no
+  blocker**. No new terminal, blocker code, event type, contract change, or schema bump — `git diff contracts/` is
+  empty and `grep -rni ingest contracts/` is still **zero**.
+- **⚠ `--no-ingest` is NOT a safety feature.** It is **strictly more mutating than not acting**: live NAVER opens, a
+  human performs a real export action, a real file lands in quarantine. The lever that is non-mutating **by
+  construction** is still **don't act** (Runs 2–3, §8-16). Its one purpose is the leg §8-17 could only prove by
+  writing **55 irreversible rows**: detect + validate against a real artifact **without a DB write**.
+- **Leak-safety is proven, not argued.** On the default path `ingest()` drops the retained bytes itself; a declined run
+  never calls it, so `cleanup()` is the only teardown. `naver-live-driver.test.ts` now drives a byte-carrying download
+  double + in-memory io hermetically: quarantine file **written then deleted at validate** (D-021), browser copy
+  dropped, dir swept at cleanup, and a post-cleanup `ingest()` returns `{ ok: false, processed: 0 }` — observable proof
+  the bytes are gone.
+- **Default-off is proven:** `buildLiveRunDeps(...).declineIngest === false`, the pre-existing happy-path CLI and
+  RUN_INTEGRATION browser tests are unchanged in substance, and `naver-live-driver.ts` / `ProbeDriver` are untouched.
+- **🔎 A stale claim was corrected, not left standing.** `CONFIRM_PROMPT` asserted *"there is no no-ingest mode"* and
+  [`HANDOFF.md`](HANDOFF.md) asserted it *"still holds for every future run"*. A1 made both false and both are fixed;
+  the prompt is now `confirmPrompt(declineIngest)`, deriving what the human is told from what the run will do — the
+  rule the timings already followed after D-025. Executed dispatch records carry **dated forward-pointers only**.
+  ⚠ This closes the §8-18 finding above (*the operator-facing prose is STALE*): the prompt is now
+  policy-derived and test-locked in both modes.
+
+**What §8-19 does NOT prove:** anything live. `--no-ingest` has **never been run against NAVER** — its live behaviour
+rests entirely on offline tests. A `--no-ingest` run needs a **fresh, scope-matched G3 + a fresh single-use G6**;
+deliberately **no G6 template is pre-written for it** (shipping a capability is not authorizing a scope). The
+`COMPLETED` path under the new timing remains unproven (§8-18).
 
 ---
 

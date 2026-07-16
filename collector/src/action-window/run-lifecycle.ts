@@ -22,6 +22,13 @@ export interface RunSessionDeps {
   dir: string;
   transport: AwServerTransport;
   driver: ProbeDriver;
+  /**
+   * Run-scoped policy: decline the ingest handoff rather than perform it (the CLI's `--no-ingest`).
+   * Default (absent/false) is the unchanged VALIDATE→INGEST path. Deliberately NOT persisted: it is a
+   * property of THIS invocation, not of the run, so a restored run never inherits it — a resumed run
+   * re-declares its policy or ingests, and never silently half-remembers one.
+   */
+  declineIngest?: boolean;
 }
 
 export interface OpenedRunSession {
@@ -37,6 +44,7 @@ export interface OpenedRunSession {
 function persistentSession(deps: RunSessionDeps, engine: ActionWindowEngine): ActionWindowSession {
   return new ActionWindowSession(engine, deps.driver, deps.transport, {
     onStatePublished: () => saveOperationRun(deps.dir, operationRunFrom(engine)),
+    ...(deps.declineIngest === undefined ? {} : { declineIngest: deps.declineIngest }),
   });
 }
 

@@ -15,12 +15,20 @@ import { fileURLToPath } from "node:url";
 import {
   liveRunRefusal,
   buildLiveRunDeps,
+  declinedIngestGuard,
   driveOneRun,
   LiveRunOperatorClient,
   PRODUCTION_REFUSAL,
-  CONFIRM_PROMPT,
+  CLASSIFY_ONLY_EXIT_CODE,
+  confirmPrompt,
 } from "../../src/cli/run-action-window-live-naver";
-import { APPROVAL_FLAG, approvalRequiredMessage } from "../../src/cli/live-run-approval";
+import {
+  APPROVAL_FLAG,
+  CLASSIFY_ONLY_FLAGS,
+  NO_INGEST_FLAG,
+  approvalRequiredMessage,
+  classifyOnlyMisuseMessage,
+} from "../../src/cli/live-run-approval";
 import { loadConfig } from "../../src/config";
 import { defaultQuarantineDirFor } from "../../src/action-window/quarantine";
 import { defaultOperationRunDirFor } from "../../src/action-window/run-store";
@@ -50,6 +58,47 @@ describe("run-action-window-live-naver — refusal gate (pure)", () => {
       exitCode: 4,
     });
   });
+
+  it(`approved + ${NO_INGEST_FLAG} → permitted (it is a policy, not a gate)`, () => {
+    expect(liveRunRefusal([APPROVAL_FLAG, NO_INGEST_FLAG], {})).toBeNull();
+  });
+});
+
+/**
+ * The classify-only flags were parsed, unit-tested, documented — and this CLI never imported them, so
+ * `--no-upload --i-understand-this-opens-live-naver` performed a full live run INCLUDING a real
+ * upload. They are now refused rather than ignored: the Action Window has no classify step, and
+ * redefining a no-click flag into a click-and-capture one would move the footgun, not remove it.
+ */
+describe("run-action-window-live-naver — classify-only flags are refused, never ignored", () => {
+  // Looped over the exported array, not hardcoded: a future third alias is refused automatically
+  // instead of silently reopening the exact hole this closes.
+  for (const flag of CLASSIFY_ONLY_FLAGS) {
+    it(`approved + ${flag} → refused (exit ${CLASSIFY_ONLY_EXIT_CODE}), never launches`, () => {
+      expect(liveRunRefusal([APPROVAL_FLAG, flag], {})).toEqual({
+        reason: classifyOnlyMisuseMessage(),
+        exitCode: CLASSIFY_ONLY_EXIT_CODE,
+      });
+    });
+  }
+
+  it("the approval gate still dominates: a classify-only flag without approval → exit 3", () => {
+    expect(liveRunRefusal([...CLASSIFY_ONLY_FLAGS], {})).toEqual({
+      reason: approvalRequiredMessage(),
+      exitCode: 3,
+    });
+  });
+
+  it("the refusal points at --no-ingest without promising a no-click run", () => {
+    const msg = classifyOnlyMisuseMessage();
+    expect(msg).toContain(NO_INGEST_FLAG);
+    // The whole point: someone reaching for --classify-only expects "nothing happens". Correct that.
+    expect(msg).toMatch(/still opens a live NAVER session/i);
+    expect(msg).toMatch(/real export action/i);
+    expect(msg).toMatch(/real file still lands in quarantine/i);
+    // …and name the lever that IS non-mutating by construction.
+    expect(msg).toMatch(/do not act/i);
+  });
 });
 
 describe("run-action-window-live-naver — downstream deps assembly (pure, no browser)", () => {
@@ -66,6 +115,25 @@ describe("run-action-window-live-naver — downstream deps assembly (pure, no br
     expect(typeof deps.ingest).toBe("function");
     expect(deps.observeTimeoutMs).toBeGreaterThan(0);
     expect(deps.downloadTimeoutMs).toBeGreaterThan(0);
+  });
+
+  it("defaults to ingesting — the flag is opt-IN, so live behaviour is unchanged without it", () => {
+    expect(buildLiveRunDeps(loadConfig({}), "/tmp/collector-root-unused").declineIngest).toBe(false);
+  });
+
+  it("under --no-ingest the real uploader is never CONSTRUCTED — the guard cannot upload", async () => {
+    const deps = buildLiveRunDeps(loadConfig({}), "/tmp/collector-root-unused", { declineIngest: true });
+    expect(deps.declineIngest).toBe(true);
+    // Barrier 2. The session declines before reaching this seam; if it ever did reach it, it must be
+    // loud rather than quietly upload. Reaching this is a programming error, not a run outcome.
+    await expect(async () =>
+      deps.ingest({ bytes: () => new Uint8Array([1, 2, 3]), artifactRef: REF }),
+    ).rejects.toThrow(/must decline before this seam/i);
+  });
+
+  it("declinedIngestGuard closes over no credentials and reaches no backend", () => {
+    // A guard built with no config at all still behaves identically — it has nothing to upload with.
+    expect(() => declinedIngestGuard()({ bytes: () => new Uint8Array(), artifactRef: REF })).toThrow();
   });
 });
 
@@ -250,51 +318,174 @@ describe("run-action-window-live-naver — driveOneRun orchestration (loopback, 
   });
 });
 
-describe("CONFIRM_PROMPT — the prose a seated human reads mid-run (D-025)", () => {
+/**
+ * `--no-ingest` (D-027): the run detects and validates a real artifact, then declines the handoff.
+ * The contract has no terminal for "validated but not ingested" — COMPLETED is reachable only via a
+ * real successful ingest, and every reserved blocker code would be a lie — so the run lands CANCELLED
+ * with the downstream step SKIPPED, which is what actually happened.
+ */
+describe("run-action-window-live-naver — --no-ingest declines the handoff (D-027)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  const openRun = (driver: ProbeDriver, runId: string, declineIngest: boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
+    dirs.push(dir);
+    const channel = createLoopbackChannel();
+    const opened = createPersistentRunSession(
+      { dir, transport: channel.server, driver, declineIngest },
+      { runId, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    return { opened, client: new LiveRunOperatorClient(channel.client, runId), dir, runId };
+  };
+
+  it("DEFAULT-OFF: without the policy the full loop still ingests and COMPLETES", async () => {
+    // The proof that A1 changes no live behaviour by default.
+    const driver = new FakeProbeDriver();
+    const { opened, client } = openRun(driver, "run_deflt1deflt1", false);
+
+    const view = await driveOneRun(opened.session, client);
+
+    expect(view?.status).toBe("COMPLETED");
+    expect(driver.calls).toContain("ingest");
+    expect(view?.progress).toEqual({ completedSteps: 3, totalSteps: 3 });
+  });
+
+  it("validate completes, ingest is NEVER called, and the run lands CANCELLED at 2 of 3", async () => {
+    const driver = new FakeProbeDriver();
+    const { opened, client } = openRun(driver, "run_noing1noing1", true);
+
+    const view = await driveOneRun(opened.session, client);
+
+    // The whole point of A1: the seam is not entered at all.
+    expect(driver.calls).not.toContain("ingest");
+    // …but everything BEFORE it did run — this is not a refusal to start.
+    expect(driver.calls).toEqual(["prepare", "locate", "highlight", "armObserve", "observe", "verify", "detect", "validate", "cleanup"]);
+    expect(view?.status).toBe("CANCELLED");
+    expect(view?.progress).toEqual({ completedSteps: 2, totalSteps: 3 });
+    expect(view?.currentStep?.status).toBe("SKIPPED");
+    // Nothing is broken, so nothing is blocked. A blocker here would be a lie.
+    expect(view?.blocker).toBeUndefined();
+    expect(view?.allowedCommands).toEqual([]);
+  });
+
+  it("fabricates neither success nor failure", async () => {
+    const driver = new FakeProbeDriver();
+    const { opened, client } = openRun(driver, "run_nofab1nofab1", true);
+
+    await driveOneRun(opened.session, client);
+
+    const types = eventTypes(client);
+    expect(types).toContain("DOWNLOAD_DETECTED"); // a real artifact WAS detected and validated
+    expect(types).not.toContain("RUN_COMPLETED"); // …and no synthetic completion was invented
+    expect(types).not.toContain("RUN_FAILED");
+    expect(types).not.toContain("RUN_BLOCKED");
+    expect(types).toContain("RUN_STATUS_CHANGED");
+  });
+
+  it("still drives CLEANUP exactly once — leak-safety does not depend on ingest running", async () => {
+    const driver = new FakeProbeDriver();
+    const { opened, client } = openRun(driver, "run_clean1clean1", true);
+
+    await driveOneRun(opened.session, client);
+
+    expect(driver.calls.filter((c) => c === "cleanup")).toHaveLength(1);
+    expect(driver.calls[driver.calls.length - 1]).toBe("cleanup");
+  });
+
+  it("the persisted record shows a run stopped AFTER validate — a reader can tell what happened", async () => {
+    // CANCELLED flattens policy-decline and operator-cancel on the wire. The record does not: a
+    // barrier cancel would show completedSteps 1 and no DOWNLOAD_DETECTED.
+    const driver = new FakeProbeDriver();
+    const { opened, client, dir, runId } = openRun(driver, "run_recrd1recrd1", true);
+
+    await driveOneRun(opened.session, client);
+
+    const rec = loadOperationRun(dir, runId)!;
+    expect(rec.resumeState).toBe("TERMINAL"); // never resumable into the ingest it just declined
+    expect(rec.humanCheckpoint).toMatchObject({ reached: true, observed: true });
+    expect(rec.engine.events.map((e) => e.type)).toContain("DOWNLOAD_DETECTED");
+    expect(rec.engine.events.map((e) => e.type)).not.toContain("RUN_COMPLETED");
+  });
+});
+
+describe("confirmPrompt — the prose a seated human reads mid-run (D-025, D-027)", () => {
   // This prompt was unexported and unasserted until D-025, and it rotted: through Run 5 it still
   // instructed the operator to confirm the dialog and quoted a single ~60 s budget that `40d7c53`
   // had already made false. These lock the invariants that rotted, so the next drift fails here
   // rather than in front of a seated human holding a single-use approval.
+  //
+  // It is now a FUNCTION of the run's ingest policy (D-027): it used to assert "there is no
+  // no-ingest mode", which `--no-ingest` made false. What the human is told about the fate of their
+  // data is derived from what THIS run will do — the same rule the timings already follow.
+  const DEFAULT_PROMPT = confirmPrompt(false);
+  const NO_INGEST_PROMPT = confirmPrompt(true);
 
   it("states the period/scope step as the operator's own, unenforced by the Runtime", () => {
     // Under D-025 period/scope is a guidance-only §4 human precondition — the gate answers
     // exportability, never scope. This line is the ONLY thing carrying that obligation, and Run 5's
     // operator skipped it with nothing noticing. It must be prominent, not buried in a sub-bullet.
-    expect(CONFIRM_PROMPT).toMatch(/SELECT THE REVIEW PERIOD \/ SCOPE YOURSELF/);
-    expect(CONFIRM_PROMPT).toMatch(/nothing enforces it/i);
-    expect(CONFIRM_PROMPT).toMatch(/never sets, requires, or checks it/i);
+    expect(DEFAULT_PROMPT).toMatch(/SELECT THE REVIEW PERIOD \/ SCOPE YOURSELF/);
+    expect(DEFAULT_PROMPT).toMatch(/nothing enforces it/i);
+    expect(DEFAULT_PROMPT).toMatch(/never sets, requires, or checks it/i);
   });
 
   it("describes TWO windows and never restates a timing in prose", () => {
     // The two-window budget is live-confirmed (§8-18: the download deadline starts at the human's
     // action, not at the highlight). Both numbers are interpolated from the constants above, so a
     // timer change can never leave the operator reading a stale one.
-    expect(CONFIRM_PROMPT).toMatch(/TWO windows, not one/);
-    expect(CONFIRM_PROMPT).toMatch(/10 MINUTES from the highlight/);
-    expect(CONFIRM_PROMPT).toMatch(/60 SECONDS from YOUR action/);
+    expect(DEFAULT_PROMPT).toMatch(/TWO windows, not one/);
+    expect(DEFAULT_PROMPT).toMatch(/10 MINUTES from the highlight/);
+    expect(DEFAULT_PROMPT).toMatch(/60 SECONDS from YOUR action/);
     // The exact stale sentence this replaced must never come back.
-    expect(/From the moment the highlight appears you have about 60 SECONDS/.test(CONFIRM_PROMPT)).toBe(false);
+    expect(/From the moment the highlight appears you have about 60 SECONDS/.test(DEFAULT_PROMPT)).toBe(false);
   });
 
   it("defers the confirm decision to the run's approved scope instead of hardcoding it", () => {
     // The prompt is shared across run scopes: Run 5 was act-but-never-confirm, the export pilot is
     // act + confirm + ingest. Telling every operator to confirm is wrong for the former — it is
     // what the stale text did, and it contradicted the very run it was printed for.
-    expect(CONFIRM_PROMPT).toMatch(/defined by THIS RUN'S\n?APPROVED SCOPE/);
-    expect(/manually confirm the expected NAVER confirmation dialog/.test(CONFIRM_PROMPT)).toBe(false);
+    expect(DEFAULT_PROMPT).toMatch(/defined by THIS RUN'S\n?APPROVED SCOPE/);
+    expect(/manually confirm the expected NAVER confirmation dialog/.test(DEFAULT_PROMPT)).toBe(false);
   });
 
-  it("warns that a validated download is ingested unconditionally", () => {
-    // There is no no-ingest mode: the engine runs VALIDATE→INGEST with no gate, so not acting is
-    // the operator's only lever on an observe-only scope. The human must know that before acting.
-    expect(CONFIRM_PROMPT).toMatch(/there is no no-ingest mode/i);
-    expect(CONFIRM_PROMPT).toMatch(/letting window 2 lapse is the lever/i);
+  it("by default, warns that a validated download is ingested — and never claims that is the ONLY mode", () => {
+    // The default path is unchanged: VALIDATE→INGEST, real and irreversible. The human must know
+    // that before acting. But the old absolute ("there is no no-ingest mode") is now false, and a
+    // prompt that lies to a seated human about the fate of their data is the worst place to be stale.
+    expect(DEFAULT_PROMPT).toMatch(/is INGESTED into SellerOps/i);
+    expect(DEFAULT_PROMPT).toMatch(/real and irreversible/i);
+    expect(DEFAULT_PROMPT).not.toMatch(/there is no no-ingest mode/i);
   });
 
-  it("still tells the operator the Runtime never acts for them, and fails closed", () => {
-    expect(CONFIRM_PROMPT).toMatch(/it never acts for you/i);
-    expect(CONFIRM_PROMPT).toMatch(/fails closed/i);
-    expect(CONFIRM_PROMPT).toMatch(/this run's approval is spent/i);
+  it("under --no-ingest, promises no write — and refuses to let that read as no-click", () => {
+    expect(NO_INGEST_PROMPT).toMatch(/THIS RUN IS --no-ingest/);
+    expect(NO_INGEST_PROMPT).toMatch(/DISCARDED/);
+    expect(NO_INGEST_PROMPT).toMatch(/nothing is written to SellerOps/i);
+    // The correction that matters: --no-ingest is strictly MORE mutating than not acting.
+    expect(NO_INGEST_PROMPT).toMatch(/NOT a no-click run/i);
+    expect(NO_INGEST_PROMPT).toMatch(/your action is real/i);
+    expect(NO_INGEST_PROMPT).toMatch(/real file lands/i);
+    // It must never claim the ingest it is declining.
+    expect(NO_INGEST_PROMPT).not.toMatch(/is INGESTED into SellerOps/i);
+  });
+
+  it("names the by-construction lever in BOTH modes — not acting is what is truly non-mutating", () => {
+    for (const prompt of [DEFAULT_PROMPT, NO_INGEST_PROMPT]) {
+      expect(prompt).toMatch(/non-mutating BY CONSTRUCTION, do not act/i);
+      expect(prompt).toMatch(/let window 2\n?lapse/i);
+    }
+  });
+
+  it("still tells the operator the Runtime never acts for them, and fails closed — in BOTH modes", () => {
+    for (const prompt of [DEFAULT_PROMPT, NO_INGEST_PROMPT]) {
+      expect(prompt).toMatch(/it never acts for you/i);
+      expect(prompt).toMatch(/fails closed/i);
+      expect(prompt).toMatch(/this run's approval is spent/i);
+    }
   });
 });
 
@@ -323,6 +514,17 @@ describe("run-action-window-live-naver — module source guard", () => {
     expect(/simulateUserAction/.test(code)).toBe(false);
     expect(/dispatchEvent\s*\(/.test(code)).toBe(false);
     expect(/\.tap\s*\(/.test(code)).toBe(false);
+  });
+
+  it("CONSUMES every argv flag it recognises — none may be silently discarded again", () => {
+    // The A1 footgun in structural form: `isClassifyOnly` existed, was exported, was unit-tested, and
+    // this module simply never imported it — so `--no-upload` was discarded and the run uploaded
+    // anyway. A green unit test on a predicate proves nothing about the caller. This is the lock.
+    expect(/isClassifyOnly/.test(code)).toBe(true);
+    expect(/hasNoIngest/.test(code)).toBe(true);
+    // Both must be reachable from the pure gate / deps builder, not merely imported and unused.
+    expect(/classifyOnlyMisuseMessage/.test(code)).toBe(true);
+    expect(/declineIngest/.test(code)).toBe(true);
   });
 
   it("imports no legacy capture path and no upload client", () => {

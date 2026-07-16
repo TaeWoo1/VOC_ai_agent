@@ -152,6 +152,7 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
       runConfig: { runId, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY, guidanceEnabled: true },
       observeTimeoutMs,
       downloadTimeoutMs: 60_000,
+      declineIngest: false, // this suite proves the DEFAULT path: validate → ingest → COMPLETED.
     };
   }
 

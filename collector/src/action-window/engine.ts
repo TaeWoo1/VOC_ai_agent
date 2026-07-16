@@ -511,6 +511,27 @@ export class ActionWindowEngine {
     return "CLEANUP";
   }
 
+  /**
+   * The EXECUTOR declined the ingest handoff under a run-scoped policy (the CLI's `--no-ingest`).
+   * The engine never decides to decline — this records a decision made above it, exactly like every
+   * other `onXxx`.
+   *
+   * Why CANCELLED, and why no blocker:
+   *  - `COMPLETE` is reachable only through a real `onIngested({ ok: true })` — a declined run that
+   *    reported success would be the fabricated completion this runtime structurally forbids.
+   *  - `FAILED` would require one of the eight reserved blocker codes, and none of them describes a
+   *    deliberate stop. Nothing is broken, so **no blocker is set**. Do not add an ingest-specific
+   *    code here: that is a governed contract change, deferred (see `onIngested` above).
+   *  - `CANCELLED` is the operator's own pre-declared stop — `CANCEL_RUN` is already accepted in this
+   *    stage — and it projects step 3 as `SKIPPED`, which is what actually happened. It is also the
+   *    only terminal that `resumeStateFor` classifies as TERMINAL, so a declined run can never be
+   *    resumed into the ingest it just declined.
+   */
+  declineIngest(): Effect {
+    this.expect("INGEST_HANDOFF");
+    return this.cancel();
+  }
+
   private resume(): Effect {
     const target = this.resumeStage ?? "PREPARE_SESSION";
     this.revision += 1;

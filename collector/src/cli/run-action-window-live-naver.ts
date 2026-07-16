@@ -59,7 +59,13 @@ import { buildBackendIngestUpload, type AwIngestUploadFn } from "../action-windo
 import { createPersistentRunSession } from "../action-window/run-lifecycle";
 import type { RunConfig } from "../action-window/engine";
 import type { ActionWindowSession } from "../action-window/session";
-import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import {
+  approvalRequiredMessage,
+  classifyOnlyMisuseMessage,
+  hasLiveRunApproval,
+  hasNoIngest,
+  isClassifyOnly,
+} from "./live-run-approval";
 import { sentinelPathFor } from "./probe-sentinel";
 
 const HYDRATION_TIMEOUT_MS = 15_000;
@@ -76,9 +82,15 @@ export const PRODUCTION_REFUSAL =
 
 /* ────────────────────────────── Gate (pure) ────────────────────────────── */
 
+/** Refusal reason for a discovery classify-only flag aimed at the Action Window runtime. */
+export const CLASSIFY_ONLY_EXIT_CODE = 5;
+
 /**
  * Decide whether a live run is refused, and why. Pure: no browser, no config, no I/O — so the gate is
  * unit-testable and `main()` never launches anything on a refusal. `null` = permitted to proceed.
+ *
+ * The approval gate is checked FIRST and keeps dominating: an unapproved run is refused for that
+ * reason alone, whatever else is on the command line.
  */
 export function liveRunRefusal(
   args: readonly string[],
@@ -86,6 +98,11 @@ export function liveRunRefusal(
 ): { reason: string; exitCode: number } | null {
   if (!hasLiveRunApproval([...args])) return { reason: approvalRequiredMessage(), exitCode: 3 };
   if (env.NODE_ENV === "production") return { reason: PRODUCTION_REFUSAL, exitCode: 4 };
+  // A discovery classify-only flag has no honest meaning here. Refuse loudly rather than ignore it
+  // (it was silently discarded before) and rather than redefine it into a click-and-capture run.
+  if (isClassifyOnly([...args])) {
+    return { reason: classifyOnlyMisuseMessage(), exitCode: CLASSIFY_ONLY_EXIT_CODE };
+  }
   return null;
 }
 
@@ -98,6 +115,22 @@ export interface LiveRunDeps {
   runConfig: RunConfig;
   observeTimeoutMs: number;
   downloadTimeoutMs: number;
+  /** Run-scoped `--no-ingest` policy, threaded to the session executor. */
+  declineIngest: boolean;
+}
+
+/**
+ * The ingest capability handed to a `--no-ingest` run: a capability that CANNOT upload. It closes
+ * over no credentials and reaches no backend. The session already declines before touching the
+ * driver's ingest seam, so this is the SECOND independent barrier — reaching it at all means barrier
+ * one is broken, which is a programming error and must be loud rather than silently uploading.
+ */
+export function declinedIngestGuard(): AwIngestUploadFn {
+  return () => {
+    throw new Error(
+      "action-window: ingest was invoked under --no-ingest — the session must decline before this seam",
+    );
+  };
 }
 
 /**
@@ -105,17 +138,27 @@ export interface LiveRunDeps {
  * without launching a browser, so it is hermetically testable. The quarantine + operation-run dirs
  * are the same gitignored locations the fixture channel uses; ingest is the real backend upload built
  * from SellerOps dev creds (the driver never imports `../upload`).
+ *
+ * Under `--no-ingest` the real uploader is never CONSTRUCTED — the dev creds never enter a closure.
  */
-export function buildLiveRunDeps(cfg: CollectorConfig, collectorRoot: string): LiveRunDeps {
+export function buildLiveRunDeps(
+  cfg: CollectorConfig,
+  collectorRoot: string,
+  opts?: { declineIngest?: boolean },
+): LiveRunDeps {
+  const declineIngest = opts?.declineIngest ?? false;
   return {
     quarantineDir: defaultQuarantineDirFor(collectorRoot),
     persistDir: defaultOperationRunDirFor(collectorRoot),
-    ingest: buildBackendIngestUpload({
-      baseUrl: cfg.baseUrl,
-      email: cfg.email,
-      password: cfg.password,
-      channelCode: "NAVER",
-    }),
+    declineIngest,
+    ingest: declineIngest
+      ? declinedIngestGuard()
+      : buildBackendIngestUpload({
+          baseUrl: cfg.baseUrl,
+          email: cfg.email,
+          password: cfg.password,
+          channelCode: "NAVER",
+        }),
     runConfig: {
       runId: `run_${randomBytes(6).toString("hex")}`,
       channelCode: NAVER_CHANNEL_CODE,
@@ -257,7 +300,7 @@ export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun
     guidanceEnabled: true,
   });
   const opened = createPersistentRunSession(
-    { dir: deps.persistDir, transport: channel.server, driver },
+    { dir: deps.persistDir, transport: channel.server, driver, declineIngest: deps.declineIngest },
     deps.runConfig,
   );
   opened.session.attach();
@@ -281,8 +324,16 @@ export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun
  *    approved scope.** This prompt is shared across scopes (Run 5 = act-but-never-confirm; the
  *    export pilot = act + confirm + ingest), so hardcoding either is wrong for the other. The
  *    dispatch record carries the choreography; this prompt carries the facts.
+ *
+ * It is a FUNCTION of the run's ingest policy for the same reason: it once said "there is no
+ * no-ingest mode", which `--no-ingest` made false. What the human is told about the fate of their
+ * data must be derived from what this run will actually do, never restated as a constant.
  */
-export const CONFIRM_PROMPT = [
+export function confirmPrompt(declineIngest: boolean): string {
+  return [...PROMPT_HEAD, ...(declineIngest ? PROMPT_NO_INGEST : PROMPT_INGEST), ...PROMPT_TAIL].join("\n");
+}
+
+const PROMPT_HEAD = [
   "",
   "A browser window is open on NAVER. In that SAME window:",
   "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
@@ -307,21 +358,44 @@ export const CONFIRM_PROMPT = [
   "APPROVED SCOPE — not by this prompt. The Runtime cannot see such a dialog; a started",
   "download is the only evidence you completed one.",
   "",
-  "  >> A download that starts and validates is INGESTED — there is no no-ingest mode. <<",
-  "     If your approved scope is observe-only, letting window 2 lapse is the lever.",
+];
+
+/** Default policy: a validated download is ingested. */
+const PROMPT_INGEST = [
+  "  >> A download that starts and validates is INGESTED into SellerOps. <<",
+  "     That write is real and irreversible.",
+  "",
+];
+
+/** `--no-ingest`: the run declines the handoff. Say what still happens, not just what doesn't. */
+const PROMPT_NO_INGEST = [
+  "  >> THIS RUN IS --no-ingest: a download that starts is validated and then <<",
+  "  >> DISCARDED. Nothing is uploaded and nothing is written to SellerOps.    <<",
+  "     This is NOT a no-click run: your action is real, and a real file lands",
+  "     in quarantine before it is validated and dropped.",
+  "",
+];
+
+const PROMPT_TAIL = [
+  "For a run that is non-mutating BY CONSTRUCTION, do not act at all: let window 2",
+  "lapse. No download means no artifact, and nothing is written anywhere.",
   "",
   "If a window lapses the run fails closed: no download, nothing written anywhere.",
   "That is safe — but this run's approval is spent, and a retry needs a fresh one.",
   "(Ctrl-C to abort.)",
-].join("\n");
+];
 
-function banner(): void {
+function banner(declineIngest: boolean): void {
   const line = "─".repeat(64);
   console.error(line);
   console.error(" LIVE NAVER Action Window export — explicit per-run approval required.");
   console.error(" A human logs in and performs the real export action; the Runtime only prepares,");
   console.error(" highlights, observes, verifies, detects the download read-only, validates, and");
-  console.error(" ingests. No credential typing, no auth bypass, no Runtime-performed export.");
+  console.error(
+    declineIngest
+      ? " DECLINES the ingest (--no-ingest). No credential typing, no auth bypass, no Runtime-performed export."
+      : " ingests. No credential typing, no auth bypass, no Runtime-performed export.",
+  );
   console.error(line);
 }
 
@@ -355,8 +429,9 @@ async function waitForSentinel(path: string, timeoutMs: number, intervalMs: numb
 }
 
 async function main(): Promise<void> {
-  banner();
   const args = process.argv.slice(2);
+  const declineIngest = hasNoIngest(args);
+  banner(declineIngest);
   const refusal = liveRunRefusal(args, process.env);
   if (refusal) {
     console.error(refusal.reason);
@@ -372,7 +447,10 @@ async function main(): Promise<void> {
   }
 
   const collectorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-  const deps = buildLiveRunDeps(cfg, collectorRoot);
+  const deps = buildLiveRunDeps(cfg, collectorRoot, { declineIngest });
+  // The wire flattens a declined run and an operator cancel to the same CANCELLED. This fixed-enum
+  // LOG is the only thing that tells them apart. Log only — never extend it to transport/persistence.
+  if (declineIngest) log("aw.live.ingest_declined", { policy: "no-ingest" });
 
   const sentinelPath = sentinelPathFor(cfg.statusFile);
   mkdirSync(dirname(sentinelPath), { recursive: true });
@@ -384,7 +462,7 @@ async function main(): Promise<void> {
   try {
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
-    console.error(CONFIRM_PROMPT);
+    console.error(confirmPrompt(declineIngest));
     console.error("");
     console.error("  Sentinel file (create this when ready):");
     console.error(`    ${sentinelPath}`);

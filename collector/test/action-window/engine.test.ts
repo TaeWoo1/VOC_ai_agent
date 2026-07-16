@@ -58,6 +58,72 @@ function driveHappyPath(engine: ActionWindowEngine) {
   engine.onArtifactValidated({ valid: true });
   return engine.onIngested({ ok: true, processed: 1 });
 }
+/** Drive the engine to the ingest handoff — validated, decision pending. */
+function driveToIngestHandoff(engine: ActionWindowEngine) {
+  driveToVerified(engine);
+  engine.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
+  engine.onArtifactValidated({ valid: true });
+}
+
+/**
+ * `declineIngest` (D-027) — the executor's `--no-ingest` policy, recorded by the engine. The engine
+ * never decides to decline; it only records that the decision was made above it.
+ */
+describe("engine — declined ingest handoff", () => {
+  it("at INGEST_HANDOFF → CANCELLED with effect CLEANUP", () => {
+    const engine = newEngine();
+    driveToIngestHandoff(engine);
+    expect(engine.currentStage()).toBe("INGEST_HANDOFF");
+
+    const effect = engine.declineIngest();
+
+    expect(effect).toBe("CLEANUP");
+    expect(engine.currentStage()).toBe("CANCELLED");
+    expect(engine.view().status).toBe("CANCELLED");
+  });
+
+  it("sets NO blocker — nothing failed, so nothing may claim to have", () => {
+    // Every reserved blocker code would be a lie here. This is the invariant that stops a future
+    // reader from "improving" the diagnostic by inventing one.
+    const engine = newEngine();
+    driveToIngestHandoff(engine);
+    engine.declineIngest();
+
+    expect(engine.view().blocker).toBeUndefined();
+    expect(engine.events().map((e) => e.type)).not.toContain("RUN_BLOCKED");
+    expect(engine.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+  });
+
+  it("never yields COMPLETED — a declined run cannot report the ingest it declined", () => {
+    const engine = newEngine();
+    driveToIngestHandoff(engine);
+    engine.declineIngest();
+
+    expect(engine.view().status).not.toBe("COMPLETED");
+    expect(engine.events().map((e) => e.type)).not.toContain("RUN_COMPLETED");
+    // Step 3 is SKIPPED, not completed: the downstream chain genuinely did not finish.
+    expect(engine.view().progress).toEqual({ completedSteps: 2, totalSteps: 3 });
+    expect(engine.view().currentStep?.status).toBe("SKIPPED");
+  });
+
+  it("is a terminal stop: no command is accepted afterwards", () => {
+    const engine = newEngine();
+    driveToIngestHandoff(engine);
+    engine.declineIngest();
+
+    expect(engine.view().allowedCommands).toEqual([]);
+  });
+
+  it("is invalid outside INGEST_HANDOFF — it records a decision, it does not make one", () => {
+    const atBarrier = newEngine();
+    driveToVerified(atBarrier);
+    expect(() => atBarrier.declineIngest()).toThrow(/expected stage INGEST_HANDOFF/);
+
+    const completed = newEngine();
+    driveHappyPath(completed);
+    expect(() => completed.declineIngest()).toThrow(/expected stage INGEST_HANDOFF/);
+  });
+});
 
 describe("engine — happy path", () => {
   it("completes the loop and emits a valid, ordered, sanitized event sequence", () => {

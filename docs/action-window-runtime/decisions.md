@@ -336,3 +336,68 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   makes the register unable to *look* like it grants one. Any live contact still needs a fresh,
   scope-matched G3 **and** a fresh single-use G6 in the dispatching turn under the full §4 boundary.
   Register: [`r4-gate-record.md`](r4-gate-record.md).
+
+- **D-027 · ACTIVE** — **The runtime has a no-ingest mode (`--no-ingest`), and a declined handoff lands
+  CANCELLED with the downstream step SKIPPED — no new terminal, no new blocker code, no schema bump. The
+  discovery `--classify-only`/`--no-upload` flags are REFUSED here, not reused** (Milestone A1, 2026-07-16).
+  *What prompted it — a real footgun:* `isClassifyOnly` / `CLASSIFY_ONLY_FLAGS` were exported, parsed, and
+  unit-tested, and `run-action-window-live-naver.ts` **never imported them**. argv reached only the approval
+  check, so `--no-upload --i-understand-this-opens-live-naver` performed a **full live run including a real
+  `/api/uploads` write**, with no diagnostic that the flag was ignored. A green unit test on a predicate
+  proved nothing about its caller. The structural lock is now a source guard on the CLI, and the refusal
+  test **loops `CLASSIFY_ONLY_FLAGS`** so a future third alias is covered automatically.
+  *Why the flag is refused rather than reused (product-owner decision):* the alias pair is **indivisible** —
+  `isClassifyOnly` cannot honour `--no-upload`'s plain-English meaning without simultaneously giving
+  `--classify-only` a **click-and-capture** meaning. `collector/CLAUDE.md` §3 records that both discovery
+  classify-only paths are **no-click**, source-guard-proved, and that the *only* triggering path is the
+  deliberate full-capture leg. Reusing the flag would swap a DB-write footgun for a **real-click footgun**,
+  under the one flag whose entire reputation is *"nothing happens"* — moving the bug, not removing it. So
+  `--no-ingest` is a new, honestly-named, Action-Window-scoped flag; the discovery flags are refused with a
+  **model-correcting** message (exit 5) that names `--no-ingest` **and** warns it is not no-click.
+  `collector/CLAUDE.md` §3/§4.2 are untouched.
+  ⚠ *`--no-ingest` is NOT a safety feature and must never be documented as one.* It is **strictly more
+  mutating than not acting**: it opens live NAVER, a human performs a real export action, and a real file
+  lands in quarantine (validated, then dropped). The lever that is non-mutating **by construction** is
+  still **don't act** — no download, no artifact, benign `DOWNLOAD_TIMEOUT` (live Runs 2–3). `--no-ingest`
+  earns its place for exactly one purpose: exercising **detect + quarantine-validate against a real
+  artifact without a DB write** — the leg Run 4 (§8-17) could only prove by fusing all three in one shot at
+  the cost of **55 irreversible rows**.
+  *Why CANCELLED is honest, not least-bad:* the contract has **no** representation for "validated but not
+  ingested" (`grep -rni ingest contracts/` → zero hits). `COMPLETED` is reachable only through a real
+  `onIngested({ok:true})` and would be the fabricated completion the runtime structurally forbids
+  (`collector/CLAUDE.md` §4.5). `FAILED` needs one of the eight reserved `BLOCKER_CODES` — **all eight would
+  be lies**; nothing failed, so **no blocker is set**. `CANCELLED` *is* the operator's pre-declared stop
+  (`CANCEL_RUN` is already accepted in `INGEST_HANDOFF`), it projects step 3 as **`SKIPPED`** — which is what
+  actually happened — and `resumeStateFor` classifies it **TERMINAL**, so a declined run can never be
+  resumed into the ingest it just declined.
+  ⚠ *Rejected designs (recorded so they are not re-derived):*
+  **(a) `PAUSED` — a loaded gun.** `operation-run.ts:113` classifies `activeStepIndex >= 3` as
+  `RESUME_DOWNSTREAM`, so a parked no-ingest run would be resumed by `openOrResumeRunSession` **and ingest**.
+  **(b) A no-op `AwIngestUploadFn` returning `{ok:true, processed:0}`** → engine `COMPLETE`. Banned by an
+  in-code invariant (`naver-live-driver.ts:74-76`, *"a synthetic completion is never fabricated"*) and §4.5.
+  **(c) `RunConfig.classifyOnly`** — flows into `PersistedEngineState`; unpersisted it would die on restore,
+  which is **the A1 footgun resurrected through the persistence path**, so it forces persistence and
+  plausibly `OPERATION_RUN_SCHEMA_VERSION` 2→3.
+  **(d) Driver-level refusal** — `driver.ingest` *would* be called and `{ok:false}` → `UNSUPPORTED_STATE` →
+  FAILED. A lie.
+  **(e) The operator client sending `CANCEL_RUN` on the published view — BROKEN, not merely inelegant.**
+  The loopback delivers synchronously and `session.drive()` computes the next effect **before**
+  `publishState()` and never re-reads the stage, so the cancel would land, the stage would become CANCELLED,
+  **and `driver.ingest()` would upload anyway**; `onIngested` would then throw into `fatalCleanup` while a
+  re-entrant `handle()` corrupted `autoBusy`. **Any view-driven interception is unsound** — the check must
+  sit inside `drive()`, before the `await`. That is where it is.
+  *Shape:* the executor decides, the engine records. `session.ts` `case "INGEST"` checks the run-scoped
+  policy before the `await` and calls the new `engine.declineIngest()` (four lines, reusing the existing
+  private `cancel()`). The policy is deliberately **not persisted** — it belongs to the invocation, not the
+  run, so a restored run never half-remembers it. Defence in depth: under `--no-ingest` the real uploader is
+  **never constructed** (the dev creds never enter a closure); the guard in its place **throws**, because
+  reaching it means the first barrier is broken and that must be loud rather than a quiet upload.
+  *Claim corrected:* the mid-run `CONFIRM_PROMPT` asserted *"there is no no-ingest mode"* and
+  [`HANDOFF.md`](HANDOFF.md) asserted it *"still holds for every future run"*. Both are now false and both
+  are fixed. The prompt is now `confirmPrompt(declineIngest)` — what the human is told about the fate of
+  their data is **derived from what this run will do**, the same rule the timings already followed after
+  D-025. The default path's wording is unchanged in substance: a validated download **is** ingested, really
+  and irreversibly.
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** A1 is offline (code + tests +
+  docs). Shipping a capability is not authorizing a scope: no `--no-ingest` G6 template is pre-written, and
+  any live use still needs a fresh, scope-matched G3 **and** a fresh single-use G6 in the dispatching turn.
