@@ -1,0 +1,80 @@
+# Backend CI — runs the Spring Boot backend's test suite on PRs so the ingest /
+# dedupe / product-linking / reporting and /api/uploads contract coverage is
+# enforced automatically, not only on a developer's machine. Until now the repo had
+# no backend job at all: `.github/workflows/` was frontend-only, so backend tests
+# ran locally or not at all.
+#
+# Hermetic by construction — the suite is H2 in-memory with Flyway disabled
+# (backend/src/test/resources/application-test.properties), so this job needs no
+# database service, no Docker, and no secrets. If a future test needs any of those,
+# it does not belong in this workflow.
+name: backend-ci
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # The backend is a self-contained Gradle project; nothing outside it feeds
+      # the JVM build (the collector talks to it over HTTP, not at compile time).
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  # Also guard the trunk itself: a merge commit (or a direct push) lands code that
+  # no PR run necessarily covered — e.g. a merge whose result differs from either
+  # side. Same path filters, so unrelated pushes to main stay silent.
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+# One run per PR ref; cancel superseded runs when new commits are pushed.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege — the job only reads the checkout.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # JDK 17 matches the toolchain pinned in backend/build.gradle
+      # (languageVersion = JavaLanguageVersion.of(17)). Gradle itself is pinned to
+      # 8.10.2 by the committed wrapper, which the run step below uses — CI must
+      # never resolve its own Gradle version.
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+          cache-dependency-path: |
+            backend/*.gradle*
+            backend/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Test
+        run: ./gradlew test --no-daemon
+
+      # Only on failure: Gradle prints just "AssertionFailedError at Foo.java:203" to
+      # the console, so a red run is undiagnosable from the log alone. The XML/HTML
+      # reports carry the expected/actual diff and the stack trace. Not uploaded on
+      # green runs — nobody reads them, and they are pure storage cost.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          # Paths are repo-relative: `uses:` steps ignore defaults.run.working-directory.
+          path: |
+            backend/build/reports/tests/test/
+            backend/build/test-results/test/
+          retention-days: 7
+          if-no-files-found: warn
