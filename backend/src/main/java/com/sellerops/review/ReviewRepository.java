@@ -2,6 +2,7 @@ package com.sellerops.review;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -11,6 +12,14 @@ import org.springframework.data.repository.query.Param;
 
 public interface ReviewRepository extends JpaRepository<Review, UUID> {
     List<Review> findTop50ByOrgIdOrderByReceivedAtDesc(UUID orgId);
+
+    /**
+     * One review, org-scoped at the query boundary — a cross-org id reads as absent rather
+     * than as a row the caller may not have. Used where an id arrives from a client (the
+     * attention surface's {@code actionRef}), so the org filter is authorization, not
+     * tidiness: {@code findById} alone would resolve any org's review.
+     */
+    Optional<Review> findByIdAndOrgId(UUID id, UUID orgId);
 
     long countByOrgIdAndReceivedAtAfter(UUID orgId, Instant after);
 

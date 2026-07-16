@@ -11,6 +11,7 @@ import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.attention.source.Cafe24VocItemSource;
 import com.sellerops.attention.source.IngestedReviewVocItemSource;
 import com.sellerops.attention.source.VocItemSourceRegistry;
+import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
@@ -117,6 +118,7 @@ class ExportToAttentionChainTest {
     @Autowired SyncJobRepository syncJobs;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
     @Autowired SellerAccountRepository sellerAccounts;
+    @Autowired ReviewTriageRepository triage;
 
     private FileUploadConnector connector;
     private OperatorAttentionService attention;
@@ -155,7 +157,7 @@ class ExportToAttentionChainTest {
         attention = new OperatorAttentionService(sellerAccounts, channels,
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
-                        new IngestedReviewVocItemSource(reviews, sellerAccounts, products))));
+                        new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage))));
 
         channelId = seedNaverChannel();
         // EXACTLY ONE account on this channel. A second would trip the ambiguity guard

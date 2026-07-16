@@ -9,6 +9,7 @@ import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
@@ -54,6 +55,7 @@ class IngestedReviewVocItemSourceTest {
     @Autowired ReviewRepository reviews;
     @Autowired Cafe24CommunityArticleRepository articles;
     @Autowired ProductRepository products;
+    @Autowired ReviewTriageRepository triage;
 
     private OperatorAttentionService service;
     private VocItemSourceRegistry registry;
@@ -73,7 +75,7 @@ class IngestedReviewVocItemSourceTest {
     void setUp() {
         registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
-                new IngestedReviewVocItemSource(reviews, sellerAccounts, products)));
+                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage)));
         service = new OperatorAttentionService(sellerAccounts, channels, registry);
     }
 
@@ -105,7 +107,7 @@ class IngestedReviewVocItemSourceTest {
         // first proves only the ordering, not the exclusion. Register this source FIRST:
         // CAFE24 must still reach the community store, because this one declines it.
         VocItemSourceRegistry reversed = new VocItemSourceRegistry(List.of(
-                new IngestedReviewVocItemSource(reviews, sellerAccounts, products),
+                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage),
                 new Cafe24VocItemSource(articles)));
 
         assertThat(reversed.forChannel("CAFE24")).containsInstanceOf(Cafe24VocItemSource.class);
@@ -114,7 +116,7 @@ class IngestedReviewVocItemSourceTest {
 
     @Test
     void supportsIsExactAndNullSafe() {
-        IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products);
+        IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage);
         assertThat(source.supports("NAVER")).isTrue();
         assertThat(source.supports("CAFE24")).isFalse();
         assertThat(source.supports("GMARKET")).isFalse();

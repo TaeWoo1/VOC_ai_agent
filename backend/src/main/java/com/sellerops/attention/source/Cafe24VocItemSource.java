@@ -110,8 +110,18 @@ public class Cafe24VocItemSource implements VocItemSource {
         // would mean either exposing the raw product_no (an identifier — excluded by the DTO)
         // or inventing a catalog join that does not exist. Null says "not available on this
         // channel"; see the OperatorVocItem javadoc on why that must not read as "no product".
+        // actionRef and triageDisposition are always null here, and — like productName above
+        // — that is a capability limit, not an absence. Triage is anchored on `reviews`
+        // (review_triage.review_id), and a community article is not a review row: it lives in
+        // its own store with its own id space. Minting a ref for it would either address a
+        // row the anchor cannot reach or invent a second anchor this slice has no grounding
+        // to design. So a Cafe24 row is readable and not decidable, and says so honestly
+        // rather than offering an affordance that would fail on use. Adding a source here is
+        // a product decision, not a mechanical edit — see VocItemRef on why refs are
+        // source-qualified precisely so a second store can be added without ambiguity.
         return new OperatorVocItem(channelCode, channelNameKo, sourceType, null, a.getRating(), a.getReplyStatus(),
-                kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview);
+                kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview,
+                null, null);
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */

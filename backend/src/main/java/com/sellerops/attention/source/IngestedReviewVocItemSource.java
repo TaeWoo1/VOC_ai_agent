@@ -3,8 +3,12 @@ package com.sellerops.attention.source;
 import com.sellerops.attention.AttentionItemFilters;
 import com.sellerops.attention.AttentionSignalType;
 import com.sellerops.attention.VocItemFilter;
+import com.sellerops.attention.VocItemRef;
 import com.sellerops.attention.VocWindowSnapshot;
 import com.sellerops.attention.dto.OperatorVocItem;
+import com.sellerops.attention.triage.ReviewTriage;
+import com.sellerops.attention.triage.ReviewTriageRepository;
+import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
@@ -143,12 +147,14 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     private final ReviewRepository reviews;
     private final SellerAccountRepository sellerAccounts;
     private final ProductRepository products;
+    private final ReviewTriageRepository triage;
 
     public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
-                                       ProductRepository products) {
+                                       ProductRepository products, ReviewTriageRepository triage) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
         this.products = products;
+        this.triage = triage;
     }
 
     @Override
@@ -201,10 +207,30 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 orgId, channelId, filter.minRating(), filter.maxRating(),
                 fromInstant, toExclusive, PageRequest.of(page, size));
         Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
+        Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
-                .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames))
+                .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames, dispositions))
                 .toList();
         return new VocItemSlice(rows, result.getTotalElements());
+    }
+
+    /**
+     * Recorded triage decisions for this page's rows — ONE org-scoped batch query, same
+     * shape and same reasoning as {@link #productNamesFor}: the id set is bounded by the
+     * clamped page size and each id hits the unique index on {@code review_triage.review_id},
+     * so the cost is a page, not the table. A row with no entry has not been triaged.
+     *
+     * <p>Read-only, and deliberately the ONLY place triage touches the read path: this
+     * source resolves what an operator already decided; it never decides. Writes live in
+     * {@code ReviewTriageService} behind their own route.
+     */
+    private Map<UUID, TriageDisposition> dispositionsFor(UUID orgId, List<Review> rows) {
+        Set<UUID> reviewIds = rows.stream().map(Review::getId).collect(Collectors.toSet());
+        if (reviewIds.isEmpty()) {
+            return Map.of();
+        }
+        return triage.findAllByOrgIdAndReviewIdIn(orgId, reviewIds).stream()
+                .collect(Collectors.toMap(ReviewTriage::getReviewId, ReviewTriage::getDisposition));
     }
 
     /**
@@ -309,19 +335,27 @@ public class IngestedReviewVocItemSource implements VocItemSource {
 
     private OperatorVocItem toItem(Review r, AttentionSignalType signalType,
                                    String channelCode, String channelNameKo,
-                                   Map<UUID, String> productNames) {
+                                   Map<UUID, String> productNames,
+                                   Map<UUID, TriageDisposition> dispositions) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String safePreview = VocPreviewSanitizer.sanitize(r.getBody()).text();
         // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
         // the channel's productNo), which stays excluded as an identifier. Absent from the
         // map (no link, cross-org, deleted, or blank-named) → null, never a guess.
         String productName = r.getProductId() == null ? null : productNames.get(r.getProductId());
+        // This store IS the triage anchor, so every row it serves is addressable. The ref
+        // carries SellerOps' own reviews.id — not a channel-side identifier, and not a
+        // capability (see VocItemRef).
+        String actionRef = VocItemRef.forReview(r.getId());
+        TriageDisposition disposition = dispositions.get(r.getId());
         return new OperatorVocItem(
                 channelCode, channelNameKo, SOURCE_TYPE_REVIEW, productName, r.getRating(),
                 null,                       // replyStatus — an export carries no reply state
                 kstDate(r.getReceivedAt()),
                 kstDate(r.getCreatedAt()),  // when SellerOps ingested it
-                signalType.name(), safePreview);
+                signalType.name(), safePreview,
+                actionRef,
+                disposition == null ? null : disposition.name());
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */
