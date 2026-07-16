@@ -99,25 +99,26 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `31b3e44`** (PR #264 merged). The branch is **4 ahead / 0 behind** — `origin/main`
-  was merged in on 2026-07-16 as **`fb98f1b`** (normal merge commit; clean, `ort`).
+- **`origin/main` = `64de3ea`** (PR #265 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
+  (`--ff-only`, no merge commit created locally).
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
-- **FOUR local-only commits, none pushed** (verified 2026-07-16 via `git ls-remote` — the remote branch
-  is at `b3a9644`, not inferred from this session's actions):
-  `ca4808e` (this file's git state after #263) · `40d7c53` (the human-barrier fix — `driveOneRun` now
-  waits on `USER_ACTION_OBSERVED`) · `5d57fde` (readiness diagnostic + the Run 5 boundary) ·
-  `fb98f1b` (merge of `main`/#264).
-  - **This batch DOES change `collector/src`** — unlike the #263 batch. `40d7c53` changed
-    `cli/run-action-window-live-naver.ts` (behaviour: barrier timing); `5d57fde` changed that file plus
+- **ZERO local-only commits.** The 5-commit Run-5-preparation batch all landed via **#265** (`64de3ea`),
+  each verified an ancestor of `origin/main` after the sync (`git merge-base --is-ancestor`):
+  `ca4808e` (this file after #263) · `40d7c53` (**the human-barrier fix** — `driveOneRun` now waits on
+  `USER_ACTION_OBSERVED`) · `5d57fde` (readiness diagnostic + the Run 5 boundary) · `fb98f1b` (merge of
+  `main`/#264) · `4539534` (this file after #264). Nothing is held.
+  - **That batch DID change `collector/src` behaviourally** — unlike the #263 batch, and the distinction
+    matters because a reader carries the older framing forward. `40d7c53` changed
+    `cli/run-action-window-live-naver.ts` (barrier timing); `5d57fde` changed that file plus
     `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
     `git diff --name-only origin/main...HEAD`; never assert it from memory** — the #263 batch's
     "docs/skill only" claim was FALSE and shipped in `5667ed4`'s own commit message.
-- ⚠ **`main` had ALREADY moved to `31b3e44` before this session fetched** — the local ref knew and
-  nothing surfaced it, so this file's `ff6eef5` was stale *while Run 5 was being planned against it*.
-  A recorded `origin/main` SHA is a snapshot, not a fact. **Re-check with `git fetch` + `git rev-list
-  --left-right --count origin/main...HEAD` before trusting the line above.**
+- ⚠ **A recorded `origin/main` SHA is a snapshot, not a fact — including the one above.** Before #265,
+  `main` had ALREADY moved to `31b3e44` before the session fetched: the local ref knew, nothing surfaced
+  it, and this file's `ff6eef5` was stale *while Run 5 was being planned against it*. **Re-check with
+  `git fetch` + `git rev-list --left-right --count origin/main...HEAD` before trusting the line above.**
 - ⚠ **"Held locally" ≠ "not pushed" — they are different facts, and this file conflated them.**
   Before #263, this section said the batch was **"none pushed"**. That was **FALSE**: the feature branch
   had already been pushed to `origin/feat/r4-supervised-channel-runtime`, by something other than the
@@ -136,13 +137,14 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-  ⚠ **LIVE — this is firing now.** `main` moved to #264 while this batch was held, so the branch is no
-  longer synced and the two forms disagree. **Use the three-dot form for any PR preview.** `main` has now
-  moved mid-batch **four times in three days** (#261, #262, #263, #264). Assume it will happen again.
-- Recent merges: **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision, `31b3e44` —
-  **backend Java + `.github/workflows/` only**; landed on `main` while this batch was held and arrived
-  here via the `fb98f1b` merge; does **not** touch `collector/`, so the baseline below is unaffected),
-  **#263** (R4 operator guidance + routing cleanup, `ff6eef5`),
+  **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
+  **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch four
+  times in three days (#261, #262, #263, #264).** Assume it will happen during the next batch too.
+- Recent merges: **#265** (this batch — the human-barrier fix + readiness instrumentation + the Run 5
+  boundary, `64de3ea`), **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision,
+  `31b3e44` — **backend Java + `.github/workflows/` only**; landed on `main` while the #265 batch was
+  held and arrived here via the `fb98f1b` merge; does **not** touch `collector/`, so the baseline below
+  is unaffected), **#263** (R4 operator guidance + routing cleanup, `ff6eef5`),
   **#262** (export→report chain verification, `3b668d7` — **backend Java only**; landed on `main` while
   #263 was open and arrived here on the ff-sync; does **not** touch `collector/`, so the baseline below
   is unaffected), **#261** (bridge abuse hardening, `d7d1161` — reached this branch via `d87ec17`),
@@ -220,7 +222,9 @@ was stale. Now closed, offline, in one commit:
 
 ## Next slice — Run 5 (barrier + observation), PREPARED OFFLINE, awaiting a fresh G6
 
-**The offline half is DONE and held locally; the live half is NOT authorized.**
+**The offline half is DONE and MERGED (#265, `64de3ea`); the live half is NOT authorized.**
+**Merged ≠ authorized, and merged ≠ live-proven** — #265 shipped the barrier fix, the readiness
+instrumentation, and the boundary. It shipped no evidence: nothing in it has run against live NAVER.
 [`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md) is the
 choreography + evidence sheet; the Run-5 G6 template is in [`r4-gate-record.md`](r4-gate-record.md).
 
@@ -274,8 +278,9 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`fb98f1b`
-  merged tree (i.e. **including #264**). Lineage, every delta attributed — **no unexplained drift**:
+- Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the synced
+  post-`64de3ea` tree (i.e. **including #264 and #265**); the ff-sync moved it not at all, as expected.
+  Lineage, every delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
   regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests). **#264 added 0** — it
   is backend Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the
