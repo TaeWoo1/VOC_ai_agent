@@ -472,3 +472,91 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   cannot exercise it** — `main()`'s `finally` closes the browser the moment `driveOneRun` returns, so the seller
   gets no time to log in; driving the recovery from the CLI is **A3**. Any live use still needs a fresh,
   scope-matched G3 **and** a fresh single-use G6 in the dispatching turn.
+  > ⏩ **Superseded in part 2026-07-17 by [D-029](#) (A3).** "The CLI cannot exercise it" is **no longer true** —
+  > the CLI now drives the recovery through an injected operator gate. Everything else in this entry stands,
+  > including that the recovery remains **offline-proven only** and that live use needs a fresh G3 + G6.
+  > ⚠ Accepted cost (2) above — *unbounded rechecks* — is bounded by A3 **on the CLI path only**; the FE/Bridge
+  > path is still unbounded. D-029 did not fix it there.
+
+- **D-029 · ACTIVE** — **the CLI drives the recovery park: prompt → the seller logs in → they signal → the
+  Runtime re-probes for real. Bounded by a SHARED 10-minute budget, not per-attempt timeouts. No contract, FE,
+  backend, schema, stage or navigation change** (Milestone A3, 2026-07-17).
+  *What prompted it:* [D-028](decisions.md) shipped recoverable parks and then recorded, in three places, that
+  **the CLI could not exercise them** — `main()`'s `finally` closes the browser the instant `driveOneRun`
+  returns, so a live park gave the seller zero seconds to log in. The engine offered recovery, the FE affordance
+  was already built and waiting, and the one entrypoint that drives real NAVER tore the browser down first. A3
+  closes exactly that gap and adds no Runtime capability — it is a pure consumer of A2-B's seam.
+  *A3 is also the DELIVERY VEHICLE for a decision that was ratified but never implemented.* D-028 ruled "the
+  seller is back on the review-export surface" a **guidance-only §4 human precondition** (the D-025 category:
+  observed, never gated). `confirmPrompt` carries the equivalent for the initial wait; **a recovery had no
+  prompt at all.** A guidance-only precondition with nowhere to print the guidance is guidance nobody reads.
+  `recoveryPrompt` is the first and only place it is delivered on the CLI path — and it states the consequence
+  plainly: the Runtime does not navigate, so a wrong page ends the run at terminal `UNSUPPORTED_STATE`.
+  *Shape:* the loop lives in `driveOneRun` (the only exported, testable seam — tests cannot call `main()`); the
+  console/fs/page I/O lives in `main()` behind an injected `RecoveryGate`. `awaitRecovery` is **optional**, so a
+  caller with no operator to reach behaves exactly as before A3 — which is both honest semantics and the
+  default-path proof (every pre-A3 test passes unmodified, including the gated browser park test).
+  ⚠ **PO decision 1 (2026-07-17) — the bound is TIME, not attempts.** A first pass proposed 3 attempts × a
+  10-minute timeout each. Rejected on two findings: (a) **a cap was never the real bound** — with the stale
+  sentinel fixed, every iteration costs either a deliberate human file-create or a full timeout, and a timeout
+  breaks the loop, so an uncapped loop cannot spin; (b) **3 attempts buy almost nothing for D-028's dominant
+  case** — a seller who logs in but lands off the export surface yields `LOGGED_IN` → readiness HALT →
+  `UNSUPPORTED_STATE` → **FAILED at attempt 1**; attempts 2-3 only help someone who signalled ready before
+  finishing login. A shared `RECOVERY_BUDGET_MS = 10 * 60_000` is monotonic regardless of attempt count and
+  degrades into an honest operator sentence — *"you have N minutes"*; *"you have 3 tries"* is not one, because a
+  try costs nothing at the seat. `MAX_RECOVERY_ATTEMPTS = 3` survives **only as a spin backstop** with its own
+  distinct outcome, so that if it ever fires we learn the trap reopened rather than blaming the seller.
+  ⚠ **GOVERNANCE — a future G6 now authorizes a materially LONGER live window.** Worst-case time a live NAVER
+  browser is held open: **~21 min before A3 → ~32 min after** (the rejected per-attempt design would have been
+  ~52 min). D-028's boundary requires a fresh scope-matched G3 **and** a fresh single-use G6 per live run; it
+  says nothing about duration, and duration is what changed. **This belongs in the next dispatch record — it
+  must not be discovered at the seat.**
+  *PO decision 2:* the recovery prompt is **self-contained** — it re-states THIS RUN'S ingest consequence,
+  derived from `declineIngest` (reusing `PROMPT_INGEST`/`PROMPT_NO_INGEST`), because a park can insert a
+  ten-minute login detour between `confirmPrompt`'s irreversibility warning and the moment the seller acts on
+  the highlight. It obeys `confirmPrompt`'s doctrine: timings interpolated from the constants, never restated.
+  ⚠ **The stale sentinel — a violation of a precondition that was ALREADY WRITTEN DOWN.** `main()` clears the
+  sentinel at startup and in its `finally`, **never in between**, so the "ready" file the seller created before
+  the run is still on disk when a park happens. A bare second `waitForSentinel` returns `true` on its first
+  `existsSync`: the recheck fires milliseconds after the park against the same logged-out page, re-parks, and
+  drains the loop — logging an exhaustion **indistinguishable from a seller who walked away**. The seller never
+  gets a chance and nothing errors. This is not a new insight: `probe-same-session.ts` documents the rule
+  verbatim — *"The caller clears any stale sentinel BEFORE calling this"* — and **this CLI's copy dropped that
+  sentence** (the 13 `waitForSentinel` bodies are identical; the docstrings are not). `awaitFreshSentinel` makes
+  the written contract structural, and its trap test fails in under a millisecond without it.
+  ⚠ **`outcomeOf` must be TOTAL and assert "recovered" POSITIVELY — the correction that matters most.** The
+  obvious shape (`isParked ? … : FAILED ? … : "recovered"`) reports **"recovered" for a run that just died**:
+  when `prepareSurface` throws, `session.ts`'s `.catch(() => fatalCleanup())` tears the driver down and never
+  publishes, so the last view is `reprobeSession`'s `PREPARING` + blocker. Nothing else produces that shape,
+  which is what makes `driver-error` detectable with no driver change. **That log line would have been the same
+  audit-lie class D-028 rejected `HUMAN_ACTION_REQUIRED` for — and ours, not inherited.** The dishonest *view*
+  is pre-existing (a first-probe throw does it today); the dishonest *log* would have been new.
+  ⚠ **D-028's falsifier is NOT free, contrary to a claim made while planning this slice.** `lastDiagnostic` is
+  assigned **after** an unguarded `page.content()`, so a thrown probe leaves the PREVIOUS probe's value in
+  place. Today at most one probe runs per CLI process, so staleness is unobservable; A3 makes up to four, and
+  A3's premise is a seller who just logged in and navigated — exactly when a page read throws. The single
+  post-run `aw.live.readiness` line could therefore report the **pre-login** readiness as post-login evidence:
+  the falsifier **or a stale lie, indistinguishably.** Fixed at the CLI boundary — `onRecoveryProbe` logs the
+  diagnostic **per attempt** (preserving the progression the single line destroys) and is withheld on
+  `driver-error`, because stale ⟺ threw ⟺ that outcome. *Guarding `page.content()` in the driver is the deeper
+  fix and is out of A3's file scope — reported, not done.*
+  *`blockerCode` rides every recovery line* because it is what makes `"failed"` legible: `UNSUPPORTED_STATE`
+  means *logged in, surface not ready* (**falsifier = FALSE**), while `TARGET_NOT_FOUND` means *logged in,
+  surface READY, control unlocatable* — a completely different finding. `safeMeta` filters log **keys**, never
+  values, so the enum survives. (It also silently drops any key containing `session` — `sessionOutcome` would
+  have vanished with no error.)
+  *Also:* `awaitRecovery` takes `RecoverableSurfaceBlockerCode`, not the 8-code `BlockerCode`, keeping the same
+  compile-time property `onSurfaceReady`'s exhaustive switch bought — a future third recoverable code cannot be
+  silently absorbed at this boundary. `LiveRunOperatorClient` now records `lastRejection`: a rejected recheck
+  drives nothing, so an unguarded loop would re-prompt the operator for the whole budget. Rejection is
+  unreachable today, but only via a proof spanning three modules — a **loop** must not rest on that.
+  ⚠ *The §8-19 footgun, a THIRD time — and the source guard against it was itself vacuous.* `--no-upload` was
+  exported, tested, and never imported by its caller. `awaitRecovery` has the identical shape: optional, with an
+  untestable `main()`. The guard written to lock the caller wiring initially asserted `/awaitRecovery:/`, which
+  **`recoverLoop`'s own type signature satisfies** — renaming `main()`'s wiring left it green and the live CLI
+  dead. Caught only by deliberately falsifying it. The guard now matches the call site, and a vacuous guard
+  against a footgun **is** the footgun.
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** A3 is offline (code + tests +
+  docs). The recovery loop has **never run against NAVER** — it is proven only against fake drivers over an
+  in-process loopback. Any live use needs a fresh, scope-matched G3 **and** a fresh single-use G6 in the
+  dispatching turn, now carrying the longer window recorded above.

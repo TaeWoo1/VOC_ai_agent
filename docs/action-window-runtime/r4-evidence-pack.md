@@ -832,6 +832,8 @@ corrected outcome). **Nothing regressed and no file lost a test.**
   (`session-integration.test.ts`: park → seller fixes session → recheck → **`prepareSurface` called a second
   time** → run recovers to the barrier). The **CLI cannot exercise it** — `main()`'s `finally` closes the browser
   the instant `driveOneRun` returns. Driving recovery from the CLI is **A3**.
+  > ⏩ **Corrected 2026-07-17 — §8-21 / [D-029](decisions.md) closed this.** The CLI now drives the recovery.
+  > The recovery is **still offline-proven only**; that half of this bullet stands.
 - **⚠ KNOWN LIMITATION, locked by test, not discovered later: a successful login can still kill the run.** The
   driver never navigates, so a recheck probes whatever page login landed on; off-surface → readiness HALT →
   `UNSUPPORTED_STATE` → terminal. **Where NAVER lands a seller after login is UNOBSERVED.** Per D-028 that is a
@@ -855,6 +857,62 @@ corrected outcome). **Nothing regressed and no file lost a test.**
   why the 4-step plan was rejected: it would not have made fixture 10 projectable either.
 
 **This section authorizes no live NAVER contact.** A2-B ships a capability and consumes no gate.
+
+---
+
+## §8-21 — Milestone A3: the CLI operator recovery loop — DELIVERED offline 2026-07-17 · **NOT live-verified**
+
+**The CLI now drives A2-B's recovery park** ([D-029](decisions.md)): prompt → the seller logs in → they signal
+the sentinel → `REQUEST_STEP_RECHECK` re-probes for real → the run continues. Bounded by a **shared 10-minute
+budget**, not per-attempt timeouts. **Zero contract / FE / backend / schema / stage / navigation change** — A3 is
+a pure consumer of A2-B's engine seam. Baseline **2976 → 2996 passed / 29 skipped** (175 files); +20, all
+attributed (3 sentinel · 9 loop · 6 prompt · 2 source-guard).
+
+- **What it closes.** §8-20 recorded, in three places, that *"the CLI cannot exercise it"* — the engine offered
+  recovery, the FE affordance was built and waiting, and the one entrypoint that drives real NAVER tore the
+  browser down before the seller could act. That claim is now **false by construction**; all three sites are
+  corrected rather than rewritten.
+- **It implements a ratified decision that had never been implemented.** D-028 ruled "the seller is back on the
+  review-export surface" a **guidance-only §4 human precondition** — and then nothing delivered the guidance.
+  `confirmPrompt` carries the equivalent for the initial wait; a recovery had **no prompt at all**.
+  `recoveryPrompt` is the first place it is spoken, and it states the consequence: the Runtime does not
+  navigate, so a wrong page ends the run at terminal `UNSUPPORTED_STATE` with the approval spent.
+- **⚠ GOVERNANCE — a G6 now authorizes a longer live window: ~21 min → ~32 min** worst case (the rejected
+  per-attempt design would have been ~52 min). D-028's boundary requires a fresh G3 + G6 per run but says
+  nothing about duration, and duration is what changed. **Belongs in the next dispatch record.**
+- **⚠ The falsifier was NOT free — the planning claim that it was is FALSIFIED.** `lastDiagnostic` is assigned
+  after an unguarded `page.content()`, so a thrown probe retains the PREVIOUS probe's value. One probe per
+  process made that unobservable; A3 makes up to four, and its premise is a seller who just logged in and
+  navigated — exactly when a page read throws. The single post-run `aw.live.readiness` could have reported the
+  **pre-login** readiness as post-login evidence: **the falsifier, or a stale lie, indistinguishably.** Now
+  logged **per attempt** and withheld on `driver-error` (stale ⟺ threw ⟺ that outcome). Guarding
+  `page.content()` in the driver is the deeper fix — **out of scope, reported.**
+- **⚠ The audit lie that nearly shipped.** The obvious `outcomeOf` reports **`"recovered"` for a run that just
+  died**: a thrown probe leaves `session.ts`'s `fatalCleanup` path with the last view still `PREPARING` +
+  blocker. That is the same class D-028 rejected `HUMAN_ACTION_REQUIRED` for — except it would have been **ours,
+  not inherited**. `"recovered"` is now asserted positively and `driver-error` is a distinct outcome; the test
+  fails against the original design.
+- **The stale sentinel violated a precondition that was already written down.** `probe-same-session.ts` says
+  verbatim *"The caller clears any stale sentinel BEFORE calling this"* — **this CLI's copy dropped the
+  sentence** (13 identical bodies, non-identical docstrings). Without the clear, the recheck fires milliseconds
+  after the park against the same logged-out page and drains the loop, logging an exhaustion
+  **indistinguishable from a seller who walked away**. `awaitFreshSentinel` makes the written rule structural;
+  its trap test fails in under a millisecond without it.
+- **The `--no-upload` lesson repeated itself a THIRD time — and the guard against it was itself vacuous.**
+  §8-19: *"a green unit test on a predicate proved nothing about its caller."* §8-20: *"an example is not a
+  golden."* Here: `awaitRecovery` is optional and `main()` is untestable, so the loop could be green while the
+  live CLI stayed dead. The source guard written to lock the caller wiring asserted `/awaitRecovery:/` — which
+  **`recoverLoop`'s own type signature satisfies**. Renaming `main()`'s wiring left all 56 tests green. It was
+  caught **only** by deliberately falsifying it. **A vacuous guard against a footgun is the footgun.**
+- **Falsification, not assertion.** Four locks were proven to fail before being trusted: delete
+  `removeSentinel` → the trap test fails; rename or drop `main()`'s gate → the wiring guard fails (twice, two
+  different shapes); restore the naive `outcomeOf` → the throw test fails.
+
+**What §8-21 does NOT prove:** anything live. **The recovery loop has never run against NAVER** — it is proven
+only against fake drivers over an in-process loopback, and the gate is injected precisely so it never needs a
+browser. The gated browser suite is untouched and **still never run**. **This section authorizes no live NAVER
+contact.** A3 ships a capability and consumes no gate; live use needs a fresh scope-matched G3 **and** a fresh
+single-use G6, now carrying the longer window recorded above.
 
 ---
 
