@@ -40,11 +40,22 @@ The collector opens a real Chrome window on NAVER and **waits**. In that same wi
 3. Reach the **review-management export surface**.
 4. **Leave the browser open, and do NOT act on the export control yet.**
 5. Signal readiness by creating the sentinel file the CLI prints (in Claude Code, just say **"ready"**).
+   ⚠ **This is no longer necessarily once per run.** If the Runtime finds no valid session it now **parks**
+   instead of failing (A2-B/A3, [D-028](decisions.md)/[D-029](decisions.md)): it prints a recovery prompt,
+   **deliberately clears that sentinel file**, and waits for a **new** one — so you log in, return to the
+   export surface, and signal **again**. A run that parks holds the browser up to ~10 minutes longer than
+   the budget above. **This capability has never run against live NAVER**, and the choreography for a
+   recovery-scoped run lives in **that run's own dispatch record**, not here.
 
 > **On period / scope:** §4 makes this **your** obligation, and this runbook deliberately gives **no
-> procedure for it** — the step has never been observed in a live run. It exists as three words in §4,
-> one CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has **never fired live**.
-> Use your own judgment on the surface; **do not expect this document to guide it.**
+> procedure for it.** Run 5 ([§8-18](r4-evidence-pack.md), 2026-07-16) **measured** the live state for the
+> first time — readiness passed *without* any selected range, and `EXPORT_DATE_RANGE_REQUIRED` turns out to
+> be **structurally unreachable** on a surface with countable rows, so it has still **never fired live**.
+> ✅ [D-025](decisions.md) then settled the category: period/scope is a **guidance-only** precondition — the
+> Runtime observes and logs it and **never gates on it**.
+> **The no-procedure rule is unchanged**: use your own judgment on the surface; **do not expect this
+> document to guide it.** *(Superseded here: this note used to say the step "has never been observed in a
+> live run" — Run 5 observed it. What it never did was tell you how to do it, and it still won't.)*
 
 If the 10 minutes lapse, the run **aborts without ever driving** — nothing happens, and nothing is
 written. Ctrl-C also aborts safely at any point before the run drives.
@@ -68,8 +79,12 @@ control, and parks — **and now genuinely waits for you.**
 - ⚠ **This changed on 2026-07-16, and Run 4 ran under the OLD behaviour.** Run 4's seller had ~60 s for
   **click + confirm combined**, because the run did not really wait — it rechecked ~1 s after the
   highlight. That was a defect (the Runtime never recorded your action). It is fixed, so the click is no
-  longer racing a clock. **The fix has not yet run against live NAVER.** If you are reading this before
-  the first run on the new behaviour, treat the old ~60 s as your safe assumption and click promptly.
+  longer racing a clock.
+  ✅ **LIVE-CONFIRMED 2026-07-16 (Run 5, [§8-18](r4-evidence-pack.md)) — the two-window budget is real, not
+  merely intended.** The ~60 s clock was measured firing **from the click**, not from the highlight. So the
+  generous window genuinely is yours: reach the control without racing. *(Superseded here: this bullet used
+  to tell you to "treat the old ~60 s as your safe assumption" because the fix had never run live. It has
+  now.)*
 - **~60 seconds still governs step 2.** The generous window is for reaching and clicking the control.
   Once you click, the dialog confirmation is on the short clock.
 - **The Runtime does not see your confirmation.** It observes your action on the highlighted control

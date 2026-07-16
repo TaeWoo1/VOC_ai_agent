@@ -4,7 +4,7 @@
 > **This file grants nothing.** It authorizes no live action, no commit, no push. It is a map, not a gate.
 > Canonical detail lives in the docs linked below; where this file and they disagree, **they win**.
 
-**Updated:** 2026-07-16 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
+**Updated:** 2026-07-17 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
 **Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
@@ -27,7 +27,8 @@ here. Report it; do not silently edit it.
    **2026-07-13**, but its bullets carry `UPDATE` segments through 2026-07-15. **Trust the UPDATE segments,
    not the header date.** The bullets are long and accrete rather than being rewritten.
 2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4; §8-18 is
-   Run 5 (the last live run); §8-19 (A1) and §8-20 (A2-B) are **offline** slices, live-verified by nothing.
+   Run 5 (**still the last live run**); §8-19 (A1), §8-20 (A2-B) and §8-21 (A3) are **offline** slices —
+   all three on `main`, **live-verified by nothing**. Milestone A shipped a capability, not a live proof.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
@@ -37,7 +38,10 @@ here. Report it; do not silently edit it.
    ⚠ **It describes the EXPORT pilot. Run 5 deliberately inverts its §3** (click, do NOT confirm) — that
    choreography lives in Run 5's own dispatch record. **Do not reconcile the two.**
 6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`, `r4-run5-…`) for run-specific
-   choreography.
+   choreography. **Executed records are frozen** — later truth arrives as a forward-pointer, never an edit.
+   ⚠ [`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md) is a
+   **DRAFT — NOT AUTHORIZED, all-☐**. It **names** two product-owner decisions it deliberately does not
+   take (a `session recovery` G3 scope; a longer authorized live window) and **grants nothing**.
 
 ## State in one line
 
@@ -118,32 +122,45 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `ccd9597`** (PR #268 merged, 2026-07-16). The branch was **synced — 0 ahead, 0 behind**
-  (`--ff-only`, no merge commit created locally) **at the moment Run 5 was dispatched**; this file's own
-  Run 5 edits are local-only until committed.
+- **`origin/main` = `73f027e`** (PR #280 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
+  (`--ff-only`, no merge commit created locally) and holds **ZERO local-only commits**: **Milestone A —
+  A1, A2-B and A3 — is entirely on `main`.** Nothing this workstream has built is held locally.
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
-- **ZERO local-only commits.** Everything Run 5 needs offline is on `main`, across two PRs — each commit
-  verified an ancestor of `origin/main` after its sync (`git merge-base --is-ancestor`), not inferred
-  from having merged it:
-  - **#267** (`db45f5a`) — **docs only**: `4f701aa` (this file after #265) · `bff96b5` (the Run 5
-    **dispatch checklist**).
-  - **#265** (`64de3ea`) — the Run-5-preparation batch: `ca4808e` (this file after #263) · `40d7c53`
-    (**the human-barrier fix** — `driveOneRun` now waits on `USER_ACTION_OBSERVED`) · `5d57fde`
-    (readiness diagnostic + the Run 5 boundary) · `fb98f1b` (merge of `main`/#264) · `4539534` (this
-    file after #264).
-  - **That #265 batch DID change `collector/src` behaviourally** — unlike the #263 batch, and unlike
-    #267, which is docs only. The distinction matters because a reader carries the older framing
-    forward.
-    `40d7c53` changed `cli/run-action-window-live-naver.ts` (barrier timing); `5d57fde` changed that
-    file plus `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
-    `git diff --name-only origin/main...HEAD`; never assert it from memory** — the #263 batch's
-    "docs/skill only" claim was FALSE and shipped in `5667ed4`'s own commit message.
+- ⚠ **This section was TWELVE merges stale when refreshed 2026-07-17** — it still described the Run-5 era
+  (`ccd9597`, #268) after five R4 slices had landed. A git-state block rots silently and continuously;
+  **enumerate it, never assert it from memory.** `git log --merges ccd9597..origin/main` and
+  `git diff --name-only` are the measure — the #263 batch's "docs/skill only" claim was FALSE and shipped
+  inside `5667ed4`'s own commit message for exactly this reason.
+
+**The twelve merges from `ccd9597` (#268) to `73f027e` (#280)** — re-derived from `git log`, 2026-07-17:
+
+| Merge | SHA | `collector/` + `contracts/` |
+|---|---|---|
+| #270 docs(runtime): Run 5 barrier-observation evidence | `dd367a6` | 0 |
+| **#272 feat(runtime): period scope as a guided precondition** (D-025) | `a8c8566` | **6 — the only behavioural merge in the gap** |
+| #273 docs(runtime): scope the G3 summary to the read-only probe | `e2dce38` | 0 |
+| #276 docs(runtime): declare G3 a per-run gate (D-026) | `9a06a08` | 0 |
+| **#277 — Milestone A1** (`--no-ingest`, D-027) | `69cf75f` | yes — §8-19 |
+| **#278 — Milestone A2-B** (recoverable login parks, D-028) | `5de0f95` | yes — §8-20 |
+| #279 review triage — **another workstream** | `4404b4f` | **0** — backend Java + `docs/product-scope-v1.md` |
+| **#280 — Milestone A3** (the CLI recovery loop, D-029) | `73f027e` | yes — §8-21 |
+
+Plus **#269 / #271 / #274 / #275** — attention + ingest workstreams, **0 `collector/` files** between them.
+
+- **#279 landed mid-batch and moved the baseline by 0.** `git diff --stat 5de0f95..4404b4f -- collector/
+  contracts/` is **empty** — it is backend Java + `docs/product-scope-v1.md` only. So no merge-from-main
+  commit was required and PR #280 contained exactly `cc9aba8`. **That is the baseline red-flag rule holding**
+  (see Working rules): a backend-only merge that *had* moved the count would have been the finding.
 - ⚠ **A recorded `origin/main` SHA is a snapshot, not a fact — including the one above.** Before #265,
   `main` had ALREADY moved to `31b3e44` before the session fetched: the local ref knew, nothing surfaced
   it, and this file's `ff6eef5` was stale *while Run 5 was being planned against it*. **Re-check with
   `git fetch` + `git rev-list --left-right --count origin/main...HEAD` before trusting the line above.**
+  > ⚠ **Reported, not acted on:** the no-HEAD-SHA rule above — *"the commit that writes it is never the
+  > commit it names"* — **applies to `origin/main` by its own reasoning**, and this line keeps rotting for
+  > precisely the cause the rule already names. Durable facts (a PR number, a merge SHA) do not rot; a
+  > moving-ref snapshot does. Left as-is by scope decision, not because it is sound.
 - ⚠ **"Held locally" ≠ "not pushed" — they are different facts, and this file conflated them.**
   Before #263, this section said the batch was **"none pushed"**. That was **FALSE**: the feature branch
   had already been pushed to `origin/feat/r4-supervised-channel-runtime`, by something other than the
@@ -153,19 +170,22 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   `git ls-remote origin refs/heads/<branch>`. Never infer push state from your own actions.**
 - **Syncing and pushing remain operator decisions — do not fetch-and-merge or push on your own
   initiative.**
-- The six commits held by the *batch before that* all landed via **#260**: `45ed82c` (upload log
-  sanitization §4.3), `053a10a` (this file + orientation skill + reading order), and the four Run 4 status
-  corrections — `19b5f10` (`current_state` §9), `47cada6` (roadmap §4.1/§1/§5.1), `568d6f7`
-  (`current_state` §7), `49dc847` (capability matrix).
 - **`git log origin/main..HEAD` remains the honest measure** — the "ahead N" figure against
   `origin/feat/r4-supervised-channel-runtime` has repeatedly overcounted work already on `main`.
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
   **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
-  **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch four
-  times in three days (#261, #262, #263, #264).** Assume it will happen during the next batch too.
-- Recent merges: **#268** (this file's git-state refresh after #267, `ccd9597` — **docs only**),
+  **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch FIVE
+  times in five days (#261, #262, #263, #264, #279).** Assume it will happen during the next batch too.
+- ⚠ **Do not plan against `main` being still — and do not claim it has been.** Opening #280 I wrote that
+  this was *"three consecutive slices where `main` didn't move"*. **#279 falsified it within minutes**, and
+  the merge's first parent came out `4404b4f` rather than the `5de0f95` I had verified against. A
+  quiet-`main` streak is a fact about the past that predicts nothing about the next hour; it is never a
+  premise. **The cost here was zero only because #279 touched no `collector/` file — which was checked, not
+  assumed.**
+- **Merges BEFORE `ccd9597`** (everything after it is in the table above): **#268** (this file's git-state
+  refresh after #267, `ccd9597` — **docs only**),
   **#267** (the Run 5 dispatch checklist + this file after #265, `db45f5a` — **docs
   only**), **#265** (the human-barrier fix + readiness instrumentation + the Run 5 boundary, `64de3ea`),
   **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision,
@@ -178,13 +198,40 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   **#260** (this handoff + Run 4 status durability, `09f2411`), **#259** (bridge fail-closed
   pairing approval via out-of-band `ApprovalPresenter` — merged to `main` *after* the R4 branch point;
   landed here on sync), **#258** (R4 runtime, `23de8d7`), #257 + #255/#254/#253 (local-agent bridge
-  hardening), #256, #252 (synthetic UI verification harness). Earlier R4 landmarks: **#242** (live driver
+  hardening), #256, #252 (synthetic UI verification harness). The **#260** batch carried `45ed82c` (upload
+  log sanitization §4.3) + the four Run 4 status corrections (`19b5f10`, `47cada6`, `568d6f7`, `49dc847`).
+  Earlier R4 landmarks: **#242** (live driver
   core `NaverLiveProbeDriver`), **#246** (gated live entrypoint), **#250** (`settleExportSurface`).
 - Merge policy: **normal merge commit** (`gh pr merge N --merge`) — never squash/rebase — then fetch +
-  `--ff-only` sync.
+  `--ff-only` sync. ⚠ **`MERGEABLE`/`CLEAN` is a precondition, not a formality — and `UNKNOWN` is not
+  `CLEAN`.** #280's first poll returned `mergeable: UNKNOWN` (GitHub still computing); merging on that would
+  have been merging on no information. **Verify the merge afterwards from its parents**, not from the CLI's
+  say-so: `73f027e` has parents `4404b4f` + `cc9aba8`, which is what proves it was neither squashed nor
+  rebased.
 
-## Last slice — docs-governance batch (6 commits, held local, 2026-07-15→16)
+## Last slice — Milestone A (A1 → A2-B → A3), **all on `main`**, 2026-07-16→17
 
+**Milestone A is complete and merged.** In one arc it made a live login failure survivable: A1 gave the run
+a way to decline ingest, A2-B made `LOGIN_REQUIRED`/`SESSION_EXPIRED` **park** instead of kill, and A3 gave
+the CLI the loop that drives a park back into a live run.
+
+| Slice | PR / merge | What landed | Evidence |
+|---|---|---|---|
+| **A1** | #277 `69cf75f` | `--no-ingest` — and the `--no-upload` footgun that motivated it ([D-027](decisions.md)) | §8-19 |
+| **A2-B** | #278 `5de0f95` | recoverable login parks; `recoverable: true` produced for the first time ([D-028](decisions.md)) | §8-20 |
+| **A3** | #280 `73f027e` | the CLI recovery loop, bounded by a shared 10-min budget ([D-029](decisions.md)) | §8-21 |
+
+⚠ **All three are OFFLINE. Milestone A shipped a capability and proved it against fake drivers — it did not
+prove anything about NAVER, and it consumed no gate.** Run 5 (2026-07-16) is **still the last live run**.
+The detail for A2-B and A3 is in their own sections below; **the next step is a live validation that needs a
+fresh scope-matched G3 + a fresh single-use G6** — see
+[`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md) (**a draft; it
+grants nothing**).
+
+## Earlier slice — the docs-governance batch (2026-07-15→16) — **no longer the last slice**
+
+**Retained for the lessons, which still bind.** All 6 commits are on `main` (#263/#265/#267/#268 — see Git
+state); the "held local" framing this section used to carry is spent.
 **No capability claim moved, no gate flipped, no G6 granted, no canonical product doc touched.** The only
 non-docs change in the batch is `4c6d1ac`'s **string-only** `CONFIRM_PROMPT` rewrite (see Git state).
 
