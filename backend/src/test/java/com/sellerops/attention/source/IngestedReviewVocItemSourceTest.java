@@ -305,11 +305,17 @@ class IngestedReviewVocItemSourceTest {
     }
 
     @Test
-    void theSkuIsNeverExposedOnTheRowInAnyField() {
+    void aNameDistinctFromItsSkuSurfacesWhileTheSkuAndProductIdStayHidden() {
         UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
         UUID accountId = seedAccount(channelId);
-        // The SKU is 상품번호 — for a NAVER export that IS the channel's productNo, i.e. the
-        // identifier the DTO excludes. The name may surface; this must not, anywhere.
+        // The ordinary case: a real 상품명 alongside its 상품번호. The name surfaces; the SKU
+        // and the internal product id must not, anywhere on the row.
+        //
+        // NOTE this test cannot prove "the SKU never surfaces" in general — on this fixture
+        // name != sku, so that assertion cannot fail. It once carried that name and that claim,
+        // which is exactly how the name==sku leak survived. The real evidence for the SKU rule
+        // is aSkuNamedProductIsWithheldBecauseItsNameIsItsIdentity below (the unit rule) and
+        // ExportToAttentionChainTest (the state ingest actually produces).
         UUID productId = seedProduct("합성-상품명-머그컵", "SKU-9876543");
         Review r = review(channelId, "2026-05-05T03:00:00Z", 1, BODY_LOW);
         r.setProductId(productId);
@@ -320,9 +326,47 @@ class IngestedReviewVocItemSourceTest {
 
         OperatorVocItem item = page.items().get(0);
         assertThat(item.productName()).isEqualTo("합성-상품명-머그컵");
-        // Whole-row sweep: no field may carry the SKU or the bare product id.
         assertThat(item.toString()).doesNotContain("SKU-9876543").doesNotContain("9876543")
                 .doesNotContain(productId.toString());
+    }
+
+    @Test
+    void aSkuNamedProductIsWithheldBecauseItsNameIsItsIdentity() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        // The cell the original test matrix missed. ProductService stores the SKU AS the name
+        // when an ingested row has a 상품번호 but no 상품명, so name == sku is a state normal
+        // operation produces — and then the "display name" IS the identifier. Withheld.
+        // ExportToAttentionChainTest proves ingest really mints this; this pins the rule.
+        UUID productId = seedProduct("2938471056", "2938471056");
+        Review r = review(channelId, "2026-05-05T03:00:00Z", 1, BODY_LOW);
+        r.setProductId(productId);
+        reviews.save(r);
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.total()).isEqualTo(1);                   // the row still surfaces
+        OperatorVocItem item = page.items().get(0);
+        assertThat(item.productName()).isNull();                 // only its "name" is withheld
+        assertThat(item.toString()).doesNotContain("2938471056");
+    }
+
+    @Test
+    void aNameThatMatchesItsSkuOnlyAfterTrimmingIsAlsoWithheld() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        // Ingest strips on the way in (HeaderAliases.pick), but a legacy or connector-written
+        // row may not have. Padding must not be a way to smuggle the identifier through.
+        UUID productId = seedProduct("  2938471056  ", "2938471056");
+        Review r = review(channelId, "2026-05-05T03:00:00Z", 1, BODY_LOW);
+        r.setProductId(productId);
+        reviews.save(r);
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items().get(0).productName()).isNull();
     }
 
     @Test
@@ -341,11 +385,18 @@ class IngestedReviewVocItemSourceTest {
     }
 
     @Test
-    void aDanglingProductLinkResolvesToNullRatherThanFailingTheRead() {
+    void anUnresolvableProductIdIsToleratedDefensivelyThoughProductionsFkForbidsIt() {
         UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
         UUID accountId = seedAccount(channelId);
+        // SCOPE, stated honestly: this is a DEFENSIVE pin, not a production guarantee.
+        // Production DDL has `product_id uuid references products (id)` (V1__init.sql), so a
+        // dangling id cannot be inserted there. It is only constructible here because the test
+        // schema comes from the entities (ddl-auto, Flyway disabled) and Review.productId is a
+        // bare UUID column with no @ManyToOne — Hibernate therefore emits no FK. All this pins
+        // is that a map miss yields null instead of an NPE; the reachable miss (cross-org) is
+        // covered separately below and is where the real guarantee lives.
         Review r = review(channelId, "2026-05-05T03:00:00Z", 1, BODY_LOW);
-        r.setProductId(UUID.randomUUID());   // points at no product row
+        r.setProductId(UUID.randomUUID());
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
@@ -409,14 +460,17 @@ class IngestedReviewVocItemSourceTest {
     }
 
     @Test
-    void aNamelessExportRowMintsThePlaceholderThisSourceFiltersOut() {
+    void aProductServiceMintedPlaceholderIsFilteredOut() {
         UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
         UUID accountId = seedAccount(channelId);
-        // Drives the REAL ProductService exactly as ingest does for an export row carrying
-        // neither 상품명 nor 상품번호. This is the pin that makes the duplicated placeholder
-        // string safe: it asserts what ingest ACTUALLY mints still equals what this source
-        // filters on, so changing ingest's placeholder breaks this test instead of silently
-        // leaving the filter matching nothing and leaking the artifact to operators.
+        // Drives ProductService's OWN placeholder fallback — the one the inquiry importers
+        // reach by passing a null name (Cafe24InquiryArticleMapper / EsmInquiryParser).
+        //
+        // SCOPE: this is NOT the review-export path, despite the shape. There, ReviewRowMapper
+        // mints the placeholder and passes it as a NON-NULL name, so this fallback never fires
+        // and the stored literal is the mapper's. ExportToAttentionChainTest pins that one.
+        // Both literals are filtered by the same constant; they are pinned separately because
+        // either could drift alone.
         Product minted = new ProductService(products).resolveOrCreate(org, null, null);
         assertThat(minted.getName()).isEqualTo(IngestedReviewVocItemSource.UNSPECIFIED_PRODUCT_NAME);
 

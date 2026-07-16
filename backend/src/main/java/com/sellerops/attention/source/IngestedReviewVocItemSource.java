@@ -42,9 +42,13 @@ import org.springframework.stereotype.Component;
  * ({@code IngestionService} resolves-or-creates a product for every row), where the
  * Cafe24 store has only a raw {@code product_no} and no catalog link. The name is a
  * DISPLAY value only — the SKU (상품번호, i.e. the channel's {@code productNo}) is the
- * product's identity and stays excluded from the DTO. Names are resolved for a whole page
- * in one org-scoped batch query (see {@code productNamesFor}); anything that cannot be
- * resolved honestly comes out {@code null}.
+ * product's identity and is withheld from the DTO. Crucially that is ENFORCED, not
+ * assumed: ingest stores the SKU as the name when a row has no name, so
+ * {@code hasDisplayableName} withholds any name equal to its own SKU rather than trusting
+ * the two fields to differ. Names are resolved for a whole page in one org-scoped batch
+ * query (see {@code productNamesFor}); anything that cannot be resolved honestly comes out
+ * {@code null}. The guarantee is this surface's, not the product model's — ingest keeps
+ * minting SKU-named rows and other surfaces keep showing them.
  *
  * <p><b>Serves NAVER only.</b> Two deliberate exclusions:
  *
@@ -118,9 +122,13 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      * seven main-source sites today and the only named constant for it
      * ({@code EsmInquiryRowMapper.UNSPECIFIED_PRODUCT}) is private to the ESM inquiry
      * importer, so there is nothing canonical to reuse and inventing one would mean
-     * editing ingest. {@code aNamelessExportRowMintsThePlaceholderThisSourceFiltersOut}
-     * pins the duplication against the REAL {@code ProductService}, so if ingest ever
-     * changes the placeholder this filter fails loudly instead of silently going dead.
+     * editing ingest. {@code ExportToAttentionChainTest} pins the duplication by uploading a
+     * real nameless export, so changing ingest's literal fails loudly instead of leaving this
+     * filter silently matching nothing. It has to be pinned THERE and not against
+     * {@code ProductService}: on the review path {@code ReviewRowMapper} mints the placeholder
+     * itself and passes it as a non-null name, so {@code ProductService}'s own fallback never
+     * fires and the stored value is the MAPPER's literal — a unit test driving
+     * {@code ProductService} directly would pin a string production never stores.
      */
     static final String UNSPECIFIED_PRODUCT_NAME = "(미지정 상품)";
 
@@ -225,13 +233,47 @@ public class IngestedReviewVocItemSource implements VocItemSource {
             return Map.of();
         }
         return products.findAllByOrgIdAndIdIn(orgId, productIds).stream()
-                .filter(p -> isDisplayableName(p.getName()))
+                .filter(IngestedReviewVocItemSource::hasDisplayableName)
                 .collect(Collectors.toMap(Product::getId, Product::getName));
     }
 
-    /** A name worth showing an operator: present, not blank, and not ingest's placeholder. */
-    private static boolean isDisplayableName(String name) {
-        return name != null && !name.isBlank() && !UNSPECIFIED_PRODUCT_NAME.equals(name.strip());
+    /**
+     * Whether this product has a name worth showing an operator — decided from the whole
+     * {@link Product}, never the name alone, because {@code name} is not independent of
+     * {@code sku}.
+     *
+     * <p>Rejects three states, all of which mean "no name is actually known":
+     *
+     * <ul>
+     *   <li><b>null/blank</b> — nothing to show.
+     *   <li><b>{@link #UNSPECIFIED_PRODUCT_NAME}</b> — ingest's placeholder; an artifact, not
+     *       a product (see that constant's note).
+     *   <li><b>name equal to sku</b> — <b>the load-bearing one.</b> When an ingested row has a
+     *       SKU but no name, {@code ProductService.resolveOrCreate} stores the SKU AS the name
+     *       ({@code name != null && !name.isBlank() ? name : sku}), and the inquiry mappers
+     *       pass a null name whenever a sku exists, so this state is produced by normal
+     *       operation, not by bad data. Without this branch the row's "display name" IS the
+     *       SKU — 상품번호, i.e. the channel's {@code productNo} — and the identifier this DTO
+     *       excludes would reach operators through the one field claiming never to carry it.
+     *       Compared on trimmed values because ingest strips on the way in
+     *       ({@code HeaderAliases.pick}) and a stored legacy value may not be.
+     * </ul>
+     *
+     * <p>A product with a real name and no sku is displayable — absent identity is not a
+     * reason to withhold a name. Read-side only; ingest is unchanged, and the same product
+     * keeps its SKU-derived name everywhere else it is already shown.
+     */
+    private static boolean hasDisplayableName(Product p) {
+        String name = p.getName();
+        if (name == null || name.isBlank()) {
+            return false;
+        }
+        String trimmedName = name.strip();
+        if (UNSPECIFIED_PRODUCT_NAME.equals(trimmedName)) {
+            return false;
+        }
+        String sku = p.getSku();
+        return sku == null || sku.isBlank() || !trimmedName.equals(sku.strip());
     }
 
     /**
