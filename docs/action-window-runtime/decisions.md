@@ -292,3 +292,47 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   deleted**: they are fail-closed HALTs that cost nothing dormant, they preserve the §8-14 lineage, and
   an offline test now locks their unreachability so a future rung reorder trips a test rather than
   silently waking a gate on an unproven detector.
+
+- **D-026 · ACTIVE** — **G3 is a per-run gate, exactly like G6. Its environment conditions AND its §9-3
+  live-work pause lift are both affirmed fresh in the dispatching turn, scoped to that one run, and
+  consumed with it. G3 has no standing ✅** (product-owner decision, 2026-07-16; resolves the question
+  the #273 gate-summary slice deliberately left open — *is G3 formally per-run, like G6?* **Answer: yes,
+  and it already was — only the definition and the glyph had not followed**).
+  *What is decided:* G3 is the compound D-024 already names — **stable environment** (network/IP/location,
+  dedicated Chrome profile, paired Bridge, Operation Run persistence) **+ the §9 item 3 NAVER live-work
+  pause lift**. Every part is affirmed **fresh in the dispatching turn**, **scope-bound** to the single run
+  it authorizes (read-only / export / export+ingest / real-click are distinct scopes and never substitute
+  for one another), and **consumed** with that run. Goal pressure, prior affirmations, and this register
+  never carry over. G3's register status is therefore **`☐ per-run`** — the same category label the §8-1
+  pack already uses for G6.
+  *Rationale — this ratifies practice, it does not change it:* the repo already operates G3 this way
+  everywhere it **acts**. The **signed** export P6 sheet is the sharpest evidence:
+  [`r4-export-dispatch-record.md`](r4-export-dispatch-record.md) block A (`:21-31`) — *"Already established
+  (static — carried in, not re-affirmed here)"* — lists G1/G2/G4/G5/P7/P10 and **omits G3**, and `:75`/`:77`
+  tick `G1–G5 all ✅` and `G3 re-affirmed for export` as **two separate boxes**: G3 is sourced from a
+  run-scoped block, never from the register. Seven executed dispatch records each carry their own fresh,
+  scope-labeled G3 block; [`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md)
+  `:56` records `G3 ☐ DOES NOT CARRY`; `r4-probe-…:36` / `r4-rowshape-…:41` / `r4-run3-…:51` / `r4-run4-…:90`
+  call earlier **G3 lifts consumed**; and the register's own export re-affirmation block
+  ([`r4-gate-record.md`](r4-gate-record.md) `:254-257`) is already all-☐, environment boxes included. The
+  gate summary already stated the rule in prose (`:315-317`, PR #273).
+  ⚠ *Why the "environment is standing state, only the lift is per-run" reading was REJECTED (recorded so it
+  is not re-derived):* the dispatch records refute it. `r4-run5-…:68-74` leaves **all four boxes ☐,
+  environment included**; `r4-run2-…:32-36` ticks all three `☑` in one turn on one date. The operator
+  performs the **same act** on both halves. The `still holds`/`intact` vs `fresh, single-run lift` verb
+  split is real (`r4-gate-record.md:254-257`) but it marks **epistemic kind** — a fact you re-verify vs a
+  decision you renew — **not lifetime**. Both have one lifetime: one run. Splitting them would have
+  preserved the exact standing ✅ this decision exists to remove.
+  *Gate effect:* G3's status becomes **`☐ per-run`** ([`r4-gate-record.md`](r4-gate-record.md) §G3,
+  [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-1), and [`r4-preparation.md`](r4-preparation.md) §3's G3
+  definition now names the §9-3 lift and the per-run lifetime (§3 defined G3 as environment only — the one
+  normative text out of step with D-024, the register, and 8/8 dispatch records). P6's *"already"* list
+  (`r4-gate-record.md:263`) drops G3 to match signed block A; G3 stays with `:265`'s existing run-scoped
+  box, so **P6's requirements are unchanged in substance**.
+  ⚠ *No gate failed and no capability changed.* The 2026-07-12 environment confirmation was real; it and
+  every later lift are **retained verbatim as dated CONSUMED instances** — the shape G6 has carried since
+  `r4-gate-record.md:103`/`:126-144`. **`☐ per-run` is a category label, not a failure marker.**
+  *Boundary:* **this entry authorizes NO live action.** It removes no requirement and grants no lift — it
+  makes the register unable to *look* like it grants one. Any live contact still needs a fresh,
+  scope-matched G3 **and** a fresh single-use G6 in the dispatching turn under the full §4 boundary.
+  Register: [`r4-gate-record.md`](r4-gate-record.md).
