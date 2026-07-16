@@ -320,7 +320,7 @@ export-pilot pre-dispatch runbook ([`r4-gate-record.md`](r4-gate-record.md) §5)
 
 ## 10. Related
 
-- **Supervised-pilot gate record (§3) → [`r4-gate-record.md`](r4-gate-record.md)** (living; G1–G5 ✅; G6 per-run — read-only-probe instance consumed 2026-07-12; export pilot needs a fresh per-run G6)
+- **Supervised-pilot gate record (§3) → [`r4-gate-record.md`](r4-gate-record.md)** — the living register and the only home for G1–G6 status, including G3's scope and the per-run G6 state. This line carries no status.
 - **Pre-live evidence pack (§8) → [`r4-evidence-pack.md`](r4-evidence-pack.md)** (assembled 2026-07-11)
 - Slice sequencing → [`implementation-plan.md`](implementation-plan.md) (R4 section)
 - Durable decisions → [`decisions.md`](decisions.md) (D-016, D-018, D-019, D-020, D-021, D-022, D-023, D-024)
