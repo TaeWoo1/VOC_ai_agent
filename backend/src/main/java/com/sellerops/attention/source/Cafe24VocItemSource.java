@@ -104,7 +104,13 @@ public class Cafe24VocItemSource implements VocItemSource {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String rawText = a.getContent() == null || a.getContent().isBlank() ? a.getTitle() : a.getContent();
         String safePreview = VocPreviewSanitizer.sanitize(rawText).text();
-        return new OperatorVocItem(channelCode, channelNameKo, sourceType, a.getRating(), a.getReplyStatus(),
+        // productName is always null here, and that is a capability limit, not an absence:
+        // a community article carries a raw product_no but no product name and no link to
+        // `products`, so this store cannot resolve a display name for any row. Resolving it
+        // would mean either exposing the raw product_no (an identifier — excluded by the DTO)
+        // or inventing a catalog join that does not exist. Null says "not available on this
+        // channel"; see the OperatorVocItem javadoc on why that must not read as "no product".
+        return new OperatorVocItem(channelCode, channelNameKo, sourceType, null, a.getRating(), a.getReplyStatus(),
                 kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview);
     }
 

@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.sellerops.attention.OperatorAttentionService;
 import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorVocItem;
+import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.attention.source.Cafe24VocItemSource;
 import com.sellerops.attention.source.IngestedReviewVocItemSource;
 import com.sellerops.attention.source.VocItemSourceRegistry;
@@ -80,8 +82,17 @@ import org.springframework.transaction.PlatformTransactionManager;
  * <p>Deliberately narrow. Rating bands, unrated exclusion, cross-org isolation and the
  * KST edge instants are pinned by {@code IngestedReviewVocItemSourceTest}; product
  * linking and the dashboard by {@code ExportToReportChainTest}. Re-asserting them here
- * would be duplicate surface that drifts. The unique value is the join, so there are
- * exactly two tests: it arrives, and a duplicate export does not move it.
+ * would be duplicate surface that drifts. The unique value is the join: it arrives, and a
+ * duplicate export does not move it.
+ *
+ * <p><b>Plus what the join surfaces as a product name</b>, which lives here for one reason:
+ * the states that matter are ones INGEST produces, not ones a test can fairly seed by hand.
+ * A row with a 상품번호 but a blank 상품명 makes {@code ProductService} store the SKU AS the
+ * product's name, and a row with neither makes {@code ReviewRowMapper} mint its placeholder
+ * — both invisible to any test that builds a {@code Product} directly. An earlier version of
+ * this feature asserted "the SKU never surfaces" against a hand-seeded product whose name
+ * and SKU differed, so the assertion could not fail on the one path where it did. Driving
+ * the real upload is what makes that evidence real.
  *
  * <p>Wiring follows the repo's uniform {@code @DataJpaTest} + hand-{@code new}ed
  * services convention. The mapped-field HEADERS are the NAVER seller-center labels
@@ -125,6 +136,9 @@ class ExportToAttentionChainTest {
 
     private static final String PRODUCT = "합성-전선몰딩-1호";
     private static final String SKU = "SKU-합성-77";
+    // A distinct synthetic 상품번호 for the name-less row, so it mints its own product rather
+    // than resolving onto SKU's (resolveOrCreate keys on sku and never renames an existing row).
+    private static final String SKU_ONLY = "SKU-합성-88";
 
     @BeforeEach
     void setUp() {
@@ -141,7 +155,7 @@ class ExportToAttentionChainTest {
         attention = new OperatorAttentionService(sellerAccounts, channels,
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
-                        new IngestedReviewVocItemSource(reviews, sellerAccounts))));
+                        new IngestedReviewVocItemSource(reviews, sellerAccounts, products))));
 
         channelId = seedNaverChannel();
         // EXACTLY ONE account on this channel. A second would trip the ambiguity guard
@@ -188,6 +202,96 @@ class ExportToAttentionChainTest {
 
         // The operator's signals must not budge — a re-upload is not four new bad reviews.
         assertThat(attention.attention(org, accountId, FROM, TO).items()).isEqualTo(before);
+    }
+
+    // --- what the join surfaces as a product name ------------------------------------
+
+    @Test
+    void anExportRowCarryingBothNameAndSkuSurfacesTheNameAndNeverTheSku() throws Exception {
+        // The positive control for the two null cases below. Without it they could both pass
+        // on a chain that resolves NO name at all, and the "never leaks the SKU" assertions
+        // would be worthless. This proves the pipeline genuinely produces a name here.
+        ingest(xlsx(new String[][] {
+                {"RV-1001", SKU, PRODUCT, "1", "합성-리뷰-본문-A", "2026.05.05."},
+        }));
+
+        OperatorVocItem item = onlyDrilledItem();
+
+        assertThat(item.productName()).isEqualTo(PRODUCT);
+        assertThat(item.toString()).doesNotContain(SKU);
+    }
+
+    @Test
+    void anExportRowWithASkuButNoProductNameNeverShowsTheSkuAsItsName() throws Exception {
+        // THE REGRESSION THIS EXISTS FOR. A blank 상품명 cell is not exotic — HeaderAliases.pick
+        // treats blank as absent, and ReviewRowMapper's placeholder fires only when BOTH the
+        // name and the sku are missing. So this row reaches ProductService with (name=null,
+        // sku=SKU_ONLY), and it stores the SKU AS THE NAME. A read that trusted `name` would
+        // publish 상품번호 — the channel's productNo — in the display field.
+        //
+        // Driven through the REAL FileUploadConnector rather than a hand-seeded product,
+        // because the whole point is that INGEST produces this state: a fixture asserting on
+        // a product built by hand is what let the original bug through.
+        ingest(xlsx(new String[][] {
+                {"RV-2001", SKU_ONLY, "", "1", "합성-리뷰-본문-상품명없음", "2026.05.05."},
+        }));
+
+        // Precondition: ingest really did store the SKU as the name. If this ever stops being
+        // true the test below would pass for the wrong reason, so assert the trap is set.
+        assertThat(products.findAllByOrgId(org)).singleElement().satisfies(p -> {
+            assertThat(p.getSku()).isEqualTo(SKU_ONLY);
+            assertThat(p.getName()).isEqualTo(SKU_ONLY);     // name == sku, straight from ingest
+        });
+
+        OperatorVocItem item = onlyDrilledItem();
+
+        assertThat(item.productName()).isNull();
+        assertThat(item.toString()).doesNotContain(SKU_ONLY);
+    }
+
+    @Test
+    void anExportRowWithNeitherNameNorSkuNeverShowsIngestsPlaceholder() throws Exception {
+        // Exercises the REAL placeholder path: ReviewRowMapper mints "(미지정 상품)" and passes
+        // it to ProductService as a NON-NULL name, so the stored value comes from the mapper's
+        // literal — not ProductService's fallback. Pinning it here means changing the mapper's
+        // literal breaks this test, which a unit test driving ProductService directly would not.
+        // Body deliberately avoids the placeholder's own wording — otherwise the sweep below
+        // would trip on safePreview echoing the fixture rather than on a real leak.
+        ingest(xlsx(new String[][] {
+                {"RV-3001", "", "", "1", "합성-리뷰-본문-이름없음", "2026.05.05."},
+        }));
+
+        // Non-vacuity, and the pin itself: ingest DID mint a name for this row — the product
+        // exists and is named — yet attention withholds it. Asserted WITHOUT naming the
+        // literal, deliberately: the coupling is pinned by behaviour, so if ReviewRowMapper's
+        // placeholder ever changes, the product stays named, the source's constant stops
+        // matching, and the null assertion below fails. That is the alarm, and it does not
+        // depend on this test knowing the string.
+        assertThat(products.findAllByOrgId(org)).singleElement().satisfies(p -> {
+            assertThat(p.getSku()).isNull();
+            assertThat(p.getName()).isNotBlank();
+        });
+
+        OperatorVocItem item = onlyDrilledItem();
+
+        assertThat(item.productName()).isNull();
+        assertThat(item.toString()).doesNotContain("미지정");
+    }
+
+    // --- fixtures --------------------------------------------------------------------
+
+    private void ingest(byte[] file) {
+        IngestResult result = connector.ingest(org, channelId, UploadType.REVIEW,
+                FILENAME, new ByteArrayInputStream(file));
+        assertThat(result.status()).isEqualTo("SUCCESS");
+    }
+
+    /** The single row behind LOW_RATING_REVIEW — fails loudly if the chain produced none. */
+    private OperatorVocItem onlyDrilledItem() {
+        OperatorVocItemPage page = attention.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+        assertThat(page.items()).hasSize(1);
+        return page.items().get(0);
     }
 
     /**
