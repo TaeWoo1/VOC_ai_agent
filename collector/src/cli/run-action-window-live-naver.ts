@@ -267,27 +267,50 @@ export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun
 
 /* ────────────────────────────── CLI (live) ────────────────────────────── */
 
-const CONFIRM_PROMPT = [
+/**
+ * The prose a seated human reads MID-RUN. EXPORTED so its invariants are test-locked: it was
+ * previously unexported and unasserted, which is exactly how it rotted — through Run 5 it still
+ * told the operator to confirm the dialog (contradicting that run's approved scope) and quoted a
+ * single "about 60 SECONDS" budget from the highlight, which `40d7c53` made false when it moved
+ * the download deadline to start at the human's action.
+ *
+ * Two rules keep it honest:
+ *  - **The timings are INTERPOLATED from the constants**, never restated in prose. A future timer
+ *    change cannot leave the operator reading a stale number.
+ *  - **It describes the MECHANISM and defers the confirm/do-not-confirm choice to the run's
+ *    approved scope.** This prompt is shared across scopes (Run 5 = act-but-never-confirm; the
+ *    export pilot = act + confirm + ingest), so hardcoding either is wrong for the other. The
+ *    dispatch record carries the choreography; this prompt carries the facts.
+ */
+export const CONFIRM_PROMPT = [
   "",
   "A browser window is open on NAVER. In that SAME window:",
   "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
-  "  2) Select account / store / period and reach the review-management export surface.",
+  "  2) Reach the review-management export surface for the intended account / store.",
   "  3) Leave the browser OPEN — do NOT act on the export control yet.",
+  "",
+  "  >> SELECT THE REVIEW PERIOD / SCOPE YOURSELF — NOW, BEFORE SIGNALLING READY. <<",
+  "     This is YOUR step and nothing enforces it. The Runtime observes period/scope",
+  "     but never sets, requires, or checks it: readiness passes on a populated grid",
+  "     whether or not you picked one. Whatever the surface is showing when you act",
+  "     is what gets exported.",
   "",
   "Then signal readiness by creating the sentinel file shown below (in Claude Code,",
   "just say \"ready\"). The collector then prepares and HIGHLIGHTS the one export control.",
   "",
-  "  >> From the moment the highlight appears you have about 60 SECONDS. <<",
+  "There are TWO windows, not one:",
+  `  1) up to ${Math.round(OBSERVE_TIMEOUT_MS / 60_000)} MINUTES from the highlight for YOU to act on the highlighted`,
+  "     export control. The Runtime waits — it never acts for you.",
+  `  2) then ${Math.round(DOWNLOAD_TIMEOUT_MS / 1_000)} SECONDS from YOUR action for a download to start.`,
   "",
-  "The export is TWO steps, and BOTH must land inside that window:",
-  "  1) act on the highlighted export control yourself;",
-  "  2) manually confirm the expected NAVER confirmation dialog that opens —",
-  "     the download only starts once YOU confirm it.",
-  "Act promptly. The Runtime only observes, verifies, detects the download",
-  "read-only, validates it, and ingests it. It performs NEITHER step for you, and",
-  "it cannot see step 2 — the download starting is the only evidence you confirmed.",
+  "Whether you complete any NAVER confirmation that may appear is defined by THIS RUN'S",
+  "APPROVED SCOPE — not by this prompt. The Runtime cannot see such a dialog; a started",
+  "download is the only evidence you completed one.",
   "",
-  "If the window lapses the run fails closed: no download, nothing written anywhere.",
+  "  >> A download that starts and validates is INGESTED — there is no no-ingest mode. <<",
+  "     If your approved scope is observe-only, letting window 2 lapse is the lever.",
+  "",
+  "If a window lapses the run fails closed: no download, nothing written anywhere.",
   "That is safe — but this run's approval is spent, and a retry needs a fresh one.",
   "(Ctrl-C to abort.)",
 ].join("\n");

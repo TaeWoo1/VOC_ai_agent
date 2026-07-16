@@ -676,11 +676,27 @@ It answers the one question `40d7c53` could not: **the fix was offline-proven on
   ⚠ This means `EXPORT_DATE_RANGE_REQUIRED` is dead for a **structural** reason, not merely an unused one: on any
   surface with countable rows, rung 1 wins first and the date rung is unreachable. **Whether that is a defect or
   correct-by-design is a product-owner decision — recorded here, deliberately not resolved.**
+  **↳ RESOLVED 2026-07-16 → [D-025](decisions.md): correct-by-design.** Period/scope is a **guidance-only §4 human
+  precondition**; the gate answers *exportability*, never *scope*. **And the mechanism above is narrower than the
+  truth** (established offline while planning D-025, not by this run): rung 1 explains **Run 5's path**, but the
+  **structural bound is rung 6** (`results_container_zero_rows`). Reaching the date rung requires **no
+  `<table>`/`<tbody>`/`role=grid|table|rowgroup` anywhere in the document** — so a review grid halts before it at
+  **any** row count, including zero, not merely when a count is positive. The rung stays reachable only on a
+  container-free surface (which is why the offline fixture still fires it); it is now **locked by test** so a future
+  rung reorder trips a suite instead of silently waking a gate.
 - **⚠ The `selectedRangePresent` detector remains UNPROVEN in the positive direction.** One true negative is not
-  validation: a detector hardwired to return `false` would have produced this identical result. Whether it correctly
-  reports `true` when a range **is** selected is untested live. **Per `collector/CLAUDE.md` §6 the markers stay
-  placeholders** — this run is not the observed finding that promotes them. A future run that selects a range settles
-  it cheaply.
+  validation. Whether it correctly reports `true` when a range **is** selected is untested live. **Per
+  `collector/CLAUDE.md` §6 the markers stay placeholders** — this run is not the observed finding that promotes them.
+  A future run that selects a range settles it cheaply.
+  **↳ CORRECTION 2026-07-16 (D-025).** This bullet originally argued *"a detector hardwired to return `false` would
+  have produced this identical result."* **That is false and is withdrawn** — offline we *know* the detector is not
+  hardwired (`export-click-signals.test.ts` drives it to `true` on both its branches). **The true concern is stronger
+  and more specific:** the filled-range regex matches the `value` **attribute** in serialized HTML, but every live
+  read is `page.content()` and a user- or JS-set input value updates the IDL **property**, leaving the attribute
+  untouched. On an SPA date picker — which this run's `dateRangeControlPresence: "some"` (6–20 date-ish controls)
+  suggests — the detector may be **structurally incapable of ever returning `true`**. That is what makes promoting it
+  to a readiness blocker a plausible **100% halt rate** rather than a rare false halt. The blind spots are now
+  characterized by offline test; only a live run with a selected range can close the direction.
 - **`dialogMatchesRecordedConsentMarkers: NOT_OBSERVED.`** The operator eyeball was **not returned** for this run.
   **HANDOFF's open question — whether the Run 4 dialog is the copyright/usage consent recorded in
   `export-click-signals.ts` — therefore remains OPEN, in neither direction.** Recording a guess here would have

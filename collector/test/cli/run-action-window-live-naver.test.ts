@@ -18,6 +18,7 @@ import {
   driveOneRun,
   LiveRunOperatorClient,
   PRODUCTION_REFUSAL,
+  CONFIRM_PROMPT,
 } from "../../src/cli/run-action-window-live-naver";
 import { APPROVAL_FLAG, approvalRequiredMessage } from "../../src/cli/live-run-approval";
 import { loadConfig } from "../../src/config";
@@ -246,6 +247,54 @@ describe("run-action-window-live-naver — driveOneRun orchestration (loopback, 
     expect(view?.blocker?.code).toBe("SESSION_EXPIRED");
     const detected = client.serverFrames.filter((f) => f.kind === "aw_event" && f.event.type === "DOWNLOAD_DETECTED");
     expect(detected).toHaveLength(0);
+  });
+});
+
+describe("CONFIRM_PROMPT — the prose a seated human reads mid-run (D-025)", () => {
+  // This prompt was unexported and unasserted until D-025, and it rotted: through Run 5 it still
+  // instructed the operator to confirm the dialog and quoted a single ~60 s budget that `40d7c53`
+  // had already made false. These lock the invariants that rotted, so the next drift fails here
+  // rather than in front of a seated human holding a single-use approval.
+
+  it("states the period/scope step as the operator's own, unenforced by the Runtime", () => {
+    // Under D-025 period/scope is a guidance-only §4 human precondition — the gate answers
+    // exportability, never scope. This line is the ONLY thing carrying that obligation, and Run 5's
+    // operator skipped it with nothing noticing. It must be prominent, not buried in a sub-bullet.
+    expect(CONFIRM_PROMPT).toMatch(/SELECT THE REVIEW PERIOD \/ SCOPE YOURSELF/);
+    expect(CONFIRM_PROMPT).toMatch(/nothing enforces it/i);
+    expect(CONFIRM_PROMPT).toMatch(/never sets, requires, or checks it/i);
+  });
+
+  it("describes TWO windows and never restates a timing in prose", () => {
+    // The two-window budget is live-confirmed (§8-18: the download deadline starts at the human's
+    // action, not at the highlight). Both numbers are interpolated from the constants above, so a
+    // timer change can never leave the operator reading a stale one.
+    expect(CONFIRM_PROMPT).toMatch(/TWO windows, not one/);
+    expect(CONFIRM_PROMPT).toMatch(/10 MINUTES from the highlight/);
+    expect(CONFIRM_PROMPT).toMatch(/60 SECONDS from YOUR action/);
+    // The exact stale sentence this replaced must never come back.
+    expect(/From the moment the highlight appears you have about 60 SECONDS/.test(CONFIRM_PROMPT)).toBe(false);
+  });
+
+  it("defers the confirm decision to the run's approved scope instead of hardcoding it", () => {
+    // The prompt is shared across run scopes: Run 5 was act-but-never-confirm, the export pilot is
+    // act + confirm + ingest. Telling every operator to confirm is wrong for the former — it is
+    // what the stale text did, and it contradicted the very run it was printed for.
+    expect(CONFIRM_PROMPT).toMatch(/defined by THIS RUN'S\n?APPROVED SCOPE/);
+    expect(/manually confirm the expected NAVER confirmation dialog/.test(CONFIRM_PROMPT)).toBe(false);
+  });
+
+  it("warns that a validated download is ingested unconditionally", () => {
+    // There is no no-ingest mode: the engine runs VALIDATE→INGEST with no gate, so not acting is
+    // the operator's only lever on an observe-only scope. The human must know that before acting.
+    expect(CONFIRM_PROMPT).toMatch(/there is no no-ingest mode/i);
+    expect(CONFIRM_PROMPT).toMatch(/letting window 2 lapse is the lever/i);
+  });
+
+  it("still tells the operator the Runtime never acts for them, and fails closed", () => {
+    expect(CONFIRM_PROMPT).toMatch(/it never acts for you/i);
+    expect(CONFIRM_PROMPT).toMatch(/fails closed/i);
+    expect(CONFIRM_PROMPT).toMatch(/this run's approval is spent/i);
   });
 });
 
