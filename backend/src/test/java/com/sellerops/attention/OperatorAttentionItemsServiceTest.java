@@ -201,14 +201,24 @@ class OperatorAttentionItemsServiceTest {
 
     @Test
     void rowDtoExposesNoRawContentFieldButCarriesSafePreview() {
-        // Privacy contract: no raw body or source identifiers. The ONE free-text field
-        // is the sanitized safePreview — assert it is present and the raw ones are not.
+        // Privacy contract: no raw body or source IDENTIFIERS. The one customer-authored
+        // free-text field is the sanitized safePreview — assert it is present, raw ones are not.
+        //
+        // "productname" was on this list until the product-context decision: the exclusion is
+        // of product IDENTITY (productNo / sku — for a NAVER export the SKU IS the channel's
+        // productNo), not of the catalog DISPLAY name, which ProductService already treats as
+        // display metadata and which FeedItem already shows operators. The identifier half of
+        // the ban is unchanged and pinned below; only the display name was let through, and
+        // deliberately, not by loosening the rule for convenience.
         var forbidden = Arrays.asList("title", "content", "body", "rawpreview", "articleno",
-                "productno", "sourceid", "customerid", "orderid", "productname", "mallid");
+                "productno", "sku", "productid", "sourceid", "customerid", "orderid", "mallid");
         var fields = Arrays.stream(OperatorVocItem.class.getRecordComponents())
                 .map(RecordComponent::getName).map(String::toLowerCase).toList();
         assertThat(fields).doesNotContainAnyElementsOf(forbidden);
         assertThat(fields).contains("safepreview");
+        // The display name is in the contract on purpose — pin it so a later "tidy-up" that
+        // drops it has to argue with a test rather than silently regress the surface.
+        assertThat(fields).contains("productname");
     }
 
     @Test
@@ -243,6 +253,24 @@ class OperatorAttentionItemsServiceTest {
         OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
 
         assertThat(p.items().get(0).safePreview()).isNull();
+    }
+
+    @Test
+    void cafe24RowsCarryNoProductNameEvenWhenTheArticleHasAProductNo() {
+        Fixture f = seedChannelAndAccount();
+        // A community article with a product_no set — the ONLY product handle this store has.
+        // It is an identifier, so it must not become a name, and there is no catalog link to
+        // resolve a real one from. The row stays null: "not available on this channel".
+        articleWithProductNo(f, "2026-05-08T12:00:00+09:00", 987654L, "배송 빨라요");
+
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(p.items()).singleElement()
+                .satisfies(item -> {
+                    assertThat(item.productName()).isNull();
+                    // The product_no must not leak into the one free-text field either.
+                    assertThat(item.safePreview()).doesNotContain("987654");
+                });
     }
 
     // --- fixtures ------------------------------------------------------------
@@ -289,6 +317,25 @@ class OperatorAttentionItemsServiceTest {
     private void saveArticle(Fixture f, String sourceKind, Instant sourceCreatedAt,
                              String replyStatus, Integer rating) {
         saveArticle(f, sourceKind, sourceCreatedAt, replyStatus, rating, null, null);
+    }
+
+    /** A review article that carries a product_no — this store's only product handle. */
+    private void articleWithProductNo(Fixture f, String sourceCreatedAt, Long productNo, String content) {
+        Cafe24CommunityArticle a = new Cafe24CommunityArticle();
+        a.setOrgId(org);
+        a.setSellerAccountId(f.accountId);
+        a.setChannelId(f.channelId);
+        a.setBoardNo(4);
+        a.setArticleNo(nextArticleNo++);
+        a.setSourceKind("REVIEW");
+        a.setReplyStatus("UNKNOWN");
+        a.setRating(5);
+        a.setProductNo(productNo);
+        a.setContent(content);
+        a.setSourceCreatedAt(OffsetDateTime.parse(sourceCreatedAt).toInstant());
+        a.setSourceHash("h-" + a.getArticleNo());
+        a.setCollectedAt(Instant.parse("2026-05-25T00:00:00Z"));
+        articles.save(a);
     }
 
     private void saveArticle(Fixture f, String sourceKind, Instant sourceCreatedAt,

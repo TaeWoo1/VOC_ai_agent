@@ -141,7 +141,7 @@ class ExportToAttentionChainTest {
         attention = new OperatorAttentionService(sellerAccounts, channels,
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
-                        new IngestedReviewVocItemSource(reviews, sellerAccounts))));
+                        new IngestedReviewVocItemSource(reviews, sellerAccounts, products))));
 
         channelId = seedNaverChannel();
         // EXACTLY ONE account on this channel. A second would trip the ambiguity guard

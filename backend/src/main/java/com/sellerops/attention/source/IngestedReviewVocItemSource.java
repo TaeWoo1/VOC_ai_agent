@@ -6,6 +6,8 @@ import com.sellerops.attention.VocItemFilter;
 import com.sellerops.attention.VocWindowSnapshot;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.common.VocPreviewSanitizer;
+import com.sellerops.product.Product;
+import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
@@ -15,9 +17,12 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -28,8 +33,18 @@ import org.springframework.stereotype.Component;
  * The ingested-review {@link VocItemSource}: reads the file-ingest review store
  * ({@code reviews}) behind the channel-generic source seam, so NAVER reviews that
  * arrive as seller-center exports become operator attention signals through the same
- * taxonomy, rules, route, and sanitizer as every other channel. Adds no signal type
- * and no DTO field — it only fills {@link VocWindowSnapshot}.
+ * taxonomy, rules, route, and sanitizer as every other channel. Adds no signal type and
+ * no route; it fills {@link VocWindowSnapshot} and, on the drill-down, the DTO's
+ * {@code productName}.
+ *
+ * <p><b>Product display name.</b> This store is the only {@link VocItemSource} that can
+ * resolve one: an ingested review carries a {@code product_id} link into {@code products}
+ * ({@code IngestionService} resolves-or-creates a product for every row), where the
+ * Cafe24 store has only a raw {@code product_no} and no catalog link. The name is a
+ * DISPLAY value only — the SKU (상품번호, i.e. the channel's {@code productNo}) is the
+ * product's identity and stays excluded from the DTO. Names are resolved for a whole page
+ * in one org-scoped batch query (see {@code productNamesFor}); anything that cannot be
+ * resolved honestly comes out {@code null}.
  *
  * <p><b>Serves NAVER only.</b> Two deliberate exclusions:
  *
@@ -88,6 +103,27 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      */
     static final Set<String> SUPPORTED_CHANNEL_CODES = Set.of("NAVER");
 
+    /**
+     * Ingest's fallback product name, filtered back out on read.
+     *
+     * <p>An export row with neither 상품명 nor 상품번호 still has to resolve to a product,
+     * so {@code ReviewRowMapper}/{@code ProductService} mint this placeholder. It is an
+     * ingest artifact, not a product: {@code ProductService} resolves it by name, so
+     * EVERY nameless row in an org collapses onto one shared row. Surfacing it would show
+     * an operator a "product" that is really a bucket of unrelated reviews, so a row
+     * naming it reads as {@code null} — the same honest "no name available" as a missing
+     * link. Ingest is unchanged; this is read-side only.
+     *
+     * <p>The string is duplicated from ingest rather than shared: it is a bare literal in
+     * seven main-source sites today and the only named constant for it
+     * ({@code EsmInquiryRowMapper.UNSPECIFIED_PRODUCT}) is private to the ESM inquiry
+     * importer, so there is nothing canonical to reuse and inventing one would mean
+     * editing ingest. {@code aNamelessExportRowMintsThePlaceholderThisSourceFiltersOut}
+     * pins the duplication against the REAL {@code ProductService}, so if ingest ever
+     * changes the placeholder this filter fails loudly instead of silently going dead.
+     */
+    static final String UNSPECIFIED_PRODUCT_NAME = "(미지정 상품)";
+
     /** Operator-facing source type; this store is reviews only. */
     static final String SOURCE_TYPE_REVIEW = "REVIEW";
     /** The filter vocabulary's review kind — inquiry-kind signals are not ours to serve. */
@@ -98,10 +134,13 @@ public class IngestedReviewVocItemSource implements VocItemSource {
 
     private final ReviewRepository reviews;
     private final SellerAccountRepository sellerAccounts;
+    private final ProductRepository products;
 
-    public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts) {
+    public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
+                                       ProductRepository products) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
+        this.products = products;
     }
 
     @Override
@@ -153,10 +192,46 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         Page<Review> result = reviews.findInWindowByChannelFiltered(
                 orgId, channelId, filter.minRating(), filter.maxRating(),
                 fromInstant, toExclusive, PageRequest.of(page, size));
+        Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
-                .map(r -> toItem(r, signalType, channelCode, channelNameKo))
+                .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames))
                 .toList();
         return new VocItemSlice(rows, result.getTotalElements());
+    }
+
+    /**
+     * Display names for the products this page's rows link to — ONE org-scoped batch
+     * query, never a per-row lookup. {@code page} is already clamped upstream
+     * ({@code OperatorAttentionService.MAX_PAGE_SIZE}), so the id set is bounded by the
+     * page size and each id is a primary-key hit: the cost is a page, not the catalog.
+     * Deliberately not {@code findAllByOrgId} — that loads the org's entire catalog to
+     * answer for at most a page's worth of ids.
+     *
+     * <p>The {@code orgId} filter is load-bearing, not defensive tidiness:
+     * {@code reviews.product_id} is a bare FK with no org constraint, so an id read off a
+     * row is not proof of same-org ownership. A cross-org id simply resolves to no entry
+     * here and the row's name comes out null.
+     *
+     * <p>A blank name, and ingest's {@link #UNSPECIFIED_PRODUCT_NAME} placeholder, both map
+     * to no entry for the same reason a missing row does: the contract is a real name or an
+     * honest null — never an empty string, and never an artifact, that the UI must decode.
+     */
+    private Map<UUID, String> productNamesFor(UUID orgId, List<Review> rows) {
+        Set<UUID> productIds = rows.stream()
+                .map(Review::getProductId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (productIds.isEmpty()) {
+            return Map.of();
+        }
+        return products.findAllByOrgIdAndIdIn(orgId, productIds).stream()
+                .filter(p -> isDisplayableName(p.getName()))
+                .collect(Collectors.toMap(Product::getId, Product::getName));
+    }
+
+    /** A name worth showing an operator: present, not blank, and not ingest's placeholder. */
+    private static boolean isDisplayableName(String name) {
+        return name != null && !name.isBlank() && !UNSPECIFIED_PRODUCT_NAME.equals(name.strip());
     }
 
     /**
@@ -191,11 +266,16 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     }
 
     private OperatorVocItem toItem(Review r, AttentionSignalType signalType,
-                                   String channelCode, String channelNameKo) {
+                                   String channelCode, String channelNameKo,
+                                   Map<UUID, String> productNames) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String safePreview = VocPreviewSanitizer.sanitize(r.getBody()).text();
+        // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
+        // the channel's productNo), which stays excluded as an identifier. Absent from the
+        // map (no link, cross-org, deleted, or blank-named) → null, never a guess.
+        String productName = r.getProductId() == null ? null : productNames.get(r.getProductId());
         return new OperatorVocItem(
-                channelCode, channelNameKo, SOURCE_TYPE_REVIEW, r.getRating(),
+                channelCode, channelNameKo, SOURCE_TYPE_REVIEW, productName, r.getRating(),
                 null,                       // replyStatus — an export carries no reply state
                 kstDate(r.getReceivedAt()),
                 kstDate(r.getCreatedAt()),  // when SellerOps ingested it
