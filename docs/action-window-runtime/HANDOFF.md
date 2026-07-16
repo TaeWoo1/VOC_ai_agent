@@ -99,19 +99,25 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `ff6eef5`** (PR #263 merged, 2026-07-15). The branch is **synced — 0 ahead, 0 behind**
-  (`--ff-only`, no merge commit created).
+- **`origin/main` = `31b3e44`** (PR #264 merged). The branch is **4 ahead / 0 behind** — `origin/main`
+  was merged in on 2026-07-16 as **`fb98f1b`** (normal merge commit; clean, `ort`).
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
-- **ZERO local-only commits.** The 7-commit docs-governance batch all landed via **#263** (`ff6eef5`):
-  `cb081e0` · `4c6d1ac` · `15e6fe3` · `1b9f582` · `5667ed4` · `d87ec17` (merge of `main`/#261) ·
-  `b3a9644`. Nothing is held.
-  - **That batch was docs/skill, plus exactly one `collector/src` change:** `4c6d1ac` rewrote
-    **`CONFIRM_PROMPT`** in `collector/src/cli/run-action-window-live-naver.ts` (+15/−4) — **string only;
-    no behavior, no timers.** ⚠ **`5667ed4` claimed the batch was "docs/skill only, no `collector/src`" —
-    FALSE**, and it contradicted this file's own §"Last slice" detail. **Verify a file set with
-    `git diff --name-only origin/main..HEAD`; never assert it from memory.**
+- **FOUR local-only commits, none pushed** (verified 2026-07-16 via `git ls-remote` — the remote branch
+  is at `b3a9644`, not inferred from this session's actions):
+  `ca4808e` (this file's git state after #263) · `40d7c53` (the human-barrier fix — `driveOneRun` now
+  waits on `USER_ACTION_OBSERVED`) · `5d57fde` (readiness diagnostic + the Run 5 boundary) ·
+  `fb98f1b` (merge of `main`/#264).
+  - **This batch DOES change `collector/src`** — unlike the #263 batch. `40d7c53` changed
+    `cli/run-action-window-live-naver.ts` (behaviour: barrier timing); `5d57fde` changed that file plus
+    `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
+    `git diff --name-only origin/main...HEAD`; never assert it from memory** — the #263 batch's
+    "docs/skill only" claim was FALSE and shipped in `5667ed4`'s own commit message.
+- ⚠ **`main` had ALREADY moved to `31b3e44` before this session fetched** — the local ref knew and
+  nothing surfaced it, so this file's `ff6eef5` was stale *while Run 5 was being planned against it*.
+  A recorded `origin/main` SHA is a snapshot, not a fact. **Re-check with `git fetch` + `git rev-list
+  --left-right --count origin/main...HEAD` before trusting the line above.**
 - ⚠ **"Held locally" ≠ "not pushed" — they are different facts, and this file conflated them.**
   Before #263, this section said the batch was **"none pushed"**. That was **FALSE**: the feature branch
   had already been pushed to `origin/feat/r4-supervised-channel-runtime`, by something other than the
@@ -130,10 +136,13 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   ⚠ **Use the three-dot diff (`git diff origin/main...HEAD`) when previewing a PR.** The two-dot form
   compares trees, so when `main` has moved it renders *other people's merged work* as deletions — this
   produced a bogus "1,871 deletions" reading against #259 while preparing #260.
-  **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
-  **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch three
-  times in two days (#261, #262, #263).** Assume it will happen during the next batch too.
-- Recent merges: **#263** (this batch — R4 operator guidance + routing cleanup, `ff6eef5`),
+  ⚠ **LIVE — this is firing now.** `main` moved to #264 while this batch was held, so the branch is no
+  longer synced and the two forms disagree. **Use the three-dot form for any PR preview.** `main` has now
+  moved mid-batch **four times in three days** (#261, #262, #263, #264). Assume it will happen again.
+- Recent merges: **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision, `31b3e44` —
+  **backend Java + `.github/workflows/` only**; landed on `main` while this batch was held and arrived
+  here via the `fb98f1b` merge; does **not** touch `collector/`, so the baseline below is unaffected),
+  **#263** (R4 operator guidance + routing cleanup, `ff6eef5`),
   **#262** (export→report chain verification, `3b668d7` — **backend Java only**; landed on `main` while
   #263 was open and arrived here on the ff-sync; does **not** touch `collector/`, so the baseline below
   is unaffected), **#261** (bridge abuse hardening, `d7d1161` — reached this branch via `d87ec17`),
@@ -265,10 +274,13 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2855 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`d87ec17`
-  tree (i.e. **including #261**). Lineage, all accounted for — **no unexplained drift**: 2761 → **2837**
-  (+76 from #259) → **2855** (+18 from #261). The 4 docs-only commits before the merge held 2837 exactly;
-  for a docs slice, **any movement is a red flag, not drift**.
+- Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the post-`fb98f1b`
+  merged tree (i.e. **including #264**). Lineage, every delta attributed — **no unexplained drift**:
+  2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
+  regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests). **#264 added 0** — it
+  is backend Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the
+  count not at all. **A docs-only or backend-only change that moves this number is a red flag, not
+  drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
