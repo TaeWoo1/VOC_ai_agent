@@ -4,8 +4,14 @@ SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.2** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.3** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.3 변경 (2026-07-17, 제품 오너 결정 반영): **NAVER 리뷰 기반 attention 항목에 로컬 트리아지 허용**
+> (§5) — 운영자가 `RESPONSE_NEEDED`/`MONITOR`/`NO_ACTION` 중 자신의 판단을 기록한다. 상태는 신호가 아니라
+> **리뷰에 귀속**되고, **attention 카운트·심각도를 바꾸지 않으며**, **마켓플레이스 부수효과가 없다**
+> — 로컬 기록일 뿐 초안 작성·발송·해결 처리가 아니므로 §5 "채널로의 쓰기 액션" 범위 밖 규정과 상충하지
+> 않는다. 현재 NAVER 전용, Cafe24는 읽기 전용.
 >
 > v1.2 변경 (2026-07-08, 제품 오너 결정 반영): ① **SellerOps를 "SME 멀티채널 커머스 운영 에이전트"로
 > 재정의**(§1.2) — 통합 셀러센터는 그 표면, 운영 루프 `OBSERVE→ACQUIRE→NORMALIZE→UNDERSTAND→PRIORITIZE→
