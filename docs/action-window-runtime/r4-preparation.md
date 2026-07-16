@@ -29,7 +29,7 @@ Gate R4 work top-to-bottom; an unchecked box above blocks everything below it.
 | P3 | R2A/R2B FE↔Runtime integration merged (loopback + real Bridge WS) | ✅ | PR #217/#218, checklist #12/#12b |
 | P4 | R3 Operation Run persistence merged (restart/resume/terminal protection) | ✅ | PR #219 merge `7292217`, checklist #13 |
 | P5 | First channel selected per §2 criteria | ✅ | **NAVER SmartStore review export** — G1 ratified 2026-07-09, [`decisions.md`](decisions.md) D-021 |
-| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1–G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md); G3 confirmed 2026-07-12 for the read-only probe path); read-only §8-4 probe complete under a **consumed** one-run G6; **the export-pilot per-run G6 is still open** — gate not fully signed until that approval. **Sign-off requirements itemized in the export-pilot pre-dispatch runbook** ([`r4-gate-record.md`](r4-gate-record.md)) — signed only in the dispatching turn |
+| P6 | Supervised-pilot internal gate signed (§3) for the selected channel | ☐ | G1/G2/G4/G5 ✅ (D-021/D-024, [`r4-gate-record.md`](r4-gate-record.md)); **G3 and G6 are per-run** (D-026) — neither is ever carried in, both are affirmed in the dispatching turn; read-only §8-4 probe complete under a **consumed** one-run G6 and a **consumed** read-only-scoped G3; **the export-pilot per-run G6 + a fresh export-scoped G3 are still open** — gate not fully signed until both land. **Sign-off requirements itemized in the export-pilot pre-dispatch runbook** ([`r4-gate-record.md`](r4-gate-record.md)) — signed only in the dispatching turn |
 | P7 | Live-action safety boundary (§4) acknowledged by the operating seller (consent recorded) | ✅ | **self-consent recorded** for `NAVER_DEV_SELLER_SELF_01` (operator's own dev account) acknowledging §4 verbatim — [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024 |
 | P8 | Platform-policy/provider-inquiry checklist (§5) — parallel track OPENED and logged | ✅ | §5 state logged — NAVER seller-owned export needs no platform grant; no platform marked "approved" — [`r4-gate-record.md`](r4-gate-record.md) §G5, [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-5 |
 | P9 | Technical adapter readiness (§6) green on synthetic fixtures for the selected channel | ✅ | all §6 items green on NAVER fixtures (session/surface probe, target locator, download detection, artifact validation, ingestion handoff, operation-run persistence, overlay+observation, **Bridge/FE loop over the real WS from boot**, privacy sweep — PRs #221/#222/#224/#225/#227 + D-023); **the seated `AW_HEADED` operator run PASSED (2026-07-11, real human click)**; **the live driver core (`NaverLiveProbeDriver`) is now MERGED (PR #242, `cf509a5`)** — its NAVER-specific seams are proven hermetically + over a real browser on a **synthetic DOM** (`naver-surface`/`naver-live-driver`/`naver-live-browser` tests). **Green here means synthetic-fixture / synthetic-browser only — no live NAVER has ever run, and the live driver is not yet wired into a session/Bridge/persistence loop.** — [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-2/§8-3 |
@@ -85,8 +85,9 @@ unverified export surface. This document deliberately selects nothing.
 > **Resolved (2026-07-09):** the product owner ratified **NAVER SmartStore review export** as the
 > first pilot channel — G1, recorded as [`decisions.md`](decisions.md) **D-021**. §2 above is
 > retained as the selection-rationale record; ESM+ and Coupang remain later candidates.
-> Fixture-only adapter work may start; live NAVER contact stays blocked by §3 G2–G6, the NAVER
-> live-work pause (§9 item 3), and per-run product-owner approval.
+> Fixture-only adapter work may start; live NAVER contact stays blocked by §3 G2–G6 — including
+> **G3**, which carries the NAVER live-work pause lift (§9 item 3), and **G6**, the per-run
+> product-owner approval. Both are per-run and never standing (D-026).
 
 ---
 
@@ -103,9 +104,15 @@ All of the following, recorded in this directory, before the first live run:
   RECORDED 2026-07-12: self-consent for `NAVER_DEV_SELLER_SELF_01`** (the operator's own dev account;
   seller = operator), first authorized live run scoped to the read-only session-precondition probe —
   [`r4-gate-record.md`](r4-gate-record.md) §G2, [`decisions.md`](decisions.md) D-024.
-- **G3 — Environment.** Stable operator environment (network/IP/location stable — the condition
-  that paused NAVER live work); dedicated Chrome profile for the connection; paired Bridge;
-  Operation Run persistence enabled.
+- **G3 — Environment + live-work pause lift.** ☐ **PER-RUN** — never standing, never inherited
+  ([`decisions.md`](decisions.md) D-026). Affirmed fresh in the **dispatching turn** and **scoped to
+  that one run**: stable operator environment (network/IP/location stable — the condition that paused
+  NAVER live work); dedicated Chrome profile for the connection; paired Bridge; Operation Run
+  persistence enabled — each **re-verified**, not carried — **plus the §9 item 3 NAVER live-work pause
+  lift**, freshly affirmed for that run's scope (read-only / export / export+ingest / real-click are
+  distinct scopes and never substitute for one another). **Consumed with the run**, exactly like G6;
+  prior affirmations and the register never carry over. Recorded affirmations are retained as dated
+  CONSUMED instances — [`r4-gate-record.md`](r4-gate-record.md) §G3.
 - **G4 — Synthetic ladder green.** §6 adapter readiness fully green on synthetic fixtures FIRST —
   live is never the first execution of any code path (slice §14-11: live action is not required
   for implementation verification).

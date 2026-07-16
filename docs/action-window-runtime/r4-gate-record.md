@@ -4,11 +4,13 @@
 **Pilot seller:** `NAVER_DEV_SELLER_SELF_01` — the operator's **own development NAVER seller account**
 ([`decisions.md`](decisions.md) D-024). **Status:** LIVING register of the §3 supervised-pilot gate.
 
-> **This record authorizes NO live NAVER contact beyond what a filled per-run G6 grants.** It records the
-> gate state only. A **read-only session-precondition probe was completed 2026-07-12** under a **consumed
-> one-run G6** (§G6 below, §8-4 result). **Live export stays blocked** — it needs **G3** (stable
-> environment + a live-work pause lift under the full §4 scope) and a **fresh per-run G6** in the
-> dispatching turn; the consumed read-only-probe instance carries over to nothing.
+> **This record authorizes NO live NAVER contact beyond what a filled per-run G3 + G6 grant.** It records
+> the gate state only. A **read-only session-precondition probe was completed 2026-07-12** under a
+> **consumed one-run G6** and a **consumed read-only-scoped G3** (§G3/§G6 below, §8-4 result). **Live export
+> stays blocked** — it needs a **fresh export-scoped G3** (stable environment + the §9-3 live-work pause
+> lift under the full §4 scope) **and a fresh per-run G6**, both in the dispatching turn. **G3 and G6 are
+> both per-run** ([`decisions.md`](decisions.md) D-026); the consumed read-only-probe instances carry over
+> to nothing.
 
 **Sanitization discipline (self-applied):** every value here is a label, enum, boolean, date, or SHA.
 No raw seller/account ID, email, username, raw URL, credential, cookie, token, or profile path
@@ -56,22 +58,52 @@ affirmed by ratifying D-024 and this record. Satisfies [`r4-preparation.md`](r4-
 
 ---
 
-## G3 — Environment · ✅ CONFIRMED 2026-07-12 (read-only probe path only)
+## G3 — Environment + pause lift · ☐ PER-RUN (affirmed in the dispatching turn — a standing ✅ is not possible)
 
-The §3 G3 preconditions, confirmed by the operator **in a stable environment**. The pause lift below
-is **scoped to the first read-only session-precondition probe only** ([`r4-preparation.md`](r4-preparation.md)
-§9 item 3) — it is **not** a blanket lift of the NAVER live-work pause.
+G3 is a **per-run** gate ([`decisions.md`](decisions.md) D-026), exactly like G6: the §3 environment
+preconditions **and** the §9 item 3 NAVER live-work pause lift are affirmed **fresh in the dispatching
+turn**, **scoped to that one run**, and **consumed** with it. Prior affirmations, this register, and goal
+pressure never carry over. To affirm G3 for a run, record one instance of this shape in that turn (append
+per run; a blank template affirms nothing):
 
+- ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
+- ☐ Dedicated Chrome profile for the connection intact.
+- ☐ Bridge paired.
+- ☐ Operation Run persistence enabled.
+- ☐ **§9 item 3 NAVER live-work pause lift — freshly affirmed FOR THIS RUN'S SCOPE ONLY**
+  (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` — distinct scopes that never
+  substitute for one another); not a blanket lift, not inherited from any earlier run.
+
+*Owner:* operator/PO — never Runtime code. A filled G3 **alone authorizes no live contact**: a fresh
+single-use **G6** (§G6 below) is still required in the same dispatching turn.
+
+*Affirmations recorded:* one **CONSUMED** read-only-probe instance (below), plus the read-only-, export-,
+and export+ingest-scoped lifts recorded in the seven executed dispatch records
+([`r4-probe-…`](r4-probe-dispatch-record.md), [`r4-rowshape-…`](r4-rowshape-probe-dispatch-record.md),
+[`r4-export-…`](r4-export-dispatch-record.md), [`r4-run2-…`](r4-run2-settle-verification-dispatch-record.md),
+[`r4-run3-…`](r4-run3-precedence-fix-verification-dispatch-record.md),
+[`r4-run4-…`](r4-run4-full-export-pilot-dispatch-record.md),
+[`r4-readiness-branch-…`](r4-readiness-branch-probe-dispatch-record.md)) — **all spent**.
+
+```
+R4 G3 affirmation — CONSUMED (authorizes nothing further)
+- date:            2026-07-12
+- operator:        self
+- run scope:       read-only session-precondition probe (no click/export/download)
 - ☑ Stable network / IP / location (the condition that paused NAVER live work).
 - ☑ Dedicated Chrome profile for the connection.
 - ☑ Bridge paired.
 - ☑ Operation Run persistence enabled.
-- ☑ **NAVER live-work pause LIFTED** — **for the first read-only session-precondition probe only**
-  (no click / export / download); not a general lift.
+- ☑ NAVER live-work pause LIFTED — for the first read-only session-precondition probe ONLY
+     (no click / export / download); not a general lift.
+- outcome:         CONSUMED — spent on the §8-4 read-only probe (2026-07-12); result in
+                   r4-evidence-pack.md §8-4. Authorized ONLY that one read-only probe. Does NOT
+                   carry to an export, ingest, or real-click run.
+```
 
-*Owner:* operator. *Confirmed:* 2026-07-12 — G3 satisfied **for the read-only probe path**. This alone
-authorizes **no live contact**: G6 per-run approval is still required in the dispatching turn before any
-probe.
+⚠ **This instance is spent.** ⚠ **G3 has never "failed".** Each affirmation above was real and is retained
+here as a dated record — `☐ PER-RUN` is this register's **category** label for a gate that is never standing
+(the same shape §G6 carries), not a failure marker.
 
 ---
 
@@ -117,7 +149,9 @@ R4 live-run approval
 - §7 abort criteria:  acknowledged (ambiguous/missing/drifted target, unexpected post-state,
                       session invalid, artifact-validation failure → fail closed, zero clicks;
                       operator abort on withdrawn consent / unrecognized dialog / anti-abuse challenge)
-- G2/G3/G5 state:     G2 ✅ recorded · G3 ✅ confirmed (checklist above all ☑, pause lifted) · G5 ✅ logged
+- G2/G3/G5 state:     G2 ✅ recorded · G5 ✅ logged
+                      G3 ☐ AFFIRMED FOR THIS RUN (§G3 instance recorded in this same turn, scoped to
+                      the run scope above — G3 is per-run; no earlier affirmation carries over)
 ```
 
 *Approvals recorded:* one **CONSUMED** read-only-probe instance (below). G6 is a **per-run** gate — it is
@@ -165,8 +199,9 @@ R4 live-run approval — EXPORT PILOT (fill in the dispatching turn)
 - §7 abort criteria:  acknowledged (ambiguous/missing/drifted target, unexpected post-state, session
                       invalid, artifact-validation failure → fail closed, zero clicks; operator abort
                       on withdrawn consent / unrecognized dialog / anti-abuse challenge)
-- G2/G3/G5 state:     G2 ✅ recorded · G3 ✅ RE-AFFIRMED for an EXPORT run (§9-3 pause lift under full §4,
-                      not the read-only scope) · G5 ✅ logged
+- G2/G3/G5 state:     G2 ✅ recorded · G5 ✅ logged
+                      G3 ☐ RE-AFFIRMED for an EXPORT run (§9-3 pause lift under full §4, not the
+                      read-only scope) — per-run; the read-only ☑ does NOT carry over
 - P6 state:           signed for this run (see the pre-dispatch runbook §P6 requirements)
 ```
 
@@ -248,8 +283,9 @@ operation, multiple runs, or any SellerOps-performed click.
 > repo, **P4 = R3 Operation Run persistence (✅ merged, PR #219)** — a different, already-satisfied row —
 > and is **not** what an export run re-affirms. This block does not touch P4.
 
-The existing **G3 ✅** (above) is scoped to the **read-only §8-4 probe only**; it does **not** carry over.
-Before an export run, re-affirm the following **under the full §4 scope** (all ☐ until the dispatching turn):
+**G3 is per-run** (D-026) — there is no standing G3 to carry in. The recorded §G3 instance is scoped to the
+**read-only §8-4 probe only** and is **CONSUMED**. Before an export run, affirm a fresh instance **under the
+full §4 scope** (all ☐ until the dispatching turn):
 
 - ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
 - ☐ Dedicated Chrome connection profile intact; Bridge paired; Operation Run persistence enabled.
@@ -260,9 +296,12 @@ Before an export run, re-affirm the following **under the full §4 scope** (all 
 
 P6 ([`r4-preparation.md`](r4-preparation.md) §1) is signed **only** when, for this export run:
 
-- ☐ G1–G5 all ✅ (already: D-021/D-024; G4 synthetic ladder green).
+- ☐ G1, G2, G4, G5 all ✅ (already: D-021/D-024; G4 synthetic ladder green). **G3 is not in this list** —
+  it is per-run (D-026) and is carried by the next box, matching the signed
+  [`r4-export-dispatch-record.md`](r4-export-dispatch-record.md) block A, which lists the static gates as
+  G1/G2/G4/G5/P7/P10 and omits G3.
 - ☐ An **export-scoped G6** recorded in the dispatching turn (§G6 template above, filled).
-- ☐ **G3 re-affirmed for export** (block 1 above).
+- ☐ **G3 affirmed for export** (block 1 above) — a fresh, export-scoped instance.
 - ☐ **§7 abort criteria acknowledged** for this run (block 3 below).
 
 **P6 stays ☐ until an actual dispatching turn records the export-scoped G6 + the G3 re-affirmation. This
@@ -312,12 +351,14 @@ including its mutation note:
 
 ## Gate summary
 
-- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅** (static) · **G3 (read-only §8-4 probe path) ✅ — confirmed 2026-07-12.**
-  The §9 item 3 pause lift is scoped to that one probe and does **not** carry over: an export, ingest, or
-  real-click run needs a **fresh, run-scoped G3 re-affirmation** under the full §4 boundary (§G3, runbook §1).
-- **G6 is a per-run gate** — a **read-only-probe instance was approved and consumed 2026-07-12** (the
-  §8-4 probe is complete). G6 is **never standing**: an **export pilot still requires a fresh per-run G6**
-  in the dispatching turn, operator/PO-owned, not Runtime code.
+- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅** (static — carried in).
+- **G3 ☐ per-run · G6 ☐ per-run** — the two live gates ([`decisions.md`](decisions.md) D-026), both
+  **never standing**, both operator/PO-owned, neither Runtime code. Each is affirmed **fresh in the
+  dispatching turn**, scoped to that one run, and **consumed** with it. A read-only-probe instance of each
+  was affirmed and **consumed 2026-07-12** (the §8-4 probe is complete); the seven executed dispatch records
+  each spent their own. An export, ingest, or real-click run needs a **fresh, scope-matched G3 and a fresh
+  single-use G6** under the full §4 boundary (§G3, §G6, runbook §1). ⚠ **Neither has failed** — `☐ per-run`
+  is the category label for a gate that cannot be standing, not a failure marker.
 - The first authorized live contact — the **read-only session-precondition probe** — **was completed
   2026-07-12**; its sanitized `{ ready, verdict }` result (`ready:true` / `LOGGED_IN`, no blocker) is
   recorded in [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4. The next live step (export pilot) needs a
