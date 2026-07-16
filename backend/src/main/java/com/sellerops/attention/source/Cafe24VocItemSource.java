@@ -21,8 +21,12 @@ import org.springframework.stereotype.Component;
 
 /**
  * The Cafe24 {@link VocItemSource}: reads the collected community-article store
- * ({@code cafe24_community_articles}) — today's only real VOC source — behind the
- * channel-generic source seam. All Cafe24-specific policy lives here: the platform
+ * ({@code cafe24_community_articles}) — the only source over API-collected VOC, and
+ * the only one carrying inquiries — behind the channel-generic source seam. NAVER's
+ * file-ingest reviews are served separately by {@link IngestedReviewVocItemSource};
+ * CAFE24 stays here, since a Cafe24 review can also reach the upload store and two
+ * sources claiming the channel would double-count it. All Cafe24-specific policy
+ * lives here: the platform
  * time zone ({@link #KST}), the stored source-kind names, the operator-facing source
  * types, and the read-time fail-closed preview. The window arrives as validated
  * calendar dates; this adapter interprets the half-open day boundaries in KST (rows
