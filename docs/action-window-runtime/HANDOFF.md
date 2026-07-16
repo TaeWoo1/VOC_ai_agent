@@ -4,7 +4,7 @@
 > **This file grants nothing.** It authorizes no live action, no commit, no push. It is a map, not a gate.
 > Canonical detail lives in the docs linked below; where this file and they disagree, **they win**.
 
-**Updated:** 2026-07-15 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
+**Updated:** 2026-07-16 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
 **Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
@@ -40,8 +40,10 @@ here. Report it; do not silently edit it.
 
 ## State in one line
 
-**The NAVER supervised export pilot is PROVEN END-TO-END on the real surface** (Run 4, 2026-07-15). The
-§8-8 → §8-17 arc is complete. There is no open Runtime blocker; what remains is polish and product decisions.
+**The NAVER supervised export pilot is PROVEN END-TO-END on the real surface** (Run 4, 2026-07-15), and
+**the human barrier is now real** — Run 5 (2026-07-16) live-proved that `USER_ACTION_OBSERVED` fires on a
+real click, which had **never** happened before and was `false` on Run 4 itself. The §8-8 → §8-18 arc is
+complete. There is no open Runtime blocker; what remains is polish and product decisions.
 
 ## Live run results (chronological — every G6 below is CONSUMED)
 
@@ -54,6 +56,7 @@ here. Report it; do not silently edit it.
 | §8-14 readiness-branch probe | 07-14 | **ROOT CAUSE CONFIRMED**: empty-state-**marker precedence** — a "no results" placeholder coexists with a populated grid and masks a would-be-`READY` surface |
 | Run 3 — precedence fix | 07-14 | **PASSED** readiness, reached the human barrier (2-of-3). Observe-only; benign `DOWNLOAD_TIMEOUT`. Readiness false-empty **RESOLVED LIVE**. §8-16 |
 | **Run 4 — full export pilot** | **07-15** | **COMPLETED 3-of-3.** Real click → download → quarantine-validate (OOXML sniff) → real `/api/uploads` ingest. Backend `SUCCESS` **55/55/0/0**, clean first ingest. §8-17 |
+| **Run 5 — barrier + observation** | **07-16** | **`USER_ACTION_OBSERVED` LIVE-PROVEN** — `observed: true` on a real click, the first time ever; persisted `humanCheckpoint.observed` agrees (`run_a911f3c6799c`). Click-but-never-confirm ⇒ benign `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. **Non-mutating, verified.** First machine evidence of live period/scope. §8-18 |
 
 **⚠ Run 4 MUTATED, as authorized:** 55 real test-seller review rows are in the **local dev** backend DB
 (`localhost:8080`, never production). **Not reversible by the Runtime.**
@@ -75,12 +78,24 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   20–40 s later, `session.ts:236`'s stage guard dropped it. **Fixed OFFLINE this slice** (`driveOneRun`
   now waits on the run's own `USER_ACTION_OBSERVED` event before rechecking). **The engine/session/
   persistence wiring was always correct — only the CLI's FE stand-in mis-timed.**
-  ⚠ **Offline-fixed ≠ live-proven. The fix has never run against live NAVER; it needs a fresh G6.**
+  ✅ **LIVE-PROVEN 2026-07-16 (Run 5, §8-18) — the fix works on the real surface.** `aw.live.barrier
+  { observed: true }` on a real NAVER click: **the in-page listener (`observer.ts`) fires live**, which no
+  prior run had ever shown. The persisted `humanCheckpoint.observed` **agrees** with the emitted line
+  (`run_a911f3c6799c`) — so the §4 audit trail is a truthful record for the first time, where Runs 1–4
+  recorded `false` regardless of what the seller did.
 - ⚠ **`OBSERVE_TIMEOUT_MS` = 10 min WAS cosmetic; after the fix it is load-bearing.** The human budget is
   now **two windows, not one**: the seller acts on the highlighted control within the observe window,
   **then** confirms the dialog within ~60 s (`DOWNLOAD_TIMEOUT_MS`), which now starts at the click rather
   than at the highlight. **Strictly more generous than Run 4's combined ~60 s** — so Run 4's timing is no
   longer the live truth, and the operator must be told before the next run.
+  ✅ **LIVE-CONFIRMED 2026-07-16 (Run 5, §8-18):** the timeout fired **~60 s after the barrier observation**,
+  not after the highlight. The two-window budget is real, not just intended.
+- ⚠ **`CONFIRM_PROMPT` — the one text an operator reads at run time — is STALE, and Run 5 hit it live.**
+  It still says "manually confirm the expected NAVER confirmation dialog" and "from the moment the highlight
+  appears you have about 60 SECONDS" for **both** steps. The first contradicts any non-confirming run outright;
+  the second was made false by `40d7c53` (see above). It was rewritten in `4c6d1ac` **before** the barrier fix
+  landed and never revisited. **Reported, not fixed** (§8-18) — fixing it mid-dispatch would have invalidated
+  the offline verification the G6 rested on. **Warn the operator, or fix it in an offline slice first.**
 - ⚠ **Observation is an audit record, NOT the completion authority — keep it that way.** `driveOneRun`
   rechecks **anyway** on observe-timeout, deliberately: the in-page listener (`observer.ts:21-28`) has
   never fired on a live run, and `armObserve`'s `timeout: 0` arming means an already-fired download is
@@ -99,8 +114,9 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `db45f5a`** (PR #267 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
-  (`--ff-only`, no merge commit created locally).
+- **`origin/main` = `ccd9597`** (PR #268 merged, 2026-07-16). The branch was **synced — 0 ahead, 0 behind**
+  (`--ff-only`, no merge commit created locally) **at the moment Run 5 was dispatched**; this file's own
+  Run 5 edits are local-only until committed.
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
@@ -145,7 +161,8 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
   **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch four
   times in three days (#261, #262, #263, #264).** Assume it will happen during the next batch too.
-- Recent merges: **#267** (the Run 5 dispatch checklist + this file after #265, `db45f5a` — **docs
+- Recent merges: **#268** (this file's git-state refresh after #267, `ccd9597` — **docs only**),
+  **#267** (the Run 5 dispatch checklist + this file after #265, `db45f5a` — **docs
   only**), **#265** (the human-barrier fix + readiness instrumentation + the Run 5 boundary, `64de3ea`),
   **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision,
   `31b3e44` — **backend Java + `.github/workflows/` only**; landed on `main` while the #265 batch was
@@ -219,44 +236,59 @@ was stale. Now closed, offline, in one commit:
 - **The period/date step is UNOBSERVED.** It exists only as three words in §4 ("selects period/scope"), one
   CLI prompt line, and a halt branch (`EXPORT_DATE_RANGE_REQUIRED`) that has never fired live. Keep the §4
   obligation; invent no procedure.
-  **UPDATE 2026-07-16 — a measurement seam now exists, but the step is still UNOBSERVED.** The live CLI
-  logs `readinessBranch` / `selectedRangePresent` / `dateRangeControlPresence`, so Run 5 can *record* the
-  live period/scope state for the first time. **That is instrumentation, not observation, and it changes
-  nothing about the procedure rule** — `EXPORT_DATE_RANGE_REQUIRED` remains dead on the AW path (every
-  HALT flattens to `UNSUPPORTED_STATE`) and has still never fired live. **Invent no procedure until a run
-  reports one.**
+  **UPDATE 2026-07-16 — Run 5 MEASURED it for the first time (§8-18), and the procedure rule still stands.**
+  Observed: `readinessBranch: labeled_count_positive` · `selectedRangePresent: false` ·
+  `dateRangeControlPresence: some`, with readiness `READY`. The operator **confirmed they selected no
+  period/scope**, so `selectedRangePresent: false` is a **true negative that agrees with the operator state** —
+  not the detector false-negative class that cost Runs 1–3.
+  **Readiness passed without requiring a selected range**, and the branch shows why: rung 1 fired on a labeled
+  positive row count and **short-circuited before any date-range rung could evaluate**. So
+  `EXPORT_DATE_RANGE_REQUIRED` is dead for a **structural** reason — on any surface with countable rows the date
+  rung is **unreachable**, not merely unused. **Whether that is a defect or correct-by-design is an OPEN
+  product-owner decision.**
+  ⚠ **The detector is UNPROVEN in the positive direction** — one true negative is not validation; a hardwired
+  `false` would look identical. Whether it reports `true` when a range **is** selected is untested live, so the
+  markers stay placeholders (`collector/CLAUDE.md` §6). **Still: invent no procedure until a run reports one.**
+- ⚠ **The Run 4 dialog's identity is STILL OPEN — Run 5 did not close it.** The
+  `dialogMatchesRecordedConsentMarkers` eyeball was **NOT_OBSERVED** (not returned by the operator), so whether
+  Run 4's dialog is the copyright/usage consent recorded in `export-click-signals.ts` remains established in
+  **neither direction**. **Do not merge the two observations.** A future run can settle it for free.
 
-## Next slice — Run 5 (barrier + observation), PREPARED OFFLINE, awaiting a fresh G6
+## Last live run — Run 5 (barrier + observation) — EXECUTED 2026-07-16 · G6 CONSUMED
 
-**The offline half is DONE and MERGED — the code in #265 (`64de3ea`), the dispatch checklist in #267
-(`db45f5a`). The live half is NOT authorized, and NOTHING further is blocked on code.**
-**Merged ≠ authorized, and merged ≠ live-proven** — those PRs shipped the barrier fix, the readiness
-instrumentation, the boundary, and the checklist. They shipped **no evidence**: nothing in them has run
-against live NAVER. **Run 5 is blocked entirely on the operator**, and no amount of further offline work
-moves it.
-[`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md) is the
-choreography + §3 dispatch checklist + evidence sheet; the Run-5 G6 template is in
-[`r4-gate-record.md`](r4-gate-record.md) — **one copy, deliberately not restated in the record.**
+**Run 5 is DONE and it PASSED its headline question** (§8-18): `USER_ACTION_OBSERVED` **fires on a real
+NAVER click**, and the persisted `humanCheckpoint.observed` agrees with the emitted line. The barrier fix
+is live-proven; the §4 audit trail is truthful for the first time. **Non-mutating, verified** (no download,
+quarantine never created, backend never reachable). **Its G6 is CONSUMED — it authorizes nothing further.**
 
-- **Run 5 is a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click +
-  confirm + ingest**; Run 5 is a real click that **deliberately never confirms**. **NON-MUTATING by
-  construction** (no download → no validate → no ingest), landing on Run 3's benign
-  `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. It still needs the **export-scoped G3 pause re-affirmation** — a
-  real click on a real control — and the read-only ☑ does not carry over.
-- **Why non-mutating is not politeness:** there is **no no-ingest mode**. `buildLiveRunDeps` wires the
+- **It was a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click + confirm
+  + ingest**; Run 5 was a real click that **deliberately never confirmed**, landing on Run 3's benign
+  `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3 by construction.
+- **Why non-mutating was not politeness:** there is **no no-ingest mode**. `buildLiveRunDeps` wires the
   real uploader unconditionally, `ingest` is non-optional, and the engine runs VALIDATE→INGEST with no
   gate. **If the seller confirms, ingest is unconditional and irreversible.** Not confirming is the only
-  lever — the one Run 3 used.
-- **It answers two things:** does `USER_ACTION_OBSERVED` fire on a real click (the `40d7c53` fix is
-  offline-proven only, and the in-page listener has **never once fired live**); and what the live
-  period/scope state is. **`observed: false` is a finding, not a failure** — it would mean the listener
-  does not survive live NAVER and the fix is insufficient.
-- **Offline precondition — DONE:** the readiness diagnostic now carries `readinessBranch` (computed and
-  discarded before this slice) plus `selectedRangePresent` / `dateRangeControlPresence`, and the gated
-  live CLI logs it. Without it every readiness HALT flattens to `UNSUPPORTED_STATE` and period/scope
-  stays unobservable. ⚠ **`naver-surface.ts`'s "never logged" clause was relaxed deliberately** — to the
-  **log only**, fixed enums only; **never extend it to transport or persistence** (the FE has no
-  period/scope blocker code; giving it one is a governed contract change).
+  lever — the one Run 3 used. **This still holds for every future run.**
+- ⚠ **`naver-surface.ts`'s "never logged" clause was relaxed deliberately** — to the **log only**, fixed
+  enums only; **never extend it to transport or persistence** (the FE has no period/scope blocker code;
+  giving it one is a governed contract change).
+
+## Next — three OPEN product-owner decisions from Run 5, and one offline slice
+
+**No Runtime blocker is open.** What follows is decisions and polish, not work the code is waiting on.
+
+- **PO DECISION — is the unreachable date rung a defect?** Run 5 showed readiness passes with **no selected
+  range**, because rung 1 (`labeled_count_positive`) short-circuits before any date rung evaluates. So
+  `EXPORT_DATE_RANGE_REQUIRED` is **structurally unreachable** on any surface with countable rows. Correct-by-
+  design, or a gap? **Not resolved here.**
+- **OPEN — `selectedRangePresent` is unproven in the positive direction.** Run 5 produced one **true negative**
+  (operator selected nothing, detector said nothing). A hardwired `false` would look identical. A future run
+  that **does** select a range settles it for free.
+- **OPEN — the Run 4 dialog's identity.** Run 5's `dialogMatchesRecordedConsentMarkers` was **NOT_OBSERVED**;
+  the question is open in **neither direction**. Also free to settle on any future click run.
+- **OFFLINE SLICE — fix the stale `CONFIRM_PROMPT`** (see Timing facts above). It tells the operator to confirm
+  the dialog and states a one-window ~60 s budget; both are now wrong. **This is the text a human reads mid-run.**
+- **The `COMPLETED` path under the new timing is still unproven** — it rests on Run 4's **old-timing** evidence.
+  Re-proving it needs a **separate mutating run with a fresh export-scoped G6**.
 
 Deferred items: a dedicated `INGEST_FAILED` contract code (governed contract + FE mapping); folding
 `esm/esm-review-schema-shape.ts:38`'s third copy of the row-count bucket into

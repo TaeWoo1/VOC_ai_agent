@@ -5,10 +5,13 @@
 > dispatching turn ([`r4-gate-record.md`](r4-gate-record.md)). **Every G6 to date is CONSUMED.**
 > **The boundary** is [`r4-preparation.md`](r4-preparation.md) §4/§7 — binding, and it wins over this file.
 
-**Status:** ☐ **NOT RUN — awaiting a fresh G6.** **Precondition ✅ MET:** the readiness-diagnostic offline
-slice is merged and verified (#265, `64de3ea`; 2860/29 green). ⚠ **Precondition met ≠ authorized, and
-merged ≠ live-proven** — #265 shipped the barrier fix, the instrumentation, and this boundary. It shipped
-**no evidence**: nothing in it has run against live NAVER. That is what this run is for.
+**Status:** ✅ **RUN — EXECUTED 2026-07-16. The Run 5 G6 is CONSUMED** (authorizes nothing further; a retry
+needs a fresh one). **Terminal `FAILED` / `DOWNLOAD_TIMEOUT` / 2-of-3 — the designed non-mutating shape**
+(seller clicked, deliberately never confirmed; no download → no validate → no ingest). **Headline: the
+barrier fix is live-proven** — `aw.live.barrier { observed: true }` on a real click, persisted
+`humanCheckpoint.observed` agreeing. **Full sanitized evidence:** [`r4-evidence-pack.md`](r4-evidence-pack.md)
+§8-18. The checklist, choreography, and evidence sheet below are preserved as the record of what this run's
+dispatch required — they are **spent**, not a live template.
 
 ## 1. Why this run exists
 

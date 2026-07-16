@@ -643,6 +643,74 @@ replaced by an exact key allow-list (a `toContain("successRows")` sweep would ha
 
 ---
 
+## §8-18 — Live Run 5 (barrier + observation) — EXECUTED 2026-07-16 · **`USER_ACTION_OBSERVED` LIVE-PROVEN** · non-mutating
+
+**Run 5 drove a real click that deliberately never confirmed**, under a fresh Run-5-scoped G6 + a real-click-scoped
+G3 pause lift + a barrier-and-observation P6 ([`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md)).
+It answers the one question `40d7c53` could not: **the fix was offline-proven only, and the in-page click listener
+(`observer.ts`) had never once fired on a live run.** Preconditions verified read-only first: backend **DOWN**
+(no listener on 8080, connection refused — deliberate, defense-in-depth against an accidental confirmation),
+`RUN_INTEGRATION` / `AW_HEADED` / `NODE_ENV` all unset, both commits under test present on `HEAD` (`ccd9597`).
+
+- **THE HEADLINE — `aw.live.barrier { observed: true }`.** **The in-page listener fires on a real NAVER click.**
+  First time ever, on any live run. The `40d7c53` barrier fix is **live-proven**, and `humanCheckpoint.observed`
+  is a **real audit record** for the first time — it was `false` on every prior live run including Run 4 (§8-17).
+- **The store agrees.** Operation Run **`run_a911f3c6799c`** persists `humanCheckpoint.observed: true`, matching the
+  log line. This was the P0 check: a disagreement between the emitted line and the persisted record would have meant
+  the audit trail lies. It does not.
+- **Sanitized terminal result:** `status: FAILED` · `progress: { completedSteps: 2, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: DOWNLOAD_TIMEOUT` — the §8-16 Run 3 shape. **The expected success condition,
+  not a fault:** the seller clicked and then deliberately let the detect window lapse.
+- **🔎 The two-window timing is live-confirmed too.** The timeout fired **~60 s after the barrier observation**, not
+  60 s after the highlight. `DOWNLOAD_TIMEOUT_MS` now starts at the **click**, exactly as `40d7c53` intended — so the
+  operator budget really is two windows (observe, then ~60 s), and §8-17's combined ~60 s is **no longer the live truth**.
+- **`aw.live.readiness` — the first machine evidence of the live period/scope state:**
+  `verdict: LOGGED_IN` · `readinessDecision: READY` · `readinessReason: positive_count` ·
+  `readinessBranch: labeled_count_positive` · `selectedRangePresent: false` · `dateRangeControlPresence: some`.
+- **Period/scope — operator-confirmed, and consistent.** The operator **did not select a review period/scope** before
+  signalling ready. `selectedRangePresent: false` **agrees with that operator state** — this is a true negative, **not**
+  a detector false-negative (the failure class that cost Runs 1–3; §8-14).
+  **Readiness still passed without requiring a selected range**, and the branch shows the mechanism: rung 1
+  (`labeled_count_positive`) fired on a labeled positive row count and **short-circuited before any date-range rung
+  could evaluate**. So the gate did not weigh period/scope and decline to care — **it never reached the question.**
+  ⚠ This means `EXPORT_DATE_RANGE_REQUIRED` is dead for a **structural** reason, not merely an unused one: on any
+  surface with countable rows, rung 1 wins first and the date rung is unreachable. **Whether that is a defect or
+  correct-by-design is a product-owner decision — recorded here, deliberately not resolved.**
+- **⚠ The `selectedRangePresent` detector remains UNPROVEN in the positive direction.** One true negative is not
+  validation: a detector hardwired to return `false` would have produced this identical result. Whether it correctly
+  reports `true` when a range **is** selected is untested live. **Per `collector/CLAUDE.md` §6 the markers stay
+  placeholders** — this run is not the observed finding that promotes them. A future run that selects a range settles
+  it cheaply.
+- **`dialogMatchesRecordedConsentMarkers: NOT_OBSERVED.`** The operator eyeball was **not returned** for this run.
+  **HANDOFF's open question — whether the Run 4 dialog is the copyright/usage consent recorded in
+  `export-click-signals.ts` — therefore remains OPEN, in neither direction.** Recording a guess here would have
+  fabricated the exact finding the field exists to establish. The run's headline never depended on it.
+- **Non-mutation — verified, not assumed:** `downloads/` **0 entries**; **no quarantine directory was ever created**;
+  the backend was **never reachable** (connection refused before *and* after the run) and `/api/uploads` was never
+  called. No download → no validate → no ingest → no DB write, no status, no `LAST_SUCCESS`. Sentinel auto-removed,
+  browser closed, process exited clean (exit 0). **G6 consumed.**
+- **🔎 Finding (reported, NOT fixed): the operator-facing run-time prose is STALE and contradicted this run's scope.**
+  `CONFIRM_PROMPT` (`cli/run-action-window-live-naver.ts`) instructs the operator to **"manually confirm the expected
+  NAVER confirmation dialog"** and states **"from the moment the highlight appears you have about 60 SECONDS"** for both
+  steps. The first **tells the operator to do the exact thing Run 5 forbids**; the second was made false by `40d7c53`
+  (see the two-window note above). It was rewritten in `4c6d1ac` **before** the barrier fix landed and never revisited.
+  The operator was warned pre-launch and ignored it. **Not fixed during the run** — a code change would have invalidated
+  the offline verification the G6 rested on.
+- **🔎 Finding (reported, NOT fixed): the readiness sentinel path is SHARED across CLIs** —
+  `.status/probe-same-session.ready`, not a Run-5-specific path. Harmless here (nothing else was running; the entrypoint
+  clears leftovers at startup), but two live CLIs must never run concurrently.
+
+**What Run 5 PROVES:** the in-page click listener survives live NAVER; `USER_ACTION_OBSERVED` fires on a real click;
+the persisted `humanCheckpoint.observed` is a truthful audit record; the click-started detect window is live-real; and
+the live period/scope state is machine-visible for the first time.
+
+**What Run 5 does NOT prove:** the **`COMPLETED` path under the new timing.** The confirmed-download → validate →
+ingest chain is untouched here and still rests on §8-17's **old-timing** evidence. Re-proving it needs a **separate
+mutating run with its own fresh export-scoped G6**. Also unproven: `selectedRangePresent` in the positive direction,
+and the dialog-marker identity (`NOT_OBSERVED`, above).
+
+---
+
 ## Readiness summary
 
 - **Technical adapter readiness (§1 P9):** substantially green — every §6 item verified on NAVER fixtures
