@@ -306,10 +306,12 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
   produced **nowhere** in production code; the field carried exactly one value while `resumeStateFor` separately
   and correctly classified those runs `RESUME_FROM_FAILURE`. **If a doc or a memory says "recoverable is
   hardcoded false", that is now stale.**
-- ⚠ **The recovery is proven OFFLINE ONLY, over the loopback.** The **CLI cannot exercise it** — `main()`'s
-  `finally` closes the browser the instant `driveOneRun` returns, so the seller gets no time to log in. Driving
-  the recovery loop from the CLI is **A3**. The FE/Bridge path is the one that works today, and its affordance
-  (`HumanCheckpointCard` + `copy.ts`) was **already built and waiting**.
+- ⚠ **The recovery is proven OFFLINE ONLY.** ~~The CLI cannot exercise it~~ — **corrected 2026-07-17: A3 /
+  [D-029](decisions.md) closed this.** The CLI now drives the recovery through an injected operator gate
+  (prompt → the seller logs in → they signal → the Runtime re-probes). But **it has still never run against
+  NAVER**: the proof is fake drivers over an in-process loopback, and the gate exists precisely so the loop
+  never needs a browser to be tested. The FE/Bridge affordance (`HumanCheckpointCard` + `copy.ts`) was
+  **already built and waiting** and is unchanged.
 - ⚠ **KNOWN, TESTED LIMITATION — a *successful* login can still kill the run.** The driver never navigates, so a
   recheck probes whatever page login landed on; off the export surface → readiness HALT → `UNSUPPORTED_STATE` →
   terminal. **Where NAVER lands a seller after login is UNOBSERVED.** Per D-028 "return to the review page
@@ -321,6 +323,36 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
   fixtures are **schema examples, not engine goldens** — no test asserts engine↔fixture agreement, and fixture
   04, the *live-proven* barrier, already diverges on six fields. A 4-step plan would **not** have made fixture 10
   projectable (`esm.prepare_session` / `esm_plus`); it buys one integer. **Do not re-derive the fork.**
+
+## The CLI recovery loop — A3, offline, 2026-07-17 ([D-029](decisions.md), §8-21)
+
+**A parked run no longer dies at teardown.** The CLI prompts, waits for the seller to log in and signal, then
+re-probes for real and continues the same run. Bounded by a **shared 10-minute budget** — not per-attempt
+timeouts. **Zero contract / FE / backend / schema / stage / navigation change.**
+
+- ⚠ **NEVER RUN LIVE.** Proven against fake drivers over an in-process loopback only. The operator gate is
+  injected precisely so the loop is testable without a browser — which is also why **passing tests say nothing
+  about NAVER.** Any live use needs a fresh scope-matched G3 + a fresh single-use G6.
+- ⚠ **A G6 now authorizes a LONGER live window: ~21 min → ~32 min** worst case. D-028's boundary requires a
+  fresh G3 + G6 but says nothing about *duration*, and duration is what changed. **Put it in the dispatch
+  record; do not let it be discovered at the seat.**
+- ⚠ **The bound is TIME, not tries** (PO, 2026-07-17). A cap was never the real bound — a sentinel timeout
+  breaks the loop, so an uncapped loop cannot spin. And 3 attempts buy almost nothing for D-028's dominant
+  case, which **fails at attempt 1**: a seller who logs in but lands off the export surface yields `LOGGED_IN`
+  → readiness HALT → `UNSUPPORTED_STATE` → terminal. `MAX_RECOVERY_ATTEMPTS = 3` is a **spin backstop only**;
+  if it ever fires, the stale-sentinel trap reopened — do not read it as "the seller gave up".
+- ⚠ **"D-028's falsifier is free" was FALSE and is now corrected.** `lastDiagnostic` is assigned after an
+  unguarded `page.content()`, so a thrown probe keeps the previous probe's value. A3 logs
+  `aw.live.readiness` **per attempt** and withholds it on `driver-error`. **If a doc or memory says A3 harvests
+  the falsifier at zero cost, that is stale.** Guarding `page.content()` in the driver is the deeper fix —
+  **open, reported, out of A3's scope.**
+- ⚠ **The `--no-upload` footgun, a third time — and my guard against it was itself vacuous.** `awaitRecovery` is
+  optional and `main()` is untestable, so the loop could be green while the live CLI stayed dead. The source
+  guard asserted `/awaitRecovery:/`, which **`recoverLoop`'s type signature satisfies** — renaming `main()`'s
+  wiring left all 56 tests green. Caught only by deliberately falsifying it. **A vacuous guard against a
+  footgun is the footgun.** Falsify every lock before trusting it.
+- **D-028's known limitation is UNCHANGED.** A3 adds no navigation; `OPEN_TARGET_SURFACE` stays dormant. What
+  A3 adds is the *delivery* of the guidance D-028 ratified and nothing had ever printed.
 
 ## Next — two OPEN product-owner decisions from Run 5
 
@@ -403,16 +435,18 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2976 passed / 29 skipped** (175 files), measured 2026-07-16 after A2-B. Lineage, every
+- Offline baseline: **2996 passed / 29 skipped** (175 files), measured 2026-07-17 after A3. Lineage, every
   delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
   regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests) → **2899** (the
   post-#268/#277-branch-point measure) → **2926** (+27 from **A1 / #277**, all new) → **2976** (+50 from
   **A2-B**, all new: `stage-tables` +32 in a new file · `engine` +12 · `session-integration` +4 ·
   `run-action-window-live-naver` +2 · `naver-session-integration` **+0**, two rows moved from the terminal
-  table to the park table). **#264 added 0** — it is backend Java + `.github/workflows/` only and touches no
-  `collector/` file, so the merge moved the count not at all. **A docs-only or backend-only change that moves
-  this number is a red flag, not drift.**
+  table to the park table) → **2996** (+20 from **A3**, all new and all in
+  `run-action-window-live-naver.test.ts`: `awaitFreshSentinel` +3 · the recovery loop +9 · `recoveryPrompt` +6 ·
+  source guard +2; **file count unchanged at 175** — A3 added no test file). **#264 added 0** — it is backend
+  Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the count not at all.
+  **A docs-only or backend-only change that moves this number is a red flag, not drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**

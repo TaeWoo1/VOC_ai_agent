@@ -8,7 +8,7 @@
  * simulated user action, `main()` invoked only when run directly).
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,10 +17,13 @@ import {
   buildLiveRunDeps,
   declinedIngestGuard,
   driveOneRun,
+  awaitFreshSentinel,
+  recoveryPrompt,
   LiveRunOperatorClient,
   PRODUCTION_REFUSAL,
   CLASSIFY_ONLY_EXIT_CODE,
   confirmPrompt,
+  type SentinelWait,
 } from "../../src/cli/run-action-window-live-naver";
 import {
   APPROVAL_FLAG,
@@ -38,7 +41,8 @@ import { createLoopbackChannel } from "../../../contracts/action-window/v1/trans
 import { createPersistentRunSession } from "../../src/action-window/run-lifecycle";
 import { loadOperationRun } from "../../src/action-window/run-store";
 import type { ProbeDriver } from "../../src/action-window/session";
-import type { SurfaceProbeResult } from "../../src/action-window/engine";
+import type { RecoverableSurfaceBlockerCode, SurfaceProbeResult } from "../../src/action-window/engine";
+import type { CommandEnvelope, CommandType } from "../../../contracts/action-window/v1/index";
 
 const HEX16 = /^[0-9a-f]{16}$/;
 const SIG = "a1b2c3d4e5f60718";
@@ -540,6 +544,331 @@ describe("confirmPrompt — the prose a seated human reads mid-run (D-025, D-027
   });
 });
 
+/**
+ * A3 — the CLI operator recovery loop (D-029).
+ *
+ * A2-B made login/session blockers recoverable; the CLI could not exercise it, because `main()`'s finally
+ * closes the browser the instant `driveOneRun` returns. These tests are the ONLY proof the loop works —
+ * it has never run against NAVER, and the gate is injected precisely so it never has to.
+ */
+class RecoveringProbeDriver extends FakeProbeDriver {
+  prepareCalls = 0;
+  /** Flipped by the test's gate to stand in for "the seller logged in on their own screen". */
+  loggedIn = false;
+  /** When set, the Nth prepare (1-based) THROWS — a seller who navigated mid-probe. */
+  throwOnPrepare = 0;
+  constructor(
+    private readonly blockerCode: "LOGIN_REQUIRED" | "SESSION_EXPIRED" = "LOGIN_REQUIRED",
+    private readonly recovered: SurfaceProbeResult = { ok: true },
+  ) {
+    super();
+  }
+  override async prepareSurface(): Promise<SurfaceProbeResult> {
+    this.prepareCalls += 1;
+    this.calls.push("prepare");
+    if (this.prepareCalls === this.throwOnPrepare) throw new Error("page read failed");
+    return this.loggedIn ? this.recovered : { ok: false, blockerCode: this.blockerCode };
+  }
+}
+
+/** Stands in for the engine refusing the recheck: nothing drives, and the refusal is recorded. */
+class RejectingOperatorClient extends LiveRunOperatorClient {
+  override send(type: CommandType, payload?: CommandEnvelope["payload"]): void {
+    if (type === "REQUEST_STEP_RECHECK") {
+      this.lastRejection = "INVALID_FOR_STATE";
+      return;
+    }
+    super.send(type, payload);
+  }
+}
+
+/** A gate that always signals ready, having "waited" `waitedMs` of the shared budget. */
+const readyGate = (waitedMs = 0, onCall?: (attempt: number) => void) => {
+  const calls: number[] = [];
+  const gate = async (_code: RecoverableSurfaceBlockerCode, attempt: number): Promise<SentinelWait> => {
+    calls.push(attempt);
+    onCall?.(attempt);
+    return { ready: true, waitedMs };
+  };
+  return { gate, calls };
+};
+
+describe("run-action-window-live-naver — awaitFreshSentinel (A3): a stale 'ready' is not a signal", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+  const sentinel = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "aw-sentinel-"));
+    dirs.push(dir);
+    return join(dir, "probe-same-session.ready");
+  };
+
+  it("REFUSES to count the pre-run sentinel as a recovery signal — the trap this function exists to close", async () => {
+    // `main()` clears the sentinel at startup and in its finally, never in between, so the file the seller
+    // created BEFORE the run is still on disk when a park happens. A bare `waitForSentinel` returns true on
+    // its first existsSync: the recheck fires milliseconds after the park against the same logged-out page,
+    // re-parks, and drains the loop — logging an exhaustion indistinguishable from a seller who walked away.
+    // Delete the `removeSentinel` line in `awaitFreshSentinel` and this returns `true` in under a
+    // millisecond. This assertion is the whole guard.
+    const path = sentinel();
+    writeFileSync(path, "");
+
+    const wait = await awaitFreshSentinel(path, 30, 1);
+
+    expect(wait.ready).toBe(false);
+    expect(existsSync(path), "the stale sentinel must be cleared, not merely ignored").toBe(false);
+  });
+
+  it("still sees a FRESH signal created after the clear — the removal did not break the handshake", async () => {
+    const path = sentinel();
+    writeFileSync(path, ""); // stale
+    setTimeout(() => writeFileSync(path, ""), 5); // the seller signals, for real this time
+
+    const wait = await awaitFreshSentinel(path, 500, 1);
+
+    expect(wait.ready).toBe(true);
+  });
+
+  it("reports a poll-derived wait, never a wall-clock read — the budget is spent against this number", async () => {
+    const path = sentinel();
+
+    const wait = await awaitFreshSentinel(path, 20, 5);
+
+    expect(wait.ready).toBe(false);
+    expect(wait.waitedMs).toBe(20); // ceil(20/5) checks × 5ms — deterministic, no clock
+  });
+});
+
+describe("run-action-window-live-naver — the recovery loop (A3, D-029)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  const openRun = (driver: ProbeDriver, runId: string, Client = LiveRunOperatorClient) => {
+    const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
+    dirs.push(dir);
+    const channel = createLoopbackChannel();
+    const opened = createPersistentRunSession(
+      { dir, transport: channel.server, driver },
+      { runId, channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    return { session: opened.session, client: new Client(channel.client, runId) };
+  };
+  const outcomes = (): unknown[] =>
+    getLogSink().filter((l) => l.event === "aw.live.recovery").map((l) => l.meta.outcome);
+
+  it("without a gate a park still returns at once — A3 is opt-in and cannot fire on a caller that has no operator", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver("SESSION_EXPIRED");
+    const { session, client } = openRun(driver, "run_a30000000001");
+
+    // A 30s ceiling that is never reached: if the loop ran without a gate, this would block on it.
+    const view = await driveOneRun(session, client, { observeTimeoutMs: 30_000 });
+
+    expect(view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(driver.prepareCalls).toBe(1);
+    expect(getLogSink().map((l) => l.event)).not.toContain("aw.live.recovery");
+  });
+
+  it("park → the seller logs in → recheck RE-PROBES for real → the run drives on to the barrier", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver();
+    const { session, client } = openRun(driver, "run_a30000000002");
+    const probes: number[] = [];
+    // The gate flips the session exactly as a seller logging in on their own screen would.
+    const { gate, calls } = readyGate(0, () => {
+      driver.loggedIn = true;
+    });
+
+    const view = await driveOneRun(session, client, {
+      observeTimeoutMs: 50,
+      awaitRecovery: gate,
+      onRecoveryProbe: (attempt) => probes.push(attempt),
+    });
+
+    expect(calls).toEqual([1]);
+    expect(driver.prepareCalls, "a recheck that did not re-probe would be the whole bug").toBe(2);
+    expect(view?.blocker, "a successful probe is the only thing that clears the blocker").toBeUndefined();
+    expect(outcomes()).toEqual(["recovered"]);
+    expect(probes).toEqual([1]);
+    // The recovery path must not disable the default path.
+    expect(getLogSink().map((l) => l.event)).toContain("aw.live.barrier");
+  });
+
+  it("the seller never signals → no recheck is sent, the run stays parked, and no barrier is claimed", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver();
+    const { session, client } = openRun(driver, "run_a30000000003");
+
+    const view = await driveOneRun(session, client, {
+      observeTimeoutMs: 30_000, // never reached — a parked run is not the barrier
+      awaitRecovery: async () => ({ ready: false, waitedMs: 10 }),
+    });
+
+    expect(driver.prepareCalls).toBe(1);
+    expect(view?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(outcomes()).toEqual(["sentinel-timeout"]);
+    expect(getLogSink().map((l) => l.event)).not.toContain("aw.live.barrier");
+  });
+
+  it("the bound is TIME, not tries: the budget stops the loop with attempts still on the clock", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver(); // never recovers
+    const { session, client } = openRun(driver, "run_a30000000004");
+    const { gate, calls } = readyGate(20);
+
+    await driveOneRun(session, client, {
+      observeTimeoutMs: 50,
+      awaitRecovery: gate,
+      recoveryBudgetMs: 30,
+      maxRecoveryAttempts: 10, // deliberately generous — the CAP must not be what stops this
+    });
+
+    expect(calls).toEqual([1, 2]); // 30ms budget, 20ms per wait → the third attempt has none left
+    expect(outcomes()).toEqual(["still-blocked", "still-blocked", "budget-exhausted"]);
+  });
+
+  it("the attempt cap is a spin backstop with its own outcome — if it EVER fires, the trap reopened", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver();
+    const { session, client } = openRun(driver, "run_a30000000005");
+    const { gate, calls } = readyGate(0); // costs no budget — only the cap can stop this
+
+    await driveOneRun(session, client, {
+      observeTimeoutMs: 50,
+      awaitRecovery: gate,
+      maxRecoveryAttempts: 2,
+    });
+
+    expect(calls).toEqual([1, 2]);
+    expect(driver.prepareCalls).toBe(3); // the initial probe + one per attempt
+    expect(outcomes()).toEqual(["still-blocked", "still-blocked", "attempts-exhausted"]);
+  });
+
+  it("⚠ a THROWN probe is never reported as 'recovered', and its stale diagnostic is never recorded", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver();
+    driver.throwOnPrepare = 2; // the seller navigated while we were reading the page
+    const { session, client } = openRun(driver, "run_a30000000006");
+    const probes: number[] = [];
+    const { gate } = readyGate(0, () => {
+      driver.loggedIn = true;
+    });
+
+    const view = await driveOneRun(session, client, {
+      observeTimeoutMs: 50,
+      awaitRecovery: gate,
+      onRecoveryProbe: (attempt) => probes.push(attempt),
+    });
+
+    // session.ts catches into fatalCleanup and never publishes, so the last view is reprobeSession's.
+    expect(view?.status).toBe("PREPARING");
+    expect(outcomes()).toEqual(["driver-error"]);
+    // `lastDiagnostic` is assigned AFTER the page read, so a throw leaves the PREVIOUS probe's value in
+    // place. Recording it here would report the pre-login readiness as post-login evidence.
+    expect(probes, "a stale diagnostic must never be logged as this attempt's evidence").toEqual([]);
+  });
+
+  it("a REJECTED recheck breaks the loop instead of re-prompting the operator for the whole budget", async () => {
+    clearLogSink();
+    const driver = new RecoveringProbeDriver();
+    const { session, client } = openRun(driver, "run_a30000000007", RejectingOperatorClient);
+    const { gate, calls } = readyGate(0);
+
+    await driveOneRun(session, client, { observeTimeoutMs: 50, awaitRecovery: gate });
+
+    expect(calls, "a refused command drives nothing — asking again would waste the seller's time").toEqual([1]);
+    expect(outcomes()).toEqual(["rejected"]);
+  });
+
+  it("UNSUPPORTED_STATE after a login is LEGIBLE — D-028's falsifier landing FALSE must say so in the log", async () => {
+    clearLogSink();
+    // The seller logs in but lands off the export surface: readiness HALTs. This is D-028's dominant case.
+    const driver = new RecoveringProbeDriver("LOGIN_REQUIRED", { ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    const { session, client } = openRun(driver, "run_a30000000008");
+    const { gate, calls } = readyGate(0, () => {
+      driver.loggedIn = true;
+    });
+
+    const view = await driveOneRun(session, client, { observeTimeoutMs: 50, awaitRecovery: gate });
+
+    expect(view?.status, "UNSUPPORTED_STATE stays terminal — recovery never softens it").toBe("FAILED");
+    expect(calls, "a terminal run is not re-prompted").toEqual([1]);
+    const line = getLogSink().find((l) => l.event === "aw.live.recovery");
+    expect(line?.meta.outcome).toBe("failed");
+    // Without this, "failed" cannot be told from a run whose control was merely unlocatable.
+    expect(line?.meta.blockerCode).toBe("UNSUPPORTED_STATE");
+  });
+
+  it("a FAILED run carrying a blocker is not mistaken for a park — the gate is never called", async () => {
+    clearLogSink();
+    const driver = new FakeProbeDriver({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    const { session, client } = openRun(driver, "run_a30000000009");
+    const { gate, calls } = readyGate(0);
+
+    const view = await driveOneRun(session, client, { observeTimeoutMs: 50, awaitRecovery: gate });
+
+    expect(view?.status).toBe("FAILED");
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("recoveryPrompt — the prose a parked seller reads (A3, D-029)", () => {
+  // D-028 ratified "return to the review-export surface" as a guidance-only precondition and then nothing
+  // implemented it. This prompt IS that implementation, so these locks are not cosmetic: they are the only
+  // thing keeping a ratified decision from silently rotting out of the product again.
+  const PROMPT = recoveryPrompt("LOGIN_REQUIRED", 1, 10 * 60_000, false);
+  const NO_INGEST = recoveryPrompt("SESSION_EXPIRED", 2, 5 * 60_000, true);
+
+  it("names the blocker and says the run is paused, not failed", () => {
+    expect(PROMPT).toMatch(/LOGIN_REQUIRED/);
+    expect(NO_INGEST).toMatch(/SESSION_EXPIRED/);
+    expect(PROMPT).toMatch(/PAUSED — NOT FAILED/);
+  });
+
+  it("carries D-028's guidance-only precondition AND its consequence — the Runtime does not navigate", () => {
+    expect(PROMPT).toMatch(/RETURN TO THE REVIEW-MANAGEMENT EXPORT PAGE/);
+    expect(PROMPT).toMatch(/does NOT navigate/);
+    expect(PROMPT).toMatch(/the run ENDS/);
+    expect(PROMPT).toMatch(/UNSUPPORTED_STATE/);
+    expect(PROMPT).toMatch(/Nothing enforces\n?\s*this step but you/);
+  });
+
+  it("tells the seller to signal AGAIN, because the previous signal was deliberately cleared", () => {
+    expect(PROMPT).toMatch(/sentinel file shown below AGAIN/);
+    expect(PROMPT).toMatch(/leftover signal cannot be mistaken for this one/);
+  });
+
+  it("reports the remaining BUDGET and never restates a timing in prose", () => {
+    // The bound is time, so the prompt says minutes — not "attempt 2 of 3". A try costs nothing at the seat.
+    expect(PROMPT).toMatch(/about 10 MINUTE\(S\) of recovery time left/);
+    expect(NO_INGEST).toMatch(/about 5 MINUTE\(S\) of recovery time left/);
+    // Both interpolated from the constants, exactly as confirmPrompt's are.
+    expect(PROMPT).toMatch(/10 MINUTES from the highlight/);
+    expect(PROMPT).toMatch(/60 SECONDS from YOUR action/);
+  });
+
+  it("re-states THIS RUN'S ingest consequence — a park can insert a 10-minute detour before the seller acts", () => {
+    // The seller read confirmPrompt's irreversibility warning before logging in. By the time they act on
+    // the highlight it may be ten minutes and a login flow ago. Derived from the run's policy, never restated.
+    expect(PROMPT).toMatch(/is INGESTED into SellerOps/i);
+    expect(PROMPT).toMatch(/real and irreversible/i);
+    expect(NO_INGEST).toMatch(/DISCARDED/);
+    expect(NO_INGEST).not.toMatch(/is INGESTED into SellerOps/i);
+  });
+
+  it("leaks nothing — no URL, no path, no selector, no page content", () => {
+    for (const p of [PROMPT, NO_INGEST]) {
+      expect(p).not.toMatch(/https?:\/\//);
+      expect(p).not.toMatch(/\.ready\b/);
+      expect(p).not.toMatch(/\[data-|querySelector|#\w+\s*>/);
+    }
+  });
+});
+
 describe("run-action-window-live-naver — module source guard", () => {
   const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/run-action-window-live-naver.ts");
   const raw = readFileSync(srcPath, "utf8");
@@ -610,5 +939,28 @@ describe("run-action-window-live-naver — module source guard", () => {
     expect(/log\("aw\.live\.barrier",\s*\{\s*observed\s*\}\)/.test(code)).toBe(true);
     expect(/log\("aw\.live\.readiness"/.test(code)).toBe(true);
     expect(/prepareDiagnostic\(\)/.test(code)).toBe(true);
+  });
+
+  /**
+   * The §8-19 footgun, a THIRD time. `isClassifyOnly` was exported, unit-tested, and simply never imported
+   * by its caller, so `--no-upload` was discarded and the run uploaded anyway. A3's recovery gate has the
+   * identical shape: `awaitRecovery` is optional, `main()` is unreachable from tests, and the entire loop
+   * could be green while the live CLI still tears the browser down the instant a park happens — the exact
+   * gap A3 exists to close. A green unit test on an opt-in seam proves nothing about the caller.
+   */
+  it("main() WIRES the recovery gate — an opt-in loop the caller never passes is --no-upload all over again", () => {
+    // ⚠ These patterns must match main()'s CALL SITE, never a declaration. The first draft of this test
+    // asserted `/awaitRecovery:/`, which the `recoverLoop` type signature satisfies — so renaming main()'s
+    // wiring left the guard green and the live CLI dead. A vacuous guard against the footgun IS the footgun.
+    expect(/driveOneRun\(assembled\.session, assembled\.client, \{/.test(code)).toBe(true);
+    expect(/awaitRecovery: async \(/.test(code)).toBe(true);
+    expect(/onRecoveryProbe: \(attempt\) =>/.test(code)).toBe(true);
+    // The prompt must be PRINTED and the sentinel must be waited on — a gate that does neither is a stub.
+    expect(/console\.error\(recoveryPrompt\(/.test(code)).toBe(true);
+    expect(/await awaitFreshSentinel\(/.test(code)).toBe(true);
+  });
+
+  it("emits the recovery evidence surface", () => {
+    expect(/log\("aw\.live\.recovery"/.test(code)).toBe(true);
   });
 });

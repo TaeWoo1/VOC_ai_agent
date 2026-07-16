@@ -57,7 +57,7 @@ import { defaultQuarantineDirFor } from "../action-window/quarantine";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
 import { buildBackendIngestUpload, type AwIngestUploadFn } from "../action-window/ingest-handoff";
 import { createPersistentRunSession } from "../action-window/run-lifecycle";
-import type { RunConfig } from "../action-window/engine";
+import type { RecoverableSurfaceBlockerCode, RunConfig } from "../action-window/engine";
 import type { ActionWindowSession } from "../action-window/session";
 import {
   approvalRequiredMessage,
@@ -75,6 +75,25 @@ const SENTINEL_POLL_INTERVAL_MS = 750;
 /** The OBSERVE step blocks on the seller's REAL action — give a seated human a generous window. */
 const OBSERVE_TIMEOUT_MS = 10 * 60_000;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * The recovery bound is **TIME, SHARED across attempts** — not a per-attempt timeout (PO, 2026-07-17;
+ * D-029). A per-attempt timeout multiplies: 3 × 10 min would take the worst-case time a live NAVER browser
+ * is held open on a single-use G6 from ~21 min to ~52 min. One shared budget is monotonic regardless of
+ * attempt count (~32 min) and degrades into an honest operator sentence — "you have N minutes to recover".
+ * "You have 3 tries" is not one: a try costs nothing if you are standing at the seat.
+ *
+ * This budget covers the time spent waiting on the HUMAN. Machine time (settleSpa + the probe) is bounded
+ * separately by MAX_RECOVERY_ATTEMPTS × (HYDRATION_TIMEOUT_MS + the driver's readiness settle).
+ */
+const RECOVERY_BUDGET_MS = 10 * 60_000;
+/**
+ * Spin backstop ONLY — not the bound. Every iteration costs either a deliberate human file-create or a full
+ * timeout, and a timeout breaks the loop, so an uncapped loop cannot spin. This is defense-in-depth against
+ * the very trap `awaitFreshSentinel` closes; it has its own outcome so that if it EVER fires we learn that
+ * the trap reopened, rather than mistaking it for a seller who gave up.
+ */
+const MAX_RECOVERY_ATTEMPTS = 3;
 
 /** Refusal reason for a run attempted in a hosted/production environment (defense-in-depth). */
 export const PRODUCTION_REFUSAL =
@@ -181,6 +200,18 @@ export function buildLiveRunDeps(
 export class LiveRunOperatorClient {
   view: ActionWindowRunView | undefined;
   readonly serverFrames: AwServerFrame[] = [];
+  /**
+   * The reason the LAST rejected command was refused, or undefined. Recorded because the recovery loop
+   * must not assume acceptance: a rejected `REQUEST_STEP_RECHECK` drives nothing, so `whenSettled()`
+   * returns in one tick with the run STILL parked — and an unguarded loop would cheerfully re-prompt the
+   * operator for the whole budget, logging a truthful-but-useless "still-blocked" every time.
+   *
+   * Rejection is unreachable today, but only via a proof spanning three modules: `allowedCommands` permits
+   * recheck at the park (`stages.ts`), `expectedRevision` cannot go stale because nothing drives while
+   * parked, and `commandId` carries a fresh `randomUUID()` suffix (below) so no idempotent replay fires.
+   * The single pre-existing recheck fails harmlessly; a LOOP resting on that proof does not.
+   */
+  lastRejection: string | undefined;
   private cmdSeq = 0;
   private readonly seenEvents = new Set<EventType>();
   private readonly eventWaiters = new Map<EventType, Array<() => void>>();
@@ -193,6 +224,7 @@ export class LiveRunOperatorClient {
       this.serverFrames.push(frame);
       if (frame.kind === "aw_view") this.view = frame.view;
       if (frame.kind === "aw_event") this.recordEvent(frame.event.type);
+      if (frame.kind === "aw_command_result" && !frame.accepted) this.lastRejection = frame.reason ?? "UNKNOWN";
     });
   }
 
@@ -242,6 +274,122 @@ export class LiveRunOperatorClient {
   }
 }
 
+/** How a single recovery attempt ended. Fixed enums — this is an audit surface, not a debug string. */
+export type RecoveryOutcome =
+  /** The probe cleared the blocker: the run is legitimately at the export barrier. */
+  | "recovered"
+  /** Re-parked — the seller has not fixed the session yet. */
+  | "still-blocked"
+  /** Terminal. The logged `blockerCode` says WHICH, and that distinction is the whole evidence value. */
+  | "failed"
+  /** The probe THREW: the driver is torn down, the run is dead, and `lastDiagnostic` is now STALE. */
+  | "driver-error"
+  /** The engine refused the recheck. Unreachable today; a loop must not assume that stays true. */
+  | "rejected"
+  | "sentinel-timeout"
+  | "budget-exhausted"
+  | "attempts-exhausted";
+
+/** Waiting on a human signal: did it arrive, and how long did we wait. */
+export interface SentinelWait {
+  ready: boolean;
+  /** Poll-derived (`checks × intervalMs`), never a wall-clock read — the `export-surface-settle` convention. */
+  waitedMs: number;
+}
+
+/**
+ * The recovery gate: prompt the seated operator and wait for them to signal that they fixed their session.
+ * Injected so `driveOneRun` stays free of console/fs/page and remains hermetically testable — the same
+ * reason `observeTimeoutMs` is a parameter. `budgetMs` is what REMAINS of the shared recovery budget.
+ */
+export type RecoveryGate = (
+  code: RecoverableSurfaceBlockerCode,
+  attempt: number,
+  budgetMs: number,
+) => Promise<SentinelWait>;
+
+/**
+ * The parked blocker code, or `null` if this view is not a recovery park.
+ *
+ * A park is the ONLY `WAITING_FOR_HUMAN` that carries a blocker: the status comes from just two stages
+ * (`WAIT_FOR_USER_ACTION`, where `onSurfaceReady` already cleared the blocker, and `AWAIT_SESSION_RECOVERY`),
+ * and this CLI builds its session with `createPersistentRunSession`, so no restore path can inject one.
+ * Narrowing to the two recoverable codes rather than casting keeps D-028's compile-time guarantee at this
+ * boundary: a future third recoverable code cannot be silently absorbed here — it simply is not a park, so
+ * the loop returns early rather than prompting a human about a state it does not understand.
+ */
+function parkedCode(view: ActionWindowRunView | undefined): RecoverableSurfaceBlockerCode | null {
+  if (view?.status !== "WAITING_FOR_HUMAN") return null;
+  const blocker = view.blocker;
+  if (!blocker || blocker.recoverable !== true) return null;
+  return blocker.code === "LOGIN_REQUIRED" || blocker.code === "SESSION_EXPIRED" ? blocker.code : null;
+}
+
+/**
+ * Classify a post-recheck view. TOTAL, and `"recovered"` is asserted POSITIVELY — never reached by
+ * falling through.
+ *
+ * ⚠ This function is the audit honesty of the whole loop. The obvious shape —
+ * `isParked ? "still-blocked" : status === "FAILED" ? "failed" : "recovered"` — reports **"recovered" for a
+ * run that just died**: when `prepareSurface` throws, `session.ts`'s `.catch(() => this.fatalCleanup())`
+ * tears the driver down and NEVER publishes, so the last view is the `PREPARING` + blocker one that
+ * `reprobeSession` pushed. Nothing else produces that shape, which is what makes `driver-error` detectable
+ * without a driver change. Logging that as "recovered" is exactly the audit-lie class D-028 rejected
+ * `HUMAN_ACTION_REQUIRED` for — and here it would be a lie WE introduced, not one we inherited.
+ */
+function outcomeOf(view: ActionWindowRunView | undefined, rejection: string | undefined): RecoveryOutcome {
+  if (rejection) return "rejected";
+  if (parkedCode(view)) return "still-blocked";
+  if (view?.status === "FAILED") return "failed";
+  if (view?.status === "PREPARING" && view.blocker) return "driver-error";
+  if (view?.status === "WAITING_FOR_HUMAN" && !view.blocker) return "recovered";
+  return "driver-error"; // never fall through to a claim of success
+}
+
+/**
+ * Prompt → wait → recheck, until the run leaves the park or the budget/backstop stops us.
+ *
+ * The bound is the SHARED budget, not the attempt count (D-029). `blockerCode` rides every line because it
+ * is what makes `"failed"` legible: `UNSUPPORTED_STATE` means *logged in, surface not ready* — D-028's
+ * falsifier landing FALSE — while `TARGET_NOT_FOUND` means *logged in, surface READY, control unlocatable*,
+ * a completely different finding. `safeMeta` filters log KEYS, never values, so the enum survives intact.
+ */
+async function recoverLoop(
+  session: ActionWindowSession,
+  client: LiveRunOperatorClient,
+  opts: { awaitRecovery: RecoveryGate; onRecoveryProbe?: (attempt: number) => void; recoveryBudgetMs?: number; maxRecoveryAttempts?: number },
+): Promise<void> {
+  const max = opts.maxRecoveryAttempts ?? MAX_RECOVERY_ATTEMPTS;
+  let remaining = opts.recoveryBudgetMs ?? RECOVERY_BUDGET_MS;
+
+  for (let attempt = 1; ; attempt += 1) {
+    const code = parkedCode(client.view);
+    if (!code) return;
+    if (attempt > max) return log("aw.live.recovery", { outcome: "attempts-exhausted", attempts: max });
+    if (remaining <= 0) return log("aw.live.recovery", { outcome: "budget-exhausted", attempt });
+
+    const wait = await opts.awaitRecovery(code, attempt, remaining);
+    remaining -= wait.waitedMs;
+    if (!wait.ready) return log("aw.live.recovery", { outcome: "sentinel-timeout", attempt });
+
+    // Per-command, not per-run: a rejection from an earlier attempt must not condemn this one.
+    client.lastRejection = undefined;
+    client.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    const outcome = outcomeOf(client.view, client.lastRejection);
+    const blockerCode = client.view?.blocker?.code;
+    log("aw.live.recovery", { outcome, attempt, ...(blockerCode ? { blockerCode } : {}) });
+    // The probe's diagnostic may be recorded ONLY when the probe actually completed. `lastDiagnostic` is
+    // assigned after an unguarded `page.content()`, so a THROWN probe leaves the PREVIOUS probe's value in
+    // place — and a seller who just logged in and navigated is precisely when a page read throws. Logging
+    // it then would report the PRE-login readiness as post-login evidence: D-028's falsifier, or a stale
+    // lie, indistinguishably. Stale ⟺ threw ⟺ driver-error, so this guard closes it with no driver change.
+    if (outcome !== "driver-error") opts.onRecoveryProbe?.(attempt);
+    if (outcome === "driver-error" || outcome === "rejected") return;
+  }
+}
+
 /**
  * Drive exactly ONE supervised run to a terminal/parked state. START_RUN prepares/locates/highlights
  * and parks at the human barrier; the SELLER then acts on the platform's own control (the live driver
@@ -264,20 +412,38 @@ export class LiveRunOperatorClient {
 export async function driveOneRun(
   session: ActionWindowSession,
   client: LiveRunOperatorClient,
-  opts?: { observeTimeoutMs?: number },
+  opts?: {
+    observeTimeoutMs?: number;
+    /**
+     * Supply this and a recovery PARK is driven instead of returned: prompt → the seller logs in → they
+     * signal → the Runtime re-probes for real. Omit it and the behavior is exactly what it was before A3
+     * (a park returns at once), which is the honest semantics — a caller with no way to reach an operator
+     * cannot recover — and is why every pre-A3 test passes unmodified.
+     */
+    awaitRecovery?: RecoveryGate;
+    /** Record probe-scoped evidence after a recovery re-probe. Called ONLY when the probe completed. */
+    onRecoveryProbe?: (attempt: number) => void;
+    recoveryBudgetMs?: number;
+    maxRecoveryAttempts?: number;
+  },
 ): Promise<ActionWindowRunView | undefined> {
   client.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
   await session.whenSettled();
-  // WAITING_FOR_HUMAN is now TWO different barriers, and only one of them is ours to wait on. A recovery
+
+  // A park is recoverable, so drive the recovery BEFORE deciding anything about the barrier. This runs
+  // first precisely so the discriminator below never has to know about it: every loop exit is either
+  // unblocked (recovered → really at the barrier), still blocked, or terminal.
+  if (opts?.awaitRecovery) {
+    await recoverLoop(session, client, { ...opts, awaitRecovery: opts.awaitRecovery });
+  }
+
+  // WAITING_FOR_HUMAN is TWO different barriers, and only one of them is ours to wait on. A recovery
   // park (login/reconnect) is also WAITING_FOR_HUMAN, but nothing was located, highlighted, or armed —
   // so USER_ACTION_OBSERVED can never fire there. Waiting anyway would burn the full observe window on
   // the one failure mode that used to fail fast, AND log an `aw.live.barrier` reading for a barrier the
   // run never reached. The discriminator is the blocker: a blocker is set only by fail() (→ FAILED) and
   // park(), and a successful re-probe clears it before LOCATE, so the export barrier always waits
   // UNBLOCKED. If that ever stops holding, this returns early rather than waiting — the safe direction.
-  //
-  // A parked run simply returns its view. Driving the recovery (prompt → seller logs in → recheck) is
-  // deliberately NOT here: `main()`'s finally closes the browser as soon as this returns.
   const atExportBarrier = client.view?.status === "WAITING_FOR_HUMAN" && !client.view.blocker;
   if (atExportBarrier) {
     const observed = await client.awaitEvent("USER_ACTION_OBSERVED", opts?.observeTimeoutMs ?? OBSERVE_TIMEOUT_MS);
@@ -387,6 +553,63 @@ const PROMPT_NO_INGEST = [
   "",
 ];
 
+/**
+ * The prose a seated human reads when their run PARKS on a login/session blocker (A3 · D-029).
+ *
+ * This is the **only place D-028's guidance-only precondition is ever delivered on the CLI path.** D-028
+ * ratified "the seller is back on the review-export surface" as a §4 human precondition the Runtime observes
+ * and never gates — and then nothing implemented it: `confirmPrompt` carries the equivalent for the initial
+ * wait, but a recovery had no prompt at all. A guidance-only precondition with nowhere to print the guidance
+ * is guidance nobody reads.
+ *
+ * It obeys `confirmPrompt`'s two rules, for the same reasons:
+ *  - **Timings are INTERPOLATED from the constants**, never restated in prose.
+ *  - **It is a FUNCTION of the run's ingest policy.** A park can insert a ten-minute login detour between
+ *    `confirmPrompt`'s irreversibility warning and the moment the seller acts, so the consequence is
+ *    re-stated here, derived from what THIS run will actually do (PO, 2026-07-17).
+ *
+ * It reports the remaining BUDGET, not "attempt N of 3": the bound is time, and a try costs nothing.
+ */
+export function recoveryPrompt(
+  code: RecoverableSurfaceBlockerCode,
+  attempt: number,
+  budgetMs: number,
+  declineIngest: boolean,
+): string {
+  return [
+    "",
+    "─".repeat(64),
+    ` THE RUN IS PAUSED — NOT FAILED. Session blocker: ${code}`,
+    "─".repeat(64),
+    "",
+    `This is recovery attempt ${attempt}. Nothing has been clicked and nothing has been`,
+    "captured. The run is alive and waiting for you. In the SAME browser window:",
+    "",
+    "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
+    "",
+    "  >> 2) RETURN TO THE REVIEW-MANAGEMENT EXPORT PAGE BEFORE YOU SIGNAL READY. <<",
+    "     The Runtime does NOT navigate. It re-reads whatever page your login left",
+    "     you on. If that is not the export surface, the run ENDS — terminal",
+    "     UNSUPPORTED_STATE — and this run's approval is spent. Nothing enforces",
+    "     this step but you.",
+    "",
+    "  3) Signal readiness by creating the sentinel file shown below AGAIN (in Claude",
+    `     Code, just say "ready"). The previous one was cleared on purpose, so a`,
+    "     leftover signal cannot be mistaken for this one.",
+    "",
+    `You have about ${Math.round(budgetMs / 60_000)} MINUTE(S) of recovery time left across all attempts.`,
+    "If it lapses the run stays parked and closes down — safe, but the approval is spent.",
+    "",
+    "If you signal and your session is good, the collector re-checks and then HIGHLIGHTS",
+    "the one export control, and the normal two windows begin:",
+    `  1) up to ${Math.round(OBSERVE_TIMEOUT_MS / 60_000)} MINUTES from the highlight for YOU to act on it.`,
+    `  2) then ${Math.round(DOWNLOAD_TIMEOUT_MS / 1_000)} SECONDS from YOUR action for a download to start.`,
+    "",
+    ...(declineIngest ? PROMPT_NO_INGEST : PROMPT_INGEST),
+    "(Ctrl-C to abort.)",
+  ].join("\n");
+}
+
 const PROMPT_TAIL = [
   "For a run that is non-mutating BY CONSTRUCTION, do not act at all: let window 2",
   "lapse. No download means no artifact, and nothing is written anywhere.",
@@ -430,13 +653,41 @@ function removeSentinel(path: string): void {
   }
 }
 
-async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<boolean> {
+/**
+ * Poll for the sentinel file up to `timeoutMs`. Bounded by a fixed iteration count, and `waitedMs` is
+ * derived from that count rather than a wall-clock read — the same convention `export-surface-settle.ts`
+ * uses. The recovery budget is spent against this number, so it must not depend on the clock.
+ *
+ * ⚠ PRECONDITION (carried verbatim from `probe-same-session.ts`, where this helper's docstring lives and
+ * where THIS copy dropped it): **the caller clears any stale sentinel BEFORE calling this**, so a hit here
+ * only ever reflects a post-startup creation. `awaitFreshSentinel` is that precondition made structural.
+ */
+async function waitForSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<SentinelWait> {
   const maxChecks = Math.max(1, Math.ceil(timeoutMs / intervalMs));
   for (let i = 0; i < maxChecks; i += 1) {
-    if (existsSync(path)) return true;
+    if (existsSync(path)) return { ready: true, waitedMs: i * intervalMs };
     await sleep(intervalMs);
   }
-  return existsSync(path);
+  return { ready: existsSync(path), waitedMs: maxChecks * intervalMs };
+}
+
+/**
+ * Clear any stale sentinel, THEN wait for a new one — `waitForSentinel`'s documented precondition, enforced
+ * structurally instead of by hoping the caller remembers.
+ *
+ * This exists because the recovery wait is the SECOND use of a handshake built for exactly one. `main()`
+ * clears the sentinel at startup and in its `finally` — never in between — so the "ready" file the seller
+ * created before the run is still on disk when a park happens. Without the removal below, the wait returns
+ * `true` on its first `existsSync`: the recheck fires milliseconds after the park against the same
+ * logged-out page, re-parks, and drains the loop — logging an exhaustion that is indistinguishable from a
+ * seller who walked away. The seller never gets a chance and nothing errors. This one line is the guard.
+ *
+ * ⚠ The caller must not `await` between printing the prompt and calling this: the removal is only safe
+ * because it lands in the same synchronous tick as the prompt, so no operator can interleave a signal.
+ */
+export async function awaitFreshSentinel(path: string, timeoutMs: number, intervalMs: number): Promise<SentinelWait> {
+  removeSentinel(path);
+  return waitForSentinel(path, timeoutMs, intervalMs);
 }
 
 async function main(): Promise<void> {
@@ -478,7 +729,7 @@ async function main(): Promise<void> {
     console.error("  Sentinel file (create this when ready):");
     console.error(`    ${sentinelPath}`);
     console.error("");
-    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+    const { ready } = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
     if (!ready) {
       console.error("No sentinel within the timeout; aborting without driving a run.");
       log("aw.live.aborted", { reason: "sentinel-timeout" });
@@ -487,7 +738,37 @@ async function main(): Promise<void> {
 
     await settleSpa(page);
     assembled = assembleLiveRun(page, deps);
-    const view = await driveOneRun(assembled.session, assembled.client);
+    const view = await driveOneRun(assembled.session, assembled.client, {
+      // A2-B made login/session blockers RECOVERABLE; until A3 this CLI could not exercise that, because
+      // the `finally` below closes the browser the instant this returns. Wiring the gate here is what makes
+      // the capability reachable on the live path — and it is the whole point of the slice.
+      awaitRecovery: async (code, attempt, budgetMs) => {
+        console.error(recoveryPrompt(code, attempt, budgetMs, declineIngest));
+        console.error("  Sentinel file (create this again when ready):");
+        console.error(`    ${sentinelPath}`);
+        console.error("");
+        // NO `await` may be introduced above this line — the stale-sentinel removal inside
+        // `awaitFreshSentinel` is only safe while it shares a synchronous tick with the prompt.
+        const wait = await awaitFreshSentinel(
+          sentinelPath,
+          Math.min(budgetMs, CONFIRM_TIMEOUT_MS),
+          SENTINEL_POLL_INTERVAL_MS,
+        );
+        // The seller just logged in and navigated; give the page a chance to land before we read it.
+        // Best-effort only — the driver's own readiness settle handles hydration.
+        if (wait.ready) await settleSpa(page);
+        return wait;
+      },
+      // Per-attempt readiness evidence. The single post-run line below reports only the LAST probe, which
+      // after a recovery is the post-login one — but it cannot show the PROGRESSION (pre-login halt vs
+      // post-login halt), and that progression is exactly D-028's falsifier: does the seller still see a
+      // readiness-READY export surface after logging in? `recoverLoop` withholds this call on a thrown
+      // probe, when the diagnostic would be stale.
+      onRecoveryProbe: (attempt) => {
+        const diagnostic = assembled?.driver.prepareDiagnostic();
+        if (diagnostic) log("aw.live.readiness", { ...diagnostic, attempt });
+      },
+    });
 
     const result = {
       status: view?.status,
