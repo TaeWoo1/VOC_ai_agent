@@ -66,6 +66,8 @@ class OperatorAttentionItemsJsonContractTest {
     @MockBean JwtTokenProvider tokenProvider;
 
     private static final String TOKEN = "test-only-token-never-a-real-jwt";
+    /** A synthetic ref in the shape the ingested-review source mints; never a real row. */
+    private static final String ACTION_REF = "review:" + UUID.randomUUID();
     private final UUID orgId = UUID.randomUUID();
     private final UUID userId = UUID.randomUUID();
     private final UUID accountId = UUID.randomUUID();
@@ -99,8 +101,8 @@ class OperatorAttentionItemsJsonContractTest {
                 .andExpect(jsonPath("$.items[0].productName").value("가을 니트 가디건 CHARCOAL"))
                 // The existing fields, pinned so a product-shaped change cannot quietly
                 // reshape the rest of the row.
-                .andExpect(jsonPath("$.items[0].channelCode").value("CAFE24"))
-                .andExpect(jsonPath("$.items[0].channelNameKo").value("카페24"))
+                .andExpect(jsonPath("$.items[0].channelCode").value("NAVER"))
+                .andExpect(jsonPath("$.items[0].channelNameKo").value("네이버"))
                 .andExpect(jsonPath("$.items[0].sourceType").value("REVIEW"))
                 .andExpect(jsonPath("$.items[0].rating").value(2))
                 .andExpect(jsonPath("$.items[0].replyStatus").value("UNANSWERED"))
@@ -108,6 +110,60 @@ class OperatorAttentionItemsJsonContractTest {
                 .andExpect(jsonPath("$.items[0].collectedDate").value("2026-05-15"))
                 .andExpect(jsonPath("$.items[0].signalType").value("LOW_RATING_REVIEW"))
                 .andExpect(jsonPath("$.items[0].safePreview").value("배송은 빨랐는데 색이 생각과 달라요"));
+    }
+
+    /**
+     * The ref reaches the client verbatim — it is the row's address, and the client's only
+     * way to name this row when recording a decision, so it must survive the wire byte for
+     * byte. Asserted as an exact string rather than a pattern: a ref the server reshapes in
+     * transit is a ref that will not parse on the way back.
+     */
+    @Test
+    void theRowsRefAndRecordedDecisionReachTheClientVerbatim() throws Exception {
+        stubItems(item("가을 니트 가디건 CHARCOAL", ACTION_REF, "RESPONSE_NEEDED"));
+
+        mockMvc.perform(itemsRequest().header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].actionRef").value(ACTION_REF))
+                // The disposition travels as the enum NAME, not an ordinal — an ordinal
+                // would silently re-map every stored decision if a value were ever inserted
+                // into the enum.
+                .andExpect(jsonPath("$.items[0].triageDisposition").value("RESPONSE_NEEDED"));
+    }
+
+    /**
+     * Both new fields are explicit nulls, for the same reason {@code productName} is: the
+     * key must be on the wire for a client to tell the states apart.
+     *
+     * <p>They are two DIFFERENT absences, and conflating them is the failure this pins. A
+     * null {@code actionRef} is a CAPABILITY limit — this row cannot be decided at all
+     * (every Cafe24 community article) — so the client renders no affordance. A null
+     * {@code triageDisposition} is a STATE — decidable, not yet decided — so the client
+     * renders an affordance and no decision. A row can have a ref and no disposition (the
+     * common case, covered here); a row with no ref necessarily has no disposition.
+     *
+     * <p>Raw-body assertions because jsonPath cannot express "key present, value null":
+     * {@code exists()} fails on a null and {@code doesNotExist()} passes for one. Only the
+     * bytes separate an explicit null from an absent key — which is exactly what would
+     * change under {@code spring.jackson.default-property-inclusion: non_null}.
+     */
+    @Test
+    void anUndecidedRowAndAnUnaddressableRowSerializeAsExplicitNullsRatherThanAbsentKeys() throws Exception {
+        // Addressable, not yet triaged — a NAVER row nobody has decided on.
+        stubItems(item("가을 니트 가디건 CHARCOAL", ACTION_REF, null));
+        String undecided = mockMvc.perform(itemsRequest().header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(undecided).contains("\"actionRef\":\"" + ACTION_REF + "\"");
+        assertThat(undecided).contains("\"triageDisposition\":null");
+
+        // Not addressable at all — the shape Cafe24VocItemSource emits for every row.
+        stubItems(item(null, null, null));
+        String unaddressable = mockMvc.perform(itemsRequest().header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(unaddressable).contains("\"actionRef\":null");
+        assertThat(unaddressable).contains("\"triageDisposition\":null");
     }
 
     /**
@@ -143,6 +199,13 @@ class OperatorAttentionItemsJsonContractTest {
      * (상품번호 — the SKU under the channel's name), or a productRef. Scanning the bytes is
      * what makes this survive a nested DTO or a future field added to the page envelope,
      * neither of which a per-field assertion would notice.
+     *
+     * <p>The row here carries an {@code actionRef}, so the scan covers it too — which is
+     * exactly the point of scanning bytes rather than naming fields. The ref is SellerOps'
+     * own row id, and none of the excluded names may ride inside it: a ref built from a
+     * channel-side identifier (say {@code review:productNo-123}) fails right here. Where the
+     * ref's id actually comes from is the source's contract, covered in
+     * {@code ReviewTriageAttentionFlowTest}.
      */
     @Test
     void noProductIdentifierAppearsAnywhereInTheSerializedPage() throws Exception {
@@ -195,11 +258,28 @@ class OperatorAttentionItemsJsonContractTest {
                         "LOW_RATING_REVIEW", from, to, 0, 20, items.length, List.of(items)));
     }
 
-    /** One synthetic drill-down row; {@code productName} is the variable under test. */
+    /** One synthetic drill-down row with a name, a ref, and no decision yet. */
     private static OperatorVocItem item(String productName) {
+        return item(productName, ACTION_REF, null);
+    }
+
+    /**
+     * One synthetic drill-down row; the last three arguments are the variables under test.
+     *
+     * <p>NAVER, not CAFE24: this is the shape of a row that actually carries these fields.
+     * Only {@code IngestedReviewVocItemSource} resolves a product name AND mints a ref, and
+     * it serves NAVER alone — {@code Cafe24VocItemSource} passes null for all three. The
+     * fixture said CAFE24 while carrying a productName before this field existed, which was
+     * already a row production could not emit; pinning an {@code actionRef} onto it would
+     * have compounded that into a fixture contradicting the rule the ref exists to express.
+     * Nothing here depends on the channel — the service is mocked and the boundary under
+     * test is record → JSON — so the honest value costs nothing.
+     */
+    private static OperatorVocItem item(String productName, String actionRef, String triageDisposition) {
         return new OperatorVocItem(
-                "CAFE24", "카페24", "REVIEW", productName, 2, "UNANSWERED",
+                "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
-                "배송은 빨랐는데 색이 생각과 달라요");
+                "배송은 빨랐는데 색이 생각과 달라요",
+                actionRef, triageDisposition);
     }
 }

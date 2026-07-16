@@ -40,6 +40,34 @@ package com.sellerops.attention.dto;
  * calendar dates (date only), {@code sourceCreatedDate} null when the source value
  * was timezone-less. {@code signalType} echoes the requesting
  * {@link com.sellerops.attention.AttentionSignalType}.
+ *
+ * <p>{@code actionRef} is the row's ADDRESS — a client-opaque, source-qualified
+ * {@link com.sellerops.attention.VocItemRef} ({@code review:<uuid>}) to round-trip when
+ * recording a decision, never to parse. It does not contradict the METADATA ONLY rule
+ * above, and the distinction is worth being precise about rather than assuming: every
+ * identifier excluded there is a SOURCE-side one — {@code articleNo}, {@code productNo},
+ * {@code sku}, {@code mall_id}, customer/order ids — i.e. a name the MARKETPLACE gave the
+ * thing, which leaks the seller's channel-side identity graph and is meaningless to
+ * SellerOps. This is SellerOps' own row id, which names nothing outside this system;
+ * {@code inbox}'s {@code FeedItem} already exposes exactly that for the same review rows.
+ * It is also NOT an authorization token: holding one grants nothing, and the server
+ * re-derives org + account/channel scope on every use (see {@code ReviewTriageService}).
+ *
+ * <p>{@code actionRef} is {@code null} when the row cannot be addressed — today, every
+ * Cafe24 community article, which has no triage anchor. That null is a CAPABILITY LIMIT,
+ * like {@code productName}'s: it means "no decision can be recorded on this row", not "this
+ * row is unimportant". A client must render it as the absence of an affordance, never as an
+ * absence of the row.
+ *
+ * <p>{@code triageDisposition} is the operator's own recorded judgement
+ * ({@link com.sellerops.attention.triage.TriageDisposition} name), or {@code null} when
+ * none has been recorded. Unlike every other field here it is not collected data at all —
+ * it is what a human concluded, and it is the one field an operator writes rather than
+ * reads. It is keyed to the review, not to the signal, so the same row shows the same
+ * disposition under every lens that surfaces it (the signal ranges overlap by design: a 2★
+ * review is both LOW_RATING_REVIEW and NEW_REVIEW). A null means "not yet triaged" and is
+ * distinct from {@code NO_ACTION}, which means "looked at, nothing to do" — collapsing the
+ * two would erase the work of having decided.
  */
 public record OperatorVocItem(
         String channelCode,
@@ -51,5 +79,7 @@ public record OperatorVocItem(
         String sourceCreatedDate,
         String collectedDate,
         String signalType,
-        String safePreview) {
+        String safePreview,
+        String actionRef,
+        String triageDisposition) {
 }
