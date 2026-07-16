@@ -99,20 +99,25 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `64de3ea`** (PR #265 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
+- **`origin/main` = `db45f5a`** (PR #267 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
   (`--ff-only`, no merge commit created locally).
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
-- **ZERO local-only commits.** The 5-commit Run-5-preparation batch all landed via **#265** (`64de3ea`),
-  each verified an ancestor of `origin/main` after the sync (`git merge-base --is-ancestor`):
-  `ca4808e` (this file after #263) · `40d7c53` (**the human-barrier fix** — `driveOneRun` now waits on
-  `USER_ACTION_OBSERVED`) · `5d57fde` (readiness diagnostic + the Run 5 boundary) · `fb98f1b` (merge of
-  `main`/#264) · `4539534` (this file after #264). Nothing is held.
-  - **That batch DID change `collector/src` behaviourally** — unlike the #263 batch, and the distinction
-    matters because a reader carries the older framing forward. `40d7c53` changed
-    `cli/run-action-window-live-naver.ts` (barrier timing); `5d57fde` changed that file plus
-    `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
+- **ZERO local-only commits.** Everything Run 5 needs offline is on `main`, across two PRs — each commit
+  verified an ancestor of `origin/main` after its sync (`git merge-base --is-ancestor`), not inferred
+  from having merged it:
+  - **#267** (`db45f5a`) — **docs only**: `4f701aa` (this file after #265) · `bff96b5` (the Run 5
+    **dispatch checklist**).
+  - **#265** (`64de3ea`) — the Run-5-preparation batch: `ca4808e` (this file after #263) · `40d7c53`
+    (**the human-barrier fix** — `driveOneRun` now waits on `USER_ACTION_OBSERVED`) · `5d57fde`
+    (readiness diagnostic + the Run 5 boundary) · `fb98f1b` (merge of `main`/#264) · `4539534` (this
+    file after #264).
+  - **That #265 batch DID change `collector/src` behaviourally** — unlike the #263 batch, and unlike
+    #267, which is docs only. The distinction matters because a reader carries the older framing
+    forward.
+    `40d7c53` changed `cli/run-action-window-live-naver.ts` (barrier timing); `5d57fde` changed that
+    file plus `action-window/naver-surface.ts` (the readiness diagnostic). **Verify a file set with
     `git diff --name-only origin/main...HEAD`; never assert it from memory** — the #263 batch's
     "docs/skill only" claim was FALSE and shipped in `5667ed4`'s own commit message.
 - ⚠ **A recorded `origin/main` SHA is a snapshot, not a fact — including the one above.** Before #265,
@@ -140,8 +145,9 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
   **Not currently firing** — the branch is synced to `main`, so the two forms agree while that holds.
   **The warning stands: it re-arms the moment `main` moves again — which it has done mid-batch four
   times in three days (#261, #262, #263, #264).** Assume it will happen during the next batch too.
-- Recent merges: **#265** (this batch — the human-barrier fix + readiness instrumentation + the Run 5
-  boundary, `64de3ea`), **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision,
+- Recent merges: **#267** (the Run 5 dispatch checklist + this file after #265, `db45f5a` — **docs
+  only**), **#265** (the human-barrier fix + readiness instrumentation + the Run 5 boundary, `64de3ea`),
+  **#264** (backend CI workflow + `SyncScheduleRunnerTest` clock precision,
   `31b3e44` — **backend Java + `.github/workflows/` only**; landed on `main` while the #265 batch was
   held and arrived here via the `fb98f1b` merge; does **not** touch `collector/`, so the baseline below
   is unaffected), **#263** (R4 operator guidance + routing cleanup, `ff6eef5`),
@@ -222,11 +228,15 @@ was stale. Now closed, offline, in one commit:
 
 ## Next slice — Run 5 (barrier + observation), PREPARED OFFLINE, awaiting a fresh G6
 
-**The offline half is DONE and MERGED (#265, `64de3ea`); the live half is NOT authorized.**
-**Merged ≠ authorized, and merged ≠ live-proven** — #265 shipped the barrier fix, the readiness
-instrumentation, and the boundary. It shipped no evidence: nothing in it has run against live NAVER.
+**The offline half is DONE and MERGED — the code in #265 (`64de3ea`), the dispatch checklist in #267
+(`db45f5a`). The live half is NOT authorized, and NOTHING further is blocked on code.**
+**Merged ≠ authorized, and merged ≠ live-proven** — those PRs shipped the barrier fix, the readiness
+instrumentation, the boundary, and the checklist. They shipped **no evidence**: nothing in them has run
+against live NAVER. **Run 5 is blocked entirely on the operator**, and no amount of further offline work
+moves it.
 [`r4-run5-barrier-observation-dispatch-record.md`](r4-run5-barrier-observation-dispatch-record.md) is the
-choreography + evidence sheet; the Run-5 G6 template is in [`r4-gate-record.md`](r4-gate-record.md).
+choreography + §3 dispatch checklist + evidence sheet; the Run-5 G6 template is in
+[`r4-gate-record.md`](r4-gate-record.md) — **one copy, deliberately not restated in the record.**
 
 - **Run 5 is a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click +
   confirm + ingest**; Run 5 is a real click that **deliberately never confirms**. **NON-MUTATING by
@@ -279,8 +289,8 @@ open:** whether to *relax* the readiness gate (accept a visible+enabled export c
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
 - Offline baseline: **2860 passed / 29 skipped** (174 files). Measured 2026-07-16 on the synced
-  post-`64de3ea` tree (i.e. **including #264 and #265**); the ff-sync moved it not at all, as expected.
-  Lineage, every delta attributed — **no unexplained drift**:
+  post-`db45f5a` tree (i.e. **including #264, #265, and #267**); neither ff-sync moved it, as expected —
+  #267 is docs only. Lineage, every delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
   regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests). **#264 added 0** — it
   is backend Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the
