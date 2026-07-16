@@ -80,18 +80,27 @@ export class ActionWindowSession {
   private unsubscribe: (() => void) | null = null;
   /** Optional R3 persistence hook — invoked after every state publication (verified transition). */
   private readonly onStatePublished: (() => void) | undefined;
+  /**
+   * Run-scoped policy: decline the ingest handoff instead of performing it (the CLI's `--no-ingest`).
+   * The decision lives HERE, in the executor, not in the engine (which stays a pure reducer) and not
+   * in a client command — an interception driven from a published view is unsound, because `drive()`
+   * computes the next effect BEFORE publishing and never re-reads the stage, so a cancel racing in
+   * on publication would land while `driver.ingest()` uploaded anyway.
+   */
+  private readonly declineIngest: boolean;
 
   constructor(
     engine: ActionWindowEngine,
     driver: ProbeDriver,
     transport: AwServerTransport,
-    opts?: { onStatePublished?: () => void },
+    opts?: { onStatePublished?: () => void; declineIngest?: boolean },
   ) {
     this.engine = engine;
     this.driver = driver;
     this.transport = transport;
     this.runId = engine.view().runId;
     this.onStatePublished = opts?.onStatePublished;
+    this.declineIngest = opts?.declineIngest ?? false;
     // A session over a RESTORED engine (R3) continues, not restarts: the run counts as started, and
     // only events emitted from now on are pushed — history is served through resync, not re-broadcast.
     this.started = engine.isStarted();
@@ -215,6 +224,13 @@ export class ActionWindowSession {
         return this.drive(next);
       }
       case "INGEST": {
+        // Checked BEFORE the await: the only sound place to intercept, and the only guarantee that
+        // the driver's ingest seam is never entered at all under `--no-ingest`.
+        if (this.declineIngest) {
+          const next = this.engine.declineIngest();
+          this.publishState();
+          return this.drive(next); // → CLEANUP: retained bytes are dropped, quarantine swept.
+        }
         const res = await this.driver.ingest(this.detectedArtifactRef());
         const next = this.engine.onIngested(res);
         this.publishState();

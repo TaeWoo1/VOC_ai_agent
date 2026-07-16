@@ -18,6 +18,11 @@
 > export pilot. The entrypoint has no no-ingest mode, so the click/download/validate/ingest legs are
 > avoided by simply **not clicking** and aborting at the barrier.
 
+> ⏩ **Forward-pointer added 2026-07-16 (A1 / [D-027](decisions.md)) — this record is NOT amended.** A
+> `--no-ingest` mode now exists, so "the entrypoint has no no-ingest mode" is no longer true of the
+> codebase; it was true at dispatch and this run was executed accordingly. **This run's G6 is spent.**
+> The lever this run used — **not clicking** — remains the only one that is non-mutating by construction.
+
 **Channel / seller:** NAVER SmartStore review-management export surface · `NAVER_DEV_SELLER_SELF_01`.
 **Entrypoint:** `collector/src/cli/run-action-window-live-naver.ts` (gated by `--i-understand-this-opens-live-naver`).
 

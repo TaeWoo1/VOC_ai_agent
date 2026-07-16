@@ -7,6 +7,9 @@
  * `session-browser.test.ts` (RUN_INTEGRATION).
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   ACTION_WINDOW_PROTOCOL_VERSION,
   findProhibitedFields,
@@ -109,10 +112,26 @@ class FeClient {
   }
 }
 
-function wire(driver: ProbeDriver): { fe: FeClient; session: ActionWindowSession } {
+/**
+ * A synthetic driver that counts ingest calls. The count — not the run outcome — is the assertion
+ * that matters for `--no-ingest`: the seam must not be entered at all, so a driver that "declined
+ * internally" would still be a bug.
+ */
+class IngestSpyDriver extends SyntheticProbeDriver {
+  ingestCalls = 0;
+  override async ingest(artifactRef: string): Promise<{ ok: boolean; processed: number }> {
+    this.ingestCalls += 1;
+    return super.ingest(artifactRef);
+  }
+}
+
+function wire(
+  driver: ProbeDriver,
+  opts?: { declineIngest?: boolean },
+): { fe: FeClient; session: ActionWindowSession } {
   const channel = createLoopbackChannel();
   const engine = new ActionWindowEngine({ runId: RUN_ID, channelCode: CHANNEL, runCopyKey: RUN_COPY });
-  const session = new ActionWindowSession(engine, driver, channel.server);
+  const session = new ActionWindowSession(engine, driver, channel.server, opts);
   session.attach();
   const fe = new FeClient(channel.client);
   fe.attach();
@@ -324,5 +343,63 @@ describe("Action Window R2 synthetic E2E (FE ↔ loopback ↔ Runtime)", () => {
     expect(fe.eventTypes()).toContain("RUN_FAILED");
     expect(fe.eventTypes()).not.toContain("USER_ACTION_OBSERVED"); // never reached the human step
     assertSanitized(fe);
+  });
+
+  it("declineIngest: the whole loop runs, ingest is never called, and the FE sees a valid CANCELLED", async () => {
+    // D-027 at the wire. The FE is a real contract client here, so this also proves the declined
+    // terminal is contract-VALID — CANCELLED + SKIPPED needed no new status, blocker, or event type.
+    const driver = new IngestSpyDriver();
+    const { fe, session } = wire(driver, { declineIngest: true });
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(driver.ingestCalls).toBe(0);
+    expect(fe.view?.status).toBe("CANCELLED");
+    expect(fe.view?.progress).toEqual({ completedSteps: 2, totalSteps: 3 });
+    expect(fe.view?.currentStep?.status).toBe("SKIPPED");
+    expect(fe.view?.blocker).toBeUndefined();
+    expect(fe.eventTypes()).toContain("DOWNLOAD_DETECTED"); // detect + validate really did run
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(fe.eventTypes()).not.toContain("RUN_FAILED");
+    assertSanitized(fe);
+  });
+
+  it("default: the same driver DOES ingest — the policy is opt-in", async () => {
+    const driver = new IngestSpyDriver();
+    const { fe, session } = wire(driver);
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+    driver.completeUserAction(true);
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    expect(driver.ingestCalls).toBe(1);
+    expect(fe.view?.status).toBe("COMPLETED");
+  });
+});
+
+describe("session — module source guard (the ingest seam)", () => {
+  const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/action-window/session.ts");
+  // Comments first, per collector/CLAUDE.md §5 — this module's prose discusses `driver.ingest` at
+  // length, and matching it would false-fail.
+  const code = readFileSync(srcPath, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .join("\n");
+
+  it("calls driver.ingest from exactly ONE site, and that site is behind the decline check", () => {
+    // A second call site would be a second way to upload — and only one of them would be gated.
+    expect(code.match(/this\.driver\.ingest\s*\(/g) ?? []).toHaveLength(1);
+    expect(/if\s*\(this\.declineIngest\)/.test(code)).toBe(true);
+    // The check must precede the call, or the policy is decorative.
+    expect(code.indexOf("if (this.declineIngest)")).toBeLessThan(code.indexOf("this.driver.ingest("));
   });
 });

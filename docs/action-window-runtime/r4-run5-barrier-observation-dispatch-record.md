@@ -40,6 +40,13 @@ backend uploader, `NaverLiveProbeDriverOptions.ingest` is non-optional, and the 
 VALIDATE→INGEST with no gate. **If the seller confirms, ingest is unconditional and irreversible.**
 Not confirming is the only lever — the same one Run 3 (§8-16) used.
 
+> ⏩ **Forward-pointer added 2026-07-16 (A1 / [D-027](decisions.md)) — this record is NOT amended.** As
+> dispatched, the statement above was true and it is why this run was non-mutating. A `--no-ingest` mode
+> now exists, so the sentence is no longer true of the codebase — but it remains true of THIS run, which
+> did not have one and did not use one. **This run's G6 is spent; nothing here is a live template.** Note
+> `--no-ingest` would NOT have been the safer choice for Run 5 anyway: it is strictly *more* mutating than
+> not confirming, which is the lever this run actually used.
+
 ## 3. Dispatch checklist — ☐ NOT AFFIRMED (fill in the dispatching turn)
 
 > **The G6 template lives in [`r4-gate-record.md`](r4-gate-record.md) and is deliberately NOT restated

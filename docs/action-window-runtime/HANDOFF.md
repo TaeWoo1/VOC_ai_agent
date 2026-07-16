@@ -276,10 +276,19 @@ quarantine never created, backend never reachable). **Its G6 is CONSUMED — it 
 - **It was a THIRD G6 scope** — the read-only probe was **no-click**; the export pilot is **click + confirm
   + ingest**; Run 5 was a real click that **deliberately never confirmed**, landing on Run 3's benign
   `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3 by construction.
-- **Why non-mutating was not politeness:** there is **no no-ingest mode**. `buildLiveRunDeps` wires the
-  real uploader unconditionally, `ingest` is non-optional, and the engine runs VALIDATE→INGEST with no
-  gate. **If the seller confirms, ingest is unconditional and irreversible.** Not confirming is the only
-  lever — the one Run 3 used. **This still holds for every future run.**
+- **Why non-mutating was not politeness — AS OF RUN 5:** there was **no no-ingest mode**.
+  `buildLiveRunDeps` wired the real uploader unconditionally, `ingest` was non-optional, and the engine ran
+  VALIDATE→INGEST with no gate. **If the seller confirmed, ingest was unconditional and irreversible.** Not
+  confirming was the only lever — the one Run 3 used.
+  - ⚠ **CORRECTED 2026-07-16 by A1 → [D-027](decisions.md).** This bullet used to end *"This still holds
+    for every future run"*, and that is now **false**: `--no-ingest` declines the handoff (validate runs,
+    the artifact is dropped, the run lands CANCELLED at 2-of-3). What **remains true for every future
+    run** is the part that matters: **on the DEFAULT path a confirmed download is still ingested
+    unconditionally and irreversibly**, and **not acting is still the only lever that is non-mutating BY
+    CONSTRUCTION.** `--no-ingest` is **not** a safety flag and is **strictly more mutating than not
+    acting** — it still opens live NAVER, still needs a real human action, and still lands a real file in
+    quarantine. It earns its place for one purpose only: exercising detect + quarantine-validate against
+    a real artifact **without a DB write** — the leg Run 4 could only prove by writing 55 irreversible rows.
 - ⚠ **`naver-surface.ts`'s "never logged" clause was relaxed deliberately** — to the **log only**, fixed
   enums only; **never extend it to transport or persistence** (the FE has no period/scope blocker code;
   giving it one is a governed contract change).
