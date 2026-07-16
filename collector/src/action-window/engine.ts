@@ -68,6 +68,12 @@ export interface IngestResult {
 /** The already-reserved contract codes a failed surface probe may carry. Never a new code. */
 export type SurfaceBlockerCode = Extract<BlockerCode, "SESSION_EXPIRED" | "LOGIN_REQUIRED" | "UNSUPPORTED_STATE">;
 /**
+ * The surface-probe causes the SELLER can clear themselves, on their own screen, without us. These park
+ * (recoverable, non-terminal); every other cause fails closed. `UNSUPPORTED_STATE` is deliberately absent:
+ * a surface we do not recognise is not something a login fixes, and it stays TERMINAL.
+ */
+export type RecoverableSurfaceBlockerCode = Extract<SurfaceBlockerCode, "SESSION_EXPIRED" | "LOGIN_REQUIRED">;
+/**
  * Rich surface-probe result (R4 channel adapters). Lets a driver report the SEMANTIC fail-closed
  * cause of a failed surface preparation using an already-reserved contract code — e.g. a reconnect
  * interstitial → `SESSION_EXPIRED`, a login form / auth challenge → `LOGIN_REQUIRED`. A bare
@@ -313,6 +319,35 @@ export class ActionWindowEngine {
     return "CLEANUP";
   }
 
+  /**
+   * Park a run whose surface probe found a session the SELLER can fix (login / reconnect). The run stays
+   * ALIVE at `WAITING_FOR_HUMAN` with `recoverable: true`, and `REQUEST_STEP_RECHECK` re-probes.
+   *
+   * Two omissions are deliberate — do not "fix" them:
+   *  - **No `RUN_FAILED`.** Nothing failed. `fail()` is for causes the seller cannot clear.
+   *  - **No `HUMAN_ACTION_REQUIRED`.** `operation-run.ts` derives `humanCheckpoint.reached` from that
+   *    event, and the checkpoint means step 2 (the export barrier). Emitting it here would record that
+   *    the run reached a barrier it never left step 1 for — the audit lie class that cost a live run.
+   *    `RUN_STATUS_CHANGED{WAITING_FOR_HUMAN}` + `RUN_BLOCKED{recoverable:true}` describe a park fully.
+   *
+   * `activeStepIndex` is RESET, not assumed: a restored run that failed downstream resumes through
+   * `PREPARE_SESSION` still carrying `activeStepIndex 3`, and parking without the reset would project
+   * "step 3 of 3" while waiting on a step-1 session probe.
+   *
+   * ⚠ Invariant this relies on: a park can only occur at prepare time, BEFORE the overlay, the click
+   * observer, and download arming exist. That is why returning `NONE` (no CLEANUP) leaks nothing. If a
+   * park ever becomes reachable from a later stage, it leaks all three — revisit this then.
+   */
+  private park(code: RecoverableSurfaceBlockerCode): Effect {
+    this.revision += 1;
+    this.blocker = { code, recoverable: true };
+    this.stage = "AWAIT_SESSION_RECOVERY";
+    this.activeStepIndex = 1;
+    this.emit("RUN_BLOCKED", { code, recoverable: true });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return "NONE";
+  }
+
   /* ── FE commands ───────────────────────────────────────────────────────── */
   command(cmd: CommandEnvelope): CommandOutcome {
     if (!isActionWindowProtocolCompatible(cmd.protocolVersion, ACTION_WINDOW_PROTOCOL_VERSION)) {
@@ -356,7 +391,9 @@ export class ActionWindowEngine {
     let effect: Effect = "NONE";
     switch (cmd.type) {
       case "REQUEST_STEP_RECHECK":
-        effect = this.beginVerify();
+        // Same command, two barriers: "I restored my session" at the park, "I did the action" at the
+        // export barrier. Both mean only "go and look" — never "it is done".
+        effect = this.stage === "AWAIT_SESSION_RECOVERY" ? this.reprobeSession() : this.beginVerify();
         break;
       case "SET_GUIDANCE_ENABLED":
         this.revision += 1;
@@ -396,12 +433,34 @@ export class ActionWindowEngine {
     return "PREPARE";
   }
 
-  /** Probe result: is the opened surface the expected seller-center surface? */
+  /**
+   * Probe result: is the opened surface the expected seller-center surface?
+   *
+   * A seller-fixable cause PARKS (recoverable, re-probeable); anything else fails closed. This is also
+   * the ONLY thing that clears a blocker and ADVANCES — a human pressing recheck never does (see
+   * `reprobeSession`). Note `pauseForRestore` also clears the blocker, but it clears-and-REPARKS: the
+   * resumed run re-enters this same probe and parks again if the cause persists.
+   */
   onSurfaceReady(res: boolean | SurfaceProbeResult): Effect {
     this.expect("PREPARE_SESSION");
     this.revision += 1;
     const surface = typeof res === "boolean" ? { ok: res } : res;
-    if (!surface.ok) return this.fail(surface.blockerCode ?? "UNSUPPORTED_STATE");
+    if (!surface.ok) {
+      // `blockerCode` is optional and `undefined` is not a SurfaceBlockerCode, so the default resolves
+      // BEFORE the switch — a bare `false` from a boolean driver still means UNSUPPORTED_STATE.
+      const code: SurfaceBlockerCode = surface.blockerCode ?? "UNSUPPORTED_STATE";
+      // Exhaustive over SurfaceBlockerCode (no `default`, non-nullable return ⇒ a 4th code is a COMPILE
+      // ERROR here). That is what keeps UNSUPPORTED_STATE terminal by construction rather than by test,
+      // and stops a future code silently inheriting recoverability.
+      switch (code) {
+        case "LOGIN_REQUIRED":
+        case "SESSION_EXPIRED":
+          return this.park(code);
+        case "UNSUPPORTED_STATE":
+          return this.fail(code);
+      }
+    }
+    this.blocker = null; // a READY probe — the only clear-and-advance
     this.completedSteps = 1; // step 1 (prepare) done
     this.activeStepIndex = 2;
     this.stage = "LOCATE_TARGET";
@@ -446,6 +505,29 @@ export class ActionWindowEngine {
     this.stage = "VERIFY_TRANSITION";
     this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
     return "VERIFY";
+  }
+
+  /**
+   * REQUEST_STEP_RECHECK from a recovery park: the seller asserts they fixed their session, so re-run the
+   * REAL probe. This mirrors the contract's own rule for the export barrier — REQUEST_STEP_RECHECK means
+   * *"the user reports they performed the action; Runtime must observe and verify again"*, never
+   * "it is done" (contract README; there is intentionally no CONFIRM_STEP_COMPLETED).
+   *
+   * **The blocker is deliberately NOT cleared here.** A human assertion is not evidence. Only a fresh
+   * `onSurfaceReady({ok:true})` clears it, so the view stays blocked (PREPARING + blocker) across the
+   * re-probe — legal, since only COMPLETED may not carry a blocker — and it stays blocked if the probe
+   * disagrees with the seller.
+   *
+   * ⚠ Known limitation, recorded so it is not rediscovered: the driver never navigates, so this probes
+   * whatever page the seller is on. If login left them off the export surface, readiness HALTs and the
+   * run lands terminal UNSUPPORTED_STATE. "Return to the review page before rechecking" is a
+   * guidance-only §4 human precondition — the Runtime observes, never gates. See D-028.
+   */
+  private reprobeSession(): Effect {
+    this.revision += 1;
+    this.stage = "PREPARE_SESSION";
+    this.emit("RUN_STATUS_CHANGED", { status: "PREPARING" });
+    return "PREPARE";
   }
 
   onVerified(res: VerifyResult): Effect {
@@ -562,9 +644,20 @@ export class ActionWindowEngine {
     }
   }
 
+  /**
+   * Clears the blocker: a cancelled run has no ACTIVE blocker, and the view's `blocker` means "what is
+   * blocking you NOW". The audit record survives in the event log (`RUN_BLOCKED`), which is the ordered
+   * history; `latestView` is a snapshot of the present.
+   *
+   * This mattered from the moment recovery parks existed. Before them a blocker implied FAILED, which
+   * accepts no commands, so `cancel()` could never see one. A parked run accepts CANCEL_RUN *and* holds a
+   * `recoverable: true` blocker — cancelling without this clear would publish a CANCELLED view that claims
+   * to be recoverable while offering no command that could recover it.
+   */
   private cancel(): Effect {
     this.revision += 1;
     this.stage = "CANCELLED";
+    this.blocker = null;
     this.emit("RUN_STATUS_CHANGED", { status: "CANCELLED" });
     return "CLEANUP";
   }

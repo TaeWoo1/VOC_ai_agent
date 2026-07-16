@@ -184,9 +184,10 @@ describe("NAVER fixture session E2E — happy path", () => {
 });
 
 describe("NAVER fixture session E2E — fail-closed hostile shapes", () => {
+  // NOTE: `reconnect-required` / `login-required` are deliberately NOT here. A session the seller can fix
+  // themselves PARKS (recoverable) instead of failing closed — see the recovery-park describe below.
+  // Everything in this table is a cause a login cannot clear, and stays terminal.
   const failsBeforeCheckpoint: ReadonlyArray<[NaverFixtureMode, BlockerCode]> = [
-    ["reconnect-required", "SESSION_EXPIRED"],
-    ["login-required", "LOGIN_REQUIRED"],
     ["empty-target", "UNSUPPORTED_STATE"],
     ["ambiguous-readiness", "UNSUPPORTED_STATE"],
     ["no-target", "TARGET_NOT_FOUND"],
@@ -203,6 +204,27 @@ describe("NAVER fixture session E2E — fail-closed hostile shapes", () => {
     expect(fe.eventTypes()).not.toContain("USER_ACTION_OBSERVED");
     expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
     expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
+    assertSanitized(fe, mode);
+  });
+
+  const parksBeforeCheckpoint: ReadonlyArray<[NaverFixtureMode, BlockerCode]> = [
+    ["reconnect-required", "SESSION_EXPIRED"],
+    ["login-required", "LOGIN_REQUIRED"],
+  ];
+
+  it.each(parksBeforeCheckpoint)("%s PARKS recoverable with %s — the seller can fix this themselves", async (mode, code) => {
+    const { fe, driver } = await startRun(mode);
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(fe.view?.blocker).toEqual({ code, recoverable: true });
+    expect(fe.view?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    // Parked ≠ progressed: the export barrier was never reached and the downstream never ran. The
+    // non-mutation guarantees of the terminal table hold here identically.
+    expect(fe.eventTypes()).not.toContain("HUMAN_ACTION_REQUIRED");
+    expect(fe.eventTypes()).not.toContain("USER_ACTION_OBSERVED");
+    expect(fe.eventTypes()).not.toContain("DOWNLOAD_DETECTED");
+    expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
+    expect(fe.eventTypes()).not.toContain("RUN_FAILED");
     expect(driver.downstreamCalls).toEqual({ detect: 0, validate: 0, ingest: 0 });
     assertSanitized(fe, mode);
   });
@@ -596,7 +618,12 @@ describe("NAVER fixture session — Operation Run persistence & resume (channelC
     assertSanitized(fixed.fe, "resumed-after-artifact-invalid");
   });
 
-  it("a run failed on a reconnect-shaped surface persists only the semantic blocker code", async () => {
+  it("a run PARKED on a reconnect-shaped surface actually reaches disk, and persists only the semantic code", async () => {
+    // This is the load-bearing persistence proof for the recovery park, and it is not a formality.
+    // `saveOperationRun` re-parses on WRITE and throws; `run-lifecycle` wires that into onStatePublished,
+    // which runs inside `drive()`, where the session swallows throws into fatalCleanup. So a bad park view
+    // (wrong executionMode) or a missing STAGES entry would not fail loudly — the run would park in memory
+    // with NOTHING on disk and no error anywhere. `loadOperationRun` returning a record is the only proof.
     const dir = tmpDir();
     const channel = createLoopbackChannel();
     const driver = new NaverFixtureProbeDriver("reconnect-required");
@@ -609,10 +636,19 @@ describe("NAVER fixture session — Operation Run persistence & resume (channelC
     fe.send("START_RUN", { channelCode: NAVER_CHANNEL_CODE });
     await opened.session.whenSettled();
 
-    expect(opened.engine.view().status).toBe("FAILED");
+    expect(opened.engine.view().status).toBe("WAITING_FOR_HUMAN");
     const persisted = loadOperationRun(dir, RUN_ID)!;
-    expect(persisted.latestView.blocker?.code).toBe("SESSION_EXPIRED");
+    expect(persisted).toBeTruthy(); // ← would be undefined if the save had thrown and been swallowed
+    expect(persisted.latestView.status).toBe("WAITING_FOR_HUMAN");
+    expect(persisted.latestView.blocker).toEqual({ code: "SESSION_EXPIRED", recoverable: true });
+    // A parked run is resumable through the checkpoint, and a restart re-drives the read-only chain from
+    // PREPARE_SESSION — i.e. it re-probes the session rather than trusting the park.
+    expect(persisted.resumeState).toBe("RESUME_AT_CHECKPOINT");
+    // The export checkpoint was NOT reached — parking on a login must never claim otherwise.
+    expect(persisted.humanCheckpoint.reached).toBe(false);
+    expect(persisted.humanCheckpoint.observed).toBe(false);
+    expect(persisted.tasks.map((t) => t.status)).toEqual(["AWAITING_USER", "PENDING", "PENDING"]);
     expect(findProhibitedFields(persisted)).toEqual([]);
-    expectNoNeedle(persisted, "persisted-failed-record");
+    expectNoNeedle(persisted, "persisted-parked-record");
   });
 });

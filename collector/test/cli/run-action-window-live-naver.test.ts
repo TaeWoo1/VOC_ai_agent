@@ -30,6 +30,7 @@ import {
   classifyOnlyMisuseMessage,
 } from "../../src/cli/live-run-approval";
 import { loadConfig } from "../../src/config";
+import { getLogSink, clearLogSink } from "../../src/log";
 import { defaultQuarantineDirFor } from "../../src/action-window/quarantine";
 import { defaultOperationRunDirFor } from "../../src/action-window/run-store";
 import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../../src/action-window/naver-surface";
@@ -300,8 +301,8 @@ describe("run-action-window-live-naver — driveOneRun orchestration (loopback, 
     const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
     dirs.push(dir);
     const channel = createLoopbackChannel();
-    // A driver that fails the surface precondition → the run lands terminal at START.
-    const driver = new FakeProbeDriver({ ok: false, blockerCode: "SESSION_EXPIRED" });
+    // A surface we cannot recognise is not something the seller can fix → the run lands terminal at START.
+    const driver = new FakeProbeDriver({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
     const opened = createPersistentRunSession(
       { dir, transport: channel.server, driver },
       { runId: "run_def456def456", channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
@@ -312,9 +313,59 @@ describe("run-action-window-live-naver — driveOneRun orchestration (loopback, 
     const view = await driveOneRun(opened.session, client);
 
     expect(view?.status).toBe("FAILED");
-    expect(view?.blocker?.code).toBe("SESSION_EXPIRED");
+    expect(view?.blocker?.code).toBe("UNSUPPORTED_STATE");
     const detected = client.serverFrames.filter((f) => f.kind === "aw_event" && f.event.type === "DOWNLOAD_DETECTED");
     expect(detected).toHaveLength(0);
+  });
+
+  /**
+   * A recovery park is ALSO WAITING_FOR_HUMAN, but it is not the export barrier — nothing was located,
+   * highlighted, or armed, so USER_ACTION_OBSERVED can never fire. If `driveOneRun` treated it as the
+   * barrier it would burn the full 10-minute observe window on the one failure mode that used to fail
+   * fast, and log an `aw.live.barrier` reading for a barrier the run never reached — corrupting the exact
+   * audit line the barrier fix made truthful. These two tests are that regression proof.
+   */
+  it("a parked run is NOT mistaken for the export barrier — returns at once, logs no barrier reading", async () => {
+    clearLogSink();
+    const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
+    dirs.push(dir);
+    const channel = createLoopbackChannel();
+    const driver = new FakeProbeDriver({ ok: false, blockerCode: "SESSION_EXPIRED" });
+    const opened = createPersistentRunSession(
+      { dir, transport: channel.server, driver },
+      { runId: "run_def456def456", channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    const client = new LiveRunOperatorClient(channel.client, "run_def456def456");
+
+    // A 30s observe window: if the park were treated as the barrier this would block on it. The test
+    // completing at all is half the assertion.
+    const view = await driveOneRun(opened.session, client, { observeTimeoutMs: 30_000 });
+
+    expect(view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(view?.blocker).toEqual({ code: "SESSION_EXPIRED", recoverable: true });
+    // No barrier was reached, so no barrier reading may be claimed.
+    expect(getLogSink().map((l) => l.event)).not.toContain("aw.live.barrier");
+    const recheck = client.serverFrames.filter((f) => f.kind === "aw_command_result");
+    expect(recheck.some((f) => f.kind === "aw_command_result" && f.accepted === false)).toBe(false);
+  });
+
+  it("the real export barrier still logs its barrier reading — the discriminator did not disable the default path", async () => {
+    clearLogSink();
+    const dir = mkdtempSync(join(tmpdir(), "aw-live-cli-"));
+    dirs.push(dir);
+    const channel = createLoopbackChannel();
+    const driver = new FakeProbeDriver();
+    const opened = createPersistentRunSession(
+      { dir, transport: channel.server, driver },
+      { runId: "run_abc123abc123", channelCode: NAVER_CHANNEL_CODE, runCopyKey: NAVER_RUN_COPY_KEY },
+    );
+    opened.session.attach();
+    const client = new LiveRunOperatorClient(channel.client, "run_abc123abc123");
+
+    await driveOneRun(opened.session, client, { observeTimeoutMs: 50 });
+
+    expect(getLogSink().map((l) => l.event)).toContain("aw.live.barrier");
   });
 });
 

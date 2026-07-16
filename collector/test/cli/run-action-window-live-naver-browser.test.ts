@@ -217,7 +217,7 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     for (const frame of assembled.client.serverFrames) expect(findProhibitedFields(frame)).toEqual([]);
   });
 
-  it("automated: a hostile session (login page) fails closed at the gate — LOGIN_REQUIRED, zero clicks, no download, persisted FAILED", async () => {
+  it("automated: a hostile session (login page) PARKS recoverable at the gate — LOGIN_REQUIRED, zero clicks, no download, persisted alive", async () => {
     const page = await newPage();
     await page.setContent(loginPage); // fails at the session gate regardless of URL — no seller-center host needed
     const quarantineDir = newDir("aw-live-cli-q-");
@@ -226,11 +226,14 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     const box: { captured: CapturedIngest | null } = { captured: null };
     const assembled = assembleLiveRun(page, makeDeps(box, quarantineDir, persistDir, runId, 30_000));
 
-    // A fail-closed START lands terminal at the gate; driveOneRun never issues REQUEST_STEP_RECHECK.
+    // A login page is a cause the SELLER can clear, so the run parks recoverable instead of failing
+    // closed. `driveOneRun` must return at once: a park is WAITING_FOR_HUMAN but it is NOT the export
+    // barrier, so waiting on an observation would block for the full observe window for nothing.
     const view = await driveOneRun(assembled.session, assembled.client);
 
-    expect(view?.status).toBe("FAILED");
-    expect(view?.blocker?.code).toBe("LOGIN_REQUIRED");
+    expect(view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(view?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    // Every non-mutation guarantee of the old terminal behavior holds identically.
     expect(box.captured).toBeNull(); // never ingested
     expect(
       assembled.client.serverFrames.filter((f) => f.kind === "aw_event" && f.event.type === "DOWNLOAD_DETECTED"),
@@ -238,8 +241,11 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
     expect(readdirSync(quarantineDir)).toEqual([]);
 
     const persisted = loadOperationRun(persistDir, runId)!;
-    expect(persisted.latestView.status).toBe("FAILED");
-    expect(persisted.latestView.blocker?.code).toBe("LOGIN_REQUIRED");
+    expect(persisted.latestView.status).toBe("WAITING_FOR_HUMAN");
+    expect(persisted.latestView.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(persisted.resumeState).toBe("RESUME_AT_CHECKPOINT");
+    // The export checkpoint was never reached — parking on a login must never claim otherwise.
+    expect(persisted.humanCheckpoint.reached).toBe(false);
     expect(persisted.humanCheckpoint.observed).toBe(false);
     expect(findProhibitedFields(persisted)).toEqual([]);
   });

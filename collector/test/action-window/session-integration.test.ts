@@ -29,6 +29,7 @@ import {
 } from "../../../contracts/action-window/v1/transport";
 import { ActionWindowEngine } from "../../src/action-window/engine";
 import { ActionWindowSession, SyntheticProbeDriver, type ProbeDriver } from "../../src/action-window/session";
+import type { SurfaceProbeResult } from "../../src/action-window/engine";
 
 const RUN_ID = "run_e2e";
 const CHANNEL = "synthetic";
@@ -382,6 +383,141 @@ describe("Action Window R2 synthetic E2E (FE ↔ loopback ↔ Runtime)", () => {
 
     expect(driver.ingestCalls).toBe(1);
     expect(fe.view?.status).toBe("COMPLETED");
+  });
+});
+
+/**
+ * A driver whose session is broken until the "seller fixes it" — the only way to exercise the recovery
+ * park end-to-end offline. `prepareSurface` is the seam under test, so it counts its own calls: a recheck
+ * that did not re-probe would be the whole bug.
+ */
+class RecoverableSessionDriver implements ProbeDriver {
+  // Delegates rather than extends: SyntheticProbeDriver narrows `prepareSurface` to Promise<boolean>,
+  // and the whole point here is to return the RICH result that carries the semantic blocker code.
+  private readonly inner = new SyntheticProbeDriver();
+  readonly seams: string[] = [];
+  prepareCalls = 0;
+  cleanupCalls = 0;
+  loggedIn = false;
+  constructor(private readonly blockerCode: "LOGIN_REQUIRED" | "SESSION_EXPIRED" = "LOGIN_REQUIRED") {}
+
+  async prepareSurface(): Promise<SurfaceProbeResult> {
+    this.prepareCalls += 1;
+    this.seams.push("prepareSurface");
+    return this.loggedIn ? { ok: true } : { ok: false, blockerCode: this.blockerCode };
+  }
+  locate() {
+    this.seams.push("locate");
+    return this.inner.locate();
+  }
+  highlight() {
+    this.seams.push("highlight");
+    return this.inner.highlight();
+  }
+  armObserve() {
+    this.seams.push("armObserve");
+    return this.inner.armObserve();
+  }
+  waitForUserAction() {
+    return this.inner.waitForUserAction();
+  }
+  verify(expectedSig: string) {
+    this.seams.push("verify");
+    return this.inner.verify(expectedSig);
+  }
+  detectDownload() {
+    this.seams.push("detectDownload");
+    return this.inner.detectDownload();
+  }
+  validateArtifact(artifactRef: string) {
+    this.seams.push("validateArtifact");
+    return this.inner.validateArtifact(artifactRef);
+  }
+  ingest(artifactRef: string) {
+    this.seams.push("ingest");
+    return this.inner.ingest(artifactRef);
+  }
+  cleanup() {
+    this.cleanupCalls += 1;
+    this.seams.push("cleanup");
+    return this.inner.cleanup();
+  }
+}
+
+describe("session — recovery park → recheck → recover (A2-B, over the real loopback)", () => {
+  it("parks on a broken session, and REQUEST_STEP_RECHECK re-probes for real and recovers the run", async () => {
+    const driver = new RecoverableSessionDriver("LOGIN_REQUIRED");
+    const { fe, session } = wire(driver);
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+
+    // Parked: alive, recoverable, and the browser is deliberately still up — the seller needs it.
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(fe.view?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(driver.prepareCalls).toBe(1);
+    expect(driver.cleanupCalls).toBe(0);
+
+    // The seller fixes their own session on their own screen, then reports it.
+    driver.loggedIn = true;
+    fe.send("REQUEST_STEP_RECHECK");
+    await session.whenSettled();
+
+    // The recheck ran a REAL second probe — that is the whole point of the command.
+    expect(driver.prepareCalls).toBe(2);
+    expect(fe.view?.blocker).toBeUndefined();
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN"); // now the genuine export barrier
+    expect(fe.view?.progress).toEqual({ completedSteps: 1, totalSteps: 3 });
+    expect(fe.eventTypes()).toContain("HUMAN_ACTION_REQUIRED"); // reached only now, not at the park
+    assertSanitized(fe);
+  });
+
+  it("a recheck while the session is STILL broken re-parks — a human assertion is not evidence", async () => {
+    const driver = new RecoverableSessionDriver("SESSION_EXPIRED");
+    const { fe, session } = wire(driver);
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+    fe.send("REQUEST_STEP_RECHECK"); // the seller says they fixed it. They did not.
+    await session.whenSettled();
+
+    expect(driver.prepareCalls).toBe(2);
+    expect(fe.view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(fe.view?.blocker).toEqual({ code: "SESSION_EXPIRED", recoverable: true });
+    expect(fe.view?.allowedCommands).toContain("REQUEST_STEP_RECHECK"); // still offered
+    expect(fe.eventTypes()).not.toContain("RUN_FAILED");
+    assertSanitized(fe);
+  });
+
+  it("the park never enters the downstream seams and never cleans up under the seller", async () => {
+    const driver = new RecoverableSessionDriver("LOGIN_REQUIRED");
+    const { fe, session } = wire(driver);
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+
+    // Nothing beyond the probe ran: no overlay, no observer, no download arming. That is exactly why
+    // the park can rest without CLEANUP and still leak nothing.
+    expect(driver.seams).toEqual(["prepareSurface"]);
+    // No CLEANUP effect: the seller is about to use this browser to log in. (The CLI's own `finally`
+    // still tears down — driving the recovery from the CLI is A3.)
+    expect(driver.cleanupCalls).toBe(0);
+    expect(fe.view).toBeDefined();
+  });
+
+  it("CANCEL_RUN from a park cleans up and drops the blocker", async () => {
+    const driver = new RecoverableSessionDriver("LOGIN_REQUIRED");
+    const { fe, session } = wire(driver);
+
+    fe.send("START_RUN", { channelCode: CHANNEL });
+    await session.whenSettled();
+    fe.send("CANCEL_RUN");
+    await session.whenSettled();
+
+    expect(fe.view?.status).toBe("CANCELLED");
+    expect(fe.view?.blocker).toBeUndefined();
+    expect(driver.cleanupCalls).toBe(1);
+    assertSanitized(fe);
   });
 });
 

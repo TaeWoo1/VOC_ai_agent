@@ -4,7 +4,7 @@
  * page content, URL, id, path, or final user prose — only contract enums, counts, opaque refs, a
  * sanitized `channelCode`, and dotted semantic copy keys + sanitized primitive params (FE owns copy).
  */
-import type { ActionWindowRunView, BlockerCode, CopyParams } from "../../../contracts/action-window/v1/index";
+import type { ActionWindowRunView, BlockerCode, CopyParams, ExecutionMode } from "../../../contracts/action-window/v1/index";
 import { ACTION_WINDOW_PROTOCOL_VERSION } from "../../../contracts/action-window/v1/index";
 import {
   type Stage,
@@ -35,6 +35,15 @@ export function projectRunView(s: EngineSnapshot): ActionWindowRunView {
   // A paused view reflects the underlying step's status, not a generic "paused" step state.
   const effectiveStage: Stage = s.stage === "PAUSED" ? s.resumeStage ?? s.stage : s.stage;
   const meta = stepMetaByIndex(s.activeStepIndex);
+  // A recovery park is a human-action context on an otherwise AUTOMATIC step: the run waits on the
+  // seller to restore their own session. The step's PLAN mode says how that step normally runs; the
+  // run's executionMode says who must act NOW. They diverge here and nowhere else.
+  //
+  // This is not cosmetic. The contract requires WAITING_FOR_HUMAN ⇒ ACTION_WINDOW && AWAITING_USER,
+  // and `run-store.ts` validates the projected view on WRITE and throws — inside `drive()`, where the
+  // session swallows it into fatalCleanup. Getting this wrong loses the record silently.
+  const executionMode: ExecutionMode =
+    s.stage === "AWAIT_SESSION_RECOVERY" ? "ACTION_WINDOW" : meta.mode;
 
   const view: ActionWindowRunView = {
     protocolVersion: ACTION_WINDOW_PROTOCOL_VERSION,
@@ -44,7 +53,7 @@ export function projectRunView(s: EngineSnapshot): ActionWindowRunView {
     runCopyKey: s.runCopyKey,
     ...(s.runCopyParams ? { runCopyParams: s.runCopyParams } : {}),
     status,
-    executionMode: meta.mode,
+    executionMode,
     currentStep: {
       stepId: meta.stepId,
       stepNumber: meta.stepNumber,

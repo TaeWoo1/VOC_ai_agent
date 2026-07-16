@@ -197,10 +197,9 @@ describe("engine — fail-closed cases", () => {
   // R4: a driver may report the SEMANTIC cause of a failed surface probe (reserved codes only).
   it("surface probe result without a code → UNSUPPORTED_STATE", () =>
     failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false }); }, "UNSUPPORTED_STATE"));
-  it("reconnect-shaped surface probe → SESSION_EXPIRED", () =>
-    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false, blockerCode: "SESSION_EXPIRED" }); }, "SESSION_EXPIRED"));
-  it("login-shaped surface probe → LOGIN_REQUIRED", () =>
-    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false, blockerCode: "LOGIN_REQUIRED" }); }, "LOGIN_REQUIRED"));
+  // NOTE: SESSION_EXPIRED / LOGIN_REQUIRED deliberately no longer fail closed — they PARK and stay
+  // recoverable. Their cases moved to `engine — recovery park (LOGIN_REQUIRED / SESSION_EXPIRED)` below.
+  // UNSUPPORTED_STATE remains the only surface-probe cause that is terminal.
   it("a rich OK surface probe proceeds exactly like the boolean form", () => {
     const engine = newEngine();
     engine.command(cmd(engine, "START_RUN"));
@@ -250,6 +249,17 @@ describe("engine — fail-closed cases", () => {
     expect(engine.events().filter((e) => e.type === "STEP_COMPLETED")).toHaveLength(1); // step 2 only
   });
 
+  it("UNSUPPORTED_STATE stays TERMINAL even though the surface probe now has a recoverable branch", () => {
+    // The exhaustive switch in `onSurfaceReady` is what guarantees this, but assert the outcome too:
+    // this is the boundary of the recovery park and a PO-level constraint, not an implementation detail.
+    failAt((e) => { e.command(cmd(e, "START_RUN")); e.onSurfaceReady({ ok: false, blockerCode: "UNSUPPORTED_STATE" }); }, "UNSUPPORTED_STATE");
+    const engine = newEngine();
+    engine.command(cmd(engine, "START_RUN"));
+    engine.onSurfaceReady({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    expect(engine.view().allowedCommands).toEqual([]);
+    expect(engine.view().blocker?.recoverable).toBe(false);
+  });
+
   it("unchanged expected state → NO false completion, remains waiting", () => {
     const engine = newEngine();
     engine.command(cmd(engine, "START_RUN"));
@@ -264,6 +274,157 @@ describe("engine — fail-closed cases", () => {
     expect(engine.events().some((e) => e.type === "STEP_COMPLETED")).toBe(false);
     expect(engine.events().some((e) => e.type === "RUN_COMPLETED")).toBe(false);
     expect(engine.view().status).toBe("WAITING_FOR_HUMAN");
+  });
+});
+
+/**
+ * The recovery park (A2-B). A surface probe that finds a session the SELLER can fix does NOT fail closed:
+ * the run parks alive at WAITING_FOR_HUMAN with `recoverable: true`, and REQUEST_STEP_RECHECK re-probes.
+ * These cases used to live in `fail-closed cases` and asserted the opposite — that is the deliberate
+ * behavior change of this slice, kept visible by living under a differently-named describe.
+ */
+describe("engine — recovery park (LOGIN_REQUIRED / SESSION_EXPIRED)", () => {
+  const parkAt = (code: "LOGIN_REQUIRED" | "SESSION_EXPIRED") => {
+    const engine = newEngine();
+    engine.command(cmd(engine, "START_RUN"));
+    const effect = engine.onSurfaceReady({ ok: false, blockerCode: code });
+    return { engine, effect };
+  };
+
+  it.each(["LOGIN_REQUIRED", "SESSION_EXPIRED"] as const)("%s parks alive and recoverable — it never fails closed", (code) => {
+    const { engine, effect } = parkAt(code);
+
+    expect(effect).toBe("NONE"); // nothing to drive: we wait on the human
+    expect(engine.currentStage()).toBe("AWAIT_SESSION_RECOVERY");
+    expect(engine.view().status).toBe("WAITING_FOR_HUMAN");
+    expect(engine.view().blocker).toEqual({ code, recoverable: true });
+    expect(engine.view().progress).toEqual({ completedSteps: 0, totalSteps: 3 });
+    expect(engine.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(engine.view().allowedCommands).toContain("CANCEL_RUN");
+    // Nothing failed, so no RUN_FAILED — the run is still alive.
+    expect(engine.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    expect(validateRunView(engine.view())).toEqual({ ok: true });
+    for (const e of engine.events()) expect(validateEventEnvelope(e)).toEqual({ ok: true });
+  });
+
+  it("is the first `recoverable: true` the engine has ever emitted, and the event agrees with the view", () => {
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    const blocked = engine.events().find((e) => e.type === "RUN_BLOCKED")!;
+    expect(blocked.payload).toMatchObject({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(engine.view().blocker?.recoverable).toBe(true);
+  });
+
+  it("never emits HUMAN_ACTION_REQUIRED — that event means the step-2 export barrier, which was never reached", () => {
+    // `operation-run.ts` derives humanCheckpoint.reached from this event. Emitting it here would record
+    // that the run reached the export barrier while it never left step 1.
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    expect(engine.events().map((e) => e.type)).not.toContain("HUMAN_ACTION_REQUIRED");
+    expect(engine.events().map((e) => e.type)).not.toContain("TARGET_HIGHLIGHTED");
+  });
+
+  it("projects step 1 even when the run parked after resuming from a downstream failure", () => {
+    // `resumeStateFor` tests FAILED before activeStepIndex>=3, so a run that failed at DETECT_DOWNLOAD
+    // resumes through PREPARE_SESSION still carrying activeStepIndex 3. Parking must reset it, or the FE
+    // shows "step 3 of 3 · downstream" while waiting on a step-1 session probe.
+    const engine = newEngine();
+    driveToVerified(engine);
+    engine.onDownloadDetected({ detected: false }); // → FAILED at activeStepIndex 3
+    engine.pauseForRestore("PREPARE_SESSION");
+    engine.command(cmd(engine, "RESUME_RUN"));
+    engine.onSurfaceReady({ ok: false, blockerCode: "LOGIN_REQUIRED" });
+
+    expect(engine.currentStage()).toBe("AWAIT_SESSION_RECOVERY");
+    expect(engine.view().currentStep?.stepNumber).toBe(1);
+    expect(engine.view().currentStep?.stepId).toBe("aw.prepare_surface");
+    expect(validateRunView(engine.view())).toEqual({ ok: true });
+  });
+
+  it("REQUEST_STEP_RECHECK re-probes the surface and does NOT clear the blocker by itself", () => {
+    // The contract's own rule: a recheck means "the user reports they acted; go observe and verify
+    // again" — never "it is done". A human assertion is not evidence.
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    const outcome = engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.ok && outcome.effect).toBe("PREPARE"); // a REAL fresh prepareSurface probe
+    expect(engine.currentStage()).toBe("PREPARE_SESSION");
+    expect(engine.view().status).toBe("PREPARING");
+    expect(engine.view().blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true }); // still blocked
+    expect(validateRunView(engine.view())).toEqual({ ok: true });
+  });
+
+  it("only a READY probe clears the blocker and advances", () => {
+    const { engine } = parkAt("SESSION_EXPIRED");
+    engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
+    expect(engine.onSurfaceReady({ ok: true })).toBe("LOCATE");
+
+    expect(engine.view().blocker).toBeUndefined();
+    expect(engine.currentStage()).toBe("LOCATE_TARGET");
+    expect(engine.view().progress).toEqual({ completedSteps: 1, totalSteps: 3 });
+  });
+
+  it("a recheck that finds the session still broken re-parks — the loop closes, it does not drift terminal", () => {
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
+    const effect = engine.onSurfaceReady({ ok: false, blockerCode: "LOGIN_REQUIRED" });
+
+    expect(effect).toBe("NONE");
+    expect(engine.currentStage()).toBe("AWAIT_SESSION_RECOVERY");
+    expect(engine.view().status).toBe("WAITING_FOR_HUMAN");
+    expect(engine.view().allowedCommands).toContain("REQUEST_STEP_RECHECK"); // still recoverable
+  });
+
+  it("a second recheck while the re-probe is in flight is rejected — the race is closed", () => {
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    engine.command(cmd(engine, "REQUEST_STEP_RECHECK")); // → PREPARE_SESSION
+    const second = engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
+
+    expect(second.ok).toBe(false);
+    expect(!second.ok && second.reason).toBe("INVALID_FOR_STATE");
+    expect(engine.currentStage()).toBe("PREPARE_SESSION"); // unmoved
+  });
+
+  it("⚠ KNOWN LIMITATION: a recovered session on the WRONG surface lands terminal UNSUPPORTED_STATE", () => {
+    // The driver never navigates, so a recheck probes whatever page login left the seller on. If that is
+    // not the export surface, readiness HALTs → UNSUPPORTED_STATE → terminal, i.e. a *successful* login
+    // can still kill the run. "Return to the review page before rechecking" is a guidance-only §4 human
+    // precondition (D-028), the same category D-025 ratified for period/scope: observed, never gated.
+    // This test exists so that behavior is KNOWN rather than discovered. Its falsifier is a live run.
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    engine.command(cmd(engine, "REQUEST_STEP_RECHECK"));
+    engine.onSurfaceReady({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+
+    expect(engine.currentStage()).toBe("FAILED");
+    expect(engine.view().blocker).toEqual({ code: "UNSUPPORTED_STATE", recoverable: false });
+    expect(engine.view().allowedCommands).toEqual([]);
+  });
+
+  it("CANCEL_RUN from a park clears the blocker — a cancelled run never claims to be recoverable", () => {
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    const outcome = engine.command(cmd(engine, "CANCEL_RUN"));
+
+    expect(outcome.ok && outcome.effect).toBe("CLEANUP");
+    expect(engine.view().status).toBe("CANCELLED");
+    expect(engine.view().blocker).toBeUndefined(); // NOT `recoverable: true` with allowedCommands []
+    expect(engine.view().allowedCommands).toEqual([]);
+    expect(engine.view().currentStep?.status).toBe("SKIPPED");
+    // The audit history keeps the reason; only the live view drops it.
+    expect(engine.events().find((e) => e.type === "RUN_BLOCKED")!.payload.code).toBe("LOGIN_REQUIRED");
+    expect(validateRunView(engine.view())).toEqual({ ok: true });
+  });
+
+  it("a parked run never reaches COMPLETED and never fabricates progress", () => {
+    const { engine } = parkAt("SESSION_EXPIRED");
+    expect(engine.view().status).not.toBe("COMPLETED");
+    expect(engine.events().map((e) => e.type)).not.toContain("RUN_COMPLETED");
+    expect(engine.events().map((e) => e.type)).not.toContain("STEP_COMPLETED");
+    expect(engine.view().progress.completedSteps).toBe(0);
+  });
+
+  it("emits no prohibited content", () => {
+    const { engine } = parkAt("LOGIN_REQUIRED");
+    expect(findProhibitedFields(engine.view())).toEqual([]);
+    for (const e of engine.events()) expect(findProhibitedFields(e)).toEqual([]);
   });
 });
 

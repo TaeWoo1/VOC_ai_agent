@@ -274,7 +274,13 @@ from a synthetic `commerce.localhost` host so the §8-4 session gate's seller-ce
 quarantine-validate → injected-fake ingest → **COMPLETED**, with the Operation Run **persisted TERMINAL**
 via `loadOperationRun`); a hostile login page failing closed at the gate (`LOGIN_REQUIRED`, zero clicks,
 no download, persisted FAILED); a non-OOXML download failing closed (`ARTIFACT_INVALID`, not ingested,
-quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-click case. No-leak +
+quarantine emptied, persisted FAILED); and a headed (`AW_HEADED=1`) real-human-click case.
+⏩ **Forward-pointer added 2026-07-16 (A2-B / [D-028](decisions.md)) — this dated section is NOT amended.**
+The hostile-login case above **no longer persists FAILED**: `LOGIN_REQUIRED` now **parks** recoverable
+(`WAITING_FOR_HUMAN` / `recoverable: true`), and that gated test was updated to assert the park. What the
+drill actually established is untouched and still true: **zero clicks, no download, nothing ingested.** The
+`ARTIFACT_INVALID` case still fails closed exactly as recorded. See §8-20.
+No-leak +
 `findProhibitedFields == []` across frames, the persisted record, and the ingest ref. This is the first
 proof that the live driver is **wired into a persistent session** (loopback channel — **not** the Bridge
 WS).
@@ -801,6 +807,54 @@ deliberately **no G6 template is pre-written for it** (shipping a capability is 
   2026-07-12. None of these are Runtime code.
 
 **This pack authorizes no live NAVER export contact.**
+
+---
+
+## §8-20 — Milestone A2-B: recoverable LOGIN_REQUIRED / SESSION_EXPIRED — DELIVERED offline 2026-07-16 · **NOT live-verified**
+
+**Offline slice: code + tests + docs. No live NAVER, no browser, no backend, no G6 consumed.** Ratified as
+[D-028](decisions.md). Baseline **2926 → 2976 passed / 29 skipped** (175 files) — **+50, every one attributed:**
+`stage-tables` +32 (new) · `engine` +12 · `session-integration` +4 · `run-action-window-live-naver` +2 ·
+`naver-session-integration` **+0** (two rows moved from the terminal table to the park table — same scenarios,
+corrected outcome). **Nothing regressed and no file lost a test.**
+
+- **The lie is gone.** `recoverable: true` was produced **nowhere in production code** — the field was plumbed
+  persist → validate → view → wire carrying exactly one value, so every blocker the FE saw claimed to be
+  unrecoverable, **including the two a seller can fix in ten seconds**. `LOGIN_REQUIRED` / `SESSION_EXPIRED` now
+  **park**: `WAITING_FOR_HUMAN` · `recoverable: true` · `REQUEST_STEP_RECHECK` offered · `0-of-3` · **no
+  `RUN_FAILED`**. `UNSUPPORTED_STATE` stays terminal **by construction** — the exhaustive switch over
+  `SurfaceBlockerCode` makes a 4th code a compile error, not a test failure.
+- **Zero contract, FE, backend, or schema change.** `git diff contracts/ frontend/ backend/` is empty;
+  `OPERATION_RUN_SCHEMA_VERSION` is still **2**. The **FE affordance already existed** and was waiting for a view
+  the engine could not produce: `HumanCheckpointCard` renders `recoverable` and gates 확인 완료 purely on
+  `allowedCommands`, and `copy.ts` has shipped Korean copy for both codes all along.
+- **⚠ The park is real; the recovery is only offline-proven.** Proven end-to-end **over the loopback**
+  (`session-integration.test.ts`: park → seller fixes session → recheck → **`prepareSurface` called a second
+  time** → run recovers to the barrier). The **CLI cannot exercise it** — `main()`'s `finally` closes the browser
+  the instant `driveOneRun` returns. Driving recovery from the CLI is **A3**.
+- **⚠ KNOWN LIMITATION, locked by test, not discovered later: a successful login can still kill the run.** The
+  driver never navigates, so a recheck probes whatever page login landed on; off-surface → readiness HALT →
+  `UNSUPPORTED_STATE` → terminal. **Where NAVER lands a seller after login is UNOBSERVED.** Per D-028 that is a
+  **guidance-only §4 human precondition** (the D-025 category): observed, never gated. **Free falsifier:** any
+  future run whose operator logs in and reports whether the surface is still readiness-`READY`.
+- **Two silent traps were found empirically, not argued.** Adding the stage broke the build in exactly three
+  exhaustive switches — and **not** in `stageStepIndex` (has a `default`) or `operation-run.ts`'s `STAGES` array
+  (a `readonly Stage[]` accepts a subset). A missing `STAGES` entry does **not** fail loudly: the save path
+  re-parses and throws from inside the session's drive chain, where the throw is swallowed into `fatalCleanup` —
+  **the run parks in memory, nothing reaches disk, and no error surfaces anywhere.** The new
+  `stage-tables.test.ts` nets both, and was **verified to fail** when each fix is reverted.
+- **The audit trail stays honest.** The park emits **no `HUMAN_ACTION_REQUIRED`** — that event is how
+  `humanCheckpoint.reached` is derived, and the checkpoint means step 2, so emitting it would claim a barrier the
+  run never reached (the §8-18 lie class). Persisted parks assert `reached: false`, `RESUME_AT_CHECKPOINT`, and
+  tasks `[AWAITING_USER, PENDING, PENDING]`. `activeStepIndex` is reset to 1, so a park after a resumed
+  downstream failure cannot project *"step 3 of 3"* while waiting on a step-1 probe.
+- **The `--no-upload` lesson repeated itself, in reverse.** §8-19's was "a green unit test on a predicate proved
+  nothing about its caller". Here: **the fixtures had a `recoverable: true` example (fixture 10) the whole time,
+  and it proved nothing about the engine** — no test asserts engine↔fixture agreement, and the live-proven
+  barrier (fixture 04) already diverges on six fields. **An example is not a golden.** That finding, not cost, is
+  why the 4-step plan was rejected: it would not have made fixture 10 projectable either.
+
+**This section authorizes no live NAVER contact.** A2-B ships a capability and consumes no gate.
 
 ---
 

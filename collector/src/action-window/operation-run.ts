@@ -197,6 +197,12 @@ export type OperationRunParseError =
 
 export type OperationRunParseResult = { ok: true; run: OperationRun } | { ok: false; error: OperationRunParseError };
 
+/**
+ * ⚠ A plain array typed `readonly Stage[]` accepts a SUBSET, so omitting a new stage here compiles
+ * cleanly and fails at runtime — and not loudly: `saveOperationRun` re-parses on write and throws, from
+ * inside the session's drive chain, where the throw is swallowed into `fatalCleanup`. The run would park
+ * in memory with nothing on disk and no error anywhere. A test asserts this list covers every `Stage`.
+ */
 const STAGES: readonly Stage[] = [
   "PREPARE_SESSION",
   "OPEN_TARGET_SURFACE",
@@ -207,6 +213,7 @@ const STAGES: readonly Stage[] = [
   "DETECT_DOWNLOAD",
   "VALIDATE_ARTIFACT",
   "INGEST_HANDOFF",
+  "AWAIT_SESSION_RECOVERY",
   "COMPLETE",
   "FAILED",
   "CANCELLED",

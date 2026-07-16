@@ -401,3 +401,74 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   *Boundary:* **this entry authorizes NO live action and consumes no gate.** A1 is offline (code + tests +
   docs). Shipping a capability is not authorizing a scope: no `--no-ingest` G6 template is pre-written, and
   any live use still needs a fresh, scope-matched G3 **and** a fresh single-use G6 in the dispatching turn.
+
+- **D-028 · ACTIVE** — **`LOGIN_REQUIRED` / `SESSION_EXPIRED` PARK instead of failing closed: the run stays
+  alive at `WAITING_FOR_HUMAN` with `recoverable: true`, and `REQUEST_STEP_RECHECK` re-probes the surface for
+  real. No contract change, no FE change, no schema bump, no 4-step plan** (Milestone A2-B, 2026-07-16).
+  *What prompted it:* a login/reconnect interstitial killed the run. `fail()` hardcodes `recoverable: false`
+  and lands `FAILED`, whose `allowedCommands` is `[]` — so **the two most obviously human-fixable causes were
+  reported to the seller as unrecoverable, with no affordance**. `recoverable: true` was produced **nowhere in
+  production code**: the field was plumbed end-to-end (persist → validate → view → wire) carrying exactly one
+  value, while `resumeStateFor` separately and correctly classified those same runs `RESUME_FROM_FAILURE`. The
+  two disagreed and only the second was true. Meanwhile the **FE affordance was already built and waiting** —
+  `HumanCheckpointCard` renders `BlockerNotice` with `recoverable` and gates its 확인 완료 button purely on
+  `allowedCommands.includes("REQUEST_STEP_RECHECK")`, and `copy.ts` has shipped Korean copy for both codes all
+  along. The gap was **entirely runtime-side**.
+  *Shape:* a new non-terminal stage `AWAIT_SESSION_RECOVERY`; `onSurfaceReady` switches **exhaustively** over
+  `SurfaceBlockerCode` (already exactly `LOGIN_REQUIRED | SESSION_EXPIRED | UNSUPPORTED_STATE`) so the two
+  seller-fixable codes park and `UNSUPPORTED_STATE` stays terminal **by construction — a 4th code would be a
+  compile error, not a test failure.** `park()` sets no `RUN_FAILED` (nothing failed) and **no
+  `HUMAN_ACTION_REQUIRED`** (that event is how `humanCheckpoint.reached` is derived, and the checkpoint means
+  step 2 — emitting it at a step-1 park would record a barrier the run never reached, the same audit-lie class
+  Run 5 spent a G6 fixing). It also **resets `activeStepIndex` to 1**: `resumeStateFor` tests `FAILED` before
+  `activeStepIndex >= 3`, so a run that failed downstream resumes through `PREPARE_SESSION` still carrying
+  index 3 and would otherwise project *"step 3 of 3"* while parked on a step-1 session probe.
+  *A2-B invents no semantics — it applies the contract's own rule.* The contract README already states
+  `REQUEST_STEP_RECHECK` means only *"the user reports that they performed the requested action; Runtime must
+  observe and verify again"* — there is intentionally no `CONFIRM_STEP_COMPLETED`. So **a human assertion never
+  clears the blocker**; only a fresh `onSurfaceReady({ok:true})` clears-and-advances. (⚠ Precise invariant:
+  `pauseForRestore` also clears the blocker, but it clears-and-**reparks** — the resumed run re-probes and
+  parks again if the cause persists. A restart is not a human assertion.)
+  ⚠ **KNOWN LIMITATION — a successful login can still kill the run, and this is recorded, not overlooked.**
+  The driver **never navigates** (`prepareSurface` reads the page "as the seller left it"), and the CLI
+  navigates exactly once, before the run. So a recheck probes whatever page login landed on; if that is not the
+  export surface, readiness HALTs → `UNSUPPORTED_STATE` → terminal. **Where NAVER lands a seller after login is
+  UNOBSERVED**, and per `collector/CLAUDE.md` §4 item 6 it stays unobserved until a run reports it.
+  *PO decision:* "the seller is back on the review-export surface" is a **guidance-only §4 human precondition** —
+  the same category [D-025](decisions.md) ratified for period/scope: **the Runtime observes, never gates.** No
+  navigation capability is added and the dormant `OPEN_TARGET_SURFACE` stage stays dormant. The bad case is
+  fail-closed and **no worse than today's behavior**, at zero clicks. An offline test **locks this as known**
+  rather than leaving it to be discovered. *Falsifier — free, rides any future run:* an operator who logs in and
+  reports whether the export surface is still readiness-`READY` afterwards. `true` → the loop closes unaided;
+  `false` → a navigate seam becomes a real PO question, **on evidence**.
+  ⚠ *Why the 4-step plan (option (a)) was REJECTED — its premise was FALSE, and I had offered the fork wrongly:*
+  **the contract fixtures are schema-valid examples, not engine goldens.** The only test over
+  `contracts/**/fixtures/` is a `validateRunView` schema check plus a filename-existence check; **no test asserts
+  the engine can produce any fixture**. Fixture `04-waiting-for-user` is the already-shipped, **live-proven**
+  human barrier and it **already** diverges from the engine on channelCode, stepId, stepNumber (3 vs 2),
+  totalSteps (4 vs 3), copyKey **and** allowedCommands (3 vs 6) — five live runs went through it. So adopting a
+  4-step plan would **not** make fixture 10 projectable (its stepId is `esm.prepare_session`, channelCode
+  `esm_plus`); it buys agreement on **one integer** while ~22 collector sites hardcode `totalSteps: 3`, forces
+  `OPERATION_RUN_SCHEMA_VERSION` 2→3 plus a real migration, and D-025(c) had **already rejected a 3→4 change on
+  its own merits** for a different feature. **A2-B is not the cheap option; it is the correct one.**
+  *Fixture divergence: REPORTED, not resolved (PO, 2026-07-16).* The three "sources of truth" — contract
+  fixtures (4-step/ESM), engine (3-step/`aw.*`), FE fixtures (`TOTAL = 4`) — are **three-way inconsistent and
+  nothing detects it**. `contracts/**` is off-limits from this branch; whether to re-author the fixtures to the
+  engine's channel-neutral vocabulary or declare them aspirational is a **deferred PO decision**.
+  *Accepted costs, recorded so they are not rediscovered as defects:* (1) the persisted record self-contradicts
+  — `executionMode: ACTION_WINDOW` (from the view) alongside `tasks[0].mode: AUTOMATIC_OPERATION` (from the step
+  plan) with `status: AWAITING_USER`, unvalidated by `parseOperationRun`; that is the honest cost of parking on
+  an automatic step. (2) Unbounded rechecks grow the event log and re-validate the whole record per write; the
+  store is dev-only, so this is accepted, not fixed. (3) The FE renders a **degraded** card — `copy.ts`'s `COPY`
+  map has no key the Runtime actually emits, so the headline falls back to "안내를 준비하고 있어요" over hardcoded
+  export-barrier prose; only the nested `BlockerNotice` says "log in". **Not caused by A2-B, not fixable from
+  this branch.**
+  *Also corrected:* `cancel()` never cleared the blocker — harmless only while a blocker implied `FAILED` (which
+  accepts no commands). A park accepts `CANCEL_RUN` **and** holds a `recoverable: true` blocker, so without the
+  clear a CANCELLED view would claim to be recoverable while offering no command that could recover it. The
+  audit record survives in the event log.
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** A2-B is offline (code + tests +
+  docs); its recovery loop is proven **only** over the loopback in `session-integration.test.ts`. The **CLI
+  cannot exercise it** — `main()`'s `finally` closes the browser the moment `driveOneRun` returns, so the seller
+  gets no time to log in; driving the recovery from the CLI is **A3**. Any live use still needs a fresh,
+  scope-matched G3 **and** a fresh single-use G6 in the dispatching turn.
