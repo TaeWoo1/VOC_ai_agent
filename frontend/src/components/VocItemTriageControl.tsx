@@ -23,10 +23,24 @@ export function VocItemTriageControl({
   accountId,
   actionRef,
   disposition,
+  onRecorded,
 }: {
   accountId: string;
   actionRef: string;
   disposition: TriageDisposition | null;
+  /**
+   * The server-CONFIRMED decision, announced to whoever owns the row.
+   *
+   * This control holds the decision in its own state, which was fine while nothing else
+   * depended on it — but the reply panel's very existence now does, and the row it lives on
+   * is a prop from a list that only refetches on its own deps. Without this, an operator
+   * clicking 대응 필요 would watch the button light up beside no panel, and reaching 답변 준비
+   * for the review they just marked would take a page reload.
+   *
+   * Fired only after a success, for the same reason `recorded` only advances then: an
+   * optimistic call would mount a panel for a decision the server never took.
+   */
+  onRecorded?: (disposition: TriageDisposition) => void;
 }) {
   // Server-confirmed state only. Seeded from the row and advanced ONLY after a success,
   // so a failed write leaves the UI showing what the server still holds. Optimism here
@@ -116,6 +130,7 @@ export function VocItemTriageControl({
         return;
       }
       setRecorded(confirmed);
+      onRecorded?.(confirmed);
       attempt.current = null;
     } catch {
       // Deliberately no error detail on screen. The failure the operator can act on is

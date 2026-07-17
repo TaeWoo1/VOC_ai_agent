@@ -24,6 +24,10 @@ import type {
   OperatorAttentionSummary,
   OperatorVocItemPage,
   OrderSummaryResponse,
+  ReviewReplyApprovalResponse,
+  ReviewReplyApprovalStateName,
+  ReviewReplyDraft,
+  ReviewReplyPrep,
   TriageDecisionResponse,
   TriageDisposition,
   ScheduleView,
@@ -47,6 +51,9 @@ import {
   mockConnectionStatus,
   mockConnectorAlerts,
   mockCredentialTemplate,
+  mockDecideReviewReplyApproval,
+  mockReviewReplyPrep,
+  mockSaveReviewReplyDraft,
   mockStoreCredential,
   mockTestConnection,
   mockDashboard,
@@ -594,6 +601,81 @@ export const api = {
     }
     const { data } = await http.post<TriageDecisionResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/triage`,
+      body,
+    );
+    return data;
+  },
+
+  // --- Review response preparation ------------------------------------------------
+  //
+  // All three round-trip `actionRef` percent-encoded, for the reason recordVocItemTriage
+  // states: it is opaque, and its format will grow.
+
+  // Everything the preparation panel needs for one review, in one read.
+  //
+  // Fail-closed, like both attention reads: no getOrMock fallback. A silent fall back here
+  // would be worse than on a list — it would show the operator a suggested reply, a draft,
+  // and a copy button belonging to a review that is not the one in front of them.
+  async getReviewReplyPrep(accountId: string, actionRef: string): Promise<ReviewReplyPrep> {
+    if (USE_MOCKS) {
+      return mockReviewReplyPrep(actionRef);
+    }
+    const { data } = await http.get<ReviewReplyPrep>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply`,
+    );
+    return data;
+  },
+
+  // Save one append-only draft version.
+  //
+  // PUT, and `baseVersion` — not a command id — is what makes a retry safe: an exact
+  // re-send of the same content on the same base inserts nothing and returns the head. A
+  // stale base is a 409 the caller must re-base on rather than retry.
+  //
+  // The caller classifies the thrown axios error: 400 (blank/over-long body, missing
+  // base), 404 (not addressable from this account), 409 (stale base, review not
+  // RESPONSE_NEEDED, or a draft frozen by a standing approval).
+  async saveReviewReplyDraft(
+    accountId: string,
+    actionRef: string,
+    body: { body: string; baseVersion: number },
+  ): Promise<ReviewReplyDraft> {
+    if (USE_MOCKS) {
+      return mockSaveReviewReplyDraft(actionRef, body.body, body.baseVersion);
+    }
+    const { data } = await http.put<ReviewReplyDraft>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/draft`,
+      body,
+    );
+    return data;
+  },
+
+  // Approve the current draft, or withdraw a standing approval.
+  //
+  // POST with a client-minted `commandId`, unlike the draft PUT beside it. The difference
+  // is what a retry must be idempotent against: a draft save carries its own content, so a
+  // re-send is recognisable by that content, whereas "approve" carries almost nothing —
+  // two approvals of the same version are indistinguishable without a key, and a retried
+  // timeout must not append a second decision to the trail. So `commandId` must be STABLE
+  // across retries of one user action and fresh for a new one, exactly as on triage.
+  //
+  // `baseVersion` is the version being approved (required for APPROVED, null for
+  // WITHDRAWN). It is what stops approving a version the operator never saw.
+  //
+  // Returns the CURRENT state, which may not be the one asked for on a replay. It
+  // deliberately does NOT carry the approved body — the caller re-reads the prep view for
+  // that, so there is exactly one way to obtain copyable text rather than two that could
+  // disagree.
+  async decideReviewReplyApproval(
+    accountId: string,
+    actionRef: string,
+    body: { commandId: string; state: ReviewReplyApprovalStateName; baseVersion: number | null },
+  ): Promise<ReviewReplyApprovalResponse> {
+    if (USE_MOCKS) {
+      return mockDecideReviewReplyApproval(actionRef, body.state, body.baseVersion);
+    }
+    const { data } = await http.post<ReviewReplyApprovalResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/approval`,
       body,
     );
     return data;
