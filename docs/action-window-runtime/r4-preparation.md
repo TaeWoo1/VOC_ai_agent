@@ -264,10 +264,17 @@ verified seam — the adapter is composition, not new invention:
   hermetically against fake drivers — §8-21 `run-action-window-live-naver.test.ts`; the REAL live
   driver's re-probe **across a real navigation** is green over a real browser on a synthetic DOM —
   §8-22 `run-action-window-live-naver-browser.test.ts`, `RUN_INTEGRATION` **PASSED 2026-07-17**, 5/5.
-  ⚠ **Scope of this ☑, stated because the rung is easy to over-read:** it does **NOT** cover
-  `page.content()` **mid-navigation** — the test's gate awaits its navigation, so the re-probe reads a
-  settled page and the unguarded read in `naver-live-driver.ts` is **still first-executed live** — nor
-  `main()`'s own gate closure (`settleSpa` on the recovery branch), which the injected gate bypasses.)*
+  ⚠ **Scope of this ☑, stated because the rung is easy to over-read:** this rung is the **synthetic**
+  proof; it does **NOT** cover `page.content()` **mid-navigation** — the test's gate awaits its navigation,
+  so the re-probe reads a settled page and the unguarded read in `naver-live-driver.ts` was left
+  first-executed live — nor `main()`'s own gate closure (`settleSpa` on the recovery branch), which the
+  injected gate bypasses. **↳ LIVE-CONFIRMED 2026-07-17 — Run 6 (§8-23):** the recovery re-probe ran on
+  live NAVER and **recovered** (`aw.live.recovery { outcome: "recovered" }`, READY post-login), and both
+  seams — the unguarded `page.content()` read **and** `main()`'s recovery-branch `settleSpa` — executed
+  live **without a `driver-error`**. ⚠ **One observation, not a closure:** the race did not fire once, on
+  one seller's settled post-login landing; the read stays **unguarded** (PO-declined) and a recovery whose
+  navigation is still in flight can still throw. **The synthetic ☑ is unchanged; Run 6 is the live
+  corroboration, not a broadening of this rung's scope.**)*
 
 ## 7. Rollback / abort criteria
 

@@ -596,3 +596,29 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   no Run-6 G6 is filled, P6 is unsigned, and Run 6 is **NOT AUTHORIZED**. Prerequisites being in place is
   precisely when they are easiest to mistake for permission. Register:
   [`r4-gate-record.md`](r4-gate-record.md) §G3/§G4/§G6 — the one canonical home.
+
+- **D-031 · ACTIVE** — **G3's `Bridge paired` is scope-dependent, not a vacuous checkbox: for
+  `session recovery` it is recorded N/A with its reason** (product owner, 2026-07-17, docs only).
+  *What prompted it:* the Run 6 draft **silently dropped** the box; the canonical G3 template requires it.
+  Both moves were wrong — **affirming it vacuously asserts a fact not in evidence, and dropping it hides the
+  question.** N/A **with a reason** is the third answer, and it is a *recorded* answer, not a waived box.
+  **(a) Why it is inapplicable to this scope.** Run 6 is a **CLI run over a loopback**, and the live driver is
+  **not Bridge-wired** — two independent sources say so: §6's Bridge rung
+  ([`r4-preparation.md`](r4-preparation.md)) verbatim *"the live driver is not yet Bridge-wired,"* and
+  [`r4-evidence-pack.md`](r4-evidence-pack.md) §8, *"the entrypoint uses a loopback channel."* There is
+  nothing for the box to assert.
+  **(b) What the control boundary actually is for this scope** — the box is scoped out because control lives
+  elsewhere, **not** because control is absent: the **CLI** + a **seated operator** + the **dedicated Chrome
+  connection profile** + **Operation Run persistence** + the **zero-click scope** (no click ⇒ no download ⇒
+  detect/validate/ingest **unreachable**). Bridge pairing is not part of that boundary; the CLI is.
+  **(c) It does not generalize.** The box **stands unchanged for every other scope**, and a Bridge-driven run
+  affirms it for real. Scoped to `session recovery` only.
+  **(d) It does not rewrite history.** Earlier dispatch records affirmed `☑ Bridge paired` on CLI-entrypoint
+  runs; by this reasoning those ☑s were vacuous. They are **consumed, spent records and stay exactly as
+  written** — a spent record is evidence of what was affirmed at the time, and back-dating it would destroy
+  the only trace of the mistake. **Reported, not resolved; a future Bridge-scope review may revisit the
+  template, not the history.**
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** It resolves the box's
+  **applicability**, never the run's **authorization** — the `session recovery` G3 instance is still ☐, no
+  Run-6 G6 is filled, P6 is unsigned, and Run 6 is **NOT AUTHORIZED**. Register:
+  [`r4-gate-record.md`](r4-gate-record.md) §G3 — the one canonical home.

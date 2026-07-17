@@ -68,7 +68,8 @@ per run; a blank template affirms nothing):
 
 - ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
 - ☐ Dedicated Chrome profile for the connection intact.
-- ☐ Bridge paired.
+- ☐ Bridge paired. *(⚠ **Scope-dependent** — recorded **N/A with a reason** where the run's scope is not
+  Bridge-driven; see the `session recovery` note below, where it is scoped out. **Never a vacuous ☑.**)*
 - ☐ Operation Run persistence enabled.
 - ☐ **§9 item 3 NAVER live-work pause lift — freshly affirmed FOR THIS RUN'S SCOPE ONLY**
   (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` | `session recovery` —
@@ -80,8 +81,22 @@ is extended, not superseded — G3 stays per-run, scopes stay non-substitutable,
 It is none of the other four: it is read-only *in effect* (zero clicks, no download, ingest unreachable) but it is **not** the
 §8-4 read-only probe — it drives the full engine and holds a live browser **~32 min**. Choreography:
 [`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md).
-⚠ **Ratifying the scope authorizes nothing.** No G3 instance of this scope has been affirmed and no
-`session recovery` G6 has been filled; both are ☐ and both are per-run.
+**`Bridge paired` — SCOPED OUT for `session recovery`, RESOLVED 2026-07-17 (product owner).** For this
+scope the box is recorded **N/A, with its reason**, never ☑ and never silently dropped: the run is a **CLI
+run over a loopback**, and the live driver **is not Bridge-wired** — §6's Bridge rung
+([`r4-preparation.md`](r4-preparation.md)) says verbatim *"the live driver is not yet Bridge-wired,"* and
+[`r4-evidence-pack.md`](r4-evidence-pack.md) §8 records that the entrypoint *"uses a loopback channel."*
+**Bridge pairing is not this run's control boundary — the CLI is.** A ☑ would assert a fact not in
+evidence; a drop would hide the question.
+⚠ **Scoped to `session recovery` only.** The box stands unchanged for every other scope, and a
+Bridge-driven run affirms it for real. **This resolves the box's applicability, not the run's
+authorization** — the G3 instance is still ☐.
+
+⚠ **Ratifying the scope authorized nothing** — the *scope* being ratified was never the *run* being
+authorized. **↳ SINCE EXECUTED 2026-07-17 (Run 6):** a `session recovery` G3 instance was affirmed and a
+Run-6 G6 filled in that dispatching turn, the run drove once, and **both are now CONSUMED** (§G6 below;
+[`r4-evidence-pack.md`](r4-evidence-pack.md) §8-23). Both were per-run and neither carries over — a further
+run needs a fresh G3 + G6.
 
 *Owner:* operator/PO — never Runtime code. A filled G3 **alone authorizes no live contact**: a fresh
 single-use **G6** (§G6 below) is still required in the same dispatching turn.
@@ -339,7 +354,37 @@ R4 live-run approval — RUN 6 SESSION RECOVERY (fill in the dispatching turn)
                       spending the G6
 ```
 
-This template, unfilled, **authorizes nothing.** No `session recovery` instance has been filled.
+This template is a template; unfilled it authorizes nothing. **One `session recovery` instance has now been
+filled and CONSUMED (below); a fresh single-use G6 is required for any further contact.**
+
+```
+R4 live-run approval — RUN 6 SESSION RECOVERY — CONSUMED (authorizes nothing further)
+- channel:            NAVER SmartStore review export
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-17
+- operator:           self
+- run scope:          session recovery — parked logged-out, recovered post-login, ZERO CLICKS,
+                      non-mutating by construction. Full §4 boundary.
+- max live window:    ~32 min affirmed; ~11 min recovery→terminal actually elapsed (1 recovery
+                      attempt; MAX_RECOVERY_ATTEMPTS 3 never approached).
+- §7 abort criteria:  acknowledged (no dialog appeared; a LOGIN_REQUIRED park is not an abort).
+- G2/G3/G5 state:     G2 ✅ · G3 ✅ (`session recovery` scope, affirmed this turn) · G5 ✅
+- G4 state:           addressed on the Run-6 record citing §8-22 (D-030); the two named residuals
+                      (page.content() mid-nav, main()'s recovery-branch settleSpa) were live-exercised
+                      in this run WITHOUT a driver-error — one observation, not a closure.
+- P6 state:           signed for this run (session recovery only).
+- outcome:            CONSUMED — one run executed 2026-07-17. Recovery LIVE-PROVEN
+                      (aw.live.recovery { outcome: "recovered", attempt 1 }; readiness LOGGED_IN /
+                      READY post-login). Terminal FAILED · DOWNLOAD_TIMEOUT · progress 2-of-3;
+                      Operation Run run_57ab9b52a3c0 persists the same (humanCheckpoint reached:true
+                      observed:false). NON-MUTATING held: no click/download/quarantine/ingest, backend
+                      never called, downloads/ untouched, worktree clean. Sanitized detail in
+                      r4-evidence-pack.md §8-23. NO retry under this G6.
+```
+
+This instance is **spent**. Each subsequent live run requires a **NEW** G6 instance filled in that
+dispatching turn under the full §4 boundary; a past `recovered` is an observation, not a standing
+authorization.
 
 ---
 
