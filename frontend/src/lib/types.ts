@@ -447,17 +447,55 @@ export interface OperatorAttentionSummary {
 // Its null means "no name is available" — NOT "this row has no product" (a Cafe24
 // community article has a product the store simply cannot name). Rendering it as an
 // absence of product would misread the contract; see productLabel in ./vocItems.
+// `actionRef` is the row's ADDRESS — a client-opaque handle to round-trip when
+// recording a decision, never to parse. It is not a permission: holding one grants
+// nothing, and the backend re-derives org + account/channel scope on every call.
+// Null when the row cannot be decided at all (every Cafe24 community article, which
+// has no triage anchor). That null is a CAPABILITY LIMIT, like productName's — render
+// it as the absence of an affordance, never as an absence of the row.
+//
+// `triageDisposition` is the operator's own recorded judgement, or null when none has
+// been recorded. Null ("not yet triaged") is NOT the same as NO_ACTION ("looked at,
+// nothing to do") — collapsing the two would erase the work of having decided. A row
+// can have a ref and no disposition (the common case); a row with no ref necessarily
+// has no disposition.
 export interface OperatorVocItem {
   channelCode: string | null;
   channelNameKo: string | null;
   sourceType: string; // REVIEW | INQUIRY
   productName: string | null; // display name, or null when none can be resolved
   rating: number | null;
-  replyStatus: string;
+  // Null for every ingested-review (NAVER) row: a seller-center export carries no reply
+  // state, so the source sends null rather than guessing one. Only the Cafe24 community
+  // store has a real status to report. Nullable because the field spans BOTH sources and
+  // one of them genuinely has nothing to say — typing it `string` forced every NAVER
+  // fixture to invent a value, which is how "미답변" ended up asserted on rows the product
+  // cannot emit. Renders as 상태 미상 either way; see replyStatusLabel.
+  replyStatus: string | null;
   sourceCreatedDate: string | null;
   collectedDate: string | null;
   signalType: string; // the requesting AttentionSignalType
   safePreview: string | null; // sanitized preview, or null when suppressed/empty
+  actionRef: string | null; // opaque address, or null when the row is not decidable
+  triageDisposition: TriageDisposition | null; // null = not yet triaged
+}
+
+// Mirrors com.sellerops.attention.triage.TriageDisposition. A decision, not a workflow
+// phase: these say what the operator concluded, and nothing happens next — recording
+// RESPONSE_NEEDED does not draft, queue, or send a reply. Deliberately NOT the inquiry
+// pipeline's phase vocabulary; borrowing it would imply a machine-driven lifecycle that
+// does not exist for reviews.
+export type TriageDisposition = "RESPONSE_NEEDED" | "MONITOR" | "NO_ACTION";
+
+// Mirrors com.sellerops.attention.triage.dto.TriageDecisionResponse.
+// `disposition` is the review's CURRENT decision after the call — not necessarily the
+// one this request asked for: replaying a command a later one superseded reports where
+// things actually stand. `replayed` distinguishes "already applied, nothing written"
+// from a fresh write; both are successes.
+export interface TriageDecisionResponse {
+  actionRef: string;
+  disposition: TriageDisposition;
+  replayed: boolean;
 }
 
 // Mirrors com.sellerops.attention.dto.OperatorVocItemPage. Reads no server clock;

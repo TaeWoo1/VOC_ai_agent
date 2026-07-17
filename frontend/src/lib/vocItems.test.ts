@@ -3,6 +3,8 @@ import type { AttentionSignal, OperatorVocItem } from "./types";
 import {
   PREVIEW_PLACEHOLDER,
   PRODUCT_PLACEHOLDER,
+  TRIAGE_OPTIONS,
+  asTriageDisposition,
   drilldownParams,
   previewText,
   productLabel,
@@ -10,22 +12,50 @@ import {
   vocItemKey,
 } from "./vocItems";
 
+/**
+ * An attention signal fixture, on a channel that exists.
+ *
+ * `channel` is `channel.getNameKo()` resolved upstream, so it can only ever be a catalog
+ * string. This said "카페24" — an abbreviation the channels table does not hold (it has
+ * "카페24 자사몰"), two lines above the fixture below that argues a fixture is a claim.
+ * NAVER, to match the row fixture and the file's subject.
+ */
 function signal(type: string, sourceType: string): AttentionSignal {
-  return { type, severity: "HIGH", count: 1, label: type, description: "", sourceType, channel: "카페24" };
+  return {
+    type,
+    severity: "HIGH",
+    count: 1,
+    label: type,
+    description: "",
+    sourceType,
+    channel: "네이버 스마트스토어",
+  };
 }
 
+/**
+ * A NAVER review row, source-faithful.
+ *
+ * This file only exercises `vocItemKey`, which reads `signalType` — but the fixture is kept
+ * honest anyway, because a fixture is a claim. It said CAFE24 while carrying a product name
+ * and a "UNKNOWN" reply status: `Cafe24VocItemSource` hardcodes productName null, and the
+ * community store's status is a real column, never that token. NAVER is the source where a
+ * name and a null status are both true.
+ */
 function item(signalType: string): OperatorVocItem {
   return {
-    channelCode: "CAFE24",
-    channelNameKo: "카페24",
+    channelCode: "NAVER",
+    channelNameKo: "네이버 스마트스토어",
     sourceType: "REVIEW",
     productName: "가을 니트 가디건 CHARCOAL",
     rating: 2,
-    replyStatus: "UNKNOWN",
+    // An export carries no reply state.
+    replyStatus: null,
     sourceCreatedDate: "2026-05-10",
     collectedDate: "2026-05-30",
     signalType,
     safePreview: null,
+    actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+    triageDisposition: null,
   };
 }
 
@@ -70,6 +100,11 @@ describe("replyStatusLabel", () => {
   it("maps known statuses", () => {
     expect(replyStatusLabel("PENDING").text).toBe("미답변");
     expect(replyStatusLabel("ANSWERED").text).toBe("답변 완료");
+    // Null is the ingested-review (NAVER) case — an export carries no reply state, so the
+    // source sends null rather than guessing. It lands on the same 상태 미상 chip as an
+    // unrecognised token, which is honest for both: the status is not known.
+    expect(replyStatusLabel(null)).toEqual(replyStatusLabel("UNKNOWN"));
+    expect(replyStatusLabel(null).text).toBe("상태 미상");
   });
 
   it("falls back to UNKNOWN for an unrecognized status", () => {
@@ -92,6 +127,56 @@ describe("previewText", () => {
   it("returns the placeholder when empty or whitespace", () => {
     expect(previewText("").isPlaceholder).toBe(true);
     expect(previewText("   ").isPlaceholder).toBe(true);
+  });
+});
+
+describe("triage copy", () => {
+  it("offers exactly the three dispositions, most-demanding first", () => {
+    // Order is the array's, not the enum's — a UI decision, pinned so a backend enum
+    // reorder cannot silently reshuffle the operator's buttons. Labels pinned as literals:
+    // the backend ships enum NAMES, which are a contract, not copy, so a wording change is
+    // a decision that must be visible here.
+    expect(TRIAGE_OPTIONS.map((o) => o.value)).toEqual([
+      "RESPONSE_NEEDED",
+      "MONITOR",
+      "NO_ACTION",
+    ]);
+    expect(TRIAGE_OPTIONS.map((o) => o.label)).toEqual(["대응 필요", "지켜보기", "조치 불필요"]);
+  });
+});
+
+describe("asTriageDisposition", () => {
+  it("accepts exactly the dispositions this client can render", () => {
+    for (const option of TRIAGE_OPTIONS) {
+      expect(asTriageDisposition(option.value)).toBe(option.value);
+    }
+  });
+
+  it("rejects anything else, so an unknown value cannot reach the UI as a decision", () => {
+    // The failure this prevents is silent: an unrecognised disposition would land in state
+    // and render as "판단 전" — no decision at all — after a SUCCESSFUL save, so the
+    // operator concludes their click did nothing.
+    expect(asTriageDisposition("RESPONSE_NEEDED_LATER")).toBeNull(); // a future value
+    expect(asTriageDisposition("response_needed")).toBeNull(); // case matters on the wire
+    expect(asTriageDisposition("PROPOSED")).toBeNull(); // the other pipeline's vocabulary
+    expect(asTriageDisposition("")).toBeNull();
+  });
+
+  it("rejects a missing or non-string value rather than coercing it", () => {
+    // A 200 with a malformed body is exactly the case the TypeScript type does not cover:
+    // it is a claim about the code, not about the bytes.
+    expect(asTriageDisposition(undefined)).toBeNull();
+    expect(asTriageDisposition(null)).toBeNull();
+    expect(asTriageDisposition(0)).toBeNull();
+    expect(asTriageDisposition({ disposition: "MONITOR" })).toBeNull();
+  });
+
+  it("derives its accepted set from the options, so the two cannot drift", () => {
+    // Not a second hand-written list: a disposition the UI offers but the validator
+    // rejects would make the control refuse its own successful writes.
+    for (const option of TRIAGE_OPTIONS) {
+      expect(asTriageDisposition(option.value)).not.toBeNull();
+    }
   });
 });
 

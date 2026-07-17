@@ -18,6 +18,16 @@
 > Action Window Runtime 상태의 정본은 `docs/action-window-runtime/`이며, 진입점은
 > [`docs/action-window-runtime/HANDOFF.md`](action-window-runtime/HANDOFF.md)다.
 
+> **⚠ 2026-07-17 부분 갱신 — §10 Active slice만.** 이 날짜에 갱신된 것은 §10뿐이다. **나머지 항목은
+> 여전히 2026-07-08 기준**(§9의 Action Window 항목은 2026-07-15 기준)이며 그 이후를 반영하지 않는다.
+>
+> **알려진 staleness — 해소하지 않고 보고한다.** 이 문서는 **리뷰 트리아지가 머지된 사실을 모른다**:
+> 백엔드 PR #279(`4404b4f`)·프론트 PR #283(`6fff8f8`)이 2026-07-17에 들어왔고 scope lock은 v1.3(`7052e71`)
+> 을 거쳐 **v1.4**가 됐지만, §9의 "구현됨/미구현" 목록과 §1의 기준일은 손대지 않았다. 그 전면 갱신은
+> 이 슬라이스의 일이 아니며(범위를 넘어 문서를 다시 쓰는 것이 된다), 제품 오너에게 별도로 올린다.
+> 특히 **§9 "명시적으로 미구현(표기 금지)"의 "채널 쓰기(답변 발송)"는 여전히 유효**하다 — v1.4가 허용한
+> 것은 답변 **준비**(로컬 초안·승인·복사)이지 발송이 아니다.
+
 > **통합 상태(integ/sellerops-main).** origin/main(`5a43dcb`)에 sellerops/main(`5889a1d`)을 non-fast-forward
 > 병합한 통합 브랜치. 유일 충돌 `collector/src/cli/local-agent.ts`을 두 계보 보존으로 해소(Bridge + same-process
 > human-completion 결합; ESM 프로필은 origin의 `base.profileBaseDir` 유지, Bridge pairing-file 전용 `collectorRoot`
@@ -117,7 +127,19 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - 채널 쓰기(답변 발송/주문 상태 변경), 무인 자동 수집, 자동 제품 매칭, standalone AI 검색.
 
 ## 10. Active slice
-**NAVER Guided Connection (Guided-Connection G3) — 계약 초안 작성 중** — `docs/slices/naver-guided-connection.md`
+**Review Response Preparation v1 (Attention 표면) — 백엔드 구현·검증 완료, 미커밋** —
+`docs/slices/review-response-preparation-v1.md` (**2026-07-17**). `RESPONSE_NEEDED` 리뷰에 한해
+redacted 본문 → **규칙 기반** 추천 초안 → 편집 → 승인(고정) → **복사**. **발송 없음**: 마켓플레이스
+쓰기 경로 부재, 승인은 텍스트를 고정할 뿐 전송하지 않으며 답변은 운영자의 클립보드로만 나간다.
+**AI 없음**(`sellerops.reply.review.provider=rule_based`, `ai` 예약·미구현). scope lock **v1.4**로
+상향(§5 계약 + §9 drift guard 범위 확정 + 좁은 redacted 판매자-대면 예외). 백엔드 테스트 **72개 신규**
+(전체 **1166** 통과, 실패 0). 구현 직후 독립 리뷰에서 blocker 5건(개행이 섞인 공백에서 redaction이
+미리보기보다 적게 가리던 privacy 결함 포함) 발견·수정·재검증, 수정 후 최종 리뷰에서 2건 추가 발견·수정
+— 상세는 슬라이스 문서 §Acceptance.
+**프론트엔드 미착수**(별도 PR). collector/R4/라이브 접속 변경 없음.
+
+### 이전 활성 슬라이스 (참고) — NAVER Guided Connection (Guided-Connection G3)
+**계약 초안 작성 중** — `docs/slices/naver-guided-connection.md`
 (**DRAFT, 제품 오너 리뷰 대기 2026-07-08**). **문서 전용; 구현 미착수.** G3 = G1(페어링)·G2(프로젝션) 위에
 **셀러 소유 NAVER 커머스 API 앱 발급(type=SELF) 가이드 + 첫 실주문 수집**(Frontend Spec §16.10 6단계).
 셀러 소유 파일럿 경로이며 **솔루션-제공자 모델 아님**(product-scope §6.1). 가이드 상태 엔진·행위자 경계
