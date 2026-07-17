@@ -56,6 +56,7 @@ function item(signalType: string): OperatorVocItem {
     safePreview: null,
     actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
     triageDisposition: null,
+    hasReplyPreparation: false,
   };
 }
 

@@ -7,6 +7,8 @@ import com.sellerops.attention.VocItemRef;
 import com.sellerops.attention.VocWindowSnapshot;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.triage.ReviewTriage;
+import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyDraftRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.VocPreviewSanitizer;
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -148,13 +151,19 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     private final SellerAccountRepository sellerAccounts;
     private final ProductRepository products;
     private final ReviewTriageRepository triage;
+    private final ReviewReplyDraftRepository replyDrafts;
+    private final ReviewReplyApprovalRepository replyApprovals;
 
     public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
-                                       ProductRepository products, ReviewTriageRepository triage) {
+                                       ProductRepository products, ReviewTriageRepository triage,
+                                       ReviewReplyDraftRepository replyDrafts,
+                                       ReviewReplyApprovalRepository replyApprovals) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
         this.products = products;
         this.triage = triage;
+        this.replyDrafts = replyDrafts;
+        this.replyApprovals = replyApprovals;
     }
 
     @Override
@@ -208,8 +217,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 fromInstant, toExclusive, PageRequest.of(page, size));
         Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
+        Set<UUID> prepared = preparedFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
-                .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames, dispositions))
+                .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames,
+                        dispositions, prepared))
                 .toList();
         return new VocItemSlice(rows, result.getTotalElements());
     }
@@ -231,6 +242,24 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         }
         return triage.findAllByOrgIdAndReviewIdIn(orgId, reviewIds).stream()
                 .collect(Collectors.toMap(ReviewTriage::getReviewId, ReviewTriage::getDisposition));
+    }
+
+    /**
+     * Which of these reviews already carry reply work — TWO batch queries per page, never a
+     * per-row lookup (see {@code ReviewReplyDraftRepository.findReviewIdsWithDraft}).
+     *
+     * <p>Drafts OR approvals, unioned rather than derived one from the other: an approval
+     * implies a draft today, but only because a service rule says so, and a read that is
+     * correct only while an unrelated invariant holds is a read that breaks silently.
+     */
+    private Set<UUID> preparedFor(UUID orgId, List<Review> rows) {
+        Set<UUID> reviewIds = rows.stream().map(Review::getId).collect(Collectors.toSet());
+        if (reviewIds.isEmpty()) {
+            return Set.of();
+        }
+        Set<UUID> prepared = new HashSet<>(replyDrafts.findReviewIdsWithDraft(orgId, reviewIds));
+        prepared.addAll(replyApprovals.findReviewIdsWithApproval(orgId, reviewIds));
+        return prepared;
     }
 
     /**
@@ -336,7 +365,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     private OperatorVocItem toItem(Review r, AttentionSignalType signalType,
                                    String channelCode, String channelNameKo,
                                    Map<UUID, String> productNames,
-                                   Map<UUID, TriageDisposition> dispositions) {
+                                   Map<UUID, TriageDisposition> dispositions,
+                                   Set<UUID> prepared) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String safePreview = VocPreviewSanitizer.sanitize(r.getBody()).text();
         // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
@@ -355,7 +385,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 kstDate(r.getCreatedAt()),  // when SellerOps ingested it
                 signalType.name(), safePreview,
                 actionRef,
-                disposition == null ? null : disposition.name());
+                disposition == null ? null : disposition.name(),
+                prepared.contains(r.getId()));
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */

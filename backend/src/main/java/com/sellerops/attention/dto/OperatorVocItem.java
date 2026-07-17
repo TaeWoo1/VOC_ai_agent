@@ -68,6 +68,27 @@ package com.sellerops.attention.dto;
  * review is both LOW_RATING_REVIEW and NEW_REVIEW). A null means "not yet triaged" and is
  * distinct from {@code NO_ACTION}, which means "looked at, nothing to do" — collapsing the
  * two would erase the work of having decided.
+ *
+ * <p>{@code hasReplyPreparation} says whether an operator has already written or approved a
+ * reply for this review. Like {@code triageDisposition} it is not collected data — it is a
+ * fact about the operator's own work.
+ *
+ * <p><b>It exists so that work cannot be stranded.</b> The reply surface stays available for
+ * a review whose draft exists but whose disposition has since moved off
+ * {@code RESPONSE_NEEDED} — the draft must remain readable, and any approval must remain
+ * withdrawable, or an operator who changes their mind is left with an approved reply they
+ * can neither see nor take back. A client cannot infer that from this row: the disposition
+ * alone says nothing about whether work exists, and the alternative — a per-row request from
+ * the drill-down just to find out — would put one HTTP call per rendered row behind a list
+ * that already paginates. So it is answered here, in the same batch the page already costs.
+ *
+ * <p>It is a BOOLEAN, deliberately, and that is the whole of what it may become: the drill-down
+ * is metadata-only, and the draft's text, its version, and the approval's state are all things
+ * this surface has no business carrying. It answers "is there something here" and nothing else;
+ * anything more comes from the reply read.
+ *
+ * <p>{@code false} for every row that cannot be prepped at all (a null {@code actionRef}),
+ * which is a capability limit rather than a claim that no work exists.
  */
 public record OperatorVocItem(
         String channelCode,
@@ -81,5 +102,6 @@ public record OperatorVocItem(
         String signalType,
         String safePreview,
         String actionRef,
-        String triageDisposition) {
+        String triageDisposition,
+        boolean hasReplyPreparation) {
 }

@@ -9,6 +9,11 @@ import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.reply.ReviewReplyApproval;
+import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyApprovalState;
+import com.sellerops.attention.reply.ReviewReplyDraft;
+import com.sellerops.attention.reply.ReviewReplyDraftRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
@@ -56,6 +61,8 @@ class IngestedReviewVocItemSourceTest {
     @Autowired Cafe24CommunityArticleRepository articles;
     @Autowired ProductRepository products;
     @Autowired ReviewTriageRepository triage;
+    @Autowired ReviewReplyDraftRepository replyDrafts;
+    @Autowired ReviewReplyApprovalRepository replyApprovals;
 
     private OperatorAttentionService service;
     private VocItemSourceRegistry registry;
@@ -75,7 +82,8 @@ class IngestedReviewVocItemSourceTest {
     void setUp() {
         registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
-                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage)));
+                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
+                        replyDrafts, replyApprovals)));
         service = new OperatorAttentionService(sellerAccounts, channels, registry);
     }
 
@@ -107,7 +115,8 @@ class IngestedReviewVocItemSourceTest {
         // first proves only the ordering, not the exclusion. Register this source FIRST:
         // CAFE24 must still reach the community store, because this one declines it.
         VocItemSourceRegistry reversed = new VocItemSourceRegistry(List.of(
-                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage),
+                new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
+                        replyDrafts, replyApprovals),
                 new Cafe24VocItemSource(articles)));
 
         assertThat(reversed.forChannel("CAFE24")).containsInstanceOf(Cafe24VocItemSource.class);
@@ -116,7 +125,8 @@ class IngestedReviewVocItemSourceTest {
 
     @Test
     void supportsIsExactAndNullSafe() {
-        IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage);
+        IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
+                        replyDrafts, replyApprovals);
         assertThat(source.supports("NAVER")).isTrue();
         assertThat(source.supports("CAFE24")).isFalse();
         assertThat(source.supports("GMARKET")).isFalse();
@@ -168,6 +178,141 @@ class IngestedReviewVocItemSourceTest {
                 org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
         assertThat(page.total()).isZero();
         assertThat(page.items()).isEmpty();
+    }
+
+    // --- hasReplyPreparation ----------------------------------------------------
+
+    /**
+     * The flag exists so reply work cannot be stranded, so the case that matters is the one
+     * where the disposition alone would hide it: a draft exists, and the operator has since
+     * re-triaged the review away from RESPONSE_NEEDED. The client mounts its panel on
+     * {@code RESPONSE_NEEDED || hasReplyPreparation}, and without this the draft would be
+     * unreachable and any approval unwithdrawable.
+     */
+    @Test
+    void aRowReportsItsReplyWorkEvenAfterTheReviewIsRetriagedAway() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        Review r = review(channelId, "2026-05-06T03:00:00Z", 1, BODY_LOW);
+        seedDraft(r.getId());
+        // No triage row at all — the harshest version of the case: nothing says
+        // RESPONSE_NEEDED, so only this flag can reveal the work.
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items()).singleElement().satisfies(i -> {
+            assertThat(i.triageDisposition()).isNull();
+            assertThat(i.hasReplyPreparation()).isTrue();
+        });
+    }
+
+    @Test
+    void aRowWithNoReplyWorkReportsFalse() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        review(channelId, "2026-05-06T03:00:00Z", 1, BODY_LOW);
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items()).singleElement()
+                .satisfies(i -> assertThat(i.hasReplyPreparation()).isFalse());
+    }
+
+    /** One review's work must not bleed onto its neighbours on the same page. */
+    @Test
+    void replyWorkDoesNotBleedOntoNeighbouringRows() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        Review prepared = review(channelId, "2026-05-06T03:00:00Z", 1, ONLY_IN_KST_WINDOW);
+        review(channelId, "2026-05-07T03:00:00Z", 1, BODY_LOW);
+        seedDraft(prepared.getId());
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items())
+                .filteredOn(i -> ONLY_IN_KST_WINDOW.equals(i.safePreview()))
+                .singleElement()
+                .satisfies(i -> assertThat(i.hasReplyPreparation()).isTrue());
+        assertThat(page.items())
+                .filteredOn(i -> BODY_LOW.equals(i.safePreview()))
+                .singleElement()
+                .satisfies(i -> assertThat(i.hasReplyPreparation()).isFalse());
+    }
+
+    /**
+     * Org-scoped at the query boundary. A review id is not proof of ownership, so another
+     * org's draft on the same review id must be invisible — the same rule the disposition
+     * batch read follows.
+     */
+    @Test
+    void anotherOrgsReplyWorkOnTheSameReviewIdIsInvisibleHere() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        Review r = review(channelId, "2026-05-06T03:00:00Z", 1, BODY_LOW);
+
+        ReviewReplyDraft foreign = new ReviewReplyDraft();
+        foreign.setOrgId(UUID.randomUUID()); // not this org
+        foreign.setReviewId(r.getId());
+        foreign.setVersion(1);
+        foreign.setBody("합성-남의-초안");
+        foreign.setContentFingerprint("f".repeat(64));
+        foreign.setFingerprintAlgorithm("review-reply-v1");
+        foreign.setCreatedBy("SELLER:" + UUID.randomUUID());
+        replyDrafts.save(foreign);
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items()).singleElement()
+                .satisfies(i -> assertThat(i.hasReplyPreparation()).isFalse());
+    }
+
+    /**
+     * The approval half of the union, which the draft cases never reach.
+     *
+     * <p>The repository's own note argues that an approval implies a draft — so the draft
+     * query "should" already cover every approved review, and this branch would be dead. That
+     * implication rests on a rule in a service, not on the schema, which is exactly why the
+     * union does not derive one from the other. An approval row with no draft is unreachable
+     * through the product today; if it ever becomes reachable, the flag must still find it,
+     * and only this test says so.
+     */
+    @Test
+    void aRowWithAnApprovalButNoDraftStillReportsReplyWork() {
+        UUID channelId = seedChannel("NAVER", "네이버 스마트스토어");
+        UUID accountId = seedAccount(channelId);
+        Review r = review(channelId, "2026-05-06T03:00:00Z", 1, BODY_LOW);
+
+        ReviewReplyApproval a = new ReviewReplyApproval();
+        a.setOrgId(org);
+        a.setReviewId(r.getId());
+        a.setState(ReviewReplyApprovalState.WITHDRAWN);
+        a.setDecidedBy("SELLER:" + UUID.randomUUID());
+        a.setDecidedAt(Instant.parse("2026-05-07T03:00:00Z"));
+        replyApprovals.save(a);
+
+        OperatorVocItemPage page = service.attentionItems(
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+
+        assertThat(page.items()).singleElement()
+                .satisfies(i -> assertThat(i.hasReplyPreparation()).isTrue());
+    }
+
+    /** Minimal draft row — the flag only cares that work EXISTS, not what it says. */
+    private void seedDraft(UUID reviewId) {
+        ReviewReplyDraft d = new ReviewReplyDraft();
+        d.setOrgId(org);
+        d.setReviewId(reviewId);
+        d.setVersion(1);
+        d.setBody("합성-답변-초안");
+        d.setContentFingerprint("a".repeat(64));
+        d.setFingerprintAlgorithm("review-reply-v1");
+        d.setCreatedBy("SELLER:" + UUID.randomUUID());
+        replyDrafts.save(d);
     }
 
     // --- KST window boundaries --------------------------------------------------

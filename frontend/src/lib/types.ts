@@ -478,6 +478,19 @@ export interface OperatorVocItem {
   safePreview: string | null; // sanitized preview, or null when suppressed/empty
   actionRef: string | null; // opaque address, or null when the row is not decidable
   triageDisposition: TriageDisposition | null; // null = not yet triaged
+  // Whether an operator has already written or approved a reply for this review — batch
+  // computed server-side, one query per page rather than a request per row.
+  //
+  // It exists so work cannot be stranded. The reply panel mounts on
+  // `RESPONSE_NEEDED || hasReplyPreparation`, because a draft written while the review was
+  // 대응 필요 must stay readable — and any approval withdrawable — after the operator moves
+  // it to 지켜보기. The disposition alone cannot say whether work exists, and this row is
+  // the only thing the drill-down has.
+  //
+  // A boolean and nothing more: this surface is metadata-only, so the draft's text, its
+  // version, and the approval's state all come from the reply read. `false` for a row that
+  // cannot be prepped at all (null actionRef) — a capability limit, not a claim.
+  hasReplyPreparation: boolean;
 }
 
 // Mirrors com.sellerops.attention.triage.TriageDisposition. A decision, not a workflow
@@ -495,6 +508,99 @@ export type TriageDisposition = "RESPONSE_NEEDED" | "MONITOR" | "NO_ACTION";
 export interface TriageDecisionResponse {
   actionRef: string;
   disposition: TriageDisposition;
+  replayed: boolean;
+}
+
+// --- Review response preparation -------------------------------------------------
+//
+// Mirrors com.sellerops.attention.reply.*. The surface goes: redacted body → rule-based
+// suggestion → operator edits → approve (freeze) → copy. It stops at the clipboard —
+// there is no publish route behind any of it, and approving freezes text rather than
+// sending it. RESPONSE_NEEDED still promises nothing: it gates whether preparation is
+// OFFERED, never causes it.
+
+// Mirrors com.sellerops.attention.reply.ReviewReplyApprovalState.
+export type ReviewReplyApprovalStateName = "APPROVED" | "WITHDRAWN";
+
+// Mirrors dto.ReviewReplySuggestionView. Computed read-time and never persisted — a pure
+// function of the (write-once) review body, so the same review always yields the same
+// suggestion. `providerKind` is RULE_BASED today; the UI owns the label and must not
+// overstate it as AI (Frontend Spec §10.3).
+export interface ReviewReplySuggestion {
+  body: string;
+  category: string;
+  providerKind: string;
+  providerName: string;
+  providerVersion: string;
+}
+
+// Mirrors dto.ReviewReplyDraftView. `contentFingerprint` is what a later approval binds
+// to; `version` is what the next save passes as its baseVersion.
+export interface ReviewReplyDraft {
+  version: number;
+  body: string;
+  contentFingerprint: string;
+  fingerprintAlgorithm: string;
+  createdAt: string;
+}
+
+// Mirrors dto.ReviewReplyApprovalView. Absent entirely until the operator has approved
+// once — never-approved is the absence of the object, not a state on it.
+//
+// `approvedBody` is the ONLY copyable text on the wire, and the server sends it only when
+// `capabilities.canCopy` is true. Copy must use it and nothing else: the editor buffer can
+// hold an unsaved keystroke nobody approved, and the clipboard's next stop is a public
+// marketplace reply.
+export interface ReviewReplyApproval {
+  state: ReviewReplyApprovalStateName;
+  approvedVersion: number | null;
+  approvedFingerprint: string | null;
+  approvedBody: string | null;
+  decidedAt: string;
+}
+
+// Mirrors dto.ReviewReplyCapabilities — computed server-side, so the gate is stated once
+// rather than re-derived here. The rule depends on the disposition AND whether a draft
+// exists AND whether an approval stands; re-deriving it in the client is how the two
+// surfaces drift apart. Render affordances from this; the server enforces independently.
+//
+// The asymmetry is deliberate: leaving RESPONSE_NEEDED closes canSave/canApprove/canCopy
+// but never canWithdraw — withdrawal is the one operation that reduces commitment, and
+// blocking it would strand a review in APPROVED with no exit.
+export interface ReviewReplyCapabilities {
+  canSave: boolean;
+  canApprove: boolean;
+  canWithdraw: boolean;
+  canCopy: boolean;
+}
+
+// Mirrors dto.ReviewReplyPrepView — everything the panel needs, in one read.
+//
+// `redactedBody` is the review's WHOLE body with sensitive spans tokenized, not the list's
+// 60-char `safePreview`: the operator has to read the complaint to answer it. Null only
+// when the source was blank. `bodyRedacted` says whether anything was hidden, so the panel
+// can tell the operator rather than leave them puzzling over a [번호] in text they are
+// about to send a customer.
+//
+// `draft` is null until they save one; `approval` is null until they approve one. Both
+// nulls mean "not yet", never "not allowed" — `capabilities` is where permission lives.
+export interface ReviewReplyPrep {
+  actionRef: string;
+  redactedBody: string | null;
+  bodyRedacted: boolean;
+  triageDisposition: TriageDisposition | null;
+  suggestion: ReviewReplySuggestion;
+  draft: ReviewReplyDraft | null;
+  approval: ReviewReplyApproval | null;
+  capabilities: ReviewReplyCapabilities;
+}
+
+// Mirrors dto.ReviewReplyApprovalResponse. `state` is the CURRENT state after the call —
+// not necessarily the one asked for. `replayed` distinguishes "already applied, nothing
+// written" from a fresh write; both are successes.
+export interface ReviewReplyApprovalResponse {
+  actionRef: string;
+  state: ReviewReplyApprovalStateName;
   replayed: boolean;
 }
 

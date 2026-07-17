@@ -132,6 +132,39 @@ class OperatorAttentionItemsJsonContractTest {
     }
 
     /**
+     * {@code hasReplyPreparation} is on the wire as a real boolean, both ways.
+     *
+     * <p>Pinned because a client's mount rule reads it directly: the reply panel appears when
+     * the row is {@code RESPONSE_NEEDED} <b>or</b> this is true, which is what keeps a draft
+     * from being stranded when an operator re-triages the review. A field that arrived as the
+     * string {@code "false"} would be truthy in JavaScript and mount the panel on every row;
+     * one that went missing would silently strand exactly the work it exists to protect. Both
+     * failures are invisible from the server side.
+     */
+    @Test
+    void theReplyPreparationFlagIsABooleanOnTheWire() throws Exception {
+        stubItems(item("가을 니트 가디건 CHARCOAL", ACTION_REF, "MONITOR", true));
+
+        mockMvc.perform(itemsRequest().header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].hasReplyPreparation").value(true))
+                .andExpect(jsonPath("$.items[0].hasReplyPreparation").isBoolean())
+                // The pairing this field exists for: work exists, but the operator has since
+                // moved the review off 대응 필요. The client must still show the panel.
+                .andExpect(jsonPath("$.items[0].triageDisposition").value("MONITOR"));
+    }
+
+    @Test
+    void theReplyPreparationFlagIsFalseNotAbsentWhenNoWorkExists() throws Exception {
+        stubItems(item("가을 니트 가디건 CHARCOAL", ACTION_REF, "RESPONSE_NEEDED", false));
+
+        mockMvc.perform(itemsRequest().header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].hasReplyPreparation").exists())
+                .andExpect(jsonPath("$.items[0].hasReplyPreparation").value(false));
+    }
+
+    /**
      * Both new fields are explicit nulls, for the same reason {@code productName} is: the
      * key must be on the wire for a client to tell the states apart.
      *
@@ -276,10 +309,15 @@ class OperatorAttentionItemsJsonContractTest {
      * test is record → JSON — so the honest value costs nothing.
      */
     private static OperatorVocItem item(String productName, String actionRef, String triageDisposition) {
+        return item(productName, actionRef, triageDisposition, false);
+    }
+
+    private static OperatorVocItem item(String productName, String actionRef,
+                                        String triageDisposition, boolean hasReplyPreparation) {
         return new OperatorVocItem(
                 "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
                 "배송은 빨랐는데 색이 생각과 달라요",
-                actionRef, triageDisposition);
+                actionRef, triageDisposition, hasReplyPreparation);
     }
 }
