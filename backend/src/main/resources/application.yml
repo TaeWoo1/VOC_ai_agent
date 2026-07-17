@@ -198,6 +198,23 @@ sellerops:
       # `ai`/`openai` is a reserved, unimplemented value; wiring a real provider is
       # a later slice that would gate its bean behind this flag.
       provider: ${SELLEROPS_ANALYSIS_ITEM_PROVIDER:rule_based}
+  reply:
+    review:
+      # Review reply-draft suggestion. The shipped provider is rule-based:
+      # deterministic, local, no external call — safe on by default.
+      #
+      # Unlike `analysis.item.provider` above (declared but not yet read), this flag
+      # IS read: RuleBasedReviewReplyProvider is @ConditionalOnProperty on it. Setting
+      # any other value therefore leaves no ReviewReplyProposalProvider bean and the
+      # application fails to start, loudly, naming the missing type.
+      #
+      # That is deliberate. `ai` is reserved and unimplemented, and this is the first
+      # place a live LLM would enter the product — separately authorized, per roadmap
+      # §9.2. A silent fall back to rules would be worse than a failed boot: the
+      # operator would be told 규칙 기반 and believe they had asked for something else,
+      # or vice versa. Selecting a provider that does not exist should stop the
+      # process, not be quietly reinterpreted.
+      provider: ${SELLEROPS_REVIEW_REPLY_PROVIDER:rule_based}
 
 logging:
   level:
