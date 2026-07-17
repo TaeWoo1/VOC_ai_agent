@@ -1,5 +1,6 @@
 import type { OperatorVocItem } from "../lib/types";
 import { previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
+import { VocItemTriageControl } from "./VocItemTriageControl";
 
 // One drill-down row behind an attention signal: the product it concerns, a reply
 // chip, ★rating, dates, and a sanitized preview line. The preview is produced/redacted
@@ -9,7 +10,7 @@ import { previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
 // The product is a display NAME only — the backend sends no product identifier here —
 // so it reads as the row's subject and is deliberately not a link or a routing target.
 
-export function VocItemCard({ item }: { item: OperatorVocItem }) {
+export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accountId: string }) {
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
   const product = productLabel(item.productName);
@@ -42,6 +43,17 @@ export function VocItemCard({ item }: { item: OperatorVocItem }) {
       <p className={`text-sm ${preview.isPlaceholder ? "text-muted italic" : "text-ink"}`}>
         {preview.text}
       </p>
+      {/* Only for a row that can actually carry a decision. A null actionRef is a
+          capability limit (a Cafe24 community article has no triage anchor), so the row
+          stays fully readable and simply offers nothing — rendering a disabled control
+          would say "you may not", when the truth is "this row cannot be decided". */}
+      {item.actionRef != null ? (
+        <VocItemTriageControl
+          accountId={accountId}
+          actionRef={item.actionRef}
+          disposition={item.triageDisposition}
+        />
+      ) : null}
     </li>
   );
 }

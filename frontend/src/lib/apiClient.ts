@@ -24,6 +24,8 @@ import type {
   OperatorAttentionSummary,
   OperatorVocItemPage,
   OrderSummaryResponse,
+  TriageDecisionResponse,
+  TriageDisposition,
   ScheduleView,
   SellerAccountResponse,
   SyncJobView,
@@ -56,6 +58,7 @@ import {
   mockSellerAccounts,
   mockSyncJobs,
   mockSyncRuns,
+  mockVocItemTriage,
 } from "./mocks";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
@@ -555,6 +558,43 @@ export const api = {
     }
     const { data } = await http.get<OperatorVocItemPage>(
       `/api/seller-accounts/${accountId}/attention/items?${search.toString()}`,
+    );
+    return data;
+  },
+  // Mutating: record the operator's decision about one drill-down row.
+  //
+  // Honors VITE_USE_MOCKS like the reads beside it, but takes NO getOrMock fallback: a
+  // dead backend must fail loudly here. The distinction is the one product scope already
+  // draws — mock data is allowed in an explicitly separated demo mode, never as a silent
+  // degradation of a real one. Without the demo branch the mixed rows would render controls
+  // where every click errors, which looks more broken than no control at all.
+  //
+  // `actionRef` is the opaque handle the drill-down handed out; it is round-tripped, never
+  // parsed. It is percent-encoded because it is a server-minted token interpolated into a
+  // path: today's `review:<uuid>` needs only the colon escaped, and the backend receives
+  // the identical decoded string either way — but the contract says the ref is opaque and
+  // its format will grow, so encoding is the only form that stays correct without betting
+  // on the alphabet.
+  //
+  // `commandId` is the caller's idempotency key and must be STABLE across retries of the
+  // same user action (see VocItemTriageControl): a fresh id per retry would append a
+  // second identical decision to the audit trail instead of replaying the first. Reusing
+  // one for a DIFFERENT decision is a 409 — that is the caller's bug, not a state to
+  // recover from.
+  //
+  // The caller classifies the thrown axios error: 400 (bad ref/disposition), 404 (not
+  // addressable from this account), 409 (commandId reused for another decision).
+  async recordVocItemTriage(
+    accountId: string,
+    actionRef: string,
+    body: { commandId: string; disposition: TriageDisposition },
+  ): Promise<TriageDecisionResponse> {
+    if (USE_MOCKS) {
+      return mockVocItemTriage(actionRef, body.disposition);
+    }
+    const { data } = await http.post<TriageDecisionResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/triage`,
+      body,
     );
     return data;
   },
