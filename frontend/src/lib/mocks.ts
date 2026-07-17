@@ -1,5 +1,6 @@
 // Seeded mock responses. Used when VITE_USE_MOCKS=true, and as a fallback when
 // the backend is unreachable — so the UI is never blank during a demo.
+import { sortBySeverity } from "./attention";
 import type {
   AccountDashboardSummary,
   ArticleListResponse,
@@ -19,6 +20,7 @@ import type {
   InboxResponse,
   ItemAnalysis,
   OperatorAttentionSummary,
+  OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
   SalesTrendPoint,
@@ -26,6 +28,8 @@ import type {
   SellerAccountResponse,
   SyncJobView,
   SyncRunView,
+  TriageDecisionResponse,
+  TriageDisposition,
   UserView,
 } from "./types";
 
@@ -292,9 +296,19 @@ export function mockStoreCredential(accountId: string, request: CredentialIntake
   });
 }
 
-// The channel code behind a demo account id (`mock-acct-mock-channel-{i}`), or
-// null if it can't be derived — used to keep the demo test-connection honest.
-function mockChannelCodeForAccount(accountId?: string): string | null {
+/**
+ * The demo channel behind an account id (`mock-acct-mock-channel-{i}`), or null if it
+ * cannot be derived.
+ *
+ * ONE place decides what channel an account is on. Every account-keyed mock reads this, so
+ * they cannot disagree — which they did: the attention pane resolved the account while the
+ * dashboard beside it hardcoded NAVER, so the 쿠팡 account rendered a NAVER dashboard next
+ * to a 쿠팡 attention pane. A SellerAccount is bound to one channelId; anything that
+ * answers per-account has to answer from the same mapping.
+ */
+function mockChannelForAccount(
+  accountId?: string,
+): { id: string; code: string; nameKo: string } | null {
   if (accountId == null) {
     return null;
   }
@@ -302,7 +316,16 @@ function mockChannelCodeForAccount(accountId?: string): string | null {
   if (match == null) {
     return null;
   }
-  return CHANNELS[Number(match[1])]?.code ?? null;
+  const channel = CHANNELS[Number(match[1])];
+  return channel == null
+    ? null
+    : { id: `mock-channel-${match[1]}`, code: channel.code, nameKo: channel.nameKo };
+}
+
+// The channel code behind a demo account id, or null if it can't be derived — used to keep
+// the demo test-connection honest.
+function mockChannelCodeForAccount(accountId?: string): string | null {
+  return mockChannelForAccount(accountId)?.code ?? null;
 }
 
 // Demo test-connection. Mirrors the real backend's truth per channel so the demo
@@ -619,150 +642,368 @@ export function mockAccountDashboard(
   accountId: string,
   range: { from: string; to: string },
 ): AccountDashboardSummary {
+  // The channel comes from the ACCOUNT, via the same helper the attention pane uses.
+  // ChannelDetail renders this card and that pane side by side for one accountId, and a
+  // SellerAccount is bound to a single channelId — so the two cannot answer with different
+  // channels. This used to hardcode NAVER for every account, which put a NAVER dashboard
+  // beside the 쿠팡 account's (correct) 쿠팡 attention pane. Invisible, because neither
+  // component renders the channel — which is exactly why it drifted.
+  const channel = mockChannelForAccount(accountId);
+  //
+  // ALL THREE VOC COUNTS ARE ZERO, and that is the honest number, not a placeholder.
+  // ChannelOperationsService computes them from the Cafe24 community-article store, which
+  // only Cafe24ApiConnector writes; NAVER reviews arrive by file upload into `reviews` and
+  // never land there. So for a real NAVER account this card genuinely has nothing to show —
+  // and for 쿠팡, which has no VOC store at all, likewise.
+  //
+  // Do NOT be tempted to mirror the attention pane's 12 here to make the page look
+  // coherent: the two numbers come from different stores, and matching them would fake a
+  // relationship the backend does not have. Order/sales stay populated — they come from
+  // order summaries, which these channels do fill.
   return {
     sellerAccountId: accountId,
-    channelId: "mock-channel-0",
-    channelNameKo: "카페24",
+    // channelId is non-nullable on this DTO, so an account this mock cannot resolve gets
+    // the id echoed back rather than a fabricated channel — wrong-shaped input in, honest
+    // "I don't know" out, never a default that silently claims a channel.
+    channelId: channel?.id ?? accountId,
+    channelNameKo: channel?.nameKo ?? null,
     fromDate: range.from,
     toDate: range.to,
     salesAmount: 1_284_000,
     orderCount: 37,
-    newReviews: 12,
-    newInquiries: 8,
-    unansweredInquiries: 3,
+    newReviews: 0,
+    newInquiries: 0,
+    unansweredInquiries: 0,
     lastSyncState: "CONNECTED",
     lastSuccessAt: hoursAgoISO(2),
   };
 }
 
+/**
+ * The collected-article list for the demo account — EMPTY, for both types.
+ *
+ * Same reason as the dashboard's zero VOC counts: this list pages the Cafe24
+ * community-article store, which only Cafe24ApiConnector writes. The demo account is NAVER,
+ * whose reviews arrive by file upload into `reviews` and never appear here. So an empty
+ * list is what a real NAVER account returns.
+ *
+ * This used to serve 12 reviews and 8 inquiries — 4 of them 미답변 — and re-labelling them
+ * 네이버 스마트스토어 made it worse, not better: the page then showed NAVER inquiries beside
+ * a dashboard reporting zero of them and an attention pane that can never raise one. The
+ * cost of the truth is two empty panes; the cost of the lie was a demo contradicting itself
+ * on one screen.
+ */
 export function mockAccountArticles(
   type: string,
   page: number,
   size: number,
 ): ArticleListResponse {
-  const isReview = type === "REVIEW";
-  const total = isReview ? 12 : 8;
-  const rows = Array.from({ length: Math.min(size, Math.max(0, total - page * size)) }, (_, i) => ({
-    type,
-    channelNameKo: "카페24",
-    rating: isReview ? 4 + ((i + page) % 2) : null,
-    replyStatus: isReview ? "UNKNOWN" : i % 2 === 0 ? "PENDING" : "ANSWERED",
-    sourceCreatedDate: `2026-05-${String(28 - ((page * size + i) % 28)).padStart(2, "0")}`,
-    collectedDate: "2026-05-30",
-  }));
-  return { type, page, size, total, items: rows };
+  return { type, page, size, total: 0, items: [] };
+}
+
+// ── The demo account's reviews ────────────────────────────────────────────────
+//
+// ONE population, filtered per lens. Every attention count and every drill-down row below
+// is derived from this array, so they cannot disagree: a card claiming 2건 and a drill-down
+// showing 4 rows is not a number to fix, it is an arithmetic impossibility.
+//
+// That was not true before. The counts were hand-written and the rows were generated by a
+// per-lens formula (`1 + (n % 3)`), so the 1~2점 card said 2건 while its drill-down showed
+// 4 low-rating rows, and NEW_REVIEW's rows implied 8 reviews at 1~3점 where LOW_RATING's
+// implied 6 — two lenses disagreeing about the same window of the same store. Three
+// separate patches would have made those three numbers agree by coincidence; deriving them
+// makes them agree by construction.
+
+/** One review in the demo account's window. `id` is its identity across every lens. */
+interface MockNaverReview {
+  id: number;
+  rating: number;
+  productName: string | null;
+  safePreview: string | null;
+  sourceCreatedDate: string;
+}
+
+/**
+ * 12 reviews: 2 rated 1~2, 4 rated 3, 6 rated 4~5.
+ *
+ * The split is the fixture's whole contract — it is what makes the HIGH card 2건, the
+ * MEDIUM card 4건, the LOW_RATING drill-down 6 (their union), and NEW_REVIEW 12.
+ *
+ * Product names are display values only, never a SKU/상품번호. One null product and one
+ * null preview, deliberately on DIFFERENT rows (id 4 vs id 7), so the demo exercises each
+ * placeholder without implying the two absences travel together.
+ */
+const NAVER_REVIEWS: readonly MockNaverReview[] = [
+  // 2 rated 1~2 → the HIGH "낮은 평점(1~2점) 리뷰" card
+  { id: 0, rating: 1, productName: "베이직 코튼 티셔츠 화이트", safePreview: "부착 후 며칠 만에 떨어졌어요", sourceCreatedDate: "2026-05-28" },
+  { id: 1, rating: 2, productName: "가을 니트 가디건 CHARCOAL", safePreview: "배송은 빨랐는데 색이 생각과 달라요", sourceCreatedDate: "2026-05-27" },
+  // 4 rated 3 → the MEDIUM "보통 평점(3점) 리뷰" card
+  { id: 2, rating: 3, productName: "리넨 와이드 팬츠 M", safePreview: "무난합니다 가격 대비 그럭저럭", sourceCreatedDate: "2026-05-26" },
+  { id: 3, rating: 3, productName: "베이직 코튼 티셔츠 화이트", safePreview: "사이즈가 조금 큰 편이에요", sourceCreatedDate: "2026-05-25" },
+  { id: 4, rating: 3, productName: null, safePreview: "재구매 의사는 반반입니다", sourceCreatedDate: "2026-05-24" },
+  { id: 5, rating: 3, productName: "가을 니트 가디건 CHARCOAL", safePreview: "보통이에요 특별한 점은 없네요", sourceCreatedDate: "2026-05-23" },
+  // 6 rated 4~5 → in NEW_REVIEW / spike only; never in the 1~3점 union
+  { id: 6, rating: 4, productName: "리넨 와이드 팬츠 M", safePreview: "포장이 꼼꼼했어요 다음에 또 살게요", sourceCreatedDate: "2026-05-22" },
+  { id: 7, rating: 5, productName: "베이직 코튼 티셔츠 화이트", safePreview: null, sourceCreatedDate: "2026-05-21" },
+  { id: 8, rating: 4, productName: "가을 니트 가디건 CHARCOAL", safePreview: "핏이 예쁩니다", sourceCreatedDate: "2026-05-20" },
+  { id: 9, rating: 5, productName: "리넨 와이드 팬츠 M", safePreview: "아주 만족스러워요", sourceCreatedDate: "2026-05-19" },
+  { id: 10, rating: 4, productName: "베이직 코튼 티셔츠 화이트", safePreview: "무난하게 잘 입고 있어요", sourceCreatedDate: "2026-05-18" },
+  { id: 11, rating: 5, productName: "가을 니트 가디건 CHARCOAL", safePreview: "따뜻하고 가볍습니다", sourceCreatedDate: "2026-05-17" },
+];
+
+/** Reviews in the prior equal-length window — the spike rule's baseline. */
+const NAVER_PREVIOUS_REVIEW_COUNT = 5;
+
+const lowRatingReviews = NAVER_REVIEWS.filter((r) => r.rating <= 2);
+const midRatingReviews = NAVER_REVIEWS.filter((r) => r.rating === 3);
+
+/**
+ * The reviews behind one lens, or null when the lens is not this store's to answer.
+ *
+ * Mirrors AttentionItemFilters exactly:
+ *   LOW_RATING_REVIEW          → (REVIEW, 1..3)      both cards share the type and drill the union
+ *   NEW_REVIEW / spike         → (REVIEW, no bounds) every review in the window
+ *   anything inquiry-shaped    → not this store's    (see the null branch's caller)
+ */
+function reviewsForLens(type: string): readonly MockNaverReview[] | null {
+  switch (type) {
+    case "LOW_RATING_REVIEW":
+      return NAVER_REVIEWS.filter((r) => r.rating >= 1 && r.rating <= 3);
+    case "NEW_REVIEW":
+    case "RECENT_REVIEW_SPIKE_CANDIDATE":
+      return NAVER_REVIEWS;
+    default:
+      return null;
+  }
+}
+
+/**
+ * A review's address — keyed on the REVIEW, not the lens it was found through.
+ *
+ * Load-bearing: product scope §5 makes it a requirement that a decision belongs to the
+ * review, so "어느 카드로 들어와도 같은 상태를 본다". The ref used to embed the signal type,
+ * which gave one review two addresses and made that invariant undemonstrable in the demo —
+ * deciding under 낮은 평점 and re-opening under 신규 리뷰 showed nothing.
+ */
+function naverReviewRef(id: number): string {
+  return `review:mock-voc-${id}`;
+}
+
+/** Seeded so the demo opens with one decided row beside undecided ones. */
+const SEEDED_TRIAGE_REVIEW_ID = 0;
+
+/** The channel display name behind a demo account id, or null if it cannot be derived. */
+function mockChannelNameForAccount(accountId: string): string | null {
+  return mockChannelForAccount(accountId)?.nameKo ?? null;
 }
 
 export function mockAccountAttention(
   accountId: string,
   range: { from: string; to: string },
 ): OperatorAttentionSummary {
-  const channel = "카페24";
+  // The channel comes from the ACCOUNT, not from a constant. The demo has two CONNECTED
+  // accounts (쿠팡 and 네이버), and this used to hardcode NAVER for both — so opening the
+  // 쿠팡 account showed a 쿠팡 header above a 네이버 스마트스토어 attention pane, which is the
+  // exact "one account, one channel" contradiction the comment below warns about, one level
+  // up.
+  const channelName = mockChannelNameForAccount(accountId);
+  if (mockChannelCodeForAccount(accountId) !== "NAVER") {
+    // Unsupported channel → VocItemSourceRegistry resolves no source → EMPTY_SNAPSHOT →
+    // AttentionSignalRules gates every signal on `> 0` → no signals at all. The channel name
+    // is still reported (the service reads it before the source lookup), so this is an
+    // honest empty state and not a null pane. COUPANG has no VocItemSource; only NAVER and
+    // CAFE24 do, and Cafe24's demo account is not CONNECTED.
+    return {
+      sellerAccountId: accountId,
+      channel: channelName,
+      fromDate: range.from,
+      toDate: range.to,
+      items: [],
+    };
+  }
+  // One account, one channel: NAVER. A SellerAccount is bound to a single channelId, so a
+  // summary claiming one channel over rows claiming another describes an account that
+  // cannot exist.
+  //
+  // REVIEW SIGNALS ONLY, and that is not a shortcut — it is what NAVER can actually raise.
+  // NAVER's attention source is IngestedReviewVocItemSource (its channel allow-list is
+  // NAVER alone), that store holds reviews and nothing else, and it passes a literal 0 for
+  // every inquiry count into the snapshot. AttentionSignalRules gates each inquiry signal on
+  // `> 0`, so UNANSWERED_INQUIRY / NEW_INQUIRY / UNKNOWN_REPLY_STATUS /
+  // RECENT_INQUIRY_SPIKE_CANDIDATE can never fire for a NAVER account. This fixture used to
+  // show three of them; they were rows the product cannot produce.
+  //
+  // The cost is a thinner demo — four cards instead of five, no inquiry lane. That is the
+  // honest trade: a Cafe24 account would demo the inquiry side but has no triage anchor at
+  // all, so it would show none of what this surface is now for.
+  // Resolved from the account above, not typed in — same string the catalog holds.
+  const channel = channelName;
+  // Every count below is COUNTED from NAVER_REVIEWS, never typed in. The rules do the same
+  // (each `count` is the snapshot field the signal was gated on), so a card can no longer
+  // disagree with the rows behind it.
+  const current = NAVER_REVIEWS.length;
+  const previous = NAVER_PREVIOUS_REVIEW_COUNT;
   return {
     sellerAccountId: accountId,
     channel,
     fromDate: range.from,
     toDate: range.to,
-    items: [
+    // Sorted by the same severity rank the backend applies, rather than hand-ordered: the
+    // rules emit in gate order and then stable-sort HIGH→LOW, so the wire order is
+    // HIGH(1~2점) → MEDIUM(3점) → MEDIUM(spike) → LOW(신규 리뷰) — the spike is emitted last
+    // but outranks 신규 리뷰. Listing them below in emission order and sorting here keeps the
+    // mock honest without asking anyone to hold that interleaving in their head.
+    items: sortBySeverity([
       {
-        type: "UNANSWERED_INQUIRY",
-        severity: "HIGH",
-        count: 3,
-        label: "답변 필요 문의",
-        description: "미답변 상태의 문의입니다. 우선 확인해 주세요.",
-        sourceType: "INQUIRY",
-        channel,
-      },
-      {
+        // Two cards, ONE type — matching the rules, which emit LOW_RATING_REVIEW at HIGH
+        // for 1~2점 and again at MEDIUM for 3점. Both drill to the combined 1~3점 set, so
+        // the drill-down total (their union) deliberately exceeds either card's count.
         type: "LOW_RATING_REVIEW",
         severity: "HIGH",
-        count: 2,
+        count: lowRatingReviews.length,
         label: "낮은 평점(1~2점) 리뷰",
         description: "불만족 리뷰입니다. 내용을 확인하고 대응을 검토하세요.",
         sourceType: "REVIEW",
         channel,
       },
       {
-        type: "NEW_INQUIRY",
+        type: "LOW_RATING_REVIEW",
         severity: "MEDIUM",
-        count: 8,
-        label: "신규 문의",
-        description: "기간 내 새로 수집된 문의입니다.",
-        sourceType: "INQUIRY",
+        count: midRatingReviews.length,
+        // Verbatim from AttentionSignalRules — the card renders `description`, so an
+        // invented sentence is a sentence the product never says.
+        label: "보통 평점(3점) 리뷰",
+        description: "개선 여지가 있는 리뷰입니다. 확인을 권장합니다.",
+        sourceType: "REVIEW",
         channel,
-      },
-      {
-        // Same 8 current inquiries as NEW_INQUIRY, up from 3 in the prior equal-length window.
-        type: "RECENT_INQUIRY_SPIKE_CANDIDATE",
-        severity: "MEDIUM",
-        count: 8,
-        label: "문의 급증 감지",
-        description: "선택 기간 문의가 8건으로 직전 동일 기간 3건보다 증가했습니다.",
-        sourceType: "INQUIRY",
-        channel,
-        spike: { previousCount: 3, deltaCount: 5, ratio: 8 / 3 },
       },
       {
         type: "NEW_REVIEW",
         severity: "LOW",
-        count: 12,
+        count: current,
         label: "신규 리뷰",
         description: "기간 내 새로 수집된 리뷰입니다.",
         sourceType: "REVIEW",
         channel,
       },
-    ],
+      {
+        // The same current reviews as NEW_REVIEW, up from the prior equal-length window —
+        // the shape the rules derive from newReviews vs previousReviews, both of which this
+        // source really does fill. MEDIUM, not HIGH: the rules need current >= previous * 3
+        // for HIGH, and 12 < 15.
+        type: "RECENT_REVIEW_SPIKE_CANDIDATE",
+        severity: "MEDIUM",
+        count: current,
+        label: "리뷰 급증 감지",
+        description: `선택 기간 리뷰가 ${current}건으로 직전 동일 기간 ${previous}건보다 증가했습니다.`,
+        sourceType: "REVIEW",
+        channel,
+        spike: { previousCount: previous, deltaCount: current - previous, ratio: current / previous },
+      },
+    ]),
   };
 }
 
 export function mockAttentionItems(
-  _accountId: string,
+  accountId: string,
   params: { type: string; from: string; to: string },
   page: number,
   size: number,
 ): OperatorVocItemPage {
   const { type } = params;
-  const isReview = type === "LOW_RATING_REVIEW" || type === "NEW_REVIEW";
-  const sourceType = isReview ? "REVIEW" : "INQUIRY";
-  // Reply/rating consistent with the signal the operator drilled into.
-  const replyStatus =
-    type === "UNANSWERED_INQUIRY" ? "PENDING" : type === "UNKNOWN_REPLY_STATUS" ? "UNKNOWN" : "ANSWERED";
-  const total = isReview ? 6 : 4;
-  const rows = Array.from({ length: Math.min(size, Math.max(0, total - page * size)) }, (_, i) => {
-    const n = page * size + i;
-    const rating =
-      type === "LOW_RATING_REVIEW" ? 1 + (n % 3) : type === "NEW_REVIEW" ? 4 + (n % 2) : null;
-    // Sanitized-looking previews for some rows, null (suppressed/empty) for others,
-    // so the UI exercises both the preview and placeholder paths.
-    const previews = [
-      isReview ? "포장이 꼼꼼했어요 다음에 또 살게요" : "배송 언제쯤 오나요 [전화번호] 로 연락 주세요",
-      "사이즈 문의드려요 [번호] 주문 건입니다",
-      null,
-    ];
-    // Display names only — never a SKU/상품번호, matching what the backend will send.
-    // One null so the demo exercises the 상품명 미상 placeholder path too; it does not
-    // line up with the null preview (n % 4 vs n % 3), so a row can lack one and not
-    // the other, as in real data.
-    const productNames = [
-      "베이직 코튼 티셔츠 화이트",
-      "가을 니트 가디건 CHARCOAL",
-      null,
-      "리넨 와이드 팬츠 M",
-    ];
-    return {
-      channelCode: "CAFE24",
-      channelNameKo: "카페24",
-      sourceType,
-      productName: productNames[n % productNames.length],
-      rating,
-      replyStatus: isReview ? "UNKNOWN" : replyStatus,
-      sourceCreatedDate: `2026-05-${String(28 - (n % 28)).padStart(2, "0")}`,
-      collectedDate: "2026-05-30",
-      signalType: type,
-      safePreview: previews[n % previews.length],
-    };
-  });
-  return { signalType: type, fromDate: params.from, toDate: params.to, page, size, total, items: rows };
+  // The account decides, here too — the drill-down is the summary's neighbour, and leaving
+  // it account-blind while fixing the summary is exactly the miss this round is about. An
+  // account with no source drills to nothing; the UI cannot reach this (no card exists to
+  // click) but a direct call gets the real answer instead of another account's rows.
+  const lens = mockChannelCodeForAccount(accountId) === "NAVER" ? reviewsForLens(type) : null;
+  // Not this store's lens — this account is NAVER, whose source holds no inquiries. Drilling
+  // an inquiry lens yields NOTHING rather than inquiry rows, which is exactly what
+  // IngestedReviewVocItemSource does ("an inquiry-kind signal can never have been raised
+  // from this store's snapshot, so drilling one yields nothing rather than silently listing
+  // reviews under an inquiry lens"). Unreachable through the UI — the summary raises no
+  // inquiry card to click — and answered honestly anyway.
+  if (lens == null) {
+    return { signalType: type, fromDate: params.from, toDate: params.to, page, size, total: 0, items: [] };
+  }
+  // Both the total and the rows come from the SAME filtered list, so the count is the rows'
+  // length by construction rather than by agreement. LOW_RATING drills the 1~3점 union —
+  // legitimately more than either of its two cards, since they share the type — while the
+  // unbounded lenses drill every review, matching theirs.
+  const rows = lens.slice(page * size, page * size + size).map((r) => toVocItem(r, type));
+  return {
+    signalType: type,
+    fromDate: params.from,
+    toDate: params.to,
+    page,
+    size,
+    total: lens.length,
+    items: rows,
+  };
+}
+
+/** One canonical review, as the ingested-review source would put it on the wire. */
+function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem {
+  const actionRef = naverReviewRef(review.id);
+  return {
+    channelCode: "NAVER",
+    channelNameKo: "네이버 스마트스토어",
+    sourceType: "REVIEW",
+    productName: review.productName,
+    rating: review.rating,
+    // Null, not "UNKNOWN": a seller-center export carries no reply state, so the source
+    // sends null rather than inventing a token. Renders as 상태 미상 either way — the
+    // difference is that null is what the wire actually holds.
+    replyStatus: null,
+    sourceCreatedDate: review.sourceCreatedDate,
+    collectedDate: "2026-05-30",
+    signalType,
+    safePreview: review.safePreview,
+    actionRef,
+    // Reflects whatever the operator decided this session, falling back to the seed. Keyed
+    // on the ref, which is keyed on the review — so a decision made under one card is
+    // visible under every other card that surfaces the same review.
+    triageDisposition:
+      triageDecisions.get(actionRef) ??
+      (review.id === SEEDED_TRIAGE_REVIEW_ID ? "RESPONSE_NEEDED" : null),
+  };
+}
+
+/**
+ * Demo-mode triage decisions, by actionRef.
+ *
+ * Module-level on purpose, exactly like {@link savedCredentials}: it has to survive the
+ * control unmounting. An earlier stateless version claimed the choice "stuck for the
+ * session" and did not — closing and re-opening the drill-down re-read
+ * {@link mockAttentionItems}, which always reported null, so the decision silently
+ * evaporated. A demo whose whole subject is a RECORD must not lose the record.
+ *
+ * In-memory and per-tab: a reload starts clean. That is the honest limit of a fake, and it
+ * is why this is only reachable behind the demo flag.
+ */
+const triageDecisions = new Map<string, TriageDisposition>();
+
+/**
+ * Demo-mode triage: record the decision and echo it back.
+ *
+ * The alternative was no mock at all, so every demo click errored — which looks more broken
+ * than an absent control, and would undo the point of showing the control at all. Product
+ * scope already fences this off: mock data is allowed only in an explicitly separated
+ * demo/dev mode, and this write exists only behind that flag.
+ */
+export function mockVocItemTriage(
+  actionRef: string,
+  disposition: TriageDisposition,
+): TriageDecisionResponse {
+  triageDecisions.set(actionRef, disposition);
+  // Always a fresh apply, never a replay: this has no command-id ledger, so it has no
+  // basis to claim a decision was already applied. Faking `replayed: true` would assert
+  // history the demo does not have.
+  return { actionRef, disposition, replayed: false };
+}
+
+/** Test-only: drop the demo decisions so each test starts from the seeded fixture. */
+export function resetMockTriageDecisions(): void {
+  triageDecisions.clear();
 }
 
 export function mockSyncRuns(): SyncRunView[] {

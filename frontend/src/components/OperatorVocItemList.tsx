@@ -51,7 +51,7 @@ export function OperatorVocItemList({
       <p className="mb-1 text-sm text-muted">총 {data.total.toLocaleString("ko-KR")}건</p>
       <ul className="divide-y divide-line">
         {data.items.map((item, i) => (
-          <VocItemCard key={vocItemKey(item, data.page, i)} item={item} />
+          <VocItemCard key={vocItemKey(item, data.page, i)} item={item} accountId={accountId} />
         ))}
       </ul>
       <div className="mt-4 flex items-center justify-between">

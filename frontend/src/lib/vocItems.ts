@@ -2,7 +2,7 @@
 // the param derivation, list-key stability, and reply-status labeling can be
 // unit-tested as plain functions, independent of any rendering.
 
-import type { AttentionSignal, OperatorVocItem } from "./types";
+import type { AttentionSignal, OperatorVocItem, TriageDisposition } from "./types";
 
 /** Query params for the drill-down behind one signal over a window. */
 export interface DrilldownParams {
@@ -40,9 +40,15 @@ const REPLY_STATUS_LABEL: Record<string, ReplyStatusLabel> = {
   UNKNOWN: { text: "상태 미상", cls: "bg-canvas text-muted" },
 };
 
-/** Label + chip style for a reply status; unknown values fall back to UNKNOWN. */
-export function replyStatusLabel(status: string): ReplyStatusLabel {
-  return REPLY_STATUS_LABEL[status] ?? REPLY_STATUS_LABEL.UNKNOWN;
+/**
+ * Label + chip style for a reply status; null and unknown values both fall back to UNKNOWN.
+ *
+ * Null is the ingested-review (NAVER) case — an export carries no reply state, so the
+ * source sends null rather than guessing. It lands on the same 상태 미상 chip as an
+ * unrecognised value, which is the honest rendering for both: the status is not known.
+ */
+export function replyStatusLabel(status: string | null): ReplyStatusLabel {
+  return (status == null ? undefined : REPLY_STATUS_LABEL[status]) ?? REPLY_STATUS_LABEL.UNKNOWN;
 }
 
 /** Neutral placeholder when no sanitized preview is available (empty or suppressed). */
@@ -90,4 +96,38 @@ export function productLabel(productName: string | null): ProductLabel {
     return { text: productName.trim(), isPlaceholder: false };
   }
   return { text: PRODUCT_PLACEHOLDER, isPlaceholder: true };
+}
+
+/**
+ * The triage choices, in the order an operator scans them: most demanding first.
+ *
+ * Copy is owned here and never sent by the server — the backend ships enum NAMES, which
+ * are a contract, not a label. The order is the array's, not the enum's: it is a UI
+ * decision, and pinning it here keeps a backend enum reorder from silently reshuffling
+ * the buttons.
+ */
+export const TRIAGE_OPTIONS: ReadonlyArray<{ value: TriageDisposition; label: string }> = [
+  { value: "RESPONSE_NEEDED", label: "대응 필요" },
+  { value: "MONITOR", label: "지켜보기" },
+  { value: "NO_ACTION", label: "조치 불필요" },
+];
+
+/** The wire values, derived from the options above so the two can never drift apart. */
+const TRIAGE_VALUES: ReadonlySet<string> = new Set(TRIAGE_OPTIONS.map((o) => o.value));
+
+/**
+ * A server-supplied disposition, or null if it is not one this client knows.
+ *
+ * The response is typed as {@code TriageDecisionResponse}, but a TypeScript type is a claim
+ * about the code, not about the bytes: a 200 carrying a typo'd, absent, or newly-added
+ * disposition satisfies the compiler and lands in state as-is. That failure is silent in
+ * the worst way — an unknown value renders as no decision, so the operator sees "판단 전"
+ * after a SUCCESSFUL save and reasonably concludes their click did nothing.
+ *
+ * Validating here turns it into an honest, retryable failure. A value the client does not
+ * recognise is treated as unusable rather than passed through, because rendering a decision
+ * this UI cannot name is worse than admitting the save could not be confirmed.
+ */
+export function asTriageDisposition(value: unknown): TriageDisposition | null {
+  return typeof value === "string" && TRIAGE_VALUES.has(value) ? (value as TriageDisposition) : null;
 }
