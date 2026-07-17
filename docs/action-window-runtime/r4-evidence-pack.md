@@ -987,6 +987,109 @@ turn — the Run 6 draft is deliberately untouched by this slice, so that decisi
 
 ---
 
+## §8-23 — Live Run 6 (session recovery) — EXECUTED 2026-07-17 · **recovery LIVE-PROVEN** · non-mutating
+
+**Run 6 parked a real run on a logged-out session and then RECOVERED it live**, under a fresh Run-6-scoped
+G6 + a `session recovery`-scoped G3 pause lift + a session-recovery P6, all affirmed by the operator in the
+dispatching turn ([`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md)).
+It answers the one question §8-21/§8-22 could not: **A3's recovery loop had only ever run against fake
+drivers (hermetic) or a real browser over a synthetic DOM (A4) — it had never re-probed live NAVER across a
+real login.** Preconditions verified read-only first: A3 (`cc9aba8`) + A4 (`4f31fc4`) both ancestors of
+`HEAD` (`d8b66a5`) and the entrypoint carrying `recoverLoop` / `awaitFreshSentinel` / `recoveryPrompt`;
+backend **DOWN** (8080 connection refused — deliberate, defense-in-depth); `RUN_INTEGRATION` / `AW_HEADED` /
+`NODE_ENV` all unset.
+
+- **THE HEADLINE — `aw.live.recovery { outcome: "recovered", attempt: 1 }`.** First live proof of the
+  park → recover → continue arc on the real NAVER surface. Run 5 (§8-18) tore the browser down at the
+  barrier after a click; **every prior live run that hit a session blocker simply ended.** Here the run
+  parked, the seller logged in and returned, and the **real driver re-probed and cleared the blocker** —
+  which only a probe can do; a human saying "I logged in" never clears it.
+- **The park was real, and it was the subject of the run.** Signal 1 fired **while logged out** →
+  `LOGIN_REQUIRED` park, `recovery attempt 1` prompt printed, browser alive, no `RUN_FAILED`. This is the
+  D-028 park working as designed, not a fault.
+- **The re-probe read the POST-LOGIN page — `aw.live.readiness` (attempt 1):** `verdict: LOGGED_IN` ·
+  `readinessDecision: READY` · `readinessReason: positive_count` · `readinessBranch: labeled_count_positive`
+  · `selectedRangePresent: false` · `dateRangeControlPresence: some`. **D-028's falsifier lands POSITIVE:**
+  the seller logged in, navigated back to the export surface themselves, and the re-probe found a READY
+  surface — **not** `UNSUPPORTED_STATE`. For this run the navigate seam is not a product-owner question; the
+  Runtime never navigated and still read a valid export surface because the seller returned to it.
+- **⚠ NO `driver-error` — the accepted `page.content()` race did NOT fire this once.** Run 6's premise —
+  a seller who just logged in and navigated — **is** the canonical `Execution context was destroyed`
+  window that the unguarded `page.content()` read in `naver-live-driver.ts` risks. It did not throw: the
+  re-probe ran on a settled page and produced a clean `readiness`. **This is one observation, not a
+  closure.** "Expect the first, tolerate the second" — the first residual was silent here, on one seller's
+  post-login landing on one day. The read stays **unguarded** (PO-declined, re-affirmed in G4's
+  ratification); a future recovery whose navigation is still in flight can still throw with signature
+  `aw.live.recovery { outcome: "driver-error" }` and **no** `aw.live.readiness` for that attempt.
+- **🔎 `main()`'s recovery-branch `settleSpa` executed live for the first time.** A4 (§8-22) injects its own
+  gate, so `settleSpa(page)` on the recovery branch (`run-action-window-live-naver.ts:759`) is executed by
+  nothing offline — it was **first-executed live here**, without incident. Best-effort by construction (the
+  driver's own readiness settle stands behind it); it cost latency, not the run.
+- **Sanitized terminal result:** `status: FAILED` · `progress: { completedSteps: 2, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: DOWNLOAD_TIMEOUT` — the §8-16 Run 3 / §8-18 Run 5 shape. **The
+  expected success condition:** after recovery the export control was highlighted and the seller **clicked
+  nothing**; the observe window lapsed and the run failed closed.
+- **The store agrees with the log.** Operation Run **`run_57ab9b52a3c0`** persists `latestView`
+  `FAILED` / 2-of-3 / `blocker { DOWNLOAD_TIMEOUT, recoverable: false }` / `channelCode: naver`, and
+  `humanCheckpoint { reached: true, observed: false, targetRef: <SHA-16> }` — the barrier was **reached**
+  (control highlighted) and **not observed** (no click). Log line and persisted record do not diverge.
+- **🔎 The two-window timing is live-confirmed on the no-click path.** Recovery at `14:45:57` → highlight →
+  `aw.live.barrier { observed: false }` at `14:55:57` (exactly `OBSERVE_TIMEOUT_MS` = 10 min later, nobody
+  acted) → `DOWNLOAD_TIMEOUT` at `14:56:57` (`DOWNLOAD_TIMEOUT_MS` = 60 s later). The two windows are
+  sequential and real; §8-18 proved the second starts at a **click**, and here — with no click — the
+  observe window itself lapsed first, then the 60 s. Total recovery→terminal ≈ 11 min; the `~32 min`
+  worst-case the G6 affirmed was budgeted, not spent (only 1 recovery attempt; `MAX_RECOVERY_ATTEMPTS` = 3
+  never approached, `RECOVERY_BUDGET_MS` mostly unused because recovery landed on the first fresh signal).
+- **Period/scope — operator-confirmed, consistent, and still a true negative.** The operator **did not
+  select a review period/scope** before either signal (confirmed this turn). `selectedRangePresent: false`
+  **agrees with that operator state** — a true negative, not a detector false-negative. **The
+  positive-direction detector remains UNPROVEN** (§8-18, D-025): this run selected no range, so it is not
+  the observed finding that could promote the markers, and the `page.content()`-attribute-vs-IDL-property
+  blind spot D-025 characterized offline is untouched. `dateRangeControlPresence: "some"` again indicates
+  the control was present; readiness passed via rung 1 (`labeled_count_positive`) without weighing scope,
+  exactly as §8-18/D-025 established.
+- **Non-mutation — verified, not assumed:** `aw.live.barrier { observed: false }`; **zero**
+  `DOWNLOAD_DETECTED` frames; **no quarantine directory was ever created**; `downloads/` untouched; the
+  backend was **never reachable** and `/api/uploads` was never called; no download → no validate → no
+  ingest → no DB write, no status, no `LAST_SUCCESS`. Sentinel auto-removed in `finally`; browser closed;
+  process exited clean (exit 0); git worktree clean. Leak sweep clean on **both** the log output and the
+  persisted record (no raw URL / filename / content / credential; `targetRef` is an opaque SHA-16).
+  **G6 CONSUMED.**
+- **🔎 Finding (reported, NOT fixed): the CLI launch/recovery prompts are the EXPORT-PILOT prompts,
+  scope-mismatched for session recovery.** `confirmPrompt` tells the operator to *"complete the NAVER-ID
+  login … reach the review-management export surface"* **before** the first signal — the exact opposite of
+  Run 6, whose whole premise is signalling **while logged out**. The dispatch record §4 flagged this as a
+  deliberate deviation and the operator was steered by the record, not the prompt, so it caused no harm.
+  But unlike §8-18's *stale*-prose finding, this prompt is not stale — **it is correct for the export
+  pilot and wrong for session recovery, and no single launch prompt is correct for both scopes.** Whether
+  the entrypoint should branch its operator prose on run scope is **reported, not resolved.**
+- **🔎 Operational note (not a defect): the documented env-load idiom is cwd-sensitive.** Two pre-launch
+  attempts failed **before any browser opened** — once at the built-in refusal (exit 2, `NAVER_REVIEW_URL`
+  unset because the shell cwd had reset out of `collector/` so `. ./.env` found no file) and once at the
+  shell (exit 127, same cause). **Defense-in-depth worked exactly as designed: the refusal fired before
+  `launchNaverContext`, so neither attempt contacted NAVER and neither spent the G6.** The working
+  invocation `cd collector && set -a && . ./.env && set +a && npx tsx …` must keep the `cd` and the env
+  load in the **same** command; the two-line idiom in the dispatch records assumes cwd is already
+  `collector/`.
+
+**What Run 6 PROVES:** A3's recovery loop works on live NAVER — a logged-out park recovers to a READY
+export surface across a real login and a seller-performed navigation; the real driver's re-probe (and
+`main()`'s recovery-branch `settleSpa`) run live without a `driver-error`; and the persisted `latestView` /
+`humanCheckpoint` is a truthful terminal record matching the emitted log.
+
+**What Run 6 does NOT prove:** **that recovery works in general** — a `recovered` is one seller's post-login
+landing on one day, an observation, not an invariant; D-028's limitation (the driver never navigates) is
+unchanged. Nor: **the `page.content()` race is closed** (it did not fire once — not proof it cannot); the
+**export / download / ingest legs** (zero clicks ⇒ unreachable, not merely unused); **`COMPLETED` under the
+two-window timing** (still rests on §8-17's old-timing evidence); the **Run 4 dialog identity** (no click ⇒
+no dialog); `selectedRangePresent` in the **positive direction**; platform acceptance.
+
+**This section authorizes no further live NAVER contact and consumes no gate.** The Run-6 G6 is spent;
+**any further live contact needs a fresh single-use G6** — and per the dispatching instruction, **there is
+no retry under this G6.**
+
+---
+
 ## Related
 
 - Gate + readiness source → [`r4-preparation.md`](r4-preparation.md) §1/§3/§6/§7/§8

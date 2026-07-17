@@ -6,9 +6,18 @@
 > CONSUMED.** **The boundary** is [`r4-preparation.md`](r4-preparation.md) §4/§7 — binding, and it wins
 > over this file.
 
-**Status:** ☐ **DRAFT — NOT DISPATCHED, NOT AUTHORIZED** (2026-07-17). **No live gate below has been
-affirmed** — G3 ☐, G6 ☐, P6 ☐, §7 ☐, seated-and-ready ☐. The one ☑ on this sheet is **G4**, ratified
-2026-07-17 on §8-22 (below); **G4 is not a live gate — G3 and G6 are, and both are open.**
+**Status:** **EXECUTED 2026-07-17 · recovery LIVE-PROVEN · non-mutating · G6 CONSUMED.** In the dispatching
+turn the operator affirmed the `session recovery` G3, filled and signed the Run-6 G6, signed P6, acknowledged
+§7, and confirmed seated-and-ready; the run then drove **exactly once**. Terminal `FAILED` /
+`DOWNLOAD_TIMEOUT` / progress 2-of-3 — the expected success shape for a zero-click run: the run parked
+logged-out, **recovered live** (`aw.live.recovery { outcome: "recovered", attempt 1 }`), reached the export
+barrier, and lapsed with nothing clicked. Full sanitized evidence, findings, and non-mutation proof:
+[`r4-evidence-pack.md`](r4-evidence-pack.md) **§8-23**; consumed G6 instance recorded in
+[`r4-gate-record.md`](r4-gate-record.md) §G6. ⚠ **This single-use G6 is spent** — the run is done and
+**there is no retry under it**; any further live contact needs a fresh single-use G6 in its own dispatching
+turn. **This record now documents a completed run; nothing here re-authorizes one.**
+*(The pre-dispatch checkbox-count discipline — "the one checked glyph is G4" — has served its purpose now
+that the run is past dispatch; the checklist below is preserved as the as-dispatched record.)*
 
 ⚠ **UPDATE 2026-07-17 — the decisions this draft NAMED are now RATIFIED ([D-030](decisions.md)), and it
 still authorizes nothing.** The product owner ratified, in docs only: (1) a **fifth G3 scope,
@@ -63,7 +72,8 @@ non-mutating by construction** — the one Run 3 and Run 5 used, and the one thi
 ## 3. Dispatch checklist — ☐ NOT AFFIRMED (fill in the dispatching turn)
 
 > **The G6 template lives in [`r4-gate-record.md`](r4-gate-record.md) and is deliberately NOT restated
-> here** — one copy, one source. ⚠ **And for this run's scope, it does not exist yet** (§G6 below). This
+> here** — one copy, one source. ⚠ **For this run's scope it now EXISTS and is BLANK** ([D-030](decisions.md),
+> §G6 below) — **a template is not an approval; a blank one grants nothing.** This
 > section records only what the dispatching turn must *affirm*. **Live begins only when the operator records
 > a filled G6 in the turn that dispatches it.**
 
@@ -111,11 +121,17 @@ because Run 6 is none of the other four: read-only *in effect* (zero clicks, no 
   lift, **not** a download lift, **not** an ingest lift, **not** general or standing. The Run 3 / Run 4 /
   Run 5 lifts authorize **nothing** here.
 - ☑ G4 addressed **on the record** (above) rather than inherited — ratified 2026-07-17 on §8-22.
-- ⚠ **REPORTED, NOT RESOLVED — the canonical G3 template's `☐ Bridge paired` box is inapplicable here.**
-  [`r4-gate-record.md`](r4-gate-record.md) §G3 requires it, but this run is a **CLI run over a loopback**
-  and §6's Bridge rung says verbatim *"the live driver is not yet Bridge-wired."* The box is not merely
-  unchecked — **there is nothing for it to assert.** Affirming it vacuously and dropping it silently are
-  both wrong; **whether the template should scope it is a product-owner call, untaken.**
+- **N/A — `Bridge paired` is SCOPED OUT for this run. RESOLVED 2026-07-17 (product owner.)** The canonical
+  G3 template ([`r4-gate-record.md`](r4-gate-record.md) §G3) carries `☐ Bridge paired`; **for the
+  `session recovery` scope it is inapplicable, and it is recorded as N/A with a reason rather than
+  affirmed or dropped.** Basis, from two independent sources: this run is a **CLI run over a loopback**, and
+  the live driver **is not Bridge-wired** — §6's Bridge rung says verbatim *"the live driver is not yet
+  Bridge-wired"* ([`r4-preparation.md`](r4-preparation.md) §6), and the evidence pack says the entrypoint
+  *"uses a loopback channel"* ([`r4-evidence-pack.md`](r4-evidence-pack.md) §8). **Bridge pairing is not
+  this run's control boundary** — the CLI is; there is nothing for the box to assert, so **affirming it
+  would assert a fact not in evidence** and a silent drop would hide the question.
+  ⚠ **Scoped to `session recovery`. It does not generalize** — the box stands for every other scope, and a
+  Bridge-driven run affirms it for real. **N/A is a recorded answer, not a waived box.**
 
 ### ⚠ The live window this G6 would authorize — ~21 min → ~32 min · ☐ NOT AFFIRMED
 
@@ -304,7 +320,7 @@ points this record restates, because Run 6 **removes** a carve-out rather than i
 ---
 
 **Related:** [`r4-gate-record.md`](r4-gate-record.md) (gates + templates — authorization; **this run's G6
-template does not exist there yet**) · [`r4-preparation.md`](r4-preparation.md) (§3 gates, §4 boundary, §6
+template now exists there and is BLANK** — [D-030](decisions.md)) · [`r4-preparation.md`](r4-preparation.md) (§3 gates, §4 boundary, §6
 ladder, §7 abort — normative) · [`r4-operator-runbook.md`](r4-operator-runbook.md) (the **export-pilot**
 choreography — deliberately different from §4 above) · [`r4-evidence-pack.md`](r4-evidence-pack.md) (§8-20
 A2-B and §8-21 A3 are the code under test; §8-16 Run 3 is this run's terminal shape) ·
