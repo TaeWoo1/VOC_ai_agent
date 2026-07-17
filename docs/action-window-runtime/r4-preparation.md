@@ -109,8 +109,9 @@ All of the following, recorded in this directory, before the first live run:
   that one run**: stable operator environment (network/IP/location stable — the condition that paused
   NAVER live work); dedicated Chrome profile for the connection; paired Bridge; Operation Run
   persistence enabled — each **re-verified**, not carried — **plus the §9 item 3 NAVER live-work pause
-  lift**, freshly affirmed for that run's scope (read-only / export / export+ingest / real-click are
-  distinct scopes and never substitute for one another). **Consumed with the run**, exactly like G6;
+  lift**, freshly affirmed for that run's scope (read-only / export / export+ingest / real-click /
+  **session recovery** — distinct scopes that never substitute for one another; the fifth was ratified
+  2026-07-17, [`r4-gate-record.md`](r4-gate-record.md) §G3). **Consumed with the run**, exactly like G6;
   prior affirmations and the register never carry over. Recorded affirmations are retained as dated
   CONSUMED instances — [`r4-gate-record.md`](r4-gate-record.md) §G3.
 - **G4 — Synthetic ladder green.** §6 adapter readiness fully green on synthetic fixtures FIRST —
@@ -121,8 +122,11 @@ All of the following, recorded in this directory, before the first live run:
   required** for the NAVER seller-owned export pilot per §5; no platform marked "approved" —
   [`r4-gate-record.md`](r4-gate-record.md) §G5.
 - **G6 — Per-run approval.** Explicit product-owner approval in the dispatching turn of the live
-  run, naming: channel, seller account owner, date, operator, and the §7 abort criteria. Goal
-  pressure, prior approvals, or standing plans are never authorization.
+  run, naming: channel, seller account owner, date, operator, the §7 abort criteria, **and — where the
+  run's scope introduces a wait earlier runs did not have — the `max live window:` it authorizes**
+  (ratified 2026-07-17; the field exists because A3's recovery budget took the worst case from ~21 to
+  ~32 min while D-028's per-run boundary stayed silent on duration). Goal pressure, prior approvals, or
+  standing plans are never authorization.
 
 ## 4. Live-action safety boundary
 

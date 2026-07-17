@@ -71,8 +71,17 @@ per run; a blank template affirms nothing):
 - ☐ Bridge paired.
 - ☐ Operation Run persistence enabled.
 - ☐ **§9 item 3 NAVER live-work pause lift — freshly affirmed FOR THIS RUN'S SCOPE ONLY**
-  (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` — distinct scopes that never
-  substitute for one another); not a blanket lift, not inherited from any earlier run.
+  (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` | `session recovery` —
+  distinct scopes that never substitute for one another); not a blanket lift, not inherited from any
+  earlier run.
+
+**`session recovery` — RATIFIED as a fifth scope 2026-07-17 (product owner, [D-030](decisions.md); D-026
+is extended, not superseded — G3 stays per-run, scopes stay non-substitutable, only the enum grows).**
+It is none of the other four: it is read-only *in effect* (zero clicks, no download, ingest unreachable) but it is **not** the
+§8-4 read-only probe — it drives the full engine and holds a live browser **~32 min**. Choreography:
+[`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md).
+⚠ **Ratifying the scope authorizes nothing.** No G3 instance of this scope has been affirmed and no
+`session recovery` G6 has been filled; both are ☐ and both are per-run.
 
 *Owner:* operator/PO — never Runtime code. A filled G3 **alone authorizes no live contact**: a fresh
 single-use **G6** (§G6 below) is still required in the same dispatching turn.
@@ -111,6 +120,35 @@ here as a dated record — `☐ PER-RUN` is this register's **category** label f
 
 Every §6 adapter-readiness item green on NAVER fixtures — [`r4-evidence-pack.md`](r4-evidence-pack.md)
 §8-2 (offline suite), §8-3 (headed human-click proof).
+
+⚠ **This ✅ predates A3 and A4, and §8-2's table is a dated snapshot that does not enumerate §6's 11th
+rung.** A run whose code postdates it therefore **addresses G4 on its own record, citing the proof** —
+the precedent Run 5 set — rather than resting on this line. **A static ✅ is not an answer for new code.**
+
+### RATIFIED 2026-07-17 — G4 carries for **Run 6 (session recovery)**, on the basis of §8-22 · [D-030](decisions.md)
+
+§6's 11th rung — **Session recovery (park → re-probe)** — is green over a **real browser on a synthetic
+DOM**: `run-action-window-live-naver-browser.test.ts`, `RUN_INTEGRATION` **PASSED 2026-07-17, 5/5**
+([`r4-evidence-pack.md`](r4-evidence-pack.md) §8-22). The real `NaverLiveProbeDriver` re-probes across a
+real navigation, so live NAVER is **no longer the first browser execution of the recovery path**.
+
+⚠ **Two named seams are PRESERVED as live-first residual risks — accepted by the product owner, not
+closed.** Both are **executed by nothing offline**; this is not Run 5's "offline-green, cite the proof"
+shape, and the distinction is recorded deliberately:
+
+1. **`page.content()` mid-navigation** (`naver-live-driver.ts`) — **unguarded**, and §8-22 does not reach
+   it: that test's gate `await`s its navigation, so the re-probe reads a **settled** page and the
+   destroyed-context window never opens. **Run 6's premise — a seller who just logged in and navigated —
+   IS that window.** A throw tears the driver down and **spends the G6**. Signature to record:
+   `aw.live.recovery { outcome: "driver-error" }` with **no** `aw.live.readiness` for that attempt. A3
+   makes the failure **legible**; it does not prevent it. Guarding the read is a known, PO-declined fix.
+2. **`settleSpa` on `main()`'s recovery branch** — executed by nothing offline (§8-22 injects its own
+   gate, so `main()` stays untestable). **Best-effort by construction:** the driver's own readiness settle
+   stands behind it, so a failure costs latency, not the run.
+
+⚠ **This ratification is scoped to Run 6 and to these two seams. It does not generalize** — any later run
+introducing a code path with no offline execution addresses G4 again, on its own record. **It authorizes
+no live contact:** G3 + G6 do that, and both are ☐.
 
 ---
 
@@ -244,6 +282,65 @@ R4 live-run approval — RUN 5 BARRIER + OBSERVATION (fill in the dispatching tu
                       period/scope and cannot answer its own second question.
 ```
 
+**Run-6 G6 (session recovery) — ☐ BLANK TEMPLATE (a blank template grants nothing).**
+A **fourth scope**, distinct from all three above: the read-only-probe G6 was a no-click *probe*; the
+export-pilot G6 is click + confirm + ingest; the Run-5 G6 is a real click that stops short of data.
+**Run 6 clicks nothing at all** — it is non-mutating *by construction* (no click ⇒ no download ⇒ detect,
+validate and ingest are **unreachable**, not declined), yet it drives the full engine and holds a live
+browser far longer than any run to date. It needs the **`session recovery`-scoped G3** (§G3 above,
+ratified 2026-07-17); no earlier scope carries over. Choreography:
+[`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md).
+
+⚠ **`max live window:` is a NEW field, ratified 2026-07-17 (product owner, [D-030](decisions.md)), and it
+exists because A3 changed the answer.** D-028's boundary requires a fresh G3 + G6 per run but is **silent
+on duration** —
+and duration is what the recovery loop changed: ~21 min for Runs 1–5, **~32 min** here. The field makes
+the operator affirm the seat time **explicitly** instead of inheriting it from the shape of earlier runs.
+**It is required on this template and optional-but-encouraged on the others**; a G6 whose scope adds a
+new wait must state it.
+
+```
+R4 live-run approval — RUN 6 SESSION RECOVERY (fill in the dispatching turn)
+- channel:            NAVER SmartStore review export
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               <YYYY-MM-DD>
+- operator:           <operator>
+- run scope:          session recovery. The seller DELIBERATELY DOES NOT LOG IN before the first
+                      signal, so the run PARKS on LOGIN_REQUIRED; they then log in, RETURN TO THE
+                      REVIEW-EXPORT SURFACE themselves, and signal a SECOND time; the Runtime
+                      re-probes for real. ZERO CLICKS — the seller never acts on the highlighted
+                      control and the observe window is allowed to lapse. NON-MUTATING BY
+                      CONSTRUCTION: no click → no download → detect/validate/ingest UNREACHABLE, not
+                      declined. Full §4 boundary. NOT read-only (the full engine drives a live
+                      browser), NOT an export pilot, NOT a barrier run, NOT unattended.
+- max live window:    ~32 min worst case — CONFIRM_TIMEOUT_MS 10m + RECOVERY_BUDGET_MS 10m (SHARED
+                      across up to MAX_RECOVERY_ATTEMPTS, not per attempt) + OBSERVE_TIMEOUT_MS 10m
+                      + DOWNLOAD_TIMEOUT_MS 60s = 31m of budgeted waits, plus launch/probe overhead.
+                      ⚠ Affirm the FULL window, not the healthy-path ~21m: the recovery budget is
+                      spent only if the run PARKS, which for this scope IS the design.
+- expected terminal:  FAILED · DOWNLOAD_TIMEOUT · progress 2-of-3 — the Run 3 (§8-16) shape.
+                      A PARK at 0-of-3 is NOT a failure; it is the SUBJECT of the run.
+                      A COMPLETED run means the seller clicked AND confirmed, the run MUTATED, and
+                      the scope was breached: report it plainly.
+- §7 abort criteria:  acknowledged (ambiguous/missing/drifted target, unexpected post-state,
+                      artifact-validation failure → fail closed, zero clicks; operator abort on
+                      withdrawn consent / unrecognized dialog / anti-abuse challenge).
+                      ⚠ Run 4's confirmation-dialog carve-out DOES NOT APPLY — no click means no
+                      dialog, so ANY prompt or dialog on the export surface is an abort.
+                      ⚠ A LOGIN_REQUIRED park is NOT an abort (§7, D-028).
+- G2/G3/G5 state:     G2 ✅ recorded · G5 ✅ logged
+                      G3 ☐ AFFIRMED FOR THIS RUN, `session recovery` scope (§G3 instance recorded in
+                      this same turn) — per-run; no earlier scope carries over
+- G4 state:           ☐ addressed on the record in this turn citing §8-22 (§G4 above), incl. the two
+                      named live-first residuals — NOT inherited from the static ✅
+- P6 state:           ☐ signed for this run
+- precondition:       the tree under test CONTAINS A3 (the recovery loop) — verify, do not assume;
+                      a tree without it reproduces Run 5's behaviour and answers nothing while still
+                      spending the G6
+```
+
+This template, unfilled, **authorizes nothing.** No `session recovery` instance has been filled.
+
 ---
 
 ## Export-pilot pre-dispatch runbook — NOT YET AUTHORIZED (grants nothing)
@@ -356,14 +453,19 @@ including its mutation note:
 
 ## Gate summary
 
-- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅** (static — carried in).
+- **G1 ✅ · G2 ✅ · G4 ✅ · G5 ✅** (static — carried in). ⚠ **G4's static ✅ predates A3/A4 and is not an
+  answer for code that postdates it** — a run addresses G4 on its own record, citing the proof (§G4). One
+  such ratification exists: **G4 carries for Run 6 on §8-22**, with two named live-first residuals
+  preserved. It is scoped to that run and generalizes to nothing.
 - **G3 ☐ per-run · G6 ☐ per-run** — the two live gates ([`decisions.md`](decisions.md) D-026), both
   **never standing**, both operator/PO-owned, neither Runtime code. Each is affirmed **fresh in the
   dispatching turn**, scoped to that one run, and **consumed** with it. A read-only-probe instance of each
   was affirmed and **consumed 2026-07-12** (the §8-4 probe is complete); the seven executed dispatch records
-  each spent their own. An export, ingest, or real-click run needs a **fresh, scope-matched G3 and a fresh
-  single-use G6** under the full §4 boundary (§G3, §G6, runbook §1). ⚠ **Neither has failed** — `☐ per-run`
-  is the category label for a gate that cannot be standing, not a failure marker.
+  each spent their own. An export, ingest, real-click, or **session-recovery** run needs a **fresh,
+  scope-matched G3 and a fresh single-use G6** under the full §4 boundary (§G3, §G6, runbook §1).
+  ⚠ **Neither has failed** — `☐ per-run` is the category label for a gate that cannot be standing, not a
+  failure marker. ⚠ **A ratified SCOPE is not an affirmed GATE:** `session recovery` was ratified as a
+  fifth G3 scope 2026-07-17 and a Run-6 G6 template now exists — **no instance of either has been filled.**
 - The first authorized live contact — the **read-only session-precondition probe** — **was completed
   2026-07-12**; its sanitized `{ ready, verdict }` result (`ready:true` / `LOGGED_IN`, no blocker) is
   recorded in [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-4. The next live step (export pilot) needs a

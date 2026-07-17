@@ -560,3 +560,39 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   docs). The recovery loop has **never run against NAVER** — it is proven only against fake drivers over an
   in-process loopback. Any live use needs a fresh, scope-matched G3 **and** a fresh single-use G6 in the
   dispatching turn, now carrying the longer window recorded above.
+
+- **D-030 · ACTIVE** — **the Run 6 prerequisites: a fifth G3 scope `session recovery`; a `max live window:`
+  G6 field for recovery-capable runs; G4 for Run 6 ratified from §8-22, NOT inherited from the static ✅;
+  and two residual risks kept named rather than closed** (product owner, 2026-07-17, docs only).
+  *What prompted it:* [D-029](decisions.md) recorded that a G6 now authorizes a materially longer live window
+  and that this **"belongs in the next dispatch record — it must not be discovered at the seat."** D-030
+  discharges that, plus the two gaps the Run 6 draft named and deliberately refused to grant itself.
+  **(a) `session recovery` is a fifth G3 scope.** Run 6 is none of the four [D-026](decisions.md) scopes: it is
+  read-only *in effect* (zero clicks ⇒ download/validate/ingest **unreachable**, not declined) yet it drives
+  the full engine and holds a live browser ~32 min, so it is **not** the §8-4 read-only probe either. D-026 is
+  **extended, not superseded** — G3 stays per-run and scopes stay non-substitutable; only the enum grows.
+  **(b) `max live window:` — a new G6 field.** D-028's boundary requires a fresh scope-matched G3 **and** a
+  fresh single-use G6 per run but is **silent on duration**, and duration is exactly what A3 changed: ~21 min
+  → **~32 min** (`CONFIRM` 10 + `RECOVERY_BUDGET` 10, shared across attempts, + `OBSERVE` 10 + `DOWNLOAD` 1 =
+  31 min of budgeted waits, plus launch overhead). Required where a scope adds a wait earlier runs lacked. The
+  operator affirms the seat time **explicitly** instead of inheriting it from the shape of Runs 1–5.
+  **(c) G4 is ratified per-run from the proof, never inherited.** G4's static ✅ cites §8-2/§8-3 and **predates
+  A3 and A4**; §8-2's table is a dated snapshot that does not enumerate §6's 11th rung. A4 (§8-22) makes the
+  recovery loop green over a **real browser on a synthetic DOM** (`RUN_INTEGRATION` PASSED 2026-07-17, 5/5), so
+  live is no longer that path's first browser execution — **that** is the basis, and it is the Run 5 precedent's
+  shape (cite the proof; do not rest on rows that predate the code). **Scoped to Run 6; generalizes to nothing.**
+  ⚠ **(d) Two seams are executed by NOTHING offline and stay named, not closed.** This is *not* Run 5's
+  "offline-green" shape — it is a narrower, accepted residue, and the two are **not equal**: (1)
+  **`page.content()` mid-navigation** (`naver-live-driver.ts`) is **unguarded**, and §8-22 cannot reach it
+  because its gate *awaits* the navigation, so the re-probe reads a settled page — **Run 6's premise IS the
+  destroyed-context window**; a throw tears the driver down and **spends the G6**, signature
+  `aw.live.recovery { outcome: "driver-error" }` with **no** `aw.live.readiness` for that attempt. A3 makes it
+  **legible, not impossible**; guarding the read stays a known, PO-declined fix. (2) **`settleSpa` on `main()`'s
+  recovery branch** is bypassed by §8-22's injected gate, but is **best-effort by construction** — the driver's
+  own readiness settle stands behind it, so it costs latency, not the run. **Expect the first; tolerate the
+  second.** Naming them is the point: an accepted risk that stops being written down becomes an assumption.
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** It is docs only. **A ratified
+  scope is not an affirmed gate and a template is not an approval** — no `session recovery` G3 instance exists,
+  no Run-6 G6 is filled, P6 is unsigned, and Run 6 is **NOT AUTHORIZED**. Prerequisites being in place is
+  precisely when they are easiest to mistake for permission. Register:
+  [`r4-gate-record.md`](r4-gate-record.md) §G3/§G4/§G6 — the one canonical home.

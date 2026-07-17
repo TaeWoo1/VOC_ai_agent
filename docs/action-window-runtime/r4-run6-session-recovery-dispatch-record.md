@@ -6,12 +6,22 @@
 > CONSUMED.** **The boundary** is [`r4-preparation.md`](r4-preparation.md) §4/§7 — binding, and it wins
 > over this file.
 
-**Status:** ☐ **DRAFT — NOT DISPATCHED, NOT AUTHORIZED** (2026-07-17). Nothing below has been affirmed.
-⚠ **This draft deliberately NAMES two things it does not grant** — a `session recovery` G3 scope and a
-longer authorized live window — and **authors neither**. It adds no G6 template, ratifies no scope, and
-**does not touch [`r4-gate-record.md`](r4-gate-record.md) or [`r4-preparation.md`](r4-preparation.md).**
-Both are product-owner acts in a dispatching turn. **Nothing here being written, read, or approved
-authorizes a run.**
+**Status:** ☐ **DRAFT — NOT DISPATCHED, NOT AUTHORIZED** (2026-07-17). **No live gate below has been
+affirmed** — G3 ☐, G6 ☐, P6 ☐, §7 ☐, seated-and-ready ☐. The one ☑ on this sheet is **G4**, ratified
+2026-07-17 on §8-22 (below); **G4 is not a live gate — G3 and G6 are, and both are open.**
+
+⚠ **UPDATE 2026-07-17 — the decisions this draft NAMED are now RATIFIED ([D-030](decisions.md)), and it
+still authorizes nothing.** The product owner ratified, in docs only: (1) a **fifth G3 scope,
+`session recovery`**;
+(2) a **Run-6 G6 template carrying a `max live window:` field**; (3) that **G4 carries for Run 6 on the
+basis of §8-22**, with `page.content()` mid-navigation and `main()`'s `settleSpa` **preserved as named
+live-first residual risks**. All three live in [`r4-gate-record.md`](r4-gate-record.md) — the one
+canonical home; this record restates none of them.
+
+⚠ **A ratified scope is not an affirmed gate; a template is not an approval.** **No G3 instance is
+affirmed. No G6 is filled. P6 is unsigned. This run is NOT AUTHORIZED.** The prerequisites now being in
+place is exactly when they are easiest to mistake for permission — **the sheet being complete is not the
+sheet being signed.** **Nothing here being written, read, or approved authorizes a run.**
 
 ## 1. Why this run exists
 
@@ -63,107 +73,128 @@ non-mutating by construction** — the one Run 3 and Run 5 used, and the one thi
 |---|---|---|
 | **G1** channel ratified | ✅ **carries** | D-021 — NAVER SmartStore review export |
 | **G2** seller consent | ✅ **carries** | Self-consent, `NAVER_DEV_SELLER_SELF_01`, D-024. §4 governs "any later, separately-approved" run |
-| **G3** environment | ☐ **DOES NOT CARRY** | The four recorded scopes are `read-only probe` / `export pilot` / `export+ingest` / `real-click barrier`. **None is this run**, and D-026 makes them non-substitutable. See below |
-| **G4** synthetic ladder | ⚠ **carries by precedent — and the precedent is the open question** | See below. **The hardest box on this sheet** |
+| **G3** environment | ☐ **DOES NOT CARRY** | The scope now **exists** — `session recovery`, ratified 2026-07-17 as a fifth scope. **Existing is not affirming:** no instance of it has been recorded, and D-026 makes scopes non-substitutable. See below |
+| **G4** synthetic ladder | ✅ **carries — RATIFIED for this run on §8-22, with two residuals named** | Not inherited from the static ✅. See below |
 | **G5** policy track | ✅ **carries** | Logged; none required for a seller-owned export on the seller's own session |
-| **G6** per-run | ☐ **fresh, single-use** | **Every G6 to date is CONSUMED.** No template exists for this scope |
+| **G6** per-run | ☐ **fresh, single-use** | **Every G6 to date is CONSUMED.** A Run-6 template now exists in [`r4-gate-record.md`](r4-gate-record.md) — **blank; a template is not an approval** |
 | **P6** | ☐ **not signed** | Signed only once G6 + the G3 affirmation + §7 all land in the dispatching turn |
 
-### ⚠ G4 — the box to think hardest about, and this draft does NOT resolve it
+### G4 — RATIFIED 2026-07-17 for this run, on §8-22 · the two residuals are the point
 
-G4 exists so that **live is never a code path's first execution** (`r4-preparation.md` §3).
+**Resolved by the product owner:** A4 delivered §6's 11th rung — **Session recovery (park → re-probe)**,
+green over a **real browser on a synthetic DOM**, `RUN_INTEGRATION` **PASSED 2026-07-17, 5/5** (§8-22). Live
+NAVER is **no longer the first browser execution of the recovery path**, and G4 **carries for Run 6 on that
+basis** — *not* on the static ✅, which was signed against §8-2/§8-3 before A3 or A4 existed. The full
+ratification, including its scope limits, is recorded once in [`r4-gate-record.md`](r4-gate-record.md) §G4.
 
-**Run 5 faced this exact shape and set a precedent** ([`r4-run5-…`](r4-run5-barrier-observation-dispatch-record.md)
-§3): its new code did not exist when G4's evidence (§8-2/§8-3) was recorded, but it was **offline-green**, so
-**G4 held** — provided the dispatching turn **cited that proof** rather than resting on rows that predate the
-code. **Applying that precedent verbatim, G4 holds for Run 6**: A3 is offline-green at **2996/29**, including
-tests that fail against pre-A3 code.
+⚠ **A4 narrowed the G4 question; it did not eliminate it.** Two seams are **executed by nothing offline**
+and are **preserved as accepted live-first risks** — this is *not* Run 5's "offline-green, cite the proof"
+shape, and the difference is why they are named rather than absorbed:
 
-**But the precedent may not fit, and the difference is specific.** §6 scopes every ☑ as green on *"synthetic
-fixtures **and/or a real browser over a synthetic DOM**"*. A3's proof is the **former only** — fake drivers
-over an in-process loopback, which never touch a `Page`. The recovery loop's live path contains two
-interactions **no test anywhere drives**: `settleSpa(page)` on a real page, and a re-probe whose
-`page.content()` crosses a **real navigation** — the exact window §7 below is about. **§6 has no
-session-recovery rung.**
+1. **`page.content()` mid-navigation** — §8-22's gate **awaits** its navigation, so the re-probe reads a
+   **settled** page. **Run 6's premise IS the destroyed-context window** (§6). A throw **spends the G6**.
+2. **`main()`'s `settleSpa` on the recovery branch** — the injected gate bypasses it. **Best-effort**: the
+   driver's own settle stands behind it, so it costs latency, not the run.
 
-→ ☐ **PRODUCT-OWNER DECISION, named not taken: does A3's offline-green proof satisfy G4 (Run 5's
-precedent), or does the recovery path need a real-browser-over-synthetic-DOM rung first?**
-⚠ **G4's static ✅ is not the answer** — it was signed against §8-2's ladder, before A3 existed. A rung is
-**cheap and consumes no gate** (headless, automated, synthetic pages, `RUN_INTEGRATION`); it is **not**
-authored by this draft.
+**They are not equal, and the sheet does not treat them as one.** Expect the first; tolerate the second.
 
-### G3 (scope: session recovery) — environment + §9-3 pause lift · ☐ NOT AFFIRMED
+### G3 (scope: `session recovery`) — environment + §9-3 pause lift · ☐ NOT AFFIRMED
 
-⚠ **The scope this run needs does not exist yet.** Run 6 is none of the four: it is read-only *in effect*
-(zero clicks, no download) but it is **not** the §8-4 read-only probe — it drives the full engine and holds a
-live browser ~32 minutes.
-
-→ ☐ **PRODUCT-OWNER DECISION, named not taken: ratify a fifth scope, `session recovery`.**
-**This draft does not add it to the enum and does not touch the gate record.** Naming the need is this file's
-job; granting it is not.
+**The scope now exists** — ratified 2026-07-17 as the fifth ([`r4-gate-record.md`](r4-gate-record.md) §G3),
+because Run 6 is none of the other four: read-only *in effect* (zero clicks, no download) but **not** the
+§8-4 read-only probe — it drives the full engine and holds a live browser ~32 min.
+⚠ **A ratified scope authorizes nothing.** The instance below is **☐ and stays ☐** until the dispatching turn.
 
 - ☐ Stable network / IP / location still holds (the condition that paused NAVER live work).
 - ☐ Dedicated Chrome connection profile intact; Operation Run persistence enabled.
 - ☐ **§9 item 3 pause lift affirmed for a SESSION-RECOVERY run** — a fresh, single-run lift. **Not** a click
   lift, **not** a download lift, **not** an ingest lift, **not** general or standing. The Run 3 / Run 4 /
   Run 5 lifts authorize **nothing** here.
-- ☐ G4 addressed **on the record** (above) rather than inherited.
+- ☑ G4 addressed **on the record** (above) rather than inherited — ratified 2026-07-17 on §8-22.
+- ⚠ **REPORTED, NOT RESOLVED — the canonical G3 template's `☐ Bridge paired` box is inapplicable here.**
+  [`r4-gate-record.md`](r4-gate-record.md) §G3 requires it, but this run is a **CLI run over a loopback**
+  and §6's Bridge rung says verbatim *"the live driver is not yet Bridge-wired."* The box is not merely
+  unchecked — **there is nothing for it to assert.** Affirming it vacuously and dropping it silently are
+  both wrong; **whether the template should scope it is a product-owner call, untaken.**
 
 ### ⚠ The live window this G6 would authorize — ~21 min → ~32 min · ☐ NOT AFFIRMED
 
 **[D-029](decisions.md)'s standing instruction, discharged here so it is not discovered at the seat.**
+The **`max live window:` field was ratified 2026-07-17** and lives on the Run-6 G6 template
+([`r4-gate-record.md`](r4-gate-record.md) §G6). **The field existing does not affirm the window** — the
+operator affirms it, explicitly, in the dispatching turn.
 
 | Phase | Budget |
 |---|---|
 | Phase A sentinel wait (`CONFIRM_TIMEOUT_MS`) | 10 min |
-| **the recovery budget (`RECOVERY_BUDGET_MS`) — NEW in A3** | **10 min** |
+| **the recovery budget (`RECOVERY_BUDGET_MS`) — NEW in A3** | **10 min — SHARED across all attempts, not per attempt** |
 | observe (`OBSERVE_TIMEOUT_MS`) | 10 min |
 | download detect (`DOWNLOAD_TIMEOUT_MS`) | ~1 min |
-| **worst case** | **~32 min** — Runs 1–5 were **~21 min** |
+| **worst case** | **~32 min** (31 min of budgeted waits + launch/probe overhead) — Runs 1–5 were **~21 min** |
 
 **A G6 for this run authorizes roughly half again as much live browser time as any G6 ever has.** D-028's
 boundary requires a fresh scope-matched G3 **and** a fresh single-use G6 — but it is **silent on duration**,
-and duration is what A3 changed. The gate record carries **no duration field**.
-
-→ ☐ **PRODUCT-OWNER DECISION, named not taken:** whether the G6 template should carry a `max live window:`
-field. **This draft does not add one.**
+and duration is what A3 changed. **That silence is what the new field closes.**
 
 ⚠ **Assume the full ~32 min, not the healthy-path ~21.** The recovery budget is spent only if the run
 **parks** — which for Run 6 is *the design*, not the exception.
 
 ### P6 — supervised-pilot sign-off · ☐ NOT SIGNED
+- ☐ G1 ✅ · G2 ✅ · G5 ✅ carried in; **G4 ✅ addressed for THIS run** (above), not the static ✅.
+  **G3 is deliberately not in this list** — it is per-run (D-026), carried by its own box.
+- ☐ A **filled** `session recovery` G6 recorded in this dispatching turn (template ≠ approval).
+- ☐ The `session recovery` **G3 instance** affirmed (above).
+- ☐ §7 abort criteria acknowledged · ☐ seated-and-ready confirmed.
 - ☐ Signed for **session recovery** scope only — **zero clicks**, no download, no validate, no ingest,
   terminal `FAILED`/`DOWNLOAD_TIMEOUT` at 2-of-3. **Explicitly does NOT authorize the §4.2 backend write**,
   and is distinct from Run 4's full-pilot P6 and Run 5's barrier P6.
 
 ### G6 — per-run approval · ☐ NOT FILLED
 
-⚠ **No template exists for this scope, and this draft does not write one.**
-[`r4-gate-record.md`](r4-gate-record.md) carries one per scope (generic · export pilot · Run 5
-barrier+observation). **There is no session-recovery template.** Authoring it — like ratifying the G3 scope —
-is a product-owner act in the dispatching turn.
+**The Run-6 template now exists** — one copy, in [`r4-gate-record.md`](r4-gate-record.md) §G6, ratified
+2026-07-17 with the `max live window:` field. ⚠ **It is deliberately NOT restated here: one copy, one
+source.** ⚠ **And a template is not an approval** — the template being written is the *last* thing that
+happens before authorization, which is precisely why it must not be mistaken for it.
 
-- ☐ Fresh, single-use, Run-6-scoped instance recorded **in the dispatching turn**. Naming channel · seller
-  account · date · operator · scope · §7 criteria. **Consumed by the launch; VOID thereafter** — including
-  if the run aborts, times out, parks and never recovers, or the operator is absent. A retry needs a new one.
-- ☐ The longer live window (above) affirmed **explicitly**, not inherited from the shape of Runs 1–5.
+- ☐ Fresh, single-use, Run-6-scoped instance **filled and recorded in the dispatching turn**. **Consumed by
+  the launch; VOID thereafter** — including if the run aborts, times out, parks and never recovers, or the
+  operator is absent. A retry needs a new one.
+- ☐ The longer live window affirmed **explicitly**, not inherited from the shape of Runs 1–5.
 
 ### §7 abort criteria · ☐ NOT ACKNOWLEDGED
 - ☐ Acknowledged for this run — see §7, which **removes** a carve-out rather than inverting one.
+- 🛑 **Run 4's confirmation-dialog carve-out DOES NOT APPLY.** No click ⇒ no dialog ⇒ **any** prompt or
+  dialog on the export surface is an **abort**. The carve-out is exactly one dialog wide; this run is not in it.
+- 🛑 **The recovery prompt is not a licence to improvise** — a normal login and nothing more.
+- ✅ **A park is NOT an abort.** `WAITING_FOR_HUMAN` + `LOGIN_REQUIRED` at 0-of-3 is the run working as
+  designed; aborting there discards its entire purpose.
 
 ### Seated and ready · ☐ — for ~32 minutes, and for TWO signals
 
-- ☐ The operator confirms they are **at the keyboard before the run starts**, and understands this run asks
-  for the ready signal **twice** (§4 steps 2 and 5). **Operator-absent is the first explanation for a
-  no-signal run, not a code bug.**
+- ☐ The operator confirms **"seated and ready" explicitly, before the run starts** — never inferred from
+  silence, a prior run, or the sheet being complete.
+- ☐ They understand this run asks for the ready signal **twice** (§4 steps 2 and 5), and that the **first is
+  given while STILL LOGGED OUT — the inversion IS the run.**
+- ☐ They understand **step 4 is the headline falsifier**: *they* return to the review-export surface; the
+  Runtime never navigates.
+- ☐ They understand **CLICK NOTHING** at step 7 — the lapse is the success condition, not a fault.
+- ☐ They understand the seat is held up to **~32 min**.
+- ⚠ **Operator-absent is the first explanation for a no-signal run, not a code bug.**
 - ⚠ Unlike Run 5, a no-signal outcome here is **not** ambiguous: it lands `sentinel-timeout`, which says the
   gate was reached and the human did not act. **That is a spent G6, but it is not a confusing one.**
 
 ### Preconditions — ☐ NOT VERIFIED
 
-- ☐ **The tree under test actually contains A3** (`cc9aba8`, PR #280, on `main` as `73f027e`). ⚠ **The
-  recovery loop is the entire subject**: a tree without it reproduces Run 5's behaviour — park, then tear
-  the browser down — and **answers nothing while still spending the G6.** Verify; do not assume.
+- ☐ **The tree under test actually contains A3** (`cc9aba8`, PR #280). ⚠ **The recovery loop is the entire
+  subject**: a tree without it reproduces Run 5's behaviour — park, then tear the browser down — and
+  **answers nothing while still spending the G6.** Verify; do not assume.
+  *(Checked 2026-07-17 on `31ec321`: `cc9aba8` (A3) and `4f31fc4` (A4) are both ancestors and the entrypoint
+  carries `recoverLoop` / `awaitFreshSentinel` / `recoveryPrompt`. **A dated check is not this box** —
+  re-verify against the tree the run actually launches from.)*
+- ☐ **Decide whether to sync to `origin/main` first.** ⚠ **`main` moved after A4 landed** — PRs #283/#284
+  (another workstream) put it at `ba39618`, 4 commits ahead of `31ec321`, with **zero `collector/` +
+  `contracts/` change**, so a sync is **baseline-neutral** and the Runtime tree under test is unaffected
+  either way. Recorded because a moving-ref snapshot rots: **re-derive it, do not trust this line.**
 - ☐ **The backend should be DOWN, and that is deliberate.** Run 6 never ingests and — with zero clicks —
   **cannot** reach ingest at all. A down backend is belt-and-braces against a risk this run does not carry.
 - ☐ **No `RUN_INTEGRATION`, no `AW_HEADED`.** This is the gated live entrypoint, nothing else.
@@ -199,8 +230,9 @@ same rule Run 5 established. This record is the sole choreography for this run.
 
 ## 5. Evidence to record (sanitized) — a new dated §8-N in [`r4-evidence-pack.md`](r4-evidence-pack.md)
 
-⚠ **The section number is assigned at dispatch, not now** — §8-21 is A3, and any slice that lands first
-claims the next slot.
+⚠ **The section number is assigned at dispatch, not now** — **§8-22 is A4**, so Run 6 lands at **§8-23**
+*unless another slice claims it first.* This line has already moved once (it said §8-21 when A3 was the
+last section); **re-check the pack, do not trust it.**
 
 Enums / booleans / coarse buckets / SHA only. **Never** a URL, filename, path, selector, page content,
 credential, cookie, token, exact count, or `eventTimeMs`.
@@ -246,9 +278,10 @@ credential, cookie, token, exact count, or `eventTimeMs`.
 - ⚠ **That recovery works in general.** A `recovered` is **one seller's post-login landing on one day** — an
   observation, not an invariant. D-028's limitation (the driver never navigates) is **unchanged** by a pass.
 
-⚠ **The accepted risk the product owner declined to close (2026-07-17):** `page.content()` at
-`naver-live-driver.ts` is **unguarded**, and `lastDiagnostic` is assigned after it — so a thrown probe keeps
-the *previous* probe's value. Run 6's premise — a seller who just logged in and navigated — **is** the
+⚠ **The accepted risk the product owner declined to close (2026-07-17)** — and **re-affirmed by name in
+G4's ratification** ([`r4-gate-record.md`](r4-gate-record.md) §G4), so it is carried knowingly, not
+overlooked: `page.content()` at `naver-live-driver.ts` is **unguarded**, and `lastDiagnostic` is assigned
+after it — so a thrown probe keeps the *previous* probe's value. Run 6's premise — a seller who just logged in and navigated — **is** the
 canonical `Execution context was destroyed` window. A throw tears the driver down and **spends the G6**.
 **Signature to record:** `aw.live.recovery { outcome: "driver-error" }` **with no `aw.live.readiness` for
 that attempt.** A3 mitigates the *lie* at the CLI boundary; it does not prevent the *throw*.
