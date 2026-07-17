@@ -1,10 +1,39 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { VocItemCard } from "./VocItemCard";
+import { api } from "../lib/apiClient";
 import type { OperatorVocItem } from "../lib/types";
 import { PREVIEW_PLACEHOLDER, PRODUCT_PLACEHOLDER } from "../lib/vocItems";
 import { mockChannels } from "../lib/mocks";
+
+// The reply panel fetches on mount, so the client is stubbed at the boundary. What this
+// file owns is WHETHER the panel mounts; everything it does once mounted belongs to
+// VocItemReplyPrep.test.tsx, and asserting it twice would just mean two places to update.
+vi.mock("../lib/apiClient", () => ({
+  api: {
+    getReviewReplyPrep: vi.fn(async () => ({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      redactedBody: "합성-리뷰-본문",
+      bodyRedacted: false,
+      triageDisposition: "RESPONSE_NEEDED",
+      suggestion: {
+        body: "합성-추천",
+        category: "general_reply",
+        providerKind: "RULE_BASED",
+        providerName: "review-reply-template",
+        providerVersion: "templates-v1",
+      },
+      draft: null,
+      approval: null,
+      capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false },
+    })),
+    saveReviewReplyDraft: vi.fn(),
+    decideReviewReplyApproval: vi.fn(),
+    recordVocItemTriage: vi.fn(),
+  },
+}));
 
 // Covers the additive `productName` on the drill-down row: a named product renders as
 // the row's subject, missing product context renders the frontend-owned placeholder,
@@ -49,6 +78,7 @@ function naverReviewItem(over: Partial<Omit<OperatorVocItem, NaverInvariant>> = 
     safePreview: "배송은 빨랐는데 색이 생각과 달라요",
     actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
     triageDisposition: null,
+    hasReplyPreparation: false,
     ...over,
   };
 }
@@ -90,6 +120,10 @@ function cafe24CommunityItem(
     productName: null,
     actionRef: null,
     triageDisposition: null,
+    // Hardcoded false by the source, for actionRef's reason: no anchor, so no draft can
+    // attach. Pinned here with its twins rather than defaulted, so a fixture cannot claim
+    // reply work on a row that can never carry any.
+    hasReplyPreparation: false,
     // The community store's real column — this row is the only one of the two that has one.
     replyStatus: over.replyStatus ?? "PENDING",
   };
@@ -224,6 +258,178 @@ describe("VocItemCard product context", () => {
     expect(screen.getByRole("button", { name: "대응 필요" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "지켜보기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "조치 불필요" })).toBeInTheDocument();
+  });
+
+  // --- when the reply panel mounts -------------------------------------------------
+  //
+  // `RESPONSE_NEEDED || hasReplyPreparation`. The second half is the whole reason the flag
+  // exists, so it gets its own case rather than riding on the first.
+
+  it("offers no reply panel on a row nobody has decided or prepared", async () => {
+    renderCard();
+    expect(screen.queryByRole("heading", { name: "답변 준비" })).not.toBeInTheDocument();
+  });
+
+  it("offers the reply panel once the row is 대응 필요", async () => {
+    renderCard({ triageDisposition: "RESPONSE_NEEDED" });
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+  });
+
+  /**
+   * The case the flag exists for: the operator wrote a draft, then changed their mind and
+   * re-triaged. On the disposition alone this row would render no panel — leaving the draft
+   * unreadable and any approval unwithdrawable. The work outlives the decision.
+   */
+  it("keeps the reply panel on a re-triaged row that already carries work", async () => {
+    renderCard({ triageDisposition: "MONITOR", hasReplyPreparation: true });
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+  });
+
+  it("keeps the reply panel on a row with work and no decision at all", async () => {
+    renderCard({ triageDisposition: null, hasReplyPreparation: true });
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+  });
+
+  it("offers no reply panel on a re-triaged row with no work to strand", async () => {
+    renderCard({ triageDisposition: "NO_ACTION", hasReplyPreparation: false });
+    expect(screen.queryByRole("heading", { name: "답변 준비" })).not.toBeInTheDocument();
+  });
+
+  /** No ref, no panel — a Cafe24 article cannot be prepped at all. */
+  it("offers no reply panel on a Cafe24 row", () => {
+    renderItem(cafe24CommunityItem());
+    expect(screen.queryByRole("heading", { name: "답변 준비" })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The entry into the whole feature, and the case every fixture-only test above misses.
+   *
+   * `item` is the row as of the last list fetch, and nothing on the triage path refetches
+   * it: `OperatorVocItemList` reloads only on its own deps, and `refreshKey` is wired to
+   * backfill/connection events. So a mount rule reading `item.triageDisposition` alone
+   * would show a pressed 대응 필요 button beside no panel, and the operator's only way to
+   * reach 답변 준비 would be a page reload — for the review they just marked as needing one.
+   *
+   * Driven through the control rather than by re-rendering with a new prop, because the
+   * bug is precisely that no new prop ever arrives.
+   */
+  it("offers the reply panel as soon as the operator records 대응 필요, without a refetch", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocItemTriage).mockResolvedValue({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      disposition: "RESPONSE_NEEDED",
+      replayed: false,
+    });
+    renderCard();
+    expect(screen.queryByRole("heading", { name: "답변 준비" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "대응 필요" }));
+
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+  });
+
+  /**
+   * The converse: moving a review off 대응 필요 must take the panel away in the same breath,
+   * rather than leave it mounted with capabilities from a read that is now wrong — where
+   * 초안 저장 would fail with a server 409 the operator cannot act on.
+   */
+  it("takes the reply panel away as soon as the operator records 지켜보기", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocItemTriage).mockResolvedValue({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      disposition: "MONITOR",
+      replayed: false,
+    });
+    renderCard({ triageDisposition: "RESPONSE_NEEDED" });
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "지켜보기" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "답변 준비" })).not.toBeInTheDocument(),
+    );
+  });
+
+  /**
+   * The promotion, and the reason it exists.
+   *
+   * `item.hasReplyPreparation` was computed with the page, so it is `false` for a draft
+   * written since. Without promoting it locally on the save, an operator could write a draft,
+   * change their mind to 지켜보기, and watch the panel leave with their draft — recoverable
+   * only by re-triaging or reopening the drill-down. There is no refetch here: the row keeps
+   * the fact the panel just told it.
+   */
+  it("keeps the panel after 지켜보기 for a draft saved in this session", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.saveReviewReplyDraft).mockResolvedValue({
+      version: 1,
+      body: "합성-초안",
+      contentFingerprint: "mock-x",
+      fingerprintAlgorithm: "review-reply-v1",
+      createdAt: "2026-07-17T00:00:00Z",
+    });
+    vi.mocked(api.recordVocItemTriage).mockResolvedValue({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      disposition: "MONITOR",
+      replayed: false,
+    });
+    // The row as the page fetched it: needs a reply, carries no work yet.
+    renderCard({ triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: false });
+    await screen.findByRole("heading", { name: "답변 준비" });
+
+    await user.click(screen.getByRole("button", { name: "초안 저장" }));
+    await waitFor(() => expect(api.saveReviewReplyDraft).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "지켜보기" }));
+
+    // The draft outlives the decision — the panel is still there to read and withdraw from.
+    expect(screen.getByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+  });
+
+  /**
+   * An unsaved reply must not be destroyed by a click on a sibling control.
+   *
+   * `prepared` protects the buffer only AFTER a save — which is precisely when the text also
+   * exists on the server. Before the first save it lives nowhere but this panel, and the
+   * mount rule would take it with no confirm, no warning and no undo. The panel already
+   * refuses to let a server re-read discard this text (`dirty`) and refuses to approve over
+   * it; handing it to a sibling click is the same loss through a different door.
+   */
+  it("keeps the panel — and the typed reply — when 지켜보기 is clicked over an unsaved edit", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocItemTriage).mockResolvedValue({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      disposition: "MONITOR",
+      replayed: false,
+    });
+    renderCard({ triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: false });
+    await screen.findByRole("heading", { name: "답변 준비" });
+
+    const editor = screen.getByLabelText("답변 초안");
+    await user.clear(editor);
+    await user.type(editor, "합성-쓰다-만-답변");
+
+    await user.click(screen.getByRole("button", { name: "지켜보기" }));
+
+    // Nothing was saved, so the server knows nothing — but the operator's text is still here.
+    expect(screen.getByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+    expect(screen.getByLabelText("답변 초안")).toHaveValue("합성-쓰다-만-답변");
+  });
+
+  /** ...unless work exists, which is exactly what the flag protects. */
+  it("keeps the panel after 지켜보기 when the row already carries work", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocItemTriage).mockResolvedValue({
+      actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
+      disposition: "MONITOR",
+      replayed: false,
+    });
+    renderCard({ triageDisposition: "RESPONSE_NEEDED", hasReplyPreparation: true });
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "지켜보기" }));
+
+    expect(screen.getByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
   });
 
   it("never renders the ref itself — it is an address, not something to show", () => {

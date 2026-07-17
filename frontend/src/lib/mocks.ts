@@ -23,6 +23,12 @@ import type {
   OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
+  ReviewReplyApproval,
+  ReviewReplyApprovalResponse,
+  ReviewReplyApprovalStateName,
+  ReviewReplyDraft,
+  ReviewReplyPrep,
+  ReviewReplySuggestion,
   SalesTrendPoint,
   ScheduleView,
   SellerAccountResponse,
@@ -721,6 +727,22 @@ interface MockNaverReview {
   productName: string | null;
   safePreview: string | null;
   sourceCreatedDate: string;
+  /**
+   * What the reply surface's `redactedBody` would be — the WHOLE body, tokenized, not the
+   * 60-char `safePreview` beside it.
+   *
+   * Stated as a fixture value rather than computed, deliberately. The mock does NOT
+   * reimplement `VocPreviewSanitizer`: that would make the client a second implementation
+   * of a redaction rule, free to disagree with the server about what is sensitive, in a
+   * demo whose whole subject is text an operator is about to paste in public. So each row
+   * records what the server would have returned for its body, and nothing here decides it.
+   *
+   * Null only when the source was blank — never as a stand-in for "suppressed", which is a
+   * preview concept the full-body path does not have.
+   */
+  redactedBody: string | null;
+  /** Whether the server tokenized anything — drives the "일부 정보가 가려졌습니다" note. */
+  bodyRedacted: boolean;
 }
 
 /**
@@ -735,20 +757,38 @@ interface MockNaverReview {
  */
 const NAVER_REVIEWS: readonly MockNaverReview[] = [
   // 2 rated 1~2 → the HIGH "낮은 평점(1~2점) 리뷰" card
-  { id: 0, rating: 1, productName: "베이직 코튼 티셔츠 화이트", safePreview: "부착 후 며칠 만에 떨어졌어요", sourceCreatedDate: "2026-05-28" },
-  { id: 1, rating: 2, productName: "가을 니트 가디건 CHARCOAL", safePreview: "배송은 빨랐는데 색이 생각과 달라요", sourceCreatedDate: "2026-05-27" },
+  // id 0 carries a redacted span so the demo exercises the "일부 정보가 가려졌습니다" note —
+  // and shows why the preview and the full body are different reads: the preview's 60 chars
+  // stop before the tokenized part.
+  { id: 0, rating: 1, productName: "베이직 코튼 티셔츠 화이트", safePreview: "부착 후 며칠 만에 떨어졌어요", sourceCreatedDate: "2026-05-28",
+    redactedBody: "부착 후 며칠 만에 떨어졌어요. 세탁도 안 했는데 프린트가 통째로 일어났습니다.\n교환이나 환불 가능한지 알려주세요. [전화번호] 로 연락 주시면 감사하겠습니다.", bodyRedacted: true },
+  { id: 1, rating: 2, productName: "가을 니트 가디건 CHARCOAL", safePreview: "배송은 빨랐는데 색이 생각과 달라요", sourceCreatedDate: "2026-05-27",
+    redactedBody: "배송은 빨랐는데 색이 생각과 달라요.\n상세페이지 사진은 차콜인데 실물은 거의 검정에 가깝습니다.", bodyRedacted: false },
   // 4 rated 3 → the MEDIUM "보통 평점(3점) 리뷰" card
-  { id: 2, rating: 3, productName: "리넨 와이드 팬츠 M", safePreview: "무난합니다 가격 대비 그럭저럭", sourceCreatedDate: "2026-05-26" },
-  { id: 3, rating: 3, productName: "베이직 코튼 티셔츠 화이트", safePreview: "사이즈가 조금 큰 편이에요", sourceCreatedDate: "2026-05-25" },
-  { id: 4, rating: 3, productName: null, safePreview: "재구매 의사는 반반입니다", sourceCreatedDate: "2026-05-24" },
-  { id: 5, rating: 3, productName: "가을 니트 가디건 CHARCOAL", safePreview: "보통이에요 특별한 점은 없네요", sourceCreatedDate: "2026-05-23" },
+  { id: 2, rating: 3, productName: "리넨 와이드 팬츠 M", safePreview: "무난합니다 가격 대비 그럭저럭", sourceCreatedDate: "2026-05-26",
+    redactedBody: "무난합니다. 가격 대비 그럭저럭이에요.\n다만 여름에 입기엔 조금 두껍습니다.", bodyRedacted: false },
+  { id: 3, rating: 3, productName: "베이직 코튼 티셔츠 화이트", safePreview: "사이즈가 조금 큰 편이에요", sourceCreatedDate: "2026-05-25",
+    redactedBody: "사이즈가 조금 큰 편이에요. 평소 M 입는데 한 치수 작게 시켰어야 했나 싶습니다.", bodyRedacted: false },
+  { id: 4, rating: 3, productName: null, safePreview: "재구매 의사는 반반입니다", sourceCreatedDate: "2026-05-24",
+    redactedBody: "재구매 의사는 반반입니다. 품질은 괜찮은데 배송이 예상보다 늦었어요.", bodyRedacted: false },
+  { id: 5, rating: 3, productName: "가을 니트 가디건 CHARCOAL", safePreview: "보통이에요 특별한 점은 없네요", sourceCreatedDate: "2026-05-23",
+    redactedBody: "보통이에요. 특별한 점은 없네요.", bodyRedacted: false },
   // 6 rated 4~5 → in NEW_REVIEW / spike only; never in the 1~3점 union
-  { id: 6, rating: 4, productName: "리넨 와이드 팬츠 M", safePreview: "포장이 꼼꼼했어요 다음에 또 살게요", sourceCreatedDate: "2026-05-22" },
-  { id: 7, rating: 5, productName: "베이직 코튼 티셔츠 화이트", safePreview: null, sourceCreatedDate: "2026-05-21" },
-  { id: 8, rating: 4, productName: "가을 니트 가디건 CHARCOAL", safePreview: "핏이 예쁩니다", sourceCreatedDate: "2026-05-20" },
-  { id: 9, rating: 5, productName: "리넨 와이드 팬츠 M", safePreview: "아주 만족스러워요", sourceCreatedDate: "2026-05-19" },
-  { id: 10, rating: 4, productName: "베이직 코튼 티셔츠 화이트", safePreview: "무난하게 잘 입고 있어요", sourceCreatedDate: "2026-05-18" },
-  { id: 11, rating: 5, productName: "가을 니트 가디건 CHARCOAL", safePreview: "따뜻하고 가볍습니다", sourceCreatedDate: "2026-05-17" },
+  { id: 6, rating: 4, productName: "리넨 와이드 팬츠 M", safePreview: "포장이 꼼꼼했어요 다음에 또 살게요", sourceCreatedDate: "2026-05-22",
+    redactedBody: "포장이 꼼꼼했어요. 다음에 또 살게요.", bodyRedacted: false },
+  // id 7: preview suppressed, body present. The two nulls are NOT the same fact — a
+  // suppressed preview is a display judgement about 60 characters, and the reply surface
+  // still has a complaint to answer.
+  { id: 7, rating: 5, productName: "베이직 코튼 티셔츠 화이트", safePreview: null, sourceCreatedDate: "2026-05-21",
+    redactedBody: "[번호] [번호] 굿", bodyRedacted: true },
+  { id: 8, rating: 4, productName: "가을 니트 가디건 CHARCOAL", safePreview: "핏이 예쁩니다", sourceCreatedDate: "2026-05-20",
+    redactedBody: "핏이 예쁩니다. 배송도 빨랐어요.", bodyRedacted: false },
+  { id: 9, rating: 5, productName: "리넨 와이드 팬츠 M", safePreview: "아주 만족스러워요", sourceCreatedDate: "2026-05-19",
+    redactedBody: "아주 만족스러워요. 재질도 좋고 핏도 잘 맞습니다.", bodyRedacted: false },
+  { id: 10, rating: 4, productName: "베이직 코튼 티셔츠 화이트", safePreview: "무난하게 잘 입고 있어요", sourceCreatedDate: "2026-05-18",
+    redactedBody: "무난하게 잘 입고 있어요.", bodyRedacted: false },
+  { id: 11, rating: 5, productName: "가을 니트 가디건 CHARCOAL", safePreview: "따뜻하고 가볍습니다", sourceCreatedDate: "2026-05-17",
+    redactedBody: "따뜻하고 가볍습니다. 겨울에도 입을 수 있을 것 같아요.", bodyRedacted: false },
 ];
 
 /** Reviews in the prior equal-length window — the spike rule's baseline. */
@@ -962,10 +1002,36 @@ function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem
     // Reflects whatever the operator decided this session, falling back to the seed. Keyed
     // on the ref, which is keyed on the review — so a decision made under one card is
     // visible under every other card that surfaces the same review.
-    triageDisposition:
-      triageDecisions.get(actionRef) ??
-      (review.id === SEEDED_TRIAGE_REVIEW_ID ? "RESPONSE_NEEDED" : null),
+    triageDisposition: mockTriageFor(review, actionRef),
+    hasReplyPreparation: mockHasReplyPreparation(actionRef),
   };
+}
+
+/**
+ * Whether this review already carries reply work — the demo's stand-in for the server's
+ * batch lookup.
+ *
+ * Drafts OR approvals, matching the server rather than deriving one from the other. The row
+ * and the reply panel must agree about this: it is half the panel's mount rule, so a demo
+ * where they disagree would show the panel on rows the real product hides, or hide it on
+ * rows the real product shows — either way teaching the wrong rule to whoever is evaluating.
+ */
+function mockHasReplyPreparation(actionRef: string): boolean {
+  return (reviewReplyDrafts.get(actionRef)?.length ?? 0) > 0 || reviewReplyApprovals.has(actionRef);
+}
+
+/**
+ * The disposition a row currently carries: this session's decision, else the seed.
+ *
+ * One function, called by both the drill-down row and the reply panel. They have to agree
+ * about whether a review is 대응 필요 — the panel's entire gate is that answer — and two
+ * copies of this fallback is exactly how they would quietly stop agreeing.
+ */
+function mockTriageFor(review: MockNaverReview, actionRef: string): TriageDisposition | null {
+  return (
+    triageDecisions.get(actionRef) ??
+    (review.id === SEEDED_TRIAGE_REVIEW_ID ? "RESPONSE_NEEDED" : null)
+  );
 }
 
 /**
@@ -1004,6 +1070,244 @@ export function mockVocItemTriage(
 /** Test-only: drop the demo decisions so each test starts from the seeded fixture. */
 export function resetMockTriageDecisions(): void {
   triageDecisions.clear();
+}
+
+// --- Review response preparation (demo mode) --------------------------------------
+//
+// Module-level, for triageDecisions' reason: the panel unmounts every time the drill-down
+// closes, and a demo whose subject is a RECORD must not lose the record.
+//
+// These enforce the SAME rules the backend does — the gate, the freeze, the asymmetric
+// withdrawal, copy-from-the-approved-head. Not gold-plating: a demo that let an operator
+// copy an unapproved draft, or approve a review that is not 대응 필요, would be teaching
+// the product's rules wrong to the person evaluating it, which is worse than showing no
+// demo. Where a rule is a security property (redaction) the mock states the server's answer
+// instead of reimplementing it — see MockNaverReview.redactedBody.
+
+/** Draft versions per actionRef, oldest first. Append-only, exactly like the server's. */
+const reviewReplyDrafts = new Map<string, ReviewReplyDraft[]>();
+/** The current approval per actionRef, or absent when never approved. */
+const reviewReplyApprovals = new Map<string, ReviewReplyApproval>();
+
+/**
+ * A stand-in for the server's content fingerprint.
+ *
+ * NOT the real algorithm (SHA-256 over canonical JSON) and does not pretend to be: it only
+ * has to be stable per content so the demo can show an approval bound to an exact version.
+ * Prefixed so nobody mistakes one of these for a value a real backend produced.
+ */
+function mockFingerprint(body: string): string {
+  let h = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    h = (h * 31 + body.charCodeAt(i)) | 0;
+  }
+  return `mock-${(h >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+/** The fixture row behind a ref, or null when the ref names nothing this store knows. */
+function reviewForRef(actionRef: string): MockNaverReview | null {
+  const found = NAVER_REVIEWS.find((r) => naverReviewRef(r.id) === actionRef);
+  return found ?? null;
+}
+
+/**
+ * Mirrors RuleBasedReviewReplyProvider — rating first, then keywords, else the default.
+ *
+ * The templates are copied VERBATIM from the Java provider, for the reason the attention
+ * card copies AttentionSignalRules' descriptions verbatim: the panel renders this text, so
+ * an invented sentence is a sentence the product never says. If the provider's templates
+ * change, these change with them.
+ *
+ * Rating beats keywords: a 5★ "배송 빨라요" must not be answered with an apology for late
+ * delivery.
+ */
+const MOCK_POSITIVE_MIN_RATING = 4;
+
+const MOCK_REPLY_RULES: ReadonlyArray<{ category: string; keywords: string[]; body: string }> = [
+  {
+    category: "quality_reply",
+    keywords: ["불량", "하자", "깨짐", "파손", "터짐", "고장", "품질"],
+    body: "안녕하세요, 고객님. 상품에 문제가 있어 불편을 드린 점 진심으로 사과드립니다. 말씀해 주신 내용을 확인한 뒤 필요한 조치를 안내드리겠습니다. 알려주셔서 감사합니다.",
+  },
+  {
+    category: "delivery_reply",
+    keywords: ["배송", "택배", "발송", "도착", "출고", "지연"],
+    body: "안녕하세요, 고객님. 상품을 받아보시기까지 불편을 드린 점 사과드립니다. 배송 과정을 다시 살펴보고 개선하겠습니다. 소중한 의견 남겨주셔서 감사합니다.",
+  },
+  {
+    category: "packaging_reply",
+    keywords: ["포장", "박스", "완충"],
+    body: "안녕하세요, 고객님. 포장 상태로 불편을 드려 죄송합니다. 포장 방식을 다시 점검하겠습니다. 알려주셔서 감사합니다.",
+  },
+  {
+    category: "product_info_reply",
+    keywords: ["설명", "사양", "스펙", "사진", "상이", "다릅", "달라요"],
+    body: "안녕하세요, 고객님. 상품 정보가 기대하신 것과 달라 실망을 드린 점 사과드립니다. 상품 설명을 다시 점검해 더 정확히 안내하겠습니다. 의견 감사합니다.",
+  },
+  {
+    category: "pricing_reply",
+    keywords: ["가격", "비싸", "할인", "가성비"],
+    body: "안녕하세요, 고객님. 가격에 대한 의견 감사합니다. 더 나은 가치를 드릴 수 있도록 계속 고민하겠습니다.",
+  },
+];
+
+const MOCK_POSITIVE_BODY =
+  "안녕하세요, 고객님. 좋은 후기를 남겨주셔서 진심으로 감사합니다. 앞으로도 만족하실 수 있도록 노력하겠습니다.";
+const MOCK_DEFAULT_BODY =
+  "안녕하세요, 고객님. 소중한 후기를 남겨주셔서 감사합니다. 남겨주신 의견을 잘 살펴보고 반영하겠습니다.";
+
+function mockSuggestion(review: MockNaverReview): ReviewReplySuggestion {
+  const provenance = {
+    providerKind: "RULE_BASED",
+    providerName: "review-reply-template",
+    providerVersion: "templates-v1",
+  };
+  if (review.rating >= MOCK_POSITIVE_MIN_RATING) {
+    return { body: MOCK_POSITIVE_BODY, category: "positive_reply", ...provenance };
+  }
+  const haystack = review.redactedBody ?? "";
+  for (const rule of MOCK_REPLY_RULES) {
+    if (rule.keywords.some((k) => haystack.includes(k))) {
+      return { body: rule.body, category: rule.category, ...provenance };
+    }
+  }
+  return { body: MOCK_DEFAULT_BODY, category: "general_reply", ...provenance };
+}
+
+/** The demo's stand-in for the server's decided_at. Fixed, so the demo reads no clock. */
+const MOCK_DECIDED_AT = "2026-07-17T00:00:00Z";
+
+/**
+ * Demo-mode reply prep for one review.
+ *
+ * Computes `capabilities` exactly as ReviewReplyService does, from the same three inputs
+ * (disposition, draft existence, approval state) — including the asymmetry: leaving
+ * 대응 필요 closes save/approve/copy but never withdrawal.
+ */
+export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
+  const review = reviewForRef(actionRef);
+  if (review == null) {
+    // The real backend answers 404 for a ref it cannot address; the demo throws so the
+    // panel takes its error path rather than rendering a review that does not exist.
+    throw new Error("mock: unknown actionRef");
+  }
+  const disposition = mockTriageFor(review, actionRef);
+  const versions = reviewReplyDrafts.get(actionRef) ?? [];
+  const head = versions.length > 0 ? versions[versions.length - 1] : null;
+  const approval = reviewReplyApprovals.get(actionRef) ?? null;
+
+  const responseNeeded = disposition === "RESPONSE_NEEDED";
+  const approved = approval?.state === "APPROVED";
+  const canCopy = responseNeeded && approved;
+
+  return {
+    actionRef,
+    redactedBody: review.redactedBody,
+    bodyRedacted: review.bodyRedacted,
+    triageDisposition: disposition,
+    suggestion: mockSuggestion(review),
+    draft: head,
+    approval:
+      approval == null
+        ? null
+        : {
+            ...approval,
+            // The copyable body is withheld unless copying is allowed — the same contract
+            // the server keeps, so a client written against the demo cannot learn to copy
+            // something the real backend would not hand it.
+            approvedBody: canCopy ? approval.approvedBody : null,
+          },
+    capabilities: {
+      canSave: responseNeeded && !approved,
+      canApprove: responseNeeded && !approved && head != null,
+      canWithdraw: approved,
+      canCopy,
+    },
+  };
+}
+
+/** Demo-mode draft save: append-only versions with the server's baseVersion semantics. */
+export function mockSaveReviewReplyDraft(
+  actionRef: string,
+  body: string,
+  baseVersion: number,
+): ReviewReplyDraft {
+  const prep = mockReviewReplyPrep(actionRef);
+  if (!prep.capabilities.canSave) {
+    throw new Error("mock: 저장할 수 없는 상태입니다");
+  }
+  const versions = reviewReplyDrafts.get(actionRef) ?? [];
+  const current = versions.length;
+  const normalized = body.replace(/\r\n?/g, "\n").trim();
+  const fingerprint = mockFingerprint(normalized);
+  const head = versions[versions.length - 1] ?? null;
+
+  // Idempotent re-save of identical content, exactly as the server treats it.
+  if (head != null && head.contentFingerprint === fingerprint && baseVersion >= current - 1) {
+    return head;
+  }
+  if (baseVersion !== current) {
+    throw new Error("mock: stale baseVersion");
+  }
+  const next: ReviewReplyDraft = {
+    version: current + 1,
+    body: normalized,
+    contentFingerprint: fingerprint,
+    fingerprintAlgorithm: "review-reply-v1",
+    createdAt: MOCK_DECIDED_AT,
+  };
+  reviewReplyDrafts.set(actionRef, [...versions, next]);
+  return next;
+}
+
+/**
+ * Demo-mode approve/withdraw.
+ *
+ * Always reports `replayed: false`, for mockVocItemTriage's reason: this has no command-id
+ * ledger, so it has no basis to claim a decision was already applied. Faking a replay would
+ * assert history the demo does not have.
+ */
+export function mockDecideReviewReplyApproval(
+  actionRef: string,
+  state: ReviewReplyApprovalStateName,
+  baseVersion: number | null,
+): ReviewReplyApprovalResponse {
+  const prep = mockReviewReplyPrep(actionRef);
+  if (state === "WITHDRAWN") {
+    if (!prep.capabilities.canWithdraw) {
+      throw new Error("mock: 승인된 초안이 없습니다");
+    }
+    reviewReplyApprovals.set(actionRef, {
+      state: "WITHDRAWN",
+      approvedVersion: null,
+      approvedFingerprint: null,
+      approvedBody: null,
+      decidedAt: MOCK_DECIDED_AT,
+    });
+    return { actionRef, state: "WITHDRAWN", replayed: false };
+  }
+  if (!prep.capabilities.canApprove) {
+    throw new Error("mock: 승인할 수 없는 상태입니다");
+  }
+  const versions = reviewReplyDrafts.get(actionRef) ?? [];
+  const head = versions[versions.length - 1] ?? null;
+  if (head == null || baseVersion !== head.version) {
+    throw new Error("mock: stale baseVersion");
+  }
+  reviewReplyApprovals.set(actionRef, {
+    state: "APPROVED",
+    approvedVersion: head.version,
+    approvedFingerprint: head.contentFingerprint,
+    approvedBody: head.body,
+    decidedAt: MOCK_DECIDED_AT,
+  });
+  return { actionRef, state: "APPROVED", replayed: false };
+}
+
+/** Test-only: drop the demo drafts/approvals so each test starts from the fixture. */
+export function resetMockReviewReplyState(): void {
+  reviewReplyDrafts.clear();
+  reviewReplyApprovals.clear();
 }
 
 export function mockSyncRuns(): SyncRunView[] {

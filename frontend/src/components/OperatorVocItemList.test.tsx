@@ -25,6 +25,7 @@ function row(over: Partial<OperatorVocItem> = {}): OperatorVocItem {
     safePreview: "배송은 빨랐는데 색이 생각과 달라요",
     actionRef: "review:abc",
     triageDisposition: null,
+    hasReplyPreparation: false,
     ...over,
   };
 }

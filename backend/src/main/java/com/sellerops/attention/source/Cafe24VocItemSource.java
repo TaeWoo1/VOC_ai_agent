@@ -121,7 +121,9 @@ public class Cafe24VocItemSource implements VocItemSource {
         // source-qualified precisely so a second store can be added without ambiguity.
         return new OperatorVocItem(channelCode, channelNameKo, sourceType, null, a.getRating(), a.getReplyStatus(),
                 kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview,
-                null, null);
+                // No triage anchor → no ref → no decision and no reply work can exist here.
+                // false is a capability limit, not a claim that nobody has prepared anything.
+                null, null, false);
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */
