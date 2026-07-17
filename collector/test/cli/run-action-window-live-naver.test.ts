@@ -544,6 +544,46 @@ describe("confirmPrompt — the prose a seated human reads mid-run (D-025, D-027
   });
 });
 
+describe("confirmPrompt — session-recovery scope branches the FIRST prompt (§8-23 resolution)", () => {
+  // Run 6 (§8-23) proved the initial prompt was the EXPORT-PILOT prose — "log in, reach the export
+  // surface, then signal" — the exact opposite of the session-recovery scope, whose premise is
+  // signalling WHILE LOGGED OUT so the run parks and recovers. `--session-recovery` swaps ONLY the
+  // head; the ingest body and tail (proven above) stay shared. These lock that the branch is real and
+  // that the export-pilot imperative can never reappear in the recovery head.
+  const RECOVERY_PROMPT = confirmPrompt(false, true);
+  const DEFAULT_PROMPT = confirmPrompt(false);
+
+  it("tells the operator to signal WHILE LOGGED OUT and to expect a LOGIN_REQUIRED park", () => {
+    expect(RECOVERY_PROMPT).toMatch(/SESSION-RECOVERY run/i);
+    expect(RECOVERY_PROMPT).toMatch(/WHILE STILL LOGGED OUT/);
+    expect(RECOVERY_PROMPT).toMatch(/PARKS on LOGIN_REQUIRED/);
+    expect(RECOVERY_PROMPT).toMatch(/paused, not failed/i);
+    expect(RECOVERY_PROMPT).toMatch(/signal readiness AGAIN/i);
+  });
+
+  it("NEVER carries the export-pilot 'log in first, reach the export surface' imperative", () => {
+    // The exact prose §8-23 named. The recovery head says "RETURN to the review-management export
+    // surface" (a post-login step), never the pilot's "1) Complete … 2) Reach …" pre-signal command.
+    expect(RECOVERY_PROMPT).not.toMatch(/Reach the review-management export surface/);
+    expect(RECOVERY_PROMPT).not.toMatch(/1\) Complete the NAVER-ID login/);
+    // Guard the default (export-pilot) direction stays byte-for-byte what it was — no accidental drift
+    // from adding the branch: the pilot imperative must still be present when the flag is absent.
+    expect(DEFAULT_PROMPT).toMatch(/1\) Complete the NAVER-ID login/);
+    expect(DEFAULT_PROMPT).toMatch(/2\) Reach the review-management export surface/);
+    expect(DEFAULT_PROMPT).not.toMatch(/SESSION-RECOVERY run/i);
+  });
+
+  it("still threads the ingest policy under session recovery — body and tail are shared, not forked", () => {
+    expect(confirmPrompt(false, true)).toMatch(/is INGESTED into SellerOps/i);
+    const noIngestRecovery = confirmPrompt(true, true);
+    expect(noIngestRecovery).toMatch(/THIS RUN IS --no-ingest/);
+    expect(noIngestRecovery).not.toMatch(/is INGESTED into SellerOps/i);
+    // The by-construction lever and fail-closed tail survive the branch.
+    expect(RECOVERY_PROMPT).toMatch(/non-mutating BY CONSTRUCTION, do not act/i);
+    expect(RECOVERY_PROMPT).toMatch(/fails closed/i);
+  });
+});
+
 /**
  * A3 — the CLI operator recovery loop (D-029).
  *

@@ -64,6 +64,7 @@ import {
   classifyOnlyMisuseMessage,
   hasLiveRunApproval,
   hasNoIngest,
+  hasSessionRecovery,
   isClassifyOnly,
 } from "./live-run-approval";
 import { sentinelPathFor } from "./probe-sentinel";
@@ -498,16 +499,27 @@ export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun
  *  - **The timings are INTERPOLATED from the constants**, never restated in prose. A future timer
  *    change cannot leave the operator reading a stale number.
  *  - **It describes the MECHANISM and defers the confirm/do-not-confirm choice to the run's
- *    approved scope.** This prompt is shared across scopes (Run 5 = act-but-never-confirm; the
- *    export pilot = act + confirm + ingest), so hardcoding either is wrong for the other. The
- *    dispatch record carries the choreography; this prompt carries the facts.
+ *    approved scope.** On the confirm/ingest axis the prompt is shared across scopes (Run 5 =
+ *    act-but-never-confirm; the export pilot = act + confirm + ingest), so hardcoding either is
+ *    wrong for the other. The dispatch record carries the choreography; this prompt carries the facts.
  *
  * It is a FUNCTION of the run's ingest policy for the same reason: it once said "there is no
  * no-ingest mode", which `--no-ingest` made false. What the human is told about the fate of their
  * data must be derived from what this run will actually do, never restated as a constant.
+ *
+ * It is ALSO a function of the run's SCOPE on one axis the "shared across scopes" note above did not
+ * contemplate: **login-first vs signal-logged-out.** The default head tells the operator to log in and
+ * reach the export surface *before* the first signal — correct for the export pilot / Run 5, but the
+ * exact opposite of the session-recovery scope, whose premise is signalling WHILE LOGGED OUT so the run
+ * parks on `LOGIN_REQUIRED` and recovers. Run 6 (§8-23) proved one head cannot serve both on this axis
+ * and left "should the entrypoint branch its operator prose on run scope" reported-not-resolved; this
+ * `sessionRecovery` branch is that resolution (PO, 2026-07-17). It swaps ONLY the head prose — the
+ * ingest body and tail stay shared because they describe what happens *after* recovery, and no gating,
+ * readiness, or run behaviour changes. `recoveryPrompt` (the second-signal prose) was already correct.
  */
-export function confirmPrompt(declineIngest: boolean): string {
-  return [...PROMPT_HEAD, ...(declineIngest ? PROMPT_NO_INGEST : PROMPT_INGEST), ...PROMPT_TAIL].join("\n");
+export function confirmPrompt(declineIngest: boolean, sessionRecovery = false): string {
+  const head = sessionRecovery ? PROMPT_HEAD_RECOVERY : PROMPT_HEAD;
+  return [...head, ...(declineIngest ? PROMPT_NO_INGEST : PROMPT_INGEST), ...PROMPT_TAIL].join("\n");
 }
 
 const PROMPT_HEAD = [
@@ -534,6 +546,34 @@ const PROMPT_HEAD = [
   "Whether you complete any NAVER confirmation that may appear is defined by THIS RUN'S",
   "APPROVED SCOPE — not by this prompt. The Runtime cannot see such a dialog; a started",
   "download is the only evidence you completed one.",
+  "",
+];
+
+/**
+ * The session-recovery head (`--session-recovery`). Same facts, opposite opening choreography: the
+ * operator signals WHILE LOGGED OUT on purpose, the run parks on `LOGIN_REQUIRED`, and `recoveryPrompt`
+ * then carries the rest. It deliberately does NOT restate the two-windows / period-scope guidance —
+ * those apply only after recovery, and `recoveryPrompt` re-prints them there — so this head carries no
+ * interpolated timings and cannot go stale on a timer change.
+ */
+const PROMPT_HEAD_RECOVERY = [
+  "",
+  "This is a SESSION-RECOVERY run. Do NOT log in first — that is the point.",
+  "",
+  "A browser window is open on NAVER, logged OUT by design. In that SAME window:",
+  "  1) Do NOT log in yet, and do NOT touch the export control.",
+  "  2) Signal readiness NOW (in Claude Code, just say \"ready\") WHILE STILL LOGGED OUT.",
+  "",
+  "The Runtime re-reads the page, finds no session, and PARKS on LOGIN_REQUIRED.",
+  "This is EXPECTED — the run is paused, not failed. It then prints a recovery",
+  "prompt that walks you through the rest, in the SAME window:",
+  "  - complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself,",
+  "  - RETURN to the review-management export surface yourself,",
+  "  - signal readiness AGAIN.",
+  "",
+  "Only after that second signal does the Runtime highlight the export control and",
+  "the two download windows begin. At the export barrier, follow THIS RUN'S approved",
+  "scope — for a non-mutating run, click nothing and let the window lapse.",
   "",
 ];
 
@@ -693,6 +733,7 @@ export async function awaitFreshSentinel(path: string, timeoutMs: number, interv
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const declineIngest = hasNoIngest(args);
+  const sessionRecovery = hasSessionRecovery(args);
   banner(declineIngest);
   const refusal = liveRunRefusal(args, process.env);
   if (refusal) {
@@ -724,7 +765,7 @@ async function main(): Promise<void> {
   try {
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
-    console.error(confirmPrompt(declineIngest));
+    console.error(confirmPrompt(declineIngest, sessionRecovery));
     console.error("");
     console.error("  Sentinel file (create this when ready):");
     console.error(`    ${sentinelPath}`);
