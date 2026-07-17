@@ -31,6 +31,20 @@ export const CLASSIFY_ONLY_FLAGS = ["--classify-only", "--no-upload"] as const;
  */
 export const NO_INGEST_FLAG = "--no-ingest";
 
+/**
+ * Action Window runtime only: this run is dispatched for the SESSION-RECOVERY scope — the operator
+ * deliberately signals readiness WHILE LOGGED OUT so the run parks on `LOGIN_REQUIRED` and then walks
+ * them through recovery (log in, return to the export surface, signal again). Run 6 (§8-23) exercised
+ * this live and found the initial `confirmPrompt` prose was the export-pilot's ("log in first, reach
+ * the export surface, then signal") — the exact opposite of this scope's premise.
+ *
+ * ⚠ This is a PROSE flag, not a behaviour or safety flag. It swaps ONLY the initial operator prompt to
+ * match the recovery choreography; it changes no gating, readiness, timeout, or run behaviour, and it
+ * does NOT imply {@link APPROVAL_FLAG} — a run still refuses without explicit approval. The park→recover
+ * machinery already fires on any logged-out first signal; this flag just makes the first prompt honest.
+ */
+export const SESSION_RECOVERY_FLAG = "--session-recovery";
+
 /** Did the operator pass the explicit live-run approval flag? */
 export function hasLiveRunApproval(args: string[]): boolean {
   return args.includes(APPROVAL_FLAG);
@@ -44,6 +58,11 @@ export function isClassifyOnly(args: string[]): boolean {
 /** Did the operator ask the Action Window runtime to decline the ingest handoff? */
 export function hasNoIngest(args: string[]): boolean {
   return args.includes(NO_INGEST_FLAG);
+}
+
+/** Is this run dispatched for the session-recovery scope (signal logged-out, park, recover)? */
+export function hasSessionRecovery(args: string[]): boolean {
+  return args.includes(SESSION_RECOVERY_FLAG);
 }
 
 /**

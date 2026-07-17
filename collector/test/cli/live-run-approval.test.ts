@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   APPROVAL_FLAG,
+  SESSION_RECOVERY_FLAG,
   approvalRequiredMessage,
   hasLiveRunApproval,
+  hasSessionRecovery,
   isClassifyOnly,
 } from "../../src/cli/live-run-approval";
 
@@ -78,5 +80,29 @@ describe("isClassifyOnly", () => {
 
   it("is order-independent", () => {
     expect(isClassifyOnly(["--no-upload", "--discover"])).toBe(true);
+  });
+});
+
+describe("hasSessionRecovery", () => {
+  it("detects --session-recovery", () => {
+    expect(hasSessionRecovery([SESSION_RECOVERY_FLAG, APPROVAL_FLAG])).toBe(true);
+  });
+
+  it("is false when the flag is absent", () => {
+    expect(hasSessionRecovery(["--no-ingest", APPROVAL_FLAG])).toBe(false);
+    expect(hasSessionRecovery([])).toBe(false);
+  });
+
+  it("is order-independent", () => {
+    expect(hasSessionRecovery([APPROVAL_FLAG, SESSION_RECOVERY_FLAG])).toBe(true);
+  });
+
+  it("is not fooled by a prefix-similar flag", () => {
+    expect(hasSessionRecovery(["--session-recovery-mode"])).toBe(false);
+  });
+
+  it("is a PROSE flag — it does NOT imply live-run approval", () => {
+    // The scope flag swaps operator prose only; it must never stand in for the approval gate.
+    expect(hasLiveRunApproval([SESSION_RECOVERY_FLAG])).toBe(false);
   });
 });
