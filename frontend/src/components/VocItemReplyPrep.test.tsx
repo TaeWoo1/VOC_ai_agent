@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VocItemReplyPrep } from "./VocItemReplyPrep";
 import { api } from "../lib/apiClient";
-import type { ReviewReplyDraft, ReviewReplyPrep } from "../lib/types";
+import type { ReviewReplyApprovalResponse, ReviewReplyDraft, ReviewReplyPrep } from "../lib/types";
 
 vi.mock("../lib/apiClient", () => ({
   api: {
@@ -447,6 +447,73 @@ describe("VocItemReplyPrep", () => {
     await user.click(screen.getByRole("button", { name: "복사" }));
     expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByText(/복사했습니다/)).toBeNull();
+  });
+
+  /**
+   * A copy must not land DURING a withdrawal.
+   *
+   * The withdrawal clears `copied`/`manualCopy` and sets `busy`, but has not yet refreshed
+   * `prep` — so `approved` and `canCopy` both still read true and the 복사 button is still
+   * rendered. It is aria-disabled, which does not stop a click. Without the in-flight guard
+   * the copy succeeds, re-sets `copied` after the withdrawal cleared it, and the panel ends
+   * up telling the operator to paste a reply that no longer stands.
+   *
+   * The earlier stale-canCopy test cannot catch this: it renders the panel stale from mount,
+   * so the withdrawal transition is never exercised.
+   */
+  it("refuses to copy while a withdrawal is in flight, and never claims one happened", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    stubClipboard({ writeText });
+
+    let resolveWithdraw: (v: ReviewReplyApprovalResponse) => void = () => {};
+    vi.mocked(api.decideReviewReplyApproval).mockReturnValue(
+      new Promise<ReviewReplyApprovalResponse>((r) => {
+        resolveWithdraw = r;
+      }),
+    );
+    // Still APPROVED + copyable after the write resolves — the panel re-reads, and only then
+    // learns the approval is gone. The window under test is before that.
+    await renderPanel(APPROVED);
+
+    await user.click(screen.getByRole("button", { name: "승인 해제" }));
+    // Mid-flight: the button is still on screen (prep has not refreshed) and still clickable.
+    await user.click(screen.getByRole("button", { name: "복사" }));
+
+    expect(writeText).not.toHaveBeenCalled();
+
+    resolveWithdraw({ actionRef: REF, state: "WITHDRAWN", replayed: false });
+    await waitFor(() => expect(api.getReviewReplyPrep).toHaveBeenCalledTimes(2));
+    // And no success message survives the decision.
+    expect(screen.queryByText(/복사했습니다/)).toBeNull();
+  });
+
+  /**
+   * The no-clipboard fallback IS the copy path on a non-secure origin, so it has to close
+   * when the button does. Nothing clears `manualCopy` on a decision change, and the render
+   * used to be gated only on it being non-null — leaving "직접 선택해 복사하세요" on screen
+   * beside a button that had just refused the same action.
+   */
+  it("withdraws the manual-copy fallback when the decision leaves 대응 필요", async () => {
+    const user = userEvent.setup();
+    stubClipboard(undefined); // no clipboard API — the LAN-dev origin
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(APPROVED);
+    const { rerender } = render(
+      <VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="RESPONSE_NEEDED" />,
+    );
+    await screen.findByRole("heading", { name: "답변 준비" });
+
+    await user.click(screen.getByRole("button", { name: "복사" }));
+    expect(await screen.findByLabelText("승인된 답변 (직접 복사)")).toHaveValue("합성-승인된-답변");
+
+    // A sibling records 지켜보기: the row hands the panel the live decision.
+    rerender(<VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="MONITOR" />);
+
+    expect(screen.queryByLabelText("승인된 답변 (직접 복사)")).toBeNull();
+    expect(screen.queryByText(/직접 선택해 복사하세요/)).toBeNull();
+    // The button's own refusal is what the operator sees instead — one message, not two
+    // contradicting each other.
+    expect(screen.getByText(/'대응 필요'로 되돌리면 복사할 수 있습니다/)).toBeTruthy();
   });
 
   /** The exit is never gated — withdrawal does not depend on the disposition. */

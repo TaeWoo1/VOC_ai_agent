@@ -258,6 +258,19 @@ export function VocItemReplyPrep({
   }
 
   async function copy() {
+    // Refused while any write is in flight — the same guard `save` and `decide` carry, and
+    // for the same reason: the buttons are aria-disabled rather than natively disabled, so
+    // they still receive clicks, and only the ref updates synchronously enough to stop one.
+    //
+    // Load-bearing here in a way it is not on the others. A withdrawal in flight has already
+    // cleared `copied`/`manualCopy` and set `busy`, but has NOT yet refreshed `prep` — so
+    // `approved` and `canCopy` both still read true, and a click landing in that window
+    // copies the body and re-sets `copied` AFTER the withdrawal cleared it. The panel then
+    // finishes withdrawing and tells the operator "복사했습니다. 채널에 직접 붙여넣으세요"
+    // about a reply that no longer stands.
+    if (inFlight.current) {
+      return;
+    }
     // The server sends `approvedBody` only when copying is allowed, so this cannot reach
     // for the editor buffer even by mistake — there is nothing else to reach for. That is
     // the point: an unsaved keystroke nobody approved must never land in a public reply.
@@ -419,9 +432,18 @@ export function VocItemReplyPrep({
         {!working && copied ? "복사했습니다. 채널에 직접 붙여넣으세요." : ""}
       </p>
 
-      {manualCopy != null ? (
+      {manualCopy != null && canCopy ? (
         // A capability limit, not a failure — and NOT a claim that anything was copied.
         // The text is the approved body, selectable, so the operator can take it by hand.
+        //
+        // Gated on `canCopy`, not just on having text: nothing clears `manualCopy` when a
+        // sibling moves the decision, and on a no-clipboard origin THIS is the copy path —
+        // so without the gate the panel would keep offering "직접 선택해 복사하세요" beside a
+        // button that has just refused the same action. That inverts the one invariant this
+        // design rests on: the client may refuse what the server allows, never the reverse.
+        //
+        // Withheld rather than cleared, so restoring 대응 필요 restores the fallback the
+        // operator was mid-way through using.
         <div role="group" aria-label="승인된 답변" className="flex flex-col gap-1">
           <p className="text-sm text-bad">
             이 환경에서는 자동 복사를 할 수 없습니다. 아래 내용을 직접 선택해 복사하세요.
