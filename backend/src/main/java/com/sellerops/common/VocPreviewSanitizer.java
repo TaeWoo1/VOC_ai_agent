@@ -6,17 +6,45 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Deterministic, read-time redactor that turns raw VOC text (a review/inquiry
- * title or body) into a short operator preview — or nothing. Channel-generic and
- * fail-closed: it takes plain text only (no channel logic) and, when in doubt,
- * suppresses rather than emit risky content.
+ * Deterministic, read-time redactor for raw VOC text (a review/inquiry title or body).
+ * Channel-generic and fail-closed: it takes plain text only (no channel logic) and, when in
+ * doubt, redacts rather than emit risky content.
  *
  * <p>Conservative by design and <b>not</b> a guarantee of perfect PII removal. It
  * reuses {@link PiiMasker} for phone/email and adds URLs, resident-registration /
  * card / bank-like numbers, long numeric IDs, messenger handles, token/secret-like
  * blobs, file paths, and a narrow Korean-address heuristic. Each match becomes a
- * fixed {@code [...]} token; if the surviving non-token text is too short, the whole
- * preview is suppressed. Pure: no DB, no clock, no logging of the input.
+ * fixed {@code [...]} token. Pure: no DB, no clock, no logging of the input.
+ *
+ * <p><b>Two entry points over one rule set</b>, differing only in what they do after
+ * redacting:
+ *
+ * <ul>
+ *   <li>{@link #sanitize(String)} — the <b>preview</b>: one line, 60 characters, suppressed
+ *       entirely when too little real text survives. For a list row, where the operator is
+ *       recognising an item rather than reading it, and where showing nothing costs them
+ *       nothing.
+ *   <li>{@link #redactFullBody(String)} — the <b>whole body</b>: no truncation, no
+ *       suppression, line structure preserved. For the reply-preparation surface, where the
+ *       operator must actually read the complaint to answer it.
+ * </ul>
+ *
+ * <p>Both run the identical {@link #redact} pipeline over identically-shaped input, and both
+ * halves of that matter. Sharing {@code redact} alone is NOT enough to make them agree: what
+ * gets redacted is a function of {@code redact} ∘ normalization, and several patterns admit
+ * only a single separator character, so a path that left a two-character whitespace run in
+ * place would silently redact less while appearing to share every rule. That is why
+ * {@link #normalizeForRedaction} is shared too, and why it guarantees no whitespace run
+ * reaches {@code redact} longer than one character. The two paths may differ on presentation
+ * — one line vs many — never on how much whitespace {@code redact} sees.
+ *
+ * <p><b>Why full-body exposure is not a hole in the preview's fail-closed rule.</b> The
+ * preview's suppression is a <i>display</i> judgement — a 60-character snippet that is
+ * mostly {@code [번호]} tells the operator nothing, so it shows nothing. It was never a
+ * claim that the redacted text is unsafe to show; the redaction is what makes it safe, and
+ * the redaction is the same here. Product scope v1.4 records the seller-facing exception
+ * (§9) that authorizes this surface; the collector's sanitized-output contract is untouched
+ * and is a different rule about a different boundary.
  */
 public final class VocPreviewSanitizer {
 
@@ -38,7 +66,27 @@ public final class VocPreviewSanitizer {
     private static final List<String> TOKENS = List.of(
             T_LINK, "[이메일]", "[전화번호]", T_RRN, T_NUMBER, T_CONTACT, T_SECRET, T_PATH, T_ADDRESS);
 
-    private static final Pattern WS = Pattern.compile("\\s+");
+    /**
+     * A whitespace run, Unicode-aware.
+     *
+     * <p>{@code (?U)} is load-bearing, not decoration. Java's bare {@code \s} is
+     * {@code [ \t\n\x0B\f\r]} — ASCII only — so a non-breaking space (U+00A0), an ideographic
+     * space (U+3000), or a narrow NBSP (U+202F) is not whitespace to it and survives
+     * normalization untouched. None of those are exotic: they are what arrives when a customer
+     * pastes from a web page or a word processor, or types on a CJK IME. And they defeat the
+     * redaction patterns exactly as a two-character run does, because {@code [-.\s]?} does not
+     * match them either — {@code 010<NBSP>1234<NBSP>5678} went through completely unredacted.
+     *
+     * <p>{@code (?U)} makes {@code \s} mean Unicode {@code White_Space}, which covers all three.
+     * This was a pre-existing gap in the preview, not something the full-body path introduced —
+     * both paths shared it, which is precisely why comparing them could not reveal it.
+     *
+     * <p>Still not airtight, and the class note above already says so rather than promising
+     * otherwise: zero-width characters (U+200B, U+FEFF) are not {@code White_Space} under any
+     * flag, so they remain a way to split a digit run. That is a separate, older evasion than
+     * the one this pattern closes.
+     */
+    private static final Pattern WS = Pattern.compile("(?U)\\s+");
     // Scheme/www URLs and Kakao open-chat links (run before generic patterns).
     private static final Pattern URL = Pattern.compile("(?i)(?:https?://|www\\.)\\S+");
     // Resident registration number (6-7), dashed.
@@ -72,14 +120,48 @@ public final class VocPreviewSanitizer {
     private VocPreviewSanitizer() {
     }
 
+    /**
+     * Normalize raw VOC text so it is safe to hand to {@link #redact}.
+     *
+     * <p><b>The one-whitespace-character rule is part of the redaction contract, not
+     * formatting.</b> Several patterns admit at most a SINGLE separator between digit groups
+     * — {@code PiiMasker.MOBILE} is {@code 01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}},
+     * {@link #CARD} is {@code \d{4}[-\s]\d{4}…} — so any whitespace RUN of two or more
+     * characters reaching {@link #redact} silently defeats them. A trailing space before a
+     * line break is two characters, and it is ordinary in typed review text: a body
+     * containing {@code "010 \n1234 \n5678"} would pass through completely unredacted.
+     *
+     * <p>So every whitespace run collapses to exactly one character here, and both entry
+     * points go through this method. They differ only in WHICH character survives — never in
+     * how many — which is what lets them share {@link #redact} and actually agree about what
+     * is sensitive, rather than merely appear to.
+     *
+     * <p>{@code preserveLineBreaks=false} (the preview) flattens everything to spaces: a
+     * snippet is one line. {@code true} (the full body) keeps a run that contained a newline
+     * as a single {@code \n}, so the operator still sees where the lines broke.
+     *
+     * <p><b>What that costs, stated rather than hidden:</b> with {@code true}, a blank line
+     * (a run of two newlines) also collapses to one, so paragraph spacing is lost and
+     * consecutive lines sit flush. That is deliberate. Preserving {@code \n\n} would put a
+     * two-character run back in front of {@link #redact} and reopen the hole above for any
+     * body whose sensitive span happens to straddle a paragraph break — trading a real leak
+     * for cosmetics. Line structure survives; only its spacing does not.
+     *
+     * <p>Not lowercased: the output is human text, and the case-insensitive patterns carry
+     * their own {@code (?i)}.
+     */
+    private static String normalizeForRedaction(String raw, boolean preserveLineBreaks) {
+        String nfc = Normalizer.normalize(raw, Normalizer.Form.NFC).strip();
+        return WS.matcher(nfc).replaceAll(match ->
+                preserveLineBreaks && match.group().indexOf('\n') >= 0 ? "\n" : " ");
+    }
+
     /** Sanitize raw title/content into an operator-safe preview (or suppress it). */
     public static SafePreviewResult sanitize(String raw) {
         if (raw == null || raw.isBlank()) {
             return SafePreviewResult.suppressed();
         }
-        // NFC + collapse whitespace; intentionally NOT lowercased (preview is human text).
-        String normalized = WS.matcher(Normalizer.normalize(raw, Normalizer.Form.NFC).strip())
-                .replaceAll(" ");
+        String normalized = normalizeForRedaction(raw, false);
 
         String redacted = redact(normalized);
 
@@ -92,6 +174,36 @@ public final class VocPreviewSanitizer {
         String preview = truncate(redacted);
         PreviewStatus status = redacted.equals(normalized) ? PreviewStatus.SAFE : PreviewStatus.REDACTED;
         return new SafePreviewResult(preview, status);
+    }
+
+    /**
+     * Redact a whole VOC body for a surface that must display all of it — the same rules as
+     * {@link #sanitize}, without the preview's truncation or suppression.
+     *
+     * <p>Line structure is preserved (see {@link #normalizeForRedaction}); everything else about the
+     * redaction is identical, because it is literally the same {@link #redact} call.
+     *
+     * <p>Never suppresses on thinness. A body that redacts down to almost nothing still
+     * comes back, because the operator is answering this review either way and a
+     * silently-empty panel would tell them the review is empty rather than that it was
+     * mostly sensitive. {@link RedactedBody#redacted()} is how the surface says so out loud.
+     * The one null case is a null/blank source: nothing in, nothing out.
+     */
+    public static RedactedBody redactFullBody(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return RedactedBody.empty();
+        }
+        // Same normalization as the preview, differing only in which single character a
+        // whitespace run collapses to — see normalizeForRedaction. CR/CRLF fold into \n first
+        // so a Windows line ending is one run, not a run plus a stray \r.
+        String normalized = normalizeForRedaction(
+                raw.replace("\r\n", "\n").replace("\r", "\n"), true);
+        if (normalized.isEmpty()) {
+            return RedactedBody.empty();
+        }
+
+        String redacted = redact(normalized);
+        return new RedactedBody(redacted, !redacted.equals(normalized));
     }
 
     private static String redact(String s) {
