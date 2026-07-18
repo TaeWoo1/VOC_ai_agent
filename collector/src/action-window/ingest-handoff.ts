@@ -58,11 +58,12 @@ export function neutralUploadName(artifactRef: string): string {
 /**
  * Pure: reduce a backend `IngestResult` to the sanitized `{ ok, processed }`. `ok` requires a clean
  * SUCCESS (an all-duplicates re-upload is SUCCESS with 0 processed — a legitimate idempotent
- * completion); PARTIAL / FAILED / any failed row fails closed. `processed` echoes only `successRows`.
+ * completion); PARTIAL / FAILED / any failed row — or an UNREADABLE (non-finite) failed-row count —
+ * fails closed, so an unknown failed count can never falsely complete a run. `processed` echoes only
+ * `successRows`.
  */
 export function sanitizeBackendIngest(result: IngestResult): AwIngestOutcome {
-  const failed = Number.isFinite(result.failedRows) ? result.failedRows : 0;
-  const ok = result.status === "SUCCESS" && failed === 0;
+  const ok = result.status === "SUCCESS" && Number.isFinite(result.failedRows) && result.failedRows === 0;
   const processed = ok && Number.isFinite(result.successRows) && result.successRows > 0 ? result.successRows : 0;
   return { ok, processed };
 }

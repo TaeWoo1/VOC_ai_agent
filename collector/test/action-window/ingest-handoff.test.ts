@@ -98,6 +98,22 @@ describe("sanitizeBackendIngest", () => {
     });
   });
 
+  it("SUCCESS with a non-finite (unreadable) failed count fails closed — never a fake success", () => {
+    for (const failedRows of [NaN, Number.POSITIVE_INFINITY, undefined as unknown as number]) {
+      expect(sanitizeBackendIngest(ingestResult({ status: "SUCCESS", successRows: 3, failedRows }))).toEqual({
+        ok: false,
+        processed: 0,
+      });
+    }
+  });
+
+  it("SUCCESS with failedRows exactly 0 stays ok — the finite-zero boundary is pinned", () => {
+    expect(sanitizeBackendIngest(ingestResult({ status: "SUCCESS", successRows: 3, failedRows: 0 }))).toEqual({
+      ok: true,
+      processed: 3,
+    });
+  });
+
   it("returns only the allow-listed keys — no status/id/error text", () => {
     const outcome = sanitizeBackendIngest(ingestResult({ errorMessage: "raw backend error", syncJobId: "raw-id" }));
     expect(Object.keys(outcome).sort()).toEqual([...AW_INGEST_OUTCOME_KEYS].sort());
