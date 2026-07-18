@@ -30,7 +30,9 @@ here. Report it; do not silently edit it.
    status **this HANDOFF wins** regardless. A fuller current-state.md body rewrite is a deliberately-deferred
    separate slice, not this refresh.
 2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4; §8-18 is
-   Run 5; **§8-23 is Run 6 — the last live run** (session recovery, LIVE-PROVEN); §8-19 (A1), §8-20 (A2-B),
+   Run 5; §8-23 is Run 6 (session recovery, LIVE-PROVEN); **§8-24 is the last live contact** — 2026-07-18
+   overlay-label check, non-mutating, on which an operator's incidental export click surfaced a real-export
+   `ARTIFACT_INVALID` finding; §8-19 (A1), §8-20 (A2-B),
    §8-21 (A3) and §8-22 (A4) are **offline** slices — **live-verified by nothing**. Milestone A shipped a
    capability, not a live proof; A4 rehearsed recovery in a browser over a synthetic DOM, which is **not** a
    live proof either — Run 6 (§8-23) is what proved the recovery loop live.
@@ -55,9 +57,13 @@ here. Report it; do not silently edit it.
 human barrier is real** (Run 5, 2026-07-16 — `USER_ACTION_OBSERVED` fires on a real click), and **the CLI
 recovery loop is now LIVE-PROVEN** — Run 6 (2026-07-17, §8-23) parked a real run on a logged-out session and
 **recovered it live** (`aw.live.recovery { outcome: "recovered", attempt: 1 }`) to a READY export surface
-across a seller-performed login + navigation. The §8-8 → §8-23 arc is complete. **Run 6 is the last live run
-(recovery / zero-click); Run 5 remains the last click/confirmation run.** There is no open Runtime blocker;
-what remains is polish and product decisions.
+across a seller-performed login + navigation. The §8-8 → §8-23 arc is complete. **§8-24 (2026-07-18) is now
+the last live contact** — a non-mutating overlay-label check (the operator-legible highlight label, since
+merged, PR #306) on which the operator's incidental export click reached the download leg and surfaced a
+**new finding: a real NAVER export download failed D-021 quarantine validation (`ARTIFACT_INVALID`)**,
+diverging from Run 4's clean OOXML. **Run 6 remains the last recovery / zero-click run; Run 5 the last
+barrier / confirmation run.** There is no open Runtime blocker; what remains is polish, the `ARTIFACT_INVALID`
+follow-up (a classification probe that needs a fresh single-use G6), and product decisions.
 
 ## Live run results (chronological — every G6 below is CONSUMED)
 
@@ -72,6 +78,7 @@ what remains is polish and product decisions.
 | **Run 4 — full export pilot** | **07-15** | **COMPLETED 3-of-3.** Real click → download → quarantine-validate (OOXML sniff) → real `/api/uploads` ingest. Backend `SUCCESS` **55/55/0/0**, clean first ingest. §8-17 |
 | **Run 5 — barrier + observation** | **07-16** | **`USER_ACTION_OBSERVED` LIVE-PROVEN** — `observed: true` on a real click, the first time ever; persisted `humanCheckpoint.observed` agrees (`run_a911f3c6799c`). Click-but-never-confirm ⇒ benign `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. **Non-mutating, verified.** First machine evidence of live period/scope. §8-18 |
 | **Run 6 — session recovery** | **07-17** | **RECOVERY LIVE-PROVEN** — signal-while-logged-out → `LOGIN_REQUIRED` park → seller logs in + returns → the real driver re-probes and clears the blocker (`aw.live.recovery { outcome: "recovered", attempt: 1 }`). **D-028's falsifier lands POSITIVE** (post-login surface `READY`, not `UNSUPPORTED_STATE`); the unguarded `page.content()` race did NOT throw this once. Zero clicks ⇒ benign `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3 (`run_57ab9b52a3c0`). **Non-mutating, verified.** `selectedRangePresent: false` — a true negative (no range selected); the live positive stays OPEN. §8-23 |
+| **§8-24 — overlay-label check (incidental click)** | **07-18** | **Overlay operator-label LIVE-VERIFIED** — Korean highlight label shown (not the raw `copyKey`), readable, positioned above the control (PR #306, since merged). Operator clicked the export control ⇒ a **real export download FAILED D-021 quarantine validation (`ARTIFACT_INVALID`)**, diverging from Run 4's clean OOXML — **NEW FINDING, cause undetermined, artifact not inspectable.** **Non-mutating** (`--no-ingest`; file sniffed-invalid then deleted; no validate-pass, no ingest, backend never contacted). Ran against **uncommitted** code (diagnostic-only label change — not the finding's cause). Follow-up classification probe needs a fresh single-use G6. §8-24 |
 
 **⚠ Run 4 MUTATED, as authorized:** 55 real test-seller review rows are in the **local dev** backend DB
 (`localhost:8080`, never production). **Not reversible by the Runtime.**
