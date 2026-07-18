@@ -4,7 +4,7 @@
 > **This file grants nothing.** It authorizes no live action, no commit, no push. It is a map, not a gate.
 > Canonical detail lives in the docs linked below; where this file and they disagree, **they win**.
 
-**Updated:** 2026-07-17 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
+**Updated:** 2026-07-18 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
 `.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
 
 **Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
@@ -23,13 +23,17 @@ here. Report it; do not silently edit it.
 
 ## Where to read first
 
-1. [`current-state.md`](current-state.md) — the living handoff state. ⚠ Its `updated at:` header still says
-   **2026-07-13**, but its bullets carry `UPDATE` segments through 2026-07-15. **Trust the UPDATE segments,
-   not the header date.** The bullets are long and accrete rather than being rewritten.
+1. [`current-state.md`](current-state.md) — the living handoff state. ⚠ Its **top fixed-metadata block** is
+   current (refreshed 2026-07-18: baseline `da47a0a`, tests 3014/31) and its **newest dated bullet** carries
+   the Run 5 → Run 6 close-out; **but the accreted body below that stops around Run 4** and reads pre-live in
+   places. **Trust the top block + the newest bullet, not the older accreted narrative** — and for Runtime
+   status **this HANDOFF wins** regardless. A fuller current-state.md body rewrite is a deliberately-deferred
+   separate slice, not this refresh.
 2. [`r4-evidence-pack.md`](r4-evidence-pack.md) — §8-N dated live/offline evidence. §8-17 is Run 4; §8-18 is
-   Run 5 (**still the last live run**); §8-19 (A1), §8-20 (A2-B), §8-21 (A3) and §8-22 (A4) are **offline**
-   slices — **live-verified by nothing**. Milestone A shipped a capability, not a live proof; A4 rehearsed
-   it in a browser over a synthetic DOM, which is **not** a live proof either.
+   Run 5; **§8-23 is Run 6 — the last live run** (session recovery, LIVE-PROVEN); §8-19 (A1), §8-20 (A2-B),
+   §8-21 (A3) and §8-22 (A4) are **offline** slices — **live-verified by nothing**. Milestone A shipped a
+   capability, not a live proof; A4 rehearsed recovery in a browser over a synthetic DOM, which is **not** a
+   live proof either — Run 6 (§8-23) is what proved the recovery loop live.
 3. [`r4-preparation.md`](r4-preparation.md) — **normative**: §3 gates G1–G6, §4 live-action safety
    boundary, §6 adapter ladder, §7 abort criteria.
 4. [`r4-gate-record.md`](r4-gate-record.md) — recorded gate sign-offs + the export-pilot pre-dispatch runbook.
@@ -40,16 +44,20 @@ here. Report it; do not silently edit it.
    choreography lives in Run 5's own dispatch record. **Do not reconcile the two.**
 6. The per-run dispatch records (`r4-run2-…`, `r4-run3-…`, `r4-run4-…`, `r4-run5-…`) for run-specific
    choreography. **Executed records are frozen** — later truth arrives as a forward-pointer, never an edit.
-   ⚠ [`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md) is a
-   **DRAFT — NOT AUTHORIZED, all-☐**. It **names** two product-owner decisions it deliberately does not
-   take (a `session recovery` G3 scope; a longer authorized live window) and **grants nothing**.
+   [`r4-run6-session-recovery-dispatch-record.md`](r4-run6-session-recovery-dispatch-record.md) is now an
+   **EXECUTED record — Run 6 ran 2026-07-17, recovery LIVE-PROVEN, G6 CONSUMED** (§8-23). It is **frozen**;
+   its `session recovery` G3 scope + longer live window were ratified as [D-030](decisions.md)/[D-031](decisions.md).
+   **The spent G6 re-authorizes nothing** — any further live contact needs a fresh single-use G6.
 
 ## State in one line
 
-**The NAVER supervised export pilot is PROVEN END-TO-END on the real surface** (Run 4, 2026-07-15), and
-**the human barrier is now real** — Run 5 (2026-07-16) live-proved that `USER_ACTION_OBSERVED` fires on a
-real click, which had **never** happened before and was `false` on Run 4 itself. The §8-8 → §8-18 arc is
-complete. There is no open Runtime blocker; what remains is polish and product decisions.
+**The NAVER supervised export pilot is PROVEN END-TO-END on the real surface** (Run 4, 2026-07-15), **the
+human barrier is real** (Run 5, 2026-07-16 — `USER_ACTION_OBSERVED` fires on a real click), and **the CLI
+recovery loop is now LIVE-PROVEN** — Run 6 (2026-07-17, §8-23) parked a real run on a logged-out session and
+**recovered it live** (`aw.live.recovery { outcome: "recovered", attempt: 1 }`) to a READY export surface
+across a seller-performed login + navigation. The §8-8 → §8-23 arc is complete. **Run 6 is the last live run
+(recovery / zero-click); Run 5 remains the last click/confirmation run.** There is no open Runtime blocker;
+what remains is polish and product decisions.
 
 ## Live run results (chronological — every G6 below is CONSUMED)
 
@@ -63,6 +71,7 @@ complete. There is no open Runtime blocker; what remains is polish and product d
 | Run 3 — precedence fix | 07-14 | **PASSED** readiness, reached the human barrier (2-of-3). Observe-only; benign `DOWNLOAD_TIMEOUT`. Readiness false-empty **RESOLVED LIVE**. §8-16 |
 | **Run 4 — full export pilot** | **07-15** | **COMPLETED 3-of-3.** Real click → download → quarantine-validate (OOXML sniff) → real `/api/uploads` ingest. Backend `SUCCESS` **55/55/0/0**, clean first ingest. §8-17 |
 | **Run 5 — barrier + observation** | **07-16** | **`USER_ACTION_OBSERVED` LIVE-PROVEN** — `observed: true` on a real click, the first time ever; persisted `humanCheckpoint.observed` agrees (`run_a911f3c6799c`). Click-but-never-confirm ⇒ benign `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3. **Non-mutating, verified.** First machine evidence of live period/scope. §8-18 |
+| **Run 6 — session recovery** | **07-17** | **RECOVERY LIVE-PROVEN** — signal-while-logged-out → `LOGIN_REQUIRED` park → seller logs in + returns → the real driver re-probes and clears the blocker (`aw.live.recovery { outcome: "recovered", attempt: 1 }`). **D-028's falsifier lands POSITIVE** (post-login surface `READY`, not `UNSUPPORTED_STATE`); the unguarded `page.content()` race did NOT throw this once. Zero clicks ⇒ benign `FAILED`/`DOWNLOAD_TIMEOUT`/2-of-3 (`run_57ab9b52a3c0`). **Non-mutating, verified.** `selectedRangePresent: false` — a true negative (no range selected); the live positive stays OPEN. §8-23 |
 
 **⚠ Run 4 MUTATED, as authorized:** 55 real test-seller review rows are in the **local dev** backend DB
 (`localhost:8080`, never production). **Not reversible by the Runtime.**
@@ -123,9 +132,20 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `73f027e`** (PR #280 merged, 2026-07-16). The branch is **synced — 0 ahead, 0 behind**
-  (`--ff-only`, no merge commit created locally) and holds **ZERO local-only commits**: **Milestone A —
-  A1, A2-B and A3 — is entirely on `main`.** Nothing this workstream has built is held locally.
+- **`origin/main` = `da47a0a`** (PR #289 merged, 2026-07-18). The branch is **synced — 0 ahead, 0 behind**
+  (`--ff-only`, no merge commit created locally) and holds **ZERO local-only commits**: everything this
+  workstream has built through Run 6 is on `main`. Nothing is held locally.
+  - **Since #280 (`73f027e`), the R4-relevant merges (re-derived from `git log`, 2026-07-18):** the Run 6
+    recovery-prep slices **#281 / #282 / #285** (whose *content* is already recorded — Run 6 dispatch record,
+    §8-23, [D-030](decisions.md)/[D-031](decisions.md)); **#287** `56e575d` — **the session-recovery CLI
+    prompt fix** (branches the launch/recovery prose on run scope, resolving §8-23's reported-not-resolved
+    finding); **#288 / #289** `6d87bae`+`3e7463d` — **`selectedRangePresent` offline propagation coverage +
+    the whitespace-only false-positive fix** (detector: a `value="  "` blank/placeholder no longer reads as a
+    selected range). The interleaved non-R4 merges **#283 / #284 / #286** (review-triage / review-response,
+    other workstreams) moved `collector/` + `contracts/` by **0** — `git diff --stat 73f027e..da47a0a --
+    collector/ contracts/` is confined to the CLI recovery-prep, the detector one-liner, and their tests.
+    ⚠ **Focused merge-level attribution only** — this is not the per-file forensic re-enumeration the older
+    "twelve merges" table below carries; re-derive from `git log`, do not trust this snapshot.
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
@@ -210,7 +230,31 @@ Plus **#269 / #271 / #274 / #275** — attention + ingest workstreams, **0 `coll
   say-so: `73f027e` has parents `4404b4f` + `cc9aba8`, which is what proves it was neither squashed nor
   rebased.
 
-## Last slice — A4: the synthetic-browser recovery rung, 2026-07-17 (§8-22) — **not yet on `main`**
+## Last slice — Run 6 close-out: prompt-scope fix + `selectedRangePresent` offline closure, 2026-07-18 — **all on `main`**
+
+**Three post-Run-6 slices, all merged (see Git state), all offline, zero live contact:**
+
+- **#287 (`56e575d`) — the session-recovery CLI prompt fix.** §8-23 reported (not resolved) that the launch/
+  recovery prose was the **export-pilot** prompt and wrong for a session-recovery run (it told the operator to
+  log in *before* the first signal — the exact inverse of Run 6). **Now RESOLVED on `main`:** the entrypoint
+  **branches its operator prose on run scope** (`live-run-approval.ts` + `run-action-window-live-naver.ts`), so
+  no single prompt has to be correct for both scopes. Production CLI-prose change + tests only — **no engine,
+  contract, gate, or timer change.**
+- **#288 / #289 (`6d87bae` + `3e7463d`) — `selectedRangePresent` offline propagation + boundary + the
+  whitespace fix.** The **offline half is now closed by test**: `naverSurfaceDecision` provably carries a
+  `true` end-to-end into the exact `NaverPrepareDiagnostic` a live run logs (never previously asserted — every
+  driver test asserted `false`), and a realistic positive-serialization corpus pins the regex boundary. The
+  one detector change: a `value="  "` blank/placeholder **no longer** reads as a selected range
+  (`FILLED_DATE_INPUT_RE` now requires a non-whitespace character). **Tests + a one-line detector tighten;
+  `selectedRangePresent` stays observe-only / non-gating per [D-025](decisions.md).**
+
+⚠ **The LIVE positive direction is NOT closed — [D-025](decisions.md)'s falsifier stays OPEN.** These slices
+prove *propagation* and *offline boundary* only. The live question — whether the detector can **ever** read
+`true` on a real SPA picker, where `page.content()` serializes the `value` **attribute** while a user/JS-set
+value updates only the IDL **property** — is untouched and unprovable offline; it needs a real selected range
+on real NAVER (G6 + browser), out of scope. Run 6 selected no range, so it did not settle it either.
+
+## Earlier slice — A4: the synthetic-browser recovery rung, 2026-07-17 (§8-22) — **now on `main`** (via #281/#282/#285)
 
 **The recovery loop now executes in a browser.** A3's loop was proven only against fake drivers over an
 in-process loopback; A4 drives the REAL live driver through a REAL `prepareSurface` **twice across a real
@@ -441,14 +485,17 @@ timeouts. **Zero contract / FE / backend / schema / stage / navigation change.**
   **interpolated from the timers** so it cannot restate a stale number, the period/scope line is lifted to
   prominence as the operator's own unenforced step, and it now warns that a validated download is ingested
   unconditionally. It is **exported and test-locked** — being unexported and unasserted is how it rotted.
-- **OPEN — `selectedRangePresent` is unproven in the positive direction.** Run 5 produced one **true negative**
-  (operator selected nothing, detector said nothing). ⚠ The stronger concern is **not** "hardwired `false`"
-  (withdrawn as false — see the correction above) but that the regex reads the `value` **attribute** while live
-  reads are `page.content()` serialization: a JS/user-set value updates the IDL **property** only, so on an SPA
-  picker the detector may be **incapable of ever returning `true`**. The blind spots are now characterized by
-  offline test. **A future run that does select a range settles the direction for free** — and it is D-025's
-  named falsifier: `true` → revisit a blocker **on evidence**; `false` → confirms the blindness and a blocker
-  stays off the table until a **different** detector exists.
+- **OPEN — `selectedRangePresent`'s LIVE positive direction is still unproven.** Runs 5 and 6 both produced a
+  **true negative** (operator selected nothing, detector said nothing). ⚠ The stronger concern is **not**
+  "hardwired `false`" (withdrawn as false) but that the regex reads the `value` **attribute** while live reads
+  are `page.content()` serialization: a JS/user-set value updates the IDL **property** only, so on an SPA
+  picker the detector may be **incapable of ever returning `true`**.
+  **↳ OFFLINE HALF CLOSED 2026-07-18 (#288/#289):** propagation through `naverSurfaceDecision` is now
+  test-proven end-to-end, the positive/negative boundary is characterized by a realistic corpus, and the
+  whitespace-only false-positive is fixed (`value="  "` no longer reads `true`). **The LIVE half is
+  untouched and remains [D-025](decisions.md)'s named falsifier:** a future run that actually selects a range
+  settles it for free — `true` → revisit a blocker **on evidence**; `false` → confirms the blindness and a
+  blocker stays off the table until a **different** detector exists.
 - **OPEN — the Run 4 dialog's identity.** Run 5's `dialogMatchesRecordedConsentMarkers` was **NOT_OBSERVED**;
   the question is open in **neither direction**. Also free to settle on any future click run.
 - **The `COMPLETED` path under the new timing is still unproven** — it rests on Run 4's **old-timing** evidence.
@@ -506,7 +553,7 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **2996 passed / 29 skipped** (175 files), measured 2026-07-17 after A3. Lineage, every
+- Offline baseline: **3014 passed / 31 skipped** (175 files), measured 2026-07-18 after #289. Lineage, every
   delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
   regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests) → **2899** (the
@@ -517,7 +564,12 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   `run-action-window-live-naver.test.ts`: `awaitFreshSentinel` +3 · the recovery loop +9 · `recoveryPrompt` +6 ·
   source guard +2; **file count unchanged at 175** — A3 added no test file). **#264 added 0** — it is backend
   Java + `.github/workflows/` only and touches no `collector/` file, so the merge moved the count not at all.
-  **A docs-only or backend-only change that moves this number is a red flag, not drift.**
+  → **3014 / 31 skipped** (the post-Run-6 measure): **+18 passing** across the Run 6 recovery-prep CLI slices
+  (#281/#282/#285), **#287**'s session-recovery prompt-scope tests, and **#288/#289**'s `selectedRangePresent`
+  propagation + boundary + whitespace-fix tests (`naver-surface` +3 · `export-click-signals` net · `live-run-approval`
+  · `run-action-window-live-naver`); **+2 skipped** (29 → 31) are A4's gated browser cases (default-suite-skipped,
+  `RUN_INTEGRATION`-only); **file count unchanged at 175**. **A docs-only or backend-only change that moves this
+  number is a red flag, not drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
