@@ -20,6 +20,7 @@
  */
 import {
   BLOCKER_CODES,
+  EXECUTION_MODES,
   findProhibitedFields,
   validateEventEnvelope,
   validateRunView,
@@ -285,9 +286,10 @@ export function parseOperationRun(input: unknown): OperationRunParseResult {
     typeof r.runId !== "string" ||
     r.runId !== engine.runId ||
     typeof r.channelCode !== "string" ||
+    r.channelCode !== engine.channelCode ||
     !isNonNegativeInt(r.revision) ||
     !isNonNegativeInt(r.sequence) ||
-    typeof r.executionMode !== "string" ||
+    !(typeof r.executionMode === "string" && (EXECUTION_MODES as readonly string[]).includes(r.executionMode)) ||
     !(typeof r.resumeState === "string" && (RESUME_STATES as readonly string[]).includes(r.resumeState)) ||
     !Array.isArray(r.tasks) ||
     typeof r.humanCheckpoint !== "object" ||
