@@ -83,6 +83,31 @@ describe.skipIf(!RUN)("action-window browser fixture", () => {
     });
   });
 
+  const badgeText = (page: import("playwright").Page) =>
+    page.evaluate(() => document.querySelector("[data-aw-badge]")?.textContent ?? "");
+
+  it("badge renders the operator-legible label when provided", async () => {
+    await withPage(async (page) => {
+      await page.setContent(fixtureHtml("normal"));
+      await mountOverlay(page, {
+        stepNumber: 2,
+        totalSteps: 3,
+        copyKey: "actionWindow.step.userTargetAction",
+        label: "리뷰 내보내기 버튼을 클릭하세요.",
+        guidanceEnabled: true,
+      });
+      expect(await badgeText(page)).toBe("2/3 · 리뷰 내보내기 버튼을 클릭하세요.");
+    });
+  });
+
+  it("badge falls back to the copyKey when no label is provided", async () => {
+    await withPage(async (page) => {
+      await page.setContent(fixtureHtml("normal"));
+      await mountOverlay(page, { stepNumber: 2, totalSteps: 3, copyKey: "actionWindow.step.userTargetAction", guidanceEnabled: true });
+      expect(await badgeText(page)).toBe("2/3 · actionWindow.step.userTargetAction");
+    });
+  });
+
   it("zero candidates → TARGET_NOT_FOUND", async () => {
     await withPage(async (page) => {
       const engine = engineFor("run_b2");

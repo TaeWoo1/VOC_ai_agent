@@ -19,6 +19,13 @@ export interface OverlayOptions {
   totalSteps: number;
   /** Semantic copy key (diagnostic badge label) — Runtime renders no final user prose. */
   copyKey: string;
+  /**
+   * Optional operator-legible label for the headed diagnostic badge. When a caller (the headed
+   * live/CLI run, which has no product FE) supplies it, the badge shows this instead of the raw
+   * dotted `copyKey`. It is a diagnostic aid on a dev-only overlay, NOT the product FE's localized
+   * copy — that mapping still belongs to the FE. Absent ⇒ the badge falls back to `copyKey`.
+   */
+  label?: string;
   guidanceEnabled: boolean;
 }
 
@@ -50,7 +57,7 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     ].join(";");
     const badge = document.createElement("div");
     badge.setAttribute("data-aw-badge", "");
-    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.copyKey}`;
+    badge.textContent = `${o.stepNumber}/${o.totalSteps} · ${o.label ?? o.copyKey}`;
     badge.style.cssText = "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap";
     box.appendChild(badge);
     document.body.appendChild(box);

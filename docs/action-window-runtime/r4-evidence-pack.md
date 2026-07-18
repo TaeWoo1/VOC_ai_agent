@@ -1090,6 +1090,81 @@ no retry under this G6.**
 
 ---
 
+## §8-24 — Live overlay-label check (incidental export click) — EXECUTED 2026-07-18 · overlay label LIVE-VERIFIED · **real export download → `ARTIFACT_INVALID` (NEW FINDING)** · non-mutating
+
+**A single-use live `--no-ingest` run**, authorized by the operator in the dispatching turn (this session)
+and scoped to verifying the **uncommitted overlay-label change** on `feat/r4-supervised-channel-runtime`
+(the highlight badge renders an operator-legible label in place of the raw `copyKey`). No export click was
+pre-authorized; the operator clicked the highlighted control **at the seat** and confirmed it afterward, so
+the run reached the downstream legs and surfaced a finding the no-click runs (§8-18 Run 5, §8-23 Run 6)
+could not. Backend **DOWN** (`--no-ingest`; the real uploader was never constructed). **G6-equivalent CONSUMED.**
+
+> **⚠ Code baseline is NOT a committed SHA.** This run executed against **uncommitted** working-tree changes
+> (overlay-label slice: `overlay.ts` badge text + `naver-live-driver.ts` label map/mount). That change is
+> **diagnostic-only** — it alters the highlight badge string and touches **no** detection / download /
+> quarantine / validation path — so the `ARTIFACT_INVALID` finding below is a property of the **real NAVER
+> export artifact, not of the change under test**. Every other §8 live entry cites a committed baseline;
+> this one deliberately does not, and says so.
+
+- **✅ Overlay label — LIVE-VERIFIED (the run's stated purpose).** Operator-confirmed at the real highlight:
+  the badge showed the **Korean operator label** (`리뷰 내보내기 버튼을 클릭하세요. NAVER 확인창이 뜨면 이번
+  실행 범위 안에서 확인하세요.`), **not** the raw `actionWindow.step.userTargetAction` key; **readable**;
+  **positioned above the control**, on-screen, not clipped. The `label ?? copyKey` fallback path is untouched
+  (offline-covered by `fixture-browser.test.ts`). The diagnostic overlay renders a legible line for the
+  seated operator on the real surface, where before it showed a dotted machine key.
+
+- **🔎 THE FINDING (reported, NOT resolved) — a real NAVER export download FAILED quarantine validation:
+  `blockerCode: ARTIFACT_INVALID`.** The operator's click fired a **real download**; the runtime quarantined
+  it read-only and the D-021 sniff returned **invalid** (unrecognized extension **or** OOXML magic mismatch),
+  so the run failed closed at step 3. **This diverges from §8-17 (Run 4, 2026-07-15), where the export
+  validated cleanly as OOXML — backend `SUCCESS` 55/55/0/0.** Same channel, same surface; different artifact
+  verdict.
+
+- **⚠ Cause UNDETERMINED, and the artifact is not inspectable.** Per §4.3 + D-021 the quarantine file was
+  **deleted after the sniff** (the quarantine directory is absent/clean afterward — so this is the
+  **validation-fail** verdict, not the delete-failure path), and its content may never be read or logged.
+  Candidate explanations, **all unverified**: a non-`.xlsx` export format (e.g. CSV), an interstitial/HTML
+  page saved in place of a workbook, a partial/aborted download, or a format-/period-dependent export shape.
+  **None is confirmed.** A controlled classification probe (extension + magic **bucket** only, no content)
+  could narrow it — and would need a **fresh single-use G6**.
+
+- **Sanitized terminal result:** `status: FAILED` · `progress { completedSteps: 2, totalSteps: 3 }` ·
+  `channelCode: naver` · `blockerCode: ARTIFACT_INVALID`. The barrier fired real — `aw.live.barrier
+  { observed: true }` (the §8-18 observer working: a real click observed) — then `aw.live.run { FAILED,
+  ARTIFACT_INVALID }` ~2 s later. Contrast the no-click runs, which lapsed to `DOWNLOAD_TIMEOUT` with
+  `observed: false`.
+
+- **Readiness (`aw.live.readiness`, post-run):** `verdict: LOGGED_IN` · `readinessDecision: READY` ·
+  `readinessReason: positive_count` · `readinessBranch: labeled_count_positive` · `dateRangeControlPresence:
+  some` · **`selectedRangePresent: false` + `selectedRangePresentLive: true`.** The D-025 discriminator
+  reproduces (attribute-regex blind `false`, in-page IDL `true`), consistent with the 2026-07-18
+  live-positive; **D-025's positive-direction promotion remains a PO decision, unchanged here.** (The
+  operator's period-selection state was not separately re-confirmed this run; `Live: true` is the machine
+  reading.)
+
+- **Non-mutation — verified, not assumed:** `--no-ingest` (real uploader never constructed); a download fired
+  and was quarantined **then deleted** on the invalid verdict (dir clean/absent after); **no** validate-pass,
+  **no** ingest, backend **never contacted** (`/api/uploads` never called), no DB write / status /
+  `LAST_SUCCESS`; `downloads/` untouched. Sentinel auto-removed in `finally`; browser closed; process exit 0.
+  **The run mutated no files** — the git worktree carried only the four overlay-slice files plus the
+  pre-existing protected pair, nothing staged. Sanitized log lines carry only enums/booleans — no raw URL /
+  filename / content / credential.
+
+**What this run PROVES:** the overlay-label change renders a legible Korean operator label at the real NAVER
+highlight (fallback intact); and — via the operator's incidental click — that a **real NAVER review-export
+download can fail D-021 quarantine validation (`ARTIFACT_INVALID`)** on the current surface, a divergence
+from Run 4's clean OOXML.
+
+**What this run does NOT prove:** that the NAVER export is broken (one seller, one day, one period/format —
+an observation, not an invariant); **the artifact's actual format/content** (never inspected, deleted by
+design); that the overlay-label change had any role (diagnostic-only, no downstream touch); or anything about
+ingest (validation failed before it, and `--no-ingest` regardless).
+
+**This section authorizes no further live NAVER contact and consumes no gate beyond the single-use approval
+already spent.** Any follow-up classification probe needs a **fresh single-use G6**.
+
+---
+
 ## Related
 
 - Gate + readiness source → [`r4-preparation.md`](r4-preparation.md) §1/§3/§6/§7/§8
