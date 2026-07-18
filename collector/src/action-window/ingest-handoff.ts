@@ -18,6 +18,7 @@
  * `../upload`; it never throws (a failure degrades to a fail-closed `{ ok:false, processed:0 }`).
  */
 import { login, resolveChannelId, uploadReviewBytes, type IngestResult, type UploadMethod } from "../upload";
+import { ARTIFACT_REF_SHAPE } from "./artifact";
 
 /** The validated artifact bytes plus the opaque ref already emitted for this download. */
 export interface AwIngestSource {
@@ -41,9 +42,6 @@ export const AW_INGEST_OUTCOME_KEYS: ReadonlyArray<keyof AwIngestOutcome> = ["ok
 
 /** The injected upload capability. Provided by the caller (session wiring / CLI), never the driver. */
 export type AwIngestUploadFn = (src: AwIngestSource) => Promise<AwIngestOutcome>;
-
-/** Opaque artifact-ref shape (engine contract) — validated BEFORE composing any wire name. */
-const ARTIFACT_REF_SHAPE = /^[0-9a-f]{16}$/;
 
 /** Fixed neutral fallback name — used when the ref is not a clean 16-hex (defense-in-depth). */
 const NEUTRAL_FALLBACK_NAME = "aw-review-export.xlsx" as const;

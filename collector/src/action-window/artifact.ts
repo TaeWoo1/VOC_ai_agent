@@ -11,3 +11,10 @@ import { createHash } from "node:crypto";
 export function artifactRefFor(parts: readonly string[]): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
 }
+
+/**
+ * The opaque `artifactRef` shape (`^[0-9a-f]{16}$`) — the single source of truth every consumer
+ * validates against before trusting a ref (engine detect-guard, ingest-handoff wire name,
+ * quarantine path composition). No `g`/`y` flag, so `.test()` is stateless and safe to share.
+ */
+export const ARTIFACT_REF_SHAPE = /^[0-9a-f]{16}$/;

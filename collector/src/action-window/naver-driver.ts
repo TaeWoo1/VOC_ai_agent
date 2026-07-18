@@ -223,7 +223,7 @@ export class NaverFixtureProbeDriver implements ProbeDriver {
    * REAL path (when `downstream.real.ingest` is set): hand the validated bytes to the injected upload
    * callback under the opaque `artifactRef` — the platform's suggested filename is never passed. Only
    * the sanitized `{ ok, processed }` crosses back; a non-`ok` outcome fails the run closed
-   * (`UNSUPPORTED_STATE`, per the engine). Absent the callback, ingest stays SYNTHETIC.
+   * (`INGEST_FAILED`, per the engine). Absent the callback, ingest stays SYNTHETIC.
    */
   async ingest(artifactRef: string): Promise<IngestResult> {
     this.downstreamCalls.ingest += 1;
