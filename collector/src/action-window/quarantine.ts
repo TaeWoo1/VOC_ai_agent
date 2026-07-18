@@ -26,6 +26,7 @@ import { mkdirSync, openSync, readSync, closeSync, readdirSync, rmSync, writeFil
 import { join, resolve } from "node:path";
 import { sniffXlsxReadable } from "../naver/review-download-save";
 import { extensionCategory } from "../naver/review-export";
+import { ARTIFACT_REF_SHAPE } from "./artifact";
 
 /** Every quarantine file this module creates carries this prefix — the sweep removes only these. */
 export const QUARANTINE_PREFIX = "aw-quarantine-" as const;
@@ -43,8 +44,6 @@ export const QUARANTINE_RETENTION_POLICY = "delete-after-validate" as const;
 
 /** How many leading bytes the structural sniff reads (matches the diagnostic precedent). */
 const DEFAULT_HEAD_BYTES = 64 * 1024;
-/** Opaque artifact-ref shape (engine contract) — validated BEFORE any path composition. */
-const ARTIFACT_REF_SHAPE = /^[0-9a-f]{16}$/;
 
 /** Minimal surface of a real browser download (Playwright `Download` satisfies this). */
 export interface SaveableDownloadLike {

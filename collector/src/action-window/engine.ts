@@ -21,6 +21,7 @@ import {
   type EventPayload,
   type EventType,
 } from "../../../contracts/action-window/v1/index";
+import { ARTIFACT_REF_SHAPE } from "./artifact";
 import { InMemoryEventSink } from "./events";
 import { projectRunView, type EngineSnapshot } from "./view";
 import { type Stage, stageStepIndex, stageToRunStatus, stepMetaByIndex } from "./stages";
@@ -558,7 +559,7 @@ export class ActionWindowEngine {
   onDownloadDetected(res: DownloadDetectResult): Effect {
     this.expect("DETECT_DOWNLOAD");
     this.revision += 1;
-    if (!res.detected || !res.artifactRef || !/^[0-9a-f]{16}$/.test(res.artifactRef)) {
+    if (!res.detected || !res.artifactRef || !ARTIFACT_REF_SHAPE.test(res.artifactRef)) {
       return this.fail("DOWNLOAD_TIMEOUT");
     }
     this.emit("DOWNLOAD_DETECTED", { stepId: this.stepId(), artifactRef: res.artifactRef });
