@@ -15,7 +15,7 @@
  * then automatically dragged through every check below.
  */
 import { describe, it, expect } from "vitest";
-import { validateRunView } from "../../../contracts/action-window/v1/index";
+import { EXECUTION_MODES, validateRunView } from "../../../contracts/action-window/v1/index";
 import { projectRunView, type EngineSnapshot } from "../../src/action-window/view";
 import { parseOperationRun, type OperationRun, OPERATION_RUN_SCHEMA_VERSION } from "../../src/action-window/operation-run";
 import { STEP_PLAN, stageStepIndex, stageToRunStatus, type Stage } from "../../src/action-window/stages";
@@ -148,6 +148,31 @@ describe("stage tables — every Stage survives persistence", () => {
     if (parsed.ok) {
       expect(parsed.run.latestView.status).toBe("WAITING_FOR_HUMAN");
       expect(parsed.run.latestView.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    }
+  });
+
+  // A tampered/corrupt record must be rejected WHOLE — never half-loaded (operation-run.ts contract).
+  // These pin the two field checks that were looser than their own siblings in the same parse.
+  const clone = (run: OperationRun): Record<string, unknown> => JSON.parse(JSON.stringify(run));
+
+  it("rejects an executionMode outside the contract allow-list (not merely 'a string')", () => {
+    const record = clone(recordFor("PREPARE_SESSION"));
+    record.executionMode = "NOT_A_REAL_MODE";
+    expect(parseOperationRun(record)).toEqual({ ok: false, error: "INVALID_FIELD" });
+  });
+
+  it("rejects a top-level channelCode that disagrees with the engine's (identity must be consistent)", () => {
+    const record = clone(recordFor("PREPARE_SESSION"));
+    record.channelCode = `${(record.engine as { channelCode: string }).channelCode}-tampered`;
+    expect(parseOperationRun(record)).toEqual({ ok: false, error: "INVALID_FIELD" });
+  });
+
+  it("still accepts every real ExecutionMode — the tightening never rejects a valid record", () => {
+    for (const mode of EXECUTION_MODES) {
+      const record = clone(recordFor("PREPARE_SESSION"));
+      record.executionMode = mode;
+      (record.latestView as { executionMode: string }).executionMode = mode;
+      expect(parseOperationRun(record).ok, `executionMode ${mode}`).toBe(true);
     }
   });
 });
