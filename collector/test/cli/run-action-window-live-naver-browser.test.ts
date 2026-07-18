@@ -92,6 +92,19 @@ const loginPage = `<!doctype html><html><head><meta charset="utf-8"></head><body
     <form><input type="password" name="pw" aria-label="password"></form>
   </body></html>`;
 
+/**
+ * A READY review-export surface carrying a date picker whose `value` ATTRIBUTE is EMPTY. The test sets
+ * its live `.value` IDL property in-page (which does NOT reflect to the attribute) to model exactly the
+ * SPA shape D-025 names: `page.content()` serializes `value=""`, so the attribute regex is blind, while
+ * the driver's IDL overlay sees the selection. One data row keeps readiness READY.
+ */
+const rangePickerPage = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <nav id="seller-gnb">메뉴</nav>
+    <h1>리뷰 관리 (합성 픽스처)</h1>
+    <table><tbody><tr><td>합성 행 A</td><td>★★★★☆</td></tr></tbody></table>
+    <div class="toolbar"><input type="date" id="startDate" value=""></div>
+  </body></html>`;
+
 /** No synthetic page string may ever reach a persisted record, a wire frame, or the injected ingest ref. */
 const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "review-export", ".xlsx", "content_types", "blob:", "commerce.localhost", "exp"];
 
@@ -420,6 +433,47 @@ describe.skipIf(!RUN)("run-action-window-live-naver — assembleLiveRun over a r
       expect(logBlob.includes(needle.toLowerCase()), `log leaked "${needle}"`).toBe(false);
     }
     for (const frame of assembled.client.serverFrames) expect(findProhibitedFields(frame)).toEqual([]);
+  }, 30_000);
+
+  it("automated: the IDL overlay SEES a range the attribute regex is blind to — D-025's discriminator, over a real browser", async () => {
+    clearLogSink();
+    const page = await newPage();
+    await serve(page, rangePickerPage);
+    // Set the picker's live value via the IDL PROPERTY only, then read the ATTRIBUTE back in the SAME
+    // evaluate: it stays empty, proving the SPA blindness precondition holds in a real Chromium — not
+    // just in prose. This is the shape `page.content()` cannot serialize as filled.
+    const attrAfter = await page.$eval("#startDate", (el) => {
+      const input = el as HTMLInputElement;
+      input.value = "2026-06-01";
+      return input.getAttribute("value");
+    });
+    expect(attrAfter).toBe(""); // the property set did NOT reflect to the serialized attribute
+
+    const quarantineDir = newDir("aw-live-cli-q-");
+    const persistDir = newDir("aw-live-cli-p-");
+    const cap: { captured: CapturedIngest | null } = { captured: null };
+    const assembled = assembleLiveRun(page, makeDeps(cap, quarantineDir, persistDir, "run_d1d1e2e2f3f3", 500, 500));
+
+    const result = await assembled.driver.prepareSurface();
+    expect(result).toEqual({ ok: true }); // READY: the range is observed, never gates (D-025)
+
+    const diagnostic = assembled.driver.prepareDiagnostic()!;
+    // The attribute regex over `page.content()` is structurally blind — it serializes value="" → false.
+    expect(diagnostic.selectedRangePresent).toBe(false);
+    // The IDL-property overlay reads the live `.value` and reports the selection. THE discriminator:
+    // attribute `false` + live `true` ⇒ the blindness is real AND the different detector works.
+    expect(diagnostic.selectedRangePresentLive).toBe(true);
+
+    // The raw date value is reduced to a boolean in the driver and never crosses into the diagnostic,
+    // the log, or a persisted record (strictly less exposure than the serialized HTML already read).
+    if (diagnostic) log("aw.live.readiness", { ...diagnostic });
+    const diagBlob = JSON.stringify(diagnostic);
+    const logBlob = JSON.stringify(getLogSink()).toLowerCase();
+    expect(diagBlob).not.toContain("2026-06-01");
+    for (const needle of LOG_NEEDLES) {
+      expect(logBlob.includes(needle.toLowerCase()), `log leaked "${needle}"`).toBe(false);
+    }
+    expect(logBlob).not.toContain("2026-06-01");
   }, 30_000);
 
   it("automated: a gate that does NOT fix the session never reports 'recovered' — the real re-probe re-parks and the loop stops honestly", async () => {

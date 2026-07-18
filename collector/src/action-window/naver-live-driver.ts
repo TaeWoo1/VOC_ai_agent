@@ -48,6 +48,7 @@ import {
   naverVerifyDecision,
   type NaverPrepareDiagnostic,
 } from "./naver-surface";
+import { selectedRangeFromValues } from "../naver/export-click-signals";
 import type { AwIngestUploadFn } from "./ingest-handoff";
 import type {
   ArtifactValidateResult,
@@ -206,8 +207,37 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     // closed on that last observation. Non-usable sessions never hydrate into a surface — decide now.
     const surfaceHtml = verdict === "LOGGED_IN" ? await this.settleSurface(frame) : html;
     const { result, diagnostic } = naverSurfaceDecision(verdict, surfaceHtml);
+    // D-025's "different detector": the pure decision above reads the serialized `value` ATTRIBUTE and is
+    // structurally blind to an SPA picker whose selected range lives on the IDL PROPERTY. Overlay a
+    // best-effort live `.value` read so the next click run emits BOTH signals and its falsifier becomes
+    // discriminating. Observation only — never gates, and undefined on any read failure.
+    if (verdict === "LOGGED_IN") {
+      diagnostic.selectedRangePresentLive = await this.readSelectedRangeLive(frame);
+    }
     this.lastDiagnostic = diagnostic;
     return result;
+  }
+
+  /**
+   * Best-effort IDL-property read of the date/range controls' live `.value` (selector mirrors
+   * `FILLED_DATE_INPUT_RE`'s targeting). The raw values are read in-page and reduced to a boolean here;
+   * they NEVER leave this method — not logged, not persisted (strictly less exposure than the serialized
+   * HTML already crossing this boundary via `page.content()`). Any failure — a navigating frame, no
+   * control present — yields `undefined`, never a throw and never a halt (§8-23 posture).
+   */
+  private async readSelectedRangeLive(frame: Frame): Promise<boolean | undefined> {
+    try {
+      const values = await frame.evaluate(() =>
+        Array.from(
+          document.querySelectorAll(
+            'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]',
+          ),
+        ).map((el) => (el as HTMLInputElement).value ?? ""),
+      );
+      return selectedRangeFromValues(values);
+    } catch {
+      return undefined;
+    }
   }
 
   /** Read-only bounded poll for the export grid to render before readiness is decided (§8-11). */

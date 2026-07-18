@@ -88,6 +88,19 @@ describe("naver-surface — session precondition decision", () => {
     expect(diagnostic.readinessDecision).toBe("HALT");
     expect(diagnostic.selectedRangePresent).toBe(true);
   });
+
+  it("the pure decision NEVER sets selectedRangePresentLive — it is a driver-only IDL overlay (D-025)", () => {
+    // The live `.value` (IDL-property) read only exists in a real DOM, so the string-pure
+    // `naverSurfaceDecision` must leave `selectedRangePresentLive` absent on EVERY path — even one whose
+    // serialized attribute already reads `selectedRangePresent: true`. Only `naver-live-driver`'s
+    // in-page overlay may populate it. This locks the seam so the field can never be mistaken for a pure
+    // output.
+    for (const html of [ROWS, EMPTY_RESULTS, `${ROWS}${RANGE}`, `${EMPTY_RESULTS}${RANGE}`, `<div>지연 렌더</div>`]) {
+      const { diagnostic } = naverSurfaceDecision("LOGGED_IN", html);
+      expect("selectedRangePresentLive" in diagnostic).toBe(false);
+      expect(diagnostic.selectedRangePresentLive).toBeUndefined();
+    }
+  });
 });
 
 describe("naver-surface — no-click locate decision", () => {

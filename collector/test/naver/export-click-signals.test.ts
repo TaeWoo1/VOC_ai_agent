@@ -22,6 +22,7 @@ import {
   parseApprovedIndexArg,
   PRE_CLICK_SIGNAL_KEYS,
   POST_CLICK_SIGNAL_KEYS,
+  selectedRangeFromValues,
   summarizePostClick,
   type DialogRecord,
   type PostClickSignals,
@@ -327,6 +328,36 @@ describe("selectedRangePresent — realistic positive serializations (characteri
     expect(diagnosePreClickSignals(`<input type="date" value="  ">`).selectedRangePresent).toBe(false);
     // A value that merely has leading/trailing whitespace around real content is still filled.
     expect(diagnosePreClickSignals(`<input type="date" value=" 2026-06-01 ">`).selectedRangePresent).toBe(true);
+  });
+});
+
+describe("selectedRangeFromValues — the IDL-property detector (D-025's 'different detector')", () => {
+  // The property-side sibling of the attribute regex. A live driver reads the date/range controls'
+  // `.value` IDL properties in-page (which an SPA picker updates without reflecting to the serialized
+  // attribute) and reduces them here. This closes NOTHING about the live positive by itself — it is the
+  // prerequisite detector D-025 names, exercised offline. Same non-whitespace rule as the regex (#289).
+  it("reads true when any value carries a real range string", () => {
+    expect(selectedRangeFromValues(["2026-06-01"])).toBe(true);
+    expect(selectedRangeFromValues(["2026-06-01", "2026-06-30"])).toBe(true);
+    expect(selectedRangeFromValues(["2026.06.01"])).toBe(true);
+  });
+
+  it("reads true if only ONE of a start/end pair is filled (partial selection is still a selection)", () => {
+    expect(selectedRangeFromValues(["", "2026-06-30"])).toBe(true);
+    expect(selectedRangeFromValues(["2026-06-01", ""])).toBe(true);
+  });
+
+  it("reads false when nothing is selected", () => {
+    expect(selectedRangeFromValues([])).toBe(false); // no date controls on the surface
+    expect(selectedRangeFromValues([""])).toBe(false); // a present but empty picker
+    expect(selectedRangeFromValues(["", ""])).toBe(false);
+  });
+
+  it("a whitespace-only value reads false — mirrors the attribute regex's #289 tightening", () => {
+    expect(selectedRangeFromValues(["  "])).toBe(false);
+    expect(selectedRangeFromValues(["\t\n"])).toBe(false);
+    // leading/trailing whitespace around real content is still a selection
+    expect(selectedRangeFromValues([" 2026-06-01 "])).toBe(true);
   });
 });
 
