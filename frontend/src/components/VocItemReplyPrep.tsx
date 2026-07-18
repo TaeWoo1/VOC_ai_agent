@@ -3,6 +3,16 @@ import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
 import type { OperatorOutcomeName, ReviewReplyPrep, TriageDisposition } from "../lib/types";
+import {
+  createSimulatedReplyRuntime,
+  startReplySubmission,
+  type ReplyRunHandle,
+  type ReplyRuntime,
+} from "../lib/actionWindow/reply/replyRuntime";
+
+// The offline / non-bridge reply runtime — a real v2 terminal, not a fabricated value. A dev-bridge
+// build injects a `createBridgeReplyRuntime` instead (VITE_AW_BRIDGE); the default stays offline.
+const defaultReplyRuntime = createSimulatedReplyRuntime();
 
 // Prepare a reply to one review: read the redacted body, start from a rule-based
 // suggestion, edit, approve (which freezes it), copy.
@@ -25,10 +35,10 @@ interface ApprovalAttempt {
 /** What the panel is currently doing, so only one write is ever in flight. */
 type Busy = null | "saving" | "approving" | "withdrawing" | "starting" | "reporting";
 
-/** One guided reply-submission run: the single-use binding + the opaque run id it reports under. */
+/** One guided reply-submission run: the single-use binding + the live run handle it reports through. */
 interface GuidedRun {
   submissionRef: string;
-  awRunRef: string;
+  handle: ReplyRunHandle;
 }
 /** One outcome-report intent: what was reported, and the command id identifying it. */
 interface OutcomeAttempt {
@@ -42,9 +52,16 @@ export function VocItemReplyPrep({
   disposition,
   onPrepared,
   onLocalWork,
+  replyRuntime = defaultReplyRuntime,
 }: {
   accountId: string;
   actionRef: string;
+  /**
+   * The reply-submission runtime the guided flow drives. Injected so tests can pass a stub and a
+   * dev-bridge build can supply `createBridgeReplyRuntime`; defaults to the offline simulated runtime.
+   * The runtime is the SOLE source of the recorded outcome + runId — the FE never fabricates them.
+   */
+  replyRuntime?: ReplyRuntime;
   /**
    * The row's LIVE triage decision — a conservative gate, never a re-read trigger.
    *
@@ -317,30 +334,27 @@ export function VocItemReplyPrep({
   }
 
   async function startGuided() {
-    if (inFlight.current || !canStart) {
+    // Reuse an UNSPENT run: a guided run already in flight keeps its single-use submissionRef rather
+    // than minting another. A fresh mint happens only after a terminal report spends it (setGuided(null)).
+    if (inFlight.current || !canStart || guided != null) {
       return;
-    }
-    // The run id is opaque and minted the same secure way as a command id — so on an origin without
-    // secure randomness this fails closed exactly like approval does, rather than inventing a weak id.
-    let awRunRef: string;
-    try {
-      awRunRef = newCommandId();
-    } catch (e) {
-      if (e instanceof SecureRandomUnavailableError) {
-        setUnavailable(true);
-        setFailed(null);
-        return;
-      }
-      throw e;
     }
     inFlight.current = true;
     setBusy("starting");
     setFailed(null);
     try {
       const run = await api.startReviewReplySubmissionRun(accountId, actionRef);
-      setGuided({ submissionRef: run.submissionRef, awRunRef });
-    } catch {
-      setFailed("답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.");
+      // The runtime assigns the opaque runId (never the FE). Minting it uses the same secure randomness
+      // as a command id, so a non-secure origin fails closed exactly like approval does.
+      const handle = await startReplySubmission(replyRuntime, { channelCode: "naver", submissionRef: run.submissionRef });
+      setGuided({ submissionRef: run.submissionRef, handle });
+    } catch (e) {
+      if (e instanceof SecureRandomUnavailableError) {
+        setUnavailable(true);
+        setFailed(null);
+      } else {
+        setFailed("답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.");
+      }
     } finally {
       inFlight.current = false;
       setBusy(null);
@@ -370,11 +384,17 @@ export function VocItemReplyPrep({
     setBusy("reporting");
     setFailed(null);
     try {
+      // Drive the run to its OPERATOR_REPORTED terminal; the recorded outcome + runId come FROM the
+      // terminal (the sole source), never fabricated on the client.
+      const terminal =
+        outcome === "OPERATOR_REPORTED_SUBMITTED"
+          ? await guided.handle.reportSubmitted()
+          : await guided.handle.abortSubmission();
       await api.recordReviewReplyOutcome(accountId, actionRef, {
         commandId,
         submissionRef: guided.submissionRef,
-        operatorOutcome: outcome,
-        awRunRef: guided.awRunRef,
+        operatorOutcome: terminal.operatorOutcome,
+        awRunRef: terminal.runId,
       });
       reportAttempt.current = null;
       setGuided(null);

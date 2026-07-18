@@ -721,7 +721,7 @@ export const api = {
     },
   ): Promise<ReviewReplyOutcomeResponse> {
     if (USE_MOCKS) {
-      return mockRecordReviewReplyOutcome(actionRef, body.submissionRef, body.operatorOutcome);
+      return mockRecordReviewReplyOutcome(actionRef, body.submissionRef, body.operatorOutcome, body.awRunRef);
     }
     const { data } = await http.post<ReviewReplyOutcomeResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/outcome`,
