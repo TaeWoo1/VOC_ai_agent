@@ -24,7 +24,7 @@ here. Report it; do not silently edit it.
 ## Where to read first
 
 1. [`current-state.md`](current-state.md) — the living handoff state. ⚠ Its **top fixed-metadata block** is
-   current (refreshed 2026-07-18: baseline `da47a0a`, tests 3014/31) and its **newest dated bullet** carries
+   current (refreshed 2026-07-18: baseline `ab4a9fa`, tests 3120/32) and its **newest dated bullet** carries
    the Run 5 → Run 6 close-out; **but the accreted body below that stops around Run 4** and reads pre-live in
    places. **Trust the top block + the newest bullet, not the older accreted narrative** — and for Runtime
    status **this HANDOFF wins** regardless. A fuller current-state.md body rewrite is a deliberately-deferred
@@ -132,20 +132,20 @@ Operator-facing version: [`r4-operator-runbook.md`](r4-operator-runbook.md) §3;
 
 ## Git state
 
-- **`origin/main` = `da47a0a`** (PR #289 merged, 2026-07-18). The branch is **synced — 0 ahead, 0 behind**
+- **`origin/main` = `ab4a9fa`** (PR #294 merged, 2026-07-18). The branch is **synced — 0 ahead, 0 behind**
   (`--ff-only`, no merge commit created locally) and holds **ZERO local-only commits**: everything this
-  workstream has built through Run 6 is on `main`. Nothing is held locally.
-  - **Since #280 (`73f027e`), the R4-relevant merges (re-derived from `git log`, 2026-07-18):** the Run 6
-    recovery-prep slices **#281 / #282 / #285** (whose *content* is already recorded — Run 6 dispatch record,
-    §8-23, [D-030](decisions.md)/[D-031](decisions.md)); **#287** `56e575d` — **the session-recovery CLI
-    prompt fix** (branches the launch/recovery prose on run scope, resolving §8-23's reported-not-resolved
-    finding); **#288 / #289** `6d87bae`+`3e7463d` — **`selectedRangePresent` offline propagation coverage +
-    the whitespace-only false-positive fix** (detector: a `value="  "` blank/placeholder no longer reads as a
-    selected range). The interleaved non-R4 merges **#283 / #284 / #286** (review-triage / review-response,
-    other workstreams) moved `collector/` + `contracts/` by **0** — `git diff --stat 73f027e..da47a0a --
-    collector/ contracts/` is confined to the CLI recovery-prep, the detector one-liner, and their tests.
-    ⚠ **Focused merge-level attribution only** — this is not the per-file forensic re-enumeration the older
-    "twelve merges" table below carries; re-derive from `git log`, do not trust this snapshot.
+  workstream has built through PR #294 is on `main`. Nothing is held locally.
+  - **Since #289 (`da47a0a`), the merges (re-derived from `git log`, 2026-07-18):** **#290** (`ea0b646`) —
+    this workstream's own Run-6 / `selectedRangePresent` **docs** refresh (HANDOFF + current-state, docs only);
+    **#291 / #292 / #293** — the **review-response-completion** workstream (**NOT R4**): reply-submission engine,
+    contract v2, and its own docs. They added `collector/src/action-window/reply-submission/*` +
+    `contracts/action-window/v2/*` and **appended** to `decisions.md` / `r4-preparation.md` / `r4-gate-record.md`,
+    but touched **no R4 detection/runtime file**; **#294** (`ab4a9fa`) — **this slice: the D-025 IDL-property
+    selected-range diagnostic path** (`selectedRangePresentLive`, observe/log-only). `git log da47a0a..c7ade92
+    -- collector/src/naver/export-click-signals.ts collector/src/action-window/naver-surface.ts
+    collector/src/action-window/naver-live-driver.ts` is **empty** — **only #294 touched the R4 detection files.**
+    ⚠ **Merge-level attribution only** — re-derive from `git log`, do not trust this snapshot; the
+    review-response-completion appends to the three runtime docs are that workstream's, not R4's.
   > **No HEAD SHA is recorded here on purpose.** The commit that writes it is never the commit it names,
   > so a HEAD line is stale on arrival — `cb081e0` and `5667ed4` both shipped one behind. **Run
   > `git log --oneline origin/main..HEAD`**; that is the live measure.
@@ -230,7 +230,31 @@ Plus **#269 / #271 / #274 / #275** — attention + ingest workstreams, **0 `coll
   say-so: `73f027e` has parents `4404b4f` + `cc9aba8`, which is what proves it was neither squashed nor
   rebased.
 
-## Last slice — Run 6 close-out: prompt-scope fix + `selectedRangePresent` offline closure, 2026-07-18 — **all on `main`**
+## Last slice — #294: the live selected-range diagnostic path (D-025's "different detector"), 2026-07-18 — **on `main`**
+
+**PR #294 (`ab4a9fa`) built the IDL-property detector [D-025](decisions.md) names — additive, observe-only,
+log-only, non-gating.** The attribute regex over `page.content()` is structurally blind to an SPA date picker
+whose selected range lives on the `.value` **IDL property**, not the serialized `value` attribute. #294 adds a
+pure `selectedRangeFromValues` (the property-side sibling of `FILLED_DATE_INPUT_RE`, same #289 non-whitespace
+rule) that the live driver overlays onto the log-only `NaverPrepareDiagnostic` as **`selectedRangePresentLive`**
+via a best-effort in-page `.value` read. The raw values are reduced to a boolean in the driver and **never
+logged or persisted** (strictly less exposure than the serialized HTML already crossing that boundary).
+
+- **No wire / `BLOCKER_CODES` / transport / persistence / gating change.** `naverSurfaceDecision` stays
+  string-pure and **never** sets the field (a surface test locks the driver-only seam); the field is one more
+  boolean on the already-log-only diagnostic.
+- **What it buys:** the next click run emits **both** signals, so its falsifier is now **discriminating** —
+  attribute `false` + live `true` confirms the blindness *and* that the detector works; both `false` is a
+  true negative. Offline A3: the interpreter is locked both directions and the driver-overlay wiring is locked
+  in the default suite (removing the overlay fails the frame-aware call-sequence test).
+- **The end-to-end mechanism proof is a `RUN_INTEGRATION`-gated browser test — WRITTEN, NOT run** (the +1 in
+  `31 → 32 skipped`). Bundles the deferred `r4-runtime-handoff` skill reading-note edit.
+
+⚠ **[D-025](decisions.md)'s LIVE positive stays OPEN.** #294 *instruments* the falsifier; it does **not** close
+it. Whether `selectedRangePresentLive` ever reads `true` on a real NAVER SPA picker needs a real selected range
+on real NAVER (G6 + browser), out of scope. Every G6 to date is consumed.
+
+## Earlier slice — Run 6 close-out: prompt-scope fix + `selectedRangePresent` offline closure, 2026-07-18 — **all on `main`**
 
 **Three post-Run-6 slices, all merged (see Git state), all offline, zero live contact:**
 
@@ -553,7 +577,7 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   evidence may prove a doc stale; it must not silently redefine product intent.
 - **Pre-commit suite** (`collector/CLAUDE.md` §6): `git diff --check` → `npm run typecheck` → `npm test` →
   confirm `package.json`/lock unchanged → **HOLD and report**. Commit only on an explicit instruction.
-- Offline baseline: **3014 passed / 31 skipped** (175 files), measured 2026-07-18 after #289. Lineage, every
+- Offline baseline: **3120 passed / 32 skipped** (179 files), measured 2026-07-18 after #294. Lineage, every
   delta attributed — **no unexplained drift**:
   2761 → **2837** (+76 from #259) → **2855** (+18 from #261) → **2857** (+2 from `40d7c53`, the barrier
   regression tests) → **2860** (+3 from `5d57fde`, the readiness-diagnostic tests) → **2899** (the
@@ -568,8 +592,16 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   (#281/#282/#285), **#287**'s session-recovery prompt-scope tests, and **#288/#289**'s `selectedRangePresent`
   propagation + boundary + whitespace-fix tests (`naver-surface` +3 · `export-click-signals` net · `live-run-approval`
   · `run-action-window-live-naver`); **+2 skipped** (29 → 31) are A4's gated browser cases (default-suite-skipped,
-  `RUN_INTEGRATION`-only); **file count unchanged at 175**. **A docs-only or backend-only change that moves this
-  number is a red flag, not drift.**
+  `RUN_INTEGRATION`-only); **file count unchanged at 175**.
+  → **3115 / 31 skipped, 179 files** (**+101 passing, +4 files**) from the **review-response-completion**
+  workstream (**#291/#292**, **NOT R4**): reply-submission engine/guard/session + contract-v2 tests
+  (`collector/test/action-window/reply-submission/*`, `contracts/action-window/v2/*`). ⚠ This is a **non-R4**
+  workstream moving the shared collector baseline — attributed, not drift.
+  → **3120 / 32 skipped** (post-**#294**, **this slice**): **+5 R4 passing** (`export-click-signals`
+  `selectedRangeFromValues` +4 · `naver-surface` driver-only-seam lock +1; the `naver-live-driver` frame-aware
+  call-sequence lock was **updated, not added**) and **+1 skipped** (31 → 32) — the `RUN_INTEGRATION`-only IDL
+  discriminator in the gated browser suite, **written but not run; file count unchanged at 179**. **A docs-only
+  or backend-only change that moves this number is a red flag, not drift.**
 - Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
   means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
