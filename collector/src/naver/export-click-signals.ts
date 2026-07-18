@@ -168,8 +168,12 @@ const REVIEW_USAGE_MARKERS: readonly RegExp[] = [
 const CONFIRM_MARKERS: readonly RegExp[] = [/확인/, /계속/, /저장/, /\bconfirm\b/i, /\bcontinue\b/i, /\bok\b/i];
 const ERROR_WARN_MARKERS: readonly RegExp[] = [/오류/, /실패/, /경고/, /불가/, /\berror\b/i, /\bfail/i, /\bwarn/i];
 const DATE_INPUT_RE = /type=["']date["']|date[-_]?picker|calendar|달력|날짜\s*선택/gi;
+// The value must carry at least one NON-whitespace character: a blanked/placeholder picker can
+// serialize as value="  " and must NOT read as a selected range. This tightens the offline detector
+// only; it does not touch the live attribute-vs-IDL-property blindness, which stays D-025's open
+// falsifier for the positive direction.
 const FILLED_DATE_INPUT_RE =
-  /<input\b[^>]*(?:type=["']date["']|class=["'][^"']*(?:date|calendar|picker)[^"']*["'])[^>]*\bvalue\s*=\s*["'][^"']+["']/i;
+  /<input\b[^>]*(?:type=["']date["']|class=["'][^"']*(?:date|calendar|picker)[^"']*["'])[^>]*\bvalue\s*=\s*["']\s*[^"'\s][^"']*["']/i;
 
 const stripComments = (html: string): string => html.replace(/<!--[\s\S]*?-->/g, " ");
 const anyMatch = (markers: readonly RegExp[], s: string): boolean => markers.some((re) => re.test(s));

@@ -319,12 +319,14 @@ describe("selectedRangePresent — realistic positive serializations (characteri
     expect(s.dateRangeControlPresence).toBe("few"); // two date controls; presence ≠ selection
   });
 
-  it("REPORTED FINDING (not fixed): a whitespace-only value reads true — a candidate false-positive", () => {
+  it("a whitespace-only value reads false — a blanked/placeholder picker is not a selected range", () => {
     // `value="  "` is a cleared/placeholder date that serialized with a non-empty attribute. The regex
-    // `value\s*=\s*["'][^"']+["']` treats any non-quote run — including whitespace — as "filled", so a
-    // blanked picker can read `true`. This is asserted AS-IS to lock the boundary; tightening it (e.g.
-    // `[^"'\s]`) is a placeholder change requiring a PO decision + ideally a live sample, per D-025.
-    expect(diagnosePreClickSignals(`<input type="date" value="  ">`).selectedRangePresent).toBe(true);
+    // now requires at least one non-whitespace character in the value, so an all-whitespace value does
+    // not read as "filled". This tightens the OFFLINE detector only; the live positive direction stays
+    // D-025's open falsifier (the page.content() attribute-vs-IDL-property blindness is untouched).
+    expect(diagnosePreClickSignals(`<input type="date" value="  ">`).selectedRangePresent).toBe(false);
+    // A value that merely has leading/trailing whitespace around real content is still filled.
+    expect(diagnosePreClickSignals(`<input type="date" value=" 2026-06-01 ">`).selectedRangePresent).toBe(true);
   });
 });
 
