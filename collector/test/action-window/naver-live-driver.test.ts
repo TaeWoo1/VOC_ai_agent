@@ -435,4 +435,13 @@ describe("NaverLiveProbeDriver — module source guard (no click, no legacy capt
       }
     }
   });
+
+  it("wires an operator-legible overlay label for the human step (headed run has no product FE)", () => {
+    // The badge otherwise shows the raw dotted copyKey; the seated operator gets a readable line at
+    // the highlight, echoing the Run-4 two-step (click, then confirm the NAVER dialog per run scope).
+    expect(code).toContain('"actionWindow.step.userTargetAction":');
+    expect(code).toContain("리뷰 내보내기 버튼을 클릭하세요. NAVER 확인창이 뜨면 이번 실행 범위 안에서 확인하세요.");
+    // and the highlight mount must actually pass that label through to the overlay.
+    expect(/label:\s*OPERATOR_STEP_LABELS\[humanStep\.copyKey\]/.test(code)).toBe(true);
+  });
 });

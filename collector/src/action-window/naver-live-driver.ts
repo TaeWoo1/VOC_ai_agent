@@ -68,6 +68,21 @@ import type { ProbeDriver } from "./session";
  */
 export const EXPORT_TARGET_KEYWORDS: readonly string[] = ["엑셀", "다운로드", "내려받기", "excel", "download", "xlsx", "csv"];
 
+/**
+ * Operator-legible overlay labels for the headed live run, keyed by the step's semantic `copyKey`.
+ *
+ * The headed live/CLI run has NO product FE, so the only thing in the real Chrome window is the
+ * overlay badge — which otherwise shows the raw dotted `copyKey`. This map gives the seated operator
+ * a readable line AT the highlight, echoing the established Run-4 two-step finding (click the control,
+ * then confirm the NAVER dialog per this run's scope). It is a diagnostic aid on a dev-only overlay,
+ * NOT the product FE's localized copy, and it introduces no contract/STEP_PLAN change. An unmapped
+ * key ⇒ the badge falls back to the `copyKey` (overlay default).
+ */
+const OPERATOR_STEP_LABELS: Readonly<Record<string, string>> = {
+  "actionWindow.step.userTargetAction":
+    "리뷰 내보내기 버튼을 클릭하세요. NAVER 확인창이 뜨면 이번 실행 범위 안에서 확인하세요.",
+};
+
 export interface NaverLiveProbeDriverOptions {
   /** The gitignored quarantine directory for the temporary validation save. */
   quarantineDir: string;
@@ -274,6 +289,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       stepNumber: humanStep.stepNumber,
       totalSteps: TOTAL_STEPS,
       copyKey: humanStep.copyKey,
+      label: OPERATOR_STEP_LABELS[humanStep.copyKey],
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
     });
   }
