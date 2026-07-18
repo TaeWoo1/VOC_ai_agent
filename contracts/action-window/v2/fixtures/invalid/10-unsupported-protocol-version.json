@@ -1,0 +1,15 @@
+{
+  "case": "10-unsupported-protocol-version",
+  "target": "command",
+  "expect": "UNSUPPORTED_PROTOCOL_VERSION",
+  "data": {
+    "protocolVersion": 1,
+    "commandId": "cmd_v1",
+    "runId": "run_0001",
+    "expectedRevision": 0,
+    "type": "START_RUN",
+    "payload": {
+      "channelCode": "esm_plus"
+    }
+  }
+}

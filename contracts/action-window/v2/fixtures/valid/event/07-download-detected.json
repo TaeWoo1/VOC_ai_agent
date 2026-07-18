@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0007",
+  "runId": "run_0001",
+  "sequence": 7,
+  "revision": 7,
+  "type": "DOWNLOAD_DETECTED",
+  "occurredAt": "2026-07-08T13:07:00Z",
+  "payload": {
+    "stepId": "esm.select_and_download",
+    "artifactRef": "0f1e2d3c4b5a6978"
+  }
+}

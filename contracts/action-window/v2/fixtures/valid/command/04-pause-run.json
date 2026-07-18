@@ -1,0 +1,7 @@
+{
+  "protocolVersion": 2,
+  "commandId": "cmd_04-pause-run",
+  "runId": "run_0001",
+  "expectedRevision": 2,
+  "type": "PAUSE_RUN"
+}

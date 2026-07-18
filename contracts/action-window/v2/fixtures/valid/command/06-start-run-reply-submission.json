@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 2,
+  "commandId": "cmd_06-start-run-reply-submission",
+  "runId": "run_0002",
+  "expectedRevision": 0,
+  "type": "START_RUN",
+  "payload": {
+    "channelCode": "naver",
+    "intent": "REPLY_SUBMISSION",
+    "submissionRef": "a1b2c3d4e5f60718"
+  }
+}

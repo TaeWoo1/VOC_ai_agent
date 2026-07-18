@@ -151,6 +151,45 @@ drifted targets fail closed with zero clicks); emits or persists selectors, URLs
 credentials, cookies, tokens, or local paths (contract `findProhibitedFields` enforced on the
 wire and in the persisted store).
 
+### 4.1 Amendment for a guided reply SUBMISSION (v1.6, a MUTATING action — NAVER review reply)
+
+§4 above is written for an **export (a read)**; a guided reply submission is a **write**, and the
+boundary is extended — never relaxed — for it. This amendment is binding for any `REPLY_SUBMISSION`
+run and is the write-side counterpart of the export clauses. (Contract: `contracts/action-window/v2/`,
+protocol 2, side-by-side; v1 export runs are unchanged. Live still requires a sixth G3 scope
+`reply submission` + a single-use G6 — see §3 and `r4-gate-record.md`.)
+
+**The seller (human) always (add):** **composes / pastes the approved reply content and clicks
+submit/post themselves.** (The export list has no notion of authoring content; a reply requires it.)
+
+**SellerOps (Runtime) only (for a submission):** prepares/validates the session precondition;
+foregrounds the window; **locates and highlights the reply composer read-only** (salted signature,
+never a selector); **observes** the seller's submit; records the audited run. It performs **no
+verify / detect / validate / ingest** — that entire export evidence chain is inapplicable, and there
+is **no read-back oracle**, so the run's honest terminal is `OPERATOR_REPORTED` (operator-reported,
+`UNVERIFIED`), **never `COMPLETED`**.
+
+**SellerOps never (for a submission — generalizing the export clauses):** **never types into the
+reply composer** (generalizes "never types credentials"); **never clicks submit/post** (generalizes
+"never clicks the export control"); never dispatches any event on the composer or submit control;
+never reads or persists the reply body or the posted content.
+
+**Double-post safety (the sharpest new clause).** An export is safe to re-drive because ingestion is
+dedup-safe; **a reply POST is not idempotent** and re-driving a submit could double-post. Therefore
+the binding `submissionRef` is **single-use**, a retry after a reported submission requires a **fresh
+re-confirmed binding**, and a run interrupted after the submit barrier **parks to the operator and
+never auto-re-drives the submit**. The submit stage is excluded from any safe-resume set.
+
+**Non-mutating-by-construction caveat.** For an export, "let the window lapse" is the guaranteed
+non-mutating lever. For a reply the safe state is likewise "don't submit," but there is no
+download-window analog to simply lapse — the honest terminal when the operator does nothing is a
+benign operator-reported `SUBMISSION_ABORTED` (`UNVERIFIED`), not a download timeout.
+
+**Unexpected-dialog abort survives with full force (§7):** a submit is exactly the action that can
+raise a copyright/usage consent dialog; "uncertain whether a dialog is the expected one ⇒ it is not
+⇒ abort, zero further action."
+
+
 ## 5. Platform-policy / provider-inquiry checklist (parallel track)
 
 **Product-owner ruling (2026-07-09, recorded as D-019):** official platform clarification and

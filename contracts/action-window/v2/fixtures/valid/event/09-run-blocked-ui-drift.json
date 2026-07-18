@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0009",
+  "runId": "run_0001",
+  "sequence": 9,
+  "revision": 9,
+  "type": "RUN_BLOCKED",
+  "occurredAt": "2026-07-08T13:09:00Z",
+  "payload": {
+    "code": "UI_DRIFT",
+    "recoverable": false
+  }
+}

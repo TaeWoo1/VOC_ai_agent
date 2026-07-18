@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0004",
+  "runId": "run_0001",
+  "sequence": 4,
+  "revision": 4,
+  "type": "HUMAN_ACTION_REQUIRED",
+  "occurredAt": "2026-07-08T13:04:00Z",
+  "payload": {
+    "stepId": "esm.select_and_download"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0001",
+  "runId": "run_0001",
+  "sequence": 1,
+  "revision": 1,
+  "type": "RUN_STARTED",
+  "occurredAt": "2026-07-08T13:01:00Z",
+  "payload": {
+    "status": "PREPARING"
+  }
+}

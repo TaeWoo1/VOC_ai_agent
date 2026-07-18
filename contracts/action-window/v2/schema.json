@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sellerops/contracts/action-window/v2/schema.json",
+  "title": "Action Window Protocol v2",
+  "description": "Normative, language-neutral source of truth for the Action Window protocol v2 — a side-by-side successor to v1 that adds a guided, human-performed review-reply submission. v1 is untouched; export runs stay on v1, reply-submission runs are v2. Consumed by the TypeScript frontend and Local Agent runtime (see index.ts) and the basis for future Java backend DTOs.",
+  "x-protocolVersion": 2,
+  "$defs": {
+    "RunStatus": {
+      "type": "string",
+      "description": "Persisted Run status. IDLE is intentionally NOT a persisted status. OPERATOR_REPORTED (v2) is the honest terminal for a guided reply submission — distinct from COMPLETED, never a verified completion.",
+      "enum": ["PREPARING", "RUNNING", "WAITING_FOR_HUMAN", "PAUSED", "PROCESSING", "COMPLETED", "OPERATOR_REPORTED", "FAILED", "CANCELLED"]
+    },
+    "StepStatus": {
+      "type": "string",
+      "enum": ["PENDING", "PREPARING", "READY", "AWAITING_USER", "OBSERVING", "PROCESSING", "COMPLETED", "OPERATOR_REPORTED", "FAILED", "SKIPPED"]
+    },
+    "ExecutionMode": {
+      "type": "string",
+      "enum": ["AUTOMATIC_OPERATION", "ACTION_WINDOW", "FILE_IMPORT", "INTEGRATION_PENDING"]
+    },
+    "BlockerCode": {
+      "type": "string",
+      "enum": ["LOGIN_REQUIRED", "UI_DRIFT", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS", "SESSION_EXPIRED", "UNSUPPORTED_STATE", "DOWNLOAD_TIMEOUT", "ARTIFACT_INVALID"]
+    },
+    "CommandType": {
+      "type": "string",
+      "enum": ["START_RUN", "PAUSE_RUN", "RESUME_RUN", "CANCEL_RUN", "FIND_CURRENT_STEP", "SWITCH_TO_MANUAL", "REQUEST_STEP_RECHECK", "SET_GUIDANCE_ENABLED"]
+    },
+    "EventType": {
+      "type": "string",
+      "enum": ["RUN_STARTED", "RUN_STATUS_CHANGED", "STEP_READY", "HUMAN_ACTION_REQUIRED", "TARGET_HIGHLIGHTED", "USER_ACTION_OBSERVED", "DOWNLOAD_DETECTED", "STEP_COMPLETED", "SUBMISSION_REPORTED", "RUN_BLOCKED", "RUN_COMPLETED", "RUN_OPERATOR_REPORTED", "RUN_FAILED"]
+    },
+    "RunIntent": {
+      "type": "string",
+      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post.",
+      "enum": ["EXPORT", "REPLY_SUBMISSION"]
+    },
+    "OperatorOutcome": {
+      "type": "string",
+      "description": "v2: what the operator reports at the submit barrier. Kept separate from verification. SUBMISSION_ABORTED is an operator outcome, not a blocker.",
+      "enum": ["OPERATOR_REPORTED_SUBMITTED", "SUBMISSION_ABORTED"]
+    },
+    "VerificationState": {
+      "type": "string",
+      "description": "v2: what SellerOps confirmed. Only UNVERIFIED is reachable (a reply post has no read-back oracle); VERIFIED is reserved but absent.",
+      "enum": ["UNVERIFIED"]
+    },
+    "OpaqueRef": {
+      "type": "string",
+      "description": "Opaque 16-hex signature/reference. NEVER a selector, URL, filename, or path.",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "SemanticCode": {
+      "type": "string",
+      "description": "Sanitized stable code (e.g. channelCode). An opaque token, never a user-facing title.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "CopyKey": {
+      "type": "string",
+      "description": "Dotted semantic copy key (e.g. actionWindow.review.ready). FE maps it to localized copy. Never final prose.",
+      "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z0-9]+)+$"
+    },
+    "CopyParams": {
+      "type": "object",
+      "description": "Flat bag of sanitized primitive interpolation values; FE owns the final copy.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "CommandEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "commandId", "runId", "expectedRevision", "type"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 2 },
+        "commandId": { "type": "string", "minLength": 1, "description": "Idempotency key." },
+        "runId": { "type": "string", "minLength": 1, "description": "Opaque run id." },
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "type": { "$ref": "#/$defs/CommandType" },
+        "payload": {
+          "type": "object",
+          "description": "Typed payload when required. START_RUN requires { channelCode } and optionally { intent, submissionRef } — submissionRef is required iff intent = REPLY_SUBMISSION. SET_GUIDANCE_ENABLED requires { enabled }.",
+          "properties": {
+            "channelCode": { "$ref": "#/$defs/SemanticCode" },
+            "intent": { "$ref": "#/$defs/RunIntent" },
+            "submissionRef": { "$ref": "#/$defs/OpaqueRef" },
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "eventId", "runId", "sequence", "revision", "type", "occurredAt", "payload"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 2 },
+        "eventId": { "type": "string", "minLength": 1, "description": "De-dupe key." },
+        "runId": { "type": "string", "minLength": 1 },
+        "sequence": { "type": "integer", "minimum": 0, "description": "Monotonic within a Run — ordering authority." },
+        "revision": { "type": "integer", "minimum": 0, "description": "Aggregate revision after this event." },
+        "type": { "$ref": "#/$defs/EventType" },
+        "occurredAt": { "type": "string", "description": "Opaque occurrence marker (display/staleness only; not parsed for elapsed duration)." },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": { "$ref": "#/$defs/RunStatus" },
+            "stepId": { "type": "string" },
+            "stepNumber": { "type": "integer", "minimum": 1 },
+            "totalSteps": { "type": "integer", "minimum": 0 },
+            "stepStatus": { "$ref": "#/$defs/StepStatus" },
+            "targetRef": { "$ref": "#/$defs/OpaqueRef" },
+            "observed": { "type": "boolean" },
+            "artifactRef": { "$ref": "#/$defs/OpaqueRef" },
+            "code": { "$ref": "#/$defs/BlockerCode" },
+            "recoverable": { "type": "boolean" },
+            "operatorOutcome": { "$ref": "#/$defs/OperatorOutcome" },
+            "verification": { "$ref": "#/$defs/VerificationState" },
+            "submissionRef": { "$ref": "#/$defs/OpaqueRef" }
+          }
+        }
+      }
+    },
+    "ActionWindowRunView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "runId", "revision", "channelCode", "runCopyKey", "status", "executionMode", "guidanceEnabled", "allowedCommands", "progress", "updatedAt"],
+      "properties": {
+        "protocolVersion": { "type": "integer", "const": 2 },
+        "runId": { "type": "string", "minLength": 1 },
+        "revision": { "type": "integer", "minimum": 0 },
+        "channelCode": { "$ref": "#/$defs/SemanticCode" },
+        "runCopyKey": { "$ref": "#/$defs/CopyKey" },
+        "runCopyParams": { "$ref": "#/$defs/CopyParams" },
+        "status": { "$ref": "#/$defs/RunStatus" },
+        "executionMode": { "$ref": "#/$defs/ExecutionMode" },
+        "intent": { "$ref": "#/$defs/RunIntent" },
+        "currentStep": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["stepId", "stepNumber", "totalSteps", "copyKey", "status"],
+          "properties": {
+            "stepId": { "type": "string", "minLength": 1 },
+            "stepNumber": { "type": "integer", "minimum": 1, "description": "1-based." },
+            "totalSteps": { "type": "integer", "minimum": 1 },
+            "copyKey": { "$ref": "#/$defs/CopyKey" },
+            "copyParams": { "$ref": "#/$defs/CopyParams" },
+            "status": { "$ref": "#/$defs/StepStatus" }
+          }
+        },
+        "guidanceEnabled": { "type": "boolean" },
+        "allowedCommands": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CommandType" },
+          "description": "Supplied by Runtime; FE does not infer permissions."
+        },
+        "blocker": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "recoverable"],
+          "properties": {
+            "code": { "$ref": "#/$defs/BlockerCode" },
+            "recoverable": { "type": "boolean" }
+          }
+        },
+        "progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["completedSteps", "totalSteps"],
+          "properties": {
+            "completedSteps": { "type": "integer", "minimum": 0 },
+            "totalSteps": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  }
+}

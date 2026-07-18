@@ -4,7 +4,10 @@ import com.sellerops.attention.reply.dto.ReviewReplyApprovalRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
+import com.sellerops.attention.reply.dto.ReviewReplyOutcomeRequest;
+import com.sellerops.attention.reply.dto.ReviewReplyOutcomeResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
+import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunResponse;
 import com.sellerops.auth.AuthPrincipal;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -114,5 +117,47 @@ public class OperatorReviewReplyController {
             @RequestBody ReviewReplyApprovalRequest request) {
         return service.decideApproval(principal.orgId(), accountId, actionRef, request.state(),
                 request.baseVersion(), request.commandId(), principal.userId());
+    }
+
+    /**
+     * Start a guided Action Window reply-submission run: mint a single-use {@code submissionRef}
+     * bound to the current approved head. The client passes it into the Action Window {@code
+     * START_RUN}; the reply text never crosses that boundary.
+     *
+     * <p><b>Still no send.</b> This authorizes a guided, human-performed post — SellerOps guides and
+     * observes; the operator submits. There is no marketplace call behind it.
+     *
+     * <p>Takes no body: the run is always bound to the review's current approved head. Returns 409
+     * when the review is not {@code RESPONSE_NEEDED} or no approval stands; 404 when the ref is not
+     * addressable from this account.
+     */
+    @PostMapping("/submission-run")
+    public ReviewReplySubmissionRunResponse startSubmissionRun(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @PathVariable String actionRef) {
+        return service.startSubmissionRun(principal.orgId(), accountId, actionRef, principal.userId());
+    }
+
+    /**
+     * Record the operator's report about their own manual reply post — a LOCAL, operator-reported,
+     * explicitly UNVERIFIED fact. Never a claim about NAVER, never a completion; the response carries
+     * no body.
+     *
+     * <p>Returns 200 for a fresh record and for an exact replay (distinguished by {@code replayed});
+     * 400 for a malformed ref/commandId/submissionRef/awRunRef or an unknown outcome; 404 when the
+     * ref is not addressable from this account; 409 when the review is not {@code RESPONSE_NEEDED},
+     * the binding no longer describes the approved head, the binding is already spent (single-use), or
+     * the command id was spent on a different outcome.
+     */
+    @PostMapping("/outcome")
+    public ReviewReplyOutcomeResponse recordOutcome(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @PathVariable String actionRef,
+            @RequestBody ReviewReplyOutcomeRequest request) {
+        return service.recordSubmissionReported(principal.orgId(), accountId, actionRef,
+                request.submissionRef(), request.operatorOutcome(), request.awRunRef(),
+                request.commandId(), principal.userId());
     }
 }

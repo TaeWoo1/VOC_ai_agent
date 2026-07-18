@@ -20,6 +20,11 @@ package com.sellerops.attention.reply.dto;
  * approve one. Both nulls mean "not yet", never "not allowed" — {@code capabilities} is where
  * permission is stated.
  *
+ * <p>{@code outcome} (v1.6) is the operator-reported result for the CURRENT approved reply, or null
+ * if none has been recorded (or nothing is approved). It carries {@code operatorOutcome} AND
+ * {@code verification} as two separate facts — the surface renders the pair, never
+ * {@code UNVERIFIED} alone, and never anything that reads as "완료".
+ *
  * <p>{@code triageDisposition} echoes the review's current decision, so the surface can
  * explain WHY an affordance is unavailable ("대응 필요일 때만 저장할 수 있습니다") instead of
  * showing a dead control with no reason. It is the same value the attention row carries.
@@ -36,5 +41,6 @@ public record ReviewReplyPrepView(
         ReviewReplySuggestionView suggestion,
         ReviewReplyDraftView draft,
         ReviewReplyApprovalView approval,
+        ReviewReplyOutcomeView outcome,
         ReviewReplyCapabilities capabilities) {
 }
