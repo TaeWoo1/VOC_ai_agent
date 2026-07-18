@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   mockAttentionItems,
   mockDecideReviewReplyApproval,
+  mockRecordReviewReplyOutcome,
   mockReviewReplyPrep,
   mockSaveReviewReplyDraft,
+  mockStartReviewReplySubmissionRun,
   mockVocItemTriage,
   resetMockReviewReplyState,
   resetMockTriageDecisions,
@@ -40,7 +42,9 @@ describe("mock review reply prep", () => {
       canApprove: false, // nothing to approve yet
       canWithdraw: false,
       canCopy: false,
+      canStartSubmissionRun: false, // nothing approved to guide-post yet
     });
+    expect(prep.outcome).toBeNull();
   });
 
   it("serves the whole redacted body, not the list's preview", () => {
@@ -244,5 +248,81 @@ describe("mock review reply prep", () => {
     mockSaveReviewReplyDraft(SEEDED_REF, "합성-답변 초안", 0);
     expect(rowFor(SEEDED_REF)?.hasReplyPreparation).toBe(true);
     expect(rowFor("review:mock-voc-1")?.hasReplyPreparation).toBe(false);
+  });
+});
+
+describe("mock guided reply submission (v1.6)", () => {
+  beforeEach(() => {
+    resetMockTriageDecisions();
+    resetMockReviewReplyState();
+  });
+
+  /** Drive the seeded row to an APPROVED reply, the precondition for a guided run. */
+  function approve() {
+    mockSaveReviewReplyDraft(SEEDED_REF, "합성-승인된-답변", 0);
+    mockDecideReviewReplyApproval(SEEDED_REF, "APPROVED", 1);
+  }
+
+  it("canStartSubmissionRun follows canCopy — only once approved under 대응 필요", () => {
+    mockSaveReviewReplyDraft(SEEDED_REF, "합성-답변 초안", 0);
+    expect(mockReviewReplyPrep(SEEDED_REF).capabilities.canStartSubmissionRun).toBe(false);
+    mockDecideReviewReplyApproval(SEEDED_REF, "APPROVED", 1);
+    const caps = mockReviewReplyPrep(SEEDED_REF).capabilities;
+    expect(caps.canStartSubmissionRun).toBe(true);
+    expect(caps.canStartSubmissionRun).toBe(caps.canCopy);
+  });
+
+  it("starting a run needs an approval", () => {
+    mockSaveReviewReplyDraft(SEEDED_REF, "합성-답변 초안", 0);
+    expect(() => mockStartReviewReplySubmissionRun(SEEDED_REF)).toThrow();
+  });
+
+  it("mints an opaque 16-hex submissionRef bound to the approved head", () => {
+    approve();
+    const run = mockStartReviewReplySubmissionRun(SEEDED_REF);
+    expect(run.submissionRef).toMatch(/^[0-9a-f]{16}$/);
+    expect(run.approvedVersion).toBe(1);
+  });
+
+  it("records an outcome that separates report from verification, never claiming completion", () => {
+    approve();
+    const run = mockStartReviewReplySubmissionRun(SEEDED_REF);
+    const res = mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "OPERATOR_REPORTED_SUBMITTED");
+    expect(res.recorded).toBe(true);
+
+    const outcome = mockReviewReplyPrep(SEEDED_REF).outcome;
+    expect(outcome?.operatorOutcome).toBe("OPERATOR_REPORTED_SUBMITTED");
+    expect(outcome?.verification).toBe("UNVERIFIED");
+    // No "COMPLETED" anywhere in the outcome vocabulary.
+    expect(JSON.stringify(outcome)).not.toContain("COMPLETED");
+  });
+
+  it("records an abort as an outcome, not a fault", () => {
+    approve();
+    const run = mockStartReviewReplySubmissionRun(SEEDED_REF);
+    mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "SUBMISSION_ABORTED");
+    expect(mockReviewReplyPrep(SEEDED_REF).outcome?.operatorOutcome).toBe("SUBMISSION_ABORTED");
+  });
+
+  it("a submissionRef is single-use; a retry needs a fresh mint", () => {
+    approve();
+    const first = mockStartReviewReplySubmissionRun(SEEDED_REF);
+    mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED");
+    expect(() =>
+      mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED"),
+    ).toThrow();
+    // A fresh mint records fine.
+    const second = mockStartReviewReplySubmissionRun(SEEDED_REF);
+    expect(second.submissionRef).not.toBe(first.submissionRef);
+    expect(
+      mockRecordReviewReplyOutcome(SEEDED_REF, second.submissionRef, "OPERATOR_REPORTED_SUBMITTED").recorded,
+    ).toBe(true);
+  });
+
+  it("an unknown submissionRef is refused", () => {
+    approve();
+    expect(() =>
+      mockRecordReviewReplyOutcome(SEEDED_REF, "0123456789abcdef", "OPERATOR_REPORTED_SUBMITTED"),
+    ).toThrow();
   });
 });

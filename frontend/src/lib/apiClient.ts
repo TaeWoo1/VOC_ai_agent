@@ -24,10 +24,13 @@ import type {
   OperatorAttentionSummary,
   OperatorVocItemPage,
   OrderSummaryResponse,
+  OperatorOutcomeName,
   ReviewReplyApprovalResponse,
   ReviewReplyApprovalStateName,
   ReviewReplyDraft,
+  ReviewReplyOutcomeResponse,
   ReviewReplyPrep,
+  ReviewReplySubmissionRunResponse,
   TriageDecisionResponse,
   TriageDisposition,
   ScheduleView,
@@ -52,8 +55,10 @@ import {
   mockConnectorAlerts,
   mockCredentialTemplate,
   mockDecideReviewReplyApproval,
+  mockRecordReviewReplyOutcome,
   mockReviewReplyPrep,
   mockSaveReviewReplyDraft,
+  mockStartReviewReplySubmissionRun,
   mockStoreCredential,
   mockTestConnection,
   mockDashboard,
@@ -676,6 +681,50 @@ export const api = {
     }
     const { data } = await http.post<ReviewReplyApprovalResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/approval`,
+      body,
+    );
+    return data;
+  },
+
+  // v1.6: start a GUIDED Action Window reply-submission run — mint a single-use `submissionRef`
+  // bound to the current approved head. No body: the run is always bound to the review's current
+  // approval. Still no send behind it: the operator posts the reply themselves; SellerOps guides
+  // and observes. Fail-closed like the reads above. 409 when not RESPONSE_NEEDED or nothing approved.
+  async startReviewReplySubmissionRun(
+    accountId: string,
+    actionRef: string,
+  ): Promise<ReviewReplySubmissionRunResponse> {
+    if (USE_MOCKS) {
+      return mockStartReviewReplySubmissionRun(actionRef);
+    }
+    const { data } = await http.post<ReviewReplySubmissionRunResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/submission-run`,
+      {},
+    );
+    return data;
+  },
+
+  // v1.6: record the operator's report about their own manual post — a LOCAL, operator-reported,
+  // explicitly UNVERIFIED fact, never a channel claim. `commandId` is the client idempotency key
+  // (stable across retries of one report, fresh for a new one); `submissionRef` is the single-use
+  // binding; `operatorOutcome` is what the operator reports; `awRunRef` is the opaque guided-run id.
+  // The response carries no body. 409 when the binding is spent, stale, or the review is not
+  // RESPONSE_NEEDED.
+  async recordReviewReplyOutcome(
+    accountId: string,
+    actionRef: string,
+    body: {
+      commandId: string;
+      submissionRef: string;
+      operatorOutcome: OperatorOutcomeName;
+      awRunRef: string;
+    },
+  ): Promise<ReviewReplyOutcomeResponse> {
+    if (USE_MOCKS) {
+      return mockRecordReviewReplyOutcome(actionRef, body.submissionRef, body.operatorOutcome);
+    }
+    const { data } = await http.post<ReviewReplyOutcomeResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/outcome`,
       body,
     );
     return data;

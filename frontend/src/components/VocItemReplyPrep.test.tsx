@@ -11,6 +11,8 @@ vi.mock("../lib/apiClient", () => ({
     getReviewReplyPrep: vi.fn(),
     saveReviewReplyDraft: vi.fn(),
     decideReviewReplyApproval: vi.fn(),
+    startReviewReplySubmissionRun: vi.fn(),
+    recordReviewReplyOutcome: vi.fn(),
   },
 }));
 
@@ -44,7 +46,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     },
     draft: null,
     approval: null,
-    capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false },
+    outcome: null,
+    capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
     ...over,
   };
 }
@@ -64,7 +67,7 @@ const APPROVED = prepView({
     approvedBody: "합성-승인된-답변",
     decidedAt: "2026-07-17T00:00:00Z",
   },
-  capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true },
+  capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true, canStartSubmissionRun: true },
 });
 
 /** aria-disabled, not the native attribute — see the class note. */
@@ -143,7 +146,7 @@ describe("VocItemReplyPrep", () => {
           fingerprintAlgorithm: "review-reply-v1",
           createdAt: "2026-07-17T00:00:00Z",
         },
-        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     expect(screen.getByLabelText("답변 초안")).toHaveValue("합성-저장된-초안");
@@ -160,7 +163,7 @@ describe("VocItemReplyPrep", () => {
           fingerprintAlgorithm: "review-reply-v1",
           createdAt: "2026-07-17T00:00:00Z",
         },
-        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     await user.click(screen.getByRole("button", { name: "초안 저장" }));
@@ -178,7 +181,7 @@ describe("VocItemReplyPrep", () => {
     await renderPanel(
       prepView({
         triageDisposition: "MONITOR",
-        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     expect(screen.getByLabelText("답변 초안")).toHaveAttribute("readonly");
@@ -191,7 +194,7 @@ describe("VocItemReplyPrep", () => {
     const user = userEvent.setup();
     await renderPanel(
       prepView({
-        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     await user.click(screen.getByRole("button", { name: "초안 저장" }));
@@ -209,7 +212,7 @@ describe("VocItemReplyPrep", () => {
           fingerprintAlgorithm: "review-reply-v1",
           createdAt: "2026-07-17T00:00:00Z",
         },
-        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     await user.click(screen.getByRole("button", { name: "승인" }));
@@ -243,7 +246,7 @@ describe("VocItemReplyPrep", () => {
       prepView({
         ...APPROVED,
         triageDisposition: "MONITOR",
-        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: false },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     expect(inert(screen.getByRole("button", { name: "승인 해제" }))).toBe(false);
@@ -314,7 +317,7 @@ describe("VocItemReplyPrep", () => {
           fingerprintAlgorithm: "review-reply-v1",
           createdAt: "2026-07-17T00:00:00Z",
         },
-        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     const approve = screen.getByRole("button", { name: "승인" });
@@ -368,7 +371,7 @@ describe("VocItemReplyPrep", () => {
         ...APPROVED,
         triageDisposition: "MONITOR",
         approval: { ...APPROVED.approval!, approvedBody: null },
-        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: false },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: false, canStartSubmissionRun: false },
       }),
     );
     expect(inert(screen.getByRole("button", { name: "복사" }))).toBe(true);
@@ -392,7 +395,7 @@ describe("VocItemReplyPrep", () => {
       createdAt: "2026-07-17T00:00:00Z",
     },
     // As the server answered while the review WAS 대응 필요.
-    capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+    capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
   });
 
   async function renderStale(view: ReviewReplyPrep) {
@@ -439,7 +442,7 @@ describe("VocItemReplyPrep", () => {
       prepView({
         ...APPROVED,
         // The server sent the body while the review was still 대응 필요.
-        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true, canStartSubmissionRun: true },
       }),
     );
 
@@ -586,5 +589,105 @@ describe("VocItemReplyPrep", () => {
       expect(el.textContent ?? "").not.toMatch(/발송|전송|등록|게시/);
     }
     expect(document.body.textContent).not.toMatch(/발송|전송/);
+  });
+});
+
+describe("VocItemReplyPrep — guided submission (v1.6)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const OUTCOME_SUBMITTED: ReviewReplyPrep = {
+    ...APPROVED,
+    outcome: {
+      operatorOutcome: "OPERATOR_REPORTED_SUBMITTED",
+      verification: "UNVERIFIED",
+      recordedVersion: 1,
+      recordedFingerprint: "mock-abc",
+      awRunRef: "aw-mock-1",
+      recordedAt: "2026-07-17T00:00:00Z",
+    },
+  };
+
+  it("offers the guided post only for an approved reply under 대응 필요", async () => {
+    await renderPanel(APPROVED);
+    expect(
+      screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer the guided post once the review has left 대응 필요", async () => {
+    await renderPanel({ ...APPROVED, triageDisposition: "MONITOR" });
+    expect(
+      screen.queryByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }),
+    ).toBeNull();
+  });
+
+  it("enters the guided flow and records a SUBMITTED outcome shown as a pair", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.recordReviewReplyOutcome).mockResolvedValue({
+      actionRef: REF,
+      recorded: true,
+      replayed: false,
+    });
+    await renderPanel(APPROVED);
+
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await waitFor(() =>
+      expect(api.startReviewReplySubmissionRun).toHaveBeenCalledWith(ACCOUNT, REF),
+    );
+    expect(screen.getByRole("group", { name: "네이버에서 직접 답변하기" })).toBeInTheDocument();
+
+    // The re-read after reporting carries the recorded outcome.
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(OUTCOME_SUBMITTED);
+    await user.click(screen.getByRole("button", { name: "답변함으로 기록" }));
+    await waitFor(() => expect(api.recordReviewReplyOutcome).toHaveBeenCalled());
+    const body = vi.mocked(api.recordReviewReplyOutcome).mock.calls[0][2];
+    expect(body.operatorOutcome).toBe("OPERATOR_REPORTED_SUBMITTED");
+    expect(body.submissionRef).toBe("a1b2c3d4e5f60718");
+
+    // The outcome is shown as a PAIR — the report line AND the verification line.
+    await waitFor(() =>
+      expect(screen.getByText("채널에 직접 답변한 것으로 기록했어요.")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("SellerOps는 답변 여부를 확인하지 않습니다(확인 안 함)."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {
+    await renderPanel({
+      ...APPROVED,
+      outcome: {
+        operatorOutcome: "SUBMISSION_ABORTED",
+        verification: "UNVERIFIED",
+        recordedVersion: 1,
+        recordedFingerprint: "mock-abc",
+        awRunRef: "aw-mock-2",
+        recordedAt: "2026-07-17T00:00:00Z",
+      },
+    });
+    expect(screen.getByText("답변하지 않은 것으로 기록했어요.")).toBeInTheDocument();
+    // The verification is always shown paired with the outcome, never alone and never as 완료.
+    expect(document.body.textContent).toContain("확인 안 함");
+    expect(document.body.textContent).not.toMatch(/완료/);
+  });
+
+  it("the guided flow and outcome carry no send-shaped label", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    await renderPanel(OUTCOME_SUBMITTED);
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+    expect(document.body.textContent).not.toMatch(/발송|전송|등록|게시/);
   });
 });

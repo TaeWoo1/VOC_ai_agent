@@ -38,7 +38,8 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     },
     draft: null,
     approval: null,
-    capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false },
+    outcome: null,
+    capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
     ...over,
   };
 }
@@ -77,7 +78,7 @@ describe("VocItemReplyPrep a11y", () => {
     await scan(
       prepView({
         draft: DRAFT,
-        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: true, canApprove: true, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
   });
@@ -93,7 +94,7 @@ describe("VocItemReplyPrep a11y", () => {
           approvedBody: "합성-저장된-초안",
           decidedAt: "2026-07-17T00:00:00Z",
         },
-        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: true, canCopy: true, canStartSubmissionRun: true },
       }),
     );
   });
@@ -103,7 +104,7 @@ describe("VocItemReplyPrep a11y", () => {
       prepView({
         triageDisposition: "MONITOR",
         draft: DRAFT,
-        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false },
+        capabilities: { canSave: false, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
       }),
     );
   });
