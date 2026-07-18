@@ -68,6 +68,7 @@ export const BLOCKER_CODES = [
   "UNSUPPORTED_STATE",
   "DOWNLOAD_TIMEOUT",
   "ARTIFACT_INVALID",
+  "INGEST_FAILED",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 

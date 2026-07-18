@@ -231,14 +231,20 @@ describe("engine — fail-closed cases", () => {
       e.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
       e.onArtifactValidated({ valid: false });
     }, "ARTIFACT_INVALID"));
-  it("failed ingestion handoff → fails closed (no reserved ingest blocker; generic UNSUPPORTED_STATE)", () => {
+  // The surface was valid and the artifact validated, so the failure is INGEST-specific — it must
+  // NOT masquerade as UNSUPPORTED_STATE ("surface is wrong"). Mirrors the ARTIFACT_INVALID branch.
+  it("failed ingestion handoff → INGEST_FAILED (never COMPLETED)", () => {
+    failAt((e) => {
+      driveToVerified(e);
+      e.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
+      e.onArtifactValidated({ valid: true });
+      e.onIngested({ ok: false, processed: 0 });
+    }, "INGEST_FAILED");
     const engine = newEngine();
     driveToVerified(engine);
     engine.onDownloadDetected({ detected: true, artifactRef: ARTIFACT });
     engine.onArtifactValidated({ valid: true });
     engine.onIngested({ ok: false, processed: 0 });
-    expect(engine.currentStage()).toBe("FAILED");
-    expect(engine.view().blocker?.code).toBe("UNSUPPORTED_STATE");
     expect(engine.events().some((e) => e.type === "RUN_COMPLETED")).toBe(false);
   });
   it("downstream failure never counts step 3 as completed", () => {

@@ -422,14 +422,14 @@ describe("NAVER fixture session E2E — REAL ingest handoff (injected upload)", 
     assertSanitized(fe, "real-ingest-happy");
   });
 
-  it("a non-ok ingest outcome FAILS the run closed with the generic UNSUPPORTED_STATE", async () => {
+  it("a non-ok ingest outcome FAILS the run closed with INGEST_FAILED", async () => {
     const dir = tmpQuarantine();
     const upload: AwIngestUploadFn = () => Promise.resolve({ ok: false, processed: 0 });
     const { fe, session, driver } = await startRun("normal", ingestOpts(dir, upload));
     await toCompletionAttempt(fe, session, driver);
 
     expect(fe.view?.status).toBe("FAILED");
-    expect(fe.view?.blocker?.code).toBe("UNSUPPORTED_STATE"); // no ingest-specific code (deferred)
+    expect(fe.view?.blocker?.code).toBe("INGEST_FAILED"); // surface + artifact were valid; only ingest failed
     expect(fe.eventTypes()).toContain("DOWNLOAD_DETECTED"); // detect + validate succeeded; ingest failed
     expect(fe.eventTypes()).not.toContain("RUN_COMPLETED");
     expect(driver.downstreamCalls).toEqual({ detect: 1, validate: 1, ingest: 1 });
