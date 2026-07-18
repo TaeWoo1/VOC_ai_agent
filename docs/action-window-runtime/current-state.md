@@ -20,8 +20,8 @@
 - **parked work:** ESM marketplace-attribution experiment in `sellerops-esm-live` (`5a43dcb` + 8 uncommitted files) — frozen; do not clean, commit, merge, or continue
 - **forbidden work:** editing canonical product docs from this branch; touching the FE worktree; touching/cleaning `sellerops-esm-live`; launching Chrome / live commerce action; automatic marketplace selection or export click as default; wiring Projection as a V1 dependency
 - **2026-07-18 CONSOLIDATED — the current state (the fields above predate Run 5 and are historical):**
-  **baseline `origin/main` = `da47a0a` (PR #289 merged 2026-07-18); branch synced 0 ahead / 0 behind; offline
-  tests 3014 passed / 31 skipped (175 files); `git diff --check` clean; `package.json`/lock unchanged.** The
+  **baseline `origin/main` = `ab4a9fa` (PR #294 merged 2026-07-18); branch synced 0 ahead / 0 behind; offline
+  tests 3120 passed / 32 skipped (179 files); `git diff --check` clean; `package.json`/lock unchanged.** The
   §8-8 → §8-23 live arc is complete: Run 4 (§8-17, 2026-07-15) proved the export pilot end-to-end; **Run 5
   (§8-18, 2026-07-16) is the last click/confirmation live run** (`USER_ACTION_OBSERVED` fires on a real click);
   **Run 6 (§8-23, 2026-07-17) is the last live run** — session recovery / **zero-click**, which **LIVE-PROVED
@@ -32,7 +32,11 @@
   **#287** — the session-recovery CLI prompt now **branches its operator prose on run scope** (resolves §8-23's
   reported-not-resolved prompt-mismatch finding); **#288/#289** — `selectedRangePresent` **offline propagation +
   boundary are now test-proven** and the **whitespace-only false-positive is fixed** (`value="  "` no longer
-  reads `true`), the signal staying observe-only / non-gating. ⚠ **[D-025](decisions.md)'s LIVE positive
+  reads `true`), the signal staying observe-only / non-gating. **#294** (`ab4a9fa`) then built the IDL-property
+  **`selectedRangePresentLive`** diagnostic path — the "different detector" D-025 names: a best-effort live
+  `.value` read overlaid onto the log-only diagnostic, **observe/log-only and non-gating** (no wire / blocker /
+  transport / persistence / gating change), with a `RUN_INTEGRATION`-gated browser discriminator **written but
+  not run**. ⚠ **[D-025](decisions.md)'s LIVE positive
   direction for `selectedRangePresent` remains OPEN** — Runs 5 and 6 both selected no range (true negatives);
   whether the detector can ever read `true` on a real SPA picker needs a future live range selection (G6 +
   browser) and is unprovable offline. **No open Runtime blocker; no live NAVER/browser/backend contact in these
