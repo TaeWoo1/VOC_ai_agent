@@ -13,7 +13,8 @@ Read it first; everything below is only what that file cannot protect you from.
 
 ## Read order
 1. `docs/action-window-runtime/HANDOFF.md` — state, live-run results, git state, next slice.
-2. `current-state.md` — living detail. **Read the `UPDATE` segments, not the `updated at:` header.**
+2. `current-state.md` — living detail. **`HANDOFF.md`'s read-order note says which parts are current** —
+   its top block accretes and older bullets go stale; do not read the body as uniformly live.
 3. `r4-evidence-pack.md` — §8-N dated evidence, newest last.
 4. `r4-preparation.md` — normative: §3 gates G1–G6, §4 safety boundary, §7 abort criteria.
 

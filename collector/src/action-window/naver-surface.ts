@@ -82,6 +82,14 @@ export interface NaverPrepareDiagnostic {
   readinessBranch?: ExportTargetReadinessBranch;
   /** A date/range control already carries a value (best-effort; the period/scope evidence seam). */
   selectedRangePresent?: boolean;
+  /**
+   * The IDL-property sibling of `selectedRangePresent`, set ONLY by the live driver — never by the pure
+   * `naverSurfaceDecision`, which is string-only and structurally attribute-blind (D-025). `undefined` on
+   * the fixture path and whenever the in-page read is unavailable. Log-only and non-gating, like every
+   * field here: it makes the next click run's falsifier discriminating (attribute `false` + live `true`
+   * ⇒ attribute-blindness confirmed) without gating on it.
+   */
+  selectedRangePresentLive?: boolean;
   /** Coarse bucket of date/range-style controls present — never an exact count. */
   dateRangeControlPresence?: PreClickSignals["dateRangeControlPresence"];
 }

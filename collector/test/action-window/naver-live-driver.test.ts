@@ -204,8 +204,9 @@ describe("NaverLiveProbeDriver — frame-aware surface resolution (iframe / SPA 
     const driver = driverForPage(page);
     expect(await driver.prepareSurface()).toEqual({ ok: true });
     expect(await driver.locate()).toMatchObject({ count: 1, sig: expect.stringMatching(HEX16) });
-    // The NAME_SHIM + in-page tagger both ran in the CHILD frame; the top document was never touched.
-    expect(childCalls).toEqual(["shim", "fn"]);
+    // Every in-page evaluate ran in the CHILD frame, never the top document: prepareSurface's IDL
+    // range-read (the leading "fn"), then locate's NAME_SHIM + in-page tagger. `mainCalls` stays empty.
+    expect(childCalls).toEqual(["fn", "shim", "fn"]);
     expect(mainCalls).toEqual([]);
   });
 });

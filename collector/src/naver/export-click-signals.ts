@@ -175,6 +175,20 @@ const DATE_INPUT_RE = /type=["']date["']|date[-_]?picker|calendar|달력|날짜\
 const FILLED_DATE_INPUT_RE =
   /<input\b[^>]*(?:type=["']date["']|class=["'][^"']*(?:date|calendar|picker)[^"']*["'])[^>]*\bvalue\s*=\s*["']\s*[^"'\s][^"']*["']/i;
 
+/**
+ * Pure: do any live date/range IDL `.value` strings carry a selected range?
+ *
+ * The property-side sibling of `FILLED_DATE_INPUT_RE`. That regex reads the serialized `value`
+ * **attribute**; a user- or JS-set SPA date picker updates only the IDL **property**, leaving the
+ * attribute empty — so the regex can be structurally incapable of ever returning `true` (D-025's open
+ * live-positive falsifier). A live driver reads the controls' `.value` properties in-page and reduces
+ * them here. Same non-whitespace rule as the regex (#289): a blanked/placeholder picker reporting `"  "`
+ * is NOT a selected range.
+ */
+export function selectedRangeFromValues(values: readonly string[]): boolean {
+  return values.some((v) => v.trim().length > 0);
+}
+
 const stripComments = (html: string): string => html.replace(/<!--[\s\S]*?-->/g, " ");
 const anyMatch = (markers: readonly RegExp[], s: string): boolean => markers.some((re) => re.test(s));
 const countMatches = (re: RegExp, html: string): number => (html.match(re) ?? []).length;
