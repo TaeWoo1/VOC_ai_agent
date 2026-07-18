@@ -109,3 +109,54 @@ export class FixtureReplySubmitDriver implements ReplySubmitProbeDriver {
     }
   }
 }
+
+/**
+ * A CANARY-LADEN synthetic reply-composer DOM for the real-browser rung (`reply-browser.test.ts`,
+ * `RUN_INTEGRATION` only). A real Chromium `Page` loads it via `page.setContent(...)` and satisfies
+ * {@link ReplyPageLike}, so {@link NaverReplySubmitProbeDriver} runs its own read-only in-page
+ * extraction over REAL markup — the reply analogue of the export `livePage`/`fixtureHtml` surface.
+ *
+ * 100% synthetic: NO marketplace trademark, HTML, or seller data. Every {@link REPLY_FIXTURE_CANARIES}
+ * string is deliberately embedded (composer content, a phone number, a selector as the element id, a
+ * URL) so the browser rung's no-leak sweep proves none of it crosses the sanitized v2 boundary. The
+ * page has NO `<script>` and NO pre-applied `data-aw-reply-target` — the driver tags its own target.
+ * A plain `<button>` submit control exists only so the TEST (or a human) can click it; the driver's
+ * capture-phase observer records that boolean and NEVER clicks or types.
+ */
+export function replyComposerFixtureHtml(mode: ReplyFixtureMode): string {
+  const [bodyText, phone, selector, url] = REPLY_FIXTURE_CANARIES as [string, string, string, string];
+  const composerId = selector.replace(/^#/, "");
+  // A reply composer the driver's EXTRACT_SIGNALS will match: a textarea whose accessible wording
+  // carries a reply keyword (답변). Its VALUE carries a canary so we prove content never leaks.
+  const composer = (idSuffix = ""): string =>
+    `<textarea id="${composerId}${idSuffix}" aria-label="답변 작성" placeholder="답변을 입력하세요">${bodyText}</textarea>`;
+  // A composer WITHOUT a reply keyword — present in the DOM but not a candidate (fail-closed count 0).
+  const decoy = `<textarea aria-label="메모" placeholder="비공개 메모"></textarea>`;
+  const submit = `<button type="button" id="aw-reply-submit">답변 등록</button>`;
+  const leak = `<a id="aw-reply-src" href="${url}" hidden>출처</a><span hidden>${phone}</span>`;
+
+  const inner = ((): string => {
+    switch (mode) {
+      case "composer-present":
+      case "submitted":
+        return composer() + submit + leak;
+      case "composer-ambiguous":
+        return composer("-a") + composer("-b") + submit + leak;
+      case "composer-missing":
+        return decoy + submit + leak;
+      case "login-required":
+        return `<section id="login-gate"><p>로그인이 필요합니다.</p></section>`;
+    }
+  })();
+
+  // `data-page` drives the driver's read-only loggedIn check: only "login-required" reads as logged out.
+  const pageAttr = mode === "login-required" ? "login" : "review-management";
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{font-family:system-ui;margin:0;padding:24px}
+    textarea{display:block;width:320px;height:80px}
+    button{margin-top:12px;font-size:16px;padding:8px 16px}
+  </style></head><body data-page="${pageAttr}">
+    <h1>리뷰 관리 (합성 픽스처)</h1>
+    <section data-aw-scope="reply">${inner}</section>
+  </body></html>`;
+}

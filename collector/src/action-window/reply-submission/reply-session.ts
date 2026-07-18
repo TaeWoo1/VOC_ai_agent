@@ -12,23 +12,30 @@ import type { AwClientFrame, AwServerTransport } from "../../../../contracts/act
 import type { ReplyEffect, ReplyEngine } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
 
+/** Optional session hooks. `onStatePublished` fires after every published transition (R3 persistence). */
+export interface ReplySessionOptions {
+  onStatePublished?: () => void;
+}
+
 export class ReplySubmitSession {
   private readonly engine: ReplyEngine;
   private readonly driver: ReplySubmitProbeDriver;
   private readonly transport: AwServerTransport;
   private readonly runId: string;
+  private readonly onStatePublished: (() => void) | undefined;
 
   private started = false;
   private publishedSeq = 0;
   private autoBusy = false;
   private unsubscribe: (() => void) | null = null;
 
-  constructor(engine: ReplyEngine, driver: ReplySubmitProbeDriver, transport: AwServerTransport) {
+  constructor(engine: ReplyEngine, driver: ReplySubmitProbeDriver, transport: AwServerTransport, opts?: ReplySessionOptions) {
     this.engine = engine;
     this.driver = driver;
     this.transport = transport;
     this.runId = engine.view().runId;
     this.started = engine.isStarted();
+    this.onStatePublished = opts?.onStatePublished;
   }
 
   attach(): () => void {
@@ -137,6 +144,9 @@ export class ReplySubmitSession {
       }
     }
     this.transport.send({ kind: "aw_view", view: this.engine.view() });
+    // R3 persistence hook: the reply-run marker is saved AFTER the sanitized state is published, never
+    // before — so a persisted record can never lead the wire. No-op unless a persistDir was wired.
+    this.onStatePublished?.();
   }
 }
 

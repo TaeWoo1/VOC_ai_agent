@@ -243,6 +243,9 @@ R4 live-run approval — REPLY SUBMISSION (MUTATING)
 *Reply-submission approvals recorded:* **none** — the sixth scope is ratified (D-032) but no G3 instance and no
 reply-submission G6 have ever been filled, and the whole program is **offline** (no live reply run exists).
 
+*Live reply-run kickoff checklist:* [`r4-reply-submission-live-kickoff.md`](r4-reply-submission-live-kickoff.md)
+— the pre-dispatch runbook (build prerequisites now MET offline; every run-gate still ☐). It grants nothing.
+
 *Approvals recorded:* one **CONSUMED** read-only-probe instance (below). G6 is a **per-run** gate — it is
 never permanently satisfied, and this record grants nothing beyond the single run it describes.
 

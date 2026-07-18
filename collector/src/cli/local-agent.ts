@@ -41,8 +41,10 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge, type AgentActionWindowConfig } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
 import { SyntheticProbeDriver } from "../action-window/session";
+import { SyntheticReplySubmitDriver } from "../action-window/reply-submission/reply-driver";
+import { defaultReplyRunDirFor, mintReplyRunId } from "../action-window/reply-submission/reply-dispatch";
 import { NaverFixtureProbeDriver, NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY, type NaverRealDownstreamOptions } from "../action-window/naver-driver";
 import { buildBackendIngestUpload } from "../action-window/ingest-handoff";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
@@ -175,6 +177,34 @@ export function resolveActionWindowChannel(args: readonly string[], env: NodeJS.
 /** Back-compat predicate for the synthetic-only hosting flag (delegates to the channel resolver). */
 export function resolveActionWindowSynthetic(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
   return resolveActionWindowChannel(args, env) === "synthetic";
+}
+
+/**
+ * DEV/TEST ONLY: host the ISOLATED reply-submission channel (v2) on the Bridge, so the FE dev-bridge
+ * (`VITE_AW_BRIDGE=1`) can dispatch a real `REPLY_SUBMISSION` run and receive a real `run_<hex>` runId —
+ * OFFLINE, over a synthetic driver (no browser, no live NAVER). Never honored under NODE_ENV=production.
+ * Mutually exclusive with the export Action Window channel (an agent hosts one carrier).
+ */
+export const ACTION_WINDOW_REPLY_FLAG = "--dev-action-window-reply";
+
+/** Pure gate: should the agent host the reply-submission channel? Never under production. */
+export function resolveReplySubmissionChannel(args: readonly string[], env: NodeJS.ProcessEnv): boolean {
+  if (env.NODE_ENV === "production") return false;
+  return args.includes(ACTION_WINDOW_REPLY_FLAG);
+}
+
+/**
+ * Build the {@link AgentReplySubmissionConfig} for the dev reply channel — a synthetic driver (no
+ * browser) and the gitignored `.reply-runs/` persistence dir (restart recovery → PARKED). Run identity
+ * is Runtime-assigned (opaque random suffix). No submissionRef here: the FE supplies it in START_RUN.
+ */
+export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
+  return {
+    runId: mintReplyRunId(),
+    channelCode: "naver",
+    createDriver: () => new SyntheticReplySubmitDriver(),
+    persistDir: defaultReplyRunDirFor(collectorRoot),
+  };
 }
 
 /**
@@ -469,10 +499,14 @@ async function main(): Promise<void> {
   // parked at the PAUSED barrier — instead of silently replaced on restart. The NAVER-fixture channel is
   // still fixture-only (no browser, no live NAVER); its ingest reaches a LOCAL dev backend only under the
   // explicit ingest opt-in.
-  const awChannel = resolveActionWindowChannel(args, process.env);
+  // Reply-submission hosting (v2, ISOLATED) is mutually exclusive with the export channel and WINS when
+  // requested — an agent hosts one carrier. The reply driver is synthetic (no browser, no live NAVER).
+  const hostReply = resolveReplySubmissionChannel(args, process.env);
+  const awChannel = hostReply ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
+  const replySubmission: AgentReplySubmissionConfig | undefined = hostReply ? buildReplySubmissionConfig() : undefined;
   // Approval-presenter wiring lives HERE and only here — never as a `createAgentBridge` default (see
   // `decideApprovalPresenter`). `none` means no human channel exists on this host, so pairing fails closed.
   const approvalKind = decideApprovalPresenter(process.env, process.platform);
@@ -480,11 +514,12 @@ async function main(): Promise<void> {
     ...resolveAgentBridgeConfig(args, process.env),
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     ...(actionWindow ? { actionWindow } : {}),
+    ...(replySubmission ? { replySubmission } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

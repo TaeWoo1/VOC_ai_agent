@@ -22,6 +22,11 @@ import { ActionWindowEndpoint } from "../bridge/action-window-endpoint";
 import { ActionWindowEngine } from "../action-window/engine";
 import { ActionWindowSession, type ProbeDriver } from "../action-window/session";
 import { createPersistentRunSession, findResumableRun, resumePersistedRunSession } from "../action-window/run-lifecycle";
+import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
+import { assembleReplyRun, recoverReplyRuns, makeReplyRunMarker } from "../action-window/reply-submission/reply-dispatch";
+import type { ReplySubmitProbeDriver } from "../action-window/reply-submission/reply-driver";
+import type { ReplySubmitSession } from "../action-window/reply-submission/reply-session";
+import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
 
@@ -64,6 +69,25 @@ export interface AgentActionWindowConfig {
   persistDir?: string;
 }
 
+/**
+ * Optional ISOLATED reply-submission session hosting (v2). Mutually exclusive with {@link AgentActionWindowConfig}
+ * — an agent hosts EITHER an export run OR a reply-submission run, never both, so exactly one carrier
+ * endpoint is ever mounted. The driver factory is injected so the default boot stays synthetic/fixture
+ * (no browser); the Runtime never submits. With a `persistDir`, restart recovery PARKS any interrupted
+ * reply run (never resumes/re-drives it), then a fresh run is minted for the next submission.
+ */
+export interface AgentReplySubmissionConfig {
+  /** Opaque run identity announced to paired clients (assigned by the Runtime, never by the FE). */
+  runId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE, e.g. `naver`). */
+  channelCode: string;
+  /** Opaque 16-hex binding to an approved reply — never text or a review id. */
+  submissionRef?: string;
+  createDriver: () => ReplySubmitProbeDriver;
+  /** Gitignored `.reply-runs/` persistence dir. Required in live mode; restart recovery → PARKED. */
+  persistDir?: string;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -84,6 +108,8 @@ export interface AgentBridgeConfig {
   projection?: AgentProjectionConfig;
   /** When present, hosts one Action Window session over the existing `/bridge/ws` opaque passthrough. */
   actionWindow?: AgentActionWindowConfig;
+  /** When present, hosts one ISOLATED reply-submission session (v2). Mutually exclusive with `actionWindow`. */
+  replySubmission?: AgentReplySubmissionConfig;
 }
 
 export type AgentBridgeListenResult =
@@ -105,9 +131,16 @@ export interface AgentBridge {
   readonly server: BridgeServer;
   /** Test-only access to the hosted Action Window session (undefined unless configured). */
   readonly actionWindowSession: ActionWindowSession | undefined;
+  /** Test-only access to the hosted reply-submission session (undefined unless configured). */
+  readonly replySubmissionSession: ReplySubmitSession | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
+  // An agent hosts EITHER an export run OR a reply-submission run — never both (one carrier slot).
+  // Fail fast before any I/O.
+  if (cfg.actionWindow && cfg.replySubmission) {
+    throw new Error("agent-bridge: actionWindow and replySubmission are mutually exclusive");
+  }
   const store = new FilePairingStore(cfg.pairingFile, { now: cfg.now ?? (() => Date.now()) });
   // Make durable-pairing restart recovery observable exactly once at boot. Sanitized: a coarse status enum
   // plus counts only — never a pairingId/origin/token/hash. Lets an operator tell "restored N pairings" from
@@ -152,6 +185,32 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     }
   }
   actionWindowSession?.attach();
+
+  // ISOLATED reply-submission hosting (v2). Restart recovery PARKS any interrupted run (never resumes/
+  // re-drives it — a reply POST is not idempotent), then a fresh run is minted for the next submission.
+  // The reply endpoint occupies the SAME single carrier slot as export (they are mutually exclusive).
+  let replyEndpoint: ReplySubmissionEndpoint | undefined;
+  let replySubmissionSession: ReplySubmitSession | undefined;
+  if (cfg.replySubmission) {
+    const rs = cfg.replySubmission;
+    if (rs.persistDir) {
+      const { parked } = recoverReplyRuns(rs.persistDir, makeReplyRunMarker());
+      if (parked.length > 0) log("aw_reply_run_parked", { count: parked.length });
+    }
+    replyEndpoint = new ReplySubmissionEndpoint({ runId: rs.runId, channelCode: rs.channelCode });
+    const assembly = assembleReplyRun(replyEndpoint.transport, {
+      runId: rs.runId,
+      channelCode: rs.channelCode,
+      ...(rs.submissionRef ? { submissionRef: rs.submissionRef } : {}),
+      createDriver: rs.createDriver,
+      ...(rs.persistDir ? { persistDir: rs.persistDir } : {}),
+    });
+    replySubmissionSession = assembly.session;
+    replySubmissionSession.attach();
+    log("aw_reply_run_hosted", {});
+  }
+
+  const carrier: AwCarrierEndpoint | undefined = replyEndpoint ?? actionWindow;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -160,7 +219,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     autoApprovePairing: cfg.autoApprovePairing,
     ...(cfg.approvalPresenter ? { approvalPresenter: cfg.approvalPresenter } : {}),
     projection,
-    actionWindow,
+    actionWindow: carrier,
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;
@@ -168,6 +227,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
   return {
     server,
     actionWindowSession,
+    replySubmissionSession,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {
