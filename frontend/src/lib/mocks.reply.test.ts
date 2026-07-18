@@ -287,12 +287,14 @@ describe("mock guided reply submission (v1.6)", () => {
   it("records an outcome that separates report from verification, never claiming completion", () => {
     approve();
     const run = mockStartReviewReplySubmissionRun(SEEDED_REF);
-    const res = mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "OPERATOR_REPORTED_SUBMITTED");
+    const res = mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "OPERATOR_REPORTED_SUBMITTED", "run_aaaa11112222");
     expect(res.recorded).toBe(true);
 
     const outcome = mockReviewReplyPrep(SEEDED_REF).outcome;
     expect(outcome?.operatorOutcome).toBe("OPERATOR_REPORTED_SUBMITTED");
     expect(outcome?.verification).toBe("UNVERIFIED");
+    // The recorded runId is the terminal-sourced value passed in, not fabricated from the ref.
+    expect(outcome?.awRunRef).toBe("run_aaaa11112222");
     // No "COMPLETED" anywhere in the outcome vocabulary.
     expect(JSON.stringify(outcome)).not.toContain("COMPLETED");
   });
@@ -300,29 +302,29 @@ describe("mock guided reply submission (v1.6)", () => {
   it("records an abort as an outcome, not a fault", () => {
     approve();
     const run = mockStartReviewReplySubmissionRun(SEEDED_REF);
-    mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "SUBMISSION_ABORTED");
+    mockRecordReviewReplyOutcome(SEEDED_REF, run.submissionRef, "SUBMISSION_ABORTED", "run_bbbb33334444");
     expect(mockReviewReplyPrep(SEEDED_REF).outcome?.operatorOutcome).toBe("SUBMISSION_ABORTED");
   });
 
   it("a submissionRef is single-use; a retry needs a fresh mint", () => {
     approve();
     const first = mockStartReviewReplySubmissionRun(SEEDED_REF);
-    mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED");
+    mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED", "run_cccc55556666");
     expect(() =>
-      mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED"),
+      mockRecordReviewReplyOutcome(SEEDED_REF, first.submissionRef, "OPERATOR_REPORTED_SUBMITTED", "run_cccc55556666"),
     ).toThrow();
     // A fresh mint records fine.
     const second = mockStartReviewReplySubmissionRun(SEEDED_REF);
     expect(second.submissionRef).not.toBe(first.submissionRef);
     expect(
-      mockRecordReviewReplyOutcome(SEEDED_REF, second.submissionRef, "OPERATOR_REPORTED_SUBMITTED").recorded,
+      mockRecordReviewReplyOutcome(SEEDED_REF, second.submissionRef, "OPERATOR_REPORTED_SUBMITTED", "run_dddd77778888").recorded,
     ).toBe(true);
   });
 
   it("an unknown submissionRef is refused", () => {
     approve();
     expect(() =>
-      mockRecordReviewReplyOutcome(SEEDED_REF, "0123456789abcdef", "OPERATOR_REPORTED_SUBMITTED"),
+      mockRecordReviewReplyOutcome(SEEDED_REF, "0123456789abcdef", "OPERATOR_REPORTED_SUBMITTED", "run_eeee99990000"),
     ).toThrow();
   });
 });

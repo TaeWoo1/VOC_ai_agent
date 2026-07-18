@@ -1385,6 +1385,7 @@ export function mockRecordReviewReplyOutcome(
   actionRef: string,
   submissionRef: string,
   operatorOutcome: OperatorOutcomeName,
+  awRunRef: string,
 ): ReviewReplyOutcomeResponse {
   const binding = reviewReplySubmissionRefs.get(submissionRef);
   if (binding == null || binding.actionRef !== actionRef) {
@@ -1407,7 +1408,8 @@ export function mockRecordReviewReplyOutcome(
     verification: "UNVERIFIED",
     recordedVersion: binding.boundVersion,
     recordedFingerprint: binding.boundFingerprint,
-    awRunRef: `aw-mock-${submissionRef}`,
+    // The runId comes from the runtime terminal (the sole source), not fabricated from the ref.
+    awRunRef,
     recordedAt: MOCK_DECIDED_AT,
   });
   return { actionRef, recorded: true, replayed: false };
