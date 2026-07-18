@@ -86,7 +86,8 @@ class OperatorReviewReplyControllerTest {
                         Instant.parse("2026-07-17T00:00:00Z")),
                 new ReviewReplyApprovalView("APPROVED", 1, "f".repeat(64), "합성-초안",
                         Instant.parse("2026-07-17T00:00:00Z")),
-                new ReviewReplyCapabilities(false, false, true, true));
+                null,
+                new ReviewReplyCapabilities(false, false, true, true, false));
     }
 
     @Test
@@ -189,8 +190,11 @@ class OperatorReviewReplyControllerTest {
         }
         assertThat(mapped).isNotEmpty();
         assertThat(mapped).allSatisfy(OperatorReviewReplyControllerTest::assertNotOutbound);
-        // The whole surface, enumerated: read, save a version, decide an approval. Nothing else.
-        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/approval");
+        // The whole surface, enumerated: read, save a version, decide an approval, and (v1.6) start a
+        // GUIDED submission run + record the operator's UNVERIFIED report. Still nothing that sends:
+        // /submission-run mints an opaque binding and /outcome records a local operator report — the
+        // operator posts the reply themselves; no route here calls a marketplace.
+        assertThat(mapped).containsExactlyInAnyOrder("/draft", "/approval", "/submission-run", "/outcome");
     }
 
     private static void assertNotOutbound(String path) {

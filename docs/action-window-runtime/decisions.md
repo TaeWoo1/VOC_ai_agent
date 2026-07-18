@@ -622,3 +622,40 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   **applicability**, never the run's **authorization** — the `session recovery` G3 instance is still ☐, no
   Run-6 G6 is filled, P6 is unsigned, and Run 6 is **NOT AUTHORIZED**. Register:
   [`r4-gate-record.md`](r4-gate-record.md) §G3 — the one canonical home.
+
+- **D-032 · ACTIVE** — **a SIXTH G3 scope `reply submission`; a guided reply-SUBMISSION is a MUTATING
+  action admitted by product-scope v1.6; and an isolated v2 runtime path that leaves the audited v1 export
+  runtime + persisted-run store unchanged** (product owner, 2026-07-18, docs only). *(D-031, now committed on
+  main, records that G3's `Bridge paired` box is scope-dependent — N/A-with-reason for `session recovery`;
+  this entry takes D-032, the next free id.)*
+  *What prompted it:* product-scope **v1.6** (2026-07-18) admits guided, human-performed NAVER review reply
+  **submission** — the first MUTATING Action Window capability. Every prior G3 scope
+  (`read-only probe` | `export pilot` | `export+ingest` | `real-click barrier` | `session recovery`) shares a
+  read/non-writing premise; a submission breaks it, so it needs its own scope, its own §4 write-side boundary
+  ([`r4-preparation.md`](r4-preparation.md) §4.1), and its own contract (`contracts/action-window/v2/`).
+  **(a) `reply submission` is a sixth G3 scope.** It is NOT any of the five: the seller performs a marketplace
+  **write** (composes + submits the reply), which none of the read scopes contemplate. D-026 is **extended, not
+  superseded** — G3 stays per-run and scopes stay non-substitutable; only the enum grows. Critically it has **no
+  non-mutating-by-construction fallback**: the export doctrine "not acting is the only guaranteed non-mutating
+  lever" holds (the safe state is "don't submit"), but there is no download-window to simply lapse — a run where
+  the operator does nothing terminates as a benign operator-reported `SUBMISSION_ABORTED` (`UNVERIFIED`).
+  **(b) Completion is honest-UNVERIFIED, never `COMPLETED`.** A reply post has no read-back oracle (no NAVER
+  REVIEW API; export carries no reply state), so the verifier that owns `COMPLETED` for an export can never fire.
+  The terminal is `OPERATOR_REPORTED`, carrying two SEPARATE fields — `operatorOutcome`
+  (`OPERATOR_REPORTED_SUBMITTED` | `SUBMISSION_ABORTED`) and `verification` (`UNVERIFIED`; `VERIFIED` reserved
+  but absent). `SUBMISSION_ABORTED` is an operator **outcome**, not a blocker. UI always shows the pair, never
+  `UNVERIFIED` alone. This preserves "관찰 ≠ 완료" verbatim — the runtime never fabricates a completion.
+  **(c) Double-post safety.** A reply POST is not idempotent, so the binding `submissionRef` is **single-use**,
+  a retry after a reported submission requires a fresh re-confirmed binding, and a run interrupted after the
+  submit barrier **parks to the operator and never auto-re-drives the submit** (the submit stage is excluded
+  from any safe-resume set). SellerOps **never types into the composer and never clicks submit** — the seller
+  does both; the Runtime highlights read-only and observes.
+  **(d) Isolation — the audited v1 runtime is untouched.** The reply path is a **separate v2 engine/driver**;
+  the v1 export engine, `stages`, and the persisted `OperationRun` store are **not modified** and existing v1
+  records need no migration. `contracts/action-window/v2/` is side-by-side; `v1/` is unchanged.
+  *Boundary:* **this entry authorizes NO live action and consumes no gate.** It is docs only. **A ratified scope
+  is not an affirmed gate and a template is not an approval** — no `reply submission` G3 instance exists, no
+  reply-submission G6 is filled, and no live reply run is authorized. The whole program is **offline** (contract
+  + isolated runtime + backend + FE, proven only on the synthetic ladder). Any live use needs a fresh
+  scope-matched G3 **and** a fresh single-use G6 in the dispatching turn. Register:
+  [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6.

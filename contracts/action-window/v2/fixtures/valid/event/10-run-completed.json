@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0010",
+  "runId": "run_0001",
+  "sequence": 10,
+  "revision": 10,
+  "type": "RUN_COMPLETED",
+  "occurredAt": "2026-07-08T13:10:00Z",
+  "payload": {
+    "status": "COMPLETED"
+  }
+}

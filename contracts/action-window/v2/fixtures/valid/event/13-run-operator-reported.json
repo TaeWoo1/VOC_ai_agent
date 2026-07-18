@@ -1,0 +1,14 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0013",
+  "runId": "run_0002",
+  "sequence": 7,
+  "revision": 7,
+  "type": "RUN_OPERATOR_REPORTED",
+  "occurredAt": "2026-07-18T09:12:30Z",
+  "payload": {
+    "status": "OPERATOR_REPORTED",
+    "operatorOutcome": "OPERATOR_REPORTED_SUBMITTED",
+    "verification": "UNVERIFIED"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "protocolVersion": 2,
+  "commandId": "cmd_03-set-guidance-enabled",
+  "runId": "run_0001",
+  "expectedRevision": 5,
+  "type": "SET_GUIDANCE_ENABLED",
+  "payload": {
+    "enabled": false
+  }
+}

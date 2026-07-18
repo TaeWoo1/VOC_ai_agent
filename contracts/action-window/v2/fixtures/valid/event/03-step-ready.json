@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0003",
+  "runId": "run_0001",
+  "sequence": 3,
+  "revision": 3,
+  "type": "STEP_READY",
+  "occurredAt": "2026-07-08T13:03:00Z",
+  "payload": {
+    "stepId": "esm.select_and_download",
+    "stepStatus": "READY"
+  }
+}

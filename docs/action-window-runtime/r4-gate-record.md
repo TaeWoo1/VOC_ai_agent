@@ -98,6 +98,16 @@ Run-6 G6 filled in that dispatching turn, the run drove once, and **both are now
 [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-23). Both were per-run and neither carries over — a further
 run needs a fresh G3 + G6.
 
+**`reply submission` — RATIFIED as a SIXTH scope 2026-07-18 (product owner, [D-032](decisions.md); D-026
+extended, not superseded).** It is the first **MUTATING** scope — the seller performs a marketplace **write**
+(composes + submits a NAVER review reply); all five earlier scopes are read/non-writing. SellerOps highlights
+the composer read-only and **observes only** — never types, never clicks submit ([`r4-preparation.md`](r4-preparation.md)
+§4.1). No read-back oracle exists, so the run terminates `OPERATOR_REPORTED` (`operatorOutcome` +
+`verification=UNVERIFIED`), **never `COMPLETED`**. `submissionRef` is single-use; an interrupted run parks
+(no auto-re-drive). Contract: `contracts/action-window/v2/` (side-by-side; v1 untouched).
+⚠ **Ratifying the scope authorizes nothing.** No `reply submission` G3 instance is affirmed and no
+reply-submission G6 is filled; both are ☐, both per-run. The program is **offline** — no live reply run exists.
+
 *Owner:* operator/PO — never Runtime code. A filled G3 **alone authorizes no live contact**: a fresh
 single-use **G6** (§G6 below) is still required in the same dispatching turn.
 
@@ -206,6 +216,32 @@ R4 live-run approval
                       G3 ☐ AFFIRMED FOR THIS RUN (§G3 instance recorded in this same turn, scoped to
                       the run scope above — G3 is per-run; no earlier affirmation carries over)
 ```
+
+**Reply-submission G6 template (v1.6, MUTATING — additional required fields).** A `reply submission` run is a
+marketplace **write**, so its G6 carries the `max live window:` field ([D-030](decisions.md)) AND a double-post
+precondition, and its `run scope` must be exactly `reply submission`. A blank template grants nothing.
+
+```
+R4 live-run approval — REPLY SUBMISSION (MUTATING)
+- channel:            NAVER SmartStore review reply
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               <YYYY-MM-DD>
+- operator:           <operator>
+- run scope:          reply submission   (sixth G3 scope, D-032 — never substitutes for a read scope)
+- max live window:    <state it> (foreground + observe window; no download/ingest waits)
+- double-post precond: acknowledged — submissionRef is single-use; a retry needs a fresh re-confirmed
+                      binding; the Runtime never auto-re-drives the submit; interrupted run parks to operator
+- write boundary:     acknowledged (r4-preparation §4.1) — SellerOps highlights the composer read-only and
+                      observes ONLY; the seller composes/pastes and clicks submit; SellerOps never types,
+                      never clicks submit; terminal is OPERATOR_REPORTED (UNVERIFIED), never COMPLETED
+- §7 abort criteria:  acknowledged (ambiguous/missing/drifted composer, unexpected dialog incl.
+                      copyright/usage consent → fail closed, zero clicks; operator abort at will)
+- G2/G3/G5 state:     G2 ✅ recorded · G5 logged · G3 ☐ AFFIRMED FOR THIS RUN, scope = reply submission
+                      (recorded in this same turn; per-run; no earlier affirmation carries over)
+```
+
+*Reply-submission approvals recorded:* **none** — the sixth scope is ratified (D-032) but no G3 instance and no
+reply-submission G6 have ever been filled, and the whole program is **offline** (no live reply run exists).
 
 *Approvals recorded:* one **CONSUMED** read-only-probe instance (below). G6 is a **per-run** gate — it is
 never permanently satisfied, and this record grants nothing beyond the single run it describes.

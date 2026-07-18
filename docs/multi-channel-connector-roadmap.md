@@ -190,6 +190,14 @@ ChannelCollectionAdapter {
 **파일 업로드(전 채널)뿐**이다. NAVER·Cafe24의 ORDER_SUMMARY와 NAVER 리뷰 감독형 캡처는
 **라이브 검증됨**(상시 운영 아님), 나머지는 구현/골격/후보 단계다.
 
+> **NAVER REVIEW 답변 제출(가이드형) — v1.6, 계획·오프라인·미검증.** 위 표의 REVIEW 행은 **수집(read)**
+> 능력이다. v1.6은 별개 축으로 **답변 제출(write)** 을 추가하나, 이 표의 "지원"과 혼동 금지: **가이드형·사람
+> 수행·관찰 전용**(SellerOps는 입력·제출 안 함), 방식은 Action Window `REPLY_SUBMISSION` 실행(`contracts/
+> action-window/v2/`). NAVER REVIEW 공식 API가 없어 **게시 여부 검증 불가** — 결과는 **운영자 보고 +
+> UNVERIFIED**로만 기록한다. 현재 **오프라인 구현 단계**이며 라이브는 게이트 잠금(6번째 G3 스코프
+> `reply submission` + 1회용 G6). **"답변 등록/발송 지원" 류의 표기 금지** — 정직 표기는 "네이버 리뷰 답변
+> 작성 가이드(직접 등록)".
+
 > **ESM+ INQUIRY 진행 노트.** PR #141로 **offline INQUIRY read 스켈레톤**
 > (`com.sellerops.connector.esm.inquiry` — status 매핑, 7일 date 청킹, request/response DTO, parser, fake-HTTP
 > 클라이언트 오케스트레이션, offline signed seam 테스트)이 존재한다. **아직 unwired**이며 wire shape는

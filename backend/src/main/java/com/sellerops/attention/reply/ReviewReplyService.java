@@ -5,7 +5,10 @@ import com.sellerops.attention.reply.dto.ReviewReplyApprovalResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyApprovalView;
 import com.sellerops.attention.reply.dto.ReviewReplyCapabilities;
 import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
+import com.sellerops.attention.reply.dto.ReviewReplyOutcomeResponse;
+import com.sellerops.attention.reply.dto.ReviewReplyOutcomeView;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
+import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunResponse;
 import com.sellerops.attention.reply.dto.ReviewReplySuggestionView;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.triage.ReviewTriageRepository;
@@ -61,17 +64,20 @@ public class ReviewReplyService {
     private final ReviewTriageRepository triages;
     private final ReviewReplyDraftService drafts;
     private final ReviewReplyApprovalService approvals;
+    private final ReviewReplyOutcomeService outcomes;
     private final ReviewReplyProposalProvider provider;
 
     public ReviewReplyService(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
                               ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                               ReviewReplyApprovalService approvals,
+                              ReviewReplyOutcomeService outcomes,
                               ReviewReplyProposalProvider provider) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
         this.triages = triages;
         this.drafts = drafts;
         this.approvals = approvals;
+        this.outcomes = outcomes;
         this.provider = provider;
     }
 
@@ -161,6 +167,108 @@ public class ReviewReplyService {
         });
         return approvals.decide(orgId, reviewId, actionRef, target, bound.getVersion(),
                 bound.getContentFingerprint(), command, actor);
+    }
+
+    /**
+     * Start a guided Action Window reply-submission run: mint a single-use {@code submissionRef}
+     * bound to the current approved head.
+     *
+     * <p>Same gate as copy — you may guide a post only for an approved reply you may copy, because a
+     * guided post IS the copy step performed in the seller center rather than the clipboard. It
+     * authorizes no send: SellerOps only guides and observes; the operator submits. Marketplace-neutral.
+     *
+     * @throws ApiException 409 when the review is not {@code RESPONSE_NEEDED} or no approval stands.
+     */
+    public ReviewReplySubmissionRunResponse startSubmissionRun(UUID orgId, UUID accountId,
+                                                               String actionRef, UUID actorUserId) {
+        Review review = authorize(orgId, accountId, actionRef);
+        UUID reviewId = review.getId();
+        requireResponseNeeded(orgId, reviewId);
+        ReviewReplyApproval approval = approvals.current(orgId, reviewId)
+                .filter(a -> a.getState() == ReviewReplyApprovalState.APPROVED)
+                .orElseThrow(() -> ApiException.conflict("승인된 답변이 없습니다. 먼저 답변을 승인하세요."));
+        String ref = outcomes.mint(orgId, reviewId, approval.getApprovedVersion(),
+                approval.getApprovedFingerprint(), ACTOR_PREFIX + actorUserId);
+        return new ReviewReplySubmissionRunResponse(actionRef, ref, approval.getApprovedVersion());
+    }
+
+    /**
+     * Record the operator's report that they posted (or did not post) the approved reply in the
+     * seller center — a LOCAL, operator-reported, explicitly UNVERIFIED fact. Never a claim about
+     * NAVER, never a completion.
+     *
+     * <p>Version and fingerprint are server-sourced from the binding; the client names only the ref,
+     * the reported outcome, the run ref, and its command id. The binding must still describe the
+     * current approved head — a withdrawal or a newer approval since the mint is a 409. The gate is
+     * the same asymmetric forward gate ({@code RESPONSE_NEEDED}) as copy; a spent binding is refused
+     * (single-use), and a retry of the same command replays rather than double-recording.
+     */
+    public ReviewReplyOutcomeResponse recordSubmissionReported(UUID orgId, UUID accountId,
+                                                               String actionRef, String submissionRef,
+                                                               String operatorOutcomeRaw, String awRunRef,
+                                                               String commandId, UUID actorUserId) {
+        OperatorOutcome operatorOutcome = OperatorOutcome.parse(operatorOutcomeRaw);
+        String command = ReviewReplyApprovalService.requireCommandId(commandId);
+        String ref = requireSubmissionRef(submissionRef);
+        String runRef = requireAwRunRef(awRunRef);
+        Review review = authorize(orgId, accountId, actionRef);
+        UUID reviewId = review.getId();
+        String actor = ACTOR_PREFIX + actorUserId;
+
+        ReviewReplySubmissionRef binding = outcomes.binding(orgId, ref)
+                .filter(b -> b.getReviewId().equals(reviewId))
+                .orElseThrow(() -> ApiException.conflict("유효하지 않은 제출 참조입니다. 다시 시작해 주세요."));
+
+        gateOrReplayOutcome(orgId, command, () -> {
+            requireResponseNeeded(orgId, reviewId);
+            ReviewReplyApproval approval = approvals.current(orgId, reviewId)
+                    .filter(a -> a.getState() == ReviewReplyApprovalState.APPROVED)
+                    .orElse(null);
+            if (approval == null || approval.getApprovedVersion() == null
+                    || approval.getApprovedVersion().intValue() != binding.getBoundVersion().intValue()
+                    || !approval.getApprovedFingerprint().equals(binding.getBoundFingerprint())) {
+                throw ApiException.conflict("승인 상태가 바뀌었습니다. 답변 제출을 다시 시작해 주세요.");
+            }
+            if (outcomes.isSpent(ref)) {
+                throw ApiException.conflict("이미 결과가 기록된 제출입니다. 다시 시작해 주세요.");
+            }
+        });
+
+        String algorithm = drafts.version(reviewId, binding.getBoundVersion())
+                .map(ReviewReplyDraft::getFingerprintAlgorithm)
+                .orElseThrow(() -> new IllegalStateException(
+                        "review_reply_submission_ref binds a draft version that does not exist"));
+        return outcomes.record(orgId, reviewId, actionRef, ref, binding.getBoundVersion(),
+                binding.getBoundFingerprint(), algorithm, operatorOutcome, runRef, command, actor);
+    }
+
+    /** As {@link #gateOrReplay}, but the idempotency ledger is the outcome table, not the approval trail. */
+    private void gateOrReplayOutcome(UUID orgId, String command, Runnable gate) {
+        try {
+            gate.run();
+        } catch (ApiException gateClosed) {
+            if (!outcomes.isCommandSpent(orgId, command)) {
+                throw gateClosed;
+            }
+        }
+    }
+
+    private static String requireSubmissionRef(String submissionRef) {
+        if (submissionRef == null || !submissionRef.strip().matches("[0-9a-f]{16}")) {
+            throw ApiException.badRequest("유효하지 않은 제출 참조입니다.");
+        }
+        return submissionRef.strip();
+    }
+
+    private static String requireAwRunRef(String awRunRef) {
+        if (awRunRef == null || awRunRef.isBlank()) {
+            throw ApiException.badRequest("실행 참조(awRunRef)가 필요합니다.");
+        }
+        String ref = awRunRef.strip();
+        if (ref.length() > 128) {
+            throw ApiException.badRequest("실행 참조가 너무 깁니다.");
+        }
+        return ref;
     }
 
     /**
@@ -254,6 +362,9 @@ public class ReviewReplyService {
                 responseNeeded && !approved,
                 responseNeeded && !approved && head != null,
                 approved,
+                responseNeeded && approved,
+                // canStartSubmissionRun — the same rule as canCopy (a guided post is the copy step
+                // performed in the seller center); it never authorizes a send.
                 responseNeeded && approved);
 
         ReviewReplyProposalProvider.Suggestion suggestion = provider.suggest(
@@ -270,7 +381,25 @@ public class ReviewReplyService {
                         suggestion.providerVersion()),
                 head == null ? null : ReviewReplyDraftView.of(head),
                 approvalView(review.getId(), approval, capabilities.canCopy()),
+                outcomeView(orgId, review.getId(), approval, approved),
                 capabilities);
+    }
+
+    /**
+     * The operator-reported outcome for the CURRENT approved reply, or null when nothing is approved
+     * or nothing has been reported. Carries {@code operatorOutcome} and {@code verification} as two
+     * separate facts — the surface renders the pair, never {@code UNVERIFIED} alone.
+     */
+    private ReviewReplyOutcomeView outcomeView(UUID orgId, UUID reviewId, ReviewReplyApproval approval,
+                                               boolean approved) {
+        if (!approved || approval.getApprovedVersion() == null) {
+            return null;
+        }
+        return outcomes.latestForVersion(orgId, reviewId, approval.getApprovedVersion())
+                .map(o -> new ReviewReplyOutcomeView(o.getOperatorOutcome().name(),
+                        o.getVerification().name(), o.getRecordedVersion(), o.getRecordedFingerprint(),
+                        o.getAwRunRef(), o.getCreatedAt()))
+                .orElse(null);
     }
 
     /**

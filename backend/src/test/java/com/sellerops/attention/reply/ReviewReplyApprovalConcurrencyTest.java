@@ -88,6 +88,8 @@ class ReviewReplyApprovalConcurrencyTest {
     @Autowired ReviewReplyDraftRepository draftRepo;
     @Autowired ReviewReplyApprovalRepository approvalRepo;
     @Autowired ReviewReplyApprovalAuditRepository approvalAudits;
+    @Autowired ReviewReplySubmissionRefRepository submissionRefRepo;
+    @Autowired ReviewReplyOutcomeRepository outcomeRepo;
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewTriageAuditRepository triageAudits;
     @Autowired ReviewRepository reviews;
@@ -451,6 +453,8 @@ class ReviewReplyApprovalConcurrencyTest {
                 new ReviewReplyDraftService(draftRepo),
                 new ReviewReplyApprovalService(approvals, audits,
                         new ReviewReplyApprovalWriter(approvals, audits, txManager)),
+                new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
+                        new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
                 new RuleBasedReviewReplyProvider());
     }
 

@@ -1,0 +1,24 @@
+{
+  "protocolVersion": 2,
+  "runId": "run_0002",
+  "revision": 7,
+  "channelCode": "naver",
+  "runCopyKey": "actionWindow.run.naverReplySubmission",
+  "status": "OPERATOR_REPORTED",
+  "executionMode": "ACTION_WINDOW",
+  "intent": "REPLY_SUBMISSION",
+  "currentStep": {
+    "stepId": "aw.user_reply_submit",
+    "stepNumber": 3,
+    "totalSteps": 3,
+    "copyKey": "actionWindow.step.userReplySubmit",
+    "status": "OPERATOR_REPORTED"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [],
+  "progress": {
+    "completedSteps": 3,
+    "totalSteps": 3
+  },
+  "updatedAt": "2026-07-18T09:12:30Z"
+}

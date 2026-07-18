@@ -1,0 +1,14 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0012",
+  "runId": "run_0002",
+  "sequence": 6,
+  "revision": 6,
+  "type": "SUBMISSION_REPORTED",
+  "occurredAt": "2026-07-18T09:12:00Z",
+  "payload": {
+    "stepId": "aw.user_reply_submit",
+    "operatorOutcome": "OPERATOR_REPORTED_SUBMITTED",
+    "verification": "UNVERIFIED"
+  }
+}

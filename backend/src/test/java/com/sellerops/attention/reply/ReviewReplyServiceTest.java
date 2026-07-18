@@ -70,6 +70,8 @@ class ReviewReplyServiceTest {
     @Autowired ReviewReplyDraftRepository draftRepo;
     @Autowired ReviewReplyApprovalRepository approvalRepo;
     @Autowired ReviewReplyApprovalAuditRepository approvalAudits;
+    @Autowired ReviewReplySubmissionRefRepository submissionRefRepo;
+    @Autowired ReviewReplyOutcomeRepository outcomeRepo;
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewTriageAuditRepository triageAudits;
     @Autowired ReviewRepository reviews;
@@ -100,6 +102,8 @@ class ReviewReplyServiceTest {
                 new ReviewReplyDraftService(draftRepo),
                 new ReviewReplyApprovalService(approvalRepo, approvalAudits,
                         new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
+                new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
+                        new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
                 new RuleBasedReviewReplyProvider());
         triageService = new ReviewTriageService(triages, triageAudits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, triageAudits, txManager));
@@ -112,6 +116,8 @@ class ReviewReplyServiceTest {
     @AfterEach
     void cleanUp() {
         // Everything here commits (see the class note), so this replaces the rollback.
+        outcomeRepo.deleteAll();
+        submissionRefRepo.deleteAll();
         approvalAudits.deleteAll();
         approvalRepo.deleteAll();
         draftRepo.deleteAll();
@@ -166,6 +172,175 @@ class ReviewReplyServiceTest {
         int version = service.view(org, account, ref).draft().version();
         service.decideApproval(org, account, ref, "APPROVED", version,
                 UUID.randomUUID().toString(), user);
+    }
+
+    /** Triage → save → approve, then mint a submission ref for the approved head. */
+    private String approveAndStart() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        return service.startSubmissionRun(org, account, ref, user).submissionRef();
+    }
+
+    private com.sellerops.attention.reply.dto.ReviewReplyOutcomeResponse record(
+            String submissionRef, OperatorOutcome outcome, String commandId) {
+        return service.recordSubmissionReported(org, account, ref, submissionRef, outcome.name(),
+                "awrun-synthetic-01", commandId, user);
+    }
+
+    // --- guided submission: mint (start run) ----------------------------------------
+
+    @Test
+    void startingASubmissionRunNeedsAnApproval() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        assertThatThrownBy(() -> service.startSubmissionRun(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void startingASubmissionRunRequiresResponseNeeded() {
+        approveAndStart();               // now approved under RESPONSE_NEEDED
+        triage(TriageDisposition.MONITOR);
+        assertThatThrownBy(() -> service.startSubmissionRun(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void startingASubmissionRunMintsAnOpaqueRefBoundToTheApprovedHead() {
+        String submissionRef = approveAndStart();
+        assertThat(submissionRef).matches("[0-9a-f]{16}");
+    }
+
+    // --- guided submission: record (operator-reported, UNVERIFIED) -------------------
+
+    @Test
+    void recordingSeparatesTheReportedOutcomeFromVerificationAndNeverClaimsCompleted() {
+        String submissionRef = approveAndStart();
+        var response = record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString());
+        assertThat(response.recorded()).isTrue();
+        assertThat(response.replayed()).isFalse();
+
+        var outcome = view().outcome();
+        assertThat(outcome).isNotNull();
+        assertThat(outcome.operatorOutcome()).isEqualTo("OPERATOR_REPORTED_SUBMITTED");
+        assertThat(outcome.verification()).isEqualTo("UNVERIFIED");
+        // The two are separate facts; there is no COMPLETED anywhere in the vocabulary.
+        assertThat(outcome.verification()).isNotEqualTo("COMPLETED");
+    }
+
+    @Test
+    void anAbortIsARecordedOutcomeNotAFault() {
+        String submissionRef = approveAndStart();
+        record(submissionRef, OperatorOutcome.SUBMISSION_ABORTED, UUID.randomUUID().toString());
+        assertThat(view().outcome().operatorOutcome()).isEqualTo("SUBMISSION_ABORTED");
+        assertThat(view().outcome().verification()).isEqualTo("UNVERIFIED");
+    }
+
+    @Test
+    void aSubmissionRefIsSingleUse() {
+        String submissionRef = approveAndStart();
+        record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, UUID.randomUUID().toString());
+        // A different command reusing the spent binding is refused — the anti-double-post guard.
+        assertThatThrownBy(() -> record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString()))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void aRetryAfterAReportedSubmissionNeedsAFreshRef() {
+        String first = approveAndStart();
+        record(first, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, UUID.randomUUID().toString());
+        // A fresh mint (same approved head) gives a new ref that can be recorded.
+        String second = service.startSubmissionRun(org, account, ref, user).submissionRef();
+        assertThat(second).isNotEqualTo(first);
+        var response = record(second, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString());
+        assertThat(response.recorded()).isTrue();
+    }
+
+    @Test
+    void recordingIsIdempotentOnTheCommandId() {
+        String submissionRef = approveAndStart();
+        String command = UUID.randomUUID().toString();
+        assertThat(record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command).replayed())
+                .isFalse();
+        var replay = record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command);
+        assertThat(replay.recorded()).isTrue();
+        assertThat(replay.replayed()).isTrue();
+    }
+
+    @Test
+    void reusingACommandIdForADifferentOutcomeIsAConflict() {
+        String first = approveAndStart();
+        String command = UUID.randomUUID().toString();
+        record(first, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command);
+        String second = service.startSubmissionRun(org, account, ref, user).submissionRef();
+        assertThatThrownBy(() -> record(second, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void recordingIsRefusedOutsideResponseNeededWhileTheOutcomeStaysReadable() {
+        String submissionRef = approveAndStart();
+        triage(TriageDisposition.MONITOR);
+        assertThatThrownBy(() -> record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString()))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void aBindingStaleAfterWithdrawalIsRefused() {
+        String submissionRef = approveAndStart();
+        service.decideApproval(org, account, ref, "WITHDRAWN", null, UUID.randomUUID().toString(), user);
+        assertThatThrownBy(() -> record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString()))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void anUnknownSubmissionRefIsRefusedAndAMalformedOneIsRejected() {
+        approveAndStart();
+        // well-formed but never minted → no binding → 409
+        assertThatThrownBy(() -> record("0123456789abcdef", OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString()))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+        // malformed (not 16-hex) → 400
+        assertThatThrownBy(() -> record("not-a-ref", OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString()))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void theOutcomeIsAppendOnlyHistoryAndTheApprovalStaysRevocable() {
+        String submissionRef = approveAndStart();
+        record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, UUID.randomUUID().toString());
+        // Withdrawal still works — the outcome did not consume the approval.
+        service.decideApproval(org, account, ref, "WITHDRAWN", null, UUID.randomUUID().toString(), user);
+        // The recorded outcome persists as history: re-approving the same version surfaces it again.
+        approveHead();
+        assertThat(view().outcome()).isNotNull();
+        assertThat(view().outcome().operatorOutcome()).isEqualTo("OPERATOR_REPORTED_SUBMITTED");
+    }
+
+    @Test
+    void canStartSubmissionRunFollowsTheCopyGate() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        assertThat(view().capabilities().canStartSubmissionRun()).isFalse(); // not yet approved
+        approveHead();
+        assertThat(view().capabilities().canStartSubmissionRun()).isTrue();
+        assertThat(view().capabilities().canStartSubmissionRun())
+                .isEqualTo(view().capabilities().canCopy());
     }
 
     // --- the gate -------------------------------------------------------------------

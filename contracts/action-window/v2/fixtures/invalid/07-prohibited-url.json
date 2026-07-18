@@ -1,0 +1,33 @@
+{
+  "case": "07-prohibited-url",
+  "target": "runView",
+  "expect": "PROHIBITED_FIELD",
+  "data": {
+    "protocolVersion": 2,
+    "runId": "run_0001",
+    "revision": 2,
+    "channelCode": "esm_plus",
+    "runCopyKey": "actionWindow.review.run",
+    "status": "WAITING_FOR_HUMAN",
+    "executionMode": "ACTION_WINDOW",
+    "currentStep": {
+      "stepId": "esm.prepare_session",
+      "stepNumber": 1,
+      "totalSteps": 4,
+      "copyKey": "actionWindow.review.prepare",
+      "copyParams": {
+        "link": "https://seller.example.com/login"
+      },
+      "status": "AWAITING_USER"
+    },
+    "guidanceEnabled": true,
+    "allowedCommands": [
+      "CANCEL_RUN"
+    ],
+    "progress": {
+      "completedSteps": 0,
+      "totalSteps": 4
+    },
+    "updatedAt": "2026-07-08T13:02:00Z"
+  }
+}
