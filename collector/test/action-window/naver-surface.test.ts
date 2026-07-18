@@ -58,6 +58,36 @@ describe("naver-surface — session precondition decision", () => {
     expect(result).toEqual({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
     expect(diagnostic.readinessState).toBe("EXPORT_TARGET_UNKNOWN");
   });
+
+  // selectedRangePresent — POSITIVE direction, end-to-end (§8-24; D-025 falsifier, offline half only).
+  // Run 5/6 saw the detector read `false` and log it; NO test proved the runtime carries a `true`
+  // through `naverSurfaceDecision` into the exact `NaverPrepareDiagnostic` a live run logs. These prove
+  // the plumbing. They do NOT (and cannot, offline) prove the LIVE positive — the `page.content()`
+  // attribute-vs-IDL-property blindness stays D-025's OPEN falsifier, provable only on real NAVER.
+  const RANGE = `<input type="date" value="2026-06-01">`;
+
+  it("LOGGED_IN + READY surface WITH a selected range → ok, and the diagnostic carries selectedRangePresent: true", () => {
+    const { result, diagnostic } = naverSurfaceDecision("LOGGED_IN", `${ROWS}${RANGE}`);
+    expect(result).toEqual({ ok: true });
+    expect(diagnostic.readinessDecision).toBe("READY");
+    expect(diagnostic.selectedRangePresent).toBe(true);
+  });
+
+  it("the same READY surface WITHOUT a range reports selectedRangePresent: false (not spuriously always-on)", () => {
+    const { result, diagnostic } = naverSurfaceDecision("LOGGED_IN", ROWS);
+    expect(result).toEqual({ ok: true });
+    expect(diagnostic.readinessDecision).toBe("READY");
+    expect(diagnostic.selectedRangePresent).toBe(false);
+  });
+
+  it("range observation is independent of the readiness HALT: an empty surface still logs selectedRangePresent: true", () => {
+    // Per D-025 the range signal is observe-and-log only; it never gates and never overrides the
+    // readiness decision. A selected range on an EMPTY (HALT) surface still propagates to the diagnostic.
+    const { result, diagnostic } = naverSurfaceDecision("LOGGED_IN", `${EMPTY_RESULTS}${RANGE}`);
+    expect(result.ok).toBe(false);
+    expect(diagnostic.readinessDecision).toBe("HALT");
+    expect(diagnostic.selectedRangePresent).toBe(true);
+  });
 });
 
 describe("naver-surface — no-click locate decision", () => {
