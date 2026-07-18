@@ -14,8 +14,12 @@ import {
 } from "../../../src/action-window/reply-submission/reply-engine";
 import {
   REPLY_FIXTURE_CANARIES,
+  REPLY_FIXTURE_HINT,
   fixtureLocateDecision,
+  fixtureRowLocateDecision,
 } from "../../../src/action-window/reply-submission/reply-fixture";
+import { NaverReplySubmitProbeDriver, type ReplyPageLike } from "../../../src/action-window/reply-submission/naver-reply-driver";
+import { reviewRowLocateDecision } from "../../../src/action-window/reply-submission/reply-surface";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, "../../../src/action-window/reply-submission");
@@ -67,6 +71,70 @@ describe("naver reply driver — source guard (no submit, no type, no downstream
     // Scan import lines only.
     const imports = code.split("\n").filter((l) => l.trim().startsWith("import"));
     expect(imports.join("\n")).not.toContain(mod);
+  });
+
+  // The live row seam must remain FAIL-CLOSED with NO invented selector until real DOM evidence exists.
+  it.each(["data-review-row", "EXTRACT_ROW_SIGNALS", "ANNOTATE_ROW", "ARM_ROW_OBSERVER"])(
+    "never invents a live row selector/script (%s)",
+    (token) => {
+      expect(code).not.toContain(token);
+    },
+  );
+});
+
+describe("naver reply driver — the guided row seam is deliberately fail-closed (no live DOM evidence yet)", () => {
+  const stubPage: ReplyPageLike = {
+    url: () => "about:blank",
+    content: () => Promise.resolve(""),
+    evaluate: () => Promise.reject(new Error("the fail-closed row seam must never touch the page")),
+    waitForFunction: () => Promise.reject(new Error("the fail-closed row seam must never touch the page")),
+  };
+
+  it("locateReviewRow reports zero rows (→ engine TARGET_NOT_FOUND) and waitForRowOpen never fires", async () => {
+    const driver = new NaverReplySubmitProbeDriver(stubPage);
+    expect(await driver.locateReviewRow()).toEqual({ count: 0 });
+    expect(await driver.highlightRow()).toEqual({ count: 0 });
+    expect(await driver.waitForRowOpen()).toBe(false);
+  });
+});
+
+describe("reply runtime — privacy: the GUIDED row path leaks no raw date/product/fingerprint", () => {
+  it("the located ROW signature is opaque 16-hex, not the fingerprint or any canary", () => {
+    const decision = fixtureRowLocateDecision("rows-present");
+    expect(decision.count).toBe(1);
+    expect(decision.sig).toMatch(/^[0-9a-f]{16}$/);
+    expect(decision.sig).not.toContain(REPLY_FIXTURE_HINT.bodyFingerprint);
+    for (const canary of REPLY_FIXTURE_CANARIES) expect(decision.sig).not.toContain(canary);
+  });
+
+  it("the row sig encodes only structural position — a hint field (rating) is NOT brute-forceable from it", () => {
+    // Same matched index, different rating → identical sig ⇒ the private `rating` is not in the sig input.
+    const sigFor = (rating: number) =>
+      reviewRowLocateDecision(
+        { rating, recencyBucket: "TODAY", bodyFingerprint: "fp" },
+        [{ rating, recencyBucket: "TODAY", bodyFingerprint: "fp" }],
+      ).sig;
+    expect(sigFor(2)).toBe(sigFor(5));
+  });
+
+  it("a full guided run's events + view carry no canary and never the bodyFingerprint match key", () => {
+    const engine = new ReplyEngine(
+      { runId: "run_reply_guided_priv", channelCode: "naver", targetHint: REPLY_FIXTURE_HINT },
+      { clock: makeReplyClock() },
+    );
+    const row = { count: 1, sig: "abcd1234abcd1234" };
+    engine.command({ type: "START_RUN", expectedRevision: 0 });
+    engine.onSurfaceReady(true);
+    engine.onRowLocated(row);
+    engine.onRowHighlighted(row);
+    engine.onRowOpened();
+    engine.onLocated({ count: 1, sig: "dcba4321dcba4321" });
+    engine.onHighlighted();
+    engine.command({ type: "REQUEST_STEP_RECHECK", expectedRevision: engine.view().revision });
+
+    const wire = JSON.stringify({ events: engine.events(), view: engine.view() });
+    for (const canary of REPLY_FIXTURE_CANARIES) expect(wire, `leaked ${canary}`).not.toContain(canary);
+    expect(wire).not.toContain(REPLY_FIXTURE_HINT.bodyFingerprint);
   });
 });
 

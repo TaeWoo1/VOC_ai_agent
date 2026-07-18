@@ -14,8 +14,9 @@ import {
 import { createLoopbackChannel, type AwServerFrame } from "../../../../contracts/action-window/v2/transport";
 import { ReplyEngine, makeReplyClock } from "../../../src/action-window/reply-submission/reply-engine";
 import { SyntheticReplySubmitDriver } from "../../../src/action-window/reply-submission/reply-driver";
-import { FixtureReplySubmitDriver } from "../../../src/action-window/reply-submission/reply-fixture";
+import { FixtureReplySubmitDriver, REPLY_FIXTURE_HINT } from "../../../src/action-window/reply-submission/reply-fixture";
 import { ReplySubmitSession } from "../../../src/action-window/reply-submission/reply-session";
+import type { ReplyTargetHint } from "../../../src/action-window/reply-submission/reply-surface";
 
 const RUN_ID = "run_reply_e2e";
 
@@ -30,9 +31,15 @@ function startCommand(): CommandEnvelope {
   };
 }
 
-function harness(driver: SyntheticReplySubmitDriver | FixtureReplySubmitDriver) {
+function harness(
+  driver: SyntheticReplySubmitDriver | FixtureReplySubmitDriver,
+  cfg?: { targetHint?: ReplyTargetHint },
+) {
   const { client, server } = createLoopbackChannel();
-  const engine = new ReplyEngine({ runId: RUN_ID, channelCode: "naver" }, { clock: makeReplyClock() });
+  const engine = new ReplyEngine(
+    { runId: RUN_ID, channelCode: "naver", ...(cfg?.targetHint ? { targetHint: cfg.targetHint } : {}) },
+    { clock: makeReplyClock() },
+  );
   const session = new ReplySubmitSession(engine, driver, server);
   session.attach();
   const frames: AwServerFrame[] = [];
@@ -116,5 +123,66 @@ describe("reply session — end to end over the v2 loopback", () => {
     await session.whenSettled();
     expect(latestView()?.status).toBe("FAILED");
     expect(latestView()?.blocker?.code).toBe("TARGET_NOT_FOUND");
+  });
+});
+
+describe("reply session — guided review-row locator over the fixture driver", () => {
+  it("rows-present: row barrier → operator opens row → composer barrier → reports SUBMITTED", async () => {
+    const driver = new FixtureReplySubmitDriver("rows-present", REPLY_FIXTURE_HINT);
+    const { client, session, frames, latestView } = harness(driver, { targetHint: REPLY_FIXTURE_HINT });
+
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+    // Rests at the ROW-open barrier (step 2 of 3) — the operator opens the reply control themselves.
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(latestView()?.currentStep?.stepNumber).toBe(2);
+    expect(latestView()?.progress.totalSteps).toBe(3);
+
+    driver.applyRowOpen(true);
+    await session.whenSettled(); // guards the watchRowOpen(autoBusy) continuation — must converge
+    // Now at the COMPOSER submit barrier (step 3 of 3).
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(latestView()?.currentStep?.stepNumber).toBe(3);
+
+    driver.applySubmit(true);
+    await session.whenSettled();
+    client.send({
+      kind: "aw_command",
+      command: { protocolVersion: 2, commandId: "cmd-report", runId: RUN_ID, expectedRevision: latestView()!.revision, type: "REQUEST_STEP_RECHECK" },
+    });
+    await session.whenSettled();
+    expect(latestView()?.status).toBe("OPERATOR_REPORTED");
+    assertFramesValid(frames);
+  });
+
+  it("rows-missing → TARGET_NOT_FOUND; rows-ambiguous → TARGET_AMBIGUOUS; rows-drift → fails closed", async () => {
+    for (const [mode, code] of [
+      ["rows-missing", "TARGET_NOT_FOUND"],
+      ["rows-ambiguous", "TARGET_AMBIGUOUS"],
+      ["rows-drift", "TARGET_NOT_FOUND"],
+    ] as const) {
+      const driver = new FixtureReplySubmitDriver(mode, REPLY_FIXTURE_HINT);
+      const { client, session, latestView } = harness(driver, { targetHint: REPLY_FIXTURE_HINT });
+      client.send({ kind: "aw_command", command: startCommand() });
+      await session.whenSettled();
+      expect(latestView()?.status, mode).toBe("FAILED");
+      expect(latestView()?.blocker?.code, mode).toBe(code);
+    }
+  });
+
+  it("abort at the row-open barrier → SUBMISSION_ABORTED, not a fault", async () => {
+    const driver = new FixtureReplySubmitDriver("rows-present", REPLY_FIXTURE_HINT);
+    const { client, session, latestView } = harness(driver, { targetHint: REPLY_FIXTURE_HINT });
+    client.send({ kind: "aw_command", command: startCommand() });
+    await session.whenSettled();
+    expect(latestView()?.status).toBe("WAITING_FOR_HUMAN");
+
+    client.send({
+      kind: "aw_command",
+      command: { protocolVersion: 2, commandId: "cmd-abort", runId: RUN_ID, expectedRevision: latestView()!.revision, type: "SWITCH_TO_MANUAL" },
+    });
+    await session.whenSettled();
+    expect(latestView()?.status).toBe("OPERATOR_REPORTED");
+    expect(latestView()?.status).not.toBe("FAILED");
   });
 });

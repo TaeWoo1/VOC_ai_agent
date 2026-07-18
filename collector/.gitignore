@@ -26,5 +26,8 @@ findings/*.local.md
 # Persisted reply-submission runs (isolated v2 store, agent-local only, never committed)
 .reply-runs/
 
+# Guided reply target hint (privacy-safe match metadata, single-use, owner-only; never committed)
+.reply-target/
+
 # Action Window artifact quarantine (temporary validation saves, delete-after-validate; local only)
 .aw-quarantine/

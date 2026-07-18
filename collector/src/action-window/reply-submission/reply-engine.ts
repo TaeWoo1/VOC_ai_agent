@@ -26,15 +26,29 @@ import type {
   RunStatus,
 } from "../../../../contracts/action-window/v2/index";
 import {
-  REPLY_TOTAL_STEPS,
+  REPLY_TERMINAL_STAGES,
   replyAllowedCommands,
+  replyPlanFor,
   replyStageToRunStatus,
   replyStageToStepStatus,
-  replyStepMetaByIndex,
+  replyStepMetaAt,
+  type ReplyPlanKind,
+  type ReplyRunMode,
   type ReplyStage,
+  type ReplyStepMeta,
 } from "./reply-stages";
+import type { ReplyTargetHint } from "./reply-surface";
 
-export type ReplyEffect = "PREPARE" | "LOCATE" | "HIGHLIGHT" | "OBSERVE" | "CLEANUP" | "NONE";
+export type ReplyEffect =
+  | "PREPARE"
+  | "LOCATE_ROW"
+  | "HIGHLIGHT_ROW"
+  | "OBSERVE_ROW"
+  | "LOCATE"
+  | "HIGHLIGHT"
+  | "OBSERVE"
+  | "CLEANUP"
+  | "NONE";
 
 /** Surface precondition: ready, or a fail-closed cause (a reserved v2 blocker code). */
 export type SurfaceProbeResult = boolean | { ok: false; code: "LOGIN_REQUIRED" | "SESSION_EXPIRED" | "UNSUPPORTED_STATE" };
@@ -43,6 +57,8 @@ export interface LocateComposerResult {
   count: number;
   sig?: string;
 }
+/** Review-row locate: how many rows match the target hint, and the opaque signature of the one (if exactly one). */
+export type LocateRowResult = LocateComposerResult;
 
 export type ReplyCommandOutcome =
   | { ok: true; idempotent: boolean; effect: ReplyEffect }
@@ -53,6 +69,17 @@ export interface ReplyRunConfig {
   channelCode: string;
   /** Opaque 16-hex binding to an approved reply — never the reply text or a review id. */
   submissionRef?: string;
+  /**
+   * Privacy-safe target metadata for the GUIDED review-row locator. Present → the run follows the 3-step
+   * guided plan (locate row → operator opens it → composer); absent → the legacy composer-only 2-step
+   * path. Stored PRIVATELY: it selects the plan and feeds the driver, and is NEVER emitted or persisted.
+   */
+  targetHint?: ReplyTargetHint;
+  /**
+   * Run mode. `ABORT_REHEARSAL` makes the submitted terminal structurally unreachable and REQUIRES a
+   * target hint (guided-only, no legacy fallback). Defaults to `FULL_SUBMIT`.
+   */
+  mode?: ReplyRunMode;
 }
 
 export type ReplyClock = () => string;
@@ -69,6 +96,11 @@ export class ReplyEngine {
   private readonly runId: string;
   private readonly channelCode: string;
   private readonly clock: ReplyClock;
+  private readonly mode: ReplyRunMode;
+  private readonly planKind: ReplyPlanKind;
+  private readonly plan: readonly ReplyStepMeta[];
+  private readonly totalSteps: number;
+  private readonly targetHint: ReplyTargetHint | null;
 
   private started = false;
   private stage: ReplyStage = "PREPARE_SESSION";
@@ -78,6 +110,7 @@ export class ReplyEngine {
   private completedSteps = 0;
   private guidanceEnabled = true;
   private targetSig: string | null = null;
+  private rowSig: string | null = null;
   private operatorOutcome: OperatorOutcome | null = null;
   private blockerCode: ("LOGIN_REQUIRED" | "SESSION_EXPIRED" | "UNSUPPORTED_STATE" | "TARGET_NOT_FOUND" | "TARGET_AMBIGUOUS") | null = null;
   private blockerRecoverable = false;
@@ -87,6 +120,20 @@ export class ReplyEngine {
     this.runId = config.runId;
     this.channelCode = config.channelCode;
     this.clock = opts?.clock ?? makeReplyClock();
+    this.mode = config.mode ?? "FULL_SUBMIT";
+    this.targetHint = config.targetHint ?? null;
+    // ABORT_REHEARSAL is guided-only and bound — a hint is mandatory, with no legacy fallback. Fail
+    // closed at construction (the CLI enforces this earlier; this is defense in depth).
+    if (this.mode === "ABORT_REHEARSAL" && !this.targetHint) {
+      throw new Error("reply-engine: ABORT_REHEARSAL requires a guided target hint");
+    }
+    this.planKind = this.targetHint ? "GUIDED" : "LEGACY";
+    this.plan = replyPlanFor(this.planKind);
+    this.totalSteps = this.plan.length;
+  }
+
+  private isTerminal(): boolean {
+    return REPLY_TERMINAL_STAGES.includes(this.stage);
   }
 
   /* ── inbound command ─────────────────────────────────────────────────────── */
@@ -97,7 +144,7 @@ export class ReplyEngine {
     }
     if (command.type === "START_RUN") return { ok: true, idempotent: true, effect: "NONE" };
     if (command.expectedRevision < this.revision) return { ok: false, reason: "STALE_REVISION" };
-    if (!replyAllowedCommands(this.stage).includes(command.type as never)) {
+    if (!replyAllowedCommands(this.stage, this.mode).includes(command.type as never)) {
       return { ok: false, reason: "INVALID_FOR_STATE" };
     }
     switch (command.type) {
@@ -134,6 +181,7 @@ export class ReplyEngine {
   }
 
   onSurfaceReady(res: SurfaceProbeResult): ReplyEffect {
+    if (this.isTerminal()) return "NONE"; // an abort may have terminated the run while this was in flight
     const ready = res === true;
     if (!ready) {
       const code = res === false ? "UNSUPPORTED_STATE" : res.code;
@@ -141,12 +189,63 @@ export class ReplyEngine {
       const recoverable = code === "LOGIN_REQUIRED" || code === "SESSION_EXPIRED";
       return recoverable ? this.block(code, true) : this.fail(code);
     }
+    // Guided (target hint present): locate the specific review ROW first. Legacy: straight to the composer.
+    if (this.targetHint) {
+      this.stage = "LOCATE_ROW";
+      this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
+      return "LOCATE_ROW";
+    }
+    this.stage = "LOCATE_COMPOSER";
+    this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
+    return "LOCATE";
+  }
+
+  /** Guided: how many review rows match the hint. Same fail-closed logic as composer locate. */
+  onRowLocated(res: LocateRowResult): ReplyEffect {
+    if (this.isTerminal()) return "NONE";
+    if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
+    if (res.count === 0 || !res.sig) return this.fail("TARGET_NOT_FOUND");
+    this.rowSig = res.sig;
+    this.stage = "HIGHLIGHT_ROW";
+    return "HIGHLIGHT_ROW";
+  }
+
+  /**
+   * Guided: annotate the matched row + its reply control read-only and rest at the row-open barrier.
+   * The arg is the driver's RE-VALIDATED locate (anti-drift): if the unique match changed between locate
+   * and highlight — count no longer 1, or a different `sig` — fail closed rather than highlight the wrong
+   * row.
+   */
+  onRowHighlighted(res: LocateRowResult): ReplyEffect {
+    if (this.isTerminal()) return "NONE";
+    if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
+    if (res.count === 0 || !res.sig || res.sig !== this.rowSig) return this.fail("TARGET_NOT_FOUND");
+    this.completedSteps = 1; // step 1 (prepare surface + locate row) complete
+    this.activeStepIndex = 2; // step 2: the operator opens the review row
+    this.stage = "WAIT_FOR_ROW_OPEN";
+    this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
+    this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
+    this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: this.rowSig! });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return "OBSERVE_ROW";
+  }
+
+  /**
+   * Guided: the operator opened the review's reply control themselves (their own click, observed — never
+   * a Runtime click). This lifts the row-open barrier and rejoins the composer chain. Like the submit
+   * observation, it is an OBSERVATION and only advances a still-open row barrier.
+   */
+  onRowOpened(): ReplyEffect {
+    if (this.stage !== "WAIT_FOR_ROW_OPEN") return "NONE";
+    this.completedSteps = 2; // step 2 (open review row) complete
+    this.activeStepIndex = 3; // step 3: the operator pastes + submits the reply
     this.stage = "LOCATE_COMPOSER";
     this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
     return "LOCATE";
   }
 
   onLocated(res: LocateComposerResult): ReplyEffect {
+    if (this.isTerminal()) return "NONE"; // an abort may have terminated the run while this was in flight
     // Fail closed on ambiguity — never highlight or observe more than one composer, and never guess.
     // Ambiguity is checked BEFORE the missing-signature check: the locate decision only signs the SINGLE
     // composer case, so a real `count > 1` carries no `sig` and must not be mislabeled TARGET_NOT_FOUND.
@@ -158,8 +257,10 @@ export class ReplyEngine {
   }
 
   onHighlighted(): ReplyEffect {
-    this.completedSteps = 1;
-    this.activeStepIndex = 2;
+    if (this.isTerminal()) return "NONE";
+    // The composer submit barrier is the LAST step of whichever plan is active (2 legacy / 3 guided).
+    this.completedSteps = this.totalSteps - 1;
+    this.activeStepIndex = this.totalSteps;
     this.stage = "WAIT_FOR_SUBMIT";
     this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
     this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
@@ -181,7 +282,7 @@ export class ReplyEngine {
 
   private reportOutcome(outcome: OperatorOutcome): ReplyEffect {
     this.operatorOutcome = outcome;
-    this.completedSteps = REPLY_TOTAL_STEPS;
+    this.completedSteps = this.totalSteps;
     this.stage = "OPERATOR_REPORTED";
     this.emit("SUBMISSION_REPORTED", {
       stepId: this.stepId(),
@@ -251,11 +352,11 @@ export class ReplyEngine {
   }
 
   private stepId(): string {
-    return replyStepMetaByIndex(this.activeStepIndex).stepId;
+    return replyStepMetaAt(this.plan, this.activeStepIndex).stepId;
   }
 
   view(): ActionWindowRunView {
-    const meta = replyStepMetaByIndex(this.activeStepIndex);
+    const meta = replyStepMetaAt(this.plan, this.activeStepIndex);
     const status: RunStatus = replyStageToRunStatus(this.stage);
     const view: ActionWindowRunView = {
       protocolVersion: 2,
@@ -269,14 +370,14 @@ export class ReplyEngine {
       currentStep: {
         stepId: meta.stepId,
         stepNumber: meta.stepNumber,
-        totalSteps: REPLY_TOTAL_STEPS,
+        totalSteps: this.totalSteps,
         copyKey: meta.copyKey,
         ...(meta.copyParams ? { copyParams: meta.copyParams } : {}),
         status: replyStageToStepStatus(this.stage),
       },
       guidanceEnabled: this.guidanceEnabled,
-      allowedCommands: replyAllowedCommands(this.stage),
-      progress: { completedSteps: this.completedSteps, totalSteps: REPLY_TOTAL_STEPS },
+      allowedCommands: replyAllowedCommands(this.stage, this.mode),
+      progress: { completedSteps: this.completedSteps, totalSteps: this.totalSteps },
       updatedAt: this.clock(),
     };
     if (this.blockerCode && this.stage === "FAILED") {
@@ -299,5 +400,13 @@ export class ReplyEngine {
   }
   reportedOutcome(): OperatorOutcome | null {
     return this.operatorOutcome;
+  }
+  /** The run's mode — persisted as non-sensitive identity so recovery can never default it. */
+  runMode(): ReplyRunMode {
+    return this.mode;
+  }
+  /** The run's plan kind — persisted alongside `mode` as non-sensitive identity. */
+  runPlanKind(): ReplyPlanKind {
+    return this.planKind;
   }
 }

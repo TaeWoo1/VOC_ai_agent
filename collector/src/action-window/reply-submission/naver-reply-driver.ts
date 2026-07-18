@@ -20,7 +20,7 @@
  * plain listener that records a boolean, exactly like the export observer.
  */
 import { replyComposerLocateDecision } from "./reply-surface";
-import type { LocateComposerResult, SurfaceProbeResult } from "./reply-engine";
+import type { LocateComposerResult, LocateRowResult, SurfaceProbeResult } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
 
 /** The minimal, READ-ONLY page surface this driver needs. `evaluate`/`waitForFunction` take strings. */
@@ -106,6 +106,24 @@ export class NaverReplySubmitProbeDriver implements ReplySubmitProbeDriver {
     const signals = await this.page.evaluate<ReplySignals>(EXTRACT_SIGNALS);
     if (!signals.loggedIn) return { ok: false, code: "LOGIN_REQUIRED" };
     return true;
+  }
+
+  // ── GUIDED review-row seam — DELIBERATELY FAIL-CLOSED ──────────────────────────────────────────
+  // A real NAVER review-row selector + a live↔redactedBody fingerprint-normalization transform require
+  // captured live DOM evidence that does not exist yet (see the offline slice's Risk 1). Rather than
+  // GUESS a selector, the live driver reports zero matching rows so a guided live run fails closed
+  // (TARGET_NOT_FOUND) and never proceeds. Only the fixture driver actually locates rows offline.
+  async locateReviewRow(): Promise<LocateRowResult> {
+    return { count: 0 };
+  }
+  async highlightRow(): Promise<LocateRowResult> {
+    return { count: 0 };
+  }
+  async armRowObserve(): Promise<void> {
+    return;
+  }
+  async waitForRowOpen(): Promise<boolean> {
+    return false;
   }
 
   async locateComposer(): Promise<LocateComposerResult> {

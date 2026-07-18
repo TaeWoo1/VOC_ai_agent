@@ -96,6 +96,25 @@ export class ReplySubmitSession {
         this.publishState();
         return this.drive(next);
       }
+      case "LOCATE_ROW": {
+        const res = await this.driver.locateReviewRow();
+        const next = this.engine.onRowLocated(res);
+        this.publishState();
+        return this.drive(next);
+      }
+      case "HIGHLIGHT_ROW": {
+        // The driver RE-VALIDATES the unique match while annotating; feed that result back (anti-drift).
+        const res = await this.driver.highlightRow();
+        const next = this.engine.onRowHighlighted(res);
+        this.publishState();
+        return this.drive(next);
+      }
+      case "OBSERVE_ROW": {
+        await this.driver.armRowObserve();
+        // Rest at the row-open barrier; the operator opens the reply control themselves (their own click).
+        void this.watchRowOpen();
+        return;
+      }
       case "LOCATE": {
         const res = await this.driver.locateComposer();
         const next = this.engine.onLocated(res);
@@ -121,6 +140,27 @@ export class ReplySubmitSession {
       case "NONE":
       default:
         return;
+    }
+  }
+
+  /**
+   * Guided: await the operator's own row-open click, then rejoin the composer chain. Unlike
+   * {@link watchSubmit}, the continuation DRIVES a multi-step chain (locate → highlight → observe), so it
+   * must hold `autoBusy` across that chain or `whenSettled` could race and return early.
+   */
+  private async watchRowOpen(): Promise<void> {
+    const opened = await this.driver.waitForRowOpen();
+    if (opened && this.engine.currentStage() === "WAIT_FOR_ROW_OPEN") {
+      this.autoBusy = true;
+      try {
+        const next = this.engine.onRowOpened();
+        this.publishState();
+        await this.drive(next);
+      } catch {
+        await this.fatalCleanup();
+      } finally {
+        this.autoBusy = false;
+      }
     }
   }
 

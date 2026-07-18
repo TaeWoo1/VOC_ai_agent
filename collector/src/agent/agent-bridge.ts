@@ -25,6 +25,8 @@ import { createPersistentRunSession, findResumableRun, resumePersistedRunSession
 import { ReplySubmissionEndpoint } from "../bridge/reply-submission-endpoint";
 import { assembleReplyRun, recoverReplyRuns, makeReplyRunMarker } from "../action-window/reply-submission/reply-dispatch";
 import type { ReplySubmitProbeDriver } from "../action-window/reply-submission/reply-driver";
+import type { ReplyTargetHint } from "../action-window/reply-submission/reply-surface";
+import type { ReplyRunMode } from "../action-window/reply-submission/reply-stages";
 import type { ReplySubmitSession } from "../action-window/reply-submission/reply-session";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
@@ -83,7 +85,11 @@ export interface AgentReplySubmissionConfig {
   channelCode: string;
   /** Opaque 16-hex binding to an approved reply — never text or a review id. */
   submissionRef?: string;
-  createDriver: () => ReplySubmitProbeDriver;
+  /** Privacy-safe guided target metadata (row locator). Present → guided run; absent → legacy. NEVER persisted/emitted. */
+  targetHint?: ReplyTargetHint;
+  /** Run mode. `ABORT_REHEARSAL` (requires a `targetHint`) makes the submitted terminal unreachable. */
+  mode?: ReplyRunMode;
+  createDriver: (hint?: ReplyTargetHint) => ReplySubmitProbeDriver;
   /** Gitignored `.reply-runs/` persistence dir. Required in live mode; restart recovery → PARKED. */
   persistDir?: string;
 }
@@ -202,6 +208,8 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
       runId: rs.runId,
       channelCode: rs.channelCode,
       ...(rs.submissionRef ? { submissionRef: rs.submissionRef } : {}),
+      ...(rs.targetHint ? { targetHint: rs.targetHint } : {}),
+      ...(rs.mode ? { mode: rs.mode } : {}),
       createDriver: rs.createDriver,
       ...(rs.persistDir ? { persistDir: rs.persistDir } : {}),
     });
