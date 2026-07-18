@@ -23,11 +23,15 @@ import type {
   OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
+  OperatorOutcomeName,
   ReviewReplyApproval,
   ReviewReplyApprovalResponse,
   ReviewReplyApprovalStateName,
   ReviewReplyDraft,
+  ReviewReplyOutcome,
+  ReviewReplyOutcomeResponse,
   ReviewReplyPrep,
+  ReviewReplySubmissionRunResponse,
   ReviewReplySuggestion,
   SalesTrendPoint,
   ScheduleView,
@@ -1089,6 +1093,28 @@ const reviewReplyDrafts = new Map<string, ReviewReplyDraft[]>();
 /** The current approval per actionRef, or absent when never approved. */
 const reviewReplyApprovals = new Map<string, ReviewReplyApproval>();
 
+/** Minted submission-run bindings, keyed on the opaque ref (v1.6). */
+interface MockSubmissionRef {
+  actionRef: string;
+  boundVersion: number;
+  boundFingerprint: string;
+}
+const reviewReplySubmissionRefs = new Map<string, MockSubmissionRef>();
+/** Append-only operator-reported outcomes, keyed on the single-use ref they consumed (v1.6). */
+interface MockOutcome extends ReviewReplyOutcome {
+  actionRef: string;
+}
+const reviewReplyOutcomes = new Map<string, MockOutcome>();
+
+let mockSubmissionRefCounter = 0;
+/** A stand-in for the server's opaque 16-hex submissionRef. Unique per call, never a real value. */
+function mockSubmissionRefToken(): string {
+  mockSubmissionRefCounter += 1;
+  const a = ((mockSubmissionRefCounter * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  const b = (mockSubmissionRefCounter >>> 0).toString(16).padStart(8, "0");
+  return (a + b).slice(0, 16);
+}
+
 /**
  * A stand-in for the server's content fingerprint.
  *
@@ -1217,12 +1243,39 @@ export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
             // something the real backend would not hand it.
             approvedBody: canCopy ? approval.approvedBody : null,
           },
+    outcome: mockOutcomeForHead(actionRef, approved ? approval?.approvedVersion ?? null : null),
     capabilities: {
       canSave: responseNeeded && !approved,
       canApprove: responseNeeded && !approved && head != null,
       canWithdraw: approved,
       canCopy,
+      // Same rule as canCopy — the server computes it the same way (responseNeeded && approved).
+      canStartSubmissionRun: canCopy,
     },
+  };
+}
+
+/** The latest recorded outcome for a review's current approved version, or null. */
+function mockOutcomeForHead(actionRef: string, approvedVersion: number | null): ReviewReplyOutcome | null {
+  if (approvedVersion == null) {
+    return null;
+  }
+  let latest: MockOutcome | null = null;
+  for (const o of reviewReplyOutcomes.values()) {
+    if (o.actionRef === actionRef && o.recordedVersion === approvedVersion) {
+      latest = o; // insertion order → the last match is the most recent
+    }
+  }
+  if (latest == null) {
+    return null;
+  }
+  return {
+    operatorOutcome: latest.operatorOutcome,
+    verification: latest.verification,
+    recordedVersion: latest.recordedVersion,
+    recordedFingerprint: latest.recordedFingerprint,
+    awRunRef: latest.awRunRef,
+    recordedAt: latest.recordedAt,
   };
 }
 
@@ -1304,10 +1357,68 @@ export function mockDecideReviewReplyApproval(
   return { actionRef, state: "APPROVED", replayed: false };
 }
 
-/** Test-only: drop the demo drafts/approvals so each test starts from the fixture. */
+/**
+ * Demo-mode start of a guided reply-submission run: mint a single-use ref bound to the approved head.
+ * Gated exactly as the server gates it (`canStartSubmissionRun`), so the demo can never offer the
+ * guided flow on a review the real backend would refuse.
+ */
+export function mockStartReviewReplySubmissionRun(actionRef: string): ReviewReplySubmissionRunResponse {
+  const prep = mockReviewReplyPrep(actionRef);
+  if (!prep.capabilities.canStartSubmissionRun || prep.approval?.approvedVersion == null) {
+    throw new Error("mock: 답변 제출을 시작할 수 없는 상태입니다");
+  }
+  const submissionRef = mockSubmissionRefToken();
+  reviewReplySubmissionRefs.set(submissionRef, {
+    actionRef,
+    boundVersion: prep.approval.approvedVersion,
+    boundFingerprint: prep.approval.approvedFingerprint ?? "",
+  });
+  return { actionRef, submissionRef, approvedVersion: prep.approval.approvedVersion };
+}
+
+/**
+ * Demo-mode record of the operator's report. Single-use: a second record against a spent ref is
+ * refused, exactly as the server refuses it. Always `replayed: false` (no command-id ledger here, for
+ * mockDecideReviewReplyApproval's reason). Verification is always UNVERIFIED — never a channel claim.
+ */
+export function mockRecordReviewReplyOutcome(
+  actionRef: string,
+  submissionRef: string,
+  operatorOutcome: OperatorOutcomeName,
+): ReviewReplyOutcomeResponse {
+  const binding = reviewReplySubmissionRefs.get(submissionRef);
+  if (binding == null || binding.actionRef !== actionRef) {
+    throw new Error("mock: 유효하지 않은 제출 참조입니다");
+  }
+  if (reviewReplyOutcomes.has(submissionRef)) {
+    throw new Error("mock: 이미 결과가 기록된 제출입니다"); // single-use
+  }
+  const prep = mockReviewReplyPrep(actionRef);
+  if (
+    prep.triageDisposition !== "RESPONSE_NEEDED" ||
+    prep.approval?.state !== "APPROVED" ||
+    prep.approval.approvedVersion !== binding.boundVersion
+  ) {
+    throw new Error("mock: 승인 상태가 바뀌었습니다");
+  }
+  reviewReplyOutcomes.set(submissionRef, {
+    actionRef,
+    operatorOutcome,
+    verification: "UNVERIFIED",
+    recordedVersion: binding.boundVersion,
+    recordedFingerprint: binding.boundFingerprint,
+    awRunRef: `aw-mock-${submissionRef}`,
+    recordedAt: MOCK_DECIDED_AT,
+  });
+  return { actionRef, recorded: true, replayed: false };
+}
+
+/** Test-only: drop the demo drafts/approvals/submission-refs/outcomes so each test starts fresh. */
 export function resetMockReviewReplyState(): void {
   reviewReplyDrafts.clear();
   reviewReplyApprovals.clear();
+  reviewReplySubmissionRefs.clear();
+  reviewReplyOutcomes.clear();
 }
 
 export function mockSyncRuns(): SyncRunView[] {

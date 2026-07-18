@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
-import type { ReviewReplyPrep, TriageDisposition } from "../lib/types";
+import type { OperatorOutcomeName, ReviewReplyPrep, TriageDisposition } from "../lib/types";
 
 // Prepare a reply to one review: read the redacted body, start from a rule-based
 // suggestion, edit, approve (which freezes it), copy.
@@ -23,7 +23,18 @@ interface ApprovalAttempt {
 }
 
 /** What the panel is currently doing, so only one write is ever in flight. */
-type Busy = null | "saving" | "approving" | "withdrawing";
+type Busy = null | "saving" | "approving" | "withdrawing" | "starting" | "reporting";
+
+/** One guided reply-submission run: the single-use binding + the opaque run id it reports under. */
+interface GuidedRun {
+  submissionRef: string;
+  awRunRef: string;
+}
+/** One outcome-report intent: what was reported, and the command id identifying it. */
+interface OutcomeAttempt {
+  outcome: OperatorOutcomeName;
+  commandId: string;
+}
 
 export function VocItemReplyPrep({
   accountId,
@@ -93,8 +104,12 @@ export function VocItemReplyPrep({
   // True once the operator has touched the editor, so a reload does not silently discard
   // their typing by re-seeding from the server.
   const [dirty, setDirty] = useState(false);
+  // A guided reply-submission run in progress (after 네이버에서 직접 답변하기, before the operator
+  // reports). Local and re-enterable: the ref is single-use, so backing out just re-mints on reopen.
+  const [guided, setGuided] = useState<GuidedRun | null>(null);
 
   const attempt = useRef<ApprovalAttempt | null>(null);
+  const reportAttempt = useRef<OutcomeAttempt | null>(null);
   const inFlight = useRef(false);
 
   // Announced, not inferred: the row cannot see a buffer that lives in this component.
@@ -160,6 +175,9 @@ export function VocItemReplyPrep({
   const responseNeeded = disposition === "RESPONSE_NEEDED";
   const canSave = capabilities.canSave && responseNeeded;
   const canCopy = capabilities.canCopy && responseNeeded;
+  // The guided post is the copy step performed in the seller center, so it carries the same
+  // conservative refinement as copy. It authorizes no send — the operator posts the reply themselves.
+  const canStart = capabilities.canStartSubmissionRun && responseNeeded;
 
   /**
    * Approving binds the last SAVED version — never what is in the box.
@@ -298,6 +316,78 @@ export function VocItemReplyPrep({
     setFailed("복사하지 못했습니다. 다시 시도해 주세요.");
   }
 
+  async function startGuided() {
+    if (inFlight.current || !canStart) {
+      return;
+    }
+    // The run id is opaque and minted the same secure way as a command id — so on an origin without
+    // secure randomness this fails closed exactly like approval does, rather than inventing a weak id.
+    let awRunRef: string;
+    try {
+      awRunRef = newCommandId();
+    } catch (e) {
+      if (e instanceof SecureRandomUnavailableError) {
+        setUnavailable(true);
+        setFailed(null);
+        return;
+      }
+      throw e;
+    }
+    inFlight.current = true;
+    setBusy("starting");
+    setFailed(null);
+    try {
+      const run = await api.startReviewReplySubmissionRun(accountId, actionRef);
+      setGuided({ submissionRef: run.submissionRef, awRunRef });
+    } catch {
+      setFailed("답변 준비를 시작하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setBusy(null);
+    }
+  }
+
+  async function report(outcome: OperatorOutcomeName) {
+    if (inFlight.current || guided == null) {
+      return;
+    }
+    // Reuse the command id ONLY when retrying the same report — a retry is one report reaching the
+    // server twice. A changed report (submitted vs aborted) takes a fresh id.
+    const reuse = reportAttempt.current?.outcome === outcome && failed != null;
+    let commandId: string;
+    try {
+      commandId = reuse ? reportAttempt.current!.commandId : newCommandId();
+    } catch (e) {
+      if (e instanceof SecureRandomUnavailableError) {
+        setUnavailable(true);
+        setFailed(null);
+        return;
+      }
+      throw e;
+    }
+    reportAttempt.current = { outcome, commandId };
+    inFlight.current = true;
+    setBusy("reporting");
+    setFailed(null);
+    try {
+      await api.recordReviewReplyOutcome(accountId, actionRef, {
+        commandId,
+        submissionRef: guided.submissionRef,
+        operatorOutcome: outcome,
+        awRunRef: guided.awRunRef,
+      });
+      reportAttempt.current = null;
+      setGuided(null);
+      // Re-read so the recorded outcome (operatorOutcome + verification, as a pair) shows.
+      await refresh();
+    } catch {
+      setFailed("기록하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setBusy(null);
+    }
+  }
+
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3 rounded-xl bg-canvas p-3">
       <h4 id={headingId} className="text-sm font-semibold text-ink">
@@ -408,6 +498,22 @@ export function VocItemReplyPrep({
             복사
           </button>
         ) : null}
+        {/* The guided post. NOT a send: SellerOps foregrounds the seller center and the operator
+            posts the reply themselves. No 발송/전송/등록 label (Frontend Spec §10.2). Rendered only
+            while no run is in progress; the run's own panel is below. */}
+        {canStart && guided == null ? (
+          <button
+            type="button"
+            aria-disabled={!canStart || working}
+            aria-busy={busy === "starting"}
+            onClick={() => void startGuided()}
+            className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
+              canStart && !working ? "bg-canvas text-ink ring-1 ring-line" : "bg-canvas text-muted opacity-40"
+            }`}
+          >
+            네이버에서 직접 답변하기(가이드)
+          </button>
+        ) : null}
         {capabilities.canApprove && dirty ? (
           <span className="text-sm text-muted">
             저장하지 않은 변경이 있습니다. 먼저 초안을 저장하세요.
@@ -419,6 +525,66 @@ export function VocItemReplyPrep({
           </span>
         ) : null}
       </div>
+
+      {/* The guided run in progress. The operator posts the reply in the seller center themselves;
+          SellerOps only guides and records what they report. Two reports, both honest: 답변함 /
+          답변 안 함 — never a claim SellerOps posted anything, and never a 완료. */}
+      {guided != null ? (
+        <div
+          role="group"
+          aria-label="네이버에서 직접 답변하기"
+          className="flex flex-col gap-2 rounded-lg border border-line bg-white p-2"
+        >
+          <p className="text-sm font-semibold text-ink">네이버에서 직접 답변하기</p>
+          <p className="text-sm text-muted">
+            복사한 답변을 네이버 판매자센터 답변란에 붙여넣고 <strong className="font-semibold">직접</strong>{" "}
+            답변해 주세요. SellerOps가 대신 하지 않으며, 답변 여부도 확인하지 않습니다.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-disabled={working}
+              aria-busy={busy === "reporting"}
+              onClick={() => void report("OPERATOR_REPORTED_SUBMITTED")}
+              className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
+                working ? "bg-canvas text-muted opacity-40" : "bg-brand/10 text-brand-700"
+              }`}
+            >
+              답변함으로 기록
+            </button>
+            <button
+              type="button"
+              aria-disabled={working}
+              onClick={() => void report("SUBMISSION_ABORTED")}
+              className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold text-ink"
+            >
+              답변 안 함으로 기록
+            </button>
+            <button
+              type="button"
+              aria-disabled={working}
+              onClick={() => setGuided(null)}
+              className="rounded-lg px-2.5 py-1 text-sm text-muted"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* The recorded outcome — outcome AND verification shown as a PAIR. Never the verification
+          ("확인 안 함") alone (it would read as a system failure, not an operator report), and never
+          a "완료". */}
+      {prep.outcome != null ? (
+        <div role="status" className="flex flex-col gap-1 rounded-lg bg-canvas p-2">
+          <p className="text-sm text-ink">
+            {prep.outcome.operatorOutcome === "OPERATOR_REPORTED_SUBMITTED"
+              ? "채널에 직접 답변한 것으로 기록했어요."
+              : "답변하지 않은 것으로 기록했어요."}
+          </p>
+          <p className="text-sm text-muted">SellerOps는 답변 여부를 확인하지 않습니다(확인 안 함).</p>
+        </div>
+      ) : null}
 
       {/* Mounted always, text toggling — a live region has to be in the accessibility tree
           before its content changes or assistive tech never registers on it. Empty renders

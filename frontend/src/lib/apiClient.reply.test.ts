@@ -89,6 +89,38 @@ describe("review reply routes — actionRef on the wire", () => {
     expect(body.baseVersion).toBeNull();
   });
 
+  it("encodes the ref on the guided submission-run mint, with no body", async () => {
+    post.mockResolvedValue({ data: { actionRef: ACTION_REF, submissionRef: "a1b2c3d4e5f60718", approvedVersion: 1 } });
+    const { api } = await import("./apiClient");
+    await api.startReviewReplySubmissionRun("acct-1", ACTION_REF);
+
+    const [url, body] = post.mock.calls[0];
+    expect(url).toBe(`${BASE}/submission-run`);
+    expect(url).not.toContain("%25");
+    expect(body).toEqual({});
+  });
+
+  it("encodes the ref on the outcome record, and sends the report + binding + run id", async () => {
+    post.mockResolvedValue({ data: { actionRef: ACTION_REF, recorded: true, replayed: false } });
+    const { api } = await import("./apiClient");
+    await api.recordReviewReplyOutcome("acct-1", ACTION_REF, {
+      commandId: "cmd-3",
+      submissionRef: "a1b2c3d4e5f60718",
+      operatorOutcome: "OPERATOR_REPORTED_SUBMITTED",
+      awRunRef: "aw-run-xyz",
+    });
+
+    const [url, body] = post.mock.calls[0];
+    expect(url).toBe(`${BASE}/outcome`);
+    expect(url).not.toContain("%25");
+    expect(body).toEqual({
+      commandId: "cmd-3",
+      submissionRef: "a1b2c3d4e5f60718",
+      operatorOutcome: "OPERATOR_REPORTED_SUBMITTED",
+      awRunRef: "aw-run-xyz",
+    });
+  });
+
   /**
    * Fail-closed, like both attention reads: a thrown read must reach the caller so the
    * panel can say "불러오지 못했습니다", rather than resolve to seeded data. A silent

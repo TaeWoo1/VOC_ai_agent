@@ -572,6 +572,28 @@ export interface ReviewReplyCapabilities {
   canApprove: boolean;
   canWithdraw: boolean;
   canCopy: boolean;
+  // v1.6: gates offering the GUIDED Action Window reply-submission flow. Same rule as canCopy —
+  // you may guide a post only for an approved reply you may copy. It authorizes no send: SellerOps
+  // guides and observes; the operator posts the reply themselves in the seller center.
+  canStartSubmissionRun: boolean;
+}
+
+// What the operator reports at the guided submit barrier (mirrors OperatorOutcome). Kept separate
+// from verification. SUBMISSION_ABORTED is an operator outcome (a deliberate end), not a failure.
+export type OperatorOutcomeName = "OPERATOR_REPORTED_SUBMITTED" | "SUBMISSION_ABORTED";
+
+// Mirrors dto.ReviewReplyOutcomeView. The operator-reported outcome for the CURRENT approved reply,
+// or null if none. `operatorOutcome` and `verification` are TWO SEPARATE facts — the UI renders the
+// pair and NEVER shows `verification` ("UNVERIFIED") alone, and never anything that reads as "완료".
+// There is no verification a reply post can earn (no read-back), so `verification` is always
+// "UNVERIFIED". Carries no reply body and no channel claim; `awRunRef` is the opaque guided-run id.
+export interface ReviewReplyOutcome {
+  operatorOutcome: OperatorOutcomeName;
+  verification: "UNVERIFIED";
+  recordedVersion: number;
+  recordedFingerprint: string;
+  awRunRef: string;
+  recordedAt: string;
 }
 
 // Mirrors dto.ReviewReplyPrepView — everything the panel needs, in one read.
@@ -592,7 +614,27 @@ export interface ReviewReplyPrep {
   suggestion: ReviewReplySuggestion;
   draft: ReviewReplyDraft | null;
   approval: ReviewReplyApproval | null;
+  // v1.6: the operator-reported outcome for the current approved reply (or null). See
+  // ReviewReplyOutcome — outcome and verification are separate, always shown as a pair.
+  outcome: ReviewReplyOutcome | null;
   capabilities: ReviewReplyCapabilities;
+}
+
+// Mirrors dto.ReviewReplySubmissionRunResponse. `submissionRef` is an opaque, single-use binding the
+// client passes into the guided run; it carries no review identity or reply text. Single-use: once an
+// outcome is recorded against it, it is spent, and a retry needs a fresh call here.
+export interface ReviewReplySubmissionRunResponse {
+  actionRef: string;
+  submissionRef: string;
+  approvedVersion: number;
+}
+
+// Mirrors dto.ReviewReplyOutcomeResponse. Deliberately carries no body and no channel claim.
+// `replayed` distinguishes an idempotent retry from a fresh record; both are successes.
+export interface ReviewReplyOutcomeResponse {
+  actionRef: string;
+  recorded: boolean;
+  replayed: boolean;
 }
 
 // Mirrors dto.ReviewReplyApprovalResponse. `state` is the CURRENT state after the call —
