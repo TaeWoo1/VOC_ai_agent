@@ -18,9 +18,14 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { findProhibitedFields } from "../../../../contracts/action-window/v2/index";
-import { REPLY_TERMINAL_STAGES, type ReplyStage } from "./reply-stages";
+import { REPLY_TERMINAL_STAGES, type ReplyPlanKind, type ReplyRunMode, type ReplyStage } from "./reply-stages";
 
-export const REPLY_RUN_SCHEMA_VERSION = 1;
+// v2: the record now also carries the run's non-sensitive identity (`mode`, `planKind`) so restart
+// recovery can NEVER default a run to FULL_SUBMIT / legacy. Bumped from v1 → v2.
+export const REPLY_RUN_SCHEMA_VERSION = 2;
+
+const REPLY_RUN_MODES: readonly ReplyRunMode[] = ["FULL_SUBMIT", "ABORT_REHEARSAL"];
+const REPLY_PLAN_KINDS: readonly ReplyPlanKind[] = ["LEGACY", "GUIDED"];
 
 /** A sanitized, audit-only reply-run marker. NOT a resumable engine snapshot. */
 export interface ReplyRunRecord {
@@ -31,6 +36,13 @@ export interface ReplyRunRecord {
   channelCode: string;
   /** Last persisted stage enum. */
   stage: ReplyStage;
+  /**
+   * The run's mode. Non-sensitive identity, persisted so recovery/reconstruction can never LAUNDER an
+   * `ABORT_REHEARSAL` run into a submit-capable `FULL_SUBMIT` one.
+   */
+  mode: ReplyRunMode;
+  /** The run's step-plan kind. Non-sensitive identity, persisted alongside `mode`. */
+  planKind: ReplyPlanKind;
   /** Set true once restart recovery has PARKED this run — it is never re-driven again. */
   parked: boolean;
   /** Opaque monotonic marker (never wall-clock). */
@@ -66,11 +78,16 @@ function runFilePath(dir: string, runId: string): string {
 }
 
 const STAGES: readonly ReplyStage[] = [
-  "PREPARE_SESSION", "LOCATE_COMPOSER", "HIGHLIGHT_COMPOSER", "WAIT_FOR_SUBMIT",
+  "PREPARE_SESSION", "LOCATE_ROW", "HIGHLIGHT_ROW", "WAIT_FOR_ROW_OPEN",
+  "LOCATE_COMPOSER", "HIGHLIGHT_COMPOSER", "WAIT_FOR_SUBMIT",
   "OPERATOR_REPORTED", "FAILED", "CANCELLED", "PAUSED",
 ];
 
-/** Structural validation — reject anything that is not a well-formed sanitized marker. */
+/**
+ * Structural validation — reject anything that is not a well-formed sanitized marker. `mode`/`planKind`
+ * are REQUIRED and validated against their enums: a record missing/!valid on either FAILS CLOSED rather
+ * than defaulting, so recovery can never infer `FULL_SUBMIT`/`LEGACY` for a run whose identity was lost.
+ */
 function parseRecord(raw: unknown): ReplyRunRecord {
   if (typeof raw !== "object" || raw === null) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
   const r = raw as Record<string, unknown>;
@@ -78,9 +95,20 @@ function parseRecord(raw: unknown): ReplyRunRecord {
   if (typeof r.runId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(r.runId)) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
   if (typeof r.channelCode !== "string" || r.channelCode.length === 0) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
   if (typeof r.stage !== "string" || !STAGES.includes(r.stage as ReplyStage)) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
+  if (typeof r.mode !== "string" || !REPLY_RUN_MODES.includes(r.mode as ReplyRunMode)) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
+  if (typeof r.planKind !== "string" || !REPLY_PLAN_KINDS.includes(r.planKind as ReplyPlanKind)) throw new ReplyRunStoreError("STORE_INVALID_RECORD");
   if (typeof r.parked !== "boolean") throw new ReplyRunStoreError("STORE_INVALID_RECORD");
   if (typeof r.updatedAt !== "string") throw new ReplyRunStoreError("STORE_INVALID_RECORD");
-  return { schemaVersion: r.schemaVersion, runId: r.runId, channelCode: r.channelCode, stage: r.stage as ReplyStage, parked: r.parked, updatedAt: r.updatedAt };
+  return {
+    schemaVersion: r.schemaVersion,
+    runId: r.runId,
+    channelCode: r.channelCode,
+    stage: r.stage as ReplyStage,
+    mode: r.mode as ReplyRunMode,
+    planKind: r.planKind as ReplyPlanKind,
+    parked: r.parked,
+    updatedAt: r.updatedAt,
+  };
 }
 
 /** Persist one reply-run marker atomically. Refuses (fail closed) rather than writing prohibited content. */

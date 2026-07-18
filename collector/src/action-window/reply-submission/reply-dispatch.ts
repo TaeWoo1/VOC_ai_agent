@@ -19,6 +19,8 @@ import type { AwServerTransport } from "../../../../contracts/action-window/v2/t
 import { ReplyEngine } from "./reply-engine";
 import { ReplySubmitSession } from "./reply-session";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
+import type { ReplyTargetHint } from "./reply-surface";
+import type { ReplyRunMode } from "./reply-stages";
 import { REPLY_RUN_SCHEMA_VERSION, saveReplyRun, type ReplyRunRecord } from "./reply-run-store";
 
 export { defaultReplyRunDirFor, recoverReplyRuns } from "./reply-run-store";
@@ -41,8 +43,16 @@ export interface ReplyDispatchConfig {
   channelCode: string;
   /** Opaque 16-hex binding to an approved reply — never text or a review id. */
   submissionRef?: string;
+  /**
+   * Privacy-safe target metadata for the guided review-row locator. Present → guided 3-step run; absent →
+   * legacy composer-only run. Passed to the engine (plan selector) AND to the driver factory (matching
+   * input). NEVER persisted or emitted.
+   */
+  targetHint?: ReplyTargetHint;
+  /** Run mode. `ABORT_REHEARSAL` (requires a `targetHint`) makes the submitted terminal unreachable. */
+  mode?: ReplyRunMode;
   /** Injected driver factory; synthetic/fixture by default (no browser), live only in the gated adapter. */
-  createDriver: () => ReplySubmitProbeDriver;
+  createDriver: (hint?: ReplyTargetHint) => ReplySubmitProbeDriver;
   /** When set, the sanitized reply-run marker is persisted after every transition (required in live mode). */
   persistDir?: string;
   /** Synthetic monotonic marker source for the persisted `updatedAt` (never wall-clock). */
@@ -62,6 +72,8 @@ function recordFrom(engine: ReplyEngine, now: () => string): ReplyRunRecord {
     runId: view.runId,
     channelCode: view.channelCode,
     stage: engine.currentStage(),
+    mode: engine.runMode(),
+    planKind: engine.runPlanKind(),
     parked: false,
     updatedAt: now(),
   };
@@ -77,12 +89,14 @@ export function assembleReplyRun(transport: AwServerTransport, cfg: ReplyDispatc
     runId: cfg.runId,
     channelCode: cfg.channelCode,
     ...(cfg.submissionRef ? { submissionRef: cfg.submissionRef } : {}),
+    ...(cfg.targetHint ? { targetHint: cfg.targetHint } : {}),
+    ...(cfg.mode ? { mode: cfg.mode } : {}),
   });
   const now = cfg.now ?? makeReplyRunMarker();
   const persistDir = cfg.persistDir;
   const session = new ReplySubmitSession(
     engine,
-    cfg.createDriver(),
+    cfg.createDriver(cfg.targetHint),
     transport,
     persistDir ? { onStatePublished: () => saveReplyRun(persistDir, recordFrom(engine, now)) } : undefined,
   );
