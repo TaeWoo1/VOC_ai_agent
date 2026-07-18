@@ -148,8 +148,10 @@ export class ReplyEngine {
 
   onLocated(res: LocateComposerResult): ReplyEffect {
     // Fail closed on ambiguity — never highlight or observe more than one composer, and never guess.
-    if (res.count === 0 || !res.sig) return this.fail("TARGET_NOT_FOUND");
+    // Ambiguity is checked BEFORE the missing-signature check: the locate decision only signs the SINGLE
+    // composer case, so a real `count > 1` carries no `sig` and must not be mislabeled TARGET_NOT_FOUND.
     if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
+    if (res.count === 0 || !res.sig) return this.fail("TARGET_NOT_FOUND");
     this.targetSig = res.sig;
     this.stage = "HIGHLIGHT_COMPOSER";
     return "HIGHLIGHT";

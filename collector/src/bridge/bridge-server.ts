@@ -39,7 +39,7 @@ import { renderConfirmationPage } from "./confirmation-page";
 import type { BridgeEventPort } from "./event-adapter";
 import { PROJECTION_CLIENT_MAX_BYTES } from "./projection-protocol";
 import type { ProjectionEndpoint } from "./projection-endpoint";
-import type { ActionWindowEndpoint } from "./action-window-endpoint";
+import type { AwCarrierEndpoint } from "./aw-carrier";
 
 const LOOPBACK = "127.0.0.1";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -92,7 +92,7 @@ export interface BridgeServerDeps {
    * inspected here), and each accepted socket receives its `aw_session` announcement. This is additive:
    * the typed G1 `ClientMessage`/`ServerMessage` unions and their handling are unchanged.
    */
-  actionWindow?: ActionWindowEndpoint;
+  actionWindow?: AwCarrierEndpoint;
 }
 
 export class BridgeServer {
@@ -107,7 +107,7 @@ export class BridgeServer {
   private readonly approvalPresenter: ApprovalPresenter;
   private readonly heartbeatMs: number;
   private readonly projection: ProjectionEndpoint | undefined;
-  private readonly actionWindow: ActionWindowEndpoint | undefined;
+  private readonly actionWindow: AwCarrierEndpoint | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;

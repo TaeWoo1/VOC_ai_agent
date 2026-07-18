@@ -45,9 +45,56 @@ export const NO_INGEST_FLAG = "--no-ingest";
  */
 export const SESSION_RECOVERY_FLAG = "--session-recovery";
 
+/**
+ * Reply-submission runtime only: the explicit per-run approval for a **MUTATING** guided reply POST on
+ * live NAVER. Deliberately a SEPARATE constant from {@link APPROVAL_FLAG}: the export flag's operator
+ * model ("a human performs the export action; the Runtime reads") does not cover authoring/posting
+ * content, so a reply run must be approved on its own terms and must not accept export authorization as
+ * reply authorization. The reply CLI refuses ANY invocation carrying the export flag (see
+ * {@link exportFlagMisuseMessage}).
+ *
+ * ⚠ This program NEVER affirms this flag — the reply CLI is built and gate-refusal-tested offline only.
+ */
+export const REPLY_APPROVAL_FLAG = "--i-understand-this-posts-a-live-naver-reply";
+
 /** Did the operator pass the explicit live-run approval flag? */
 export function hasLiveRunApproval(args: string[]): boolean {
   return args.includes(APPROVAL_FLAG);
+}
+
+/** Did the operator pass the explicit reply-submission approval flag? */
+export function hasReplyRunApproval(args: string[]): boolean {
+  return args.includes(REPLY_APPROVAL_FLAG);
+}
+
+/** Operator-facing refusal shown when the reply approval flag is missing. */
+export function replyApprovalRequiredMessage(): string {
+  return [
+    "Refusing to start a LIVE NAVER reply submission without explicit per-run approval.",
+    "",
+    "  - This is a MUTATING action: it foregrounds the NAVER reply composer so a human can",
+    "    paste and POST an approved reply themselves. The Runtime never types or submits.",
+    "  - A human performs login / 2FA / CAPTCHA and the actual submit.",
+    "  - The outcome is recorded as operator-reported and explicitly UNVERIFIED — never 완료.",
+    "  - Use only a user-owned test seller account.",
+    "  - This requires explicit per-run approval AND a fresh scope-matched G3 + single-use G6.",
+    "",
+    "Re-run with the reply approval flag:",
+    `  npx tsx src/cli/run-reply-submission-live-naver.ts -- ${REPLY_APPROVAL_FLAG}`,
+  ].join("\n");
+}
+
+/**
+ * Refusal shown when the EXPORT approval flag is passed to the reply-submission CLI. It CORRECTS the
+ * operator's model: the export flag authorizes a read (an export action), not a mutating reply POST.
+ */
+export function exportFlagMisuseMessage(): string {
+  return [
+    `Refusing: ${APPROVAL_FLAG} is the EXPORT approval flag and does NOT authorize a reply submission.`,
+    "",
+    "  - An export is a READ; a reply submission is a MUTATING post. They are approved separately.",
+    `  - Use ${REPLY_APPROVAL_FLAG} to authorize a guided reply run.`,
+  ].join("\n");
 }
 
 /** Is this a classify-only / no-upload run (discovery, never ingestion)? */

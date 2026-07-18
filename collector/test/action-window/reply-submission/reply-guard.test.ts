@@ -32,38 +32,67 @@ function codeOnly(path: string): string {
     .join("\n");
 }
 
+const NO_SUBMIT_TOKENS = [
+  ".click(",
+  ".type(",
+  ".fill(",
+  ".press(",
+  ".check(",
+  ".selectOption(",
+  ".setInputFiles(",
+  ".keyboard",
+  "dispatchEvent",
+  ".submit(",
+  ".value =",
+  ".value=",
+] as const;
+
+const NO_DOWNSTREAM_IMPORTS = [
+  "ingest-handoff",
+  "review-export",
+  "capture-export",
+  "runExport",
+  "quarantine",
+  "../upload",
+] as const;
+
 describe("naver reply driver — source guard (no submit, no type, no downstream)", () => {
   const code = codeOnly(resolve(SRC, "naver-reply-driver.ts"));
 
-  it.each([
-    ".click(",
-    ".type(",
-    ".fill(",
-    ".press(",
-    ".check(",
-    ".selectOption(",
-    ".setInputFiles(",
-    ".keyboard",
-    "dispatchEvent",
-    ".submit(",
-    ".value =",
-    ".value=",
-  ])("never contains %s", (token) => {
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
   });
 
-  it.each([
-    "ingest-handoff",
-    "review-export",
-    "capture-export",
-    "runExport",
-    "quarantine",
-    "../upload",
-  ])("imports no downstream/legacy-capture path (%s)", (mod) => {
+  it.each(NO_DOWNSTREAM_IMPORTS)("imports no downstream/legacy-capture path (%s)", (mod) => {
     // Scan import lines only.
     const imports = code.split("\n").filter((l) => l.trim().startsWith("import"));
     expect(imports.join("\n")).not.toContain(mod);
   });
+});
+
+/**
+ * The NEW live-seam surface — the shared dispatch service, the Bridge endpoint, and the gated CLI — must
+ * hold the SAME boundary as the driver: it never submits/types/clicks the composer and imports no
+ * downstream/ingest path. A reply produces no artifact, so none of these files may reach a capture path.
+ */
+describe("reply-submission live-seam surface — source guard (dispatch + Bridge endpoint + gated CLI)", () => {
+  const files = {
+    "reply-dispatch.ts": resolve(SRC, "reply-dispatch.ts"),
+    "reply-run-store.ts": resolve(SRC, "reply-run-store.ts"),
+    "reply-submission-endpoint.ts": resolve(SRC, "../../../src/bridge/reply-submission-endpoint.ts"),
+    "run-reply-submission-live-naver.ts": resolve(SRC, "../../../src/cli/run-reply-submission-live-naver.ts"),
+  };
+
+  for (const [name, path] of Object.entries(files)) {
+    const code = codeOnly(path);
+    it.each(NO_SUBMIT_TOKENS)(`${name} never contains %s`, (token) => {
+      expect(code).not.toContain(token);
+    });
+    it.each(NO_DOWNSTREAM_IMPORTS)(`${name} imports no downstream/legacy-capture path (%s)`, (mod) => {
+      const imports = code.split("\n").filter((l) => l.trim().startsWith("import"));
+      expect(imports.join("\n")).not.toContain(mod);
+    });
+  }
 });
 
 describe("reply runtime — privacy: hostile fixture content never crosses the boundary", () => {
