@@ -290,6 +290,44 @@ describe("selectedRangePresent — the KNOWN blind spots (D-025; placeholder, do
   });
 });
 
+describe("selectedRangePresent — realistic positive serializations (characterizes the boundary)", () => {
+  // Companion to the blind-spots block above. That block pins what the detector CANNOT see; this pins
+  // what it CAN — the serialized attribute shapes a real filled date/range control plausibly emits, so
+  // the positive edge is executable, not just the two bare inputs at the "NOT hardwired to false" test.
+  // These lock CURRENT behavior; per collector §4 item 6 the regex is corrected only from live findings,
+  // never guess-tuned. The one degenerate case below (whitespace-only value) is a reported finding, not
+  // a fix — see the note on it.
+  const POSITIVE: Array<[string, string]> = [
+    ["extra attributes between type and value", `<input type="date" id="startDate" class="cal" value="2026-06-01" readonly>`],
+    ["single-quoted attributes", `<input type='date' value='2026-06-01'>`],
+    ["class-based picker wrapper, no type=date", `<input class="form-control datepicker" value="2026-06-30">`],
+    ["dotted Korean-locale value string", `<input type="date" value="2026.06.01">`],
+    ["whitespace around the value equals sign", `<input type="date" value = "2026-06-01">`],
+  ];
+
+  for (const [label, html] of POSITIVE) {
+    it(`reads true for: ${label}`, () => {
+      expect(diagnosePreClickSignals(html).selectedRangePresent).toBe(true);
+    });
+  }
+
+  it("a filled start+end pair reads true and stays independent of the count bucket", () => {
+    const s = diagnosePreClickSignals(
+      `<input type="date" value="2026-06-01"><input type="date" value="2026-06-30">`,
+    );
+    expect(s.selectedRangePresent).toBe(true);
+    expect(s.dateRangeControlPresence).toBe("few"); // two date controls; presence ≠ selection
+  });
+
+  it("REPORTED FINDING (not fixed): a whitespace-only value reads true — a candidate false-positive", () => {
+    // `value="  "` is a cleared/placeholder date that serialized with a non-empty attribute. The regex
+    // `value\s*=\s*["'][^"']+["']` treats any non-quote run — including whitespace — as "filled", so a
+    // blanked picker can read `true`. This is asserted AS-IS to lock the boundary; tightening it (e.g.
+    // `[^"'\s]`) is a placeholder change requiring a PO decision + ideally a live sample, per D-025.
+    expect(diagnosePreClickSignals(`<input type="date" value="  ">`).selectedRangePresent).toBe(true);
+  });
+});
+
 describe("decideSupervisedExportReady — light readiness for the supervised-fast path", () => {
   const base: PreClickSignals = {
     exportLayout: "LAYOUT_UNRECOGNIZED",
