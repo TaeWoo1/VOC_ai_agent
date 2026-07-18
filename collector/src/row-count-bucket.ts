@@ -5,10 +5,8 @@
  * A zero-import pure leaf (§5) so any layer may depend on it: `upload.ts` needs it for its logs and
  * cannot reach `naver/review-upload-diagnostic.ts` (which imports `../upload`, so that edge would be
  * a cycle). `review-upload-diagnostic.ts` re-exports `rowCountBucket` under its established
- * `countBucket` name.
- *
- * `esm/esm-review-schema-shape.ts` still carries an identical private copy; folding the esm family in
- * is a separate slice.
+ * `countBucket` name, and `esm/esm-review-schema-shape.ts` re-exports it under the same name so the
+ * esm family shares this one definition.
  */
 
 /** Coarse row-count bucket — never the exact count. */

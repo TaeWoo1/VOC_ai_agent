@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { rowCountBucket, type RowCountBucket } from "../row-count-bucket";
+
 /**
  * Pure, SANITIZED schema-SHAPE summariser for an ESM+ REVIEW workbook (Gate 4).
  *
@@ -31,18 +33,10 @@ export function parseXlsxPathArg(args: readonly string[]): string | null {
   return null;
 }
 
-/** Coarse row-count bucket — never the exact row count (rows may be PII-bearing). */
-export type RowCountBucket = "zero" | "one" | "few" | "tens" | "hundreds" | "thousands_plus";
-
-/** Pure: coarse row-count bucket. */
-export function rowCountBucket(n: number): RowCountBucket {
-  if (!Number.isFinite(n) || n <= 0) return "zero";
-  if (n === 1) return "one";
-  if (n <= 9) return "few";
-  if (n <= 99) return "tens";
-  if (n <= 999) return "hundreds";
-  return "thousands_plus";
-}
+// Coarse row-count bucket — never the exact row count (rows may be PII-bearing).
+// Shared with the rest of the collector via the zero-import `row-count-bucket` leaf;
+// re-exported here so the esm family keeps importing it from this module.
+export { rowCountBucket, type RowCountBucket };
 
 /**
  * Sanitized candidate category for a header column. These are **candidates** only — a
