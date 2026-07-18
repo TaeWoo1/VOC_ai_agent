@@ -247,8 +247,11 @@ logged or persisted** (strictly less exposure than the serialized HTML already c
   attribute `false` + live `true` confirms the blindness *and* that the detector works; both `false` is a
   true negative. Offline A3: the interpreter is locked both directions and the driver-overlay wiring is locked
   in the default suite (removing the overlay fails the frame-aware call-sequence test).
-- **The end-to-end mechanism proof is a `RUN_INTEGRATION`-gated browser test — WRITTEN, NOT run** (the +1 in
-  `31 → 32 skipped`). Bundles the deferred `r4-runtime-handoff` skill reading-note edit.
+- **The end-to-end mechanism proof is a `RUN_INTEGRATION`-gated browser test — RUN GREEN over a synthetic
+  SPA fixture in headless Chromium (2026-07-18: `6 passed | 1 skipped`, discriminator green —
+  `selectedRangePresent:false` + `selectedRangePresentLive:true`, no-leak sweep clean).** Stays gated in the
+  default hermetic suite (the +1 in `31 → 32 skipped`); run out-of-suite via the single-file command, never
+  `RUN_INTEGRATION=1 npm test`. Bundles the deferred `r4-runtime-handoff` skill reading-note edit.
 
 ⚠ **[D-025](decisions.md)'s LIVE positive stays OPEN.** #294 *instruments* the falsifier; it does **not** close
 it. Whether `selectedRangePresentLive` ever reads `true` on a real NAVER SPA picker needs a real selected range
