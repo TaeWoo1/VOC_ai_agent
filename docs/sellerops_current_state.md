@@ -18,8 +18,9 @@
 > Action Window Runtime 상태의 정본은 `docs/action-window-runtime/`이며, 진입점은
 > [`docs/action-window-runtime/HANDOFF.md`](action-window-runtime/HANDOFF.md)다.
 
-> **⚠ 2026-07-17 부분 갱신 — §10 Active slice만.** 이 날짜에 갱신된 것은 §10뿐이다. **나머지 항목은
-> 여전히 2026-07-08 기준**(§9의 Action Window 항목은 2026-07-15 기준)이며 그 이후를 반영하지 않는다.
+> **⚠ 2026-07-18 부분 갱신 — §10 Active slice만.** 이 날짜에 갱신된 것은 §10뿐이다(Review Response
+> Completion v1 병합을 명시하고 Preparation v1을 이전 슬라이스로 강등). **나머지 항목은 여전히
+> 2026-07-08 기준**(§9의 Action Window 항목은 2026-07-15 기준)이며 그 이후를 반영하지 않는다.
 >
 > **알려진 staleness — 해소하지 않고 보고한다.** 이 문서는 **리뷰 트리아지가 머지된 사실을 모른다**:
 > 백엔드 PR #279(`4404b4f`)·프론트 PR #283(`6fff8f8`)이 2026-07-17에 들어왔고 scope lock은 v1.3(`7052e71`)
@@ -127,16 +128,30 @@ Browser Projection **구현은 미착수**(계약 승인 전). Guided Connection
 - 채널 쓰기(답변 발송/주문 상태 변경), 무인 자동 수집, 자동 제품 매칭, standalone AI 검색.
 
 ## 10. Active slice
-**Review Response Preparation v1 (Attention 표면) — 백엔드 구현·검증 완료, 미커밋** —
-`docs/slices/review-response-preparation-v1.md` (**2026-07-17**). `RESPONSE_NEEDED` 리뷰에 한해
-redacted 본문 → **규칙 기반** 추천 초안 → 편집 → 승인(고정) → **복사**. **발송 없음**: 마켓플레이스
-쓰기 경로 부재, 승인은 텍스트를 고정할 뿐 전송하지 않으며 답변은 운영자의 클립보드로만 나간다.
-**AI 없음**(`sellerops.reply.review.provider=rule_based`, `ai` 예약·미구현). scope lock **v1.4**로
-상향(§5 계약 + §9 drift guard 범위 확정 + 좁은 redacted 판매자-대면 예외). 백엔드 테스트 **72개 신규**
-(전체 **1166** 통과, 실패 0). 구현 직후 독립 리뷰에서 blocker 5건(개행이 섞인 공백에서 redaction이
-미리보기보다 적게 가리던 privacy 결함 포함) 발견·수정·재검증, 수정 후 최종 리뷰에서 2건 추가 발견·수정
-— 상세는 슬라이스 문서 §Acceptance.
-**프론트엔드 미착수**(별도 PR). collector/R4/라이브 접속 변경 없음.
+**Review Response Completion v1 (가이드형 NAVER Action Window 답변 제출) — 병합 완료(main), 오프라인 전용** —
+`docs/slices/review-response-completion-v1.md` (**2026-07-18**). 승인된 답변 준비 위에 **가이드형·사람 수행
+제출**을 얹는다: `RESPONSE_NEEDED` 승인 답변 → **네이버에서 직접 답변하기(가이드)** → 운영자가 판매자센터에
+직접 붙여넣고 제출 → **로컬·운영자 보고·명시적 UNVERIFIED** 결과 기록. **발송 없음**: SellerOps는 쓰지·
+입력하지·제출하지 않고 창을 앞으로 가져와 관찰만 하며, 게시 여부는 검증하지 않는다(NAVER REVIEW 공식 API
+부재 → 결과는 절대 "완료"/채널 주장 아님; 보고(`OPERATOR_REPORTED_SUBMITTED`/`SUBMISSION_ABORTED`)와
+검증(`UNVERIFIED`)을 **항상 쌍으로** 표기, `UNVERIFIED` 단독 금지). scope lock **v1.6**(§5·§9 좁은 outbound
+예외), R4 §4.1 + ADR §4 변형-행동 개정, 결정 **D-032**(6번째 G3 스코프 `reply submission` + G6 템플릿).
+계약은 **병렬 `contracts/action-window/v2/`**(protocol 2 — `OPERATOR_REPORTED` 종단·`COMPLETED` 아님·
+outcome⟂verification), 런타임은 **격리된 `collector/src/action-window/reply-submission/`**(감사되는 v1 export
+런타임·`OperationRun` store 불변, 절대 타이핑/제출 클릭 없음), 백엔드는 **V20**(1회용 `submission_ref` 바인딩 +
+append-only `review_reply_outcome`, `operator_outcome`·`verification` 분리 컬럼, `COMPLETED` 값 없음).
+**두 스택 PR 병합**: 플랫폼 **#291**(merge `3203b05`) → 프론트 **#292**(merge `9f2af64`). 검증: collector
+typecheck+**3115** · backend `./gradlew test` BUILD SUCCESSFUL · frontend typecheck+**577**+build; 독립
+읽기 전용 리뷰 clean. **라이브 리뷰 실행은 여전히 게이트 잠금** — 신선한 scope-matched G3(6번째 스코프
+`reply submission`) + 1회용 G6가 필요하며 어느 것도 부여되지 않았다(D-032). collector 감사 런타임·라이브
+접속·자격증명 변경 없음.
+
+### 이전 활성 슬라이스 (참고) — Review Response Preparation v1, 병합 완료 (PR #284 백엔드 · #286 프론트)
+`docs/slices/review-response-preparation-v1.md`. `RESPONSE_NEEDED` 리뷰에 한해 redacted 본문 →
+**규칙 기반** 추천 초안 → 편집 → 승인(고정) → **복사**. **발송 없음**(마켓플레이스 쓰기 경로 부재, 답변은
+운영자의 클립보드로만), **AI 없음**(`sellerops.reply.review.provider=rule_based`), scope lock **v1.4**
+(§5 계약 + §9 좁은 redacted 판매자-대면 예외). Completion v1(위)이 이 위에 **가이드형 제출 + UNVERIFIED
+결과 기록**을 얹으며 v1.4의 "클립보드로만"을 좁게 대체했다.
 
 ### 이전 활성 슬라이스 (참고) — NAVER Guided Connection (Guided-Connection G3)
 **계약 초안 작성 중** — `docs/slices/naver-guided-connection.md`
