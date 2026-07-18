@@ -230,7 +230,37 @@ Plus **#269 / #271 / #274 / #275** — attention + ingest workstreams, **0 `coll
   say-so: `73f027e` has parents `4404b4f` + `cc9aba8`, which is what proves it was neither squashed nor
   rebased.
 
-## Last slice — #294: the live selected-range diagnostic path (D-025's "different detector"), 2026-07-18 — **on `main`**
+## Last slice — live NAVER selected-range confirmation: D-025 live-positive RESOLVED, 2026-07-18 — **evidence only, no code / gate change**
+
+**One single-use G6 live NAVER run settled [D-025](decisions.md)'s live-positive falsifier POSITIVE.** Under a
+fresh export-scoped G3 / P6 / §9-3 re-affirmation + a single-use G6 (all now CONSUMED), the operator logged in
+as `NAVER_DEV_SELLER_SELF_01`, **selected a real review date range**, signalled ready, and — per the run's
+approved scope — **clicked nothing**. `run-action-window-live-naver.ts … --no-ingest` drove `prepareSurface`
+once and logged the sanitized `aw.live.readiness` diagnostic:
+
+- `verdict: LOGGED_IN` · `readinessDecision: READY` · `readinessBranch: labeled_count_positive` ·
+  `dateRangeControlPresence: some`
+- **`selectedRangePresent: false`** (the `page.content()` attribute regex) **+ `selectedRangePresentLive: true`**
+  (the #294 in-page IDL `.value` read).
+
+**This is the discriminating positive.** On real NAVER, after a real manual range selection, the attribute
+detector is **structurally blind** (`false`) while the #294 IDL detector **sees the selection** (`true`): NAVER
+writes the picked range to the `.value` **IDL property**, not the serialized `value` attribute — exactly D-025's
+hypothesis, now confirmed live and matching the 2026-07-18 synthetic discriminator. **D-025's live-positive
+direction can close on this evidence.**
+
+- **Non-mutating, verified.** No export click, no download, no ingest, backend down; the run ended benign
+  **`FAILED` / `DOWNLOAD_TIMEOUT`** (observe window lapsed → no download → nothing captured / validated / ingested
+  / written). Clean teardown; single-use **G6 CONSUMED** — the spent G6 re-authorizes nothing.
+- **Evidence only.** No production code, no tests, no gate-behaviour change, no docs-gating change.
+  `selectedRangePresent` / `selectedRangePresentLive` stay **observe-only / non-gating**.
+
+⚠ **Product decision deliberately NOT taken here:** whether a selected range should become a **readiness gate**
+(D-025's option (b) blocker / (c) observed-step) is a **product-owner** call. The `true` result licenses
+"revisit a blocker **on evidence**"; it does not make that call. Until the PO decides, both signals stay
+observe-only.
+
+## Earlier slice — #294: the live selected-range diagnostic path (D-025's "different detector"), 2026-07-18 — **on `main`**
 
 **PR #294 (`ab4a9fa`) built the IDL-property detector [D-025](decisions.md) names — additive, observe-only,
 log-only, non-gating.** The attribute regex over `page.content()` is structurally blind to an SPA date picker
@@ -253,9 +283,10 @@ logged or persisted** (strictly less exposure than the serialized HTML already c
   default hermetic suite (the +1 in `31 → 32 skipped`); run out-of-suite via the single-file command, never
   `RUN_INTEGRATION=1 npm test`. Bundles the deferred `r4-runtime-handoff` skill reading-note edit.
 
-⚠ **[D-025](decisions.md)'s LIVE positive stays OPEN.** #294 *instruments* the falsifier; it does **not** close
-it. Whether `selectedRangePresentLive` ever reads `true` on a real NAVER SPA picker needs a real selected range
-on real NAVER (G6 + browser), out of scope. Every G6 to date is consumed.
+✅ **[D-025](decisions.md)'s LIVE positive RESOLVED 2026-07-18** (see the top slice). #294 *instrumented* the
+falsifier; the live selected-range run then read `selectedRangePresentLive: true` (attribute `false`) on real
+NAVER → **POSITIVE / can close**. Whether a selected range becomes gating stays a product-owner decision. Every
+G6 to date is consumed.
 
 ## Earlier slice — Run 6 close-out: prompt-scope fix + `selectedRangePresent` offline closure, 2026-07-18 — **all on `main`**
 
@@ -275,11 +306,12 @@ on real NAVER (G6 + browser), out of scope. Every G6 to date is consumed.
   (`FILLED_DATE_INPUT_RE` now requires a non-whitespace character). **Tests + a one-line detector tighten;
   `selectedRangePresent` stays observe-only / non-gating per [D-025](decisions.md).**
 
-⚠ **The LIVE positive direction is NOT closed — [D-025](decisions.md)'s falsifier stays OPEN.** These slices
-prove *propagation* and *offline boundary* only. The live question — whether the detector can **ever** read
-`true` on a real SPA picker, where `page.content()` serializes the `value` **attribute** while a user/JS-set
-value updates only the IDL **property** — is untouched and unprovable offline; it needs a real selected range
-on real NAVER (G6 + browser), out of scope. Run 6 selected no range, so it did not settle it either.
+✅ **The LIVE positive direction is now RESOLVED (2026-07-18, see the top slice) — [D-025](decisions.md)'s
+falsifier lands POSITIVE.** These offline slices prove *propagation* and *offline boundary* only; the live
+question — whether the detector can **ever** read `true` on a real SPA picker, where `page.content()` serializes
+the `value` **attribute** while a user/JS-set value updates only the IDL **property** — was unprovable offline
+and needed a real selected range on real NAVER (G6 + browser). Run 6 selected no range; the 2026-07-18 live
+range run settled it (attribute `false` + live `true`).
 
 ## Earlier slice — A4: the synthetic-browser recovery rung, 2026-07-17 (§8-22) — **now on `main`** (via #281/#282/#285)
 
@@ -512,17 +544,18 @@ timeouts. **Zero contract / FE / backend / schema / stage / navigation change.**
   **interpolated from the timers** so it cannot restate a stale number, the period/scope line is lifted to
   prominence as the operator's own unenforced step, and it now warns that a validated download is ingested
   unconditionally. It is **exported and test-locked** — being unexported and unasserted is how it rotted.
-- **OPEN — `selectedRangePresent`'s LIVE positive direction is still unproven.** Runs 5 and 6 both produced a
-  **true negative** (operator selected nothing, detector said nothing). ⚠ The stronger concern is **not**
-  "hardwired `false`" (withdrawn as false) but that the regex reads the `value` **attribute** while live reads
-  are `page.content()` serialization: a JS/user-set value updates the IDL **property** only, so on an SPA
+- **RESOLVED 2026-07-18 — `selectedRangePresent`'s LIVE positive direction is now PROVEN.** Runs 5 and 6 both
+  produced a **true negative** (operator selected nothing, detector said nothing). ⚠ The stronger concern was
+  **not** "hardwired `false`" (withdrawn as false) but that the regex reads the `value` **attribute** while live
+  reads are `page.content()` serialization: a JS/user-set value updates the IDL **property** only, so on an SPA
   picker the detector may be **incapable of ever returning `true`**.
   **↳ OFFLINE HALF CLOSED 2026-07-18 (#288/#289):** propagation through `naverSurfaceDecision` is now
   test-proven end-to-end, the positive/negative boundary is characterized by a realistic corpus, and the
-  whitespace-only false-positive is fixed (`value="  "` no longer reads `true`). **The LIVE half is
-  untouched and remains [D-025](decisions.md)'s named falsifier:** a future run that actually selects a range
-  settles it for free — `true` → revisit a blocker **on evidence**; `false` → confirms the blindness and a
-  blocker stays off the table until a **different** detector exists.
+  whitespace-only false-positive is fixed (`value="  "` no longer reads `true`).
+  **↳ LIVE HALF CLOSED 2026-07-18:** a single-use G6 live run (no-click / no-ingest, operator selected a real
+  range) read **attribute `false` + `selectedRangePresentLive: true`** on real NAVER — the attribute detector
+  IS blind AND the #294 IDL detector works → **falsifier POSITIVE**. ⚠ Whether to now **gate** on the range
+  (a blocker / observed-step) stays a **product-owner** decision; the signals remain observe-only until then.
 - **OPEN — the Run 4 dialog's identity.** Run 5's `dialogMatchesRecordedConsentMarkers` was **NOT_OBSERVED**;
   the question is open in **neither direction**. Also free to settle on any future click run.
 - **The `COMPLETED` path under the new timing is still unproven** — it rests on Run 4's **old-timing** evidence.
