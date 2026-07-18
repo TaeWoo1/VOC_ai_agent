@@ -577,14 +577,15 @@ export class ActionWindowEngine {
 
   /**
    * Probe result: the ingestion handoff outcome. Only a verified-and-validated artifact reaches
-   * here, and only success completes the run. A failed handoff fails closed with the generic
-   * `UNSUPPORTED_STATE` — the contract reserves no ingest-specific blocker code, and adding one is
-   * a governed contract change deferred to the channel-adapter slice.
+   * here, and only success completes the run. A failed handoff fails closed with the dedicated
+   * `INGEST_FAILED` — the surface was valid and the artifact was validated, so the generic
+   * `UNSUPPORTED_STATE` ("surface is wrong") would misattribute the cause. This mirrors the sibling
+   * `ARTIFACT_INVALID` branch, which already names its own failure.
    */
   onIngested(res: IngestResult): Effect {
     this.expect("INGEST_HANDOFF");
     this.revision += 1;
-    if (!res.ok) return this.fail("UNSUPPORTED_STATE");
+    if (!res.ok) return this.fail("INGEST_FAILED");
     this.completedSteps = 3;
     this.emit("STEP_COMPLETED", { stepId: this.stepId() });
     this.stage = "COMPLETE";

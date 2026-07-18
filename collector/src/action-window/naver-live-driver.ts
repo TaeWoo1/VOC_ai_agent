@@ -353,7 +353,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   /**
    * Hand the validated bytes to the INJECTED upload callback under the opaque `artifactRef` (the
    * platform's suggested filename is never passed). Only the sanitized `{ ok, processed }` crosses
-   * back; a non-`ok` outcome fails the run closed (`UNSUPPORTED_STATE`, per the engine).
+   * back; a non-`ok` outcome fails the run closed (`INGEST_FAILED`, per the engine).
    */
   async ingest(artifactRef: string): Promise<IngestResult> {
     const retained = this.retained;

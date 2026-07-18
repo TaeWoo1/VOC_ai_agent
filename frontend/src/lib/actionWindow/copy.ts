@@ -117,6 +117,7 @@ const BLOCKER_VIEW: Record<BlockerCode, BlockerView> = {
   UNSUPPORTED_STATE: { title: "지원하지 않는 화면이에요", body: "직접 진행해 주세요." },
   DOWNLOAD_TIMEOUT: { title: "다운로드가 지연돼요", body: "잠시 후 다시 시도해 주세요." },
   ARTIFACT_INVALID: { title: "받은 파일을 확인할 수 없어요", body: "다시 내려받아 주세요." },
+  INGEST_FAILED: { title: "저장 중 문제가 생겼어요", body: "잠시 후 다시 시도해 주세요." },
 };
 export function blockerView(code: BlockerCode): BlockerView {
   return BLOCKER_VIEW[code];
