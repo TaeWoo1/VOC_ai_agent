@@ -36,11 +36,13 @@
   **`selectedRangePresentLive`** diagnostic path — the "different detector" D-025 names: a best-effort live
   `.value` read overlaid onto the log-only diagnostic, **observe/log-only and non-gating** (no wire / blocker /
   transport / persistence / gating change), with a `RUN_INTEGRATION`-gated browser discriminator **written but
-  not run**. ⚠ **[D-025](decisions.md)'s LIVE positive
-  direction for `selectedRangePresent` remains OPEN** — Runs 5 and 6 both selected no range (true negatives);
-  whether the detector can ever read `true` on a real SPA picker needs a future live range selection (G6 +
-  browser) and is unprovable offline. **No open Runtime blocker; no live NAVER/browser/backend contact in these
-  slices; every G6 to date is consumed.** Detail + git-state: [`HANDOFF.md`](HANDOFF.md); Run 6 evidence:
+  not run**. ✅ **[D-025](decisions.md)'s LIVE positive
+  direction for `selectedRangePresent` is RESOLVED 2026-07-18** — a single-use G6 live run (no-click / no-ingest,
+  operator selected a real range) read **attribute `false` + `selectedRangePresentLive: true`** on real NAVER →
+  the attribute detector is blind AND the #294 IDL detector works → **falsifier POSITIVE / can close**; benign
+  `FAILED` / `DOWNLOAD_TIMEOUT`, nothing captured / ingested. Whether a selected range becomes **gating** stays a
+  product-owner decision (not taken here); the signals remain observe-only. **No open Runtime blocker; every G6
+  to date is consumed.** Detail + git-state: [`HANDOFF.md`](HANDOFF.md); Run 6 evidence:
   [`r4-evidence-pack.md`](r4-evidence-pack.md) §8-23.
 
 ## Truth snapshot
