@@ -246,6 +246,12 @@ reply-submission G6 have ever been filled, and the whole program is **offline** 
 *Live reply-run kickoff checklist:* [`r4-reply-submission-live-kickoff.md`](r4-reply-submission-live-kickoff.md)
 — the pre-dispatch runbook (build prerequisites now MET offline; every run-gate still ☐). It grants nothing.
 
+*First reply-submission dispatch record (scaffold):*
+[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](r4-reply-submission-abort-rehearsal-dispatch-record.md)
+— choreography + evidence sheet for one **abort-path rehearsal** (operator reaches the composer and does NOT
+submit → `SUBMISSION_ABORTED · UNVERIFIED`, non-mutating by construction). ☐ NOT AUTHORIZED, all gates blank;
+it grants nothing.
+
 *Approvals recorded:* one **CONSUMED** read-only-probe instance (below). G6 is a **per-run** gate — it is
 never permanently satisfied, and this record grants nothing beyond the single run it describes.
 
