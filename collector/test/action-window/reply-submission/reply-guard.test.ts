@@ -77,16 +77,21 @@ describe("naver reply driver — source guard (no submit, no type, no downstream
     expect(imports.join("\n")).not.toContain(mod);
   });
 
-  // The live row seam must remain FAIL-CLOSED with NO invented selector until real DOM evidence exists.
-  it.each(["data-review-row", "EXTRACT_ROW_SIGNALS", "ANNOTATE_ROW", "ARM_ROW_OBSERVER"])(
-    "never invents a live row selector/script (%s)",
+  // The row seam is now EVIDENCE-BACKED by the operator-calibrated mapping: it addresses rows by relative
+  // structural paths over the GENERIC container groups and invents NO NAVER-specific selector/class/host.
+  it.each(["data-review-row", "smartstore", "sell.naver", "reviewItem", ".review_"])(
+    "invents no NAVER-specific selector/class/host (%s)",
     (token) => {
       expect(code).not.toContain(token);
     },
   );
+  it("addresses rows through the operator-calibrated mapping (structural), never a hardcoded selector", () => {
+    expect(code).toContain("mapping");
+    expect(code).toContain("inPageRowCensus");
+  });
 });
 
-describe("naver reply driver — the guided row seam is deliberately fail-closed (no live DOM evidence yet)", () => {
+describe("naver reply driver — the guided row seam is fail-closed when UNMAPPED (no calibration artifact)", () => {
   const stubPage: ReplyPageLike = {
     url: () => "about:blank",
     content: () => Promise.resolve(""),
@@ -155,6 +160,14 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "run-reply-submission-live-naver.ts": resolve(SRC, "../../../src/cli/run-reply-submission-live-naver.ts"),
     "review-body-fingerprint.ts": resolve(SRC, "review-body-fingerprint.ts"),
     "reply-target-bundle.ts": resolve(SRC, "reply-target-bundle.ts"),
+    // Operator-assisted live-match slice: in-page scripts + calibration + mapping/cross-source + calibration CLI.
+    "review-body-fingerprint-inpage.ts": resolve(SRC, "review-body-fingerprint-inpage.ts"),
+    "reply-row-inpage.ts": resolve(SRC, "reply-row-inpage.ts"),
+    "reply-calibrate-inpage.ts": resolve(SRC, "reply-calibrate-inpage.ts"),
+    "reply-row-mapping-artifact.ts": resolve(SRC, "reply-row-mapping-artifact.ts"),
+    "reply-cross-source.ts": resolve(SRC, "reply-cross-source.ts"),
+    "handle-reply-row-driver.ts": resolve(SRC, "handle-reply-row-driver.ts"),
+    "calibrate-reply-target.ts": resolve(SRC, "../../../src/cli/calibrate-reply-target.ts"),
   };
 
   for (const [name, path] of Object.entries(files)) {
@@ -177,6 +190,18 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
  */
 describe("prepare-reply-target CLI — source guard (no submit/type/click; backend-prep only)", () => {
   const code = codeOnly(resolve(SRC, "../../../src/cli/prepare-reply-target.ts"));
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+});
+
+/**
+ * The same-session abort-rehearsal CLI legitimately imports the backend client (`../upload`) to mint the one-shot
+ * submissionRef (so the "no downstream import" rule does NOT apply), but it must NEVER submit/type/click a NAVER
+ * control — it captures the operator's own click (preventDefault) and highlights the retained element read-only.
+ */
+describe("run-abort-rehearsal-live-naver CLI — source guard (no submit/type/click)", () => {
+  const code = codeOnly(resolve(SRC, "../../../src/cli/run-abort-rehearsal-live-naver.ts"));
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
   });

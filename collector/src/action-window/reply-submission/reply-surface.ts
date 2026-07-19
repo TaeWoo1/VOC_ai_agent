@@ -61,13 +61,26 @@ export interface ReviewRowSignal {
 }
 
 /**
+ * The single row-match predicate — `rating` + `recencyBucket` + `bodyFingerprint` all equal (the fingerprint
+ * is the strong key; rating/bucket pre-filter). Exported so the discovery classifier, the pure locate
+ * decision, and the live driver (which tracks DOM indices, not filtered indices) all apply the IDENTICAL rule
+ * and can never disagree.
+ */
+export function reviewRowMatchesHint(hint: ReplyTargetHint, row: ReviewRowSignal): boolean {
+  return (
+    row.rating === hint.rating &&
+    row.recencyBucket === hint.recencyBucket &&
+    row.bodyFingerprint === hint.bodyFingerprint
+  );
+}
+
+/**
  * Read-only row locate decision: how many rows match the hint, and the opaque signature of the one (when
- * exactly one). The match keys are `rating` + `recencyBucket` + `bodyFingerprint` (the fingerprint is the
- * strong key; rating/bucket pre-filter). Fail-closed 0/many is the engine's job; this only reports counts
- * + sig. The signature is over the matched row's structural POSITION only (`["row", matchedIndex]`) — an
- * observable page fact, NEVER a hint field (rating), the fingerprint, or any raw content. (A hint field in
- * the sig would be brute-forceable off the wire AND redundant for drift detection, since a unique match
- * pins all hint fields.) Mirrors {@link replyComposerLocateDecision} so fixture and live drivers agree.
+ * exactly one). Fail-closed 0/many is the engine's job; this only reports counts + sig. The signature is over
+ * the matched row's structural POSITION only (`["row", matchedIndex]`) — an observable page fact, NEVER a hint
+ * field (rating), the fingerprint, or any raw content. (A hint field in the sig would be brute-forceable off
+ * the wire AND redundant for drift detection, since a unique match pins all hint fields.) Mirrors
+ * {@link replyComposerLocateDecision} so fixture and live drivers agree.
  */
 export function reviewRowLocateDecision(
   hint: ReplyTargetHint,
@@ -76,11 +89,7 @@ export function reviewRowLocateDecision(
   let count = 0;
   let onlyIndex = -1;
   rows.forEach((row, i) => {
-    if (
-      row.rating === hint.rating &&
-      row.recencyBucket === hint.recencyBucket &&
-      row.bodyFingerprint === hint.bodyFingerprint
-    ) {
+    if (reviewRowMatchesHint(hint, row)) {
       count += 1;
       onlyIndex = i;
     }
