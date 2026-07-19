@@ -8,6 +8,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   EXTRACT_API_CENTER_CENSUS,
+  LOGIN_WAIT_TIMEOUT_MS,
+  NAVIGATION_WAIT_TIMEOUT_MS,
   classifyApiCenterPage,
   classifyUrlCategory,
   countBucket,
@@ -384,6 +386,16 @@ describe("observeApiCenterGuidedTutorial — two-step guided journey (login → 
     for (const c of r.path) {
       expect(["login", "app_list", "app_detail", "credential_issuance", "unknown"]).toContain(c);
     }
+  });
+});
+
+describe("checkpoint timeouts — the app_detail navigation walk is not rushed", () => {
+  it("gives the manual-navigation checkpoint a larger budget than the login gate", () => {
+    expect(NAVIGATION_WAIT_TIMEOUT_MS).toBeGreaterThan(LOGIN_WAIT_TIMEOUT_MS);
+  });
+
+  it("keeps the navigation budget generous enough for a real two-step walk (≥ 15 min)", () => {
+    expect(NAVIGATION_WAIT_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000);
   });
 });
 

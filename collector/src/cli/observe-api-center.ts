@@ -457,7 +457,14 @@ function banner(): void {
   console.error(line);
 }
 
-const LOGIN_WAIT_TIMEOUT_MS = 5 * 60_000; // generous: manual login + 2FA
+export const LOGIN_WAIT_TIMEOUT_MS = 5 * 60_000; // generous: manual login + 2FA
+/**
+ * The manual-navigation checkpoint is a deliberate tutorial walk — the seller must log in, THEN find and
+ * open one application to reach app_detail (or its issued-keys page). It gets a much larger budget than the
+ * login gate so the app_detail calibration walk is not rushed by the login timeout (a too-short window is
+ * what forced a `category_unchanged` timeout re-read on the first cold two-step run).
+ */
+export const NAVIGATION_WAIT_TIMEOUT_MS = 20 * 60_000;
 const SENTINEL_POLL_MS = 1_000;
 
 async function settle(page: Page): Promise<void> {
@@ -482,8 +489,8 @@ function removeSentinel(path: string): void {
 }
 
 /** Poll for the sentinel up to the timeout (counter-based; no wall-clock read). */
-async function waitForSentinel(path: string): Promise<boolean> {
-  const maxTicks = Math.ceil(LOGIN_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
+async function waitForSentinel(path: string, timeoutMs: number = LOGIN_WAIT_TIMEOUT_MS): Promise<boolean> {
+  const maxTicks = Math.ceil(timeoutMs / SENTINEL_POLL_MS);
   for (let i = 0; i < maxTicks; i++) {
     if (existsSync(path)) return true;
     await sleep(SENTINEL_POLL_MS);
@@ -583,7 +590,8 @@ async function main(): Promise<void> {
   const waitForManualNavigation = async (): Promise<void> => {
     removeSentinel(sentinelPath);
     printManualNavigationInstructions(sentinelPath);
-    const appeared = await waitForSentinel(sentinelPath);
+    // Larger budget than the login gate — the app_detail walk (find + open one application) is not rushed.
+    const appeared = await waitForSentinel(sentinelPath, NAVIGATION_WAIT_TIMEOUT_MS);
     if (!appeared) console.error("Manual-navigation wait timed out — re-observing the current page as-is.");
   };
 
