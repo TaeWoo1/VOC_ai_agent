@@ -1,13 +1,21 @@
 /**
- * **Read-only NAVER API-center observation harness** (G3-C.2). OFFLINE-SAFE to build/verify: importing
- * this module launches nothing (`main()` runs only when invoked directly), and even then it refuses every
- * live action without the explicit per-run approval flag — exactly like `probe-session` / `discover-export`.
+ * **NAVER API-center GUIDED-TUTORIAL observation harness** (G3-C.2). OFFLINE-SAFE to build/verify:
+ * importing this module launches nothing (`main()` runs only when invoked directly), and even then it
+ * refuses every live action without the explicit per-run approval flag — like `probe-session` /
+ * `discover-export`.
  *
- * Purpose: a generic, no-click instrument that classifies a NAVER API-center page
- * (`apicenter.commerce.naver.com`) into a COARSE category (login / app list / app detail /
- * credential-issuance-like / unknown) from **structural counts and booleans only**, so a future live
- * G3-C.2 walk (under a fresh single-use G6) can calibrate the guided-connection readiness detection
- * WITHOUT ever clicking, submitting, or reading any value.
+ * Purpose: **guided-tutorial support only.** A generic, no-click instrument that classifies a NAVER
+ * API-center page (`apicenter.commerce.naver.com`) into a COARSE category (login / app list / app detail /
+ * credential-issuance-like / unknown) from **structural counts and booleans only**, so the guided-connection
+ * wizard can show the seller the **next tutorial instruction** for where they are. The seller does every
+ * real step **manually** in their own dedicated Chrome window — logs in, opens/creates the Commerce API
+ * application, and copies the Client ID / Secret themselves.
+ *
+ * **This is NOT automatic API-key issuance or automatic credential linking.** SellerOps never logs in,
+ * never clicks/submits, never issues or links an application, never scrapes or auto-fills a value, and
+ * never reads the Client ID / Secret. It only reads a sanitized page CATEGORY / structural state to drive
+ * the tutorial. (Secure Client ID/Secret ENTRY, when the seller chooses to, is a separate manual form in
+ * the wizard that posts to the backend Vault — never anything this observer does.)
  *
  * Hard invariants (see also `docs/action-window-runtime/g3c-live-walk-preflight.md`):
  *  - **No invented selectors.** The in-page sweep uses only generic HTML structure (input types,
@@ -26,6 +34,8 @@ import { loadConfig } from "../config";
 import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Coarse host category, derived from a URL WITHOUT ever logging the raw URL. */
@@ -167,6 +177,63 @@ export function observeFrom(urlCategory: ApiCenterUrlCategory, census: ApiCenter
   return { urlCategory, pageCategory, signals, blockers };
 }
 
+/** Opt-in flag: after a login observation, wait for the operator to log in manually, then re-observe. */
+export const WAIT_FOR_MANUAL_LOGIN_FLAG = "--wait-for-manual-login";
+
+/** Fixed sentinel filename (one run at a time). Distinct from probe-same-session's. */
+export const OBSERVE_SENTINEL_FILENAME = "observe-api-center.ready";
+
+/** Sentinel path next to the collector status file (same `.status/` dir), mirroring `probe-sentinel`. */
+export function observeSentinelPathFor(statusFile: string): string {
+  return resolve(dirname(resolve(statusFile)), OBSERVE_SENTINEL_FILENAME);
+}
+
+/**
+ * Safe transition enum across an optional manual-login wait — describes only the PAGE's login gate, not
+ * any SellerOps authentication (the seller logs in manually; the tool authenticates nothing):
+ *   • `none` — no wait happened.
+ *   • `login_resolved` — was a login page; after the seller's manual login it is no longer a login page.
+ *   • `login_persists` — still a login page after the wait.
+ */
+export type LoginTransition = "none" | "login_resolved" | "login_persists";
+
+export interface ObserveApiCenterResult {
+  observation: ApiCenterObservation;
+  waited: boolean;
+  loginTransition: LoginTransition;
+}
+
+export interface ObserveDeps {
+  /** Read the CURRENT page as a sanitized census (production: re-navigate + settle + evaluate). */
+  readCensus: () => Promise<ApiCenterStructuralCensus>;
+  /** Block until the operator signals they logged in manually (production: a sentinel file). */
+  waitForManualLogin: () => Promise<void>;
+}
+
+/**
+ * Orchestrate either a one-shot observation, or — with `waitForLogin` and a `login` first read — a
+ * login → operator-manual-login → re-observe cycle. **Pure over injected deps**, so it is fully
+ * unit-tested offline with scripted censuses. The tool NEVER logs in, types, clicks, or reads a value:
+ * the operator logs in manually inside the opened window and this only re-reads the sanitized census.
+ */
+export async function observeApiCenter(
+  urlCategory: ApiCenterUrlCategory,
+  waitForLogin: boolean,
+  deps: ObserveDeps,
+): Promise<ObserveApiCenterResult> {
+  const first = observeFrom(urlCategory, await deps.readCensus());
+  if (!waitForLogin || first.pageCategory !== "login") {
+    return { observation: first, waited: false, loginTransition: "none" };
+  }
+  await deps.waitForManualLogin();
+  const second = observeFrom(urlCategory, await deps.readCensus());
+  return {
+    observation: second,
+    waited: true,
+    loginTransition: second.pageCategory === "login" ? "login_persists" : "login_resolved",
+  };
+}
+
 /**
  * The in-page structural sweep, as a **string** IIFE evaluated in the browser (generic HTML only — no
  * NAVER selectors, no value reads). It MUST be a string, not a passed function: tsx/esbuild instruments
@@ -240,11 +307,16 @@ const HYDRATION_TIMEOUT_MS = 15_000;
 function banner(): void {
   const line = "─".repeat(64);
   console.error(line);
-  console.error(" LIVE NAVER API-center observation — requires explicit per-run operator approval.");
-  console.error(" Reads the page for SANITIZED structural signals only. No URL/HTML/text/screenshots");
-  console.error(" are saved; no value (incl. Client ID/Secret) is read; nothing is clicked or uploaded.");
+  console.error(" LIVE NAVER API-center GUIDED-TUTORIAL observation — explicit per-run approval required.");
+  console.error(" Tutorial support only: the SELLER logs in, opens/creates the API application, and copies");
+  console.error(" the Client ID/Secret MANUALLY. This tool never logs in, issues, links, clicks, submits,");
+  console.error(" autofills, or reads any value (incl. Client ID/Secret) — it only reads a SANITIZED page");
+  console.error(" category/structure to show the next tutorial step. No URL/HTML/text/screenshot is saved.");
   console.error(line);
 }
+
+const LOGIN_WAIT_TIMEOUT_MS = 5 * 60_000; // generous: manual login + 2FA
+const SENTINEL_POLL_MS = 1_000;
 
 async function settle(page: Page): Promise<void> {
   try {
@@ -252,6 +324,43 @@ async function settle(page: Page): Promise<void> {
   } catch {
     /* timeout is fine — the classifier fails closed on thin signals */
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Best-effort remove (clear stale at startup, and at cleanup). */
+function removeSentinel(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Poll for the sentinel up to the timeout (counter-based; no wall-clock read). */
+async function waitForSentinel(path: string): Promise<boolean> {
+  const maxTicks = Math.ceil(LOGIN_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
+  for (let i = 0; i < maxTicks; i++) {
+    if (existsSync(path)) return true;
+    await sleep(SENTINEL_POLL_MS);
+  }
+  return existsSync(path);
+}
+
+/** Safe operator instructions for the manual-login wait — no raw URL/content, only the local file path. */
+function printLoginWaitInstructions(sentinelPath: string): void {
+  console.error("");
+  console.error("Tutorial step: the API-center page looks like a LOGIN page (dedicated profile not signed in).");
+  console.error("Log in MANUALLY inside the opened dedicated Chrome window — YOU do the login (and, later,");
+  console.error("open/create the API application and copy the Client ID/Secret). The tool will NOT type,");
+  console.error("click, submit, autofill, or read your ID / password / Client ID / Secret. When you have");
+  console.error("logged in and are on the API-center page, signal readiness by creating this file — the tool");
+  console.error("then RE-READS only the sanitized page category to advance the tutorial:");
+  console.error(`  ${sentinelPath}`);
+  console.error('  (e.g. `touch "' + sentinelPath + '"`; in Claude Code, just say "ready").');
+  console.error("Polling…");
 }
 
 /**
@@ -286,23 +395,46 @@ async function main(): Promise<void> {
   }
   const urlCategory = screen.urlCategory;
   const cfg = loadConfig();
+  const waitForLogin = args.includes(WAIT_FOR_MANUAL_LOGIN_FLAG);
+  const sentinelPath = observeSentinelPathFor(cfg.statusFile);
+  mkdirSync(dirname(sentinelPath), { recursive: true });
+  removeSentinel(sentinelPath); // clear any stale sentinel BEFORE the run
+
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
-  try {
+  // Evaluate a STRING (not a passed function) so tsx/esbuild's __name helper is never referenced in the
+  // page context. Cast to get the typed census back from the string-form evaluate.
+  const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
+  const readCensus = async (): Promise<ApiCenterStructuralCensus> => {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await settle(page);
-    // Evaluate a STRING (not a passed function) so tsx/esbuild's __name helper is never referenced in the
-    // page context. Cast to get the typed census back from the string-form evaluate.
-    const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
-    const census = await evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
-    const observation = observeFrom(urlCategory, census);
-    console.log(JSON.stringify(observation, null, 2));
+    return evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
+  };
+  const waitForManualLogin = async (): Promise<void> => {
+    removeSentinel(sentinelPath);
+    printLoginWaitInstructions(sentinelPath);
+    const appeared = await waitForSentinel(sentinelPath);
+    if (!appeared) console.error("Manual-login wait timed out — re-observing the current page as-is.");
+  };
+
+  try {
+    const result = await observeApiCenter(urlCategory, waitForLogin, { readCensus, waitForManualLogin });
+    console.log(
+      JSON.stringify(
+        { ...result.observation, waited: result.waited, loginTransition: result.loginTransition },
+        null,
+        2,
+      ),
+    );
     log("apiCenter.observe.done", {
-      urlCategory: observation.urlCategory,
-      pageCategory: observation.pageCategory,
-      blockerCount: observation.blockers.length,
+      urlCategory: result.observation.urlCategory,
+      pageCategory: result.observation.pageCategory,
+      waited: result.waited,
+      loginTransition: result.loginTransition,
+      blockerCount: result.observation.blockers.length,
     });
   } finally {
+    removeSentinel(sentinelPath);
     await ctx.close();
   }
 }

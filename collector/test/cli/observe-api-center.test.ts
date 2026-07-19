@@ -5,13 +5,15 @@
  * raw URL, that classification is structural + fail-closed, and that it always flags itself as an
  * unvalidated (calibration-pending) instrument.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   EXTRACT_API_CENTER_CENSUS,
   classifyApiCenterPage,
   classifyUrlCategory,
   countBucket,
+  observeApiCenter,
   observeFrom,
+  observeSentinelPathFor,
   resolveUrlCategory,
   screenApiCenterUrl,
   toSignals,
@@ -164,6 +166,69 @@ describe("EXTRACT_API_CENTER_CENSUS — browser-context safe (regression for the
     });
     // And it classifies as a login page end-to-end.
     expect(observeFrom("api_center_host", census).pageCategory).toBe("login");
+  });
+});
+
+describe("observeApiCenter — one-shot vs manual-login wait/re-observe (no login/click by the tool)", () => {
+  const LOGIN = census({ passwordFieldPresent: true, submitAffordancePresent: true, formCount: 1, editableTextInputCount: 1 });
+  const APP_LIST = census({ listLikeContainerCount: 3 });
+
+  function scriptedDeps(sequence: ApiCenterStructuralCensus[]) {
+    let i = 0;
+    return {
+      readCensus: vi.fn(async () => sequence[Math.min(i++, sequence.length - 1)]!),
+      waitForManualLogin: vi.fn(async () => {}),
+    };
+  }
+
+  it("one-shot (no wait flag): returns the first observation, never waits", async () => {
+    const deps = scriptedDeps([LOGIN]);
+    const r = await observeApiCenter("api_center_host", false, deps);
+    expect(r.observation.pageCategory).toBe("login");
+    expect(r.waited).toBe(false);
+    expect(r.loginTransition).toBe("none");
+    expect(deps.readCensus).toHaveBeenCalledTimes(1);
+    expect(deps.waitForManualLogin).not.toHaveBeenCalled();
+  });
+
+  it("wait mode re-observes after the SELLER's manual login: login → app_list (tool authenticates nothing)", async () => {
+    const deps = scriptedDeps([LOGIN, APP_LIST]);
+    const r = await observeApiCenter("api_center_host", true, deps);
+    expect(r.observation.pageCategory).toBe("app_list");
+    expect(r.waited).toBe(true);
+    expect(r.loginTransition).toBe("login_resolved"); // the page's login gate cleared, not a SellerOps auth
+    expect(deps.readCensus).toHaveBeenCalledTimes(2);
+    expect(deps.waitForManualLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("wait mode but the first read is NOT login → one-shot, no wait", async () => {
+    const deps = scriptedDeps([APP_LIST]);
+    const r = await observeApiCenter("api_center_host", true, deps);
+    expect(r.observation.pageCategory).toBe("app_list");
+    expect(r.waited).toBe(false);
+    expect(deps.waitForManualLogin).not.toHaveBeenCalled();
+  });
+
+  it("wait mode but still login after re-observe → login_persists (does not fake progress)", async () => {
+    const deps = scriptedDeps([LOGIN, LOGIN]);
+    const r = await observeApiCenter("api_center_host", true, deps);
+    expect(r.observation.pageCategory).toBe("login");
+    expect(r.loginTransition).toBe("login_persists");
+    expect(r.waited).toBe(true);
+  });
+
+  it("the result carries only sanitized enums/buckets/booleans — no raw values", async () => {
+    const deps = scriptedDeps([LOGIN, census({ readonlyFieldCount: 7 })]);
+    const r = await observeApiCenter("api_center_host", true, deps);
+    const flat = JSON.stringify(r);
+    expect(flat).not.toContain("7"); // the raw readonly count is bucketed, never emitted
+    expect(r.observation.signals.readonlyFieldCountBucket).toBe("many");
+  });
+});
+
+describe("observeSentinelPathFor", () => {
+  it("resolves the sentinel next to the status file", () => {
+    expect(observeSentinelPathFor("/x/.status/naver.json")).toBe("/x/.status/observe-api-center.ready");
   });
 });
 
