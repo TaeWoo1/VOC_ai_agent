@@ -97,12 +97,14 @@ Authoritative completion criteria: **Frontend Spec §16.10, six steps**, assiste
 6. **Result shown** in SellerOps dashboard.
 
 **State:** steps ③–⑥ exist as backend endpoints + one live ORDER_SUMMARY verification. The *guided*
-issuance/overlay screens (①②) are **MISSING** in the frontend — there is no dedicated NAVER connect
-wizard component (only generic shell + `channelSupport.ts` knowing NAVER as the verified-upload
-exception). The onboarding **contract** `docs/slices/naver-guided-connection.md` is **DRAFT / PO-review
-pending** (default renderer = ACTION_WINDOW, unimplemented). Offline bind logic exists and is pure:
-`collector/src/connection/onboarding.ts` (assumes the human already logged in + selected the store) +
-`cli/connection.ts` (skeleton). Vendored API reference: `docs/vendor/naver-commerce-api/`.
+wizard (①②③④⑤⑥ as one flow) is now **BUILT OFFLINE (G3-A/B)** — committed locally `f9d069c` on
+`feat/naver-smartstore-v1`: a pure FE-owned guided-journey state machine
+(`frontend/src/lib/guidedConnection/`) + the `ConnectNaver` wizard (`/connect/naver`, reached via a
+`connect-naver` channel-card intent), reusing `useBridge` pairing + `api.storeCredential/testConnection/
+manualSync`. The contract `docs/slices/naver-guided-connection.md` is now **RATIFIED (§0)** for G3-A/B.
+The Client Secret never enters state/an event/localStorage (§11, test-enforced). **Live assisted walk
+(real NAVER window, live session/DOM detection) is G3-C — gated** (PO sign-off + G6). Vendored API
+reference: `docs/vendor/naver-commerce-api/`.
 
 ---
 
@@ -203,7 +205,7 @@ selector). See §8.
 | B6 | ~~**[CONFLICT/PO]** product-scope §7.2 excludes review-reply outbound; Runtime ADR §4 v1.6 + current-task decision include *guided* reply.~~ **RULED 2026-07-19 (PO):** v1 completes at reply **offline-proven + backend-verified + read-only live discovery (B2 lifted)**; **live guided reply submission is a gated follow-up** (separate PO sign-off + fresh G6). | RESOLVED | — | Recorded also in §9. |
 | B7 | Bridge pairing production-ready **macOS only**; Windows/Linux fail-closed. | platform | non-mac deploy | macOS pilot unaffected. |
 | B8 | ~~Uncommitted backend fingerprint/hint/DTO + service changes not yet built/tested.~~ **RESOLVED 2026-07-19:** offline backend unit tests run (approved) — 90 pass; whole slice committed locally `12c93a8`. | RESOLVED | — | Local commit only; not integrated. |
-| B9 | **FE guided-connection onboarding MISSING** (no NAVER connect wizard component) and its contract `docs/slices/naver-guided-connection.md` is **DRAFT / PO-review pending**. | [PO]+build | onboarding ①② | Building before PO ratifies the DRAFT would invent UX (assumption rule). |
+| B9 | ~~FE guided-connection onboarding MISSING; contract DRAFT.~~ **RESOLVED-OFFLINE 2026-07-19:** contract RATIFIED (§0) + `ConnectNaver` wizard built & tested offline (G3-A/B), committed `f9d069c`. **Live assisted walk (G3-C) still gated** (PO + G6). | RESOLVED (offline) | — | Live DOM/session detection deferred to G3-C. |
 
 ---
 
