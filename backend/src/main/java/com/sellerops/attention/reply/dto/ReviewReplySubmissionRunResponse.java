@@ -11,7 +11,14 @@ package com.sellerops.attention.reply.dto;
  *
  * <p>{@code approvedVersion} echoes the head the ref was minted against, so the client can confirm it
  * is guiding the version it means to. No body, no channel-side id.
+ *
+ * <p>{@code targetHint} (nullable) and {@code asOfDate} (nullable ISO KST date) are present only for guided
+ * preparation ({@code requireTargetHint}); they carry the coarse rating, recency bucket, and one-way
+ * review-body fingerprint used to locate the matching row, plus the explicit KST date the bucket was computed
+ * against. Still no body and no channel-side id — only coarse fields and a hash.
  */
 public record ReviewReplySubmissionRunResponse(String actionRef, String submissionRef,
-                                               Integer approvedVersion) {
+                                               Integer approvedVersion,
+                                               ReviewReplyTargetHintView targetHint,
+                                               String asOfDate) {
 }

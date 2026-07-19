@@ -19,7 +19,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -76,6 +76,49 @@ export async function resolveChannelId(
   if (!match) throw new UploadError(`channel not found: ${code}`, "resolveChannel");
   log("channel.resolved", { code });
   return match.id;
+}
+
+/** The backend-derived, privacy-safe review target hint returned by the submission-run endpoint. */
+export interface ReplyTargetHintResponse {
+  rating: number;
+  recencyBucket: string;
+  bodyFingerprint: string;
+}
+
+/** Mirror of the backend `ReviewReplySubmissionRunResponse` (guided fields nullable). */
+export interface SubmissionRunResponse {
+  actionRef: string;
+  submissionRef: string;
+  approvedVersion: number | null;
+  targetHint: ReplyTargetHintResponse | null;
+  asOfDate: string | null;
+}
+
+/**
+ * Start a guided reply-submission run over the authenticated backend (JWT bearer, loopback in dev). With
+ * {@code requireTargetHint} the backend derives AND validates the review target hint BEFORE minting the
+ * single-use submissionRef — a review that cannot produce a valid hint 409s and mints nothing. The response
+ * carries the opaque submissionRef, the coarse hint, and the explicit KST {@code asOfDate}; never a review
+ * body. Only non-secret path ids (accountId, actionRef) are sent; no review text ever crosses this call.
+ */
+export async function startReplySubmissionRun(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  opts: { requireTargetHint: boolean },
+  fetchImpl: FetchImpl = fetch,
+): Promise<SubmissionRunResponse> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply/submission-run`;
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ requireTargetHint: opts.requireTargetHint }),
+  });
+  if (!res.ok) throw new UploadError("submission-run failed", "startSubmissionRun", res.status);
+  log("reply.submissionRun.ok", { requireTargetHint: opts.requireTargetHint });
+  return (await res.json()) as SubmissionRunResponse;
 }
 
 /**

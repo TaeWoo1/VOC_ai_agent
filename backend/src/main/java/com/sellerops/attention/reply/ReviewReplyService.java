@@ -10,18 +10,23 @@ import com.sellerops.attention.reply.dto.ReviewReplyOutcomeView;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
 import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunResponse;
 import com.sellerops.attention.reply.dto.ReviewReplySuggestionView;
+import com.sellerops.attention.reply.dto.ReviewReplyTargetHintView;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.RedactedBody;
+import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -66,12 +71,23 @@ public class ReviewReplyService {
     private final ReviewReplyApprovalService approvals;
     private final ReviewReplyOutcomeService outcomes;
     private final ReviewReplyProposalProvider provider;
+    private final Clock clock;
 
+    @Autowired
     public ReviewReplyService(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
                               ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                               ReviewReplyApprovalService approvals,
                               ReviewReplyOutcomeService outcomes,
                               ReviewReplyProposalProvider provider) {
+        this(reviews, sellerAccounts, triages, drafts, approvals, outcomes, provider, Clock.systemUTC());
+    }
+
+    /** Test seam: an explicit {@link Clock} pins the KST as-of date used for the recency bucket. */
+    ReviewReplyService(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
+                       ReviewTriageRepository triages, ReviewReplyDraftService drafts,
+                       ReviewReplyApprovalService approvals,
+                       ReviewReplyOutcomeService outcomes,
+                       ReviewReplyProposalProvider provider, Clock clock) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
         this.triages = triages;
@@ -79,6 +95,7 @@ public class ReviewReplyService {
         this.approvals = approvals;
         this.outcomes = outcomes;
         this.provider = provider;
+        this.clock = clock;
     }
 
     /** Everything the preparation surface needs for one review, in one read. */
@@ -181,15 +198,52 @@ public class ReviewReplyService {
      */
     public ReviewReplySubmissionRunResponse startSubmissionRun(UUID orgId, UUID accountId,
                                                                String actionRef, UUID actorUserId) {
+        return startSubmissionRun(orgId, accountId, actionRef, actorUserId, false);
+    }
+
+    /**
+     * As {@link #startSubmissionRun(UUID, UUID, String, UUID)}, but when {@code requireTargetHint} is set
+     * (guided preparation) the privacy-safe review target hint — coarse rating, KST recency bucket, and the
+     * one-way {@code review-body-fingerprint/v1} — is derived AND validated <b>before</b> the ref is minted.
+     * A review that cannot produce a valid hint (missing rating or blank body) throws 409 and mints
+     * <b>nothing</b>, so a missing hint can never leave an unusable single-use ref. The hint carries no raw
+     * body/timestamp/id; only the coarse fields and the fingerprint surface, alongside the explicit KST
+     * {@code asOfDate} the bucket was computed against.
+     *
+     * @throws ApiException 409 when the review is not {@code RESPONSE_NEEDED}, no approval stands, or (guided)
+     *     the review cannot produce a valid target hint.
+     */
+    public ReviewReplySubmissionRunResponse startSubmissionRun(UUID orgId, UUID accountId,
+                                                               String actionRef, UUID actorUserId,
+                                                               boolean requireTargetHint) {
         Review review = authorize(orgId, accountId, actionRef);
         UUID reviewId = review.getId();
         requireResponseNeeded(orgId, reviewId);
         ReviewReplyApproval approval = approvals.current(orgId, reviewId)
                 .filter(a -> a.getState() == ReviewReplyApprovalState.APPROVED)
                 .orElseThrow(() -> ApiException.conflict("승인된 답변이 없습니다. 먼저 답변을 승인하세요."));
+
+        // Guided: derive AND validate the hint BEFORE minting, so a review that cannot produce a valid hint
+        // never leaves an unusable spent ref.
+        ReviewReplyTargetHintView targetHint = null;
+        String asOfDate = null;
+        if (requireTargetHint) {
+            LocalDate asOf = ReviewRecencyBucket.asOfKstDate(clock.instant());
+            Integer rating = review.getRating();
+            String body = review.getBody();
+            if (rating == null || rating < 1 || rating > 5 || body == null || body.isBlank()) {
+                throw ApiException.conflict("이 리뷰로는 제출 대상 힌트를 만들 수 없어 제출을 시작할 수 없습니다.");
+            }
+            targetHint = new ReviewReplyTargetHintView(rating,
+                    ReviewRecencyBucket.of(review.getReceivedAt(), asOf).name(),
+                    ReviewBodyFingerprint.of(body));
+            asOfDate = asOf.toString();
+        }
+
         String ref = outcomes.mint(orgId, reviewId, approval.getApprovedVersion(),
                 approval.getApprovedFingerprint(), ACTOR_PREFIX + actorUserId);
-        return new ReviewReplySubmissionRunResponse(actionRef, ref, approval.getApprovedVersion());
+        return new ReviewReplySubmissionRunResponse(actionRef, ref, approval.getApprovedVersion(),
+                targetHint, asOfDate);
     }
 
     /**

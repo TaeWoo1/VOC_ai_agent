@@ -1,0 +1,84 @@
+{
+  "spec": "review-body-fingerprint/v1",
+  "note": "Synthetic vectors only — no captured production samples. fingerprint = lowercase hex sha256 of the UTF-8 bytes of `normalized`.",
+  "cases": [
+    {
+      "name": "plain",
+      "raw": "좋은 상품이에요",
+      "normalized": "좋은 상품이에요",
+      "fingerprint": "4f2423378e8e0ec1d7af365aaf21f1c8a5353dcaffeb6ba6951450ec3ab7141e"
+    },
+    {
+      "name": "crlf",
+      "raw": "첫째 줄\r\n둘째 줄",
+      "normalized": "첫째 줄 둘째 줄",
+      "fingerprint": "1fad8b502de112a36bb88426241d4effc0a0078289249c60dccd02f43cb28b35"
+    },
+    {
+      "name": "lf-equiv-crlf",
+      "raw": "첫째 줄\n둘째 줄",
+      "normalized": "첫째 줄 둘째 줄",
+      "fingerprint": "1fad8b502de112a36bb88426241d4effc0a0078289249c60dccd02f43cb28b35"
+    },
+    {
+      "name": "blank-lines-collapse",
+      "raw": "가\n\n나",
+      "normalized": "가 나",
+      "fingerprint": "ff22d858c6a624ba72a8d2341933b8741ebc79167578bed79ae97560bcb631a0"
+    },
+    {
+      "name": "leading-trailing-ws",
+      "raw": "  \t앞뒤 공백  ",
+      "normalized": "앞뒤 공백",
+      "fingerprint": "2774ec283b6ef0f32b196772d55ded620b9a324995eafa524f79ba955904335d"
+    },
+    {
+      "name": "nbsp-split-phone",
+      "raw": "연락처 010 1234 5678 로 주세요",
+      "normalized": "연락처 [전화번호] 로 주세요",
+      "fingerprint": "6a49819e57a9269ad91294ebde1fc72681e08f0e0503bf5c8aeeea3de7545e30"
+    },
+    {
+      "name": "ideographic-space-phone",
+      "raw": "전화　010　1234　5678",
+      "normalized": "전화 [전화번호]",
+      "fingerprint": "53832ce62ff76acc5de3898b50fd4cf4cec1eab0070738964f4631a50a8fc08e"
+    },
+    {
+      "name": "pii-body",
+      "raw": "환불 요청 http://naver.me/xYz 이메일 hong@test.com 연락 010-1234-5678 매장 02-345-6789 주문 1234567890 처리요망",
+      "normalized": "환불 요청 [링크] 이메일 [이메일] 연락 [전화번호] 매장 [전화번호] 주문 [번호] 처리요망",
+      "fingerprint": "cd677ee4e50f8681c005879f575b04e0821076c6adc41874480f2fab0abbf50a"
+    },
+    {
+      "name": "url-with-digits",
+      "raw": "링크 www.shop.co.kr/98765432 끝",
+      "normalized": "링크 [링크] 끝",
+      "fingerprint": "c18735abd4dbd64dec3bebee77052bc6bd79520ac93bc5c214af901edc8bcb4d"
+    },
+    {
+      "name": "phone-before-longnum",
+      "raw": "번호 01012345678 임",
+      "normalized": "번호 [전화번호] 임",
+      "fingerprint": "b9da2ef69912d1cd2aac96622e0414dfd8a3dfde58dbdf60faa3b2d75c3cd31e"
+    },
+    {
+      "name": "fullwidth-digits-not-tokenized",
+      "raw": "주문 ０１２３４５６７８９ 확인",
+      "normalized": "주문 ０１２３４５６７８９ 확인",
+      "fingerprint": "217b37a3f582fc4db74c65a6198600226c142f920ff17661b01ae10024f456e9"
+    },
+    {
+      "name": "arabic-indic-digits-not-tokenized",
+      "raw": "번호 ٠١٠١٢٣٤٥٦٧٨ 끝",
+      "normalized": "번호 ٠١٠١٢٣٤٥٦٧٨ 끝",
+      "fingerprint": "86dfa10ce5400b1232a83b498baed98db6c8de6ec93d98f190b5c128774f5117"
+    },
+    {
+      "name": "zero-width-survives",
+      "raw": "앞​뒤",
+      "normalized": "앞​뒤",
+      "fingerprint": "e6d59b969ccf2fe2603fd5de0097964f915073ef47e62a517abdefccc802e03a"
+    }
+  ]
+}
