@@ -105,8 +105,15 @@ the composer read-only and **observes only** — never types, never clicks submi
 §4.1). No read-back oracle exists, so the run terminates `OPERATOR_REPORTED` (`operatorOutcome` +
 `verification=UNVERIFIED`), **never `COMPLETED`**. `submissionRef` is single-use; an interrupted run parks
 (no auto-re-drive). Contract: `contracts/action-window/v2/` (side-by-side; v1 untouched).
-⚠ **Ratifying the scope authorizes nothing.** No `reply submission` G3 instance is affirmed and no
-reply-submission G6 is filled; both are ☐, both per-run. The program is **offline** — no live reply run exists.
+⚠ **Ratifying the scope authorizes nothing** — the scope being ratified was never the run being authorized.
+**↳ AFFIRMED 2026-07-18 (fresh dispatching turn, abort rehearsal), bound to ONE approved review** (NAVER dev
+seller; approvedVersion 1, approvedFingerprint `4f0feedd9f498ce2…`; identifiers kept LOCAL): a `reply submission`
+G3 instance is affirmed — environment VERIFIED this turn (operating checkout `sellerops-r4-runtime` @ `666d334`,
+clean, HEAD == current origin/main & contained; dedicated NAVER R4 profile intact; `.reply-runs` persistence;
+backend healthy); §9-3 pause lift + stable location/IP **operator-CONFIRMED this turn (2026-07-18)**; Bridge
+paired = N/A (CLI/loopback) — alongside a filled
+reply-submission G6 (§G6 below). Per-run, single-use — **VOID if the run is not launched this dispatching turn**;
+carries over to nothing. (The prior 2026-07-18 instance was VOIDED unlaunched.)
 
 *Owner:* operator/PO — never Runtime code. A filled G3 **alone authorizes no live contact**: a fresh
 single-use **G6** (§G6 below) is still required in the same dispatching turn.
@@ -240,8 +247,56 @@ R4 live-run approval — REPLY SUBMISSION (MUTATING)
                       (recorded in this same turn; per-run; no earlier affirmation carries over)
 ```
 
-*Reply-submission approvals recorded:* **none** — the sixth scope is ratified (D-032) but no G3 instance and no
-reply-submission G6 have ever been filled, and the whole program is **offline** (no live reply run exists).
+⚠ **VOID / CONSUMED — the 2026-07-18 live attempt FAILED (fail-closed).** Run `run_2253b30a8e0b` reached
+`stage=FAILED`, `parked=false` at the composer-locate step (no click, no submit). **No operator-reported terminal
+was produced; backend outcome is null; no reply was posted.** Per operator directive this **G6 and its
+`submissionRef` are SPENT / NON-REUSABLE** — a retry requires a **fresh** dispatching-turn G6 **and** a **fresh**
+`submissionRef`. **Blocker code: UNKNOWN / PENDING (not recoverable from local evidence).** Verified 2026-07-19
+by inspecting the persisted marker `collector/.reply-runs/run_2253b30a8e0b.json`: it is `schemaVersion 1`
+(`stage=FAILED`, `parked=false`, `channelCode=naver`) and carries **no `blockerCode` field** — that field
+postdates this run's v1 marker schema, so the code was never persisted. No terminal capture exists in-repo. The
+exact code therefore stays PENDING the operator's terminal run-view and is **left UNKNOWN, not guessed**. The
+affirmation below is retained as the as-attempted record only.
+
+**Reply-submission G6 — FILLED + AFFIRMED (dispatching turn, 2026-07-18; single-use; bound to ONE approved review) — now VOID (above).**
+Reaffirmed from the operator's explicit standing affirmations (re-invoked this turn) + current verification. The prior
+2026-07-18 instance was **VOIDED unlaunched** (environment not ready) and carries nothing here. ⚠ **Single-use — consumed by
+the launch; VOID after this dispatching turn.**
+
+```
+R4 live-run approval — REPLY SUBMISSION (MUTATING) — abort rehearsal
+- channel:            NAVER SmartStore review reply
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-18
+- operator:           self (operator / product owner)
+- run scope:          reply submission   (sixth G3 scope, D-032 — never substitutes for a read scope)
+- bound review:       ONE approved reply — approvedVersion 1, approvedFingerprint 4f0feedd9f498ce2…
+                      (NAVER 스마트스토어 dev seller; RESPONSE_NEEDED; outcome null; canStartSubmissionRun true).
+                      Raw review/account identifiers kept LOCAL — never in this register.
+- max live window:    20 minutes (foreground + observe; no download/ingest waits)
+- double-post precond: acknowledged — one approved review, one single-use submissionRef; NO second run;
+                      the Runtime never auto-re-drives; recover ONLY to PARKED or SUBMISSION_ABORTED · UNVERIFIED
+- write boundary:     acknowledged (r4-preparation §4.1) — operator acts manually; SellerOps highlights read-only
+                      + observes ONLY; NO submit authorized this run; terminal OPERATOR_REPORTED (UNVERIFIED), never COMPLETED
+- §7 abort criteria:  acknowledged — any login prompt / account mismatch / security check / unexpected dialog / drift → abort, zero clicks
+- G2/G3/G5 state:     G2 ✅ affirmed (reply WRITE-surface consent; manual action; highlight + observe only; no submit) ·
+                      G5 ✅ (no platform grant implied; abort triggers understood) ·
+                      G3 ✅ AFFIRMED THIS RUN, scope = reply submission — environment VERIFIED this turn (operating checkout
+                      sellerops-r4-runtime @ 666d334, clean; dedicated NAVER R4 Chrome profile intact; .reply-runs persistence;
+                      backend healthy; HEAD == current origin/main, contained, clean); §9-3 pause lift affirmed + stable location/IP
+                      operator-CONFIRMED this turn (2026-07-18); Bridge paired = N/A (CLI/loopback)
+- G4 state:           ✅ affirmed — existing green real-browser proof (reply-browser.test.ts, present at HEAD); operator waived
+                      a re-run; NOT re-executed this session
+- P6 / P12:           ✅ signed — this single supervised abort rehearsal only; seated and ready
+```
+
+*Reply-submission approvals recorded:* **one AFFIRMED (fresh dispatching turn 2026-07-18), bound to ONE approved review,
+awaiting its single launch.** Single-use; **VOID if the run is not launched this turn.** Authorizes exactly one abort-only
+rehearsal (no submit, one submissionRef, ≤20 min, recover only to PARKED / `SUBMISSION_ABORTED · UNVERIFIED`). ⚠ Provenance
+note (resolved before mint/launch): **G4** was operator-waived (real-browser proof not re-run this session); **stable
+location/IP** is **operator-CONFIRMED this turn (2026-07-18)**; checkout SHA corrected to the **verified current
+origin/main tip `666d334`** (HEAD == main, contained, clean). Choreography:
+[`r4-reply-submission-abort-rehearsal-dispatch-record.md`](r4-reply-submission-abort-rehearsal-dispatch-record.md).
 
 *Live reply-run kickoff checklist:* [`r4-reply-submission-live-kickoff.md`](r4-reply-submission-live-kickoff.md)
 — the pre-dispatch runbook (build prerequisites now MET offline; every run-gate still ☐). It grants nothing.
