@@ -180,6 +180,9 @@ export function observeFrom(urlCategory: ApiCenterUrlCategory, census: ApiCenter
 /** Opt-in flag: after a login observation, wait for the operator to log in manually, then re-observe. */
 export const WAIT_FOR_MANUAL_LOGIN_FLAG = "--wait-for-manual-login";
 
+/** Opt-in flag: after the initial observation, wait for the seller to MANUALLY navigate deeper, then re-observe. */
+export const WAIT_FOR_MANUAL_NAVIGATION_FLAG = "--wait-for-manual-navigation";
+
 /** Fixed sentinel filename (one run at a time). Distinct from probe-same-session's. */
 export const OBSERVE_SENTINEL_FILENAME = "observe-api-center.ready";
 
@@ -231,6 +234,60 @@ export async function observeApiCenter(
     observation: second,
     waited: true,
     loginTransition: second.pageCategory === "login" ? "login_persists" : "login_resolved",
+  };
+}
+
+/**
+ * Safe transition enum across an optional manual-navigation checkpoint — describes only the coarse PAGE
+ * CATEGORY change, never a value, path, or direction claim:
+ *   • `none` — no wait happened (one-shot).
+ *   • `category_changed` — the sanitized page category differs after the seller's manual navigation
+ *     (e.g. app_list → app_detail, app_detail → credential_issuance, or → unknown).
+ *   • `category_unchanged` — the same page category after the wait (no transition; progress is not faked).
+ */
+export type NavigationTransition = "none" | "category_changed" | "category_unchanged";
+
+export interface ManualNavigationResult {
+  observation: ApiCenterObservation;
+  /** The coarse category BEFORE the manual navigation (sanitized enum). */
+  fromPageCategory: ApiCenterPageCategory;
+  waited: boolean;
+  navigationTransition: NavigationTransition;
+}
+
+export interface ManualNavigationDeps {
+  /** Read the entry page as a sanitized census (production: navigate to url + settle + evaluate). */
+  readCensus: () => Promise<ApiCenterStructuralCensus>;
+  /** Re-read the CURRENT page WITHOUT navigating (production: settle + evaluate; the seller moved, not us). */
+  reReadCurrentCensus: () => Promise<ApiCenterStructuralCensus>;
+  /** Block until the seller signals they navigated manually (production: a sentinel file). */
+  waitForManualNavigation: () => Promise<void>;
+}
+
+/**
+ * Orchestrate a manual-navigation checkpoint for guided-tutorial calibration: observe the entry page, then
+ * — with the flag — wait while the SELLER manually navigates deeper in their own window, and re-observe the
+ * CURRENT page ONCE. **Pure over injected deps** (fully unit-tested offline with scripted censuses). The
+ * tool NEVER navigates, clicks, types, submits, or reads a value: it only re-reads a sanitized census of
+ * wherever the seller went. Unlike the login wait, the re-read does NOT re-navigate to the entry URL — the
+ * seller's deeper page (app_detail / credential-issuance) must be preserved, not reset to the entry list.
+ */
+export async function observeApiCenterManualNavigation(
+  urlCategory: ApiCenterUrlCategory,
+  waitForNavigation: boolean,
+  deps: ManualNavigationDeps,
+): Promise<ManualNavigationResult> {
+  const first = observeFrom(urlCategory, await deps.readCensus());
+  if (!waitForNavigation) {
+    return { observation: first, fromPageCategory: first.pageCategory, waited: false, navigationTransition: "none" };
+  }
+  await deps.waitForManualNavigation();
+  const second = observeFrom(urlCategory, await deps.reReadCurrentCensus());
+  return {
+    observation: second,
+    fromPageCategory: first.pageCategory,
+    waited: true,
+    navigationTransition: second.pageCategory === first.pageCategory ? "category_unchanged" : "category_changed",
   };
 }
 
@@ -363,6 +420,20 @@ function printLoginWaitInstructions(sentinelPath: string): void {
   console.error("Polling…");
 }
 
+/** Safe operator instructions for the manual-navigation checkpoint — no raw URL/content, only the local file path. */
+function printManualNavigationInstructions(sentinelPath: string): void {
+  console.error("");
+  console.error("Tutorial checkpoint: manually navigate to the NEXT API-center page, then signal readiness.");
+  console.error("Inside the opened dedicated Chrome window — in the SAME window/tab — YOU navigate to the next");
+  console.error("tutorial step (e.g. open one API application to see its detail, or open its issued-keys page).");
+  console.error("The tool will NOT click, type, submit, open, issue, link, copy, autofill, or read any value");
+  console.error("(incl. Client ID/Secret). After you signal readiness it RE-READS only the sanitized page");
+  console.error("category ONCE to advance the tutorial. When you are on the next page, create this file:");
+  console.error(`  ${sentinelPath}`);
+  console.error('  (e.g. `touch "' + sentinelPath + '"`; in Claude Code, just say "ready").');
+  console.error("Polling…");
+}
+
 /**
  * Live entry (gated). NOT run during offline build/verify. Reads the operator-owned
  * `NAVER_API_CENTER_URL` (never logged), navigates read-only, runs the generic sweep, prints the
@@ -396,6 +467,7 @@ async function main(): Promise<void> {
   const urlCategory = screen.urlCategory;
   const cfg = loadConfig();
   const waitForLogin = args.includes(WAIT_FOR_MANUAL_LOGIN_FLAG);
+  const waitForNavigation = args.includes(WAIT_FOR_MANUAL_NAVIGATION_FLAG);
   const sentinelPath = observeSentinelPathFor(cfg.statusFile);
   mkdirSync(dirname(sentinelPath), { recursive: true });
   removeSentinel(sentinelPath); // clear any stale sentinel BEFORE the run
@@ -410,29 +482,72 @@ async function main(): Promise<void> {
     await settle(page);
     return evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
   };
+  // Re-read the CURRENT page WITHOUT navigating — the manual-navigation checkpoint observes wherever the
+  // seller manually moved (app_list → app_detail → issued-keys), so re-navigating to the entry URL would
+  // undo their navigation. Still no click/type/submit; only a sanitized structural re-read.
+  const reReadCurrentCensus = async (): Promise<ApiCenterStructuralCensus> => {
+    await settle(page);
+    return evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
+  };
   const waitForManualLogin = async (): Promise<void> => {
     removeSentinel(sentinelPath);
     printLoginWaitInstructions(sentinelPath);
     const appeared = await waitForSentinel(sentinelPath);
     if (!appeared) console.error("Manual-login wait timed out — re-observing the current page as-is.");
   };
+  const waitForManualNavigation = async (): Promise<void> => {
+    removeSentinel(sentinelPath);
+    printManualNavigationInstructions(sentinelPath);
+    const appeared = await waitForSentinel(sentinelPath);
+    if (!appeared) console.error("Manual-navigation wait timed out — re-observing the current page as-is.");
+  };
 
   try {
-    const result = await observeApiCenter(urlCategory, waitForLogin, { readCensus, waitForManualLogin });
-    console.log(
-      JSON.stringify(
-        { ...result.observation, waited: result.waited, loginTransition: result.loginTransition },
-        null,
-        2,
-      ),
-    );
-    log("apiCenter.observe.done", {
-      urlCategory: result.observation.urlCategory,
-      pageCategory: result.observation.pageCategory,
-      waited: result.waited,
-      loginTransition: result.loginTransition,
-      blockerCount: result.observation.blockers.length,
-    });
+    if (waitForNavigation) {
+      // Manual-navigation checkpoint: observe entry, wait for the seller's manual navigation, re-read the
+      // CURRENT page once (never re-navigates). Takes precedence if both wait flags are passed.
+      const result = await observeApiCenterManualNavigation(urlCategory, true, {
+        readCensus,
+        reReadCurrentCensus,
+        waitForManualNavigation,
+      });
+      console.log(
+        JSON.stringify(
+          {
+            ...result.observation,
+            fromPageCategory: result.fromPageCategory,
+            waited: result.waited,
+            navigationTransition: result.navigationTransition,
+          },
+          null,
+          2,
+        ),
+      );
+      log("apiCenter.observe.done", {
+        urlCategory: result.observation.urlCategory,
+        pageCategory: result.observation.pageCategory,
+        fromPageCategory: result.fromPageCategory,
+        waited: result.waited,
+        navigationTransition: result.navigationTransition,
+        blockerCount: result.observation.blockers.length,
+      });
+    } else {
+      const result = await observeApiCenter(urlCategory, waitForLogin, { readCensus, waitForManualLogin });
+      console.log(
+        JSON.stringify(
+          { ...result.observation, waited: result.waited, loginTransition: result.loginTransition },
+          null,
+          2,
+        ),
+      );
+      log("apiCenter.observe.done", {
+        urlCategory: result.observation.urlCategory,
+        pageCategory: result.observation.pageCategory,
+        waited: result.waited,
+        loginTransition: result.loginTransition,
+        blockerCount: result.observation.blockers.length,
+      });
+    }
   } finally {
     removeSentinel(sentinelPath);
     await ctx.close();

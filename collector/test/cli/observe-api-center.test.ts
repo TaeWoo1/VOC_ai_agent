@@ -12,6 +12,7 @@ import {
   classifyUrlCategory,
   countBucket,
   observeApiCenter,
+  observeApiCenterManualNavigation,
   observeFrom,
   observeSentinelPathFor,
   resolveUrlCategory,
@@ -220,6 +221,75 @@ describe("observeApiCenter — one-shot vs manual-login wait/re-observe (no logi
   it("the result carries only sanitized enums/buckets/booleans — no raw values", async () => {
     const deps = scriptedDeps([LOGIN, census({ readonlyFieldCount: 7 })]);
     const r = await observeApiCenter("api_center_host", true, deps);
+    const flat = JSON.stringify(r);
+    expect(flat).not.toContain("7"); // the raw readonly count is bucketed, never emitted
+    expect(r.observation.signals.readonlyFieldCountBucket).toBe("many");
+  });
+});
+
+describe("observeApiCenterManualNavigation — manual-navigation checkpoint (no navigate/click by the tool)", () => {
+  const APP_LIST = census({ listLikeContainerCount: 3 });
+  const APP_DETAIL = census({ editableTextInputCount: 3, formCount: 1 });
+  const CREDENTIAL = census({ readonlyFieldCount: 2 });
+  const UNKNOWN = census({});
+
+  function navDeps(first: ApiCenterStructuralCensus, second: ApiCenterStructuralCensus) {
+    return {
+      readCensus: vi.fn(async () => first),
+      reReadCurrentCensus: vi.fn(async () => second),
+      waitForManualNavigation: vi.fn(async () => {}),
+    };
+  }
+
+  it("case 1: app_list → app_detail after the SELLER's manual navigation (re-reads current, never re-navigates)", async () => {
+    const deps = navDeps(APP_LIST, APP_DETAIL);
+    const r = await observeApiCenterManualNavigation("api_center_host", true, deps);
+    expect(r.fromPageCategory).toBe("app_list");
+    expect(r.observation.pageCategory).toBe("app_detail");
+    expect(r.waited).toBe(true);
+    expect(r.navigationTransition).toBe("category_changed");
+    // The initial read navigates once; the re-observe uses the CURRENT-page reader — the tool never navigates.
+    expect(deps.readCensus).toHaveBeenCalledTimes(1);
+    expect(deps.reReadCurrentCensus).toHaveBeenCalledTimes(1);
+    expect(deps.waitForManualNavigation).toHaveBeenCalledTimes(1);
+  });
+
+  it("case 2: app_detail → credential_issuance after manual navigation", async () => {
+    const deps = navDeps(APP_DETAIL, CREDENTIAL);
+    const r = await observeApiCenterManualNavigation("api_center_host", true, deps);
+    expect(r.fromPageCategory).toBe("app_detail");
+    expect(r.observation.pageCategory).toBe("credential_issuance");
+    expect(r.navigationTransition).toBe("category_changed");
+  });
+
+  it("case 3: no transition (same category) → category_unchanged (does not fake progress)", async () => {
+    const deps = navDeps(APP_LIST, APP_LIST);
+    const r = await observeApiCenterManualNavigation("api_center_host", true, deps);
+    expect(r.observation.pageCategory).toBe("app_list");
+    expect(r.navigationTransition).toBe("category_unchanged");
+  });
+
+  it("case 4: ambiguous re-read stays fail-closed to unknown (still emits)", async () => {
+    const deps = navDeps(APP_LIST, UNKNOWN);
+    const r = await observeApiCenterManualNavigation("api_center_host", true, deps);
+    expect(r.observation.pageCategory).toBe("unknown");
+    expect(r.observation.blockers).toContain("AMBIGUOUS_SIGNALS");
+    expect(r.navigationTransition).toBe("category_changed"); // app_list → unknown is still a category change
+  });
+
+  it("flag absent → one-shot: returns the entry observation, never waits or re-reads", async () => {
+    const deps = navDeps(APP_LIST, APP_DETAIL);
+    const r = await observeApiCenterManualNavigation("api_center_host", false, deps);
+    expect(r.observation.pageCategory).toBe("app_list");
+    expect(r.waited).toBe(false);
+    expect(r.navigationTransition).toBe("none");
+    expect(deps.reReadCurrentCensus).not.toHaveBeenCalled();
+    expect(deps.waitForManualNavigation).not.toHaveBeenCalled();
+  });
+
+  it("emits only sanitized enums/buckets/booleans — no raw counts/values", async () => {
+    const deps = navDeps(APP_LIST, census({ readonlyFieldCount: 7 }));
+    const r = await observeApiCenterManualNavigation("api_center_host", true, deps);
     const flat = JSON.stringify(r);
     expect(flat).not.toContain("7"); // the raw readonly count is bucketed, never emitted
     expect(r.observation.signals.readonlyFieldCountBucket).toBe("many");
