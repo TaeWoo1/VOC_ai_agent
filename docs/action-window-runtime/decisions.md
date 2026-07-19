@@ -717,3 +717,32 @@ is `UNVERIFIED` ([D-032](decisions.md)(b)). **Entry-strategy caveat:** only path
 is **not yet live-proven**. *Boundary:* this decision changes the composer-locate/entry mechanism only; every
 live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies per-run and this
 entry authorizes no live action.
+
+---
+
+## D-035 · ACTIVE — the NAVER reply body/link entry opens an INLINE composer; the detail-page navigation entry is not live-reachable via replying (2026-07-20, live-evidence-driven)
+
+**Context.** [D-034](decisions.md) documented two observed entry paths from the review list to a reply composer
+and noted only `INLINE_COMPOSER` had been live-exercised. A dedicated run
+([Run 3](r4-reply-composer-abort-run3-bodylink-finding.md), `run_535c358f1064`) set out to live-exercise the
+**body-link → detail-page navigation** entry (`NAV_NEW_TAB` / `NAV_SAME_TAB`).
+
+**Finding (operator-confirmed at the live browser).** On this NAVER SmartStore review surface, clicking the
+**review body/link reply action opens an INLINE composer** — **no new tab, no URL change, no navigation**. The
+entry-transition observer checks new-tab and same-tab-URL-change **before** the inline signal and correctly
+reported `INLINE_COMPOSER`; it did not misclassify a navigation. **There is no distinct detail-page reply
+composer to navigate to via this action.**
+
+**Decision.** The `NAV_NEW_TAB` / `NAV_SAME_TAB` observer branches stay in the code as **defensive support** for a
+surface that navigates, and are now **deterministically unit-tested**
+(`collector/test/cli/composer-abort-entry-transition.test.ts` covers all three transition kinds + timeout + the
+`about:blank` guard + a `url()`-throws-mid-navigation case). But the **detail-page navigation entry is treated as
+NOT live-reachable via the reply action on this surface** — it is **not claimed as live-proven**, and the
+milestone premise ("body-link detail-page composer") does **not** describe this reply surface. Any future NAV
+observation would require a genuinely navigating NAVER action, which the reply flow does not provide here.
+
+**Scope / non-claims.** Run 3 is a **second clean inline composer-abort** (non-mutating by construction) **plus**
+this finding. It does **not** establish cross-source fingerprint equality (B1 stays `[EXT]`) and is **not** an
+end-to-end submission (terminal `UNVERIFIED`, [D-032](decisions.md)(b)). *Boundary:* this entry records a live
+finding + defensive test coverage only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6,
+G2-write, P6/P12) still applies per-run and this entry authorizes no live action.
