@@ -7,6 +7,7 @@ import com.sellerops.attention.reply.dto.ReviewReplyDraftView;
 import com.sellerops.attention.reply.dto.ReviewReplyOutcomeRequest;
 import com.sellerops.attention.reply.dto.ReviewReplyOutcomeResponse;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
+import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunRequest;
 import com.sellerops.attention.reply.dto.ReviewReplySubmissionRunResponse;
 import com.sellerops.auth.AuthPrincipal;
 import java.util.UUID;
@@ -127,16 +128,22 @@ public class OperatorReviewReplyController {
      * <p><b>Still no send.</b> This authorizes a guided, human-performed post — SellerOps guides and
      * observes; the operator submits. There is no marketplace call behind it.
      *
-     * <p>Takes no body: the run is always bound to the review's current approved head. Returns 409
-     * when the review is not {@code RESPONSE_NEEDED} or no approval stands; 404 when the ref is not
-     * addressable from this account.
+     * <p>The run is always bound to the review's current approved head. The optional body's
+     * {@code requireTargetHint} asks the server to derive AND validate the privacy-safe review target hint
+     * (coarse rating, KST recency bucket, one-way review-body fingerprint) <b>before</b> minting — so a
+     * review that cannot produce a valid hint 409s and mints nothing. Returns 409 when the review is not
+     * {@code RESPONSE_NEEDED}, no approval stands, or (guided) no valid hint can be derived; 404 when the ref
+     * is not addressable from this account.
      */
     @PostMapping("/submission-run")
     public ReviewReplySubmissionRunResponse startSubmissionRun(
             @AuthenticationPrincipal AuthPrincipal principal,
             @PathVariable UUID accountId,
-            @PathVariable String actionRef) {
-        return service.startSubmissionRun(principal.orgId(), accountId, actionRef, principal.userId());
+            @PathVariable String actionRef,
+            @RequestBody(required = false) ReviewReplySubmissionRunRequest request) {
+        boolean requireTargetHint = request != null && Boolean.TRUE.equals(request.requireTargetHint());
+        return service.startSubmissionRun(principal.orgId(), accountId, actionRef,
+                principal.userId(), requireTargetHint);
     }
 
     /**

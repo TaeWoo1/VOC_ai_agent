@@ -135,9 +135,9 @@ export class FixtureReplySubmitDriver implements ReplySubmitProbeDriver {
   private rowOpenResolve: ((observed: boolean) => void) | null = null;
   private pendingRowOpen: boolean | null = null;
 
-  constructor(mode: ReplyFixtureMode, hint: ReplyTargetHint = REPLY_FIXTURE_HINT) {
+  constructor(mode: ReplyFixtureMode, hint: ReplyTargetHint = REPLY_FIXTURE_HINT, rowsOverride?: RowFixtureShape) {
     this.shape = shapeFor(mode);
-    this.rowShape = rowShapeFor(mode);
+    this.rowShape = rowsOverride ?? rowShapeFor(mode);
     this.hint = hint;
     this.locateResult = fixtureLocateDecision(mode);
   }
@@ -209,6 +209,30 @@ export class FixtureReplySubmitDriver implements ReplySubmitProbeDriver {
       this.pending = observed;
     }
   }
+}
+
+/**
+ * A rows-present fixture driver whose UNIQUE matching row bears an ARBITRARY body fingerprint (e.g. a real
+ * `review-body-fingerprint/v1` value), with a hint that matches it. Used by the end-to-end Review Target
+ * Binding proof to tie a backend-shaped hint to a fixture row via a REAL fingerprint. The non-matching rows
+ * keep their distinct fingerprints so the match stays unique.
+ */
+export function rowsPresentDriverFor(bodyFingerprint: string): FixtureReplySubmitDriver {
+  const hint: ReplyTargetHint = { rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint };
+  const match: ReviewRowSignal = { rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint };
+  const rows = [NON_MATCH_A, match, NON_MATCH_B];
+  return new FixtureReplySubmitDriver("rows-present", hint, { rows, revalidateRows: rows });
+}
+
+/**
+ * A driver whose page row shares the hint's rating + recency bucket but carries a DIFFERENT body fingerprint,
+ * so the fingerprint is the ONLY thing that could match — and it does not. The run must fail closed
+ * (TARGET_NOT_FOUND), proving the fingerprint is load-bearing for row targeting.
+ */
+export function rowsFingerprintMismatchDriver(hintFingerprint: string, rowFingerprint: string): FixtureReplySubmitDriver {
+  const hint: ReplyTargetHint = { rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint: hintFingerprint };
+  const rows: ReviewRowSignal[] = [{ rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint: rowFingerprint }];
+  return new FixtureReplySubmitDriver("rows-present", hint, { rows, revalidateRows: rows });
 }
 
 /**

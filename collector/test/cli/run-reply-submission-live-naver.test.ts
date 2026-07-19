@@ -1,36 +1,22 @@
 /**
- * Reply-submission CLI approval gate (pure) — proves `main()` can never launch a live reply run without
- * the reply-specific approval flag, refuses ANY export approval flag, and refuses production. Importing
- * the module launches nothing (`main()` runs only when invoked directly).
+ * Reply-submission CLI approval gate + run mode + abort watcher (pure). Proves `main()` can never launch a
+ * live reply run without the reply-specific approval flag, refuses ANY export approval flag, refuses
+ * production, and that the abort watcher is armed from process start. Importing the module launches nothing
+ * (`main()` runs only when invoked directly). The submissionRef/hint intake lives in the reply-target BUNDLE
+ * (see `reply-target-bundle.test.ts`) — it is no longer an argv/CLI concern.
  */
 import { describe, it, expect } from "vitest";
 import { APPROVAL_FLAG, REPLY_APPROVAL_FLAG } from "../../src/cli/live-run-approval";
 import {
   EXPORT_FLAG_MISUSE_EXIT_CODE,
-  loadTargetHint,
+  currentKstDate,
   replyLiveRunRefusal,
   replyRunModeFrom,
-  submissionRefFrom,
-  TargetHintError,
   watchForAbort,
   type AbortWatchDeps,
-  type HintFileDeps,
 } from "../../src/cli/run-reply-submission-live-naver";
 
 const REF = "a1b2c3d4e5f60718";
-
-/** Build an injected fs surface returning a single owner-only hint file with the given JSON body. */
-function hintDeps(body: string, mode = 0o600, exists = true): HintFileDeps {
-  return {
-    existsSync: () => exists,
-    statSync: () => ({ mode }),
-    readFileSync: () => body,
-  };
-}
-
-function validHintBody(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({ submissionRef: REF, rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint: "fp_match_0001", ...overrides });
-}
 
 describe("replyLiveRunRefusal (pure gate)", () => {
   it("refuses with exit 3 when no approval flag is present", () => {
@@ -56,59 +42,17 @@ describe("replyLiveRunRefusal (pure gate)", () => {
   });
 });
 
-describe("submissionRefFrom", () => {
-  it("extracts a valid 16-hex binding", () => {
-    expect(submissionRefFrom(["--submission-ref", "a1b2c3d4e5f60718"])).toBe("a1b2c3d4e5f60718");
-  });
-  it("rejects a malformed or absent binding", () => {
-    expect(submissionRefFrom(["--submission-ref", "NOPE"])).toBeNull();
-    expect(submissionRefFrom(["--submission-ref", "a1b2c3d4e5f6071"])).toBeNull(); // 15 chars
-    expect(submissionRefFrom([])).toBeNull();
-  });
-});
-
 describe("replyRunModeFrom", () => {
   it("selects ABORT_REHEARSAL only with the flag; defaults to FULL_SUBMIT", () => {
     expect(replyRunModeFrom(["--abort-rehearsal"])).toBe("ABORT_REHEARSAL");
     expect(replyRunModeFrom([])).toBe("FULL_SUBMIT");
-    expect(replyRunModeFrom(["--submission-ref", REF])).toBe("FULL_SUBMIT");
+    expect(replyRunModeFrom([REPLY_APPROVAL_FLAG])).toBe("FULL_SUBMIT");
   });
 });
 
-describe("loadTargetHint — permission-restricted, bound, file-only intake (never argv)", () => {
-  const P = "/x/.reply-target/hint.json";
-
-  it("returns the minimal privacy-safe hint on a valid, owner-only, bound file — never the submissionRef", () => {
-    const hint = loadTargetHint(P, REF, hintDeps(validHintBody()));
-    expect(hint).toEqual({ rating: 2, recencyBucket: "THIS_WEEK", bodyFingerprint: "fp_match_0001" });
-    // The binding submissionRef must NOT survive into the hint passed onward to engine/driver.
-    expect(Object.keys(hint ?? {}).sort()).toEqual(["bodyFingerprint", "rating", "recencyBucket"]);
-  });
-
-  it("absent file → null (legacy composer-only path in FULL_SUBMIT)", () => {
-    expect(loadTargetHint(P, REF, hintDeps("", 0o600, false))).toBeNull();
-  });
-
-  it("fails closed PERMS when the file is group/world-readable", () => {
-    expect(() => loadTargetHint(P, REF, hintDeps(validHintBody(), 0o644))).toThrow(TargetHintError);
-    try { loadTargetHint(P, REF, hintDeps(validHintBody(), 0o640)); } catch (e) { expect((e as TargetHintError).code).toBe("PERMS"); }
-  });
-
-  it("fails closed MALFORMED on non-JSON", () => {
-    try { loadTargetHint(P, REF, hintDeps("{not json")); expect.fail("should throw"); }
-    catch (e) { expect((e as TargetHintError).code).toBe("MALFORMED"); }
-  });
-
-  it("fails closed BIND_MISMATCH when the file's submissionRef is not this run's", () => {
-    try { loadTargetHint(P, REF, hintDeps(validHintBody({ submissionRef: "ffffffffffffffff" }))); expect.fail("should throw"); }
-    catch (e) { expect((e as TargetHintError).code).toBe("BIND_MISMATCH"); }
-  });
-
-  it("fails closed SCHEMA on a bad rating / bucket / fingerprint", () => {
-    for (const bad of [{ rating: 9 }, { rating: 0 }, { recencyBucket: "SOON" }, { bodyFingerprint: "" }]) {
-      try { loadTargetHint(P, REF, hintDeps(validHintBody(bad))); expect.fail(`should throw for ${JSON.stringify(bad)}`); }
-      catch (e) { expect((e as TargetHintError).code, JSON.stringify(bad)).toBe("SCHEMA"); }
-    }
+describe("currentKstDate (CLI-boundary wall-clock)", () => {
+  it("returns a YYYY-MM-DD KST calendar date", () => {
+    expect(currentKstDate()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
 
@@ -116,7 +60,7 @@ describe("watchForAbort — ABORT_REHEARSAL abort watcher (armed from process st
   const ABORTED = "/x/.status/reply-aborted.ready";
 
   /**
-   * Build injectable deps. `existsSyncAfter` = number of polls before the aborted sentinel "appears"
+   * Build injectable deps. `existsAfter` = number of polls before the aborted sentinel "appears"
    * (0 = present on the very first check; Infinity = never). `sleep` is a no-op that counts calls, so the
    * poll loop runs deterministically without real timers.
    */

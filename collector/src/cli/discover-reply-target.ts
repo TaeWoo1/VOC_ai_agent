@@ -71,8 +71,9 @@ export interface RowCensusEntry {
 /**
  * A per-row signal after (future) enrichment. During discovery `rating`/`recencyBucket`/`bodyFingerprint`
  * are null — the star VALUE is not parsed (no invented markup mapping), the date→bucket derivation is
- * deferred (no KST assumption), and the fingerprint is blocked on the backend normalization spec. The
- * structural presence booleans are what a live census can safely fill today.
+ * deferred (no KST assumption), and the fingerprint SPEC now exists (`review-body-fingerprint/v1`, shared
+ * Java↔TS) but computing it live needs in-page text extraction, deliberately deferred here (no live
+ * selector). The structural presence booleans are what a live census can safely fill today.
  */
 export interface DiscoveredRowSignal {
   rating: number | null;
@@ -88,7 +89,7 @@ export type DiscoveryBlocker =
   | "NO_ROW_CANDIDATES"
   | "RATING_VALUE_PARSE_DEFERRED"
   | "RECENCY_BUCKET_DERIVATION_DEFERRED"
-  | "FINGERPRINT_NORMALIZATION_SPEC_MISSING";
+  | "FINGERPRINT_LIVE_EXTRACTION_DEFERRED";
 
 export interface DiscoveryMatch {
   /** How many fully-enriched rows match the expected hint (via the runtime's own decision). */
@@ -150,7 +151,7 @@ export function classifyReviewRowStructure(
   if (rows.length > 0 && ratingValuePresentCount < rows.length) blockers.push("RATING_VALUE_PARSE_DEFERRED");
   if (rows.length > 0 && recencyBucketPresentCount < rows.length) blockers.push("RECENCY_BUCKET_DERIVATION_DEFERRED");
   if (fingerprintComputableCount < rows.length || rows.length === 0) {
-    blockers.push("FINGERPRINT_NORMALIZATION_SPEC_MISSING");
+    blockers.push("FINGERPRINT_LIVE_EXTRACTION_DEFERRED");
   }
 
   let match: DiscoveryMatch | null = null;
