@@ -53,7 +53,10 @@ export type ApiCenterPageCategory =
 export type ApiCenterBlocker =
   | "LIVE_DOM_CALIBRATION_PENDING" // always present: the rules are unvalidated hypotheses until a live run
   | "OFF_TARGET_HOST" // not the API-center/auth host → refuse to classify
-  | "AMBIGUOUS_SIGNALS"; // no category signal at all → fail closed to unknown
+  | "AMBIGUOUS_SIGNALS" // no category signal at all → fail closed to unknown
+  | "MULTIPLE_PAGES_OPEN"; // >1 tab at the manual-navigation re-read: the seller opened the next step in a
+// new tab, so the reading was taken from the NEWEST tab (not necessarily the entry list) — a caveat, never
+// a raw URL/title/count leak.
 
 export type CountBucket = "none" | "few" | "many";
 
@@ -291,6 +294,20 @@ export async function observeApiCenterManualNavigation(
   };
 }
 
+/**
+ * A sanitized re-read of the seller's manually-navigated page: its structural census PLUS how many
+ * pages/tabs are open in the dedicated context at that moment. The tool reads only the COUNT of tabs and
+ * the census of the newest one — never any tab's URL, title, or text. Lets the guided flow detect the
+ * "seller opened the next step in a NEW tab" case, where re-reading the original (stale app_list) tab would
+ * miss where they actually went.
+ */
+export interface NavigatedPageRead {
+  /** Structural census of the page the tool observes — the NEWEST/active tab (production: last of ctx.pages()). */
+  census: ApiCenterStructuralCensus;
+  /** How many pages/tabs are open in the dedicated context after manual navigation (count only, no URL/title). */
+  openPageCount: number;
+}
+
 export interface GuidedTutorialResult {
   /** The FINAL sanitized observation (after whichever checkpoints ran). */
   observation: ApiCenterObservation;
@@ -303,13 +320,22 @@ export interface GuidedTutorialResult {
   navigationCheckpointUsed: boolean;
   /** Transition of the manual-navigation hop only (the seller advancing app_list → deeper). */
   navigationTransition: NavigationTransition;
+  /**
+   * Sanitized bucket of how many tabs were open at the manual-navigation re-read (none/few/many). Always
+   * ≥ "few" once the navigation checkpoint runs (≥1 tab); `none` only when the checkpoint never ran. When
+   * this is "few"/"many" from >1 tab, `observation.blockers` carries `MULTIPLE_PAGES_OPEN`.
+   */
+  openPageCountBucket: CountBucket;
 }
 
 export interface GuidedTutorialDeps {
   /** Read/RE-READ the ENTRY page as a sanitized census (production: navigate to url + settle + evaluate). */
   readCensus: () => Promise<ApiCenterStructuralCensus>;
-  /** Re-read the CURRENT page WITHOUT navigating (production: settle + evaluate; the seller moved, not us). */
-  reReadCurrentCensus: () => Promise<ApiCenterStructuralCensus>;
+  /**
+   * Re-read the seller's navigated page WITHOUT the tool navigating — returns the NEWEST tab's census + the
+   * open-tab count (production: pick the last of ctx.pages(), settle + evaluate; the seller moved, not us).
+   */
+  reReadNavigatedPage: () => Promise<NavigatedPageRead>;
   /** Block until the seller signals they logged in manually (production: a sentinel file). */
   waitForManualLogin: () => Promise<void>;
   /** Block until the seller signals they navigated deeper manually (production: a sentinel file). */
@@ -327,8 +353,11 @@ export interface GuidedTutorialDeps {
  *  2. **Login checkpoint** — only when the entry is a `login` page: wait for the seller's manual login, then
  *     RE-NAVIGATE to the entry (app-list) URL and re-read (login clears on the same URL after sign-in).
  *  3. **Navigation checkpoint** — unless we are still stuck on a login page (fail-closed): wait for the
- *     seller's manual navigation, then re-read the CURRENT page WITHOUT navigating (so a deeper
- *     app_detail / credential-issuance page is preserved, not reset to the entry list).
+ *     seller's manual navigation, then re-read the seller's page WITHOUT the tool navigating (so a deeper
+ *     app_detail / credential-issuance page is preserved, not reset to the entry list). The re-read observes
+ *     the NEWEST tab and reports the open-tab count: if the seller opened the next step in a new tab (>1
+ *     tab), the reading comes from that newest tab and the observation is flagged `MULTIPLE_PAGES_OPEN` so a
+ *     page/tab mismatch is never silently misread as "the seller did not advance".
  *
  * Resulting `path`s: `login → app_list → app_detail` (two checkpoints), `login → app_list → app_list`
  * (app_detail NOT reached), `app_list → app_detail` (one checkpoint, already authenticated),
@@ -344,6 +373,7 @@ export async function observeApiCenterGuidedTutorial(
 
   let loginCheckpointUsed = false;
   let navigationCheckpointUsed = false;
+  let openPageCountBucket: CountBucket = "none";
 
   if (current.pageCategory === "login") {
     await deps.waitForManualLogin();
@@ -355,7 +385,15 @@ export async function observeApiCenterGuidedTutorial(
   if (current.pageCategory !== "login") {
     await deps.waitForManualNavigation();
     navigationCheckpointUsed = true;
-    current = observeFrom(urlCategory, await deps.reReadCurrentCensus());
+    const navRead = await deps.reReadNavigatedPage();
+    current = observeFrom(urlCategory, navRead.census);
+    // Tab-mismatch caveat: >1 tab means the seller opened the next step in a NEW tab. Production reads the
+    // newest tab (see main()'s reReadNavigatedPage), so `current` reflects where they went — we only flag
+    // that a switch happened. Never emits any tab's URL/title; only the sanitized count/bucket + blocker.
+    if (navRead.openPageCount > 1 && !current.blockers.includes("MULTIPLE_PAGES_OPEN")) {
+      current = { ...current, blockers: [...current.blockers, "MULTIPLE_PAGES_OPEN"] };
+    }
+    openPageCountBucket = countBucket(navRead.openPageCount);
     path.push(current.pageCategory);
   }
 
@@ -373,6 +411,7 @@ export async function observeApiCenterGuidedTutorial(
     loginCheckpointUsed,
     navigationCheckpointUsed,
     navigationTransition,
+    openPageCountBucket,
   };
 }
 
@@ -574,12 +613,18 @@ async function main(): Promise<void> {
     await settle(page);
     return evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
   };
-  // Re-read the CURRENT page WITHOUT navigating — the manual-navigation checkpoint observes wherever the
-  // seller manually moved (app_list → app_detail → issued-keys), so re-navigating to the entry URL would
-  // undo their navigation. Still no click/type/submit; only a sanitized structural re-read.
-  const reReadCurrentCensus = async (): Promise<ApiCenterStructuralCensus> => {
-    await settle(page);
-    return evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
+  // Re-read the seller's page WITHOUT the tool navigating — the manual-navigation checkpoint observes
+  // wherever the seller manually moved (app_list → app_detail → issued-keys), so re-navigating to the entry
+  // URL would undo their navigation. Tab-aware: if the seller opened the next step in a NEW tab, the original
+  // `page` still shows the app list, so we select the NEWEST tab (last of ctx.pages()) and also report the
+  // open-tab COUNT (never any tab's URL/title). Still no click/type/submit; only a sanitized structural read.
+  const reReadNavigatedPage = async (): Promise<NavigatedPageRead> => {
+    const pages = ctx.pages();
+    const target = (pages[pages.length - 1] ?? page) as Page;
+    await settle(target);
+    const targetEval = target as unknown as { evaluate<R>(script: string): Promise<R> };
+    const census = await targetEval.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
+    return { census, openPageCount: pages.length };
   };
   const waitForManualLogin = async (): Promise<void> => {
     removeSentinel(sentinelPath);
@@ -603,7 +648,7 @@ async function main(): Promise<void> {
       // precedence if both wait flags are passed.
       const result = await observeApiCenterGuidedTutorial(urlCategory, {
         readCensus,
-        reReadCurrentCensus,
+        reReadNavigatedPage,
         waitForManualLogin,
         waitForManualNavigation,
       });
@@ -616,6 +661,7 @@ async function main(): Promise<void> {
             loginCheckpointUsed: result.loginCheckpointUsed,
             navigationCheckpointUsed: result.navigationCheckpointUsed,
             navigationTransition: result.navigationTransition,
+            openPageCountBucket: result.openPageCountBucket,
           },
           null,
           2,
@@ -629,6 +675,7 @@ async function main(): Promise<void> {
         loginCheckpointUsed: result.loginCheckpointUsed,
         navigationCheckpointUsed: result.navigationCheckpointUsed,
         navigationTransition: result.navigationTransition,
+        openPageCountBucket: result.openPageCountBucket, // coarse bucket only — safe to log
         blockerCount: result.observation.blockers.length,
       });
     } else {

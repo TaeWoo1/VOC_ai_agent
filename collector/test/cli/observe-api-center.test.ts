@@ -305,13 +305,18 @@ describe("observeApiCenterGuidedTutorial — two-step guided journey (login → 
   const APP_DETAIL = census({ editableTextInputCount: 3, formCount: 1 });
   const CREDENTIAL = census({ readonlyFieldCount: 2 });
 
-  // readCensus (entry / login re-navigate) returns a scripted sequence; reReadCurrentCensus (the
-  // navigation checkpoint, which must NOT re-navigate) returns the seller's deeper page.
-  function guidedDeps(entryReads: ApiCenterStructuralCensus[], navRead: ApiCenterStructuralCensus) {
+  // readCensus (entry / login re-navigate) returns a scripted sequence; reReadNavigatedPage (the navigation
+  // checkpoint, which must NOT re-navigate) returns the seller's deeper page + the open-tab count. Default
+  // openPageCount=1 is the same-tab case (unchanged behavior); pass >1 to simulate a new-tab navigation.
+  function guidedDeps(
+    entryReads: ApiCenterStructuralCensus[],
+    navRead: ApiCenterStructuralCensus,
+    openPageCount = 1,
+  ) {
     let i = 0;
     return {
       readCensus: vi.fn(async () => entryReads[Math.min(i++, entryReads.length - 1)]!),
-      reReadCurrentCensus: vi.fn(async () => navRead),
+      reReadNavigatedPage: vi.fn(async () => ({ census: navRead, openPageCount })),
       waitForManualLogin: vi.fn(async () => {}),
       waitForManualNavigation: vi.fn(async () => {}),
     };
@@ -326,11 +331,14 @@ describe("observeApiCenterGuidedTutorial — two-step guided journey (login → 
     expect(r.navigationCheckpointUsed).toBe(true);
     expect(r.navigationTransition).toBe("category_changed");
     // Login gate re-navigates (readCensus twice: entry + post-login); the navigation checkpoint re-reads the
-    // CURRENT page (reReadCurrentCensus once) so the seller's deeper page is preserved, never reset.
+    // seller's page (reReadNavigatedPage once) so the seller's deeper page is preserved, never reset.
     expect(deps.readCensus).toHaveBeenCalledTimes(2);
-    expect(deps.reReadCurrentCensus).toHaveBeenCalledTimes(1);
+    expect(deps.reReadNavigatedPage).toHaveBeenCalledTimes(1);
     expect(deps.waitForManualLogin).toHaveBeenCalledTimes(1);
     expect(deps.waitForManualNavigation).toHaveBeenCalledTimes(1);
+    // same-tab (openPageCount 1): no tab-mismatch caveat, bucket "few" (1 tab).
+    expect(r.observation.blockers).not.toContain("MULTIPLE_PAGES_OPEN");
+    expect(r.openPageCountBucket).toBe("few");
   });
 
   it("cold login → app_list only: app_detail NOT calibrated (category_unchanged, both checkpoints used)", async () => {
@@ -372,8 +380,10 @@ describe("observeApiCenterGuidedTutorial — two-step guided journey (login → 
     expect(r.loginCheckpointUsed).toBe(true);
     expect(r.navigationCheckpointUsed).toBe(false);
     expect(r.navigationTransition).toBe("none");
-    expect(deps.reReadCurrentCensus).not.toHaveBeenCalled();
+    expect(deps.reReadNavigatedPage).not.toHaveBeenCalled();
     expect(deps.waitForManualNavigation).not.toHaveBeenCalled();
+    // no navigation checkpoint ran → no tab count observed.
+    expect(r.openPageCountBucket).toBe("none");
   });
 
   it("emits only sanitized enums/buckets/booleans — no raw counts/values leak", async () => {
@@ -385,6 +395,69 @@ describe("observeApiCenterGuidedTutorial — two-step guided journey (login → 
     // the path is coarse category enums only
     for (const c of r.path) {
       expect(["login", "app_list", "app_detail", "credential_issuance", "unknown"]).toContain(c);
+    }
+  });
+});
+
+describe("observeApiCenterGuidedTutorial — page/tab-mismatch detection at the navigation checkpoint", () => {
+  const APP_LIST = census({ listLikeContainerCount: 3 });
+  const APP_DETAIL = census({ editableTextInputCount: 3, formCount: 1 });
+
+  function guidedDeps(
+    entryReads: ApiCenterStructuralCensus[],
+    navRead: ApiCenterStructuralCensus,
+    openPageCount = 1,
+  ) {
+    let i = 0;
+    return {
+      readCensus: vi.fn(async () => entryReads[Math.min(i++, entryReads.length - 1)]!),
+      reReadNavigatedPage: vi.fn(async () => ({ census: navRead, openPageCount })),
+      waitForManualLogin: vi.fn(async () => {}),
+      waitForManualNavigation: vi.fn(async () => {}),
+    };
+  }
+
+  it("same-tab (1 tab): reads the seller's page as before, no MULTIPLE_PAGES_OPEN caveat", async () => {
+    const deps = guidedDeps([APP_LIST], APP_DETAIL, 1);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["app_list", "app_detail"]);
+    expect(r.observation.pageCategory).toBe("app_detail");
+    expect(r.navigationTransition).toBe("category_changed");
+    expect(r.observation.blockers).not.toContain("MULTIPLE_PAGES_OPEN");
+    expect(r.openPageCountBucket).toBe("few"); // 1 tab
+  });
+
+  it("new-tab (2 tabs): reads the NEWEST tab (app_detail) AND flags MULTIPLE_PAGES_OPEN", async () => {
+    // The seller opened the next step in a new tab; production selects the newest tab, so the reading is the
+    // app_detail census (not the stale app_list). The result is flagged so a tab switch is never silently
+    // misread as "did not advance".
+    const deps = guidedDeps([APP_LIST], APP_DETAIL, 2);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["app_list", "app_detail"]);
+    expect(r.observation.pageCategory).toBe("app_detail"); // newest tab selected, not the entry list
+    expect(r.navigationTransition).toBe("category_changed");
+    expect(r.observation.blockers).toContain("MULTIPLE_PAGES_OPEN");
+    expect(r.observation.blockers).toContain("LIVE_DOM_CALIBRATION_PENDING"); // still an unvalidated instrument
+    expect(r.openPageCountBucket).toBe("few"); // 2 tabs
+  });
+
+  it("many tabs (≥4): bucketizes to many and still flags MULTIPLE_PAGES_OPEN", async () => {
+    const deps = guidedDeps([APP_LIST], APP_DETAIL, 5);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.openPageCountBucket).toBe("many");
+    expect(r.observation.blockers).toContain("MULTIPLE_PAGES_OPEN");
+  });
+
+  it("new-tab path emits only sanitized enums/buckets — no raw tab count / value / URL / title leak", async () => {
+    const deps = guidedDeps([APP_LIST], census({ readonlyFieldCount: 7 }), 5);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    const flat = JSON.stringify(r);
+    expect(flat).not.toContain("7"); // raw readonly count bucketed, never emitted
+    expect(flat).not.toContain("5"); // raw open-tab count bucketed, never emitted
+    expect(r.openPageCountBucket).toBe("many");
+    // only coarse-enum blockers ever appear — no raw url/title/text
+    for (const b of r.observation.blockers) {
+      expect(["LIVE_DOM_CALIBRATION_PENDING", "OFF_TARGET_HOST", "AMBIGUOUS_SIGNALS", "MULTIPLE_PAGES_OPEN"]).toContain(b);
     }
   });
 });
