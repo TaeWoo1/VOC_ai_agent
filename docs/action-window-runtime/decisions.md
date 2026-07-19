@@ -659,3 +659,30 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   + isolated runtime + backend + FE, proven only on the synthetic ladder). Any live use needs a fresh
   scope-matched G3 **and** a fresh single-use G6 in the dispatching turn. Register:
   [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6.
+
+---
+
+## D-033 · ACTIVE — the reply row-target must be a same-session retained element, not a cross-session mapping (2026-07-20, live-evidence-driven)
+
+**Context.** The operator-assisted live-match slice first tried a **two-process** design: a read-only calibration
+run captured the review row as a persisted, page-bound structural artifact (relative child-index `parentPath` +
+`rowTag` + a whole-page `structuralPageSignature`), and a separate mutating run reloaded that artifact to locate
+the row. On the first live attempt (2026-07-20) this **fail-closed at `PAGE_DRIFT`**: NAVER SmartStore's review
+list is a **dynamic SPA**, so the DOM structure (row counts, `[role="row"]` layers, child counts) differed
+between the calibration browser load and the rehearsal browser load, and the signature check correctly refused.
+
+**Decision (PO, live-evidence-driven).** For the reply row target, **the operator-clicked live element itself is
+the anchor**, retained **in memory within one browser process** and used immediately — **no persisted mapping
+artifact, no whole-page signature, no reload/restart** between calibration and highlight. The review row is
+resolved from that anchor (nearest repeated text-rich ancestor) at highlight time; if the element **detaches or
+the DOM re-renders it away, the run fails closed** and the operator re-calibrates in the same session. The
+cross-session structural-mapping path (`reply-row-mapping-artifact` v2, page-signature) is **retired for the live
+rehearsal** — it does not survive a dynamic SPA. This is the same live-DOM-instability class as **B1**
+(cross-source) and is why B1 stays an explicit `[EXT]` non-goal.
+
+**Scope / non-claims.** The same-session abort rehearsal ([Run 1](r4-reply-abort-rehearsal-run1-dispatch-record.md))
+is a **row-match rehearsal aborted before reply-entry/composer**, non-mutating by construction. It does **not**
+establish cross-source fingerprint equality (none is computed) and is **not** an end-to-end submission; the
+terminal is `UNVERIFIED` ([D-032](decisions.md)(b)). *Boundary:* this decision changes the row-locate mechanism
+only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies
+per-run and this entry authorizes no live action.

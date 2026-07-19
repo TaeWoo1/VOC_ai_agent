@@ -19,9 +19,27 @@
  * are legible to a source scan. `data-aw-reply-*` annotations are read-only markers; the observer is a
  * plain listener that records a boolean, exactly like the export observer.
  */
-import { replyComposerLocateDecision } from "./reply-surface";
+import { composerSigFor, replyComposerLocateDecision, reviewRowMatchesHint } from "./reply-surface";
+import type { RecencyBucket, ReplyTargetHint } from "./reply-surface";
 import type { LocateComposerResult, LocateRowResult, SurfaceProbeResult } from "./reply-engine";
 import type { ReplySubmitProbeDriver } from "./reply-driver";
+import type { ReplyRowMapping } from "./reply-row-mapping-artifact";
+import {
+  IN_PAGE_ARM_ROW_OBSERVER,
+  IN_PAGE_ROW_TEARDOWN,
+  inPageAnnotateRow,
+  inPageRowCensus,
+  inPageRowCount,
+} from "./reply-row-inpage";
+
+/** The sanitized per-row census a live row extraction returns — coarse fields or null, never raw text/date. */
+interface RawCensusRow {
+  rating: number | null;
+  recencyBucket: string | null;
+  bodyFingerprint: string | null;
+}
+
+const RECENCY_BUCKETS: readonly RecencyBucket[] = ["TODAY", "THIS_WEEK", "OLDER"];
 
 /** The minimal, READ-ONLY page surface this driver needs. `evaluate`/`waitForFunction` take strings. */
 export interface ReplyPageLike {
@@ -40,6 +58,21 @@ interface ReplySignals {
 
 export interface NaverReplyDriverOptions {
   submitTimeoutMs?: number;
+  /** Timeout for observing the operator's own row-open click; defaults to {@link submitTimeoutMs}. */
+  rowOpenTimeoutMs?: number;
+  /** Privacy-safe match hint (threaded from the bundle). Absent → the guided row seam stays fail-closed. */
+  hint?: ReplyTargetHint;
+  /** Operator-calibrated relative-DOM mapping. Absent → the guided row seam stays fail-closed (no invented selector). */
+  mapping?: ReplyRowMapping;
+  /** The KST as-of date (from the bundle) the per-row recency buckets are derived against. */
+  asOfDate?: string;
+  /**
+   * How the target row is located. `"match"` (default) censuses every row and matches on the hint (rating +
+   * bucket + body fingerprint). `"calibrated"` trusts the operator-designated `mapping.rowIndex` directly (the
+   * row-match abort rehearsal): the operator visually confirms the highlighted row, so no live fingerprint match
+   * is required — used when the live body cannot yet be pinned to the backend body (B1 still open).
+   */
+  locateMode?: "match" | "calibrated";
 }
 
 /**
@@ -96,10 +129,20 @@ const TEARDOWN = `(() => {
 export class NaverReplySubmitProbeDriver implements ReplySubmitProbeDriver {
   private readonly page: ReplyPageLike;
   private readonly submitTimeoutMs: number;
+  private readonly rowOpenTimeoutMs: number;
+  private readonly hint?: ReplyTargetHint;
+  private readonly mapping?: ReplyRowMapping;
+  private readonly asOfDate?: string;
+  private readonly locateMode: "match" | "calibrated";
 
   constructor(page: ReplyPageLike, opts: NaverReplyDriverOptions = {}) {
     this.page = page;
     this.submitTimeoutMs = opts.submitTimeoutMs ?? 600_000;
+    this.rowOpenTimeoutMs = opts.rowOpenTimeoutMs ?? this.submitTimeoutMs;
+    this.hint = opts.hint;
+    this.mapping = opts.mapping;
+    this.asOfDate = opts.asOfDate;
+    this.locateMode = opts.locateMode ?? "match";
   }
 
   async prepareSurface(): Promise<SurfaceProbeResult> {
@@ -108,22 +151,102 @@ export class NaverReplySubmitProbeDriver implements ReplySubmitProbeDriver {
     return true;
   }
 
-  // ── GUIDED review-row seam — DELIBERATELY FAIL-CLOSED ──────────────────────────────────────────
-  // A real NAVER review-row selector + a live↔redactedBody fingerprint-normalization transform require
-  // captured live DOM evidence that does not exist yet (see the offline slice's Risk 1). Rather than
-  // GUESS a selector, the live driver reports zero matching rows so a guided live run fails closed
-  // (TARGET_NOT_FOUND) and never proceeds. Only the fixture driver actually locates rows offline.
+  // ── GUIDED review-row seam — evidence-backed via the operator-calibrated mapping ────────────────
+  // The mapping's relative structural paths were captured from the operator's OWN clicks during live
+  // calibration (never an invented selector). Each row is censused in-page through those paths — rating,
+  // recency bucket (vs the bundle's KST as-of date), and an in-page body fingerprint — and matched against
+  // the hint with the SHARED `reviewRowMatchesHint` rule so discovery and this driver can never disagree.
+  // With no hint or no mapping the seam stays fail-closed (`{count:0}` → TARGET_NOT_FOUND): no invented selector.
+
+  /** Census every row in the mapped group and apply the shared match rule, tracking the matched DOM index. */
+  private async censusDecide(): Promise<{ count: number; sig?: string; matchedRowIndex: number }> {
+    if (!this.hint || !this.mapping || !this.asOfDate) return { count: 0, matchedRowIndex: -1 };
+    const rows = await this.page.evaluate<RawCensusRow[]>(
+      inPageRowCensus(
+        {
+          parentPath: this.mapping.parentPath,
+          rowTag: this.mapping.rowTag,
+          ratingPath: this.mapping.ratingPath,
+          datePath: this.mapping.datePath,
+          bodyPath: this.mapping.bodyPath,
+        },
+        this.asOfDate,
+      ),
+    );
+    let count = 0;
+    let matchedRowIndex = -1;
+    rows.forEach((r, i) => {
+      if (
+        r &&
+        typeof r.rating === "number" &&
+        typeof r.bodyFingerprint === "string" &&
+        typeof r.recencyBucket === "string" &&
+        (RECENCY_BUCKETS as readonly string[]).includes(r.recencyBucket) &&
+        reviewRowMatchesHint(this.hint!, {
+          rating: r.rating,
+          recencyBucket: r.recencyBucket as RecencyBucket,
+          bodyFingerprint: r.bodyFingerprint,
+        })
+      ) {
+        count += 1;
+        matchedRowIndex = i;
+      }
+    });
+    if (count === 1) return { count, sig: composerSigFor(["row", matchedRowIndex]), matchedRowIndex };
+    return { count, matchedRowIndex: -1 };
+  }
+
+  /** Calibrated locate: trust the operator-designated row index, only confirming the row still exists. */
+  private async locateCalibrated(): Promise<{ count: number; sig?: string; matchedRowIndex: number }> {
+    if (!this.mapping) return { count: 0, matchedRowIndex: -1 };
+    const n = await this.page.evaluate<number>(
+      inPageRowCount({ parentPath: this.mapping.parentPath, rowTag: this.mapping.rowTag }),
+    );
+    const idx = this.mapping.rowIndex;
+    if (typeof n !== "number" || idx < 0 || idx >= n) return { count: 0, matchedRowIndex: -1 };
+    return { count: 1, sig: composerSigFor(["row", idx]), matchedRowIndex: idx };
+  }
+
+  private async locateDecide(): Promise<{ count: number; sig?: string; matchedRowIndex: number }> {
+    return this.locateMode === "calibrated" ? this.locateCalibrated() : this.censusDecide();
+  }
+
   async locateReviewRow(): Promise<LocateRowResult> {
-    return { count: 0 };
+    const d = await this.locateDecide();
+    return d.sig ? { count: d.count, sig: d.sig } : { count: d.count };
   }
+
   async highlightRow(): Promise<LocateRowResult> {
-    return { count: 0 };
+    // Anti-drift: re-locate, then annotate the matched row read-only ONLY on a stable unique locate.
+    const d = await this.locateDecide();
+    if (d.count === 1 && d.sig && this.mapping) {
+      await this.page.evaluate(
+        inPageAnnotateRow({
+          parentPath: this.mapping.parentPath,
+          rowTag: this.mapping.rowTag,
+          matchedRowIndex: d.matchedRowIndex,
+          replyControlPath: this.mapping.replyControlPath,
+        }),
+      );
+      return { count: d.count, sig: d.sig };
+    }
+    return { count: d.count };
   }
+
   async armRowObserve(): Promise<void> {
-    return;
+    // Unmapped → fail-closed: never touch the page (the run already fails closed at locate).
+    if (!this.hint || !this.mapping) return;
+    await this.page.evaluate(IN_PAGE_ARM_ROW_OBSERVER);
   }
+
   async waitForRowOpen(): Promise<boolean> {
-    return false;
+    if (!this.hint || !this.mapping) return false; // unmapped → fail-closed, no wait
+    try {
+      await this.page.waitForFunction("window.__awReplyRowObserved === true", { timeout: this.rowOpenTimeoutMs });
+      return true;
+    } catch {
+      return false; // timeout — the operator did not open the reply control within the window
+    }
   }
 
   async locateComposer(): Promise<LocateComposerResult> {
@@ -153,5 +276,6 @@ export class NaverReplySubmitProbeDriver implements ReplySubmitProbeDriver {
 
   async cleanup(): Promise<void> {
     await this.page.evaluate(TEARDOWN).catch(() => undefined);
+    await this.page.evaluate(IN_PAGE_ROW_TEARDOWN).catch(() => undefined);
   }
 }

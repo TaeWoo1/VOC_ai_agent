@@ -19,7 +19,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -119,6 +119,50 @@ export async function startReplySubmissionRun(
   if (!res.ok) throw new UploadError("submission-run failed", "startSubmissionRun", res.status);
   log("reply.submissionRun.ok", { requireTargetHint: opts.requireTargetHint });
   return (await res.json()) as SubmissionRunResponse;
+}
+
+/** The operator's own reply-outcome report (a LOCAL, UNVERIFIED fact — never a claim about NAVER). */
+export interface ReplyOutcomeBody {
+  /** Idempotency key: the same id + same outcome replays; a different outcome on the same id is refused (409). */
+  commandId: string;
+  /** The single-use submissionRef the run was bound to. */
+  submissionRef: string;
+  /** `SUBMISSION_ABORTED` (operator did not post) or `OPERATOR_REPORTED_SUBMITTED` (operator posted). */
+  operatorOutcome: string;
+  /** The Runtime-assigned opaque run id (`run_<hex>`). */
+  awRunRef: string;
+}
+
+export interface ReplyOutcomeResult {
+  actionRef: string;
+  recorded: boolean;
+  replayed: boolean;
+}
+
+/**
+ * Record the operator's reply-submission outcome on the backend — a LOCAL, operator-reported, explicitly
+ * UNVERIFIED fact (never a NAVER claim, never a completion). Idempotent by {@code commandId}: replaying the same
+ * outcome returns 200 with {@code replayed:true}; a different outcome on the same id is refused (409). Only the
+ * opaque submissionRef / run ref and the outcome enum cross this call — never any review text.
+ */
+export async function submitReplyOutcome(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  body: ReplyOutcomeBody,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ReplyOutcomeResult> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply/outcome`;
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new UploadError("reply outcome failed", "replyOutcome", res.status);
+  log("reply.outcome.ok", { operatorOutcome: body.operatorOutcome });
+  return (await res.json()) as ReplyOutcomeResult;
 }
 
 /**
