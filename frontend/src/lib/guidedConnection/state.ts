@@ -15,6 +15,8 @@ import type {
   GuidedFailureReason,
   GuidedMilestones,
   GuidedPhase,
+  NaverSessionSignal,
+  NaverSessionSource,
 } from "./types";
 
 const NO_MILESTONES: GuidedMilestones = { registered: false, tested: false, synced: false };
@@ -25,6 +27,7 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   agent_unavailable: "USER_REQUIRED",
   renderer_unavailable: "USER_REQUIRED",
   naver_login_required: "USER_REQUIRED",
+  naver_reconnect_required: "USER_REQUIRED",
   account_store_choice_required: "USER_REQUIRED",
   application_issuance: "USER_REQUIRED",
   credential_issued: "SELLEROPS_GUIDED",
@@ -40,12 +43,31 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
 };
 
 /** Readiness-gate phases: only here does a `READINESS` signal (re-)derive the gate. Past the
- *  gate, regressions arrive as explicit `AGENT_LOST` / `NAVER_LOGGED_OUT` events (§13). */
+ *  gate, regressions arrive as explicit `AGENT_LOST` / `NAVER_LOGGED_OUT` / `NAVER_RECONNECT_REQUIRED`
+ *  events (§13). */
 const GATE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
   "readiness_checking",
   "agent_unavailable",
   "renderer_unavailable",
   "naver_login_required",
+  "naver_reconnect_required",
+]);
+
+/**
+ * Phases where a live NAVER **browser** session is actually in use — the gate plus the API-center
+ * issuance walk (B4). A NAVER session drop (logged-out / reconnect-required) regresses ONLY from here;
+ * once the seller has moved on to typing credentials, the remaining steps are backend calls and
+ * `completed` is durable, so a browser-session change there is a no-op (login is never assumed permanent).
+ */
+const SESSION_SENSITIVE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
+  "readiness_checking",
+  "agent_unavailable",
+  "renderer_unavailable",
+  "naver_login_required",
+  "naver_reconnect_required",
+  "account_store_choice_required",
+  "application_issuance",
+  "credential_issued",
 ]);
 
 /** The public actor for a phase — exported so the UI never re-derives it. */
@@ -57,24 +79,51 @@ function state(
   phase: GuidedPhase,
   milestones: GuidedMilestones,
   failureReason: GuidedFailureReason | null = null,
+  sessionSource: NaverSessionSource = "none",
 ): GuidedConnectionState {
-  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones };
+  return { phase, actor: ACTOR_BY_PHASE[phase], failureReason, milestones, sessionSource };
 }
 
 export const INITIAL_STATE: GuidedConnectionState = state("readiness_checking", NO_MILESTONES);
 
+/**
+ * Compose the seller's login attestation with any live detection into one signal + its provenance (B4).
+ * **Live detection always wins when present** — a detected `reconnect_required`/`logged_out` can never be
+ * attested past (fail-closed), and a detected `logged_in` outranks attestation — so the two can never
+ * conflict. With no detection available (the offline G3-A/B path), the seller's attestation is used.
+ */
+export function resolveNaverSession(
+  attested: boolean,
+  detected: NaverSessionSignal | null,
+): { signal: NaverSessionSignal; source: NaverSessionSource } {
+  if (detected !== null) return { signal: detected, source: "detected" };
+  if (attested) return { signal: "logged_in", source: "attested" };
+  return { signal: "unknown", source: "none" };
+}
+
 /** Derive the readiness-gate phase from a sanitized readiness signal, fail-closed. */
 function deriveReadiness(
   ev: Extract<GuidedEvent, { type: "READINESS" }>,
+  prevPhase: GuidedPhase,
   milestones: GuidedMilestones,
 ): GuidedConnectionState {
   if (!ev.agentPaired) return state("agent_unavailable", milestones, "AGENT_UNAVAILABLE");
   if (!ev.rendererAvailable) return state("renderer_unavailable", milestones, "RENDERER_UNAVAILABLE");
-  // logged_out AND unknown both fail closed to "log in first" — we never assume a live session.
-  if (ev.naverSession !== "logged_in") {
-    return state("naver_login_required", milestones, "NAVER_LOGIN_REQUIRED");
+  // reconnect_required is first-class (B4) — the dedicated-profile session expired / a cold launch did not
+  // inherit it. Recoverable, distinct from never-logged-in.
+  if (ev.naverSession === "reconnect_required") {
+    return state("naver_reconnect_required", milestones, "RECONNECT_REQUIRED", ev.sessionSource);
   }
-  return state("account_store_choice_required", milestones);
+  // logged_out AND unknown both fail closed to "log in first" — we never assume a live session.
+  if (ev.naverSession === "logged_out" || ev.naverSession === "unknown") {
+    return state("naver_login_required", milestones, "NAVER_LOGIN_REQUIRED", ev.sessionSource);
+  }
+  // logged_in: a DETECTED reconnect can only be cleared by DETECTION — a bare attestation cannot bypass a
+  // live-observed reconnect (B4 non-conflict). So hold reconnect until a detected logged_in arrives.
+  if (prevPhase === "naver_reconnect_required" && ev.sessionSource !== "detected") {
+    return state("naver_reconnect_required", milestones, "RECONNECT_REQUIRED", "detected");
+  }
+  return state("account_store_choice_required", milestones, null, ev.sessionSource);
 }
 
 /** Map a non-SUCCESS `test-connection` result to the next safe phase (§12). */
@@ -116,9 +165,19 @@ export function guidedConnectionReducer(
     case "RESET":
       return INITIAL_STATE;
     case "AGENT_LOST":
+      // Agent loss is runtime-liveness (the local agent process is gone), so it surfaces from anywhere.
       return state("agent_unavailable", m, "AGENT_UNAVAILABLE");
     case "NAVER_LOGGED_OUT":
-      return state("naver_login_required", m, "NAVER_LOGIN_REQUIRED");
+      // A NAVER browser-session drop matters only while a browser session is in use (B4). Past that
+      // (credential entry onward, completed) it is a no-op — login is never assumed permanent.
+      return SESSION_SENSITIVE_PHASES.has(prev.phase)
+        ? state("naver_login_required", m, "NAVER_LOGIN_REQUIRED", "detected")
+        : prev;
+    case "NAVER_RECONNECT_REQUIRED":
+      // Dedicated-profile session expired / not inherited — first-class + recoverable, session-scoped.
+      return SESSION_SENSITIVE_PHASES.has(prev.phase)
+        ? state("naver_reconnect_required", m, "RECONNECT_REQUIRED", "detected")
+        : prev;
     case "UI_DRIFT":
       return state("recoverable_ui_drift", m, "UI_DRIFT");
     case "UNKNOWN_STATE":
@@ -133,10 +192,14 @@ export function guidedConnectionReducer(
   if (event.type === "READINESS") {
     // Only advance/regress the gate while inside it; never clobber later journey progress.
     if (!GATE_PHASES.has(prev.phase)) return prev;
-    const next = deriveReadiness(event, m);
+    const next = deriveReadiness(event, prev.phase, m);
     // Idempotent: an unchanged gate result returns the SAME reference, so a reactive effect can
     // re-dispatch READINESS on every bridge tick without looping (useReducer bails on identity).
-    return next.phase === prev.phase && next.failureReason === prev.failureReason ? prev : next;
+    return next.phase === prev.phase &&
+      next.failureReason === prev.failureReason &&
+      next.sessionSource === prev.sessionSource
+      ? prev
+      : next;
   }
 
   switch (prev.phase) {

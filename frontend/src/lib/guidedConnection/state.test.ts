@@ -6,6 +6,7 @@ import {
   actorFor,
   guidedConnectionReducer as reduce,
   isComplete,
+  resolveNaverSession,
   resumeFromMilestones,
 } from "./state";
 import type { GuidedConnectionState, GuidedEvent } from "./types";
@@ -18,6 +19,18 @@ import {
 const run = (events: GuidedEvent[], from: GuidedConnectionState = INITIAL_STATE): GuidedConnectionState =>
   events.reduce(reduce, from);
 
+/** A READINESS event with sensible defaults (paired, renderer up, logged-in via attestation). */
+const readiness = (
+  o: Partial<Omit<Extract<GuidedEvent, { type: "READINESS" }>, "type">> = {},
+): GuidedEvent => ({
+  type: "READINESS",
+  agentPaired: true,
+  rendererAvailable: true,
+  naverSession: "logged_in",
+  sessionSource: "attested",
+  ...o,
+});
+
 describe("INITIAL_STATE", () => {
   it("starts at readiness_checking with no milestones", () => {
     expect(INITIAL_STATE.phase).toBe("readiness_checking");
@@ -29,24 +42,21 @@ describe("INITIAL_STATE", () => {
 
 describe("readiness gate — fail-closed (§17.3)", () => {
   it("no agent → agent_unavailable", () => {
-    const s = reduce(INITIAL_STATE, { type: "READINESS", agentPaired: false, rendererAvailable: true, naverSession: "logged_in" });
+    const s = reduce(INITIAL_STATE, readiness({ agentPaired: false }));
     expect(s.phase).toBe("agent_unavailable");
     expect(s.failureReason).toBe("AGENT_UNAVAILABLE");
   });
 
   it("agent but no renderer → renderer_unavailable", () => {
-    const s = reduce(INITIAL_STATE, { type: "READINESS", agentPaired: true, rendererAvailable: false, naverSession: "logged_in" });
-    expect(s.phase).toBe("renderer_unavailable");
+    expect(reduce(INITIAL_STATE, readiness({ rendererAvailable: false })).phase).toBe("renderer_unavailable");
   });
 
   it("logged_out → naver_login_required", () => {
-    const s = reduce(INITIAL_STATE, { type: "READINESS", agentPaired: true, rendererAvailable: true, naverSession: "logged_out" });
-    expect(s.phase).toBe("naver_login_required");
+    expect(reduce(INITIAL_STATE, readiness({ naverSession: "logged_out" })).phase).toBe("naver_login_required");
   });
 
   it("unknown session fails closed to naver_login_required (never assumes a live session)", () => {
-    const s = reduce(INITIAL_STATE, { type: "READINESS", agentPaired: true, rendererAvailable: true, naverSession: "unknown" });
-    expect(s.phase).toBe("naver_login_required");
+    expect(reduce(INITIAL_STATE, readiness({ naverSession: "unknown", sessionSource: "none" })).phase).toBe("naver_login_required");
   });
 
   it("all clear → account_store_choice_required", () => {
@@ -155,12 +165,6 @@ describe("global regressions preserve milestones for resume (§13)", () => {
     expect(s.milestones).toEqual({ registered: true, tested: true, synced: false });
   });
 
-  it("NAVER_LOGGED_OUT → naver_login_required, milestones kept", () => {
-    const s = reduce(midJourney, { type: "NAVER_LOGGED_OUT" });
-    expect(s.phase).toBe("naver_login_required");
-    expect(s.milestones.registered).toBe(true);
-  });
-
   it("UI_DRIFT → recoverable_ui_drift; UNKNOWN_STATE → unsupported_state", () => {
     expect(reduce(midJourney, { type: "UI_DRIFT" }).phase).toBe("recoverable_ui_drift");
     expect(reduce(midJourney, { type: "UNKNOWN_STATE" }).phase).toBe("unsupported_state");
@@ -171,8 +175,63 @@ describe("READINESS does not clobber journey progress past the gate", () => {
   it("a readiness signal during connection_testing is a no-op (regress only via AGENT_LOST)", () => {
     const testing = run(HAPPY_PATH_EVENTS.slice(0, 6));
     expect(testing.phase).toBe("connection_testing");
-    const s = reduce(testing, { type: "READINESS", agentPaired: false, rendererAvailable: false, naverSession: "logged_out" });
+    const s = reduce(testing, readiness({ agentPaired: false, rendererAvailable: false, naverSession: "logged_out", sessionSource: "detected" }));
     expect(s).toBe(testing); // unchanged
+  });
+});
+
+describe("B4 — dedicated-profile session continuity", () => {
+  const issuance = run([READY_SIGNAL, { type: "ACCOUNT_STORE_RESOLVED" }]); // application_issuance (session-sensitive)
+  const completed = run(HAPPY_PATH_EVENTS);
+
+  it("resolveNaverSession: live detection outranks attestation, and there is no conflict", () => {
+    // A detected reconnect can never be attested past; a detected logged_in outranks attestation.
+    expect(resolveNaverSession(true, "reconnect_required")).toEqual({ signal: "reconnect_required", source: "detected" });
+    expect(resolveNaverSession(false, "logged_in")).toEqual({ signal: "logged_in", source: "detected" });
+    // With no detection, the seller's attestation is used (offline G3-A/B path).
+    expect(resolveNaverSession(true, null)).toEqual({ signal: "logged_in", source: "attested" });
+    expect(resolveNaverSession(false, null)).toEqual({ signal: "unknown", source: "none" });
+  });
+
+  it("a cold-launched dedicated profile (detected reconnect_required) → naver_reconnect_required, not fatal", () => {
+    const s = reduce(INITIAL_STATE, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
+    expect(s.phase).toBe("naver_reconnect_required");
+    expect(s.failureReason).toBe("RECONNECT_REQUIRED");
+    expect(s.actor).toBe("USER_REQUIRED"); // recoverable user step, NOT terminal_failure
+    expect(s.sessionSource).toBe("detected");
+  });
+
+  it("the seller must log in inside the dedicated window: attestation cannot clear a DETECTED reconnect", () => {
+    const reconnect = reduce(INITIAL_STATE, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
+    // Bare attestation ("I logged in") does NOT advance — it is held at reconnect.
+    const stillReconnect = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "attested" }));
+    expect(stillReconnect.phase).toBe("naver_reconnect_required");
+    // Only a fresh DETECTED logged_in (re-login observed inside the dedicated window) clears it.
+    const cleared = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "detected" }));
+    expect(cleared.phase).toBe("account_store_choice_required");
+  });
+
+  it("reconnect_required is recoverable, not treated as fatal", () => {
+    const reconnect = reduce(issuance, { type: "NAVER_RECONNECT_REQUIRED" });
+    expect(reconnect.phase).toBe("naver_reconnect_required");
+    expect(reconnect.phase).not.toBe("terminal_failure");
+    // Recovers forward once a live logged-in session is detected.
+    expect(reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "detected" })).phase).toBe("account_store_choice_required");
+  });
+
+  it("completed onboarding does not imply permanent login: a later session drop does not un-complete it", () => {
+    expect(completed.phase).toBe("completed");
+    const afterDrop = reduce(completed, { type: "NAVER_RECONNECT_REQUIRED" });
+    expect(afterDrop.phase).toBe("completed"); // API connection is durable — no regression
+    expect(afterDrop.milestones).toEqual({ registered: true, tested: true, synced: true });
+    // The same is true for a logout signal after completion.
+    expect(reduce(completed, { type: "NAVER_LOGGED_OUT" }).phase).toBe("completed");
+  });
+
+  it("a NAVER session drop regresses ONLY from session-sensitive phases", () => {
+    expect(reduce(issuance, { type: "NAVER_LOGGED_OUT" }).phase).toBe("naver_login_required"); // sensitive
+    const testing = run(HAPPY_PATH_EVENTS.slice(0, 6)); // connection_testing — backend, not session-sensitive
+    expect(reduce(testing, { type: "NAVER_LOGGED_OUT" })).toBe(testing); // no-op
   });
 });
 

@@ -5,7 +5,7 @@ import { GuidedConnectionWizard } from "../components/guidedConnection/GuidedCon
 import { useBridge } from "../hooks/useBridge";
 import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
-import { guidedConnectionReducer, INITIAL_STATE } from "../lib/guidedConnection";
+import { guidedConnectionReducer, INITIAL_STATE, resolveNaverSession } from "../lib/guidedConnection";
 import type { CredentialTemplateView, SyncRunView } from "../lib/types";
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
 
@@ -74,11 +74,16 @@ export function ConnectNaver() {
   // and a no-op past the gate, so re-dispatching on every bridge tick is safe.
   const agentPaired = bridge.state.phase === "paired";
   useEffect(() => {
+    // Offline G3-A/B wires NO live session detection yet (that is G3-C), so detection is null and the
+    // seller's attestation drives. resolveNaverSession guarantees that once detection IS wired, a
+    // detected reconnect/logout outranks attestation (B4) — attestation can never bypass a live reconnect.
+    const { signal, source } = resolveNaverSession(naverAttested, null);
     dispatch({
       type: "READINESS",
       agentPaired,
       rendererAvailable: agentPaired, // ACTION_WINDOW renderer is reached through the paired agent
-      naverSession: naverAttested ? "logged_in" : "unknown",
+      naverSession: signal,
+      sessionSource: source,
     });
   }, [agentPaired, naverAttested]);
 

@@ -21,6 +21,7 @@ export type GuidedPhase =
   | "agent_unavailable"
   | "renderer_unavailable"
   | "naver_login_required"
+  | "naver_reconnect_required"
   | "account_store_choice_required"
   | "application_issuance"
   | "credential_issued"
@@ -48,6 +49,7 @@ export type GuidedFailureReason =
   | "AGENT_UNAVAILABLE"
   | "RENDERER_UNAVAILABLE"
   | "NAVER_LOGIN_REQUIRED"
+  | "RECONNECT_REQUIRED"
   | "INVALID_CREDENTIAL"
   | "TEMPORARY_PROVIDER_ERROR"
   | "PROVIDER_UNAVAILABLE"
@@ -73,10 +75,23 @@ export interface GuidedConnectionState {
   /** Present only when the current phase reflects a recoverable/blocking failure. */
   failureReason: GuidedFailureReason | null;
   milestones: GuidedMilestones;
+  /** Where the current NAVER-session-derived phase came from (B4 — makes readiness source explicit). */
+  sessionSource: NaverSessionSource;
 }
 
-/** Coarse NAVER session signal (§8 evidence enum). `unknown` is treated fail-closed. */
-export type NaverSessionSignal = "unknown" | "logged_in" | "logged_out";
+/**
+ * Coarse NAVER session signal (§8 evidence enum, aligned with the collector `SessionVerdict`). `unknown`
+ * is treated fail-closed. `reconnect_required` = the dedicated-profile session expired / a cold launch did
+ * not inherit it (the G3-C.1 outcome) — a first-class, recoverable state, NOT a login-never-happened.
+ */
+export type NaverSessionSignal = "unknown" | "logged_in" | "logged_out" | "reconnect_required";
+
+/**
+ * Provenance of a NAVER session signal (B4). `detected` = observed live (bridge/probe) and authoritative;
+ * `attested` = the seller asserted they logged in (used only when no live detection is available);
+ * `none` = neither. Detection outranks attestation so the two can never conflict (see `resolveNaverSession`).
+ */
+export type NaverSessionSource = "detected" | "attested" | "none";
 
 /** Sync status vocabulary consumed from the backend `SyncRunView.status` (mapped by the caller). */
 export type GuidedSyncStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "RUNNING";
@@ -87,7 +102,14 @@ export type GuidedSyncStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "RUNNING";
  * jumps straight to `completed` — the seller's decisions (§17.2) cannot be skipped.
  */
 export type GuidedEvent =
-  | { type: "READINESS"; agentPaired: boolean; rendererAvailable: boolean; naverSession: NaverSessionSignal }
+  | {
+      type: "READINESS";
+      agentPaired: boolean;
+      rendererAvailable: boolean;
+      naverSession: NaverSessionSignal;
+      /** Provenance of `naverSession` (B4). A detected reconnect can never be cleared by attestation. */
+      sessionSource: NaverSessionSource;
+    }
   | { type: "ACCOUNT_STORE_RESOLVED" }
   | { type: "ISSUANCE_COMPLETE" }
   | { type: "BEGIN_CREDENTIAL_ENTRY" }
@@ -98,6 +120,7 @@ export type GuidedEvent =
   | { type: "SYNC_RESULT"; status: GuidedSyncStatus }
   | { type: "CONTINUE_TO_REVIEW_EXPORT" }
   | { type: "NAVER_LOGGED_OUT" }
+  | { type: "NAVER_RECONNECT_REQUIRED" }
   | { type: "AGENT_LOST" }
   | { type: "UI_DRIFT" }
   | { type: "UNKNOWN_STATE" }

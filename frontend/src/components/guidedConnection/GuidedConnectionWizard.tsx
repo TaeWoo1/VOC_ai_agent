@@ -89,6 +89,14 @@ export function GuidedConnectionWizard({
           </button>
         )}
 
+        {phase === "naver_reconnect_required" && (
+          // A DETECTED reconnect can't be cleared by mere attestation (B4): the seller re-logs-in inside
+          // the dedicated window, then we re-check the live session — no password autofill, no bypass.
+          <button type="button" className="btn-primary" onClick={onRecheck} disabled={busy}>
+            로그인 후 다시 확인
+          </button>
+        )}
+
         {phase === "account_store_choice_required" && (
           <button
             type="button"

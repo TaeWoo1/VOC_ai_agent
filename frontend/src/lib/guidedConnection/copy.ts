@@ -19,7 +19,11 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   naver_login_required: {
     title: "NAVER 로그인 필요",
-    body: "NAVER 커머스 API 센터에 직접 로그인해 주세요. 로그인·2단계 인증은 고객님이 진행합니다.",
+    body: "전용 작업 창(Action Window)에서 NAVER에 직접 로그인해 주세요. 평소 쓰는 브라우저가 아니라 전용 창에서 로그인해야 합니다. 로그인·2단계 인증은 고객님이 진행합니다.",
+  },
+  naver_reconnect_required: {
+    title: "다시 로그인 필요",
+    body: "전용 작업 창의 NAVER 세션이 만료되었거나 이 창에 로그인되어 있지 않습니다. 전용 작업 창에서 다시 로그인한 뒤 확인해 주세요. (세션은 같은 날 전용 창 안에서만 유지되며, 창을 완전히 종료하면 다시 로그인이 필요할 수 있습니다.)",
   },
   account_store_choice_required: {
     title: "계정·스토어 선택",
@@ -82,7 +86,8 @@ export const ACTOR_COPY: Record<GuidedActor, string> = {
 export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   AGENT_UNAVAILABLE: "로컬 에이전트에 연결하지 못했습니다. 에이전트 실행 상태를 확인해 주세요.",
   RENDERER_UNAVAILABLE: "작업 창을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-  NAVER_LOGIN_REQUIRED: "NAVER 로그인이 필요합니다. 직접 로그인해 주세요.",
+  NAVER_LOGIN_REQUIRED: "전용 작업 창에서 NAVER 로그인이 필요합니다. 직접 로그인해 주세요.",
+  RECONNECT_REQUIRED: "전용 작업 창의 NAVER 세션이 만료되었습니다. 전용 창에서 다시 로그인해 주세요.",
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",

@@ -51,6 +51,17 @@ describe("SecureCredentialForm", () => {
     }
   });
 
+  it("introduces NO password autofill — every input opts out of autocomplete (B4)", () => {
+    const { container } = render(
+      <SecureCredentialForm template={NAVER_LIKE_TEMPLATE} onSubmit={vi.fn()} submitting={false} />,
+    );
+    const inputs = Array.from(container.querySelectorAll("input"));
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const input of inputs) {
+      expect(input.getAttribute("autocomplete")).toBe("off");
+    }
+  });
+
   it("keeps the submit button disabled until required fields are filled", async () => {
     const user = userEvent.setup();
     render(<SecureCredentialForm template={NAVER_LIKE_TEMPLATE} onSubmit={vi.fn()} submitting={false} />);

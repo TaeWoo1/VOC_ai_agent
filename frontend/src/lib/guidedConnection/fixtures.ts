@@ -32,12 +32,13 @@ export const NAVER_LIKE_TEMPLATE: CredentialTemplateView = {
   notes: "셀러 소유 NAVER 커머스 API 애플리케이션(type=SELF) 기준입니다.",
 };
 
-/** The readiness signal that passes the gate (agent paired, renderer up, session live). */
+/** The readiness signal that passes the gate (agent paired, renderer up, session live via attestation). */
 export const READY_SIGNAL: Extract<GuidedEvent, { type: "READINESS" }> = {
   type: "READINESS",
   agentPaired: true,
   rendererAvailable: true,
   naverSession: "logged_in",
+  sessionSource: "attested",
 };
 
 /** Happy path: readiness → issuance → credentials → registration → test → sync → completed. */
