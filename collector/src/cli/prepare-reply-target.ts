@@ -7,7 +7,8 @@
  *
  * Inputs and outputs are permission-restricted files under `.reply-target/`, never argv/stdout, so the
  * account id, action ref, and submissionRef never land in shell history or a process listing:
- *  - reads the request bundle `.reply-target/request.json` = `{accountId, actionRef}` (consumed on read);
+ *  - reads the request bundle `.reply-target/request.json` = `{accountId, actionRef}` (consumed on SUCCESS;
+ *    left in place on a failed run so a retry is easy);
  *  - POSTs `reply/submission-run` with `requireTargetHint: true` (the backend derives AND validates the hint
  *    BEFORE minting — an invalid hint 409s and mints nothing);
  *  - writes the result bundle `.reply-target/hint.json` = `{submissionRef, rating, recencyBucket,
@@ -26,6 +27,7 @@ import type { RecencyBucket } from "../action-window/reply-submission/reply-surf
 import {
   loadRequestBundle,
   ReplyTargetBundleError,
+  reserveResultBundle,
   writeResultBundle,
   type BundleErrorCode,
   type ReplyTargetRequestBundle,
@@ -38,6 +40,10 @@ const RESULT_BUNDLE_REL_PATH = ".reply-target/hint.json";
 
 /** Exit code: the request bundle is present but invalid / mis-permissioned. */
 export const REQUEST_BUNDLE_REFUSAL_EXIT_CODE = 5;
+/** Exit code: a result bundle already exists (unconsumed) — refuse BEFORE minting; leave it untouched. */
+export const RESULT_BUNDLE_EXISTS_EXIT_CODE = 6;
+/** Exit code: preparation failed after reserving the slot (login/mint/finalize error); reservation released. */
+export const PREPARE_FAILED_EXIT_CODE = 1;
 
 /**
  * Map a successful (guided) submission-run response into the result bundle to persist. Throws if the backend
@@ -58,13 +64,22 @@ export function resultBundleFrom(response: SubmissionRunResponse): ReplyTargetRe
 }
 
 /** Refusal for a present-but-unusable request bundle (no field value is ever printed). */
-export function requestBundleRefusal(code: Exclude<BundleErrorCode, "EXPIRED">, path: string): string {
-  const why: Record<Exclude<BundleErrorCode, "EXPIRED">, string> = {
+export function requestBundleRefusal(code: Exclude<BundleErrorCode, "EXPIRED" | "EXISTS">, path: string): string {
+  const why: Record<Exclude<BundleErrorCode, "EXPIRED" | "EXISTS">, string> = {
     PERMS: "the file is group/world-readable — re-create it owner-only (chmod 600)",
     MALFORMED: "the file is not valid JSON",
     SCHEMA: "the file fails schema validation (accountId, actionRef)",
   };
   return `Refusing: the request bundle at ${path} is unusable — ${why[code]}.`;
+}
+
+/** Refusal for an existing unconsumed result bundle — no mint happens, the existing file is left untouched. */
+export function resultBundleExistsRefusal(path: string): string {
+  return [
+    `Refusing: a reply-target bundle already exists at ${path} — NOT minting a new submissionRef.`,
+    "  - An unconsumed bundle holds a live single-use submissionRef; overwriting it would orphan that ref.",
+    "  - Consume it (run the reply CLI) or remove it, then re-run prepare-reply-target.",
+  ].join("\n");
 }
 
 /** Consume a bundle file (best-effort) so ids/refs never linger on disk after use. */
@@ -85,6 +100,99 @@ function banner(): void {
   console.error(line);
 }
 
+/* ─────────────── Orchestration (reserve-before-mint, testable offline) ─────────────── */
+
+export type PrepareStatus = "OK" | "NO_REQUEST" | "BAD_REQUEST" | "RESULT_EXISTS" | "PREPARE_FAILED";
+
+export interface PrepareOutcome {
+  status: PrepareStatus;
+  exitCode: number;
+}
+
+export interface PrepareConfig {
+  requestPath: string;
+  resultPath: string;
+  baseUrl: string;
+  email: string;
+  password: string;
+}
+
+/** Injected effects so the reserve-before-mint ordering is unit-testable offline (no disk, no backend). */
+export interface PrepareDeps {
+  loadRequest: (path: string) => ReplyTargetRequestBundle | null;
+  reserve: (path: string) => void; // throws ReplyTargetBundleError("EXISTS") when the slot is taken
+  consume: (path: string) => void;
+  finalize: (path: string, bundle: ReplyTargetResultBundle) => void;
+  discardReservation: (path: string) => void;
+  login: (baseUrl: string, email: string, password: string) => Promise<string>;
+  startRun: (
+    baseUrl: string,
+    token: string,
+    accountId: string,
+    actionRef: string,
+    opts: { requireTargetHint: boolean },
+  ) => Promise<SubmissionRunResponse>;
+  onError: (message: string) => void;
+}
+
+/**
+ * Reserve-before-mint preparation. The exclusive reservation happens BEFORE any login/mint, so:
+ *  - an existing unconsumed result bundle (or a concurrent prepare that reserved first) fails with
+ *    `RESULT_EXISTS` — no mint, request untouched, existing bundle untouched;
+ *  - only the reservation winner mints, then finalizes over its OWN reservation;
+ *  - any failure after reserving releases the reservation so a retry can proceed.
+ * The request bundle is consumed only on full success, so a failed mint leaves it for an easy retry.
+ */
+export async function prepareReplyTarget(cfg: PrepareConfig, deps: PrepareDeps): Promise<PrepareOutcome> {
+  let request: ReplyTargetRequestBundle | null;
+  try {
+    request = deps.loadRequest(cfg.requestPath);
+  } catch (e) {
+    if (e instanceof ReplyTargetBundleError && e.code !== "EXPIRED" && e.code !== "EXISTS") {
+      deps.onError(requestBundleRefusal(e.code, cfg.requestPath));
+      return { status: "BAD_REQUEST", exitCode: REQUEST_BUNDLE_REFUSAL_EXIT_CODE };
+    }
+    throw e;
+  }
+  if (!request) {
+    deps.onError(
+      `No request bundle at ${cfg.requestPath}. Create it owner-only (chmod 600) as {"accountId","actionRef"}.`,
+    );
+    return { status: "NO_REQUEST", exitCode: 2 };
+  }
+
+  // Reserve the result slot atomically BEFORE minting; fail closed (no mint) if it is already taken.
+  try {
+    deps.reserve(cfg.resultPath);
+  } catch (e) {
+    if (e instanceof ReplyTargetBundleError && e.code === "EXISTS") {
+      deps.onError(resultBundleExistsRefusal(cfg.resultPath));
+      return { status: "RESULT_EXISTS", exitCode: RESULT_BUNDLE_EXISTS_EXIT_CODE };
+    }
+    throw e;
+  }
+
+  // We own the slot. A failure from here releases the reservation so the operator can retry.
+  try {
+    const token = await deps.login(cfg.baseUrl, cfg.email, cfg.password);
+    const response = await deps.startRun(cfg.baseUrl, token, request.accountId, request.actionRef, {
+      requireTargetHint: true,
+    });
+    deps.finalize(cfg.resultPath, resultBundleFrom(response));
+  } catch (e) {
+    deps.discardReservation(cfg.resultPath);
+    deps.onError(
+      `Preparation failed after reserving the slot (reservation released): ${e instanceof Error ? e.message : String(e)}. `
+        + "If a submissionRef was minted it is now orphaned; re-run to mint a fresh one.",
+    );
+    return { status: "PREPARE_FAILED", exitCode: PREPARE_FAILED_EXIT_CODE };
+  }
+
+  // Single-use: consume the request only on success, so a failed run above leaves it for retry.
+  deps.consume(cfg.requestPath);
+  return { status: "OK", exitCode: 0 };
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   banner();
@@ -99,38 +207,29 @@ async function main(): Promise<void> {
   const requestPath = resolve(collectorRoot, REQUEST_BUNDLE_REL_PATH);
   const resultPath = resolve(collectorRoot, RESULT_BUNDLE_REL_PATH);
 
-  let request: ReplyTargetRequestBundle | null;
-  try {
-    request = loadRequestBundle(requestPath, { existsSync, statSync, readFileSync });
-  } catch (e) {
-    if (e instanceof ReplyTargetBundleError && e.code !== "EXPIRED") {
-      console.error(requestBundleRefusal(e.code, requestPath));
-      process.exit(REQUEST_BUNDLE_REFUSAL_EXIT_CODE);
-      return;
-    }
-    throw e;
-  }
-  if (!request) {
-    console.error(
-      `No request bundle at ${requestPath}. Create it owner-only (chmod 600) as {"accountId","actionRef"}.`,
-    );
-    process.exit(2);
+  const outcome = await prepareReplyTarget(
+    { requestPath, resultPath, baseUrl: cfg.baseUrl, email: cfg.email, password: cfg.password },
+    {
+      loadRequest: (p) => loadRequestBundle(p, { existsSync, statSync, readFileSync }),
+      reserve: (p) => reserveResultBundle(p, { existsSync, mkdirSync, writeFileSync }),
+      consume: consumeBundleFile,
+      finalize: (p, b) => writeResultBundle(p, b, { existsSync, mkdirSync, writeFileSync, chmodSync, renameSync }),
+      // Release the reserved slot AND any partial temp from a failed finalize, so a retry starts clean.
+      discardReservation: (p) => { consumeBundleFile(p); consumeBundleFile(`${p}.tmp`); },
+      login,
+      startRun: startReplySubmissionRun,
+      onError: (m) => console.error(m),
+    },
+  );
+
+  if (outcome.status === "OK") {
+    // Print ONLY a non-sensitive confirmation — never the ids, the ref, the hint, or the review body.
+    console.error(`Wrote an owner-only, single-use reply-target bundle to ${resultPath}.`);
+    console.error("Run the reply CLI to consume it (it reads the submissionRef and hint from the bundle).");
+    log("reply.target.prepared", {});
     return;
   }
-  // Consume the request bundle immediately (single-use) — the ids never linger on disk past the read.
-  consumeBundleFile(requestPath);
-
-  const token = await login(cfg.baseUrl, cfg.email, cfg.password);
-  const response = await startReplySubmissionRun(cfg.baseUrl, token, request.accountId, request.actionRef, {
-    requireTargetHint: true,
-  });
-  const bundle = resultBundleFrom(response);
-  writeResultBundle(resultPath, bundle, { existsSync, mkdirSync, writeFileSync, chmodSync, renameSync });
-
-  // Print ONLY a non-sensitive confirmation — never the ids, the ref, the hint, or the review body.
-  console.error(`Wrote an owner-only, single-use reply-target bundle to ${resultPath}.`);
-  console.error("Run the reply CLI to consume it (it reads the submissionRef and hint from the bundle).");
-  log("reply.target.prepared", {});
+  process.exit(outcome.exitCode);
 }
 
 // Run ONLY when invoked directly (never on import) so hermetic tests launch nothing.

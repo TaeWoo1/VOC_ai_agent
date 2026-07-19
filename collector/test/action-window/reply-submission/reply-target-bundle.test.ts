@@ -3,12 +3,16 @@
  * of the request and result bundles, and that what `writeResultBundle` writes is exactly what
  * `loadResultBundle` accepts (the writer↔reader contract the prepare CLI and reply CLI depend on).
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   hintFrom,
   loadRequestBundle,
   loadResultBundle,
   ReplyTargetBundleError,
+  reserveResultBundle,
   resultBundleRefusalMessage,
   writeResultBundle,
   type BundleReadDeps,
@@ -133,8 +137,59 @@ describe("writeResultBundle — hardened owner-only write + writer↔reader cont
 
 describe("resultBundleRefusalMessage", () => {
   it("explains every code and points at the path without printing a field value", () => {
-    for (const code of ["PERMS", "MALFORMED", "SCHEMA", "EXPIRED"] as const) {
+    for (const code of ["PERMS", "MALFORMED", "SCHEMA", "EXPIRED", "EXISTS"] as const) {
       expect(resultBundleRefusalMessage(code, "/x/hint.json")).toContain("/x/hint.json");
     }
+  });
+});
+
+describe("reserveResultBundle — atomic no-clobber reservation (real fs, O_EXCL)", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const realReserveDeps = { existsSync, mkdirSync, writeFileSync };
+  function freshPath(): string {
+    const d = mkdtempSync(join(tmpdir(), "reserve-"));
+    tmpDirs.push(d);
+    return join(d, ".reply-target", "hint.json"); // dir does not exist yet — exercises the 0700 mkdir
+  }
+
+  it("creates an owner-only empty reservation (and its 0700 dir) when the slot is free", () => {
+    const p = freshPath();
+    reserveResultBundle(p, realReserveDeps);
+    expect(existsSync(p)).toBe(true);
+    expect(statSync(p).mode & 0o077).toBe(0); // owner-only — the security property, umask-robust
+    expect(readFileSync(p, "utf8")).toBe("");
+  });
+
+  it("throws EXISTS on a second reservation and leaves the existing file BYTE-UNCHANGED (no clobber)", () => {
+    const p = freshPath();
+    reserveResultBundle(p, realReserveDeps);
+    writeFileSync(p, '{"already":"here"}\n', { mode: 0o600 }); // winner finalized real content
+    const before = readFileSync(p, "utf8");
+    try {
+      reserveResultBundle(p, realReserveDeps);
+      expect.fail("should have thrown EXISTS");
+    } catch (e) {
+      expect((e as ReplyTargetBundleError).code).toBe("EXISTS");
+    }
+    expect(readFileSync(p, "utf8")).toBe(before); // untouched — no clobber
+  });
+
+  it("only ONE of two reservations on the same path wins; the other gets EXISTS (race-free)", () => {
+    const p = freshPath();
+    let wins = 0;
+    let exists = 0;
+    for (let i = 0; i < 2; i += 1) {
+      try {
+        reserveResultBundle(p, realReserveDeps);
+        wins += 1;
+      } catch (e) {
+        if ((e as ReplyTargetBundleError).code === "EXISTS") exists += 1;
+      }
+    }
+    expect(wins).toBe(1);
+    expect(exists).toBe(1);
   });
 });
