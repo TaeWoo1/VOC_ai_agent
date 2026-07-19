@@ -7,11 +7,13 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  EXTRACT_API_CENTER_CENSUS,
   classifyApiCenterPage,
   classifyUrlCategory,
   countBucket,
   observeFrom,
   resolveUrlCategory,
+  screenApiCenterUrl,
   toSignals,
   type ApiCenterStructuralCensus,
 } from "../../src/cli/observe-api-center";
@@ -99,6 +101,69 @@ describe("classifyApiCenterPage — structural, fail-closed, always calibration-
   it("precedence: read-only display wins over editable inputs (issued values shown)", () => {
     const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2, editableTextInputCount: 2 }));
     expect(r.pageCategory).toBe("credential_issuance");
+  });
+});
+
+describe("screenApiCenterUrl — pre-launch fail-closed gate", () => {
+  it("accepts the API-center and NAVER auth hosts", () => {
+    expect(screenApiCenterUrl("https://apicenter.commerce.naver.com/ko/x")).toEqual({ ok: true, reason: "ok", urlCategory: "api_center_host" });
+    expect(screenApiCenterUrl("https://nid.naver.com/nidlogin.login").ok).toBe(true);
+  });
+
+  it("rejects a bare placeholder token before any navigation (invalid — not a URL)", () => {
+    // The first failed live run passed the literal env-var name; it must never reach page.navigate.
+    const r = screenApiCenterUrl("NAVER_API_CENTER_URL");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("placeholder"); // caught as placeholder (no "://")
+  });
+
+  it("rejects placeholder-shaped values", () => {
+    for (const bad of ["https://your-store.example.com/api", "https://example.com/apicenter", "<put-url-here>", "https://changeme.naver.com"]) {
+      expect(screenApiCenterUrl(bad).ok).toBe(false);
+    }
+  });
+
+  it("rejects an off-target host (e.g. the seller-center review page) — the second failed run's mistake", () => {
+    const r = screenApiCenterUrl("https://sell.smartstore.naver.com/#/reviews");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("off_target");
+  });
+});
+
+describe("EXTRACT_API_CENTER_CENSUS — browser-context safe (regression for the __name evaluate bug)", () => {
+  it("is a string with no esbuild/tsx helper reference", () => {
+    expect(typeof EXTRACT_API_CENTER_CENSUS).toBe("string");
+    // A passed (esbuild-instrumented) function would carry __name; a string literal never does.
+    expect(EXTRACT_API_CENTER_CENSUS).not.toContain("__name");
+  });
+
+  it("runs in a clean scope over a synthetic DOM and returns the census shape (no external helpers)", () => {
+    // Running via `new Function` executes the script in a scope with NO esbuild helpers — if the script
+    // referenced __name (or any module helper) this would throw ReferenceError, exactly reproducing the
+    // live failure. A login-like fake DOM: one password + one text input, a submit control, one form.
+    const doc = {
+      querySelector: (sel: string) =>
+        sel === "input[type='password']" || sel === "button[type='submit'], input[type='submit']" ? {} : null,
+      querySelectorAll: (sel: string) => {
+        if (sel === "input") return [
+          { type: "password", readOnly: false, disabled: false },
+          { type: "text", readOnly: false, disabled: false },
+        ];
+        if (sel === "form") return [{}];
+        return []; // list-like containers
+      },
+    };
+    const census = new Function("document", `return ${EXTRACT_API_CENTER_CENSUS}`)(doc) as ApiCenterStructuralCensus;
+    expect(census).toEqual({
+      passwordFieldPresent: true,
+      submitAffordancePresent: true,
+      formCount: 1,
+      editableTextInputCount: 1, // the text input; the password input is not counted as editable
+      readonlyFieldCount: 0,
+      listLikeContainerCount: 0,
+    });
+    // And it classifies as a login page end-to-end.
+    expect(observeFrom("api_center_host", census).pageCategory).toBe("login");
   });
 });
 

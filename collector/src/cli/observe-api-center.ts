@@ -168,28 +168,71 @@ export function observeFrom(urlCategory: ApiCenterUrlCategory, census: ApiCenter
 }
 
 /**
- * The in-page structural sweep (generic HTML only — no NAVER selectors, no value reads). Passed to
- * `page.evaluate` during a live run; not executed offline. Returns counts/booleans only.
+ * The in-page structural sweep, as a **string** IIFE evaluated in the browser (generic HTML only — no
+ * NAVER selectors, no value reads). It MUST be a string, not a passed function: tsx/esbuild instruments
+ * named/module functions with a `__name` helper that does not exist in the page context, so a serialized
+ * function throws `ReferenceError: __name is not defined`. A string literal is never instrumented, so it
+ * runs cleanly. It returns counts/booleans only — it never reads any field VALUE (incl. Client ID/Secret),
+ * text, or URL. Kept ES5-plain (no arrow/`Set`) so it is robust across page runtimes. Shape matches
+ * {@link ApiCenterStructuralCensus}.
  */
-export function apiCenterCensusInPage(): ApiCenterStructuralCensus {
-  const all = (sel: string) => Array.from(document.querySelectorAll(sel));
-  const editableTypes = new Set(["text", "email", "tel", "number", "url", "search", ""]);
-  const inputs = all("input") as HTMLInputElement[];
-  const editableTextInputCount = inputs.filter(
-    (i) => editableTypes.has(i.type) && !i.readOnly && !i.disabled,
-  ).length;
-  const readonlyFieldCount = inputs.filter((i) => i.readOnly || i.disabled).length;
-  const listLikeContainerCount = all("table, ul, ol, [role='grid'], [role='table']").filter(
-    (el) => el.childElementCount >= 2,
-  ).length;
+export const EXTRACT_API_CENTER_CENSUS = `(function () {
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var inputs = slice(document.querySelectorAll('input'));
+  var editableTypes = ['text', 'email', 'tel', 'number', 'url', 'search', ''];
+  var isEditable = function (i) { return editableTypes.indexOf(i.type) !== -1 && !i.readOnly && !i.disabled; };
+  var containers = slice(document.querySelectorAll("table, ul, ol, [role='grid'], [role='table']"));
+  var editableTextInputCount = 0, readonlyFieldCount = 0, listLikeContainerCount = 0, i;
+  for (i = 0; i < inputs.length; i++) {
+    if (isEditable(inputs[i])) editableTextInputCount++;
+    if (inputs[i].readOnly || inputs[i].disabled) readonlyFieldCount++;
+  }
+  for (i = 0; i < containers.length; i++) {
+    if (containers[i].childElementCount >= 2) listLikeContainerCount++;
+  }
   return {
     passwordFieldPresent: document.querySelector("input[type='password']") != null,
     submitAffordancePresent: document.querySelector("button[type='submit'], input[type='submit']") != null,
-    formCount: all("form").length,
-    editableTextInputCount,
-    readonlyFieldCount,
-    listLikeContainerCount,
+    formCount: document.querySelectorAll('form').length,
+    editableTextInputCount: editableTextInputCount,
+    readonlyFieldCount: readonlyFieldCount,
+    listLikeContainerCount: listLikeContainerCount
   };
+})()`;
+
+export type UrlScreenReason = "ok" | "invalid" | "placeholder" | "off_target";
+
+/** Placeholder-ish markers — caught WITHOUT logging the value (only a boolean leaves). */
+function looksLikePlaceholder(url: string): boolean {
+  const u = url.toLowerCase();
+  return (
+    u.includes("<") ||
+    u.includes(">") ||
+    u.includes("example.") ||
+    u.includes("your-") ||
+    u.includes("your_") ||
+    u.includes("placeholder") ||
+    u.includes("changeme") ||
+    u.includes("todo") ||
+    u.includes("xxxx") ||
+    !url.includes("://") // a bare token like NAVER_API_CENTER_URL is not a URL
+  );
+}
+
+/**
+ * Pre-launch screen for the operator-provided URL (fail-closed BEFORE Chrome launches). Rejects
+ * placeholder-like values, unparseable URLs, and any host that is not the NAVER API-center or auth host —
+ * so G3-C.2 can never navigate to a seller-center/off-target page. Reads the URL; emits only a reason
+ * enum + host category (never the raw URL).
+ */
+export function screenApiCenterUrl(url: string): { ok: boolean; reason: UrlScreenReason; urlCategory: ApiCenterUrlCategory } {
+  const urlCategory = classifyUrlCategory(url);
+  if (looksLikePlaceholder(url)) return { ok: false, reason: "placeholder", urlCategory };
+  if (urlCategory === "unknown") return { ok: false, reason: "invalid", urlCategory };
+  if (urlCategory !== "api_center_host" && urlCategory !== "naver_auth_host") {
+    return { ok: false, reason: "off_target", urlCategory };
+  }
+  return { ok: true, reason: "ok", urlCategory };
 }
 
 const HYDRATION_TIMEOUT_MS = 15_000;
@@ -230,14 +273,28 @@ async function main(): Promise<void> {
     process.exit(2);
     return;
   }
-  const urlCategory = classifyUrlCategory(url);
+  // Fail closed BEFORE launching Chrome: reject placeholders, unparseable URLs, and off-target hosts
+  // (e.g. a seller-center review page) — so the browser only ever opens the API-center / auth host.
+  const screen = screenApiCenterUrl(url);
+  if (!screen.ok) {
+    console.error(
+      `Refusing to launch: NAVER_API_CENTER_URL failed screening (reason=${screen.reason}). It must be the ` +
+        "NAVER API-center or auth host and not a placeholder. No browser launched.",
+    );
+    process.exit(2);
+    return;
+  }
+  const urlCategory = screen.urlCategory;
   const cfg = loadConfig();
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
   try {
     await page.goto(url, { waitUntil: "domcontentloaded" });
     await settle(page);
-    const census = await page.evaluate(apiCenterCensusInPage);
+    // Evaluate a STRING (not a passed function) so tsx/esbuild's __name helper is never referenced in the
+    // page context. Cast to get the typed census back from the string-form evaluate.
+    const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
+    const census = await evalPage.evaluate<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS);
     const observation = observeFrom(urlCategory, census);
     console.log(JSON.stringify(observation, null, 2));
     log("apiCenter.observe.done", {
