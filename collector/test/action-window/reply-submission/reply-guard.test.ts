@@ -168,6 +168,9 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "reply-cross-source.ts": resolve(SRC, "reply-cross-source.ts"),
     "handle-reply-row-driver.ts": resolve(SRC, "handle-reply-row-driver.ts"),
     "calibrate-reply-target.ts": resolve(SRC, "../../../src/cli/calibrate-reply-target.ts"),
+    // Composer abort rehearsal: the retained-composer driver + its in-page scripts (read-only, no submit).
+    "handle-reply-composer-driver.ts": resolve(SRC, "handle-reply-composer-driver.ts"),
+    "reply-composer-inpage.ts": resolve(SRC, "reply-composer-inpage.ts"),
   };
 
   for (const [name, path] of Object.entries(files)) {
@@ -202,6 +205,20 @@ describe("prepare-reply-target CLI — source guard (no submit/type/click; backe
  */
 describe("run-abort-rehearsal-live-naver CLI — source guard (no submit/type/click)", () => {
   const code = codeOnly(resolve(SRC, "../../../src/cli/run-abort-rehearsal-live-naver.ts"));
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+});
+
+/**
+ * The same-session COMPOSER abort-rehearsal CLI legitimately imports the backend client (`../upload`) to mint
+ * the one-shot submissionRef and to READ the operator's own approved draft for the read-only overlay (so the
+ * "no downstream import" rule does NOT apply), but it must NEVER submit/type/paste/click a NAVER control — it
+ * captures the operator's own clicks (preventDefault), observes the entry transition, and highlights the
+ * retained row + composer read-only.
+ */
+describe("run-composer-abort-rehearsal-live-naver CLI — source guard (no submit/type/click)", () => {
+  const code = codeOnly(resolve(SRC, "../../../src/cli/run-composer-abort-rehearsal-live-naver.ts"));
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
   });

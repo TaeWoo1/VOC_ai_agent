@@ -19,7 +19,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome" | "replyDraft",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -163,6 +163,52 @@ export async function submitReplyOutcome(
   if (!res.ok) throw new UploadError("reply outcome failed", "replyOutcome", res.status);
   log("reply.outcome.ok", { operatorOutcome: body.operatorOutcome });
   return (await res.json()) as ReplyOutcomeResult;
+}
+
+/**
+ * The operator's OWN approved reply draft — the text they authored and approved, shown to them read-only in
+ * the SellerOps abort-rehearsal overlay so they can visually confirm what they would post before aborting.
+ * This is the seller's own reply, NOT review PII: it deliberately carries only the draft body/version and a
+ * standing-approval flag, and NEVER the review's `redactedBody` (which the source read also returns but this
+ * client discards). The body is display-only; callers MUST NOT log it or put it on any wire.
+ */
+export interface ApprovedReplyDraft {
+  /** The operator-authored approved reply body — display-only; never logged, never persisted. */
+  draftBody: string | null;
+  /** The approved draft's version, or null when no draft exists. */
+  draftVersion: number | null;
+  /** Whether a standing approval exists (the submission-run already requires one before minting). */
+  approved: boolean;
+}
+
+/**
+ * Read the current reply-preparation view for one review and return ONLY the approved draft text (+ version +
+ * approval flag). The endpoint (`GET .../reply`) also returns the review's `redactedBody`; this client throws
+ * it away and never surfaces it. Used solely to populate the read-only draft overlay in the abort rehearsal.
+ * Only non-secret path ids (accountId, actionRef) are sent; the reply body that comes back is display-only and
+ * is never logged (the success log records only presence flags, never any text).
+ */
+export async function fetchApprovedReplyDraft(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ApprovedReplyDraft> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply`;
+  const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new UploadError("reply prep fetch failed", "replyDraft", res.status);
+  const view = (await res.json()) as {
+    draft?: { version?: number; body?: string } | null;
+    approval?: unknown;
+  };
+  const draftBody = typeof view.draft?.body === "string" ? view.draft.body : null;
+  const draftVersion = typeof view.draft?.version === "number" ? view.draft.version : null;
+  const approved = view.approval != null;
+  // Presence flags only — NEVER the draft text, and never the review body it discarded.
+  log("reply.draft.fetched", { hasDraft: draftBody != null, approved });
+  return { draftBody, draftVersion, approved };
 }
 
 /**

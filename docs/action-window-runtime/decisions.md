@@ -686,3 +686,34 @@ establish cross-source fingerprint equality (none is computed) and is **not** an
 terminal is `UNVERIFIED` ([D-032](decisions.md)(b)). *Boundary:* this decision changes the row-locate mechanism
 only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies
 per-run and this entry authorizes no live action.
+
+---
+
+## D-034 · ACTIVE — the reply composer target is a SECOND same-session retained element, and the entry into it is OBSERVED, not driven (2026-07-20, live-evidence-driven)
+
+**Context.** [D-033](decisions.md) fixed the *row* target as an operator-clicked, in-memory live element. The
+composer-abort rehearsal ([Run 2](r4-reply-composer-abort-run2-dispatch-record.md)) extends the same-session flow
+*through* the composer barrier that [Run 1](r4-reply-abort-rehearsal-run1-dispatch-record.md) stopped short of.
+Two observed NAVER entry paths exist from the review list to a reply composer: **(A)** the operator clicks the
+review body/link into a **detail page** (a navigation), or **(B)** the operator checks the row and clicks the
+**toolbar reply** action, opening an **inline composer** (no navigation).
+
+**Decision (PO, live-evidence-driven).** The reply composer target is a **second operator-clicked live element**,
+retained **in memory within the same browser process** exactly like the row anchor — **no persisted mapping, no
+page signature, no reload**. The runtime **does not click or navigate** into the composer: the operator performs
+their own entry, and the runtime **observes the resulting transition** (a new tab, a same-tab URL change, or a
+generic composer candidate appearing inline over a pre-entry baseline). The composer barrier opens **only** when a
+**connected** composer handle was retained; a timeout / detach fails closed (the operator aborts at the row
+barrier). The operator's **own approved draft** is shown in a **separate SellerOps read-only overlay**
+(`pointer-events:none`, `textContent`, JSON-escaped) so they can confirm what they would post — **the runtime
+never types or pastes it into the composer**. The draft is read from the existing `GET …/reply` prep view; the
+review body it also returns is discarded and never logged.
+
+**Scope / non-claims.** Run 2 is an **operator-calibrated composer-abort rehearsal, non-mutating by construction**
+(`ABORT_REHEARSAL` makes the submit terminal structurally unreachable). It does **not** establish cross-source
+fingerprint equality (none is computed — B1 stays `[EXT]`) and is **not** an end-to-end submission; the terminal
+is `UNVERIFIED` ([D-032](decisions.md)(b)). **Entry-strategy caveat:** only path **(B) `INLINE_COMPOSER`** was
+**live-exercised** in Run 2; path **(A) body-link navigation** is supported in code and observed generically but
+is **not yet live-proven**. *Boundary:* this decision changes the composer-locate/entry mechanism only; every
+live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies per-run and this
+entry authorizes no live action.
