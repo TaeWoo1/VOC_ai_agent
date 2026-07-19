@@ -107,7 +107,7 @@ const ROW_TEARDOWN = `(() => {
   return true;
 })()`;
 
-type TransitionKind = "NAV_NEW_TAB" | "NAV_SAME_TAB" | "INLINE_COMPOSER";
+export type TransitionKind = "NAV_NEW_TAB" | "NAV_SAME_TAB" | "INLINE_COMPOSER";
 
 function sleep(ms: number): Promise<void> {
   // unref'd: a lingering poll loop (e.g. the composer-acquire loop still running when the operator aborts at
@@ -142,14 +142,15 @@ function evalOn<R>(page: Page, script: string): Promise<R> {
  *  - a generic composer candidate appears inline (checkbox + toolbar reply — count rises over the baseline).
  * Returns the observed kind, or null on timeout.
  */
-async function waitForEntryTransition(
+export async function waitForEntryTransition(
   ctx: BrowserContext,
   listUrl: string,
   baselinePages: number,
   baselineCensus: number,
   timeoutMs: number,
+  pollIntervalMs: number = SENTINEL_POLL_INTERVAL_MS,
 ): Promise<TransitionKind | null> {
-  for (let i = 0; i < Math.ceil(timeoutMs / SENTINEL_POLL_INTERVAL_MS); i += 1) {
+  for (let i = 0; i < Math.ceil(timeoutMs / pollIntervalMs); i += 1) {
     const pages = ctx.pages();
     if (pages.length > baselinePages) return "NAV_NEW_TAB";
     const ap = pages[pages.length - 1] as Page | undefined;
@@ -169,7 +170,7 @@ async function waitForEntryTransition(
       }
       if (census > baselineCensus) return "INLINE_COMPOSER";
     }
-    await sleep(SENTINEL_POLL_INTERVAL_MS);
+    await sleep(pollIntervalMs);
   }
   return null;
 }
