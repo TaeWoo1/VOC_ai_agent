@@ -61,6 +61,18 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.onConfirmLogin).toHaveBeenCalledOnce();
   });
 
+  it("naver_login_required with DETECTED source → re-check, not attest (detection outranks attestation)", async () => {
+    const detectedLogin: GuidedConnectionState = {
+      ...stateAt("naver_login_required", "NAVER_LOGIN_REQUIRED"),
+      sessionSource: "detected",
+    };
+    const { props } = renderWizard(detectedLogin);
+    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "로그인 후 다시 확인" }));
+    expect(props.onRecheck).toHaveBeenCalledOnce();
+    expect(props.onConfirmLogin).not.toHaveBeenCalled();
+  });
+
   it("naver_reconnect_required → tells the seller to re-login inside the dedicated window; recheck re-detects", async () => {
     const { props } = renderWizard(stateAt("naver_reconnect_required", "RECONNECT_REQUIRED"));
     // Copy must direct the seller to the DEDICATED window (B4 profile-mismatch explanation).

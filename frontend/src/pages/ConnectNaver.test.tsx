@@ -7,15 +7,26 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { screen, userEvent, waitFor } from "../test/renderWithRouter";
 import { NAVER_LIKE_TEMPLATE } from "../lib/guidedConnection";
+import type { BridgeState } from "../lib/bridge/bridgeClient";
+import type { BridgeConnectionState, BridgeConnectionView, BridgePendingUserAction } from "../lib/bridge/bridgeProtocol";
 
+// Configurable bridge state so tests can drive the live-detection source (B4). Default: paired with no
+// snapshot → detection unavailable → attestation fallback (the pre-B4-wiring behavior).
+const DEFAULT_BRIDGE: BridgeState = { phase: "paired", maybeNeedsLocalNetworkAccess: false };
+const h = vi.hoisted(() => ({ bridge: { phase: "paired", maybeNeedsLocalNetworkAccess: false } as BridgeState }));
 vi.mock("../hooks/useBridge", () => ({
-  useBridge: () => ({
-    state: { phase: "paired", maybeNeedsLocalNetworkAccess: false },
-    requestPairing: vi.fn(),
-    revoke: vi.fn(),
-    retry: vi.fn(),
-  }),
+  useBridge: () => ({ state: h.bridge, requestPairing: () => {}, revoke: () => {}, retry: () => {} }),
 }));
+
+/** Build a paired bridge state carrying one connection with the given session state. */
+function pairedWith(state: BridgeConnectionState, pendingUserAction: BridgePendingUserAction | null = null): BridgeState {
+  const conn: BridgeConnectionView = { ref: "opaque", state, pendingUserAction, browserOpen: false };
+  return {
+    phase: "paired",
+    maybeNeedsLocalNetworkAccess: false,
+    snapshot: { agentVersion: "x", protocolVersion: 1, capabilities: [], supportedEvents: [], connections: [conn] },
+  };
+}
 
 vi.mock("../lib/apiClient", () => ({
   api: {
@@ -35,6 +46,7 @@ const SECRET = "n4ver-client-secret";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.bridge = DEFAULT_BRIDGE; // reset to detection-unavailable (attestation fallback) each test
   vi.mocked(api.getChannelsStrict).mockResolvedValue([
     { id: "ch-naver", code: "NAVER", nameKo: "네이버", status: "AVAILABLE", dataBadges: [], lastSyncedAt: null, actionLabel: "연결하기", support: {} as never },
   ]);
@@ -133,5 +145,38 @@ describe("ConnectNaver — end-to-end guided journey (offline, mocked backend)",
     await waitFor(() => {
       for (const call of setItem.mock.calls) expect(JSON.stringify(call)).not.toContain(SECRET);
     });
+  });
+});
+
+describe("ConnectNaver — live session detection wiring (B4)", () => {
+  it("detected ready drives readiness forward WITHOUT attestation", async () => {
+    h.bridge = pairedWith("ready");
+    renderPage();
+    // No "로그인했어요" step needed — a detected live session advances straight to the choice step.
+    expect(await screen.findByRole("button", { name: /계정·스토어를 선택/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
+  });
+
+  it("detected reconnect drives naver_reconnect_required — attestation is not even offered", async () => {
+    h.bridge = pairedWith("human_reconnect_required");
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "다시 로그인 필요" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "로그인 후 다시 확인" })).toBeInTheDocument();
+    // Detection outranks attestation: the "I logged in" attest button is absent at a detected reconnect.
+    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
+  });
+
+  it("attestation fallback works when detection is unavailable (no snapshot)", async () => {
+    h.bridge = DEFAULT_BRIDGE; // paired, no snapshot → detection null
+    renderPage();
+    // The attest button is offered and advances the journey.
+    await userEvent.click(await screen.findByRole("button", { name: "로그인했어요" }));
+    expect(await screen.findByRole("button", { name: /계정·스토어를 선택/ })).toBeInTheDocument();
+  });
+
+  it("indeterminate detection stays neutral → attestation fallback (does not force-fail)", async () => {
+    h.bridge = pairedWith("starting"); // transient → detection null → attestation path
+    renderPage();
+    expect(await screen.findByRole("button", { name: "로그인했어요" })).toBeInTheDocument();
   });
 });

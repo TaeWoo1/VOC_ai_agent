@@ -6,6 +6,7 @@ import { useBridge } from "../hooks/useBridge";
 import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
 import { guidedConnectionReducer, INITIAL_STATE, resolveNaverSession } from "../lib/guidedConnection";
+import { bridgeSessionDetection } from "../lib/guidedConnection/bridgeSession";
 import type { CredentialTemplateView, SyncRunView } from "../lib/types";
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
 
@@ -73,11 +74,12 @@ export function ConnectNaver() {
   // Feed pairing (+ the seller's login attestation) into the readiness gate. READINESS is idempotent
   // and a no-op past the gate, so re-dispatching on every bridge tick is safe.
   const agentPaired = bridge.state.phase === "paired";
+  // Live session detection from the paired bridge (B4). `null` when unavailable → attestation fallback.
+  const detected = bridgeSessionDetection(bridge.state);
   useEffect(() => {
-    // Offline G3-A/B wires NO live session detection yet (that is G3-C), so detection is null and the
-    // seller's attestation drives. resolveNaverSession guarantees that once detection IS wired, a
-    // detected reconnect/logout outranks attestation (B4) — attestation can never bypass a live reconnect.
-    const { signal, source } = resolveNaverSession(naverAttested, null);
+    // resolveNaverSession makes a detected reconnect/logout outrank attestation (B4) — the seller can
+    // never attest past a live-observed reconnect; attestation drives only when detection is unavailable.
+    const { signal, source } = resolveNaverSession(naverAttested, detected);
     dispatch({
       type: "READINESS",
       agentPaired,
@@ -85,7 +87,7 @@ export function ConnectNaver() {
       naverSession: signal,
       sessionSource: source,
     });
-  }, [agentPaired, naverAttested]);
+  }, [agentPaired, naverAttested, detected]);
 
   const runFirstSync = useCallback(async () => {
     if (!accountId) return;

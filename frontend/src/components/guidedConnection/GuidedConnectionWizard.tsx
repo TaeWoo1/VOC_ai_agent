@@ -81,13 +81,20 @@ export function GuidedConnectionWizard({
           </button>
         )}
 
-        {phase === "naver_login_required" && (
-          // No live session detection in G3-A/B (§9 deferred to G3-C): the seller logs in directly
-          // in the real window and attests it here. This is attestation, not a bypass or auto-login.
-          <button type="button" className="btn-primary" onClick={onConfirmLogin} disabled={busy}>
-            로그인했어요
-          </button>
-        )}
+        {phase === "naver_login_required" &&
+          (state.sessionSource === "detected" ? (
+            // Live detection is driving: the seller logs in inside the dedicated window and we re-detect —
+            // attestation would be ignored here (detection outranks it), so offer a re-check, not attest.
+            <button type="button" className="btn-primary" onClick={onRecheck} disabled={busy}>
+              로그인 후 다시 확인
+            </button>
+          ) : (
+            // No live detection available (offline / not wired): the seller logs in in the dedicated window
+            // and attests it here. Attestation, not a bypass or auto-login.
+            <button type="button" className="btn-primary" onClick={onConfirmLogin} disabled={busy}>
+              로그인했어요
+            </button>
+          ))}
 
         {phase === "naver_reconnect_required" && (
           // A DETECTED reconnect can't be cleared by mere attestation (B4): the seller re-logs-in inside
