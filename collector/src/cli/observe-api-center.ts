@@ -148,9 +148,14 @@ export function toSignals(urlCategory: ApiCenterUrlCategory, census: ApiCenterSt
  * `LIVE_DOM_CALIBRATION_PENDING`), never a proven detector:
  *  1. **login** — a password field present (the strongest single signal; a login page also has an
  *     editable id input, so login must win over `app_detail`).
- *  2. **app_list** — a list-like container present.
- *  3. **credential_issuance** — read-only fields displayed (issued values shown), no list.
- *  4. **app_detail** — editable inputs present, no read-only display, no list.
+ *  2. **credential_issuance** — read-only fields displayed (issued values shown). Stays highest after
+ *     login: an issued-keys page can also carry list-like containers, so read-only must win over `app_list`.
+ *  3. **app_detail** — editable text inputs present (no read-only display). Wins over `app_list`: a
+ *     detail/edit page commonly ALSO contains many list-like containers (live G3-C.2 finding — the app
+ *     detail page classified as `app_list` because list-like was checked first), so editable inputs must
+ *     take precedence over the list signal.
+ *  4. **app_list** — a list-like container present, and no detail/credential signal (no read-only, no
+ *     editable input). Only the pure list view lands here.
  *  5. otherwise → **unknown** (fail-closed, `AMBIGUOUS_SIGNALS`).
  *
  * `unknown` also when the host is off-target (`OFF_TARGET_HOST`) — the harness refuses to classify a page
@@ -165,9 +170,9 @@ export function classifyApiCenterPage(signals: ApiCenterSignals): { pageCategory
   }
 
   if (signals.passwordFieldPresent) return { pageCategory: "login", blockers };
-  if (signals.listLikeContainerCountBucket !== "none") return { pageCategory: "app_list", blockers };
   if (signals.readonlyFieldCountBucket !== "none") return { pageCategory: "credential_issuance", blockers };
   if (signals.editableTextInputCountBucket !== "none") return { pageCategory: "app_detail", blockers };
+  if (signals.listLikeContainerCountBucket !== "none") return { pageCategory: "app_list", blockers };
 
   blockers.push("AMBIGUOUS_SIGNALS");
   return { pageCategory: "unknown", blockers };

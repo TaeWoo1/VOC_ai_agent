@@ -108,6 +108,24 @@ describe("classifyApiCenterPage — structural, fail-closed, always calibration-
     const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2, editableTextInputCount: 2 }));
     expect(r.pageCategory).toBe("credential_issuance");
   });
+
+  // Live G3-C.2 regression: the app-detail page carried MANY list-like containers AND a few editable text
+  // inputs, and the old precedence (list-like checked first) masked it as `app_list`. Editable inputs must
+  // now win over the list signal so app_detail calibrates.
+  it("precedence: many list-like + few editable → app_detail (list no longer masks the detail page)", () => {
+    const r = classifyApiCenterPage(onTarget({ listLikeContainerCount: 5, editableTextInputCount: 2 }));
+    expect(r.pageCategory).toBe("app_detail");
+  });
+
+  it("precedence: many list-like + no editable/read-only → app_list (pure list view still lands here)", () => {
+    const r = classifyApiCenterPage(onTarget({ listLikeContainerCount: 5 }));
+    expect(r.pageCategory).toBe("app_list");
+  });
+
+  it("precedence: read-only present wins even alongside a list and editable inputs → credential_issuance", () => {
+    const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2, editableTextInputCount: 2, listLikeContainerCount: 5 }));
+    expect(r.pageCategory).toBe("credential_issuance");
+  });
 });
 
 describe("screenApiCenterUrl — pre-launch fail-closed gate", () => {
