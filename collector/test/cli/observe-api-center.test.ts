@@ -1,0 +1,125 @@
+/**
+ * Read-only API-center observation harness — offline/synthetic tests (G3-C.2). Importing the module
+ * launches nothing (`main()` runs only when invoked directly). Every assertion is offline: no live NAVER,
+ * no browser, no disk. Proves the harness is counts/booleans/enums only, that it never surfaces a value or
+ * raw URL, that classification is structural + fail-closed, and that it always flags itself as an
+ * unvalidated (calibration-pending) instrument.
+ */
+import { describe, it, expect } from "vitest";
+import {
+  classifyApiCenterPage,
+  classifyUrlCategory,
+  countBucket,
+  observeFrom,
+  resolveUrlCategory,
+  toSignals,
+  type ApiCenterStructuralCensus,
+} from "../../src/cli/observe-api-center";
+
+function census(o: Partial<ApiCenterStructuralCensus> = {}): ApiCenterStructuralCensus {
+  return {
+    passwordFieldPresent: false,
+    submitAffordancePresent: false,
+    formCount: 0,
+    editableTextInputCount: 0,
+    readonlyFieldCount: 0,
+    listLikeContainerCount: 0,
+    ...o,
+  };
+}
+
+describe("classifyUrlCategory — host category, never the raw URL", () => {
+  it("maps the named API-center host and the canonical login host", () => {
+    expect(classifyUrlCategory("https://apicenter.commerce.naver.com/ko/some/path?q=1")).toBe("api_center_host");
+    expect(classifyUrlCategory("https://nid.naver.com/nidlogin.login")).toBe("naver_auth_host");
+    expect(classifyUrlCategory("https://sub.nid.naver.com/x")).toBe("naver_auth_host");
+  });
+
+  it("treats any other host as other_host and unparseable input as unknown (fail-closed)", () => {
+    expect(classifyUrlCategory("https://example.com/apicenter")).toBe("other_host");
+    expect(classifyUrlCategory("not a url")).toBe("unknown");
+  });
+
+  it("resolveUrlCategory prefers an explicit category and never requires the URL", () => {
+    expect(resolveUrlCategory({ category: "api_center_host" })).toBe("api_center_host");
+    expect(resolveUrlCategory({ url: "https://apicenter.commerce.naver.com/x" })).toBe("api_center_host");
+    expect(resolveUrlCategory({})).toBe("unknown");
+  });
+});
+
+describe("countBucket", () => {
+  it("buckets by ≤0 / ≤3 / else", () => {
+    expect(countBucket(0)).toBe("none");
+    expect(countBucket(3)).toBe("few");
+    expect(countBucket(4)).toBe("many");
+  });
+});
+
+describe("classifyApiCenterPage — structural, fail-closed, always calibration-pending", () => {
+  const onTarget = (c: Partial<ApiCenterStructuralCensus>) => toSignals("api_center_host", census(c));
+
+  it("always reports LIVE_DOM_CALIBRATION_PENDING (never a proven detector)", () => {
+    const r = classifyApiCenterPage(onTarget({ passwordFieldPresent: true, submitAffordancePresent: true }));
+    expect(r.blockers).toContain("LIVE_DOM_CALIBRATION_PENDING");
+  });
+
+  it("login = password field present (wins over an incidental id input or list — precedence)", () => {
+    expect(classifyApiCenterPage(onTarget({ passwordFieldPresent: true, submitAffordancePresent: true, formCount: 1 })).pageCategory).toBe("login");
+    // Precedence: a password page also carrying an editable id input and even a list still classifies login.
+    expect(classifyApiCenterPage(onTarget({ passwordFieldPresent: true, editableTextInputCount: 1, listLikeContainerCount: 5 })).pageCategory).toBe("login");
+  });
+
+  it("app_list = list container, no password", () => {
+    const r = classifyApiCenterPage(onTarget({ listLikeContainerCount: 2 }));
+    expect(r.pageCategory).toBe("app_list");
+  });
+
+  it("credential_issuance = read-only fields shown, no list, no password", () => {
+    const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2 }));
+    expect(r.pageCategory).toBe("credential_issuance");
+  });
+
+  it("app_detail = editable inputs, no read-only display, no list, no password", () => {
+    const r = classifyApiCenterPage(onTarget({ editableTextInputCount: 3, formCount: 1 }));
+    expect(r.pageCategory).toBe("app_detail");
+  });
+
+  it("off-target host → unknown + OFF_TARGET_HOST (refuse to classify)", () => {
+    const r = classifyApiCenterPage(toSignals("other_host", census({ passwordFieldPresent: true, submitAffordancePresent: true })));
+    expect(r.pageCategory).toBe("unknown");
+    expect(r.blockers).toContain("OFF_TARGET_HOST");
+  });
+
+  it("no signal → unknown + AMBIGUOUS_SIGNALS (fail-closed)", () => {
+    const r = classifyApiCenterPage(onTarget({}));
+    expect(r.pageCategory).toBe("unknown");
+    expect(r.blockers).toContain("AMBIGUOUS_SIGNALS");
+  });
+
+  it("precedence: read-only display wins over editable inputs (issued values shown)", () => {
+    const r = classifyApiCenterPage(onTarget({ readonlyFieldCount: 2, editableTextInputCount: 2 }));
+    expect(r.pageCategory).toBe("credential_issuance");
+  });
+});
+
+describe("observeFrom — end-to-end sanitized shape leaks no value/URL/DOM", () => {
+  it("emits only enums/buckets/booleans — no raw counts, no value fields", () => {
+    const obs = observeFrom("api_center_host", census({ readonlyFieldCount: 9, editableTextInputCount: 0 }));
+    expect(obs).toEqual({
+      urlCategory: "api_center_host",
+      pageCategory: "credential_issuance",
+      signals: {
+        urlCategory: "api_center_host",
+        passwordFieldPresent: false,
+        submitAffordancePresent: false,
+        formCountBucket: "none",
+        editableTextInputCountBucket: "none",
+        readonlyFieldCountBucket: "many",
+        listLikeContainerCountBucket: "none",
+      },
+      blockers: ["LIVE_DOM_CALIBRATION_PENDING"],
+    });
+    // Structural buckets only — the raw count (9) never surfaces anywhere in the output.
+    expect(JSON.stringify(obs)).not.toContain("9");
+  });
+});
