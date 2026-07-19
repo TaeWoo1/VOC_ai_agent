@@ -87,7 +87,7 @@ describe("classifyReviewRowStructure — safe summary (counts/booleans/opaque si
     const s = classifyReviewRowStructure([], null, null);
     expect(s.reviewRowCandidateCount).toBe(0);
     expect(s.blockers).toContain("NO_ROW_CANDIDATES");
-    expect(s.blockers).toContain("FINGERPRINT_NORMALIZATION_SPEC_MISSING");
+    expect(s.blockers).toContain("FINGERPRINT_LIVE_EXTRACTION_DEFERRED");
     expect(s.match).toBeNull();
   });
 
@@ -101,7 +101,7 @@ describe("classifyReviewRowStructure — safe summary (counts/booleans/opaque si
       expect.arrayContaining([
         "RATING_VALUE_PARSE_DEFERRED",
         "RECENCY_BUCKET_DERIVATION_DEFERRED",
-        "FINGERPRINT_NORMALIZATION_SPEC_MISSING",
+        "FINGERPRINT_LIVE_EXTRACTION_DEFERRED",
       ]),
     );
   });
@@ -110,7 +110,7 @@ describe("classifyReviewRowStructure — safe summary (counts/booleans/opaque si
     const s = classifyReviewRowStructure([discovered(), discovered()], HINT, 0);
     expect(s.expectedHintProvided).toBe(true);
     expect(s.match).toEqual({ matchCount: 0, uniqueMatch: false, matchedRowSig: null });
-    expect(s.blockers).toContain("FINGERPRINT_NORMALIZATION_SPEC_MISSING");
+    expect(s.blockers).toContain("FINGERPRINT_LIVE_EXTRACTION_DEFERRED");
   });
 
   it("reuses the runtime match rule: a uniquely-enriched matching row yields uniqueMatch + an opaque sig", () => {
@@ -127,7 +127,7 @@ describe("classifyReviewRowStructure — safe summary (counts/booleans/opaque si
     expect(s.match?.uniqueMatch).toBe(true);
     expect(s.match?.matchedRowSig).toMatch(/^[0-9a-f]{16}$/);
     // No blocker for fingerprint or values once every row is enriched.
-    expect(s.blockers).not.toContain("FINGERPRINT_NORMALIZATION_SPEC_MISSING");
+    expect(s.blockers).not.toContain("FINGERPRINT_LIVE_EXTRACTION_DEFERRED");
     expect(s.blockers).not.toContain("RATING_VALUE_PARSE_DEFERRED");
     const flat = JSON.stringify(s);
     expect(flat).not.toContain("fp_match_0001"); // the fingerprint value never surfaces in the summary

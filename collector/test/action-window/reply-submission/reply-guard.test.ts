@@ -20,6 +20,10 @@ import {
 } from "../../../src/action-window/reply-submission/reply-fixture";
 import { NaverReplySubmitProbeDriver, type ReplyPageLike } from "../../../src/action-window/reply-submission/naver-reply-driver";
 import { reviewRowLocateDecision } from "../../../src/action-window/reply-submission/reply-surface";
+import {
+  normalizeForFingerprint,
+  reviewBodyFingerprint,
+} from "../../../src/action-window/reply-submission/review-body-fingerprint";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(HERE, "../../../src/action-window/reply-submission");
@@ -149,6 +153,8 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "reply-run-store.ts": resolve(SRC, "reply-run-store.ts"),
     "reply-submission-endpoint.ts": resolve(SRC, "../../../src/bridge/reply-submission-endpoint.ts"),
     "run-reply-submission-live-naver.ts": resolve(SRC, "../../../src/cli/run-reply-submission-live-naver.ts"),
+    "review-body-fingerprint.ts": resolve(SRC, "review-body-fingerprint.ts"),
+    "reply-target-bundle.ts": resolve(SRC, "reply-target-bundle.ts"),
   };
 
   for (const [name, path] of Object.entries(files)) {
@@ -161,6 +167,28 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
       expect(imports.join("\n")).not.toContain(mod);
     });
   }
+});
+
+/**
+ * The prepare-reply-target CLI is a backend-auth PREP tool, not the live reply runtime: it authenticates to
+ * the SellerOps backend (loopback in dev) to mint a submissionRef and write the owner-only result bundle. It
+ * legitimately imports the backend client (`../upload`) — so the "no ingest import" rule does NOT apply to it
+ * — but it still must NEVER submit/type/click a composer (it touches no page at all).
+ */
+describe("prepare-reply-target CLI — source guard (no submit/type/click; backend-prep only)", () => {
+  const code = codeOnly(resolve(SRC, "../../../src/cli/prepare-reply-target.ts"));
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+});
+
+describe("review-body-fingerprint — privacy: volatile PII is tokenized, no raw span survives", () => {
+  it("tokenizes url/email/phone/long-number and never leaks the raw span; the output is an opaque 64-hex", () => {
+    const norm = normalizeForFingerprint("환불 http://x.kr 메일 a@b.com 연락 010-1234-5678 주문 1234567890");
+    for (const tok of ["[링크]", "[이메일]", "[전화번호]", "[번호]"]) expect(norm).toContain(tok);
+    for (const raw of ["x.kr", "a@b.com", "010-1234-5678", "1234567890"]) expect(norm).not.toContain(raw);
+    expect(reviewBodyFingerprint("샘플 본문")).toMatch(/^[0-9a-f]{64}$/);
+  });
 });
 
 describe("reply runtime — privacy: hostile fixture content never crosses the boundary", () => {

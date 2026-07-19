@@ -3,6 +3,7 @@ package com.sellerops.attention.reply;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.attention.VocItemRef;
 import com.sellerops.attention.reply.dto.ReviewReplyPrepView;
 import com.sellerops.attention.triage.ReviewTriageAuditRepository;
@@ -14,11 +15,14 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.common.ApiException;
+import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,6 +89,9 @@ class ReviewReplyServiceTest {
     private final UUID org = UUID.randomUUID();
     private final UUID user = UUID.randomUUID();
 
+    /** Pins the KST as-of date the recency bucket is computed against: 2026-05-12 KST. */
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-05-12T00:00:00Z"), ZoneOffset.UTC);
+
     /** A synthetic review body — never captured content. */
     private static final String BODY = "합성-리뷰-본문: 배송이 너무 늦었습니다";
 
@@ -104,7 +111,7 @@ class ReviewReplyServiceTest {
                         new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
                 new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
-                new RuleBasedReviewReplyProvider());
+                new RuleBasedReviewReplyProvider(), FIXED_CLOCK);
         triageService = new ReviewTriageService(triages, triageAudits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, triageAudits, txManager));
         naverChannel = seedChannel("NAVER", "네이버 스마트스토어");
@@ -212,6 +219,55 @@ class ReviewReplyServiceTest {
     void startingASubmissionRunMintsAnOpaqueRefBoundToTheApprovedHead() {
         String submissionRef = approveAndStart();
         assertThat(submissionRef).matches("[0-9a-f]{16}");
+    }
+
+    @Test
+    void guidedStartDerivesTheReviewTargetHintAndAnExplicitAsOfDate() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+
+        var response = service.startSubmissionRun(org, account, ref, user, true);
+
+        assertThat(response.submissionRef()).matches("[0-9a-f]{16}");
+        assertThat(response.asOfDate()).isEqualTo("2026-05-12"); // FIXED_CLOCK, KST date-only
+        assertThat(response.targetHint()).isNotNull();
+        assertThat(response.targetHint().rating()).isEqualTo(2);
+        // review receivedAt 2026-05-10 (KST) vs as-of 2026-05-12 → 2 days → THIS_WEEK.
+        assertThat(response.targetHint().recencyBucket()).isEqualTo("THIS_WEEK");
+        assertThat(response.targetHint().bodyFingerprint())
+                .isEqualTo(ReviewBodyFingerprint.of(BODY))
+                .matches("[0-9a-f]{64}");
+    }
+
+    @Test
+    void guidedStartValidatesTheHintBeforeMintingSoNoUnusableRefIsEverCreated() {
+        // A rating-less review cannot produce a valid hint. Approve it, then request a GUIDED run.
+        Review noRating = seedReview(org, naverChannel, null);
+        String ref0 = VocItemRef.forReview(noRating.getId());
+        triageService.decide(org, account, ref0, TriageDisposition.RESPONSE_NEEDED.name(),
+                UUID.randomUUID().toString(), user);
+        service.saveDraft(org, account, ref0, "합성-답변 초안", 0, user);
+        int version = service.view(org, account, ref0).draft().version();
+        service.decideApproval(org, account, ref0, "APPROVED", version, UUID.randomUUID().toString(), user);
+
+        assertThatThrownBy(() -> service.startSubmissionRun(org, account, ref0, user, true))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+        // The 409 fired BEFORE the mint — no submission-ref row was ever created.
+        assertThat(submissionRefRepo.count()).isZero();
+    }
+
+    @Test
+    void guidedStartResponseCarriesTheFingerprintButNeverTheRawBody() throws Exception {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+
+        var response = service.startSubmissionRun(org, account, ref, user, true);
+        String json = new ObjectMapper().writeValueAsString(response);
+
+        assertThat(json).contains(ReviewBodyFingerprint.of(BODY)).doesNotContain(BODY);
     }
 
     // --- guided submission: record (operator-reported, UNVERIFIED) -------------------
