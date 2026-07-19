@@ -12,6 +12,7 @@ import {
   classifyUrlCategory,
   countBucket,
   observeApiCenter,
+  observeApiCenterGuidedTutorial,
   observeApiCenterManualNavigation,
   observeFrom,
   observeSentinelPathFor,
@@ -293,6 +294,96 @@ describe("observeApiCenterManualNavigation — manual-navigation checkpoint (no 
     const flat = JSON.stringify(r);
     expect(flat).not.toContain("7"); // the raw readonly count is bucketed, never emitted
     expect(r.observation.signals.readonlyFieldCountBucket).toBe("many");
+  });
+});
+
+describe("observeApiCenterGuidedTutorial — two-step guided journey (login → app_list → app_detail)", () => {
+  const LOGIN = census({ passwordFieldPresent: true, editableTextInputCount: 1, formCount: 1 });
+  const APP_LIST = census({ listLikeContainerCount: 3 });
+  const APP_DETAIL = census({ editableTextInputCount: 3, formCount: 1 });
+  const CREDENTIAL = census({ readonlyFieldCount: 2 });
+
+  // readCensus (entry / login re-navigate) returns a scripted sequence; reReadCurrentCensus (the
+  // navigation checkpoint, which must NOT re-navigate) returns the seller's deeper page.
+  function guidedDeps(entryReads: ApiCenterStructuralCensus[], navRead: ApiCenterStructuralCensus) {
+    let i = 0;
+    return {
+      readCensus: vi.fn(async () => entryReads[Math.min(i++, entryReads.length - 1)]!),
+      reReadCurrentCensus: vi.fn(async () => navRead),
+      waitForManualLogin: vi.fn(async () => {}),
+      waitForManualNavigation: vi.fn(async () => {}),
+    };
+  }
+
+  it("cold login → app_list → app_detail: two sentinels, full safe path, app_detail reached", async () => {
+    const deps = guidedDeps([LOGIN, APP_LIST], APP_DETAIL);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["login", "app_list", "app_detail"]);
+    expect(r.observation.pageCategory).toBe("app_detail");
+    expect(r.loginCheckpointUsed).toBe(true);
+    expect(r.navigationCheckpointUsed).toBe(true);
+    expect(r.navigationTransition).toBe("category_changed");
+    // Login gate re-navigates (readCensus twice: entry + post-login); the navigation checkpoint re-reads the
+    // CURRENT page (reReadCurrentCensus once) so the seller's deeper page is preserved, never reset.
+    expect(deps.readCensus).toHaveBeenCalledTimes(2);
+    expect(deps.reReadCurrentCensus).toHaveBeenCalledTimes(1);
+    expect(deps.waitForManualLogin).toHaveBeenCalledTimes(1);
+    expect(deps.waitForManualNavigation).toHaveBeenCalledTimes(1);
+  });
+
+  it("cold login → app_list only: app_detail NOT calibrated (category_unchanged, both checkpoints used)", async () => {
+    const deps = guidedDeps([LOGIN, APP_LIST], APP_LIST);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["login", "app_list", "app_list"]);
+    expect(r.observation.pageCategory).toBe("app_list");
+    expect(r.navigationTransition).toBe("category_unchanged"); // the seller did not advance — progress not faked
+    expect(r.loginCheckpointUsed).toBe(true);
+    expect(r.navigationCheckpointUsed).toBe(true);
+  });
+
+  it("already-authenticated app_list → app_detail: ONE navigation checkpoint, no login wait", async () => {
+    const deps = guidedDeps([APP_LIST], APP_DETAIL);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["app_list", "app_detail"]);
+    expect(r.loginCheckpointUsed).toBe(false);
+    expect(r.navigationCheckpointUsed).toBe(true);
+    expect(r.navigationTransition).toBe("category_changed");
+    expect(deps.readCensus).toHaveBeenCalledTimes(1); // no login re-navigate
+    expect(deps.waitForManualLogin).not.toHaveBeenCalled();
+    expect(deps.waitForManualNavigation).toHaveBeenCalledTimes(1);
+  });
+
+  it("app_detail → credential_issuance still works as a one-checkpoint (separate fresh-G6) flow", async () => {
+    const deps = guidedDeps([APP_DETAIL], CREDENTIAL);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["app_detail", "credential_issuance"]);
+    expect(r.observation.pageCategory).toBe("credential_issuance");
+    expect(r.navigationTransition).toBe("category_changed");
+    expect(r.loginCheckpointUsed).toBe(false);
+  });
+
+  it("login persists after manual login → fail-closed, no navigation checkpoint", async () => {
+    const deps = guidedDeps([LOGIN, LOGIN], APP_DETAIL);
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    expect(r.path).toEqual(["login", "login"]);
+    expect(r.observation.pageCategory).toBe("login");
+    expect(r.loginCheckpointUsed).toBe(true);
+    expect(r.navigationCheckpointUsed).toBe(false);
+    expect(r.navigationTransition).toBe("none");
+    expect(deps.reReadCurrentCensus).not.toHaveBeenCalled();
+    expect(deps.waitForManualNavigation).not.toHaveBeenCalled();
+  });
+
+  it("emits only sanitized enums/buckets/booleans — no raw counts/values leak", async () => {
+    const deps = guidedDeps([APP_LIST], census({ readonlyFieldCount: 7 }));
+    const r = await observeApiCenterGuidedTutorial("api_center_host", deps);
+    const flat = JSON.stringify(r);
+    expect(flat).not.toContain("7"); // the raw readonly count is bucketed, never emitted
+    expect(r.observation.signals.readonlyFieldCountBucket).toBe("many");
+    // the path is coarse category enums only
+    for (const c of r.path) {
+      expect(["login", "app_list", "app_detail", "credential_issuance", "unknown"]).toContain(c);
+    }
   });
 });
 

@@ -291,6 +291,91 @@ export async function observeApiCenterManualNavigation(
   };
 }
 
+export interface GuidedTutorialResult {
+  /** The FINAL sanitized observation (after whichever checkpoints ran). */
+  observation: ApiCenterObservation;
+  /** Ordered coarse-category path: entry + each checkpoint re-read. Enums only, never a value/URL. */
+  path: ApiCenterPageCategory[];
+  waited: boolean;
+  /** The login checkpoint ran (entry was a login page and the seller logged in manually). */
+  loginCheckpointUsed: boolean;
+  /** The manual-navigation checkpoint ran (the seller navigated deeper manually). */
+  navigationCheckpointUsed: boolean;
+  /** Transition of the manual-navigation hop only (the seller advancing app_list → deeper). */
+  navigationTransition: NavigationTransition;
+}
+
+export interface GuidedTutorialDeps {
+  /** Read/RE-READ the ENTRY page as a sanitized census (production: navigate to url + settle + evaluate). */
+  readCensus: () => Promise<ApiCenterStructuralCensus>;
+  /** Re-read the CURRENT page WITHOUT navigating (production: settle + evaluate; the seller moved, not us). */
+  reReadCurrentCensus: () => Promise<ApiCenterStructuralCensus>;
+  /** Block until the seller signals they logged in manually (production: a sentinel file). */
+  waitForManualLogin: () => Promise<void>;
+  /** Block until the seller signals they navigated deeper manually (production: a sentinel file). */
+  waitForManualNavigation: () => Promise<void>;
+}
+
+/**
+ * Orchestrate the full first-time guided-tutorial journey with UP TO TWO manual checkpoints, so a cold
+ * dedicated profile that starts on a login page still gets a chance to reach `app_detail` — the single
+ * checkpoint in {@link observeApiCenterManualNavigation} was consumed by the manual login, leaving none for
+ * app_list → app_detail. **Pure over injected deps** (fully unit-tested offline with scripted censuses).
+ *
+ * Adaptive path (the tool NEVER navigates/clicks/types/reads a value — the SELLER does every real step):
+ *  1. Observe the entry page.
+ *  2. **Login checkpoint** — only when the entry is a `login` page: wait for the seller's manual login, then
+ *     RE-NAVIGATE to the entry (app-list) URL and re-read (login clears on the same URL after sign-in).
+ *  3. **Navigation checkpoint** — unless we are still stuck on a login page (fail-closed): wait for the
+ *     seller's manual navigation, then re-read the CURRENT page WITHOUT navigating (so a deeper
+ *     app_detail / credential-issuance page is preserved, not reset to the entry list).
+ *
+ * Resulting `path`s: `login → app_list → app_detail` (two checkpoints), `login → app_list → app_list`
+ * (app_detail NOT reached), `app_list → app_detail` (one checkpoint, already authenticated),
+ * `app_detail → credential_issuance` (one checkpoint), or `login → login` (login persisted, fail-closed).
+ */
+export async function observeApiCenterGuidedTutorial(
+  urlCategory: ApiCenterUrlCategory,
+  deps: GuidedTutorialDeps,
+): Promise<GuidedTutorialResult> {
+  const path: ApiCenterPageCategory[] = [];
+  let current = observeFrom(urlCategory, await deps.readCensus());
+  path.push(current.pageCategory);
+
+  let loginCheckpointUsed = false;
+  let navigationCheckpointUsed = false;
+
+  if (current.pageCategory === "login") {
+    await deps.waitForManualLogin();
+    loginCheckpointUsed = true;
+    current = observeFrom(urlCategory, await deps.readCensus());
+    path.push(current.pageCategory);
+  }
+
+  if (current.pageCategory !== "login") {
+    await deps.waitForManualNavigation();
+    navigationCheckpointUsed = true;
+    current = observeFrom(urlCategory, await deps.reReadCurrentCensus());
+    path.push(current.pageCategory);
+  }
+
+  let navigationTransition: NavigationTransition = "none";
+  if (navigationCheckpointUsed) {
+    const before = path[path.length - 2]!;
+    const after = path[path.length - 1]!;
+    navigationTransition = before === after ? "category_unchanged" : "category_changed";
+  }
+
+  return {
+    observation: current,
+    path,
+    waited: loginCheckpointUsed || navigationCheckpointUsed,
+    loginCheckpointUsed,
+    navigationCheckpointUsed,
+    navigationTransition,
+  };
+}
+
 /**
  * The in-page structural sweep, as a **string** IIFE evaluated in the browser (generic HTML only — no
  * NAVER selectors, no value reads). It MUST be a string, not a passed function: tsx/esbuild instruments
@@ -504,19 +589,24 @@ async function main(): Promise<void> {
 
   try {
     if (waitForNavigation) {
-      // Manual-navigation checkpoint: observe entry, wait for the seller's manual navigation, re-read the
-      // CURRENT page once (never re-navigates). Takes precedence if both wait flags are passed.
-      const result = await observeApiCenterManualNavigation(urlCategory, true, {
+      // Guided-tutorial flow: observe entry, then up to TWO manual checkpoints (login, then navigation) so a
+      // cold login start can still reach app_detail. The tool never navigates on the navigation checkpoint
+      // (preserves the seller's deeper page); it re-navigates only to resolve the login gate. Takes
+      // precedence if both wait flags are passed.
+      const result = await observeApiCenterGuidedTutorial(urlCategory, {
         readCensus,
         reReadCurrentCensus,
+        waitForManualLogin,
         waitForManualNavigation,
       });
       console.log(
         JSON.stringify(
           {
             ...result.observation,
-            fromPageCategory: result.fromPageCategory,
+            transitionPath: result.path,
             waited: result.waited,
+            loginCheckpointUsed: result.loginCheckpointUsed,
+            navigationCheckpointUsed: result.navigationCheckpointUsed,
             navigationTransition: result.navigationTransition,
           },
           null,
@@ -526,8 +616,10 @@ async function main(): Promise<void> {
       log("apiCenter.observe.done", {
         urlCategory: result.observation.urlCategory,
         pageCategory: result.observation.pageCategory,
-        fromPageCategory: result.fromPageCategory,
+        transitionPath: result.path.join(">"), // coarse enums only — safe to log
         waited: result.waited,
+        loginCheckpointUsed: result.loginCheckpointUsed,
+        navigationCheckpointUsed: result.navigationCheckpointUsed,
         navigationTransition: result.navigationTransition,
         blockerCount: result.observation.blockers.length,
       });
