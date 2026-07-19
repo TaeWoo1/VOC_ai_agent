@@ -79,9 +79,10 @@ describe("channelCardAction — driven by real account status", () => {
     ).toBe("다시 연결하기");
   });
 
-  it("no account: upload channel → upload; credential channel → notice; PREPARING → disabled", () => {
+  it("no account: upload channel → upload; NAVER → guided wizard; PREPARING → disabled", () => {
     expect(channelCardAction(fileChan, null, true, false).intent).toBe("upload");
-    expect(channelCardAction(naver, null, false, false).intent).toBe("notice");
+    // First-time NAVER routes to the guided-connection wizard, not a passive notice.
+    expect(channelCardAction(naver, null, false, false).intent).toBe("connect-naver");
     expect(channelCardAction({ ...naver, status: "PREPARING" }, null, false, false).disabled).toBe(
       true,
     );

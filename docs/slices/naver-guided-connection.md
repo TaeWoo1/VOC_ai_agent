@@ -1,7 +1,9 @@
 # Slice Contract — NAVER Guided Connection (Guided-Connection G3)
 
-> Status: **DRAFT — 제품 오너 리뷰 대기(2026-07-08).** 이 문서는 **assisted NAVER 가이드 연결 파일럿**의 G3
-> 실행 계약이다. 구현·커밋·라이브 NAVER 액션 없음. 대상은 **셀러 소유 NAVER 커머스 API 애플리케이션 발급
+> Status: **RATIFIED (v1, 2026-07-19) — 오프라인 구현 착수: G3-A + G3-B. G3-C/D 게이트 유지.**
+> (원 상태: DRAFT — 제품 오너 리뷰 대기 2026-07-08.) 비준 세부는 **§0**. 이 문서는 **assisted NAVER
+> 가이드 연결 파일럿**의 G3
+> 실행 계약이다. 오프라인 구현·로컬 커밋은 착수하되 **라이브 NAVER 액션은 없다**. 대상은 **셀러 소유 NAVER 커머스 API 애플리케이션 발급
 > 흐름**(type=SELF)이며, **미래 SellerOps 솔루션-제공자 OAuth 연동 모델로 문서화하지 않는다**
 > (`docs/product-scope-v1.md` §6.1). **실제 NAVER 사용은 마켓 정책 게이트 뒤에 유지**된다(§14).
 >
@@ -17,6 +19,34 @@
 **기본 렌더러 = ACTION_WINDOW**(`docs/slices/action-window-v1.md`, 승인된 기본 production 설계이나 미구현),
 **선택 렌더러 = PROJECTION**(G2 `a0e4f6f`, 채널·정책 게이트가 허용할 때만). **가이드 상태 엔진(§8)은 두
 렌더러가 공유**하며, **마켓별 로직이 PROJECTION에 직접 의존하지 않는다.**
+
+---
+
+## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
+
+제품 오너가 본 계약을 **NAVER SmartStore v1 흐름으로 비준**한다(우선순위 ① 현재 태스크 결정 +
+`docs/action-window-runtime/naver-smartstore-v1-plan.md`). 아래를 넘어서는 UX는 발명하지 않는다.
+
+- **착수 범위 = G3-A + G3-B (오프라인)**: 가이드 상태 엔진 + 합성 흐름(§19 G3-A), 안전 자격증명 등록·연결
+  테스트·첫 sync를 **기존 백엔드 경계 어댑터/합성**으로(§19 G3-B). **G3-C(라이브 정찰)·G3-D(하드닝)은 여전히
+  게이트** — 별도 PO 승인 + 단일-사용 G6 + §14 정책 해명 선결. **라이브 NAVER·브라우저·원격 git 없음.**
+- **가이드-여정 상태 머신 = FE 소유 순수 모듈**(`frontend/src/lib/guidedConnection/`, 렌더러-중립,
+  오프라인). §8 의미 상태를 그대로 따르되 **라이브 DOM 감지(§9)는 G3-C까지 유예** — G3-A/B에서 발급 하위
+  단계는 **사용자-구동 가이드 전이**(합성 픽스처)로 진행하고 FE는 라이브 상태를 감지하지 않는다. 이는
+  frontend/CLAUDE.md의 "runtime owns semantic state"와 **충돌하지 않는다**: 본 상태는 AW **런(run)** 계약이
+  아니라 **온보딩 여정** 오케스트레이션이며, sanitized 신호(페어링 상태·API 결과)만 소비한다.
+- **[CONFLICT 해소] 리뷰 export 준비 스텝**: DRAFT §16은 NAVER 리뷰 수집을 G3 범위 밖(Action Window 별도
+  트랙)으로 둔다. v1 위저드는 **"리뷰 export 준비(readiness) 스텝"**을 포함하되, 이는 리뷰 수집을 G3 안에서
+  재구현하는 것이 **아니라** 연결 완료 후 **기존 라이브-검증된 Action Window export 트랙으로의 준비/핸드오프
+  표시**다(실제 수집·클릭·다운로드는 여전히 AW 트랙·감독형·게이트). 근거: 우선순위 ① + v1 plan §7.
+- **재사용(신규 백엔드 능력 없음)**: 기존 백엔드 경계(`credentials`/`test-connection`/`sync`), FE apiClient,
+  bridge 페어링 상태, 기존 연결-상태 어휘(§3.2의 3종은 발명·통합하지 않고 완료 시 매핑만 — 통합은 별도 과제).
+- **불변식 계승(테스트 강제)**: Secret 무영속·무로깅(§11·§17.4), 사용자 결정 건너뛰기 금지(§17.2), 미지 상태
+  **fail-closed**(§17.3), `completed`는 **등록+테스트+sync 후에만**(§12), **0건 vs 실패 구분**(§12). 자동
+  로그인·Secret 추출·클립보드·2FA/CAPTCHA 우회·**cropped/projection UI 없음**(v1 기본 = 실제 로컬 Chrome +
+  Action Window 오버레이).
+- **구현 위치**: `frontend/src/lib/guidedConnection/*`(순수 상태 머신·타입·합성 픽스처) +
+  `frontend/src/` 위저드 UI. **검증: FE typecheck + 단위 테스트(§18) — 라이브 NAVER 불필요(§17.10).**
 
 ---
 
