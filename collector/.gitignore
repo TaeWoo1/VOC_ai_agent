@@ -1,5 +1,6 @@
-# Dependencies / build
-node_modules/
+# Dependencies / build. NO trailing slash: in some worktrees this is a SYMLINK to a shared install, and a
+# `node_modules/` pattern matches directories only — leaving an absolute-path symlink stageable by `git add -A`.
+node_modules
 
 # Local browser profile (holds the user's NAVER session — must NEVER be committed)
 .profile/
@@ -31,3 +32,6 @@ findings/*.local.md
 
 # Action Window artifact quarantine (temporary validation saves, delete-after-validate; local only)
 .aw-quarantine/
+
+# Review-id reconciliation probe records (sanitized counts/enums only, but agent-local; never committed)
+.review-id-runs/

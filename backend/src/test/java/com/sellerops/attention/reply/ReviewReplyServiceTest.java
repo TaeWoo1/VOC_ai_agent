@@ -16,6 +16,7 @@ import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.ReviewBodyFingerprint;
+import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
@@ -1014,5 +1015,36 @@ class ReviewReplyServiceTest {
         assertThat(v.redactedBody()).contains("[전화번호]").doesNotContain("1234");
         // Not the 60-char preview: the operator gets the whole complaint.
         assertThat(v.redactedBody().length()).isGreaterThan(200);
+    }
+
+    // --- channel review-id identity (review-id-fingerprint/v1) -----------------------
+
+    @Test
+    void prepViewCarriesAOneWayIdentityFingerprintAndNeverTheRawChannelId() {
+        // A 10-digit id, the shape a NAVER review export's 리뷰글번호 column carries.
+        String channelReviewId = "4185720931";
+        review.setExternalId(channelReviewId);
+        reviews.save(review);
+
+        ReviewReplyPrepView v = view();
+
+        assertThat(v.channelReviewIdFingerprint())
+                .isEqualTo(ReviewIdFingerprint.of(channelReviewId))
+                .matches("[0-9a-f]{64}");
+        // The whole point: the raw id must not be reachable from this response.
+        assertThat(v.toString()).doesNotContain(channelReviewId);
+        // And it is a DIFFERENT contract from the body fingerprint, for the same review.
+        assertThat(v.channelReviewIdFingerprint()).isNotEqualTo(ReviewBodyFingerprint.of(BODY));
+    }
+
+    @Test
+    void prepViewIdentityIsNullWhenTheReviewWasIngestedWithoutAChannelId() {
+        // The seeded review has no external id — the runtime must see "no identity", never a fabricated one.
+        assertThat(view().channelReviewIdFingerprint()).isNull();
+    }
+
+    @Test
+    void prepViewCarriesTheCoarseRatingAsTheSecondaryFact() {
+        assertThat(view().rating()).isEqualTo(2);
     }
 }

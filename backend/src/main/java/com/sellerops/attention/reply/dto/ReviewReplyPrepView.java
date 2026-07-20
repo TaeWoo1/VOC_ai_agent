@@ -29,9 +29,23 @@ package com.sellerops.attention.reply.dto;
  * explain WHY an affordance is unavailable ("대응 필요일 때만 저장할 수 있습니다") instead of
  * showing a dead control with no reason. It is the same value the attention row carries.
  *
- * <p>Deliberately carries no customer identity, no order/product identifier, no channel-side
- * id, and no raw timestamp beyond the draft's and approval's own — every field it does not
- * carry is a field that cannot leak.
+ * <p>{@code channelReviewIdFingerprint} is a one-way {@code review-id-fingerprint/v1} digest of the
+ * review's channel-side id ({@code reviews.external_id}; for NAVER, the export's {@code 리뷰글번호}),
+ * or null when the review was ingested without one. It exists so a guided runtime can prove the row
+ * it is looking at in the seller center is <b>this</b> review — an identity match, rather than the
+ * coarse (rating, date-bucket, body-fingerprint) narrowing the target hint supports — <b>without the
+ * raw id ever crossing this boundary</b>. It is domain-separated, so it can never be confused with
+ * the body fingerprint. See {@code contracts/review-id-fingerprint/v1/SPEC.md}, including its honest
+ * note that a 10-digit id space is enumerable: this is leak hygiene, not a privacy guarantee.
+ *
+ * <p>{@code rating} is the review's coarse 1..5 star rating, or null when the source row carried none.
+ * It is the non-identifying secondary fact a guided runtime asserts <b>after</b> an identity match, to
+ * catch a stale candidate set. It adds no new exposure: the same value is already on the attention row
+ * ({@code OperatorVocItem.rating}) and in the target hint.
+ *
+ * <p>Deliberately carries no customer identity, no order/product identifier, no <b>raw</b>
+ * channel-side id, and no raw timestamp beyond the draft's and approval's own — every field it does
+ * not carry is a field that cannot leak.
  */
 public record ReviewReplyPrepView(
         String actionRef,
@@ -42,5 +56,7 @@ public record ReviewReplyPrepView(
         ReviewReplyDraftView draft,
         ReviewReplyApprovalView approval,
         ReviewReplyOutcomeView outcome,
-        ReviewReplyCapabilities capabilities) {
+        ReviewReplyCapabilities capabilities,
+        String channelReviewIdFingerprint,
+        Integer rating) {
 }

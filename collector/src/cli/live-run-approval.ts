@@ -57,6 +57,54 @@ export const SESSION_RECOVERY_FLAG = "--session-recovery";
  */
 export const REPLY_APPROVAL_FLAG = "--i-understand-this-posts-a-live-naver-reply";
 
+/**
+ * Review-id reconciliation probe only: the explicit per-run approval for a **READ-ONLY** live NAVER
+ * inspection. A third separate constant, for the same reason the reply flag is separate from the export
+ * flag — authorization must name what it authorizes. This one authorizes strictly less than either: the
+ * runtime reads the DOM and outlines one row. It never clicks, navigates, types, pastes, opens a composer,
+ * or submits, and it triggers no export and no download.
+ *
+ * Because it is the weakest authorization, it must never be accepted as a substitute for the other two,
+ * and neither of them may stand in for it — a mutating flag on this CLI is a REFUSAL, not a permission.
+ */
+export const REVIEW_ID_PROBE_FLAG = "--i-understand-this-inspects-live-naver-read-only";
+
+/** Did the operator pass the explicit read-only review-id probe approval flag? */
+export function hasReviewIdProbeApproval(args: string[]): boolean {
+  return args.includes(REVIEW_ID_PROBE_FLAG);
+}
+
+/** Operator-facing refusal shown when the read-only probe approval flag is missing. */
+export function reviewIdProbeApprovalRequiredMessage(): string {
+  return [
+    "Refusing to open a LIVE NAVER session without explicit per-run approval.",
+    "",
+    "  - This is a READ-ONLY inspection: it reads the review list's DOM and outlines one matched row.",
+    "  - It never clicks, navigates, types, pastes, opens a composer, or submits.",
+    "  - No export is triggered and no file is downloaded.",
+    "  - A human performs login / 2FA / CAPTCHA and all filtering.",
+    "  - Use only a user-owned test seller account.",
+    "",
+    "Re-run with the read-only approval flag:",
+    `  npx tsx src/cli/run-review-id-reconciliation-live-naver.ts -- ${REVIEW_ID_PROBE_FLAG}`,
+  ].join("\n");
+}
+
+/**
+ * Refusal shown when a MUTATING approval flag is passed to the read-only probe. It corrects the operator's
+ * model rather than silently accepting a stronger grant: authorization is scoped to an action, and a grant
+ * for a different action is not a superset here — it is evidence the wrong CLI is being run.
+ */
+export function mutatingFlagOnReadOnlyProbeMessage(flag: string): string {
+  return [
+    `Refusing: ${flag} authorizes a MUTATING run and does NOT authorize this read-only inspection.`,
+    "",
+    "  - Approval names the action it approves. A reply/export grant on a read-only probe means the",
+    "    intended CLI and the invoked CLI disagree — that is a mistake worth stopping for.",
+    `  - To run this probe, pass only ${REVIEW_ID_PROBE_FLAG}.`,
+  ].join("\n");
+}
+
 /** Did the operator pass the explicit live-run approval flag? */
 export function hasLiveRunApproval(args: string[]): boolean {
   return args.includes(APPROVAL_FLAG);

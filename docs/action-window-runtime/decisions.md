@@ -746,3 +746,48 @@ this finding. It does **not** establish cross-source fingerprint equality (B1 st
 end-to-end submission (terminal `UNVERIFIED`, [D-032](decisions.md)(b)). *Boundary:* this entry records a live
 finding + defensive test coverage only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6,
 G2-write, P6/P12) still applies per-run and this entry authorizes no live action.
+
+## D-036 · ACTIVE — the NAVER review row DOES carry the channel review id, but only where the row is RENDERED (2026-07-20, live-evidence-driven)
+
+**Context.** Until now the guided runtime could find a live review row only by coarse hint matching
+(`rating` + `recencyBucket` + `bodyFingerprint`) or by operator calibration ([D-033](decisions.md)). Neither is
+an identity match. Meanwhile the imported export already carries `리뷰글번호`, which lands untransformed in
+`reviews.external_id` and is the primary dedup key — the two halves had never been reconciled.
+
+**Finding (operator-confirmed, two supervised READ-ONLY live runs; see
+[the run record](r4-review-id-reconciliation-run-record.md)).** The live NAVER review row **does** expose the
+channel review id, as **plain rendered text in the `리뷰글번호` column**. The imported id and the live id are
+**the same id** — proven by `review-id-fingerprint/v1` digests compared in memory, with the raw id never
+present in the probe process at all.
+
+**The qualification is the substance of this decision.** The review list is horizontally scrollable and that
+column renders lazily: with it off-screen its cells are **not in the DOM**, and an otherwise-identical scan
+returned `ZERO_MATCH` (`idrun_34686ac82c82`) while the id was simultaneously **present in the review-list
+network response**. Scrolling the column into view turned the same code path into an exact,
+operator-confirmed, single-row match (`idrun_b00209b6f66d`). So:
+
+- **"Not found on the row" is not evidence that the surface does not expose it** on a lazily-rendered list.
+  Any negative must be reported with what was actually scanned. The ladder now returns `rowsTruncated` /
+  `tokensTruncated`, the probe reports rows-scanned per rung, and it suppresses the "does not expose"
+  wording whenever a cap bit.
+- The probe therefore **rescans in-session** on operator view adjustment (bounded). The runtime still never
+  scrolls or clicks — the operator moves the view, the runtime re-reads it.
+- The scan widens from the innermost row container to the outermost ancestor that contains **that row and no
+  other**, so a wrapper-borne id is attributed to exactly one row and can never create a second claimant.
+
+**Decision.** Identity matching keyed by `(channel, sellerAccountId, channelReviewId)` is **viable on this
+surface** and is the strongest of the three row-match modes. `ROW_MATCH_MODES` records all three with
+`operator-calibrated` and `target-hint` explicitly labelled **non-identity**; neither may be reported as
+equivalent to an id match, and the probe refuses to fall back to them.
+
+**Non-claims (do not broaden).**
+- The `sellerAccountId` half of the key is **asserted by the request bundle, never verified against the open
+  session** (`reviews` has no `seller_account_id`, deliberately). `CONTEXT_MISMATCH` cannot fire in this flow;
+  the run record states this in its own field. **Review identity only.**
+- `상품주문번호` was deliberately **not** used as a key: it is not the imported identity and
+  `docs/review_acquisition.md` classifies it High sensitivity.
+- One supervised target, one account, one channel, one filter. No reply/composer/submission progress; B1 stays
+  `[EXT]`; nothing was minted, posted, or downloaded.
+
+*Boundary:* this entry records a live finding and the read-only probe that produced it. Every live-run gate
+([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.
