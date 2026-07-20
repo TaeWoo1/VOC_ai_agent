@@ -171,6 +171,12 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     // Composer abort rehearsal: the retained-composer driver + its in-page scripts (read-only, no submit).
     "handle-reply-composer-driver.ts": resolve(SRC, "handle-reply-composer-driver.ts"),
     "reply-composer-inpage.ts": resolve(SRC, "reply-composer-inpage.ts"),
+    // Review-id reconciliation: the identity contract, the exact locator, and the read-only discovery ladder.
+    "review-id-fingerprint.ts": resolve(SRC, "review-id-fingerprint.ts"),
+    "review-id-fingerprint-inpage.ts": resolve(SRC, "review-id-fingerprint-inpage.ts"),
+    "review-id-locator.ts": resolve(SRC, "review-id-locator.ts"),
+    "review-id-network-scan.ts": resolve(SRC, "review-id-network-scan.ts"),
+    "review-id-probe-inpage.ts": resolve(SRC, "review-id-probe-inpage.ts"),
   };
 
   for (const [name, path] of Object.entries(files)) {
@@ -221,6 +227,58 @@ describe("run-composer-abort-rehearsal-live-naver CLI — source guard (no submi
   const code = codeOnly(resolve(SRC, "../../../src/cli/run-composer-abort-rehearsal-live-naver.ts"));
   it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
     expect(code).not.toContain(token);
+  });
+});
+
+/**
+ * The read-only review-id probe CLI holds the WEAKEST authorization in the runtime, and its guard is
+ * correspondingly the strictest. It legitimately imports the backend client (`../upload`) to read the
+ * identity fingerprint, so the "no downstream import" rule does not apply — but beyond never
+ * submitting/typing/clicking, it must not navigate after the session is opened, and it must not reach the
+ * composer surface at all.
+ */
+describe("run-review-id-reconciliation-live-naver CLI — source guard (read-only, single goto, no composer)", () => {
+  const path = resolve(SRC, "../../../src/cli/run-review-id-reconciliation-live-naver.ts");
+  const code = codeOnly(path);
+
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each([".goBack(", ".goForward(", ".reload(", "waitForNavigation", "window.open"])(
+    "never drives navigation (%s)",
+    (token) => {
+      expect(code).not.toContain(token);
+    },
+  );
+
+  it("navigates exactly once, and only to the configured review URL", () => {
+    const gotos = code.split("\n").filter((l) => l.includes(".goto("));
+    expect(gotos).toHaveLength(1);
+    expect(gotos[0]).toContain("cfg.naverReviewUrl");
+  });
+
+  // The word "composer" appears in the operator-facing prose ("never ... opens a composer"), which is the
+  // point; what must be absent is any composer MACHINERY.
+  it.each([
+    "reply-composer-inpage",
+    "handle-reply-composer-driver",
+    "ARM_COMPOSER_CAPTURE",
+    "renderDraftOverlay",
+    "fetchApprovedReplyDraft",
+  ])("never reaches the composer surface — this milestone stops at the row (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it("imports only the read-only identity reader from the backend client", () => {
+    const uploadImport = code
+      .split("\n")
+      .filter((l) => l.includes('from "../upload"'))
+      .join("");
+    expect(uploadImport).toContain("fetchReviewIdentityFingerprint");
+    expect(uploadImport).not.toContain("startReplySubmissionRun");
+    expect(uploadImport).not.toContain("submitReplyOutcome");
+    expect(uploadImport).not.toContain("uploadReview");
   });
 });
 

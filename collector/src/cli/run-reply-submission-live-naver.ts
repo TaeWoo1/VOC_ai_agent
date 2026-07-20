@@ -23,6 +23,7 @@
  * is offline and hermetic; the gate keeps `main()` from launching anything on a refusal.**
  */
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { currentKstDate } from "./kst-date";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -123,13 +124,13 @@ export function replyRunModeFrom(args: readonly string[]): ReplyRunMode {
 /* ─────────────── Reply-target bundle intake (permission-restricted file, never argv) ─────────────── */
 
 /**
- * Today's KST calendar date (`YYYY-MM-DD`). KST is UTC+9 with no DST. This is the ONE wall-clock read in the
- * flow — permitted here at the CLI boundary, never in library code — and it is what the result bundle's
- * `asOfDate` is checked against, so a bundle minted on a prior KST day is rejected as EXPIRED.
+ * Today's KST calendar date (`YYYY-MM-DD`) — the ONE wall-clock read in the flow, permitted here at the CLI
+ * boundary and never in library code. It is what the result bundle's `asOfDate` is checked against, so a
+ * bundle minted on a prior KST day is rejected as EXPIRED.
+ *
+ * Re-exported from {@link ./kst-date} so another CLI can take the date without importing this whole module.
  */
-export function currentKstDate(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
+export { currentKstDate };
 
 /* ─────────────────── Automated operator client (v2) ─────────────────── */
 

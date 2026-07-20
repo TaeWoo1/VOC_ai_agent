@@ -17,6 +17,7 @@ import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.ApiException;
 import com.sellerops.common.RedactedBody;
 import com.sellerops.common.ReviewBodyFingerprint;
+import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
@@ -436,7 +437,11 @@ public class ReviewReplyService {
                 head == null ? null : ReviewReplyDraftView.of(head),
                 approvalView(review.getId(), approval, capabilities.canCopy()),
                 outcomeView(orgId, review.getId(), approval, approved),
-                capabilities);
+                capabilities,
+                // One-way; null when the review was ingested without a channel-side id. The raw
+                // external id is read here and immediately digested — it never reaches the response.
+                ReviewIdFingerprint.of(review.getExternalId()),
+                review.getRating());
     }
 
     /**

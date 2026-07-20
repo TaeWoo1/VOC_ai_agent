@@ -19,7 +19,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome" | "replyDraft",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome" | "replyDraft" | "reviewIdentity",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -209,6 +209,56 @@ export async function fetchApprovedReplyDraft(
   // Presence flags only — NEVER the draft text, and never the review body it discarded.
   log("reply.draft.fetched", { hasDraft: draftBody != null, approved });
   return { draftBody, draftVersion, approved };
+}
+
+/**
+ * The one-way identity fingerprint of a review's channel-side id (`review-id-fingerprint/v1`), read from the
+ * SAME `GET .../reply` view. Deliberately its own tiny result type and its own reader, separate from
+ * {@link ApprovedReplyDraft}: the identity path and the draft path have different purposes and different
+ * safety properties, and neither should widen to carry the other's data.
+ */
+export interface ReviewIdentityFingerprint {
+  /** 64-hex `review-id-fingerprint/v1` digest, or null when the review was ingested without a channel id. */
+  channelReviewIdFingerprint: string | null;
+  /** The coarse 1..5 rating — the secondary fact asserted AFTER an identity match. Null when unknown. */
+  rating: number | null;
+}
+
+/**
+ * Read the reply-preparation view for one review and return ONLY the channel review-id fingerprint. Everything
+ * else the endpoint returns — the redacted review body, the draft text, the suggestion — is discarded here and
+ * never surfaced. The backend never sends the raw channel id, so no raw identifier exists on this path at all;
+ * the success log records presence only.
+ */
+export async function fetchReviewIdentityFingerprint(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ReviewIdentityFingerprint> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply`;
+  const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new UploadError("review identity fetch failed", "reviewIdentity", res.status);
+  // A non-JSON body (a proxy error page, an HTML login redirect) must not surface as a SyntaxError whose
+  // message quotes that body — the caller prints errors, and a body snippet is exactly what must not appear.
+  let view: { channelReviewIdFingerprint?: unknown; rating?: unknown };
+  try {
+    view = (await res.json()) as { channelReviewIdFingerprint?: unknown; rating?: unknown };
+  } catch {
+    throw new UploadError("review identity response was not JSON", "reviewIdentity", res.status);
+  }
+  const raw = view.channelReviewIdFingerprint;
+  // Fail closed on anything that is not a lowercase 64-hex digest — a malformed value must never be
+  // treated as an identity, and must never be echoed back in a log line.
+  const fingerprint = typeof raw === "string" && /^[0-9a-f]{64}$/.test(raw) ? raw : null;
+  const rating =
+    typeof view.rating === "number" && Number.isInteger(view.rating) && view.rating >= 1 && view.rating <= 5
+      ? view.rating
+      : null;
+  log("reply.identity.fetched", { hasChannelReviewId: fingerprint != null, hasRating: rating != null });
+  return { channelReviewIdFingerprint: fingerprint, rating };
 }
 
 /**

@@ -87,7 +87,9 @@ class OperatorReviewReplyControllerTest {
                 new ReviewReplyApprovalView("APPROVED", 1, "f".repeat(64), "합성-초안",
                         Instant.parse("2026-07-17T00:00:00Z")),
                 null,
-                new ReviewReplyCapabilities(false, false, true, true, false));
+                new ReviewReplyCapabilities(false, false, true, true, false),
+                "a".repeat(64),
+                1);
     }
 
     @Test

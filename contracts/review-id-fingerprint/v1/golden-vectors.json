@@ -1,0 +1,293 @@
+{
+  "spec": "review-id-fingerprint/v1",
+  "note": "Synthetic vectors only - no real seller review ids. `raw` and `canonical` are JSON strings; exotic code points appear as \\u escapes. fingerprint = lowercase hex sha256 of the UTF-8 bytes of ('review-id-fingerprint/v1' + LF + canonical), or null when the canonical form is malformed (empty, longer than 120, embedded whitespace, or a C0/C1 control).",
+  "cases": [
+    {
+      "name": "naver-10-digit",
+      "raw": "1234567890",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ascii-space-padded",
+      "raw": "  1234567890  ",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "newline-padded",
+      "raw": "\n1234567890\r\n",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ideographic-space-padded",
+      "raw": "\u30001234567890\u3000",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "nbsp-padded",
+      "raw": "\u00a01234567890\u00a0",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "zero-width-inside",
+      "raw": "12345\u200b67890",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "bom-prefixed",
+      "raw": "\ufeff1234567890",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "alphanumeric-id",
+      "raw": "R-2026-0001",
+      "canonical": "R-2026-0001",
+      "wellFormed": true,
+      "fingerprint": "8220cdcf919320cb6d7a55fd1cf62cf75b00c194c3293684c65462123d51c316"
+    },
+    {
+      "name": "nfd-normalizes-to-nfc",
+      "raw": "\u1100\u1161-1",
+      "canonical": "\uac00-1",
+      "wellFormed": true,
+      "fingerprint": "bdf94916b84e2724b443790ffb206c3abc6e650f7d61bc1f9a70d7699055a698"
+    },
+    {
+      "name": "nfc-equivalent",
+      "raw": "\uac00-1",
+      "canonical": "\uac00-1",
+      "wellFormed": true,
+      "fingerprint": "bdf94916b84e2724b443790ffb206c3abc6e650f7d61bc1f9a70d7699055a698"
+    },
+    {
+      "name": "max-length-120",
+      "raw": "999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "canonical": "999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "wellFormed": true,
+      "fingerprint": "64aca352f37aec369346d7eee8153e73c96d6f970173e9efeb855adc71ff359e"
+    },
+    {
+      "name": "empty",
+      "raw": "",
+      "canonical": "",
+      "wellFormed": false,
+      "fingerprint": null
+    },
+    {
+      "name": "whitespace-only",
+      "raw": "   ",
+      "canonical": "",
+      "wellFormed": false,
+      "fingerprint": null
+    },
+    {
+      "name": "internal-space",
+      "raw": "123 456",
+      "canonical": "123 456",
+      "wellFormed": false,
+      "fingerprint": null
+    },
+    {
+      "name": "control-char",
+      "raw": "12\u000034",
+      "canonical": "12\u000034",
+      "wellFormed": false,
+      "fingerprint": null
+    },
+    {
+      "name": "too-long-121",
+      "raw": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "canonical": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "wellFormed": false,
+      "fingerprint": null
+    },
+    {
+      "name": "ws-u0009-padded",
+      "raw": "\t1234567890\t",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u000a-padded",
+      "raw": "\n1234567890\n",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u000b-padded",
+      "raw": "\u000b1234567890\u000b",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u000c-padded",
+      "raw": "\f1234567890\f",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u000d-padded",
+      "raw": "\r1234567890\r",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u0020-padded",
+      "raw": " 1234567890 ",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u0085-padded",
+      "raw": "\u00851234567890\u0085",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u00a0-padded",
+      "raw": "\u00a01234567890\u00a0",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u1680-padded",
+      "raw": "\u16801234567890\u1680",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2000-padded",
+      "raw": "\u20001234567890\u2000",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2001-padded",
+      "raw": "\u20011234567890\u2001",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2002-padded",
+      "raw": "\u20021234567890\u2002",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2003-padded",
+      "raw": "\u20031234567890\u2003",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2004-padded",
+      "raw": "\u20041234567890\u2004",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2005-padded",
+      "raw": "\u20051234567890\u2005",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2006-padded",
+      "raw": "\u20061234567890\u2006",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2007-padded",
+      "raw": "\u20071234567890\u2007",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2008-padded",
+      "raw": "\u20081234567890\u2008",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2009-padded",
+      "raw": "\u20091234567890\u2009",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u200a-padded",
+      "raw": "\u200a1234567890\u200a",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2028-padded",
+      "raw": "\u20281234567890\u2028",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u2029-padded",
+      "raw": "\u20291234567890\u2029",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u202f-padded",
+      "raw": "\u202f1234567890\u202f",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u205f-padded",
+      "raw": "\u205f1234567890\u205f",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    },
+    {
+      "name": "ws-u3000-padded",
+      "raw": "\u30001234567890\u3000",
+      "canonical": "1234567890",
+      "wellFormed": true,
+      "fingerprint": "f824b9835a0e1fd928837ff52c14ed82ce9ac5ce06c3a66c470a84ffbf220723"
+    }
+  ]
+}
