@@ -226,7 +226,7 @@ describe("capture-esm-review — Gate 5 / Slice 5A opt-in composite-key emit (--
     expect((code.match(/waitForEvent\s*\(\s*["']download["']/g) ?? []).length).toBe(1);
   });
 
-  it("adds NO upload / DB / status / scheduler", () => {
+  it("adds NO upload / DB / status / scheduler (composite-key path)", () => {
     for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
       expect(code.includes(token)).toBe(false);
     }
@@ -265,9 +265,67 @@ describe("capture-esm-review — Slice 2b opt-in header-label capture (--capture
     expect((code.match(/waitForEvent\s*\(\s*["']download["']/g) ?? []).length).toBe(1);
   });
 
-  it("adds NO upload / DB / status / scheduler", () => {
+  it("adds NO upload / DB / status / scheduler (header-label path)", () => {
     for (const token of ["uploadReviewFile", "writeStatus", "runExport", "manualSync", "scheduler", "setInterval", "cron"]) {
       expect(code.includes(token)).toBe(false);
     }
+  });
+});
+
+describe("capture-esm-review — required marketplace attribution", () => {
+  const code = stripComments(readFileSync(CLI_PATH, "utf8"));
+
+  it("REQUIRES an explicit --marketplace and fails closed when missing/invalid", () => {
+    expect(/--marketplace GMARKET\|AUCTION/.test(code)).toBe(true);
+    expect(/parseMarketplaceArg\s*\(/.test(code)).toBe(true);
+    expect(/marketplace === null/.test(code)).toBe(true);
+  });
+
+  it("verifies the marketplace BEFORE any export scan/click (no export before verification)", () => {
+    // Call sites (with "(") — not the comma-terminated import list.
+    const gateAt = code.indexOf("marketplaceGateOutcome(");
+    const decideAt = code.indexOf("decideApprovedCapture(");
+    const clickAt = code.search(/\.click\s*\(/);
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(decideAt); // verified before the approved-index decision
+    expect(gateAt).toBeLessThan(clickAt); // and before the click
+  });
+
+  it("re-checks the marketplace IMMEDIATELY before the export click (fails closed on reset)", () => {
+    expect(/preClickMarketplace/.test(code)).toBe(true);
+    expect(/marketplace-reset/.test(code)).toBe(true);
+    const preClickAt = code.indexOf("preClickMarketplace !== marketplace");
+    const clickAt = code.search(/\.click\s*\(/);
+    expect(preClickAt).toBeGreaterThan(-1);
+    expect(preClickAt).toBeLessThan(clickAt);
+  });
+
+  it("never auto-clicks a marketplace tab — the single click is still the approved-index locator", () => {
+    expect((code.match(/\.click\s*\(/g) ?? []).length).toBe(1);
+    expect(/\[data-sellerops-esm-cap-index="\$\{approvedIndex\}"\]/.test(code)).toBe(true);
+  });
+
+  it("both-tabs-selected (AMBIGUOUS) fails closed; UNKNOWN/mismatch prompts the ready signal once", () => {
+    expect(/AMBIGUOUS_FAIL/.test(code)).toBe(true);
+    expect(/marketplace-ambiguous/.test(code)).toBe(true);
+    expect(/MARKETPLACE_SELECTION_REQUIRED/.test(code)).toBe(true);
+    expect(/esmMarketplaceReadyPathFor\s*\(/.test(code)).toBe(true);
+    // The marketplace-ready signal is waited on and consumed (removed) after each use. (The read-only
+    // --observe-marketplace A/B branch reuses the same signal for snapshot B, so ≥1 wait sites exist.)
+    expect((code.match(/waitForSentinel\s*\(\s*marketplaceReadyPath/g) ?? []).length).toBeGreaterThanOrEqual(1);
+    expect(/removeSentinel\(marketplaceReadyPath\)/.test(code)).toBe(true);
+  });
+
+  it("carries the VERIFIED sourceMarketplace into the capture result (never inferred, only on success)", () => {
+    expect(/sourceMarketplace:\s*marketplace/.test(code)).toBe(true);
+    expect(/marketplaceVerified:\s*true/.test(code)).toBe(true);
+    expect(/marketplaceVerificationMethod/.test(code)).toBe(true);
+    // Stops carry the REQUESTED marketplace, never a claimed sourceMarketplace.
+    expect(/requestedMarketplace:\s*marketplace/.test(code)).toBe(true);
+  });
+
+  it("does not infer marketplace from loginMode / channel code / connection id", () => {
+    expect(/marketplace\s*[:=]\s*loginMode/.test(code)).toBe(false);
+    expect(/marketplace\s*[:=]\s*connectionId/.test(code)).toBe(false);
   });
 });

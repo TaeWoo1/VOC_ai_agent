@@ -19,10 +19,22 @@ import { dirname, resolve } from "node:path";
 export const ESM_SENTINEL_FILENAME = "classify-esm-review.ready";
 
 /**
+ * The operator's per-run "the requested marketplace tab is now selected" signal, DISTINCT from the
+ * capture-ready sentinel so one can never satisfy the other. Created once by the operator after a
+ * `MARKETPLACE_SELECTION_REQUIRED` prompt; the capture CLI consumes it once and re-inspects.
+ */
+export const ESM_MARKETPLACE_READY_FILENAME = "esm-marketplace-ready.ready";
+
+/**
  * Resolve the absolute ESM sentinel path next to the collector's status file, so it
  * lands in the same `.status/` directory the rest of the live layer uses (and honours
  * a `COLLECTOR_STATUS_FILE` override). Pass `cfg.statusFile`.
  */
 export function esmSentinelPathFor(statusFile: string): string {
   return resolve(dirname(resolve(statusFile)), ESM_SENTINEL_FILENAME);
+}
+
+/** The marketplace-ready signal path (same `.status/` dir as {@link esmSentinelPathFor}). */
+export function esmMarketplaceReadyPathFor(statusFile: string): string {
+  return resolve(dirname(resolve(statusFile)), ESM_MARKETPLACE_READY_FILENAME);
 }

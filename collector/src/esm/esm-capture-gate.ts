@@ -45,6 +45,11 @@ export type CaptureStop =
   | "row-shape-inspect-failed"
   // Slice-2b header-LABEL capture addition (only reachable under `--capture-review-headers`):
   | "header-capture-failed"
+  // Marketplace-attribution additions (verified BEFORE any export scan/click):
+  | "marketplace-ambiguous"
+  | "marketplace-ready-timeout"
+  | "marketplace-unverified"
+  | "marketplace-reset"
   | "delete-failed";
 
 /** Coarse category of an in-frame candidate, by accessible-text class (never the text). */
