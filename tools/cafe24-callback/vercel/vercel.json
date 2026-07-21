@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/cafe24/callback", "destination": "/api/cafe24/callback" }
+  ]
+}
