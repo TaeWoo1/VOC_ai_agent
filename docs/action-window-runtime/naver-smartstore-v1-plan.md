@@ -200,11 +200,12 @@ selector). See §8.
 |---|---|---|---|---|
 | B1 | **Cross-source fingerprint** — Java≡TS proven on the *same text*, but a live NAVER DOM row's rendered text is **not proven** to normalize to the backend's *stored* body (truncation, entity encoding, emoji, trailing UI). | [EXT] | live reply row-match | Explicit non-goal in the SPEC. |
 | B2 | **No live reply row selector** — `naver-reply-driver.ts` row methods are fail-closed (`{count:0}`/`false`), by design. **PARTIALLY LIFTED (LIVE 2026-07-20, single-use G6 consumed)** — a read-only no-click census captured the row structure (see the note below); **NOT fully lifted** — per-row rating/date value sub-selectors still need live calibration. The **offline**
-half of that calibration is now built and wired **report-only** (candidate ladder → `ladderCalibration`,
-2026-07-20, no live, no G6) — see the note below. ⛔ **That ladder is SUPERSEDED BEFORE ADOPTION (2026-07-20):**
-its live pass returned a negative result and the stronger path is the operator-assisted calibration stack on
-`feat/naver-guided-reply-session-v1`, **RULED 2026-07-20 (PO) as the guided-reply source of truth**; no
-integration before the final v1 integration. | [REPO]→live → **RULED (PO)** | live reply | Container captured live; ladder dead-lettered here; row match now owned by the calibration stack on the other branch. |
+half of that calibration was explored offline as the read-only **candidate ladder** (which reported a
+`ladderCalibration` field, 2026-07-20, no live, no G6) — see the note below. ⛔ **That ladder is SUPERSEDED
+BEFORE ADOPTION (2026-07-20) and DE-WIRED (2026-07-21): it is NOT part of NAVER v1 shipped code.** Its live
+pass returned a negative result and the stronger path is the operator-assisted calibration stack on
+`feat/naver-guided-reply-session-v1`, **RULED 2026-07-20 (PO) as the guided-reply source of truth**; that
+stack is now upstream on `main`. | [REPO]→live → **RULED (PO)** | live reply | Container captured live; ladder dead-lettered and de-wired; row match owned by the upstream calibration stack. |
 | B3 | **Export `ARTIFACT_INVALID` finding** (§8-24) — **DOWNGRADED 2026-07-20 to a non-reproducing intermittent finding.** Run A″ + Run B both executed live in same-session sentinel mode; **Run B's artifact was VALID** (`fileFamily: ooxml_zip_like`, `xlsxReadable: true`), so the original failure **did not reproduce**. Cause remains **unexplained — not "fully explained."** **✅ ACCEPTED 2026-07-21 (PO): B3 is TRIAGED-and-ACCEPTED for v1 and does NOT block v1 completion** — a **known caveat**, closed to further live probing. Run B evidence: `fileFamily: ooxml_zip_like`, `xlsxReadable: true`, `savedExtensionCategory: xlsx`, artifact **deleted** after classification, **no upload / backend / status write**. | finding → **ACCEPTED (PO)** | export reliability | **CLOSED to further live probing — no more B3 live download probes.** Unproven date-range hypothesis recorded in the §8 note only; no detector/gate/D-025 work opened. ⚠ Run B was a **one-off supervised diagnostic exception**, NOT v1 product behavior — production export stays human-driven Action Window. |
 | B4 | **Cold-restart reconnect persistence.** **HANDLED-OFFLINE 2026-07-19** (`18171b2`, `<this>`): the wizard now models `reconnect_required` first-class + recoverable, wires **live bridge session detection** (`bridgeSessionDetection`) as the readiness source with attestation as fallback, and makes detection outrank attestation. **Underlying auto-inherit-across-cold-launch stays OPEN by design** — the answer is re-login inside the dedicated window (Device Vault excluded). Multi-connection channel-ref disambiguation is a reported bridge-protocol gap (v1 = single connection). | HANDLED (offline) | readiness detection | Intra-session OK; cold launch → re-login in the dedicated window. |
 | B5 | **Auto-relogin / Device Vault / autofill** MISSING. | scope | opt-in autofill | v1 = human re-login only; do not advertise autofill. |
@@ -232,8 +233,11 @@ hardening** in the loop:
 family + row-count order + opaque sigs, but a fingerprint/rating/date-matched selector still needs the
 deferred value calibration (a separate future step — not designed or run here).
 
-**B2 offline calibration wiring — 2026-07-20 (OFFLINE ONLY · no live · no G6 consumed).** The offline half
-of the deferred value calibration is built and wired as **report-only** output. Uncommitted; local tree only.
+**B2 offline calibration experiment — 2026-07-20 (OFFLINE ONLY · no live · no G6 consumed).** ⛔ **SUPERSEDED
+BEFORE ADOPTION and DE-WIRED 2026-07-21 (`e6032e9`) — historical record only; none of the code described in
+this sub-section ships in NAVER v1.** It is preserved because its negative result is the evidence for the
+ruling. As explored, the offline half of the deferred value calibration was built and wired as **report-only**
+output, never committed to a shipping path.
 
 - **New pure leaf** `collector/src/action-window/reply-submission/review-row-candidate-ladder.ts` — an
   ordered **candidate ladder** per value kind (rating / date / body) plus a fail-closed decision:
@@ -241,9 +245,10 @@ of the deferred value calibration is built and wired as **report-only** output. 
   Row disambiguation classifies each `ul > li` candidate `REVIEW_ROW` / `UNCERTAIN_ROW` /
   `NON_REVIEW_ROW`, so the ~4 non-review list-items that inflated the live census are filtered out and a
   body-bearing row whose rating+date do not both resolve stays **UNCERTAIN**, never promoted.
-- **Wired into** `collector/src/cli/discover-reply-target.ts` as a second READ-ONLY in-page pass, surfaced
-  as a new `ladderCalibration` field on `DiscoverySummary`. Its purpose is to report **which structural
-  hypothesis fires** on live markup instead of a bare "0 / 18 matched".
+- **Was wired into** `collector/src/cli/discover-reply-target.ts` as a second READ-ONLY in-page pass,
+  surfacing a `ladderCalibration` field on `DiscoverySummary`. Its purpose was to report **which structural
+  hypothesis fires** on live markup instead of a bare "0 / 18 matched". ⛔ **This wiring was REMOVED on
+  2026-07-21 — `ladderCalibration` no longer exists in `discover-reply-target`.**
 - **Report-only — it changes no decision.** It does **not** enrich `rating` / `recencyBucket` /
   `bodyFingerprint`, does **not** participate in expected-hint matching, and does **not** clear
   `RATING_VALUE_PARSE_DEFERRED` / `RECENCY_BUCKET_DERIVATION_DEFERRED` /
@@ -279,8 +284,9 @@ wasted on a cold or reconnect-required profile. Uncommitted; local tree only.
   the same correction §8 already recorded for B3 (`capture-export-same-session`), applied to discovery.
 - **One context, one lifetime.** The operator logs in / clears 2FA / completes the Commerce reconnect and
   account-store selection / navigates to the **review-management list — in that same open window, leaving
-  it open**. After they say ready the sentinel is touched; **only then** does the existing settle census +
-  `ladderCalibration` read-only pass run, on the page **as they left it (no re-navigation)**.
+  it open**. After they say ready the sentinel is touched; **only then** does the settle census read-only
+  pass run, on the page **as they left it (no re-navigation)**. (At the time of this run the now-removed
+  `ladderCalibration` pass also ran; the sentinel + settle behavior is independent of it and is retained.)
 - **Shared sentinel path** — `sentinelPathFor(cfg.statusFile)`, i.e. the same `.status/` continuation file
   the other same-session CLIs use. **Run only one same-session CLI at a time.**
 - **Stale sentinel cleared BEFORE polling**, so a leftover file from an earlier run can never satisfy the
@@ -588,7 +594,8 @@ Live (each requires a fresh, single-use, in-turn **G6**; **hold** — do not lau
    G6 consumed) — B2 PARTIALLY LIFTED:** container `ul > li` (selectorKind 2), 18 candidate / 14 body-present
    rows, settle hardening verified live (no timeout / no false-empty); per-row rating/date/fingerprint value
    calibration remains deferred (§8). A value-calibration run is a separate future step. **Its OFFLINE half
-   is now designed and wired report-only** (candidate ladder → `ladderCalibration`, 2026-07-20, no live);
+   was explored report-only** (candidate ladder → `ladderCalibration`, 2026-07-20, no live) — ⛔ **since
+   DE-WIRED 2026-07-21 and not shipped in v1**;
    ~~the live pass itself is **not scheduled**~~ — **EXECUTED 2026-07-20 in `--require-sentinel` mode
    (fresh G3/G6 consumed): NEGATIVE RESULT** (201 `ul > li` candidates, 0 `REVIEW_ROW`, `UNCALIBRATED`).
    ⛔ **CLOSED to further B2 ladder live runs in this worktree — the ladder is superseded before adoption
