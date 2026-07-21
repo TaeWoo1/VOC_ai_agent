@@ -59,6 +59,33 @@ export interface CollectorConnection {
   boundStoreFingerprintHash: string | null;
   /** Coarse category of the bound fingerprint's source; null until bound. */
   fingerprintSourceCategory: FingerprintSourceCategory | null;
+  /**
+   * `seller-session-identity/v1` digest of the composite `(userId, shopName)` read
+   * from the seller-center chrome; null until bound. This is the PRIMARY session
+   * identity — the SPA-state store key remains as a future fallback, not a
+   * prerequisite.
+   */
+  boundSessionIdentityFingerprint: string | null;
+  /**
+   * The shop name as displayed at bind time. Stored in CLEAR by explicit
+   * product-owner decision: it is the shop's own public name, and it is what turns an
+   * otherwise unexplained MISMATCH into a visible "the shop was renamed". Distinct
+   * from `userProvidedDisplayName`, which the operator types and this never touches.
+   */
+  boundShopDisplayName: string | null;
+  /**
+   * Digest of the selector SPECS that produced the bound identity. A binding is only
+   * meaningful together with the selectors it was read through, so a later run whose
+   * specs differ is comparing something else and must fail closed rather than answer.
+   */
+  boundSelectorSpecFingerprint: string | null;
+  /**
+   * Fingerprint of the SellerOps seller-account id this connection serves; null
+   * until the account link is bound. See `seller-account-fingerprint.ts` for why a
+   * digest and not the raw id. This is what lets a reply request bundle resolve to
+   * exactly one connection by DATA rather than by an operator assertion per run.
+   */
+  boundSellerAccountFingerprint: string | null;
   /** Human-friendly label the USER typed — not scraped from NAVER. */
   userProvidedDisplayName: string;
   /** ISO timestamp of creation. */

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPendingConnection, fingerprintHash } from "../../src/connection/connection";
 import { completeManualAccountSelection } from "../../src/connection/workflow";
 import { createConnectionRegistry } from "../../src/connection/registry";
+import { CONNECTION_SCHEMA_VERSION } from "../../src/connection/record";
 import {
   ConnectionStoreError,
   connectionStoreErrorCategory,
@@ -119,7 +120,7 @@ describe("saveConnectionRegistryToFile", () => {
     saveConnectionRegistryToFile(storePath, createConnectionRegistry([connected("a")]));
     const parsed = JSON.parse(readFileSync(storePath, "utf8"));
     expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed[0].schemaVersion).toBe(1);
+    expect(parsed[0].schemaVersion).toBe(CONNECTION_SCHEMA_VERSION);
     expect(parsed[0].connectionId).toBe("a");
   });
 

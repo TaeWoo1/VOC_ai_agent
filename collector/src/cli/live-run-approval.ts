@@ -75,6 +75,34 @@ export function hasReviewIdProbeApproval(args: string[]): boolean {
 }
 
 /** Operator-facing refusal shown when the read-only probe approval flag is missing. */
+/** Approval message for selector discovery — its own, because it names a different CLI. */
+export function selectorDiscoveryApprovalRequiredMessage(): string {
+  return [
+    "REFUSING to inspect live NAVER without explicit read-only approval.",
+    "",
+    "Selector discovery captures TWO of your clicks in the capture phase (nothing on NAVER fires), derives",
+    "selectors from those exact elements, validates them, re-checks them after a re-render you cause, and",
+    "stores the selector specifications. It binds nothing and stores no identity value.",
+    "",
+    "Re-run with:",
+    "  npx tsx src/cli/run-chrome-selector-discovery-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
+  ].join("\n");
+}
+
+/** Approval message for the store-identity diagnostic — its own, because it does something else. */
+export function storeIdentityDiagnosticApprovalRequiredMessage(): string {
+  return [
+    "REFUSING to inspect live NAVER without explicit read-only approval.",
+    "",
+    "The store-identity diagnostic reads the page's parsed state for allow-listed identity KEYS and",
+    "reports key names, roots, value counts and digest prefixes. It binds nothing, looks up no review,",
+    "opens no composer, and calls no backend. It never clicks, types, pastes, navigates or submits.",
+    "",
+    "Re-run with:",
+    "  npx tsx src/cli/run-store-identity-diagnostic-live-naver.ts -- " + REVIEW_ID_PROBE_FLAG,
+  ].join("\n");
+}
+
 export function reviewIdProbeApprovalRequiredMessage(): string {
   return [
     "Refusing to open a LIVE NAVER session without explicit per-run approval.",
