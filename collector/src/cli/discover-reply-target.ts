@@ -4,6 +4,14 @@
  *   node --env-file=.env src/cli/discover-reply-target.ts --login    --i-understand-this-opens-live-naver
  *   node --env-file=.env src/cli/discover-reply-target.ts --discover --classify-only \
  *        --expected-hint .reply-target/hint.json  --i-understand-this-opens-live-naver
+ *   node --env-file=.env src/cli/discover-reply-target.ts --discover --classify-only \
+ *        --require-sentinel  --i-understand-this-opens-live-naver
+ *
+ * `--require-sentinel` (alias `--sentinel`) adds the SAME-SESSION hand-off the other live CLIs use: the
+ * window stays open, the human logs in / reconnects / selects the store / reaches the review list IN IT,
+ * touches the sentinel file, and only then is the page read AS THEY LEFT IT (no re-navigation). It exists
+ * because a cold or reconnect-required profile otherwise yields an empty census and wastes the run's
+ * single-use approval. The gate is read-only: on timeout the page is never read and no summary is emitted.
  *
  * Purpose: gather the SANITIZED structural evidence needed to implement the guided review-row seam that
  * is deliberately fail-closed in `naver-reply-driver.ts` (`locateReviewRow` / `highlightRow` /
@@ -24,7 +32,8 @@
  * types credentials and never writes to NAVER. Do NOT run during planning/implementation — building and
  * verifying this file is offline and hermetic (`main()` launches nothing on import).
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import { log } from "../log";
@@ -37,12 +46,23 @@ import {
   type ReviewRowSignal,
 } from "../action-window/reply-submission/reply-surface";
 import { approvalRequiredMessage, hasLiveRunApproval, isClassifyOnly } from "./live-run-approval";
+import { sentinelPathFor } from "./probe-sentinel";
 
 const EXPECTED_HINT_FLAG = "--expected-hint";
 const RECENCY_BUCKETS: readonly RecencyBucket[] = ["TODAY", "THIS_WEEK", "OLDER"];
 
 /** PLACEHOLDER landing; the human navigates to the review-management list themselves. */
 const NAVER_LANDING_URL = "https://sell.smartstore.naver.com/";
+
+/**
+ * Bounded read-only settle before the structural census. NAVER's review list is an SPA whose rows can
+ * hydrate AFTER `domcontentloaded`, so censusing immediately risks a timing false-empty. These bound how
+ * long discovery waits for candidate rows to appear before failing closed.
+ */
+const SETTLE_INTERVAL_MS = 500;
+const SETTLE_TIMEOUT_MS = 15_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /* ───────────────────────── Sanitized structural evidence (pure) ───────────────────────── */
 
@@ -87,6 +107,7 @@ export interface DiscoveredRowSignal {
 /** Machine-stable blocker codes surfaced in the summary — no free text, safe to log. */
 export type DiscoveryBlocker =
   | "NO_ROW_CANDIDATES"
+  | "ROW_CENSUS_SETTLE_TIMEOUT"
   | "RATING_VALUE_PARSE_DEFERRED"
   | "RECENCY_BUCKET_DERIVATION_DEFERRED"
   | "FINGERPRINT_LIVE_EXTRACTION_DEFERRED";
@@ -140,6 +161,7 @@ export function classifyReviewRowStructure(
   rows: readonly DiscoveredRowSignal[],
   expected: ReplyTargetHint | null,
   selectorKind: number | null,
+  settleTimedOut = false,
 ): DiscoverySummary {
   const count = (pred: (r: DiscoveredRowSignal) => boolean): number => rows.filter(pred).length;
   const ratingValuePresentCount = count((r) => r.rating !== null);
@@ -147,6 +169,7 @@ export function classifyReviewRowStructure(
   const fingerprintComputableCount = count((r) => r.bodyFingerprint !== null);
 
   const blockers: DiscoveryBlocker[] = [];
+  if (settleTimedOut) blockers.push("ROW_CENSUS_SETTLE_TIMEOUT");
   if (rows.length === 0) blockers.push("NO_ROW_CANDIDATES");
   if (rows.length > 0 && ratingValuePresentCount < rows.length) blockers.push("RATING_VALUE_PARSE_DEFERRED");
   if (rows.length > 0 && recencyBucketPresentCount < rows.length) blockers.push("RECENCY_BUCKET_DERIVATION_DEFERRED");
@@ -183,6 +206,56 @@ export function classifyReviewRowStructure(
     match,
     blockers,
   };
+}
+
+/* ─────────────────────── Row-census settle (pure, injected clock) ─────────────────────── */
+
+export type SettleOutcome = "settled" | "timeout";
+
+export interface RowCensusSettleResult {
+  /** The last sanitized census read — counts/booleans/lengths only, never DOM/text. */
+  census: RowCensus;
+  outcome: SettleOutcome;
+  /** How many times the census was read (≥ 1). */
+  attempts: number;
+}
+
+/** Injected so the poll is unit-testable offline with a fake census + fake sleep — no browser, no timers. */
+export interface RowCensusSettleDeps {
+  /** Read ONE sanitized census (in the CLI this is the in-page `EXTRACT_ROW_CENSUS`). */
+  readCensus: () => Promise<RowCensus>;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export interface RowCensusSettleOptions {
+  intervalMs: number;
+  timeoutMs: number;
+}
+
+/**
+ * Poll the SANITIZED row census until candidate rows appear or a bounded budget expires, so a live SPA
+ * whose rows hydrate after `domcontentloaded` is not mis-read as empty. Reads only the {@link RowCensus}
+ * (counts/booleans/lengths) — never DOM, text, value, date, id, or URL. Elapsed time is summed from the
+ * interval we control (no wall-clock read), keeping it deterministic under test. Fail-closed: if no
+ * candidate ever appears within the budget, the last (empty) census is returned with `timeout`.
+ */
+export async function settleRowCensus(
+  deps: RowCensusSettleDeps,
+  opts: RowCensusSettleOptions,
+): Promise<RowCensusSettleResult> {
+  const interval = Math.max(1, opts.intervalMs);
+  const budget = Math.max(0, opts.timeoutMs);
+  let elapsed = 0;
+  let attempts = 0;
+  let census = await deps.readCensus();
+  attempts += 1;
+  while (census.candidateCount <= 0 && elapsed < budget) {
+    await deps.sleep(interval);
+    elapsed += interval;
+    census = await deps.readCensus();
+    attempts += 1;
+  }
+  return { census, outcome: census.candidateCount > 0 ? "settled" : "timeout", attempts };
 }
 
 /* ─────────────── Optional expected-hint intake (owner-only file, never argv) ─────────────── */
@@ -246,6 +319,89 @@ export function expectedHintPathFrom(args: readonly string[]): string | null {
   return raw && !raw.startsWith("--") ? raw : null;
 }
 
+/* ──────────────── Same-session sentinel gate (read-only hand-off, pure core) ──────────────── */
+
+/** Budget for the human hand-off, mirroring the other same-session CLIs. */
+const SENTINEL_TIMEOUT_MS = 10 * 60_000;
+const SENTINEL_POLL_INTERVAL_MS = 750;
+
+export type SentinelGateOutcome = "ready" | "timeout";
+
+/** Injected so the gate is unit-testable offline with a fake fs + fake sleep — no disk, no timers. */
+export interface SentinelGateDeps {
+  existsFile: (path: string) => boolean;
+  removeFile: (path: string) => void;
+  sleep: (ms: number) => Promise<void>;
+}
+
+/**
+ * Opt into same-session sentinel mode. Mirrors `capture-export-same-session`'s flag vocabulary so the
+ * operator uses one muscle memory across the live CLIs; `--no-sentinel` is an explicit override.
+ */
+export function sentinelModeFrom(args: readonly string[]): boolean {
+  return (args.includes("--require-sentinel") || args.includes("--sentinel")) && !args.includes("--no-sentinel");
+}
+
+/**
+ * Wait for the operator's sentinel file, having FIRST cleared any stale one.
+ *
+ * Clearing before polling is the whole safety property: a leftover file from an earlier run must never
+ * satisfy this gate, or the census would read a page the human has not finished preparing. Bounded by a
+ * fixed iteration count (no wall-clock read), so it is deterministic under test. Fails closed with
+ * `timeout` — the caller must then abort WITHOUT reading the page.
+ */
+export async function awaitSentinelGate(
+  deps: SentinelGateDeps,
+  path: string,
+  opts: { timeoutMs: number; intervalMs: number },
+): Promise<SentinelGateOutcome> {
+  deps.removeFile(path);
+  const interval = Math.max(1, opts.intervalMs);
+  const maxChecks = Math.max(1, Math.ceil(Math.max(0, opts.timeoutMs) / interval));
+  for (let i = 0; i < maxChecks; i += 1) {
+    if (deps.existsFile(path)) return "ready";
+    await deps.sleep(interval);
+  }
+  return deps.existsFile(path) ? "ready" : "timeout";
+}
+
+/**
+ * Sequence the hand-off: the census runs **only** after the gate reports `ready`. On `timeout` the
+ * census is never invoked, so a half-prepared page is never read. Kept as its own tiny pure combinator
+ * precisely so this ordering invariant is unit-testable without a browser.
+ */
+export async function runSentinelGatedCensus<T>(
+  gate: () => Promise<SentinelGateOutcome>,
+  census: () => Promise<T>,
+): Promise<{ outcome: "ready"; result: T } | { outcome: "timeout" }> {
+  const outcome = await gate();
+  if (outcome === "timeout") return { outcome: "timeout" };
+  return { outcome: "ready", result: await census() };
+}
+
+/** Best-effort sentinel removal — used to clear a stale file at startup and to clean up after use. */
+function removeSentinelFile(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort — a leftover is cleared by the next run's pre-poll removal anyway */
+  }
+}
+
+const SENTINEL_PROMPT = [
+  "",
+  "SENTINEL MODE — this window is yours. In THIS SAME window:",
+  "  1) Complete the NAVER-ID login (and any 2FA/CAPTCHA) yourself.",
+  "  2) Complete any Commerce reconnect / account-store selection.",
+  "  3) Navigate to the review-management list, with review rows visibly rendered.",
+  "  4) Leave the browser OPEN.",
+  "",
+  "Then signal readiness by creating the sentinel file shown below (in Claude Code, just say",
+  '"ready" and Claude creates it). Only then is the page read — READ-ONLY, structure only:',
+  "no click, no typing, no submit, no download, no upload, no status write. (Ctrl-C to abort.)",
+  "",
+].join("\n");
+
 /* ─────────────────────────── In-page census (read-only, generic) ─────────────────────────── */
 
 /**
@@ -293,21 +449,72 @@ async function doLogin(): Promise<void> {
   console.error("Log in (and clear any 2FA/CAPTCHA) in the opened window, then close it.");
 }
 
-async function doDiscover(expectedHintPath: string | null): Promise<void> {
+async function doDiscover(expectedHintPath: string | null, sentinelMode: boolean): Promise<void> {
   const expected = expectedHintPath ? loadExpectedHint(expectedHintPath) : null;
   const cfg = loadConfig();
+  // Single source of truth for the continuation file, shared with the other same-session CLIs —
+  // run only ONE of them at a time. Cleared before polling and again on cleanup.
+  const sentinelPath = sentinelPathFor(cfg.statusFile);
   const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
-  const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
-  await page.goto(process.env.NAVER_REVIEW_URL ?? NAVER_LANDING_URL, { waitUntil: "domcontentloaded" });
-  console.error("Navigate to the review-management list, then return here. Reading structure only…");
-  // `evaluate` is deliberately absent from the pure `PwPage` structural surface; a real Playwright page
-  // always has it. The census is sanitized IN-PAGE (counts/booleans/lengths) before it crosses back.
-  const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
-  const census = await evalPage.evaluate<RowCensus>(EXTRACT_ROW_CENSUS);
-  const summary = classifyReviewRowStructure(censusToRows(census), expected, census.selectorKind);
-  // stdout carries ONLY the sanitized summary; nothing raw is ever logged.
-  console.log(JSON.stringify(summary, null, 2));
-  await (ctx as unknown as { close(): Promise<void> }).close();
+  try {
+    const page = (ctx.pages()[0] ?? (await ctx.newPage())) as unknown as PwPage;
+    await page.goto(process.env.NAVER_REVIEW_URL ?? NAVER_LANDING_URL, { waitUntil: "domcontentloaded" });
+    // `evaluate` is deliberately absent from the pure `PwPage` structural surface; a real Playwright page
+    // always has it. The census is sanitized IN-PAGE (counts/booleans/lengths) before it crosses back.
+    const evalPage = page as unknown as { evaluate<R>(script: string): Promise<R> };
+
+    /** The READ-ONLY reads, identical in both modes. Runs only once the page is ours to read. */
+    const readSanitized = async (): Promise<DiscoverySummary> => {
+      // Bounded read-only settle: re-read the sanitized census until rows appear or the budget expires,
+      // so an SPA that hydrates rows after domcontentloaded is not mis-read as empty. No click, no value read.
+      const { census, outcome } = await settleRowCensus(
+        { readCensus: () => evalPage.evaluate<RowCensus>(EXTRACT_ROW_CENSUS), sleep },
+        { intervalMs: SETTLE_INTERVAL_MS, timeoutMs: SETTLE_TIMEOUT_MS },
+      );
+      return classifyReviewRowStructure(
+        censusToRows(census),
+        expected,
+        census.selectorKind,
+        outcome === "timeout",
+      );
+    };
+
+    if (sentinelMode) {
+      // SAME-SESSION HAND-OFF. The human logs in / reconnects / selects the store / reaches the review
+      // list IN THIS WINDOW; only then is the page read, AS THEY LEFT IT (no re-navigation). This exists
+      // so a cold or reconnect-required profile costs an aborted run instead of an empty census.
+      mkdirSync(dirname(sentinelPath), { recursive: true });
+      console.error(SENTINEL_PROMPT);
+      console.error("  Sentinel file (create this when ready):");
+      console.error(`    ${sentinelPath}`);
+      console.error("");
+      const gated = await runSentinelGatedCensus(
+        () =>
+          awaitSentinelGate(
+            { existsFile: existsSync, removeFile: removeSentinelFile, sleep },
+            sentinelPath,
+            { timeoutMs: SENTINEL_TIMEOUT_MS, intervalMs: SENTINEL_POLL_INTERVAL_MS },
+          ),
+        readSanitized,
+      );
+      if (gated.outcome === "timeout") {
+        // Fail closed: never read a page the human has not finished preparing. No summary is emitted.
+        console.error("No sentinel within the timeout; aborting without reading the page.");
+        log("discover.reply.aborted", { reason: "sentinel-timeout" });
+        process.exitCode = 4;
+        return;
+      }
+      // stdout carries ONLY the sanitized summary; nothing raw is ever logged.
+      console.log(JSON.stringify(gated.result, null, 2));
+      return;
+    }
+
+    console.error("Waiting for the review list to render, then reading structure only (no click)…");
+    console.log(JSON.stringify(await readSanitized(), null, 2));
+  } finally {
+    removeSentinelFile(sentinelPath);
+    await (ctx as unknown as { close(): Promise<void> }).close();
+  }
 }
 
 async function main(): Promise<void> {
@@ -329,10 +536,12 @@ async function main(): Promise<void> {
       process.exitCode = 3;
       return;
     }
-    await doDiscover(expectedHintPathFrom(args));
+    await doDiscover(expectedHintPathFrom(args), sentinelModeFrom(args));
     return;
   }
-  console.error("Usage: --login | --discover --classify-only [--expected-hint <path>]  (+ approval flag)");
+  console.error(
+    "Usage: --login | --discover --classify-only [--require-sentinel] [--expected-hint <path>]  (+ approval flag)",
+  );
   process.exitCode = 2;
 }
 

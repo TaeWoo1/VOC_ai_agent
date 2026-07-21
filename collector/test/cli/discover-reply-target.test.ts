@@ -7,11 +7,15 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  awaitSentinelGate,
   censusToRows,
   classifyReviewRowStructure,
   expectedHintPathFrom,
   ExpectedHintError,
   loadExpectedHint,
+  runSentinelGatedCensus,
+  sentinelModeFrom,
+  settleRowCensus,
   type DiscoveredRowSignal,
   type ExpectedHintFileDeps,
   type RowCensus,
@@ -140,6 +144,99 @@ describe("classifyReviewRowStructure — safe summary (counts/booleans/opaque si
   });
 });
 
+/* ───────────────────────────── Row-census settle (bounded poll) ───────────────────────────── */
+
+function emptyCensus(): RowCensus {
+  return { selectorKind: null, candidateCount: 0, perRow: [] };
+}
+function populatedCensus(n: number): RowCensus {
+  return { selectorKind: 1, candidateCount: n, perRow: Array.from({ length: n }, () => entry()) };
+}
+/** A scripted census reader: returns each element in turn, then repeats the last one forever. */
+function scriptedReader(seq: readonly RowCensus[]): { read: () => Promise<RowCensus>; calls: () => number } {
+  let i = 0;
+  return {
+    read: () => {
+      const c = seq[Math.min(i, seq.length - 1)]!;
+      i += 1;
+      return Promise.resolve(c);
+    },
+    calls: () => i,
+  };
+}
+/** A fake sleep that never actually waits but records each requested interval. */
+function recordingSleep(): { sleep: (ms: number) => Promise<void>; waits: number[] } {
+  const waits: number[] = [];
+  return { sleep: (ms) => { waits.push(ms); return Promise.resolve(); }, waits };
+}
+
+describe("settleRowCensus — bounded read-only poll before the census (SPA hydration)", () => {
+  it("captures rows that appear only after a few polls, reporting outcome 'settled'", async () => {
+    const reader = scriptedReader([emptyCensus(), emptyCensus(), populatedCensus(3)]);
+    const clk = recordingSleep();
+    const r = await settleRowCensus({ readCensus: reader.read, sleep: clk.sleep }, { intervalMs: 500, timeoutMs: 15_000 });
+    expect(r.outcome).toBe("settled");
+    expect(r.census.candidateCount).toBe(3);
+    expect(r.attempts).toBe(3);
+    expect(clk.waits).toEqual([500, 500]); // slept between reads, and NOT after the successful read
+    // Feeds the classifier to a real, non-timeout summary — no false-empty blocker.
+    const s = classifyReviewRowStructure(censusToRows(r.census), null, r.census.selectorKind, r.outcome === "timeout");
+    expect(s.reviewRowCandidateCount).toBe(3);
+    expect(s.blockers).not.toContain("ROW_CENSUS_SETTLE_TIMEOUT");
+    expect(s.blockers).not.toContain("NO_ROW_CANDIDATES");
+  });
+
+  it("returns immediately (no sleep) when rows are already present on the first read", async () => {
+    const reader = scriptedReader([populatedCensus(2)]);
+    const clk = recordingSleep();
+    const r = await settleRowCensus({ readCensus: reader.read, sleep: clk.sleep }, { intervalMs: 500, timeoutMs: 15_000 });
+    expect(r.outcome).toBe("settled");
+    expect(r.attempts).toBe(1);
+    expect(clk.waits).toEqual([]);
+  });
+
+  it("fails closed with outcome 'timeout' when no rows ever appear within the budget", async () => {
+    const reader = scriptedReader([emptyCensus()]); // always empty
+    const clk = recordingSleep();
+    const r = await settleRowCensus({ readCensus: reader.read, sleep: clk.sleep }, { intervalMs: 500, timeoutMs: 1500 });
+    expect(r.outcome).toBe("timeout");
+    expect(r.census.candidateCount).toBe(0);
+    expect(clk.waits).toEqual([500, 500, 500]); // budget 1500 / interval 500 → 3 sleeps, 4 reads
+    expect(r.attempts).toBe(4);
+    // Fails closed in the summary: both the settle-timeout and no-candidates blockers surface.
+    const s = classifyReviewRowStructure(censusToRows(r.census), null, r.census.selectorKind, r.outcome === "timeout");
+    expect(s.reviewRowCandidateCount).toBe(0);
+    expect(s.blockers).toContain("ROW_CENSUS_SETTLE_TIMEOUT");
+    expect(s.blockers).toContain("NO_ROW_CANDIDATES");
+  });
+
+  it("settle→classify emits sanitized keys only (counts/booleans/enums/opaque sigs) — no raw content", async () => {
+    const reader = scriptedReader([emptyCensus(), populatedCensus(2)]);
+    const r = await settleRowCensus({ readCensus: reader.read, sleep: () => Promise.resolve() }, { intervalMs: 10, timeoutMs: 1000 });
+    const s = classifyReviewRowStructure(censusToRows(r.census), null, r.census.selectorKind, r.outcome === "timeout");
+    expect(Object.keys(s).sort()).toEqual([
+      "blockers", "bodyNodePresentCount", "dateNodePresentCount", "expectedHintProvided",
+      "fingerprintComputableCount", "match", "ratingNodePresentCount",
+      "ratingValuePresentCount", "recencyBucketPresentCount", "reviewRowCandidateCount", "selectorKind",
+      "structuralRowSigs",
+    ]);
+    s.structuralRowSigs.forEach((sig) => expect(sig).toMatch(/^[0-9a-f]{16}$/));
+  });
+});
+
+describe("classifyReviewRowStructure — settle-timeout blocker (opt-in flag, existing callers unchanged)", () => {
+  it("surfaces ROW_CENSUS_SETTLE_TIMEOUT alongside NO_ROW_CANDIDATES when the settle timed out", () => {
+    const s = classifyReviewRowStructure([], null, null, true);
+    expect(s.blockers).toContain("ROW_CENSUS_SETTLE_TIMEOUT");
+    expect(s.blockers).toContain("NO_ROW_CANDIDATES");
+  });
+
+  it("omits ROW_CENSUS_SETTLE_TIMEOUT by default — the flag defaults false, so 3-arg callers are unchanged", () => {
+    const s = classifyReviewRowStructure([discovered()], null, 1);
+    expect(s.blockers).not.toContain("ROW_CENSUS_SETTLE_TIMEOUT");
+  });
+});
+
 describe("loadExpectedHint — owner-only, schema-validated, no submissionRef binding", () => {
   const P = "/x/.reply-target/hint.json";
 
@@ -183,5 +280,122 @@ describe("expectedHintPathFrom", () => {
     expect(expectedHintPathFrom(["--expected-hint", ".reply-target/hint.json"])).toBe(".reply-target/hint.json");
     expect(expectedHintPathFrom([])).toBeNull();
     expect(expectedHintPathFrom(["--expected-hint", "--discover"])).toBeNull(); // next token is a flag
+  });
+});
+
+/* ─────────────── Same-session sentinel gate (read-only hand-off) ─────────────── */
+
+const SENTINEL = "/tmp/does-not-matter/.status/probe-same-session.ready";
+
+/** A fake fs whose sentinel appears only after `appearsAfter` existence checks *following* removal. */
+function fakeSentinelFs(opts: { staleAtStart?: boolean; appearsAfterChecks?: number } = {}) {
+  const events: string[] = [];
+  let present = opts.staleAtStart === true;
+  let checks = 0;
+  return {
+    events,
+    checks: () => checks,
+    deps: {
+      existsFile: (_p: string) => {
+        checks += 1;
+        if (opts.appearsAfterChecks !== undefined && checks > opts.appearsAfterChecks) present = true;
+        events.push(`exists:${present}`);
+        return present;
+      },
+      removeFile: (_p: string) => {
+        present = false;
+        events.push("remove");
+      },
+      sleep: () => {
+        events.push("sleep");
+        return Promise.resolve();
+      },
+    },
+  };
+}
+
+describe("sentinelModeFrom — opt-in flag vocabulary", () => {
+  it("is off by default, so existing non-sentinel dispatches are unchanged", () => {
+    expect(sentinelModeFrom([])).toBe(false);
+    expect(sentinelModeFrom(["--discover", "--classify-only", "--i-understand-this-opens-live-naver"])).toBe(false);
+  });
+
+  it("opts in via --require-sentinel or --sentinel, and --no-sentinel overrides both", () => {
+    expect(sentinelModeFrom(["--require-sentinel"])).toBe(true);
+    expect(sentinelModeFrom(["--sentinel"])).toBe(true);
+    expect(sentinelModeFrom(["--require-sentinel", "--no-sentinel"])).toBe(false);
+    expect(sentinelModeFrom(["--sentinel", "--no-sentinel"])).toBe(false);
+  });
+});
+
+describe("awaitSentinelGate — clears stale first, then polls, fails closed", () => {
+  it("clears a STALE sentinel before polling, so a leftover file cannot satisfy the gate", async () => {
+    const fs = fakeSentinelFs({ staleAtStart: true, appearsAfterChecks: 2 });
+    const outcome = await awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 100, intervalMs: 10 });
+    expect(outcome).toBe("ready");
+    // The very first action is the removal, and the first existence check after it is false.
+    expect(fs.events[0]).toBe("remove");
+    expect(fs.events[1]).toBe("exists:false");
+  });
+
+  it("returns ready once the operator creates the sentinel", async () => {
+    const fs = fakeSentinelFs({ appearsAfterChecks: 3 });
+    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 1000, intervalMs: 10 })).resolves.toBe("ready");
+  });
+
+  it("fails closed with timeout when the sentinel never appears, bounded by iteration count", async () => {
+    const fs = fakeSentinelFs();
+    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 50, intervalMs: 10 })).resolves.toBe("timeout");
+    // 5 polls + one final check — bounded, never a wall-clock read.
+    expect(fs.checks()).toBe(6);
+  });
+
+  it("still honours a zero/degenerate budget without spinning", async () => {
+    const fs = fakeSentinelFs();
+    await expect(awaitSentinelGate(fs.deps, SENTINEL, { timeoutMs: 0, intervalMs: 0 })).resolves.toBe("timeout");
+    expect(fs.checks()).toBe(2);
+  });
+});
+
+describe("runSentinelGatedCensus — the census runs ONLY after the gate", () => {
+  it("never reads the page when the gate times out", async () => {
+    let censusCalls = 0;
+    const r = await runSentinelGatedCensus(
+      () => Promise.resolve("timeout" as const),
+      () => {
+        censusCalls += 1;
+        return Promise.resolve("read");
+      },
+    );
+    expect(r).toEqual({ outcome: "timeout" });
+    expect(censusCalls).toBe(0);
+  });
+
+  it("reads the page only after the gate reports ready (ordering is observable)", async () => {
+    const order: string[] = [];
+    const r = await runSentinelGatedCensus(
+      async () => {
+        order.push("gate");
+        return "ready" as const;
+      },
+      async () => {
+        order.push("census");
+        return "summary";
+      },
+    );
+    expect(order).toEqual(["gate", "census"]);
+    expect(r).toEqual({ outcome: "ready", result: "summary" });
+  });
+
+  it("the gated result is the unchanged sanitized summary — sentinel mode adds no new output", async () => {
+    const summary = classifyReviewRowStructure([discovered()], null, 2, false);
+    const r = await runSentinelGatedCensus(() => Promise.resolve("ready" as const), () => Promise.resolve(summary));
+    expect(r.outcome).toBe("ready");
+    expect(r.outcome === "ready" && Object.keys(r.result).sort()).toEqual([
+      "blockers", "bodyNodePresentCount", "dateNodePresentCount", "expectedHintProvided",
+      "fingerprintComputableCount", "match", "ratingNodePresentCount",
+      "ratingValuePresentCount", "recencyBucketPresentCount", "reviewRowCandidateCount", "selectorKind",
+      "structuralRowSigs",
+    ]);
   });
 });
