@@ -18,7 +18,15 @@ import type {
 } from "./types";
 
 /** Current on-disk/record schema version. */
-export const CONNECTION_SCHEMA_VERSION = 1 as const;
+export const CONNECTION_SCHEMA_VERSION = 3 as const;
+
+/**
+ * Schema versions this parser accepts. Version 1 predates
+ * `boundSellerAccountFingerprint`; such a record is read with that field `null`,
+ * which means "account link not bound yet" — the same conservative state a fresh
+ * connection is in. Nothing is inferred or back-filled.
+ */
+export const SUPPORTED_CONNECTION_SCHEMA_VERSIONS: readonly number[] = [1, 2, 3];
 
 /** JSON-safe connection record: the connection fields plus a schema version. */
 export interface ConnectionRecord extends CollectorConnection {
@@ -76,6 +84,10 @@ export function toConnectionRecord(connection: CollectorConnection): ConnectionR
     connectionStatus: connection.connectionStatus,
     boundStoreFingerprintHash: connection.boundStoreFingerprintHash,
     fingerprintSourceCategory: connection.fingerprintSourceCategory,
+    boundSellerAccountFingerprint: connection.boundSellerAccountFingerprint,
+    boundSessionIdentityFingerprint: connection.boundSessionIdentityFingerprint,
+    boundShopDisplayName: connection.boundShopDisplayName,
+    boundSelectorSpecFingerprint: connection.boundSelectorSpecFingerprint,
     userProvidedDisplayName: connection.userProvidedDisplayName,
     createdAt: connection.createdAt,
     lastVerifiedAt: connection.lastVerifiedAt,
@@ -103,9 +115,23 @@ export function parseConnectionRecord(input: unknown): ParseConnectionResult {
   }
   const r = input as Record<string, unknown>;
 
-  if (r.schemaVersion !== CONNECTION_SCHEMA_VERSION) {
+  if (
+    typeof r.schemaVersion !== "number" ||
+    !SUPPORTED_CONNECTION_SCHEMA_VERSIONS.includes(r.schemaVersion)
+  ) {
     return { ok: false, errorCategory: "unknown-schema-version" };
   }
+  // v1 records predate the field, so at v1 the link is ALWAYS null — not merely when the field is absent.
+  // Honouring a value that a v1 record could not legitimately carry would let an edited store assert an
+  // account link the schema never supported.
+  const sellerAccountFingerprintRaw =
+    r.schemaVersion === 1 ? null : r.boundSellerAccountFingerprint;
+  // Same rule one version up: a record below v3 could not legitimately carry the
+  // session identity, so a value there can only have been written by hand.
+  const sessionIdentityRaw =
+    r.schemaVersion < 3 ? null : r.boundSessionIdentityFingerprint;
+  const shopDisplayNameRaw = r.schemaVersion < 3 ? null : r.boundShopDisplayName;
+  const selectorSpecRaw = r.schemaVersion < 3 ? null : r.boundSelectorSpecFingerprint;
 
   // Required string fields.
   if (
@@ -119,6 +145,10 @@ export function parseConnectionRecord(input: unknown): ParseConnectionResult {
   // Nullable string fields.
   if (
     !isStringOrNull(r.boundStoreFingerprintHash) ||
+    !isStringOrNull(sellerAccountFingerprintRaw) ||
+    !isStringOrNull(sessionIdentityRaw) ||
+    !isStringOrNull(shopDisplayNameRaw) ||
+    !isStringOrNull(selectorSpecRaw) ||
     !isStringOrNull(r.lastVerifiedAt) ||
     !isStringOrNull(r.lastExportAttemptAt)
   ) {
@@ -164,6 +194,10 @@ export function parseConnectionRecord(input: unknown): ParseConnectionResult {
     connectionStatus: r.connectionStatus as ConnectionStatus,
     boundStoreFingerprintHash: r.boundStoreFingerprintHash,
     fingerprintSourceCategory: r.fingerprintSourceCategory as FingerprintSourceCategory | null,
+    boundSellerAccountFingerprint: sellerAccountFingerprintRaw,
+    boundSessionIdentityFingerprint: sessionIdentityRaw,
+    boundShopDisplayName: shopDisplayNameRaw,
+    boundSelectorSpecFingerprint: selectorSpecRaw,
     userProvidedDisplayName: r.userProvidedDisplayName,
     createdAt: r.createdAt,
     lastVerifiedAt: r.lastVerifiedAt,

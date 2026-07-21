@@ -5,7 +5,7 @@
  *  - a PRIVACY sweep that hostile fixture content never crosses the sanitized v2 boundary.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
@@ -177,7 +177,46 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
     "review-id-locator.ts": resolve(SRC, "review-id-locator.ts"),
     "review-id-network-scan.ts": resolve(SRC, "review-id-network-scan.ts"),
     "review-id-probe-inpage.ts": resolve(SRC, "review-id-probe-inpage.ts"),
+    // Guided reply session: the session seller/store preflight and its read-only identity evidence.
+    "session-account-identity.ts": resolve(SRC, "session-account-identity.ts"),
+    "session-account-probe-inpage.ts": resolve(SRC, "session-account-probe-inpage.ts"),
+    "session-account-verify.ts": resolve(SRC, "session-account-verify.ts"),
+    "seller-account-fingerprint.ts": resolve(SRC, "../../../src/connection/seller-account-fingerprint.ts"),
+    "session-signals.ts": resolve(SRC, "session-signals.ts"),
+    "store-identity-diagnostic.ts": resolve(SRC, "store-identity-diagnostic.ts"),
+    // Composite seller-center chrome identity — the primary session identity.
+    "session-chrome-identity.ts": resolve(SRC, "session-chrome-identity.ts"),
+    "session-chrome-binding.ts": resolve(SRC, "session-chrome-binding.ts"),
+    "chrome-identity-inpage.ts": resolve(SRC, "chrome-identity-inpage.ts"),
+    // Operator-calibrated selector discovery: the spec contract, its store, and the derivation script.
+    "chrome-selector-spec.ts": resolve(SRC, "chrome-selector-spec.ts"),
+    "chrome-selector-store.ts": resolve(SRC, "chrome-selector-store.ts"),
+    "chrome-selector-derive-inpage.ts": resolve(SRC, "chrome-selector-derive-inpage.ts"),
+    // Pre-existing surface, swept here too now that the guard enumerates the directory rather than a
+    // hand-kept list. `naver-reply-driver.ts` also has its own dedicated suite above.
+    "naver-reply-driver.ts": resolve(SRC, "naver-reply-driver.ts"),
+    "reply-driver.ts": resolve(SRC, "reply-driver.ts"),
+    "reply-engine.ts": resolve(SRC, "reply-engine.ts"),
+    "reply-fixture.ts": resolve(SRC, "reply-fixture.ts"),
+    "reply-session.ts": resolve(SRC, "reply-session.ts"),
+    "reply-stages.ts": resolve(SRC, "reply-stages.ts"),
+    "reply-surface.ts": resolve(SRC, "reply-surface.ts"),
   };
+
+  // The map above is hand-maintained, so a NEW module is unguarded until someone remembers to add it — and
+  // the most safety-critical module in this milestone was itself missing from it when a reviewer looked.
+  // This makes forgetting fail the build instead of silently widening the seam.
+  it("guards EVERY module in the reply-submission surface, by enumeration", () => {
+    // Scoping the sweep to `session-*` left module-level state one rename away: a reviewer put a mutable
+    // singleton in `account-shell-hint.ts`, imported it from `session-signals.ts`, and the suite stayed
+    // green. A filename pattern is not a boundary; the directory is.
+    const onDisk = readdirSync(SRC)
+      .filter((f) => f.endsWith(".ts"))
+      .sort();
+    const guarded = Object.keys(files).sort();
+    const unguarded = onDisk.filter((f) => !guarded.includes(f));
+    expect(unguarded, `unguarded modules in ${SRC}`).toEqual([]);
+  });
 
   for (const [name, path] of Object.entries(files)) {
     const code = codeOnly(path);
@@ -185,8 +224,10 @@ describe("reply-submission live-seam surface — source guard (dispatch + Bridge
       expect(code).not.toContain(token);
     });
     it.each(NO_DOWNSTREAM_IMPORTS)(`${name} imports no downstream/legacy-capture path (%s)`, (mod) => {
-      const imports = code.split("\n").filter((l) => l.trim().startsWith("import"));
-      expect(imports.join("\n")).not.toContain(mod);
+      // Whole-file, not `startsWith("import")`: a multi-line import puts the specifier on the `} from …`
+      // line, which that filter drops.
+      expect(code).not.toContain(`"${mod}"`);
+      expect(code).not.toContain(`'${mod}'`);
     });
   }
 });
@@ -279,6 +320,231 @@ describe("run-review-id-reconciliation-live-naver CLI — source guard (read-onl
     expect(uploadImport).not.toContain("startReplySubmissionRun");
     expect(uploadImport).not.toContain("submitReplyOutcome");
     expect(uploadImport).not.toContain("uploadReview");
+  });
+});
+
+/**
+ * The guided-session CLI reaches the composer barrier, so it legitimately imports the composer machinery and
+ * the backend client. What it must never do is act on NAVER: no submit/type/click, and — like the read-only
+ * probe — no navigation of its own. Every page transition after the single opening `goto` is the operator's.
+ */
+describe("run-guided-reply-session-live-naver CLI — source guard (no submit/type/click, single goto)", () => {
+  const path = resolve(SRC, "../../../src/cli/run-guided-reply-session-live-naver.ts");
+  const code = codeOnly(path);
+
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each([".goBack(", ".goForward(", ".reload(", "waitForNavigation", "window.open"])(
+    "never drives navigation (%s)",
+    (token) => {
+      expect(code).not.toContain(token);
+    },
+  );
+
+  it("navigates exactly once, and only to the configured review URL", () => {
+    const gotos = code.split("\n").filter((l) => l.includes(".goto("));
+    expect(gotos).toHaveLength(1);
+    expect(gotos[0]).toContain("cfg.naverReviewUrl");
+  });
+
+  it("builds the run record in a finally, so every fail-closed stop still leaves evidence", () => {
+    // Each stop below returns early; a record built after a plain try/finally would be skipped by all of
+    // them, and the honest stops are exactly the outcomes this milestone needs evidence for.
+    expect(code).toMatch(/\}\s*finally\s*\{\s*const record = buildGuidedRecord/);
+  });
+
+  // These four are SOURCE pins, and they are here because the behaviour they protect lives inside a live
+  // `main()` that no offline test can drive. A regression that reverted any of them would leave every
+  // behavioural test green — which is exactly how the defects they encode survived the first review.
+  it("replaces the preflight read with the barrier read before each verdict check", () => {
+    // Otherwise an ACCOUNT_DRIFTED record would carry the preflight's MATCH — the exact claim the scope
+    // forbids on a stop path.
+    const body = code.slice(code.indexOf("async function main("));
+    for (const barrier of ["atOutline", "atComposer", "atEntry"]) {
+      const assignAt = body.indexOf(`chromeResult = ${barrier}`);
+      const checkAt = body.indexOf(`mayProceedAfterChromeIdentity(${barrier}.verification)`);
+      expect(assignAt, `${barrier} assignment missing`).toBeGreaterThan(-1);
+      expect(checkAt, `${barrier} check missing`).toBeGreaterThan(-1);
+      expect(assignAt).toBeLessThan(checkAt);
+    }
+  });
+
+  it("re-reads BOTH the registry and the page immediately before binding", () => {
+    const body = code.slice(code.indexOf("async function main("));
+    const promptAt = body.indexOf("waitForEither(bindConfirmedSentinel, stopSentinel");
+    // THE NEEDLE ITSELF IS NOW ASSERTED. It previously read `waitForEither(sentinel, stopSentinel`, which
+    // matches nothing in this file — so `indexOf` returned -1, `body.indexOf(x, -1)` behaves as
+    // `indexOf(x, 0)`, and both "after the prompt" checks were satisfied by the STARTUP registry load and
+    // the PREFLIGHT page read. Every assertion passed while the property was entirely unguarded. A source
+    // pin that cannot find its own anchor is worse than no pin, because it reads as coverage.
+    expect(promptAt, "bind-prompt anchor missing — fix the needle, not the expectation").toBeGreaterThan(-1);
+    const bindAt = body.indexOf("bindSessionChromeIdentity({");
+    expect(bindAt).toBeGreaterThan(promptAt);
+    const registryReread = body.indexOf("loadConnectionRegistryFromFile(storePath)", promptAt);
+    const pageReread = body.indexOf("readChromeIdentity(activePage", promptAt);
+    // Both must sit between the operator prompt and the bind: the prompt can wait many minutes, and a
+    // binding is permanent with no unbind path.
+    for (const [name, at] of [["registry", registryReread], ["page", pageReread]] as const) {
+      expect(at, `${name} not re-read after the prompt`).toBeGreaterThan(promptAt);
+      expect(at).toBeLessThan(bindAt);
+    }
+  });
+
+  it("clears each sentinel immediately before waiting on it", () => {
+    // A gate that can be satisfied BEFORE it is asked is not a gate. Clearing only at startup left a window
+    // in which a sentinel created early was already present when its step arrived, so the wait returned at
+    // once and the operator never did the thing. Caught live, on the re-render check.
+    expect(code).toMatch(/async function waitForFile\([\s\S]{0,600}?removeSentinel\(path\);/);
+    expect(code).toMatch(/async function waitForEither\([\s\S]{0,600}?removeSentinel\(a\);\s*removeSentinel\(b\);/);
+  });
+
+  it("offers NO inline rebind — a mismatch ends the run", () => {
+    // POLICY (product owner): the runtime cannot distinguish a renamed shop from a different seller, so an
+    // inline "was it renamed?" affordance asks the operator to certify that mid-reply, and one wrong click
+    // writes a permanent binding with no unbind path. Rebinding belongs in a deliberate connection-management
+    // flow. The binding path here is first-time ONLY.
+    expect(code).not.toContain("rebindConfirmedSentinel");
+    expect(code).not.toContain('intent: "rebind"');
+    expect(code).toContain('intent: "first-time"');
+    const body = code.slice(code.indexOf("async function main("));
+    const mismatchAt = body.indexOf('chromeResult.verification.verdict === "MISMATCH"');
+    const lookupAt = body.indexOf("locateRowByReviewId(");
+    expect(mismatchAt).toBeGreaterThan(-1);
+    expect(mismatchAt).toBeLessThan(lookupAt);
+  });
+
+  it("never invents a selector — the calibrated specs are LOADED, and their absence stops the run", () => {
+    expect(code).toContain("loadSelectorSpecs(defaultSelectorStorePath(collectorRoot))");
+    expect(code).toContain("run-chrome-selector-discovery-live-naver");
+    // The identity is read only through the loaded specs.
+    expect(code).toMatch(/specs\.userId\.map\(\(x\) => x\.selector\)/);
+    expect(code).toMatch(/specs\.shopName\.map\(\(x\) => x\.selector\)/);
+  });
+
+  it("refuses colliding selectors before reading anything through them", () => {
+    // Both fields reading one element yields a composite of a value with itself, which looks perfectly
+    // stable and identifies nothing.
+    expect(code).toContain("specsCollide(specs)");
+  });
+
+  it("never prints or persists the observed user id — anywhere in the file", () => {
+    // THE REGRESSION THIS EXISTS FOR: this assertion used to slice the source to two functions, so a
+    // `console.error` in main() that printed the user id at the bind prompt passed it vacuously. The value
+    // may be READ (the bind step needs it) but must never reach a console or a record.
+    const consoleLines = code.split("\n").filter((l) => l.includes("console."));
+    for (const line of consoleLines) {
+      expect(line, "user id printed").not.toContain("observedUserId");
+    }
+    const builder = code.slice(code.indexOf("export function buildGuidedRecord("));
+    expect(builder).not.toContain("observedUserId");
+    // The occurrence CEILING that used to sit here has been removed. A cap on how often an identifier
+    // appears is not a leak proof — it says nothing about where the value goes — and it fails on any
+    // honest refactor: adding the pre-bind equality check (which makes the binding SAFER by refusing to
+    // bind evidence the operator never saw) pushed the count past the cap and broke this test while
+    // improving the property it claimed to protect. The two checks above are the substantive ones, and
+    // the file-writing check below closes the third sink.
+    const writes = code.split("\n").filter((l) => l.includes("writeFileSync"));
+    for (const line of writes) {
+      expect(line, "user id written to disk").not.toContain("observedUserId");
+    }
+  });
+
+  it("gates the review lookup behind the preflight inside main(), not just in the imports", () => {
+    const body = code.slice(code.indexOf("async function main("));
+    expect(body).toContain("mayProceedAfterChromeIdentity");
+    const gateAt = body.indexOf("mayProceedAfterChromeIdentity");
+    const lookupAt = body.indexOf("locateRowByReviewId(");
+    expect(lookupAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(lookupAt);
+  });
+
+  it("does not post a backend outcome for a run that stopped on account drift", () => {
+    // A drift stop is a safety event; recording an abort against the action would present it as an ordinary
+    // operator decision.
+    expect(code).toContain("if (operatorOutcome && driftReason === null)");
+  });
+
+  it("re-verifies the account at THREE barriers, matching what the record reports", () => {
+    const body = code.slice(code.indexOf("async function main("));
+    expect((body.match(/reverifiedAtBarriers \+= 1/g) ?? []).length).toBe(3);
+  });
+
+  it("takes identity evidence ONLY from the in-page probe, never from raw response text", () => {
+    // Raw response text has no provenance: a customer-written review body containing a JSON-looking
+    // fragment, or a build-time constant in a shared bundle, would otherwise become the store identity.
+    expect(code).not.toContain("session-account-network-scan");
+    expect(code).not.toContain('ctx.on("response"');
+  });
+
+  it("records a crash as its own terminal rather than as the stage it had reached", () => {
+    expect(code).toContain('terminal = "RUN_FAILED"');
+  });
+
+});
+
+/**
+ * The store-identity diagnostic holds the WEAKEST authorization in the runtime and must be incapable of the
+ * things the guided session can do — not merely careful about them. These assert absence of capability by
+ * absence of the import, which is the only form of "cannot" a source guard can express honestly.
+ */
+describe("run-store-identity-diagnostic-live-naver CLI — source guard (cannot bind, look up, or post)", () => {
+  const path = resolve(SRC, "../../../src/cli/run-store-identity-diagnostic-live-naver.ts");
+  const code = codeOnly(path);
+
+  it.each(NO_SUBMIT_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each([".goBack(", ".goForward(", ".reload(", "waitForNavigation", "window.open"])(
+    "never drives navigation (%s)",
+    (token) => {
+      expect(code).not.toContain(token);
+    },
+  );
+
+  it("navigates exactly once, and only to the configured review URL", () => {
+    const gotos = code.split("\n").filter((l) => l.includes(".goto("));
+    expect(gotos).toHaveLength(1);
+    expect(gotos[0]).toContain("cfg.naverReviewUrl");
+  });
+
+  it.each([
+    ["a connection binding", "session-chrome-binding"],
+    ["the connection store", "connection/store"],
+    ["the account verifier", "session-account-verify"],
+    ["a review lookup", "review-id-locator"],
+    ["the review ladder", "review-id-probe-inpage"],
+    ["the composer", "reply-composer-inpage"],
+    ["the composer driver", "handle-reply-composer-driver"],
+    ["the backend client", "../upload"],
+    ["the reply dispatcher", "reply-dispatch"],
+  ])("cannot reach %s — the module is not imported (%s)", (_label, mod) => {
+    // Scanning only lines that START with `import` is vacuous here: five of this file's imports are
+    // multi-line, so the specifier lives on the `} from "…"` line and was never examined. A reviewer added
+    // a multi-line `connection/store` import and every check still reported clean. Scan the whole file, and
+    // catch dynamic imports too.
+    expect(code).not.toContain(`"${mod}"`);
+    expect(code).not.toContain(`'${mod}'`);
+  });
+
+  it("uses no dynamic import, which would sidestep the check above", () => {
+    expect(code).not.toMatch(/\bimport\s*\(/);
+    expect(code).not.toContain("require(");
+  });
+
+  it("evaluates only the vetted in-page probe, and reads no page text", () => {
+    expect(code).toContain("inPageAccountIdentityProbe()");
+    expect((code.match(/\.evaluate</g) ?? [])).toHaveLength(1);
+    expect((code.match(/\.evaluate\(/g) ?? [])).toHaveLength(0);
+    expect(code).not.toContain("page.content()");
+  });
+
+  it("refuses a mutating flag rather than accepting the stronger grant", () => {
+    expect(code).toContain("mutatingFlagOnReadOnlyProbeMessage(REPLY_APPROVAL_FLAG)");
+    expect(code).toContain("mutatingFlagOnReadOnlyProbeMessage(APPROVAL_FLAG)");
+    expect(code).toContain("hasReviewIdProbeApproval");
   });
 });
 
