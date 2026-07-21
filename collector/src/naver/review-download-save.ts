@@ -24,6 +24,7 @@
  */
 import { closeSync, mkdirSync, openSync, readSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { TextDecoder } from "node:util";
 import { messageFingerprint } from "./export-click-signals";
 import { extensionCategory, type ExtensionCategory } from "./review-export";
 import type { UploadInspection } from "./review-upload-diagnostic";
@@ -63,6 +64,11 @@ export interface SavedDownloadInspection<R = never> {
   savedExtensionCategory: ExtensionCategory;
   fileSizeBucket: FileSizeBucket;
   xlsxReadable: boolean;
+  /**
+   * Positive byte-derived structural family (enum only). Meaningful only when `downloadSaved` is true;
+   * on the degraded/no-save path it defaults to `"empty"`. Never carries content.
+   */
+  fileFamily: FileFamily;
   /** Sheet/row/column/header validation is deferred to a follow-up PR that adds a parser. */
   workbookContentValidation: "deferred";
   /** No cell is ever read by THIS module (no parser) — structurally true. */
@@ -95,6 +101,7 @@ export const SAVED_DOWNLOAD_INSPECTION_KEYS: ReadonlyArray<keyof SavedDownloadIn
   "savedExtensionCategory",
   "fileSizeBucket",
   "xlsxReadable",
+  "fileFamily",
   "workbookContentValidation",
   "rawCellLeak",
   "fileRetained",
@@ -167,6 +174,74 @@ export function sniffXlsxReadable(head: Uint8Array): boolean {
   return s.includes("[Content_Types].xml");
 }
 
+/**
+ * Byte-derived POSITIVE family of a saved artifact — a sanitized structural verdict so an
+ * `ARTIFACT_INVALID` cause can be told apart (HTML interstitial vs CSV/text export vs truncated vs
+ * non-OOXML zip vs empty) without ever exposing content. Enum only.
+ */
+export type FileFamily =
+  | "empty"
+  | "too_small_or_partial"
+  | "ooxml_zip_like"
+  | "zip_non_ooxml_or_partial"
+  | "html_like"
+  | "csv_like"
+  | "binary_unknown";
+
+/** Below this, a payload is too small to be any plausible export — treated as truncated/incomplete. */
+const MIN_PLAUSIBLE_BYTES = 8;
+
+/** Pure: does the head begin with the ZIP local-header magic (`50 4B 03 04`)? */
+function hasZipLocalHeaderMagic(head: Uint8Array): boolean {
+  return head.length >= 4 && head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+}
+
+/**
+ * Pure, CONSERVATIVE text check. True only for clean printable ASCII / valid UTF-8 (CSV/TSV/plain text) —
+ * never for control-heavy or binary payloads. Rejects any C0 control other than tab/LF/CR, plus NUL and
+ * DEL; then requires a STRICT (fatal) UTF-8 decode, tolerating a multibyte char cut at the head boundary
+ * (retry with up to 3 trailing bytes trimmed). Arbitrary `>=0x80` bytes are NOT assumed to be text — only
+ * genuinely-valid UTF-8 passes. Reads bytes for the verdict; returns a boolean, never any content.
+ */
+function looksLikeText(head: Uint8Array): boolean {
+  if (head.length === 0) return false;
+  for (let i = 0; i < head.length; i += 1) {
+    const b = head[i] ?? 0;
+    const allowedControl = b === 0x09 || b === 0x0a || b === 0x0d;
+    if ((b < 0x20 && !allowedControl) || b === 0x7f) return false;
+  }
+  for (let trim = 0; trim <= 3; trim += 1) {
+    const slice = trim === 0 ? head : head.subarray(0, head.length - trim);
+    if (slice.length === 0) break;
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(slice);
+      return true;
+    } catch {
+      // possibly a multibyte sequence cut at the head boundary — trim one more trailing byte and retry
+    }
+  }
+  return false;
+}
+
+/**
+ * Pure: classify a saved artifact into a POSITIVE, sanitized byte-family. Reads only the already-in-memory
+ * head bytes + the coarse size; returns an ENUM only — never any content. Precedence (first match wins):
+ * empty → too-small → ooxml → zip-without-proven-ooxml → markup → strict-text → binary.
+ */
+export function classifyFileFamily(head: Uint8Array, size: number): FileFamily {
+  if (size <= 0 || head.length === 0) return "empty";
+  if (size < MIN_PLAUSIBLE_BYTES) return "too_small_or_partial";
+  if (sniffXlsxReadable(head)) return "ooxml_zip_like";
+  if (hasZipLocalHeaderMagic(head)) return "zip_non_ooxml_or_partial";
+  let i = 0;
+  while (i < head.length && (head[i] === 0x20 || head[i] === 0x09 || head[i] === 0x0a || head[i] === 0x0d)) {
+    i += 1;
+  }
+  if (i < head.length && head[i] === 0x3c) return "html_like";
+  if (looksLikeText(head)) return "csv_like";
+  return "binary_unknown";
+}
+
 /** The real `node:fs`-backed io used when none is injected. */
 const defaultIo: DownloadSaveIo = {
   ensureDir(dir: string): void {
@@ -202,6 +277,7 @@ function failedInspection<R = never>(
     savedExtensionCategory: category,
     fileSizeBucket: "empty",
     xlsxReadable: false,
+    fileFamily: "empty",
     workbookContentValidation: "deferred",
     rawCellLeak: false,
     fileRetained: false,
@@ -237,6 +313,7 @@ export async function saveAndInspectDownload<R = never>(
     const size = io.fileSize(targetPath);
     const head = io.readHead(targetPath, headBytes);
     const xlsxReadable = sniffXlsxReadable(head);
+    const fileFamily = classifyFileFamily(head, size);
     // Pre-delete hooks run ONLY when the file is a structurally-valid .xlsx, and BEFORE the finally
     // delete. A non-OOXML payload is never uploaded or inspected. Each injected fn owns its own
     // read/call and returns a sanitized result; this module never parses a cell itself.
@@ -249,6 +326,7 @@ export async function saveAndInspectDownload<R = never>(
       savedExtensionCategory: category,
       fileSizeBucket: fileSizeBucket(size),
       xlsxReadable,
+      fileFamily,
       workbookContentValidation: "deferred",
       rawCellLeak: false,
       fileRetained: false,

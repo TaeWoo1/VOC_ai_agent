@@ -3,12 +3,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  classifyFileFamily,
   diagnosticBasenameFor,
   fileSizeBucket,
   saveAndInspectDownload,
   SAVED_DOWNLOAD_INSPECTION_KEYS,
   sniffXlsxReadable,
   type DownloadSaveIo,
+  type FileFamily,
   type SaveableDownload,
 } from "../../src/naver/review-download-save";
 import type { UploadInspection } from "../../src/naver/review-upload-diagnostic";
@@ -109,6 +111,82 @@ describe("sniffXlsxReadable — structural OOXML zip sniff (no cell read)", () =
   });
 });
 
+describe("classifyFileFamily — positive byte-family, conservative, enum only", () => {
+  const ALL_FAMILIES: readonly FileFamily[] = [
+    "empty", "too_small_or_partial", "ooxml_zip_like", "zip_non_ooxml_or_partial",
+    "html_like", "csv_like", "binary_unknown",
+  ];
+  const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
+
+  it("empty — nothing downloaded (size <= 0 or no bytes)", () => {
+    expect(classifyFileFamily(new Uint8Array([]), 0)).toBe("empty");
+    expect(classifyFileFamily(ooxmlHead(), 0)).toBe("empty"); // size gate wins even over a valid head
+  });
+
+  it("too_small_or_partial — below the plausible-workbook size (gate precedes ooxml)", () => {
+    expect(classifyFileFamily(ooxmlHead(), 4)).toBe("too_small_or_partial");
+  });
+
+  it("ooxml_zip_like — ZIP magic + [Content_Types].xml at a real size", () => {
+    expect(classifyFileFamily(ooxmlHead(), 50_000)).toBe("ooxml_zip_like");
+  });
+
+  it("zip_non_ooxml_or_partial — ZIP magic but OOXML not proven (no truncation claim)", () => {
+    const zipNoOoxml = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    expect(classifyFileFamily(zipNoOoxml, 5_000)).toBe("zip_non_ooxml_or_partial");
+  });
+
+  it("html_like — leading '<' markup, incl. after leading whitespace", () => {
+    expect(classifyFileFamily(enc("<!DOCTYPE html><html><body>error</body></html>"), 2_000)).toBe("html_like");
+    expect(classifyFileFamily(enc("  \n\t<html><head></head></html>"), 2_000)).toBe("html_like");
+  });
+
+  it("csv_like — clean ASCII CSV/TSV/plain text", () => {
+    expect(classifyFileFamily(enc("a,b,c\n1,2,3\n4,5,6\n"), 4_000)).toBe("csv_like");
+    expect(classifyFileFamily(enc("id\tname\tvalue\n1\tfoo\t9\n"), 4_000)).toBe("csv_like");
+  });
+
+  it("csv_like — valid UTF-8 (multi-byte) text passes the strict decoder", () => {
+    expect(classifyFileFamily(enc("리뷰,평점,작성일\n좋아요,5,오늘\n"), 4_000)).toBe("csv_like");
+  });
+
+  it("csv_like — a valid UTF-8 multi-byte char truncated at the head boundary is tolerated", () => {
+    const full = enc("AAAAAAA안"); // 7 ASCII + a 3-byte 안
+    const cut = full.subarray(0, full.length - 1); // drop the last byte → incomplete trailing char
+    expect(classifyFileFamily(cut, cut.length)).toBe("csv_like");
+  });
+
+  it("binary_unknown — invalid UTF-8 (not just a boundary cut)", () => {
+    expect(classifyFileFamily(new Uint8Array([0x41, 0x42, 0x43, 0x44, 0xff, 0xfe, 0x45, 0x46]), 8)).toBe(
+      "binary_unknown",
+    );
+    // a lone continuation byte 0x80 with no lead byte is invalid UTF-8 (and not treated as text)
+    expect(classifyFileFamily(new Uint8Array([0x41, 0x41, 0x41, 0x41, 0x80, 0x41, 0x41, 0x41]), 8)).toBe(
+      "binary_unknown",
+    );
+  });
+
+  it("binary_unknown — control-heavy (NUL / C0 controls) is never text", () => {
+    expect(classifyFileFamily(new Uint8Array([0x41, 0x42, 0x00, 0x43, 0x44, 0x45, 0x46, 0x47]), 8)).toBe(
+      "binary_unknown",
+    );
+  });
+
+  it("returns a bare enum with no markup characters", () => {
+    for (const [head, size] of [
+      [new Uint8Array([]), 0],
+      [ooxmlHead(), 50_000],
+      [enc("<html>"), 2_000],
+      [enc("a,b\n1,2\n"), 2_000],
+      [new Uint8Array([0x41, 0x42, 0x00, 0x43, 0x44, 0x45, 0x46, 0x47]), 8],
+    ] as ReadonlyArray<readonly [Uint8Array, number]>) {
+      const fam = classifyFileFamily(head, size);
+      expect(ALL_FAMILIES).toContain(fam);
+      expect(/[<>]/.test(fam)).toBe(false);
+    }
+  });
+});
+
 describe("diagnosticBasenameFor — generated name, never the raw NAVER filename", () => {
   it("embeds a salted hash of the raw name + the derived extension, never the raw name", () => {
     const name = diagnosticBasenameFor("salt", "리뷰_행복마켓_20260622.xlsx", "xlsx");
@@ -132,6 +210,7 @@ describe("saveAndInspectDownload — save → validate → DELETE, sanitized rec
     expect(r.savedExtensionCategory).toBe("xlsx");
     expect(r.fileSizeBucket).toBe("small");
     expect(r.xlsxReadable).toBe(true);
+    expect(r.fileFamily).toBe("ooxml_zip_like");
     expect(r.workbookContentValidation).toBe("deferred");
     expect(r.rawCellLeak).toBe(false);
     expect(r.savedPathCategory).toBe("downloads_diagnostic_quarantine");
@@ -153,6 +232,7 @@ describe("saveAndInspectDownload — save → validate → DELETE, sanitized rec
     const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
     expect(r.downloadSaved).toBe(true);
     expect(r.xlsxReadable).toBe(false);
+    expect(r.fileFamily).toBe("html_like"); // "<html" head → positive family verdict, not just !xlsxReadable
     expect(calls.removeFile).toBe(1);
   });
 
@@ -160,6 +240,7 @@ describe("saveAndInspectDownload — save → validate → DELETE, sanitized rec
     const { io, download, calls } = makeFakes({ saveAsThrows: true });
     const r = await saveAndInspectDownload(download, { dir: OPTS_DIR, salt: "s", io });
     expect(r.downloadSaved).toBe(false);
+    expect(r.fileFamily).toBe("empty"); // no bytes classified on the degraded path
     expect(calls.removeFile).toBe(1); // finally still attempts cleanup
   });
 
@@ -179,6 +260,7 @@ describe("saveAndInspectDownload — save → validate → DELETE, sanitized rec
     expect(json.includes(".xlsx")).toBe(false); // extension is a CATEGORY, not the raw name
     expect(/\/tmp\/|diagnostic\//.test(json)).toBe(false); // never the raw path
     expect(/[<>]/.test(json)).toBe(false);
+    expect((SAVED_DOWNLOAD_INSPECTION_KEYS as readonly string[]).includes("fileFamily")).toBe(true);
     for (const k of Object.keys(r)) {
       expect((SAVED_DOWNLOAD_INSPECTION_KEYS as readonly string[]).includes(k)).toBe(true);
     }
