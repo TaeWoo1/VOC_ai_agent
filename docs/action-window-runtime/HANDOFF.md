@@ -5,7 +5,14 @@
 > Canonical detail lives in the docs linked below; where this file and they disagree, **they win**.
 
 **Updated:** 2026-07-18 · **Worktree:** `BE/worktrees/sellerops-r4-runtime` (dedicated BE writer, owner file
-`.claude-worktree-owner` — never stage it) · **Branch:** `feat/r4-supervised-channel-runtime`
+`.claude-worktree-owner` — never stage it) · **Branch:** `feat/naver-smartstore-v1`
+
+> ⚠ **Branch moved for the NAVER SmartStore v1 phase** (`feat/r4-supervised-channel-runtime` →
+> `feat/naver-smartstore-v1`). The **Git state** block below predates this phase and is stale on
+> sync/ahead-behind/local-commit counts — **re-derive from `git log`**, and follow the phase git
+> cadence in root `CLAUDE.md` "Current phase" (local commits only on explicit instruction; no remote
+> integration until final v1). Historical narrative that names the old branch (e.g. the pre-#263
+> push lessons) is left intact as accurate r4-era history.
 
 **Discovery:** the root `CLAUDE.md` workstream routing table points here, and the `r4-runtime-handoff`
 skill (`.claude/skills/r4-runtime-handoff/SKILL.md`) routes here. **Both carry paths only** — they
@@ -64,6 +71,50 @@ merged, PR #306) on which the operator's incidental export click reached the dow
 diverging from Run 4's clean OOXML. **Run 6 remains the last recovery / zero-click run; Run 5 the last
 barrier / confirmation run.** There is no open Runtime blocker; what remains is polish, the `ARTIFACT_INVALID`
 follow-up (a classification probe that needs a fresh single-use G6), and product decisions.
+
+> ⚠ **STALE BY DECISION — guided-reply row match (flagged 2026-07-20).** This HANDOFF and the v1 plan's
+> §7/§8 describe the guided-reply row seam as fail-closed with no live selector. That is accurate for
+> `feat/naver-smartstore-v1` and **stale for the workstream**: a separate branch —
+> `sellerops-naver-live-review-match` / `feat/naver-guided-reply-session-v1` (merged PRs #311–#315) — carries
+> an operator-assisted calibration stack (`calibrate-reply-target`, row-mapping artifact, `reply-row-inpage`,
+> `review-id-locator`, cross-source fingerprint) that this branch does not contain. ✅ **RULED 2026-07-20
+> (PO): that branch is the guided-reply SOURCE OF TRUTH.** This worktree's B2 ladder is a superseded
+> dead-letter experiment (settle/sentinel hardening kept as possible utility; no further ladder live runs
+> here). Detail lives in `naver-smartstore-v1-plan.md` §8; this block carries the flag, not the status.
+> **No branch integration happens before the final v1 integration**, which remains the only allowed
+> integration point.
+>
+> ✅ **B6 RULED 2026-07-20 (PO): live guided reply SUBMISSION is NOT required for NAVER v1.** The v1 bar is
+> calibrated target discovery + row mapping + row identity + composer-open / abort-safe hand-off evidence —
+> **no final submit click on NAVER**. SellerOps may guide / highlight / open the composer where already
+> proven safe; the **seller performs the final platform submission in v1**, and **automated reply submission
+> must not be presented as v1-supported**. Live submission is a post-v1 gated follow-up (separate PO
+> approval + fresh G6). Detail in `naver-smartstore-v1-plan.md` §8-B6 / §9.
+>
+> ✅ **B9 RULED 2026-07-21 (PO): NAVER v1 onboarding completes at the ratified G3-A/B bar.** The
+> `ConnectNaver` wizard + secure credential form → Vault → `test-connection` → `sync` → dashboard is
+> **sufficient for v1**; API-center steps ①② ship **tutorial-guided with seller self-attestation**.
+> **G3-C.1 and G3-C.2 are NOT v1 gating** — live API-center observation is **diagnostic / tool-calibration
+> evidence only** (the G3-C.2 live runs covered sanitized page-category observation and classifier
+> calibration only, and prove nothing about issuance completion, policy permission, credential extraction,
+> or test/sync for a freshly issued app). ⚠ API-center = **guided tutorial support only**: no automatic
+> issuance/linking, and **SellerOps never reads Client ID/Secret from the page** — the seller creates/opens
+> the app and copies the values manually. The assisted end-to-end walk against a **freshly issued** app is
+> **POST-v1** (mutates Vault + local DB; separate PO approval + fresh G6; not v1-verified). **No live
+> onboarding run is scheduled.** Detail in `naver-smartstore-v1-plan.md` §8-B9 / §9 / §10,
+> `docs/slices/naver-guided-connection.md` §0, `g3c-live-walk-preflight.md` §0 / §12.
+>
+> ✅ **B3 ACCEPTED 2026-07-21 (PO): the export `ARTIFACT_INVALID` finding is TRIAGED-and-ACCEPTED and does
+> NOT block NAVER v1.** The original failure is **not fully explained** but is **non-reproducing /
+> intermittent** — the Run B diagnostic produced a **valid** artifact (`ooxml_zip_like`, `xlsxReadable:
+> true`, `savedExtensionCategory: xlsx`, deleted after classification, no upload/backend/status write).
+> **No further B3 live download probes.** ⚠ Run B was a **one-off supervised diagnostic exception, NOT v1
+> product behavior**: production review export stays **human-driven Action Window** — the seller clicks
+> export and consent on NAVER, SellerOps only detects/validates/processes the resulting download, and
+> automatic export/consent/download **must not be presented as v1-supported**. Detail in
+> `naver-smartstore-v1-plan.md` §8-B3 / §9.
+>
+> ✅ **No `[PO]` item remains open for NAVER v1 completion.**
 
 ## Live run results (chronological — every G6 below is CONSUMED)
 

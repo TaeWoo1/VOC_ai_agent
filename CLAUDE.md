@@ -2,6 +2,39 @@
 
 SellerOps collector project instructions.
 
+## Current phase — NAVER SmartStore v1 (anti-drift anchor)
+
+**The active phase is completing NAVER SmartStore v1 end-to-end.** Phase source of
+truth: `docs/action-window-runtime/naver-smartstore-v1-plan.md`. Status lives there and
+in each workstream home — this block carries rules, not status.
+
+**v1 = one channel, four surfaces, all in scope:** (1) guided API onboarding (orders),
+(2) review export (Action Window), (3) session readiness, (4) guided review reply. v1 is
+not "complete" until all four meet the plan's §9 criteria. (The guided-connection *slice*
+scopes review out of *itself* — that is slice scope, not phase scope; review still ships
+in v1 via the Action Window track.)
+
+**v1 runtime shape:** real local Chrome + dedicated NAVER profile + Action Window tutorial
+overlay. **Cropped/projection UI is excluded from v1.** API-center work is **guided-tutorial
+support only** — never automatic API issuance or linking. The seller manually creates/opens
+their own app and copies Client ID/Secret into SellerOps; **SellerOps never reads Client
+ID/Secret from the API-center page** (the observe tool reads only a sanitized page category).
+
+**Scope fence.** Coupang and Cafe24 are the **next**-channel targets, **after** NAVER v1.
+Do not start them and do not widen v1 into them.
+
+**Git cadence for this phase — overrides the "one slice = one PR" workflow below and in
+`collector/CLAUDE.md` §6 until v1 is complete:**
+
+- **No push / PR / merge / rebase / remote sync / branch deletion** until the single final
+  v1 integration. No force-push (standing).
+- **No new local commits** unless the user explicitly instructs one; when they do, commit a
+  meaningful completed unit. **Do not optimize for tiny checkpoints.**
+- Work accumulates in the tree / meaningful local commits; the branch stays local.
+
+Live NAVER, credentials, and sanitization follow the standing rules below and in
+`collector/CLAUDE.md` §4 (each live run still needs a fresh, single-use, in-turn G6).
+
 ## Working directory
 
 Use this repository only:
@@ -49,6 +82,26 @@ After opening a PR, report:
 ## Safety boundaries
 
 Do not run live NAVER, live ESM, browser, Playwright, backend, DB, upload, or RUN_INTEGRATION unless explicitly approved for that exact step.
+
+### Product-boundary check — mandatory before any NAVER live run
+
+Approval to run live is **not** approval to act like the product. Every NAVER live dispatch must
+explicitly answer, **before launch**:
+
+1. Is this **product-path behavior** or a **one-off diagnostic exception**?
+2. Will the tool **click export, consent, download, submit, upload, or otherwise mutate platform state**?
+3. If yes — is that **supported v1 product behavior**?
+4. If not — the run must be **labeled a diagnostic exception**, the **human-driven product alternative
+   must be stated**, and the user must **explicitly approve that exception in the grant**. A generic
+   live grant never covers it.
+5. **Default production NAVER review export stays human-driven Action Window:** the user clicks
+   export / consent / download **on NAVER**; SellerOps only **detects, validates, and processes the
+   resulting download**.
+6. **Do not implement, wire, or present automatic export / consent / download as NAVER v1 behavior.**
+
+**B3 Run B (2026-07-20) is not precedent for product behavior** — a single supervised diagnostic
+exception to classify one artifact. **No further B3 live download probes.** Detail lives in
+`docs/action-window-runtime/naver-smartstore-v1-plan.md` §8; this block carries the rule, not the status.
 
 Do not use credentials, seller IDs, Master ID, API keys, JWTs, real seller data, raw HTML, screenshots, exported files, or AI API calls unless explicitly approved.
 

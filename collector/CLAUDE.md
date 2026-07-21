@@ -73,6 +73,7 @@ npm run probe-session -- --i-understand-this-opens-live-naver           # saniti
 npm run probe-same-session -- --i-understand-this-opens-live-naver      # READ-ONLY same-context verdict probe; sentinel-file continuation; no export/click/download
 npm run probe-export-same-session -- --i-understand-this-opens-live-naver  # READ-ONLY frame-aware export-area probe (top doc + every child frame); same sentinel flow; no export/click/download
 npm run classify-export-same-session -- --i-understand-this-opens-live-naver  # STRICT NO-CLICK export-layout classifier (sync/async/unrecognized from structure only); same sentinel flow; never triggers/captures
+npx tsx src/cli/observe-api-center.ts --i-understand-this-opens-live-naver  # GUIDED-TUTORIAL ONLY API-center page-category observer (NAVER v1 onboarding); reads a SANITIZED page category to show the next tutorial step; NEVER logs in / issues / links / clicks / types / submits / autofills, and NEVER reads any value incl. Client ID / Secret; the seller creates/opens the app and copies Client ID/Secret manually
 npm run upload -- /abs/path/to/export.xlsx                              # offline manual upload check (needs backend)
 ```
 
@@ -239,6 +240,27 @@ guidelines.
 6. **Placeholders stay honest.** Session/export markers are guesses pending a
    live run. Correct them from observed (sanitized) findings — never tune them
    speculatively, and don't claim a mechanism is confirmed until a run proves it.
+7. **Product-boundary check — MANDATORY before every NAVER live run.** Approval
+   to run live is not approval to act like the product. Answer all of these
+   **in the dispatch, before launch**:
+   1. Is this **product-path behavior** or a **one-off diagnostic exception**?
+   2. Will the tool **click export, consent, download, submit, upload, or
+      otherwise mutate platform state**?
+   3. If yes — is that **supported v1 product behavior**?
+   4. If not — the run must be **labeled a diagnostic exception**, the
+      **human-driven product alternative must be stated**, and the user must
+      **explicitly approve that exception in the grant**. A generic live grant
+      does not cover it.
+   5. **Default production NAVER review export is human-driven Action Window:**
+      the user clicks export / consent / download **on NAVER**; SellerOps only
+      **detects, validates, and processes the resulting download**.
+   6. **Do not implement, wire, or present automatic export / consent / download
+      as NAVER v1 behavior.**
+
+   **B3 Run B (2026-07-20) is NOT precedent for product behavior** — it was a
+   single supervised diagnostic exception taken to classify one artifact. **No
+   further B3 live download probes.** See the §8 note in
+   `docs/action-window-runtime/naver-smartstore-v1-plan.md`.
 
 ---
 
@@ -274,6 +296,13 @@ guidelines.
 ---
 
 ## 6. Git workflow (one slice = one PR)
+
+> **NAVER SmartStore v1 phase override:** the "one slice = one PR" cadence below is
+> **suspended until v1 is complete** — no push/PR/merge/rebase/remote sync/branch deletion
+> until the single final v1 integration, and **no new local commits without an explicit
+> user instruction** (do not optimize for tiny checkpoints). See root `CLAUDE.md`
+> "Current phase". Standing safety (§4), sanitization, and the pre-commit suite are
+> unchanged.
 
 Development proceeds in small, approval-gated, offline-first slices:
 

@@ -13,18 +13,39 @@
   sanitized signals (url→category enum, hydration result, readyState, bucketed scalars, structural
   booleans), **never** saves HTML/text/screenshots, **never** uploads, **never** starts the backend,
   **never** mutates the DB, and **always** closes the context in `finally`.
-- **Nothing in `collector/src` observes the NAVER *API center*** (`apicenter.commerce.naver.com`) —
-  every live-NAVER CLI targets the **seller center** (review/export). `classifySessionVerdict` is tuned
-  to `isSellerCenterUrl`. So **API-center issuance-state detection has no harness, and selectors must
-  not be invented** (standing rule). This splits G3-C:
+- ~~**Nothing in `collector/src` observes the NAVER *API center*** (`apicenter.commerce.naver.com`) —
+  every live-NAVER CLI targets the **seller center** (review/export)... So **API-center issuance-state
+  detection has no harness**.~~ **CORRECTED 2026-07-21 — that statement is STALE.** The rest of the
+  standing rule is unchanged and still binding: `classifySessionVerdict` is tuned to `isSellerCenterUrl`,
+  and **selectors must not be invented**. This splits G3-C:
 
 | Sub-walk | What | Tooling | Runnable now? |
 |---|---|---|---|
 | **G3-C.1** | NAVER **session/login** readiness calibration | `probe-session.ts` (existing, read-only) | **Yes — under a fresh G6** |
-| **G3-C.2** | **API-center** issuance-flow observation | **none** — needs an offline harness built first | **No** — see §5 |
+| **G3-C.2** | **API-center** issuance-flow observation | ~~none~~ **`observe-api-center.ts` (EXISTS — read-only, no-click)** | **Yes — under a fresh G6**, but ⛔ **NOT v1-gating** (see below) |
 
-**This preflight is for G3-C.1.** G3-C.2 is deferred to §5 (offline prerequisite), so this first live
-walk stays tightly scoped, read-only, and grounded in real tooling.
+**This preflight was written for G3-C.1.** G3-C.2 was deferred to §5 as an offline prerequisite; that
+prerequisite has since been **built** — `collector/src/cli/observe-api-center.ts` is a read-only,
+no-click, guided-tutorial API-center **page-category** observer with a two-checkpoint manual-navigation
+journey model.
+
+> ### ✅ RULED 2026-07-21 (PO) — G3-C is NOT a v1 gate
+>
+> - **G3-C.1 and G3-C.2 are NOT v1 gating.** NAVER v1 onboarding completes at **G3-A/B**; G3-C/D are
+>   **post-v1** (`docs/slices/naver-guided-connection.md` §0; v1 plan §9).
+> - **Live API-center observation is diagnostic / tool-calibration evidence only.** **G3-C.2 live runs
+>   DID occur in this workstream**, but **only** for sanitized page-category observation and calibration
+>   of the `observe-api-center` classifier (the classifier's documented precedence corrections are
+>   live-derived). They are **not** a product path and are **not** a v1 verification item.
+> - **What those runs do NOT prove:** first-time issuance completion · marketplace-policy permission ·
+>   credential extraction (**never attempted — SellerOps never reads Client ID/Secret**) · connection-test
+>   or `sync` success for a **freshly issued** app.
+> - ⚠ **Boundary preserved.** API-center work is **guided tutorial support only**: no automatic API
+>   issuance, no automatic linking, no click/type/submit on the API center, and **SellerOps never reads
+>   Client ID / Secret from the page** — the seller creates/opens the app and copies the values manually.
+> - **No live run is scheduled.** Any further API-center live contact is a **diagnostic exception**
+>   requiring a fresh, single-use, in-turn **G3 + G6** named in the dispatching turn plus seated-and-ready,
+>   and it never rides on a generic live grant.
 
 ---
 
@@ -126,13 +147,19 @@ the probe has no click, capture, upload, or backend path to enable.
 
 ## 12. Blockers that REMAIN after G3-C.1
 
-- **API-center issuance-state detection** (G3-C.2) → §16.10 steps ②③ readiness stays manual/attested
-  until an **offline** read-only observation harness is built (generic url-category + structural census,
-  census-style like `discover-reply-target`, **no invented selectors**), tested offline, then run under a
-  **separate** live G6. Until then, API-center calibration = **manual operator narration only** (sanitized,
-  no runtime capture).
+- **API-center issuance-state detection** (G3-C.2) → **RULED 2026-07-21 (PO): this is NOT a v1 blocker.**
+  §16.10 steps ①② ship in v1 as **tutorial-guided with seller self-attestation**, and that is the accepted
+  v1 bar — not a gap awaiting live detection. The offline harness this section anticipated **has since been
+  built** (`observe-api-center.ts`, read-only / no-click / no invented selectors) and has a **diagnostic
+  calibration history**; that history is **evidence about the tool**, not a v1 verification item and not a
+  product path.
 - **Live order-connection completion** (real `test-connection` + first `sync`) — a separate,
-  more-mutating step needing its own pre-approval; **not** part of this read-only walk.
+  more-mutating step needing its own pre-approval; **not** part of this read-only walk. **RULED 2026-07-21
+  (PO): an assisted end-to-end onboarding walk against a real, FRESHLY ISSUED NAVER app is POST-v1.** It
+  would mutate the **Vault and the local DB** (credential store → `test-connection` → `sync`), needs
+  **separate PO approval plus a fresh single-use G6** when it eventually runs, and **must not be claimed
+  as v1-verified**. (The 2026-06-14 ORDER_SUMMARY live verification used an already-configured account and
+  does **not** cover the first-time-issuance path.)
 - Unrelated, unchanged: **B1** cross-source fingerprint, **B2** reply row selector, **B3** export
   `ARTIFACT_INVALID`, **B4** cold-restart persistence, **B5** autofill/Device Vault, **B7** Windows/Linux
   pairing.

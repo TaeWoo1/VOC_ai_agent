@@ -48,6 +48,16 @@
 - **구현 위치**: `frontend/src/lib/guidedConnection/*`(순수 상태 머신·타입·합성 픽스처) +
   `frontend/src/` 위저드 UI. **검증: FE typecheck + 단위 테스트(§18) — 라이브 NAVER 불필요(§17.10).**
 
+> **✅ RULED 2026-07-21 (PO) — v1은 G3-A/B에서 완료되고, G3-C/D는 POST-v1이다.** 본 §0 비준이 곧 **NAVER v1
+> 온보딩 기준**이다: `ConnectNaver` 위저드 + 안전 자격증명 폼 → Vault → `test-connection` → `sync` →
+> 대시보드. **API 센터 ①②단계는 튜토리얼 안내 + 셀러 자기확인(self-attestation)** 으로 출시하며 **라이브
+> API-센터 DOM 감지는 v1에 불필요**하다 — **G3-C.1·G3-C.2는 v1 게이트가 아니다**(라이브 API-센터 관측은
+> **진단·도구 보정 증거일 뿐** 제품 경로가 아니다). §20-(3)의 G3-C 착수·플래그 활성·SUPERVISED_ACTION 범위는
+> 그에 따라 **POST-v1로 연기**된다. ⚠ 경계 불변: **API 센터는 가이드 튜토리얼 지원 전용** — 자동 발급·자동
+> 연동 없음, **SellerOps는 API-센터 페이지에서 Client ID/Secret을 절대 읽지 않음**, 셀러가 앱을 직접
+> 생성/열고 값을 **수동 복사**한다. **신규 발급 앱에 대한 assisted end-to-end 워크는 POST-v1**(Vault·로컬 DB
+> 변경 — 별도 PO 승인 + 신규 단일-사용 G6 필요, v1-검증으로 주장 금지). 상세: v1 plan §8-B9 · §9 · §10.
+
 ---
 
 ## 1. 목적 (Purpose)
