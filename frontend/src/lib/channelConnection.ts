@@ -9,6 +9,7 @@ export type ChannelCardIntent =
   | "manage" // open the connected account's detail
   | "reconnect" // Cafe24: (re-)run the OAuth flow, reusing the existing account
   | "connect-cafe24" // no account yet: start the Cafe24 OAuth flow
+  | "connect-naver" // no account yet: start the NAVER guided-connection wizard (/connect/naver)
   | "upload" // file-upload channel
   | "notice"; // no auto-connect path: show a guidance notice
 
@@ -78,6 +79,12 @@ export function channelCardAction(
   const prepping = channel.status === "PREPARING";
   if (channel.code === "CAFE24") {
     return { label: channel.actionLabel, intent: "connect-cafe24", disabled: prepping };
+  }
+  if (channel.code === "NAVER") {
+    // First-time NAVER: the guided-connection wizard (§16.10) is the primary path — it connects
+    // orders via the official API and hands off to Action Window review export. Upload stays
+    // reachable from the channel detail.
+    return { label: channel.actionLabel, intent: "connect-naver", disabled: prepping };
   }
   if (canUpload) {
     return { label: channel.actionLabel, intent: "upload", disabled: false };

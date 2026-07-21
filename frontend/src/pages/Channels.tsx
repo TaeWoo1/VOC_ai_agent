@@ -160,6 +160,10 @@ function ChannelCard({
         // Reuse the existing account via the OAuth flow (backend upserts, no duplicate).
         navigate(CAFE24_CONNECT_ROUTE);
         return;
+      case "connect-naver":
+        // First-time NAVER guided-connection wizard (§16.10).
+        navigate("/connect/naver");
+        return;
       case "upload":
         navigate(`/settings/upload?channelId=${channel.id}`);
         return;

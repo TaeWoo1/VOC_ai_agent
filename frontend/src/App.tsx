@@ -12,6 +12,7 @@ import { Channels } from "./pages/Channels";
 import { ChannelDetail } from "./pages/ChannelDetail";
 import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
+import { ConnectNaver } from "./pages/ConnectNaver";
 import { Upload } from "./pages/Upload";
 import { ProductIssues } from "./pages/ProductIssues";
 import { Operations } from "./pages/Operations";
@@ -80,6 +81,9 @@ export function App() {
         {/* Cafe24 OAuth connect flow (unchanged) */}
         <Route path="/connect/cafe24" element={<Cafe24Connect />} />
         <Route path="/connect/cafe24/result" element={<Cafe24ConnectResult />} />
+
+        {/* NAVER guided-connection wizard (offline; §16.10 six steps) */}
+        <Route path="/connect/naver" element={<ConnectNaver />} />
 
         {/* Backward-compatible redirects from the pre-Product-Shell routes */}
         <Route path="/channels" element={<Navigate to="/settings/channels" replace />} />
