@@ -57,7 +57,17 @@ import {
 } from "../esm/esm-capture-inspect";
 import { headerLabelArtifactPath } from "../esm/esm-review-header-quarantine";
 import { esmUrlCategory, extractEsmReviewProbeSignals } from "../esm/esm-review-probe";
-import { esmSentinelPathFor } from "../esm/esm-sentinel";
+import {
+  classifySelectedMarketplace,
+  marketplaceGateOutcome,
+  marketplaceTabScanInPage,
+  parseMarketplaceArg,
+  MARKETPLACE_VERIFICATION_METHOD,
+  type MarketplaceEnum,
+  type SelectedMarketplace,
+} from "../esm/esm-marketplace-verify";
+import { observeMarketplaceAcrossPages, summarizeMarketplaceObservation, visibleMarketplaceCandidates } from "../esm/esm-marketplace-observe";
+import { esmMarketplaceReadyPathFor, esmSentinelPathFor } from "../esm/esm-sentinel";
 import { log } from "../log";
 import { saveAndInspectDownload, type SavedDownloadInspection } from "../naver/review-download-save";
 import { launchPersistentBrowser } from "../profile";
@@ -67,6 +77,9 @@ const STABILITY_INTERVAL_MS = 500;
 const STABILITY_STABLE_READS = 3;
 const STABILITY_MAX_CHECKS = 24;
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
+/** Longer supervised operator-wait for the READ-ONLY `--observe-marketplace` A/B run only (contract
+ *  discovery is hands-on and slower). Does NOT affect the export path's confirm timeout. */
+const OBSERVE_WAIT_MS = 90 * 60_000;
 const SENTINEL_POLL_INTERVAL_MS = 750;
 const CLICK_TIMEOUT_MS = 8_000;
 const DOWNLOAD_WAIT_MS = 30_000;
@@ -204,6 +217,16 @@ async function findAllowlistedFrame(page: Page, allowlist: readonly string[]): P
   return null;
 }
 
+/** Inspect the live review surface's selected marketplace — sanitized enum only, never page text. */
+async function inspectSelectedMarketplace(page: Page): Promise<SelectedMarketplace> {
+  try {
+    const scan = await page.evaluate(marketplaceTabScanInPage);
+    return classifySelectedMarketplace(scan.tabs);
+  } catch {
+    return "UNKNOWN"; // fail closed — an unreadable page yields no safe selected signal
+  }
+}
+
 /** One sanitized stop emission — no click happened. */
 function emitStop(stop: CaptureStop, extra: Record<string, unknown>): void {
   const summary = { mode: "capture", result: "STOPPED", stop, clicked: 0, ...extra };
@@ -219,8 +242,11 @@ async function main(): Promise<void> {
     process.exit(3);
     return;
   }
+  // Read-only marketplace-tab OBSERVATION (contract discovery). When set, the run stops after a sanitized
+  // marketplace observation — no export scan, no click, no download, no row read — so it needs no index.
+  const observeMarketplace = args.includes("--observe-marketplace");
   const approvedIndex = parseApprovedIndexArg(args);
-  if (approvedIndex === null) {
+  if (!observeMarketplace && approvedIndex === null) {
     console.error("Gate 3 requires an explicit approved index: --approved-index <N>.");
     process.exit(4);
     return;
@@ -287,9 +313,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Explicit marketplace INTENT is required and never inferred (from loginMode / hostname / channel code /
+  // connection id / a historical candidate index). Invalid or missing fails closed before any export action.
+  const marketplace: MarketplaceEnum | null = parseMarketplaceArg(args);
+  if (marketplace === null) {
+    console.error("Live capture requires an explicit marketplace: --marketplace GMARKET|AUCTION.");
+    process.exit(7);
+    return;
+  }
+
+  const marketplaceReadyPath = esmMarketplaceReadyPathFor(cfg.statusFile);
   const sentinelPath = esmSentinelPathFor(cfg.statusFile);
   mkdirSync(dirname(sentinelPath), { recursive: true });
   removeSentinel(sentinelPath);
+  removeSentinel(marketplaceReadyPath);
 
   const ctx = await launchPersistentBrowser(resolution.profileDir, cfg.browserChannel);
   const page = (ctx.pages()[0] ?? (await ctx.newPage())) as Page;
@@ -300,7 +337,7 @@ async function main(): Promise<void> {
     console.error(`  Sentinel file (create this when ready):`);
     console.error(`    ${sentinelPath}`);
     console.error("");
-    const ready = await waitForSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+    const ready = await waitForSentinel(sentinelPath, observeMarketplace ? OBSERVE_WAIT_MS : CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
     if (!ready) {
       console.error("No sentinel within the timeout; aborting without reading the page.");
       log("esm.review.capture", { result: "STOPPED", stop: "sentinel-timeout", clicked: 0 });
@@ -315,6 +352,86 @@ async function main(): Promise<void> {
     const sessionGate = captureSessionGate(signals.sessionVerdict);
     if (!sessionGate.proceed) {
       emitStop(sessionGate.stop!, { sessionVerdict: signals.sessionVerdict });
+      return;
+    }
+
+    // 1a) OBSERVATION mode (read-only, REVIEW DROPDOWN): 3 supervised snapshots in ONE browser lifecycle —
+    //     [A-closed GMARKET] → [A-open dropdown showing options] → [B-closed AUCTION] — to learn the real
+    //     dropdown current-value + option contract. No export, no click, no row read; the operator drives
+    //     every dropdown open/select manually.
+    if (observeMarketplace) {
+      const OBSERVE_STEPS = [
+        { label: "A-closed-GMARKET", next: "Now OPEN the REVIEW marketplace dropdown (leave it open), then create the signal below." },
+        { label: "A-open-dropdown", next: "Now SELECT AUCTION from the dropdown (let it close), then create the signal below." },
+        { label: "B-closed-AUCTION", next: null },
+      ];
+      const snapshots: Array<{ label: string; captured: boolean; visibleMarketplaceCandidates: ReturnType<typeof visibleMarketplaceCandidates>; qualifyingGroups: ReturnType<typeof summarizeMarketplaceObservation> }> = [];
+      for (let k = 0; k < OBSERVE_STEPS.length; k += 1) {
+        const frames = await observeMarketplaceAcrossPages(ctx, allowlist);
+        snapshots.push({
+          label: OBSERVE_STEPS[k]!.label,
+          captured: true,
+          visibleMarketplaceCandidates: visibleMarketplaceCandidates(frames),
+          qualifyingGroups: summarizeMarketplaceObservation(frames),
+        });
+        const next = OBSERVE_STEPS[k]!.next;
+        if (next === null) break;
+        console.error("");
+        console.error(`  OBSERVE ${OBSERVE_STEPS[k]!.label} captured. ${next}`);
+        console.error(`    ${marketplaceReadyPath}`);
+        console.error("");
+        const got = await waitForSentinel(marketplaceReadyPath, OBSERVE_WAIT_MS, SENTINEL_POLL_INTERVAL_MS);
+        removeSentinel(marketplaceReadyPath);
+        if (!got) {
+          snapshots.push({ label: OBSERVE_STEPS[k + 1]!.label, captured: false, visibleMarketplaceCandidates: [], qualifyingGroups: [] });
+          break;
+        }
+      }
+      console.log(
+        JSON.stringify(
+          { mode: "observe-marketplace", uiAdapter: "review-dropdown", result: "OBSERVED", sessionVerdict: signals.sessionVerdict, snapshots, clicked: 0, exported: false, rowsRead: false },
+          null,
+          2,
+        ),
+      );
+      log("esm.review.capture", { mode: "observe-marketplace", uiAdapter: "review-dropdown", result: "OBSERVED", snapshots: snapshots.map((s) => `${s.label}:${s.captured}`).join(",") });
+      return;
+    }
+    // Past observation: the export path requires a concrete approved index (enforced by the arg gate above).
+    if (approvedIndex === null) {
+      console.error("Internal: missing approved index on the export path.");
+      return;
+    }
+
+    // 1b) Marketplace verification — the requested marketplace MUST be the live-selected one BEFORE any
+    //     export scan/click. Attribution comes only from the verified page signal (D1/D2/D7). On a
+    //     mismatch/UNKNOWN the operator selects the tab manually (we never auto-click a marketplace tab)
+    //     and signals readiness once; both-selected (AMBIGUOUS) fails closed immediately.
+    let detectedMarketplace = await inspectSelectedMarketplace(page);
+    let gate = marketplaceGateOutcome(marketplace, detectedMarketplace);
+    if (gate === "AMBIGUOUS_FAIL") {
+      emitStop("marketplace-ambiguous", { requestedMarketplace: marketplace, detectedMarketplace });
+      return;
+    }
+    if (gate === "SELECTION_REQUIRED") {
+      console.error("");
+      console.error(`  MARKETPLACE_SELECTION_REQUIRED — requested ${marketplace}, selected ${detectedMarketplace}.`);
+      console.error(`  Select the ${marketplace} tab in the open window, then create this signal:`);
+      console.error(`    ${marketplaceReadyPath}`);
+      console.error("");
+      log("esm.review.capture", { event: "MARKETPLACE_SELECTION_REQUIRED", requestedMarketplace: marketplace, detectedMarketplace });
+      const mReady = await waitForSentinel(marketplaceReadyPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+      removeSentinel(marketplaceReadyPath); // consume the one signal
+      if (!mReady) {
+        emitStop("marketplace-ready-timeout", { requestedMarketplace: marketplace, detectedMarketplace });
+        return;
+      }
+      // exactly ONE re-inspection after the single ready signal
+      detectedMarketplace = await inspectSelectedMarketplace(page);
+      gate = marketplaceGateOutcome(marketplace, detectedMarketplace);
+    }
+    if (gate !== "VERIFIED") {
+      emitStop("marketplace-unverified", { requestedMarketplace: marketplace, detectedMarketplace });
       return;
     }
 
@@ -400,6 +517,14 @@ async function main(): Promise<void> {
     }
     if (bound !== 1) {
       emitStop("bind-not-unique", { approvedIndex, frameAware });
+      return;
+    }
+
+    // 5b) Re-check the selected marketplace IMMEDIATELY before the export click (selection could have
+    //     reset / the page navigated). Fail closed on any drift — never export under the wrong marketplace.
+    const preClickMarketplace = await inspectSelectedMarketplace(page);
+    if (preClickMarketplace !== marketplace) {
+      emitStop("marketplace-reset", { requestedMarketplace: marketplace, detectedMarketplace: preClickMarketplace, approvedIndex });
       return;
     }
 
@@ -498,6 +623,11 @@ async function main(): Promise<void> {
           clicked: 1,
           clickedCount: 1,
           sessionVerdict: signals.sessionVerdict,
+          // Marketplace attribution — set ONLY because live page verification passed (the requested tab
+          // was the selected one, re-checked immediately before the click). Never inferred.
+          sourceMarketplace: marketplace,
+          marketplaceVerified: true,
+          marketplaceVerificationMethod: MARKETPLACE_VERIFICATION_METHOD,
           allowlistConfigured: true,
           postClickOutcome: outcome,
           fileStructure,
@@ -540,6 +670,8 @@ async function main(): Promise<void> {
       result,
       clicked: 1,
       postClickOutcome: outcome,
+      sourceMarketplace: marketplace,
+      marketplaceVerified: true,
       fileStructure,
       downloadSaved: inspection.downloadSaved,
       fileRetained: inspection.fileRetained,
@@ -555,6 +687,7 @@ async function main(): Promise<void> {
     });
   } finally {
     removeSentinel(sentinelPath);
+    removeSentinel(marketplaceReadyPath);
     await ctx.close();
   }
 }
