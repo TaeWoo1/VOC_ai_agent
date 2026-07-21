@@ -158,6 +158,43 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
   populated rows shape-read, observe-and-discard). **Pending on this (marketplace-attributed) track:**
   carrying verified GMARKET/AUCTION attribution (D1/D2/D7) into the capture result. Not "no records read" —
   rows were shape-read; what is unstarted is *marketplace-verified* bounded capture.
+  - **Marketplace-attribution attempt — BLOCKED on the selected-state contract (2026-07-08, branch
+    `feat/esm-review-marketplace-attribution`, commit `baa12bc`).** A `--marketplace GMARKET|AUCTION` verifier
+    was added (fails closed; never inferred), but a live GMARKET run detected `UNKNOWN` for a
+    manually-selected GMARKET tab. A read-only A/B observation (GMARKET-selected vs AUCTION-selected, no
+    export/click/row-read) then showed: `LOGGED_IN`; 34 marketplace-labelled matches in the top document
+    (almost all hidden GNB/nav), **0** in the allowlisted vendor frame; the **only** visible short-label
+    marketplace element is a **static `span.text` GMARKET** that is **identical in both snapshots** (no
+    flip); **no** visible AUCTION tab, **no** `role=tablist`, **no** ARIA/native selected on any group.
+    ⇒ the "two visible tabs, one aria-selected" model does **not** match this surface. **Blocker (needs
+    resolution before the verifier can be correct):** the real GMARKET/AUCTION selection mechanism on the
+    review-management surface is unknown — likely image/icon tabs (no text), a collapsed dropdown/menu
+    (options hidden until opened), or **separate per-marketplace review pages** (no in-page toggle; a
+    product/UX question). Marketplace-attributed capture is **NOT** complete; no verifier contract was
+    guessed. Zero export/download/row-read/upload/DB/status; profile intact.
+  - **Bounded-capture protocol for G3 — BINDING (reconciled from the preserved aiagent-sellerops planning
+    notes).** When G3 is eventually approved, the run is bounded by these conditions, all of which must hold
+    together; any one failing means the run does not start or stops:
+    - **≤5 records.** The capture reads at most five review records. This is a hard cap, not a target.
+    - **Presence-only evidence.** Records are evaluated for presence / value-class / salted hashes only —
+      never raw review, customer, order, or seller content, and never reference codes, identity, amounts,
+      raw timestamps, or elapsed durations.
+    - **Explicit marketplace attribution, fail-closed.** The run carries an explicit `--marketplace
+      GMARKET|AUCTION` intent and proceeds only on a verified page signal (D1/D2/D7). Attribution is never
+      inferred from `loginMode`, hostname, backend channel code, connection id, or a historical badge index;
+      `UNKNOWN`/`AMBIGUOUS` blocks the capture path.
+    - **No automatic export / consent / download.** These remain operator-driven and are not product
+      behavior on this track; any such step needs separate, explicit approval in the granting turn.
+    - **Fresh per-run live approval.** A future live run requires a fresh, single-use G3/G6 approval issued
+      in the same turn — a generic or prior live grant never covers it.
+    - **Do not rebuild the removed one-off diagnostic.** Marketplace verification belongs to the established
+      verifier seam, not to a re-created single-use probe.
+  - **Historical blocker B-C — RESOLVED (commit `baa12bc`).** The 2026-07-07 pre-flight recorded that
+    `capture-esm-review` badged export/consent controls only, with no marketplace selector, so the only code
+    that had ever verified a selected marketplace was the one-off diagnostic that was later removed — meaning
+    a capture could not be attributed to GMARKET through the established path. That gap is now closed by the
+    committed verifier, observation probe, gate blockers, and marketplace-ready sentinel. What remains open is
+    **not** the absence of a seam but the **unknown selected-state contract** described immediately above.
 - `[~]` **Stable identity (G4)** — no obvious stable source review-id / dedup-key column was detected even
   on a populated export (discovery lineage); **source review-id verification still pending.**
 - `[~]` **Field mapping (G4)** — schema-SHAPE explored (14-column shape, offline mapper aliases grounded);
@@ -197,8 +234,14 @@ Legend: `[x]` done · `[~]` partial/in-progress · `[ ]` not started.
 
 ## Current single next action (whole track)
 
-**Target 1 / G3 — marketplace-attributed bounded review capture for GMARKET × REVIEW**, via the proven
-**capture-owned single browser lifecycle** (`capture-esm-review --connection-id … --connections … --approved-index N`;
-operator logs in in the capture window; no local-agent hand-off needed), under explicit per-run approval.
-The new work versus the 2026-06-30 → 07-02 discovery-lineage successes is carrying **verified GMARKET/AUCTION
-attribution** (D1/D2/D7) into the capture result — not re-proving that a download fires.
+**Target 1 / G3 — marketplace-attributed bounded review capture (≤5 records, presence-only) for
+GMARKET × REVIEW**, via the proven **capture-owned single browser lifecycle**
+(`capture-esm-review --connection-id … --connections … --approved-index N`; operator logs in in the capture
+window; no local-agent hand-off needed), under explicit per-run approval. The new work versus the
+2026-06-30 → 07-02 discovery-lineage successes is carrying **verified GMARKET/AUCTION attribution**
+(D1/D2/D7) into the capture result — not re-proving that a download fires.
+
+**This is not currently runnable, and must not be scheduled.** It is gated on (a) resolving the unknown
+selected-state contract recorded under G3, and (b) a fresh, single-use live approval issued in the same
+turn. The full bounded-capture conditions — ≤5 records, presence-only evidence, fail-closed attribution,
+no automatic export/consent/download — are binding and are recorded under G3.
