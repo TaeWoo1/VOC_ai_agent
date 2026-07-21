@@ -6,6 +6,13 @@
 // vercel.json (sibling) rewrites /cafe24/callback -> this function so the public
 // path is exactly /cafe24/callback.
 
+// The Redirect URI is the only non-literal value that reaches the HTML. It comes from
+// PUBLIC_BASE_URL, so escape it rather than reasoning about who set that env var — and
+// it also makes the `https://<YOUR_DEPLOY_HOST>` placeholder render instead of being
+// eaten as a tag. Dependency-free by design; no templating library.
+const ESCAPE_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ESCAPE_HTML[c]);
+
 module.exports = function handler(req, res) {
   const q = req.query || {};
   const received = { code: Boolean(q.code), state: Boolean(q.state) };
@@ -28,7 +35,7 @@ module.exports = function handler(req, res) {
 </ul>
 <p><b>Values are intentionally not displayed.</b> No token exchange was performed.</p>
 <hr><p>Register this exact HTTPS Redirect URI in Cafe24 Developers:</p>
-<pre>${redirectUri}</pre>
+<pre>${escapeHtml(redirectUri)}</pre>
 <p style="color:#666">Must be byte-identical in: Cafe24 Developers app settings ·
 authorize URL <code>redirect_uri</code> · token-exchange <code>redirect_uri</code>.</p>
 </body>`

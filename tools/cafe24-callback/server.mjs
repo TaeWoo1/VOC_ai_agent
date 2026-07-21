@@ -22,6 +22,13 @@ const CALLBACK_PATH = '/cafe24/callback';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL ?? 'https://<TUNNEL_HOST>';
 const REDIRECT_URI = `${PUBLIC_BASE_URL.replace(/\/+$/, '')}${CALLBACK_PATH}`;
 
+// The Redirect URI is the only non-literal value that reaches the HTML. It comes from
+// PUBLIC_BASE_URL, so escape it rather than reasoning about who set that env var — and
+// it also makes the `https://<TUNNEL_HOST>` placeholder render instead of being eaten
+// as a tag. Dependency-free by design; no templating library.
+const ESCAPE_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => ESCAPE_HTML[c]);
+
 function page(received) {
   const yn = (b) => (b ? 'YES' : 'NO');
   return `<!doctype html><meta charset="utf-8"><title>Cafe24 callback</title>
@@ -35,7 +42,7 @@ function page(received) {
 Read the <code>code</code> and verify <code>state</code> only from your local flow.</p>
 <hr>
 <p>Register this exact HTTPS Redirect URI in Cafe24 Developers:</p>
-<pre>${REDIRECT_URI}</pre>
+<pre>${escapeHtml(REDIRECT_URI)}</pre>
 <p style="color:#666">The same Redirect URI must be byte-identical in all three places:
 Cafe24 Developers app settings · the authorize URL <code>redirect_uri</code> ·
 the token-exchange <code>redirect_uri</code>.</p>
