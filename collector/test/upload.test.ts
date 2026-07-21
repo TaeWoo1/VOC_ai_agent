@@ -5,9 +5,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { clearLogSink, getLogSink } from "../src/log";
 import { decideState } from "../src/status";
 import {
+  fetchApprovedReplyDraft,
   fetchItemAnalysisCount,
   login,
   resolveChannelId,
+  submitReplyOutcome,
   uploadReviewBytes,
   uploadReviewFile,
   UploadError,
@@ -279,6 +281,121 @@ describe("metadata-only logging", () => {
  * login + the synthetic file.
  */
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
+describe("submitReplyOutcome", () => {
+  const BODY = {
+    commandId: "outcome-run_deadbeef01",
+    submissionRef: "a1b2c3d4e5f60718",
+    operatorOutcome: "SUBMISSION_ABORTED",
+    awRunRef: "run_deadbeef01",
+  };
+
+  it("POSTs to the outcome path with the bearer + body and returns the idempotent record result", async () => {
+    let captured: { url?: string; body?: string; auth?: string } = {};
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      captured = {
+        url,
+        body: String(init.body),
+        auth: (init.headers as Record<string, string>).authorization,
+      };
+      return jsonResponse({ actionRef: "review:abc", recorded: true, replayed: false });
+    }) as unknown as typeof fetch;
+
+    const res = await submitReplyOutcome("http://x", "tok", "acc-1", "review:abc", BODY, fakeFetch);
+    expect(res).toEqual({ actionRef: "review:abc", recorded: true, replayed: false });
+    expect(captured.url).toBe("http://x/api/seller-accounts/acc-1/attention/items/review%3Aabc/reply/outcome");
+    expect(captured.auth).toBe("Bearer tok");
+    expect(JSON.parse(captured.body ?? "{}")).toMatchObject({
+      commandId: BODY.commandId,
+      submissionRef: BODY.submissionRef,
+      operatorOutcome: "SUBMISSION_ABORTED",
+      awRunRef: "run_deadbeef01",
+    });
+  });
+
+  it("surfaces an idempotent replay (replayed:true) unchanged", async () => {
+    const fakeFetch = (async () => jsonResponse({ actionRef: "review:abc", recorded: true, replayed: true })) as unknown as typeof fetch;
+    expect(await submitReplyOutcome("http://x", "tok", "acc", "review:abc", BODY, fakeFetch)).toMatchObject({ replayed: true });
+  });
+
+  it("throws UploadError(replyOutcome) on a 409 conflict", async () => {
+    const fakeFetch = (async () => new Response("conflict", { status: 409 })) as unknown as typeof fetch;
+    await expect(submitReplyOutcome("http://x", "tok", "acc", "review:abc", BODY, fakeFetch)).rejects.toMatchObject({
+      name: "UploadError",
+      stage: "replyOutcome",
+      httpStatus: 409,
+    });
+  });
+});
+
+describe("fetchApprovedReplyDraft", () => {
+  beforeEach(() => clearLogSink());
+
+  const REVIEW_BODY = "환불 안 해주면 신고합니다 — 고객 raw 리뷰 본문 (절대 노출 금지)";
+  const DRAFT_BODY = "안녕하세요 고객님, 불편을 드려 죄송합니다. 환불 도와드리겠습니다.";
+
+  it("GETs the reply path and returns ONLY the approved draft (discards the review body)", async () => {
+    let captured: { url?: string; auth?: string } = {};
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      captured = { url, auth: (init.headers as Record<string, string>).authorization };
+      return jsonResponse({
+        actionRef: "review:abc",
+        redactedBody: REVIEW_BODY,
+        bodyRedacted: true,
+        triageDisposition: "RESPONSE_NEEDED",
+        suggestion: { body: "제안", provenance: "RULE" },
+        draft: { version: 3, body: DRAFT_BODY, contentFingerprint: "ff", fingerprintAlgorithm: "sha256" },
+        approval: { version: 3, state: "APPROVED" },
+        outcome: null,
+        capabilities: {},
+      });
+    }) as unknown as typeof fetch;
+
+    const res = await fetchApprovedReplyDraft("http://x", "tok", "acc-1", "review:abc", fakeFetch);
+    expect(res).toEqual({ draftBody: DRAFT_BODY, draftVersion: 3, approved: true });
+    expect(captured.url).toBe("http://x/api/seller-accounts/acc-1/attention/items/review%3Aabc/reply");
+    expect(captured.auth).toBe("Bearer tok");
+  });
+
+  it("neither the approved draft NOR the review body is ever written to the log", async () => {
+    const fakeFetch = (async () =>
+      jsonResponse({
+        actionRef: "review:abc",
+        redactedBody: REVIEW_BODY,
+        bodyRedacted: true,
+        draft: { version: 1, body: DRAFT_BODY },
+        approval: { state: "APPROVED" },
+      })) as unknown as typeof fetch;
+
+    await fetchApprovedReplyDraft("http://x", "tok", "acc", "review:abc", fakeFetch);
+    const serialized = JSON.stringify(getLogSink());
+    expect(serialized).not.toContain(DRAFT_BODY);
+    expect(serialized).not.toContain(REVIEW_BODY);
+    const entry = getLogSink().find((e) => e.event === "reply.draft.fetched");
+    expect(entry).toBeDefined();
+    expect(Object.keys(entry!.meta).sort()).toEqual(["approved", "hasDraft"]);
+    expect(entry!.meta).toEqual({ hasDraft: true, approved: true });
+  });
+
+  it("reports no draft / not approved when the prep view carries neither", async () => {
+    const fakeFetch = (async () =>
+      jsonResponse({ actionRef: "review:abc", redactedBody: REVIEW_BODY, draft: null, approval: null })) as unknown as typeof fetch;
+    expect(await fetchApprovedReplyDraft("http://x", "tok", "acc", "review:abc", fakeFetch)).toEqual({
+      draftBody: null,
+      draftVersion: null,
+      approved: false,
+    });
+  });
+
+  it("throws UploadError(replyDraft) on a non-ok response", async () => {
+    const fakeFetch = (async () => new Response("nope", { status: 404 })) as unknown as typeof fetch;
+    await expect(fetchApprovedReplyDraft("http://x", "tok", "acc", "review:abc", fakeFetch)).rejects.toMatchObject({
+      name: "UploadError",
+      stage: "replyDraft",
+      httpStatus: 404,
+    });
+  });
+});
+
 describe("live-backend integration (gated)", () => {
   it.skipIf(!RUN_INTEGRATION)(
     "uploads twice: first inserts + enriches, second dedups with no new analyses",

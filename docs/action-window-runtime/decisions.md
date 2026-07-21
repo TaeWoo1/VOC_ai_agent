@@ -659,3 +659,135 @@ Format: `D-NNN` · status (`ACTIVE` / `SUPERSEDED`) · decision · rationale.
   + isolated runtime + backend + FE, proven only on the synthetic ladder). Any live use needs a fresh
   scope-matched G3 **and** a fresh single-use G6 in the dispatching turn. Register:
   [`r4-gate-record.md`](r4-gate-record.md) §G3/§G6.
+
+---
+
+## D-033 · ACTIVE — the reply row-target must be a same-session retained element, not a cross-session mapping (2026-07-20, live-evidence-driven)
+
+**Context.** The operator-assisted live-match slice first tried a **two-process** design: a read-only calibration
+run captured the review row as a persisted, page-bound structural artifact (relative child-index `parentPath` +
+`rowTag` + a whole-page `structuralPageSignature`), and a separate mutating run reloaded that artifact to locate
+the row. On the first live attempt (2026-07-20) this **fail-closed at `PAGE_DRIFT`**: NAVER SmartStore's review
+list is a **dynamic SPA**, so the DOM structure (row counts, `[role="row"]` layers, child counts) differed
+between the calibration browser load and the rehearsal browser load, and the signature check correctly refused.
+
+**Decision (PO, live-evidence-driven).** For the reply row target, **the operator-clicked live element itself is
+the anchor**, retained **in memory within one browser process** and used immediately — **no persisted mapping
+artifact, no whole-page signature, no reload/restart** between calibration and highlight. The review row is
+resolved from that anchor (nearest repeated text-rich ancestor) at highlight time; if the element **detaches or
+the DOM re-renders it away, the run fails closed** and the operator re-calibrates in the same session. The
+cross-session structural-mapping path (`reply-row-mapping-artifact` v2, page-signature) is **retired for the live
+rehearsal** — it does not survive a dynamic SPA. This is the same live-DOM-instability class as **B1**
+(cross-source) and is why B1 stays an explicit `[EXT]` non-goal.
+
+**Scope / non-claims.** The same-session abort rehearsal ([Run 1](r4-reply-abort-rehearsal-run1-dispatch-record.md))
+is a **row-match rehearsal aborted before reply-entry/composer**, non-mutating by construction. It does **not**
+establish cross-source fingerprint equality (none is computed) and is **not** an end-to-end submission; the
+terminal is `UNVERIFIED` ([D-032](decisions.md)(b)). *Boundary:* this decision changes the row-locate mechanism
+only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies
+per-run and this entry authorizes no live action.
+
+---
+
+## D-034 · ACTIVE — the reply composer target is a SECOND same-session retained element, and the entry into it is OBSERVED, not driven (2026-07-20, live-evidence-driven)
+
+**Context.** [D-033](decisions.md) fixed the *row* target as an operator-clicked, in-memory live element. The
+composer-abort rehearsal ([Run 2](r4-reply-composer-abort-run2-dispatch-record.md)) extends the same-session flow
+*through* the composer barrier that [Run 1](r4-reply-abort-rehearsal-run1-dispatch-record.md) stopped short of.
+Two observed NAVER entry paths exist from the review list to a reply composer: **(A)** the operator clicks the
+review body/link into a **detail page** (a navigation), or **(B)** the operator checks the row and clicks the
+**toolbar reply** action, opening an **inline composer** (no navigation).
+
+**Decision (PO, live-evidence-driven).** The reply composer target is a **second operator-clicked live element**,
+retained **in memory within the same browser process** exactly like the row anchor — **no persisted mapping, no
+page signature, no reload**. The runtime **does not click or navigate** into the composer: the operator performs
+their own entry, and the runtime **observes the resulting transition** (a new tab, a same-tab URL change, or a
+generic composer candidate appearing inline over a pre-entry baseline). The composer barrier opens **only** when a
+**connected** composer handle was retained; a timeout / detach fails closed (the operator aborts at the row
+barrier). The operator's **own approved draft** is shown in a **separate SellerOps read-only overlay**
+(`pointer-events:none`, `textContent`, JSON-escaped) so they can confirm what they would post — **the runtime
+never types or pastes it into the composer**. The draft is read from the existing `GET …/reply` prep view; the
+review body it also returns is discarded and never logged.
+
+**Scope / non-claims.** Run 2 is an **operator-calibrated composer-abort rehearsal, non-mutating by construction**
+(`ABORT_REHEARSAL` makes the submit terminal structurally unreachable). It does **not** establish cross-source
+fingerprint equality (none is computed — B1 stays `[EXT]`) and is **not** an end-to-end submission; the terminal
+is `UNVERIFIED` ([D-032](decisions.md)(b)). **Entry-strategy caveat:** only path **(B) `INLINE_COMPOSER`** was
+**live-exercised** in Run 2; path **(A) body-link navigation** is supported in code and observed generically but
+is **not yet live-proven**. *Boundary:* this decision changes the composer-locate/entry mechanism only; every
+live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6, G2-write, P6/P12) still applies per-run and this
+entry authorizes no live action.
+
+---
+
+## D-035 · ACTIVE — the NAVER reply body/link entry opens an INLINE composer; the detail-page navigation entry is not live-reachable via replying (2026-07-20, live-evidence-driven)
+
+**Context.** [D-034](decisions.md) documented two observed entry paths from the review list to a reply composer
+and noted only `INLINE_COMPOSER` had been live-exercised. A dedicated run
+([Run 3](r4-reply-composer-abort-run3-bodylink-finding.md), `run_535c358f1064`) set out to live-exercise the
+**body-link → detail-page navigation** entry (`NAV_NEW_TAB` / `NAV_SAME_TAB`).
+
+**Finding (operator-confirmed at the live browser).** On this NAVER SmartStore review surface, clicking the
+**review body/link reply action opens an INLINE composer** — **no new tab, no URL change, no navigation**. The
+entry-transition observer checks new-tab and same-tab-URL-change **before** the inline signal and correctly
+reported `INLINE_COMPOSER`; it did not misclassify a navigation. **There is no distinct detail-page reply
+composer to navigate to via this action.**
+
+**Decision.** The `NAV_NEW_TAB` / `NAV_SAME_TAB` observer branches stay in the code as **defensive support** for a
+surface that navigates, and are now **deterministically unit-tested**
+(`collector/test/cli/composer-abort-entry-transition.test.ts` covers all three transition kinds + timeout + the
+`about:blank` guard + a `url()`-throws-mid-navigation case). But the **detail-page navigation entry is treated as
+NOT live-reachable via the reply action on this surface** — it is **not claimed as live-proven**, and the
+milestone premise ("body-link detail-page composer") does **not** describe this reply surface. Any future NAV
+observation would require a genuinely navigating NAVER action, which the reply flow does not provide here.
+
+**Scope / non-claims.** Run 3 is a **second clean inline composer-abort** (non-mutating by construction) **plus**
+this finding. It does **not** establish cross-source fingerprint equality (B1 stays `[EXT]`) and is **not** an
+end-to-end submission (terminal `UNVERIFIED`, [D-032](decisions.md)(b)). *Boundary:* this entry records a live
+finding + defensive test coverage only; every live-run gate ([`r4-gate-record.md`](r4-gate-record.md) §G3/§G6,
+G2-write, P6/P12) still applies per-run and this entry authorizes no live action.
+
+## D-036 · ACTIVE — the NAVER review row DOES carry the channel review id, but only where the row is RENDERED (2026-07-20, live-evidence-driven)
+
+**Context.** Until now the guided runtime could find a live review row only by coarse hint matching
+(`rating` + `recencyBucket` + `bodyFingerprint`) or by operator calibration ([D-033](decisions.md)). Neither is
+an identity match. Meanwhile the imported export already carries `리뷰글번호`, which lands untransformed in
+`reviews.external_id` and is the primary dedup key — the two halves had never been reconciled.
+
+**Finding (operator-confirmed, two supervised READ-ONLY live runs; see
+[the run record](r4-review-id-reconciliation-run-record.md)).** The live NAVER review row **does** expose the
+channel review id, as **plain rendered text in the `리뷰글번호` column**. The imported id and the live id are
+**the same id** — proven by `review-id-fingerprint/v1` digests compared in memory, with the raw id never
+present in the probe process at all.
+
+**The qualification is the substance of this decision.** The review list is horizontally scrollable and that
+column renders lazily: with it off-screen its cells are **not in the DOM**, and an otherwise-identical scan
+returned `ZERO_MATCH` (`idrun_34686ac82c82`) while the id was simultaneously **present in the review-list
+network response**. Scrolling the column into view turned the same code path into an exact,
+operator-confirmed, single-row match (`idrun_b00209b6f66d`). So:
+
+- **"Not found on the row" is not evidence that the surface does not expose it** on a lazily-rendered list.
+  Any negative must be reported with what was actually scanned. The ladder now returns `rowsTruncated` /
+  `tokensTruncated`, the probe reports rows-scanned per rung, and it suppresses the "does not expose"
+  wording whenever a cap bit.
+- The probe therefore **rescans in-session** on operator view adjustment (bounded). The runtime still never
+  scrolls or clicks — the operator moves the view, the runtime re-reads it.
+- The scan widens from the innermost row container to the outermost ancestor that contains **that row and no
+  other**, so a wrapper-borne id is attributed to exactly one row and can never create a second claimant.
+
+**Decision.** Identity matching keyed by `(channel, sellerAccountId, channelReviewId)` is **viable on this
+surface** and is the strongest of the three row-match modes. `ROW_MATCH_MODES` records all three with
+`operator-calibrated` and `target-hint` explicitly labelled **non-identity**; neither may be reported as
+equivalent to an id match, and the probe refuses to fall back to them.
+
+**Non-claims (do not broaden).**
+- The `sellerAccountId` half of the key is **asserted by the request bundle, never verified against the open
+  session** (`reviews` has no `seller_account_id`, deliberately). `CONTEXT_MISMATCH` cannot fire in this flow;
+  the run record states this in its own field. **Review identity only.**
+- `상품주문번호` was deliberately **not** used as a key: it is not the imported identity and
+  `docs/review_acquisition.md` classifies it High sensitivity.
+- One supervised target, one account, one channel, one filter. No reply/composer/submission progress; B1 stays
+  `[EXT]`; nothing was minted, posted, or downloaded.
+
+*Boundary:* this entry records a live finding and the read-only probe that produced it. Every live-run gate
+([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.

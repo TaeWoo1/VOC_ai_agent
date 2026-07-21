@@ -23,6 +23,7 @@
  * is offline and hermetic; the gate keeps `main()` from launching anything on a refusal.**
  */
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync } from "node:fs";
+import { currentKstDate } from "./kst-date";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -49,6 +50,14 @@ import {
   type ReplyTargetResultBundle,
 } from "../action-window/reply-submission/reply-target-bundle";
 import {
+  loadRowMapping,
+  ReplyRowMappingError,
+  rowMappingRefusalMessage,
+  type ReplyRowMapping,
+} from "../action-window/reply-submission/reply-row-mapping-artifact";
+import { inPagePageSignature, inPageRowFingerprintAt } from "../action-window/reply-submission/reply-row-inpage";
+import { compareCrossSource, crossSourceRefusalMessage } from "../action-window/reply-submission/reply-cross-source";
+import {
   assembleReplyRun,
   defaultReplyRunDirFor,
   makeReplyRunMarker,
@@ -71,8 +80,14 @@ const SUBMIT_TIMEOUT_MS = 10 * 60_000;
 
 /** Gitignored, permission-restricted local file the reply-target bundle is read from — NEVER argv. */
 const TARGET_HINT_REL_PATH = ".reply-target/hint.json";
+/** Gitignored, permission-restricted local file the calibration row-mapping artifact is read from — NEVER argv. */
+const ROW_MAPPING_REL_PATH = ".reply-target/row-mapping.json";
 /** Exit code: the reply-target bundle is present but invalid / mis-permissioned / expired. */
 export const HINT_FILE_REFUSAL_EXIT_CODE = 5;
+/** Exit code: the calibration row-mapping artifact is present but invalid / mis-permissioned / drifted / expired. */
+export const ROW_MAPPING_REFUSAL_EXIT_CODE = 7;
+/** Exit code: the cross-source equality preflight failed (missing live fingerprint / mismatch) — no run started. */
+export const CROSS_SOURCE_REFUSAL_EXIT_CODE = 8;
 
 /** Refusal reason for a reply run attempted in a hosted/production environment (defense-in-depth). */
 export const REPLY_PRODUCTION_REFUSAL =
@@ -109,13 +124,13 @@ export function replyRunModeFrom(args: readonly string[]): ReplyRunMode {
 /* ─────────────── Reply-target bundle intake (permission-restricted file, never argv) ─────────────── */
 
 /**
- * Today's KST calendar date (`YYYY-MM-DD`). KST is UTC+9 with no DST. This is the ONE wall-clock read in the
- * flow — permitted here at the CLI boundary, never in library code — and it is what the result bundle's
- * `asOfDate` is checked against, so a bundle minted on a prior KST day is rejected as EXPIRED.
+ * Today's KST calendar date (`YYYY-MM-DD`) — the ONE wall-clock read in the flow, permitted here at the CLI
+ * boundary and never in library code. It is what the result bundle's `asOfDate` is checked against, so a
+ * bundle minted on a prior KST day is rejected as EXPIRED.
+ *
+ * Re-exported from {@link ./kst-date} so another CLI can take the date without importing this whole module.
  */
-export function currentKstDate(): string {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
+export { currentKstDate };
 
 /* ─────────────────── Automated operator client (v2) ─────────────────── */
 
@@ -346,6 +361,97 @@ async function main(): Promise<void> {
   try {
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
 
+    // ── Operator readiness (read-only; no run assembled yet) ──────────────────────────────────────────
+    // Reproduce the SAME filtered review-list view the calibration was captured against (same date range /
+    // rating filter / sort so the target review is visible), staying on the LIST, then signal ready — so the
+    // page-signature + mapping + cross-source checks below run against the matching view, not the raw landing.
+    const replyReadySentinel = resolve(statusDir, "reply-ready.ready");
+    removeSentinel(replyReadySentinel);
+    console.error(
+      [
+        "",
+        "Reproduce the SAME review-list view the calibration used (same filters / date range / sort so the",
+        "target review row is visible), staying ON THE LIST. Do NOT click into the review.",
+        `Then create this file to continue:  ${replyReadySentinel}`,
+        "",
+      ].join("\n"),
+    );
+    let ready = false;
+    for (let i = 0; i < Math.ceil(CONFIRM_TIMEOUT_MS / SENTINEL_POLL_INTERVAL_MS); i += 1) {
+      if (existsSync(replyReadySentinel)) { ready = true; break; }
+      await sleep(SENTINEL_POLL_INTERVAL_MS);
+    }
+    removeSentinel(replyReadySentinel);
+    if (!ready) {
+      console.error("No readiness signal within the window; ending without a run.");
+      process.exitCode = 2;
+      return;
+    }
+    // Re-acquire the ACTIVE page (the operator may have navigated / opened a tab while filtering).
+    const openPages = ctx.pages();
+    if (openPages.length === 0) {
+      console.error("The browser page was closed before the run could start — retry with the window open.");
+      process.exitCode = 2;
+      return;
+    }
+    const activePage = openPages[openPages.length - 1] as Page;
+
+    // Playwright's Page.evaluate accepts a string at runtime; the sanitized in-page snippets are strings, so
+    // cast to the string-evaluate surface the reply driver already relies on (mirrors discover-reply-target).
+    const evalStr = (activePage as unknown as { evaluate<R>(script: string): Promise<R> }).evaluate.bind(activePage);
+
+    // ── Escalation checkpoint (3): cross-source preflight, BEFORE any run is assembled ──────────────
+    // The operator calibrated the target row (relative-DOM paths) in the read-only Phase A; that artifact is
+    // page-bound (structural signature) + short-lived (expiry). Load + validate it against the LIVE page, then
+    // fingerprint the calibrated row in-page and require equality with the bundle's backend fingerprint. Any
+    // failure refuses here — the mutating rehearsal never starts against an unconfirmed/ drifted target.
+    const mappingPath = resolve(collectorRoot, ROW_MAPPING_REL_PATH);
+    const livePageSignature = await evalStr<string>(inPagePageSignature());
+    let mapping: ReplyRowMapping | null;
+    try {
+      mapping = loadRowMapping(mappingPath, { existsSync, statSync, readFileSync }, Date.now(), livePageSignature);
+    } catch (e) {
+      if (e instanceof ReplyRowMappingError) {
+        console.error(rowMappingRefusalMessage(e.code, mappingPath));
+        consumeTargetHintFile(mappingPath);
+        process.exitCode = ROW_MAPPING_REFUSAL_EXIT_CODE;
+        return;
+      }
+      throw e;
+    }
+    if (!mapping) {
+      console.error(
+        `No calibration artifact at ${mappingPath}. Run calibrate-reply-target on the live review list first (Phase A).`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+    consumeTargetHintFile(mappingPath); // single-use: never reusable across runs (defense atop page-binding + expiry)
+
+    const liveRowFingerprint = await evalStr<string | null>(
+      inPageRowFingerprintAt({ parentPath: mapping.parentPath, rowTag: mapping.rowTag, rowIndex: mapping.rowIndex, bodyPath: mapping.bodyPath }),
+    );
+    const crossSource = compareCrossSource(liveRowFingerprint, bundle.bodyFingerprint);
+    if (mode === "ABORT_REHEARSAL") {
+      // Row-match abort rehearsal: the operator designated + visually confirms the row and never submits, so
+      // cross-source is recorded as EVIDENCE only (NAVER body-to-stored-body reconciliation, B1, is still open) —
+      // it NEVER blocks a non-mutating abort. A live post (FULL_SUBMIT) keeps the hard gate in the else branch.
+      log("aw.reply.crossSource.evidence", { confirmed: crossSource.ok, code: crossSource.ok ? "MATCH" : crossSource.code });
+      console.error(
+        crossSource.ok
+          ? "Cross-source EVIDENCE: the live body fingerprint MATCHES the backend for this target."
+          : `Cross-source EVIDENCE: NOT confirmed (${crossSource.code}) — recorded; the non-mutating abort proceeds anyway.`,
+      );
+    } else {
+      if (!crossSource.ok) {
+        console.error(crossSourceRefusalMessage(crossSource.code));
+        log("aw.reply.crossSource.refused", { code: crossSource.code });
+        process.exitCode = CROSS_SOURCE_REFUSAL_EXIT_CODE;
+        return;
+      }
+      log("aw.reply.crossSource.confirmed", {});
+    }
+
     const runId = mintReplyRunId();
     const channel = createLoopbackChannel();
     const assembly = assembleReplyRun(channel.server, {
@@ -354,7 +460,16 @@ async function main(): Promise<void> {
       submissionRef,
       ...(targetHint ? { targetHint } : {}),
       mode,
-      createDriver: () => new NaverReplySubmitProbeDriver(page, { submitTimeoutMs: SUBMIT_TIMEOUT_MS }),
+      createDriver: (hint) =>
+        new NaverReplySubmitProbeDriver(activePage, {
+          submitTimeoutMs: SUBMIT_TIMEOUT_MS,
+          rowOpenTimeoutMs: SUBMIT_TIMEOUT_MS,
+          ...(hint ? { hint } : {}),
+          mapping: mapping!,
+          asOfDate: bundle.asOfDate,
+          // Abort rehearsal trusts the operator-designated row (B1 open); a live post matches on the hint.
+          locateMode: mode === "ABORT_REHEARSAL" ? "calibrated" : "match",
+        }),
       persistDir,
     });
     session = assembly.session;

@@ -29,7 +29,7 @@ export interface ReplyTargetResultBundle {
   asOfDate: string;
 }
 
-export type BundleErrorCode = "PERMS" | "MALFORMED" | "SCHEMA" | "EXPIRED";
+export type BundleErrorCode = "PERMS" | "MALFORMED" | "SCHEMA" | "EXPIRED" | "EXISTS";
 
 export class ReplyTargetBundleError extends Error {
   constructor(readonly code: BundleErrorCode) {
@@ -52,6 +52,13 @@ export interface BundleWriteDeps {
   writeFileSync: (p: string, data: string, opts: { mode: number }) => void;
   chmodSync: (p: string, mode: number) => void;
   renameSync: (from: string, to: string) => void;
+}
+
+/** Injectable surface for the atomic exclusive reservation (`O_EXCL` via the `wx` flag). */
+export interface BundleReserveDeps {
+  existsSync: (p: string) => boolean;
+  mkdirSync: (p: string, opts: { recursive: boolean; mode: number }) => void;
+  writeFileSync: (p: string, data: string, opts: { mode: number; flag: string }) => void;
 }
 
 const RECENCY_BUCKETS: readonly RecencyBucket[] = ["TODAY", "THIS_WEEK", "OLDER"];
@@ -134,9 +141,30 @@ export function hintFrom(bundle: ReplyTargetResultBundle): ReplyTargetHint {
 }
 
 /**
+ * **Atomically reserve the result-bundle slot** with an exclusive create (`O_EXCL` via the `wx` flag) BEFORE
+ * anything is minted. This is the no-clobber gate: if the file already exists — an earlier unconsumed bundle,
+ * or a concurrent prepare that reserved first — this throws {@link ReplyTargetBundleError} `EXISTS` and leaves
+ * the existing file byte-unchanged. Only the process that wins this exclusive create may go on to mint and
+ * {@link writeResultBundle finalize} (which atomically replaces this empty reservation). Using `O_EXCL` rather
+ * than a check-then-write makes the guard race-free: two concurrent reservers cannot both succeed, so a
+ * submissionRef can never be overwritten or orphaned by a losing prepare.
+ */
+export function reserveResultBundle(path: string, deps: BundleReserveDeps): void {
+  const dir = dirname(path);
+  if (!deps.existsSync(dir)) deps.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    deps.writeFileSync(path, "", { mode: 0o600, flag: "wx" }); // wx = O_CREAT | O_EXCL — fails if it exists
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new ReplyTargetBundleError("EXISTS");
+    throw e;
+  }
+}
+
+/**
  * Write the result bundle owner-only and atomically: dir 0700, temp file 0600 (chmod-forced past a permissive
  * umask), then an atomic rename. The bundle is a transient one-shot (re-mintable), so durability fsync is not
- * required — the security property (0600, no partial file) is.
+ * required — the security property (0600, no partial file) is. Called only after {@link reserveResultBundle}
+ * has claimed the slot, so the rename replaces this process's OWN empty reservation, never a live bundle.
  */
 export function writeResultBundle(path: string, bundle: ReplyTargetResultBundle, deps: BundleWriteDeps): void {
   const dir = dirname(path);
@@ -154,6 +182,7 @@ export function resultBundleRefusalMessage(code: BundleErrorCode, path: string):
     MALFORMED: "the file is not valid JSON",
     SCHEMA: "the file fails schema validation (submissionRef, rating 1..5, recencyBucket, bodyFingerprint, asOfDate)",
     EXPIRED: "the bundle's KST as-of date is not today — its recency bucket is stale; re-prepare a fresh bundle",
+    EXISTS: "a result bundle already exists here — consume or remove it before preparing a new one",
   };
   return [
     `Refusing: the reply-target bundle at ${path} is unusable — ${why[code]}.`,

@@ -48,6 +48,12 @@ export interface CreatePendingConnectionInput {
   userProvidedDisplayName: string;
   /** ISO timestamp; passed in for deterministic, testable output. */
   now: string;
+  /**
+   * Fingerprint of the SellerOps seller-account this connection serves
+   * (`sellerAccountFingerprint`). Optional: a connection may be created before the
+   * account link is known, and stays unlinked until `bindConnectionToSellerAccount`.
+   */
+  boundSellerAccountFingerprint?: string | null;
 }
 
 /**
@@ -63,6 +69,10 @@ export function createPendingConnection(input: CreatePendingConnectionInput): Co
     connectionStatus: "PENDING_USER_LOGIN",
     boundStoreFingerprintHash: null,
     fingerprintSourceCategory: null,
+    boundSellerAccountFingerprint: input.boundSellerAccountFingerprint ?? null,
+    boundSessionIdentityFingerprint: null,
+    boundShopDisplayName: null,
+    boundSelectorSpecFingerprint: null,
     userProvidedDisplayName: input.userProvidedDisplayName,
     createdAt: input.now,
     lastVerifiedAt: null,
@@ -96,6 +106,49 @@ export function bindConnectionToFingerprint(
     fingerprintSourceCategory: input.fingerprintSourceCategory,
     lastVerifiedAt: input.now,
     reauthRequiredReason: null,
+  };
+}
+
+/**
+ * Link a connection to the SellerOps seller-account it serves, by fingerprint (see
+ * `seller-account-fingerprint.ts`). Deliberately independent of the STORE binding:
+ * "which SellerOps account is this connection for" and "which NAVER store is this
+ * connection bound to" are separate facts, and conflating them would let one be
+ * silently inferred from the other.
+ *
+ * Status is untouched — linking an account is bookkeeping, not a verification.
+ */
+export function bindConnectionToSellerAccount(
+  connection: CollectorConnection,
+  sellerAccountFingerprint: string,
+): CollectorConnection {
+  return { ...connection, boundSellerAccountFingerprint: sellerAccountFingerprint };
+}
+
+/**
+ * Bind (or REBIND) the seller-center chrome session identity.
+ *
+ * Takes the composite digest and the shop's displayed name together, because the
+ * display name only means anything as the label of that particular digest — storing
+ * one without the other would leave a rename undiagnosable.
+ *
+ * This overwrites. That is safe ONLY because the single caller
+ * (`bindSessionChromeIdentity`) refuses unless the operator explicitly confirmed a
+ * first-time bind or an explicit rebind; there is no silent-overwrite path to here.
+ */
+export function bindConnectionToSessionIdentity(
+  connection: CollectorConnection,
+  compositeFingerprint: string,
+  shopDisplayName: string,
+  selectorSpecFingerprint: string,
+  now: string,
+): CollectorConnection {
+  return {
+    ...connection,
+    boundSessionIdentityFingerprint: compositeFingerprint,
+    boundShopDisplayName: shopDisplayName,
+    boundSelectorSpecFingerprint: selectorSpecFingerprint,
+    lastVerifiedAt: now,
   };
 }
 

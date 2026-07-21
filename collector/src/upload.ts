@@ -19,7 +19,7 @@ export interface IngestResult {
 export class UploadError extends Error {
   constructor(
     message: string,
-    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun",
+    readonly stage: "login" | "resolveChannel" | "upload" | "itemAnalysis" | "startSubmissionRun" | "replyOutcome" | "replyDraft" | "reviewIdentity",
     readonly httpStatus?: number,
   ) {
     super(message);
@@ -119,6 +119,146 @@ export async function startReplySubmissionRun(
   if (!res.ok) throw new UploadError("submission-run failed", "startSubmissionRun", res.status);
   log("reply.submissionRun.ok", { requireTargetHint: opts.requireTargetHint });
   return (await res.json()) as SubmissionRunResponse;
+}
+
+/** The operator's own reply-outcome report (a LOCAL, UNVERIFIED fact — never a claim about NAVER). */
+export interface ReplyOutcomeBody {
+  /** Idempotency key: the same id + same outcome replays; a different outcome on the same id is refused (409). */
+  commandId: string;
+  /** The single-use submissionRef the run was bound to. */
+  submissionRef: string;
+  /** `SUBMISSION_ABORTED` (operator did not post) or `OPERATOR_REPORTED_SUBMITTED` (operator posted). */
+  operatorOutcome: string;
+  /** The Runtime-assigned opaque run id (`run_<hex>`). */
+  awRunRef: string;
+}
+
+export interface ReplyOutcomeResult {
+  actionRef: string;
+  recorded: boolean;
+  replayed: boolean;
+}
+
+/**
+ * Record the operator's reply-submission outcome on the backend — a LOCAL, operator-reported, explicitly
+ * UNVERIFIED fact (never a NAVER claim, never a completion). Idempotent by {@code commandId}: replaying the same
+ * outcome returns 200 with {@code replayed:true}; a different outcome on the same id is refused (409). Only the
+ * opaque submissionRef / run ref and the outcome enum cross this call — never any review text.
+ */
+export async function submitReplyOutcome(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  body: ReplyOutcomeBody,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ReplyOutcomeResult> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply/outcome`;
+  const res = await fetchImpl(url, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new UploadError("reply outcome failed", "replyOutcome", res.status);
+  log("reply.outcome.ok", { operatorOutcome: body.operatorOutcome });
+  return (await res.json()) as ReplyOutcomeResult;
+}
+
+/**
+ * The operator's OWN approved reply draft — the text they authored and approved, shown to them read-only in
+ * the SellerOps abort-rehearsal overlay so they can visually confirm what they would post before aborting.
+ * This is the seller's own reply, NOT review PII: it deliberately carries only the draft body/version and a
+ * standing-approval flag, and NEVER the review's `redactedBody` (which the source read also returns but this
+ * client discards). The body is display-only; callers MUST NOT log it or put it on any wire.
+ */
+export interface ApprovedReplyDraft {
+  /** The operator-authored approved reply body — display-only; never logged, never persisted. */
+  draftBody: string | null;
+  /** The approved draft's version, or null when no draft exists. */
+  draftVersion: number | null;
+  /** Whether a standing approval exists (the submission-run already requires one before minting). */
+  approved: boolean;
+}
+
+/**
+ * Read the current reply-preparation view for one review and return ONLY the approved draft text (+ version +
+ * approval flag). The endpoint (`GET .../reply`) also returns the review's `redactedBody`; this client throws
+ * it away and never surfaces it. Used solely to populate the read-only draft overlay in the abort rehearsal.
+ * Only non-secret path ids (accountId, actionRef) are sent; the reply body that comes back is display-only and
+ * is never logged (the success log records only presence flags, never any text).
+ */
+export async function fetchApprovedReplyDraft(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ApprovedReplyDraft> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply`;
+  const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new UploadError("reply prep fetch failed", "replyDraft", res.status);
+  const view = (await res.json()) as {
+    draft?: { version?: number; body?: string } | null;
+    approval?: unknown;
+  };
+  const draftBody = typeof view.draft?.body === "string" ? view.draft.body : null;
+  const draftVersion = typeof view.draft?.version === "number" ? view.draft.version : null;
+  const approved = view.approval != null;
+  // Presence flags only — NEVER the draft text, and never the review body it discarded.
+  log("reply.draft.fetched", { hasDraft: draftBody != null, approved });
+  return { draftBody, draftVersion, approved };
+}
+
+/**
+ * The one-way identity fingerprint of a review's channel-side id (`review-id-fingerprint/v1`), read from the
+ * SAME `GET .../reply` view. Deliberately its own tiny result type and its own reader, separate from
+ * {@link ApprovedReplyDraft}: the identity path and the draft path have different purposes and different
+ * safety properties, and neither should widen to carry the other's data.
+ */
+export interface ReviewIdentityFingerprint {
+  /** 64-hex `review-id-fingerprint/v1` digest, or null when the review was ingested without a channel id. */
+  channelReviewIdFingerprint: string | null;
+  /** The coarse 1..5 rating — the secondary fact asserted AFTER an identity match. Null when unknown. */
+  rating: number | null;
+}
+
+/**
+ * Read the reply-preparation view for one review and return ONLY the channel review-id fingerprint. Everything
+ * else the endpoint returns — the redacted review body, the draft text, the suggestion — is discarded here and
+ * never surfaced. The backend never sends the raw channel id, so no raw identifier exists on this path at all;
+ * the success log records presence only.
+ */
+export async function fetchReviewIdentityFingerprint(
+  baseUrl: string,
+  token: string,
+  accountId: string,
+  actionRef: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<ReviewIdentityFingerprint> {
+  const url = `${baseUrl}/api/seller-accounts/${encodeURIComponent(accountId)}`
+    + `/attention/items/${encodeURIComponent(actionRef)}/reply`;
+  const res = await fetchImpl(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new UploadError("review identity fetch failed", "reviewIdentity", res.status);
+  // A non-JSON body (a proxy error page, an HTML login redirect) must not surface as a SyntaxError whose
+  // message quotes that body — the caller prints errors, and a body snippet is exactly what must not appear.
+  let view: { channelReviewIdFingerprint?: unknown; rating?: unknown };
+  try {
+    view = (await res.json()) as { channelReviewIdFingerprint?: unknown; rating?: unknown };
+  } catch {
+    throw new UploadError("review identity response was not JSON", "reviewIdentity", res.status);
+  }
+  const raw = view.channelReviewIdFingerprint;
+  // Fail closed on anything that is not a lowercase 64-hex digest — a malformed value must never be
+  // treated as an identity, and must never be echoed back in a log line.
+  const fingerprint = typeof raw === "string" && /^[0-9a-f]{64}$/.test(raw) ? raw : null;
+  const rating =
+    typeof view.rating === "number" && Number.isInteger(view.rating) && view.rating >= 1 && view.rating <= 5
+      ? view.rating
+      : null;
+  log("reply.identity.fetched", { hasChannelReviewId: fingerprint != null, hasRating: rating != null });
+  return { channelReviewIdFingerprint: fingerprint, rating };
 }
 
 /**
