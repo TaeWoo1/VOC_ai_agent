@@ -1,6 +1,0 @@
-PRODUCT_URL=https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000238828&t_page=%ED%86%B5%ED%95%A9%EA%B2%80%EC%83%89%EA%B2%B0%EA%B3%BC%ED%8E%98%EC%9D%B4%EC%A7%80&t_click=%EA%B2%80%EC%83%89%EC%83%81%ED%92%88%EC%83%81%EC%84%B8&t_search_name=%EB%B8%94%EB%9F%AC%EC%85%94&t_number=1&dispCatNo=1000001000200010006&trackingCd=Result_1&tab=review
-REVIEW_API_PATH=/review/api/v2/reviews/cursor
-CAPTURED_AT=2026-04-21T08:47:43.439800Z
-PLAYWRIGHT_HEADLESS=True
-PAGE1_REVIEWS=10 hasNext=True
-PAGE2_REVIEWS=10 hasNext=True
