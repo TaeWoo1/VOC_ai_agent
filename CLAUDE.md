@@ -65,15 +65,20 @@ one place on disk and are **not** recoverable from git.
 
 Read the canonical documents before product/frontend work:
 
+0. `docs/product_operating_model.md` — anti-drift orientation: what SellerOps is, who for, the open
+   channel set, acquisition posture, user journey. Orientation only; points, owns nothing.
 1. `docs/sellerops_canonical_reference.md` — product identity, strategy, honest state, authority.
 2. `docs/product-scope-v1.md` — product scope contract (**scope lock v1.6**).
 3. `docs/sellerops_frontend_spec.md` — frontend source of truth.
 4. `docs/multi-channel-connector-roadmap.md` — connector strategy; §4.1 = living capability table.
 5. `docs/sellerops_local_agent_runtime_adr.md` — local-agent runtime & guided-connection boundaries.
 
+Channel lessons (derived from §4.1, non-authoritative): `docs/channel_capability_ledger.md`.
+
 **Status lives in workstream homes, not here:** Action Window / R4 → `docs/action-window-runtime/`
 (`HANDOFF.md`); Action Window frontend → `docs/workstreams/action-window-frontend/` (`progress.md`);
-ESM live capture → `docs/esm/` (`live-capture-checklist.md`). A router carries paths, not state.
+ESM live capture → `docs/esm/` (`live-capture-checklist.md`); review operations MVP →
+`docs/workstreams/review_operations_mvp.md`. A router carries paths, not state.
 
 ### Conflict priority
 
