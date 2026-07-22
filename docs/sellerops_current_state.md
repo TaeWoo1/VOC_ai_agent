@@ -1,3 +1,15 @@
+> **⚠ RETIRED AS CURRENT-STATE AUTHORITY — historical handoff, not live truth.**
+> This document is **no longer** the SellerOps current-state source of truth. Its body is a
+> **2026-07-08 snapshot** (with partial 07-15 / 07-18 patches) that predates PRs #317–#322 and
+> the repo restructure — readable for lineage, **not citable for current state**.
+>
+> - **Product / strategy / state authority:** [`docs/sellerops_canonical_reference.md`](sellerops_canonical_reference.md)
+> - **Repo overview & working rules:** [`README.md`](../README.md) · [`CLAUDE.md`](../CLAUDE.md)
+> - **Action Window / runtime status of record:** [`docs/action-window-runtime/HANDOFF.md`](action-window-runtime/HANDOFF.md)
+>
+> Everything below is preserved unchanged for historical lineage. Do not rely on its paths,
+> commit SHAs, scope-lock versions, or 구현됨/미구현 claims as current.
+
 # SellerOps — Current State (living handoff)
 
 > **Living handoff document — not a strategy document.** 이 문서는 "지금 어디까지 됐는가"의 단일
