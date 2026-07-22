@@ -26,8 +26,10 @@ passed through the running pipeline.
 
 What no offline test can establish:
 
-- that a **real** export still carries the 25 columns in that order, the `yyyy.MM.dd. HH:mm:ss`
-  timestamp, and `답글여부` on rows the seller recognises as answered;
+- that a **real** export is **compatible** with the mapping — that the columns the canonical model
+  depends on are present under names the aliases match, that its review date is the time-bearing
+  form, that `답글여부` / `답글등록일시` are there on rows the seller recognises as answered, and that
+  the whole file **ingests successfully**;
 - that reply state survives the real acquisition path end to end;
 - that an already-answered review actually leaves the operator's queue on real data;
 - that the guided reply flow **refuses** a review the channel already answered.
@@ -63,12 +65,12 @@ SellerOps detects, validates, and processes the result. The human-driven alterna
 
 ## 4. Preconditions — ☐ to be verified at dispatch
 
-- ☐ Offline suites green on the unmodified tree (backend 1418 · collector 4843/95 · frontend 668) —
-  **G4: live is never the first execution of any code path.**
+- ☑ Offline suites green on the unmodified tree (backend 1418 · collector 4843/95 · frontend 668) —
+  **G4: live is never the first execution of any code path.** Verified 2026-07-23 (§12).
 - ☐ Dedicated Chrome profile intact; stable network / IP / location.
 - ☐ Operation Run persistence enabled.
-- ☐ Disposable database created and the backend pointed at it (§5 Phase A), **verified by a dry run
-  of Phase A + teardown before any live contact**.
+- ☑ Disposable-DB path rehearsed (Phase A + Phase D, guard falsified) 2026-07-23 (§12).
+  ☐ A **fresh** disposable database created for the actual run and confirmed as the ingest target.
 - ☐ Operator seated and ready ("a no-click failure means operator-absent first, not a code bug").
 - ☐ **Range precondition (§8) confirmed ON SCREEN by the seller BEFORE the live window opens.**
 
@@ -105,7 +107,22 @@ Live contact ends when the browser closes.
 
 Documented `curl` against the disposable backend. Each step records a **sanitized** result.
 
-**C1 — ingest.** The run's own sanitized output: status `SUCCESS`, row counts.
+**C1 — the real export is COMPATIBLE and ingests.** The run's own sanitized output: status `SUCCESS`,
+row counts. Compatibility is then read off the Phase D census, not off the file:
+
+- every **required mapped column** landed — `body`, `rating`, `received_at`, `external_id` non-null
+  across the ingested rows;
+- `received_at` parsed from the **time-bearing** review date (non-null, quantised to UTC midnight by
+  the shared `DateParse` path — the branch a date-only value never exercises);
+- the **reply-state fields** landed — `reply_state` populated on every row, with `replied_at` where
+  the export supplied one.
+
+⚠ **Deliberately NOT claimed: "all 25 headers, in exact order."** That would need the artifact
+retained to hash, which the D-021 delete-after-validate posture forbids — and it is the wrong
+question. A populated field proves the column was present **and its header matched the alias**, which
+is what the pipeline actually depends on; a header hash proves only that a string appeared. Column
+order is irrelevant to `HeaderAliases.pick`, which is an exact-key lookup on a header-keyed map. The
+seller's on-screen view of the column set is recorded as an operator observation, nothing more.
 
 **C2 — the queue excludes answered reviews.**
 `GET /api/seller-accounts/{id}/attention?from=&to=` → low-rating counts.
@@ -137,12 +154,12 @@ started**. Without C5, a 409 caused by an unrelated defect would read as success
 Captured **before** the database is dropped, because the aggregates are the evidence and the rows are
 not:
 
-- **Mapped-field census** — per-field non-null counts across the ingested rows: `rating`,
-  `received_at`, `external_id`, `reply_state`, `replied_at`. This is the *schema* evidence: a field
-  populated means its column was present **and its header matched the alias**, which is strictly
-  stronger than a header hash. ⚠ **A header count/order hash is deliberately NOT taken** — it would
-  require retaining the artifact, which the D-021 delete-after-validate posture forbids. The column
-  set the seller sees on screen is recorded as an operator observation instead.
+- **Mapped-field census** — per-field non-null counts across the ingested rows: `body`, `rating`,
+  `received_at`, `external_id`, `reply_state`, `replied_at`. This is C1's compatibility evidence: a
+  populated field means the column was present **and its header matched the alias**, which is what
+  the pipeline depends on. ⚠ **A header count/order hash is deliberately NOT taken** — it would
+  require retaining the artifact (D-021 forbids it) and proves less. The column set the seller sees
+  on screen is recorded as an operator observation instead.
 - **Timestamp distribution** — how many `received_at` values are non-null and at UTC midnight
   (the shared `DateParse` quantisation), confirming the 20-char form parsed.
 - **Reply-state distribution** — counts of `ANSWERED` / `PENDING` / `UNKNOWN`, plus the low-rating
@@ -230,6 +247,77 @@ Census:             rating <n> · received_at <n> (UTC-midnight <n>) · external
 Teardown:           DB dropped ☐ · sellerops intact ☐ · quarantine empty ☐ · no artifact ☐
 Findings:           <...>
 ```
+
+## 12. Pre-dispatch preparation — ☑ COMPLETED 2026-07-23 (no live contact)
+
+Recorded here because these are the two things that must be true *before* a dispatching turn, and
+neither of them is a gate.
+
+**G4 evidence — offline suites green on the unmodified tree** (live is never the first execution of
+any code path):
+
+| Suite | Result |
+|---|---|
+| backend | **1418 passed**, 0 failures, 0 errors |
+| collector | **4843 passed / 95 skipped** (218 files); `typecheck` clean |
+| frontend | **668 passed** (62 files); `tsc --noEmit` clean |
+
+Working tree carried only this document — no uncommitted code.
+
+**Disposable-DB rehearsal — Phase A + Phase D exercised end to end, with no live window:**
+
+- created `sellerops_run7_rehearsal_<stamp>`; booted the backend against it on `SERVER_PORT=18080`;
+- confirmed it answers (`/api/channels` 401 unauthenticated → authenticates → **NAVER channel seeded**,
+  so a fresh org can resolve the channel and register its file-channel account);
+- **name guard falsified**: the drop guard was tested against `sellerops` and `sellerops_dev` and
+  refused both, so the persistent dev database cannot be the argument;
+- stopped the backend, dropped the rehearsal database, confirmed **`sellerops` is the only remaining
+  `sellerops*` database**, and confirmed no quarantine residue.
+
+The blast-radius controls are therefore rehearsed before a single real row can exist.
+
+## 13. PROPOSED gate values — ⚠ **NOT AFFIRMED, NOT A SIGN-OFF**
+
+> **Nothing below is a gate.** These are the values the operator/PO would *copy into* the affirmation
+> blocks **in a dispatching turn**, after deciding to run. Reading them here affirms nothing, and this
+> document cannot affirm anything: `r4-gate-record.md` is the register, G3/G6 are per-run and
+> consumed with the run, and **P6 is signed only in a dispatching turn that records both**.
+
+| Field | Proposed value |
+|---|---|
+| Channel / DataType | NAVER SmartStore · REVIEW export (read) |
+| Seller account | `NAVER_DEV_SELLER_SELF_01` — the operator's own dev seller (G2 self-consent, D-024) |
+| Operator / PO | `OPERATOR_SELF_01` — seller = operator; the real identity is named at the seat, never in this file |
+| Date | _(the dispatching turn's date)_ |
+| Backend | disposable `sellerops_run7_<stamp>` on `SERVER_PORT=18080`; **never** the persistent dev DB |
+
+**G3 — proposed instance (`export+ingest` scope).** Each box is affirmed fresh at the seat; none may
+be inherited from Run 4 or from anything else:
+
+- ☐ Stable network / IP / location still holds.
+- ☐ Dedicated Chrome profile for the connection intact.
+- ☐ Bridge paired — **☑ required for this scope** (it is *not* scoped out: the `session recovery`
+  N/A carve-out is scoped to that run type only, and this is an export run).
+- ☐ Operation Run persistence enabled.
+- ☐ §9 item 3 pause lift, **for `export+ingest` only** — not a blanket lift, not inherited.
+
+**G6 — proposed one-run approval.** Channel / seller account owner / date / operator as above, §7
+abort criteria acknowledged, plus:
+
+- `max live window:` **~15 min** proposed — one drive, no recovery loop (this run does not use the
+  A3 recovery budget that took Run 6's worst case to ~32 min). The seller's two-step action sits
+  inside the observe → download windows the CLI prompt interpolates from the timers.
+
+**P6 — proposed sign-off inputs** (per `r4-gate-record.md` §2): G1 ✅ (D-021) · G2 ✅ (D-024) ·
+G4 ☑ *(offline suites green on the unmodified tree — §12)* · G5 ✅ (none required) ·
+export-scoped G6 ☐ · export-scoped G3 ☐ · §7 acknowledged ☐. **P6 stays ☐ until the dispatching turn
+records the G6 and the G3.**
+
+**§7 abort criteria — proposed acknowledgement.** `r4-preparation.md` §7 verbatim, including the
+carve-out that the **expected** NAVER export confirmation dialog is not a trigger while any
+*unrecognized* prompt is; plus this run's three additions in §9 above (range precondition fails →
+abort before the window; ingest target not confirmed disposable → abort; any composer/reply surface
+→ abort).
 
 *Boundary: this record is a plan for a run that has not been authorized. Every live-run gate applies
 per-run, and this document grants none of them.*
