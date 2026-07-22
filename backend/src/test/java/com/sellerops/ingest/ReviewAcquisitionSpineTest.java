@@ -48,10 +48,15 @@ import java.io.ByteArrayInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import org.assertj.core.groups.Tuple;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -106,6 +111,7 @@ class ReviewAcquisitionSpineTest {
     /** The shared contract directory — the same relative path the collector's loader resolves. */
     private static final Path CONTRACT_DIR = Path.of("..", "contracts", "review-export", "naver", "v1");
     private static final Path FIXTURE = CONTRACT_DIR.resolve("naver-review-export-v1.xlsx");
+    private static final Path EMPTY_FIXTURE = CONTRACT_DIR.resolve("naver-review-export-empty-v1.xlsx");
     private static final Path EXPECTED_ROWS = CONTRACT_DIR.resolve("expected-rows.json");
 
     /** The multipart name an Action Window handoff sends: derived from the opaque ref, never the platform's. */
@@ -152,13 +158,39 @@ class ReviewAcquisitionSpineTest {
     // --- the joint --------------------------------------------------------------------
 
     @Test
-    void theCommittedArtifactIsTheOneTheContractPins() throws Exception {
-        // Asserted before anything is read: if the workbook were regenerated, every assertion below
+    void theCommittedArtifactsAreTheOnesTheContractPins() throws Exception {
+        // Asserted before anything is read: if a workbook were regenerated, every assertion below
         // would still be green while proving something about DIFFERENT bytes than the collector saw.
         assertThat(sha256(Files.readAllBytes(FIXTURE)))
-                .as("contracts/review-export/naver/v1 :: fileSha256 — regenerating the workbook is a "
+                .as("contracts/review-export/naver/v1 :: fileSha256 — regenerating a workbook is a "
                         + "deliberate, visible event; update expected-rows.json in the same change")
                 .isEqualTo(contract.get("fileSha256").asText());
+        assertThat(sha256(Files.readAllBytes(EMPTY_FIXTURE)))
+                .as("contracts/review-export/naver/v1 :: emptyFileSha256")
+                .isEqualTo(contract.get("emptyFileSha256").asText());
+    }
+
+    @Test
+    void theRealExportsTimestampFormParsesAndLandsInTheOperatorsWindow() throws Exception {
+        // The real export writes `yyyy.MM.dd. HH:mm:ss`, not a bare date. DateParse splits on the
+        // space and strips the trailing dot; the time-of-day is dropped to UTC start-of-day. Nothing
+        // asserted that end to end while the fixture carried date-only values.
+        assertThat(contract.get("reviewDateFormat").asText()).isEqualTo("yyyy.MM.dd. HH:mm:ss");
+
+        ingestFixture();
+
+        for (JsonNode row : contract.get("rows")) {
+            LocalDate day = LocalDate.parse(row.get("reviewDate").asText().substring(0, 10),
+                    DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+            Instant expected = day.atStartOfDay(ZoneOffset.UTC).toInstant();
+            assertThat(reviews.findAllByOrgId(org))
+                    .as("row %s receivedAt", row.get("channelReviewId").asText())
+                    .anySatisfy(review -> {
+                        assertThat(review.getExternalId()).isEqualTo(row.get("channelReviewId").asText());
+                        assertThat(review.getReceivedAt()).isEqualTo(expected);
+                    });
+            assertThat(day).isBetween(from, to);   // …and inside the window the operator asks about
+        }
     }
 
     @Test
@@ -231,14 +263,13 @@ class ReviewAcquisitionSpineTest {
 
         assertThat(summary.channel()).isEqualTo("네이버 스마트스토어");
         // containsExactly, not contains: the ABSENCE of a signal is part of what the operator sees.
-        // Ratings are 1·2·3·4·5·5 → two HIGH (1★,2★), one MEDIUM (3★), six NEW. There are no
-        // inquiries in this store and no prior window, so no other signal may appear.
+        // The expected set comes from the CONTRACT, which the collector's E2E asserts against the
+        // live HTTP payload and the frontend asserts its selector over — one declaration, three
+        // ports, no cross-stack imports.
         assertThat(summary.items())
-                .extracting(AttentionSignal::type, AttentionSignal::severity, AttentionSignal::count)
-                .containsExactly(
-                        tuple("LOW_RATING_REVIEW", "HIGH", 2L),
-                        tuple("LOW_RATING_REVIEW", "MEDIUM", 1L),
-                        tuple("NEW_REVIEW", "LOW", 6L));
+                .extracting(AttentionSignal::type, AttentionSignal::severity, AttentionSignal::count,
+                        AttentionSignal::sourceType)
+                .containsExactlyElementsOf(expectedAttentionTuples());
     }
 
     @Test
@@ -294,12 +325,62 @@ class ReviewAcquisitionSpineTest {
                 .isEmpty();
     }
 
+    @Test
+    void anEmptyButValidExportIngestsCleanlyAndSurfacesNothing() throws Exception {
+        // A quiet date range is a legitimate seller outcome, and a real header-only export has been
+        // observed. It must ingest as an honest zero — not fail, and not invent activity.
+        IngestResult result = connector.ingest(org, naverChannelId, UploadType.REVIEW, FILENAME,
+                new ByteArrayInputStream(Files.readAllBytes(EMPTY_FIXTURE)), CollectionMethod.SELLER_CENTER_EXPORT);
+
+        JsonNode expected = contract.get("expectedEmptyIngest");
+        assertThat(result.status()).isEqualTo(expected.get("status").asText());
+        assertThat(result.successRows()).isEqualTo(expected.get("successRows").asInt());
+        assertThat(result.failedRows()).isEqualTo(expected.get("failedRows").asInt());
+        assertThat(reviews.findAllByOrgId(org)).isEmpty();
+        assertThat(attention.attention(org, naverAccountId, from, to).items()).isEmpty();
+    }
+
+    @Test
+    void thatSameEmptyFileStillFailsWhenAHUMANUploadedIt() throws Exception {
+        // The distinction is provenance, not emptiness — and it must be pinned in both directions or
+        // the rule reads as "empty is always fine". A person who picks an empty file almost certainly
+        // picked the wrong one; the Action Window hands over what the platform produced for the range
+        // the seller chose. Same bytes, different question, deliberately different answer.
+        IngestResult manual = connector.ingest(org, naverChannelId, UploadType.REVIEW, "review_export.xlsx",
+                new ByteArrayInputStream(Files.readAllBytes(EMPTY_FIXTURE)), CollectionMethod.MANUAL_UPLOAD);
+
+        assertThat(manual.status()).isEqualTo("FAILED");
+        assertThat(manual.totalRows()).isZero();
+    }
+
+    @Test
+    void anUnreadableExportIsNeverReportedAsAnHonestZero() throws Exception {
+        // The guard on the rule above: a parse failure also lands with zero rows, and it must stay an
+        // error. "We could not read it" must never be reported as "there was nothing in it".
+        IngestResult broken = connector.ingest(org, naverChannelId, UploadType.REVIEW, FILENAME,
+                new ByteArrayInputStream("not a workbook".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                CollectionMethod.SELLER_CENTER_EXPORT);
+
+        assertThat(broken.status()).isEqualTo("FAILED");
+        assertThat(broken.errorMessage()).isNotBlank();
+    }
+
     // --- fixtures ---------------------------------------------------------------------
 
     /** Ingest the committed artifact exactly as an Action Window handoff would. */
     private IngestResult ingestFixture() throws Exception {
         return connector.ingest(org, naverChannelId, UploadType.REVIEW, FILENAME,
                 new ByteArrayInputStream(Files.readAllBytes(FIXTURE)), CollectionMethod.SELLER_CENTER_EXPORT);
+    }
+
+    /** The contract's declared attention signals, as assertion tuples. */
+    private List<Tuple> expectedAttentionTuples() {
+        List<Tuple> tuples = new ArrayList<>();
+        for (JsonNode signal : contract.get("expectedAttention").get("signals")) {
+            tuples.add(tuple(signal.get("type").asText(), signal.get("severity").asText(),
+                    signal.get("count").asLong(), signal.get("sourceType").asText()));
+        }
+        return tuples;
     }
 
     private static String sha256(byte[] bytes) throws Exception {

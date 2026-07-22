@@ -30,6 +30,7 @@
 import { randomUUID } from "node:crypto";
 import type { Download, Frame, Page } from "playwright";
 import { artifactRefFor } from "./artifact";
+import { artifactParseVerdict, type ArtifactParseVerdict } from "./artifact-parse";
 import {
   quarantineValidateBytes,
   sweepQuarantine,
@@ -125,6 +126,8 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private lastDiagnostic: NaverPrepareDiagnostic | null = null;
   /** TEST-VISIBLE booleans of the last quarantine validation (never wired). */
   private lastQuarantineVerdict: QuarantineVerdict | null = null;
+  /** TEST-VISIBLE booleans of the last artifact parse check (never wired to transport/persistence). */
+  private lastParseVerdict: ArtifactParseVerdict | null = null;
   /** Armed BEFORE the user acts (a download can fire the instant they click); resolved lazily. */
   private pendingDownload: Promise<Download | null> | null = null;
   /** The detected artifact buffered in memory (bytes re-readable for validate + ingest). */
@@ -198,6 +201,15 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   /** Sanitized booleans of the last quarantine validation (test introspection only — never wired). */
   lastQuarantine(): QuarantineVerdict | null {
     return this.lastQuarantineVerdict;
+  }
+
+  /**
+   * Sanitized booleans of the last artifact parse check (test introspection only — never wired).
+   * `dataRowPresent` is the observed, non-gating signal: an empty-but-valid export reads `false`
+   * here and still completes the run.
+   */
+  lastParse(): ArtifactParseVerdict | null {
+    return this.lastParseVerdict;
   }
 
   /**
@@ -349,9 +361,20 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
-   * Validate the buffered artifact via the ratified quarantine posture (temporary save → extension +
-   * OOXML magic sniff → DELETE; a failed delete fails closed). The bytes are RETAINED for the ingest
-   * handoff; only the sanitized boolean crosses back to the engine.
+   * Validate the buffered artifact: the ratified quarantine posture (temporary save → extension +
+   * OOXML magic sniff → DELETE; a failed delete fails closed) AND the parse gate. The bytes are
+   * RETAINED for the ingest handoff; only the sanitized boolean crosses back to the engine.
+   *
+   * **Why the parse gate is here and not at the ingest handoff.** The quarantine sniff reads ZIP
+   * magic plus the `[Content_Types].xml` entry NAME in the head — a payload can satisfy both and not
+   * be a workbook. Refusing such an artifact at the *handoff* would surface as `INGEST_FAILED`,
+   * whose seller-facing copy says storage failed and to retry later: both false, and the retry is
+   * useless. Refusing it HERE surfaces as `ARTIFACT_INVALID` — "받은 파일을 확인할 수 없어요 /
+   * 다시 내려받아 주세요" — which is true and actionable.
+   *
+   * ⚠ `dataRowPresent` does NOT participate. A valid workbook carrying only a header row is a
+   * legitimate seller outcome (an export of a quiet range), and a real one has been observed; failing
+   * the run on it would tell a seller their correct export was broken.
    */
   async validateArtifact(artifactRef: string): Promise<ArtifactValidateResult> {
     const retained = this.retained;
@@ -363,7 +386,9 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       ...(this.opts.headBytes !== undefined ? { headBytes: this.opts.headBytes } : {}),
     });
     this.lastQuarantineVerdict = verdict;
-    return { valid: verdict.valid };
+    const parse = artifactParseVerdict(retained.bytes());
+    this.lastParseVerdict = parse;
+    return { valid: verdict.valid && parse.parseOk };
   }
 
   /**

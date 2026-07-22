@@ -28,10 +28,12 @@ import { sniffXlsxReadable } from "../../src/naver/review-download-save";
 import { readWorkbookRowSample } from "../../src/esm/esm-review-xlsx-reader";
 import { fixtureHtml } from "../../src/action-window/fixture";
 import {
+  REVIEW_EXPORT_EMPTY_FIXTURE_PATH,
   REVIEW_EXPORT_FIXTURE_PATH,
   expectedRows,
   reviewExportBase64,
   reviewExportBytes,
+  reviewExportEmptyBytes,
 } from "../support/review-export-fixture";
 
 const REF = "00ff00ff00ff00ff"; // opaque 16-hex artifact ref, as the engine emits
@@ -108,20 +110,74 @@ describe("spine :: the committed artifact is THE artifact", () => {
       expect(row[col("구매자평점")]).toBe(String(expectedRow.rating));
       expect(row[col("리뷰상세내용")]).toBe(expectedRow.body);
       expect(row[col("리뷰등록일")]).toBe(expectedRow.reviewDate);
+      expect(row[col("리뷰구분")]).toBe(expectedRow.reviewType);
+      expect(row[col("답글여부")]).toBe(expectedRow.replyFlag);
+    });
+  });
+
+  it("carries the REAL export's timestamp form, not a bare date", () => {
+    // The real export writes `yyyy.MM.dd. HH:mm:ss` (20 chars, uniform across every row of a real
+    // capture). `DateParse.localDate` splits on the space and strips the trailing dot — a date-only
+    // fixture never exercised that branch, so the spine had never tested the form sellers produce.
+    const sample = readWorkbookRowSample(REVIEW_EXPORT_FIXTURE_PATH, 50);
+    const dateCol = EXPECTED.headers.indexOf("리뷰등록일");
+
+    expect(EXPECTED.reviewDateFormat).toBe("yyyy.MM.dd. HH:mm:ss");
+    for (const row of sample.sampleRows) {
+      expect(row[dateCol]).toMatch(/^\d{4}\.\d{2}\.\d{2}\. \d{2}:\d{2}:\d{2}$/);
+      expect(row[dateCol]!.length).toBe(20);
+    }
+  });
+
+  it("carries the reply state the pipeline currently drops", () => {
+    // `답글여부` is real, and `CanonicalReview` has no field for it — so the operator's queue cannot
+    // tell an answered review from an unanswered one. The fixture carries both values on purpose, so
+    // the follow-up slice inherits a fixture that already proves the loss rather than needing a new one.
+    const sample = readWorkbookRowSample(REVIEW_EXPORT_FIXTURE_PATH, 50);
+    const replyCol = EXPECTED.headers.indexOf("답글여부");
+    const repliedAtCol = EXPECTED.headers.indexOf("답글등록일시");
+    const flags = sample.sampleRows.map((r) => r[replyCol]);
+
+    expect(new Set(flags)).toEqual(new Set(["Y", "N"])); // both states present
+    // 답글등록일시 is set exactly where 답글여부 is Y — the real file's nullability.
+    sample.sampleRows.forEach((row) => {
+      expect(Boolean(row[repliedAtCol])).toBe(row[replyCol] === "Y");
     });
   });
 
   it("plants the unmapped-column sentinels the backend proves never persist", () => {
-    // These columns have no canonical slot. Their presence here is what gives the backend's
-    // "never reaches a canonical field" assertion something real to fail on.
+    // These columns have no canonical slot and are PII-class in a real export (등록자 medium,
+    // 상품주문번호 high, 유저정보 등록 항목 unknown). Their presence here is what gives the
+    // backend's "never reaches a canonical field" assertion something real to fail on.
     const sample = readWorkbookRowSample(REVIEW_EXPORT_FIXTURE_PATH, 50);
-    for (const header of EXPECTED.unmappedHeaders) {
+    for (const [header, sentinel] of Object.entries(EXPECTED.unmappedSentinels)) {
       const index = EXPECTED.headers.indexOf(header);
       expect(index).toBeGreaterThanOrEqual(0);
       for (const row of sample.sampleRows) {
-        expect(row[index]).toBe(EXPECTED.unmappedSentinels[header]);
+        expect(row[index]).toBe(sentinel);
       }
     }
+  });
+
+  it("keeps the near-miss headers that must never be mis-picked as the mapped ones", () => {
+    // `관련리뷰상세내용` sits beside `리뷰상세내용`, `관련리뷰글번호` beside `리뷰글번호`.
+    // HeaderAliases.pick is an exact-key lookup, so these cannot collide — the fixture keeps them
+    // present so that stays true by test rather than by assumption.
+    expect(EXPECTED.headers).toContain("관련리뷰상세내용");
+    expect(EXPECTED.headers).toContain("관련리뷰글번호");
+    expect(EXPECTED.mappedHeaders["body"]).toBe("리뷰상세내용");
+    expect(EXPECTED.mappedHeaders["externalId"]).toBe("리뷰글번호");
+  });
+
+  it("the empty artifact is a real, readable workbook with no data rows", () => {
+    // The legitimate quiet-range export — a real one was observed in the wild. It must read as a
+    // valid workbook, because failing it would tell a seller their correct export was broken.
+    const sample = readWorkbookRowSample(REVIEW_EXPORT_EMPTY_FIXTURE_PATH, 50);
+
+    expect(() => reviewExportEmptyBytes()).not.toThrow();
+    expect(sample.workbookReadable).toBe(true);
+    expect(sample.headerCells).toEqual(EXPECTED.headers);
+    expect(sample.sampleRows).toEqual([]);
   });
 
   it("contains no platform token", () => {
@@ -152,15 +208,15 @@ describe("spine :: quarantine validation over the real artifact", () => {
 
 describe("spine :: structural validity is NOT ingestibility", () => {
   /**
-   * THE FINDING THIS SLICE RECORDS. The quarantine sniff checks ZIP magic plus the
+   * THE FINDING, AND ITS CLOSURE. The quarantine sniff checks ZIP magic plus the
    * `[Content_Types].xml` entry NAME within the head — a payload can satisfy both and still not be a
-   * workbook. Before this slice the synthetic fixture served exactly such a payload, so a green
-   * fixture run proved detection and validation and could prove NOTHING downstream: a real parser
-   * rejects those bytes.
+   * workbook. The pre-spine synthetic fixture served exactly such a payload, so a green fixture run
+   * proved detection and validation and could prove NOTHING downstream.
    *
-   * This is reported, not resolved: the sniff's semantics are the ratified D-021 posture and are
-   * deliberately unchanged here. What changes is that the synthetic path can now carry bytes that
-   * pass BOTH checks, and that the gap between them is pinned rather than assumed.
+   * The sniff's semantics are the ratified D-021 posture and remain **unchanged**. What closes the
+   * gap is `artifact-parse.ts` at the driver's validate seam (see `artifact-parse.test.ts` and the
+   * live-driver lock): the two verdicts answer **different questions**, and this block keeps that
+   * distinction pinned rather than assumed.
    */
   it("the pre-spine payload passes the sniff", () => {
     expect(sniffXlsxReadable(structurallyShapedOnly())).toBe(true);

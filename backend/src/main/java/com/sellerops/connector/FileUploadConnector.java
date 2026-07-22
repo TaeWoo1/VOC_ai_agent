@@ -202,10 +202,38 @@ public class FileUploadConnector implements ChannelConnector {
         int total = success + skipped + failed;
         ConnectorResult r = ConnectorResult.of(channelCode, DataType.valueOf(type.name()),
                 method, success, skipped, failed,
-                /*rateLimited*/ false, /*errored*/ total == 0, /*failureCode*/ null);
+                /*rateLimited*/ false, /*errored*/ erroredOnEmpty(total, method, errorMessage), /*failureCode*/ null);
         collectionRuns.finalizeRun(job, r, errorMessage);
         return new IngestResult(job.getId(), type, r.jobStatus(), total, success, skipped, failed,
                 errorMessage, sampleErrors);
+    }
+
+    /**
+     * Whether an upload that produced <b>zero rows</b> is an error — and it depends on who chose the
+     * file.
+     *
+     * <p>A {@code MANUAL_UPLOAD} of an empty file stays {@code FAILED}, unchanged: a human picking a
+     * file almost certainly picked the wrong one, and answering "success" would hide that. That is
+     * the legacy {@code resolveStatus} rule, pinned by {@code FileUploadConnectorTest}.
+     *
+     * <p>A {@code SELLER_CENTER_EXPORT} is different: the Action Window hands over an artifact the
+     * platform produced for the range the seller selected, and an export of a quiet range is
+     * legitimately empty — a real header-only export has been observed. Reporting that as a failure
+     * would tell a seller their correct export was broken, and the seller-facing blocker copy
+     * ("저장 중 문제가 생겼어요 / 잠시 후 다시 시도해 주세요") would be false twice over. So an empty
+     * export is an honest zero: {@code SUCCESS} with 0/0/0.
+     *
+     * <p>An {@code errorMessage} always wins. A parse failure on the export path reaches here with
+     * zero rows too, and that <b>is</b> an error — this rule must never turn "we could not read it"
+     * into "there was nothing in it". {@code RunOutcome.classify} already treats an empty-but-clean
+     * run as SUCCESS ("including an empty incremental pull"); this restores that intent for exports
+     * without touching the manual-upload contract.
+     */
+    private boolean erroredOnEmpty(int total, CollectionMethod method, String errorMessage) {
+        if (total > 0) {
+            return false;
+        }
+        return errorMessage != null || method != CollectionMethod.SELLER_CENTER_EXPORT;
     }
 
     private List<RowError> sample(List<RowError> errors) {

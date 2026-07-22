@@ -1,23 +1,51 @@
 {
   "contract": "review-export/naver/v1",
   "file": "naver-review-export-v1.xlsx",
-  "fileSha256": "0648a3a02ea97807b038d66d35411cf634f9af15b5a435bf527384aadefca6f1",
+  "fileSha256": "86e5d460bdebab5b3838ae455abb06df1aa92009c93b3ca377f798fc5ff3a8dd",
+  "emptyFile": "naver-review-export-empty-v1.xlsx",
+  "emptyFileSha256": "6088c3b76a82f07769aec7f334ff677c240edd73b2a44892de6f9961bb084081",
   "sheetName": "Sheet0",
   "headers": [
-    "리뷰글번호",
     "상품번호",
     "상품명",
+    "리뷰구분",
     "구매자평점",
+    "포토/영상",
     "리뷰상세내용",
+    "리뷰도움수",
+    "등록자",
     "리뷰등록일",
+    "최종수정일",
+    "리뷰글번호",
+    "관련리뷰글번호",
+    "관련리뷰상세내용",
+    "전시상태",
+    "답글여부",
+    "답글등록일시",
+    "베스트리뷰",
+    "베스트리뷰선정일시",
+    "이벤트번호",
+    "혜택지급",
+    "혜택지급일시",
+    "유저정보 등록 항목",
     "상품주문번호",
-    "등록자"
+    "풀필먼트사",
+    "리뷰이동일"
   ],
-  "unmappedHeaders": ["상품주문번호", "등록자"],
-  "unmappedSentinels": {
-    "상품주문번호": "ORDER-MUST-NOT-PERSIST",
-    "등록자": "REVIEWER-MUST-NOT-PERSIST"
+  "mappedHeaders": {
+    "sku": "상품번호",
+    "product": "상품명",
+    "rating": "구매자평점",
+    "body": "리뷰상세내용",
+    "receivedAt": "리뷰등록일",
+    "externalId": "리뷰글번호"
   },
+  "unmappedSentinels": {
+    "등록자": "REVIEWER-MUST-NOT-PERSIST",
+    "상품주문번호": "ORDER-MUST-NOT-PERSIST",
+    "유저정보 등록 항목": "USERINFO-MUST-NOT-PERSIST"
+  },
+  "reviewDateFormat": "yyyy.MM.dd. HH:mm:ss",
   "window": { "from": "2026-05-01", "to": "2026-05-31" },
   "expectedIngest": {
     "status": "SUCCESS",
@@ -31,6 +59,20 @@
     "skippedRows": 6,
     "failedRows": 0
   },
+  "expectedEmptyIngest": {
+    "status": "SUCCESS",
+    "successRows": 0,
+    "skippedRows": 0,
+    "failedRows": 0
+  },
+  "expectedAttention": {
+    "signals": [
+      { "type": "LOW_RATING_REVIEW", "severity": "HIGH", "count": 2, "sourceType": "REVIEW" },
+      { "type": "LOW_RATING_REVIEW", "severity": "MEDIUM", "count": 1, "sourceType": "REVIEW" },
+      { "type": "NEW_REVIEW", "severity": "LOW", "count": 6, "sourceType": "REVIEW" }
+    ],
+    "reviewsNeedingAttention": 3
+  },
   "rows": [
     {
       "channelReviewId": "1000000001",
@@ -38,7 +80,10 @@
       "product": "합성 몰딩 세트 1호",
       "rating": 1,
       "body": "합성 리뷰 본문 - 배송이 늦었고 포장이 눌렸습니다.",
-      "reviewDate": "2026.05.05.",
+      "reviewDate": "2026.05.05. 09:12:33",
+      "reviewType": "일반",
+      "replyFlag": "N",
+      "relatedReviewId": "",
       "reviewIdFingerprint": "329d8b0d8d587b4d0771a7edc5b20ed593dac5b4e51eb04144aa9e8dbefb4689"
     },
     {
@@ -47,7 +92,10 @@
       "product": "합성 몰딩 세트 1호",
       "rating": 2,
       "body": "합성 리뷰 본문 - 색상이 사진과 달라 아쉽습니다.",
-      "reviewDate": "2026.05.06.",
+      "reviewDate": "2026.05.06. 14:03:07",
+      "reviewType": "일반",
+      "replyFlag": "Y",
+      "relatedReviewId": "",
       "reviewIdFingerprint": "e114b438c8efe1db5070aa5d54f8aaaeca9fe9236e2116cd4a3d42d198a65369"
     },
     {
@@ -56,7 +104,10 @@
       "product": "합성 마감재 2호",
       "rating": 3,
       "body": "합성 리뷰 본문 - 무난하지만 접착력이 약합니다.",
-      "reviewDate": "2026.05.07.",
+      "reviewDate": "2026.05.07. 08:45:19",
+      "reviewType": "한달사용",
+      "replyFlag": "N",
+      "relatedReviewId": "1000000001",
       "reviewIdFingerprint": "0879390c9a924c3e14f1e9441c8d6829d4c9968694c01efcfc05ac43341b05f8"
     },
     {
@@ -65,7 +116,10 @@
       "product": "합성 마감재 2호",
       "rating": 4,
       "body": "합성 리뷰 본문 - 시공이 쉬웠습니다.",
-      "reviewDate": "2026.05.08.",
+      "reviewDate": "2026.05.08. 19:31:52",
+      "reviewType": "일반",
+      "replyFlag": "N",
+      "relatedReviewId": "",
       "reviewIdFingerprint": "12846ccbb93b995c921df80a4457a92a3d29d501a5427f93744f905b3c14a8ef"
     },
     {
@@ -74,7 +128,10 @@
       "product": "합성 시공 키트 3호",
       "rating": 5,
       "body": "합성 리뷰 본문 - 재구매 의사 있습니다.",
-      "reviewDate": "2026.05.09.",
+      "reviewDate": "2026.05.09. 11:58:26",
+      "reviewType": "일반",
+      "replyFlag": "Y",
+      "relatedReviewId": "",
       "reviewIdFingerprint": "c421a5f4f977191bb0c856e14354ad28c89cc850271372b5a2c0d683f5c08be9"
     },
     {
@@ -82,8 +139,11 @@
       "sku": "SKU-합성-33",
       "product": "합성 시공 키트 3호",
       "rating": 5,
-      "body": "합성 리뷰 본문 - 마감이 깔끔합니다.",
-      "reviewDate": "2026.05.10.",
+      "body": "합성 리뷰 본문 - 한 달 써보니 마감이 깔끔합니다.",
+      "reviewDate": "2026.05.10. 16:40:58",
+      "reviewType": "한달사용",
+      "replyFlag": "N",
+      "relatedReviewId": "1000000002",
       "reviewIdFingerprint": "8a4560479fa937f3917bcc6bfa07de8926d37de17ef6e654065e458814a7b235"
     }
   ]

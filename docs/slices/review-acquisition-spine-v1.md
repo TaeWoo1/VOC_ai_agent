@@ -1,6 +1,8 @@
 # Slice — Review Acquisition Spine v1
 
-> **Status:** IMPLEMENTED, offline. **Consumes no gate, promotes no capability.**
+> **Status:** IMPLEMENTED, offline — **the two named gaps are closed (2026-07-23); the spine is NOT
+> declared fully closed.** One measured product gap remains open and is recorded in §7.
+> **Consumes no gate, promotes no capability.**
 > Capability truth stays `docs/multi-channel-connector-roadmap.md` §4.1; workstream status stays
 > `docs/workstreams/review_operations_mvp.md`. This document describes what was built and what it
 > does — and does not — establish.
@@ -115,7 +117,138 @@ No live marketplace run and no G6 requested; no CAPTCHA/2FA/auth path; no automa
 download, or submit; no seller-facing capability claim; nothing read from or written to
 `runtime-holders/`; no `.env`, profile, or download path touched. Every byte committed is synthetic.
 
-## 6. Related
+---
+
+## 5. Round 2 (2026-07-23) — the gaps closed, against real export evidence
+
+A read-only inspection of real seller exports held **outside this repository** (never copied,
+committed, or read by a test) reshaped both remaining gaps. Only schema, failure cases, and impact
+measurements informed the work.
+
+### 5.1 The fixture now has the real shape
+
+The 8-column convenience subset tested a schema no seller produces. Both artifacts are regenerated at
+the **real 25 columns in real order**, with `리뷰등록일` in the real **`yyyy.MM.dd. HH:mm:ss`** form
+(20 chars). That matters concretely: `DateParse.localDate` handles it by splitting on the space and
+stripping the trailing dot — a branch the date-only fixture never exercised, now asserted end to end
+(`ReviewAcquisitionSpineTest#theRealExportsTimestampFormParsesAndLandsInTheOperatorsWindow`). A
+second artifact, `naver-review-export-empty-v1.xlsx`, carries the same headers and zero rows.
+
+The fixture also deliberately carries `답글여부`/`답글등록일시`, `리뷰구분`, and a
+`관련리뷰글번호`/`관련리뷰상세내용` follow-up pair — state the pipeline currently drops (§7).
+
+### 5.2 Parse-level validation, at the validate seam
+
+`collector/src/action-window/artifact-parse.ts` walks the container via the extracted pure reader
+(`collector/src/xlsx/workbook-shape-read.ts`, `node:zlib` only; `esm-review-xlsx-reader.ts` is now a
+thin file-path delegate with its public API unchanged). Both drivers run it inside `validateArtifact`,
+**after** the quarantine verdict.
+
+**Why there and not at the ingest handoff.** A handoff refusal surfaces as `INGEST_FAILED`, whose
+seller-facing copy is "저장 중 문제가 생겼어요 / 잠시 후 다시 시도해 주세요" — storage did not fail,
+and retrying will not help. At the validate seam it surfaces as `ARTIFACT_INVALID` — "받은 파일을
+확인할 수 없어요 / 다시 내려받아 주세요" — which is true and actionable. **This tightens the live
+NAVER path**; see the decision record note in §8.
+
+`dataRowPresent` is **observed and non-gating** (the D-025 observe-never-gate category): an empty
+export is legitimate, and a real header-only export was observed in the wild.
+
+### 5.3 Honest zero — and a conflict resolved by provenance, not by override
+
+Driving the empty artifact revealed that `FileUploadConnector.finish()` marked **any** zero-row upload
+as errored, so a valid empty export ingested as `FAILED`. That rule is deliberate and pinned
+(`FileUploadConnectorTest#statusMappingMatchesLegacyResolveStatus`: "empty upload → error"), and it is
+right for a **human** upload — a person who picks an empty file almost certainly picked the wrong one.
+
+Rather than break that contract, the rule now distinguishes **provenance**: an empty
+`SELLER_CENTER_EXPORT` (the Action Window hands over what the platform produced for the seller's
+chosen range) is an honest zero → `SUCCESS` 0/0/0; an empty `MANUAL_UPLOAD` still fails; and an
+`errorMessage` always wins, so "we could not read it" can never become "there was nothing in it".
+Both directions are pinned by test. `RunOutcome.classify` already documented this intent ("including
+an empty incremental pull is SUCCESS"); the connector had overridden it.
+
+### 5.4 The end-to-end proof — actually run
+
+`collector/test/action-window/review-spine-e2e.test.ts` (gated on `RUN_INTEGRATION=1` +
+`SPINE_E2E_BASE_URL`) drives a synthetic Action Window run in real Chromium, over the fixture page
+serving the **real committed bytes**, through the real quarantine and the real ingest handoff, into a
+**running backend over HTTP**, then reads the attention API.
+
+**Executed 2026-07-23 against a disposable backend** — a uniquely-named throwaway database
+(`sellerops_spine_e2e_*`, created for the run and dropped after, with a name guard so the dev database
+could not be the argument) on port 18080. **4/4 passed:**
+
+| Case | Result |
+|---|---|
+| Real export → run `COMPLETED` 3-of-3, quarantine dir empty, every frame sanitized, attention API payload equals `expectedAttention` | PASS |
+| Re-handing the same artifact | `{ok:true, processed:0}`, attention unchanged |
+| Empty export | run `COMPLETED`, no blocker, ingest `SUCCESS` 0 rows, attention unchanged |
+| Sniff-passing non-workbook | run `FAILED` / `ARTIFACT_INVALID`, nothing uploaded |
+
+The dev database was never connected to; the throwaway was dropped and `sellerops` verified intact.
+
+**No frontend code is imported by the collector.** The joint is `expectedAttention` in the contract:
+the backend asserts its service produces those signals, this E2E asserts the live HTTP payload matches
+them, and the frontend asserts its selector and render over the same declaration.
+
+**Falsified before trusting** (*a vacuous guard against a footgun is the footgun*): forcing
+`parseOk: true` fails 8 hermetic tests **and** the E2E's `ARTIFACT_INVALID` case; making
+`dataRowPresent` gate fails 3 hermetic tests **and** the E2E's empty-export case.
+
+---
+
+## 6. Test deltas (attributed, no unexplained drift)
+
+| Suite | Before | After | Attribution |
+|---|---|---|---|
+| collector | 4822 / 91 skipped | **4843 / 95** | +15 `artifact-parse`, +4 spine (timestamp form, reply state, near-miss headers, empty artifact), +2 live-driver (sniff-passing rejection, empty-but-valid); +4 skipped = the gated E2E |
+| backend | 1366 | **1370** | +4 in `ReviewAcquisitionSpineTest` (timestamp form, empty export, manual-upload contrast, unreadable export) |
+| frontend | 663 | **666** | +2 `attention.test.ts` (contract joint, non-vacuity), +1 `AttentionSignalList.test.tsx` (renders the declared number) |
+
+---
+
+## 7. Open — the spine is NOT fully closed
+
+**`답글여부` / `답글등록일시` are dropped, and it changes what an operator sees.** The loss is
+structural at four layers: no alias in `ReviewRowMapper` → no field on `CanonicalReview` → no column
+on `reviews` → `IngestedReviewVocItemSource:383` hardcodes `null, // replyStatus — an export carries
+no reply state`. **That comment is false for NAVER**, and the DTO field (`OperatorVocItem.replyStatus`)
+already exists to carry the value.
+
+Measured on a real export: **26 of the 79 low-rating reviews (33%) were already answered.** The
+operator's "needs a look" queue is inflated by a third, and the guided-reply path can lead a seller to
+post a **duplicate public reply** — an outward-facing mistake on the wedge's core workflow.
+
+**Recommended follow-up slice — *Review reply-state ingest v1*:** aliases → `CanonicalReview` field →
+`reviews.reply_state` + `replied_at` (Flyway V21) → populate `replyStatus` → correct the false comment
+→ and a product decision on whether answered reviews are **excluded** from "needs a look" or **badged**.
+The golden fixture already carries both states, so that slice inherits a fixture that proves the loss.
+
+**Investigated and dismissed: `관련리뷰상세내용`.** On the real export it appears on 1,272 rows, all
+`한달사용` follow-ups; where the link resolves in-file (1,157), its SHA-256 **equals the linked row's
+own body in 1,157/1,157 cases**. It is a denormalized copy of a review that is itself ingested —
+dropping the text loses no distinct customer feedback. `관련리뷰글번호` + `리뷰구분` carry follow-up
+*linkage* worth revisiting later; nothing is lost today.
+
+---
+
+## 8. Governance
+
+- **No live marketplace contact, no G6, no gate consumed.** The E2E is a synthetic page plus a
+  disposable local backend, run under the in-turn approval the HANDOFF's forbidden list requires.
+- **§4.1 and `channel_capability_ledger.md` untouched.** A disposable local backend is not marketplace
+  live verification; `운영 지원` stays file-upload-only.
+- **`decisions.md` — a record is owed, not yet appended.** Tightening `validateArtifact` changes
+  behaviour on the **live NAVER** path, which the B3 record (an unexplained real-export
+  `ARTIFACT_INVALID`, accepted by PO ruling) warns about. The entry is drafted and held for
+  product-owner wording approval; `decisions.md` is append-only and PO-ratified.
+- **Doc drift, reported not fixed:** `contracts/review-id-fingerprint/v1/SPEC.md` cites
+  `docs/review_acquisition.md` §S and `docs/action-window-runtime/r4-review-id-trace.md`; neither
+  exists in the active repo (the former survives only in the preserved runtime worktrees). Porting
+  §S's schema and sensitivity analysis into the repo deserves a PO decision — it is the provenance the
+  review-export contract rests on.
+
+## 9. Related
 
 - Contract: `contracts/review-export/naver/v1/SPEC.md`
 - Workstream status: `docs/workstreams/review_operations_mvp.md`

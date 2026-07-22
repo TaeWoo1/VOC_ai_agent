@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import type { Download, Page } from "playwright";
 import { artifactRefFor } from "./artifact";
+import { artifactParseVerdict } from "./artifact-parse";
 import type { AwIngestUploadFn } from "./ingest-handoff";
 import { quarantineValidateBytes, quarantineValidateDownload, sweepQuarantine, type ByteDownloadLike } from "./quarantine";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, VerifyResult } from "./engine";
@@ -164,9 +165,14 @@ export class BrowserProbeDriver implements ProbeDriver {
         artifactRef,
         ...(quarantine.headBytes !== undefined ? { headBytes: quarantine.headBytes } : {}),
       });
+      // The quarantine sniff answers "ZIP magic + content-types entry name", which a non-workbook
+      // payload can satisfy. The parse gate answers "is it actually readable as a workbook".
+      // `dataRowPresent` is observed, never gating — an empty export is a legitimate outcome.
+      const parse = artifactParseVerdict(bytes);
+      const valid = verdict.valid && parse.parseOk;
       // Fail closed: bytes are retained for the handoff ONLY on a clean verdict.
-      this.retainedBytes = verdict.valid ? byteDownload : null;
-      return { valid: verdict.valid };
+      this.retainedBytes = valid ? byteDownload : null;
+      return { valid };
     }
     const verdict = await quarantineValidateDownload(retained, {
       dir: quarantine.dir,

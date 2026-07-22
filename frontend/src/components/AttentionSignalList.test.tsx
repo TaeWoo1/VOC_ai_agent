@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { AttentionSignalList } from "./AttentionSignalList";
 import { api } from "../lib/apiClient";
 import type { AttentionSignal, OperatorAttentionSummary } from "../lib/types";
@@ -57,6 +60,32 @@ describe("AttentionSignalList — review-ops headline", () => {
 
     expect(await screen.findByTestId("reviews-needing-attention")).toHaveTextContent(
       "현재 확인이 필요한 리뷰 3건",
+    );
+  });
+
+  it("renders the number the spine contract declares", async () => {
+    // The render-side half of the three-port joint: the backend asserts its service produces these
+    // signals, the collector E2E asserts the live API payload matches them, and this asserts what an
+    // operator ends up reading. Same declaration, verified per stack, no cross-stack imports.
+    const contract = JSON.parse(
+      readFileSync(
+        resolve(dirname(fileURLToPath(import.meta.url)), "../../../contracts/review-export/naver/v1/expected-rows.json"),
+        "utf8",
+      ),
+    ) as {
+      expectedAttention: {
+        signals: Array<{ type: string; severity: string; count: number; sourceType: string }>;
+        reviewsNeedingAttention: number;
+      };
+    };
+    vi.spyOn(api, "getAccountAttention").mockResolvedValue(
+      summary(contract.expectedAttention.signals.map((s) => signal(s))),
+    );
+
+    render(<AttentionSignalList accountId="acct-42" />);
+
+    expect(await screen.findByTestId("reviews-needing-attention")).toHaveTextContent(
+      `현재 확인이 필요한 리뷰 ${contract.expectedAttention.reviewsNeedingAttention}건`,
     );
   });
 

@@ -12,11 +12,13 @@
 - **Workstream:** Review Operations (acquisition → normalize → prioritize → guided response)
 - **Wedge channel:** NAVER (Action Window reference precedent). Second channel not yet selected.
 - **Status:** ACQUIRE live-verified once (NAVER, 2026-07-15, Run 4 — supervised, dev seller, local
-  dev backend). **NORMALIZE + visibility joined offline 2026-07-22** over one committed golden export
-  (`contracts/review-export/naver/v1/`): collector-side validation and backend-side ingest →
-  attention now assert the same bytes, and the seller center shows an honest
-  "현재 확인이 필요한 리뷰 N건". Guided ACT remains offline. **Nothing promoted in §4.1.**
-- **Last updated:** 2026-07-22
+  dev backend). **NORMALIZE + visibility proven end-to-end against a running local backend
+  2026-07-23** over committed golden exports at the **real 25-column schema**
+  (`contracts/review-export/naver/v1/`), with a parse gate that fails unreadable artifacts as
+  `ARTIFACT_INVALID` and an empty export treated as an honest zero. Guided ACT remains offline.
+  ⚠ **Not fully closed:** the export's `답글여부` is dropped, inflating the "needs a look" queue by
+  ~33% on real data. **Nothing promoted in §4.1.**
+- **Last updated:** 2026-07-23
 - **Owner:** SellerOps product/engineering
 
 ---
@@ -59,15 +61,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
       overstates the implementation — reported, not silently re-scoped.
 - [ ] Cross-channel-shaped (no NAVER-specific leakage into the core model)
 - [x] Golden fixture(s) for the wedge channel's export form — `contracts/review-export/naver/v1/`
-      (one committed workbook + `expected-rows.json`, loaded by the collector AND backend tests)
+      (two committed workbooks at the **real 25-column schema** with the real `yyyy.MM.dd. HH:mm:ss`
+      timestamp — one populated, one empty — plus `expected-rows.json`, loaded by the collector AND
+      backend tests, with the FE asserting the same `expectedAttention` declaration)
 
 ### UNDERSTAND / PRIORITIZE
 - [ ] Reviews classified (needs-response / risk / informational)
 - [ ] Urgency + operational-risk signals computed (recencyBucket only; no internal timing surfaced)
-- [~] Surfaced in the seller center with alerts (`docs/sellerops_frontend_spec.md`) — the attention
-      signals are proven to arrive from an ingested export offline, and the FE renders the honest
-      headline **"현재 확인이 필요한 리뷰 N건"** from the existing attention endpoint. Not yet
-      exercised against a running backend from a seller-facing flow.
+- [x] Surfaced in the seller center with alerts (`docs/sellerops_frontend_spec.md`) — proven against a
+      **running backend** 2026-07-23: a synthetic Action Window run reached a disposable local backend
+      over HTTP and the attention API returned the contract's declared signals; the FE renders the
+      honest headline **"현재 확인이 필요한 리뷰 N건"** from that same declaration. ⚠ Local dev backend
+      only — no marketplace contact, nothing promoted in §4.1.
+- [!] **Already-answered reviews are not excluded or badged** — the export states `답글여부` and the
+      pipeline drops it, so the queue is inflated (33% of the low-rating rows in a real export were
+      already answered). Blocker for calling this stage done; see the log entry below.
 
 ### ACT (bounded: prepare + guided only)
 - [ ] Response **prepared** for a review needing reply
@@ -127,6 +135,34 @@ Append a dated entry; never rewrite prior entries — correct forward.
   parse-level check is a `[PO]` call.
 - **Next:** a single-process synthetic run (fixture → real local dev backend → attention) would
   close the last offline gap; it needs a running backend, not a gate.
+
+### 2026-07-23 — Spine gaps closed against real-export evidence — IMPLEMENTED (offline)
+- **Loop stage(s):** ACQUIRE (artifact validation) → NORMALIZE → UNDERSTAND/PRIORITIZE (visibility)
+- **Did:** Regenerated the golden fixtures at the **real 25-column schema** with the real
+  `yyyy.MM.dd. HH:mm:ss` timestamp (a `DateParse` branch the old date-only fixture never exercised),
+  plus an empty-export artifact. Added a **parse gate at the validate seam** — a payload that passes
+  the D-021 sniff but is not a workbook now fails as `ARTIFACT_INVALID` (true, actionable copy)
+  instead of reaching ingest as `INGEST_FAILED` ("저장 중 문제…", false). Made an empty **export** an
+  honest zero without breaking the manual-upload contract (provenance-based rule). **Ran the E2E for
+  real**: synthetic Action Window → disposable local backend → attention API, 4/4.
+- **Evidence:** `docs/slices/review-acquisition-spine-v1.md` §5–§6; collector 4843/95 (was 4822/91),
+  backend 1370 (was 1366), frontend 666 (was 663) — every delta attributed in §6. Both new locks
+  falsified and caught, hermetically **and** end to end.
+- **§4.1 impact:** none. A disposable local backend is not marketplace live verification;
+  `운영 지원` stays file-upload-only.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed; no live marketplace contact. The E2E ran under this turn's
+  in-turn approval, on a synthetic page against a throwaway database that was dropped afterwards.
+- **Blockers:** **`답글여부` is dropped by the canonical model.** On a real export 26 of 79 low-rating
+  reviews (33%) were already answered, so the "needs a look" queue is inflated and the guided-reply
+  path can produce a **duplicate public reply**. `IngestedReviewVocItemSource:383`'s comment ("an
+  export carries no reply state") is false for NAVER. **The spine is not declared fully closed until
+  this is dispositioned.** Investigated and dismissed: `관련리뷰상세내용` duplicates the linked
+  review's own body (1,157/1,157 resolvable cases) — no data loss.
+- **Next:** *Review reply-state ingest v1* — aliases → `CanonicalReview` field → `reviews.reply_state`
+  + `replied_at` (Flyway V21) → populate the existing `replyStatus` DTO field, plus a `[PO]` decision:
+  are answered reviews **excluded** from "needs a look" or **badged**? Separately, a `[PO]` wording
+  approval is owed for the `decisions.md` entry covering the live-path validate tightening.
 
 ---
 
