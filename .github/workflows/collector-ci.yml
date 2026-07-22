@@ -1,0 +1,55 @@
+# Collector CI — runs the collector local-agent package's typecheck / test on PRs and on
+# pushes to main, so the collector safety net is enforced automatically, not only locally.
+# Scoped to the self-contained `collector/` npm package plus the inputs it consumes:
+# shared `contracts/` and the frontend contract shims under `frontend/src/lib/`.
+name: Collector CI
+
+on:
+  pull_request:
+    paths:
+      - 'collector/**'
+      - 'contracts/**'
+      - 'frontend/src/lib/**'
+      - '.github/workflows/collector-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'collector/**'
+      - 'contracts/**'
+      - 'frontend/src/lib/**'
+      - '.github/workflows/collector-ci.yml'
+
+# One run per ref; cancel superseded runs when new commits are pushed.
+concurrency:
+  group: collector-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege — the job only reads the checkout.
+permissions:
+  contents: read
+
+jobs:
+  collector:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: collector
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: collector/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
