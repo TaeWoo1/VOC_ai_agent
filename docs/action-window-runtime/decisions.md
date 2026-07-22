@@ -791,3 +791,49 @@ equivalent to an id match, and the probe refuses to fall back to them.
 
 *Boundary:* this entry records a live finding and the read-only probe that produced it. Every live-run gate
 ([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.
+
+## D-037 · ACTIVE — artifact validation requires the artifact to PARSE, not merely to sniff OOXML (2026-07-23, offline-evidence-driven)
+
+**Context.** The D-021 quarantine posture validates a detected artifact structurally: a temporary save, an
+extension-category check, and a magic sniff (`sniffXlsxReadable` — ZIP local-header magic plus the literal
+`[Content_Types].xml` entry name within the head), then a delete. That verdict was the only thing standing
+between a download and the ingest handoff.
+
+**Finding (offline, hermetic).** A payload can satisfy the sniff and not be a workbook at all. The synthetic
+fixture used by the Action Window's own review-export surface was exactly such a payload — magic plus the
+entry *name* as literal text — so it validated clean while no parser could read it. `valid` therefore never
+implied *ingestible*, and nothing downstream noticed: the artifact was uploaded, the backend rejected it, and
+the run failed as `INGEST_FAILED`, whose seller-facing copy is "저장 중 문제가 생겼어요 / 잠시 후 다시
+시도해 주세요". Storage had not failed, and retrying could not help.
+
+**Decision.** `validateArtifact` now runs a **parse-level check** on the retained bytes after the quarantine
+verdict, in both the browser driver and the live NAVER driver
+(`collector/src/action-window/artifact-parse.ts`, over the pure `node:zlib` reader extracted to
+`collector/src/xlsx/workbook-shape-read.ts`). `parseOk = workbookReadable && sheetPresent`. A failure is
+`{valid:false}` → **`ARTIFACT_INVALID`**, whose copy — "받은 파일을 확인할 수 없어요 / 다시 내려받아 주세요" —
+is true and actionable. No contract change: `ARTIFACT_INVALID` already exists in `BLOCKER_CODES`.
+
+**The D-021 posture is UNCHANGED.** The quarantine module, its verdict keys, its save→sniff→delete sequence,
+and its retention policy are untouched. The parse check is a second, separate question asked at the driver
+seam — the sniff answers "does this look like an OOXML container", the parse answers "is it a workbook".
+
+**`dataRowPresent` is OBSERVED and NON-GATING** — deliberately the [D-025](decisions.md) category. A valid
+workbook carrying only a header row is a **legitimate** seller outcome (an export of a quiet date range), and
+a real header-only export has been observed. Failing a run on it would tell a seller their correct export was
+broken. The signal is available for diagnosis (`lastParse()`) and gates nothing.
+
+**⚠ This tightens the LIVE NAVER path.** An artifact that previously reached ingest and failed there now fails
+at validation instead. The halt *reason* becomes truthful, but the halt *rate* may rise on artifacts that were
+already doomed downstream. This does **not** re-open B3: the 2026-07-18 real-export `ARTIFACT_INVALID` remains
+unexplained and non-reproducing, and no further B3 live download probes are authorized by this entry.
+
+**Non-claims (do not broaden).**
+- **No live run produced this.** The evidence is hermetic plus one end-to-end run against a *disposable local*
+  backend — no marketplace contact, no G6 consumed.
+- The check is **structural only**: it never inspects headers, cell values, or review semantics, and returns
+  booleans only. It is not a schema check and must not become one without its own decision.
+- Emptiness is not invalidity. Any future move to gate on `dataRowPresent` is a **separate product-owner
+  decision**, not an extension of this one.
+
+*Boundary:* this entry records an offline behavioural change at the validate seam. Every live-run gate
+([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.
