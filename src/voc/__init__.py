@@ -1,1 +1,0 @@
-"""VOC Intelligence Mini-System."""
