@@ -4,7 +4,7 @@ import { AttentionSignalCard } from "./AttentionSignalCard";
 import { AttentionSignalDrilldown } from "./AttentionSignalDrilldown";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
-import { sortBySeverity } from "../lib/attention";
+import { reviewsNeedingAttention, sortBySeverity } from "../lib/attention";
 import { toIsoDate } from "../lib/backfillPresets";
 import type { AttentionSignal } from "../lib/types";
 
@@ -57,6 +57,10 @@ export function AttentionSignalList({
   }, [accountId, range.from, range.to, refreshKey]);
 
   const items = data ? sortBySeverity(data.items) : [];
+  // The review-ops headline: the one number an operator wants right after an acquisition run.
+  // Rendered only when the read succeeded AND it is non-zero — a "0건" line on a dead or empty
+  // read would read as reassurance the data does not support.
+  const reviewCount = data ? reviewsNeedingAttention(data.items) : 0;
 
   return (
     <Section title="오늘 확인할 일">
@@ -85,6 +89,11 @@ export function AttentionSignalList({
         <p className="text-base text-muted">지금 확인할 일이 없습니다.</p>
       ) : (
         <>
+          {reviewCount > 0 ? (
+            <p className="mb-3 text-base font-semibold text-ink" data-testid="reviews-needing-attention">
+              현재 확인이 필요한 리뷰 {reviewCount}건
+            </p>
+          ) : null}
           <ul className="divide-y divide-line">
             {items.map((s, i) => {
               const key = signalKey(s, i);

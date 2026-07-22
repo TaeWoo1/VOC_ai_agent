@@ -11,7 +11,11 @@
 
 - **Workstream:** Review Operations (acquisition → normalize → prioritize → guided response)
 - **Wedge channel:** NAVER (Action Window reference precedent). Second channel not yet selected.
-- **Status:** _[set on each update — e.g. "ACQUIRE live-verified once (NAVER, 2026-07-15, Run 4); UNDERSTAND/PRIORITIZE in progress; guided ACT offline"]_
+- **Status:** ACQUIRE live-verified once (NAVER, 2026-07-15, Run 4 — supervised, dev seller, local
+  dev backend). **NORMALIZE + visibility joined offline 2026-07-22** over one committed golden export
+  (`contracts/review-export/naver/v1/`): collector-side validation and backend-side ingest →
+  attention now assert the same bytes, and the seller center shows an honest
+  "현재 확인이 필요한 리뷰 N건". Guided ACT remains offline. **Nothing promoted in §4.1.**
 - **Last updated:** 2026-07-22
 - **Owner:** SellerOps product/engineering
 
@@ -48,14 +52,22 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
 - [ ] Evidence linked: _[e.g. `docs/action-window-runtime/r4-evidence-pack.md` §8–17]_
 
 ### NORMALIZE
-- [ ] Ingested to canonical `review` model + dedup by fingerprint (`contracts/`)
+- [~] Ingested to canonical `review` model + dedup — **offline, over the committed golden export**
+      (`ReviewAcquisitionSpineTest`). ⚠ Dedup keys on `external_id` (`리뷰글번호`), **not** on a
+      fingerprint; `review-id-fingerprint/v1` parity is proven across the TS and Java ports on the
+      same rows but is not what dedup keys on. The checklist line's "by fingerprint" wording
+      overstates the implementation — reported, not silently re-scoped.
 - [ ] Cross-channel-shaped (no NAVER-specific leakage into the core model)
-- [ ] Golden fixture(s) for the wedge channel's export form
+- [x] Golden fixture(s) for the wedge channel's export form — `contracts/review-export/naver/v1/`
+      (one committed workbook + `expected-rows.json`, loaded by the collector AND backend tests)
 
 ### UNDERSTAND / PRIORITIZE
 - [ ] Reviews classified (needs-response / risk / informational)
 - [ ] Urgency + operational-risk signals computed (recencyBucket only; no internal timing surfaced)
-- [ ] Surfaced in the seller center with alerts (`docs/sellerops_frontend_spec.md`)
+- [~] Surfaced in the seller center with alerts (`docs/sellerops_frontend_spec.md`) — the attention
+      signals are proven to arrive from an ingested export offline, and the FE renders the honest
+      headline **"현재 확인이 필요한 리뷰 N건"** from the existing attention endpoint. Not yet
+      exercised against a running backend from a seller-facing flow.
 
 ### ACT (bounded: prepare + guided only)
 - [ ] Response **prepared** for a review needing reply
@@ -92,7 +104,29 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
-_(no entries yet — first task appends here)_
+### 2026-07-22 — Review Acquisition Spine v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACQUIRE (artifact validation) → NORMALIZE → UNDERSTAND/PRIORITIZE (visibility)
+- **Did:** Joined the two halves of review acquisition on ONE committed golden export
+  (`contracts/review-export/naver/v1/`): the collector validates those exact bytes through the
+  quarantine and the backend ingests the same file to operator attention signals. Gave the synthetic
+  fixture page the real bytes + the browser driver an injected ingest seam. Added the honest
+  review-ops number ("현재 확인이 필요한 리뷰 N건") from the existing attention endpoint and removed
+  `CompletedResult`'s unbacked "정리·분석까지 끝냈어요" claim.
+- **Evidence:** `docs/slices/review-acquisition-spine-v1.md`;
+  `collector/test/action-window/review-acquisition-spine.test.ts` (16);
+  `backend/.../ingest/ReviewAcquisitionSpineTest.java` (8);
+  `frontend/src/components/AttentionSignalList.test.tsx` (3) + `lib/attention.test.ts`.
+  **No live run** — offline only.
+- **§4.1 impact:** none. Nothing live happened; `운영 지원` stays file-upload-only.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed. Market-policy gate and live-run approval both untouched and
+  still closed; this slice needed neither.
+- **Blockers:** none introduced. One finding **reported, not resolved**: quarantine `valid: true`
+  does not imply ingestible (the sniff checks ZIP magic + the `[Content_Types].xml` entry name; the
+  pre-spine fixture payload passed it and was not a workbook). Whether validation should gain a
+  parse-level check is a `[PO]` call.
+- **Next:** a single-process synthetic run (fixture → real local dev backend → attention) would
+  close the last offline gap; it needs a running backend, not a gate.
 
 ---
 
@@ -113,5 +147,7 @@ _(no entries yet — first task appends here)_
 - Channel lessons ledger: `docs/channel_capability_ledger.md`
 - Action Window contract: `docs/slices/action-window-v1.md`
 - Action Window runtime status: `docs/action-window-runtime/HANDOFF.md`
+- Review acquisition spine slice: `docs/slices/review-acquisition-spine-v1.md`
+- Shared golden export contract: `contracts/review-export/naver/v1/SPEC.md`
 - Review response slices: `docs/slices/review-response-preparation-v1.md`, `docs/slices/review-response-completion-v1.md`
 - Frontend source of truth: `docs/sellerops_frontend_spec.md`

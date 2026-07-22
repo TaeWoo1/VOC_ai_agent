@@ -10,7 +10,8 @@
 import { randomUUID } from "node:crypto";
 import type { Download, Page } from "playwright";
 import { artifactRefFor } from "./artifact";
-import { quarantineValidateDownload, sweepQuarantine } from "./quarantine";
+import type { AwIngestUploadFn } from "./ingest-handoff";
+import { quarantineValidateBytes, quarantineValidateDownload, sweepQuarantine, type ByteDownloadLike } from "./quarantine";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, VerifyResult } from "./engine";
 import { SYNTHETIC_ARTIFACT_REF, type ProbeDriver } from "./session";
 import { STEP_PLAN, TOTAL_STEPS } from "./stages";
@@ -35,7 +36,12 @@ export interface BrowserProbeOptions {
    * never saved, read, or ingested. With `quarantine` (requires `realDetection`), the detected
    * download is retained for `validateArtifact()`, which runs the ratified D-021 posture: a
    * TEMPORARY save into the quarantine dir, extension + OOXML magic sniff, then DELETE (a failed
-   * delete fails closed). Ingestion stays synthetic in this slice.
+   * delete fails closed).
+   *
+   * `ingestFn` (requires `realDetection` + `quarantine`) replaces the synthetic ingest with the same
+   * INJECTED capability the live driver takes: the validated bytes are handed to the caller's upload
+   * callback under the opaque `artifactRef`. The driver still never imports `../upload` and stays
+   * network-free — exactly as on the live path. Absent (the default), ingestion stays synthetic.
    */
   downstream?: {
     detect?: DownloadDetectResult;
@@ -43,7 +49,14 @@ export interface BrowserProbeOptions {
     ingest?: IngestResult;
     realDetection?: { timeoutMs?: number };
     quarantine?: { dir: string; headBytes?: number };
+    ingestFn?: AwIngestUploadFn;
   };
+  /**
+   * Base64 of the committed golden review-export workbook, forwarded to the fixture page so the
+   * `naver-review-export-xlsx` surface downloads REAL parseable bytes rather than the structurally
+   * -shaped stand-in. Loaded by the caller; the driver never reads the filesystem itself.
+   */
+  reviewExportBase64?: string;
 }
 
 export class BrowserProbeDriver implements ProbeDriver {
@@ -53,6 +66,8 @@ export class BrowserProbeDriver implements ProbeDriver {
   private pendingDownload: Promise<Download | null> | null = null;
   /** Detected download held for quarantine validation (quarantine mode only). */
   private retainedDownload: Download | null = null;
+  /** Validated bytes held for the INJECTED ingest handoff (`downstream.ingestFn` only). */
+  private retainedBytes: ByteDownloadLike | null = null;
 
   constructor(page: Page, opts: BrowserProbeOptions) {
     this.page = page;
@@ -60,7 +75,9 @@ export class BrowserProbeDriver implements ProbeDriver {
   }
 
   async prepareSurface(): Promise<boolean> {
-    await this.page.setContent(fixtureHtml(this.opts.mode));
+    await this.page.setContent(
+      fixtureHtml(this.opts.mode, this.opts.reviewExportBase64 ? { reviewExportBase64: this.opts.reviewExportBase64 } : {}),
+    );
     // Identity shim for bundlers that inject `__name(...)` into serialized evaluate bodies (see harness.ts).
     await this.page.evaluate("globalThis.__name = globalThis.__name || function (f) { return f; };");
     return surfaceIsValid(this.page);
@@ -134,6 +151,23 @@ export class BrowserProbeDriver implements ProbeDriver {
     const retained = this.retainedDownload;
     this.retainedDownload = null;
     if (!retained) return { valid: false }; // fail closed: nothing detected/retained to validate
+    // With an injected ingest the bytes must survive validation, so they are buffered into memory
+    // and validated through the byte entry point — the same shape the live driver uses. Without
+    // one, nothing downstream needs the bytes and the saveAs entry point stays in play.
+    if (this.opts.downstream?.ingestFn) {
+      const filename = retained.suggestedFilename();
+      const bytes = await bufferDownload(retained);
+      await retained.delete().catch(() => {});
+      const byteDownload: ByteDownloadLike = { suggestedFilename: () => filename, bytes: () => bytes };
+      const verdict = await quarantineValidateBytes(byteDownload, {
+        dir: quarantine.dir,
+        artifactRef,
+        ...(quarantine.headBytes !== undefined ? { headBytes: quarantine.headBytes } : {}),
+      });
+      // Fail closed: bytes are retained for the handoff ONLY on a clean verdict.
+      this.retainedBytes = verdict.valid ? byteDownload : null;
+      return { valid: verdict.valid };
+    }
     const verdict = await quarantineValidateDownload(retained, {
       dir: quarantine.dir,
       artifactRef,
@@ -143,8 +177,14 @@ export class BrowserProbeDriver implements ProbeDriver {
     await retained.delete().catch(() => {});
     return { valid: verdict.valid };
   }
-  ingest(_artifactRef: string): Promise<IngestResult> {
-    return Promise.resolve(this.opts.downstream?.ingest ?? { ok: true, processed: 1 });
+  async ingest(artifactRef: string): Promise<IngestResult> {
+    const ingestFn = this.opts.downstream?.ingestFn;
+    if (!ingestFn) return this.opts.downstream?.ingest ?? { ok: true, processed: 1 };
+    const retained = this.retainedBytes;
+    this.retainedBytes = null;
+    if (!retained) return { ok: false, processed: 0 }; // fail closed: nothing validated to hand off
+    const outcome = await ingestFn({ bytes: () => retained.bytes(), artifactRef });
+    return { ok: outcome.ok, processed: outcome.processed };
   }
 
   async cleanup(): Promise<void> {
@@ -153,6 +193,7 @@ export class BrowserProbeDriver implements ProbeDriver {
     // promise may never resolve and must not block teardown.
     const retained = this.retainedDownload;
     this.retainedDownload = null;
+    this.retainedBytes = null; // validated bytes never outlive the run
     if (retained) {
       await retained.cancel().catch(() => {});
       await retained.delete().catch(() => {});
@@ -173,4 +214,15 @@ export class BrowserProbeDriver implements ProbeDriver {
     await unmountOverlay(this.page).catch(() => {});
     await disarmObserver(this.page).catch(() => {});
   }
+}
+
+/** Buffer a real Playwright download stream into memory — no fs write, no path retained. */
+async function bufferDownload(download: Download): Promise<Uint8Array> {
+  const stream = await download.createReadStream();
+  if (!stream) return new Uint8Array(0);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return new Uint8Array(Buffer.concat(chunks));
 }
