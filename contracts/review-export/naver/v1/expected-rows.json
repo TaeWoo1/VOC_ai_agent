@@ -38,7 +38,9 @@
     "rating": "구매자평점",
     "body": "리뷰상세내용",
     "receivedAt": "리뷰등록일",
-    "externalId": "리뷰글번호"
+    "externalId": "리뷰글번호",
+    "replyState": "답글여부",
+    "repliedAt": "답글등록일시"
   },
   "unmappedSentinels": {
     "등록자": "REVIEWER-MUST-NOT-PERSIST",
@@ -66,12 +68,18 @@
     "failedRows": 0
   },
   "expectedAttention": {
+    "note": "The 2★ row carries 답글여부=Y, so it is excluded from the low-rating bands (HIGH is the 1★ row alone) while NEW_REVIEW still counts every arrival. Reply-state preservation is what makes these numbers differ from a naive rating count.",
     "signals": [
-      { "type": "LOW_RATING_REVIEW", "severity": "HIGH", "count": 2, "sourceType": "REVIEW" },
+      { "type": "LOW_RATING_REVIEW", "severity": "HIGH", "count": 1, "sourceType": "REVIEW" },
       { "type": "LOW_RATING_REVIEW", "severity": "MEDIUM", "count": 1, "sourceType": "REVIEW" },
       { "type": "NEW_REVIEW", "severity": "LOW", "count": 6, "sourceType": "REVIEW" }
     ],
-    "reviewsNeedingAttention": 3
+    "reviewsNeedingAttention": 2
+  },
+  "expectedReplyState": {
+    "answeredChannelReviewIds": ["1000000002", "1000000005"],
+    "pendingChannelReviewIds": ["1000000001", "1000000003", "1000000004", "1000000006"],
+    "repliedAtUtcStartOfDay": { "1000000002": "2026-05-07T00:00:00Z", "1000000005": "2026-05-10T00:00:00Z" }
   },
   "rows": [
     {

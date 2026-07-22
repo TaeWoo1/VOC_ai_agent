@@ -43,6 +43,13 @@ package com.sellerops.attention.reply.dto;
  * catch a stale candidate set. It adds no new exposure: the same value is already on the attention row
  * ({@code OperatorVocItem.rating}) and in the target hint.
  *
+ * <p>{@code channelReplyState} is what the CHANNEL last said about an existing reply
+ * ({@code PENDING} / {@code ANSWERED} / {@code UNKNOWN}, from the import's {@code 답글여부}) — never
+ * SellerOps' own record of a guided reply, which is {@code outcome}. It exists for the same reason as
+ * {@code triageDisposition}: when {@code canStartSubmissionRun} is false because the channel already
+ * has a reply, the surface can say so instead of showing a dead control. A closed enum name only —
+ * no reply text, no reply timestamp.
+ *
  * <p>Deliberately carries no customer identity, no order/product identifier, no <b>raw</b>
  * channel-side id, and no raw timestamp beyond the draft's and approval's own — every field it does
  * not carry is a field that cannot leak.
@@ -58,5 +65,6 @@ public record ReviewReplyPrepView(
         ReviewReplyOutcomeView outcome,
         ReviewReplyCapabilities capabilities,
         String channelReviewIdFingerprint,
-        Integer rating) {
+        Integer rating,
+        String channelReplyState) {
 }

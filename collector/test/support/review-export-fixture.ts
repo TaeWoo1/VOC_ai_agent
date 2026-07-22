@@ -69,7 +69,17 @@ export interface ExpectedRows {
   expectedIngest: ExpectedIngestCounts;
   expectedReingest: ExpectedIngestCounts;
   expectedEmptyIngest: ExpectedIngestCounts;
-  expectedAttention: { signals: ExpectedAttentionSignal[]; reviewsNeedingAttention: number };
+  expectedAttention: { note?: string; signals: ExpectedAttentionSignal[]; reviewsNeedingAttention: number };
+  /**
+   * What the CHANNEL says about an existing reply, per row. Declared here because the queue numbers
+   * above depend on it: the 2★ row is answered, so it is excluded from the low-rating bands while
+   * still counting as an arrival. The backend asserts these land in `reviews.reply_state`.
+   */
+  expectedReplyState: {
+    answeredChannelReviewIds: string[];
+    pendingChannelReviewIds: string[];
+    repliedAtUtcStartOfDay: Record<string, string>;
+  };
   rows: ExpectedRow[];
 }
 

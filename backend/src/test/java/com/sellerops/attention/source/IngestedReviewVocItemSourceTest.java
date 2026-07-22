@@ -440,8 +440,10 @@ class IngestedReviewVocItemSourceTest {
         assertThat(item.collectedDate()).isNotNull();                   // when SellerOps ingested it
         assertThat(item.signalType()).isEqualTo("LOW_RATING_REVIEW");
         assertThat(item.safePreview()).isEqualTo(BODY_LOW);             // sanitized evidence
-        // An export carries no reply state — the field is honestly empty, not guessed.
-        assertThat(item.replyStatus()).isNull();
+        // The CHANNEL's own statement, from the import's 답글여부. This row was seeded without one,
+        // so it reads UNKNOWN — honestly "not known", never guessed into an answer (a guess would
+        // silently drop the row out of the operator's queue).
+        assertThat(item.replyStatus()).isEqualTo("UNKNOWN");
 
         // The product DISPLAY name is now evidence the operator sees; its IDENTITY is not.
         assertThat(item.productName()).isEqualTo("합성-상품명-머그컵");

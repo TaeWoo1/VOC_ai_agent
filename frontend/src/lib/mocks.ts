@@ -1206,11 +1206,19 @@ const MOCK_DECIDED_AT = "2026-07-17T00:00:00Z";
 /**
  * Demo-mode reply prep for one review.
  *
- * Computes `capabilities` exactly as ReviewReplyService does, from the same three inputs
- * (disposition, draft existence, approval state) — including the asymmetry: leaving
- * 대응 필요 closes save/approve/copy but never withdrawal.
+ * Computes `capabilities` exactly as ReviewReplyService does, from the same four inputs
+ * (disposition, draft existence, approval state, and the CHANNEL's reply state) — including the
+ * asymmetry: leaving 대응 필요 closes save/approve/copy but never withdrawal, and a review the
+ * channel already answered loses the guided run alone.
+ *
+ * Demo reviews carry no import behind them, so `channelReplyState` is UNKNOWN — the same value the
+ * server sends for a review whose source said nothing, and the one that blocks nothing.
  */
 export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
+  // Demo data has no import behind it, so the channel has said nothing about a reply. Typed as the
+  // wire's own string so the capability rule below is the SAME expression the server evaluates —
+  // narrowing it to the literal would let the comparison be optimized away and the parity lost.
+  const channelReplyState: string = "UNKNOWN";
   const review = reviewForRef(actionRef);
   if (review == null) {
     // The real backend answers 404 for a ref it cannot address; the demo throws so the
@@ -1249,9 +1257,11 @@ export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
       canApprove: responseNeeded && !approved && head != null,
       canWithdraw: approved,
       canCopy,
-      // Same rule as canCopy — the server computes it the same way (responseNeeded && approved).
-      canStartSubmissionRun: canCopy,
+      // Same rule as canCopy, minus a review the channel already answered — the server computes it
+      // the same way (responseNeeded && approved && !channelAnswered).
+      canStartSubmissionRun: canCopy && channelReplyState !== "ANSWERED",
     },
+    channelReplyState,
   };
 }
 

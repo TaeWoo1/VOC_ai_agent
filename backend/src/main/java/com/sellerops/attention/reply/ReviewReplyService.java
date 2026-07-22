@@ -20,6 +20,7 @@ import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -220,6 +221,13 @@ public class ReviewReplyService {
         Review review = authorize(orgId, accountId, actionRef);
         UUID reviewId = review.getId();
         requireResponseNeeded(orgId, reviewId);
+        // Enforced server-side, not merely hidden by `canStartSubmissionRun`: the capability object
+        // renders affordances, and a client that ignores it must still not be able to start a guided
+        // run against a review the channel already answered. A guided run is the step immediately
+        // before a public post, and the post cannot be taken back.
+        if (review.getReplyState() == ReviewReplyState.ANSWERED) {
+            throw ApiException.conflict("채널에 이미 답변이 등록된 리뷰입니다. 가이드형 답변을 시작할 수 없습니다.");
+        }
         ReviewReplyApproval approval = approvals.current(orgId, reviewId)
                 .filter(a -> a.getState() == ReviewReplyApprovalState.APPROVED)
                 .orElseThrow(() -> ApiException.conflict("승인된 답변이 없습니다. 먼저 답변을 승인하세요."));
@@ -413,14 +421,20 @@ public class ReviewReplyService {
         boolean responseNeeded = triage == TriageDisposition.RESPONSE_NEEDED;
         boolean approved = approval != null
                 && approval.getState() == ReviewReplyApprovalState.APPROVED;
+        // The channel says this review already has a reply. Draft, approval and copy stay open —
+        // an operator may still want the internal record, and the clipboard is theirs to use — but
+        // the GUIDED run does not, because that is the step where SellerOps walks a seller to the
+        // reply box and a second post becomes an irreversible public double-reply.
+        boolean channelAnswered = review.getReplyState() == ReviewReplyState.ANSWERED;
         ReviewReplyCapabilities capabilities = new ReviewReplyCapabilities(
                 responseNeeded && !approved,
                 responseNeeded && !approved && head != null,
                 approved,
                 responseNeeded && approved,
                 // canStartSubmissionRun — the same rule as canCopy (a guided post is the copy step
-                // performed in the seller center); it never authorizes a send.
-                responseNeeded && approved);
+                // performed in the seller center); it never authorizes a send. Plus: never for a
+                // review the channel already reports as answered.
+                responseNeeded && approved && !channelAnswered);
 
         ReviewReplyProposalProvider.Suggestion suggestion = provider.suggest(
                 new ReviewReplyProposalProvider.ReviewReplyContext(orgId, review.getId(),
@@ -441,7 +455,10 @@ public class ReviewReplyService {
                 // One-way; null when the review was ingested without a channel-side id. The raw
                 // external id is read here and immediately digested — it never reaches the response.
                 ReviewIdFingerprint.of(review.getExternalId()),
-                review.getRating());
+                review.getRating(),
+                // The channel's own statement — the reason a guided run may be unavailable. A closed
+                // enum name; the reply text and its timestamp never cross this boundary.
+                review.getReplyState().name());
     }
 
     /**

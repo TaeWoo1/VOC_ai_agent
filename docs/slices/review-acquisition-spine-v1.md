@@ -219,6 +219,10 @@ Measured on a real export: **26 of the 79 low-rating reviews (33%) were already 
 operator's "needs a look" queue is inflated by a third, and the guided-reply path can lead a seller to
 post a **duplicate public reply** — an outward-facing mistake on the wedge's core workflow.
 
+> ✅ **DISPOSITIONED 2026-07-23 — implemented as `docs/slices/review-reply-state-v1.md`.** Reply state
+> is preserved, answered reviews leave the low-rating queue, and the guided run refuses them
+> server-side. This section is left as written: it is the finding that motivated the slice.
+
 **Recommended follow-up slice — *Review reply-state ingest v1*:** aliases → `CanonicalReview` field →
 `reviews.reply_state` + `replied_at` (Flyway V21) → populate `replyStatus` → correct the false comment
 → and a product decision on whether answered reviews are **excluded** from "needs a look" or **badged**.

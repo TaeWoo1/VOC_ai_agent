@@ -40,6 +40,7 @@ import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -253,6 +254,49 @@ class ReviewAcquisitionSpineTest {
                         contract.get("rows").findValuesAsText("channelReviewId"));
     }
 
+    @Test
+    void theExportsReplyStateIsPreservedRowByRow() throws Exception {
+        // 답글여부 / 답글등록일시 are real columns the pipeline used to drop. On a real export a third
+        // of the low-rating rows were already answered, so dropping them inflated the operator's
+        // queue and pointed the guided reply flow at reviews that already had a public reply.
+        ingestFixture();
+
+        JsonNode expected = contract.get("expectedReplyState");
+        for (JsonNode id : expected.get("answeredChannelReviewIds")) {
+            assertThat(storedById(id.asText()).getReplyState()).isEqualTo(ReviewReplyState.ANSWERED);
+        }
+        for (JsonNode id : expected.get("pendingChannelReviewIds")) {
+            assertThat(storedById(id.asText()).getReplyState()).isEqualTo(ReviewReplyState.PENDING);
+        }
+        // The reply timestamp lands on exactly the rows that carry one, at UTC start-of-day.
+        expected.get("repliedAtUtcStartOfDay").fields().forEachRemaining(entry ->
+                assertThat(storedById(entry.getKey()).getRepliedAt())
+                        .isEqualTo(Instant.parse(entry.getValue().asText())));
+        for (JsonNode id : expected.get("pendingChannelReviewIds")) {
+            assertThat(storedById(id.asText()).getRepliedAt()).isNull();
+        }
+    }
+
+    @Test
+    void theFollowUpRowIsItsOwnReviewAndItsCopiedParentBodyCreatesNoSecondOne() throws Exception {
+        // 관련리뷰상세내용 was investigated and dismissed: on a real export it duplicated the linked
+        // review's own body in 1,157 of 1,157 resolvable cases. The fixture reproduces that shape (a
+        // 한달사용 row carrying 관련리뷰글번호 + a copy of the parent's body), and this pins the
+        // consequence — the copy must never mint a second review or leak into another row's body.
+        ingestFixture();
+
+        JsonNode followUp = contract.get("rows").get(2);          // 1000000003, 한달사용
+        JsonNode parent = contract.get("rows").get(0);            // 1000000001, its 관련리뷰글번호
+        assertThat(followUp.get("relatedReviewId").asText()).isEqualTo(parent.get("channelReviewId").asText());
+
+        assertThat(reviews.findAllByOrgId(org)).hasSize(contract.get("rows").size());
+        assertThat(storedById(followUp.get("channelReviewId").asText()).getBody())
+                .isEqualTo(followUp.get("body").asText());        // its OWN body, not the parent's
+        assertThat(reviews.findAllByOrgId(org))
+                .filteredOn(r -> parent.get("body").asText().equals(r.getBody()))
+                .hasSize(1);                                      // the parent's body exists exactly once
+    }
+
     // --- operator visibility ----------------------------------------------------------
 
     @Test
@@ -279,7 +323,12 @@ class ReviewAcquisitionSpineTest {
         OperatorVocItemPage page = attention.attentionItems(
                 org, naverAccountId, "LOW_RATING_REVIEW", from, to, 0, 20);
 
-        assertThat(page.items()).hasSize(3);
+        // TWO, not three: the export's 2★ row carries 답글여부=Y, so the channel already answered it
+        // and it leaves the queue. The count says the same — see the signals test — because the list
+        // and the count apply one predicate.
+        assertThat(page.items()).hasSize(2);
+        assertThat(page.items()).extracting(OperatorVocItem::replyStatus)
+                .doesNotContain("ANSWERED");
         // The display name resolves (the rows carry both 상품명 and 상품번호) and the SKU — the
         // channel's productNo, an identity value — never rides along.
         assertThat(page.items()).allSatisfy(item -> {
@@ -381,6 +430,14 @@ class ReviewAcquisitionSpineTest {
                     signal.get("count").asLong(), signal.get("sourceType").asText()));
         }
         return tuples;
+    }
+
+    /** The stored review carrying that channel review id — fails loudly if ingest produced none. */
+    private Review storedById(String channelReviewId) {
+        return reviews.findAllByOrgId(org).stream()
+                .filter(r -> channelReviewId.equals(r.getExternalId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no stored review for " + channelReviewId));
     }
 
     private static String sha256(byte[] bytes) throws Exception {

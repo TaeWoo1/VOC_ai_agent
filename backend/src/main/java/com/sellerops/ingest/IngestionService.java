@@ -19,6 +19,7 @@ import com.sellerops.order.OrderDailySummaryRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
+import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -93,7 +94,21 @@ public class IngestionService {
                         datePart(row.receivedAt()), row.body(), row.rating());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
-                if (!seen.add(token) || existsReview(orgId, channelId, hasExternal, row.externalId(), hash)) {
+                // A duplicate — whether of a stored row or of an earlier row in THIS file — is still
+                // skipped, but it is not silent: it may carry a reply statement the row we kept did
+                // not. An export that lists the same 리뷰글번호 twice, N then Y, must not leave the
+                // review looking unanswered; that is the duplicate-public-reply path this exists to
+                // close, and it does not care which side of a file boundary the two rows sat on.
+                boolean firstInBatch = seen.add(token);
+                Review existing = row.replyState() == ReviewReplyState.UNKNOWN
+                        ? null   // nothing to learn — never pay for the lookup
+                        : findReview(orgId, channelId, hasExternal, row.externalId(), hash);
+                if (existing != null) {
+                    refreshReplyState(existing, row);
+                    tally.skip();
+                    continue;
+                }
+                if (!firstInBatch || existsReview(orgId, channelId, hasExternal, row.externalId(), hash)) {
                     tally.skip();
                     continue;
                 }
@@ -109,6 +124,8 @@ public class IngestionService {
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
                 entity.setDedupKeyVersion(keyVersion);
+                entity.setReplyState(row.replyState());
+                entity.setRepliedAt(row.repliedAt());
                 trySave(tally, row.sourceRow(),
                         () -> reviews.save(entity).getId(),
                         () -> existsReview(orgId, channelId, hasExternal, row.externalId(), hash));
@@ -320,6 +337,53 @@ public class IngestionService {
         return hasExternal
                 ? reviews.existsByOrgIdAndChannelIdAndExternalId(orgId, channelId, externalId)
                 : reviews.existsByOrgIdAndChannelIdAndContentHash(orgId, channelId, hash);
+    }
+
+    /** The already-stored row this canonical row dedups against, or null when it is new. */
+    private Review findReview(UUID orgId, UUID channelId, boolean hasExternal,
+                              String externalId, String hash) {
+        return (hasExternal
+                ? reviews.findByOrgIdAndChannelIdAndExternalId(orgId, channelId, externalId)
+                : reviews.findByOrgIdAndChannelIdAndContentHash(orgId, channelId, hash))
+                .orElse(null);
+    }
+
+    /**
+     * A duplicate row still carries NEWS: whether the channel now reports the review as answered.
+     * Without this, reply state would freeze at first import — and the SECOND export is exactly
+     * where it changes, so the feature would be stale within days of shipping.
+     *
+     * <p><b>Field-scoped, deliberately.</b> Only {@code reply_state} and {@code replied_at} are ever
+     * written here. Body, rating, date, product, external id and hashes are never touched by a
+     * duplicate: dedup means "we already have this review", and a re-export must not be able to
+     * rewrite the content we stored the first time.
+     *
+     * <p><b>Monotonic</b> ({@link ReviewReplyState#isProgress}): an import may report a review as
+     * answered, or report a previously-unknown one as still unanswered; it may never un-answer a
+     * review a prior import reported as answered. The realistic regression is a stale re-upload,
+     * which would re-inflate the queue and re-arm duplicate public replies.
+     *
+     * <p>The row still counts as {@code skipped}: dedup semantics, the ingest counts, and every
+     * caller that reads them are unchanged.
+     */
+    private void refreshReplyState(Review existing, CanonicalReview row) {
+        boolean stateAdvances = ReviewReplyState.isProgress(existing.getReplyState(), row.replyState());
+        // The date can arrive AFTER the state it belongs to: an export may report ANSWERED with a
+        // blank or unparseable 답글등록일시, and a later one supply it. Gating the date on the state
+        // moving would make it permanently unlearnable in exactly that case, so it is filled
+        // whenever it is still missing — and never overwritten, so a null can't erase what we have.
+        boolean dateArrives = row.repliedAt() != null && existing.getRepliedAt() == null
+                && (stateAdvances || existing.getReplyState() == row.replyState());
+        if (!stateAdvances && !dateArrives) {
+            return;
+        }
+        if (stateAdvances) {
+            existing.setReplyState(row.replyState());
+        }
+        if (dateArrives) {
+            existing.setRepliedAt(row.repliedAt());
+        }
+        reviews.save(existing);
     }
 
     private boolean existsInquiry(UUID orgId, UUID channelId, boolean hasExternal,

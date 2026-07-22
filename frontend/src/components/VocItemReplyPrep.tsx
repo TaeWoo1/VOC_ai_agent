@@ -195,6 +195,10 @@ export function VocItemReplyPrep({
   // The guided post is the copy step performed in the seller center, so it carries the same
   // conservative refinement as copy. It authorizes no send — the operator posts the reply themselves.
   const canStart = capabilities.canStartSubmissionRun && responseNeeded;
+  // The channel already has a reply on this review. The server has already withheld
+  // `canStartSubmissionRun` and would 409 the call anyway; this only lets the panel SAY why, instead
+  // of hiding the control with no reason. Copy stays available — the clipboard is the operator's.
+  const channelAnswered = prep.channelReplyState === "ANSWERED";
 
   /**
    * Approving binds the last SAVED version — never what is in the box.
@@ -533,6 +537,12 @@ export function VocItemReplyPrep({
           >
             네이버에서 직접 답변하기(가이드)
           </button>
+        ) : null}
+        {channelAnswered ? (
+          <span className="text-sm text-muted" data-testid="channel-answered-notice">
+            채널에 이미 답변이 등록된 리뷰예요. 같은 리뷰에 답변이 두 번 달리지 않도록 가이드형 답변은
+            제공하지 않아요.
+          </span>
         ) : null}
         {capabilities.canApprove && dirty ? (
           <span className="text-sm text-muted">

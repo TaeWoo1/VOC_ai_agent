@@ -39,7 +39,7 @@ ever produces. Specifically, the real shape adds:
 - **`리뷰등록일` is `yyyy.MM.dd. HH:mm:ss`** (20 chars), not a bare date. `DateParse.localDate`
   handles it — it splits on the space and strips the trailing dot — but a date-only fixture never
   exercised that branch. The fixture now does. Time-of-day is dropped (UTC start-of-day) by design.
-- **17 columns with no canonical slot**, so unmapped-column tolerance is tested at real width rather
+- **15 columns with no canonical slot**, so unmapped-column tolerance is tested at real width rather
   than against two token extras.
 - **Near-miss header names** — `관련리뷰상세내용` sits beside `리뷰상세내용`, and `관련리뷰글번호`
   beside `리뷰글번호`. `HeaderAliases.pick` is an exact-key lookup on normalized headers, so these
@@ -63,14 +63,14 @@ across three SKUs. `리뷰글번호` values are 10-digit, matching the real colu
 (`contracts/review-id-fingerprint/v1/SPEC.md`), and land untransformed in `reviews.external_id`,
 which is what makes a re-ingest of the same file an all-duplicate, idempotent `SUCCESS`.
 
-The fixture also carries state the pipeline currently **drops**, on purpose:
+The fixture also carries the state the operator's queue depends on:
 
-- **`답글여부`** (`Y` on two rows, with `답글등록일시` set only there). A real export states whether
-  the seller already answered; `CanonicalReview` has no field for it and
-  `IngestedReviewVocItemSource` sends `replyStatus: null`. On the real export **33% of the low-rating
-  queue was already answered**, so the operator's "needs a look" list is inflated and the guided-reply
-  path can lead to a duplicate public reply. Carrying the column here means the follow-up slice
-  inherits a fixture that already proves the loss.
+- **`답글여부`** (`Y` on two rows, with `답글등록일시` set only there) — the channel's own statement
+  that the seller already answered. It is **preserved** (`reviews.reply_state` / `replied_at`), and it
+  is why `expectedAttention` below is not a naive rating count: the answered 2★ row leaves the
+  low-rating bands while still counting as an arrival. On the real export **33% of the low-rating
+  queue was already answered**, which is what made this worth carrying — an inflated queue, and a
+  guided-reply path pointed at reviews that already had a public reply.
 - **`관련리뷰글번호` / `관련리뷰상세내용`** on the two `한달사용` rows, each holding a copy of the
   linked row's body — matching the real file, where the related body was byte-identical to the linked
   review's own body in 1,157 of 1,157 resolvable cases. Dropping that text loses nothing; the linkage
@@ -91,7 +91,7 @@ The fixture also carries state the pipeline currently **drops**, on purpose:
 | Port | File |
 |---|---|
 | Collector | `collector/test/action-window/review-acquisition-spine.test.ts`, `artifact-parse.test.ts`, and the gated `review-spine-e2e.test.ts`, all via the loader `collector/test/support/review-export-fixture.ts` (test scope on purpose — `src/action-window/**` gains no filesystem reader) |
-| Backend | `backend/src/test/java/com/sellerops/ingest/ReviewAcquisitionSpineTest.java` |
+| Backend | `backend/src/test/java/com/sellerops/ingest/ReviewAcquisitionSpineTest.java`; the reply-state rules themselves in `ReviewReplyStateIngestTest` + `IngestedReviewReplyStateExclusionTest` |
 | Frontend | `frontend/src/lib/attention.test.ts` + `AttentionSignalList.test.tsx` assert `expectedAttention` — the number is verified per stack, with **no cross-stack imports** |
 
 Slice: `docs/slices/review-acquisition-spine-v1.md`.

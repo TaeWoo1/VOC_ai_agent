@@ -43,9 +43,14 @@ const REPLY_STATUS_LABEL: Record<string, ReplyStatusLabel> = {
 /**
  * Label + chip style for a reply status; null and unknown values both fall back to UNKNOWN.
  *
- * Null is the ingested-review (NAVER) case — an export carries no reply state, so the
- * source sends null rather than guessing. It lands on the same 상태 미상 chip as an
- * unrecognised value, which is the honest rendering for both: the status is not known.
+ * An ingested review now carries the CHANNEL's own statement where the export makes one — NAVER's
+ * `답글여부` arrives as PENDING or ANSWERED. `UNKNOWN` covers a source that says nothing (an export
+ * without the column, a blank cell, a row imported before the state was preserved) and is never
+ * guessed into an answer; null and unrecognised values land on the same 상태 미상 chip, which is the
+ * honest rendering for all three: the status is not known.
+ *
+ * This describes the channel, not SellerOps: a reply SellerOps guided is reported separately as
+ * 답변함으로 기록 + 확인 안 함, because a public reply has no read-back oracle.
  */
 export function replyStatusLabel(status: string | null): ReplyStatusLabel {
   return (status == null ? undefined : REPLY_STATUS_LABEL[status]) ?? REPLY_STATUS_LABEL.UNKNOWN;

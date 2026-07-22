@@ -15,9 +15,10 @@
   dev backend). **NORMALIZE + visibility proven end-to-end against a running local backend
   2026-07-23** over committed golden exports at the **real 25-column schema**
   (`contracts/review-export/naver/v1/`), with a parse gate that fails unreadable artifacts as
-  `ARTIFACT_INVALID` and an empty export treated as an honest zero. Guided ACT remains offline.
-  ⚠ **Not fully closed:** the export's `답글여부` is dropped, inflating the "needs a look" queue by
-  ~33% on real data. **Nothing promoted in §4.1.**
+  `ARTIFACT_INVALID` and an empty export treated as an honest zero. **Reply state is now preserved**
+  (2026-07-23): already-answered reviews leave the action queue and cannot be guided into a duplicate
+  public reply. Guided ACT remains offline. ⚠ **No live evidence for any of it** — everything since
+  Run 4 rests on synthetic fixtures. **Nothing promoted in §4.1.**
 - **Last updated:** 2026-07-23
 - **Owner:** SellerOps product/engineering
 
@@ -73,15 +74,18 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
       over HTTP and the attention API returned the contract's declared signals; the FE renders the
       honest headline **"현재 확인이 필요한 리뷰 N건"** from that same declaration. ⚠ Local dev backend
       only — no marketplace contact, nothing promoted in §4.1.
-- [!] **Already-answered reviews are not excluded or badged** — the export states `답글여부` and the
-      pipeline drops it, so the queue is inflated (33% of the low-rating rows in a real export were
-      already answered). Blocker for calling this stage done; see the log entry below.
+- [x] **Already-answered reviews leave the queue** — `답글여부`/`답글등록일시` are preserved
+      (`reviews.reply_state`), the low-rating count AND its drill-down exclude ANSWERED, arrivals stay
+      whole, and UNKNOWN still asks for a look (`docs/slices/review-reply-state-v1.md`). ⚠ Correct
+      *about the last import*: a reply posted since is invisible until the next one.
 
 ### ACT (bounded: prepare + guided only)
 - [ ] Response **prepared** for a review needing reply
 - [ ] Seller **guided** to post it (human-performed, observe-only; SellerOps does not submit)
 - [ ] Posting recorded honestly — `UNVERIFIED` where no official API can confirm
 - [ ] No autonomous outbound write anywhere in the path (fence check)
+- [x] **A review the channel already answered cannot be guided into a second reply** — server-side 409
+      + withheld capability, with the panel saying why (`docs/slices/review-reply-state-v1.md` §2)
 
 ### ESCALATE / RESUME
 - [ ] Human checkpoint returns a **decision**, not the whole workflow
@@ -135,6 +139,26 @@ Append a dated entry; never rewrite prior entries — correct forward.
   parse-level check is a `[PO]` call.
 - **Next:** a single-process synthetic run (fixture → real local dev backend → attention) would
   close the last offline gap; it needs a running backend, not a gate.
+
+### 2026-07-23 — Review Reply-State Preservation v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** NORMALIZE → UNDERSTAND/PRIORITIZE → ACT (bounded)
+- **Did:** Preserved the export's `답글여부`/`답글등록일시` (Flyway V21 + `ReviewReplyState`), refreshed
+  it on duplicate re-import (field-scoped, **monotonic** — an import may never un-answer), excluded
+  channel-answered reviews from the low-rating count **and** its drill-down while arrivals stay whole,
+  and blocked the guided reply run for an answered review server-side (409 + withheld capability +
+  a panel notice). Assessed `관련리뷰상세내용` and kept dropping it, on evidence.
+- **Evidence:** `docs/slices/review-reply-state-v1.md`; backend 1418 (was 1370), frontend 668 (was
+  666), collector 4843/95 unchanged; typechecks clean. An adversarial review pass found 8 real
+  defects — including a frontend that did not typecheck and a within-file duplicate that could
+  discard an ANSWERED statement — all fixed and pinned (§5). Both new rules falsified and caught.
+- **§4.1 impact:** none. This changes what an operator sees, not what a channel supports.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ The queue is correct **about the last import** by construction: a reply posted
+  since is invisible until the next export.
+- **Next:** a bounded human-in-the-loop NAVER live proof — real export → ingest → reply state → queue
+  exclusion → duplicate-reply refusal, **submitting no public reply**. Needs its own fresh single-use
+  approval. Also owed: a `[PO]` decision record for the monotonic rule.
 
 ### 2026-07-23 — Spine gaps closed against real-export evidence — IMPLEMENTED (offline)
 - **Loop stage(s):** ACQUIRE (artifact validation) → NORMALIZE → UNDERSTAND/PRIORITIZE (visibility)

@@ -3,6 +3,8 @@ package com.sellerops.review;
 import com.sellerops.common.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
@@ -48,4 +50,16 @@ public class Review extends BaseEntity {
      *  without invalidating existing hashes. Defaults to 1 in the DB. */
     @Column(name = "dedup_key_version")
     private Integer dedupKeyVersion;
+
+    /** What the CHANNEL says about whether the seller already answered — never SellerOps' own
+     *  record of a guided reply (that lives in {@code review_reply_outcome}). Set from an import
+     *  only, and only ever forward: see {@link ReviewReplyState#isProgress}. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reply_state", nullable = false)
+    private ReviewReplyState replyState = ReviewReplyState.UNKNOWN;
+
+    /** When the channel says the reply was posted. Date-granular (the shared DateParse path
+     *  quantises to UTC start-of-day) and diagnostic only — nothing gates on it. */
+    @Column(name = "replied_at")
+    private Instant repliedAt;
 }

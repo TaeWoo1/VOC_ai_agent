@@ -196,6 +196,57 @@ class ReviewReplyServiceTest {
                 "awrun-synthetic-01", commandId, user);
     }
 
+    // --- guided submission: the channel already answered ------------------------------
+
+    @Test
+    void aChannelAnsweredReviewCannotStartAGuidedRun() {
+        // THE DUPLICATE-REPLY GATE. The guided run is the step immediately before a public post, and
+        // the post cannot be taken back. Enforced server-side, not merely hidden: a client that
+        // ignores `canStartSubmissionRun` still cannot start one.
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        markChannelAnswered();
+
+        assertThatThrownBy(() -> service.startSubmissionRun(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void aChannelAnsweredReviewWithholdsTheGuidedCapabilityButKeepsTheRest() {
+        // Copy, approval and withdrawal stay open: the harm being prevented is specifically the
+        // guided double-post, not the operator's own record or their clipboard.
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        markChannelAnswered();
+
+        var caps = view().capabilities();
+        assertThat(caps.canStartSubmissionRun()).isFalse();
+        assertThat(caps.canCopy()).isTrue();
+        assertThat(caps.canWithdraw()).isTrue();
+        // …and the surface is told WHY, rather than being left with a control that vanished.
+        assertThat(view().channelReplyState()).isEqualTo("ANSWERED");
+    }
+
+    @Test
+    void anUnknownChannelStateNeverBlocksTheGuidedRun() {
+        // Absence of a statement is not evidence of an answer. Blocking on UNKNOWN would strand
+        // every review imported before reply-state preservation existed.
+        approveAndStart();
+
+        assertThat(view().channelReplyState()).isEqualTo("UNKNOWN");
+        assertThat(view().capabilities().canStartSubmissionRun()).isTrue();
+    }
+
+    /** The channel now reports a reply on this review — the state an import would have written. */
+    private void markChannelAnswered() {
+        Review r = reviews.findById(review.getId()).orElseThrow();
+        r.setReplyState(com.sellerops.review.ReviewReplyState.ANSWERED);
+        reviews.save(r);
+    }
+
     // --- guided submission: mint (start run) ----------------------------------------
 
     @Test

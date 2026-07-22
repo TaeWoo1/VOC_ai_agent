@@ -618,6 +618,11 @@ export interface ReviewReplyPrep {
   // ReviewReplyOutcome — outcome and verification are separate, always shown as a pair.
   outcome: ReviewReplyOutcome | null;
   capabilities: ReviewReplyCapabilities;
+  // What the CHANNEL last said about an existing reply (PENDING | ANSWERED | UNKNOWN, from the
+  // import's 답글여부) — never SellerOps' own record of a guided reply, which is `outcome`. Present
+  // so the panel can explain WHY the guided step is unavailable instead of showing a dead control:
+  // a review the channel already answered must not be guided into a second public reply.
+  channelReplyState: string | null;
 }
 
 // Mirrors dto.ReviewReplySubmissionRunResponse. `submissionRef` is an opaque, single-use binding the
