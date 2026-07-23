@@ -13,7 +13,10 @@ import java.util.List;
  * <p>{@code examined} is how many stored analyses this batch looked at; {@code changed} how many
  * produced a different verdict; {@code unchanged} how many recomputed to exactly what was already
  * stored (common and healthy — a version bump rarely moves every row); {@code skipped} how many
- * could not be recomputed at all, which today means an analysis whose source row is gone.
+ * turned out to be unrecomputable after selection — expected to be ZERO, because such rows are
+ * excluded from the selection entirely (they are reported under {@code unrecomputable} instead). It
+ * covers only the residue of a source row disappearing between the selection and the recompute, and
+ * exists so that race is counted rather than thrown.
  * {@code remaining} is how many outdated rows are still waiting AFTER this batch, and it is what an
  * operator re-calls against until it reaches zero.
  *

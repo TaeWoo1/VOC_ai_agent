@@ -29,6 +29,7 @@ class EvalMetricsTest {
         assertThat(EvalMetrics.MIN_PRECISION_LOWER_BOUND).isEqualTo(0.80);
         assertThat(EvalMetrics.MIN_RECALL).isEqualTo(0.30);
         assertThat(EvalMetrics.MAX_HIGH_RATING_FP_RATE).isEqualTo(0.05);
+        assertThat(EvalMetrics.MIN_HIGH_RATING_NO_ACTION).isEqualTo(30);
     }
 
     @Test
@@ -60,6 +61,29 @@ class EvalMetricsTest {
 
         assertThat(v.adequate()).isFalse();
         assertThat(v.reason()).contains("10/40 positive");
+    }
+
+    @Test
+    void aSeedWithNoHappyCustomersCannotClearTheHappyCustomerGate() {
+        // The gate exists to catch "you told a seller a happy customer needs handling". On a seed
+        // drawn only from low-rated reviews there are no happy customers in it at all, 0/0 reads as
+        // a 0.00 rate, and the gate passes on no evidence whatsoever — vacuously clearing the one
+        // check that protects the case nobody labels much of.
+        Verdict v = EvalMetrics.evaluate(new Counts(180, 20, 20, 100, 0, 0, 0));
+
+        assertThat(v.adequate()).isFalse();
+        assertThat(v.pass()).isFalse();
+        assertThat(v.reason()).contains("0/30 high-rated NO_ACTION");
+    }
+
+    @Test
+    void aThinSliceOfHighRatedReviewsIsAlsoRefused() {
+        // At the 0.05 bar one false positive in 20 is already a failure, so a handful of rows cannot
+        // separate 0.05 from zero however clean the result looks.
+        Verdict v = EvalMetrics.evaluate(new Counts(180, 20, 20, 100, 0, 0, 20));
+
+        assertThat(v.adequate()).isFalse();
+        assertThat(v.reason()).contains("20/30 high-rated NO_ACTION");
     }
 
     @Test

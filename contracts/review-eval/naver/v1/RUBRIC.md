@@ -84,11 +84,18 @@ alongside it.
 Below this, the numbers are **descriptive, not decisive**, and the harness refuses to print a verdict
 and says why:
 
-- **≥ 200** labeled reviews (excluding `UNCERTAIN`), and
-- **≥ 40** labeled `NEEDS_LOOK`.
+- **≥ 200** labeled reviews (excluding `UNCERTAIN`),
+- **≥ 40** labeled `NEEDS_LOOK`, and
+- **≥ 30** labeled `NO_ACTION` reviews rated **4–5★**.
 
-Rationale: with 30 samples a single flip moves recall by 3+ points, which is how a detector "passes"
-on noise.
+Rationale for the first two: with 30 samples a single flip moves recall by 3+ points, which is how a
+detector "passes" on noise.
+
+⚠ The third is not symmetry — it closes a hole found in review. Without it the high-rating
+false-positive gate is **vacuous in exactly the case it exists for**: a seed drawn mostly from
+low-rated reviews contains few or no happy customers, `0/0` reads as a 0.00 rate, and a detector
+clears "we do not flag happy customers" on a sample containing none. At the 0.05 bar one false
+positive in 20 is already a failure, so fewer than ~30 such rows cannot separate 0.05 from zero.
 
 ## 5. Go / no-go
 

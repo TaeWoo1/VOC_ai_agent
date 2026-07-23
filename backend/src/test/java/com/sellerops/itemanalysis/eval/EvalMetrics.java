@@ -17,6 +17,18 @@ public final class EvalMetrics {
     public static final int MIN_LABELED = 200;
     public static final int MIN_POSITIVES = 40;
 
+    /**
+     * The seed must contain enough 4–5★ {@code NO_ACTION} reviews for the high-rating
+     * false-positive gate to mean anything.
+     *
+     * <p>Without this the gate is VACUOUS in the exact case it exists for: a seed drawn mostly from
+     * low-rated reviews has few or no happy customers in it, {@code 0/0} reads as a 0.00 rate, and a
+     * detector clears "we do not flag happy customers" on a sample containing none. At the 0.05 bar
+     * a single false positive in 20 is already a failure, so anything under ~30 cannot separate 0.05
+     * from zero.
+     */
+    public static final int MIN_HIGH_RATING_NO_ACTION = 30;
+
     /** Go/no-go bars (RUBRIC §5). */
     public static final double MIN_PRECISION_LOWER_BOUND = 0.80;
     public static final double MIN_RECALL = 0.30;
@@ -67,11 +79,14 @@ public final class EvalMetrics {
                 ? 0.0
                 : (double) c.highRatingFalsePositives() / c.highRatingNoAction();
 
-        if (c.labeled() < MIN_LABELED || c.positives() < MIN_POSITIVES) {
+        if (c.labeled() < MIN_LABELED || c.positives() < MIN_POSITIVES
+                || c.highRatingNoAction() < MIN_HIGH_RATING_NO_ACTION) {
             return new Verdict(false, false, precision, lowerBound, recall, highRatingFpRate,
                     "Seed below the adequacy floor (" + c.labeled() + "/" + MIN_LABELED + " labeled, "
-                            + c.positives() + "/" + MIN_POSITIVES + " positive) — these numbers "
-                            + "describe the sample, they do not decide anything.");
+                            + c.positives() + "/" + MIN_POSITIVES + " positive, "
+                            + c.highRatingNoAction() + "/" + MIN_HIGH_RATING_NO_ACTION
+                            + " high-rated NO_ACTION) — these numbers describe the sample, they do "
+                            + "not decide anything.");
         }
         if (lowerBound < MIN_PRECISION_LOWER_BOUND) {
             return new Verdict(true, false, precision, lowerBound, recall, highRatingFpRate,

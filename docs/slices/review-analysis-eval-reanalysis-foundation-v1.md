@@ -82,10 +82,19 @@ which is sane exactly where a detector under evaluation sits.
 
 ## 4. Rollback — why there is no snapshot table
 
-`InboxItemAnalyzer` implementations are pure, and the inputs (`body`, `rating`, `status`) are
-immutable after ingest. A verdict is therefore not stored history but a **reproducible function** of
-(source row, analyzer version): running the prior analyzer reproduces it exactly. A snapshot table
-would store what can be recomputed and add a second thing to keep consistent.
+`InboxItemAnalyzer` implementations are pure, and a **review's** analyzed inputs (`body`, `rating`,
+`negative`) are immutable after ingest — dedup skips a re-import and `refreshReplyState` touches only
+reply fields. A review verdict is therefore not stored history but a **reproducible function** of
+(row, analyzer version): running the prior analyzer reproduces it exactly. A snapshot table would
+store what can be recomputed and add a second thing to keep consistent.
+
+⚠ **It is not a restore for inquiries, and the first draft of this slice claimed it was.**
+`Inquiry.status` IS mutated after ingest — `EsmInquiryReconciler.reconcileAnswered` flips it to
+`ANSWERED` — and the analyzer's inquiry branch reads it for both `urgency` and `recommendedAction`.
+Re-running a prior analyzer over an inquiry answered since yields that analyzer's verdict on
+*today's* inputs, which may differ from what was stored. That is the more useful outcome — the
+stored verdict described a state that no longer holds — but it is a **recompute, not a restore**, and
+saying otherwise would have promised a guarantee the data cannot keep.
 
 ⚠ **One prerequisite, recorded for whoever writes the next analyzer:** add it *alongside*
 `RuleBasedInboxItemAnalyzer`, never by mutating it in place. Mutating turns rollback from a
@@ -133,11 +142,25 @@ number that stops moving. Deleting them is a separate question this slice does n
 Both halves falsified: restoring the count breaks three tests; restoring selectability breaks
 `orphansCannotStarveRealWorkOutOfASmallBatch`.
 
+**A second review pass found two more, both in areas the reviewer was asked to probe.**
+
+*The happy-customer gate was vacuous.* `highRatingFalsePositiveRate` is `0/0 → 0.00` when a seed
+contains no 4–5★ `NO_ACTION` reviews, so a detector cleared "we do not flag happy customers" on a
+sample containing none — the one gate protecting the case a labeler is least likely to over-sample.
+The adequacy floor now requires **≥ 30** such rows and refuses a verdict below it, consistent with
+the rest of the design: refuse rather than pass vacuously.
+
+*The rollback guarantee was overstated for inquiries* — see §4. Corrected in the javadoc, here, and
+in D-038 rather than quietly narrowed.
+
+*Also corrected:* `ReanalysisResult.skipped`'s javadoc still described orphans, which the
+convergence fix had already removed from the selection.
+
 ## 7. Verification
 
 | | before | after |
 |---|---|---|
-| backend | 1458 (1 skipped) | **1488** (2 skipped — the new gated IT) |
+| backend | 1458 (1 skipped) | **1490** (2 skipped — the new gated IT) |
 | frontend | 710 | unchanged, untouched |
 | collector | 4843 / 95 skipped | unchanged, untouched |
 
@@ -152,6 +175,7 @@ Both halves falsified: restoring the count breaks three tests; restoring selecta
 | `readOnly` removed | **nothing** — recorded above as an untested guard, not claimed as proven |
 | orphans counted as pending work | `anOrphanedAnalysisIsSkippedNotThrown` + 2 others |
 | orphans selectable again | `orphansCannotStarveRealWorkOutOfASmallBatch` |
+| high-rating adequacy floor removed | `aSeedWithNoHappyCustomersCannotClearTheHappyCustomerGate` + 1 |
 
 The re-analysis suite was **also run against a disposable PostgreSQL 15 database** (never the dev
 DB), since `application-test.properties` disables Flyway and runs H2 — with the tables' existence

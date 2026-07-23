@@ -846,8 +846,10 @@ unexplained and non-reproducing, and no further B3 live download probes are auth
 evaluation seed and a harness exist, and the go/no-go bars are committed **before** any candidate does.
 The bars live in `contracts/review-eval/naver/v1/RUBRIC.md`: precision **≥ 0.80 on the Wilson 95% lower
 bound**, recall **≥ 0.30**, false positives on 4–5★ `NO_ACTION` reviews **≤ 0.05**, and no change to the
-existing `LOW_RATING_REVIEW` counts. A seed below **200 labeled / 40 `NEEDS_LOOK`** returns *no verdict*
-rather than a weak one.
+existing `LOW_RATING_REVIEW` counts. A seed below **200 labeled / 40 `NEEDS_LOOK` / 30 four-and-five-star
+`NO_ACTION`** returns *no verdict* rather than a weak one — the third floor exists because without it
+the high-rating gate is vacuous on a seed containing no high-rated reviews, which is the case a
+labeler is least likely to over-sample.
 
 **Why, and it is not caution for its own sake.** `aiagent/docs/phase2e_detector_design.md` (2026-04-27)
 already measured a flat-substring Korean polarity detector: **sample recall 0/30, attribute capture
@@ -879,6 +881,13 @@ would re-bucket an operator's facets mid-session with no record of why.
 `RuleBasedInboxItemAnalyzer`, never by mutating it. The rollback story has no snapshot table precisely
 because a pure analyzer over immutable inputs makes a prior verdict *reproducible*; mutating the
 existing analyzer turns that from a configuration change into git archaeology.
+
+⚠ **That reproducibility is a REVIEW guarantee, not an inquiry one.** A review's analyzed inputs are
+immutable after ingest; `Inquiry.status` is not — `EsmInquiryReconciler.reconcileAnswered` flips it to
+`ANSWERED`, and the analyzer's inquiry branch reads it. Re-running a prior analyzer over an inquiry
+answered since produces that analyzer's verdict on *today's* inputs, which is a **recompute, not a
+restore**. Useful (the stored verdict described a state that no longer holds) but not a rollback, and
+it must not be described as one.
 
 **Non-claims (do not broaden).**
 - **No detector was built, and no baseline number exists yet.** `labels.json` ships empty; no labeling

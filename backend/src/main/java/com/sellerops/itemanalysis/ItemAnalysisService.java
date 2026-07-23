@@ -199,11 +199,22 @@ public class ItemAnalysisService {
      * is what is proven; {@code readOnly} protects only the deployed path, and only if the first
      * guard regresses.
      *
-     * <p>Rollback needs no snapshot: {@link InboxItemAnalyzer} implementations are pure and the
-     * inputs are immutable after ingest, so a prior verdict is not stored history but a reproducible
-     * function of (source row, analyzer version). Running the previous analyzer reproduces it
-     * exactly. ⚠ That holds only while a new analyzer is added ALONGSIDE the old one rather than
-     * mutating it in place — mutating makes rollback a git-archaeology exercise.
+     * <p><b>Rollback needs no snapshot — for REVIEWS.</b> {@link InboxItemAnalyzer} implementations
+     * are pure, and a review's analyzed inputs ({@code body}, {@code rating}, {@code negative}) are
+     * immutable after ingest — dedup skips a re-import and {@code refreshReplyState} touches only
+     * reply fields. So a prior review verdict is not stored history but a reproducible function of
+     * (row, analyzer version): running the previous analyzer reproduces it exactly.
+     *
+     * <p>⚠ <b>It is NOT a restore for inquiries.</b> {@code Inquiry.status} is mutable after ingest —
+     * {@code EsmInquiryReconciler.reconcileAnswered} flips it to {@code ANSWERED} — and the analyzer's
+     * inquiry branch reads it for both {@code urgency} and {@code recommendedAction}. Re-running a
+     * prior analyzer over an inquiry answered since therefore yields that analyzer's verdict on
+     * TODAY's inputs, which may differ from what was stored. That is the more useful outcome (the
+     * stored verdict was describing a state that no longer holds) but it is a RECOMPUTE, not a
+     * restore, and must not be described as one.
+     *
+     * <p>⚠ Reproducibility also holds only while a new analyzer is added ALONGSIDE the old one rather
+     * than mutating it in place — mutating makes rollback a git-archaeology exercise.
      */
     @Transactional
     public ReanalysisResult reanalyzeOutdated(UUID orgId, int limit) {

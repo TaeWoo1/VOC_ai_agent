@@ -147,13 +147,15 @@ Append a dated entry; never rewrite prior entries — correct forward.
   two things a detector needs instead: a **versioned re-analysis path** (every write path was
   skip-if-exists, so no future analyzer could reach the existing corpus) and a **fingerprint-keyed
   local evaluation harness** whose go/no-go bars are committed *before* any candidate exists.
-- **Evidence:** `docs/slices/review-analysis-eval-reanalysis-foundation-v1.md`; backend 1488 (was
+- **Evidence:** `docs/slices/review-analysis-eval-reanalysis-foundation-v1.md`; backend 1490 (was
   1458), frontend 710 and collector 4843/95 **untouched**. Six falsifications caught; a seventh
   (removing `readOnly`) caught nothing and is recorded as an untested guard rather than claimed as
-  proven. An independent review found one blocker: `remaining` counted rows that can never be
-  recomputed, so the documented "re-call until remaining == 0" loop would never terminate — and with
-  a small limit those rows starved real work out of every batch. Fixed and falsified. Re-analysis
-  suite also run against a disposable PostgreSQL 15 DB. No migration needed.
+  proven. Two review passes found three real defects: `remaining` counted rows that can never be
+  recomputed, so the documented "re-call until remaining == 0" loop would never terminate (and with a
+  small limit those rows starved real work out of every batch); the high-rating false-positive gate
+  passed **vacuously** on a seed containing no high-rated reviews; and the rollback guarantee was
+  overstated for inquiries, whose `status` IS mutable after ingest. All fixed and falsified.
+  Re-analysis suite also run against a disposable PostgreSQL 15 DB. No migration needed.
 - **§4.1 impact:** none. Nothing about channel support changed.
 - **Ledger impact:** none.
 - **Gate state:** no gate consumed, no live contact. **No re-analysis run against real data** — the
