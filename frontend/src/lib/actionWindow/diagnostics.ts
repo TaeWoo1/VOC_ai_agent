@@ -22,6 +22,8 @@ export interface BridgeDiagnosticsInput {
   connection: SourceConnection;
   bridgeModeEnabled: boolean;
   bootAttempted: boolean;
+  /** Why the last boot was refused (sanitized enum), or null when it succeeded / never ran. */
+  bridgeRefusal: { reason: string; announcedCarrier?: string } | null;
   retryPending: boolean;
   /** Timestamp-free trail of connection literals (oldest → newest), already capped. */
   connectionTrail: SourceConnection[];
@@ -83,6 +85,44 @@ const VERDICT_LABEL: Record<BridgeVerdict, string> = {
  * bounded set (the connection/source-mode literals, 예/아니오, integers, "—", and
  * the pre-resolved channel label), so no raw identifier can appear in the output.
  */
+/**
+ * Why the last live-bridge boot was refused, in words.
+ *
+ * <p>The refusals used to be one indistinguishable failure, so a DEV panel could only say "fixture
+ * demo" whether the agent was off, unpaired, or hosting the OTHER carrier. That last one is the
+ * expensive confusion: a perfectly healthy agent running with `--dev-action-window-reply` looked
+ * exactly like a dead one.
+ *
+ * <p>A closed set of sanitized enums in, Korean out. An unknown reason renders verbatim rather than
+ * being swallowed — a new refusal nobody labelled should be visible, not invisible.
+ */
+export function refusalLabel(refusal: { reason: string; announcedCarrier?: string } | null): string {
+  if (refusal == null) {
+    return NONE;
+  }
+  switch (refusal.reason) {
+    case "bridge-disabled":
+      return "브리지 모드 꺼짐";
+    case "unpaired":
+      return "페어링 없음";
+    case "ticket-rejected":
+      return "티켓 거절됨";
+    case "unreachable":
+      return "에이전트 연결 불가";
+    case "no-announcement":
+      return "세션 알림 없음";
+    case "transport-version-mismatch":
+      return "전송 버전 불일치";
+    case "carrier-mismatch":
+      // The actionable one: the agent is fine, it is simply hosting the other carrier.
+      return refusal.announcedCarrier === "reply"
+        ? "다른 캐리어 호스팅 중(reply)"
+        : "캐리어 불일치";
+    default:
+      return refusal.reason;
+  }
+}
+
 export function describeBridgeDiagnostics(input: BridgeDiagnosticsInput): BridgeDiagnosticsView {
   const verdict = computeVerdict(input);
   return {
@@ -93,6 +133,7 @@ export function describeBridgeDiagnostics(input: BridgeDiagnosticsInput): Bridge
       { label: "연결 상태", value: input.connection },
       { label: "브리지 모드", value: yesNo(input.bridgeModeEnabled) },
       { label: "부트 시도됨", value: yesNo(input.bootAttempted) },
+      { label: "부트 거절 사유", value: refusalLabel(input.bridgeRefusal) },
       { label: "재연결 대기", value: yesNo(input.retryPending) },
       { label: "마지막 전이", value: lastTransition(input.connectionTrail) },
       { label: "연결 변경 횟수", value: String(input.connectionChangeCount) },

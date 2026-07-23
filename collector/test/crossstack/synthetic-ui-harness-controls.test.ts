@@ -94,7 +94,7 @@ async function connectFe(bridgePort: number, token: string, opened: WebSocket[])
   const statuses: AwConnectionStatus[] = [];
   let source: BridgeBackedSource | null = null;
   const { fetchFn, wsFactory } = makeBrowserDeps(opened);
-  const session: AwBridgeSession | null = await connectAwBridgeSession({
+  const result = await connectAwBridgeSession({
     httpBase: `http://127.0.0.1:${bridgePort}`,
     wsBase: `ws://127.0.0.1:${bridgePort}`,
     fetchFn,
@@ -108,7 +108,10 @@ async function connectFe(bridgePort: number, token: string, opened: WebSocket[])
       source?.notifyStatus(s as SourceConnection);
     },
   });
-  if (!session) throw new Error("FE stack failed to establish a live session over the harness Bridge");
+  // The refusal now carries WHY, so a cross-stack failure names its cause instead of being a bare
+  // "failed" — and this is also the end-to-end proof that the EXPORT carrier still attaches.
+  if (!result.ok) throw new Error(`FE stack failed to establish a live session over the harness Bridge: ${result.reason}`);
+  const session: AwBridgeSession = result.session;
   const client = createBridgeClient(session.transport, { runId: session.runId, channelCode: session.channelCode });
   source = createBridgeSource(client);
   const unsub = source.subscribe((u) => updates.push(u));

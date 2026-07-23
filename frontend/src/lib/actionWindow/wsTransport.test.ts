@@ -107,39 +107,40 @@ async function connected(h: Harness) {
   const ws = await until(() => h.sockets[0]);
   ws.receive({ type: "hello", protocolVersion: 1 }); // status-channel noise — must be ignored
   ws.receive(ANNOUNCEMENT);
-  const session = await pending;
-  expect(session).not.toBeNull();
-  return { session: session!, ws };
+  const result = await pending;
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error("unreachable: session expected");
+  return { session: result.session, ws };
 }
 
 describe("actionWindow/wsTransport", () => {
-  it("resolves null when unpaired (no stored token) without calling the agent", async () => {
+  it("refuses as `unpaired` (no stored token) without calling the agent", async () => {
     const h = harness({ withToken: false });
-    expect(await connectAwBridgeSession(h.deps)).toBeNull();
+    expect(await connectAwBridgeSession(h.deps)).toEqual({ ok: false, reason: "unpaired" });
     expect(h.ticketCalls).toBe(0);
     expect(h.sockets).toHaveLength(0);
   });
 
-  it("resolves null when the ticket mint is rejected (revoked/unreachable)", async () => {
+  it("refuses as `ticket-rejected` when the ticket mint is rejected (revoked/unreachable)", async () => {
     const h = harness({ ticketStatus: 401 });
-    expect(await connectAwBridgeSession(h.deps)).toBeNull();
+    expect(await connectAwBridgeSession(h.deps)).toEqual({ ok: false, reason: "ticket-rejected" });
     expect(h.sockets).toHaveLength(0);
   });
 
-  it("resolves null when no aw_session announcement arrives in time", async () => {
+  it("refuses as `no-announcement` when none arrives in time", async () => {
     const h = harness();
     h.deps.sessionTimeoutMs = 20;
-    const session = await connectAwBridgeSession(h.deps);
-    expect(session).toBeNull();
+    const result = await connectAwBridgeSession(h.deps);
+    expect(result).toEqual({ ok: false, reason: "no-announcement" });
     expect(h.sockets[0]?.closedByClient).toBe(true);
   });
 
-  it("resolves null on a transport-version mismatch", async () => {
+  it("refuses as `transport-version-mismatch`", async () => {
     const h = harness();
     const pending = connectAwBridgeSession(h.deps);
     const ws = await until(() => h.sockets[0]);
     ws.receive({ ...ANNOUNCEMENT, transportVersion: ACTION_WINDOW_TRANSPORT_VERSION + 1 });
-    expect(await pending).toBeNull();
+    expect(await pending).toEqual({ ok: false, reason: "transport-version-mismatch" });
     expect(ws.closedByClient).toBe(true);
   });
 
@@ -289,7 +290,9 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     // surface keeps its contract-backed fixture instead of a half-attached live view.
     const { session, ws } = await announce({ carrier: "reply" });
 
-    expect(session).toBeNull();
+    // The reason travels with the refusal — "the agent hosts replies" is actionable where a bare
+    // failure is not — and it names WHICH carrier, so diagnostics can say so.
+    expect(session).toEqual({ ok: false, reason: "carrier-mismatch", announcedCarrier: "reply" });
     expect(ws.closedByClient).toBe(true);
   });
 
@@ -303,14 +306,16 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     const ws = await until(() => h.sockets[0]);
     ws.receive(withoutCarrier);
 
-    expect(await pending).toBeNull();
+    // No announcedCarrier: absence is precisely the thing we could not identify, so naming one
+    // would be a guess.
+    expect(await pending).toEqual({ ok: false, reason: "carrier-mismatch" });
     expect(ws.closedByClient).toBe(true);
   });
 
   it("REFUSES an unrecognised carrier rather than guessing", async () => {
     const { session } = await announce({ carrier: "something-new" });
 
-    expect(session).toBeNull();
+    expect(session).toEqual({ ok: false, reason: "carrier-mismatch" });
   });
 
   it("REFUSES a carrier switch on RECONNECT — an agent that came back hosting replies is not spliced", async () => {
