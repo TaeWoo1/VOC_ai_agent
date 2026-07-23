@@ -84,6 +84,33 @@ const OPERATOR_STEP_LABELS: Readonly<Record<string, string>> = {
     "리뷰 내보내기 버튼을 클릭하세요. NAVER 확인창이 뜨면 이번 실행 범위 안에서 확인하세요.",
 };
 
+/**
+ * Overlay label for a CONTINUATION checkpoint — a NAVER-native follow-up notification/dialog whose
+ * download/confirm control the seller must act on before the actual browser download fires (the
+ * Run 7 attempt-2 finding: the export choreography can carry more than one human step). Dev-overlay
+ * copy only, same posture as `OPERATOR_STEP_LABELS`.
+ */
+const CONTINUATION_STEP_LABEL =
+  "NAVER 알림창이 표시되었습니다. 알림창의 다운로드(확인) 버튼을 직접 클릭하세요.";
+
+/**
+ * Upper bound on continuation checkpoints in one run. Two are real (the consent dialog can itself
+ * carry download wording, then the follow-up notification carries the actual control); the cap only
+ * guards against a pathological surface producing an unbounded highlight → wait loop. Hitting the
+ * cap fails closed like any other undetected download.
+ */
+const MAX_CONTINUATION_CHECKPOINTS = 3;
+
+/** Sanitized, TEST-VISIBLE record of the continuation checkpoints one detection pass walked. */
+export interface ContinuationDiagnostic {
+  /** How many continuation controls were highlighted (0 = the Run-4 direct-download shape). */
+  checkpoints: number;
+  /** The operator acted on the last highlighted continuation control. */
+  observedLast: boolean;
+  /** More than one candidate control appeared at once → failed closed on ambiguity. */
+  ambiguous: boolean;
+}
+
 export interface NaverLiveProbeDriverOptions {
   /** The gitignored quarantine directory for the temporary validation save. */
   quarantineDir: string;
@@ -109,6 +136,15 @@ export interface NaverLiveProbeDriverOptions {
   readinessSettleIntervalMs?: number;
   /** Injectable sleep for the readiness settle — hermetic tests pass an instant resolver. */
   sleepFn?: (ms: number) => Promise<void>;
+  /**
+   * Bounded window for the OPERATOR to act on a highlighted continuation checkpoint (the NAVER-native
+   * follow-up notification/dialog observed on Run 7 attempt 2 — see `detectDownload`). Defaults to
+   * `observeTimeoutMs`: it is the same kind of wait as the first human step, a seated human acting on
+   * a highlighted control.
+   */
+  continuationObserveTimeoutMs?: number;
+  /** Poll cadence for continuation-checkpoint appearance during the download race. Default 500 ms. */
+  continuationPollMs?: number;
 }
 
 /** Some bundlers inject `__name(...)` into serialized evaluate bodies — a harmless identity shim. */
@@ -128,6 +164,8 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private lastQuarantineVerdict: QuarantineVerdict | null = null;
   /** TEST-VISIBLE booleans of the last artifact parse check (never wired to transport/persistence). */
   private lastParseVerdict: ArtifactParseVerdict | null = null;
+  /** TEST-VISIBLE sanitized record of the continuation checkpoints the last detection pass walked. */
+  private lastContinuationDiagnostic: ContinuationDiagnostic | null = null;
   /** Armed BEFORE the user acts (a download can fire the instant they click); resolved lazily. */
   private pendingDownload: Promise<Download | null> | null = null;
   /** The detected artifact buffered in memory (bytes re-readable for validate + ingest). */
@@ -334,30 +372,109 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
-   * READ-ONLY detection: race the armed download against the deadline. Absence → the timeout shape.
+   * READ-ONLY detection, extended to the multi-checkpoint choreography (Run 7 attempt-2 finding).
+   *
+   * The Run-4 shape — the seller's confirm fires the download directly — is still the fast path:
+   * the armed download is raced against the deadline and wins immediately. But the live surface can
+   * interpose further NAVER-native human checkpoints (a consent dialog whose confirm carries
+   * download wording, then an asynchronous notification whose control the seller must click before
+   * the browser download exists). While the race waits, the driver therefore polls read-only for a
+   * NEW single wording-matched control (the original stays excluded by identity); when exactly one
+   * appears it is re-tagged, HIGHLIGHTED, and the driver WAITS for the seller's own action on it —
+   * it never clicks. Only after that action does a fresh download deadline run. Bounded everywhere:
+   * ≥2 simultaneous candidates → ambiguous → fail closed; no action inside the continuation observe
+   * window → fail closed; more than `MAX_CONTINUATION_CHECKPOINTS` → fail closed; and absence of
+   * both a download and a checkpoint at any deadline → the unchanged `DOWNLOAD_TIMEOUT` shape.
+   *
    * A detected download is buffered into memory (bytes re-readable for validate + ingest), the
    * browser's own copy is dropped, and only a nonce-seeded opaque 16-hex ref is emitted — the
    * filename / path / URL never influence the ref or leave this scope.
    */
   async detectDownload(): Promise<DownloadDetectResult> {
     const timeoutMs = this.opts.downloadTimeoutMs ?? 15_000;
-    const armed = this.pendingDownload ?? this.page.waitForEvent("download", { timeout: timeoutMs }).catch(() => null);
-    let timer: NodeJS.Timeout | undefined;
-    const download = await Promise.race([
-      armed,
-      new Promise<null>((resolveTimeout) => {
-        timer = setTimeout(() => resolveTimeout(null), timeoutMs);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    this.pendingDownload = null;
-    if (!download) return { detected: false };
+    const armed = this.pendingDownload ?? this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
+    this.pendingDownload = armed;
+    const diagnostic: ContinuationDiagnostic = { checkpoints: 0, observedLast: false, ambiguous: false };
+    this.lastContinuationDiagnostic = diagnostic;
+    try {
+      for (let checkpoint = 0; checkpoint <= MAX_CONTINUATION_CHECKPOINTS; checkpoint += 1) {
+        const outcome = await this.raceDownloadOrContinuation(armed, timeoutMs);
+        if (outcome.kind === "download") return await this.bufferDetected(outcome.download);
+        if (outcome.kind === "timeout") return { detected: false };
+        if (outcome.kind === "ambiguous") {
+          diagnostic.ambiguous = true;
+          return { detected: false }; // fail closed: 2+ candidate controls is ambiguity, never a guess
+        }
+        // outcome.kind === "continuation": exactly ONE new control is now the tagged target.
+        diagnostic.checkpoints = checkpoint + 1;
+        diagnostic.observedLast = false;
+        const humanStep = STEP_PLAN[1]!;
+        await mountOverlay(this.ctx(), {
+          stepNumber: humanStep.stepNumber,
+          totalSteps: TOTAL_STEPS,
+          copyKey: humanStep.copyKey,
+          label: CONTINUATION_STEP_LABEL,
+          guidanceEnabled: this.opts.guidanceEnabled ?? true,
+        });
+        await this.ctx().evaluate(NAME_SHIM);
+        await armObserver(this.ctx());
+        const observed = await waitForUserAction(this.ctx(), {
+          timeoutMs: this.opts.continuationObserveTimeoutMs ?? this.opts.observeTimeoutMs ?? 15_000,
+        });
+        diagnostic.observedLast = observed;
+        if (!observed) return { detected: false }; // fail closed: the checkpoint was never acted on
+        // Loop: the action either fires the download (next race wins) or raises the NEXT checkpoint.
+      }
+      return { detected: false }; // fail closed: checkpoint cap reached without a download
+    } finally {
+      this.pendingDownload = null;
+    }
+  }
+
+  /**
+   * Race the armed download against the deadline while polling read-only for a NEW continuation
+   * control. Iteration-count accounting (the sentinel-wait convention): `deadlineMs` is spent in
+   * `pollMs` slices, so the budget never depends on a wall-clock read.
+   */
+  private async raceDownloadOrContinuation(
+    armed: Promise<Download | null>,
+    deadlineMs: number,
+  ): Promise<
+    { kind: "download"; download: Download } | { kind: "timeout" } | { kind: "ambiguous" } | { kind: "continuation" }
+  > {
+    const pollMs = this.opts.continuationPollMs ?? 500;
+    const sleep = this.opts.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const maxChecks = Math.max(1, Math.ceil(deadlineMs / pollMs));
+    const TICK = Symbol("tick");
+    for (let i = 0; i < maxChecks; i += 1) {
+      const winner = await Promise.race([armed, sleep(pollMs).then(() => TICK as typeof TICK)]);
+      if (winner !== TICK) {
+        // The armed promise settled: a download, or null (page/context gone) → the timeout shape.
+        return winner ? { kind: "download", download: winner as Download } : { kind: "timeout" };
+      }
+      const count = await this.markContinuationTarget().catch(() => 0);
+      if (count === 1) return { kind: "continuation" };
+      if (count >= 2) return { kind: "ambiguous" };
+    }
+    return { kind: "timeout" };
+  }
+
+  /** Buffer a detected download into memory and emit the opaque ref (shared detection tail). */
+  private async bufferDetected(download: Download): Promise<DownloadDetectResult> {
     const filename = download.suggestedFilename();
     const bytes = await bufferDownload(download);
     // We hold the bytes in memory; the browser's own temp copy is no longer needed.
     await download.delete().catch(() => {});
     this.retained = { suggestedFilename: () => filename, bytes: () => bytes };
     return { detected: true, artifactRef: artifactRefFor(["aw-naver-live-download", randomUUID()]) };
+  }
+
+  /**
+   * Sanitized record of the continuation checkpoints the last `detectDownload` walked
+   * (test introspection + CLI logging only — never wired to transport/persistence).
+   */
+  lastContinuation(): ContinuationDiagnostic | null {
+    return this.lastContinuationDiagnostic;
   }
 
   /**
@@ -467,6 +584,64 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     }, this.exportKeywords());
   }
 
+  /**
+   * In-page, atomic: find a NEW single actionable control matching the confirmed export wording —
+   * the CURRENT `[data-aw-target]` element is excluded **by identity**, so the original export
+   * control (still present under the dialog) can never be re-matched. On exactly one match the tag
+   * MOVES: the old element loses its tag AND its observer click-listener (a stale click on the
+   * original control must not satisfy the continuation observation), the new element gains the tag
+   * with a `review-export-continuation` label. Returns the NEW-match count so the caller can fail
+   * closed on 0-keeps-waiting / ≥2-is-ambiguous. Read-only otherwise — it NEVER clicks.
+   */
+  private markContinuationTarget(): Promise<number> {
+    return this.ctx().evaluate((keywords: readonly string[]) => {
+      const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration } & Record<string, unknown>;
+      const current = document.querySelector("[data-aw-target]");
+      const kws = keywords.map((k) => k.toLowerCase());
+      // Persistent exclusion: `data-aw-seen` stamps every control this run has EVER highlighted. The
+      // by-identity `current` exclusion alone is not enough — a checkpoint control is typically
+      // REMOVED from the DOM by its own click, and the moment it goes, the original export control
+      // (untagged when the tag moved) would become matchable again and be re-highlighted at the
+      // seller as if it were new. Seen controls stay excluded for the whole run; `cleanup()` unstamps.
+      const seen = (el: Element): boolean => el.hasAttribute("data-aw-seen");
+      const visibleEnabled = (el: Element): boolean => {
+        const style = w.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden") return false;
+        if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+        if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
+        if (el.getAttribute("type") === "hidden") return false;
+        return true;
+      };
+      const accessibleName = (el: Element): string => {
+        const text = el.textContent ?? "";
+        const value = el.getAttribute("value") ?? "";
+        const aria = el.getAttribute("aria-label") ?? "";
+        const title = el.getAttribute("title") ?? "";
+        return `${text} ${value} ${aria} ${title}`.toLowerCase();
+      };
+      const selector = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+      const matches = Array.from(document.querySelectorAll(selector)).filter(
+        (el) => el !== current && !seen(el) && visibleEnabled(el) && kws.some((k) => accessibleName(el).includes(k)),
+      );
+      if (matches.length === 1) {
+        if (current) {
+          const handler = w["__aw_observer_handler__"];
+          if (typeof handler === "function") current.removeEventListener("click", handler as EventListener);
+          current.removeAttribute("data-aw-target");
+          current.removeAttribute("data-aw-role");
+          current.removeAttribute("data-aw-label");
+          current.setAttribute("data-aw-seen", "");
+        }
+        const el = matches[0]!;
+        el.setAttribute("data-aw-target", "");
+        el.setAttribute("data-aw-role", "primary-action");
+        el.setAttribute("data-aw-label", "review-export-continuation");
+        el.setAttribute("data-aw-seen", "");
+      }
+      return matches.length;
+    }, this.exportKeywords());
+  }
+
   private unmarkExportTarget(): Promise<void> {
     return this.ctx()
       .evaluate(() => {
@@ -475,6 +650,7 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           el.removeAttribute("data-aw-role");
           el.removeAttribute("data-aw-label");
         });
+        document.querySelectorAll("[data-aw-seen]").forEach((el) => el.removeAttribute("data-aw-seen"));
       })
       .then(() => undefined);
   }
