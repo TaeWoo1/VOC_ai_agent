@@ -313,6 +313,26 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     expect(session).toBeNull();
   });
 
+  it("REFUSES a carrier switch on RECONNECT — an agent that came back hosting replies is not spliced", async () => {
+    // The guard lives inside the shared handshake, so the retry loop re-reads the announcement rather
+    // than trusting the carrier it attached under. Worth pinning: an agent restarted with
+    // --dev-action-window-reply is a realistic way for the carrier to change mid-session, and
+    // splicing v2 frames into an established v1 transport is the failure this slice exists to stop.
+    const h = harness();
+    h.deps.maxReconnectAttempts = 1; // one attempt, so the refusal settles quickly
+    const { session } = await connected(h);
+
+    h.sockets[0]!.drop();
+    const ws2 = await until(() => h.sockets[1]);
+    ws2.receive({ ...ANNOUNCEMENT, carrier: "reply" });
+
+    // The reply-carrier socket is refused by the handshake, so it is never adopted: no resync frame
+    // is ever sent on it. Dormant, not spliced.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ws2.sent).toHaveLength(0);
+    expect(session.runId).toBe(RUN_ID);
+  });
+
   it("still attaches to the EXPORT carrier — v1 behaviour is unchanged", async () => {
     const h = harness();
     const { session } = await connected(h);

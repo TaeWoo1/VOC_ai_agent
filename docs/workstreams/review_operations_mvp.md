@@ -159,9 +159,11 @@ Append a dated entry; never rewrite prior entries — correct forward.
   it v2 envelopes ("connected but dormant" rather than an honest fallback). Added an explicit
   `carrier` field to `aw_session`, announced by both endpoints and typed to the literal each can emit,
   and made the FE attach only on `export` — refusing `reply`, unknown, and **absent**.
-- **Evidence:** `docs/slices/aw-carrier-discriminator-v1.md`; frontend 750 (was 746), collector
-  unchanged count (2 fixtures updated), backend untouched; typechecks clean. Two falsifications
-  caught. 11 existing tests failed the moment the guard landed — their fixtures announced without
+- **Evidence:** `docs/slices/aw-carrier-discriminator-v1.md`; frontend 751 (was 746), collector
+  unchanged count (2 fixtures updated), backend untouched; typechecks clean. Three falsifications caught, and review found two defects: the carrier
+  constants were ANNOTATED (`: AwCarrierKind`), which widened them so an announcement typed against
+  one accepted the other — the very mistake the field prevents, inside its own definition — and the
+  reconnect path was protected by construction but pinned by nothing. 11 existing tests failed the moment the guard landed — their fixtures announced without
   `carrier`, which is the refusal working.
 - **§4.1 impact:** none.
 - **Ledger impact:** none.

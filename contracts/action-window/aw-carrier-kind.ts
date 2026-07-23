@@ -33,11 +33,18 @@ export const AW_CARRIER_KINDS = ["export", "reply"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
-/** The v1 export Action Window carrier — the acquisition/export run world. */
-export const AW_CARRIER_EXPORT: AwCarrierKind = "export";
+/**
+ * The v1 export Action Window carrier — the acquisition/export run world.
+ *
+ * <p>Deliberately UNANNOTATED so it keeps its literal type. Written
+ * {@code const AW_CARRIER_EXPORT: AwCarrierKind = "export"} the annotation widens it to the union,
+ * and an announcement field typed {@code typeof AW_CARRIER_EXPORT} would then accept
+ * {@code "reply"} — which is exactly the mistake this whole field exists to make impossible.
+ */
+export const AW_CARRIER_EXPORT = "export";
 
-/** The v2 reply-submission carrier — the isolated guided-reply world. */
-export const AW_CARRIER_REPLY: AwCarrierKind = "reply";
+/** The v2 reply-submission carrier. Unannotated for the same reason as {@link AW_CARRIER_EXPORT}. */
+export const AW_CARRIER_REPLY = "reply";
 
 /**
  * Narrow an announced value to a known carrier, or `null` when it is absent or unrecognised.

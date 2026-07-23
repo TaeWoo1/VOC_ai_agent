@@ -70,7 +70,7 @@ demo exactly as it does for an unpaired or unreachable agent.
 
 | | before | after |
 |---|---|---|
-| frontend | 746 | **750** |
+| frontend | 746 | **751** |
 | collector | 4843 / 95 skipped | unchanged count, 2 fixtures updated |
 | backend | 1502 (2 skipped) | unchanged, untouched |
 
@@ -80,12 +80,25 @@ Both typechecks clean.
 collector tests failed the moment the guard landed, because their fixtures announced without
 `carrier` — which is the new refusal working. They now announce as the real endpoints do.
 
+**What the independent review caught (2, both fixed):**
+
+1. **The typing claim was false.** `export const AW_CARRIER_EXPORT: AwCarrierKind = "export"` —
+   the annotation **widens** the literal, so `typeof AW_CARRIER_EXPORT` was the union and an
+   announcement field typed against it happily accepted `"reply"`. Exactly the mistake the field
+   exists to prevent, reintroduced in the field's own definition. The constants are now unannotated
+   so they keep their literal types, verified with a throwaway probe that must fail to compile.
+2. **Reconnect was protected but unpinned.** The guard sits inside `openAnnouncedSocket`, which the
+   retry loop reuses — so an agent that restarts hosting the reply carrier is already refused rather
+   than spliced into an established v1 transport. That was true by construction and asserted by
+   nothing; a test now pins it, and it fails when the guard is removed.
+
 **Falsified:**
 
 | revert | tests that failed |
 |---|---|
 | remove the carrier guard entirely | all 3 refusal tests |
 | treat an absent carrier as `export` | `REFUSES an announcement with no carrier at all` |
+| remove the guard (reconnect path) | `REFUSES a carrier switch on RECONNECT` |
 
 And the positive case is pinned too — `still attaches to the EXPORT carrier — v1 behaviour is
 unchanged` — so the guard cannot be satisfied by refusing everything.
