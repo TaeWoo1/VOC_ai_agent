@@ -109,8 +109,41 @@ unchanged` — so the guard cannot be satisfied by refusing everything.
   `createAgentBridge` refuses to host both carriers; an explicit switch matches the agent's real
   model. Sequencing, UX, failure and security implications are in the branch discussion; this slice
   only supplies the discriminator every option needs.
+
+## 6. DECISION — 2026-07-24: keep the carriers SPLIT (product owner)
+
+**The two carriers stay split; a session is born into ONE carrier and stays there for its whole life,
+reconnect included.** Neither multiplexing nor a mid-life mode switch is implemented now. This holds
+until a concrete seller-facing workflow demonstrably needs both carriers live in one session — at
+which point the additive option is preferred and the switching option is not.
+
+**Why split is the right default now.** The one-carrier-per-session invariant is what makes every
+fail-closed guarantee simple to state and to prove: the export surface refuses a reply announcement,
+the reply panel refuses an export announcement, and both hold on reconnect because reconnect reuses
+the same `openAnnouncedSocket` carrier gate. That reconnect-inclusive refusal is now proven end to
+end over a real socket in `collector/test/crossstack/fe-reply-runtime-real-bridge.test.ts` (the FE
+reply runtime against the real agent-hosted reply carrier). No seller flow today opens both surfaces
+against one agent session, so splitting costs nothing a seller can observe.
+
+**The three options, ranked (recap for the next reader):**
+
+1. **Split (this decision, zero further work).** Two separate connections, one per carrier, each
+   refusing the other. Safe, shipped, and honest.
+2. **Concurrent multiplexing — the additive path, NOT built.** The agent hosts both carriers on one
+   socket; the `aw_session` announcement carries a *set* of carriers; the client attaches to the
+   one(s) it speaks and the transport demultiplexes by carrier per frame. This preserves every
+   fail-closed property (it is additive, not a switch) and the cross-stack harness above extends
+   directly to prove a dual-carrier announcement. **Do this — and only this — when a real workflow
+   needs both carriers in one session.**
+3. **Mid-life mode switch — REJECTED.** A session changing carrier mid-life breaks the invariant
+   above and forces re-derivation of every refusal guarantee, including the reconnect refusal just
+   proven, with no demonstrated need. Do not implement.
+
+⚠ **`bootAttempted` note still applies to option 2:** it is once-per-app-session with a DEV-only
+retry, so if multiplexing ever lands, re-attach must re-read the announcement rather than assume the
+prior carrier set.
 - `bootAttempted` is once-per-app-session with a DEV-only retry. A mode switch means the carrier can
   change between attempts, so re-attach must re-read the announcement rather than assume the prior
-  carrier.
-- **Run 7 stays deferred** until the approved network/IP environment returns. No gate consumed, no
-  live contact.
+  carrier. *(Superseded by the §6 decision: the switch is rejected; this note now governs option 2.)*
+- **Run 7 — EXECUTED and COMPLETED 2026-07-24** (attempt 3: real export → ingest SUCCESS). See
+  `docs/action-window-runtime/r4-run7-reply-state-live-proof-dispatch-record.md` §18.
