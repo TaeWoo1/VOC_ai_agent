@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -40,6 +41,14 @@ public class GlobalExceptionHandler {
         // client error, not a server fault, which the catch-all would otherwise report
         // as 500. Echo only the part NAME, never the part's content.
         return body(HttpStatus.BAD_REQUEST, "필수 파일 항목이 없습니다: " + ex.getRequestPartName());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
+        // A wrong HTTP method on a known path (e.g. PUT on a POST-only route) — a client
+        // error (405), not a server fault, which the catch-all would otherwise report as
+        // 500 and thereby mask as a backend failure. Echo only the offending method name.
+        return body(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식입니다: " + ex.getMethod());
     }
 
     @ExceptionHandler(Exception.class)
