@@ -11,6 +11,9 @@ import type { StorageLike, WebSocketLike } from "../bridge/bridgeClient";
 const RUN_ID = "run_ws_test";
 const ANNOUNCEMENT = {
   type: "aw_session",
+  // The real export endpoint announces this; without it the transport fails closed, because nothing
+  // else on the wire distinguishes the export carrier from the reply one.
+  carrier: "export",
   transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
   runId: RUN_ID,
   channelCode: "synthetic",
@@ -263,5 +266,57 @@ describe("actionWindow/wsTransport — onStatus callback", () => {
     session.close(); // the client-initiated close must not report reconnecting/offline
     await new Promise((r) => setTimeout(r, 30));
     expect(statuses).toEqual(["connected"]);
+  });
+});
+
+describe("actionWindow/wsTransport — carrier discrimination", () => {
+  // The mis-attach this guard exists for. `transportVersion` is 1 in BOTH the v1 and v2 contracts
+  // (it versions the framing, which really is identical) and `channelCode` is the same on both, so
+  // before `carrier` there was nothing to tell them apart: this transport would have accepted a
+  // reply-carrier agent, built a v1 client, and fed it v2 envelopes — connected but dormant.
+
+  /** Announce `overrides` on the first socket and resolve whatever the transport decides. */
+  async function announce(overrides: Record<string, unknown>) {
+    const h = harness();
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive({ ...ANNOUNCEMENT, ...overrides });
+    return { session: await pending, ws };
+  }
+
+  it("REFUSES to attach to an agent hosting the REPLY carrier", async () => {
+    // Null, not a degraded export: a different world this caller does not speak. The operations
+    // surface keeps its contract-backed fixture instead of a half-attached live view.
+    const { session, ws } = await announce({ carrier: "reply" });
+
+    expect(session).toBeNull();
+    expect(ws.closedByClient).toBe(true);
+  });
+
+  it("REFUSES an announcement with no carrier at all", async () => {
+    // Both endpoints predate this field, so an announcement without it is genuinely ambiguous —
+    // and resolving ambiguity by assuming "export" is exactly how the mis-attach comes back.
+    const withoutCarrier: Record<string, unknown> = { ...ANNOUNCEMENT };
+    delete withoutCarrier.carrier;
+    const h = harness();
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive(withoutCarrier);
+
+    expect(await pending).toBeNull();
+    expect(ws.closedByClient).toBe(true);
+  });
+
+  it("REFUSES an unrecognised carrier rather than guessing", async () => {
+    const { session } = await announce({ carrier: "something-new" });
+
+    expect(session).toBeNull();
+  });
+
+  it("still attaches to the EXPORT carrier — v1 behaviour is unchanged", async () => {
+    const h = harness();
+    const { session } = await connected(h);
+
+    expect(session.runId).toBe(RUN_ID);
   });
 });

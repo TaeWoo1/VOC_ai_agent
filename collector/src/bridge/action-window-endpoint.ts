@@ -7,9 +7,11 @@
  *
  * Carrier shapes (additive; older clients ignore unknown `type`s, so Bridge v1 semantics are untouched):
  *   - both directions: `{ type: "aw", payload: string }` — payload is a serialized Aw*Frame;
- *   - agent → client on attach: `{ type: "aw_session", transportVersion, runId, channelCode }` — the
- *     announcement that tells the FE which Operation Run this agent hosts (run identity is assigned by
- *     the Runtime, never invented by the FE).
+ *   - agent → client on attach: `{ type: "aw_session", carrier, transportVersion, runId, channelCode }`
+ *     — the announcement that tells the FE which Operation Run this agent hosts (run identity is
+ *     assigned by the Runtime, never invented by the FE). `carrier` is `export` here; it is the ONLY
+ *     field that distinguishes this carrier from the reply one, which is otherwise identical on the
+ *     wire (see {@link AW_CARRIER_EXPORT}).
  *
  * Security is fully inherited: a socket only ever reaches this endpoint after the Bridge's own
  * origin-allowlist + single-use-ticket + pairing checks, so no separate Action Window ticket exists.
@@ -17,6 +19,7 @@
  * endpoint itself logs only booleans/counts and never logs a frame body.
  */
 import { WebSocket } from "ws";
+import { AW_CARRIER_EXPORT } from "../../../contracts/action-window/aw-carrier-kind";
 import {
   ACTION_WINDOW_TRANSPORT_VERSION,
   deserializeFrame,
@@ -30,6 +33,8 @@ import { log } from "../log";
 /** Agent → client announcement of the hosted run. Values are sanitized (opaque runId, semantic code). */
 export interface AwSessionAnnouncement {
   type: "aw_session";
+  /** Always `export` for this endpoint — the discriminator a client routes or fails closed on. */
+  carrier: typeof AW_CARRIER_EXPORT;
   transportVersion: number;
   runId: string;
   channelCode: string;
@@ -79,6 +84,7 @@ export class ActionWindowEndpoint {
     // so the production boot and every existing caller announce exactly as before.
     if (this.announcing) {
       const announcement: AwSessionAnnouncement = {
+        carrier: AW_CARRIER_EXPORT,
         type: "aw_session",
         transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
         runId: this.runId,

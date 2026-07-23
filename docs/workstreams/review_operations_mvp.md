@@ -150,6 +150,27 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-23 — Action Window Carrier Discriminator v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the Bridge carrier beneath it)
+- **Did:** Closed a mis-attach that nothing could have detected. The v1 export and v2 reply carriers
+  are byte-for-byte identical on the wire — same socket, same framing, same `aw_session` — and
+  `transportVersion` is **1 in BOTH** contracts while `channelCode` is `naver` on both, so the FE had
+  nothing to discriminate on: attaching to a reply-hosting agent would have built a v1 client and fed
+  it v2 envelopes ("connected but dormant" rather than an honest fallback). Added an explicit
+  `carrier` field to `aw_session`, announced by both endpoints and typed to the literal each can emit,
+  and made the FE attach only on `export` — refusing `reply`, unknown, and **absent**.
+- **Evidence:** `docs/slices/aw-carrier-discriminator-v1.md`; frontend 750 (was 746), collector
+  unchanged count (2 fixtures updated), backend untouched; typechecks clean. Two falsifications
+  caught. 11 existing tests failed the moment the guard landed — their fixtures announced without
+  `carrier`, which is the refusal working.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ Safety only — **no mode switch and no production reply runtime**. The
+  one-carrier constraint is agent-side (`createAgentBridge` throws when both are configured), so a
+  *second connection* stays unavailable without reworking the agent.
+- **Next:** the mode-switch decision, which now has the discriminator every option needs.
+
 ### 2026-07-23 — Reply Handoff Honesty v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the handoff at the end of it)
 - **Did:** The audit's last stretch found production minting Action Window runs that never happened.
