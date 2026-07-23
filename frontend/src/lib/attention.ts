@@ -26,6 +26,32 @@ export function severityStyle(severity: string): SeverityStyle {
   return SEVERITY_STYLE[severity] ?? SEVERITY_STYLE.LOW;
 }
 
+/**
+ * How many reviews currently need a look — the minimal honest review-ops number the operator can
+ * see after an acquisition run, derived from the attention summary the backend already serves. No
+ * new endpoint, no new field, no client-side taxonomy.
+ *
+ * The rule is deliberately narrow and made of values the BACKEND declares, not ones we invent:
+ * a signal counts when its `sourceType` is `REVIEW` **and** its severity is HIGH or MEDIUM. That
+ * excludes `NEW_REVIEW` (routine arrival, always LOW — "collected" is not "needs a look") and
+ * excludes the `RECENT_*_SPIKE_CANDIDATE` volume signals, which describe the same rows a
+ * rating signal already counts.
+ *
+ * **Honest limitation.** This is a sum of signal counts, not a proven count of distinct reviews.
+ * For the ingested-review source the surviving signals are the LOW_RATING_REVIEW severities, which
+ * partition rows by rating and therefore cannot overlap — but that is a property of today's
+ * signals, not a guarantee of the taxonomy. If a future REVIEW signal can cover a row a rating
+ * signal also covers, this number would double-count it, and the copy that renders it must not be
+ * strengthened into a distinctness claim.
+ */
+export function reviewsNeedingAttention(items: readonly AttentionSignal[]): number {
+  return items
+    .filter((s) => s.sourceType === "REVIEW")
+    .filter((s) => s.severity === "HIGH" || s.severity === "MEDIUM")
+    .filter((s) => !s.type.endsWith("_SPIKE_CANDIDATE"))
+    .reduce((total, s) => total + (Number.isFinite(s.count) ? s.count : 0), 0);
+}
+
 /** Stable sort by severity (HIGH → LOW); does not mutate the input. */
 export function sortBySeverity(items: AttentionSignal[]): AttentionSignal[] {
   return [...items].sort(

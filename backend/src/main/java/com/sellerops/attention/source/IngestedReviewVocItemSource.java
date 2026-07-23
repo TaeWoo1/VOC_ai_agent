@@ -185,12 +185,21 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         long windowDays = ChronoUnit.DAYS.between(from, to) + 1;
         Instant prevFromInstant = from.minusDays(windowDays).atStartOfDay(KST).toInstant();
         return new VocWindowSnapshot(
+                // Arrivals: EVERY review in the window, answered or not. This is what came in, and
+                // the spike baseline is computed from it — filtering it would misreport both.
                 reviews.countInWindowByChannel(orgId, channelId, fromInstant, toExclusive),
                 0,  // newInquiries — this store holds no inquiries
                 0,  // unansweredInquiries
                 0,  // unknownReplyInquiries
-                reviews.countInWindowByChannelAndRatingBetween(orgId, channelId, 1, 2, fromInstant, toExclusive),
-                reviews.countInWindowByChannelAndRatingBetween(orgId, channelId, 3, 3, fromInstant, toExclusive),
+                // The "needs a look" bands EXCLUDE reviews the channel reports as answered. On a
+                // real export a third of the low-rating rows were already answered, so counting
+                // them told an operator to look at work that was done — and pointed the guided
+                // reply flow at reviews that already had a public reply. UNKNOWN still counts:
+                // an absent statement is not evidence of an answer.
+                reviews.countUnansweredInWindowByChannelAndRatingBetween(
+                        orgId, channelId, 1, 2, fromInstant, toExclusive),
+                reviews.countUnansweredInWindowByChannelAndRatingBetween(
+                        orgId, channelId, 3, 3, fromInstant, toExclusive),
                 reviews.countInWindowByChannel(orgId, channelId, prevFromInstant, fromInstant),
                 0); // previousInquiries
     }
@@ -212,9 +221,19 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         Instant fromInstant = from.atStartOfDay(KST).toInstant();
         Instant toExclusive = to.plusDays(1).atStartOfDay(KST).toInstant();
 
-        Page<Review> result = reviews.findInWindowByChannelFiltered(
-                orgId, channelId, filter.minRating(), filter.maxRating(),
-                fromInstant, toExclusive, PageRequest.of(page, size));
+        // The "needs a look" lens hides reviews the CHANNEL says are already answered, and it must
+        // apply the SAME predicate as its count (see excludesAnswered) — a card saying N건 over a
+        // list showing something else is exactly the drift these window semantics exist to prevent.
+        // The arrival lenses (NEW_REVIEW, the spike drill-down) stay complete: they report what came
+        // in, not what needs doing.
+        PageRequest pageRequest = PageRequest.of(page, size);
+        Page<Review> result = excludesAnswered(signalType)
+                ? reviews.findUnansweredInWindowByChannelFiltered(
+                        orgId, channelId, filter.minRating(), filter.maxRating(),
+                        fromInstant, toExclusive, pageRequest)
+                : reviews.findInWindowByChannelFiltered(
+                        orgId, channelId, filter.minRating(), filter.maxRating(),
+                        fromInstant, toExclusive, pageRequest);
         Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
         Set<UUID> prepared = preparedFor(orgId, result.getContent());
@@ -380,13 +399,26 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         TriageDisposition disposition = dispositions.get(r.getId());
         return new OperatorVocItem(
                 channelCode, channelNameKo, SOURCE_TYPE_REVIEW, productName, r.getRating(),
-                null,                       // replyStatus — an export carries no reply state
+                // What the CHANNEL said at the last import (답글여부 on the NAVER export), never
+                // SellerOps' own record of a guided reply. A source that said nothing is UNKNOWN —
+                // the honest value, and the one this surface still treats as needing a look.
+                r.getReplyState().name(),
                 kstDate(r.getReceivedAt()),
                 kstDate(r.getCreatedAt()),  // when SellerOps ingested it
                 signalType.name(), safePreview,
                 actionRef,
                 disposition == null ? null : disposition.name(),
                 prepared.contains(r.getId()));
+    }
+
+    /**
+     * Whether this lens hides channel-answered reviews.
+     *
+     * <p>Stated once, and used by BOTH the count and the drill-down, so the two cannot disagree:
+     * the "needs a look" bands exclude answered reviews, and every arrival lens keeps every row.
+     */
+    private static boolean excludesAnswered(AttentionSignalType signalType) {
+        return signalType == AttentionSignalType.LOW_RATING_REVIEW;
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */

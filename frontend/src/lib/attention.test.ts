@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AttentionSignal } from "./types";
 import {
   isSpikeSignal,
+  reviewsNeedingAttention,
   severityStyle,
   signalActionLabel,
   sortBySeverity,
@@ -97,5 +101,98 @@ describe("spikeComparisonText", () => {
     expect(spikeComparisonText({ previousCount: 3, deltaCount: 3, ratio: 2 })).toBe(
       "직전 동일 기간 대비 +3건 · 2배",
     );
+  });
+});
+
+describe("reviewsNeedingAttention", () => {
+  function reviewSignal(type: string, severity: string, count: number): AttentionSignal {
+    return { type, severity, count, label: type, description: "", sourceType: "REVIEW", channel: null };
+  }
+  function inquirySignal(type: string, severity: string, count: number): AttentionSignal {
+    return { type, severity, count, label: type, description: "", sourceType: "INQUIRY", channel: null };
+  }
+
+  it("sums the HIGH/MEDIUM review signals — the shape the ingested-review source produces", () => {
+    // Ratings 1·2·3·4·5·5 → LOW_RATING HIGH 2 (1★,2★) + MEDIUM 1 (3★), NEW_REVIEW LOW 6.
+    // The answer is 3: the reviews needing a look, not the six that merely arrived.
+    expect(
+      reviewsNeedingAttention([
+        reviewSignal("LOW_RATING_REVIEW", "HIGH", 2),
+        reviewSignal("LOW_RATING_REVIEW", "MEDIUM", 1),
+        reviewSignal("NEW_REVIEW", "LOW", 6),
+      ]),
+    ).toBe(3);
+  });
+
+  it("excludes inquiries — this is the REVIEW number, not a combined workload", () => {
+    expect(
+      reviewsNeedingAttention([
+        reviewSignal("LOW_RATING_REVIEW", "HIGH", 2),
+        inquirySignal("UNANSWERED_INQUIRY", "HIGH", 9),
+      ]),
+    ).toBe(2);
+  });
+
+  it("excludes the spike candidate, which re-counts rows a rating signal already counted", () => {
+    expect(
+      reviewsNeedingAttention([
+        reviewSignal("LOW_RATING_REVIEW", "HIGH", 2),
+        reviewSignal("RECENT_REVIEW_SPIKE_CANDIDATE", "HIGH", 12),
+      ]),
+    ).toBe(2);
+  });
+
+  it("is 0 for an empty window and for arrivals alone", () => {
+    expect(reviewsNeedingAttention([])).toBe(0);
+    expect(reviewsNeedingAttention([reviewSignal("NEW_REVIEW", "LOW", 40)])).toBe(0);
+  });
+
+  it("ignores a non-finite count rather than rendering NaN건", () => {
+    expect(
+      reviewsNeedingAttention([
+        reviewSignal("LOW_RATING_REVIEW", "HIGH", Number.NaN),
+        reviewSignal("LOW_RATING_REVIEW", "MEDIUM", 1),
+      ]),
+    ).toBe(1);
+  });
+});
+
+describe("reviewsNeedingAttention — the shared spine declaration", () => {
+  // The joint with the other two ports. `contracts/review-export/naver/v1/expected-rows.json`
+  // declares the attention signals that golden export produces; the backend asserts its service
+  // yields them and the collector E2E asserts the live HTTP payload matches. Here the FE proves the
+  // number an operator actually reads is derived from that same declaration — verified per stack,
+  // with no cross-stack imports.
+  const contract = JSON.parse(
+    readFileSync(
+      resolve(dirname(fileURLToPath(import.meta.url)), "../../../contracts/review-export/naver/v1/expected-rows.json"),
+      "utf8",
+    ),
+  ) as {
+    expectedAttention: {
+      signals: Array<{ type: string; severity: string; count: number; sourceType: string }>;
+      reviewsNeedingAttention: number;
+    };
+  };
+
+  it("derives the declared number from the declared signals", () => {
+    const signals: AttentionSignal[] = contract.expectedAttention.signals.map((s) => ({
+      ...s,
+      label: s.type,
+      description: "",
+      channel: null,
+    }));
+
+    expect(reviewsNeedingAttention(signals)).toBe(contract.expectedAttention.reviewsNeedingAttention);
+  });
+
+  it("the declaration is non-vacuous — it carries more reviews than it flags", () => {
+    // Guards against a future edit where every signal is HIGH and the assertion above passes while
+    // proving nothing about the exclusion rule.
+    const total = contract.expectedAttention.signals
+      .filter((s) => s.sourceType === "REVIEW")
+      .reduce((n, s) => n + s.count, 0);
+
+    expect(total).toBeGreaterThan(contract.expectedAttention.reviewsNeedingAttention);
   });
 });

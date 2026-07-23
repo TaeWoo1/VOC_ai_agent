@@ -24,6 +24,7 @@ import {
 import { naverLocateDecision } from "../../src/action-window/naver-surface";
 import { EXPORT_WORDING_KEYWORDS } from "../../src/naver/review-export";
 import type { AwIngestUploadFn } from "../../src/action-window/ingest-handoff";
+import { reviewExportBytes, reviewExportEmptyBytes } from "../support/review-export-fixture";
 
 const HEX16 = /^[0-9a-f]{16}$/;
 
@@ -320,6 +321,16 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
     return out;
   }
 
+  /**
+   * A REAL workbook — the committed golden export (`contracts/review-export/naver/v1`). Since the
+   * parse gate joined `validateArtifact`, sniff-shaped bytes are no longer enough to reach the
+   * retained-bytes path: only an artifact that actually parses does. Using the shared fixture keeps
+   * "a real workbook" defined in exactly one place.
+   */
+  const workbookBytes = (): Uint8Array => reviewExportBytes();
+  /** The committed EMPTY workbook — valid and readable, with no data rows. */
+  const emptyWorkbookBytes = (): Uint8Array => reviewExportEmptyBytes();
+
   /** In-memory QuarantineIo: proves the file is written AND removed without touching a real disk. */
   function memIo() {
     const files = new Map<string, Uint8Array>();
@@ -362,7 +373,7 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
   it("cleanup() drops the retained bytes, so a later ingest has nothing to upload", async () => {
     const deleted = { count: 0 };
     const { io } = memIo();
-    const driver = driverForPage(downloadingPage(ooxmlBytes(), deleted), { quarantineDir: "/q", io });
+    const driver = driverForPage(downloadingPage(workbookBytes(), deleted), { quarantineDir: "/q", io });
 
     const detected = await driver.detectDownload();
     expect(detected.detected).toBe(true);
@@ -379,7 +390,7 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
   it("the quarantine file is deleted at validate and the dir is swept at cleanup", async () => {
     const deleted = { count: 0 };
     const { io, files, written } = memIo();
-    const driver = driverForPage(downloadingPage(ooxmlBytes(), deleted), { quarantineDir: "/q", io });
+    const driver = driverForPage(downloadingPage(workbookBytes(), deleted), { quarantineDir: "/q", io });
 
     const detected = await driver.detectDownload();
     await driver.validateArtifact(detected.artifactRef!);
@@ -390,6 +401,52 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
 
     await driver.cleanup();
     expect(io.listDir()).toEqual([]);
+  });
+
+  it("a sniff-passing NON-workbook now fails validation → ARTIFACT_INVALID, and nothing is retained", async () => {
+    // THE TIGHTENING, pinned on the LIVE driver. `ooxmlBytes()` carries ZIP magic + the
+    // `[Content_Types].xml` entry NAME, which is exactly what the D-021 sniff looks for — so before
+    // the parse gate this artifact validated clean and was handed to ingest, where the backend would
+    // reject it and the seller would be told "저장 중 문제가 생겼어요 / 잠시 후 다시 시도해 주세요":
+    // false, and useless advice. Now it fails HERE, as ARTIFACT_INVALID ("받은 파일을 확인할 수
+    // 없어요 / 다시 내려받아 주세요"), which is true and actionable.
+    const deleted = { count: 0 };
+    const { io, written, files } = memIo();
+    const driver = driverForPage(downloadingPage(ooxmlBytes(), deleted), { quarantineDir: "/q", io });
+
+    const detected = await driver.detectDownload();
+    expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: false });
+
+    // The quarantine leg still ran and still cleaned up — the sniff passed; only the parse failed.
+    expect(driver.lastQuarantine()).toMatchObject({ valid: true });
+    expect(driver.lastParse()).toEqual({
+      workbookReadable: false,
+      sheetPresent: false,
+      dataRowPresent: false,
+      parseOk: false,
+    });
+    expect(written).toHaveLength(1);
+    expect(files.size).toBe(0);
+
+    // …and an invalid artifact is never retained, so the handoff has nothing to upload.
+    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: false, processed: 0 });
+  });
+
+  it("an empty-but-valid workbook still validates — an empty export is a legitimate outcome", async () => {
+    // `dataRowPresent` is observed, never gating. A seller who exports a quiet date range gets a
+    // correct, readable file with no rows; failing their run would tell them it was broken.
+    const deleted = { count: 0 };
+    const { io } = memIo();
+    const driver = driverForPage(downloadingPage(emptyWorkbookBytes(), deleted), { quarantineDir: "/q", io });
+
+    const detected = await driver.detectDownload();
+    expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: true });
+    expect(driver.lastParse()).toEqual({
+      workbookReadable: true,
+      sheetPresent: true,
+      dataRowPresent: false, // observed — and deliberately not part of `parseOk`
+      parseOk: true,
+    });
   });
 
   it("declining never fabricates a completion — a nothing-retained ingest is not success", async () => {

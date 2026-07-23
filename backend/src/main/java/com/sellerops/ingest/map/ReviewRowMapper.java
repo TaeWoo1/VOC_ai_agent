@@ -2,6 +2,7 @@ package com.sellerops.ingest.map;
 
 import com.sellerops.ingest.canonical.CanonicalReview;
 import com.sellerops.ingest.parse.DateParse;
+import com.sellerops.review.ReviewReplyState;
 import com.sellerops.ingest.parse.ParsedTable;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -44,7 +45,27 @@ public class ReviewRowMapper {
                 Instant receivedAt = dateRaw == null ? null : DateParse.instantAtStartOfDay(dateRaw);
                 String externalId = HeaderAliases.pick(
                         row, "리뷰id", "리뷰아이디", "리뷰글번호", "review_id", "external_id", "id");
-                ok.add(new CanonicalReview(product, sku, rating, body, receivedAt, externalId, rowNumber));
+                // What the CHANNEL says about an existing reply. Only NAVER's export columns are
+                // aliased, because only their vocabulary is grounded: ESM+ has a 답변 상태 column
+                // but the observed file was header-only, so its tokens are unknown and no alias is
+                // added for it — a channel-support decision belongs in the capability table, not in
+                // an alias list. `HeaderAliases.pick` is an exact-key lookup, so 답글여부 can never
+                // be satisfied by a neighbouring column.
+                ReviewReplyState replyState = ReviewReplyState.normalize(
+                        HeaderAliases.pick(row, "답글여부"));
+                String repliedRaw = HeaderAliases.pick(row, "답글등록일시");
+                // Date-granular by the same rule as 리뷰등록일 — and never fatal: an unparseable
+                // reply date must not fail a row whose review content is fine.
+                Instant repliedAt = null;
+                if (repliedRaw != null) {
+                    try {
+                        repliedAt = DateParse.instantAtStartOfDay(repliedRaw);
+                    } catch (Exception ignored) {
+                        repliedAt = null;
+                    }
+                }
+                ok.add(new CanonicalReview(product, sku, rating, body, receivedAt, externalId, rowNumber,
+                        replyState, repliedAt));
             } catch (Exception e) {
                 errors.add(new RowError(rowNumber, e.getMessage()));
             }

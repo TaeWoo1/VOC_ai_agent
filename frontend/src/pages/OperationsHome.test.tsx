@@ -27,9 +27,11 @@ vi.mock("../lib/actionWindow/bridgeSource", async (importOriginal) => ({
 import { OperationsHome } from "./OperationsHome";
 import { renderWithRouter, screen } from "../test/renderWithRouter";
 import { resetOps, seedHome, seedBridge } from "../test/opsStoreHarness";
+import { api } from "../lib/apiClient";
 
 const ACTIVE = "현재 작업"; // ActiveRunCard section
-const RECENT = "최근 활동"; // RecentActivityList section
+const RECENT = "최근 활동"; // RecentActivityList — the DEV-only session list
+const IMPORTS = "최근 가져오기 기록"; // ImportHistoryList — the persisted rail
 const REVIEW_WORK = "리뷰 업무 현황"; // idle review-work section (FE-12)
 const RECONNECT = "다시 연결"; // ConnectionBanner reconnect button
 const DIAGNOSTICS = "브리지 진단 (개발용)";
@@ -38,6 +40,8 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
   beforeEach(() => {
     devModeMock.isFixturePreviewEnabled.mockReturnValue(false);
     devModeMock.isBridgeModeEnabled.mockReturnValue(false);
+    // The rail reads persisted import history; keep it off the wire and deterministic.
+    vi.spyOn(api, "getReviewImportsStrict").mockResolvedValue([]);
     resetOps();
   });
 
@@ -47,13 +51,24 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     expect(screen.queryByRole("navigation", { name: "데모 시나리오 (개발용)" })).toBeNull();
   });
 
-  it("empty state: review-work region + the recent-activity empty message", () => {
+  it("empty state: review-work region + the PERSISTED import-history rail", () => {
     seedHome("home-empty"); // run null, no history, connected
     renderWithRouter(<OperationsHome />);
     expect(screen.getByRole("region", { name: REVIEW_WORK })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: ACTIVE })).toBeNull(); // no active card
-    const recent = screen.getByRole("region", { name: RECENT });
-    expect(recent).toHaveTextContent("아직 완료된 작업이 없어요.");
+    // The rail is the seller's own import history, which survives a reload.
+    expect(screen.getByRole("region", { name: IMPORTS })).toBeInTheDocument();
+    // The session list is a DEV fixture-preview affordance and is absent production-shaped: it
+    // lived in browser memory and could never be a seller's record of their own work.
+    expect(screen.queryByRole("region", { name: RECENT })).toBeNull();
+  });
+
+  it("the session activity list returns only under the DEV fixture preview", () => {
+    devModeMock.isFixturePreviewEnabled.mockReturnValue(true);
+    seedHome("home-active-checkpoint"); // fixture source + session history
+    renderWithRouter(<OperationsHome />);
+    expect(screen.getByRole("region", { name: RECENT })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: IMPORTS })).toBeInTheDocument();
   });
 
   it("active checkpoint: active-run card with the detail link + a populated recent list", () => {
@@ -65,7 +80,6 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
       "href",
       "/operations/current",
     );
-    expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0); // recent history rendered
   });
 
   it("offline (bridge): banner + reconnect shown, start affordance suppressed", () => {

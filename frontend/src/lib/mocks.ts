@@ -36,6 +36,7 @@ import type {
   SalesTrendPoint,
   ScheduleView,
   SellerAccountResponse,
+  ReviewImport,
   SyncJobView,
   SyncRunView,
   TriageDecisionResponse,
@@ -1206,11 +1207,19 @@ const MOCK_DECIDED_AT = "2026-07-17T00:00:00Z";
 /**
  * Demo-mode reply prep for one review.
  *
- * Computes `capabilities` exactly as ReviewReplyService does, from the same three inputs
- * (disposition, draft existence, approval state) — including the asymmetry: leaving
- * 대응 필요 closes save/approve/copy but never withdrawal.
+ * Computes `capabilities` exactly as ReviewReplyService does, from the same four inputs
+ * (disposition, draft existence, approval state, and the CHANNEL's reply state) — including the
+ * asymmetry: leaving 대응 필요 closes save/approve/copy but never withdrawal, and a review the
+ * channel already answered loses the guided run alone.
+ *
+ * Demo reviews carry no import behind them, so `channelReplyState` is UNKNOWN — the same value the
+ * server sends for a review whose source said nothing, and the one that blocks nothing.
  */
 export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
+  // Demo data has no import behind it, so the channel has said nothing about a reply. Typed as the
+  // wire's own string so the capability rule below is the SAME expression the server evaluates —
+  // narrowing it to the literal would let the comparison be optimized away and the parity lost.
+  const channelReplyState: string = "UNKNOWN";
   const review = reviewForRef(actionRef);
   if (review == null) {
     // The real backend answers 404 for a ref it cannot address; the demo throws so the
@@ -1249,9 +1258,11 @@ export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
       canApprove: responseNeeded && !approved && head != null,
       canWithdraw: approved,
       canCopy,
-      // Same rule as canCopy — the server computes it the same way (responseNeeded && approved).
-      canStartSubmissionRun: canCopy,
+      // Same rule as canCopy, minus a review the channel already answered — the server computes it
+      // the same way (responseNeeded && approved && !channelAnswered).
+      canStartSubmissionRun: canCopy && channelReplyState !== "ANSWERED",
     },
+    channelReplyState,
   };
 }
 
@@ -1485,4 +1496,61 @@ export function mockSyncJobs(): SyncJobView[] {
       finishedAt: hoursAgoISO(3),
     },
   ];
+}
+
+/**
+ * Demo-mode review-import history.
+ *
+ * Deliberately spans the outcomes the real surface must tell apart — a normal import, an
+ * all-duplicate re-import, an empty export, and a failure — so the demo shows the honest state table
+ * rather than a row of uniform successes. Newest first, like the real read.
+ */
+export function mockReviewImports(limit?: number): ReviewImport[] {
+  const rows: ReviewImport[] = [
+    {
+      id: "mock-import-1",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 6,
+      successRows: 6,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-10T09:00:00Z",
+      finishedAt: "2026-05-10T09:00:12Z",
+    },
+    {
+      id: "mock-import-2",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 6,
+      successRows: 0,
+      skippedRows: 6,
+      failedRows: 0,
+      startedAt: "2026-05-09T09:00:00Z",
+      finishedAt: "2026-05-09T09:00:08Z",
+    },
+    {
+      id: "mock-import-3",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 0,
+      successRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-08T09:00:00Z",
+      finishedAt: "2026-05-08T09:00:05Z",
+    },
+    {
+      id: "mock-import-4",
+      method: "MANUAL_UPLOAD",
+      status: "FAILED",
+      totalRows: 0,
+      successRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-07T09:00:00Z",
+      finishedAt: "2026-05-07T09:00:02Z",
+    },
+  ];
+  return limit == null ? rows : rows.slice(0, limit);
 }

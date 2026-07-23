@@ -20,6 +20,7 @@ import { ConnectionBanner } from "../components/actionWindow/ConnectionBanner";
 import { SimulationPreview } from "../components/actionWindow/SimulationPreview";
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
+import { ImportHistoryList } from "../components/actionWindow/ImportHistoryList";
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
   "home-empty": "처음 (기록 없음)",
@@ -141,9 +142,14 @@ export function OperationsHome() {
         onReconnect={sourceMode === "bridge" ? reconnect : undefined}
       />
 
-      {/* Review-ops workbench: the current task/state on the left, recent activity
-          as a side rail (stacks below on mobile). Progressive disclosure stays at
-          the page level — the no-run start card vs. the active-run summary. */}
+      {/* Review-ops workbench: the current task/state on the left, the seller's own import
+          history as a side rail (stacks below on mobile). Progressive disclosure stays at
+          the page level — the no-run start card vs. the active-run summary.
+
+          The rail reads PERSISTED imports, not this session's runs: `recentRuns` lives in
+          browser memory, so it starts empty and vanishes on reload — yesterday's import left no
+          trace anywhere the seller looks. The session list is kept as what it always was, a DEV
+          fixture-preview affordance, and is shown only under the fixture-preview gate. */}
       <WorkbenchLayout
         body={
           run === null ? (
@@ -159,7 +165,14 @@ export function OperationsHome() {
             />
           )
         }
-        rail={<RecentActivityList items={recentRuns} />}
+        rail={
+          <div className="flex flex-col gap-4">
+            <ImportHistoryList />
+            {isFixturePreviewEnabled() && sourceMode === "fixture" ? (
+              <RecentActivityList items={recentRuns} />
+            ) : null}
+          </div>
+        }
       />
     </div>
   );

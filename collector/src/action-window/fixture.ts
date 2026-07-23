@@ -64,6 +64,20 @@ const TEXT_PAYLOAD = `'sellerops synthetic fixture artifact\\n'`;
  * content-types entry name — enough for the quarantine sniff, not a real workbook.
  */
 const XLSX_PAYLOAD = `'PK\\u0003\\u0004\\u0014\\u0000\\u0000\\u0000\\u0008\\u0000[Content_Types].xml (sellerops synthetic fixture)'`;
+/**
+ * The payload expression for a REAL committed workbook, supplied as base64 by the caller
+ * (`FixtureHtmlOptions.reviewExportBase64` — the golden `contracts/review-export/naver/v1` artifact).
+ *
+ * Why this exists: {@link XLSX_PAYLOAD} carries the ZIP magic and the content-types entry NAME, so it
+ * satisfies the quarantine sniff — but it is not a workbook and no parser can read it. A fixture run
+ * on that payload can therefore never prove anything downstream of validation. Handing the page the
+ * real committed bytes makes the synthetic path's artifact the SAME bytes the backend ingest test
+ * consumes. Structural validity is not ingestibility; only real bytes close that gap.
+ *
+ * Still fully synthetic: the committed workbook contains only invented rows (see the contract SPEC).
+ */
+const BASE64_PAYLOAD = (base64: string): string =>
+  `Uint8Array.from(atob('${base64}'), function(c){ return c.charCodeAt(0); })`;
 const DOWNLOAD_HREF_SCRIPT = (payloadLiteral: string): string => `
   (function(){
     var t = document.querySelector('a[data-aw-target][download]');
@@ -103,7 +117,18 @@ function page(body: string, opts: { surface: boolean; state: boolean; downloadPa
   </body></html>`;
 }
 
-export function fixtureHtml(mode: FixtureMode): string {
+/** Caller-supplied fixture inputs. Absent → the fixture behaves exactly as it always has. */
+export interface FixtureHtmlOptions {
+  /**
+   * Base64 of the committed golden review-export workbook. Applies to `naver-review-export-xlsx`
+   * only. When supplied, the user's click fires a download of the REAL committed bytes instead of
+   * the structurally-shaped stand-in. The fixture module itself never reads the filesystem — the
+   * caller loads the artifact and passes it in.
+   */
+  reviewExportBase64?: string;
+}
+
+export function fixtureHtml(mode: FixtureMode, opts: FixtureHtmlOptions = {}): string {
   switch (mode) {
     case "normal":
       return page(TARGET_BUTTON("export-reviews"), { surface: true, state: true });
@@ -139,7 +164,7 @@ export function fixtureHtml(mode: FixtureMode): string {
       return page(REVIEW_EXPORT_SURFACE(REVIEW_EXPORT_ANCHOR("synthetic-review-export.xlsx")), {
         surface: true,
         state: true,
-        downloadPayload: XLSX_PAYLOAD,
+        downloadPayload: opts.reviewExportBase64 ? BASE64_PAYLOAD(opts.reviewExportBase64) : XLSX_PAYLOAD,
       });
   }
 }

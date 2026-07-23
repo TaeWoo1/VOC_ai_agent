@@ -35,6 +35,7 @@ import type {
   TriageDisposition,
   ScheduleView,
   SellerAccountResponse,
+  ReviewImport,
   SyncJobView,
   SyncRunFilters,
   SyncRunView,
@@ -68,6 +69,7 @@ import {
   mockOrders,
   mockSchedules,
   mockSellerAccounts,
+  mockReviewImports,
   mockSyncJobs,
   mockSyncRuns,
   mockVocItemTriage,
@@ -535,6 +537,22 @@ export const api = {
       `/api/seller-accounts/${accountId}/backfill`,
       request,
     );
+    return data;
+  },
+  // The org's most recent REVIEW imports, newest first — the seller's own record of what their
+  // exports and uploads brought. Fail-closed like the attention reads: a dead backend must surface as
+  // an error, never as "아직 가져온 기록이 없어요", which would read as reassurance.
+  //
+  // The server filters to review imports IN THE QUERY and limits after, so this is the newest N
+  // review imports rather than the review imports inside the newest N jobs.
+  async getReviewImportsStrict(limit?: number): Promise<ReviewImport[]> {
+    // Demo mode is a coherent fixture world, not a broken one: without this the rail is the only
+    // panel on /operations that renders an error, which reads as a bug rather than as a demo.
+    if (USE_MOCKS) {
+      return mockReviewImports(limit);
+    }
+    const search = limit == null ? "" : `?limit=${limit}`;
+    const { data } = await http.get<ReviewImport[]>(`/api/imports/reviews${search}`);
     return data;
   },
   // Channel-generic operator attention signals over an explicit [from, to] window.

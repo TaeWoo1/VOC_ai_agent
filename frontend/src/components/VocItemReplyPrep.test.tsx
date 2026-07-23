@@ -48,6 +48,7 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     approval: null,
     outcome: null,
     capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
+    channelReplyState: "UNKNOWN",
     ...over,
   };
 }
@@ -689,5 +690,32 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
     await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
     expect(document.body.textContent).not.toMatch(/발송|전송|등록|게시/);
+  });
+});
+
+describe("VocItemReplyPrep — the channel already answered", () => {
+  // The server withholds `canStartSubmissionRun` and 409s the call for a review the channel has
+  // already answered. The panel's job is to say WHY, so an operator does not read a missing control
+  // as a bug — and to keep copy available, because the clipboard is theirs.
+  const ANSWERED = {
+    ...APPROVED,
+    capabilities: { ...APPROVED.capabilities, canStartSubmissionRun: false },
+    channelReplyState: "ANSWERED",
+  };
+
+  it("explains why the guided step is unavailable", async () => {
+    await renderPanel(ANSWERED);
+
+    expect(await screen.findByTestId("channel-answered-notice")).toHaveTextContent(
+      "채널에 이미 답변이 등록된 리뷰예요",
+    );
+    expect(screen.queryByRole("button", { name: /네이버에서 직접 답변하기/ })).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the channel state is unknown — absence is not an answer", async () => {
+    await renderPanel(APPROVED);
+
+    await screen.findByRole("button", { name: /네이버에서 직접 답변하기/ });
+    expect(screen.queryByTestId("channel-answered-notice")).not.toBeInTheDocument();
   });
 });

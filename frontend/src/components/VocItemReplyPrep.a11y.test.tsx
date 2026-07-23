@@ -26,6 +26,7 @@ const REF = "review:mock-voc-0";
 function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
   return {
     actionRef: REF,
+    channelReplyState: "UNKNOWN",
     redactedBody: "합성-리뷰-본문: 배송이 너무 늦었습니다",
     bodyRedacted: true,
     triageDisposition: "RESPONSE_NEEDED",

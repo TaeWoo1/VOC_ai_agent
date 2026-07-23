@@ -394,6 +394,32 @@ export interface BackfillRequest {
 
 // --- Operator attention signals (channel-generic VOC) ---
 
+// Mirrors com.sellerops.sync.ReviewImportView — one review import as the operator's history shows it.
+//
+// Counts mean exactly what ingest tallied: `successRows` = newly inserted reviews, `skippedRows` =
+// duplicates rejected by dedup (an all-duplicate re-import is a SUCCESS with 0 new), `failedRows` =
+// mapping plus persistence errors, `totalRows` = the sum of those three — NOT the file's row count.
+//
+// `status` is RUNNING (opened, never finalized) | SUCCESS | PARTIAL | FAILED.
+// `method` is SELLER_CENTER_EXPORT (an Action Window export landed) | MANUAL_UPLOAD (a person picked
+// a file) | null (a row older than the provenance column — unknown, never guessed).
+//
+// Deliberately carries no `errorMessage`: the server's is a raw row-error or exception text that can
+// embed parser or filename detail. Copy for a failure is FE-owned. It carries no `channelId` either —
+// nothing renders it, and per-row channel attribution arrives (as a readable label) when a second
+// channel actually reaches this history.
+export interface ReviewImport {
+  id: string;
+  method: string | null;
+  status: string;
+  totalRows: number;
+  successRows: number;
+  skippedRows: number;
+  failedRows: number;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 // Mirrors com.sellerops.attention.dto.AttentionSignal — METADATA ONLY. A typed,
 // severity-ranked count of collected review/inquiry rows that need a look. Carries
 // no raw article title/content, source identifiers, or customer PII; label and
@@ -618,6 +644,11 @@ export interface ReviewReplyPrep {
   // ReviewReplyOutcome — outcome and verification are separate, always shown as a pair.
   outcome: ReviewReplyOutcome | null;
   capabilities: ReviewReplyCapabilities;
+  // What the CHANNEL last said about an existing reply (PENDING | ANSWERED | UNKNOWN, from the
+  // import's 답글여부) — never SellerOps' own record of a guided reply, which is `outcome`. Present
+  // so the panel can explain WHY the guided step is unavailable instead of showing a dead control:
+  // a review the channel already answered must not be guided into a second public reply.
+  channelReplyState: string | null;
 }
 
 // Mirrors dto.ReviewReplySubmissionRunResponse. `submissionRef` is an opaque, single-use binding the
