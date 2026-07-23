@@ -142,11 +142,12 @@ Append a dated entry; never rewrite prior entries — correct forward.
   can be filtered by category — with server-computed window counts, since a server-paginated page of
   ten cannot describe the window. Added `ItemAnalysisCategories` as the one vocabulary the analyzer
   writes and the facet filters on, plus V23.
-- **Evidence:** `docs/slices/review-classification-queue-v1.md`; backend 1456 (was 1433), frontend 710
-  (was 691), collector 4843/95 unchanged; both typechecks clean. Seven falsifications, all caught. An
-  independent review found 4 real defects — an over-claiming drill-down heading, a WARN log echoing an
-  unvetted category value, an undocumented break in the count reconciliation, and an active filter
-  that could outlive its own options — all fixed (§6).
+- **Evidence:** `docs/slices/review-classification-queue-v1.md`; backend 1458 (was 1433), frontend 710
+  (was 691), collector 4843/95 unchanged; both typechecks clean. Eight falsifications, all caught. Two
+  independent review passes found 5 real defects — an over-claiming drill-down heading, a WARN log
+  echoing an unvetted category value, an undocumented break in the count reconciliation, an active
+  filter that could outlive its own options, and a valid category silently dropped on a lens that
+  cannot use it (now a 400) — all fixed (§6).
   V23 applied to a disposable PostgreSQL 15 database (history contiguous 1–23) and the new JPQL was
   executed against real PostgreSQL as well as H2, since the test profile disables Flyway.
 - **§4.1 impact:** none. This changes what an operator sees and in what order, not what a channel

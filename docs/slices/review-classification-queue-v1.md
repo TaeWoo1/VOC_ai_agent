@@ -111,13 +111,13 @@ Two consequences follow, both deliberate:
 
 | | before | after |
 |---|---|---|
-| backend | 1433 (1 skipped) | **1456** (1 skipped) |
+| backend | 1433 (1 skipped) | **1458** (1 skipped) |
 | frontend | 691 | **710** |
 | collector | 4843 / 95 skipped | unchanged |
 
 Both typechecks clean (`tsc --noEmit` for frontend and collector — vitest does not typecheck).
 
-**Every new rule was falsified before being trusted** — seven reverts, each caught:
+**Every new rule was falsified before being trusted** — eight reverts, each caught:
 
 | revert | test that failed |
 |---|---|
@@ -128,6 +128,7 @@ Both typechecks clean (`tsc --noEmit` for frontend and collector — vitest does
 | `categoryChip` falls back to 기타 | `renders NOTHING when no analysis exists` (+ the card test) |
 | facet built from the rendered page | `builds the facet from the SERVER's window counts` |
 | drop the page reset on facet change | `resets to the first page when the facet changes` |
+| `supportsCategoryFacet()` → always true | `aCategoryOnALensThatCannotUseItIsRefusedRatherThanDropped` |
 
 **Migration verified on real PostgreSQL 15**, not just H2: V23 applied to a disposable database
 (`sellerops_v23_check`), history contiguous **1–23**, `ix_item_analyses_category` present with the
@@ -137,9 +138,9 @@ executed against a real PostgreSQL 15 database and passed there, with the table'
 afterwards proving the run was not silently falling back to H2. Both disposable databases dropped;
 the dev database was never touched.
 
-## 6. What the independent review caught
+## 6. What the independent reviews caught
 
-Four defects, all fixed before commit:
+Five defects, all fixed:
 
 1. **The drill-down header over-claimed once a facet existed.** It read
    "낮은 평점(1~3점) 리뷰 **전체를** 보여줍니다" — true before this slice, false the moment the list
@@ -156,6 +157,14 @@ Four defects, all fixed before commit:
 4. **An active filter could outlive its options.** The drill-down survives a window change, so a
    category chosen over one window can have no rows in the next — leaving an empty list whose only
    cause was a filter with no visible control. An active filter now always renders, at 0 if need be.
+5. **A valid category on a lens that cannot use it was silently dropped** (`?type=NEW_REVIEW&
+   category=배송` returned unfiltered rows as if filtered). This is the mirror image of the
+   unknown-category 400 — and the more dangerous half, because it returns strictly MORE rows than
+   the caller asked for while the response says nothing about having ignored the filter. Now a 400,
+   keyed on `AttentionSignalType.supportsCategoryFacet()`. The source's count-emission was switched
+   onto that same predicate rather than `excludesAnswered()`, which selects the same lens today for
+   an unrelated reason: two rules that coincide by accident drift apart silently, and the drift here
+   would render a filtered list with no way back.
 
 ## 7. Recorded, not fixed
 

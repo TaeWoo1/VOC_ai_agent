@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.sellerops.attention.dto.CategoryCount;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
@@ -109,7 +110,15 @@ class OperatorAttentionItemsJsonContractTest {
                 .andExpect(jsonPath("$.items[0].sourceCreatedDate").value("2026-05-14"))
                 .andExpect(jsonPath("$.items[0].collectedDate").value("2026-05-15"))
                 .andExpect(jsonPath("$.items[0].signalType").value("LOW_RATING_REVIEW"))
-                .andExpect(jsonPath("$.items[0].safePreview").value("배송은 빨랐는데 색이 생각과 달라요"));
+                .andExpect(jsonPath("$.items[0].safePreview").value("배송은 빨랐는데 색이 생각과 달라요"))
+                // The classification fields cross the wire under the names the client reads. The two
+                // totals are asserted together and DIFFERENT here, so a serializer that dropped one
+                // and echoed the other into its place could not pass.
+                .andExpect(jsonPath("$.items[0].category").value("배송"))
+                .andExpect(jsonPath("$.unfilteredTotal").value(3))
+                .andExpect(jsonPath("$.categoryCounts[0].category").value("배송"))
+                .andExpect(jsonPath("$.categoryCounts[0].count").value(1))
+                .andExpect(jsonPath("$.unclassifiedCount").value(2));
     }
 
     /**
@@ -288,8 +297,8 @@ class OperatorAttentionItemsJsonContractTest {
     private void stubItems(OperatorVocItem... items) {
         when(service.attentionItems(any(), any(), anyString(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new OperatorVocItemPage(
-                        "LOW_RATING_REVIEW", from, to, 0, 20, items.length, items.length,
-                        List.of(), 0L, List.of(items)));
+                        "LOW_RATING_REVIEW", from, to, 0, 20, items.length, items.length + 2,
+                        List.of(new CategoryCount("배송", 1L)), 2L, List.of(items)));
     }
 
     /** One synthetic drill-down row with a name, a ref, and no decision yet. */

@@ -89,7 +89,7 @@ public class OperatorAttentionService {
                                               int page, int size) {
         SellerAccount account = requireAccount(orgId, accountId);
         AttentionSignalType signalType = parseType(type);
-        String safeCategory = parseCategory(category);
+        String safeCategory = parseCategory(signalType, category);
         BackfillWindow window = BackfillWindow.of(from, to);
         int safeSize = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
         int safePage = Math.max(0, page);
@@ -130,9 +130,12 @@ public class OperatorAttentionService {
      * category. Same reasoning as {@link #parseType} directly above, which has always refused an
      * unknown signal type instead of quietly listing nothing.
      */
-    private static String parseCategory(String category) {
+    private static String parseCategory(AttentionSignalType signalType, String category) {
         if (category == null || category.isBlank()) {
             return null;
+        }
+        if (!signalType.supportsCategoryFacet()) {
+            throw ApiException.badRequest("이 신호에는 분류 필터를 사용할 수 없습니다.");
         }
         String trimmed = category.strip();
         if (ItemAnalysisCategories.isUnclassified(trimmed) || ItemAnalysisCategories.isSupported(trimmed)) {

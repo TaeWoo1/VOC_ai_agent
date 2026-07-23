@@ -253,7 +253,13 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         // The breakdown is offered only for the lens the facet applies to; an arrivals list is a
         // chronological record, not a worklist to slice up. Its counts are always UNFILTERED by
         // category, so choosing a facet cannot collapse the facet list to the chosen option.
-        if (!excludesAnswered(signalType)) {
+        //
+        // Keyed on supportsCategoryFacet(), the SAME predicate the service validates the request
+        // against — not on excludesAnswered(), which happens to select the same lens today for an
+        // unrelated reason (hiding channel-answered rows). Two rules that coincide by accident drift
+        // apart the moment either changes, and the drift would be silent: a lens the service accepts
+        // a facet for but this emits no counts for renders a filtered list with no way back.
+        if (!signalType.supportsCategoryFacet()) {
             return new VocItemSlice(rows, result.getTotalElements(), result.getTotalElements(),
                     List.of(), 0L);
         }

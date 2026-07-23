@@ -274,6 +274,28 @@ class IngestedReviewCategoryFacetTest {
     }
 
     @Test
+    void aCategoryOnALensThatCannotUseItIsRefusedRatherThanDropped() {
+        // The mirror image of the unknown-category 400, and the more dangerous half: dropping the
+        // filter returns strictly MORE rows than the caller asked for, with nothing in the response
+        // admitting the filter was ignored. An arrivals list is a record, not a queue to slice up.
+        seedClassified(1, "2026-05-05T00:00:00Z", ItemAnalysisCategories.DELIVERY);
+
+        assertThatThrownBy(() -> attention.attentionItems(org, accountId,
+                AttentionSignalType.NEW_REVIEW.name(), FROM, TO, ItemAnalysisCategories.DELIVERY, 0, 20))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("분류 필터를 사용할 수 없습니다");
+    }
+
+    @Test
+    void anArrivalsLensWithNoCategoryIsStillPerfectlyFine() {
+        // The refusal must be about the FILTER, not about the lens: omitting it keeps working.
+        seedClassified(1, "2026-05-05T00:00:00Z", ItemAnalysisCategories.DELIVERY);
+
+        assertThat(attention.attentionItems(org, accountId,
+                AttentionSignalType.NEW_REVIEW.name(), FROM, TO, null, 0, 20).total()).isEqualTo(1);
+    }
+
+    @Test
     void aBlankCategoryMeansNoFilterNotAnEmptyResult() {
         seedClassified(1, "2026-05-05T00:00:00Z", ItemAnalysisCategories.DELIVERY);
 
