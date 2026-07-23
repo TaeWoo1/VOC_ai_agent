@@ -54,6 +54,7 @@ describe("dev-bridge reply runtime (v2 over an injected transport)", () => {
           listeners.add(l);
           return () => listeners.delete(l);
         },
+        subscribeResults: () => () => {},
       },
     };
   }
@@ -130,21 +131,35 @@ describe("resolveReplyRuntime — production may not mint a run", () => {
 });
 
 describe("createBridgeReplyRuntime.report — it always settles, and always cleans up", () => {
-  /** A transport that also reports how many listeners are still attached. */
+  /**
+   * A transport that also reports how many listeners are still attached — EVENT and RESULT
+   * listeners together, so the disposal tests' "zero" claim cannot be satisfied by cleaning one
+   * channel and leaking the other.
+   */
   function fakeTransport(): {
     transport: ReplyClientTransport;
+    sent: CommandEnvelope[];
     emit: (e: EventEnvelope) => void;
+    emitResult: (r: { commandId: string; accepted: boolean; reason?: string }) => void;
     listenerCount: () => number;
   } {
+    const sent: CommandEnvelope[] = [];
     const listeners = new Set<(e: EventEnvelope) => void>();
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
     return {
+      sent,
       emit: (e) => listeners.forEach((l) => l(e)),
-      listenerCount: () => listeners.size,
+      emitResult: (r) => resultListeners.forEach((l) => l(r)),
+      listenerCount: () => listeners.size + resultListeners.size,
       transport: {
-        send: () => {},
+        send: (c) => sent.push(c),
         subscribe: (l) => {
           listeners.add(l);
           return () => listeners.delete(l);
+        },
+        subscribeResults: (l) => {
+          resultListeners.add(l);
+          return () => resultListeners.delete(l);
         },
       },
     };
@@ -217,6 +232,7 @@ describe("createBridgeReplyRuntime.report — it always settles, and always clea
         throw new Error("socket closed");
       },
       subscribe: () => () => {},
+      subscribeResults: () => () => {},
     };
     const runtime = createBridgeReplyRuntime({ transport: throwing, runId: "run_agentabcd12" });
 
@@ -266,6 +282,7 @@ describe("createBridgeReplyRuntime.report — it always settles, and always clea
         }
         return () => listeners.delete(l);
       },
+      subscribeResults: () => () => {},
     };
     const runtime = createBridgeReplyRuntime({ transport: syncTransport, runId: "run_agentabcd12" });
     const baseline = listeners.size;
@@ -286,5 +303,191 @@ describe("createBridgeReplyRuntime.report — it always settles, and always clea
 
     // Arrives after the caller gave up. Must not throw, must not resolve anything.
     expect(() => t.emit(terminalEvent("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED"))).not.toThrow();
+  });
+
+  it("REJECTS IMMEDIATELY when the agent refuses the report command — the refusal must not hide behind the timeout", async () => {
+    // The timeout made report() finite; this makes it honest about WHY. A STALE_REVISION or
+    // INVALID_FOR_STATE refusal is an answer the agent already gave — the generous timeout below
+    // would turn this test into a 10s hang if the rejection path did not exist.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 10_000 });
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    const reportCommand = t.sent[0]!;
+    t.emitResult({ commandId: reportCommand.commandId, accepted: false, reason: "STALE_REVISION" });
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyReportRejectedError", reason: "STALE_REVISION" });
+  });
+
+  it("a rejection carries a null reason when the agent sent none — never an invented one", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 10_000 });
+    const pending = runtime.report("run_agentabcd12", "SUBMISSION_ABORTED");
+    t.emitResult({ commandId: t.sent[0]!.commandId, accepted: false });
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyReportRejectedError", reason: null });
+  });
+
+  it("ignores a rejection addressed to a DIFFERENT command — correlation is by commandId, not by arrival", async () => {
+    // A reused transport can carry acks for commands this report never sent (an earlier retry, the
+    // START_RUN). Settling on any of them would reject a report the agent never refused.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 5 });
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    t.emitResult({ commandId: "someone-elses-command", accepted: false, reason: "STALE_REVISION" });
+
+    // The foreign rejection settled nothing: the report runs on to its own timeout.
+    await expect(pending).rejects.toThrow(ReplyReportTimeoutError);
+  });
+
+  it("an ACCEPTED result settles nothing — acceptance is permission to keep waiting, not a terminal", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    t.emitResult({ commandId: t.sent[0]!.commandId, accepted: true });
+    // Still pending — the terminal is what resolves it.
+    t.emit(terminalEvent("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED"));
+
+    await expect(pending).resolves.toMatchObject({ operatorOutcome: "OPERATOR_REPORTED_SUBMITTED" });
+  });
+
+  it("cleans up BOTH listeners after a rejection — the result channel must not leak either", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 10_000 });
+    const baseline = t.listenerCount();
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    t.emitResult({ commandId: t.sent[0]!.commandId, accepted: false, reason: "INVALID_FOR_STATE" });
+
+    await expect(pending).rejects.toThrow();
+    expect(t.listenerCount()).toBe(baseline);
+  });
+
+  it("settles and cleans up when the transport REJECTS synchronously inside send() — the loopback shape", async () => {
+    // An in-process transport (the contract's loopback, an in-memory reply session) delivers the
+    // agent's answer synchronously INSIDE transport.send(reportCommand): the promise settles before
+    // send() has even returned. Both unsubscribes are assigned by then, so cleanup must hold — and
+    // this is the wire shape the frame adapter's loopback E2E really produces.
+    const listeners = new Set<(e: EventEnvelope) => void>();
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
+    const syncRejecting: ReplyClientTransport = {
+      send: (c) => {
+        for (const l of [...resultListeners]) l({ commandId: c.commandId, accepted: false, reason: "INVALID_FOR_STATE" });
+      },
+      subscribe: (l) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+      subscribeResults: (l) => {
+        resultListeners.add(l);
+        return () => resultListeners.delete(l);
+      },
+    };
+    const runtime = createBridgeReplyRuntime({ transport: syncRejecting, runId: "run_agentabcd12" }, { reportTimeoutMs: 10_000 });
+    const baseline = listeners.size + resultListeners.size;
+
+    await expect(runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED")).rejects.toMatchObject({
+      name: "ReplyReportRejectedError",
+      reason: "INVALID_FOR_STATE",
+    });
+    expect(listeners.size + resultListeners.size).toBe(baseline);
+  });
+});
+
+describe("createBridgeReplyRuntime.dispose — the runtime releases everything and stays closed", () => {
+  function fakeTransport(): {
+    transport: ReplyClientTransport;
+    sent: CommandEnvelope[];
+    emit: (e: EventEnvelope) => void;
+    listenerCount: () => number;
+  } {
+    const sent: CommandEnvelope[] = [];
+    const listeners = new Set<(e: EventEnvelope) => void>();
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
+    return {
+      sent,
+      emit: (e) => listeners.forEach((l) => l(e)),
+      listenerCount: () => listeners.size + resultListeners.size,
+      transport: {
+        send: (c) => sent.push(c),
+        subscribe: (l) => {
+          listeners.add(l);
+          return () => listeners.delete(l);
+        },
+        subscribeResults: (l) => {
+          resultListeners.add(l);
+          return () => resultListeners.delete(l);
+        },
+      },
+    };
+  }
+
+  it("returns the transport to ZERO listeners — not merely the construction baseline", () => {
+    // The disposal contract's own pin: the construction-time revision tracker is the listener the
+    // report-cleanup tests deliberately treat as baseline, and it is exactly the one dispose() must
+    // remove. Zero, so nothing survives the runtime.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    expect(t.listenerCount()).toBeGreaterThan(0);
+
+    runtime.dispose();
+
+    expect(t.listenerCount()).toBe(0);
+  });
+
+  it("rejects an IN-FLIGHT report and still lands at zero — unmount mid-report leaks nothing", async () => {
+    // Without this, a report in flight at disposal would hold its listeners and timer until the
+    // timeout ran down, on a session the caller has already torn down.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 10_000 });
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+
+    runtime.dispose();
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyRuntimeDisposedError" });
+    expect(t.listenerCount()).toBe(0);
+  });
+
+  it("a report AFTER dispose fails closed and attaches nothing", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    runtime.dispose();
+    const sentBefore = t.sent.length;
+
+    await expect(runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED")).rejects.toMatchObject({
+      name: "ReplyRuntimeDisposedError",
+    });
+    expect(t.listenerCount()).toBe(0);
+    expect(t.sent.length).toBe(sentBefore);
+  });
+
+  it("start AFTER dispose fails closed too — a disposed runtime must not dispatch into a torn-down session", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    runtime.dispose();
+
+    await expect(runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" })).rejects.toMatchObject({
+      name: "ReplyRuntimeDisposedError",
+    });
+    expect(t.sent).toHaveLength(0);
+  });
+
+  it("dispose is idempotent", () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    runtime.dispose();
+
+    expect(() => runtime.dispose()).not.toThrow();
+    expect(t.listenerCount()).toBe(0);
+  });
+
+  it("the SIMULATED runtime honours the same lifecycle — one contract for every consumer", async () => {
+    const runtime = createSimulatedReplyRuntime();
+    runtime.dispose();
+
+    await expect(runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" })).rejects.toMatchObject({
+      name: "ReplyRuntimeDisposedError",
+    });
+    await expect(runtime.report("run_x", "SUBMISSION_ABORTED")).rejects.toMatchObject({
+      name: "ReplyRuntimeDisposedError",
+    });
   });
 });

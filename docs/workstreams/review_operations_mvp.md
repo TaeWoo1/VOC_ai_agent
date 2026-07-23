@@ -150,6 +150,30 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-23 — Reply Frame Adapter & Runtime Disposal v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the guided-reply terminal)
+- **Did:** The v2 reply runtime spoke envelopes; the wire speaks frames; nothing translated — the
+  runtime had never been driven by anything shaped like the real wire, and an agent refusal
+  (`aw_command_result{accepted:false}`) could only surface as the 12s timeout. Added
+  `createReplyFrameTransport` (envelope↔frame, one subscription each way), immediate
+  `ReplyReportRejectedError` on a refused report (correlated by commandId; `accepted:true` settles
+  nothing), and `dispose()` per the recorded DISPOSAL CONTRACT: releases the construction listener,
+  rejects in-flight reports, fails later start/report closed, idempotent — transport listener count
+  pinned at ZERO after disposal, including mid-report.
+- **Evidence:** `docs/slices/reply-frame-adapter-v1.md`; frontend 784 (was 765), collector and
+  backend untouched; typechecks clean. A loopback E2E drives the real runtime through the real
+  adapter over serialized frames — terminal and refusal both. Four falsifications caught; dropping
+  the rejection settle reproduces the hang exactly.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ Adapter + lifecycle only — **still injected into nothing**; no carrier
+  switching; `start()` stays fire-and-forget (a refused START_RUN surfaces at the first report —
+  recorded for the injection slice, which decides who awaits what).
+- **Next:** the injection slice — construct the bridge runtime behind `resolveReplyRuntime()` when a
+  reply-carrier session exists, with the React effect cleanup that actually calls `dispose()`, and
+  decide `start()`'s acknowledgement semantics there.
+
 ### 2026-07-23 — Reply Report Safety v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the guided-reply terminal)
 - **Did:** `createBridgeReplyRuntime.report()` resolved ONLY on `RUN_OPERATOR_REPORTED` — no timeout,

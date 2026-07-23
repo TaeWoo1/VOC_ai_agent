@@ -815,6 +815,7 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     const hangingRuntime = {
       start: () => Promise.resolve({ runId: "run_stub01" }),
       report: () => Promise.reject(new Error("no terminal arrived")),
+      dispose: () => {},
     };
     render(
       <VocItemReplyPrep
