@@ -150,6 +150,28 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-23 — Carrier Refusal Diagnostics v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the Bridge carrier beneath it)
+- **Did:** `connectAwBridgeSession` returned bare `null` for six different situations — bridge off,
+  unpaired, ticket rejected, unreachable, no announcement, version mismatch — and, after the carrier
+  discriminator, for an agent hosting the REPLY carrier. That last one is a healthy agent, and it
+  reached the operator as "offline". Replaced the null with a discriminated result carrying a closed
+  set of sanitized reason enums (plus the announced carrier, only when knowable), surfaced in the
+  DEV-only Bridge diagnostics panel.
+- **Evidence:** `docs/slices/carrier-refusal-diagnostics-v1.md`; frontend 756 (was 751), collector
+  unchanged count (2 cross-stack call sites updated), backend untouched; typechecks clean. Two
+  falsifications caught. ⚠ The collector's CROSS-STACK tests caught the signature change where the
+  frontend suite could not — they drive the real FE transport against a real Bridge, and are the
+  end-to-end proof the export attachment path still works.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ Diagnostics only — **no v2 transport, no reply-runtime injection, no mode
+  switching**. Every fail-closed path still fails closed; the refusal set is identical, only labelled.
+- **Next:** audit the envelope↔frame adapter and the `report()` timeout/rejection path. `report()`
+  resolves only on `RUN_OPERATOR_REPORTED` with no timeout and no `aw_command_result` handling, so
+  wiring it today would wedge the reply panel at `busy = "reporting"` with no way out.
+
 ### 2026-07-23 — Action Window Carrier Discriminator v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the Bridge carrier beneath it)
 - **Did:** Closed a mis-attach that nothing could have detected. The v1 export and v2 reply carriers

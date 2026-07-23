@@ -27,7 +27,9 @@
 // `appendRecentRun`). Recheck-never-completes is inherited from the FE-1 mock
 // adapter, not re-implemented.
 
+import type { AwCarrierKind } from "../../../../contracts/action-window/aw-carrier-kind";
 import type { ActionWindowRunView, CommandType } from "./contract";
+import type { AwRefusalReason } from "./wsTransport";
 import { isOutOfOrderEvent } from "./contract";
 import { UI_SCENARIOS, type ScenarioName } from "./fixtures";
 import {
@@ -76,6 +78,12 @@ export interface OperationsState {
    *  RE-RENDERS when it flips — even on the fixture-fallback path, which otherwise
    *  changes no store field and would leave the panel showing a stale "아니오". */
   bootAttempted: boolean;
+  /**
+   * Why the last live-bridge boot was refused, or null when it succeeded / was never attempted.
+   * DEV diagnostics only — a sanitized enum plus, for a carrier mismatch, which carrier the agent
+   * announced. Never a message, status code, origin or token.
+   */
+  bridgeRefusal: { reason: AwRefusalReason; announcedCarrier?: AwCarrierKind } | null;
   sourceMode: SourceMode;
   /** Last-loaded fixture names — used only to highlight the DEV selectors. */
   runScenario: ScenarioName;
@@ -110,6 +118,7 @@ function initialState(): OperationsState {
     ...freshConnectionDiagnostics(),
     retryPending: false,
     bootAttempted: false,
+    bridgeRefusal: null,
     sourceMode: "fixture",
     runScenario: "human-action-required",
     homeScenario: INITIAL_HOME,
@@ -286,6 +295,19 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
  *  store state. `bridgeSource.connectBridgeIfEnabled` calls this so the DEV panel
  *  re-renders when the flag flips — the fixture-fallback path changes no other store
  *  field, so without this the panel would keep showing a stale "부트 시도됨 = 아니오". */
+/** Record (or clear, with null) why the last live-bridge boot was refused. */
+export function setBridgeRefusal(
+  reason: AwRefusalReason | null,
+  announcedCarrier?: AwCarrierKind,
+): void {
+  const next = reason == null ? null : announcedCarrier ? { reason, announcedCarrier } : { reason };
+  if (state.bridgeRefusal?.reason === next?.reason
+      && state.bridgeRefusal?.announcedCarrier === next?.announcedCarrier) {
+    return;
+  }
+  setState({ ...state, bridgeRefusal: next });
+}
+
 export function setBridgeBootAttempted(value: boolean): void {
   if (state.bootAttempted === value) return;
   setState({ ...state, bootAttempted: value });

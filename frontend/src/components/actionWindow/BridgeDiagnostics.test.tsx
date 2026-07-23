@@ -43,12 +43,12 @@ describe("FE-6 BridgeDiagnostics (DOM/a11y)", () => {
     mockBridgeModeEnabled.mockReturnValue(false);
   });
 
-  it("renders a labelled diagnostics section with a definition list of 10 fields", () => {
+  it("renders a labelled diagnostics section with a definition list of 11 fields", () => {
     mockBridgeModeEnabled.mockReturnValue(true);
     const { container } = render(<BridgeDiagnostics state={bridgeState({ sourceMode: "bridge" })} />);
     expect(screen.getByRole("region", { name: "브리지 진단 (개발용)" })).toBeInTheDocument();
-    expect(container.querySelectorAll("dl dt")).toHaveLength(10);
-    expect(container.querySelectorAll("dl dd")).toHaveLength(10);
+    expect(container.querySelectorAll("dl dt")).toHaveLength(11);
+    expect(container.querySelectorAll("dl dd")).toHaveLength(11);
   });
 
   it("verdict LIVE: bridge mode on + bridge source shows the live label and 소스 모드 = bridge", () => {

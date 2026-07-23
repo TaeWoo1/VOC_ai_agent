@@ -17,9 +17,9 @@ describe("adapter mode selection (mock vs bridge)", () => {
     expect(resolveAdapterMode()).toBe("mock");
   });
 
-  it("resolves no live session when bridge mode is disabled (no network attempted)", async () => {
+  it("refuses as `bridge-disabled` when bridge mode is off (no network attempted)", async () => {
     // With bridge mode off, resolveBridgeSession must short-circuit to null — this is the structural
     // guarantee that the shipped screen stays on the mock without ever touching the agent.
-    await expect(resolveBridgeSession()).resolves.toBeNull();
+    await expect(resolveBridgeSession()).resolves.toEqual({ ok: false, reason: "bridge-disabled" });
   });
 });

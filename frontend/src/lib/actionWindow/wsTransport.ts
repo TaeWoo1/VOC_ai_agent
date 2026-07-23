@@ -17,6 +17,7 @@
 import {
   AW_CARRIER_EXPORT,
   parseAwCarrierKind,
+  type AwCarrierKind,
 } from "../../../../contracts/action-window/aw-carrier-kind";
 import {
   ACTION_WINDOW_TRANSPORT_VERSION,
@@ -97,19 +98,60 @@ function resolveDeps(deps: AwWsDeps): ResolvedDeps {
 }
 
 interface OpenedSocket {
+  ok: true;
   ws: WebSocketLike;
   runId: string;
   channelCode: string;
 }
 
 /**
- * Mint a ticket from the stored pairing token and open one authenticated socket, resolving only once
- * the agent announces its hosted run (`aw_session`). `null` on any failure — unpaired, unreachable,
- * revoked (401), no announcement in time, or a transport-version mismatch.
+ * Why a live session could not be established. A CLOSED set of stable, sanitized enum values —
+ * never a message, a status code, an origin, or a token — so it is safe to show and safe to log.
+ *
+ * <p>These used to be one indistinguishable `null`, which made "you have not paired yet", "the agent
+ * is off", and "the agent is hosting the REPLY carrier" the same event to a caller. The last one in
+ * particular is a normal, recoverable state that an operator can act on — and reporting it as
+ * "offline" is how a working agent looks broken.
  */
-async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null> {
+export type AwRefusalReason =
+  | "bridge-disabled"
+  | "unpaired"
+  | "ticket-rejected"
+  | "unreachable"
+  | "no-announcement"
+  | "transport-version-mismatch"
+  | "carrier-mismatch";
+
+/** A refused connection attempt: the reason, plus the announced carrier when that is what refused it. */
+export interface AwRefusal {
+  ok: false;
+  reason: AwRefusalReason;
+  /**
+   * Present only for {@code carrier-mismatch} AND only when the announced value was a KNOWN carrier.
+   * An unrecognised or absent carrier stays absent here: it is precisely the thing we could not
+   * identify, and naming it would be a guess.
+   */
+  announcedCarrier?: AwCarrierKind;
+}
+
+export type AwBridgeConnectResult = { ok: true; session: AwBridgeSession } | AwRefusal;
+
+function refuse(reason: AwRefusalReason): AwRefusal {
+  return { ok: false, reason };
+}
+
+/**
+ * Mint a ticket from the stored pairing token and open one authenticated socket, resolving only once
+ * the agent announces its hosted run (`aw_session`).
+ *
+ * <p>Every failure carries a REASON rather than collapsing to null. They are genuinely different
+ * situations — "you have not paired", "the agent is off", "the agent is hosting the OTHER carrier" —
+ * and an operator can act on the difference. The refusal behaviour itself is unchanged: no reason
+ * attaches a socket that the previous code would have rejected.
+ */
+async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRefusal> {
   const token = d.storage.getItem(BRIDGE_TOKEN_KEY);
-  if (!token) return null;
+  if (!token) return refuse("unpaired");
 
   let ticket: string;
   try {
@@ -118,18 +160,18 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ clientProtocolVersion: BRIDGE_PROTOCOL_VERSION }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return refuse("ticket-rejected");
     const body = (await res.json()) as { ticket?: unknown };
-    if (typeof body.ticket !== "string") return null;
+    if (typeof body.ticket !== "string") return refuse("ticket-rejected");
     ticket = body.ticket;
   } catch {
-    return null;
+    return refuse("unreachable");
   }
 
   return new Promise((resolve) => {
     const ws = d.wsFactory(`${d.wsBase}/bridge/ws?ticket=${encodeURIComponent(ticket)}`);
     let settled = false;
-    const giveUp = (): void => {
+    const giveUp = (reason: AwRefusalReason, announcedCarrier?: AwCarrierKind): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -138,9 +180,9 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
       } catch {
         /* already closed */
       }
-      resolve(null);
+      resolve(announcedCarrier ? { ok: false, reason, announcedCarrier } : refuse(reason));
     };
-    const timer = setTimeout(giveUp, d.sessionTimeoutMs);
+    const timer = setTimeout(() => giveUp("no-announcement"), d.sessionTimeoutMs);
     ws.onmessage = (ev) => {
       if (settled) return;
       let msg: unknown;
@@ -158,7 +200,7 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
       };
       if (m.type !== "aw_session") return; // hello/snapshot belong to the status channel — ignore here
       if (m.transportVersion !== ACTION_WINDOW_TRANSPORT_VERSION || typeof m.runId !== "string" || typeof m.channelCode !== "string") {
-        giveUp();
+        giveUp("transport-version-mismatch");
         return;
       }
       // WHICH carrier the agent hosts. Nothing else on this announcement can tell them apart:
@@ -174,19 +216,23 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
       // Absence fails closed too. Both endpoints predate this field, so an announcement without it is
       // genuinely ambiguous — and resolving that by assuming "export" is exactly how the mis-attach
       // would come back.
-      if (parseAwCarrierKind(m.carrier) !== AW_CARRIER_EXPORT) {
-        giveUp();
+      const announced = parseAwCarrierKind(m.carrier);
+      if (announced !== AW_CARRIER_EXPORT) {
+        // The announced carrier travels with the refusal when it is a KNOWN one: "this agent hosts
+        // replies" is actionable where "offline" is not. A null announced value stays absent rather
+        // than being reported as a carrier, since it is precisely the thing we could not identify.
+        giveUp("carrier-mismatch", announced ?? undefined);
         return;
       }
       settled = true;
       clearTimeout(timer);
-      resolve({ ws, runId: m.runId, channelCode: m.channelCode });
+      resolve({ ok: true, ws, runId: m.runId, channelCode: m.channelCode });
     };
     ws.onclose = () => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
-        resolve(null);
+        resolve(refuse("unreachable"));
       }
     };
     ws.onerror = () => {
@@ -196,13 +242,16 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
 }
 
 /**
- * Connect the live Action Window transport over the Local Agent Bridge. Resolves `null` whenever a
- * live session cannot be established — the caller falls back to the mock.
+ * Connect the live Action Window transport over the Local Agent Bridge.
+ *
+ * <p>Resolves a session, or a REFUSAL carrying why. The caller still falls back to the mock on any
+ * refusal — the honest-fallback rule is unchanged; the difference is only that it can now say what
+ * happened instead of showing "offline" for every cause.
  */
-export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSession | null> {
+export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeConnectResult> {
   const d = resolveDeps(deps);
   const first = await openAnnouncedSocket(d);
-  if (!first) return null;
+  if (!first.ok) return first;
 
   const listeners = new Set<(frame: AwServerFrame) => void>();
   let active: WebSocketLike | null = null;
@@ -267,7 +316,9 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
       await new Promise<void>((r) => setTimeout(r, d.retryDelayMs));
       if (closed) return;
       const next = await openAnnouncedSocket(d);
-      if (!next) continue;
+      // A refusal on reconnect is retried like any other failure — including a carrier switch, which
+      // must never be adopted into an established v1 transport.
+      if (!next.ok) continue;
       if (closed || next.runId !== first.runId) {
         // Session closed meanwhile, or the agent now hosts a different run — never splice two runs.
         try {
@@ -290,7 +341,7 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
   adopt(first.ws);
   setStatus("connected");
 
-  return {
+  const session: AwBridgeSession = {
     runId: first.runId,
     channelCode: first.channelCode,
     transport: {
@@ -313,4 +364,5 @@ export async function connectAwBridgeSession(deps: AwWsDeps): Promise<AwBridgeSe
       }
     },
   };
+  return { ok: true, session };
 }
