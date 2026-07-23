@@ -1,4 +1,29 @@
-# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (EXECUTED · FAILED CLOSED)**
+# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (EXECUTED · COMPLETED on attempt 3)**
+
+> ## ✅ ATTEMPT 3 — 2026-07-24 — **COMPLETED 3-of-3, REAL INGEST · G3 + G6 CONSUMED**
+>
+> The multi-checkpoint runtime (`871fccd`, holder-synced) drove the export to a real `COMPLETED`:
+> export click **observed** (01:27:58), a **direct download** (0 continuation checkpoints — this
+> range delivered the Run-4 sync shape, not the attempt-2 notification flow), validated +
+> parse-gated + **ingested `SUCCESS`** (58 rows, 0 skipped / 0 failed) into the disposable backend.
+> Live contact 01:23:36 → ~01:28:21, well inside the 55-min window.
+>
+> - **PROVEN (C1/C3):** a real NAVER export is compatible and ingests end to end — all mapped fields
+>   non-null across 58 rows (`body`/`rating`/`received_at`/`external_id`/`reply_state` = 58/58),
+>   `received_at` time-bearing and quantised to **UTC midnight 58/58**, and **`답글여부` matched its
+>   exact-key alias** producing valid reply-states (all `PENDING`, zero `UNKNOWN` — the column was
+>   present and read). Arrivals whole: 58 `NEW_REVIEW`; rating split low/mid/high = 1 / 1 / 56.
+> - **NOT DEMONSTRATED (C2/C4 — the reply-state headline):** the exported range held **0 answered
+>   reviews**, so "an answered review leaves the queue" and "guided reply refuses an answered review"
+>   could not be shown — the **§8 fallback**, recorded not passed. ⚠ Diverges from the operator's
+>   on-screen §8 confirmation; the range that actually exported evidently differed from that view
+>   (all 58 rows are a single recent date). **C5** (mint on a PENDING row) was **blocked by a 500 on
+>   the triage/draft endpoints** — a separate backend-only anomaly to reproduce OFFLINE.
+> - Teardown clean: DB dropped (name-guarded), `sellerops` intact, zero artifacts, secrets scrubbed,
+>   holder `.env`/profile untouched. Both 2026-07-24 gates **CONSUMED**. Full record: **§18**.
+>
+> **A first live SUCCESS for the continuation-checkpoint runtime**, and the multi-step choreography
+> was proven safe live even though this range happened to take the direct path.
 
 > ## ▶ DISPATCHED 2026-07-23 (second attempt) — **RUN EXECUTED · FAILED CLOSED (`DOWNLOAD_TIMEOUT`) · G3 + G6 CONSUMED**
 >
@@ -570,7 +595,7 @@ debugging environment. That work is §17.
 
 G3 #2 and G6 #2 (2026-07-24) are **CONSUMED** — register updated. C1–C5 remain `NOT DEMONSTRATED`.
 
-## 17. Continuation-checkpoint slice — built OFFLINE 2026-07-24, ⚠ UNCOMMITTED (report-first hold)
+## 17. Continuation-checkpoint slice — built OFFLINE 2026-07-24, committed `871fccd`
 
 The §16.3 reclassification made the fix a **choreography extension**, implemented entirely inside
 `NaverLiveProbeDriver` — no engine, contract, `STEP_PLAN`, or FE change:
@@ -609,3 +634,81 @@ The §16.3 reclassification made the fix a **choreography extension**, implement
 
 The popup-listener hardening from the earlier hypothesis is **parked** (patch preserved locally,
 not committed, not part of this slice) pending independent justification.
+
+## 18. Execution record — 2026-07-24, attempt 3 (COMPLETED · sanitized)
+
+### 18.1 Dispatch
+
+Fresh G3 (`export+ingest`, five boxes for the current environment; Bridge N/A/CLI-loopback) +
+fresh single-use G6 (**max live window 55 min**, timer-derived from the new worst case: sentinel
+≤10 + observe ≤10 + detect ≤34 for 3 checkpoints × [continuation observe + re-race]; no-reply
+bound) affirmed in the dispatching turn, operator **seated and ready**, §8 range **confirmed on
+screen**. Code under proof: the multi-checkpoint runtime at **`871fccd`**, holder-synced from the
+local repo (fetch-only + `checkout --detach`; preserved paths re-fingerprinted byte-identical;
+collector suite + the five continuation proofs green **inside the holder**). Disposable backend
+`sellerops_run7_20260724T011628` on 18080, ingest confirmed on the run's own output.
+
+### 18.2 Timeline (KST)
+
+| Time | Event |
+|---|---|
+| 01:23:36 | Live window opens; ingest target `http://127.0.0.1:18080` on the run's output |
+| 01:25:02 | Operator signals ready; sentinel created |
+| — | ⚠ **Highlight off-screen finding:** the export control was below the fold; the overlay is fixed at the control's highlight-time position and **does not follow scroll**, so no highlight was visible until the operator scrolled. Observation is bound to the CONTROL, not the overlay, so a direct click still registered. Recorded as §18.4-1. |
+| 01:27:58 | `aw.live.barrier {"observed":true}` — export action observed |
+| ~01:28:21 | Direct download → validate → parse-gate → `upload.done SUCCESS` (tens rows, 0 skipped/0 failed) → **`COMPLETED`**; `aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}` |
+
+Live contact ended when the browser closed. Teardown immediately after: backend stopped · guarded
+drop of `sellerops_run7_20260724T011628` · `sellerops` the only surviving `sellerops*` DB · run-local
+credentials/token/response bodies scrubbed · holder quarantine/downloads empty · profile unheld ·
+`.env` byte-identical.
+
+### 18.3 Claim results (filled §11 template)
+
+```
+Run 7 — 2026-07-24 (attempt 3) — OPERATOR_SELF_01 — G3 (export+ingest) CONSUMED · G6 CONSUMED
+Outcome:            COMPLETED 3-of-3 (real download → validate → parse-gate → ingest SUCCESS)
+Ingest:             SUCCESS — 58 rows, 0 skipped, 0 failed
+C1 compatibility:   PASS — body/rating/received_at/external_id/reply_state = 58/58 non-null;
+                    received_at UTC-midnight 58/58; 답글여부 matched its exact-key alias
+                    (all PENDING, 0 UNKNOWN → column present + read); reply-state ingest proven
+C2 queue exclusion: NOT DEMONSTRATED (§8) — 0 answered reviews in the exported range
+C3 arrivals whole:  PASS — 58 NEW_REVIEW; low/mid/high = 1/1/56
+C4 refusal:         NOT DEMONSTRABLE — no answered review exists to refuse
+C5 non-vacuity:     BLOCKED — 500 on triage/draft (backend-only anomaly; §18.4-3)
+Census:             rating 58 · received_at 58 (UTC-midnight 58) · external_id 58
+                    reply_state PENDING 58 / ANSWERED 0 / UNKNOWN 0
+                    replied_at on ANSWERED 0/0 · on PENDING 0 (expect 0) ✓
+Teardown:           DB dropped ☑ · sellerops intact ☑ · quarantine empty ☑ · no artifact ☑
+Findings:           §18.4
+```
+
+### 18.4 Findings
+
+1. **The highlight overlay does not follow scroll.** `mountOverlay` fixes the box at the control's
+   viewport position at highlight time; a control below the fold gets an off-screen overlay and the
+   seated operator sees nothing until they scroll. It cost minutes this run and would read as "no
+   highlight" to any operator. The observer is bound to the control (a direct click still worked),
+   so this is a visibility defect, not a correctness one. **Fix candidate:** scroll the control into
+   view before mounting, and/or reposition the overlay on scroll. Recorded for a follow-up slice —
+   not fixed here (it is orthogonal to the choreography work and wants its own headed proof).
+2. **The exported range carried 0 answered reviews**, diverging from the operator's on-screen §8
+   confirmation. All 58 rows are a single recent date with a 1/1/56 rating split — consistent with a
+   narrow recent window in which nothing has been answered yet, while the §8 eyeball was evidently
+   on a broader view. This is the §8 fallback working exactly as written: C2/C4 recorded
+   `NOT DEMONSTRATED`, never quietly passed on an empty set. A future attempt wanting the reply-state
+   headline must confirm the answered row is **inside the range that will actually export**, not just
+   visible somewhere on screen.
+3. **A 500 on the triage and reply-draft endpoints** blocked C5 (mint-on-PENDING non-vacuity). It is
+   backend-only (no NAVER contact), reproducible OFFLINE against a disposable Postgres backend, and
+   did not affect the ingest headline. The `gradle -q` boot suppressed the request-time stack trace;
+   the disposable DB was dropped on schedule rather than kept to chase it. **Recorded for offline
+   reproduction** — the triage/reply path has hermetic tests, so the divergence is likely
+   environment- or Postgres-specific and characterizable without any live run.
+
+### 18.5 Gate state after attempt 3
+
+G3 #3 and G6 #3 (2026-07-24) are **CONSUMED** — register updated. C1 and C3 are **PROVEN on real
+data**; C2/C4 stay `NOT DEMONSTRATED` (§8 fallback); C5 `BLOCKED` (§18.4-3). The reply-state
+*headline* (answered reviews leave the queue; guided reply refuses an answered review) still awaits
+a range that contains an answered low-rating review — a future run starts from a blank template.

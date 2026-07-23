@@ -409,6 +409,34 @@ R4 live-run approval — RUN 7 ATTEMPT 2 (export+ingest) — CONSUMED (run FAILE
                       blank template (fresh G3 + G6).
 ```
 
+```
+R4 live-run approval — RUN 7 ATTEMPT 3 (export+ingest) — CONSUMED (run COMPLETED)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest
+- code under proof:   871fccd (multi-checkpoint continuation runtime, §16.3/§17); holder-synced,
+                      collector suite + 5 continuation proofs green inside the holder
+- backend:            disposable sellerops_run7_20260724T011628 on 18080, confirmed on the run's
+                      output; dropped at teardown (name-guarded), sellerops intact
+- max live window:    55 minutes — timer-derived from the new multi-checkpoint worst case; actual
+                      live window ~4 min 45 s (01:23:36 → ~01:28:21)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions; §8 range confirmed on screen
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (2026-07-24 attempt-3 instance:
+                      five boxes for the current environment; Bridge N/A/CLI-loopback)
+- P6:                 ✅ signed on G6 + G3 + G4-on-871fccd (collector suite + continuation proofs
+                      green in the holder; backend 1502 / frontend 765 unaffected by the slice)
+- outcome:            CONSUMED — the run drove once and COMPLETED 3-of-3: real download → validate →
+                      parse-gate → ingest SUCCESS (58 rows, 0 skipped/failed); 0 continuation
+                      checkpoints (this range took the Run-4 direct shape). C1 (compatibility) and
+                      C3 (arrivals) PROVEN on real data; C2/C4 NOT DEMONSTRATED (§8 fallback — 0
+                      answered rows in range); C5 BLOCKED by a backend-only 500. Full record:
+                      r4-run7-…-dispatch-record.md §18. A retry for the reply-state headline needs
+                      a fresh G3 + G6 AND a range that actually exports an answered low-rating review.
+```
+
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
 > the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a
