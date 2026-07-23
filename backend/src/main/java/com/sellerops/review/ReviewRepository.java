@@ -335,4 +335,88 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                       and o.operatorOutcome
                           = com.sellerops.attention.reply.OperatorOutcome.OPERATOR_REPORTED_SUBMITTED)
             """;
+
+    /**
+     * "The operator has COMMITTED to replying to this review" — the membership rule of the
+     * 내 답변 작업 worklist.
+     *
+     * <p>Two independent commitments, unioned rather than one derived from the other: an explicit
+     * {@code RESPONSE_NEEDED} triage decision, OR reply work that already exists (a saved draft, or
+     * a standing approval). A seller who saved a draft and then moved the disposition has still done
+     * work that must not vanish; a seller who marked 대응 필요 without drafting yet has still
+     * committed. Approvals are unioned with drafts for the same reason
+     * {@code IngestedReviewVocItemSource.preparedFor} does it: an approval implies a draft only
+     * because a service rule says so, and a read correct only while an unrelated invariant holds
+     * breaks silently.
+     *
+     * <p>This is a COMMITMENT, not a workflow phase: it promises no draft, no queue, and no send.
+     */
+    String COMMITTED_REPLY_WORK_PREDICATE = """
+            (exists (select 1 from ReviewTriage t
+                     where t.orgId = r.orgId and t.reviewId = r.id
+                       and t.disposition
+                           = com.sellerops.attention.triage.TriageDisposition.RESPONSE_NEEDED)
+             or exists (select 1 from ReviewReplyDraft d
+                        where d.orgId = r.orgId and d.reviewId = r.id)
+             or exists (select 1 from ReviewReplyApproval a2
+                        where a2.orgId = r.orgId and a2.reviewId = r.id
+                          and a2.state
+                              = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED))
+            """;
+
+    /**
+     * The 내 답변 작업 TO-DO: reviews this operator committed to replying to and has not yet
+     * reported posting. Account/org scoped via {@code channelId}, exactly like every other lens here.
+     *
+     * <p>Reported rows are EXCLUDED (not sunk): this list is "what is still mine to do", and a
+     * reported reply belongs to the separate recently-reported section. That divergence from the
+     * arrival worklist — which sinks rather than drops — is deliberate: there, the row must stay
+     * visible because the report is UNVERIFIED and correctable; here, a finished item would crowd
+     * out the work that remains.
+     *
+     * <p><b>Ordering is worst-first, with NULL ratings pushed LAST explicitly.</b> Unlike
+     * {@link #findUnansweredInWindowByChannelFiltered}, this lens has no {@code minRating} floor, so
+     * a null rating is reachable — and bare {@code rating asc} sorts nulls FIRST on H2 and LAST on
+     * PostgreSQL, which would make the top of an operator's own worklist depend on the database.
+     * The explicit CASE removes that.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and
+            """ + COMMITTED_REPLY_WORK_PREDICATE + """
+              and not
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+            order by case when r.rating is null then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id desc
+            """)
+    Page<Review> findCommittedReplyWorkByChannel(@Param("orgId") UUID orgId,
+                                                @Param("channelId") UUID channelId,
+                                                Pageable pageable);
+
+    /**
+     * The 내 답변 작업 RECENTLY REPORTED section: reviews whose reply the operator reported posting,
+     * most-recently-reported first, bounded by the caller's page size.
+     *
+     * <p>Ordered by when the REPORT was recorded (the outcome's own {@code createdAt}), not by the
+     * review's date — "recently reported" is a fact about the operator's work, not about the review.
+     * The correlated MAX keeps one row per review even when several outcomes exist for it.
+     *
+     * <p>Every row here is {@code UNVERIFIED} by construction — there is no read-back oracle for a
+     * public reply — so the surface must present it as "기록함 · 확인 안 함", never as 완료.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+            order by (select max(o2.createdAt) from ReviewReplyOutcome o2
+                      where o2.orgId = r.orgId and o2.reviewId = r.id
+                        and o2.operatorOutcome
+                            = com.sellerops.attention.reply.OperatorOutcome.OPERATOR_REPORTED_SUBMITTED)
+                     desc, r.id desc
+            """)
+    Page<Review> findRecentlyReportedByChannel(@Param("orgId") UUID orgId,
+                                              @Param("channelId") UUID channelId,
+                                              Pageable pageable);
 }

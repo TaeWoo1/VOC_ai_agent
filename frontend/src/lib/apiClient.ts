@@ -22,6 +22,7 @@ import type {
   ItemAnalysis,
   ProposalResult,
   OperatorAttentionSummary,
+  OperatorReplyWorkView,
   OperatorVocItemPage,
   OrderSummaryResponse,
   OperatorOutcomeName,
@@ -47,6 +48,7 @@ import {
   mockAccountAttention,
   mockAccountDashboard,
   mockAttentionItems,
+  mockReplyWork,
   mockAuth,
   mockCapabilities,
   mockCapabilityOverview,
@@ -567,6 +569,25 @@ export const api = {
     const search = new URLSearchParams({ from: range.from, to: range.to });
     const { data } = await http.get<OperatorAttentionSummary>(
       `/api/seller-accounts/${accountId}/attention?${search.toString()}`,
+    );
+    return data;
+  },
+  // 내 답변 작업: the operator's OWN committed reply work + a bounded recently-reported record.
+  // Deliberately NOT window-scoped — a commitment is theirs until finished or abandoned, so this
+  // read must survive a reload, a window change and a new session. Fail-closed like the others.
+  async getReplyWork(
+    accountId: string,
+    limits?: { todoLimit?: number; recentLimit?: number },
+  ): Promise<OperatorReplyWorkView> {
+    if (USE_MOCKS) {
+      return mockReplyWork(accountId);
+    }
+    const search = new URLSearchParams();
+    if (limits?.todoLimit != null) search.set("todoLimit", String(limits.todoLimit));
+    if (limits?.recentLimit != null) search.set("recentLimit", String(limits.recentLimit));
+    const qs = search.toString();
+    const { data } = await http.get<OperatorReplyWorkView>(
+      `/api/seller-accounts/${accountId}/reply-work${qs ? `?${qs}` : ""}`,
     );
     return data;
   },

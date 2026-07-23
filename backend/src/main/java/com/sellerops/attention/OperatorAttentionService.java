@@ -2,7 +2,10 @@ package com.sellerops.attention;
 
 import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorReplyWorkView;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.source.IngestedReviewVocItemSource;
+import com.sellerops.attention.source.ReplyWorkSlice;
 import com.sellerops.attention.source.VocItemSlice;
 import com.sellerops.attention.source.VocItemSource;
 import com.sellerops.attention.source.VocItemSourceRegistry;
@@ -38,6 +41,8 @@ public class OperatorAttentionService {
 
     /** Drill-down page-size ceiling (mirrors the article-list drill-down). */
     static final int MAX_PAGE_SIZE = 50;
+    /** Ceiling for the bounded 내 답변 작업 recently-reported section — a record, not a history. */
+    static final int MAX_RECENT_REPORTED = 20;
     /** A channel with no source contributes no counts — yields zero signals. */
     private static final VocWindowSnapshot EMPTY_SNAPSHOT =
             new VocWindowSnapshot(0, 0, 0, 0, 0, 0, 0, 0);
@@ -87,6 +92,48 @@ public class OperatorAttentionService {
                         channelNameKo);
         return new OperatorAttentionSummary(
                 accountId, channelNameKo, window.startDate(), window.endDate(), coverage, items);
+    }
+
+    /**
+     * The 내 답변 작업 worklist: the operator's OWN committed reply work for this account, plus a
+     * bounded record of what they recently reported posting.
+     *
+     * <p><b>Deliberately not window-scoped</b> — unlike {@link #attention}, which answers "what came
+     * in" over a chosen window. A commitment (a 대응 필요 decision, a saved draft) is the operator's
+     * until they finish or abandon it, so it must survive a reload, a window change and a new
+     * session. That persistence IS the feature.
+     *
+     * <p>Carries the same {@link AttentionCoverage} guard as the summary: an unattributable scope
+     * returns empty lists WITH an uncertain verdict, so the surface declines rather than showing
+     * "no work". Only {@code IngestedReviewVocItemSource} serves reply work today; any other channel
+     * yields an empty (and, via coverage, honestly-labelled) worklist.
+     */
+    @Transactional(readOnly = true)
+    public OperatorReplyWorkView replyWork(UUID orgId, UUID accountId, int todoLimit, int recentLimit) {
+        SellerAccount account = requireAccount(orgId, accountId);
+        Channel channel = channels.findById(account.getChannelId()).orElse(null);
+        String channelCode = channel == null ? null : channel.getCode();
+        String channelNameKo = channel == null ? null : channel.getNameKo();
+        int safeTodo = Math.max(1, Math.min(todoLimit, MAX_PAGE_SIZE));
+        int safeRecent = Math.max(1, Math.min(recentLimit, MAX_RECENT_REPORTED));
+
+        var source = sources.forChannel(channelCode);
+        AttentionCoverage coverage = source
+                .map(s -> s.coverage(orgId, accountId))
+                .orElse(AttentionCoverage.UNCERTAIN_UNSUPPORTED_CHANNEL);
+
+        // An uncertain scope lists nothing — the same rule the summary follows. Reply work read from
+        // a scope we cannot attribute would be work shown under the wrong account.
+        ReplyWorkSlice slice = coverage.isUncertain()
+                ? ReplyWorkSlice.empty()
+                : source
+                        .filter(IngestedReviewVocItemSource.class::isInstance)
+                        .map(IngestedReviewVocItemSource.class::cast)
+                        .map(s -> s.replyWork(orgId, accountId, channelCode, channelNameKo, safeTodo, safeRecent))
+                        .orElse(ReplyWorkSlice.empty());
+
+        return new OperatorReplyWorkView(
+                accountId, channelNameKo, coverage, slice.todo(), slice.recentlyReported());
     }
 
     /**

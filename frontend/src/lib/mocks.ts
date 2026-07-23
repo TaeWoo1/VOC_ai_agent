@@ -20,6 +20,7 @@ import type {
   InboxResponse,
   ItemAnalysis,
   OperatorAttentionSummary,
+  OperatorReplyWorkView,
   OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
@@ -964,6 +965,39 @@ export function mockAccountAttention(
         spike: { previousCount: previous, deltaCount: current - previous, ratio: current / previous },
       },
     ]),
+  };
+}
+
+/**
+ * 내 답변 작업 (mock): the operator's committed reply work, built from the SAME membership rule the
+ * backend uses — RESPONSE_NEEDED and/or standing reply work, minus anything already reported — so the
+ * demo cannot disagree with the product about what "mine to do" means. Not window-scoped.
+ */
+export function mockReplyWork(accountId: string): OperatorReplyWorkView {
+  const channelName = mockChannelNameForAccount(accountId);
+  if (mockChannelCodeForAccount(accountId) !== "NAVER") {
+    // No attention source for this channel — empty lists here are NOT "no work"; the coverage
+    // verdict says the scope cannot be determined, exactly as the attention summary does.
+    return {
+      sellerAccountId: accountId,
+      channel: channelName,
+      coverage: "UNCERTAIN_UNSUPPORTED_CHANNEL",
+      todo: [],
+      recentlyReported: [],
+    };
+  }
+  const rows = NAVER_REVIEWS.map((r) => toVocItem(r, "LOW_RATING_REVIEW"));
+  const committed = (i: OperatorVocItem) =>
+    i.triageDisposition === "RESPONSE_NEEDED" || i.hasReplyPreparation;
+  return {
+    sellerAccountId: accountId,
+    channel: channelName,
+    coverage: "COVERED",
+    // Worst-first, mirroring the server ordering (rating asc, newest first within a rating).
+    todo: rows
+      .filter((i) => committed(i) && !i.hasReportedSubmission)
+      .sort((a, b) => (a.rating ?? 99) - (b.rating ?? 99)),
+    recentlyReported: rows.filter((i) => i.hasReportedSubmission).slice(0, 5),
   };
 }
 
