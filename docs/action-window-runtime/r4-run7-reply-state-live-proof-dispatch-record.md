@@ -523,9 +523,18 @@ swept — **zero artifacts anywhere**.
 
 ### 16.3 The finding — a download-detection miss, now the blocking question
 
-The operator reports, seconds after the observed action: **export clicked, the expected NAVER
-dialog confirmed, and a download started.** The detector saw nothing for its full 60 s. Action
-observed + operator-reported download + no detection = a **detection gap**, not a seat error:
+**Operator observation, recorded verbatim (2026-07-24, seconds after the observed action):**
+
+> "clicked export and confirmed the dialog, download started"
+
+**That is the complete observation. Deliberately NOT recorded, because it was not stated:** how the
+download's start manifested (a Chrome download indicator, a filename, a save dialog, a NAVER-side
+"파일 생성/다운로드" surface, a new tab/page — none of these was reported), whether it visibly
+completed, or where it was delivered. Both delivery hypotheses below therefore remain open, and the
+offline reproduction must cover **both**.
+
+The detector saw nothing for its full 60 s. Action observed + operator-reported download start +
+no detection = a **detection gap**, not a seat error:
 
 - Run 4 (`COMPLETED` 3-of-3) proved this exact two-step flow **with Run-4-era code** — detection
   worked on this surface before.
