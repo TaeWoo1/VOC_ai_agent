@@ -1,7 +1,6 @@
 // The FE-1 mock scenario selector is a fixture/demo preview tool. It is DEV-only
 // and must never appear in the production UI: gated on Vite's build-time `DEV`
 // flag, so the production build tree-shakes it out entirely.
-import type { AwClientTransport } from "./contract";
 import {
   connectAwBridgeSession,
   type AwBridgeConnectResult,
@@ -28,15 +27,6 @@ export type AdapterMode = "mock" | "bridge";
 export function isBridgeModeEnabled(): boolean {
   const env = import.meta.env as Record<string, unknown>;
   return env.DEV === true && env.VITE_AW_BRIDGE === "1";
-}
-
-/** A live Action Window transport bound to the Operation Run the local agent announced. */
-export interface BridgeSession {
-  transport: AwClientTransport;
-  runId: string;
-  channelCode: string;
-  /** Tear down the underlying socket and stop reconnection. */
-  close(): void;
 }
 
 /**

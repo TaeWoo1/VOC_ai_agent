@@ -27,7 +27,9 @@
 // `appendRecentRun`). Recheck-never-completes is inherited from the FE-1 mock
 // adapter, not re-implemented.
 
+import type { AwCarrierKind } from "../../../../contracts/action-window/aw-carrier-kind";
 import type { ActionWindowRunView, CommandType } from "./contract";
+import type { AwRefusalReason } from "./wsTransport";
 import { isOutOfOrderEvent } from "./contract";
 import { UI_SCENARIOS, type ScenarioName } from "./fixtures";
 import {
@@ -81,7 +83,7 @@ export interface OperationsState {
    * DEV diagnostics only — a sanitized enum plus, for a carrier mismatch, which carrier the agent
    * announced. Never a message, status code, origin or token.
    */
-  bridgeRefusal: { reason: string; announcedCarrier?: string } | null;
+  bridgeRefusal: { reason: AwRefusalReason; announcedCarrier?: AwCarrierKind } | null;
   sourceMode: SourceMode;
   /** Last-loaded fixture names — used only to highlight the DEV selectors. */
   runScenario: ScenarioName;
@@ -294,7 +296,10 @@ export function adoptBridgeSource(bridge: ActionWindowSource, cleanup: () => voi
  *  re-renders when the flag flips — the fixture-fallback path changes no other store
  *  field, so without this the panel would keep showing a stale "부트 시도됨 = 아니오". */
 /** Record (or clear, with null) why the last live-bridge boot was refused. */
-export function setBridgeRefusal(reason: string | null, announcedCarrier?: string): void {
+export function setBridgeRefusal(
+  reason: AwRefusalReason | null,
+  announcedCarrier?: AwCarrierKind,
+): void {
   const next = reason == null ? null : announcedCarrier ? { reason, announcedCarrier } : { reason };
   if (state.bridgeRefusal?.reason === next?.reason
       && state.bridgeRefusal?.announcedCarrier === next?.announcedCarrier) {

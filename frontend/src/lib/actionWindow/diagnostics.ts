@@ -22,7 +22,14 @@ export interface BridgeDiagnosticsInput {
   connection: SourceConnection;
   bridgeModeEnabled: boolean;
   bootAttempted: boolean;
-  /** Why the last boot was refused (sanitized enum), or null when it succeeded / never ran. */
+  /**
+   * Why the last boot was refused, or null when it succeeded / never ran.
+   *
+   * <p>Typed as plain strings on purpose, unlike the store that feeds it: this is a presentation
+   * input, and {@link refusalLabel} deliberately renders an unrecognised reason verbatim so a
+   * refusal nobody labelled is visible rather than invisible. Narrowing here would delete the only
+   * path that behaviour can be reached by.
+   */
   bridgeRefusal: { reason: string; announcedCarrier?: string } | null;
   retryPending: boolean;
   /** Timestamp-free trail of connection literals (oldest → newest), already capped. */

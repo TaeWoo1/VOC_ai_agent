@@ -84,7 +84,22 @@ cause instead of saying "failed".
 The label table is also asserted to be **injective** — a mapping that collapsed two reasons onto one
 label would undo the point while every individual assertion still passed.
 
-## 6. Recorded, not fixed — and the next audit
+## 6. What the independent review caught
+
+Two, both fixed:
+
+1. **The "closed set" claim was not enforced.** The operations store typed the refusal as
+   `{reason: string}`, so a typo like `"unpared"` would have flowed straight through to the panel
+   while the slice's own documentation promised a closed enum. Now typed to `AwRefusalReason` /
+   `AwCarrierKind` — verified with a throwaway probe that must fail to compile. The *presentation*
+   input stays `string` deliberately: `refusalLabel` renders an unrecognised reason verbatim so a
+   refusal nobody labelled is visible, and narrowing there would delete the only path that reaches
+   that behaviour.
+2. **An orphaned type.** `devMode.BridgeSession` — a duplicate of `AwBridgeSession` — became
+   referenced by nothing once `resolveBridgeSession` started returning the discriminated result.
+   Removed, along with its now-unused import.
+
+## 7. Recorded, not fixed — and the next audit
 
 - **The envelope↔frame adapter does not exist.** `createBridgeReplyRuntime` takes a
   `ReplyClientTransport` speaking `CommandEnvelope`/`EventEnvelope`, but the wire carries
