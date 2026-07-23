@@ -51,7 +51,7 @@ import {
   type CommandType,
   type EventType,
 } from "../../../contracts/action-window/v1/index";
-import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
+import { NaverLiveProbeDriver, type ExportScopeReadback } from "../action-window/naver-live-driver";
 import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../action-window/naver-surface";
 import { defaultQuarantineDirFor } from "../action-window/quarantine";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
@@ -664,6 +664,34 @@ const PROMPT_TAIL = [
   "(Ctrl-C to abort.)",
 ];
 
+/**
+ * OPERATOR-LOCAL export-scope read-back prompt (Run 7 attempt-3 finding). Formats the seller's own
+ * selected range / filters so they can confirm the scope that WILL export before acting. Returns a
+ * plain string the caller prints to stderr — it is NEVER logged, persisted, or sent over the wire
+ * (see `readExportScope`). An empty read-back tells the operator the runtime could not read a range,
+ * which is itself worth surfacing (they should verify manually).
+ */
+function exportScopePrompt(scope: ExportScopeReadback): string {
+  const lines = [
+    "",
+    "  >> CONFIRM THE EXPORT SCOPE — this is what WILL export, not just what is on screen. <<",
+  ];
+  if (scope.rangeValues.length > 0) {
+    lines.push(`     Selected range/date values: ${scope.rangeValues.join("  ·  ")}`);
+  } else {
+    lines.push("     Selected range/date values: (none read — verify the period on screen yourself)");
+  }
+  if (scope.filterLabels.length > 0) {
+    lines.push(`     Active filters: ${scope.filterLabels.join("  ·  ")}`);
+  }
+  lines.push(
+    "     If this is NOT the range you intend to export (e.g. it excludes the answered review",
+    "     you meant to include), fix the period/filters on the page BEFORE you act. §8.",
+    "",
+  );
+  return lines.join("\n");
+}
+
 function banner(declineIngest: boolean): void {
   const line = "─".repeat(64);
   console.error(line);
@@ -784,6 +812,11 @@ async function main(): Promise<void> {
 
     await settleSpa(page);
     assembled = assembleLiveRun(page, deps);
+    // OPERATOR-LOCAL export-scope read-back (Run 7 attempt-3 finding): show the seller the range /
+    // filters that will ACTUALLY export, so they confirm the real scope rather than a review visible
+    // elsewhere on the page. Printed to the operator's own console ONLY — never through `log()`, never
+    // over the wire, never persisted (see `readExportScope`'s contract).
+    console.error(exportScopePrompt(await assembled.driver.readExportScope()));
     const view = await driveOneRun(assembled.session, assembled.client, {
       // A2-B made login/session blockers RECOVERABLE; until A3 this CLI could not exercise that, because
       // the `finally` below closes the browser the instant this returns. Wiring the gate here is what makes

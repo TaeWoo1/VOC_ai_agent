@@ -36,8 +36,14 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     const target = document.querySelector("[data-aw-target]");
     const prev = document.getElementById("__aw_overlay__");
     if (prev) prev.remove();
+    // Clean any stale in-page tracker before re-mounting so listeners never accumulate.
+    const stale = (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
+    if (typeof stale === "function") (stale as () => void)();
     if (!target) return;
-    const rect = (target as Element).getBoundingClientRect();
+    // Run 7 attempt-3 finding: a target below the fold got a fixed overlay drawn OFF-SCREEN, so the
+    // seated operator saw no highlight. Bring the control into view FIRST (read-only — scrolling is
+    // not a click), then position over it. `block:"center"` keeps a comfortable margin around it.
+    (target as Element).scrollIntoView({ block: "center", inline: "center" });
     const box = document.createElement("div");
     box.id = "__aw_overlay__";
     box.setAttribute("aria-hidden", "true");
@@ -49,10 +55,6 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
       "border:3px solid #2b6cff",
       "border-radius:8px",
       "box-shadow:0 0 0 9999px rgba(0,0,0,0.28)",
-      `left:${rect.left - 6}px`,
-      `top:${rect.top - 6}px`,
-      `width:${rect.width + 12}px`,
-      `height:${rect.height + 12}px`,
       o.guidanceEnabled ? "display:block" : "display:none",
     ].join(";");
     const badge = document.createElement("div");
@@ -61,6 +63,29 @@ export async function mountOverlay(page: PageOrFrame, opts: OverlayOptions): Pro
     badge.style.cssText = "position:absolute;left:0;top:-28px;background:#2b6cff;color:#fff;font:12px system-ui;padding:2px 8px;border-radius:4px;white-space:nowrap";
     box.appendChild(badge);
     document.body.appendChild(box);
+    // Glue the box to the control's live position. A `position:fixed` box uses viewport coordinates,
+    // so it must be recomputed on every scroll/resize or it drifts off the control the moment the
+    // operator scrolls — the other half of the same finding. The tracker recomputes from the target's
+    // own getBoundingClientRect (read-only) and is torn down by unmountOverlay / the next mount.
+    const reposition = () => {
+      const el = document.querySelector("[data-aw-target]");
+      const b = document.getElementById("__aw_overlay__");
+      if (!el || !b) return;
+      const r = (el as Element).getBoundingClientRect();
+      b.style.left = `${r.left - 6}px`;
+      b.style.top = `${r.top - 6}px`;
+      b.style.width = `${r.width + 12}px`;
+      b.style.height = `${r.height + 12}px`;
+    };
+    reposition();
+    // `capture:true` catches scrolls on any nested scroller, not just the window.
+    window.addEventListener("scroll", reposition, true);
+    window.addEventListener("resize", reposition);
+    (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"] = () => {
+      window.removeEventListener("scroll", reposition, true);
+      window.removeEventListener("resize", reposition);
+      delete (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
+    };
   }, opts);
 }
 
@@ -87,6 +112,8 @@ export async function setOverlayGuidance(page: PageOrFrame, enabled: boolean): P
 
 export async function unmountOverlay(page: PageOrFrame): Promise<void> {
   await page.evaluate(() => {
+    const untrack = (window as unknown as Record<string, unknown>)["__aw_overlay_untrack__"];
+    if (typeof untrack === "function") (untrack as () => void)();
     const box = document.getElementById("__aw_overlay__");
     if (box) box.remove();
   });

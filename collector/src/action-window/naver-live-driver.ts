@@ -101,6 +101,18 @@ const CONTINUATION_STEP_LABEL =
  */
 const MAX_CONTINUATION_CHECKPOINTS = 3;
 
+/**
+ * OPERATOR-LOCAL export-scope read-back (never logged, never transported — see `readExportScope`).
+ * The seller's own selected range/filters, reflected to their own console so they can confirm the
+ * scope that will actually export.
+ */
+export interface ExportScopeReadback {
+  /** Selected date/range control values, verbatim, for local operator display only. */
+  rangeValues: string[];
+  /** Active filter labels (chosen <select> option text, checked radio/checkbox labels). */
+  filterLabels: string[];
+}
+
 /** Sanitized, TEST-VISIBLE record of the continuation checkpoints one detection pass walked. */
 export interface ContinuationDiagnostic {
   /** How many continuation controls were highlighted (0 = the Run-4 direct-download shape). */
@@ -302,6 +314,47 @@ export class NaverLiveProbeDriver implements ProbeDriver {
       return selectedRangeFromValues(values);
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * OPERATOR-LOCAL export-scope read-back (Run 7 attempt-3 finding: the operator confirmed §8 on a
+   * view that differed from the range that actually exported). Reads the selected date/range control
+   * values and any active filter labels from the export surface so the CLI can show the seller the
+   * scope that WILL export — letting them confirm the real range, not merely a review visible
+   * elsewhere on the page.
+   *
+   * ⚠ **This is the ONE place raw selected values are surfaced, and ONLY to the seated operator's own
+   * console (stderr).** The values NEVER reach `log()`, the persisted run, or any Aw wire message —
+   * they are the operator's own filter selection reflected back to them locally, categorically
+   * distinct from anything crossing the sanitization boundary (§3). The caller must print, never log.
+   * Any read failure yields an empty read-back rather than a throw (§8-23 posture).
+   */
+  async readExportScope(): Promise<ExportScopeReadback> {
+    try {
+      return await this.ctx().evaluate(() => {
+        const rangeValues = Array.from(
+          document.querySelectorAll(
+            'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]',
+          ),
+        )
+          .map((el) => (el as HTMLInputElement).value ?? "")
+          .filter((v) => v.trim() !== "");
+        const filterLabels: string[] = [];
+        // Active <select> choices (the chosen option text) and checked radios/checkboxes' labels.
+        for (const sel of Array.from(document.querySelectorAll("select"))) {
+          const s = sel as HTMLSelectElement;
+          const opt = s.selectedOptions[0];
+          if (opt && opt.textContent && opt.textContent.trim() !== "") filterLabels.push(opt.textContent.trim());
+        }
+        for (const el of Array.from(document.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked'))) {
+          const label = (el as HTMLInputElement).labels?.[0]?.textContent?.trim();
+          if (label) filterLabels.push(label);
+        }
+        return { rangeValues, filterLabels };
+      });
+    } catch {
+      return { rangeValues: [], filterLabels: [] };
     }
   }
 
