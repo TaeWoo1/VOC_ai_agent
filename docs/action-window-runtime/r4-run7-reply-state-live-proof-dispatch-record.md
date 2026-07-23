@@ -15,10 +15,14 @@
 >
 > **↳ ATTEMPT 2 — 2026-07-24, fresh G3+G6 (25-min timer-derived window), ALSO FAILED closed on
 > `DOWNLOAD_TIMEOUT` — but one step further:** the runtime **observed the export action**
-> (`observed:true`) and the operator reports the download started, yet the detector saw nothing in
-> its 60 s. **The blocker is now a repo-side download-detection gap (or a NAVER delivery change),
-> §16.3 — no attempt 3 until it is reproduced and closed OFFLINE.** Zero artifacts anywhere,
-> zero rows ingested, guarded teardown clean. Both 2026-07-24 gates CONSUMED (§16).
+> (`observed:true`); the operator confirmed the expected dialog. **RECLASSIFIED (operator
+> clarification, 2026-07-24): an INCOMPLETE HUMAN-CHECKPOINT WORKFLOW, not a missed download
+> event** — after the confirmation a **second NAVER-native in-page notification/dialog** appears
+> before the actual download, carrying a control the seller must still act on; the state machine
+> modeled only ONE human step, so nothing highlighted or awaited that control and the 60 s download
+> deadline ran from the FIRST action. §16.3 (reclassification) and §17 (the offline
+> continuation-checkpoint slice). Zero artifacts anywhere, zero rows ingested, guarded teardown
+> clean. Both 2026-07-24 gates CONSUMED (§16).
 
 > ## ⏸ DEFERRED 2026-07-23 (first attempt) — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
 >
@@ -533,25 +537,75 @@ download's start manifested (a Chrome download indicator, a filename, a save dia
 completed, or where it was delivered. Both delivery hypotheses below therefore remain open, and the
 offline reproduction must cover **both**.
 
-The detector saw nothing for its full 60 s. Action observed + operator-reported download start +
-no detection = a **detection gap**, not a seat error:
+**RECLASSIFIED — operator clarification (2026-07-24, after the run):** what the operator saw was
+**not a Chrome download indicator and not necessarily a popup page**: after confirming the export
+dialog, a **second NAVER-native in-page notification/dialog appeared before the actual download**,
+carrying its own download/confirm control. Attempt 2 is therefore an **INCOMPLETE HUMAN-CHECKPOINT
+WORKFLOW**, not a missed download event: the export choreography carries more human steps than the
+state machine modeled. The runtime highlighted and awaited only the FIRST control; the follow-up
+checkpoint was never highlighted, never awaited, and the 60 s download deadline ran from the first
+action — so the run failed closed exactly as designed, one human step short of the download.
 
-- Run 4 (`COMPLETED` 3-of-3) proved this exact two-step flow **with Run-4-era code** — detection
-  worked on this surface before.
-- The holder now runs `783a9b4`. Either the download-detection path regressed somewhere in the
-  intervening slices, **or NAVER changed how the export delivers** (e.g. async generation /
-  notification-center delivery instead of a direct download event), which the runtime would
-  experience identically.
-- Whatever fired, nothing survived: an intercepted download dies with the browser context, which
-  is the data posture working as designed.
+Supporting history (this step was not unforeseeable):
 
-**Consequence: no attempt 3 until the gap is reproduced and closed OFFLINE.** Live is never the
-first execution of a code path (G4), and it is equally not the debugging environment. The
-investigation is repo-verifiable: diff the live driver's download-detection path Run-4-era →
-`783a9b4`, and re-run the headed human-click proof (§6's ladder) against a synthetic page whose
-download fires the way the operator describes. Two consumed gate pairs now say the same thing:
-the runtime's observe/readiness side is proven live; the download seam is where Run 7 dies.
+- Run 4 (`COMPLETED` 3-of-3) observed a **two**-step flow — click → expected confirmation dialog →
+  download on the confirmation — and both steps happened to land inside one 60 s window. The
+  dialog's identity (whether it is the copyright/usage consent recorded in
+  `export-click-signals.ts`) is an **open question** in the evidence pack, in neither direction.
+- The collector's classify layer has always modeled an **async** export that delivers via a
+  follow-up surface (`ASYNC_JOB_MARKERS`: 다운로드 목록/센터/요청 · 처리 중 · 대기열 — "confirmed
+  against the live page's wording"), precisely so an async mechanism is never mistaken for a sync
+  capture. The Action Window engine simply had no counterpart for it until §17.
+- An earlier hypothesis this session — a popup-initiated download invisible to the page-level
+  listener — reproduced offline but is **not established as attempt 2's cause**; that change is
+  parked as optional hardening, uncommitted, pending independent justification.
+- Whatever fired, nothing survived: no artifact existed anywhere at teardown, which is the data
+  posture working as designed.
+
+**Consequence: no attempt 3 until the multi-checkpoint choreography is modeled and proven
+OFFLINE** — live is never the first execution of a code path (G4), and it is equally not the
+debugging environment. That work is §17.
 
 ### 16.4 Gate state after attempt 2
 
 G3 #2 and G6 #2 (2026-07-24) are **CONSUMED** — register updated. C1–C5 remain `NOT DEMONSTRATED`.
+
+## 17. Continuation-checkpoint slice — built OFFLINE 2026-07-24, ⚠ UNCOMMITTED (report-first hold)
+
+The §16.3 reclassification made the fix a **choreography extension**, implemented entirely inside
+`NaverLiveProbeDriver` — no engine, contract, `STEP_PLAN`, or FE change:
+
+- **`detectDownload` is now a bounded multi-checkpoint state machine.** The Run-4 direct shape is
+  the unchanged fast path (armed download raced against the deadline). While the race waits, the
+  driver polls **read-only** for a NEW single control matching the confirmed export wording — every
+  previously highlighted control stays excluded via a persistent `data-aw-seen` stamp, so a
+  checkpoint control that its own click removes from the DOM can never cause the original export
+  button to be re-highlighted. On exactly one match the tag MOVES (the old control also loses its
+  observer listener — a stale click on it can no longer satisfy observation), the control is
+  **HIGHLIGHTED** with continuation copy, and the driver **WAITS for the seller's own click** —
+  it never clicks. Only after that click does a fresh download deadline run.
+- **Fail-closed from every exit, timers accounted:** ≥2 simultaneous candidates → ambiguous → fail
+  closed; checkpoint never acted on within the continuation observe window (defaults to
+  `observeTimeoutMs`) → fail closed; more than 3 checkpoints → fail closed; no download and no
+  checkpoint at any deadline → the unchanged `DOWNLOAD_TIMEOUT` shape. Poll accounting is
+  iteration-count based (the sentinel-wait convention), never a wall-clock read.
+- **Evidence seam:** sanitized `aw.live.continuation { checkpoints, observedLast, ambiguous }`
+  logged by the CLI (booleans + small count; never transported/persisted), and the CLI prompt now
+  tells the seated operator a follow-up NAVER control may be highlighted and is theirs to click.
+- **Proof** (`test/action-window/naver-live-continuation.test.ts`, RUN_INTEGRATION; headed variant
+  available): the operator-described flow end-to-end (confirm → async notification → highlighted
+  control → operator click → download DETECTED); a consent-worded dialog as checkpoint 1 with the
+  notification as checkpoint 2; Run 4's direct shape pinned at zero checkpoints; fail-closed pinned
+  for unacted checkpoint and for ambiguity. **Falsified:** with the state machine reverted, all
+  five fail. **Headed operator proof 2026-07-24:** the operator personally performed every click
+  through four headed runs (the described flow, the two-checkpoint consent shape, Run 4's direct
+  shape, and the ambiguity fail-closed) — all passed with no issue observed at the seat; the
+  unacted-checkpoint exit stays proven by the automated run (a four-minute deliberate no-click
+  adds nothing).
+- **Verification:** collector hermetic **4843 / 100 skipped** (+5 gated, zero existing tests
+  moved), typecheck clean. Two `RUN_INTEGRATION` browser tests fail identically on unmodified
+  `main` (their synthetic blob predates the D-037 parse gate) — **pre-existing, recorded for a
+  follow-up fixlet, untouched by this slice.**
+
+The popup-listener hardening from the earlier hypothesis is **parked** (patch preserved locally,
+not committed, not part of this slice) pending independent justification.
