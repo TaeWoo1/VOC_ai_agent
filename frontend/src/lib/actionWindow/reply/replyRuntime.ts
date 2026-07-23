@@ -124,14 +124,70 @@ export interface ReplyClientTransport {
 }
 
 /**
- * The dev-bridge runtime (VITE_AW_BRIDGE): drives a REAL agent-hosted reply run over an injected v2
+ * **DISPOSAL CONTRACT — required before this runtime is ever injected.**
+ *
+ * <p>This factory subscribes ONCE at construction, to track the latest revision so a report carries
+ * a fresh `expectedRevision`. That subscription has **no disposal path**: there is no `dispose()`,
+ * and nothing removes it. `report()` cleans up its OWN listener on every settle path, but the
+ * construction-time one outlives every call and lives as long as the runtime object.
+ *
+ * <p>Harmless today only because **nothing constructs this runtime in any build**. The moment
+ * injection lands, the shape of the leak follows the runtime's lifetime:
+ *
+ * <ul>
+ *   <li><b>One runtime per app session</b> — a single listener for the life of the tab. Tolerable,
+ *       but it must then be a deliberate choice rather than an accident.
+ *   <li><b>One runtime per panel/row</b> — a listener per mounted reply panel, none of which are
+ *       ever released. A worklist page mounting many rows accumulates them, and each one holds a
+ *       closure over a transport that outlives it.
+ * </ul>
+ *
+ * <p><b>What the injection slice must supply:</b>
+ *
+ * <ol>
+ *   <li>a {@code dispose()} on the returned runtime that removes the construction-time subscription
+ *       and makes subsequent {@code report()} calls fail closed rather than attach a new listener to
+ *       a torn-down session;
+ *   <li>a caller that actually invokes it — for a React consumer, the cleanup of the effect that
+ *       created the runtime, so unmounting a panel releases it;
+ *   <li>a test asserting the transport's listener count returns to ZERO after disposal, not merely
+ *       to the construction baseline that {@code report()}'s own tests use. Those tests deliberately
+ *       measure the delta, because asserting zero there would pressure someone into deleting a
+ *       listener the protocol needs.
+ * </ol>
+ *
+ * <p>Recorded here rather than in a doc because this is where the next author will be standing.
+ *
+ * <p>The dev-bridge runtime (VITE_AW_BRIDGE): drives a REAL agent-hosted reply run over an injected v2
  * transport, reading the runtime-assigned runId from the agent's `aw_session` announcement. `start`
  * dispatches the v2 START_RUN with a LAN-safe command id; `report` sends the operator's command and
  * resolves on the agent's `RUN_OPERATOR_REPORTED` terminal event. Only ever used when a dev-bridge is
  * attached; the offline default is the simulated runtime above.
  */
-export function createBridgeReplyRuntime(session: { transport: ReplyClientTransport; runId: string }): ReplyRuntime {
+/**
+ * How long a reported outcome waits for its terminal before giving up.
+ *
+ * <p>Any finite bound beats none. Without one, `report()` settles ONLY on
+ * `RUN_OPERATOR_REPORTED`: a dropped socket, a rejected command, or an agent that died mid-run
+ * leaves the promise pending forever, and the caller pending with it. Twelve seconds is longer than
+ * a healthy local round-trip by orders of magnitude and shorter than an operator's patience.
+ */
+export const REPLY_REPORT_TIMEOUT_MS = 12_000;
+
+/** Thrown when a reported outcome never reached its terminal. Distinguishable from a transport throw. */
+export class ReplyReportTimeoutError extends Error {
+  constructor() {
+    super("reply runtime: no terminal event arrived for the reported outcome");
+    this.name = "ReplyReportTimeoutError";
+  }
+}
+
+export function createBridgeReplyRuntime(
+  session: { transport: ReplyClientTransport; runId: string },
+  options: { reportTimeoutMs?: number } = {},
+): ReplyRuntime {
   const { transport, runId } = session;
+  const reportTimeoutMs = options.reportTimeoutMs ?? REPLY_REPORT_TIMEOUT_MS;
   // Track the latest revision the agent has emitted for THIS run, so a report command carries a
   // fresh `expectedRevision`. Sending a stale 0 would trip the engine's `expectedRevision < revision`
   // guard (STALE_REVISION) once the run has advanced past START_RUN, and the report would never land.
@@ -153,15 +209,54 @@ export function createBridgeReplyRuntime(session: { transport: ReplyClientTransp
       return Promise.resolve({ runId });
     },
     report(id, outcome) {
-      return new Promise<ReplyTerminal>((resolve) => {
-        const unsubscribe = transport.subscribe((event) => {
+      return new Promise<ReplyTerminal>((resolve, reject) => {
+        // ONE settle path, and it always tears the subscription down. A listener that outlives its
+        // promise is not merely a leak here: it holds a closure over a run that has finished, and a
+        // later event on a reused transport would resolve a promise nobody is waiting on.
+        let settled = false;
+        let unsubscribe: (() => void) | null = null;
+        const settle = (fn: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unsubscribe?.();
+          fn();
+        };
+        const timer = setTimeout(
+          () => settle(() => reject(new ReplyReportTimeoutError())),
+          reportTimeoutMs,
+        );
+        unsubscribe = transport.subscribe((event) => {
           if (event.type === "RUN_OPERATOR_REPORTED" && event.runId === id) {
-            unsubscribe();
-            resolve(terminalFromEvent(event));
+            // terminalFromEvent throws on a non-contract terminal; route that through settle too, so
+            // a malformed terminal rejects the caller instead of leaving it pending behind a throw
+            // raised inside a listener nobody catches.
+            settle(() => {
+              try {
+                resolve(terminalFromEvent(event));
+              } catch (e) {
+                reject(e instanceof Error ? e : new Error(String(e)));
+              }
+            });
           }
         });
+        // A transport that delivers SYNCHRONOUSLY inside subscribe() settles before the assignment
+        // above completes, so `settle`'s `unsubscribe?.()` no-ops and the listener survives the
+        // promise — the exact leak this function exists to prevent, reachable by a replaying or
+        // buffering transport. Cheap to close, and closing it means the guarantee does not rest on
+        // an assumption about a transport that has not been written yet.
+        if (settled) {
+          unsubscribe();
+          return;
+        }
         // REQUEST_STEP_RECHECK = "I posted it"; SWITCH_TO_MANUAL = "I did not" — both terminate the run.
-        transport.send(command(outcome === "OPERATOR_REPORTED_SUBMITTED" ? "REQUEST_STEP_RECHECK" : "SWITCH_TO_MANUAL"));
+        try {
+          transport.send(command(outcome === "OPERATOR_REPORTED_SUBMITTED" ? "REQUEST_STEP_RECHECK" : "SWITCH_TO_MANUAL"));
+        } catch (e) {
+          // A transport that throws on send would otherwise leave the promise pending AND the
+          // listener attached, with nothing ever arriving to clear either.
+          settle(() => reject(e instanceof Error ? e : new Error(String(e))));
+        }
       });
     },
   };

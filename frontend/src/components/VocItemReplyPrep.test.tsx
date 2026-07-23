@@ -801,6 +801,43 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     expect(panel).toHaveTextContent("★★");
   });
 
+  it("RELEASES the panel when the report never terminates — no permanent 기록 중 wedge", async () => {
+    // The end of the wedge, asserted where the operator would feel it. A runtime whose report()
+    // rejects (timeout, dropped socket, rejected command) must leave the panel usable: an honest
+    // failure they can retry, not a spinner and a dead panel recoverable only by reloading.
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(APPROVED);
+    const hangingRuntime = {
+      start: () => Promise.resolve({ runId: "run_stub01" }),
+      report: () => Promise.reject(new Error("no terminal arrived")),
+    };
+    render(
+      <VocItemReplyPrep
+        accountId={ACCOUNT}
+        actionRef={REF}
+        disposition="RESPONSE_NEEDED"
+        replyRuntime={hangingRuntime}
+      />,
+    );
+    await screen.findByRole("heading", { name: "답변 준비" });
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+
+    await user.click(screen.getByRole("button", { name: "답변함으로 기록" }));
+
+    // Released: an actionable failure, and the control is live again.
+    expect(await screen.findByText("기록하지 못했습니다. 다시 시도해 주세요.")).toBeInTheDocument();
+    const retry = screen.getByRole("button", { name: "답변함으로 기록" });
+    expect(retry).toHaveAttribute("aria-disabled", "false");
+    // And nothing was recorded — a report that never terminated must not look like one that did.
+    expect(api.recordReviewReplyOutcome).not.toHaveBeenCalled();
+  });
+
   it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {
     await renderPanel({
       ...APPROVED,
