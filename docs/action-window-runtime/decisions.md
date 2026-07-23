@@ -837,3 +837,58 @@ unexplained and non-reproducing, and no further B3 live download probes are auth
 
 *Boundary:* this entry records an offline behavioural change at the validate seam. Every live-run gate
 ([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.
+
+---
+
+## D-038 · ACTIVE — a review-analysis detector must be MEASURABLE before it is built, and the bar is set first (2026-07-23, prior-evidence-driven)
+
+**Decision.** No polarity-aware review analyzer (`rules-v2` or otherwise) is built until a labeled
+evaluation seed and a harness exist, and the go/no-go bars are committed **before** any candidate does.
+The bars live in `contracts/review-eval/naver/v1/RUBRIC.md`: precision **≥ 0.80 on the Wilson 95% lower
+bound**, recall **≥ 0.30**, false positives on 4–5★ `NO_ACTION` reviews **≤ 0.05**, and no change to the
+existing `LOW_RATING_REVIEW` counts. A seed below **200 labeled / 40 `NEEDS_LOOK`** returns *no verdict*
+rather than a weak one.
+
+**Why, and it is not caution for its own sake.** `aiagent/docs/phase2e_detector_design.md` (2026-04-27)
+already measured a flat-substring Korean polarity detector: **sample recall 0/30, attribute capture
+0/121, 12 of 12 attributes never captured.** Its diagnosis is that the failure is *surface-form
+rigidity*, not vocabulary breadth — `발색이 별로` never matches `발색도 약하구요` — and that the observed
+0 false positives held only because the vocabulary was too narrow to match anything, so expansion
+converts the failure into unacceptable FP. `RuleBasedInboxItemAnalyzer` is that architecture exactly.
+
+⚠ **Bound the transfer.** That corpus is cosmetics with 12 attributes × 6 polarities — a harder target
+than "is this review complaining?" — and a different product. The **architecture** finding transfers;
+the specific 0% does not. This entry does not decide that a detector is impossible. It decides that we
+currently have no way to tell, and that shipping one into an operator's queue on that basis is not
+available.
+
+**Precision is the gating metric, not recall.** The headline reads "확인이 필요한 리뷰 N건"; past roughly
+one-in-five noise the queue stops being a worklist. Gating on the interval's lower bound rather than the
+point estimate is deliberate — at 20/20 the normal approximation reports ±0 and would clear an 0.80 bar
+outright.
+
+**A candidate failing these gates may still be BUILT. It may not be SURFACED to an operator.**
+
+**Consequences already implemented** (`docs/slices/review-analysis-eval-reanalysis-foundation-v1.md`):
+a versioned re-analysis path, since every write path was skip-if-exists and no future analyzer could
+otherwise reach the existing corpus; and a gated, fingerprint-keyed local harness. Re-analysis is
+**manual and dry-run-by-default** — categories drive the review-queue facet counts, so an automatic run
+would re-bucket an operator's facets mid-session with no record of why.
+
+**Recorded prerequisite for whoever writes the next analyzer.** Add it **alongside**
+`RuleBasedInboxItemAnalyzer`, never by mutating it. The rollback story has no snapshot table precisely
+because a pure analyzer over immutable inputs makes a prior verdict *reproducible*; mutating the
+existing analyzer turns that from a configuration change into git archaeology.
+
+**Non-claims (do not broaden).**
+- **No detector was built, and no baseline number exists yet.** `labels.json` ships empty; no labeling
+  session has run. Nothing may be quoted from it.
+- These thresholds govern **surfacing to an operator**. They are not a research standard and not a
+  claim about any method's ceiling.
+- **No LLM decision is taken here.** Any LLM-based approach would send customer-authored review bodies
+  to an external provider — the first crossing of the "sanitized output only" fence — and needs its own
+  product-owner privacy decision, not this entry.
+- No re-analysis has been run against real data.
+
+*Boundary:* this entry records an offline posture and the machinery for it. Every live-run gate
+([`r4-gate-record.md`](r4-gate-record.md)) still applies per-run and this entry authorizes no live action.

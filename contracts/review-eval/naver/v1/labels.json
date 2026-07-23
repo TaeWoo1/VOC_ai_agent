@@ -1,0 +1,20 @@
+{
+  "contract": "review-eval/naver/v1",
+  "rubricVersion": "v1",
+  "_comment": [
+    "DELIBERATELY EMPTY. No labeling session has been run, and an empty seed is the honest",
+    "state — not a placeholder to be filled with plausible-looking rows. Labeling requires a",
+    "human pass over real seller review text, which is a separate gated activity: read-only,",
+    "nothing copied or committed, only these derived labels leaving the machine.",
+    "",
+    "Until `labels` reaches the adequacy floor in RUBRIC.md (>= 200 labeled, >= 40 NEEDS_LOOK),",
+    "ReviewAnalyzerEvalIT refuses to print a verdict and says why. An under-powered seed that",
+    "quietly reported a number would be worse than no seed: it would look like evidence.",
+    "",
+    "Each entry carries ONLY a review-id fingerprint and a label. Never the body, the raw",
+    "리뷰글번호, the rating, the date, the product, or any seller identity — the harness reads",
+    "the rating from the local database at evaluation time. See RUBRIC.md section 3, including",
+    "why the fingerprint is leak-hygiene rather than anonymity."
+  ],
+  "labels": []
+}

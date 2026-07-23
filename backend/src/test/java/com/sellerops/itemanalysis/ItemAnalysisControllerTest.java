@@ -1,7 +1,10 @@
 package com.sellerops.itemanalysis;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -9,6 +12,7 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
 import com.sellerops.itemanalysis.dto.LookupRequest;
 import com.sellerops.itemanalysis.dto.LookupRequest.SourceRef;
+import com.sellerops.itemanalysis.dto.ReanalysisResult;
 import com.sellerops.itemanalysis.dto.RunResult;
 import java.util.List;
 import java.util.UUID;
@@ -56,6 +60,34 @@ class ItemAnalysisControllerTest {
 
         assertThat(result).isEmpty();
         verify(service).lookup(orgId, items);
+    }
+
+    @Test
+    void reanalyzeDefaultsToADryRunSoTheForgetfulCallIsTheHarmlessOne() {
+        // The parameter an operator omits must be the one that writes nothing. Reversed, a curious
+        // GET-turned-POST would rewrite an org's whole analysis corpus.
+        ReanalysisResult preview = preview();
+        when(service.previewReanalysis(orgId, 500)).thenReturn(preview);
+
+        assertThat(controller.reanalyze(principal, 500, true)).isSameAs(preview);
+        verify(service).previewReanalysis(orgId, 500);
+        verify(service, never()).reanalyzeOutdated(any(), anyInt());
+    }
+
+    @Test
+    void reanalyzeAppliesOnlyWhenDryRunIsExplicitlyFalse() {
+        ReanalysisResult applied = new ReanalysisResult(false, 1, 1, 0, 0, 0L, 0L,
+                new ReanalysisResult.FieldChanges(1, 0, 0, 0), List.of());
+        when(service.reanalyzeOutdated(orgId, 10)).thenReturn(applied);
+
+        assertThat(controller.reanalyze(principal, 10, false)).isSameAs(applied);
+        verify(service).reanalyzeOutdated(orgId, 10);
+        verify(service, never()).previewReanalysis(any(), anyInt());
+    }
+
+    private static ReanalysisResult preview() {
+        return new ReanalysisResult(true, 2, 1, 1, 0, 2L, 0L,
+                new ReanalysisResult.FieldChanges(1, 0, 0, 0), List.of());
     }
 
     @Test

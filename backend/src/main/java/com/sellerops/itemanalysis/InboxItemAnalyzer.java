@@ -16,6 +16,20 @@ public interface InboxItemAnalyzer {
     Result analyze(SourceItem item);
 
     /**
+     * The version string this analyzer stamps onto every {@link Result} it produces.
+     *
+     * <p>Askable WITHOUT analyzing anything, which is the whole point: "is this stored row stale?"
+     * has to be answerable before deciding whether to do the work. Reading the version out of a
+     * {@code Result} would mean analyzing every row in the corpus just to discover which ones needed
+     * analyzing.
+     *
+     * <p>Implementations must return the same value they put in {@code Result.analyzerVersion()} —
+     * a divergence would make every row look permanently stale and re-analysis never converge.
+     * {@code ItemAnalysisServiceTest} pins the two together.
+     */
+    String version();
+
+    /**
      * The minimal, already-loaded view of an inquiry/review the analyzer needs.
      * {@code rating}/{@code negative} apply to reviews; {@code status} to inquiries.
      */

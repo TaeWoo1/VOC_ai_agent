@@ -54,6 +54,11 @@ public class RuleBasedInboxItemAnalyzer implements InboxItemAnalyzer {
             List.of("불량", "하자", "환불", "실망", "별로");
 
     @Override
+    public String version() {
+        return VERSION;
+    }
+
+    @Override
     public Result analyze(SourceItem item) {
         String body = item.body() == null ? "" : item.body();
         boolean isReview = REVIEW.equals(item.sourceType());

@@ -4,6 +4,7 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.itemanalysis.dto.BackfillResult;
 import com.sellerops.itemanalysis.dto.ItemAnalysisView;
 import com.sellerops.itemanalysis.dto.LookupRequest;
+import com.sellerops.itemanalysis.dto.ReanalysisResult;
 import com.sellerops.itemanalysis.dto.RunResult;
 import java.util.List;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -43,6 +44,27 @@ public class ItemAnalysisController {
     public BackfillResult backfill(@AuthenticationPrincipal AuthPrincipal principal,
                                    @RequestParam(defaultValue = "500") int limit) {
         return service.backfillMissing(principal.orgId(), limit);
+    }
+
+    /**
+     * Recompute this org's analyses that a different analyzer version produced — the only way an
+     * analyzer change reaches rows that already exist.
+     *
+     * <p><b>Manual trigger, deliberately.</b> Nothing runs this on deploy: categories drive the
+     * review-queue facet counts, so an automatic run would re-bucket an operator's facets
+     * mid-session. Re-call until {@code remaining == 0}.
+     *
+     * <p>{@code dryRun=true} (the DEFAULT) predicts the batch and writes nothing, so the harmless
+     * call is the one you get by forgetting the parameter. ⚠ A dry run's {@code remaining} does not
+     * count down — never drive a re-call loop on it (see {@code ReanalysisResult}).
+     */
+    @PostMapping("/reanalyze")
+    public ReanalysisResult reanalyze(@AuthenticationPrincipal AuthPrincipal principal,
+                                      @RequestParam(defaultValue = "500") int limit,
+                                      @RequestParam(defaultValue = "true") boolean dryRun) {
+        return dryRun
+                ? service.previewReanalysis(principal.orgId(), limit)
+                : service.reanalyzeOutdated(principal.orgId(), limit);
     }
 
     /** Read stored analyses for this org. */
