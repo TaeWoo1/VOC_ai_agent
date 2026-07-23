@@ -10,7 +10,7 @@
 
 import { createBridgeClient, type BridgeClient } from "./bridgeAdapter";
 import { resolveBridgeSession } from "./devMode";
-import { adoptBridgeSource, setBridgeBootAttempted } from "./operationsStore";
+import { adoptBridgeSource, setBridgeBootAttempted, setBridgeRefusal } from "./operationsStore";
 import type { ActionWindowSource, SourceCommand, SourceConnection, SourceUpdate } from "./source";
 
 export interface BridgeBackedSource extends ActionWindowSource {
@@ -97,8 +97,17 @@ export async function connectBridgeIfEnabled(): Promise<boolean> {
   // the session resolves; transitions arriving before adoption are dropped (the
   // store starts a bridge world as "connected" anyway).
   let source: BridgeBackedSource | null = null;
-  const session = await resolveBridgeSession((status) => source?.notifyStatus(status));
-  if (!session) return false;
+  const result = await resolveBridgeSession((status) => source?.notifyStatus(status));
+  if (!result.ok) {
+    // Record WHY before falling back. The fallback itself is unchanged — the fixture source stays —
+    // but "the agent is hosting the reply carrier" and "you never paired" are different problems with
+    // different fixes, and collapsing both into a silent false is what made a working agent look
+    // broken. Sanitized enums only; safe to surface and safe to log.
+    setBridgeRefusal(result.reason, result.announcedCarrier);
+    return false;
+  }
+  const session = result.session;
+  setBridgeRefusal(null);
   const client = createBridgeClient(session.transport, {
     runId: session.runId,
     channelCode: session.channelCode,

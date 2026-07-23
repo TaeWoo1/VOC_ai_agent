@@ -1,8 +1,11 @@
 // The FE-1 mock scenario selector is a fixture/demo preview tool. It is DEV-only
 // and must never appear in the production UI: gated on Vite's build-time `DEV`
 // flag, so the production build tree-shakes it out entirely.
-import type { AwClientTransport } from "./contract";
-import { connectAwBridgeSession, type AwConnectionStatus } from "./wsTransport";
+import {
+  connectAwBridgeSession,
+  type AwBridgeConnectResult,
+  type AwConnectionStatus,
+} from "./wsTransport";
 
 export function isFixturePreviewEnabled(): boolean {
   return import.meta.env.DEV === true;
@@ -26,28 +29,23 @@ export function isBridgeModeEnabled(): boolean {
   return env.DEV === true && env.VITE_AW_BRIDGE === "1";
 }
 
-/** A live Action Window transport bound to the Operation Run the local agent announced. */
-export interface BridgeSession {
-  transport: AwClientTransport;
-  runId: string;
-  channelCode: string;
-  /** Tear down the underlying socket and stop reconnection. */
-  close(): void;
-}
-
 /**
  * Establish the live Action Window session over the Local Agent Bridge (R2B), or resolve `null` when
- * none is reachable — bridge mode disabled, agent off, unpaired, no hosted run announced, or a
- * transport-version mismatch. `null` keeps Operations on the mock (the honest fallback), so the screen
- * degrades to the contract-backed demo instead of a broken live view.
+ * none is reachable — bridge mode disabled, agent off, unpaired, no hosted run announced, a
+ * transport-version mismatch, or an agent hosting the OTHER carrier. A refusal keeps Operations on
+ * the mock (the honest fallback), so the screen degrades to the contract-backed demo instead of a
+ * broken live view — and now carries WHY, which is the difference between an operator who can fix it
+ * and one staring at "offline".
  *
  * Authentication reuses the pairing the Bridge status client established (`BRIDGE_TOKEN_KEY`); the run
  * identity comes from the agent's `aw_session` announcement — the FE never invents a runId.
  */
 export function resolveBridgeSession(
   onStatus?: (status: AwConnectionStatus) => void,
-): Promise<BridgeSession | null> {
-  if (!isBridgeModeEnabled()) return Promise.resolve(null);
+): Promise<AwBridgeConnectResult> {
+  // Not a failure — this build simply did not ask for a live bridge. Named so diagnostics can say
+  // "bridge mode is off" instead of reporting a connection problem that was never attempted.
+  if (!isBridgeModeEnabled()) return Promise.resolve({ ok: false, reason: "bridge-disabled" });
   const env = import.meta.env as Record<string, unknown>;
   const httpBase = typeof env.VITE_BRIDGE_URL === "string" ? env.VITE_BRIDGE_URL : "http://127.0.0.1:47615";
   return connectAwBridgeSession({ httpBase, wsBase: httpBase.replace(/^http/, "ws"), onStatus });

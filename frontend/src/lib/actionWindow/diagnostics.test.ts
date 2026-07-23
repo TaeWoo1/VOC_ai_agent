@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeBridgeDiagnostics, type BridgeDiagnosticsInput } from "./diagnostics";
+import { refusalLabel, describeBridgeDiagnostics, type BridgeDiagnosticsInput } from "./diagnostics";
 import { channelLabel } from "./copy";
 import { UI_SCENARIOS } from "./fixtures";
 
@@ -13,6 +13,7 @@ function liveInput(overrides: Partial<BridgeDiagnosticsInput> = {}): BridgeDiagn
     connection: "connected",
     bridgeModeEnabled: true,
     bootAttempted: true,
+    bridgeRefusal: null,
     retryPending: false,
     connectionTrail: ["connected"],
     connectionChangeCount: 0,
@@ -159,5 +160,44 @@ describe("FE-5 bridge diagnostics formatter", () => {
         expect(allowed.has(f.value)).toBe(true);
       }
     }
+  });
+});
+
+describe("refusalLabel — why the live bridge was refused", () => {
+  it("names the ACTIONABLE case: the agent is healthy, it just hosts the other carrier", () => {
+    // The confusion this whole slice exists for. An agent running with --dev-action-window-reply is
+    // working perfectly; before the reason existed it was indistinguishable from a dead one.
+    expect(refusalLabel({ reason: "carrier-mismatch", announcedCarrier: "reply" }))
+      .toBe("다른 캐리어 호스팅 중(reply)");
+  });
+
+  it("does not name a carrier it could not identify", () => {
+    // An absent or unrecognised carrier is precisely the thing we failed to read; claiming one
+    // would be a guess dressed as a diagnosis.
+    expect(refusalLabel({ reason: "carrier-mismatch" })).toBe("캐리어 불일치");
+  });
+
+  it("distinguishes the other refusals from each other", () => {
+    expect(refusalLabel({ reason: "bridge-disabled" })).toBe("브리지 모드 꺼짐");
+    expect(refusalLabel({ reason: "unpaired" })).toBe("페어링 없음");
+    expect(refusalLabel({ reason: "ticket-rejected" })).toBe("티켓 거절됨");
+    expect(refusalLabel({ reason: "unreachable" })).toBe("에이전트 연결 불가");
+    expect(refusalLabel({ reason: "no-announcement" })).toBe("세션 알림 없음");
+    expect(refusalLabel({ reason: "transport-version-mismatch" })).toBe("전송 버전 불일치");
+    // All distinct — a label table that collapsed two reasons would undo the point.
+    const labels = [
+      "bridge-disabled", "unpaired", "ticket-rejected", "unreachable",
+      "no-announcement", "transport-version-mismatch", "carrier-mismatch",
+    ].map((reason) => refusalLabel({ reason }));
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("says nothing when there was no refusal", () => {
+    expect(refusalLabel(null)).toBe("—");
+  });
+
+  it("renders an UNKNOWN reason verbatim rather than swallowing it", () => {
+    // A refusal nobody labelled should be visible in the DEV panel, not invisible.
+    expect(refusalLabel({ reason: "something-new" })).toBe("something-new");
   });
 });

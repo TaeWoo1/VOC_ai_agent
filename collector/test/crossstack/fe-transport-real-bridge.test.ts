@@ -177,7 +177,7 @@ async function connectRealFeStack(basePort: number, portRef: { port: number }, t
   let source: BridgeBackedSource | null = null;
   const { fetchFn, wsFactory } = makeBrowserDeps(basePort, portRef, opened);
 
-  const session: AwBridgeSession | null = await connectAwBridgeSession({
+  const result = await connectAwBridgeSession({
     httpBase,
     wsBase,
     fetchFn,
@@ -191,7 +191,10 @@ async function connectRealFeStack(basePort: number, portRef: { port: number }, t
       source?.notifyStatus(s as SourceConnection); // exactly the relay connectBridgeIfEnabled sets up
     },
   });
-  if (!session) throw new Error("FE stack failed to establish a live session over the real Bridge");
+  // The refusal now carries WHY, so a cross-stack failure names its cause instead of being a bare
+  // "failed" — and this is also the end-to-end proof that the EXPORT carrier still attaches.
+  if (!result.ok) throw new Error(`FE stack failed to establish a live session over the real Bridge: ${result.reason}`);
+  const session: AwBridgeSession = result.session;
 
   const client = createBridgeClient(session.transport, { runId: session.runId, channelCode: session.channelCode });
   source = createBridgeSource(client);

@@ -31,6 +31,7 @@ export function BridgeDiagnostics({ state }: { state: OperationsState }) {
     connection: state.connection,
     bridgeModeEnabled: isBridgeModeEnabled(),
     bootAttempted: state.bootAttempted,
+    bridgeRefusal: state.bridgeRefusal,
     retryPending: state.retryPending,
     connectionTrail: state.connectionTrail,
     connectionChangeCount: state.connectionChangeCount,
