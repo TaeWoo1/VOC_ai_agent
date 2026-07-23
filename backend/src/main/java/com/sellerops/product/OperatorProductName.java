@@ -54,6 +54,12 @@ public final class OperatorProductName {
      *
      * <p>A product with a real name and no sku IS displayable — absent identity is not a reason to
      * withhold a name.
+     *
+     * <p>Returns the TRIMMED name. The predicate this replaced already compared on trimmed values but
+     * returned the raw one, so a stored {@code "  가디건  "} reached the DTO with its padding; both
+     * operator surfaces trim for display anyway, so nothing renders differently — the contract ("a
+     * real name or an honest null") simply now holds on the value itself rather than on what the
+     * client does to it.
      */
     public static String displayNameOrNull(Product product) {
         if (product == null) {

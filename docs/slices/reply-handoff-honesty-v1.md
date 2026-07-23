@@ -82,7 +82,30 @@ Both typechecks clean. **V24 verified on a disposable PostgreSQL 15 database** �
 24, and `information_schema` confirms `aw_run_ref` is now `is_nullable = YES`. Database dropped; the
 dev DB was never touched.
 
-## 5. Recorded, not fixed
+## 5. What the independent review caught
+
+Three, all fixed:
+
+1. **A dangling citation.** `IngestedReviewVocItemSource`'s class javadoc still cited
+   `hasDisplayableName` — a method the extraction had removed from that class. Repointed at
+   `OperatorProductName.displayNameOrNull`.
+2. **An undocumented behaviour change.** The extracted rule returns the TRIMMED name where the
+   predicate it replaced compared on trimmed values but returned the raw one. Nothing renders
+   differently (both surfaces trim for display), but the DTO's contract now holds on the value itself
+   rather than on what the client does to it — so it is written down rather than left to be noticed.
+3. **A test-isolation defect, which then bit immediately.** The manual-handoff tests stub
+   `import.meta.env.DEV = false`, and the stub was only cleared at the END of each test body — a
+   thrown assertion would leak `DEV=false` into every later test, sending guided-path tests down the
+   manual branch where they would pass while testing something else. Moving the cleanup into the
+   nearest `afterEach` was **wrong**: that block lives inside the first `describe` and does not cover
+   the others, so two guided tests started failing. Fixed properly at FILE scope. Worth recording
+   because the failure was the good outcome — the alternative was two tests quietly asserting the
+   wrong branch forever.
+
+Also renamed `startGuided` → `startHandoff`: it opens the manual path too, and a name that
+overclaims in code is the same defect as one that overclaims in a label.
+
+## 6. Recorded, not fixed
 
 - ⚠ **The real Bridge runtime is still not wired.** `createBridgeReplyRuntime` exists, speaks v2, and
   is unit-tested — but nothing constructs it from a live session. This slice makes the absence

@@ -58,8 +58,9 @@ import org.springframework.stereotype.Component;
  * DISPLAY value only — the SKU (상품번호, i.e. the channel's {@code productNo}) is the
  * product's identity and is withheld from the DTO. Crucially that is ENFORCED, not
  * assumed: ingest stores the SKU as the name when a row has no name, so
- * {@code hasDisplayableName} withholds any name equal to its own SKU rather than trusting
- * the two fields to differ. Names are resolved for a whole page in one org-scoped batch
+ * {@code OperatorProductName.displayNameOrNull} withholds any name equal to its own SKU rather than
+ * trusting the two fields to differ — a rule now SHARED with the reply-preparation panel, which makes
+ * the same promise about the same rows and would otherwise be free to drift into rendering a SKU. Names are resolved for a whole page in one org-scoped batch
  * query (see {@code productNamesFor}); anything that cannot be resolved honestly comes out
  * {@code null}. The guarantee is this surface's, not the product model's — ingest keeps
  * minting SKU-named rows and other surfaces keep showing them.

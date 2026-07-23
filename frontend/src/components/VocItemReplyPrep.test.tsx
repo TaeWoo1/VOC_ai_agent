@@ -132,6 +132,15 @@ function stubGuidedRun() {
   });
 }
 
+// FILE-SCOPE, deliberately: `resolveReplyRuntime()` reads import.meta.env.DEV, and the manual-handoff
+// tests stub it false. Registered inside a describe it would not cover the OTHER describes, and a
+// leaked DEV=false silently sends every later guided-path test down the manual branch — where it
+// passes, while testing something else entirely. That is exactly what happened when this cleanup
+// first landed in the wrong block.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("VocItemReplyPrep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -771,7 +780,6 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     // THE assertion: no run identity for a run that did not happen.
     expect(body.awRunRef).toBeUndefined();
     expect("awRunRef" in body).toBe(false);
-    vi.unstubAllEnvs();
   });
 
   it("gives the seller what they need to FIND the review, since nothing navigates for them", async () => {
@@ -791,7 +799,6 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     expect(panel).toHaveTextContent("가을 니트 가디건 CHARCOAL");
     expect(panel).toHaveTextContent("2026-05-10");
     expect(panel).toHaveTextContent("★★");
-    vi.unstubAllEnvs();
   });
 
   it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {

@@ -367,8 +367,12 @@ export function VocItemReplyPrep({
     setFailed("복사하지 못했습니다. 다시 시도해 주세요.");
   }
 
-  async function startGuided() {
-    // Reuse an UNSPENT run: a guided run already in flight keeps its single-use submissionRef rather
+  async function startHandoff() {
+    // Named for what it does in BOTH modes: it starts a handoff, which is a guided run only when this
+    // build has a runtime. Calling it startGuided while it also opened the manual path would be the
+    // same overclaim in code that "(가이드)" was in the label.
+    //
+    // Reuse an UNSPENT handoff: one already in flight keeps its single-use submissionRef rather
     // than minting another. A fresh mint happens only after a terminal report spends it (setGuided(null)).
     if (inFlight.current || !canStart || guided != null) {
       return;
@@ -575,7 +579,7 @@ export function VocItemReplyPrep({
             type="button"
             aria-disabled={!canStart || working}
             aria-busy={busy === "starting"}
-            onClick={() => void startGuided()}
+            onClick={() => void startHandoff()}
             className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
               canStart && !working ? "bg-canvas text-ink ring-1 ring-line" : "bg-canvas text-muted opacity-40"
             }`}
