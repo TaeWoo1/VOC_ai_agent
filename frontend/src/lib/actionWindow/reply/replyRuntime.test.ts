@@ -4,6 +4,8 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import type { CommandEnvelope, EventEnvelope } from "../../../../../contracts/action-window/v2/index";
 import {
+  REPLY_REPORT_TIMEOUT_MS,
+  ReplyReportTimeoutError,
   resolveReplyRuntime,
   createBridgeReplyRuntime,
   createSimulatedReplyRuntime,
@@ -124,5 +126,133 @@ describe("resolveReplyRuntime — production may not mint a run", () => {
 
     expect(runtime).toBeNull();
     expect(() => resolveReplyRuntime()).not.toThrow();
+  });
+});
+
+describe("createBridgeReplyRuntime.report — it always settles, and always cleans up", () => {
+  /** A transport that also reports how many listeners are still attached. */
+  function fakeTransport(): {
+    transport: ReplyClientTransport;
+    emit: (e: EventEnvelope) => void;
+    listenerCount: () => number;
+  } {
+    const listeners = new Set<(e: EventEnvelope) => void>();
+    return {
+      emit: (e) => listeners.forEach((l) => l(e)),
+      listenerCount: () => listeners.size,
+      transport: {
+        send: () => {},
+        subscribe: (l) => {
+          listeners.add(l);
+          return () => listeners.delete(l);
+        },
+      },
+    };
+  }
+
+  function terminalEvent(runId: string, outcome: "OPERATOR_REPORTED_SUBMITTED" | "SUBMISSION_ABORTED"): EventEnvelope {
+    return {
+      protocolVersion: 2,
+      eventId: `${runId}-e1`,
+      runId,
+      sequence: 1,
+      revision: 1,
+      type: "RUN_OPERATOR_REPORTED",
+      occurredAt: "2026-01-01T00:00:00.000001Z",
+      payload: { status: "OPERATOR_REPORTED", operatorOutcome: outcome, verification: "UNVERIFIED" },
+    } as EventEnvelope;
+  }
+
+  it("has a FINITE default bound — any finite bound beats none", () => {
+    // Pinned so the default cannot quietly become Infinity or a value long enough to feel like the
+    // hang it replaced. Longer than a healthy local round-trip by orders of magnitude, shorter than
+    // an operator's patience.
+    expect(Number.isFinite(REPLY_REPORT_TIMEOUT_MS)).toBe(true);
+    expect(REPLY_REPORT_TIMEOUT_MS).toBeGreaterThan(1_000);
+    expect(REPLY_REPORT_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
+  });
+
+  it("REJECTS on timeout instead of hanging forever", async () => {
+    // The wedge this fixes. report() used to resolve only on RUN_OPERATOR_REPORTED, so a dropped
+    // socket or a rejected command left the promise pending — and VocItemReplyPrep pending with it,
+    // stuck at busy="reporting" with inFlight=true and no way out but a reload.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 5 });
+
+    await expect(runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED")).rejects.toThrow(
+      ReplyReportTimeoutError,
+    );
+  });
+
+  it("unsubscribes on timeout — a listener must not outlive its promise", async () => {
+    // Not merely a leak: the closure holds a finished run, and a later event on a reused transport
+    // would resolve a promise nobody is waiting on.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 5 });
+    // The runtime keeps ONE permanent listener from construction, tracking the latest revision so a
+    // report carries a fresh expectedRevision. The baseline is that listener; what must not survive
+    // is report()'s own.
+    const baseline = t.listenerCount();
+
+    await expect(runtime.report("run_agentabcd12", "SUBMISSION_ABORTED")).rejects.toThrow();
+
+    expect(t.listenerCount()).toBe(baseline);
+  });
+
+  it("unsubscribes after a successful terminal too", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    const baseline = t.listenerCount();
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    t.emit(terminalEvent("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED"));
+
+    await pending;
+
+    expect(t.listenerCount()).toBe(baseline);
+  });
+
+  it("REJECTS when the transport throws on send, rather than waiting for a reply that cannot come", async () => {
+    const throwing: ReplyClientTransport = {
+      send: () => {
+        throw new Error("socket closed");
+      },
+      subscribe: () => () => {},
+    };
+    const runtime = createBridgeReplyRuntime({ transport: throwing, runId: "run_agentabcd12" });
+
+    await expect(runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED")).rejects.toThrow(
+      "socket closed",
+    );
+  });
+
+  it("REJECTS a malformed terminal instead of throwing inside a listener nobody catches", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    const baseline = t.listenerCount();
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    // Right type and runId, contract-invalid payload — the shape terminalFromEvent refuses.
+    t.emit({
+      protocolVersion: 2,
+      eventId: "run_agentabcd12-e1",
+      runId: "run_agentabcd12",
+      sequence: 1,
+      revision: 1,
+      type: "RUN_OPERATOR_REPORTED",
+      occurredAt: "not-a-timestamp",
+      payload: { status: "OPERATOR_REPORTED" },
+    } as unknown as EventEnvelope);
+
+    await expect(pending).rejects.toThrow();
+    expect(t.listenerCount()).toBe(baseline);
+  });
+
+  it("settles exactly once — a late terminal after a timeout changes nothing", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 5 });
+    const pending = runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+    await expect(pending).rejects.toThrow(ReplyReportTimeoutError);
+
+    // Arrives after the caller gave up. Must not throw, must not resolve anything.
+    expect(() => t.emit(terminalEvent("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED"))).not.toThrow();
   });
 });

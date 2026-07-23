@@ -150,6 +150,28 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-23 — Reply Report Safety v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the guided-reply terminal)
+- **Did:** `createBridgeReplyRuntime.report()` resolved ONLY on `RUN_OPERATOR_REPORTED` — no timeout,
+  no rejection, no handling of a transport that throws — so a dropped socket or a rejected command
+  left the promise pending forever, and `VocItemReplyPrep` pending with it at `busy = "reporting"`,
+  every control inert, recoverable only by reloading. Now one settle path that always clears the
+  timer and unsubscribes: four ways in, one way out. A panel test asserts the operator is released
+  with an actionable failure and that NOTHING was recorded.
+- **Evidence:** `docs/slices/reply-report-safety-v1.md`; frontend 759 (was 756), collector and
+  backend untouched; typecheck clean. Two falsifications caught — removing the timeout makes three
+  tests hang to their 5s limit, reproducing the original bug exactly.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ Safety only — **no v2 frame adapter, no runtime injection, no carrier
+  switching**. Nothing constructs this runtime in any build; the fix guarantees that when something
+  finally does, it cannot wedge the panel.
+- **Next:** the envelope↔frame adapter, which should surface `aw_command_result{accepted:false}` as a
+  rejection (the v1 adapter already does) — turning today's timeout into an immediate, accurate
+  failure. The runtime's construction-time listener also has no disposal path; that belongs with the
+  injection slice, which decides its lifetime.
+
 ### 2026-07-23 — Action Window Carrier Discriminator v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the Bridge carrier beneath it)
 - **Did:** Closed a mis-attach that nothing could have detected. The v1 export and v2 reply carriers
