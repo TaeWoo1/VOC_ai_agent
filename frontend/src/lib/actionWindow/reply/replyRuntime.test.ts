@@ -246,6 +246,38 @@ describe("createBridgeReplyRuntime.report — it always settles, and always clea
     expect(t.listenerCount()).toBe(baseline);
   });
 
+  it("cleans up even when the transport delivers SYNCHRONOUSLY inside subscribe()", async () => {
+    // The leak the cleanup guarantee would otherwise rest on luck to avoid: a replaying or buffering
+    // transport can settle the promise before `subscribe()` has returned its unsubscribe function,
+    // so the tear-down inside settle() has nothing to call and the listener outlives the promise.
+    const listeners = new Set<(e: EventEnvelope) => void>();
+    // Armed only AFTER construction: the runtime's own constructor subscribes first (the revision
+    // tracker), and it would otherwise swallow the replay meant for report()'s listener.
+    let replay: EventEnvelope | null = null;
+    const syncTransport: ReplyClientTransport = {
+      send: () => {},
+      subscribe: (l) => {
+        listeners.add(l);
+        // Deliver DURING subscribe, before the caller can hold the unsubscribe.
+        if (replay) {
+          const e = replay;
+          replay = null;
+          l(e);
+        }
+        return () => listeners.delete(l);
+      },
+    };
+    const runtime = createBridgeReplyRuntime({ transport: syncTransport, runId: "run_agentabcd12" });
+    const baseline = listeners.size;
+    replay = terminalEvent("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED");
+
+    await expect(runtime.report("run_agentabcd12", "OPERATOR_REPORTED_SUBMITTED")).resolves.toMatchObject({
+      operatorOutcome: "OPERATOR_REPORTED_SUBMITTED",
+    });
+
+    expect(listeners.size).toBe(baseline);
+  });
+
   it("settles exactly once — a late terminal after a timeout changes nothing", async () => {
     const t = fakeTransport();
     const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { reportTimeoutMs: 5 });

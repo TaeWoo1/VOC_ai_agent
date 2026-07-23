@@ -62,7 +62,7 @@ not look like one that did.
 
 | | before | after |
 |---|---|---|
-| frontend | 756 | **759** |
+| frontend | 756 | **760** |
 | collector | 4843 / 95 skipped | unchanged, untouched |
 | backend | 1502 (2 skipped) | unchanged, untouched |
 
@@ -75,18 +75,50 @@ Typecheck clean.
 | remove the timeout rejection | 3 tests **hang to their 5s limit** — the wedge, reproduced |
 | leave the listener attached after settling | all 3 cleanup tests fail |
 
-## 5. What is NOT in this slice
+## 5. What the independent review caught
+
+**One confirmed defect: the cleanup guarantee rested on an assumption about a transport that has not
+been written yet.**
+
+`settle()` calls `unsubscribe?.()`, but `unsubscribe` is assigned *from* `transport.subscribe(...)`.
+A transport that delivers a matching terminal **synchronously, inside `subscribe()`** settles the
+promise before that assignment completes — so the optional call no-ops and the listener survives the
+promise. Exactly the leak this function exists to prevent, reachable by any replaying or buffering
+transport, and the real adapter does not exist yet to rule it out.
+
+Closed by re-checking after the assignment: if it settled during subscribe, unsubscribe immediately
+and skip the send — a run that has already terminated should not be commanded. Falsified: removing
+the guard leaves **2** listeners where **1** is expected.
+
+⚠ Writing the test for it also surfaced why it is easy to miss: the runtime's *constructor*
+subscribes first, so a naive synchronous-replay fixture is swallowed by the revision tracker and the
+report listener never sees it. The fixture arms the replay only after construction.
+
+## 6. Disposal contract for the injection slice
+
+Recorded **in `replyRuntime.ts`**, where the next author will be standing, rather than only here.
+
+The factory subscribes once at construction (the revision tracker) and that subscription has **no
+disposal path** — no `dispose()`, nothing removes it. Harmless only because nothing constructs the
+runtime in any build. Once injection lands the leak takes the shape of the runtime's lifetime: one
+per session is a single listener for the life of the tab; **one per panel/row is a listener per
+mounted reply panel, never released**, accumulating across a worklist page.
+
+The injection slice must supply: a `dispose()` that removes the construction-time subscription and
+makes later `report()` calls fail closed rather than attach to a torn-down session; a caller that
+actually invokes it (for React, the effect cleanup that created it); and a test asserting the
+listener count returns to **zero** after disposal — not to the construction baseline that
+`report()`'s own tests measure, which is deliberately a delta so nobody is pressured into deleting a
+listener the protocol needs.
+
+## 7. What is NOT in this slice
 
 No envelope↔frame adapter, no `createBridgeReplyRuntime` injection, no carrier switching. The
 runtime is still constructed by nothing in any build; this only guarantees that when it *is*
 constructed, it cannot wedge the panel.
 
-## 6. Recorded, not fixed
+## 8. Recorded, not fixed
 
-- **The construction-time listener has no disposal path.** `createBridgeReplyRuntime` subscribes once
-  to track revisions and never unsubscribes; there is no `dispose()`. Bounded today (one per runtime
-  instance, and nothing constructs them), but it belongs with the injection slice, which is what
-  decides the runtime's lifetime.
 - **The envelope↔frame adapter still does not exist** — the wire carries `{kind:"aw_command"…}` /
   `{kind:"aw_event"…}`, the runtime speaks `CommandEnvelope`/`EventEnvelope`, and the only
   implementation of `ReplyClientTransport` is a test fake. A real adapter should also surface

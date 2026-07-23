@@ -124,7 +124,41 @@ export interface ReplyClientTransport {
 }
 
 /**
- * The dev-bridge runtime (VITE_AW_BRIDGE): drives a REAL agent-hosted reply run over an injected v2
+ * **DISPOSAL CONTRACT — required before this runtime is ever injected.**
+ *
+ * <p>This factory subscribes ONCE at construction, to track the latest revision so a report carries
+ * a fresh `expectedRevision`. That subscription has **no disposal path**: there is no `dispose()`,
+ * and nothing removes it. `report()` cleans up its OWN listener on every settle path, but the
+ * construction-time one outlives every call and lives as long as the runtime object.
+ *
+ * <p>Harmless today only because **nothing constructs this runtime in any build**. The moment
+ * injection lands, the shape of the leak follows the runtime's lifetime:
+ *
+ * <ul>
+ *   <li><b>One runtime per app session</b> — a single listener for the life of the tab. Tolerable,
+ *       but it must then be a deliberate choice rather than an accident.
+ *   <li><b>One runtime per panel/row</b> — a listener per mounted reply panel, none of which are
+ *       ever released. A worklist page mounting many rows accumulates them, and each one holds a
+ *       closure over a transport that outlives it.
+ * </ul>
+ *
+ * <p><b>What the injection slice must supply:</b>
+ *
+ * <ol>
+ *   <li>a {@code dispose()} on the returned runtime that removes the construction-time subscription
+ *       and makes subsequent {@code report()} calls fail closed rather than attach a new listener to
+ *       a torn-down session;
+ *   <li>a caller that actually invokes it — for a React consumer, the cleanup of the effect that
+ *       created the runtime, so unmounting a panel releases it;
+ *   <li>a test asserting the transport's listener count returns to ZERO after disposal, not merely
+ *       to the construction baseline that {@code report()}'s own tests use. Those tests deliberately
+ *       measure the delta, because asserting zero there would pressure someone into deleting a
+ *       listener the protocol needs.
+ * </ol>
+ *
+ * <p>Recorded here rather than in a doc because this is where the next author will be standing.
+ *
+ * <p>The dev-bridge runtime (VITE_AW_BRIDGE): drives a REAL agent-hosted reply run over an injected v2
  * transport, reading the runtime-assigned runId from the agent's `aw_session` announcement. `start`
  * dispatches the v2 START_RUN with a LAN-safe command id; `report` sends the operator's command and
  * resolves on the agent's `RUN_OPERATOR_REPORTED` terminal event. Only ever used when a dev-bridge is
@@ -206,6 +240,15 @@ export function createBridgeReplyRuntime(
             });
           }
         });
+        // A transport that delivers SYNCHRONOUSLY inside subscribe() settles before the assignment
+        // above completes, so `settle`'s `unsubscribe?.()` no-ops and the listener survives the
+        // promise — the exact leak this function exists to prevent, reachable by a replaying or
+        // buffering transport. Cheap to close, and closing it means the guarantee does not rest on
+        // an assumption about a transport that has not been written yet.
+        if (settled) {
+          unsubscribe();
+          return;
+        }
         // REQUEST_STEP_RECHECK = "I posted it"; SWITCH_TO_MANUAL = "I did not" — both terminate the run.
         try {
           transport.send(command(outcome === "OPERATOR_REPORTED_SUBMITTED" ? "REQUEST_STEP_RECHECK" : "SWITCH_TO_MANUAL"));
