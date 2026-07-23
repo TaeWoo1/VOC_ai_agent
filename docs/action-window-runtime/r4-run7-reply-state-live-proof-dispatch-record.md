@@ -18,7 +18,9 @@
 >   could not be shown — the **§8 fallback**, recorded not passed. ⚠ Diverges from the operator's
 >   on-screen §8 confirmation; the range that actually exported evidently differed from that view
 >   (all 58 rows are a single recent date). **C5** (mint on a PENDING row) was **blocked by a 500 on
->   the triage/draft endpoints** — a separate backend-only anomaly to reproduce OFFLINE.
+>   the triage/draft endpoints** — since RESOLVED (§18.4-3): the live chain used the wrong
+>   method/path; the correct chain mints a submissionRef end to end, and the investigation found +
+>   fixed a real 405-masked-as-500 defect (`fix/method-not-allowed-500-masking`).
 > - Teardown clean: DB dropped (name-guarded), `sellerops` intact, zero artifacts, secrets scrubbed,
 >   holder `.env`/profile untouched. Both 2026-07-24 gates **CONSUMED**. Full record: **§18**.
 >
@@ -675,7 +677,9 @@ C1 compatibility:   PASS — body/rating/received_at/external_id/reply_state = 5
 C2 queue exclusion: NOT DEMONSTRATED (§8) — 0 answered reviews in the exported range
 C3 arrivals whole:  PASS — 58 NEW_REVIEW; low/mid/high = 1/1/56
 C4 refusal:         NOT DEMONSTRABLE — no answered review exists to refuse
-C5 non-vacuity:     BLOCKED — 500 on triage/draft (backend-only anomaly; §18.4-3)
+C5 non-vacuity:     was recorded BLOCKED (500) — RESOLVED §18.4-3: the live chain used wrong
+                    method/path; the CORRECT chain mints a submissionRef end to end. A real
+                    405-masked-as-500 defect was found + fixed (fix/method-not-allowed-500-masking)
 Census:             rating 58 · received_at 58 (UTC-midnight 58) · external_id 58
                     reply_state PENDING 58 / ANSWERED 0 / UNKNOWN 0
                     replied_at on ANSWERED 0/0 · on PENDING 0 (expect 0) ✓
@@ -699,16 +703,27 @@ Findings:           §18.4
    `NOT DEMONSTRATED`, never quietly passed on an empty set. A future attempt wanting the reply-state
    headline must confirm the answered row is **inside the range that will actually export**, not just
    visible somewhere on screen.
-3. **A 500 on the triage and reply-draft endpoints** blocked C5 (mint-on-PENDING non-vacuity). It is
-   backend-only (no NAVER contact), reproducible OFFLINE against a disposable Postgres backend, and
-   did not affect the ingest headline. The `gradle -q` boot suppressed the request-time stack trace;
-   the disposable DB was dropped on schedule rather than kept to chase it. **Recorded for offline
-   reproduction** — the triage/reply path has hermetic tests, so the divergence is likely
-   environment- or Postgres-specific and characterizable without any live run.
+3. **The C5 "500" — RESOLVED 2026-07-24, offline reproduction complete.** It was **not** a
+   triage/draft business-logic defect. The live C5 chain used the **wrong method and path** on two
+   calls: `PUT …/triage` (the route is `POST …/triage`) and `POST …/reply` (the draft route is
+   `PUT …/reply/draft`). Reproduced on a disposable Postgres backend with a seeded RESPONSE_NEEDED
+   review: the **correct** chain works end to end — `POST /triage` → 200, `PUT /reply/draft` → 200,
+   `POST /reply/approval` → 200, `POST /reply/submission-run` → **200 with a `submissionRef`
+   minted**. So C5's underlying capability (mint on a PENDING row) is in fact **sound**; the live
+   run simply exercised it wrongly.
+   ⚠ **But the investigation found a real, separate defect and fixed it:** a wrong HTTP method on a
+   known route returned **500 instead of 405** — `GlobalExceptionHandler`'s catch-all
+   `@ExceptionHandler(Exception.class)` was swallowing `HttpRequestMethodNotSupportedException`. That
+   masking is exactly what made the C5 method-mismatch read as a backend failure and cost the
+   diagnostic time. Fixed with a dedicated 405 handler + a regression test (a `PUT` on the POST-only
+   triage route is 405, never a masked 500; reverting the handler fails it with 500). Backend 1502 →
+   1503. Fix: `fix/method-not-allowed-500-masking`.
 
 ### 18.5 Gate state after attempt 3
 
 G3 #3 and G6 #3 (2026-07-24) are **CONSUMED** — register updated. C1 and C3 are **PROVEN on real
-data**; C2/C4 stay `NOT DEMONSTRATED` (§8 fallback); C5 `BLOCKED` (§18.4-3). The reply-state
-*headline* (answered reviews leave the queue; guided reply refuses an answered review) still awaits
-a range that contains an answered low-rating review — a future run starts from a blank template.
+data**; C2/C4 stay `NOT DEMONSTRATED` (§8 fallback); C5's capability is **sound** (§18.4-3 — the
+live "500" was a wrong-method test error; a real 405-masking defect was found + fixed). The
+reply-state *headline* (answered reviews leave the queue; guided reply refuses an answered review)
+still awaits a range that contains an answered low-rating review — a future run starts from a blank
+template.
