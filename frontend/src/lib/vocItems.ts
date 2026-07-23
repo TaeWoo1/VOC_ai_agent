@@ -103,6 +103,23 @@ export function productLabel(productName: string | null): ProductLabel {
   return { text: PRODUCT_PLACEHOLDER, isPlaceholder: true };
 }
 
+/**
+ * The marker for a row whose reply the operator has reported posting, or `null` when none.
+ *
+ * <p>Copy is FE-owned and deliberately unlike the {@link replyStatusLabel} chip beside it. That one
+ * reports what the CHANNEL said at the last import; this one reports what the OPERATOR told us they
+ * did since — and SellerOps cannot verify a public reply, so it says 기록 and 확인 안 함 rather than
+ * 완료. A seller reading "답변 완료" on an unverified self-report would reasonably stop checking.
+ */
+export function reportedSubmissionLabel(hasReportedSubmission: boolean): ReplyStatusLabel | null {
+  // OUTLINED, where the channel's chips are filled. It is deliberately near the ANSWERED green —
+  // this is about a reply — while never wearing it: a filled chip is what the marketplace's own
+  // statement looks like, and an unverified self-report has not earned that weight.
+  return hasReportedSubmission
+    ? { text: "답변함으로 기록 · 확인 안 함", cls: "border border-good/40 text-good" }
+    : null;
+}
+
 // --- Classification facet (stored rule-based analysis category) ---
 
 /** The reserved server-side sentinel for "no analysis row exists". Never a stored category. */

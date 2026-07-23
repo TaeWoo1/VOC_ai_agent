@@ -14,6 +14,7 @@ import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
 import com.sellerops.attention.reply.ReviewReplyApprovalState;
 import com.sellerops.attention.reply.ReviewReplyDraft;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
@@ -64,6 +65,7 @@ class IngestedReviewVocItemSourceTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ReviewReplyOutcomeRepository replyOutcomes;
     @Autowired ItemAnalysisRepository itemAnalyses;
 
     private OperatorAttentionService service;
@@ -85,7 +87,7 @@ class IngestedReviewVocItemSourceTest {
         registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals, itemAnalyses)));
+                        replyDrafts, replyApprovals, replyOutcomes, itemAnalyses)));
         service = new OperatorAttentionService(sellerAccounts, channels, registry);
     }
 
@@ -118,7 +120,7 @@ class IngestedReviewVocItemSourceTest {
         // CAFE24 must still reach the community store, because this one declines it.
         VocItemSourceRegistry reversed = new VocItemSourceRegistry(List.of(
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals, itemAnalyses),
+                        replyDrafts, replyApprovals, replyOutcomes, itemAnalyses),
                 new Cafe24VocItemSource(articles)));
 
         assertThat(reversed.forChannel("CAFE24")).containsInstanceOf(Cafe24VocItemSource.class);
@@ -128,7 +130,7 @@ class IngestedReviewVocItemSourceTest {
     @Test
     void supportsIsExactAndNullSafe() {
         IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals, itemAnalyses);
+                        replyDrafts, replyApprovals, replyOutcomes, itemAnalyses);
         assertThat(source.supports("NAVER")).isTrue();
         assertThat(source.supports("CAFE24")).isFalse();
         assertThat(source.supports("GMARKET")).isFalse();

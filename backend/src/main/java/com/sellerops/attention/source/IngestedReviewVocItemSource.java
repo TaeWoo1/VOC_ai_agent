@@ -9,6 +9,7 @@ import com.sellerops.attention.dto.CategoryCount;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
+import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
@@ -158,12 +159,14 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     private final ReviewTriageRepository triage;
     private final ReviewReplyDraftRepository replyDrafts;
     private final ReviewReplyApprovalRepository replyApprovals;
+    private final ReviewReplyOutcomeRepository replyOutcomes;
     private final ItemAnalysisRepository analyses;
 
     public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
                                        ProductRepository products, ReviewTriageRepository triage,
                                        ReviewReplyDraftRepository replyDrafts,
                                        ReviewReplyApprovalRepository replyApprovals,
+                                       ReviewReplyOutcomeRepository replyOutcomes,
                                        ItemAnalysisRepository analyses) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
@@ -171,6 +174,7 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         this.triage = triage;
         this.replyDrafts = replyDrafts;
         this.replyApprovals = replyApprovals;
+        this.replyOutcomes = replyOutcomes;
         this.analyses = analyses;
     }
 
@@ -245,9 +249,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
         Set<UUID> prepared = preparedFor(orgId, result.getContent());
         Map<UUID, String> categories = categoriesFor(orgId, result.getContent());
+        Set<UUID> reported = reportedSubmissionsFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
                 .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames,
-                        dispositions, prepared, categories))
+                        dispositions, prepared, categories, reported))
                 .toList();
 
         // The breakdown is offered only for the lens the facet applies to; an arrivals list is a
@@ -330,6 +335,23 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 .filter(counts::containsKey)
                 .map(c -> new CategoryCount(c, counts.get(c)))
                 .toList();
+    }
+
+    /**
+     * Which of this page's rows carry a REPORTED submission for the reply version that stands — one
+     * org-scoped batch query, the same shape as {@link #preparedFor} beside it.
+     *
+     * <p>Distinct from {@code preparedFor}: that answers "is there work in progress here" (a draft
+     * or an approval) and drives whether the reply panel mounts. This answers "did the operator say
+     * they posted it", which is what removes the row from the count and sinks it down the list.
+     * Collapsing the two would make a saved draft look like a finished reply.
+     */
+    private Set<UUID> reportedSubmissionsFor(UUID orgId, List<Review> rows) {
+        Set<UUID> reviewIds = rows.stream().map(Review::getId).collect(Collectors.toSet());
+        if (reviewIds.isEmpty()) {
+            return Set.of();
+        }
+        return Set.copyOf(replyOutcomes.findReviewIdsWithReportedSubmission(orgId, reviewIds));
     }
 
     /**
@@ -498,7 +520,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                                    Map<UUID, String> productNames,
                                    Map<UUID, TriageDisposition> dispositions,
                                    Set<UUID> prepared,
-                                   Map<UUID, String> categories) {
+                                   Map<UUID, String> categories,
+                                   Set<UUID> reported) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String safePreview = VocPreviewSanitizer.sanitize(r.getBody()).text();
         // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
@@ -524,7 +547,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 prepared.contains(r.getId()),
                 // Absent from the map = no analysis row. Passed through as null, never inferred
                 // into 기타 — see categoriesFor.
-                categories.get(r.getId()));
+                categories.get(r.getId()),
+                // SellerOps' own record that the operator reported posting the reply that stands —
+                // never the channel's statement, which is replyState above.
+                reported.contains(r.getId()));
     }
 
     /**

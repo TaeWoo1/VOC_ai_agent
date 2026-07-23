@@ -110,6 +110,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
 - [ ] Seller **guided** to post it (human-performed, observe-only; SellerOps does not submit)
 - [ ] Posting recorded honestly — `UNVERIFIED` where no official API can confirm
 - [ ] No autonomous outbound write anywhere in the path (fence check)
+- [x] **A reply the seller reported posting leaves the queue** — excluded from the needs-a-look
+      count and sunk below every actionable row, while staying listed and badged
+      답변함으로 기록 · 확인 안 함, because the report is UNVERIFIED and a mistaken one must remain
+      correctable (`docs/slices/reported-replies-leave-the-queue-v1.md`).
 - [x] **A review the channel already answered cannot be guided into a second reply** — server-side 409
       + withheld capability, with the panel saying why (`docs/slices/review-reply-state-v1.md` §2)
 
@@ -141,6 +145,29 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Reported Replies Leave the Queue v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT → PRIORITIZE (the loop closing on itself)
+- **Did:** The next break in the journey audit was the closing step: ACT happened and the queue did
+  not notice. `reply_state` is written only by ingest from the channel's `답글여부`, so a reply
+  SellerOps ITSELF guided — recorded with a fingerprint and an Action Window run ref — left the
+  headline at 10건 with the same ten rows on top until the next export. Now a reported submission
+  leaves the count, **stays listed**, sinks below every actionable row, and carries an honest
+  badge. Version-scoped and existence-based, stated once and shared by the count, the ordering and
+  the marker.
+- **Evidence:** `docs/slices/reported-replies-leave-the-queue-v1.md`; backend 1500 (was 1490),
+  frontend 739 (was 733), collector 4843/95 untouched; typechecks clean. Six falsifications caught —
+  one for real, when a test written to keep the new badge distinguishable caught it wearing the
+  channel's own 답변 완료 green. New JPQL also run against a disposable PostgreSQL 15 DB. The golden
+  contract's `expectedAttention` is byte-unchanged, as it must be.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ The count and the list now deliberately differ (reported rows are excluded
+  from one and kept in the other); the drill-down's existing explanatory sentence covers it. ⚠
+  Nothing here claims the channel answered — `verification` is permanently UNVERIFIED.
+- **Next:** continue the journey audit — the remaining stretch is detail → draft → approval →
+  Action Window.
 
 ### 2026-07-23 — Operations Review Worklist v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** the hand-off between PRIORITIZE and ACT

@@ -90,6 +90,19 @@ package com.sellerops.attention.dto;
  * <p>{@code false} for every row that cannot be prepped at all (a null {@code actionRef}),
  * which is a capability limit rather than a claim that no work exists.
  *
+ * <p>{@code hasReportedSubmission} says the operator has REPORTED posting the reply that currently
+ * stands — SellerOps' own record of a guided reply, not the channel's statement. Like
+ * {@code triageDisposition} and {@code hasReplyPreparation} it is a fact about the operator's work.
+ *
+ * <p><b>It is not {@code replyStatus}, and the two must stay visibly different.</b>
+ * {@code replyStatus} is what the CHANNEL said at the last import; this is what the operator told us
+ * they did since. Verification is permanently {@code UNVERIFIED} — there is no read-back oracle for a
+ * public reply — so a client may say "답변함으로 기록", never "답변 완료".
+ *
+ * <p>A row carrying it is EXCLUDED from the needs-a-look count but stays LISTED, sorted below every
+ * row that still needs doing. Excluded because the work is reported done; listed because the report
+ * is unverified and a mistaken one must remain visible and correctable.
+ *
  * <p>{@code category} is the row's stored rule-based analysis category — one of the nine fixed
  * labels in {@code ItemAnalysisCategories}. It does not contradict the METADATA ONLY rule: it is
  * derived from keyword hits and is never an excerpt, so it carries no customer text (see
@@ -119,5 +132,6 @@ public record OperatorVocItem(
         String actionRef,
         String triageDisposition,
         boolean hasReplyPreparation,
-        String category) {
+        String category,
+        boolean hasReportedSubmission) {
 }

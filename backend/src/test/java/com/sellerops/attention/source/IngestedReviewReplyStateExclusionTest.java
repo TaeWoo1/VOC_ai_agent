@@ -9,6 +9,7 @@ import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
@@ -56,6 +57,7 @@ class IngestedReviewReplyStateExclusionTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ReviewReplyOutcomeRepository replyOutcomes;
     @Autowired ItemAnalysisRepository itemAnalyses;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
 
@@ -73,7 +75,7 @@ class IngestedReviewReplyStateExclusionTest {
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                                replyDrafts, replyApprovals, itemAnalyses))));
+                                replyDrafts, replyApprovals, replyOutcomes, itemAnalyses))));
         Channel ch = new Channel();
         ch.setCode("NAVER");
         ch.setNameKo("네이버 스마트스토어");

@@ -80,6 +80,7 @@ function naverReviewItem(over: Partial<Omit<OperatorVocItem, NaverInvariant>> = 
     triageDisposition: null,
     hasReplyPreparation: false,
     category: "배송",
+    hasReportedSubmission: false,
     ...over,
   };
 }
@@ -476,5 +477,26 @@ describe("VocItemCard classification chip", () => {
     expect(screen.getByText("배송은 빨랐는데 색이 생각과 달라요")).toBeInTheDocument();
     expect(screen.getByText("★★")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "처리 상태" })).toBeInTheDocument();
+  });
+});
+
+describe("VocItemCard reported submission", () => {
+  it("marks a row whose reply the operator reported posting", () => {
+    render(<VocItemCard item={naverReviewItem({ hasReportedSubmission: true })} accountId="a" />);
+    expect(screen.getByText("답변함으로 기록 · 확인 안 함")).toBeInTheDocument();
+  });
+
+  it("shows nothing for a row with no reported submission", () => {
+    render(<VocItemCard item={naverReviewItem({ hasReportedSubmission: false })} accountId="a" />);
+    expect(screen.queryByText(/답변함으로 기록/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the CHANNEL's chip separate — a self-report is not the channel answering", () => {
+    // The row still shows 상태 미상 (a NAVER export carries no reply state) beside the operator's own
+    // record. Collapsing the two would let an unverified self-report read as the marketplace's word.
+    render(<VocItemCard item={naverReviewItem({ hasReportedSubmission: true })} accountId="a" />);
+    expect(screen.getByText("답변함으로 기록 · 확인 안 함")).toBeInTheDocument();
+    expect(screen.getByText("상태 미상")).toBeInTheDocument();
+    expect(screen.queryByText("답변 완료")).not.toBeInTheDocument();
   });
 });

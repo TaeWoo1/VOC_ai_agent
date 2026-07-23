@@ -100,6 +100,8 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
               and r.rating >= :minRating and r.rating <= :maxRating
               and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
               and r.receivedAt >= :from and r.receivedAt < :toExclusive
+              and not
+            """ + REPORTED_SUBMISSION_PREDICATE + """
             """)
     long countUnansweredInWindowByChannelAndRatingBetween(
             @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
@@ -136,10 +138,19 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      * prevent. Pair it with {@link #countUnansweredInWindowByChannelAndRatingBetween}, never with the
      * unfiltered count.
      *
-     * <p><b>Ordered worst-first</b> ({@code rating asc}), then newest, then by id. This is the
-     * operator's WORKLIST — the 1★ from yesterday outranks the 3★ from this morning — where the
+     * <p><b>Ordered actionable-first, then worst-first</b>: a review whose reply the operator has
+     * already reported posting sinks below every row that still needs doing, and within each group
+     * the 1★ from yesterday outranks the 3★ from this morning. Completed work must not hold the top
+     * of a worklist — a seller working top-down would keep re-reading what they just finished. The
      * arrival lenses ({@link #findInWindowByChannelFiltered}) stay chronological, because a record of
      * what came in is chronological by definition.
+     *
+     * <p>Reported rows stay LISTED while being excluded from
+     * {@link #countUnansweredInWindowByChannelAndRatingBetween}, so the count and the list here
+     * deliberately differ. That is survivable only because the drill-down already carries a sentence
+     * explaining why its total can exceed a card's count (the two low/mid-rating cards share a type),
+     * and because both surfaces read {@link #REPORTED_SUBMISSION_PREDICATE} rather than each deciding
+     * separately what "reported" means. Anything reported is UNVERIFIED, so it may not vanish.
      *
      * <p>The ordering is safe here specifically because this lens is only ever driven with
      * {@code minRating >= 1}, which excludes null ratings: {@code rating asc} would otherwise sort
@@ -154,7 +165,10 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
               and (:maxRating is null or r.rating <= :maxRating)
               and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
               and r.receivedAt >= :from and r.receivedAt < :toExclusive
-            order by r.rating asc, r.receivedAt desc, r.id desc
+            order by case when
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+                     then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id desc
             """)
     Page<Review> findUnansweredInWindowByChannelFiltered(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
                                                         @Param("minRating") Integer minRating,
@@ -192,7 +206,10 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
               and exists (select 1 from ItemAnalysis a
                           where a.orgId = r.orgId and a.sourceType = 'REVIEW'
                             and a.sourceId = r.id and a.category = :category)
-            order by r.rating asc, r.receivedAt desc, r.id desc
+            order by case when
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+                     then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id desc
             """)
     Page<Review> findUnansweredInWindowByChannelAndCategory(
             @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
@@ -217,7 +234,10 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
               and not exists (select 1 from ItemAnalysis a
                               where a.orgId = r.orgId and a.sourceType = 'REVIEW'
                                 and a.sourceId = r.id)
-            order by r.rating asc, r.receivedAt desc, r.id desc
+            order by case when
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+                     then 1 else 0 end asc,
+                     r.rating asc, r.receivedAt desc, r.id desc
             """)
     Page<Review> findUnansweredInWindowByChannelUnclassified(
             @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
@@ -282,4 +302,37 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
             @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
             @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
+
+    /**
+     * "The operator has reported posting a reply for the version of this review's reply that
+     * currently stands."
+     *
+     * <p><b>Version-scoped, deliberately.</b> Outcomes carry {@code recorded_version} because they
+     * describe one approved VERSION, not a review. An operator who edits and re-approves after
+     * posting has new text that was never posted, and this predicate stops matching — so the review
+     * returns to the count on its own.
+     *
+     * <p><b>Existence, not recency</b> — diverging from
+     * {@code ReviewReplyOutcomeRepository.findTopBy...OrderByCreatedAtDesc} on purpose. That read
+     * describes where the CURRENT ATTEMPT stands, for the panel. This one asks whether a post was
+     * ever reported for the reply that stands, and a later abort does not un-post an earlier
+     * reported post. {@code SUBMISSION_ABORTED} never matches: it means "I did not post it".
+     *
+     * <p>Says nothing about the CHANNEL. {@code verification} is always {@code UNVERIFIED} — there
+     * is no read-back oracle for a public reply — so this is the operator's report about their own
+     * work, never a claim that the export's 답글여부 became Y.
+     *
+     * <p>Stated once and shared by the count (which EXCLUDES these rows) and the worklist ordering
+     * (which SINKS them). Two copies would let the number and the order disagree about what
+     * "reported" means.
+     */
+    String REPORTED_SUBMISSION_PREDICATE = """
+            exists (select 1 from ReviewReplyOutcome o, ReviewReplyApproval ap
+                    where o.orgId = r.orgId and o.reviewId = r.id
+                      and ap.orgId = r.orgId and ap.reviewId = r.id
+                      and ap.state = com.sellerops.attention.reply.ReviewReplyApprovalState.APPROVED
+                      and ap.approvedVersion = o.recordedVersion
+                      and o.operatorOutcome
+                          = com.sellerops.attention.reply.OperatorOutcome.OPERATOR_REPORTED_SUBMITTED)
+            """;
 }

@@ -115,6 +115,10 @@ class OperatorAttentionItemsJsonContractTest {
                 // totals are asserted together and DIFFERENT here, so a serializer that dropped one
                 // and echoed the other into its place could not pass.
                 .andExpect(jsonPath("$.items[0].category").value("배송"))
+                // SellerOps' own record of a guided reply crosses the wire under its own name, and
+                // must never be confused with replyStatus above it — one is the channel's statement
+                // at the last import, the other an UNVERIFIED operator self-report.
+                .andExpect(jsonPath("$.items[0].hasReportedSubmission").value(false))
                 .andExpect(jsonPath("$.unfilteredTotal").value(3))
                 .andExpect(jsonPath("$.categoryCounts[0].category").value("배송"))
                 .andExpect(jsonPath("$.categoryCounts[0].count").value(1))
@@ -328,6 +332,6 @@ class OperatorAttentionItemsJsonContractTest {
                 "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
                 "배송은 빨랐는데 색이 생각과 달라요",
-                actionRef, triageDisposition, hasReplyPreparation, "배송");
+                actionRef, triageDisposition, hasReplyPreparation, "배송", false);
     }
 }

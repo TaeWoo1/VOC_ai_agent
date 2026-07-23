@@ -12,6 +12,7 @@ import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.source.Cafe24VocItemSource;
 import com.sellerops.attention.source.IngestedReviewVocItemSource;
 import com.sellerops.attention.source.VocItemSourceRegistry;
@@ -108,6 +109,7 @@ class ReviewAcquisitionSpineTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ReviewReplyOutcomeRepository replyOutcomes;
     @Autowired ItemAnalysisRepository itemAnalyses;
 
     /** The shared contract directory — the same relative path the collector's loader resolves. */
@@ -149,7 +151,7 @@ class ReviewAcquisitionSpineTest {
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                                replyDrafts, replyApprovals, itemAnalyses))));
+                                replyDrafts, replyApprovals, replyOutcomes, itemAnalyses))));
 
         naverChannelId = seedChannel("NAVER", "네이버 스마트스토어");
         // EXACTLY ONE account on this channel — a second trips the ambiguity guard (reviews carry no

@@ -13,6 +13,7 @@ import {
   previewText,
   productLabel,
   replyStatusLabel,
+  reportedSubmissionLabel,
   vocItemKey,
 } from "./vocItems";
 
@@ -62,6 +63,7 @@ function item(signalType: string): OperatorVocItem {
     triageDisposition: null,
     hasReplyPreparation: false,
     category: "배송",
+    hasReportedSubmission: false,
   };
 }
 
@@ -223,6 +225,28 @@ describe("productLabel", () => {
     expect(productLabel("리넨 와이드 팬츠 M").isPlaceholder).toBe(false);
     expect(previewText(null).isPlaceholder).toBe(true);
     expect(PRODUCT_PLACEHOLDER).not.toBe(PREVIEW_PLACEHOLDER);
+  });
+});
+
+describe("reportedSubmissionLabel", () => {
+  it("says RECORDED and UNCONFIRMED — never 답변 완료", () => {
+    // SellerOps cannot verify a public reply; verification is permanently UNVERIFIED. A seller
+    // reading "답변 완료" on their own unverified self-report would reasonably stop checking.
+    const label = reportedSubmissionLabel(true);
+
+    expect(label?.text).toBe("답변함으로 기록 · 확인 안 함");
+    expect(label?.text).not.toContain("완료");
+  });
+
+  it("is absent when nothing was reported", () => {
+    expect(reportedSubmissionLabel(false)).toBeNull();
+  });
+
+  it("is visibly different from the CHANNEL's own reply chip", () => {
+    // One reports what the marketplace said at the last import, the other what the operator says
+    // they did since. Rendering them alike would merge a fact with a self-report.
+    expect(reportedSubmissionLabel(true)?.text).not.toBe(replyStatusLabel("ANSWERED").text);
+    expect(reportedSubmissionLabel(true)?.cls).not.toBe(replyStatusLabel("ANSWERED").cls);
   });
 });
 

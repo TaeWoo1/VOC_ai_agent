@@ -13,6 +13,7 @@ import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.attention.source.Cafe24VocItemSource;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
+import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
 import com.sellerops.attention.source.IngestedReviewVocItemSource;
 import com.sellerops.attention.source.VocItemSourceRegistry;
 import com.sellerops.channel.Channel;
@@ -86,6 +87,7 @@ class ReviewTriageAttentionFlowTest {
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ReviewReplyOutcomeRepository replyOutcomes;
     @Autowired ItemAnalysisRepository itemAnalyses;
     @Autowired ReviewTriageAuditRepository audits;
     @Autowired PlatformTransactionManager txManager;
@@ -107,7 +109,7 @@ class ReviewTriageAttentionFlowTest {
         VocItemSourceRegistry registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triages,
-                        replyDrafts, replyApprovals, itemAnalyses)));
+                        replyDrafts, replyApprovals, replyOutcomes, itemAnalyses)));
         attention = new OperatorAttentionService(sellerAccounts, channels, registry);
         triage = new ReviewTriageService(triages, audits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, audits, txManager));

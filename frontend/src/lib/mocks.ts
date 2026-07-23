@@ -1061,7 +1061,39 @@ function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem
     // What the row is ABOUT, per the stored analysis — context, not a queue rule. Null for a
     // row nothing analyzed, which the card renders as no chip at all.
     category: review.category,
+    // The demo's own record of a guided reply: true once an outcome was reported as SUBMITTED for
+    // the approved version that stands, mirroring the server's rule rather than a separate one.
+    hasReportedSubmission: mockHasReportedSubmission(actionRef),
   };
+}
+
+/**
+ * Whether the demo has a reported submission for this review's current approved reply.
+ *
+ * Mirrors the server: an ABORTED report does not count, and the outcome must belong to the version
+ * that stands. A demo that marked a row on any recorded outcome would teach the wrong rule to
+ * whoever is evaluating — the same reason mockHasReplyPreparation unions drafts and approvals
+ * instead of deriving one from the other.
+ */
+function mockHasReportedSubmission(actionRef: string): boolean {
+  const approval = reviewReplyApprovals.get(actionRef);
+  if (approval == null || approval.state !== "APPROVED" || approval.approvedVersion == null) {
+    return false;
+  }
+  // Keyed on the single-use submissionRef, so the review's outcomes are found by scanning for its
+  // actionRef — the demo holds a handful of rows, and correctness matters more here than the lookup.
+  // EXISTENCE, not recency: a later abort does not un-post an earlier reported post, matching
+  // ReviewRepository.REPORTED_SUBMISSION_PREDICATE rather than the panel's latest-outcome read.
+  for (const outcome of reviewReplyOutcomes.values()) {
+    if (
+      outcome.actionRef === actionRef &&
+      outcome.operatorOutcome === "OPERATOR_REPORTED_SUBMITTED" &&
+      outcome.recordedVersion === approval.approvedVersion
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
