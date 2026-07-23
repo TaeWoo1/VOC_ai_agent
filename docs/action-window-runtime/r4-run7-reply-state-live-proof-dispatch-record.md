@@ -1,6 +1,55 @@
-# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (DRAFT · DEFERRED)**
+# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (EXECUTED · COMPLETED on attempt 3)**
 
-> ## ⏸ DEFERRED 2026-07-23 — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
+> ## ✅ ATTEMPT 3 — 2026-07-24 — **COMPLETED 3-of-3, REAL INGEST · G3 + G6 CONSUMED**
+>
+> The multi-checkpoint runtime (`871fccd`, holder-synced) drove the export to a real `COMPLETED`:
+> export click **observed** (01:27:58), a **direct download** (0 continuation checkpoints — this
+> range delivered the Run-4 sync shape, not the attempt-2 notification flow), validated +
+> parse-gated + **ingested `SUCCESS`** (58 rows, 0 skipped / 0 failed) into the disposable backend.
+> Live contact 01:23:36 → ~01:28:21, well inside the 55-min window.
+>
+> - **PROVEN (C1/C3):** a real NAVER export is compatible and ingests end to end — all mapped fields
+>   non-null across 58 rows (`body`/`rating`/`received_at`/`external_id`/`reply_state` = 58/58),
+>   `received_at` time-bearing and quantised to **UTC midnight 58/58**, and **`답글여부` matched its
+>   exact-key alias** producing valid reply-states (all `PENDING`, zero `UNKNOWN` — the column was
+>   present and read). Arrivals whole: 58 `NEW_REVIEW`; rating split low/mid/high = 1 / 1 / 56.
+> - **NOT DEMONSTRATED (C2/C4 — the reply-state headline):** the exported range held **0 answered
+>   reviews**, so "an answered review leaves the queue" and "guided reply refuses an answered review"
+>   could not be shown — the **§8 fallback**, recorded not passed. ⚠ Diverges from the operator's
+>   on-screen §8 confirmation; the range that actually exported evidently differed from that view
+>   (all 58 rows are a single recent date). **C5** (mint on a PENDING row) was **blocked by a 500 on
+>   the triage/draft endpoints** — a separate backend-only anomaly to reproduce OFFLINE.
+> - Teardown clean: DB dropped (name-guarded), `sellerops` intact, zero artifacts, secrets scrubbed,
+>   holder `.env`/profile untouched. Both 2026-07-24 gates **CONSUMED**. Full record: **§18**.
+>
+> **A first live SUCCESS for the continuation-checkpoint runtime**, and the multi-step choreography
+> was proven safe live even though this range happened to take the direct path.
+
+> ## ▶ DISPATCHED 2026-07-23 (second attempt) — **RUN EXECUTED · FAILED CLOSED (`DOWNLOAD_TIMEOUT`) · G3 + G6 CONSUMED**
+>
+> The deferral below was lifted in a fresh dispatching turn on 2026-07-23: the operator affirmed a
+> **fresh G3** (`export+ingest`, current environment — starting with the network box that voided the
+> first attempt) and a **fresh single-use G6** (15-minute live window, no-reply bound), stated
+> **"seated and ready"**, and the live window opened at 23:42:46 KST. The run drove once and
+> **FAILED closed on `DOWNLOAD_TIMEOUT`** — readiness on the real page was fully green
+> (`LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`), the export control
+> was highlighted, but no export action produced a download inside the windows. **No download ⇒ no
+> artifact ⇒ nothing ingested; zero rows at teardown.** Both gates are **CONSUMED** — a retry needs
+> a fresh G3 + G6. Execution record, timeline, and findings: **§15**; filled evidence template: §11.
+> C1–C5 are all **NOT DEMONSTRATED** — the run ended at the human export barrier.
+>
+> **↳ ATTEMPT 2 — 2026-07-24, fresh G3+G6 (25-min timer-derived window), ALSO FAILED closed on
+> `DOWNLOAD_TIMEOUT` — but one step further:** the runtime **observed the export action**
+> (`observed:true`); the operator confirmed the expected dialog. **RECLASSIFIED (operator
+> clarification, 2026-07-24): an INCOMPLETE HUMAN-CHECKPOINT WORKFLOW, not a missed download
+> event** — after the confirmation a **second NAVER-native in-page notification/dialog** appears
+> before the actual download, carrying a control the seller must still act on; the state machine
+> modeled only ONE human step, so nothing highlighted or awaited that control and the 60 s download
+> deadline ran from the FIRST action. §16.3 (reclassification) and §17 (the offline
+> continuation-checkpoint slice). Zero artifacts anywhere, zero rows ingested, guarded teardown
+> clean. Both 2026-07-24 gates CONSUMED (§16).
+
+> ## ⏸ DEFERRED 2026-07-23 (first attempt) — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
 >
 > **What happened:** a G6 approval was given on 2026-07-23 (channel NAVER SmartStore · REVIEW export ·
 > account `NAVER_DEV_SELLER_SELF_01` · operator `OPERATOR_SELF_01` · scope `export+ingest` ·
@@ -266,20 +315,20 @@ that the **expected** NAVER export confirmation dialog is not an abort trigger w
 - **Says nothing about ESM+**, whose `답변 상태` vocabulary remains unobserved.
 - **One seller, one account, one range, one run**, on a local disposable backend — never production.
 
-## 11. Post-run evidence template (to be filled after execution, sanitized)
+## 11. Post-run evidence — FILLED 2026-07-23 (sanitized)
 
 ```
-Run 7 — <date> — <operator> — G3 (export+ingest) CONSUMED · G6 CONSUMED
-Outcome:            <COMPLETED n-of-3 | FAILED + blocker code>
-Ingest:             <status> <success/skipped/failed>
-C2 queue exclusion: <PASS | NOT DEMONSTRATED (§8)>  low-rating: <answered excluded: y/n>
-C3 arrivals whole:  <PASS/FAIL>
-C4 refusal:         <409 | other>          C5 non-vacuity: <ref minted | other>
-Census:             rating <n> · received_at <n> (UTC-midnight <n>) · external_id <n>
-                    reply_state ANSWERED <n> / PENDING <n> / UNKNOWN <n>
-                    replied_at on ANSWERED <n>/<n> · on PENDING <n> (expect 0)
-Teardown:           DB dropped ☐ · sellerops intact ☐ · quarantine empty ☐ · no artifact ☐
-Findings:           <...>
+Run 7 — 2026-07-23 — OPERATOR_SELF_01 — G3 (export+ingest) CONSUMED · G6 CONSUMED
+Outcome:            FAILED + DOWNLOAD_TIMEOUT (2-of-3 steps; fail-closed)
+Ingest:             not reached — no download, no artifact; disposable DB at 0 reviews / 0 sync_jobs
+C2 queue exclusion: NOT DEMONSTRATED — run ended at the export barrier (before any export)
+C3 arrivals whole:  NOT DEMONSTRATED
+C4 refusal:         NOT ATTEMPTED          C5 non-vacuity: NOT ATTEMPTED
+Census:             none — nothing ingested, so no census exists
+Teardown:           DB dropped ☑ (name-guarded) · sellerops intact ☑ (only surviving sellerops* DB)
+                    quarantine empty ☑ · no artifact ☑ · run-local credentials file removed ☑
+Findings:           see §15.4 — the 15-minute cap cannot contain the CLI's own timers; the highlight
+                    moment is not logged; live readiness path proven green up to the human barrier
 ```
 
 ## 12. Pre-dispatch preparation — ☑ COMPLETED 2026-07-23 (no live contact)
@@ -399,3 +448,267 @@ the rollback. **No ignored file was touched, no `git clean` was run, nothing was
 **The holder stays at `b5f0683`** (product-owner decision): it is now the runtime baseline, and the
 checkout matches the code a future Run 7 would exercise. Rollback remains one command —
 `git checkout --detach bc7d5d8`, an ancestor of `origin/main`, so it survives any fetch.
+
+> **↳ SUPERSEDED 2026-07-23:** on the operator's instruction the holder was re-synced
+> `b5f0683 → 783a9b4` (merged `origin/main`, which contains `b5f0683` as an ancestor) for the second
+> dispatch attempt — same fetch-only + `checkout --detach` shape, preserved paths re-fingerprinted
+> byte-for-byte identical. Details in §15.1. The holder now stays at **`783a9b4`**.
+
+## 15. Execution record — 2026-07-23, second attempt (sanitized)
+
+### 15.1 Pre-dispatch preparation (no live contact; all before the dispatching turn's affirmation)
+
+- **Holder re-sync:** `naver-r4` moved `b5f0683 → 783a9b4` (fetch-only, `checkout --detach`; no
+  commit created in the holder, no `git clean`, nothing deleted by hand). The six preserved paths
+  (`.profile` / `.env` / `.status` / `downloads` / `.operation-runs` / `.aw-quarantine`)
+  fingerprinted **byte-for-byte identical** across the sync (count, size, newest mtime); `.env`
+  mtime unchanged and never opened; profile unheld (no `Singleton*`/lock, `lsof` clean).
+  ⚠ One observation: `.profile` counted **897 files** where §14 recorded 961 — size identical to
+  the kilobyte (132,176K) and the newest profile mtime **predates the §14 sync itself**, so nothing
+  wrote to the profile in between; recorded as counting/ephemeral-file drift, not use.
+- **G4, fresh, on the unmodified `783a9b4` tree:** backend **1502** passed / 0 failures / 2 skipped ·
+  collector **inside the holder** **4843 / 95 skipped** + typecheck clean · frontend **765** passed +
+  `tsc --noEmit` clean.
+- **Phase A executed:** drop guard falsified (refused `sellerops` and `sellerops_dev`); rehearsal
+  create/drop clean; fresh disposable DB `sellerops_run7_20260723T233452` created; backend booted on
+  `SERVER_PORT=18080` against it (Flyway 24 migrations, NAVER channel seeded); run-local operator
+  org registered; ingest pointing via environment only. The credentials existed only in a
+  `chmod 600` scratchpad file, never printed, and were removed at teardown.
+
+### 15.2 Gates (affirmed by the operator in the dispatching turn — register: `r4-gate-record.md`)
+
+Fresh G3 (`export+ingest`; network box affirmed **for the current environment**; Bridge = N/A with
+reason, CLI/loopback; §9-3 lift for this scope only) + fresh single-use G6 (channel / account /
+date / operator as §13 proposed; **max live window 15 min**; no-reply bound; §7 + this record's three
+abort additions acknowledged) + P6 signed on both plus the fresh G4 above. The operator stated
+**"seated and ready"**, and committed to confirming the §8 range precondition on screen after login,
+aborting before export if it failed — the run ended before that step became observable.
+
+### 15.3 Timeline (KST, sanitized — from the CLI's own output and the operator turn)
+
+| Time | Event |
+|---|---|
+| 23:42:46 | Live window opens — headed Chrome on the dedicated profile; ingest target printed and confirmed `http://127.0.0.1:18080` (the disposable backend) |
+| 23:48:47 | Operator signals ready; sentinel created |
+| ~23:48:50 | Highlight (inferred — the CLI logs no line for it; the overlay is the only signal, §15.4) |
+| 23:58:50 | Observe window lapses — `aw.live.barrier {"observed":false}` |
+| 23:59:50 | `DOWNLOAD_TIMEOUT` → **FAILED (2-of-3 steps), fail-closed**; readiness line confirms `LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`; browser closed, process exited 0 |
+
+Teardown followed immediately: backend stopped · guarded drop of `sellerops_run7_20260723T233452` ·
+`sellerops` confirmed the only surviving `sellerops*` database · quarantine/downloads/`.status`
+empty · no artifact anywhere · profile released (no locks) · `.env` byte-identical · the run
+persisted its Operation Run marker (8 → 9 files).
+
+### 15.4 Findings
+
+1. **The 15-minute cap cannot contain the CLI's own timers.** Sentinel wait (up to 10 min) +
+   observe (10 min) + download (60 s) structurally exceed a 15-minute window unless the human
+   completes login → range → signal in under ~4 minutes and acts on the highlight quickly. This
+   run's fail-closed tail ran ~2 minutes past the cap (barrier 23:58:50 vs cap 23:57:46) with no
+   way to stop it that was safer than letting it lapse. **A future capped run must either size the
+   G6 window to the timers (Run 6 precedent: budget stated from the timers) or shorten the CLI
+   timers for the run.** Killing the process mid-flight against the preserved profile was rejected
+   deliberately.
+2. **The highlight moment is not logged.** Between sentinel pickup and the barrier line the CLI is
+   silent; the overlay in Chrome is the only signal the observe window has started. A seated
+   operator being relayed CLI output (the "say ready in Claude Code" path this CLI itself
+   documents) has no relayable confirmation — this run's observe window lapsed with the operator
+   never acting. One sanitized `aw.live.highlighted` log line would close the gap. (Code change —
+   belongs to a future slice, not this record.)
+3. **The live readiness path is proven green up to the human barrier.** Real login, real page,
+   populated grid, range control present, readiness `positive_count` — every runtime-side step of
+   the choreography worked; the run failed at the one step the design reserves for the human, which
+   is the boundary behaving exactly as specified (fail closed, zero clicks, nothing written).
+4. **What Run 7 set out to prove remains unproven** — C1–C5 all `NOT DEMONSTRATED`. The claims
+   still rest on synthetic fixtures plus the one offline-read real export. This record adds
+   evidence about the *choreography*, not the *pipeline*.
+
+## 16. Execution record — 2026-07-24, third attempt (attempt 2 of the run; sanitized)
+
+### 16.1 Dispatch
+
+Fresh G3 (`export+ingest`, five boxes incl. network-for-current-environment; Bridge N/A with
+reason) + fresh single-use G6 affirmed in the dispatching turn of **2026-07-24**, with the window
+re-sized per §15.4 finding 1: **max live window 25 minutes, timer-derived**. Same channel /
+account / operator / no-reply bound as §15.2. Disposable backend `sellerops_run7_20260724T000758`
+on 18080 (fresh DB; survived a session restart mid-preparation — the prior turn's unlaunched
+affirmation was treated as VOID and re-affirmed fresh, per the register rule). The first launch
+attempt of this turn was blocked by the operator-side permission classifier; the operator granted
+the permission explicitly and the same affirmation carried the immediate retry — no live contact
+occurred in between.
+
+### 16.2 Timeline (KST)
+
+| Time | Event |
+|---|---|
+| 00:26:55 | Live window opens; ingest target confirmed `http://127.0.0.1:18080` on the run's own output |
+| 00:27:47 | Operator signals ready; sentinel created (**52 s** from window open — the §15.4-2 act-on-sight seat protocol worked) |
+| 00:28:05 | `aw.live.barrier {"observed":true}` — the runtime OBSERVED the export action (attempt 1 never got here) |
+| 00:29:06 | `DOWNLOAD_TIMEOUT` (exactly 60 s later) → **FAILED (2-of-3), fail-closed**; readiness green (`LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`); exit 0 |
+
+Teardown: 0 rows before drop · guarded drop clean · `sellerops` the only surviving `sellerops*`
+DB · credentials file removed · quarantine/downloads/profile/`~/Downloads`/Playwright temp all
+swept — **zero artifacts anywhere**.
+
+### 16.3 The finding — a download-detection miss, now the blocking question
+
+**Operator observation, recorded verbatim (2026-07-24, seconds after the observed action):**
+
+> "clicked export and confirmed the dialog, download started"
+
+**That is the complete observation. Deliberately NOT recorded, because it was not stated:** how the
+download's start manifested (a Chrome download indicator, a filename, a save dialog, a NAVER-side
+"파일 생성/다운로드" surface, a new tab/page — none of these was reported), whether it visibly
+completed, or where it was delivered. Both delivery hypotheses below therefore remain open, and the
+offline reproduction must cover **both**.
+
+**RECLASSIFIED — operator clarification (2026-07-24, after the run):** what the operator saw was
+**not a Chrome download indicator and not necessarily a popup page**: after confirming the export
+dialog, a **second NAVER-native in-page notification/dialog appeared before the actual download**,
+carrying its own download/confirm control. Attempt 2 is therefore an **INCOMPLETE HUMAN-CHECKPOINT
+WORKFLOW**, not a missed download event: the export choreography carries more human steps than the
+state machine modeled. The runtime highlighted and awaited only the FIRST control; the follow-up
+checkpoint was never highlighted, never awaited, and the 60 s download deadline ran from the first
+action — so the run failed closed exactly as designed, one human step short of the download.
+
+Supporting history (this step was not unforeseeable):
+
+- Run 4 (`COMPLETED` 3-of-3) observed a **two**-step flow — click → expected confirmation dialog →
+  download on the confirmation — and both steps happened to land inside one 60 s window. The
+  dialog's identity (whether it is the copyright/usage consent recorded in
+  `export-click-signals.ts`) is an **open question** in the evidence pack, in neither direction.
+- The collector's classify layer has always modeled an **async** export that delivers via a
+  follow-up surface (`ASYNC_JOB_MARKERS`: 다운로드 목록/센터/요청 · 처리 중 · 대기열 — "confirmed
+  against the live page's wording"), precisely so an async mechanism is never mistaken for a sync
+  capture. The Action Window engine simply had no counterpart for it until §17.
+- An earlier hypothesis this session — a popup-initiated download invisible to the page-level
+  listener — reproduced offline but is **not established as attempt 2's cause**; that change is
+  parked as optional hardening, uncommitted, pending independent justification.
+- Whatever fired, nothing survived: no artifact existed anywhere at teardown, which is the data
+  posture working as designed.
+
+**Consequence: no attempt 3 until the multi-checkpoint choreography is modeled and proven
+OFFLINE** — live is never the first execution of a code path (G4), and it is equally not the
+debugging environment. That work is §17.
+
+### 16.4 Gate state after attempt 2
+
+G3 #2 and G6 #2 (2026-07-24) are **CONSUMED** — register updated. C1–C5 remain `NOT DEMONSTRATED`.
+
+## 17. Continuation-checkpoint slice — built OFFLINE 2026-07-24, committed `871fccd`
+
+The §16.3 reclassification made the fix a **choreography extension**, implemented entirely inside
+`NaverLiveProbeDriver` — no engine, contract, `STEP_PLAN`, or FE change:
+
+- **`detectDownload` is now a bounded multi-checkpoint state machine.** The Run-4 direct shape is
+  the unchanged fast path (armed download raced against the deadline). While the race waits, the
+  driver polls **read-only** for a NEW single control matching the confirmed export wording — every
+  previously highlighted control stays excluded via a persistent `data-aw-seen` stamp, so a
+  checkpoint control that its own click removes from the DOM can never cause the original export
+  button to be re-highlighted. On exactly one match the tag MOVES (the old control also loses its
+  observer listener — a stale click on it can no longer satisfy observation), the control is
+  **HIGHLIGHTED** with continuation copy, and the driver **WAITS for the seller's own click** —
+  it never clicks. Only after that click does a fresh download deadline run.
+- **Fail-closed from every exit, timers accounted:** ≥2 simultaneous candidates → ambiguous → fail
+  closed; checkpoint never acted on within the continuation observe window (defaults to
+  `observeTimeoutMs`) → fail closed; more than 3 checkpoints → fail closed; no download and no
+  checkpoint at any deadline → the unchanged `DOWNLOAD_TIMEOUT` shape. Poll accounting is
+  iteration-count based (the sentinel-wait convention), never a wall-clock read.
+- **Evidence seam:** sanitized `aw.live.continuation { checkpoints, observedLast, ambiguous }`
+  logged by the CLI (booleans + small count; never transported/persisted), and the CLI prompt now
+  tells the seated operator a follow-up NAVER control may be highlighted and is theirs to click.
+- **Proof** (`test/action-window/naver-live-continuation.test.ts`, RUN_INTEGRATION; headed variant
+  available): the operator-described flow end-to-end (confirm → async notification → highlighted
+  control → operator click → download DETECTED); a consent-worded dialog as checkpoint 1 with the
+  notification as checkpoint 2; Run 4's direct shape pinned at zero checkpoints; fail-closed pinned
+  for unacted checkpoint and for ambiguity. **Falsified:** with the state machine reverted, all
+  five fail. **Headed operator proof 2026-07-24:** the operator personally performed every click
+  through four headed runs (the described flow, the two-checkpoint consent shape, Run 4's direct
+  shape, and the ambiguity fail-closed) — all passed with no issue observed at the seat; the
+  unacted-checkpoint exit stays proven by the automated run (a four-minute deliberate no-click
+  adds nothing).
+- **Verification:** collector hermetic **4843 / 100 skipped** (+5 gated, zero existing tests
+  moved), typecheck clean. Two `RUN_INTEGRATION` browser tests fail identically on unmodified
+  `main` (their synthetic blob predates the D-037 parse gate) — **pre-existing, recorded for a
+  follow-up fixlet, untouched by this slice.**
+
+The popup-listener hardening from the earlier hypothesis is **parked** (patch preserved locally,
+not committed, not part of this slice) pending independent justification.
+
+## 18. Execution record — 2026-07-24, attempt 3 (COMPLETED · sanitized)
+
+### 18.1 Dispatch
+
+Fresh G3 (`export+ingest`, five boxes for the current environment; Bridge N/A/CLI-loopback) +
+fresh single-use G6 (**max live window 55 min**, timer-derived from the new worst case: sentinel
+≤10 + observe ≤10 + detect ≤34 for 3 checkpoints × [continuation observe + re-race]; no-reply
+bound) affirmed in the dispatching turn, operator **seated and ready**, §8 range **confirmed on
+screen**. Code under proof: the multi-checkpoint runtime at **`871fccd`**, holder-synced from the
+local repo (fetch-only + `checkout --detach`; preserved paths re-fingerprinted byte-identical;
+collector suite + the five continuation proofs green **inside the holder**). Disposable backend
+`sellerops_run7_20260724T011628` on 18080, ingest confirmed on the run's own output.
+
+### 18.2 Timeline (KST)
+
+| Time | Event |
+|---|---|
+| 01:23:36 | Live window opens; ingest target `http://127.0.0.1:18080` on the run's output |
+| 01:25:02 | Operator signals ready; sentinel created |
+| — | ⚠ **Highlight off-screen finding:** the export control was below the fold; the overlay is fixed at the control's highlight-time position and **does not follow scroll**, so no highlight was visible until the operator scrolled. Observation is bound to the CONTROL, not the overlay, so a direct click still registered. Recorded as §18.4-1. |
+| 01:27:58 | `aw.live.barrier {"observed":true}` — export action observed |
+| ~01:28:21 | Direct download → validate → parse-gate → `upload.done SUCCESS` (tens rows, 0 skipped/0 failed) → **`COMPLETED`**; `aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}` |
+
+Live contact ended when the browser closed. Teardown immediately after: backend stopped · guarded
+drop of `sellerops_run7_20260724T011628` · `sellerops` the only surviving `sellerops*` DB · run-local
+credentials/token/response bodies scrubbed · holder quarantine/downloads empty · profile unheld ·
+`.env` byte-identical.
+
+### 18.3 Claim results (filled §11 template)
+
+```
+Run 7 — 2026-07-24 (attempt 3) — OPERATOR_SELF_01 — G3 (export+ingest) CONSUMED · G6 CONSUMED
+Outcome:            COMPLETED 3-of-3 (real download → validate → parse-gate → ingest SUCCESS)
+Ingest:             SUCCESS — 58 rows, 0 skipped, 0 failed
+C1 compatibility:   PASS — body/rating/received_at/external_id/reply_state = 58/58 non-null;
+                    received_at UTC-midnight 58/58; 답글여부 matched its exact-key alias
+                    (all PENDING, 0 UNKNOWN → column present + read); reply-state ingest proven
+C2 queue exclusion: NOT DEMONSTRATED (§8) — 0 answered reviews in the exported range
+C3 arrivals whole:  PASS — 58 NEW_REVIEW; low/mid/high = 1/1/56
+C4 refusal:         NOT DEMONSTRABLE — no answered review exists to refuse
+C5 non-vacuity:     BLOCKED — 500 on triage/draft (backend-only anomaly; §18.4-3)
+Census:             rating 58 · received_at 58 (UTC-midnight 58) · external_id 58
+                    reply_state PENDING 58 / ANSWERED 0 / UNKNOWN 0
+                    replied_at on ANSWERED 0/0 · on PENDING 0 (expect 0) ✓
+Teardown:           DB dropped ☑ · sellerops intact ☑ · quarantine empty ☑ · no artifact ☑
+Findings:           §18.4
+```
+
+### 18.4 Findings
+
+1. **The highlight overlay does not follow scroll.** `mountOverlay` fixes the box at the control's
+   viewport position at highlight time; a control below the fold gets an off-screen overlay and the
+   seated operator sees nothing until they scroll. It cost minutes this run and would read as "no
+   highlight" to any operator. The observer is bound to the control (a direct click still worked),
+   so this is a visibility defect, not a correctness one. **Fix candidate:** scroll the control into
+   view before mounting, and/or reposition the overlay on scroll. Recorded for a follow-up slice —
+   not fixed here (it is orthogonal to the choreography work and wants its own headed proof).
+2. **The exported range carried 0 answered reviews**, diverging from the operator's on-screen §8
+   confirmation. All 58 rows are a single recent date with a 1/1/56 rating split — consistent with a
+   narrow recent window in which nothing has been answered yet, while the §8 eyeball was evidently
+   on a broader view. This is the §8 fallback working exactly as written: C2/C4 recorded
+   `NOT DEMONSTRATED`, never quietly passed on an empty set. A future attempt wanting the reply-state
+   headline must confirm the answered row is **inside the range that will actually export**, not just
+   visible somewhere on screen.
+3. **A 500 on the triage and reply-draft endpoints** blocked C5 (mint-on-PENDING non-vacuity). It is
+   backend-only (no NAVER contact), reproducible OFFLINE against a disposable Postgres backend, and
+   did not affect the ingest headline. The `gradle -q` boot suppressed the request-time stack trace;
+   the disposable DB was dropped on schedule rather than kept to chase it. **Recorded for offline
+   reproduction** — the triage/reply path has hermetic tests, so the divergence is likely
+   environment- or Postgres-specific and characterizable without any live run.
+
+### 18.5 Gate state after attempt 3
+
+G3 #3 and G6 #3 (2026-07-24) are **CONSUMED** — register updated. C1 and C3 are **PROVEN on real
+data**; C2/C4 stay `NOT DEMONSTRATED` (§8 fallback); C5 `BLOCKED` (§18.4-3). The reply-state
+*headline* (answered reviews leave the queue; guided reply refuses an answered review) still awaits
+a range that contains an answered low-rating review — a future run starts from a blank template.

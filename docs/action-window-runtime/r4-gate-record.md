@@ -142,6 +142,26 @@ R4 G3 affirmation — CONSUMED (authorizes nothing further)
                    carry to an export, ingest, or real-click run.
 ```
 
+```
+R4 G3 affirmation — CONSUMED (authorizes nothing further)
+- date:            2026-07-23
+- operator:        self (OPERATOR_SELF_01)
+- run scope:       export+ingest (Run 7 — reply-state live proof; Run 4's ratified scope, no new scope)
+- ☑ Stable network / IP / location — affirmed FOR THE CURRENT ENVIRONMENT in the dispatching turn.
+     (The first 2026-07-23 attempt was DEFERRED precisely because this box went false; that instance
+     was VOID and carried nothing here.)
+- ☑ Dedicated Chrome profile intact (mechanically verified: unheld, preserved paths byte-identical
+     across the holder re-sync to 783a9b4).
+- N/A Bridge paired — CLI run over a loopback; the live driver is not Bridge-wired (the same
+     resolution ratified for `session recovery`: recorded with its reason, never a vacuous ☑).
+- ☑ Operation Run persistence enabled (verified post-run: the run persisted its marker).
+- ☑ §9 item 3 pause lift — for `export+ingest` ONLY, this one run; not blanket, not inherited.
+- outcome:         CONSUMED — spent on Run 7 (2026-07-23), which drove once and FAILED closed:
+                   DOWNLOAD_TIMEOUT (readiness green, control highlighted, no export action within
+                   the windows; no download ⇒ no artifact ⇒ zero ingest). Dispatch record §15.
+                   Carries to nothing; a retry needs a fresh G3 + G6.
+```
+
 ⚠ **This instance is spent.** ⚠ **G3 has never "failed".** Each affirmation above was real and is retained
 here as a dated record — `☐ PER-RUN` is this register's **category** label for a gate that is never standing
 (the same shape §G6 carries), not a failure marker.
@@ -329,6 +349,93 @@ R4 live-run approval — CONSUMED (authorizes nothing further)
 This instance is **spent**. Each subsequent live run — **including any export pilot** — requires a **NEW**
 G6 instance filled in that dispatching turn under the full §4 boundary. Goal pressure, prior approvals,
 or this consumed instance never carry over.
+
+```
+R4 live-run approval — RUN 7 (export+ingest) — CONSUMED (run FAILED closed)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-23
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest (Run 4's ratified scope — no new scope)
+- backend:            disposable sellerops_run7_20260723T233452 on SERVER_PORT=18080, confirmed as
+                      the ingest target on the run's own output; NEVER the persistent dev DB;
+                      dropped at teardown via the falsified name guard
+- max live window:    15 minutes (exceeded ~2 min by the run's own fail-closed tail — dispatch
+                      record §15.4 finding 1; no marketplace contact occurred in the overrun beyond
+                      the already-open idle page timing out)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION run, reply-approval flag
+                      never passed; the §4.1 write boundary never in scope
+- §7 abort criteria:  acknowledged, incl. Run 7's three additions (range precondition → abort
+                      before the window; unconfirmed ingest target → abort; any composer surface → abort)
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (export+ingest instance above)
+- P6:                 ✅ signed in the dispatching turn on G6 + G3 + fresh G4 (backend 1502/0/2sk ·
+                      collector-in-holder 4843/95 · frontend 765; unmodified 783a9b4 tree)
+- outcome:            CONSUMED — the run drove once and FAILED closed: DOWNLOAD_TIMEOUT (2-of-3
+                      steps; readiness LOGGED_IN · READY · positive_count; observe window lapsed
+                      observed:false; no download ⇒ no artifact ⇒ zero ingest; disposable DB at
+                      0 rows when dropped). Full record: r4-run7-reply-state-live-proof-dispatch-
+                      record.md §11 + §15. A retry needs a fresh G3 + G6 — nothing carries over.
+```
+
+⚠ **Run 7's instance is spent without its claims being demonstrated** (C1–C5 all `NOT DEMONSTRATED`) —
+consumption follows the *run*, not the *result*. The same rule as every instance above: a further
+attempt starts from a blank template.
+
+```
+R4 live-run approval — RUN 7 ATTEMPT 2 (export+ingest) — CONSUMED (run FAILED closed)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest
+- backend:            disposable sellerops_run7_20260724T000758 on SERVER_PORT=18080, confirmed on
+                      the run's own output; dropped at teardown (0 rows), name-guarded
+- max live window:    25 minutes — timer-derived per dispatch record §15.4 finding 1; actual live
+                      window ~2 min 15 s (00:26:55 open → 00:29:06 terminal)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (2026-07-24 instance: same five
+                      boxes as the 2026-07-23 instance above, affirmed fresh for the current
+                      environment; Bridge N/A/CLI-loopback; the prior evening's UNLAUNCHED
+                      affirmation was treated as VOID and never carried)
+- P6:                 ✅ signed on G6 + G3 + standing same-tree G4 (783a9b4 unmodified, suites green
+                      2026-07-23: backend 1502/0/2sk · collector-in-holder 4843/95 · frontend 765)
+- outcome:            CONSUMED — the run drove once and FAILED closed: DOWNLOAD_TIMEOUT. One step
+                      past attempt 1: the export action was OBSERVED (observed:true) and the
+                      operator reports a started download, but the detector saw nothing in 60 s —
+                      a download-detection gap (or NAVER delivery change), dispatch record §16.3.
+                      Zero artifacts anywhere; zero ingest. NO ATTEMPT 3 until the gap is
+                      reproduced and closed OFFLINE — a further attempt then still starts from a
+                      blank template (fresh G3 + G6).
+```
+
+```
+R4 live-run approval — RUN 7 ATTEMPT 3 (export+ingest) — CONSUMED (run COMPLETED)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest
+- code under proof:   871fccd (multi-checkpoint continuation runtime, §16.3/§17); holder-synced,
+                      collector suite + 5 continuation proofs green inside the holder
+- backend:            disposable sellerops_run7_20260724T011628 on 18080, confirmed on the run's
+                      output; dropped at teardown (name-guarded), sellerops intact
+- max live window:    55 minutes — timer-derived from the new multi-checkpoint worst case; actual
+                      live window ~4 min 45 s (01:23:36 → ~01:28:21)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions; §8 range confirmed on screen
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (2026-07-24 attempt-3 instance:
+                      five boxes for the current environment; Bridge N/A/CLI-loopback)
+- P6:                 ✅ signed on G6 + G3 + G4-on-871fccd (collector suite + continuation proofs
+                      green in the holder; backend 1502 / frontend 765 unaffected by the slice)
+- outcome:            CONSUMED — the run drove once and COMPLETED 3-of-3: real download → validate →
+                      parse-gate → ingest SUCCESS (58 rows, 0 skipped/failed); 0 continuation
+                      checkpoints (this range took the Run-4 direct shape). C1 (compatibility) and
+                      C3 (arrivals) PROVEN on real data; C2/C4 NOT DEMONSTRATED (§8 fallback — 0
+                      answered rows in range); C5 BLOCKED by a backend-only 500. Full record:
+                      r4-run7-…-dispatch-record.md §18. A retry for the reply-state headline needs
+                      a fresh G3 + G6 AND a range that actually exports an answered low-rating review.
+```
 
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
