@@ -19,6 +19,8 @@ import com.sellerops.common.RedactedBody;
 import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.common.VocPreviewSanitizer;
+import com.sellerops.product.OperatorProductName;
+import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
 import com.sellerops.review.ReviewRepository;
@@ -66,7 +68,11 @@ public class ReviewReplyService {
     /** Actor-tag prefix; {@code SELLER:} for the same reason {@code ReviewTriageService} uses it. */
     static final String ACTOR_PREFIX = "SELLER:";
 
+    /** KST — the platform zone every operator-facing date in this product uses. */
+    private static final java.time.ZoneId KST = java.time.ZoneId.of("Asia/Seoul");
+
     private final ReviewRepository reviews;
+    private final ProductRepository products;
     private final SellerAccountRepository sellerAccounts;
     private final ReviewTriageRepository triages;
     private final ReviewReplyDraftService drafts;
@@ -76,21 +82,25 @@ public class ReviewReplyService {
     private final Clock clock;
 
     @Autowired
-    public ReviewReplyService(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
+    public ReviewReplyService(ReviewRepository reviews, ProductRepository products,
+                              SellerAccountRepository sellerAccounts,
                               ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                               ReviewReplyApprovalService approvals,
                               ReviewReplyOutcomeService outcomes,
                               ReviewReplyProposalProvider provider) {
-        this(reviews, sellerAccounts, triages, drafts, approvals, outcomes, provider, Clock.systemUTC());
+        this(reviews, products, sellerAccounts, triages, drafts, approvals, outcomes, provider,
+                Clock.systemUTC());
     }
 
     /** Test seam: an explicit {@link Clock} pins the KST as-of date used for the recency bucket. */
-    ReviewReplyService(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
+    ReviewReplyService(ReviewRepository reviews, ProductRepository products,
+                       SellerAccountRepository sellerAccounts,
                        ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                        ReviewReplyApprovalService approvals,
                        ReviewReplyOutcomeService outcomes,
                        ReviewReplyProposalProvider provider, Clock clock) {
         this.reviews = reviews;
+        this.products = products;
         this.sellerAccounts = sellerAccounts;
         this.triages = triages;
         this.drafts = drafts;
@@ -273,7 +283,7 @@ public class ReviewReplyService {
         OperatorOutcome operatorOutcome = OperatorOutcome.parse(operatorOutcomeRaw);
         String command = ReviewReplyApprovalService.requireCommandId(commandId);
         String ref = requireSubmissionRef(submissionRef);
-        String runRef = requireAwRunRef(awRunRef);
+        String runRef = optionalAwRunRef(awRunRef);
         Review review = authorize(orgId, accountId, actionRef);
         UUID reviewId = review.getId();
         String actor = ACTOR_PREFIX + actorUserId;
@@ -323,9 +333,21 @@ public class ReviewReplyService {
         return submissionRef.strip();
     }
 
-    private static String requireAwRunRef(String awRunRef) {
+    /**
+     * The Action Window run ref, or {@code null} when the operator posted MANUALLY with no run.
+     *
+     * <p>This used to REQUIRE one, and that requirement is what produced the defect it now prevents:
+     * with no guided runtime wired, the client had to supply something, so every shipped build sent a
+     * locally-minted {@code run_<hex>} for a run that never happened — a fabricated Action Window
+     * identity, indistinguishable in the table from a real one.
+     *
+     * <p>Absence is now a first-class answer. A blank string normalises to null rather than being
+     * stored: a caller with no run says so by OMISSION, and there is no placeholder it could send
+     * that would be true. A present value is still length-checked.
+     */
+    private static String optionalAwRunRef(String awRunRef) {
         if (awRunRef == null || awRunRef.isBlank()) {
-            throw ApiException.badRequest("실행 참조(awRunRef)가 필요합니다.");
+            return null;
         }
         String ref = awRunRef.strip();
         if (ref.length() > 128) {
@@ -412,6 +434,28 @@ public class ReviewReplyService {
         }
     }
 
+    /** KST calendar date (date only) — the granularity a seller scans a review list by. */
+    private static String kstDate(java.time.Instant instant) {
+        return instant == null ? null : instant.atZone(KST).toLocalDate().toString();
+    }
+
+    /**
+     * The review's product display name, or null when none can be shown honestly.
+     *
+     * <p>Org-scoped at the query boundary: {@code reviews.product_id} is a bare FK with no org
+     * constraint, so an id read off a row is not proof of same-org ownership and a cross-org id must
+     * resolve to nothing rather than to another org's catalog entry.
+     */
+    private String productDisplayName(UUID orgId, Review review) {
+        if (review.getProductId() == null) {
+            return null;
+        }
+        return products.findAllByOrgIdAndIdIn(orgId, java.util.Set.of(review.getProductId())).stream()
+                .findFirst()
+                .map(OperatorProductName::displayNameOrNull)
+                .orElse(null);
+    }
+
     private ReviewReplyPrepView compose(UUID orgId, Review review, String actionRef) {
         RedactedBody body = VocPreviewSanitizer.redactFullBody(review.getBody());
         TriageDisposition triage = disposition(orgId, review.getId()).orElse(null);
@@ -458,7 +502,12 @@ public class ReviewReplyService {
                 review.getRating(),
                 // The channel's own statement — the reason a guided run may be unavailable. A closed
                 // enum name; the reply text and its timestamp never cross this boundary.
-                review.getReplyState().name());
+                review.getReplyState().name(),
+                // Locating context, same values the attention row already showed. The display-name
+                // rule is shared rather than re-implemented, so this panel cannot start rendering a
+                // SKU while the row beside it withholds one.
+                productDisplayName(orgId, review),
+                kstDate(review.getReceivedAt()));
     }
 
     /**

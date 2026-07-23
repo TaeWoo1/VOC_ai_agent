@@ -14,7 +14,9 @@ package com.sellerops.attention.reply.dto;
  * service ({@code OPERATOR_REPORTED_SUBMITTED} | {@code SUBMISSION_ABORTED}). Verification is NOT a
  * client field — it is always {@code UNVERIFIED}.
  *
- * <p>{@code awRunRef} is the opaque Action Window runId the guided post ran under.
+ * <p>{@code awRunRef} is the opaque Action Window runId a guided post ran under, or {@code null}
+ * for a MANUAL post with no guided run. A blank string is normalised to null — a caller that has no
+ * run must say so by omission, never by inventing a placeholder.
  */
 public record ReviewReplyOutcomeRequest(String commandId, String submissionRef, String operatorOutcome,
                                         String awRunRef) {

@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
 import type { OperatorOutcomeName, ReviewReplyPrep, TriageDisposition } from "../lib/types";
 import {
-  createSimulatedReplyRuntime,
+  resolveReplyRuntime,
   startReplySubmission,
   type ReplyRunHandle,
   type ReplyRuntime,
 } from "../lib/actionWindow/reply/replyRuntime";
 
-// The offline / non-bridge reply runtime — a real v2 terminal, not a fabricated value. A dev-bridge
-// build injects a `createBridgeReplyRuntime` instead (VITE_AW_BRIDGE); the default stays offline.
-const defaultReplyRuntime = createSimulatedReplyRuntime();
+// NO module-level runtime. `resolveReplyRuntime()` returns null in any shipped build, and that null
+// is the point: before it, this panel fell back to the SIMULATED runtime everywhere, minting a
+// `run_<hex>` locally and persisting it as an Action Window run that never happened.
 
 // Prepare a reply to one review: read the redacted body, start from a rule-based
 // suggestion, edit, approve (which freezes it), copy.
@@ -38,7 +38,14 @@ type Busy = null | "saving" | "approving" | "withdrawing" | "starting" | "report
 /** One guided reply-submission run: the single-use binding + the live run handle it reports through. */
 interface GuidedRun {
   submissionRef: string;
-  handle: ReplyRunHandle;
+  /**
+   * The live run this report will terminate through, or null for a MANUAL handoff.
+   *
+   * <p>Null is not a missing handle — it says no Action Window run exists, so the outcome is the
+   * operator's own report and no run ref is recorded. It is the difference between "SellerOps
+   * watched a run end" and "the seller told us what they did".
+   */
+  handle: ReplyRunHandle | null;
 }
 /** One outcome-report intent: what was reported, and the command id identifying it. */
 interface OutcomeAttempt {
@@ -53,14 +60,19 @@ export function VocItemReplyPrep({
   onPrepared,
   onOutcomeRecorded,
   onLocalWork,
-  replyRuntime = defaultReplyRuntime,
+  replyRuntime,
 }: {
   accountId: string;
   actionRef: string;
   /**
-   * The reply-submission runtime the guided flow drives. Injected so tests can pass a stub and a
-   * dev-bridge build can supply `createBridgeReplyRuntime`; defaults to the offline simulated runtime.
-   * The runtime is the SOLE source of the recorded outcome + runId — the FE never fabricates them.
+   * The reply-submission runtime the guided flow drives, when this build HAS one.
+   *
+   * <p>Injected so tests can pass a stub; otherwise resolved by {@code resolveReplyRuntime()}, which
+   * returns null in production. When it is null the panel offers a MANUAL handoff instead of a
+   * guided one — different copy, and no run ref recorded — rather than silently simulating a run.
+   *
+   * <p>When a runtime does exist it remains the SOLE source of the recorded outcome + runId; the FE
+   * never fabricates either.
    */
   replyRuntime?: ReplyRuntime;
   /**
@@ -147,6 +159,11 @@ export function VocItemReplyPrep({
   useEffect(() => {
     onLocalWork?.(hasLocalWork);
   }, [hasLocalWork, onLocalWork]);
+  // Resolved once. Null in every shipped build: this build cannot guide, and the panel says so
+  // rather than simulating a run nobody ran.
+  const runtime = useMemo(() => replyRuntime ?? resolveReplyRuntime(), [replyRuntime]);
+  const canGuide = runtime != null;
+
   const headingId = useId();
   const editorId = useId();
 
@@ -350,8 +367,12 @@ export function VocItemReplyPrep({
     setFailed("복사하지 못했습니다. 다시 시도해 주세요.");
   }
 
-  async function startGuided() {
-    // Reuse an UNSPENT run: a guided run already in flight keeps its single-use submissionRef rather
+  async function startHandoff() {
+    // Named for what it does in BOTH modes: it starts a handoff, which is a guided run only when this
+    // build has a runtime. Calling it startGuided while it also opened the manual path would be the
+    // same overclaim in code that "(가이드)" was in the label.
+    //
+    // Reuse an UNSPENT handoff: one already in flight keeps its single-use submissionRef rather
     // than minting another. A fresh mint happens only after a terminal report spends it (setGuided(null)).
     if (inFlight.current || !canStart || guided != null) {
       return;
@@ -360,10 +381,15 @@ export function VocItemReplyPrep({
     setBusy("starting");
     setFailed(null);
     try {
+      // The submissionRef is minted by the SERVER either way — a real single-use binding, in both
+      // the guided and the manual path. Only the RUN is conditional.
       const run = await api.startReviewReplySubmissionRun(accountId, actionRef);
-      // The runtime assigns the opaque runId (never the FE). Minting it uses the same secure randomness
-      // as a command id, so a non-secure origin fails closed exactly like approval does.
-      const handle = await startReplySubmission(replyRuntime, { channelCode: "naver", submissionRef: run.submissionRef });
+      // With a runtime, it assigns the opaque runId (never the FE), using the same secure randomness
+      // as a command id so a non-secure origin fails closed exactly like approval does. Without one,
+      // there is no run to start and nothing to mint — the handoff is manual and says so.
+      const handle = runtime
+        ? await startReplySubmission(runtime, { channelCode: "naver", submissionRef: run.submissionRef })
+        : null;
       setGuided({ submissionRef: run.submissionRef, handle });
     } catch (e) {
       if (e instanceof SecureRandomUnavailableError) {
@@ -403,22 +429,26 @@ export function VocItemReplyPrep({
     try {
       // Drive the run to its OPERATOR_REPORTED terminal; the recorded outcome + runId come FROM the
       // terminal (the sole source), never fabricated on the client.
-      const terminal =
-        outcome === "OPERATOR_REPORTED_SUBMITTED"
+      // With a run, the terminal is the sole source of both the outcome and the runId. Without one,
+      // the outcome is the operator's own report and there is NO run ref — production may not mint a
+      // run identity for a run that did not happen, and an absent ref is the honest record of that.
+      const terminal = guided.handle
+        ? outcome === "OPERATOR_REPORTED_SUBMITTED"
           ? await guided.handle.reportSubmitted()
-          : await guided.handle.abortSubmission();
+          : await guided.handle.abortSubmission()
+        : null;
       await api.recordReviewReplyOutcome(accountId, actionRef, {
         commandId,
         submissionRef: guided.submissionRef,
-        operatorOutcome: terminal.operatorOutcome,
-        awRunRef: terminal.runId,
+        operatorOutcome: terminal ? terminal.operatorOutcome : outcome,
+        ...(terminal ? { awRunRef: terminal.runId } : {}),
       });
       reportAttempt.current = null;
       setGuided(null);
       // Only a reported SUBMISSION changes the worklist. An abort is a normal ending that leaves the
       // review exactly where it was, so telling the list to refetch would spend a request to redraw
       // an identical page.
-      if (terminal.operatorOutcome === "OPERATOR_REPORTED_SUBMITTED") {
+      if ((terminal ? terminal.operatorOutcome : outcome) === "OPERATOR_REPORTED_SUBMITTED") {
         onOutcomeRecorded?.();
       }
       // Re-read so the recorded outcome (operatorOutcome + verification, as a pair) shows.
@@ -549,12 +579,12 @@ export function VocItemReplyPrep({
             type="button"
             aria-disabled={!canStart || working}
             aria-busy={busy === "starting"}
-            onClick={() => void startGuided()}
+            onClick={() => void startHandoff()}
             className={`rounded-lg px-2.5 py-1 text-sm font-semibold ${
               canStart && !working ? "bg-canvas text-ink ring-1 ring-line" : "bg-canvas text-muted opacity-40"
             }`}
           >
-            네이버에서 직접 답변하기(가이드)
+            {canGuide ? "네이버에서 직접 답변하기(가이드)" : "직접 답변하고 기록하기"}
           </button>
         ) : null}
         {channelAnswered ? (
@@ -589,6 +619,37 @@ export function VocItemReplyPrep({
             복사한 답변을 네이버 판매자센터 답변란에 붙여넣고 <strong className="font-semibold">직접</strong>{" "}
             답변해 주세요. SellerOps가 대신 하지 않으며, 답변 여부도 확인하지 않습니다.
           </p>
+          {/* The overclaim this slice removes. Without a runtime nothing opens the seller center,
+              nothing finds the row, nothing watches the post — so the panel must not imply it does.
+              The locating facts below are what SellerOps CAN offer instead. */}
+          {!canGuide ? (
+            <p className="text-sm text-muted">
+              이 화면은 안내(가이드)를 제공하지 않아요. 아래 정보로 네이버에서 리뷰를 찾아 주세요.
+            </p>
+          ) : null}
+          {/* The narrowing facts: what the seller scans a review list by. Display name only — never
+              a SKU or 상품번호 — resolved by the same shared rule the attention row uses. Each is
+              omitted rather than guessed when the review does not carry it. */}
+          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
+            {prep.productName != null ? (
+              <div className="flex gap-1">
+                <dt className="font-semibold">상품</dt>
+                <dd>{prep.productName}</dd>
+              </div>
+            ) : null}
+            {prep.reviewDate != null ? (
+              <div className="flex gap-1">
+                <dt className="font-semibold">작성일</dt>
+                <dd>{prep.reviewDate}</dd>
+              </div>
+            ) : null}
+            {prep.rating != null ? (
+              <div className="flex gap-1">
+                <dt className="font-semibold">평점</dt>
+                <dd>{"★".repeat(prep.rating)}</dd>
+              </div>
+            ) : null}
+          </dl>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"

@@ -98,6 +98,10 @@ public class ReviewReplyOutcomeService {
                                              OperatorOutcome operatorOutcome, String awRunRef,
                                              String commandId, String actor) {
         String command = ReviewReplyApprovalService.requireCommandId(commandId);
+        // A caller with no guided run says so by OMISSION. Normalising blank to null keeps a client
+        // that sends "" from creating a third state that is neither a run nor an honest absence —
+        // and there is no placeholder it could send that would be true.
+        String runRef = awRunRef == null || awRunRef.isBlank() ? null : awRunRef.strip();
 
         // Fast path only — NOT the correctness boundary.
         Optional<ReviewReplyOutcome> prior = outcomes.findByOrgIdAndCommandId(orgId, command);
@@ -107,7 +111,7 @@ public class ReviewReplyOutcomeService {
 
         try {
             writer.appendOutcome(orgId, reviewId, submissionRef, recordedVersion, recordedFingerprint,
-                    fingerprintAlgorithm, operatorOutcome, awRunRef, command, actor);
+                    fingerprintAlgorithm, operatorOutcome, runRef, command, actor);
             return new ReviewReplyOutcomeResponse(actionRef, true, false);
         } catch (DataIntegrityViolationException race) {
             return resolveRace(race, orgId, reviewId, actionRef, submissionRef, operatorOutcome, command);

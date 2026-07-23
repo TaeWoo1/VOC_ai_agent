@@ -17,6 +17,7 @@ import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.itemanalysis.ItemAnalysis;
 import com.sellerops.itemanalysis.ItemAnalysisCategories;
 import com.sellerops.itemanalysis.ItemAnalysisRepository;
+import com.sellerops.product.OperatorProductName;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
@@ -57,8 +58,9 @@ import org.springframework.stereotype.Component;
  * DISPLAY value only — the SKU (상품번호, i.e. the channel's {@code productNo}) is the
  * product's identity and is withheld from the DTO. Crucially that is ENFORCED, not
  * assumed: ingest stores the SKU as the name when a row has no name, so
- * {@code hasDisplayableName} withholds any name equal to its own SKU rather than trusting
- * the two fields to differ. Names are resolved for a whole page in one org-scoped batch
+ * {@code OperatorProductName.displayNameOrNull} withholds any name equal to its own SKU rather than
+ * trusting the two fields to differ — a rule now SHARED with the reply-preparation panel, which makes
+ * the same promise about the same rows and would otherwise be free to drift into rendering a SKU. Names are resolved for a whole page in one org-scoped batch
  * query (see {@code productNamesFor}); anything that cannot be resolved honestly comes out
  * {@code null}. The guarantee is this surface's, not the product model's — ingest keeps
  * minting SKU-named rows and other surfaces keep showing them.
@@ -120,30 +122,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      */
     static final Set<String> SUPPORTED_CHANNEL_CODES = Set.of("NAVER");
 
-    /**
-     * Ingest's fallback product name, filtered back out on read.
-     *
-     * <p>An export row with neither 상품명 nor 상품번호 still has to resolve to a product,
-     * so {@code ReviewRowMapper}/{@code ProductService} mint this placeholder. It is an
-     * ingest artifact, not a product: {@code ProductService} resolves it by name, so
-     * EVERY nameless row in an org collapses onto one shared row. Surfacing it would show
-     * an operator a "product" that is really a bucket of unrelated reviews, so a row
-     * naming it reads as {@code null} — the same honest "no name available" as a missing
-     * link. Ingest is unchanged; this is read-side only.
-     *
-     * <p>The string is duplicated from ingest rather than shared: it appears at seven
-     * main-source sites today — six as a bare literal, the seventh as
-     * {@code EsmInquiryRowMapper.UNSPECIFIED_PRODUCT}, which is private to the ESM inquiry
-     * importer — so there is nothing canonical to reuse and inventing one would mean
-     * editing ingest. {@code ExportToAttentionChainTest} pins the duplication by uploading a
-     * real nameless export, so changing ingest's literal fails loudly instead of leaving this
-     * filter silently matching nothing. It has to be pinned THERE and not against
-     * {@code ProductService}: on the review path {@code ReviewRowMapper} mints the placeholder
-     * itself and passes it as a non-null name, so {@code ProductService}'s own fallback never
-     * fires and the stored value is the MAPPER's literal — a unit test driving
-     * {@code ProductService} directly would pin a string production never stores.
-     */
-    static final String UNSPECIFIED_PRODUCT_NAME = "(미지정 상품)";
+    /** Ingest's fallback product name — now shared with the reply panel via {@link OperatorProductName}. */
+    static final String UNSPECIFIED_PRODUCT_NAME = OperatorProductName.UNSPECIFIED_PRODUCT_NAME;
 
     /** Operator-facing source type; this store is reviews only. */
     static final String SOURCE_TYPE_REVIEW = "REVIEW";
@@ -441,47 +421,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
             return Map.of();
         }
         return products.findAllByOrgIdAndIdIn(orgId, productIds).stream()
-                .filter(IngestedReviewVocItemSource::hasDisplayableName)
-                .collect(Collectors.toMap(Product::getId, Product::getName));
-    }
-
-    /**
-     * Whether this product has a name worth showing an operator — decided from the whole
-     * {@link Product}, never the name alone, because {@code name} is not independent of
-     * {@code sku}.
-     *
-     * <p>Rejects three states, all of which mean "no name is actually known":
-     *
-     * <ul>
-     *   <li><b>null/blank</b> — nothing to show.
-     *   <li><b>{@link #UNSPECIFIED_PRODUCT_NAME}</b> — ingest's placeholder; an artifact, not
-     *       a product (see that constant's note).
-     *   <li><b>name equal to sku</b> — <b>the load-bearing one.</b> When an ingested row has a
-     *       SKU but no name, {@code ProductService.resolveOrCreate} stores the SKU AS the name
-     *       ({@code name != null && !name.isBlank() ? name : sku}), and the inquiry mappers
-     *       pass a null name whenever a sku exists, so this state is produced by normal
-     *       operation, not by bad data. Without this branch the row's "display name" IS the
-     *       SKU — 상품번호, i.e. the channel's {@code productNo} — and the identifier this DTO
-     *       excludes would reach operators through the one field claiming never to carry it.
-     *       Compared on trimmed values because ingest strips on the way in
-     *       ({@code HeaderAliases.pick}) and a stored legacy value may not be.
-     * </ul>
-     *
-     * <p>A product with a real name and no sku is displayable — absent identity is not a
-     * reason to withhold a name. Read-side only; ingest is unchanged, and the same product
-     * keeps its SKU-derived name everywhere else it is already shown.
-     */
-    private static boolean hasDisplayableName(Product p) {
-        String name = p.getName();
-        if (name == null || name.isBlank()) {
-            return false;
-        }
-        String trimmedName = name.strip();
-        if (UNSPECIFIED_PRODUCT_NAME.equals(trimmedName)) {
-            return false;
-        }
-        String sku = p.getSku();
-        return sku == null || sku.isBlank() || !trimmedName.equals(sku.strip());
+                .map(p -> Map.entry(p.getId(),
+                        Optional.ofNullable(OperatorProductName.displayNameOrNull(p))))
+                .filter(e -> e.getValue().isPresent())
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().get()));
     }
 
     /**

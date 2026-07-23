@@ -1,9 +1,10 @@
 // Isolated v2 reply-submission runtime: the offline simulated runtime and the dev-bridge runtime.
 // Proves the runtime terminal is the sole source of the recorded outcome + a real run_<hex> runId,
 // and that the dev-bridge path speaks v2 with LAN-safe command ids.
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import type { CommandEnvelope, EventEnvelope } from "../../../../../contracts/action-window/v2/index";
 import {
+  resolveReplyRuntime,
   createBridgeReplyRuntime,
   createSimulatedReplyRuntime,
   startReplySubmission,
@@ -90,5 +91,38 @@ describe("dev-bridge reply runtime (v2 over an injected transport)", () => {
       payload: { status: "OPERATOR_REPORTED", operatorOutcome: "OPERATOR_REPORTED_SUBMITTED", verification: "UNVERIFIED" },
     });
     expect(await pending).toEqual({ runId: "run_agentabcd12", operatorOutcome: "OPERATOR_REPORTED_SUBMITTED", verification: "UNVERIFIED" });
+  });
+});
+
+describe("resolveReplyRuntime — production may not mint a run", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns NULL in a production build, so nothing can simulate a run", () => {
+    // The defect this replaced: with no bridge wired, the panel silently fell back to the simulated
+    // runtime in EVERY shipped build — minting a `run_<hex>` locally, synthesising a terminal, and
+    // persisting that fabricated identity into review_reply_outcome.aw_run_ref. The database could
+    // not tell it from a real guided run.
+    vi.stubEnv("DEV", false);
+
+    expect(resolveReplyRuntime()).toBeNull();
+  });
+
+  it("gives DEV builds the simulated runtime, which is the only place it belongs", () => {
+    vi.stubEnv("DEV", true);
+
+    expect(resolveReplyRuntime()).not.toBeNull();
+  });
+
+  it("a null runtime is not a broken runtime — there is simply nothing to drive", () => {
+    // Stated as a test so the null is read as a capability statement rather than an error state:
+    // callers branch on it to offer a manual handoff, they do not retry it.
+    vi.stubEnv("DEV", false);
+
+    const runtime = resolveReplyRuntime();
+
+    expect(runtime).toBeNull();
+    expect(() => resolveReplyRuntime()).not.toThrow();
   });
 });

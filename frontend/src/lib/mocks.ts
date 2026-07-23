@@ -1347,6 +1347,11 @@ export function mockReviewReplyPrep(actionRef: string): ReviewReplyPrep {
       canStartSubmissionRun: canCopy && channelReplyState !== "ANSWERED",
     },
     channelReplyState,
+    // Locating context — the same values the attention row shows, so the demo teaches the same
+    // narrowing the product actually offers.
+    productName: review.productName,
+    reviewDate: review.sourceCreatedDate,
+    rating: review.rating,
   };
 }
 
@@ -1480,7 +1485,8 @@ export function mockRecordReviewReplyOutcome(
   actionRef: string,
   submissionRef: string,
   operatorOutcome: OperatorOutcomeName,
-  awRunRef: string,
+  // Optional, mirroring the server: absent for a MANUAL post with no guided run.
+  awRunRef?: string,
 ): ReviewReplyOutcomeResponse {
   const binding = reviewReplySubmissionRefs.get(submissionRef);
   if (binding == null || binding.actionRef !== actionRef) {
@@ -1503,8 +1509,9 @@ export function mockRecordReviewReplyOutcome(
     verification: "UNVERIFIED",
     recordedVersion: binding.boundVersion,
     recordedFingerprint: binding.boundFingerprint,
-    // The runId comes from the runtime terminal (the sole source), not fabricated from the ref.
-    awRunRef,
+    // The runId comes from the runtime terminal (the sole source), never fabricated from the ref —
+    // and is NULL for a manual post, because no run happened to have an id.
+    awRunRef: awRunRef ?? null,
     recordedAt: MOCK_DECIDED_AT,
   });
   return { actionRef, recorded: true, replayed: false };

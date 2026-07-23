@@ -49,6 +49,9 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
     outcome: null,
     capabilities: { canSave: true, canApprove: false, canWithdraw: false, canCopy: false, canStartSubmissionRun: false },
     channelReplyState: "UNKNOWN",
+    productName: "가을 니트 가디건 CHARCOAL",
+    reviewDate: "2026-05-10",
+    rating: 2,
     ...over,
   };
 }
@@ -128,6 +131,15 @@ function stubGuidedRun() {
     replayed: false,
   });
 }
+
+// FILE-SCOPE, deliberately: `resolveReplyRuntime()` reads import.meta.env.DEV, and the manual-handoff
+// tests stub it false. Registered inside a describe it would not cover the OTHER describes, and a
+// leaked DEV=false silently sends every later guided-path test down the manual branch — where it
+// passes, while testing something else entirely. That is exactly what happened when this cleanup
+// first landed in the wrong block.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("VocItemReplyPrep", () => {
   beforeEach(() => {
@@ -730,6 +742,65 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     expect(onOutcomeRecorded).not.toHaveBeenCalled();
   });
 
+  it("without a runtime it offers a MANUAL handoff and records NO run ref", async () => {
+    // Production has no wired runtime, so this is the shipped path. It must not mint a run: before
+    // this slice the panel fell back to the simulated runtime and persisted a fabricated
+    // `run_<hex>` as an Action Window run that never happened.
+    const user = userEvent.setup();
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.recordReviewReplyOutcome).mockResolvedValue({
+      actionRef: REF,
+      recorded: true,
+      replayed: false,
+    });
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(APPROVED);
+    // No replyRuntime prop and DEV stubbed off — exactly what a shipped build resolves to.
+    vi.stubEnv("DEV", false);
+    render(<VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="RESPONSE_NEEDED" />);
+    await screen.findByRole("heading", { name: "답변 준비" });
+
+    // The button does NOT promise guidance.
+    const start = screen.getByRole("button", { name: "직접 답변하고 기록하기" });
+    expect(screen.queryByRole("button", { name: /가이드/ })).toBeNull();
+    await user.click(start);
+
+    await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+    expect(screen.getByText(/안내\(가이드\)를 제공하지 않아요/)).toBeInTheDocument();
+
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(OUTCOME_SUBMITTED);
+    await user.click(screen.getByRole("button", { name: "답변함으로 기록" }));
+
+    await waitFor(() => expect(api.recordReviewReplyOutcome).toHaveBeenCalled());
+    const body = vi.mocked(api.recordReviewReplyOutcome).mock.calls[0][2];
+    expect(body.operatorOutcome).toBe("OPERATOR_REPORTED_SUBMITTED");
+    // THE assertion: no run identity for a run that did not happen.
+    expect(body.awRunRef).toBeUndefined();
+    expect("awRunRef" in body).toBe(false);
+  });
+
+  it("gives the seller what they need to FIND the review, since nothing navigates for them", async () => {
+    vi.stubEnv("DEV", false);
+    vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+      actionRef: REF,
+      submissionRef: "a1b2c3d4e5f60718",
+      approvedVersion: 1,
+    });
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(APPROVED);
+    render(<VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition="RESPONSE_NEEDED" />);
+    await screen.findByRole("heading", { name: "답변 준비" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "직접 답변하고 기록하기" }));
+
+    const panel = await screen.findByRole("group", { name: "네이버에서 직접 답변하기" });
+    // Product name, date and rating — the coarse narrowing a seller scans a review list by.
+    expect(panel).toHaveTextContent("가을 니트 가디건 CHARCOAL");
+    expect(panel).toHaveTextContent("2026-05-10");
+    expect(panel).toHaveTextContent("★★");
+  });
+
   it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {
     await renderPanel({
       ...APPROVED,
@@ -770,6 +841,9 @@ describe("VocItemReplyPrep — the channel already answered", () => {
     ...APPROVED,
     capabilities: { ...APPROVED.capabilities, canStartSubmissionRun: false },
     channelReplyState: "ANSWERED",
+    productName: "가을 니트 가디건 CHARCOAL",
+    reviewDate: "2026-05-10",
+    rating: 2,
   };
 
   it("explains why the guided step is unavailable", async () => {

@@ -12,7 +12,8 @@ import java.time.Instant;
  * reported outcome reads as a system failure rather than an operator report, and there is no
  * {@code COMPLETED} to show at all.
  *
- * <p>Carries no reply body and no channel claim. {@code awRunRef} is the opaque Action Window runId
+ * <p>Carries no reply body and no channel claim. {@code awRunRef} is null for a manual post with no
+ * guided run; when present it is the opaque Action Window runId
  * the guided post ran under.
  */
 public record ReviewReplyOutcomeView(String operatorOutcome, String verification,
