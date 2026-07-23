@@ -10,6 +10,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.collect.BackfillWindow;
 import com.sellerops.common.ApiException;
+import com.sellerops.itemanalysis.ItemAnalysisCategories;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.time.LocalDate;
@@ -84,9 +85,11 @@ public class OperatorAttentionService {
      */
     @Transactional(readOnly = true)
     public OperatorVocItemPage attentionItems(UUID orgId, UUID accountId, String type,
-                                              LocalDate from, LocalDate to, int page, int size) {
+                                              LocalDate from, LocalDate to, String category,
+                                              int page, int size) {
         SellerAccount account = requireAccount(orgId, accountId);
         AttentionSignalType signalType = parseType(type);
+        String safeCategory = parseCategory(category);
         BackfillWindow window = BackfillWindow.of(from, to);
         int safeSize = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
         int safePage = Math.max(0, page);
@@ -96,11 +99,12 @@ public class OperatorAttentionService {
 
         VocItemSlice slice = sources.forChannel(channelCode)
                 .map(s -> s.items(orgId, accountId, channelCode, channelNameKo,
-                        signalType, window.startDate(), window.endDate(), safePage, safeSize))
+                        signalType, window.startDate(), window.endDate(), safeCategory, safePage, safeSize))
                 .orElse(VocItemSlice.empty());
 
         return new OperatorVocItemPage(signalType.name(), window.startDate(), window.endDate(),
-                safePage, safeSize, slice.total(), slice.items());
+                safePage, safeSize, slice.total(), slice.unfilteredTotal(),
+                slice.categoryCounts(), slice.unclassifiedCount(), slice.items());
     }
 
     /** Parse an operator drill-down type into a signal type; unknown → bad request. */
@@ -113,6 +117,28 @@ public class OperatorAttentionService {
         } catch (IllegalArgumentException e) {
             throw ApiException.badRequest("지원되지 않는 신호 유형입니다.");
         }
+    }
+
+    /**
+     * Validate the optional classification facet: absent/blank → no filter, a canonical
+     * {@code ItemAnalysisCategories} label or the reserved {@code unclassified} sentinel → that
+     * filter, anything else → <b>400</b>.
+     *
+     * <p>Rejecting rather than returning an empty page is the point. A typo'd or stale category
+     * would otherwise render as "확인이 필요한 리뷰 중 배송 관련은 없습니다" — an operator would read a
+     * claim about their reviews where the truth is that the request named something that is not a
+     * category. Same reasoning as {@link #parseType} directly above, which has always refused an
+     * unknown signal type instead of quietly listing nothing.
+     */
+    private static String parseCategory(String category) {
+        if (category == null || category.isBlank()) {
+            return null;
+        }
+        String trimmed = category.strip();
+        if (ItemAnalysisCategories.isUnclassified(trimmed) || ItemAnalysisCategories.isSupported(trimmed)) {
+            return trimmed;
+        }
+        throw ApiException.badRequest("지원되지 않는 분류입니다.");
     }
 
     private SellerAccount requireAccount(UUID orgId, UUID accountId) {

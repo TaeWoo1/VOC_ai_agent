@@ -5,6 +5,7 @@ import com.sellerops.attention.AttentionSignalType;
 import com.sellerops.attention.VocItemFilter;
 import com.sellerops.attention.VocItemRef;
 import com.sellerops.attention.VocWindowSnapshot;
+import com.sellerops.attention.dto.CategoryCount;
 import com.sellerops.attention.dto.OperatorVocItem;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.reply.ReviewReplyApprovalRepository;
@@ -12,6 +13,9 @@ import com.sellerops.attention.reply.ReviewReplyDraftRepository;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.common.VocPreviewSanitizer;
+import com.sellerops.itemanalysis.ItemAnalysis;
+import com.sellerops.itemanalysis.ItemAnalysisCategories;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
@@ -22,6 +26,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -153,17 +158,20 @@ public class IngestedReviewVocItemSource implements VocItemSource {
     private final ReviewTriageRepository triage;
     private final ReviewReplyDraftRepository replyDrafts;
     private final ReviewReplyApprovalRepository replyApprovals;
+    private final ItemAnalysisRepository analyses;
 
     public IngestedReviewVocItemSource(ReviewRepository reviews, SellerAccountRepository sellerAccounts,
                                        ProductRepository products, ReviewTriageRepository triage,
                                        ReviewReplyDraftRepository replyDrafts,
-                                       ReviewReplyApprovalRepository replyApprovals) {
+                                       ReviewReplyApprovalRepository replyApprovals,
+                                       ItemAnalysisRepository analyses) {
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
         this.products = products;
         this.triage = triage;
         this.replyDrafts = replyDrafts;
         this.replyApprovals = replyApprovals;
+        this.analyses = analyses;
     }
 
     @Override
@@ -206,7 +214,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
 
     @Override
     public VocItemSlice items(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
-                              AttentionSignalType signalType, LocalDate from, LocalDate to, int page, int size) {
+                              AttentionSignalType signalType, LocalDate from, LocalDate to,
+                              String category, int page, int size) {
         UUID channelId = unambiguousChannelFor(orgId, accountId);
         if (channelId == null) {
             return VocItemSlice.empty();
@@ -228,20 +237,117 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         // in, not what needs doing.
         PageRequest pageRequest = PageRequest.of(page, size);
         Page<Review> result = excludesAnswered(signalType)
-                ? reviews.findUnansweredInWindowByChannelFiltered(
-                        orgId, channelId, filter.minRating(), filter.maxRating(),
-                        fromInstant, toExclusive, pageRequest)
+                ? needsALookPage(orgId, channelId, filter, fromInstant, toExclusive, category, pageRequest)
                 : reviews.findInWindowByChannelFiltered(
                         orgId, channelId, filter.minRating(), filter.maxRating(),
                         fromInstant, toExclusive, pageRequest);
         Map<UUID, String> productNames = productNamesFor(orgId, result.getContent());
         Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, result.getContent());
         Set<UUID> prepared = preparedFor(orgId, result.getContent());
+        Map<UUID, String> categories = categoriesFor(orgId, result.getContent());
         List<OperatorVocItem> rows = result.getContent().stream()
                 .map(r -> toItem(r, signalType, channelCode, channelNameKo, productNames,
-                        dispositions, prepared))
+                        dispositions, prepared, categories))
                 .toList();
-        return new VocItemSlice(rows, result.getTotalElements());
+
+        // The breakdown is offered only for the lens the facet applies to; an arrivals list is a
+        // chronological record, not a worklist to slice up. Its counts are always UNFILTERED by
+        // category, so choosing a facet cannot collapse the facet list to the chosen option.
+        if (!excludesAnswered(signalType)) {
+            return new VocItemSlice(rows, result.getTotalElements(), result.getTotalElements(),
+                    List.of(), 0L);
+        }
+        long unfilteredTotal = reviews.countUnansweredInWindowByChannelFiltered(
+                orgId, channelId, filter.minRating(), filter.maxRating(), fromInstant, toExclusive);
+        long unclassified = reviews.countUnansweredInWindowByChannelUnclassified(
+                orgId, channelId, filter.minRating(), filter.maxRating(), fromInstant, toExclusive);
+        return new VocItemSlice(rows, result.getTotalElements(), unfilteredTotal,
+                categoryCounts(orgId, channelId, filter, fromInstant, toExclusive), unclassified);
+    }
+
+    /**
+     * One page of the "needs a look" lens, narrowed by the (already-validated) category filter.
+     *
+     * <p>Three distinct queries rather than one with a nullable predicate, because the three
+     * questions are genuinely different: no filter, "carries THIS category", and "carries no
+     * analysis at all". The third is not a category value and could not be expressed as one.
+     */
+    private Page<Review> needsALookPage(UUID orgId, UUID channelId, VocItemFilter filter,
+                                        Instant fromInstant, Instant toExclusive,
+                                        String category, PageRequest pageRequest) {
+        if (category == null) {
+            return reviews.findUnansweredInWindowByChannelFiltered(
+                    orgId, channelId, filter.minRating(), filter.maxRating(),
+                    fromInstant, toExclusive, pageRequest);
+        }
+        if (ItemAnalysisCategories.isUnclassified(category)) {
+            return reviews.findUnansweredInWindowByChannelUnclassified(
+                    orgId, channelId, filter.minRating(), filter.maxRating(),
+                    fromInstant, toExclusive, pageRequest);
+        }
+        return reviews.findUnansweredInWindowByChannelAndCategory(
+                orgId, channelId, filter.minRating(), filter.maxRating(),
+                fromInstant, toExclusive, category, pageRequest);
+    }
+
+    /**
+     * The window's category breakdown, in {@link ItemAnalysisCategories#ORDERED} order rather than
+     * whatever order the group-by returned — a facet list that reshuffles between reads is a facet
+     * list an operator cannot build a habit around.
+     *
+     * <p>A category the analyzer could emit but that this window has none of is omitted, not shown
+     * as zero: the list is what is here, not a catalogue. A stored value NOT in the canonical
+     * vocabulary is also omitted and logged, since it is unfilterable by construction — that is a
+     * writer bug, and swallowing it silently would hide rows from every facet forever.
+     */
+    private List<CategoryCount> categoryCounts(UUID orgId, UUID channelId, VocItemFilter filter,
+                                               Instant fromInstant, Instant toExclusive) {
+        Map<String, Long> counts = new HashMap<>();
+        for (Object[] row : reviews.countUnansweredInWindowByChannelGroupedByCategory(
+                orgId, channelId, filter.minRating(), filter.maxRating(), fromInstant, toExclusive)) {
+            String category = (String) row[0];
+            long count = ((Number) row[1]).longValue();
+            if (ItemAnalysisCategories.isSupported(category)) {
+                counts.merge(category, count, Long::sum);
+            } else {
+                // The VALUE is deliberately not logged. Every category this system writes is one of
+                // nine fixed labels, so a value reaching this branch is by definition one no writer
+                // we control produced — which makes "it is derived metadata, never customer text" an
+                // assumption about unknown code rather than a fact. The count is the whole
+                // diagnostic; identifying which category it was means reading the table.
+                log.warn("Ignoring {} attention rows whose analysis category is not in the canonical "
+                        + "vocabulary — they cannot be offered as a facet, so no filter reaches them.",
+                        count);
+            }
+        }
+        return ItemAnalysisCategories.ORDERED.stream()
+                .filter(counts::containsKey)
+                .map(c -> new CategoryCount(c, counts.get(c)))
+                .toList();
+    }
+
+    /**
+     * Stored analysis categories for this page's rows — ONE org-scoped batch query, the same shape
+     * and the same reasoning as {@link #dispositionsFor}/{@link #preparedFor}: the id set is bounded
+     * by the clamped page size and each id hits {@code uq_item_analyses_source}, so the cost is a
+     * page rather than the corpus.
+     *
+     * <p>A row absent from the map has no analysis, and the DTO carries that as {@code null}. It is
+     * never inferred into 기타: analysis is best-effort by design ({@code FileUploadConnector}
+     * triggers it on newly-inserted ids only and swallows failures), so an absence is a coverage
+     * gap, not a verdict — and a row is never withheld for having one.
+     */
+    private Map<UUID, String> categoriesFor(UUID orgId, List<Review> rows) {
+        Set<UUID> reviewIds = rows.stream().map(Review::getId).collect(Collectors.toSet());
+        if (reviewIds.isEmpty()) {
+            return Map.of();
+        }
+        return analyses.findByOrgIdAndSourceTypeAndSourceIdIn(orgId, SOURCE_TYPE_REVIEW, reviewIds).stream()
+                .collect(Collectors.toMap(ItemAnalysis::getSourceId, ItemAnalysis::getCategory,
+                        // The unique index makes a duplicate impossible; keeping the first is a
+                        // total function rather than a claim, so a legacy duplicate cannot throw
+                        // inside a read path.
+                        (first, second) -> first));
     }
 
     /**
@@ -385,7 +491,8 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                                    String channelCode, String channelNameKo,
                                    Map<UUID, String> productNames,
                                    Map<UUID, TriageDisposition> dispositions,
-                                   Set<UUID> prepared) {
+                                   Set<UUID> prepared,
+                                   Map<UUID, String> categories) {
         // Read-time, fail-closed preview — never the raw body, never persisted/logged.
         String safePreview = VocPreviewSanitizer.sanitize(r.getBody()).text();
         // Display name only, straight from the batch map — never the SKU (상품번호, i.e.
@@ -408,7 +515,10 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 signalType.name(), safePreview,
                 actionRef,
                 disposition == null ? null : disposition.name(),
-                prepared.contains(r.getId()));
+                prepared.contains(r.getId()),
+                // Absent from the map = no analysis row. Passed through as null, never inferred
+                // into 기타 — see categoriesFor.
+                categories.get(r.getId()));
     }
 
     /**

@@ -286,9 +286,10 @@ class OperatorAttentionItemsJsonContractTest {
     }
 
     private void stubItems(OperatorVocItem... items) {
-        when(service.attentionItems(any(), any(), anyString(), any(), any(), anyInt(), anyInt()))
+        when(service.attentionItems(any(), any(), anyString(), any(), any(), any(), anyInt(), anyInt()))
                 .thenReturn(new OperatorVocItemPage(
-                        "LOW_RATING_REVIEW", from, to, 0, 20, items.length, List.of(items)));
+                        "LOW_RATING_REVIEW", from, to, 0, 20, items.length, items.length,
+                        List.of(), 0L, List.of(items)));
     }
 
     /** One synthetic drill-down row with a name, a ref, and no decision yet. */
@@ -318,6 +319,6 @@ class OperatorAttentionItemsJsonContractTest {
                 "NAVER", "네이버", "REVIEW", productName, 2, "UNANSWERED",
                 "2026-05-14", "2026-05-15", "LOW_RATING_REVIEW",
                 "배송은 빨랐는데 색이 생각과 달라요",
-                actionRef, triageDisposition, hasReplyPreparation);
+                actionRef, triageDisposition, hasReplyPreparation, "배송");
     }
 }

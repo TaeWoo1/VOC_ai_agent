@@ -42,6 +42,11 @@ public class OperatorAttentionController {
     /**
      * Drill-down: one page of the metadata-only rows behind a chosen signal
      * ({@code type} = {@link AttentionSignalType} name) over the same [from, to] window.
+     *
+     * <p>{@code category} optionally narrows the page to one stored analysis category, or to
+     * {@code unclassified} for rows nothing has analyzed. Omitted means no narrowing; an
+     * unrecognised value is a 400, never an empty page (see
+     * {@code OperatorAttentionService.parseCategory}).
      */
     @GetMapping("/attention/items")
     public OperatorVocItemPage attentionItems(
@@ -50,8 +55,9 @@ public class OperatorAttentionController {
             @RequestParam String type,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String category,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return service.attentionItems(principal.orgId(), accountId, type, from, to, page, size);
+        return service.attentionItems(principal.orgId(), accountId, type, from, to, category, page, size);
     }
 }

@@ -746,6 +746,20 @@ interface MockNaverReview {
    * preview concept the full-body path does not have.
    */
   redactedBody: string | null;
+  /**
+   * The stored rule-based analysis category, or null when nothing analyzed the row.
+   *
+   * Each value is what {@code RuleBasedInboxItemAnalyzer} would actually derive from this
+   * row's {@code redactedBody} — first keyword hit in its declared detection order, else 기타.
+   * Recorded as a fixture value rather than computed, for the same reason {@code redactedBody}
+   * is: the mock must not become a second implementation of a server rule, free to disagree
+   * with it.
+   *
+   * id 5 is deliberately null. Analysis is best-effort — it runs on newly-inserted ids only and
+   * swallows its own failures — so an unanalyzed row is a real production state, and the demo
+   * has to show that it stays fully in the queue rather than quietly vanishing from it.
+   */
+  category: string | null;
   /** Whether the server tokenized anything — drives the "일부 정보가 가려졌습니다" note. */
   bodyRedacted: boolean;
 }
@@ -765,34 +779,34 @@ const NAVER_REVIEWS: readonly MockNaverReview[] = [
   // id 0 carries a redacted span so the demo exercises the "일부 정보가 가려졌습니다" note —
   // and shows why the preview and the full body are different reads: the preview's 60 chars
   // stop before the tokenized part.
-  { id: 0, rating: 1, productName: "베이직 코튼 티셔츠 화이트", safePreview: "부착 후 며칠 만에 떨어졌어요", sourceCreatedDate: "2026-05-28",
+  { id: 0, rating: 1, category: "교환", productName: "베이직 코튼 티셔츠 화이트", safePreview: "부착 후 며칠 만에 떨어졌어요", sourceCreatedDate: "2026-05-28",
     redactedBody: "부착 후 며칠 만에 떨어졌어요. 세탁도 안 했는데 프린트가 통째로 일어났습니다.\n교환이나 환불 가능한지 알려주세요. [전화번호] 로 연락 주시면 감사하겠습니다.", bodyRedacted: true },
-  { id: 1, rating: 2, productName: "가을 니트 가디건 CHARCOAL", safePreview: "배송은 빨랐는데 색이 생각과 달라요", sourceCreatedDate: "2026-05-27",
+  { id: 1, rating: 2, category: "배송", productName: "가을 니트 가디건 CHARCOAL", safePreview: "배송은 빨랐는데 색이 생각과 달라요", sourceCreatedDate: "2026-05-27",
     redactedBody: "배송은 빨랐는데 색이 생각과 달라요.\n상세페이지 사진은 차콜인데 실물은 거의 검정에 가깝습니다.", bodyRedacted: false },
   // 4 rated 3 → the MEDIUM "보통 평점(3점) 리뷰" card
-  { id: 2, rating: 3, productName: "리넨 와이드 팬츠 M", safePreview: "무난합니다 가격 대비 그럭저럭", sourceCreatedDate: "2026-05-26",
+  { id: 2, rating: 3, category: "가격", productName: "리넨 와이드 팬츠 M", safePreview: "무난합니다 가격 대비 그럭저럭", sourceCreatedDate: "2026-05-26",
     redactedBody: "무난합니다. 가격 대비 그럭저럭이에요.\n다만 여름에 입기엔 조금 두껍습니다.", bodyRedacted: false },
-  { id: 3, rating: 3, productName: "베이직 코튼 티셔츠 화이트", safePreview: "사이즈가 조금 큰 편이에요", sourceCreatedDate: "2026-05-25",
+  { id: 3, rating: 3, category: "사이즈", productName: "베이직 코튼 티셔츠 화이트", safePreview: "사이즈가 조금 큰 편이에요", sourceCreatedDate: "2026-05-25",
     redactedBody: "사이즈가 조금 큰 편이에요. 평소 M 입는데 한 치수 작게 시켰어야 했나 싶습니다.", bodyRedacted: false },
-  { id: 4, rating: 3, productName: null, safePreview: "재구매 의사는 반반입니다", sourceCreatedDate: "2026-05-24",
+  { id: 4, rating: 3, category: "배송", productName: null, safePreview: "재구매 의사는 반반입니다", sourceCreatedDate: "2026-05-24",
     redactedBody: "재구매 의사는 반반입니다. 품질은 괜찮은데 배송이 예상보다 늦었어요.", bodyRedacted: false },
-  { id: 5, rating: 3, productName: "가을 니트 가디건 CHARCOAL", safePreview: "보통이에요 특별한 점은 없네요", sourceCreatedDate: "2026-05-23",
+  { id: 5, rating: 3, category: null, productName: "가을 니트 가디건 CHARCOAL", safePreview: "보통이에요 특별한 점은 없네요", sourceCreatedDate: "2026-05-23",
     redactedBody: "보통이에요. 특별한 점은 없네요.", bodyRedacted: false },
   // 6 rated 4~5 → in NEW_REVIEW / spike only; never in the 1~3점 union
-  { id: 6, rating: 4, productName: "리넨 와이드 팬츠 M", safePreview: "포장이 꼼꼼했어요 다음에 또 살게요", sourceCreatedDate: "2026-05-22",
+  { id: 6, rating: 4, category: "기타", productName: "리넨 와이드 팬츠 M", safePreview: "포장이 꼼꼼했어요 다음에 또 살게요", sourceCreatedDate: "2026-05-22",
     redactedBody: "포장이 꼼꼼했어요. 다음에 또 살게요.", bodyRedacted: false },
   // id 7: preview suppressed, body present. The two nulls are NOT the same fact — a
   // suppressed preview is a display judgement about 60 characters, and the reply surface
   // still has a complaint to answer.
-  { id: 7, rating: 5, productName: "베이직 코튼 티셔츠 화이트", safePreview: null, sourceCreatedDate: "2026-05-21",
+  { id: 7, rating: 5, category: "기타", productName: "베이직 코튼 티셔츠 화이트", safePreview: null, sourceCreatedDate: "2026-05-21",
     redactedBody: "[번호] [번호] 굿", bodyRedacted: true },
-  { id: 8, rating: 4, productName: "가을 니트 가디건 CHARCOAL", safePreview: "핏이 예쁩니다", sourceCreatedDate: "2026-05-20",
+  { id: 8, rating: 4, category: "배송", productName: "가을 니트 가디건 CHARCOAL", safePreview: "핏이 예쁩니다", sourceCreatedDate: "2026-05-20",
     redactedBody: "핏이 예쁩니다. 배송도 빨랐어요.", bodyRedacted: false },
-  { id: 9, rating: 5, productName: "리넨 와이드 팬츠 M", safePreview: "아주 만족스러워요", sourceCreatedDate: "2026-05-19",
+  { id: 9, rating: 5, category: "기타", productName: "리넨 와이드 팬츠 M", safePreview: "아주 만족스러워요", sourceCreatedDate: "2026-05-19",
     redactedBody: "아주 만족스러워요. 재질도 좋고 핏도 잘 맞습니다.", bodyRedacted: false },
-  { id: 10, rating: 4, productName: "베이직 코튼 티셔츠 화이트", safePreview: "무난하게 잘 입고 있어요", sourceCreatedDate: "2026-05-18",
+  { id: 10, rating: 4, category: "기타", productName: "베이직 코튼 티셔츠 화이트", safePreview: "무난하게 잘 입고 있어요", sourceCreatedDate: "2026-05-18",
     redactedBody: "무난하게 잘 입고 있어요.", bodyRedacted: false },
-  { id: 11, rating: 5, productName: "가을 니트 가디건 CHARCOAL", safePreview: "따뜻하고 가볍습니다", sourceCreatedDate: "2026-05-17",
+  { id: 11, rating: 5, category: "기타", productName: "가을 니트 가디건 CHARCOAL", safePreview: "따뜻하고 가볍습니다", sourceCreatedDate: "2026-05-17",
     redactedBody: "따뜻하고 가볍습니다. 겨울에도 입을 수 있을 것 같아요.", bodyRedacted: false },
 ];
 
@@ -951,7 +965,7 @@ export function mockAccountAttention(
 
 export function mockAttentionItems(
   accountId: string,
-  params: { type: string; from: string; to: string },
+  params: { type: string; from: string; to: string; category?: string },
   page: number,
   size: number,
 ): OperatorVocItemPage {
@@ -968,22 +982,57 @@ export function mockAttentionItems(
   // reviews under an inquiry lens"). Unreachable through the UI — the summary raises no
   // inquiry card to click — and answered honestly anyway.
   if (lens == null) {
-    return { signalType: type, fromDate: params.from, toDate: params.to, page, size, total: 0, items: [] };
+    return {
+      signalType: type, fromDate: params.from, toDate: params.to, page, size,
+      total: 0, unfilteredTotal: 0, categoryCounts: [], unclassifiedCount: 0, items: [],
+    };
   }
+  // The facet belongs to the "needs a look" worklist only; arrivals are a chronological record
+  // and offer no breakdown — same rule as IngestedReviewVocItemSource.
+  const faceted = type === "LOW_RATING_REVIEW";
+  // Counts are computed over the lens UNFILTERED, so picking a facet cannot collapse the facet
+  // list to the option just chosen.
+  const categoryCounts = faceted ? mockCategoryCounts(lens) : [];
+  const unclassifiedCount = faceted ? lens.filter((r) => r.category == null).length : 0;
+  const filtered = !faceted || params.category == null
+    ? lens
+    : lens.filter((r) =>
+        params.category === "unclassified" ? r.category == null : r.category === params.category);
   // Both the total and the rows come from the SAME filtered list, so the count is the rows'
   // length by construction rather than by agreement. LOW_RATING drills the 1~3점 union —
   // legitimately more than either of its two cards, since they share the type — while the
   // unbounded lenses drill every review, matching theirs.
-  const rows = lens.slice(page * size, page * size + size).map((r) => toVocItem(r, type));
+  const rows = filtered.slice(page * size, page * size + size).map((r) => toVocItem(r, type));
   return {
     signalType: type,
     fromDate: params.from,
     toDate: params.to,
     page,
     size,
-    total: lens.length,
+    // total narrows with the facet; unfilteredTotal never does — they are the denominator of
+    // two different questions (see OperatorVocItemPage).
+    total: filtered.length,
+    unfilteredTotal: lens.length,
+    categoryCounts,
+    unclassifiedCount,
     items: rows,
   };
+}
+
+/**
+ * The lens's category breakdown, in the server's canonical order.
+ *
+ * Order is stated here rather than taken from the data, so the demo's facet list does not
+ * reshuffle as the fixture rows change — the same reason the server sorts by
+ * ItemAnalysisCategories.ORDERED instead of by count.
+ */
+const MOCK_CATEGORY_ORDER = ["배송", "교환", "제품정보", "설치", "가격", "품질", "색상", "사이즈", "기타"];
+
+function mockCategoryCounts(lens: readonly MockNaverReview[]): { category: string; count: number }[] {
+  return MOCK_CATEGORY_ORDER.map((category) => ({
+    category,
+    count: lens.filter((r) => r.category === category).length,
+  })).filter((c) => c.count > 0);
 }
 
 /** One canonical review, as the ingested-review source would put it on the wire. */
@@ -1009,6 +1058,9 @@ function toVocItem(review: MockNaverReview, signalType: string): OperatorVocItem
     // visible under every other card that surfaces the same review.
     triageDisposition: mockTriageFor(review, actionRef),
     hasReplyPreparation: mockHasReplyPreparation(actionRef),
+    // What the row is ABOUT, per the stored analysis — context, not a queue rule. Null for a
+    // row nothing analyzed, which the card renders as no chip at all.
+    category: review.category,
   };
 }
 

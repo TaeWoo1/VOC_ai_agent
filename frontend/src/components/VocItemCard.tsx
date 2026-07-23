@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OperatorVocItem, TriageDisposition } from "../lib/types";
-import { previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
+import { categoryChip, previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
 import { VocItemReplyPrep } from "./VocItemReplyPrep";
 import { VocItemTriageControl } from "./VocItemTriageControl";
 
@@ -16,6 +16,7 @@ export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accoun
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
   const product = productLabel(item.productName);
+  const category = categoryChip(item.category);
 
   // The row's LIVE decision, not the one the list last fetched.
   //
@@ -74,6 +75,17 @@ export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accoun
           </span>
           {item.rating != null ? (
             <span className="text-sm font-semibold text-ink">{"★".repeat(item.rating)}</span>
+          ) : null}
+          {/* What the review is about, per the stored rule-based analysis. Context only — it
+              does not decide whether the row is here. Absent when nothing analyzed the row:
+              no chip at all, never a placeholder and never 기타 (see categoryChip). */}
+          {category != null ? (
+            <span
+              className={`inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-medium ${category.cls}`}
+            >
+              <span className="sr-only">분류: </span>
+              {category.text}
+            </span>
           ) : null}
         </div>
         <div className="flex items-center gap-4 text-sm text-muted">

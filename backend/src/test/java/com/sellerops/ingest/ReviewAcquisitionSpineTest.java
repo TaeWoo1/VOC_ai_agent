@@ -108,6 +108,7 @@ class ReviewAcquisitionSpineTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ItemAnalysisRepository itemAnalyses;
 
     /** The shared contract directory — the same relative path the collector's loader resolves. */
     private static final Path CONTRACT_DIR = Path.of("..", "contracts", "review-export", "naver", "v1");
@@ -148,7 +149,7 @@ class ReviewAcquisitionSpineTest {
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                                replyDrafts, replyApprovals))));
+                                replyDrafts, replyApprovals, itemAnalyses))));
 
         naverChannelId = seedChannel("NAVER", "네이버 스마트스토어");
         // EXACTLY ONE account on this channel — a second trips the ambiguity guard (reviews carry no
@@ -334,7 +335,7 @@ class ReviewAcquisitionSpineTest {
         ingestFixture();
 
         OperatorVocItemPage page = attention.attentionItems(
-                org, naverAccountId, "LOW_RATING_REVIEW", from, to, 0, 20);
+                org, naverAccountId, "LOW_RATING_REVIEW", from, to, null, 0, 20);
 
         // TWO, not three: the export's 2★ row carries 답글여부=Y, so the channel already answered it
         // and it leaves the queue. The count says the same — see the signals test — because the list

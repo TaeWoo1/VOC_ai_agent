@@ -32,7 +32,14 @@ public interface VocItemSource {
      * One clamped page of metadata-only rows behind a chosen signal type, over the
      * same window. {@code channelCode}/{@code channelNameKo} are stamped onto each
      * row by the adapter (channel identity is resolved generically upstream).
+     *
+     * <p>{@code category} optionally narrows the page to one stored analysis category, or to
+     * {@code ItemAnalysisCategories.UNCLASSIFIED} for rows with no analysis at all; {@code null}
+     * means no narrowing. It arrives ALREADY VALIDATED — {@code OperatorAttentionService} rejects
+     * an unrecognised value with a 400 — so an adapter never has to decide what an unknown category
+     * means, and can never quietly answer "no rows" for a typo.
      */
     VocItemSlice items(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
-                       AttentionSignalType signalType, LocalDate from, LocalDate to, int page, int size);
+                       AttentionSignalType signalType, LocalDate from, LocalDate to,
+                       String category, int page, int size);
 }

@@ -23,6 +23,7 @@ import com.sellerops.product.Product;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.Review;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -63,6 +64,7 @@ class IngestedReviewVocItemSourceTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ItemAnalysisRepository itemAnalyses;
 
     private OperatorAttentionService service;
     private VocItemSourceRegistry registry;
@@ -83,7 +85,7 @@ class IngestedReviewVocItemSourceTest {
         registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals)));
+                        replyDrafts, replyApprovals, itemAnalyses)));
         service = new OperatorAttentionService(sellerAccounts, channels, registry);
     }
 
@@ -116,7 +118,7 @@ class IngestedReviewVocItemSourceTest {
         // CAFE24 must still reach the community store, because this one declines it.
         VocItemSourceRegistry reversed = new VocItemSourceRegistry(List.of(
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals),
+                        replyDrafts, replyApprovals, itemAnalyses),
                 new Cafe24VocItemSource(articles)));
 
         assertThat(reversed.forChannel("CAFE24")).containsInstanceOf(Cafe24VocItemSource.class);
@@ -126,7 +128,7 @@ class IngestedReviewVocItemSourceTest {
     @Test
     void supportsIsExactAndNullSafe() {
         IngestedReviewVocItemSource source = new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                        replyDrafts, replyApprovals);
+                        replyDrafts, replyApprovals, itemAnalyses);
         assertThat(source.supports("NAVER")).isTrue();
         assertThat(source.supports("CAFE24")).isFalse();
         assertThat(source.supports("GMARKET")).isFalse();
@@ -175,7 +177,7 @@ class IngestedReviewVocItemSourceTest {
 
         // Nor may it appear behind the low-rating drill-down (minRating=1 excludes it).
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
         assertThat(page.total()).isZero();
         assertThat(page.items()).isEmpty();
     }
@@ -199,7 +201,7 @@ class IngestedReviewVocItemSourceTest {
         // RESPONSE_NEEDED, so only this flag can reveal the work.
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).singleElement().satisfies(i -> {
             assertThat(i.triageDisposition()).isNull();
@@ -214,7 +216,7 @@ class IngestedReviewVocItemSourceTest {
         review(channelId, "2026-05-06T03:00:00Z", 1, BODY_LOW);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).singleElement()
                 .satisfies(i -> assertThat(i.hasReplyPreparation()).isFalse());
@@ -230,7 +232,7 @@ class IngestedReviewVocItemSourceTest {
         seedDraft(prepared.getId());
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).hasSize(2);
         assertThat(page.items())
@@ -265,7 +267,7 @@ class IngestedReviewVocItemSourceTest {
         replyDrafts.save(foreign);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).singleElement()
                 .satisfies(i -> assertThat(i.hasReplyPreparation()).isFalse());
@@ -296,7 +298,7 @@ class IngestedReviewVocItemSourceTest {
         replyApprovals.save(a);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).singleElement()
                 .satisfies(i -> assertThat(i.hasReplyPreparation()).isTrue());
@@ -331,7 +333,7 @@ class IngestedReviewVocItemSourceTest {
         review(channelId, "2026-05-31T15:00:00Z", 1, ONLY_IN_UTC_WINDOW);   // 2026-06-01 KST
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items()).singleElement().satisfies(i -> {
@@ -409,7 +411,7 @@ class IngestedReviewVocItemSourceTest {
                         tuple("NEW_REVIEW", "LOW", 1L));
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items()).extracting(OperatorVocItem::safePreview)
                 .doesNotContain("합성-타사-리뷰-본문");
@@ -427,7 +429,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.signalType()).isEqualTo("LOW_RATING_REVIEW");
         assertThat(page.total()).isEqualTo(1);
@@ -471,7 +473,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         OperatorVocItem item = page.items().get(0);
         assertThat(item.productName()).isEqualTo("합성-상품명-머그컵");
@@ -493,7 +495,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(1);                   // the row still surfaces
         OperatorVocItem item = page.items().get(0);
@@ -513,7 +515,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items().get(0).productName()).isNull();
     }
@@ -527,7 +529,7 @@ class IngestedReviewVocItemSourceTest {
         review(channelId, "2026-05-05T03:00:00Z", 1, BODY_LOW);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items().get(0).productName()).isNull();
@@ -549,7 +551,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items().get(0).productName()).isNull();
@@ -574,7 +576,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(1);
         OperatorVocItem item = page.items().get(0);
@@ -603,7 +605,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items().get(0).productName()).isEqualTo("합성-상품명-노트");
     }
@@ -631,7 +633,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         // The row still surfaces — only its "name" is withheld, because the placeholder is an
         // ingest artifact (every nameless row in the org shares this ONE product), not a product.
@@ -661,7 +663,7 @@ class IngestedReviewVocItemSourceTest {
         }
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.total()).isEqualTo(2);
         assertThat(page.items()).extracting(OperatorVocItem::productName).containsOnlyNulls();
@@ -681,7 +683,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items().get(0).productName()).isNull();
     }
@@ -696,7 +698,7 @@ class IngestedReviewVocItemSourceTest {
         reviews.save(r);
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items().get(0).productName()).isNull();
     }
@@ -725,7 +727,7 @@ class IngestedReviewVocItemSourceTest {
         }
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 50);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 50);
 
         assertThat(page.total()).isEqualTo(rows + 2);
         assertThat(page.items()).hasSize(rows + 2);
@@ -742,7 +744,7 @@ class IngestedReviewVocItemSourceTest {
         review(channelId, "2026-05-05T03:00:00Z", 1, "연락처 010-1234-5678 로 연락주세요");
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.items()).singleElement()
                 .satisfies(i -> assertThat(i.safePreview()).doesNotContain("010-1234-5678"));
@@ -773,7 +775,7 @@ class IngestedReviewVocItemSourceTest {
             assertThat(s.channel()).isEqualTo("네이버 스마트스토어");   // channel identity still resolves
 
             OperatorVocItemPage page = service.attentionItems(
-                    org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                    org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
             assertThat(page.total()).isZero();
             assertThat(page.items()).isEmpty();
         }
@@ -821,7 +823,7 @@ class IngestedReviewVocItemSourceTest {
         // The snapshot's inquiry counts are hard zeros, so this signal can never have been
         // raised here; drilling it must not list reviews under an inquiry lens.
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, AttentionSignalType.UNANSWERED_INQUIRY.name(), FROM, TO, 0, 20);
+                org, accountId, AttentionSignalType.UNANSWERED_INQUIRY.name(), FROM, TO, null, 0, 20);
         assertThat(page.total()).isZero();
         assertThat(page.items()).isEmpty();
     }

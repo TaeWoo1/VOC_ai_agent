@@ -4,6 +4,10 @@ import {
   PREVIEW_PLACEHOLDER,
   PRODUCT_PLACEHOLDER,
   TRIAGE_OPTIONS,
+  UNCLASSIFIED,
+  UNCLASSIFIED_LABEL,
+  categoryChip,
+  facetOptions,
   asTriageDisposition,
   drilldownParams,
   previewText,
@@ -57,6 +61,7 @@ function item(signalType: string): OperatorVocItem {
     actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
     triageDisposition: null,
     hasReplyPreparation: false,
+    category: "배송",
   };
 }
 
@@ -218,5 +223,79 @@ describe("productLabel", () => {
     expect(productLabel("리넨 와이드 팬츠 M").isPlaceholder).toBe(false);
     expect(previewText(null).isPlaceholder).toBe(true);
     expect(PRODUCT_PLACEHOLDER).not.toBe(PREVIEW_PLACEHOLDER);
+  });
+});
+
+describe("categoryChip", () => {
+  it("renders the server's own label — there is no second vocabulary here", () => {
+    expect(categoryChip("배송")?.text).toBe("배송");
+    expect(categoryChip("기타")?.text).toBe("기타");
+  });
+
+  it("renders NOTHING when no analysis exists — not a placeholder, not 기타", () => {
+    // Unlike productLabel, whose null still implies a product exists ("상품명 미상" is true),
+    // a null category implies nothing at all: the row was simply never analyzed. Any visible
+    // fallback would be read as a finding about the review. And it must never borrow 기타,
+    // which is a verdict the analyzer actually reached.
+    expect(categoryChip(null)).toBeNull();
+    expect(categoryChip("")).toBeNull();
+    expect(categoryChip("   ")).toBeNull();
+  });
+
+  it("still renders an unrecognised value rather than hiding a writer-side bug", () => {
+    // It is derived metadata, never customer text, so showing it is safe — and hiding it
+    // would make a category the analyzer emits but the facet cannot name invisible on the
+    // one surface most likely to reveal it.
+    expect(categoryChip("배송지연")?.text).toBe("배송지연");
+  });
+});
+
+describe("facetOptions", () => {
+  it("keeps the server's order and appends the unclassified bucket last", () => {
+    // The unclassified bucket is a coverage state, not a subject, so it never interleaves
+    // with real categories.
+    expect(
+      facetOptions([{ category: "배송", count: 2 }, { category: "품질", count: 1 }], 3),
+    ).toEqual([
+      { value: "배송", label: "배송", count: 2 },
+      { value: "품질", label: "품질", count: 1 },
+      { value: UNCLASSIFIED, label: UNCLASSIFIED_LABEL, count: 3 },
+    ]);
+  });
+
+  it("omits empty buckets — the list is this window, not a catalogue", () => {
+    expect(facetOptions([{ category: "배송", count: 0 }], 0)).toEqual([]);
+  });
+
+  it("offers the unclassified bucket whenever it has rows, so they stay reachable", () => {
+    // These are exactly the rows no category filter can ever surface. Without this option an
+    // operator who picks any facet has no way back to them except clearing the filter.
+    expect(facetOptions([], 4)).toEqual([
+      { value: UNCLASSIFIED, label: UNCLASSIFIED_LABEL, count: 4 },
+    ]);
+  });
+
+  it("keeps an ACTIVE filter visible even when this window has none of it", () => {
+    // The drill-down survives a window change, so a category chosen over one window can outlive
+    // its rows in the next. Dropping the option would leave an empty list whose only cause is a
+    // filter the operator can no longer see — or clear.
+    expect(facetOptions([{ category: "품질", count: 2 }], 0, "배송")).toEqual([
+      { value: "품질", label: "품질", count: 2 },
+      { value: "배송", label: "배송", count: 0 },
+    ]);
+  });
+
+  it("does not duplicate an active filter that is already present", () => {
+    expect(facetOptions([{ category: "배송", count: 2 }], 0, "배송")).toEqual([
+      { value: "배송", label: "배송", count: 2 },
+    ]);
+  });
+
+  it("labels the sentinel with FE-owned copy and never sends that copy as a value", () => {
+    // The wire value is the ASCII sentinel; the Korean label is ours. Sending the label back
+    // would be an unrecognised category, which the server answers with a 400.
+    const [option] = facetOptions([], 1);
+    expect(option.value).toBe("unclassified");
+    expect(option.label).toBe("분류 전");
   });
 });

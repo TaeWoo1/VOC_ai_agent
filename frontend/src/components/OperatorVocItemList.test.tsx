@@ -26,11 +26,16 @@ function row(over: Partial<OperatorVocItem> = {}): OperatorVocItem {
     actionRef: "review:abc",
     triageDisposition: null,
     hasReplyPreparation: false,
+    category: "배송",
     ...over,
   };
 }
 
-function page(items: OperatorVocItem[], total = items.length): OperatorVocItemPage {
+function page(
+  items: OperatorVocItem[],
+  total = items.length,
+  over: Partial<OperatorVocItemPage> = {},
+): OperatorVocItemPage {
   return {
     signalType: "LOW_RATING_REVIEW",
     fromDate: "2026-05-01",
@@ -38,7 +43,11 @@ function page(items: OperatorVocItem[], total = items.length): OperatorVocItemPa
     page: 0,
     size: 10,
     total,
+    unfilteredTotal: total,
+    categoryCounts: [],
+    unclassifiedCount: 0,
     items,
+    ...over,
   };
 }
 
@@ -138,5 +147,118 @@ describe("OperatorVocItemList triage wiring", () => {
       .filter((r) => r.getAttribute("aria-pressed") === "true");
     expect(checkedRows).toHaveLength(1);
     expect(spy.mock.calls[0][1]).toBe("review:one");
+  });
+});
+
+describe("OperatorVocItemList classification facet", () => {
+  const faceted = (over = {}) =>
+    page([row()], 6, {
+      unfilteredTotal: 6,
+      categoryCounts: [
+        { category: "배송", count: 3 },
+        { category: "품질", count: 2 },
+      ],
+      unclassifiedCount: 1,
+      ...over,
+    });
+
+  it("builds the facet from the SERVER's window counts, not from the rendered page", async () => {
+    // The list is server-paginated at 10. Deriving options from `items` would describe one
+    // page and present it as the window — here, one row standing in for six.
+    vi.spyOn(api, "getAttentionItems").mockResolvedValue(faceted());
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+
+    const group = await screen.findByRole("group", { name: "분류 필터" });
+    expect(group).toHaveTextContent("전체 6");
+    expect(group).toHaveTextContent("배송 3");
+    expect(group).toHaveTextContent("품질 2");
+    expect(group).toHaveTextContent("분류 전 1");
+  });
+
+  it("refetches with the chosen category and sends the sentinel for the unclassified bucket", async () => {
+    const spy = vi.spyOn(api, "getAttentionItems").mockResolvedValue(faceted());
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+    await screen.findByRole("group", { name: "분류 필터" });
+
+    await userEvent.click(screen.getByRole("button", { name: /배송 3/ }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("a", expect.objectContaining({ category: "배송" })),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /분류 전 1/ }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("a", expect.objectContaining({ category: "unclassified" })),
+    );
+  });
+
+  it("omits the param entirely for 전체 rather than sending an empty category", async () => {
+    const spy = vi.spyOn(api, "getAttentionItems").mockResolvedValue(faceted());
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+    await screen.findByRole("group", { name: "분류 필터" });
+    await userEvent.click(screen.getByRole("button", { name: /배송 3/ }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    await userEvent.click(screen.getByRole("button", { name: /전체 6/ }));
+
+    await waitFor(() => {
+      const last = spy.mock.calls[spy.mock.calls.length - 1][1];
+      expect(last).not.toHaveProperty("category");
+    });
+  });
+
+  it("resets to the first page when the facet changes", async () => {
+    // A page index left over from a wider result set renders an empty list above a non-zero
+    // total — which reads as "no such reviews" when the truth is "you are past the end".
+    const spy = vi.spyOn(api, "getAttentionItems").mockResolvedValue(
+      faceted({ page: 0, total: 30, unfilteredTotal: 30 }),
+    );
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+    await screen.findByRole("group", { name: "분류 필터" });
+    await userEvent.click(screen.getByRole("button", { name: "다음" }));
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("a", expect.objectContaining({ page: 1 })),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /배송 3/ }));
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith("a", expect.objectContaining({ category: "배송", page: 0 })),
+    );
+  });
+
+  it("keeps the facet visible when a filter yields nothing, so the operator is not stranded", async () => {
+    vi.spyOn(api, "getAttentionItems").mockResolvedValue(faceted({ total: 0, items: [] }));
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+
+    expect(await screen.findByText("해당하는 항목이 없습니다.")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "분류 필터" })).toBeInTheDocument();
+  });
+
+  it("hides the facet when there is nothing to choose between", async () => {
+    // A control whose every setting shows the same rows is noise dressed as agency.
+    vi.spyOn(api, "getAttentionItems").mockResolvedValue(
+      page([row()], 3, { unfilteredTotal: 3, categoryCounts: [{ category: "배송", count: 3 }], unclassifiedCount: 0 }),
+    );
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+
+    await screen.findByText(/총 3건/);
+    expect(screen.queryByRole("group", { name: "분류 필터" })).not.toBeInTheDocument();
+  });
+
+  it("shows no facet counts beside a failed read", async () => {
+    // Fail closed: the counts describe a window this read could not confirm, so rendering
+    // them next to an error would present unverified numbers as current.
+    vi.spyOn(api, "getAttentionItems").mockRejectedValue(new Error("backend down"));
+
+    render(<OperatorVocItemList accountId="a" type="LOW_RATING_REVIEW" from="2026-05-01" to="2026-05-31" />);
+
+    expect(await screen.findByText(/항목을 불러오지 못했습니다/)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "분류 필터" })).not.toBeInTheDocument();
   });
 });

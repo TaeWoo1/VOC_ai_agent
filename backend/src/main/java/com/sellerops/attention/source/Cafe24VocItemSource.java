@@ -9,6 +9,7 @@ import com.sellerops.common.VocPreviewSanitizer;
 import com.sellerops.community.Cafe24CommunityArticle;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.community.CommunityReplyStatus;
+import com.sellerops.itemanalysis.ItemAnalysisCategories;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -83,7 +84,15 @@ public class Cafe24VocItemSource implements VocItemSource {
 
     @Override
     public VocItemSlice items(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
-                              AttentionSignalType signalType, LocalDate from, LocalDate to, int page, int size) {
+                              AttentionSignalType signalType, LocalDate from, LocalDate to,
+                              String category, int page, int size) {
+        // This store carries NO item_analyses rows: analysis runs on `reviews`/`inquiries`, and a
+        // community article is neither. So every row here is unclassified — a capability limit, not
+        // a finding about the articles. A real category therefore matches nothing, while the
+        // UNCLASSIFIED sentinel matches everything, and both answers are true rather than convenient.
+        if (category != null && !ItemAnalysisCategories.isUnclassified(category)) {
+            return VocItemSlice.empty();
+        }
         Instant fromInstant = from.atStartOfDay(KST).toInstant();
         Instant toExclusive = to.plusDays(1).atStartOfDay(KST).toInstant();
         VocItemFilter filter = AttentionItemFilters.forType(signalType);
@@ -95,7 +104,7 @@ public class Cafe24VocItemSource implements VocItemSource {
         List<OperatorVocItem> rows = result.getContent().stream()
                 .map(a -> toItem(a, signalType, channelCode, channelNameKo))
                 .toList();
-        return new VocItemSlice(rows, result.getTotalElements());
+        return VocItemSlice.unclassifiable(rows, result.getTotalElements());
     }
 
     private OperatorVocItem toItem(Cafe24CommunityArticle a, AttentionSignalType signalType,
@@ -123,7 +132,11 @@ public class Cafe24VocItemSource implements VocItemSource {
                 kstDate(a.getSourceCreatedAt()), kstDate(a.getCollectedAt()), signalType.name(), safePreview,
                 // No triage anchor → no ref → no decision and no reply work can exist here.
                 // false is a capability limit, not a claim that nobody has prepared anything.
-                null, null, false);
+                null, null, false,
+                // category is always null: item_analyses covers `reviews` and `inquiries`, and a
+                // community article is neither, so nothing has ever analyzed this row. Same kind of
+                // capability limit as productName above — not a claim that it fits no category.
+                null);
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */

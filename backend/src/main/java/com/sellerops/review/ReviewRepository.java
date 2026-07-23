@@ -135,6 +135,17 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
      * list that shows something else is the drift this repository's window semantics were written to
      * prevent. Pair it with {@link #countUnansweredInWindowByChannelAndRatingBetween}, never with the
      * unfiltered count.
+     *
+     * <p><b>Ordered worst-first</b> ({@code rating asc}), then newest, then by id. This is the
+     * operator's WORKLIST — the 1★ from yesterday outranks the 3★ from this morning — where the
+     * arrival lenses ({@link #findInWindowByChannelFiltered}) stay chronological, because a record of
+     * what came in is chronological by definition.
+     *
+     * <p>The ordering is safe here specifically because this lens is only ever driven with
+     * {@code minRating >= 1}, which excludes null ratings: {@code rating asc} would otherwise sort
+     * nulls FIRST on H2 and LAST on PostgreSQL, making the top of an operator's worklist depend on
+     * which database they were running. Do not reuse this ordering on a nullable-rating lens without
+     * an explicit NULLS clause.
      */
     @Query("""
             select r from Review r
@@ -143,7 +154,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
               and (:maxRating is null or r.rating <= :maxRating)
               and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
               and r.receivedAt >= :from and r.receivedAt < :toExclusive
-            order by r.receivedAt desc, r.id desc
+            order by r.rating asc, r.receivedAt desc, r.id desc
             """)
     Page<Review> findUnansweredInWindowByChannelFiltered(@Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
                                                         @Param("minRating") Integer minRating,
@@ -151,4 +162,124 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                                                         @Param("from") Instant from,
                                                         @Param("toExclusive") Instant toExclusive,
                                                         Pageable pageable);
+
+    // --- Classification facet over the "needs a look" lens ---
+    //
+    // Every query below repeats the SAME predicate as findUnansweredInWindowByChannelFiltered
+    // (window + rating band + ANSWERED exclusion) and adds exactly one classification clause. That
+    // repetition is deliberate: the facet's counts, its filtered pages and its unfiltered total are
+    // read together on one screen, so any divergence between them shows up as a number that does not
+    // add up. Stating the shared predicate in each is what makes the divergence impossible to
+    // introduce silently.
+    //
+    // The join to ItemAnalysis is an EXISTS on (orgId, sourceType, sourceId) rather than a fetch: the
+    // category is only a predicate here, and the row's own category is resolved per page by
+    // IngestedReviewVocItemSource.categoriesFor.
+
+    /**
+     * As {@link #findUnansweredInWindowByChannelFiltered}, restricted to rows whose stored analysis
+     * carries {@code category}. The {@code a.orgId = r.orgId} clause is load-bearing, not tidiness:
+     * {@code item_analyses.source_id} is a bare polymorphic reference with no FK, so a same-id row
+     * from another org would otherwise qualify a review it does not describe.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:minRating is null or r.rating >= :minRating)
+              and (:maxRating is null or r.rating <= :maxRating)
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+              and exists (select 1 from ItemAnalysis a
+                          where a.orgId = r.orgId and a.sourceType = 'REVIEW'
+                            and a.sourceId = r.id and a.category = :category)
+            order by r.rating asc, r.receivedAt desc, r.id desc
+            """)
+    Page<Review> findUnansweredInWindowByChannelAndCategory(
+            @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+            @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
+            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive,
+            @Param("category") String category, Pageable pageable);
+
+    /**
+     * As {@link #findUnansweredInWindowByChannelFiltered}, restricted to rows with NO analysis row.
+     *
+     * <p>This is a coverage state, not a verdict about the review: analysis runs on newly-inserted
+     * ids only and swallows its own failures, so these are rows nothing ever looked at. It is
+     * distinct from the stored 기타 category, which IS a verdict.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:minRating is null or r.rating >= :minRating)
+              and (:maxRating is null or r.rating <= :maxRating)
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+              and not exists (select 1 from ItemAnalysis a
+                              where a.orgId = r.orgId and a.sourceType = 'REVIEW'
+                                and a.sourceId = r.id)
+            order by r.rating asc, r.receivedAt desc, r.id desc
+            """)
+    Page<Review> findUnansweredInWindowByChannelUnclassified(
+            @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+            @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
+            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive, Pageable pageable);
+
+    /**
+     * The window's category breakdown: {@code [category, count]} pairs over the same
+     * needs-a-look predicate. Always computed UNFILTERED by category — a breakdown recomputed
+     * under its own filter would collapse to the one option the operator already chose.
+     */
+    @Query("""
+            select a.category, count(r) from Review r, ItemAnalysis a
+            where a.orgId = r.orgId and a.sourceType = 'REVIEW' and a.sourceId = r.id
+              and r.orgId = :orgId and r.channelId = :channelId
+              and (:minRating is null or r.rating >= :minRating)
+              and (:maxRating is null or r.rating <= :maxRating)
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+            group by a.category
+            """)
+    List<Object[]> countUnansweredInWindowByChannelGroupedByCategory(
+            @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+            @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
+            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
+
+    /** How many needs-a-look rows in the window have no analysis row at all. */
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:minRating is null or r.rating >= :minRating)
+              and (:maxRating is null or r.rating <= :maxRating)
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+              and not exists (select 1 from ItemAnalysis a
+                              where a.orgId = r.orgId and a.sourceType = 'REVIEW'
+                                and a.sourceId = r.id)
+            """)
+    long countUnansweredInWindowByChannelUnclassified(
+            @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+            @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
+            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
+
+    /**
+     * The window's needs-a-look total, ignoring any category filter — the denominator the
+     * breakdown is comparable to.
+     *
+     * <p>Deliberately an INDEPENDENT query rather than the sum of the breakdown plus the
+     * unclassified count. Deriving it would make the invariant that ties them together
+     * ({@code sum(categories) + unclassified == unfilteredTotal}) true by construction, so the
+     * test asserting it would prove nothing about the queries it is meant to guard.
+     */
+    @Query("""
+            select count(r) from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and (:minRating is null or r.rating >= :minRating)
+              and (:maxRating is null or r.rating <= :maxRating)
+              and r.replyState <> com.sellerops.review.ReviewReplyState.ANSWERED
+              and r.receivedAt >= :from and r.receivedAt < :toExclusive
+            """)
+    long countUnansweredInWindowByChannelFiltered(
+            @Param("orgId") UUID orgId, @Param("channelId") UUID channelId,
+            @Param("minRating") Integer minRating, @Param("maxRating") Integer maxRating,
+            @Param("from") Instant from, @Param("toExclusive") Instant toExclusive);
 }

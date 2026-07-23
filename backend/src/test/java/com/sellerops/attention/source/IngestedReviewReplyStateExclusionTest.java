@@ -17,6 +17,7 @@ import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewReplyState;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -55,6 +56,7 @@ class IngestedReviewReplyStateExclusionTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ItemAnalysisRepository itemAnalyses;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
 
     private OperatorAttentionService attention;
@@ -71,7 +73,7 @@ class IngestedReviewReplyStateExclusionTest {
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                                replyDrafts, replyApprovals))));
+                                replyDrafts, replyApprovals, itemAnalyses))));
         Channel ch = new Channel();
         ch.setCode("NAVER");
         ch.setNameKo("네이버 스마트스토어");
@@ -105,7 +107,7 @@ class IngestedReviewReplyStateExclusionTest {
 
     private OperatorVocItemPage lowRatingRows() {
         return attention.attentionItems(org, accountId,
-                AttentionSignalType.LOW_RATING_REVIEW.name(), FROM, TO, 0, 20);
+                AttentionSignalType.LOW_RATING_REVIEW.name(), FROM, TO, null, 0, 20);
     }
 
     @Test
@@ -133,7 +135,7 @@ class IngestedReviewReplyStateExclusionTest {
         seed(2, ReviewReplyState.ANSWERED, "합성 본문 B");
 
         OperatorVocItemPage arrivals = attention.attentionItems(org, accountId,
-                AttentionSignalType.NEW_REVIEW.name(), FROM, TO, 0, 20);
+                AttentionSignalType.NEW_REVIEW.name(), FROM, TO, null, 0, 20);
 
         assertThat(arrivals.total()).isEqualTo(2);
         assertThat(arrivals.items()).extracting(item -> item.replyStatus())

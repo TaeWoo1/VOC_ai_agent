@@ -574,12 +574,26 @@ export const api = {
   // over the same [from, to] window, paginated. Fail-closed, like the summary read.
   async getAttentionItems(
     accountId: string,
-    params: { type: string; from: string; to: string; page?: number; size?: number },
+    params: {
+      type: string;
+      from: string;
+      to: string;
+      // Optional classification facet: a stored category, or "unclassified" for rows nothing
+      // has analyzed. Omitted means no narrowing. Sent verbatim — the server validates it and
+      // answers an unrecognised value with a 400 rather than an empty page, so this must not
+      // pre-filter or silently drop one.
+      category?: string;
+      page?: number;
+      size?: number;
+    },
   ): Promise<OperatorVocItemPage> {
     if (USE_MOCKS) {
       return mockAttentionItems(accountId, params, params.page ?? 0, params.size ?? 20);
     }
     const search = new URLSearchParams({ type: params.type, from: params.from, to: params.to });
+    if (params.category != null) {
+      search.set("category", params.category);
+    }
     if (params.page != null) {
       search.set("page", String(params.page));
     }
