@@ -289,6 +289,7 @@ describe("NAVER fixture channel over the real Bridge WS (R4 boot wiring)", () =>
     const { client, runId } = await openClient(handle);
     const ann = await waitFor(() => client.announcement);
     expect(ann).toEqual({
+      carrier: "export",
       type: "aw_session",
       transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
       runId,

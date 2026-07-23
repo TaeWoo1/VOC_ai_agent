@@ -7,15 +7,18 @@
  *
  * Carrier shapes (identical framing to export; older clients ignore unknown `type`s):
  *   - both directions: `{ type: "aw", payload: string }` — payload is a serialized v2 Aw*Frame;
- *   - agent → client on attach: `{ type: "aw_session", transportVersion, runId, channelCode }` — the
- *     announcement that tells the FE which reply-submission Operation Run this agent hosts. Run identity
- *     is assigned by the Runtime, never invented by the FE.
+ *   - agent → client on attach: `{ type: "aw_session", carrier, transportVersion, runId, channelCode }`
+ *     — the announcement that tells the FE which reply-submission Operation Run this agent hosts. Run
+ *     identity is assigned by the Runtime, never invented by the FE. `carrier` is `reply` here, and it
+ *     is the ONLY field that distinguishes this from the export carrier: `transportVersion` is 1 in
+ *     BOTH contracts (it versions the identical framing) and `channelCode` is `naver` on both.
  *
  * Security + sanitization are fully inherited (origin-allowlist + ticket + pairing at the Bridge;
  * frames carry only enums/counts/opaque refs from the v2 contract). The endpoint logs only
  * booleans/counts and never a frame body.
  */
 import { WebSocket } from "ws";
+import { AW_CARRIER_REPLY } from "../../../contracts/action-window/aw-carrier-kind";
 import {
   ACTION_WINDOW_TRANSPORT_VERSION,
   deserializeFrame,
@@ -30,6 +33,8 @@ import { log } from "../log";
 /** Agent → client announcement of the hosted reply-submission run. Values are sanitized. */
 export interface ReplyAwSessionAnnouncement {
   type: "aw_session";
+  /** Always `reply` for this endpoint. A v1-only client must fail closed on it, never attach. */
+  carrier: typeof AW_CARRIER_REPLY;
   transportVersion: number;
   runId: string;
   channelCode: string;
@@ -68,6 +73,7 @@ export class ReplySubmissionEndpoint implements AwCarrierEndpoint {
     this.sockets.add(ws);
     if (this.announcing) {
       const announcement: ReplyAwSessionAnnouncement = {
+        carrier: AW_CARRIER_REPLY,
         type: "aw_session",
         transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
         runId: this.runId,

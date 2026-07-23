@@ -248,6 +248,7 @@ describe("Action Window over the real Bridge WS (R2B)", () => {
     const { client } = await openClient(port);
     const ann = await waitFor(() => client.announcement);
     expect(ann).toEqual({
+      carrier: "export",
       type: "aw_session",
       transportVersion: ACTION_WINDOW_TRANSPORT_VERSION,
       runId: RUN_ID,

@@ -15,6 +15,10 @@
 // transport goes dormant instead of splicing two runs together.
 
 import {
+  AW_CARRIER_EXPORT,
+  parseAwCarrierKind,
+} from "../../../../contracts/action-window/aw-carrier-kind";
+import {
   ACTION_WINDOW_TRANSPORT_VERSION,
   deserializeFrame,
   serializeFrame,
@@ -145,9 +149,32 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | null
       } catch {
         return;
       }
-      const m = msg as { type?: unknown; transportVersion?: unknown; runId?: unknown; channelCode?: unknown };
+      const m = msg as {
+        type?: unknown;
+        carrier?: unknown;
+        transportVersion?: unknown;
+        runId?: unknown;
+        channelCode?: unknown;
+      };
       if (m.type !== "aw_session") return; // hello/snapshot belong to the status channel — ignore here
       if (m.transportVersion !== ACTION_WINDOW_TRANSPORT_VERSION || typeof m.runId !== "string" || typeof m.channelCode !== "string") {
+        giveUp();
+        return;
+      }
+      // WHICH carrier the agent hosts. Nothing else on this announcement can tell them apart:
+      // `transportVersion` is 1 in BOTH contracts (it versions the framing, which really is
+      // identical) and `channelCode` is `naver` on both. Without this check, attaching to an agent
+      // hosting the REPLY carrier would build a v1 client and feed it v2 envelopes — "connected but
+      // dormant" instead of an honest fallback.
+      //
+      // This transport serves the v1 EXPORT world only. A reply carrier is not an error and not a
+      // degraded export: it is a different world this caller does not speak, so it fails closed and
+      // the operations surface keeps its contract-backed fixture rather than a half-attached live view.
+      //
+      // Absence fails closed too. Both endpoints predate this field, so an announcement without it is
+      // genuinely ambiguous — and resolving that by assuming "export" is exactly how the mis-attach
+      // would come back.
+      if (parseAwCarrierKind(m.carrier) !== AW_CARRIER_EXPORT) {
         giveUp();
         return;
       }
