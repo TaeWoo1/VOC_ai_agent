@@ -739,7 +739,8 @@ export const api = {
   // v1.6: record the operator's report about their own manual post — a LOCAL, operator-reported,
   // explicitly UNVERIFIED fact, never a channel claim. `commandId` is the client idempotency key
   // (stable across retries of one report, fresh for a new one); `submissionRef` is the single-use
-  // binding; `operatorOutcome` is what the operator reports; `awRunRef` is the opaque guided-run id.
+  // binding; `operatorOutcome` is what the operator reports; `awRunRef` is the opaque guided-run id,
+  // ABSENT when the seller posted manually with no guided run.
   // The response carries no body. 409 when the binding is spent, stale, or the review is not
   // RESPONSE_NEEDED.
   async recordReviewReplyOutcome(
@@ -749,7 +750,8 @@ export const api = {
       commandId: string;
       submissionRef: string;
       operatorOutcome: OperatorOutcomeName;
-      awRunRef: string;
+      /** Omitted for a MANUAL post: production may not mint a run identity for a run that did not happen. */
+      awRunRef?: string;
     },
   ): Promise<ReviewReplyOutcomeResponse> {
     if (USE_MOCKS) {

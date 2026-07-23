@@ -18,6 +18,7 @@ import com.sellerops.common.ApiException;
 import com.sellerops.common.ReviewBodyFingerprint;
 import com.sellerops.common.ReviewIdFingerprint;
 import com.sellerops.review.Review;
+import com.sellerops.product.ProductRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -80,6 +81,7 @@ class ReviewReplyServiceTest {
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewTriageAuditRepository triageAudits;
     @Autowired ReviewRepository reviews;
+    @Autowired ProductRepository products;
     @Autowired SellerAccountRepository sellerAccounts;
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
@@ -106,7 +108,7 @@ class ReviewReplyServiceTest {
         // Hand-constructed, exactly as Spring would wire it — the writers take explicit
         // TransactionTemplates rather than relying on a @Transactional proxy, so their
         // atomicity holds here too.
-        service = new ReviewReplyService(reviews, sellerAccounts, triages,
+        service = new ReviewReplyService(reviews, products, sellerAccounts, triages,
                 new ReviewReplyDraftService(draftRepo),
                 new ReviewReplyApprovalService(approvalRepo, approvalAudits,
                         new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
@@ -194,6 +196,38 @@ class ReviewReplyServiceTest {
             String submissionRef, OperatorOutcome outcome, String commandId) {
         return service.recordSubmissionReported(org, account, ref, submissionRef, outcome.name(),
                 "awrun-synthetic-01", commandId, user);
+    }
+
+    @Test
+    void aManualPostRecordsWithNoRunRefRatherThanAFabricatedOne() {
+        // Production has no wired guided runtime, so this is the shipped path. Before V24 the column
+        // was NOT NULL and the client had to supply something — every build sent a locally-minted
+        // `run_<hex>` for a run that never happened, indistinguishable in the table from a real one.
+        String submissionRef = approveAndStart();
+
+        service.recordSubmissionReported(org, account, ref, submissionRef,
+                OperatorOutcome.OPERATOR_REPORTED_SUBMITTED.name(), null,
+                UUID.randomUUID().toString(), user);
+
+        var outcome = service.view(org, account, ref).outcome();
+        assertThat(outcome.operatorOutcome()).isEqualTo("OPERATOR_REPORTED_SUBMITTED");
+        assertThat(outcome.awRunRef()).isNull();
+        // Still UNVERIFIED, and still a real recorded outcome: the absent run ref narrows what is
+        // claimed, it does not weaken the record.
+        assertThat(outcome.verification()).isEqualTo("UNVERIFIED");
+    }
+
+    @Test
+    void aBlankRunRefIsNormalisedToAbsentRatherThanStored() {
+        // A caller with no run says so by OMISSION. Storing "" would create a third state that is
+        // neither a run nor an honest absence, and no placeholder it could send would be true.
+        String submissionRef = approveAndStart();
+
+        service.recordSubmissionReported(org, account, ref, submissionRef,
+                OperatorOutcome.OPERATOR_REPORTED_SUBMITTED.name(), "   ",
+                UUID.randomUUID().toString(), user);
+
+        assertThat(service.view(org, account, ref).outcome().awRunRef()).isNull();
     }
 
     // --- guided submission: the channel already answered ------------------------------

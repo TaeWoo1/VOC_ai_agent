@@ -27,6 +27,9 @@ function prepView(over: Partial<ReviewReplyPrep> = {}): ReviewReplyPrep {
   return {
     actionRef: REF,
     channelReplyState: "UNKNOWN",
+    productName: "가을 니트 가디건 CHARCOAL",
+    reviewDate: "2026-05-10",
+    rating: 2,
     redactedBody: "합성-리뷰-본문: 배송이 너무 늦었습니다",
     bodyRedacted: true,
     triageDisposition: "RESPONSE_NEEDED",

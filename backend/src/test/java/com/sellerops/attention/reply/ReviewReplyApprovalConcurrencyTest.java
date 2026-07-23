@@ -17,6 +17,7 @@ import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.review.Review;
+import com.sellerops.product.ProductRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -93,6 +94,7 @@ class ReviewReplyApprovalConcurrencyTest {
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewTriageAuditRepository triageAudits;
     @Autowired ReviewRepository reviews;
+    @Autowired ProductRepository products;
     @Autowired SellerAccountRepository sellerAccounts;
     @Autowired ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
@@ -449,7 +451,7 @@ class ReviewReplyApprovalConcurrencyTest {
     /** A service wired exactly as Spring would, but over the given (possibly gated) repositories. */
     private ReviewReplyService serviceWith(ReviewReplyApprovalRepository approvals,
                                            ReviewReplyApprovalAuditRepository audits) {
-        return new ReviewReplyService(reviews, sellerAccounts, triages,
+        return new ReviewReplyService(reviews, products, sellerAccounts, triages,
                 new ReviewReplyDraftService(draftRepo),
                 new ReviewReplyApprovalService(approvals, audits,
                         new ReviewReplyApprovalWriter(approvals, audits, txManager)),

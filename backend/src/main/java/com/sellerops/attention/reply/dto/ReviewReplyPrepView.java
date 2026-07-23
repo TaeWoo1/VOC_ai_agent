@@ -43,6 +43,20 @@ package com.sellerops.attention.reply.dto;
  * catch a stale candidate set. It adds no new exposure: the same value is already on the attention row
  * ({@code OperatorVocItem.rating}) and in the target hint.
  *
+ * <p>{@code productName} and {@code reviewDate} exist so the operator can FIND this review in the
+ * seller center. SellerOps does not post the reply and, with no guided runtime, does not navigate
+ * anywhere either — so the panel telling someone to "paste it into the reply box" owes them enough to
+ * locate the row. These are exactly the coarse narrowing facts this DTO's fingerprint note already
+ * describes as the fallback when an identity match is unavailable.
+ *
+ * <p>They add NO new exposure: both are already on the attention row the operator clicked through
+ * ({@code OperatorVocItem.productName} / {@code sourceCreatedDate}), and {@code productName} is a
+ * DISPLAY name resolved by the same shared rule ({@code OperatorProductName}) — never a SKU, never a
+ * {@code productNo}. Null when no name can be resolved honestly, or when the review carried no date.
+ *
+ * <p>{@code reviewDate} is a KST calendar date (date only). No time: internal timing never surfaces,
+ * and a date is what a seller scans a review list by.
+ *
  * <p>{@code channelReplyState} is what the CHANNEL last said about an existing reply
  * ({@code PENDING} / {@code ANSWERED} / {@code UNKNOWN}, from the import's {@code 답글여부}) — never
  * SellerOps' own record of a guided reply, which is {@code outcome}. It exists for the same reason as
@@ -66,5 +80,7 @@ public record ReviewReplyPrepView(
         ReviewReplyCapabilities capabilities,
         String channelReviewIdFingerprint,
         Integer rating,
-        String channelReplyState) {
+        String channelReplyState,
+        String productName,
+        String reviewDate) {
 }

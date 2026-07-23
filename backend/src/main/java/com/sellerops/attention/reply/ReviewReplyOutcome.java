@@ -99,8 +99,16 @@ public class ReviewReplyOutcome {
     @Column(name = "verification", nullable = false, length = 24)
     private VerificationState verification;
 
-    /** Opaque Action Window runId the guided post ran under — no account id, no page content. */
-    @Column(name = "aw_run_ref", nullable = false, length = 128)
+    /**
+     * Opaque Action Window runId a guided post ran under, or {@code null} when the operator posted
+     * MANUALLY with no guided run — no account id, no page content either way.
+     *
+     * <p>Nullable since V24, and the null is a FACT rather than a gap. Before it, the column was
+     * {@code not null}, so a client with no runtime had to supply something; every shipped build used
+     * the simulated runtime and stored a locally-minted {@code run_<hex>} for a run that never
+     * happened. Production may not mint a run identity for a run that did not occur.
+     */
+    @Column(name = "aw_run_ref", length = 128)
     private String awRunRef;
 
     /** The client's idempotency key. */

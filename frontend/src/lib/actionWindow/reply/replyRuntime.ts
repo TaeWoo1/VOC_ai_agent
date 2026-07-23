@@ -14,6 +14,7 @@ import {
   type EventEnvelope,
 } from "../../../../../contracts/action-window/v2/index";
 import { newCommandId } from "../../commandId";
+import { isFixturePreviewEnabled } from "../devMode";
 import type { OperatorOutcomeName } from "../../types";
 
 /** The honest terminal of a guided reply run — outcome + verification as a pair, plus the run identity. */
@@ -56,6 +57,25 @@ export async function startReplySubmission(
     reportSubmitted: () => runtime.report(runId, "OPERATOR_REPORTED_SUBMITTED"),
     abortSubmission: () => runtime.report(runId, "SUBMISSION_ABORTED"),
   };
+}
+
+/**
+ * The reply runtime this build may use, or `null` when guidance is unavailable.
+ *
+ * **Production resolves to `null`, deliberately.** `createBridgeReplyRuntime` is not wired to
+ * anything yet, so before this the panel silently fell back to the SIMULATED runtime in every
+ * shipped build: it minted a `run_<hex>` locally, synthesised a terminal event, and persisted that
+ * fabricated run identity into `review_reply_outcome.aw_run_ref`. Nothing guided the seller and the
+ * database could not tell the difference.
+ *
+ * A null is not a degraded guided run — it is the honest statement that this build cannot guide, and
+ * the panel answers it with a clearly-labelled manual handoff that records NO run ref at all.
+ *
+ * Simulation stays DEV/test-only: `isFixturePreviewEnabled()` is `import.meta.env.DEV`, so the
+ * production bundle tree-shakes the branch out entirely.
+ */
+export function resolveReplyRuntime(): ReplyRuntime | null {
+  return isFixturePreviewEnabled() ? createSimulatedReplyRuntime() : null;
 }
 
 /** A LAN-safe opaque run identity mirroring the agent's `run_<hex>` shape. Throws on a non-secure origin. */

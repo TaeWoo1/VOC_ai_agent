@@ -110,6 +110,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
 - [ ] Seller **guided** to post it (human-performed, observe-only; SellerOps does not submit)
 - [ ] Posting recorded honestly — `UNVERIFIED` where no official API can confirm
 - [ ] No autonomous outbound write anywhere in the path (fence check)
+- [x] **The handoff is honest about what it is** — production never simulates a guided run or mints a
+      run identity for a run that did not happen; with no Bridge runtime the panel fails closed to a
+      clearly-labelled manual handoff carrying the product name, review date and rating so the seller
+      can find the row (`docs/slices/reply-handoff-honesty-v1.md`).
 - [x] **A reply the seller reported posting leaves the queue** — excluded from the needs-a-look
       count and sunk below every actionable row, while staying listed and badged
       답변함으로 기록 · 확인 안 함, because the report is UNVERIFIED and a mistaken one must remain
@@ -145,6 +149,26 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Reply Handoff Honesty v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the handoff at the end of it)
+- **Did:** The audit's last stretch found production minting Action Window runs that never happened.
+  `VocItemReplyPrep` defaulted to the SIMULATED runtime at module scope and `createBridgeReplyRuntime`
+  is wired to nothing, so every shipped build minted a `run_<hex>` locally and stored it in
+  `review_reply_outcome.aw_run_ref` — and the column's NOT NULL is what forced it. Removed the silent
+  fallback (simulation is now DEV-only), made the run ref genuinely optional (V24 + `optionalAwRunRef`),
+  failed closed to a clearly-labelled manual handoff, dropped the 가이드 overclaim, and added product
+  name / date / rating so the seller can find the row nothing navigates them to.
+- **Evidence:** `docs/slices/reply-handoff-honesty-v1.md`; backend 1502 (was 1500), frontend 746 (was
+  741), collector untouched; typechecks clean. Three falsifications caught. V24 verified on a
+  disposable PostgreSQL 15 DB (`aw_run_ref` now `is_nullable = YES`).
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. ⚠ **The real Bridge runtime is still unwired** — this makes the absence honest,
+  it does not fill it. ⚠ Still no link to NAVER: no review-list URL is pinned in the repo and D-035
+  records the detail-page entry as not live-reachable, so a destination needs gated live evidence.
+- **Next:** audit the real Bridge runtime wiring.
 
 ### 2026-07-23 — Reported Replies Leave the Queue v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT → PRIORITIZE (the loop closing on itself)

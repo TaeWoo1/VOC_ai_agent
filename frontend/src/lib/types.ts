@@ -638,7 +638,10 @@ export interface ReviewReplyOutcome {
   verification: "UNVERIFIED";
   recordedVersion: number;
   recordedFingerprint: string;
-  awRunRef: string;
+  // The opaque runId a guided post ran under, or NULL when the seller posted manually with no
+  // guided run. Null is a FACT, not a gap: production may not mint a run identity for a run that
+  // did not happen.
+  awRunRef: string | null;
   recordedAt: string;
 }
 
@@ -669,6 +672,15 @@ export interface ReviewReplyPrep {
   // so the panel can explain WHY the guided step is unavailable instead of showing a dead control:
   // a review the channel already answered must not be guided into a second public reply.
   channelReplyState: string | null;
+  // Locating context, so the seller can FIND this review in the seller center. SellerOps neither
+  // posts the reply nor (without a runtime) navigates anywhere, so a panel that says "paste it into
+  // the reply box" owes them enough to find the row. Both are already on the attention row they
+  // clicked through; productName is a DISPLAY name, never a SKU. Null when unresolvable.
+  productName: string | null;
+  /** KST calendar date (date only) — the granularity a seller scans a review list by. */
+  reviewDate: string | null;
+  /** The review's coarse 1..5 rating, already on the wire and on the attention row. */
+  rating: number | null;
 }
 
 // Mirrors dto.ReviewReplySubmissionRunResponse. `submissionRef` is an opaque, single-use binding the
