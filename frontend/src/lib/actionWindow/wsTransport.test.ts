@@ -345,3 +345,41 @@ describe("actionWindow/wsTransport — carrier discrimination", () => {
     expect(session.runId).toBe(RUN_ID);
   });
 });
+
+describe("actionWindow/wsTransport — expectedCarrier (the caller declares its world)", () => {
+  // NOT mode switching: a session is bound to one carrier for its whole life. This only lets the v2
+  // reply world use the shared transport by declaring `reply`, instead of hardcoding v1's `export` —
+  // with the refusal symmetric in both directions.
+
+  it("attaches a reply-declared caller to a REPLY-carrier agent", async () => {
+    const h = harness();
+    h.deps.expectedCarrier = "reply";
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive({ ...ANNOUNCEMENT, carrier: "reply" });
+    const result = await pending;
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.session.runId).toBe(RUN_ID);
+  });
+
+  it("REFUSES an EXPORT-carrier agent for a reply-declared caller — symmetric, and names the carrier", async () => {
+    const h = harness();
+    h.deps.expectedCarrier = "reply";
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive(ANNOUNCEMENT); // the real export announcement
+
+    expect(await pending).toEqual({ ok: false, reason: "carrier-mismatch", announcedCarrier: "export" });
+    expect(ws.closedByClient).toBe(true);
+  });
+
+  it("omitting expectedCarrier still means EXPORT — every existing caller is unchanged", async () => {
+    const h = harness();
+    const pending = connectAwBridgeSession(h.deps);
+    const ws = await until(() => h.sockets[0]);
+    ws.receive({ ...ANNOUNCEMENT, carrier: "reply" });
+
+    expect(await pending).toEqual({ ok: false, reason: "carrier-mismatch", announcedCarrier: "reply" });
+  });
+});

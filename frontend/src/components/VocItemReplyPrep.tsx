@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api } from "../lib/apiClient";
 import { copyText } from "../lib/clipboard";
 import { SecureRandomUnavailableError, newCommandId } from "../lib/commandId";
 import type { OperatorOutcomeName, ReviewReplyPrep, TriageDisposition } from "../lib/types";
 import {
-  resolveReplyRuntime,
   startReplySubmission,
   type ReplyRunHandle,
   type ReplyRuntime,
 } from "../lib/actionWindow/reply/replyRuntime";
+import { useReplyRuntime } from "../lib/actionWindow/reply/useReplyRuntime";
 
-// NO module-level runtime. `resolveReplyRuntime()` returns null in any shipped build, and that null
-// is the point: before it, this panel fell back to the SIMULATED runtime everywhere, minting a
+// NO module-level runtime. The hook resolves null in any shipped build without a bridge, and that
+// null is the point: before it, this panel fell back to the SIMULATED runtime everywhere, minting a
 // `run_<hex>` locally and persisting it as an Action Window run that never happened.
 
 // Prepare a reply to one review: read the redacted body, start from a rule-based
@@ -67,8 +67,10 @@ export function VocItemReplyPrep({
   /**
    * The reply-submission runtime the guided flow drives, when this build HAS one.
    *
-   * <p>Injected so tests can pass a stub; otherwise resolved by {@code resolveReplyRuntime()}, which
-   * returns null in production. When it is null the panel offers a MANUAL handoff instead of a
+   * <p>Injected so tests can pass a stub — an injected runtime is owned (and disposed) by whoever
+   * created it, never by this panel. Otherwise {@code useReplyRuntime} owns it: the live bridge
+   * runtime in DEV bridge mode (released, socket and all, on unmount), the simulated one in plain
+   * DEV, and null in production. When it is null the panel offers a MANUAL handoff instead of a
    * guided one — different copy, and no run ref recorded — rather than silently simulating a run.
    *
    * <p>When a runtime does exist it remains the SOLE source of the recorded outcome + runId; the FE
@@ -159,9 +161,10 @@ export function VocItemReplyPrep({
   useEffect(() => {
     onLocalWork?.(hasLocalWork);
   }, [hasLocalWork, onLocalWork]);
-  // Resolved once. Null in every shipped build: this build cannot guide, and the panel says so
-  // rather than simulating a run nobody ran.
-  const runtime = useMemo(() => replyRuntime ?? resolveReplyRuntime(), [replyRuntime]);
+  // Owned by the hook: injected (tests, untouched) > live bridge runtime (DEV, disposed with its
+  // socket on unmount) > simulated (DEV) > null. Null in every shipped build without a bridge:
+  // this build cannot guide, and the panel says so rather than simulating a run nobody ran.
+  const runtime = useReplyRuntime(replyRuntime);
   const canGuide = runtime != null;
 
   const headingId = useId();

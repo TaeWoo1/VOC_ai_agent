@@ -58,6 +58,14 @@ export interface AwWsDeps {
    *  transitions of an established session, deduped, never after `close()`.
    *  When omitted, transport behavior is identical to before this hook existed. */
   onStatus?: (status: AwConnectionStatus) => void;
+  /**
+   * WHICH carrier this caller speaks — the announcement must match or the connection is refused
+   * (`carrier-mismatch`), exactly as before. Defaults to `export`, so every existing caller keeps
+   * byte-identical behavior; the reply world passes `reply`. This is NOT mode switching: a session
+   * is bound to one carrier for its whole life, reconnect included — it only lets the v2 caller
+   * state which world it lives in instead of hardcoding v1's.
+   */
+  expectedCarrier?: AwCarrierKind;
 }
 
 /** A live Action Window transport bound to the run the local agent announced. */
@@ -79,6 +87,7 @@ interface ResolvedDeps {
   retryDelayMs: number;
   maxReconnectAttempts: number;
   onStatus?: (status: AwConnectionStatus) => void;
+  expectedCarrier: AwCarrierKind;
 }
 
 const SERVER_FRAME_KINDS = new Set(["aw_event", "aw_view", "aw_command_result", "aw_resync_result"]);
@@ -94,6 +103,7 @@ function resolveDeps(deps: AwWsDeps): ResolvedDeps {
     retryDelayMs: deps.retryDelayMs ?? 1500,
     maxReconnectAttempts: deps.maxReconnectAttempts ?? 5,
     onStatus: deps.onStatus,
+    expectedCarrier: deps.expectedCarrier ?? AW_CARRIER_EXPORT,
   };
 }
 
@@ -209,15 +219,16 @@ async function openAnnouncedSocket(d: ResolvedDeps): Promise<OpenedSocket | AwRe
       // hosting the REPLY carrier would build a v1 client and feed it v2 envelopes — "connected but
       // dormant" instead of an honest fallback.
       //
-      // This transport serves the v1 EXPORT world only. A reply carrier is not an error and not a
-      // degraded export: it is a different world this caller does not speak, so it fails closed and
-      // the operations surface keeps its contract-backed fixture rather than a half-attached live view.
+      // This transport serves ONE carrier per session — the one the caller declared (`export` by
+      // default, `reply` for the v2 world). The other carrier is not an error and not a degraded
+      // session: it is a different world this caller does not speak, so it fails closed and the
+      // caller keeps its honest fallback rather than a half-attached live view.
       //
       // Absence fails closed too. Both endpoints predate this field, so an announcement without it is
-      // genuinely ambiguous — and resolving that by assuming "export" is exactly how the mis-attach
-      // would come back.
+      // genuinely ambiguous — and resolving that by assuming the happy case is exactly how the
+      // mis-attach would come back.
       const announced = parseAwCarrierKind(m.carrier);
-      if (announced !== AW_CARRIER_EXPORT) {
+      if (announced !== d.expectedCarrier) {
         // The announced carrier travels with the refusal when it is a KNOWN one: "this agent hosts
         // replies" is actionable where "offline" is not. A null announced value stays absent rather
         // than being reported as a carrier, since it is precisely the thing we could not identify.

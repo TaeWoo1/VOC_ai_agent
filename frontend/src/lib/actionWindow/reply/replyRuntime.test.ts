@@ -42,19 +42,27 @@ describe("simulated reply runtime", () => {
 });
 
 describe("dev-bridge reply runtime (v2 over an injected transport)", () => {
+  /** Acks every sent command synchronously (accepted:true) — the real session acks every command. */
   function fakeTransport(): { transport: ReplyClientTransport; sent: CommandEnvelope[]; emit: (e: EventEnvelope) => void } {
     const sent: CommandEnvelope[] = [];
     const listeners = new Set<(e: EventEnvelope) => void>();
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
     return {
       sent,
       emit: (e) => listeners.forEach((l) => l(e)),
       transport: {
-        send: (c) => sent.push(c),
+        send: (c) => {
+          sent.push(c);
+          for (const l of [...resultListeners]) l({ commandId: c.commandId, accepted: true });
+        },
         subscribe: (l) => {
           listeners.add(l);
           return () => listeners.delete(l);
         },
-        subscribeResults: () => () => {},
+        subscribeResults: (l) => {
+          resultListeners.add(l);
+          return () => resultListeners.delete(l);
+        },
       },
     };
   }
@@ -94,6 +102,101 @@ describe("dev-bridge reply runtime (v2 over an injected transport)", () => {
       payload: { status: "OPERATOR_REPORTED", operatorOutcome: "OPERATOR_REPORTED_SUBMITTED", verification: "UNVERIFIED" },
     });
     expect(await pending).toEqual({ runId: "run_agentabcd12", operatorOutcome: "OPERATOR_REPORTED_SUBMITTED", verification: "UNVERIFIED" });
+  });
+});
+
+describe("createBridgeReplyRuntime.start — acknowledged, not fire-and-forget", () => {
+  function fakeTransport(): {
+    transport: ReplyClientTransport;
+    sent: CommandEnvelope[];
+    emitResult: (r: { commandId: string; accepted: boolean; reason?: string }) => void;
+    listenerCount: () => number;
+  } {
+    const sent: CommandEnvelope[] = [];
+    const listeners = new Set<(e: EventEnvelope) => void>();
+    const resultListeners = new Set<(r: { commandId: string; accepted: boolean; reason?: string }) => void>();
+    return {
+      sent,
+      emitResult: (r) => resultListeners.forEach((l) => l(r)),
+      listenerCount: () => listeners.size + resultListeners.size,
+      transport: {
+        send: (c) => sent.push(c),
+        subscribe: (l) => {
+          listeners.add(l);
+          return () => listeners.delete(l);
+        },
+        subscribeResults: (l) => {
+          resultListeners.add(l);
+          return () => resultListeners.delete(l);
+        },
+      },
+    };
+  }
+
+  it("resolves ONLY on the agent's ack — and cleans its listener up", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" });
+    const baseline = t.listenerCount();
+    const pending = runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    t.emitResult({ commandId: t.sent[0]!.commandId, accepted: true });
+
+    await expect(pending).resolves.toEqual({ runId: "run_agentabcd12" });
+    expect(t.listenerCount()).toBe(baseline);
+  });
+
+  it("REJECTS IMMEDIATELY when the agent refuses START_RUN — the failure lands where the operator caused it", async () => {
+    // The old start resolved the announced runId unconditionally, so a refused START_RUN surfaced
+    // minutes later at the first report, wearing the wrong error. The generous timeout below turns
+    // this test into a hang if the immediate rejection ever disappears.
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { startTimeoutMs: 10_000 });
+    const pending = runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    t.emitResult({ commandId: t.sent[0]!.commandId, accepted: false, reason: "INVALID_FOR_STATE" });
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyStartRejectedError", reason: "INVALID_FOR_STATE" });
+    expect(t.listenerCount()).toBe(1); // construction tracker only — start's own listener is gone
+  });
+
+  it("times out DISTINGUISHABLY when nothing acks — a dead session is not a refused command", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { startTimeoutMs: 5 });
+
+    await expect(runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" })).rejects.toMatchObject({
+      name: "ReplyStartTimeoutError",
+    });
+  });
+
+  it("ignores an ack addressed to a DIFFERENT command", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { startTimeoutMs: 5 });
+    const pending = runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+    t.emitResult({ commandId: "someone-elses-command", accepted: true });
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyStartTimeoutError" });
+  });
+
+  it("REJECTS when the transport throws on send", async () => {
+    const throwing: ReplyClientTransport = {
+      send: () => {
+        throw new Error("socket closed");
+      },
+      subscribe: () => () => {},
+      subscribeResults: () => () => {},
+    };
+    const runtime = createBridgeReplyRuntime({ transport: throwing, runId: "run_agentabcd12" });
+
+    await expect(runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" })).rejects.toThrow("socket closed");
+  });
+
+  it("dispose() rejects an IN-FLIGHT start and lands the transport at zero", async () => {
+    const t = fakeTransport();
+    const runtime = createBridgeReplyRuntime({ transport: t.transport, runId: "run_agentabcd12" }, { startTimeoutMs: 10_000 });
+    const pending = runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" });
+
+    runtime.dispose();
+
+    await expect(pending).rejects.toMatchObject({ name: "ReplyRuntimeDisposedError" });
+    expect(t.listenerCount()).toBe(0);
   });
 });
 

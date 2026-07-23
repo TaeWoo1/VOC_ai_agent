@@ -150,6 +150,32 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-23 — Reply Runtime Injection v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACT (the guided-reply terminal)
+- **Did:** The proven runtime was constructed by nothing. Now: `expectedCarrier` on the shared
+  transport (caller declares its world; default `export`, every existing caller byte-identical),
+  `connectGuidedReplyRuntime` (DEV-only reply-carrier session wrapped adapter→runtime into one
+  handle whose `close()` disposes then disconnects), an ACKNOWLEDGED `START_RUN` (accepted → runId;
+  refused → immediate `ReplyStartRejectedError`; silence → `ReplyStartTimeoutError` at 5s — the
+  failure lands at the click that caused it, in the panel's existing retry path), and
+  `useReplyRuntime` — the disposal contract's missing caller: injected > bridge > simulated/null,
+  releasing on unmount exactly what it created, including a session that resolves after unmount.
+  `VocItemReplyPrep` swaps one `useMemo` for the hook; all 40 panel tests unchanged.
+- **Evidence:** `docs/slices/reply-runtime-injection-v1.md`; frontend 805 (was 784), collector and
+  backend untouched; typechecks clean. Four falsifications caught — fire-and-forget start fails 6
+  tests including the loopback refused-START E2E.
+- **§4.1 impact:** none.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact. Production behavior unchanged: a shipped build
+  still resolves NO runtime and offers the honest manual handoff.
+- **Blockers:** none. ⚠ **No carrier mode switching** — a session is born into one carrier and the
+  agent still hosts exactly one; running both worlds live at once needs the agent-side rework
+  recorded in the discriminator slice. No reply-side resync: a terminal missed during a reconnect
+  gap surfaces as timeout → retry → immediate `INVALID_FOR_STATE` — honest, recorded.
+- **Next:** end-to-end DEV proof against the real agent-hosted reply carrier (collector cross-stack,
+  offline synthetic page), then reply-refusal visibility in diagnostics; the carrier-switch decision
+  stays open and separate.
+
 ### 2026-07-23 — Reply Frame Adapter & Runtime Disposal v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the guided-reply terminal)
 - **Did:** The v2 reply runtime spoke envelopes; the wire speaks frames; nothing translated — the

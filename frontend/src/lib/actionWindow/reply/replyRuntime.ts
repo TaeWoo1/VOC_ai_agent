@@ -214,7 +214,7 @@ export class ReplyReportRejectedError extends Error {
   }
 }
 
-/** Thrown by `start`/`report` on a disposed runtime, and by `dispose()` into any in-flight report. */
+/** Thrown by `start`/`report` on a disposed runtime, and by `dispose()` into any in-flight call. */
 export class ReplyRuntimeDisposedError extends Error {
   constructor() {
     super("reply runtime: disposed — this runtime can no longer drive a run");
@@ -222,12 +222,42 @@ export class ReplyRuntimeDisposedError extends Error {
   }
 }
 
+/**
+ * How long `start()` waits for the agent to acknowledge `START_RUN`.
+ *
+ * <p>Shorter than the report timeout on purpose: an ack is a machine-speed round-trip with no human
+ * step behind it, and `start` runs at the moment the operator opens the guided panel — five seconds
+ * of silence there already means the session is not usable, and saying so beats making them wait out
+ * the report bound to learn the same thing.
+ */
+export const REPLY_START_TIMEOUT_MS = 5_000;
+
+/** Thrown when `START_RUN` was never acknowledged. Distinguishable from an agent refusal. */
+export class ReplyStartTimeoutError extends Error {
+  constructor() {
+    super("reply runtime: the agent never acknowledged START_RUN");
+    this.name = "ReplyStartTimeoutError";
+  }
+}
+
+/** Thrown when the agent REFUSED `START_RUN` (`aw_command_result.accepted=false`). */
+export class ReplyStartRejectedError extends Error {
+  /** The agent's sanitized rejection code (e.g. `INVALID_FOR_STATE`), or `null` when it sent none. */
+  readonly reason: string | null;
+  constructor(reason: string | null) {
+    super(`reply runtime: the agent rejected START_RUN${reason ? ` (${reason})` : ""}`);
+    this.name = "ReplyStartRejectedError";
+    this.reason = reason;
+  }
+}
+
 export function createBridgeReplyRuntime(
   session: { transport: ReplyClientTransport; runId: string },
-  options: { reportTimeoutMs?: number } = {},
+  options: { reportTimeoutMs?: number; startTimeoutMs?: number } = {},
 ): ReplyRuntime {
   const { transport, runId } = session;
   const reportTimeoutMs = options.reportTimeoutMs ?? REPLY_REPORT_TIMEOUT_MS;
+  const startTimeoutMs = options.startTimeoutMs ?? REPLY_START_TIMEOUT_MS;
   // Track the latest revision the agent has emitted for THIS run, so a report command carries a
   // fresh `expectedRevision`. Sending a stale 0 would trip the engine's `expectedRevision < revision`
   // guard (STALE_REVISION) once the run has advanced past START_RUN, and the report would never land.
@@ -250,8 +280,42 @@ export function createBridgeReplyRuntime(
   return {
     start(input) {
       if (disposed) return Promise.reject(new ReplyRuntimeDisposedError());
-      transport.send(command("START_RUN", { channelCode: input.channelCode, intent: "REPLY_SUBMISSION", submissionRef: input.submissionRef }));
-      return Promise.resolve({ runId });
+      return new Promise<{ runId: string }>((resolve, reject) => {
+        // ACKNOWLEDGED, not fire-and-forget. The old start resolved the announced runId immediately,
+        // so a refused or lost START_RUN surfaced only minutes later, at the first report, wearing
+        // the wrong error. The agent acks every command; waiting for that ack makes the failure land
+        // where the operator caused it — opening the guided panel — inside an existing retry path.
+        let settled = false;
+        let unsubscribeResults: (() => void) | null = null;
+        const settle = (fn: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          unsubscribeResults?.();
+          pendingAborts.delete(abort);
+          fn();
+        };
+        const abort = (): void => settle(() => reject(new ReplyRuntimeDisposedError()));
+        pendingAborts.add(abort);
+        const timer = setTimeout(() => settle(() => reject(new ReplyStartTimeoutError())), startTimeoutMs);
+        const startCommand = command("START_RUN", { channelCode: input.channelCode, intent: "REPLY_SUBMISSION", submissionRef: input.submissionRef });
+        unsubscribeResults = transport.subscribeResults((result) => {
+          if (result.commandId !== startCommand.commandId) return;
+          if (result.accepted) settle(() => resolve({ runId }));
+          else settle(() => reject(new ReplyStartRejectedError(result.reason ?? null)));
+        });
+        // Same ordering-insurance guard as report(): unreachable while the commandId is unsent, kept
+        // because the argument rests on exactly that ordering.
+        if (settled) {
+          unsubscribeResults();
+          return;
+        }
+        try {
+          transport.send(startCommand);
+        } catch (e) {
+          settle(() => reject(e instanceof Error ? e : new Error(String(e))));
+        }
+      });
     },
     report(id, outcome) {
       if (disposed) return Promise.reject(new ReplyRuntimeDisposedError());

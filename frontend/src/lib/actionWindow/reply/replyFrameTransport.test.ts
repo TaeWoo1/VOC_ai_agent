@@ -144,9 +144,10 @@ describe("the runtime over the adapter over the contract's loopback — real fra
     server.subscribe((frame) => {
       if (frame.kind !== "aw_command") return;
       received.push(frame.command);
+      // The real session acks EVERY command — start() resolves on this ack, and for the report the
+      // accepted ack is NOT the terminal: the runtime must keep waiting through it.
+      server.send({ kind: "aw_command_result", commandId: frame.command.commandId, accepted: true });
       if (frame.command.type === "REQUEST_STEP_RECHECK") {
-        // Accepted is NOT the terminal — the runtime must keep waiting through it.
-        server.send({ kind: "aw_command_result", commandId: frame.command.commandId, accepted: true });
         server.send({ kind: "aw_event", event: terminalEvent("OPERATOR_REPORTED_SUBMITTED") });
       }
     });
@@ -176,6 +177,24 @@ describe("the runtime over the adapter over the contract's loopback — real fra
     await expect(runtime.report(RUN_ID, "SUBMISSION_ABORTED")).rejects.toMatchObject({
       name: "ReplyReportRejectedError",
       reason: "STALE_REVISION",
+    });
+  });
+
+  it("surfaces a refused START_RUN immediately as well — the failure lands at the click that caused it", async () => {
+    const { client, server } = createLoopbackChannel();
+    server.subscribe((frame) => {
+      if (frame.kind === "aw_command" && frame.command.type === "START_RUN") {
+        server.send({ kind: "aw_command_result", commandId: frame.command.commandId, accepted: false, reason: "INVALID_FOR_STATE" });
+      }
+    });
+    const runtime = createBridgeReplyRuntime(
+      { transport: createReplyFrameTransport(client), runId: RUN_ID },
+      { startTimeoutMs: 10_000 },
+    );
+
+    await expect(runtime.start({ channelCode: "naver", submissionRef: "a1b2c3d4e5f60718" })).rejects.toMatchObject({
+      name: "ReplyStartRejectedError",
+      reason: "INVALID_FOR_STATE",
     });
   });
 });
