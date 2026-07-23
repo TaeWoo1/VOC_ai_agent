@@ -547,6 +547,11 @@ const PROMPT_HEAD = [
   "APPROVED SCOPE — not by this prompt. The Runtime cannot see such a dialog; a started",
   "download is the only evidence you completed one.",
   "",
+  "NAVER may interpose FURTHER steps after your confirmation (e.g. an in-page notification",
+  "with its own download button — observed on 2026-07-24). When that happens the collector",
+  "HIGHLIGHTS the new control and WAITS — click it yourself, like the first one. The",
+  "download window restarts from that click. The collector never clicks anything.",
+  "",
 ];
 
 /**
@@ -828,6 +833,12 @@ async function main(): Promise<void> {
     // (see `NaverPrepareDiagnostic`); never transported, never persisted.
     const diagnostic = assembled.driver.prepareDiagnostic();
     if (diagnostic) log("aw.live.readiness", { ...diagnostic });
+    // The continuation-checkpoint evidence seam (Run 7 attempt-2 finding): how many NAVER-native
+    // follow-up controls were highlighted before the download, whether the last one was acted on,
+    // and whether detection failed closed on ambiguity. Booleans + a small count only; never
+    // transported, never persisted.
+    const continuation = assembled.driver.lastContinuation();
+    if (continuation) log("aw.live.continuation", { ...continuation });
   } finally {
     try {
       await assembled?.driver.cleanup();
