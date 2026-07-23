@@ -1,4 +1,38 @@
-# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (DRAFT)**
+# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (DRAFT · DEFERRED)**
+
+> ## ⏸ DEFERRED 2026-07-23 — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
+>
+> **What happened:** a G6 approval was given on 2026-07-23 (channel NAVER SmartStore · REVIEW export ·
+> account `NAVER_DEV_SELLER_SELF_01` · operator `OPERATOR_SELF_01` · scope `export+ingest` ·
+> `max live window: 15 min`), with the G3 boxes and §7 affirmed in the same turn. **The run was never
+> dispatched.** Before any browser opened, the run was found unexecutable from the development
+> checkout (the code under proof and the NAVER profile were in two different repositories), and while
+> that was being resolved the operator reported that the **current network / IP differs** from the
+> environment the G3 affirmation described.
+>
+> **G3's first box — "stable network / IP / location still holds" — is therefore FALSE**, and it is the
+> very condition that paused NAVER live work in the first place ([`r4-preparation.md`](r4-preparation.md)
+> §3, §9-3). A G3 affirmed against a different environment cannot be carried into this one.
+>
+> **State of the gates:**
+>
+> - **G6 — UNCONSUMED.** An approval is consumed by a **run**, and no run occurred. It is **not** spent,
+>   and it is equally **not** available: it named a date and an environment that no longer describe the
+>   situation. A future dispatch needs a **fresh** single-use G6, not this one revived.
+> - **G3 — VOID for this environment.** Per-run and non-inheritable by construction (D-026); the
+>   network condition alone would invalidate it.
+> - **P6 — still ☐.** It is signed only in a dispatching turn that records both.
+> - **Zero live contact.** No browser launched, no login, no export, no marketplace page, no download.
+>   Nothing was ingested; no disposable database was created for a live run.
+>
+> **What DID happen, and stands:** the offline preparation (§12) and the holder sync. The
+> `naver-r4` runtime holder was synced to `b5f0683` and **stays there** — it now carries the code under
+> proof, verified with every preserved path byte-for-byte unchanged (§14). That work is not wasted by
+> this deferral; it is exactly the prerequisite a future dispatch would otherwise have to do first.
+>
+> **To dispatch later:** re-affirm G3 **for the environment as it then is** (starting with the network
+> box), record a **fresh** G6 in that turn, confirm the range precondition (§8) on screen, and state
+> **"seated and ready"** before the browser opens.
 
 > **STATUS: DRAFT. This document authorizes NOTHING.** No gate below is filled, and a filled gate is
 > the only thing that authorizes live contact. A live NAVER run needs a **per-run G3** (`export+ingest`
@@ -250,6 +284,10 @@ Findings:           <...>
 
 ## 12. Pre-dispatch preparation — ☑ COMPLETED 2026-07-23 (no live contact)
 
+> ⏸ **Superseded in part by the deferral at the top of this file.** The evidence below stands as
+> recorded; what it no longer implies is readiness — the environment it was gathered in is not the
+> environment a future run will start from.
+
 Recorded here because these are the two things that must be true *before* a dispatching turn, and
 neither of them is a gate.
 
@@ -296,8 +334,12 @@ be inherited from Run 4 or from anything else:
 
 - ☐ Stable network / IP / location still holds.
 - ☐ Dedicated Chrome profile for the connection intact.
-- ☐ Bridge paired — **☑ required for this scope** (it is *not* scoped out: the `session recovery`
-  N/A carve-out is scoped to that run type only, and this is an export run).
+- ☐ Bridge paired — **CORRECTED 2026-07-23 → record `N/A, with reason`, not ☑.** An earlier draft of
+  this record proposed ☑ on the reasoning that the `session recovery` carve-out belongs to that scope
+  alone. That is true of the carve-out's *scope* but wrong about *this run's control boundary*: this
+  is a **CLI run over a loopback**, and the live driver **is not Bridge-wired**
+  ([`r4-preparation.md`](r4-preparation.md) §6 says so verbatim). A ☑ would assert a fact the run does
+  not exercise; a silent drop would hide the question. **The CLI is the control boundary here.**
 - ☐ Operation Run persistence enabled.
 - ☐ §9 item 3 pause lift, **for `export+ingest` only** — not a blanket lift, not inherited.
 
@@ -321,3 +363,39 @@ abort before the window; ingest target not confirmed disposable → abort; any c
 
 *Boundary: this record is a plan for a run that has not been authorized. Every live-run gate applies
 per-run, and this document grants none of them.*
+
+## 14. Holder sync — ☑ COMPLETED 2026-07-23 (no live contact)
+
+The run was found unexecutable from the development checkout: the code under proof and the NAVER
+browser profile lived in **two different repositories**. `sellerops/repo` is its own clone;
+`runtime-holders/naver-r4` is a worktree of the **`aiagent/.git`** host and was detached at `bc7d5d8`
+(PR #317), carrying the profile but not the parse gate, the reply-state code, or `V21`. They share one
+remote, so the commit could travel.
+
+Performed, with the operator's approval, entirely offline:
+
+1. `feat/review-acquisition-spine` pushed to origin at **`b5f0683`** — a new branch, no force, no PR,
+   `main` untouched (`origin/main...main` = `0 0`).
+2. `git fetch origin feat/review-acquisition-spine` in the holder — **fetch only**, never `pull`,
+   which would try to merge into a detached HEAD. HEAD stayed at `bc7d5d8`; no working file moved.
+3. `git checkout --detach b5f0683` — the same detached shape the holder was already in, so no branch
+   can collide with another worktree of the host. **No commit is ever created in the holder.**
+
+**Verification — all passed:**
+
+| Check | Result |
+|---|---|
+| HEAD / cleanliness | `b5f0683`, `git status --porcelain` empty |
+| **Preserved paths** (`.profile` 961 files / 132,176K · `.env` · `.status` · `downloads` · `.operation-runs` · `.aw-quarantine`) | **byte-for-byte identical** to the pre-sync fingerprint — file count, size, and newest mtime unchanged for all six |
+| Code under proof present | `artifact-parse.ts` · `workbook-shape-read.ts` · `ReviewReplyState.java` · `V21` · the golden fixtures · D-037 · this record |
+| Collector suite **inside the holder** | typecheck clean · **4843 passed / 95 skipped** — proving `node_modules` survived a 773-file rewrite |
+| `.env` | mtime unchanged, **never opened** |
+| Profile | still unheld (no `Singleton*`/lock, `lsof` clean) |
+
+⚠ The checkout rewrote 773 tracked files (+6,761 / −238,800). The deletions are the **legacy
+VOC/OliveYoung/cardnews lineage** removed by the repo-purpose cleanup — all tracked, and restored by
+the rollback. **No ignored file was touched, no `git clean` was run, nothing was deleted by hand.**
+
+**The holder stays at `b5f0683`** (product-owner decision): it is now the runtime baseline, and the
+checkout matches the code a future Run 7 would exercise. Rollback remains one command —
+`git checkout --detach bc7d5d8`, an ancestor of `origin/main`, so it survives any fetch.
