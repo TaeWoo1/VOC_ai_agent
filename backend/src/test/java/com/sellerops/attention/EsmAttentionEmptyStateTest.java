@@ -54,14 +54,17 @@ class EsmAttentionEmptyStateTest {
     }
 
     @Test
-    void gmarketAccountWithNoArticlesYieldsEmptySummary() {
+    void gmarketAccountReportsUncertainCoverageNotAFalseCalm() {
         UUID accountId = seedGmarketAccount();
 
         OperatorAttentionSummary s = service.attention(org, accountId, FROM, TO);
 
         assertThat(s.sellerAccountId()).isEqualTo(accountId);
         assertThat(s.channel()).isEqualTo("G마켓/옥션");   // non-Cafe24 channel, generically carried
-        assertThat(s.items()).isEmpty();                  // safe empty — no signals, no throw
+        assertThat(s.items()).isEmpty();                  // no signals, no throw
+        // ⚠ The empty list is NOT a calm "nothing needs attention": GMARKET has no attention source,
+        // so the surface must SAY it cannot determine the state rather than imply all is well.
+        assertThat(s.coverage()).isEqualTo(AttentionCoverage.UNCERTAIN_UNSUPPORTED_CHANNEL);
         assertThat(s.fromDate()).isEqualTo(FROM);
         assertThat(s.toDate()).isEqualTo(TO);
     }

@@ -446,14 +446,24 @@ export interface AttentionSignal {
   spike?: SpikeComparison | null;
 }
 
+// Mirrors com.sellerops.attention.AttentionCoverage. Whether the attention state can be safely
+// determined for this scope. An empty `items` list means "nothing needs attention" ONLY when
+// COVERED; otherwise SellerOps could not attribute the reviews and the surface must say so.
+export type AttentionCoverage =
+  | "COVERED"
+  | "UNCERTAIN_MULTI_ACCOUNT"
+  | "UNCERTAIN_UNSUPPORTED_CHANNEL";
+
 // Mirrors com.sellerops.attention.dto.OperatorAttentionSummary. Reads no server
 // clock: the [fromDate, toDate] window is the as-of context (no generatedAt). Items
-// arrive pre-sorted by severity; an empty list means nothing needs attention.
+// arrive pre-sorted by severity; an empty list means nothing needs attention ONLY when
+// `coverage === "COVERED"` (see AttentionCoverage).
 export interface OperatorAttentionSummary {
   sellerAccountId: string;
   channel: string | null;
   fromDate: string; // ISO yyyy-MM-dd
   toDate: string;
+  coverage: AttentionCoverage;
   items: AttentionSignal[];
 }
 

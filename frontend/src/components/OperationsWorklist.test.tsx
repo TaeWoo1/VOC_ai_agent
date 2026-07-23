@@ -26,6 +26,7 @@ function attention(): OperatorAttentionSummary {
     channel: "네이버 스마트스토어",
     fromDate: "2026-05-01",
     toDate: "2026-05-31",
+    coverage: "COVERED",
     items: [
       {
         type: "LOW_RATING_REVIEW",

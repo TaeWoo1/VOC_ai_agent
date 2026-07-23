@@ -44,6 +44,30 @@ export function severityStyle(severity: string): SeverityStyle {
  * signal also covers, this number would double-count it, and the copy that renders it must not be
  * strengthened into a distinctness claim.
  */
+// FE-owned copy for a scope whose attention state SellerOps cannot safely determine. Returning null
+// means the scope is COVERED and the normal empty/`items` rendering applies. The copy deliberately
+// says "안전하게 판단할 수 없어요" — never "확인할 일이 없어요" — so a false calm can never render.
+export function attentionUncertaintyCopy(
+  coverage: string,
+): { headline: string; detail: string } | null {
+  switch (coverage) {
+    case "UNCERTAIN_MULTI_ACCOUNT":
+      return {
+        headline: "이 채널의 확인 상태를 안전하게 판단할 수 없어요.",
+        detail:
+          "한 채널에 판매 계정이 여러 개 연결되어 있어, 리뷰를 어느 계정의 것으로 볼지 지금은 구분할 수 없습니다. 그래서 '확인이 필요한 리뷰'를 정확히 셀 수 없어요 — 아무 일도 없다는 뜻이 아닙니다.",
+      };
+    case "UNCERTAIN_UNSUPPORTED_CHANNEL":
+      return {
+        headline: "이 채널의 리뷰 확인 상태는 아직 지원하지 않아요.",
+        detail:
+          "이 채널의 리뷰는 수집되더라도 아직 '확인할 일'로 분석하지 않습니다. 비어 있는 것은 확인이 끝났다는 뜻이 아니라, SellerOps가 아직 판단하지 않는다는 뜻입니다.",
+      };
+    default:
+      return null; // COVERED — an empty list here honestly means nothing needs a look.
+  }
+}
+
 export function reviewsNeedingAttention(items: readonly AttentionSignal[]): number {
   return items
     .filter((s) => s.sourceType === "REVIEW")

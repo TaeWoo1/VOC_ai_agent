@@ -4,7 +4,7 @@ import { AttentionSignalCard } from "./AttentionSignalCard";
 import { AttentionSignalDrilldown } from "./AttentionSignalDrilldown";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
-import { reviewsNeedingAttention, sortBySeverity } from "../lib/attention";
+import { attentionUncertaintyCopy, reviewsNeedingAttention, sortBySeverity } from "../lib/attention";
 import { toIsoDate } from "../lib/backfillPresets";
 import type { AttentionSignal } from "../lib/types";
 
@@ -64,6 +64,9 @@ export function AttentionSignalList({
   }, [accountId, range.from, range.to, readKey]);
 
   const items = data ? sortBySeverity(data.items) : [];
+  // A scope SellerOps cannot safely attribute (multi-account channel, or a channel with no source)
+  // must NEVER render as "확인할 일이 없습니다." — that is the false calm this guard exists to prevent.
+  const uncertainty = data ? attentionUncertaintyCopy(data.coverage) : null;
   // The review-ops headline: the one number an operator wants right after an acquisition run.
   // Rendered only when the read succeeded AND it is non-zero — a "0건" line on a dead or empty
   // read would read as reassurance the data does not support.
@@ -92,6 +95,15 @@ export function AttentionSignalList({
         <p className="rounded-xl bg-bad/5 px-4 py-3 text-base text-bad">
           확인할 일을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
         </p>
+      ) : uncertainty ? (
+        <div
+          className="rounded-xl bg-warn/5 px-4 py-3"
+          role="status"
+          data-testid="attention-coverage-uncertain"
+        >
+          <p className="text-base font-semibold text-ink">{uncertainty.headline}</p>
+          <p className="mt-1 text-sm text-muted">{uncertainty.detail}</p>
+        </div>
       ) : items.length === 0 ? (
         <p className="text-base text-muted">지금 확인할 일이 없습니다.</p>
       ) : (

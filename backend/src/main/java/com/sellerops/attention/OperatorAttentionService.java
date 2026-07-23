@@ -68,12 +68,25 @@ public class OperatorAttentionService {
         String channelCode = channel == null ? null : channel.getCode();
         String channelNameKo = channel == null ? null : channel.getNameKo();
 
-        VocWindowSnapshot snapshot = sources.forChannel(channelCode)
-                .map(s -> s.snapshot(orgId, accountId, window.startDate(), window.endDate()))
-                .orElse(EMPTY_SNAPSHOT);
+        // Coverage first: a channel with NO source cannot be attributed at all (ESM+/GMARKET), and a
+        // supported source may still decline for an ambiguous scope (a multi-account channel). Either
+        // way the surface must SAY it is declining rather than let an empty snapshot read as calm.
+        var source = sources.forChannel(channelCode);
+        AttentionCoverage coverage = source
+                .map(s -> s.coverage(orgId, accountId))
+                .orElse(AttentionCoverage.UNCERTAIN_UNSUPPORTED_CHANNEL);
 
-        List<AttentionSignal> items = AttentionSignalRules.evaluate(snapshot, channelNameKo);
-        return new OperatorAttentionSummary(accountId, channelNameKo, window.startDate(), window.endDate(), items);
+        // An uncertain scope contributes NO signals — never a fabricated one, and never a real one
+        // read from a snapshot that could not be attributed. The empty list plus the coverage verdict
+        // is the honest answer; the surface renders "cannot determine", not "nothing needs attention".
+        List<AttentionSignal> items = coverage.isUncertain()
+                ? List.of()
+                : AttentionSignalRules.evaluate(
+                        source.map(s -> s.snapshot(orgId, accountId, window.startDate(), window.endDate()))
+                                .orElse(EMPTY_SNAPSHOT),
+                        channelNameKo);
+        return new OperatorAttentionSummary(
+                accountId, channelNameKo, window.startDate(), window.endDate(), coverage, items);
     }
 
     /**

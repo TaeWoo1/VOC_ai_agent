@@ -26,10 +26,14 @@ function signal(over: Partial<AttentionSignal> = {}): AttentionSignal {
   };
 }
 
-function summary(items: AttentionSignal[]): OperatorAttentionSummary {
+function summary(
+  items: AttentionSignal[],
+  coverage: OperatorAttentionSummary["coverage"] = "COVERED",
+): OperatorAttentionSummary {
   return {
     sellerAccountId: "acct-42",
     channel: "네이버 스마트스토어",
+    coverage,
     fromDate: "2026-05-01",
     toDate: "2026-05-31",
     items,
@@ -110,5 +114,40 @@ describe("AttentionSignalList — review-ops headline", () => {
       expect(screen.getByText(/확인할 일을 불러오지 못했습니다/)).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("reviews-needing-attention")).not.toBeInTheDocument();
+  });
+
+  it("a COVERED empty scope still reads as an honest calm — 'nothing needs a look'", async () => {
+    vi.spyOn(api, "getAccountAttention").mockResolvedValue(summary([], "COVERED"));
+
+    render(<AttentionSignalList accountId="acct-42" />);
+
+    await screen.findByText("지금 확인할 일이 없습니다.");
+    // The measured-zero case must NOT be swept into the uncertain state.
+    expect(screen.queryByTestId("attention-coverage-uncertain")).not.toBeInTheDocument();
+  });
+
+  it("a multi-account scope declines to answer — never 'nothing needs a look'", async () => {
+    vi.spyOn(api, "getAccountAttention").mockResolvedValue(summary([], "UNCERTAIN_MULTI_ACCOUNT"));
+
+    render(<AttentionSignalList accountId="acct-42" />);
+
+    const notice = await screen.findByTestId("attention-coverage-uncertain");
+    expect(notice).toHaveTextContent("안전하게 판단할 수 없어요");
+    expect(notice).toHaveTextContent(/여러 개 연결/);
+    // The false calm must be absent.
+    expect(screen.queryByText("지금 확인할 일이 없습니다.")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("reviews-needing-attention")).not.toBeInTheDocument();
+  });
+
+  it("an unsupported-channel scope says review attention is not supported yet — not calm", async () => {
+    vi.spyOn(api, "getAccountAttention").mockResolvedValue(
+      summary([], "UNCERTAIN_UNSUPPORTED_CHANNEL"),
+    );
+
+    render(<AttentionSignalList accountId="acct-42" />);
+
+    const notice = await screen.findByTestId("attention-coverage-uncertain");
+    expect(notice).toHaveTextContent("아직 지원하지 않아요");
+    expect(screen.queryByText("지금 확인할 일이 없습니다.")).not.toBeInTheDocument();
   });
 });
