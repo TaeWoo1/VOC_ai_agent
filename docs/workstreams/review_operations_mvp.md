@@ -75,7 +75,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
       backend tests, with the FE asserting the same `expectedAttention` declaration)
 
 ### UNDERSTAND / PRIORITIZE
-- [ ] Reviews classified (needs-response / risk / informational) — ⚠ **not this.** A rule-based
+- [ ] Reviews classified (needs-response / risk / informational) — ⚠ **not this**, and now with a way
+      to find out: `contracts/review-eval/naver/v1/` commits the labeling rubric and the go/no-go bars
+      (precision ≥ 0.80 on a Wilson lower bound, recall ≥ 0.30, high-rating FP ≤ 0.05) *before* any
+      candidate detector exists, measured by a gated local harness
+      (`docs/slices/review-analysis-eval-reanalysis-foundation-v1.md`). The seed is empty until a
+      labeling session runs. A rule-based
       category IS stored per review and is now visible and filterable in the queue
       (`docs/slices/review-classification-queue-v1.md`), but it does not decide who is in the queue,
       and for reviews the analyzer's sentiment/urgency are pure functions of `rating` — so nothing
@@ -132,6 +137,36 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Review Analysis Evaluation & Reanalysis Foundation v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** UNDERSTAND / PRIORITIZE (the machinery, not the judgement)
+- **Did:** Stopped short of the `rules-v2` this log named as next, **on evidence**:
+  `aiagent/docs/phase2e_detector_design.md` (2026-04-27) already measured a flat-substring Korean
+  polarity detector at **0/30 sample recall, 0/121 records**, diagnosing surface-form rigidity rather
+  than vocabulary breadth — and `RuleBasedInboxItemAnalyzer` is exactly that architecture. Built the
+  two things a detector needs instead: a **versioned re-analysis path** (every write path was
+  skip-if-exists, so no future analyzer could reach the existing corpus) and a **fingerprint-keyed
+  local evaluation harness** whose go/no-go bars are committed *before* any candidate exists.
+- **Evidence:** `docs/slices/review-analysis-eval-reanalysis-foundation-v1.md`; backend 1490 (was
+  1458), frontend 710 and collector 4843/95 **untouched**. Six falsifications caught; a seventh
+  (removing `readOnly`) caught nothing and is recorded as an untested guard rather than claimed as
+  proven. Two review passes found three real defects: `remaining` counted rows that can never be
+  recomputed, so the documented "re-call until remaining == 0" loop would never terminate (and with a
+  small limit those rows starved real work out of every batch); the high-rating false-positive gate
+  passed **vacuously** on a seed containing no high-rated reviews; and the rollback guarantee was
+  overstated for inquiries, whose `status` IS mutable after ingest. All fixed and falsified.
+  Re-analysis suite also run against a disposable PostgreSQL 15 DB. No migration needed.
+- **§4.1 impact:** none. Nothing about channel support changed.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact. **No re-analysis run against real data** — the
+  endpoint defaults to `dryRun=true`.
+- **Blockers:** none. ⚠ The high-rating complaint is still undetected, and now measurably so rather
+  than assumedly so. ⚠ `labels.json` ships **empty**; the harness refuses a verdict below the
+  adequacy floor (≥200 labeled, ≥40 NEEDS_LOOK), so nothing can be quoted from it yet.
+- **Next:** a labeling session over real NAVER review bodies — separate, gated, read-only, with only
+  derived labels leaving the machine — to produce the honest `rules-v1` baseline. Only after that is
+  a detector candidate worth building, and it must be added ALONGSIDE the existing analyzer so
+  rollback stays a configuration change.
 
 ### 2026-07-23 — Classification-Aware Review Queue v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** UNDERSTAND / PRIORITIZE
