@@ -31,7 +31,8 @@ class OperatorAttentionControllerTest {
         LocalDate from = LocalDate.parse("2026-05-01");
         LocalDate to = LocalDate.parse("2026-05-31");
         AuthPrincipal principal = new AuthPrincipal(UUID.randomUUID(), orgId, "op@example.com");
-        OperatorAttentionSummary view = new OperatorAttentionSummary(accountId, "카페24", from, to, List.of());
+        OperatorAttentionSummary view =
+                new OperatorAttentionSummary(accountId, "카페24", from, to, AttentionCoverage.COVERED, List.of());
         when(service.attention(orgId, accountId, from, to)).thenReturn(view);
 
         OperatorAttentionSummary result = controller.attention(principal, accountId, from, to);

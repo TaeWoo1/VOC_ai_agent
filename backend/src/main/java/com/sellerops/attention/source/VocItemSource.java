@@ -1,5 +1,6 @@
 package com.sellerops.attention.source;
 
+import com.sellerops.attention.AttentionCoverage;
 import com.sellerops.attention.AttentionSignalType;
 import com.sellerops.attention.VocWindowSnapshot;
 import java.time.LocalDate;
@@ -27,6 +28,19 @@ public interface VocItemSource {
 
     /** Exact window-scoped review/inquiry counts for the account, for the attention signals. */
     VocWindowSnapshot snapshot(UUID orgId, UUID accountId, LocalDate from, LocalDate to);
+
+    /**
+     * Whether this source can SAFELY attribute attention for the account scope, or must decline to
+     * answer rather than let an empty snapshot read as a false calm. The default is
+     * {@link AttentionCoverage#COVERED} — a source with no attribution ambiguity always covers its
+     * scope. A source whose store cannot attribute some scopes (today {@code IngestedReviewVocItemSource}
+     * for a multi-account channel) overrides this; it is a read-time verdict over account/channel
+     * metadata and MUST agree with what {@link #snapshot}/{@link #items} could actually attribute
+     * (an uncertain scope returns empty counts, and this says why).
+     */
+    default AttentionCoverage coverage(UUID orgId, UUID accountId) {
+        return AttentionCoverage.COVERED;
+    }
 
     /**
      * One clamped page of metadata-only rows behind a chosen signal type, over the

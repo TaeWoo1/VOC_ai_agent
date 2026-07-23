@@ -1,6 +1,7 @@
 package com.sellerops.attention.source;
 
 import com.sellerops.attention.AttentionItemFilters;
+import com.sellerops.attention.AttentionCoverage;
 import com.sellerops.attention.AttentionSignalType;
 import com.sellerops.attention.VocItemFilter;
 import com.sellerops.attention.VocItemRef;
@@ -432,6 +433,29 @@ public class IngestedReviewVocItemSource implements VocItemSource {
      * the account is absent/cross-org, or the org holds more than one account on the
      * channel (see the class note on why that fails closed).
      */
+    /**
+     * The coverage verdict for this account scope: {@link AttentionCoverage#UNCERTAIN_MULTI_ACCOUNT}
+     * when the org holds more than one account on the channel (reviews carry no
+     * {@code seller_account_id}, so a per-account read cannot attribute them), else
+     * {@link AttentionCoverage#COVERED}. This is the SAME condition that makes
+     * {@link #unambiguousChannelFor} return null, surfaced so the summary can decline to answer
+     * instead of rendering a false calm. Never {@code UNCERTAIN_UNSUPPORTED_CHANNEL} — this source
+     * only serves channels it supports; the "no source" case is decided upstream in the service.
+     */
+    @Override
+    public AttentionCoverage coverage(UUID orgId, UUID accountId) {
+        Optional<SellerAccount> account = sellerAccounts.findByIdAndOrgId(accountId, orgId);
+        if (account.isEmpty() || account.get().getChannelId() == null) {
+            // A resolvable account with a channel is the service's precondition (requireAccount runs
+            // first); an absent account/channel here is not the ambiguity case, so it is COVERED (a
+            // genuine empty), not "declining to answer".
+            return AttentionCoverage.COVERED;
+        }
+        return sellerAccounts.countByOrgIdAndChannelId(orgId, account.get().getChannelId()) > 1
+                ? AttentionCoverage.UNCERTAIN_MULTI_ACCOUNT
+                : AttentionCoverage.COVERED;
+    }
+
     private UUID unambiguousChannelFor(UUID orgId, UUID accountId) {
         Optional<SellerAccount> account = sellerAccounts.findByIdAndOrgId(accountId, orgId);
         if (account.isEmpty()) {

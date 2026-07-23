@@ -867,16 +867,17 @@ export function mockAccountAttention(
   // up.
   const channelName = mockChannelNameForAccount(accountId);
   if (mockChannelCodeForAccount(accountId) !== "NAVER") {
-    // Unsupported channel → VocItemSourceRegistry resolves no source → EMPTY_SNAPSHOT →
-    // AttentionSignalRules gates every signal on `> 0` → no signals at all. The channel name
-    // is still reported (the service reads it before the source lookup), so this is an
-    // honest empty state and not a null pane. COUPANG has no VocItemSource; only NAVER and
-    // CAFE24 do, and Cafe24's demo account is not CONNECTED.
+    // Unsupported channel → VocItemSourceRegistry resolves no source → the service now returns
+    // coverage UNCERTAIN_UNSUPPORTED_CHANNEL with no signals. An empty list here is NOT a calm
+    // "nothing needs attention" — it is SellerOps declining to answer, and the surface says so.
+    // COUPANG has no VocItemSource; only NAVER and CAFE24 do, and Cafe24's demo account is not
+    // CONNECTED.
     return {
       sellerAccountId: accountId,
       channel: channelName,
       fromDate: range.from,
       toDate: range.to,
+      coverage: "UNCERTAIN_UNSUPPORTED_CHANNEL",
       items: [],
     };
   }
@@ -907,6 +908,9 @@ export function mockAccountAttention(
     channel,
     fromDate: range.from,
     toDate: range.to,
+    // Single-account NAVER: the attention state IS safely determinable, so an empty list here
+    // would honestly mean nothing needs a look.
+    coverage: "COVERED",
     // Sorted by the same severity rank the backend applies, rather than hand-ordered: the
     // rules emit in gate order and then stable-sort HIGH→LOW, so the wire order is
     // HIGH(1~2점) → MEDIUM(3점) → MEDIUM(spike) → LOW(신규 리뷰) — the spike is emitted last
