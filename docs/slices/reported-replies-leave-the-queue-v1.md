@@ -79,7 +79,7 @@ never 완료.
 | | before | after |
 |---|---|---|
 | backend | 1490 (2 skipped) | **1500** (2 skipped) |
-| frontend | 733 | **739** |
+| frontend | 733 | **741** |
 | collector | 4843 / 95 skipped | unchanged, untouched |
 
 Both typechecks clean.
@@ -115,7 +115,30 @@ speculatively.
 `"… and not " + PREDICATE` compiled to `and notexists` and Hibernate rejected it at context load. The
 separator has to be a line terminator, not a space.
 
-## 5. Recorded, not fixed
+## 5. What reviewing both commits as one slice caught
+
+**The rule was real and invisible.** `VocItemReplyPrep` had `onPrepared` for a saved draft but fired
+**nothing** when an outcome was recorded — so the count that now shrinks, and the badge that now
+appears, only did so after a page reload. A seller working through their queue would have watched the
+number sit still and learned the truth by reloading. The second commit's entire value was
+unobservable in the session where the work happened.
+
+Fixed by bubbling an `onOutcomeRecorded` up the chain that already exists for
+`onPrepared`/`onRecorded`: panel → card → list → `AttentionSignalList`, which owns the COUNT's read
+and so must be the thing that refetches — the drill-down alone would leave the headline stating a
+number its own list contradicts.
+
+Two details worth keeping:
+
+- **Fired after the server records it, never on the click.** Announcing work the backend has not
+  stored would make the queue lie in the other direction.
+- **Not fired on an abort.** "I did not post it" leaves the review exactly where it was, so a refetch
+  would spend a request to redraw an identical page. Both halves are falsified by test.
+- The refresh key is **composite** (`${refreshKey}:${reloadKey}`) rather than additive: the
+  page-level key is a run-id hash and may be any value, so summing the two could collide and silently
+  skip a refetch.
+
+## 6. Recorded, not fixed
 
 - A reply posted **on the channel**, outside SellerOps, stays invisible until the next import. This
   slice narrows the gap to replies SellerOps itself guided; it does not close it.

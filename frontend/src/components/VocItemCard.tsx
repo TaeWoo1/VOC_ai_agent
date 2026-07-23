@@ -18,7 +18,16 @@ import { VocItemTriageControl } from "./VocItemTriageControl";
 // The product is a display NAME only — the backend sends no product identifier here —
 // so it reads as the row's subject and is deliberately not a link or a routing target.
 
-export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accountId: string }) {
+export function VocItemCard({
+  item,
+  accountId,
+  onOutcomeRecorded,
+}: {
+  item: OperatorVocItem;
+  accountId: string;
+  /** Bubbled to the list so the count and this row's badge reflect a reply the operator just posted. */
+  onOutcomeRecorded?: () => void;
+}) {
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
   const product = productLabel(item.productName);
@@ -145,6 +154,7 @@ export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accoun
           actionRef={item.actionRef}
           disposition={decided}
           onPrepared={promote}
+          onOutcomeRecorded={onOutcomeRecorded}
           onLocalWork={noteLocalWork}
         />
       ) : null}

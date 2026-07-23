@@ -156,9 +156,9 @@ Append a dated entry; never rewrite prior entries — correct forward.
   badge. Version-scoped and existence-based, stated once and shared by the count, the ordering and
   the marker.
 - **Evidence:** `docs/slices/reported-replies-leave-the-queue-v1.md`; backend 1500 (was 1490),
-  frontend 739 (was 733), collector 4843/95 untouched; typechecks clean. Six falsifications caught —
-  one for real, when a test written to keep the new badge distinguishable caught it wearing the
-  channel's own 답변 완료 green. New JPQL also run against a disposable PostgreSQL 15 DB. The golden
+  frontend 741 (was 733), collector 4843/95 untouched; typechecks clean. Eight falsifications caught — plus two real defects found by review: the new
+  rule was invisible in-session (nothing refetched after an outcome was recorded), and the new badge
+  wore the channel's own 답변 완료 green until a test written to keep them distinguishable caught it. New JPQL also run against a disposable PostgreSQL 15 DB. The golden
   contract's `expectedAttention` is byte-unchanged, as it must be.
 - **§4.1 impact:** none.
 - **Ledger impact:** none.

@@ -10,13 +10,15 @@ export function AttentionSignalDrilldown({
   from,
   to,
   refreshKey = 0,
+  onOutcomeRecorded,
   onClose,
 }: {
   signal: AttentionSignal;
   accountId: string;
   from: string;
   to: string;
-  refreshKey?: number;
+  refreshKey?: number | string;
+  onOutcomeRecorded?: () => void;
   onClose: () => void;
 }) {
   return (
@@ -48,6 +50,7 @@ export function AttentionSignalDrilldown({
         from={from}
         to={to}
         refreshKey={refreshKey}
+        onOutcomeRecorded={onOutcomeRecorded}
       />
     </div>
   );

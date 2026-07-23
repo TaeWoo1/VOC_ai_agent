@@ -99,12 +99,34 @@ function stubClipboard(clipboard: unknown): void {
  * `triageDisposition` — i.e. a read that is NOT stale. That is the ordinary case; the stale
  * one is driven explicitly below, because it is where the forward gates have to close.
  */
-async function renderPanel(view: ReviewReplyPrep = prepView()) {
+async function renderPanel(
+  view: ReviewReplyPrep = prepView(),
+  onOutcomeRecorded?: () => void,
+) {
   vi.mocked(api.getReviewReplyPrep).mockResolvedValue(view);
   render(
-    <VocItemReplyPrep accountId={ACCOUNT} actionRef={REF} disposition={view.triageDisposition} />,
+    <VocItemReplyPrep
+      accountId={ACCOUNT}
+      actionRef={REF}
+      disposition={view.triageDisposition}
+      onOutcomeRecorded={onOutcomeRecorded}
+    />,
   );
   await screen.findByRole("heading", { name: "답변 준비" });
+}
+
+/** The two API stubs a guided run needs, in the shape the panel expects. */
+function stubGuidedRun() {
+  vi.mocked(api.startReviewReplySubmissionRun).mockResolvedValue({
+    actionRef: REF,
+    submissionRef: "a1b2c3d4e5f60718",
+    approvedVersion: 1,
+  });
+  vi.mocked(api.recordReviewReplyOutcome).mockResolvedValue({
+    actionRef: REF,
+    recorded: true,
+    replayed: false,
+  });
 }
 
 describe("VocItemReplyPrep", () => {
@@ -659,6 +681,53 @@ describe("VocItemReplyPrep — guided submission (v1.6)", () => {
     expect(
       screen.getByText("SellerOps는 답변 여부를 확인하지 않습니다(확인 안 함)."),
     ).toBeInTheDocument();
+  });
+
+  it("tells the worklist a reply was posted, so the count and badge do not wait for a reload", async () => {
+    // The rule that a reported reply leaves the count is real but INVISIBLE without this: the count
+    // and the row are snapshots taken when the page loaded, so a seller working their queue would
+    // watch the number sit still and only learn the truth by reloading.
+    const user = userEvent.setup();
+    stubGuidedRun();
+    const onOutcomeRecorded = vi.fn();
+    await renderPanel(APPROVED, onOutcomeRecorded);
+
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await waitFor(() => expect(api.startReviewReplySubmissionRun).toHaveBeenCalled());
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue(OUTCOME_SUBMITTED);
+    await user.click(screen.getByRole("button", { name: "답변함으로 기록" }));
+
+    await waitFor(() => expect(onOutcomeRecorded).toHaveBeenCalledTimes(1));
+    // AFTER the server recorded it, never on the click — announcing work the backend has not
+    // recorded would make the queue lie in the other direction.
+    expect(api.recordReviewReplyOutcome).toHaveBeenCalled();
+  });
+
+  it("does NOT tell the worklist anything when the operator aborts", async () => {
+    // "I did not post it" leaves the review exactly where it was; a refetch would spend a request
+    // to redraw an identical page.
+    const user = userEvent.setup();
+    stubGuidedRun();
+    const onOutcomeRecorded = vi.fn();
+    await renderPanel(APPROVED, onOutcomeRecorded);
+
+    await user.click(screen.getByRole("button", { name: "네이버에서 직접 답변하기(가이드)" }));
+    await waitFor(() => expect(api.startReviewReplySubmissionRun).toHaveBeenCalled());
+    vi.mocked(api.getReviewReplyPrep).mockResolvedValue({
+      ...APPROVED,
+      outcome: {
+        operatorOutcome: "SUBMISSION_ABORTED",
+        verification: "UNVERIFIED",
+        recordedVersion: 1,
+        recordedFingerprint: "mock-abc",
+        awRunRef: "aw-mock-2",
+        recordedAt: "2026-05-20T00:00:00Z",
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "답변 안 함으로 기록" }));
+
+    await waitFor(() => expect(api.recordReviewReplyOutcome).toHaveBeenCalled());
+    expect(onOutcomeRecorded).not.toHaveBeenCalled();
   });
 
   it("shows a distinct outcome for an abort, and never a bare UNVERIFIED or 완료", async () => {

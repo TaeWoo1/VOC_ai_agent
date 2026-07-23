@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Section } from "./Section";
 import { AttentionSignalCard } from "./AttentionSignalCard";
 import { AttentionSignalDrilldown } from "./AttentionSignalDrilldown";
@@ -45,16 +45,23 @@ export function AttentionSignalList({
   const [period, setPeriod] = useState<Period>("d7");
   const range = useMemo(() => rangeFor(period), [period]);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Bumped when an operator records a reply as posted. The COUNT lives in this component's read, so
+  // refetching the drill-down alone would leave the headline stating a number the list contradicts —
+  // and the seller would watch it sit still while they worked. Composite rather than additive: the
+  // page-level refreshKey is a hash and may be any value, so summing the two could collide.
+  const [reloadKey, setReloadKey] = useState(0);
+  const noteOutcomeRecorded = useCallback(() => setReloadKey((k) => k + 1), []);
+  const readKey = `${refreshKey}:${reloadKey}`;
 
   const { data, loading, error } = useApiData(
     () => api.getAccountAttention(accountId, range),
-    [accountId, range.from, range.to, refreshKey],
+    [accountId, range.from, range.to, readKey],
   );
 
   // The drill-down is window-scoped; a window/account change invalidates it.
   useEffect(() => {
     setSelectedKey(null);
-  }, [accountId, range.from, range.to, refreshKey]);
+  }, [accountId, range.from, range.to, readKey]);
 
   const items = data ? sortBySeverity(data.items) : [];
   // The review-ops headline: the one number an operator wants right after an acquisition run.
@@ -116,7 +123,8 @@ export function AttentionSignalList({
                 accountId={accountId}
                 from={range.from}
                 to={range.to}
-                refreshKey={refreshKey}
+                refreshKey={readKey}
+                onOutcomeRecorded={noteOutcomeRecorded}
                 onClose={() => setSelectedKey(null)}
               />
             ) : null;
