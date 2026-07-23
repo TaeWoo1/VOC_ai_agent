@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -121,6 +122,26 @@ class OperatorReviewTriageControllerTest {
 
         // Nothing is written, and no row is even looked at, for a caller whose org is
         // unknown — the write is behind the same gate as the read.
+        verifyNoInteractions(service);
+    }
+
+    /**
+     * A wrong HTTP method on the POST-only triage route is a client error (405), never a
+     * server fault (500). Regression for the Run 7 attempt-3 verification, where a stray
+     * {@code PUT} on this route surfaced as 500 "서버 오류가 발생했습니다." and read as a
+     * backend defect — the catch-all in {@link com.sellerops.common.GlobalExceptionHandler}
+     * was swallowing {@code HttpRequestMethodNotSupportedException}. The service is never
+     * reached: the request fails at handler resolution, before any decision is attempted.
+     */
+    @Test
+    void aWrongMethodOnTheTriageRouteIs405NotAMasked500() throws Exception {
+        mockMvc.perform(put("/api/seller-accounts/{accountId}/attention/items/{actionRef}/triage", accountId, actionRef)
+                        .header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"commandId\":\"cmd-1\",\"disposition\":\"RESPONSE_NEEDED\"}"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.status").value(405));
+
         verifyNoInteractions(service);
     }
 
