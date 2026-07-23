@@ -136,7 +136,11 @@ public class Cafe24VocItemSource implements VocItemSource {
                 // category is always null: item_analyses covers `reviews` and `inquiries`, and a
                 // community article is neither, so nothing has ever analyzed this row. Same kind of
                 // capability limit as productName above — not a claim that it fits no category.
-                null);
+                null,
+                // Always false: reply outcomes are anchored on `reviews`, and a community article is
+                // not a review row — there is no guided reply to report. A capability limit, not a
+                // claim that nothing was posted.
+                false);
     }
 
     /** Instant → KST calendar date string (date only), or null when unknown. */

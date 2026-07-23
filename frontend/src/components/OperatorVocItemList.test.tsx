@@ -27,6 +27,7 @@ function row(over: Partial<OperatorVocItem> = {}): OperatorVocItem {
     triageDisposition: null,
     hasReplyPreparation: false,
     category: "배송",
+    hasReportedSubmission: false,
     ...over,
   };
 }

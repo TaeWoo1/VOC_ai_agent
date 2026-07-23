@@ -35,6 +35,7 @@ const IMPORTS = "최근 가져오기 기록"; // ImportHistoryList — the persi
 const REVIEW_WORK = "리뷰 업무 현황"; // idle review-work section (FE-12)
 const RECONNECT = "다시 연결"; // ConnectionBanner reconnect button
 const DIAGNOSTICS = "브리지 진단 (개발용)";
+const WORKLIST = "오늘 확인할 일"; // OperationsWorklist — the work itself
 
 describe("FE-7 Operations home page (store → DOM wiring)", () => {
   beforeEach(() => {
@@ -42,6 +43,8 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     devModeMock.isBridgeModeEnabled.mockReturnValue(false);
     // The rail reads persisted import history; keep it off the wire and deterministic.
     vi.spyOn(api, "getReviewImportsStrict").mockResolvedValue([]);
+    // The worklist resolves an account before it can show anything; keep it off the wire.
+    vi.spyOn(api, "getSellerAccountsStrict").mockResolvedValue([]);
     resetOps();
   });
 
@@ -61,6 +64,29 @@ describe("FE-7 Operations home page (store → DOM wiring)", () => {
     // The session list is a DEV fixture-preview affordance and is absent production-shaped: it
     // lived in browser memory and could never be a seller's record of their own work.
     expect(screen.queryByRole("region", { name: RECENT })).toBeNull();
+  });
+
+  it("puts the WORKLIST on this page — the whole reason the seller is here", async () => {
+    // Before this it rendered only on /settings/channels/:accountId, and nothing in 운영 linked
+    // there: the page named 리뷰 운영 showed run status and import counts and no reviews, while the
+    // work sat behind 연결·설정. This is the regression test for that.
+    seedHome("home-empty");
+    renderWithRouter(<OperationsHome />);
+    expect(await screen.findByRole("region", { name: WORKLIST })).toBeInTheDocument();
+  });
+
+  it("puts the work above the record — worklist in the body, import history in the rail", async () => {
+    // Order is the point, not decoration: the worklist is what the seller came to do and the import
+    // history is how it got here. `body` renders before `rail` on desktop AND mobile.
+    seedHome("home-empty");
+    const { container } = renderWithRouter(<OperationsHome />);
+    await screen.findByRole("region", { name: WORKLIST });
+
+    const worklist = screen.getByRole("region", { name: WORKLIST });
+    const imports = screen.getByRole("region", { name: IMPORTS });
+    expect(worklist.compareDocumentPosition(imports) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(container).toBeTruthy();
   });
 
   it("the session activity list returns only under the DEV fixture preview", () => {

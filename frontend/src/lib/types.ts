@@ -528,6 +528,15 @@ export interface OperatorVocItem {
   // and not a placeholder implying something is missing from the review. Always null for a
   // source that cannot classify (every Cafe24 community article).
   category: string | null;
+  // SellerOps' own record that the operator REPORTED posting the reply that currently stands — not
+  // the channel's statement, which is `replyStatus`. The two must stay visibly different: this can
+  // only ever say "기록됨", never "답변 완료", because verification is permanently UNVERIFIED (there
+  // is no read-back oracle for a public reply).
+  //
+  // A row carrying it is excluded from the needs-a-look COUNT but stays LISTED, sorted below every
+  // row that still needs doing. Excluded because the work is reported done; listed because the
+  // report is unverified and a mistaken one has to remain visible and correctable.
+  hasReportedSubmission: boolean;
 }
 
 // Mirrors com.sellerops.attention.triage.TriageDisposition. A decision, not a workflow

@@ -17,12 +17,16 @@ export function OperatorVocItemList({
   from,
   to,
   refreshKey = 0,
+  onOutcomeRecorded,
 }: {
   accountId: string;
   type: string;
   from: string;
   to: string;
-  refreshKey?: number;
+  /** Composite change-signal; only its identity matters, never its magnitude. */
+  refreshKey?: number | string;
+  /** Bubbled up so the COUNT above refetches too — this list alone cannot correct the headline. */
+  onOutcomeRecorded?: () => void;
 }) {
   const [page, setPage] = useState(0);
   // The active classification facet; null = all rows. Held here rather than in the card so the
@@ -99,7 +103,12 @@ export function OperatorVocItemList({
       <p className="mb-1 text-sm text-muted">총 {data.total.toLocaleString("ko-KR")}건</p>
       <ul className="divide-y divide-line">
         {data.items.map((item, i) => (
-          <VocItemCard key={vocItemKey(item, data.page, i)} item={item} accountId={accountId} />
+          <VocItemCard
+            key={vocItemKey(item, data.page, i)}
+            item={item}
+            accountId={accountId}
+            onOutcomeRecorded={onOutcomeRecorded}
+          />
         ))}
       </ul>
       <div className="mt-4 flex items-center justify-between">

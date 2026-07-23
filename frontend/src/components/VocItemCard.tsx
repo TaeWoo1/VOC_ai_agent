@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import type { OperatorVocItem, TriageDisposition } from "../lib/types";
-import { categoryChip, previewText, productLabel, replyStatusLabel } from "../lib/vocItems";
+import {
+  categoryChip,
+  previewText,
+  productLabel,
+  replyStatusLabel,
+  reportedSubmissionLabel,
+} from "../lib/vocItems";
 import { VocItemReplyPrep } from "./VocItemReplyPrep";
 import { VocItemTriageControl } from "./VocItemTriageControl";
 
@@ -12,11 +18,21 @@ import { VocItemTriageControl } from "./VocItemTriageControl";
 // The product is a display NAME only — the backend sends no product identifier here —
 // so it reads as the row's subject and is deliberately not a link or a routing target.
 
-export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accountId: string }) {
+export function VocItemCard({
+  item,
+  accountId,
+  onOutcomeRecorded,
+}: {
+  item: OperatorVocItem;
+  accountId: string;
+  /** Bubbled to the list so the count and this row's badge reflect a reply the operator just posted. */
+  onOutcomeRecorded?: () => void;
+}) {
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
   const product = productLabel(item.productName);
   const category = categoryChip(item.category);
+  const reported = reportedSubmissionLabel(item.hasReportedSubmission);
 
   // The row's LIVE decision, not the one the list last fetched.
   //
@@ -79,6 +95,17 @@ export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accoun
           {/* What the review is about, per the stored rule-based analysis. Context only — it
               does not decide whether the row is here. Absent when nothing analyzed the row:
               no chip at all, never a placeholder and never 기타 (see categoryChip). */}
+          {/* SellerOps' own record, beside the channel's chip and never merged into it: one says
+              what the marketplace reported at the last import, the other what the operator says they
+              did since. This row is already excluded from the headline count and sorted to the
+              bottom — the badge is what makes that visible instead of merely true. */}
+          {reported != null ? (
+            <span
+              className={`inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-medium ${reported.cls}`}
+            >
+              {reported.text}
+            </span>
+          ) : null}
           {category != null ? (
             <span
               className={`inline-flex items-center rounded-lg px-2 py-0.5 text-xs font-medium ${category.cls}`}
@@ -127,6 +154,7 @@ export function VocItemCard({ item, accountId }: { item: OperatorVocItem; accoun
           actionRef={item.actionRef}
           disposition={decided}
           onPrepared={promote}
+          onOutcomeRecorded={onOutcomeRecorded}
           onLocalWork={noteLocalWork}
         />
       ) : null}

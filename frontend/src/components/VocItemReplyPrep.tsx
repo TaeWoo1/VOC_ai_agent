@@ -51,6 +51,7 @@ export function VocItemReplyPrep({
   actionRef,
   disposition,
   onPrepared,
+  onOutcomeRecorded,
   onLocalWork,
   replyRuntime = defaultReplyRuntime,
 }: {
@@ -93,6 +94,18 @@ export function VocItemReplyPrep({
    * open for work the server never accepted.
    */
   onPrepared?: () => void;
+  /**
+   * Fired once a SUBMITTED outcome has been RECORDED by the server — the moment the worklist above
+   * stops counting this review and the row earns its 답변함으로 기록 badge.
+   *
+   * <p>Without it the rule is real and invisible: the count and the row are snapshots taken when the
+   * page loaded, so a seller who works through their queue watches the number sit still and only
+   * discovers the truth by reloading. Fired AFTER the server call, never on the operator's click —
+   * announcing work the backend has not recorded would make the queue lie in the other direction.
+   *
+   * <p>Not fired for an abort: "I did not post it" changes nothing about the queue.
+   */
+  onOutcomeRecorded?: () => void;
   /**
    * Whether this panel currently holds work that only exists here — an unsaved edit, or a
    * write in flight.
@@ -402,6 +415,12 @@ export function VocItemReplyPrep({
       });
       reportAttempt.current = null;
       setGuided(null);
+      // Only a reported SUBMISSION changes the worklist. An abort is a normal ending that leaves the
+      // review exactly where it was, so telling the list to refetch would spend a request to redraw
+      // an identical page.
+      if (terminal.operatorOutcome === "OPERATOR_REPORTED_SUBMITTED") {
+        onOutcomeRecorded?.();
+      }
       // Re-read so the recorded outcome (operatorOutcome + verification, as a pair) shows.
       await refresh();
     } catch {
