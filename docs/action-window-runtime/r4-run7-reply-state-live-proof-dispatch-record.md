@@ -12,6 +12,13 @@
 > artifact ⇒ nothing ingested; zero rows at teardown.** Both gates are **CONSUMED** — a retry needs
 > a fresh G3 + G6. Execution record, timeline, and findings: **§15**; filled evidence template: §11.
 > C1–C5 are all **NOT DEMONSTRATED** — the run ended at the human export barrier.
+>
+> **↳ ATTEMPT 2 — 2026-07-24, fresh G3+G6 (25-min timer-derived window), ALSO FAILED closed on
+> `DOWNLOAD_TIMEOUT` — but one step further:** the runtime **observed the export action**
+> (`observed:true`) and the operator reports the download started, yet the detector saw nothing in
+> its 60 s. **The blocker is now a repo-side download-detection gap (or a NAVER delivery change),
+> §16.3 — no attempt 3 until it is reproduced and closed OFFLINE.** Zero artifacts anywhere,
+> zero rows ingested, guarded teardown clean. Both 2026-07-24 gates CONSUMED (§16).
 
 > ## ⏸ DEFERRED 2026-07-23 (first attempt) — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
 >
@@ -486,3 +493,56 @@ persisted its Operation Run marker (8 → 9 files).
 4. **What Run 7 set out to prove remains unproven** — C1–C5 all `NOT DEMONSTRATED`. The claims
    still rest on synthetic fixtures plus the one offline-read real export. This record adds
    evidence about the *choreography*, not the *pipeline*.
+
+## 16. Execution record — 2026-07-24, third attempt (attempt 2 of the run; sanitized)
+
+### 16.1 Dispatch
+
+Fresh G3 (`export+ingest`, five boxes incl. network-for-current-environment; Bridge N/A with
+reason) + fresh single-use G6 affirmed in the dispatching turn of **2026-07-24**, with the window
+re-sized per §15.4 finding 1: **max live window 25 minutes, timer-derived**. Same channel /
+account / operator / no-reply bound as §15.2. Disposable backend `sellerops_run7_20260724T000758`
+on 18080 (fresh DB; survived a session restart mid-preparation — the prior turn's unlaunched
+affirmation was treated as VOID and re-affirmed fresh, per the register rule). The first launch
+attempt of this turn was blocked by the operator-side permission classifier; the operator granted
+the permission explicitly and the same affirmation carried the immediate retry — no live contact
+occurred in between.
+
+### 16.2 Timeline (KST)
+
+| Time | Event |
+|---|---|
+| 00:26:55 | Live window opens; ingest target confirmed `http://127.0.0.1:18080` on the run's own output |
+| 00:27:47 | Operator signals ready; sentinel created (**52 s** from window open — the §15.4-2 act-on-sight seat protocol worked) |
+| 00:28:05 | `aw.live.barrier {"observed":true}` — the runtime OBSERVED the export action (attempt 1 never got here) |
+| 00:29:06 | `DOWNLOAD_TIMEOUT` (exactly 60 s later) → **FAILED (2-of-3), fail-closed**; readiness green (`LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`); exit 0 |
+
+Teardown: 0 rows before drop · guarded drop clean · `sellerops` the only surviving `sellerops*`
+DB · credentials file removed · quarantine/downloads/profile/`~/Downloads`/Playwright temp all
+swept — **zero artifacts anywhere**.
+
+### 16.3 The finding — a download-detection miss, now the blocking question
+
+The operator reports, seconds after the observed action: **export clicked, the expected NAVER
+dialog confirmed, and a download started.** The detector saw nothing for its full 60 s. Action
+observed + operator-reported download + no detection = a **detection gap**, not a seat error:
+
+- Run 4 (`COMPLETED` 3-of-3) proved this exact two-step flow **with Run-4-era code** — detection
+  worked on this surface before.
+- The holder now runs `783a9b4`. Either the download-detection path regressed somewhere in the
+  intervening slices, **or NAVER changed how the export delivers** (e.g. async generation /
+  notification-center delivery instead of a direct download event), which the runtime would
+  experience identically.
+- Whatever fired, nothing survived: an intercepted download dies with the browser context, which
+  is the data posture working as designed.
+
+**Consequence: no attempt 3 until the gap is reproduced and closed OFFLINE.** Live is never the
+first execution of a code path (G4), and it is equally not the debugging environment. The
+investigation is repo-verifiable: diff the live driver's download-detection path Run-4-era →
+`783a9b4`, and re-run the headed human-click proof (§6's ladder) against a synthetic page whose
+download fires the way the operator describes. Two consumed gate pairs now say the same thing:
+the runtime's observe/readiness side is proven live; the download seam is where Run 7 dies.
+
+### 16.4 Gate state after attempt 2
+
+G3 #2 and G6 #2 (2026-07-24) are **CONSUMED** — register updated. C1–C5 remain `NOT DEMONSTRATED`.

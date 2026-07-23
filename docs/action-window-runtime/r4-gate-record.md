@@ -381,6 +381,34 @@ R4 live-run approval — RUN 7 (export+ingest) — CONSUMED (run FAILED closed)
 consumption follows the *run*, not the *result*. The same rule as every instance above: a further
 attempt starts from a blank template.
 
+```
+R4 live-run approval — RUN 7 ATTEMPT 2 (export+ingest) — CONSUMED (run FAILED closed)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest
+- backend:            disposable sellerops_run7_20260724T000758 on SERVER_PORT=18080, confirmed on
+                      the run's own output; dropped at teardown (0 rows), name-guarded
+- max live window:    25 minutes — timer-derived per dispatch record §15.4 finding 1; actual live
+                      window ~2 min 15 s (00:26:55 open → 00:29:06 terminal)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (2026-07-24 instance: same five
+                      boxes as the 2026-07-23 instance above, affirmed fresh for the current
+                      environment; Bridge N/A/CLI-loopback; the prior evening's UNLAUNCHED
+                      affirmation was treated as VOID and never carried)
+- P6:                 ✅ signed on G6 + G3 + standing same-tree G4 (783a9b4 unmodified, suites green
+                      2026-07-23: backend 1502/0/2sk · collector-in-holder 4843/95 · frontend 765)
+- outcome:            CONSUMED — the run drove once and FAILED closed: DOWNLOAD_TIMEOUT. One step
+                      past attempt 1: the export action was OBSERVED (observed:true) and the
+                      operator reports a started download, but the detector saw nothing in 60 s —
+                      a download-detection gap (or NAVER delivery change), dispatch record §16.3.
+                      Zero artifacts anywhere; zero ingest. NO ATTEMPT 3 until the gap is
+                      reproduced and closed OFFLINE — a further attempt then still starts from a
+                      blank template (fresh G3 + G6).
+```
+
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
 > the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a
