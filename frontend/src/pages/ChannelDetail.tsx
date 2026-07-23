@@ -7,7 +7,6 @@ import { HealthBadge } from "../components/HealthBadge";
 import { CapabilityBadges } from "../components/CapabilityBadges";
 import { ChannelSummaryCards } from "../components/ChannelSummaryCards";
 import { BackfillPanel } from "../components/BackfillPanel";
-import { AttentionSignalList } from "../components/AttentionSignalList";
 import { CommunityArticleList } from "../components/CommunityArticleList";
 import { api } from "../lib/apiClient";
 import { relativeTime, untilTime } from "../lib/format";
@@ -379,7 +378,11 @@ export function ChannelDetail() {
         <>
           {channel?.code ? <CapabilityBadges channelCode={channel.code} /> : null}
           <ChannelSummaryCards accountId={accountId} refreshKey={refreshKey} />
-          <AttentionSignalList accountId={accountId} refreshKey={refreshKey} />
+          {/* The worklist ("오늘 확인할 일") lives on /operations now, not here. This page is
+              connection and collection SETUP — health, credentials, schedules, backfill — and the
+              daily review/inquiry work was filed under 연결·설정 only because that is where the
+              accountId happened to be in scope. Nothing in 운영 linked here, so the seller was told
+              to find their work in Settings. One mount, on the operations surface. */}
           <BackfillPanel accountId={accountId} onCompleted={reload} />
         </>
       ) : null}

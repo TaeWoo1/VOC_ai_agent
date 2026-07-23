@@ -8,7 +8,8 @@ import { channelLabel } from "../../lib/actionWindow/copy";
  * run view carries no acquired-row count (the ingest outcome is reduced to `{ok, processed}` at the
  * handoff and is persisted nowhere), so this component must not imply a finished analysis or a
  * number it cannot show. It states what the run proves — the export was collected and handed on —
- * and points at the surface that does hold the review-ops number ("오늘 확인할 일", which reads the
+ * and points at the surface that does hold the review-ops number ("오늘 확인할 일" — now on THIS
+ * page, where it used to send people to a channel screen under Settings, which reads the
  * attention endpoint per seller account). Do not restore a completion claim here without a field
  * that backs it; that would be a contract change, not a copy change.
  */
@@ -28,8 +29,8 @@ export function CompletedResult({ run }: { run: ActionWindowRunView }) {
         {channelLabel(run.channelCode)} 리뷰를 가져와 SellerOps에 넘겼어요.
       </p>
       <p className="mt-1 text-sm text-muted">
-        무엇이 들어왔는지는 리뷰 운영 홈의 &lsquo;최근 가져오기 기록&rsquo;에, 확인이 필요한 리뷰는
-        채널 화면의 &lsquo;오늘 확인할 일&rsquo;에 표시돼요.
+        무엇이 들어왔는지는 &lsquo;최근 가져오기 기록&rsquo;에, 확인이 필요한 리뷰는 아래
+        &lsquo;오늘 확인할 일&rsquo;에 표시돼요.
       </p>
       <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-xl bg-surface p-3">

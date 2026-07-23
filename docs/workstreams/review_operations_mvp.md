@@ -102,6 +102,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
       *about the last import*: a reply posted since is invisible until the next one.
 
 ### ACT (bounded: prepare + guided only)
+- [x] **The seller can reach their review work from the operations surface** — the worklist,
+      triage, reply preparation and the guided reply run render on `/operations`, not behind
+      연결·설정. Multi-account orgs choose explicitly; nothing is auto-picked
+      (`docs/slices/operations-review-worklist-v1.md`).
 - [ ] Response **prepared** for a review needing reply
 - [ ] Seller **guided** to post it (human-performed, observe-only; SellerOps does not submit)
 - [ ] Posting recorded honestly — `UNVERIFIED` where no official API can confirm
@@ -137,6 +141,28 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Operations Review Worklist v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** the hand-off between PRIORITIZE and ACT
+- **Did:** A journey audit (import history → worklist → detail/draft/approval → Action Window) found
+  the largest seller-visible break was not a missing feature but a misplaced one: the worklist —
+  headline, worst-first list, facet, triage, draft, approval and the guided reply run — rendered ONLY
+  at `/settings/channels/:accountId`, and **nothing in 운영 linked there**. The page named 리뷰 운영
+  showed run status and import counts and no reviews, while its own completion copy told the seller to
+  go to "채널 화면". Moved it: Operations is the review action surface, Settings keeps connection and
+  setup diagnostics. One mount, not two.
+- **Evidence:** `docs/slices/operations-review-worklist-v1.md`; frontend 733 (was 710), backend 1490
+  and collector 4843/95 **untouched**; typechecks clean. Five falsifications caught — one of them for
+  real, when a `git checkout --` during falsification silently reverted the copy fix.
+- **§4.1 impact:** none. This changes where a seller finds their work, not what a channel supports.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact. **Run 7 stays deferred** until the approved
+  network/IP environment returns.
+- **Blockers:** none. ⚠ Multi-account orgs must now CHOOSE — nothing is auto-picked, because
+  `reviews` has no `seller_account_id` and the backend already refuses that attribution. ⚠ The
+  false-calm limitation behind that refusal is unchanged and still invisible to the client.
+- **Next:** continue the journey audit at the next break — worklist → detail → draft → approval →
+  Action Window.
 
 ### 2026-07-23 — Review Analysis Evaluation & Reanalysis Foundation v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** UNDERSTAND / PRIORITIZE (the machinery, not the judgement)

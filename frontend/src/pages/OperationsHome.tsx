@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { HOME_SCENARIO_NAMES, type HomeScenarioName } from "../lib/actionWindow/homeFixtures";
 import {
   dispatchOperationsCommand,
@@ -21,6 +22,27 @@ import { SimulationPreview } from "../components/actionWindow/SimulationPreview"
 import { BridgeDiagnostics } from "../components/actionWindow/BridgeDiagnostics";
 import { RecentActivityList } from "../components/actionWindow/RecentActivityList";
 import { ImportHistoryList } from "../components/actionWindow/ImportHistoryList";
+import { OperationsWorklist } from "../components/OperationsWorklist";
+
+/**
+ * Run statuses after which the backend may hold rows the worklist has not seen.
+ *
+ * COMPLETED is the one that matters — an export landed. FAILED and CANCELLED are included because a
+ * run can fail AFTER a partial ingest (`PARTIAL` is a real import outcome), so treating them as
+ * "nothing changed" would leave the seller looking at a list that silently predates their own work.
+ * The in-flight statuses are deliberately absent: nothing has reached the backend yet, so refetching
+ * would spend requests redrawing the same list.
+ */
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+/** Stable small integer from a runId — a changed value is the signal; its magnitude means nothing. */
+function hashRunId(runId: string): number {
+  let hash = 0;
+  for (let i = 0; i < runId.length; i += 1) {
+    hash = (hash * 31 + runId.charCodeAt(i)) | 0;
+  }
+  return hash;
+}
 
 const HOME_SCENARIO_LABEL: Record<HomeScenarioName, string> = {
   "home-empty": "처음 (기록 없음)",
@@ -53,6 +75,12 @@ export function OperationsHome() {
   const note = useOperationsNote();
   const reconnect = useBridgeReconnect(); // FE-4: manual live-Bridge reconnect
   const connected = connection === "connected";
+  // Changes only when a run SETTLES, not on every revision: an in-flight run has not handed
+  // anything to the backend yet, so refetching mid-run would spend requests to redraw the same list.
+  const worklistRefreshKey = useMemo(
+    () => (run !== null && TERMINAL_RUN_STATUSES.has(run.status) ? hashRunId(run.runId) : 0),
+    [run],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -152,18 +180,28 @@ export function OperationsHome() {
           fixture-preview affordance, and is shown only under the fixture-preview gate. */}
       <WorkbenchLayout
         body={
-          run === null ? (
-            <ReviewWorkCard
-              connected={connected}
-              onStart={() => dispatchOperationsCommand("START_RUN")}
-            />
-          ) : (
-            <ActiveRunCard
-              run={run}
-              onStartNew={() => dispatchOperationsCommand("START_RUN")}
-              actionsEnabled={connected}
-            />
-          )
+          <>
+            {run === null ? (
+              <ReviewWorkCard
+                connected={connected}
+                onStart={() => dispatchOperationsCommand("START_RUN")}
+              />
+            ) : (
+              <ActiveRunCard
+                run={run}
+                onStartNew={() => dispatchOperationsCommand("START_RUN")}
+                actionsEnabled={connected}
+              />
+            )}
+            {/* The work itself, on the page named for it. It belongs in `body` and not the rail:
+                the worklist is what the seller came to do, and the import history beside it is the
+                record of how it got here. Mobile stacks the rail after the body, so the work stays
+                above the record on both. */}
+            {/* Bumped when a run reaches a terminal, so the list below an import reflects it —
+                the completion copy points at this section by position ("아래"), and a stale list
+                would make that sentence untrue the one time a seller is certain to read it. */}
+            <OperationsWorklist refreshKey={worklistRefreshKey} />
+          </>
         }
         rail={
           <div className="flex flex-col gap-4">
