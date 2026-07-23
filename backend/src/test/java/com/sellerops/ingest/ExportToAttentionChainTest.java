@@ -123,6 +123,7 @@ class ExportToAttentionChainTest {
     @Autowired ReviewTriageRepository triage;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ItemAnalysisRepository itemAnalyses;
 
     private FileUploadConnector connector;
     private OperatorAttentionService attention;
@@ -162,7 +163,7 @@ class ExportToAttentionChainTest {
                 new VocItemSourceRegistry(List.of(
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
-                                replyDrafts, replyApprovals))));
+                                replyDrafts, replyApprovals, itemAnalyses))));
 
         channelId = seedNaverChannel();
         // EXACTLY ONE account on this channel. A second would trip the ambiguity guard
@@ -296,7 +297,7 @@ class ExportToAttentionChainTest {
     /** The single row behind LOW_RATING_REVIEW — fails loudly if the chain produced none. */
     private OperatorVocItem onlyDrilledItem() {
         OperatorVocItemPage page = attention.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
         assertThat(page.items()).hasSize(1);
         return page.items().get(0);
     }

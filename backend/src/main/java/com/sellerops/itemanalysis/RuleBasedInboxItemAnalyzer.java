@@ -32,18 +32,23 @@ public class RuleBasedInboxItemAnalyzer implements InboxItemAnalyzer {
     static final String HIGH = "HIGH";
 
     // Categories in detection order: first keyword hit wins, else 기타.
+    //
+    // The NAMES come from ItemAnalysisCategories, not from literals here: a category this
+    // analyzer can emit but a filter cannot name would be silently unreachable on every
+    // surface that facets by category. The keyword lists stay local — they are this
+    // analyzer's detection strategy, which a future AI adapter would not share.
     private record Category(String name, List<String> keywords) {
     }
 
     private static final List<Category> CATEGORIES = List.of(
-            new Category("배송", List.of("배송", "택배", "발송", "도착", "출고")),
-            new Category("교환", List.of("교환", "반품", "환불")),
-            new Category("제품정보", List.of("사양", "스펙", "호환", "성분", "크기", "mm")),
-            new Category("설치", List.of("설치", "시공", "부착")),
-            new Category("가격", List.of("가격", "비싸", "할인", "가성비")),
-            new Category("품질", List.of("불량", "하자", "깨짐", "터짐", "품질")),
-            new Category("색상", List.of("색상", "컬러", "색깔")),
-            new Category("사이즈", List.of("사이즈", "길이", "폭")));
+            new Category(ItemAnalysisCategories.DELIVERY, List.of("배송", "택배", "발송", "도착", "출고")),
+            new Category(ItemAnalysisCategories.EXCHANGE, List.of("교환", "반품", "환불")),
+            new Category(ItemAnalysisCategories.PRODUCT_INFO, List.of("사양", "스펙", "호환", "성분", "크기", "mm")),
+            new Category(ItemAnalysisCategories.INSTALLATION, List.of("설치", "시공", "부착")),
+            new Category(ItemAnalysisCategories.PRICE, List.of("가격", "비싸", "할인", "가성비")),
+            new Category(ItemAnalysisCategories.QUALITY, List.of("불량", "하자", "깨짐", "터짐", "품질")),
+            new Category(ItemAnalysisCategories.COLOR, List.of("색상", "컬러", "색깔")),
+            new Category(ItemAnalysisCategories.SIZE, List.of("사이즈", "길이", "폭")));
 
     private static final List<String> COMPLAINT_KEYWORDS =
             List.of("불량", "하자", "환불", "실망", "별로");
@@ -70,7 +75,7 @@ public class RuleBasedInboxItemAnalyzer implements InboxItemAnalyzer {
                 }
             }
         }
-        return "기타";
+        return ItemAnalysisCategories.FALLBACK;
     }
 
     private String sentiment(SourceItem item, String body, boolean isReview) {
@@ -95,13 +100,15 @@ public class RuleBasedInboxItemAnalyzer implements InboxItemAnalyzer {
         if (!unanswered) {
             return LOW;
         }
-        return ("배송".equals(category) || "교환".equals(category)) ? HIGH : NORMAL;
+        return (ItemAnalysisCategories.DELIVERY.equals(category)
+                || ItemAnalysisCategories.EXCHANGE.equals(category)) ? HIGH : NORMAL;
     }
 
     private String recommendedAction(SourceItem item, String category, String sentiment,
                                      boolean isReview) {
         if (isReview) {
-            if (NEGATIVE.equals(sentiment) && ("품질".equals(category) || "제품정보".equals(category))) {
+            if (NEGATIVE.equals(sentiment) && (ItemAnalysisCategories.QUALITY.equals(category)
+                    || ItemAnalysisCategories.PRODUCT_INFO.equals(category))) {
                 return "상세페이지 개선 후보";
             }
             return "확인 필요";
@@ -110,7 +117,7 @@ public class RuleBasedInboxItemAnalyzer implements InboxItemAnalyzer {
             return "답변 필요";
         }
         // Answered product-info questions are repeat-FAQ candidates.
-        return "제품정보".equals(category) ? "FAQ 후보" : "확인 필요";
+        return ItemAnalysisCategories.PRODUCT_INFO.equals(category) ? "FAQ 후보" : "확인 필요";
     }
 
     /**

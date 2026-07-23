@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.sellerops.attention.dto.CategoryCount;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
@@ -46,12 +47,33 @@ class OperatorAttentionControllerTest {
         LocalDate from = LocalDate.parse("2026-05-01");
         LocalDate to = LocalDate.parse("2026-05-31");
         AuthPrincipal principal = new AuthPrincipal(UUID.randomUUID(), orgId, "op@example.com");
-        OperatorVocItemPage view = new OperatorVocItemPage("NEW_REVIEW", from, to, 0, 20, 0, List.of());
-        when(service.attentionItems(orgId, accountId, "NEW_REVIEW", from, to, 0, 20)).thenReturn(view);
+        OperatorVocItemPage view = new OperatorVocItemPage("NEW_REVIEW", from, to, 0, 20, 0, 0, List.of(), 0L, List.of());
+        when(service.attentionItems(orgId, accountId, "NEW_REVIEW", from, to, null, 0, 20)).thenReturn(view);
 
-        OperatorVocItemPage result = controller.attentionItems(principal, accountId, "NEW_REVIEW", from, to, 0, 20);
+        OperatorVocItemPage result = controller.attentionItems(principal, accountId, "NEW_REVIEW", from, to, null, 0, 20);
 
         assertThat(result).isSameAs(view);
-        verify(service).attentionItems(orgId, accountId, "NEW_REVIEW", from, to, 0, 20);
+        verify(service).attentionItems(orgId, accountId, "NEW_REVIEW", from, to, null, 0, 20);
+    }
+
+    @Test
+    void attentionItemsPassesTheCategoryFacetThroughUntouched() {
+        // The controller must not interpret the facet — validation (and the 400 for an unrecognised
+        // value) belongs to the service, so a raw value reaching it unaltered is the contract.
+        UUID orgId = UUID.randomUUID();
+        UUID accountId = UUID.randomUUID();
+        LocalDate from = LocalDate.parse("2026-05-01");
+        LocalDate to = LocalDate.parse("2026-05-31");
+        AuthPrincipal principal = new AuthPrincipal(UUID.randomUUID(), orgId, "op@example.com");
+        OperatorVocItemPage view = new OperatorVocItemPage(
+                "LOW_RATING_REVIEW", from, to, 0, 20, 1, 3, List.of(new CategoryCount("배송", 1L)), 2L, List.of());
+        when(service.attentionItems(orgId, accountId, "LOW_RATING_REVIEW", from, to, "배송", 0, 20))
+                .thenReturn(view);
+
+        OperatorVocItemPage result = controller.attentionItems(
+                principal, accountId, "LOW_RATING_REVIEW", from, to, "배송", 0, 20);
+
+        assertThat(result).isSameAs(view);
+        verify(service).attentionItems(orgId, accountId, "LOW_RATING_REVIEW", from, to, "배송", 0, 20);
     }
 }

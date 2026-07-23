@@ -18,7 +18,9 @@
   `ARTIFACT_INVALID` and an empty export treated as an honest zero. **Reply state is now preserved**
   (2026-07-23): already-answered reviews leave the action queue and cannot be guided into a duplicate
   public reply. **Import history is now persistent** (2026-07-23): the seller can see what each
-  import brought after a reload. Guided ACT remains offline. ⚠ **No live evidence for any of it** —
+  import brought after a reload. **The queue is a worklist** (2026-07-23): worst-first, each row
+  showing its stored category and filterable by it — visibility and ordering only, the membership
+  rule is unchanged. Guided ACT remains offline. ⚠ **No live evidence for any of it** —
   everything since Run 4 rests on synthetic fixtures. **Nothing promoted in §4.1.**
 - **Last updated:** 2026-07-23
 - **Owner:** SellerOps product/engineering
@@ -73,7 +75,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
       backend tests, with the FE asserting the same `expectedAttention` declaration)
 
 ### UNDERSTAND / PRIORITIZE
-- [ ] Reviews classified (needs-response / risk / informational)
+- [ ] Reviews classified (needs-response / risk / informational) — ⚠ **not this.** A rule-based
+      category IS stored per review and is now visible and filterable in the queue
+      (`docs/slices/review-classification-queue-v1.md`), but it does not decide who is in the queue,
+      and for reviews the analyzer's sentiment/urgency are pure functions of `rating` — so nothing
+      here yet classifies by need. Stays unchecked deliberately.
+- [x] **The queue is ordered worst-first, and says what each review is about** — the "needs a look"
+      lens orders `rating asc, receivedAt desc` (arrivals stay chronological), rows carry their stored
+      category, and the drill-down filters by it over server-computed window counts. An unanalyzed row
+      stays in the queue with no chip; 기타 (a verdict) and 분류 전 (a coverage gap) never collapse
+      (`docs/slices/review-classification-queue-v1.md`).
 - [ ] Urgency + operational-risk signals computed (recencyBucket only; no internal timing surfaced)
 - [x] Surfaced in the seller center with alerts (`docs/sellerops_frontend_spec.md`) — proven against a
       **running backend** 2026-07-23: a synthetic Action Window run reached a disposable local backend
@@ -121,6 +132,36 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Classification-Aware Review Queue v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** UNDERSTAND / PRIORITIZE
+- **Did:** Made the queue a worklist instead of a date-ordered list. `item_analyses` had carried a
+  category for every ingested review since V5 and only the Inbox read it; the queue ranked by arrival
+  date, so a 3★ from this morning outranked a 1★ from yesterday. The "needs a look" lens now orders
+  worst-first (arrival lenses stay chronological), each row shows what it is about, and the drill-down
+  can be filtered by category — with server-computed window counts, since a server-paginated page of
+  ten cannot describe the window. Added `ItemAnalysisCategories` as the one vocabulary the analyzer
+  writes and the facet filters on, plus V23.
+- **Evidence:** `docs/slices/review-classification-queue-v1.md`; backend 1458 (was 1433), frontend 710
+  (was 691), collector 4843/95 unchanged; both typechecks clean. Eight falsifications, all caught. Two
+  independent review passes found 5 real defects — an over-claiming drill-down heading, a WARN log
+  echoing an unvetted category value, an undocumented break in the count reconciliation, an active
+  filter that could outlive its own options, and a valid category silently dropped on a lens that
+  cannot use it (now a 400) — all fixed (§6).
+  V23 applied to a disposable PostgreSQL 15 database (history contiguous 1–23) and the new JPQL was
+  executed against real PostgreSQL as well as H2, since the test profile disables Flyway.
+- **§4.1 impact:** none. This changes what an operator sees and in what order, not what a channel
+  supports.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact. Run 7 remains deferred.
+- **Blockers:** none. ⚠ **The queue definition is UNCHANGED** — `[ ] Reviews classified` stays
+  unchecked. A key finding scoped this slice: for reviews the analyzer's `sentiment` and `urgency` are
+  pure functions of `rating` (`negative = rating<=2`), so only `category` is body-derived. A 5★
+  "배송이 늦었어요" is therefore undetectable by `rules-v1` — requeueing on classification needs a
+  polarity-aware analyzer, not a join.
+- **Next:** the high-rating complaint — a `rules-v2` analyzer with body polarity, a re-analysis path
+  (`analyzeForSources` is skip-if-exists; `backfillMissing` only fills missing rows), and a `[PO]`
+  decision on the complaint vocabulary. Surfaced as its own signal, never folded into the headline.
 
 ### 2026-07-23 — Import Outcome & History v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACQUIRE (the operator's record of it)

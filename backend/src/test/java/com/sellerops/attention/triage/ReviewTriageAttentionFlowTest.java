@@ -23,6 +23,7 @@ import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
+import com.sellerops.itemanalysis.ItemAnalysisRepository;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -85,6 +86,7 @@ class ReviewTriageAttentionFlowTest {
     @Autowired ReviewTriageRepository triages;
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
+    @Autowired ItemAnalysisRepository itemAnalyses;
     @Autowired ReviewTriageAuditRepository audits;
     @Autowired PlatformTransactionManager txManager;
 
@@ -105,7 +107,7 @@ class ReviewTriageAttentionFlowTest {
         VocItemSourceRegistry registry = new VocItemSourceRegistry(List.of(
                 new Cafe24VocItemSource(articles),
                 new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triages,
-                        replyDrafts, replyApprovals)));
+                        replyDrafts, replyApprovals, itemAnalyses)));
         attention = new OperatorAttentionService(sellerAccounts, channels, registry);
         triage = new ReviewTriageService(triages, audits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, audits, txManager));
@@ -323,7 +325,7 @@ class ReviewTriageAttentionFlowTest {
     // --- helpers ----------------------------------------------------------------
 
     private OperatorVocItemPage drill(UUID account, AttentionSignalType type) {
-        return attention.attentionItems(org, account, type.name(), FROM, TO, 0, 20);
+        return attention.attentionItems(org, account, type.name(), FROM, TO, null, 0, 20);
     }
 
     private static List<Object> summarize(OperatorAttentionSummary s) {

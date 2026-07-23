@@ -89,6 +89,21 @@ package com.sellerops.attention.dto;
  *
  * <p>{@code false} for every row that cannot be prepped at all (a null {@code actionRef}),
  * which is a capability limit rather than a claim that no work exists.
+ *
+ * <p>{@code category} is the row's stored rule-based analysis category — one of the nine fixed
+ * labels in {@code ItemAnalysisCategories}. It does not contradict the METADATA ONLY rule: it is
+ * derived from keyword hits and is never an excerpt, so it carries no customer text (see
+ * {@code RuleBasedInboxItemAnalyzer}, whose summary/category outputs are built only from rule
+ * results). It is CONTEXT, not a queue rule — a row's presence here is still decided by rating and
+ * reply state alone.
+ *
+ * <p>{@code null} means NO analysis row exists for this review, and it is a coverage fact rather
+ * than a verdict: analysis runs on newly-inserted ids only and swallows its own failures, so a row
+ * can be perfectly ordinary and still unanalyzed. It is deliberately distinct from the stored
+ * {@code 기타} category, which IS a verdict ("we looked; it fits nothing"). A client must render the
+ * null as no statement at all — not as 기타, and not as a placeholder implying something is missing
+ * from the review. It is also always {@code null} for a source that cannot classify (Cafe24
+ * community articles have no analyses), the same capability limit {@code productName} carries.
  */
 public record OperatorVocItem(
         String channelCode,
@@ -103,5 +118,6 @@ public record OperatorVocItem(
         String safePreview,
         String actionRef,
         String triageDisposition,
-        boolean hasReplyPreparation) {
+        boolean hasReplyPreparation,
+        String category) {
 }

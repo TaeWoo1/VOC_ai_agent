@@ -66,7 +66,7 @@ class OperatorAttentionItemsServiceTest {
         article(f, "PRODUCT_INQUIRY", "2026-05-12T12:00:00+09:00", "UNKNOWN", null);
         article(f, "REVIEW", "2026-05-13T12:00:00+09:00", "PENDING", 2);   // wrong source kind
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "UNANSWERED_INQUIRY", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "UNANSWERED_INQUIRY", FROM, TO, null, 0, 20);
 
         assertThat(p.signalType()).isEqualTo("UNANSWERED_INQUIRY");
         assertThat(p.total()).isEqualTo(1);
@@ -85,7 +85,7 @@ class OperatorAttentionItemsServiceTest {
         article(f, "PRODUCT_INQUIRY", "2026-05-10T12:00:00+09:00", "PENDING", null);
         article(f, "PRODUCT_INQUIRY", "2026-05-11T12:00:00+09:00", "UNKNOWN", null);
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "UNKNOWN_REPLY_STATUS", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "UNKNOWN_REPLY_STATUS", FROM, TO, null, 0, 20);
 
         assertThat(p.total()).isEqualTo(1);
         assertThat(p.items()).extracting(OperatorVocItem::replyStatus).containsExactly("UNKNOWN");
@@ -101,7 +101,7 @@ class OperatorAttentionItemsServiceTest {
         article(f, "REVIEW", "2026-05-09T12:00:00+09:00", "UNKNOWN", 5);   // excluded
         article(f, "REVIEW", "2026-05-10T12:00:00+09:00", "UNKNOWN", null); // excluded (null rating)
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(p.total()).isEqualTo(3);
         assertThat(p.items()).extracting(OperatorVocItem::rating).containsExactlyInAnyOrder(1, 2, 3);
@@ -114,8 +114,8 @@ class OperatorAttentionItemsServiceTest {
         article(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5);
         article(f, "PRODUCT_INQUIRY", "2026-05-06T12:00:00+09:00", "ANSWERED", null);
 
-        OperatorVocItemPage reviews = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
-        OperatorVocItemPage inquiries = service.attentionItems(org, f.accountId, "NEW_INQUIRY", FROM, TO, 0, 20);
+        OperatorVocItemPage reviews = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20);
+        OperatorVocItemPage inquiries = service.attentionItems(org, f.accountId, "NEW_INQUIRY", FROM, TO, null, 0, 20);
 
         assertThat(reviews.items()).extracting(OperatorVocItem::sourceType).containsExactly("REVIEW");
         assertThat(inquiries.items()).extracting(OperatorVocItem::sourceType).containsExactly("INQUIRY");
@@ -128,7 +128,7 @@ class OperatorAttentionItemsServiceTest {
         article(f, "REVIEW", "2026-04-15T12:00:00+09:00", "UNKNOWN", 5);   // prior (baseline) window
 
         OperatorVocItemPage p = service.attentionItems(
-                org, f.accountId, "RECENT_REVIEW_SPIKE_CANDIDATE", FROM, TO, 0, 20);
+                org, f.accountId, "RECENT_REVIEW_SPIKE_CANDIDATE", FROM, TO, null, 0, 20);
 
         // The spike's baseline window is compared, never listed: only the current row shows.
         assertThat(p.signalType()).isEqualTo("RECENT_REVIEW_SPIKE_CANDIDATE");
@@ -143,7 +143,7 @@ class OperatorAttentionItemsServiceTest {
         article(f, "REVIEW", "2026-04-30T12:00:00+09:00", "UNKNOWN", 1);   // before window
         articleUnknownDate(f, "REVIEW", "UNKNOWN", 1);                     // null source date
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(p.total()).isEqualTo(1);
         assertThat(p.items()).hasSize(1);
@@ -157,45 +157,45 @@ class OperatorAttentionItemsServiceTest {
         article(f, "REVIEW", "2026-05-06T12:00:00+09:00", "UNKNOWN", 5);
         article(f, "REVIEW", "2026-05-07T12:00:00+09:00", "UNKNOWN", 5);
 
-        OperatorVocItemPage page0 = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 2);
+        OperatorVocItemPage page0 = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 2);
         assertThat(page0.total()).isEqualTo(3);
         assertThat(page0.page()).isEqualTo(0);
         assertThat(page0.size()).isEqualTo(2);
         assertThat(page0.items()).hasSize(2);
 
-        OperatorVocItemPage page1 = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 1, 2);
+        OperatorVocItemPage page1 = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 1, 2);
         assertThat(page1.items()).hasSize(1);
 
         // An over-large requested size is clamped to the ceiling.
-        OperatorVocItemPage capped = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 1000);
+        OperatorVocItemPage capped = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 1000);
         assertThat(capped.size()).isEqualTo(50);
     }
 
     @Test
     void rejectsAnInvertedWindow() {
         Fixture f = seedChannelAndAccount();
-        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NEW_REVIEW", TO, FROM, 0, 20))
+        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NEW_REVIEW", TO, FROM, null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 
     @Test
     void rejectsAMissingBound() {
         Fixture f = seedChannelAndAccount();
-        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NEW_REVIEW", null, TO, 0, 20))
+        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NEW_REVIEW", null, TO, null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 
     @Test
     void rejectsAnUnknownSignalType() {
         Fixture f = seedChannelAndAccount();
-        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NOT_A_SIGNAL", FROM, TO, 0, 20))
+        assertThatThrownBy(() -> service.attentionItems(org, f.accountId, "NOT_A_SIGNAL", FROM, TO, null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 
     @Test
     void isOrgScopedSoACrossOrgAccountReadsAsNotFound() {
         Fixture f = seedChannelAndAccount();
-        assertThatThrownBy(() -> service.attentionItems(UUID.randomUUID(), f.accountId, "NEW_REVIEW", FROM, TO, 0, 20))
+        assertThatThrownBy(() -> service.attentionItems(UUID.randomUUID(), f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -227,7 +227,7 @@ class OperatorAttentionItemsServiceTest {
         articleWithText(f, "REVIEW", "2026-05-05T12:00:00+09:00", "UNKNOWN", 5,
                 null, "배송 빨라요 연락은 010-1234-5678 로 주세요");
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20);
 
         String preview = p.items().get(0).safePreview();
         assertThat(preview).isNotNull().contains("[전화번호]")
@@ -240,7 +240,7 @@ class OperatorAttentionItemsServiceTest {
         articleWithText(f, "REVIEW", "2026-05-06T12:00:00+09:00", "UNKNOWN", 5,
                 null, "010-1234-5678 buyer@example.com");
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(p.items().get(0).safePreview()).isNull();
     }
@@ -250,7 +250,7 @@ class OperatorAttentionItemsServiceTest {
         Fixture f = seedChannelAndAccount();
         articleWithText(f, "REVIEW", "2026-05-07T12:00:00+09:00", "UNKNOWN", 5, null, null);
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(p.items().get(0).safePreview()).isNull();
     }
@@ -263,7 +263,7 @@ class OperatorAttentionItemsServiceTest {
         // resolve a real one from. The row stays null: "not available on this channel".
         articleWithProductNo(f, "2026-05-08T12:00:00+09:00", 987654L, "배송 빨라요");
 
-        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, 0, 20);
+        OperatorVocItemPage p = service.attentionItems(org, f.accountId, "NEW_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(p.items()).singleElement()
                 .satisfies(item -> {

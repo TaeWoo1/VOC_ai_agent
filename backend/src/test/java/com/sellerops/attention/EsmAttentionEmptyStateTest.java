@@ -71,7 +71,7 @@ class EsmAttentionEmptyStateTest {
         UUID accountId = seedGmarketAccount();
 
         OperatorVocItemPage page = service.attentionItems(
-                org, accountId, "LOW_RATING_REVIEW", FROM, TO, 0, 20);
+                org, accountId, "LOW_RATING_REVIEW", FROM, TO, null, 0, 20);
 
         assertThat(page.signalType()).isEqualTo("LOW_RATING_REVIEW");
         assertThat(page.items()).isEmpty();

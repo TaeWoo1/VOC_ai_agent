@@ -79,6 +79,7 @@ function naverReviewItem(over: Partial<Omit<OperatorVocItem, NaverInvariant>> = 
     actionRef: "review:6f1c8b1e-0000-4000-8000-000000000001",
     triageDisposition: null,
     hasReplyPreparation: false,
+    category: "배송",
     ...over,
   };
 }
@@ -447,5 +448,33 @@ describe("VocItemCard product context", () => {
     const row = renderCard();
     expect(row.querySelector(".md\\:flex-row")).not.toBeNull();
     expect(row.querySelector(".md\\:justify-between")).not.toBeNull();
+  });
+});
+
+describe("VocItemCard classification chip", () => {
+  it("shows what the review is about", () => {
+    render(<VocItemCard item={naverReviewItem({ category: "배송" })} accountId="a" />);
+    expect(screen.getByText("배송")).toBeInTheDocument();
+  });
+
+  it("shows NOTHING when the row was never analyzed", () => {
+    // A null category is a coverage gap, not a verdict. A placeholder — or worse, 기타 —
+    // would report a system failure as a finding about the seller's review.
+    const { container } = render(
+      <VocItemCard item={naverReviewItem({ category: null })} accountId="a" />,
+    );
+    expect(screen.queryByText("기타")).not.toBeInTheDocument();
+    expect(container.textContent).not.toContain("분류 없음");
+    expect(container.textContent).not.toContain("분류 미상");
+  });
+
+  it("keeps an unanalyzed row otherwise complete — the chip is the only thing missing", () => {
+    // Fail open: the row must stay fully readable and fully actionable. Losing the preview,
+    // the rating or the triage control along with the chip would turn a missing analysis into
+    // a degraded row.
+    render(<VocItemCard item={naverReviewItem({ category: null })} accountId="a" />);
+    expect(screen.getByText("배송은 빨랐는데 색이 생각과 달라요")).toBeInTheDocument();
+    expect(screen.getByText("★★")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "처리 상태" })).toBeInTheDocument();
   });
 });

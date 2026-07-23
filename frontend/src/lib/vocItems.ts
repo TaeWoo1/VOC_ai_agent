@@ -103,6 +103,85 @@ export function productLabel(productName: string | null): ProductLabel {
   return { text: PRODUCT_PLACEHOLDER, isPlaceholder: true };
 }
 
+// --- Classification facet (stored rule-based analysis category) ---
+
+/** The reserved server-side sentinel for "no analysis row exists". Never a stored category. */
+export const UNCLASSIFIED = "unclassified";
+
+/** FE-owned label for the unclassified bucket. */
+export const UNCLASSIFIED_LABEL = "분류 전";
+
+export interface CategoryChip {
+  text: string;
+  cls: string;
+}
+
+/**
+ * The chip for a row's category, or `null` when there is nothing to say.
+ *
+ * <p>Deliberately unlike {@link productLabel}, which has a placeholder: a missing product NAME
+ * still implies a product exists, so "상품명 미상" is a true statement. A missing category implies
+ * nothing at all — the row was simply never analyzed (analysis runs on newly-inserted ids only and
+ * swallows its own failures), so there is no honest sentence to render. Returning null means the
+ * card shows no chip, rather than a placeholder an operator would read as a finding about their
+ * review. It must also never fall back to 기타, which is a real verdict the analyzer reached.
+ *
+ * <p>The label is the server's value: the analyzer's categories are already Korean operator-facing
+ * words, and re-mapping them here would create a second vocabulary to keep in sync. An unrecognised
+ * value still renders — it is derived metadata, never customer text — because hiding it would make
+ * a writer-side bug invisible on the surface most likely to reveal it.
+ */
+export function categoryChip(category: string | null): CategoryChip | null {
+  if (category == null || category.trim() === "") {
+    return null;
+  }
+  return { text: category.trim(), cls: "bg-brand/10 text-brand-700" };
+}
+
+/** Display label for one facet option; the sentinel gets FE-owned copy, a category speaks for itself. */
+export function facetLabel(category: string): string {
+  return category === UNCLASSIFIED ? UNCLASSIFIED_LABEL : category;
+}
+
+export interface FacetOption {
+  /** Wire value: a stored category, or the UNCLASSIFIED sentinel. */
+  value: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * Facet options for one drill-down page: the window's categories in the server's order, then the
+ * unclassified bucket last.
+ *
+ * <p>Built from the page's counts, which the server computes UNFILTERED — so the options do not
+ * collapse to the one already chosen. A zero-count bucket is omitted: the list is what is in this
+ * window, not a catalogue of everything the analyzer could say. The unclassified bucket comes last
+ * because it is a coverage state rather than a subject, and is included at all so those rows stay
+ * reachable — they are exactly the rows a category filter can never surface.
+ */
+export function facetOptions(
+  categoryCounts: readonly { category: string; count: number }[],
+  unclassifiedCount: number,
+  active: string | null = null,
+): FacetOption[] {
+  const options: FacetOption[] = categoryCounts
+    .filter((c) => c.count > 0)
+    .map((c) => ({ value: c.category, label: facetLabel(c.category), count: c.count }));
+  if (unclassifiedCount > 0) {
+    options.push({ value: UNCLASSIFIED, label: UNCLASSIFIED_LABEL, count: unclassifiedCount });
+  }
+  // An ACTIVE filter always appears, even at zero. The drill-down survives a window change, so a
+  // category chosen over one window can outlive its rows in the next — and an empty list whose
+  // cause is a filter with no visible control reads as "there are no such reviews" when the truth
+  // is "you are still filtering". Showing it at 0 both explains the emptiness and gives the
+  // operator the thing to click their way out of.
+  if (active != null && !options.some((o) => o.value === active)) {
+    options.push({ value: active, label: facetLabel(active), count: 0 });
+  }
+  return options;
+}
+
 /**
  * The triage choices, in the order an operator scans them: most demanding first.
  *

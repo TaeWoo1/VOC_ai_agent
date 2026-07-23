@@ -517,6 +517,17 @@ export interface OperatorVocItem {
   // version, and the approval's state all come from the reply read. `false` for a row that
   // cannot be prepped at all (null actionRef) — a capability limit, not a claim.
   hasReplyPreparation: boolean;
+  // The row's stored rule-based analysis category — one of nine fixed Korean labels. It is
+  // CONTEXT, not a queue rule: whether a row appears here is still decided by rating and
+  // reply state alone.
+  //
+  // Null means NO analysis row exists, which is a COVERAGE fact rather than a verdict —
+  // analysis runs on newly-inserted ids only and swallows its own failures, so an ordinary
+  // review can be unanalyzed. Deliberately distinct from the stored 기타 category ("we
+  // looked; it fits nothing"). Render the null as no statement at all: no chip, not 기타,
+  // and not a placeholder implying something is missing from the review. Always null for a
+  // source that cannot classify (every Cafe24 community article).
+  category: string | null;
 }
 
 // Mirrors com.sellerops.attention.triage.TriageDisposition. A decision, not a workflow
@@ -685,8 +696,29 @@ export interface OperatorVocItemPage {
   toDate: string;
   page: number;
   size: number;
+  // Rows matching everything the caller asked for, INCLUDING an active category facet —
+  // this is what the pager pages through.
   total: number;
+  // The same window IGNORING the category facet — the denominator categoryCounts and
+  // unclassifiedCount are comparable to. Equal to `total` only when no facet is applied,
+  // which is exactly why the two must not be used interchangeably: the mistake is invisible
+  // until an operator picks a facet.
+  unfilteredTotal: number;
+  // The window's category breakdown, always computed unfiltered so choosing a facet cannot
+  // collapse the facet list to the chosen option. Empty for a lens that offers no facet
+  // (arrivals) and for a source that cannot classify at all (Cafe24 community articles).
+  categoryCounts: CategoryCount[];
+  // Rows with NO analysis at all — a coverage fact, not the 기타 category (which is a stored
+  // verdict and appears in categoryCounts like any other).
+  unclassifiedCount: number;
   items: OperatorVocItem[];
+}
+
+// Mirrors com.sellerops.attention.dto.CategoryCount. Derived metadata only: the category is
+// one of the analyzer's nine fixed labels and never echoes customer text.
+export interface CategoryCount {
+  category: string;
+  count: number;
 }
 
 // --- Seller inquiry workflow (OPEN queue → detail → proposal → PROPOSED) ---
