@@ -1,6 +1,19 @@
-# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (DRAFT · DEFERRED)**
+# Run 7 — NAVER reply-state live proof — **DISPATCH RECORD (EXECUTED · FAILED CLOSED)**
 
-> ## ⏸ DEFERRED 2026-07-23 — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
+> ## ▶ DISPATCHED 2026-07-23 (second attempt) — **RUN EXECUTED · FAILED CLOSED (`DOWNLOAD_TIMEOUT`) · G3 + G6 CONSUMED**
+>
+> The deferral below was lifted in a fresh dispatching turn on 2026-07-23: the operator affirmed a
+> **fresh G3** (`export+ingest`, current environment — starting with the network box that voided the
+> first attempt) and a **fresh single-use G6** (15-minute live window, no-reply bound), stated
+> **"seated and ready"**, and the live window opened at 23:42:46 KST. The run drove once and
+> **FAILED closed on `DOWNLOAD_TIMEOUT`** — readiness on the real page was fully green
+> (`LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`), the export control
+> was highlighted, but no export action produced a download inside the windows. **No download ⇒ no
+> artifact ⇒ nothing ingested; zero rows at teardown.** Both gates are **CONSUMED** — a retry needs
+> a fresh G3 + G6. Execution record, timeline, and findings: **§15**; filled evidence template: §11.
+> C1–C5 are all **NOT DEMONSTRATED** — the run ended at the human export barrier.
+
+> ## ⏸ DEFERRED 2026-07-23 (first attempt) — **NOT DISPATCHED, NOT CONSUMED, NO LIVE CONTACT**
 >
 > **What happened:** a G6 approval was given on 2026-07-23 (channel NAVER SmartStore · REVIEW export ·
 > account `NAVER_DEV_SELLER_SELF_01` · operator `OPERATOR_SELF_01` · scope `export+ingest` ·
@@ -266,20 +279,20 @@ that the **expected** NAVER export confirmation dialog is not an abort trigger w
 - **Says nothing about ESM+**, whose `답변 상태` vocabulary remains unobserved.
 - **One seller, one account, one range, one run**, on a local disposable backend — never production.
 
-## 11. Post-run evidence template (to be filled after execution, sanitized)
+## 11. Post-run evidence — FILLED 2026-07-23 (sanitized)
 
 ```
-Run 7 — <date> — <operator> — G3 (export+ingest) CONSUMED · G6 CONSUMED
-Outcome:            <COMPLETED n-of-3 | FAILED + blocker code>
-Ingest:             <status> <success/skipped/failed>
-C2 queue exclusion: <PASS | NOT DEMONSTRATED (§8)>  low-rating: <answered excluded: y/n>
-C3 arrivals whole:  <PASS/FAIL>
-C4 refusal:         <409 | other>          C5 non-vacuity: <ref minted | other>
-Census:             rating <n> · received_at <n> (UTC-midnight <n>) · external_id <n>
-                    reply_state ANSWERED <n> / PENDING <n> / UNKNOWN <n>
-                    replied_at on ANSWERED <n>/<n> · on PENDING <n> (expect 0)
-Teardown:           DB dropped ☐ · sellerops intact ☐ · quarantine empty ☐ · no artifact ☐
-Findings:           <...>
+Run 7 — 2026-07-23 — OPERATOR_SELF_01 — G3 (export+ingest) CONSUMED · G6 CONSUMED
+Outcome:            FAILED + DOWNLOAD_TIMEOUT (2-of-3 steps; fail-closed)
+Ingest:             not reached — no download, no artifact; disposable DB at 0 reviews / 0 sync_jobs
+C2 queue exclusion: NOT DEMONSTRATED — run ended at the export barrier (before any export)
+C3 arrivals whole:  NOT DEMONSTRATED
+C4 refusal:         NOT ATTEMPTED          C5 non-vacuity: NOT ATTEMPTED
+Census:             none — nothing ingested, so no census exists
+Teardown:           DB dropped ☑ (name-guarded) · sellerops intact ☑ (only surviving sellerops* DB)
+                    quarantine empty ☑ · no artifact ☑ · run-local credentials file removed ☑
+Findings:           see §15.4 — the 15-minute cap cannot contain the CLI's own timers; the highlight
+                    moment is not logged; live readiness path proven green up to the human barrier
 ```
 
 ## 12. Pre-dispatch preparation — ☑ COMPLETED 2026-07-23 (no live contact)
@@ -399,3 +412,77 @@ the rollback. **No ignored file was touched, no `git clean` was run, nothing was
 **The holder stays at `b5f0683`** (product-owner decision): it is now the runtime baseline, and the
 checkout matches the code a future Run 7 would exercise. Rollback remains one command —
 `git checkout --detach bc7d5d8`, an ancestor of `origin/main`, so it survives any fetch.
+
+> **↳ SUPERSEDED 2026-07-23:** on the operator's instruction the holder was re-synced
+> `b5f0683 → 783a9b4` (merged `origin/main`, which contains `b5f0683` as an ancestor) for the second
+> dispatch attempt — same fetch-only + `checkout --detach` shape, preserved paths re-fingerprinted
+> byte-for-byte identical. Details in §15.1. The holder now stays at **`783a9b4`**.
+
+## 15. Execution record — 2026-07-23, second attempt (sanitized)
+
+### 15.1 Pre-dispatch preparation (no live contact; all before the dispatching turn's affirmation)
+
+- **Holder re-sync:** `naver-r4` moved `b5f0683 → 783a9b4` (fetch-only, `checkout --detach`; no
+  commit created in the holder, no `git clean`, nothing deleted by hand). The six preserved paths
+  (`.profile` / `.env` / `.status` / `downloads` / `.operation-runs` / `.aw-quarantine`)
+  fingerprinted **byte-for-byte identical** across the sync (count, size, newest mtime); `.env`
+  mtime unchanged and never opened; profile unheld (no `Singleton*`/lock, `lsof` clean).
+  ⚠ One observation: `.profile` counted **897 files** where §14 recorded 961 — size identical to
+  the kilobyte (132,176K) and the newest profile mtime **predates the §14 sync itself**, so nothing
+  wrote to the profile in between; recorded as counting/ephemeral-file drift, not use.
+- **G4, fresh, on the unmodified `783a9b4` tree:** backend **1502** passed / 0 failures / 2 skipped ·
+  collector **inside the holder** **4843 / 95 skipped** + typecheck clean · frontend **765** passed +
+  `tsc --noEmit` clean.
+- **Phase A executed:** drop guard falsified (refused `sellerops` and `sellerops_dev`); rehearsal
+  create/drop clean; fresh disposable DB `sellerops_run7_20260723T233452` created; backend booted on
+  `SERVER_PORT=18080` against it (Flyway 24 migrations, NAVER channel seeded); run-local operator
+  org registered; ingest pointing via environment only. The credentials existed only in a
+  `chmod 600` scratchpad file, never printed, and were removed at teardown.
+
+### 15.2 Gates (affirmed by the operator in the dispatching turn — register: `r4-gate-record.md`)
+
+Fresh G3 (`export+ingest`; network box affirmed **for the current environment**; Bridge = N/A with
+reason, CLI/loopback; §9-3 lift for this scope only) + fresh single-use G6 (channel / account /
+date / operator as §13 proposed; **max live window 15 min**; no-reply bound; §7 + this record's three
+abort additions acknowledged) + P6 signed on both plus the fresh G4 above. The operator stated
+**"seated and ready"**, and committed to confirming the §8 range precondition on screen after login,
+aborting before export if it failed — the run ended before that step became observable.
+
+### 15.3 Timeline (KST, sanitized — from the CLI's own output and the operator turn)
+
+| Time | Event |
+|---|---|
+| 23:42:46 | Live window opens — headed Chrome on the dedicated profile; ingest target printed and confirmed `http://127.0.0.1:18080` (the disposable backend) |
+| 23:48:47 | Operator signals ready; sentinel created |
+| ~23:48:50 | Highlight (inferred — the CLI logs no line for it; the overlay is the only signal, §15.4) |
+| 23:58:50 | Observe window lapses — `aw.live.barrier {"observed":false}` |
+| 23:59:50 | `DOWNLOAD_TIMEOUT` → **FAILED (2-of-3 steps), fail-closed**; readiness line confirms `LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive=true`; browser closed, process exited 0 |
+
+Teardown followed immediately: backend stopped · guarded drop of `sellerops_run7_20260723T233452` ·
+`sellerops` confirmed the only surviving `sellerops*` database · quarantine/downloads/`.status`
+empty · no artifact anywhere · profile released (no locks) · `.env` byte-identical · the run
+persisted its Operation Run marker (8 → 9 files).
+
+### 15.4 Findings
+
+1. **The 15-minute cap cannot contain the CLI's own timers.** Sentinel wait (up to 10 min) +
+   observe (10 min) + download (60 s) structurally exceed a 15-minute window unless the human
+   completes login → range → signal in under ~4 minutes and acts on the highlight quickly. This
+   run's fail-closed tail ran ~2 minutes past the cap (barrier 23:58:50 vs cap 23:57:46) with no
+   way to stop it that was safer than letting it lapse. **A future capped run must either size the
+   G6 window to the timers (Run 6 precedent: budget stated from the timers) or shorten the CLI
+   timers for the run.** Killing the process mid-flight against the preserved profile was rejected
+   deliberately.
+2. **The highlight moment is not logged.** Between sentinel pickup and the barrier line the CLI is
+   silent; the overlay in Chrome is the only signal the observe window has started. A seated
+   operator being relayed CLI output (the "say ready in Claude Code" path this CLI itself
+   documents) has no relayable confirmation — this run's observe window lapsed with the operator
+   never acting. One sanitized `aw.live.highlighted` log line would close the gap. (Code change —
+   belongs to a future slice, not this record.)
+3. **The live readiness path is proven green up to the human barrier.** Real login, real page,
+   populated grid, range control present, readiness `positive_count` — every runtime-side step of
+   the choreography worked; the run failed at the one step the design reserves for the human, which
+   is the boundary behaving exactly as specified (fail closed, zero clicks, nothing written).
+4. **What Run 7 set out to prove remains unproven** — C1–C5 all `NOT DEMONSTRATED`. The claims
+   still rest on synthetic fixtures plus the one offline-read real export. This record adds
+   evidence about the *choreography*, not the *pipeline*.
