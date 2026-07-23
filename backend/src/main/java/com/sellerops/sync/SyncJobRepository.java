@@ -30,11 +30,17 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
      * (see {@code FileUploadConnector.uploadDescriptor}), which is exactly why the existing
      * run-history filters cannot see uploads.
      *
-     * <p>Ordering is <b>deterministic</b>, and it sorts by the same instant the surface displays:
-     * {@code finishedAt} where the import ended, falling back to {@code createdAt} while it has not,
-     * with {@code id desc} as the tiebreaker. Sorting on one timestamp while labelling rows with
-     * another is how a list ends up showing an older date above a newer one — two overlapping
-     * imports (one long, one short) would otherwise render in an order the dates contradict.
+     * <p>Ordering is <b>deterministic</b>: {@code finishedAt} where the import ended, falling back to
+     * {@code createdAt} while it has not, with {@code id desc} as the tiebreaker. Sorting on the
+     * import's own end instant is what keeps the list consistent with the dates it shows — two
+     * overlapping imports (one long, one short) would otherwise render in an order the dates
+     * contradict.
+     *
+     * <p>⚠ The fallback is {@code createdAt}, while the surface falls back to {@code startedAt}. They
+     * are stamped together by {@code CollectionRunService.open}, so in practice they coincide — but
+     * they are not the same column, and the difference is deliberate: {@code createdAt} is NOT NULL
+     * (BaseEntity) where {@code startedAt} is nullable, so ordering on it cannot degrade into a null
+     * sort key. Do not "fix" this into {@code startedAt} without making that column non-null first.
      */
     @Query("""
             select j from SyncJob j

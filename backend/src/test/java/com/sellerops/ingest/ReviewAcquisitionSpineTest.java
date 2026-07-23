@@ -221,15 +221,28 @@ class ReviewAcquisitionSpineTest {
     void theUnmappedExportColumnsNeverReachAStoredField() throws Exception {
         ingestFixture();
 
-        // 상품주문번호 / 등록자 have no canonical slot. The fixture plants loud sentinels precisely so
-        // this assertion has something real to fail on if a mapping ever widens by accident.
+        // 등록자 / 상품주문번호 / 유저정보 등록 항목 have no canonical slot, and they are the PII-class
+        // columns of a real export. The fixture plants loud sentinels precisely so this has something
+        // real to fail on if a mapping ever widens by accident.
+        //
+        // Asserted over the STORED FIELDS, not over `toString()`. These entities carry only Lombok's
+        // @Getter/@Setter — no @ToString, no @Data — so `toString()` is Object's identity hash and a
+        // `doesNotContain` against it can never fail. A privacy guard that cannot fail is worse than
+        // none: it gets cited as evidence. Every field ingest can write is checked by name.
         JsonNode sentinels = contract.get("unmappedSentinels");
         List<Review> stored = reviews.findAllByOrgId(org);
+        assertThat(stored).isNotEmpty();   // non-vacuity: there are rows to inspect
         sentinels.fieldNames().forEachRemaining(header -> {
             String sentinel = sentinels.get(header).asText();
-            assertThat(stored).allSatisfy(review -> assertThat(review.toString()).doesNotContain(sentinel));
-            assertThat(products.findAllByOrgId(org))
-                    .allSatisfy(product -> assertThat(product.toString()).doesNotContain(sentinel));
+            assertThat(stored).allSatisfy(review -> {
+                assertThat(review.getBody()).doesNotContain(sentinel);
+                assertThat(review.getExternalId()).doesNotContain(sentinel);
+                assertThat(String.valueOf(review.getContentHash())).doesNotContain(sentinel);
+            });
+            assertThat(products.findAllByOrgId(org)).allSatisfy(product -> {
+                assertThat(String.valueOf(product.getName())).doesNotContain(sentinel);
+                assertThat(String.valueOf(product.getSku())).doesNotContain(sentinel);
+            });
         });
     }
 

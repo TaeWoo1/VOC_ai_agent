@@ -131,8 +131,8 @@ Append a dated entry; never rewrite prior entries — correct forward.
   displays), a minimal DTO carrying no `errorMessage` and no `channelId`, an index (V22), and a
   fail-closed rail rendering the full state table — empty export, all-duplicate, partial, failed,
   unfinalized, unknown provenance.
-- **Evidence:** `docs/slices/import-outcome-history-v1.md`; backend 1433 (was 1425), frontend 691
-  (was 668), collector unchanged; typechecks clean. An adversarial review found 11 issues —
+- **Evidence:** `docs/slices/import-outcome-history-v1.md`; backend 1433 (was **1418** — +15: 10
+  history + 5 controller), frontend 691 (was 668), collector unchanged; typechecks clean. An adversarial review found 11 issues —
   including an over-claiming heading, two stale copy pointers, a sort/label mismatch, a vacuous
   ordering test and a missing controller test — all fixed (§5). Both new rules falsified and caught.
 - **§4.1 impact:** none. This changes what a seller sees, not what a channel supports.

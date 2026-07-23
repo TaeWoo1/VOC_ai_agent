@@ -29,9 +29,11 @@ The seller's record of their own operational work existed and simply was not sho
 writer of `uploadType`) **in the query**, with `Pageable` bounding the result after it. The sibling
 reads fetch a fixed window and filter afterwards, so a busy org can push its review imports out of
 the window before the filter runs — the seller then sees an empty history for imports that exist.
-Ordering is `coalesce(finishedAt, createdAt) desc, id desc`: **the same instant the surface
-displays**, because sorting on one timestamp while labelling rows with another is how a list shows an
-older date above a newer one.
+Ordering is `coalesce(finishedAt, createdAt) desc, id desc` — the import's own end instant, because
+sorting on one timestamp while labelling rows with another is how a list shows an older date above a
+newer one. (The fallback is `createdAt` while the surface falls back to `startedAt`; `open()` stamps
+both together, and `createdAt` is NOT NULL where `startedAt` is not — so the sort key cannot degrade
+into a null.)
 
 **A minimal DTO.** `ReviewImportView` carries counts, provenance, outcome and timing. It deliberately
 carries **no `errorMessage`** (the column holds raw row-errors and exception text that can embed
@@ -45,7 +47,10 @@ JWT, default 20, clamped to 50 — clamped rather than rejected, since a display
 fixture-preview gate, which is what it always was.
 
 **V22** indexes `(org_id, job_type, upload_type, coalesce(finished_at, created_at) desc)` — the limit
-bounds the result, not the scan, and `sync_jobs` grows once per import forever.
+bounds the result, not the scan, and `sync_jobs` grows once per import forever. Verified on PostgreSQL
+15: the plan is `Limit → Sort → Index Scan using idx_sync_jobs_review_imports`. The index serves the
+**predicate**; a Sort remains because the `id desc` tiebreaker is not in the index, so the win is that
+the sort runs over one org's review imports rather than its whole history.
 
 ## 3. The state table — every case, said correctly
 
@@ -112,10 +117,49 @@ Frontend `importHistory.test.ts` (13) + `ImportHistoryList.test.tsx` (8) — one
 error-is-not-empty rule both directions, a bounded request, and **survival across a remount**, the
 property the in-memory rail failed.
 
-Backend **1433** (was 1425) · frontend **691** (was 668) · collector **4843/95** unchanged · all
+Backend **1433** (was **1418**, the branch head before this slice: +10 `ReviewImportHistoryTest`
++ 5 `ReviewImportControllerTest`) · frontend **691** (was 668: +13 `importHistory` + 8
+`ImportHistoryList` + 1 `OperationsHome`, +1 rewritten) · collector **4843/95** unchanged · all
 typechecks clean.
 
-## 7. Open
+⚠ An earlier draft of this line said "was 1425". That number was a mid-slice measurement taken
+before the ordering test was split and the controller test existed — it corresponds to no commit.
+In a doc that advertises attributed deltas, an unattributable baseline is the drift.
+
+## 7. Final pre-merge review (PR #326)
+
+A third independent pass reviewed the whole branch against `origin/main` for security/privacy,
+migration safety, API/query correctness, reply-state semantics, frontend honesty and documentation
+claims. **No blockers.** It verified: no cross-org leakage; `errorMessage`/`channelId` genuinely
+absent; both committed workbooks synthetic (unzipped and inspected) with matching SHA-256s; V21/V22
+additive, idempotent and valid on PostgreSQL 15; the monotonic rule unbypassable; the 409 enforced in
+the service rather than only in `capabilities`; and every stated test count accurate.
+
+Fixed in response:
+
+- **The PII-sentinel assertion was vacuous.** It asserted over `Review.toString()`, but these entities
+  carry only `@Getter/@Setter` — no `@ToString` — so it compared against an identity hash and could
+  never fail, while the slice doc cited it as proof. It now asserts over the stored fields by name,
+  and was falsified (a probe against a string the body *does* contain fails it).
+- **An unattributable test baseline** ("was 1425" — a mid-slice number matching no commit).
+- **Two overstated claims about the ordering/index**, corrected above.
+
+Recorded as follow-ups, not fixed here (no new scope in a pre-merge pass):
+
+- `IngestionService` runs `findReview` and then `existsReview` with the same predicate on the insert
+  path for any row carrying a reply statement — the second query is redundant.
+- `ReviewImportHistoryTest`'s running-row ordering case sets `createdAt == startedAt`, so it cannot
+  falsify the fallback-column difference it is named for.
+- `ReviewImport.startedAt` is typed non-nullable on the wire while `SyncJob.startedAt` is nullable;
+  a row with both timestamps null would render a fabricated date.
+- V22 uses plain `CREATE INDEX`, not `CONCURRENTLY` (Flyway would need it outside a transaction) — a
+  stated trade-off on a table that grows once per import.
+- `AttentionSignalList`'s "**현재** 확인이 필요한 리뷰 N건" is window-scoped by the selector above it,
+  so "현재" claims a present-tense total the data does not support.
+- The two attention cards (1–2★, 3★) still drill into one shared 1–3★ list — pre-existing, and the
+  new comment about count/list agreement reads as if it were resolved.
+
+## 8. Open
 
 - Per-row **channel attribution** when a second channel reaches this history — as a readable label,
   not the raw id that was deliberately dropped.
