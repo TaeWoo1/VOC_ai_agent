@@ -27,10 +27,13 @@ vi.mock("../lib/actionWindow/bridgeSource", async (importOriginal) => ({
 import { OperationsHome } from "./OperationsHome";
 import { renderWithRouter } from "../test/renderWithRouter";
 import { resetOps, seedHome, seedBridge } from "../test/opsStoreHarness";
+import { api } from "../lib/apiClient";
 import { expectNoAxeViolations } from "../test/axe";
 
 describe("FE-9 Operations home page — axe a11y scans", () => {
   beforeEach(() => {
+    // The import-history rail self-fetches; keep the axe run off the wire and deterministic.
+    vi.spyOn(api, "getReviewImportsStrict").mockResolvedValue([]);
     devModeMock.isFixturePreviewEnabled.mockReturnValue(false);
     devModeMock.isBridgeModeEnabled.mockReturnValue(false);
     resetOps();

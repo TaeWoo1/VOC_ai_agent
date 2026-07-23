@@ -56,7 +56,7 @@ export function ActiveRunCard({
 
       {terminal && run.status === "COMPLETED" ? (
         <p className="mt-3 text-sm text-muted">
-          새 작업을 시작하면 이 작업은 최근 활동으로 이동해요.
+          새 작업을 시작하면 이 작업은 종료돼요.
         </p>
       ) : null}
 

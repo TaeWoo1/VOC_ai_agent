@@ -17,8 +17,9 @@
   (`contracts/review-export/naver/v1/`), with a parse gate that fails unreadable artifacts as
   `ARTIFACT_INVALID` and an empty export treated as an honest zero. **Reply state is now preserved**
   (2026-07-23): already-answered reviews leave the action queue and cannot be guided into a duplicate
-  public reply. Guided ACT remains offline. ⚠ **No live evidence for any of it** — everything since
-  Run 4 rests on synthetic fixtures. **Nothing promoted in §4.1.**
+  public reply. **Import history is now persistent** (2026-07-23): the seller can see what each
+  import brought after a reload. Guided ACT remains offline. ⚠ **No live evidence for any of it** —
+  everything since Run 4 rests on synthetic fixtures. **Nothing promoted in §4.1.**
 - **Last updated:** 2026-07-23
 - **Owner:** SellerOps product/engineering
 
@@ -51,6 +52,11 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done + evidence linked �
 - [ ] At cadence, seller is prompted with the **single** required action (e.g. "click review export")
 - [ ] No hidden/chained clicks; manual progress always available (fence check)
 - [ ] Export/download result captured by SellerOps (Action Window: detect, don't perform)
+- [x] **The seller can see what each import brought, after a reload** — persisted import history
+      (counts · provenance · outcome) on the review-ops home, with the empty export, the
+      all-duplicate re-import and a failure each said correctly
+      (`docs/slices/import-outcome-history-v1.md`). ⚠ Covers file uploads and seller-center exports
+      only; API-collected reviews are a different acquisition path and do not appear.
 - [ ] Result validated (shape, channel, non-empty, sanitized) — **fail closed** on ambiguity
 - [ ] Evidence linked: _[e.g. `docs/action-window-runtime/r4-evidence-pack.md` §8–17]_
 
@@ -115,6 +121,29 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-23 — Import Outcome & History v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** ACQUIRE (the operator's record of it)
+- **Did:** Gave the seller a persistent answer to "did it work, and what came in?". The home's
+  activity rail was in-memory only — it started empty and vanished on reload — while `sync_jobs` had
+  persisted every ingest all along. Added `GET /api/imports/reviews` (org-scoped, predicate **in the
+  query** so a busy org cannot push review imports out of the window, ordered by the instant the UI
+  displays), a minimal DTO carrying no `errorMessage` and no `channelId`, an index (V22), and a
+  fail-closed rail rendering the full state table — empty export, all-duplicate, partial, failed,
+  unfinalized, unknown provenance.
+- **Evidence:** `docs/slices/import-outcome-history-v1.md`; backend 1433 (was 1425), frontend 691
+  (was 668), collector unchanged; typechecks clean. An adversarial review found 11 issues —
+  including an over-claiming heading, two stale copy pointers, a sort/label mismatch, a vacuous
+  ordering test and a missing controller test — all fixed (§5). Both new rules falsified and caught.
+- **§4.1 impact:** none. This changes what a seller sees, not what a channel supports.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact.
+- **Blockers:** none. Two defects **recorded, not fixed**: API-collected reviews cannot appear in this
+  history by construction, and the shared run-history read (`listRuns`) filters after fetching and
+  cannot see uploads at all — so `ChannelDetail`'s run list silently excludes every import.
+- **Next:** classification-aware queueing (the rules-based analyzer already writes sentiment/urgency/
+  category into `item_analyses` and surfaces in the Inbox, but the review-ops queue ignores it) —
+  a product decision about what "needs a look" means, not an effort question.
 
 ### 2026-07-22 — Review Acquisition Spine v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACQUIRE (artifact validation) → NORMALIZE → UNDERSTAND/PRIORITIZE (visibility)

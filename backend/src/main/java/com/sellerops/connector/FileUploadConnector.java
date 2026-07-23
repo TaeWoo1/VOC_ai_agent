@@ -191,7 +191,9 @@ public class FileUploadConnector implements ChannelConnector {
     /**
      * Finalize the run through the common runtime and build the operator-facing result.
      * The status mapping ({@link ConnectorResult#jobStatus()}) is equivalent to the legacy
-     * resolveStatus: an empty upload (total 0) is an error → FAILED; otherwise failures with
+     * resolveStatus, with one deliberate exception: an empty upload (total 0) is an error → FAILED
+     * <b>unless it is a {@code SELLER_CENTER_EXPORT}</b>, where an empty export is a legitimate quiet
+     * range and lands SUCCESS 0/0/0 (see {@link #erroredOnEmpty}). Otherwise failures with
      * any landed/skipped row are PARTIAL, all-fail is FAILED, and a clean (incl. all-duplicate)
      * upload is SUCCESS. The raw first row-error is preserved in {@code error_message}; the
      * {@code IngestResult} is built in-memory so the HTTP response is unchanged.

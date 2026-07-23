@@ -28,7 +28,8 @@ export function CompletedResult({ run }: { run: ActionWindowRunView }) {
         {channelLabel(run.channelCode)} 리뷰를 가져와 SellerOps에 넘겼어요.
       </p>
       <p className="mt-1 text-sm text-muted">
-        확인이 필요한 리뷰는 채널 화면의 &lsquo;오늘 확인할 일&rsquo;에서 볼 수 있어요.
+        무엇이 들어왔는지는 리뷰 운영 홈의 &lsquo;최근 가져오기 기록&rsquo;에, 확인이 필요한 리뷰는
+        채널 화면의 &lsquo;오늘 확인할 일&rsquo;에 표시돼요.
       </p>
       <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-xl bg-surface p-3">

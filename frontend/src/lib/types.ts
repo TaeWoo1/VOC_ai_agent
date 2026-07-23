@@ -394,6 +394,32 @@ export interface BackfillRequest {
 
 // --- Operator attention signals (channel-generic VOC) ---
 
+// Mirrors com.sellerops.sync.ReviewImportView — one review import as the operator's history shows it.
+//
+// Counts mean exactly what ingest tallied: `successRows` = newly inserted reviews, `skippedRows` =
+// duplicates rejected by dedup (an all-duplicate re-import is a SUCCESS with 0 new), `failedRows` =
+// mapping plus persistence errors, `totalRows` = the sum of those three — NOT the file's row count.
+//
+// `status` is RUNNING (opened, never finalized) | SUCCESS | PARTIAL | FAILED.
+// `method` is SELLER_CENTER_EXPORT (an Action Window export landed) | MANUAL_UPLOAD (a person picked
+// a file) | null (a row older than the provenance column — unknown, never guessed).
+//
+// Deliberately carries no `errorMessage`: the server's is a raw row-error or exception text that can
+// embed parser or filename detail. Copy for a failure is FE-owned. It carries no `channelId` either —
+// nothing renders it, and per-row channel attribution arrives (as a readable label) when a second
+// channel actually reaches this history.
+export interface ReviewImport {
+  id: string;
+  method: string | null;
+  status: string;
+  totalRows: number;
+  successRows: number;
+  skippedRows: number;
+  failedRows: number;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 // Mirrors com.sellerops.attention.dto.AttentionSignal — METADATA ONLY. A typed,
 // severity-ranked count of collected review/inquiry rows that need a look. Carries
 // no raw article title/content, source identifiers, or customer PII; label and

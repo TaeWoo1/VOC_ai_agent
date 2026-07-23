@@ -65,7 +65,9 @@ describe("FE-11 ActiveRunCard (DOM/a11y)", () => {
     renderWithRouter(<ActiveRunCard run={completed} onStartNew={onStartNew} />);
     const region = screen.getByRole("region", { name: "현재 작업" });
     // Completed-only hint that the finished run moves to recent activity.
-    expect(region).toHaveTextContent("새 작업을 시작하면 이 작업은 최근 활동으로 이동해요.");
+    // The card no longer promises a "최근 활동" section: that list is a DEV fixture-preview
+    // affordance now, so production-shaped it would name a section the seller never sees.
+    expect(region).toHaveTextContent("새 작업을 시작하면 이 작업은 종료돼요.");
     await userEvent.click(screen.getByRole("button", { name: START_NEW_RUN_LABEL }));
     expect(onStartNew).toHaveBeenCalledTimes(1);
     // Desktop-only note is present, and the detail link still navigates.

@@ -36,6 +36,7 @@ import type {
   SalesTrendPoint,
   ScheduleView,
   SellerAccountResponse,
+  ReviewImport,
   SyncJobView,
   SyncRunView,
   TriageDecisionResponse,
@@ -1495,4 +1496,61 @@ export function mockSyncJobs(): SyncJobView[] {
       finishedAt: hoursAgoISO(3),
     },
   ];
+}
+
+/**
+ * Demo-mode review-import history.
+ *
+ * Deliberately spans the outcomes the real surface must tell apart — a normal import, an
+ * all-duplicate re-import, an empty export, and a failure — so the demo shows the honest state table
+ * rather than a row of uniform successes. Newest first, like the real read.
+ */
+export function mockReviewImports(limit?: number): ReviewImport[] {
+  const rows: ReviewImport[] = [
+    {
+      id: "mock-import-1",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 6,
+      successRows: 6,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-10T09:00:00Z",
+      finishedAt: "2026-05-10T09:00:12Z",
+    },
+    {
+      id: "mock-import-2",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 6,
+      successRows: 0,
+      skippedRows: 6,
+      failedRows: 0,
+      startedAt: "2026-05-09T09:00:00Z",
+      finishedAt: "2026-05-09T09:00:08Z",
+    },
+    {
+      id: "mock-import-3",
+      method: "SELLER_CENTER_EXPORT",
+      status: "SUCCESS",
+      totalRows: 0,
+      successRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-08T09:00:00Z",
+      finishedAt: "2026-05-08T09:00:05Z",
+    },
+    {
+      id: "mock-import-4",
+      method: "MANUAL_UPLOAD",
+      status: "FAILED",
+      totalRows: 0,
+      successRows: 0,
+      skippedRows: 0,
+      failedRows: 0,
+      startedAt: "2026-05-07T09:00:00Z",
+      finishedAt: "2026-05-07T09:00:02Z",
+    },
+  ];
+  return limit == null ? rows : rows.slice(0, limit);
 }

@@ -40,6 +40,18 @@ export function shortDate(iso: string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+/**
+ * A history row's date, with the year.
+ *
+ * `shortDate`'s `M/D` is right for something recent, and wrong for a list that can reach back past a
+ * year: a row from last May would read exactly like one from this May. History says the year.
+ */
+export function importDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
+
 /** Future counterpart of relativeTime — "다음 수집 5분 후" style. */
 export function untilTime(iso: string | null): string {
   if (!iso) {
