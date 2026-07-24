@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -365,22 +366,36 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """;
 
     /**
-     * "This review is NOT currently set aside from the reply to-do" — the 작업에서 제외 rule.
+     * "This review is NOT currently set aside from the reply to-do" — the 작업에서 제외 / 복원 rule.
      *
-     * <p>A dismissal removes an otherwise-eligible review from the to-do, but only until superseded:
-     * the review re-enters the moment the operator takes a fresh COMMITTING action newer than their
-     * latest dismissal — a {@code RESPONSE_NEEDED} triage decision, or a saved draft version. So this
-     * holds when there is no dismissal at all, OR the latest such committing signal is newer than the
-     * latest dismissal. Re-entry is automatic and read-time; nothing "un-dismisses" a stored row.
+     * <p>A dismissal removes an otherwise-eligible review from the to-do; the review re-enters through
+     * either of two independent paths, so this predicate holds when there is no dismissal at all, OR:
      *
-     * <p><b>Only decision/version timestamps count</b> — {@code ReviewTriage.decidedAt} changes only
-     * on a triage decision, and {@code ReviewReplyDraft.createdAt} only on a new saved version. An
-     * ordinary read, or an unrelated timestamp touch (e.g. a re-import bumping {@code reviews.updated_at}),
-     * moves neither, so it can never reactivate a dismissed review.
+     * <ul>
+     *   <li><b>Explicit restore (복원), arbitrated by the shared event sequence.</b> Dismissal and
+     *       restore draw from one globally-monotonic {@code seq}, so the latest EXPLICIT action is the
+     *       one with the greatest seq. A restore whose {@code seq} exceeds the review's greatest
+     *       dismissal {@code seq} means the newest explicit event is a restore — active. This is a
+     *       TOTAL order, so it decides same-{@code dismissed_at} cases (same clock tick) that a
+     *       timestamp comparison cannot.
+     *   <li><b>Automatic re-entry, by timestamp.</b> A fresh committing action newer than the latest
+     *       dismissal's {@code dismissed_at} — a {@code RESPONSE_NEEDED} triage decision, or a saved
+     *       draft version. Preserved exactly as before; independent of the restore log.
+     * </ul>
+     *
+     * <p><b>Only decision/version timestamps count for the automatic paths</b> — {@code
+     * ReviewTriage.decidedAt} changes only on a triage decision, and {@code ReviewReplyDraft.createdAt}
+     * only on a new saved version. An ordinary read, or an unrelated timestamp touch (e.g. a re-import
+     * bumping {@code reviews.updated_at}), moves neither, so it can never reactivate a dismissed review.
+     * Likewise a restore moves only the seq order, never a draft or a disposition.
      */
     String NOT_DISMISSED_PREDICATE = """
             (not exists (select 1 from ReviewReplyWorkDismissal dis
                          where dis.orgId = r.orgId and dis.reviewId = r.id)
+             or exists (select 1 from ReviewReplyWorkRestore res
+                        where res.orgId = r.orgId and res.reviewId = r.id
+                          and res.seq > (select max(d0.seq) from ReviewReplyWorkDismissal d0
+                                         where d0.orgId = r.orgId and d0.reviewId = r.id))
              or exists (select 1 from ReviewTriage tdis
                         where tdis.orgId = r.orgId and tdis.reviewId = r.id
                           and tdis.disposition
@@ -450,4 +465,37 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     Page<Review> findRecentlyReportedByChannel(@Param("orgId") UUID orgId,
                                               @Param("channelId") UUID channelId,
                                               Pageable pageable);
+
+    /**
+     * The 제외한 작업 recovery list: reviews the operator committed to, has NOT reported posting, and
+     * has currently set aside — the exact negation of {@link #NOT_DISMISSED_PREDICATE}. A dismissed
+     * review keeps its draft (dismissal deletes nothing), so it still satisfies the committed
+     * predicate; it is only filtered out of the to-do, which is what makes it recoverable here.
+     *
+     * <p><b>Not window-scoped</b>, like the whole reply-work read — so a review dismissed long ago
+     * stays reachable regardless of age, which is the point: a set-aside review must never become
+     * permanently unreachable. Returned as a {@link Slice} (fetches size+1, no count query) so the
+     * caller can page with a "더 보기" affordance rather than hide older items behind a hard cap.
+     *
+     * <p><b>Ordering is deterministic:</b> by the review's latest dismissal time DESC (most-recently
+     * set aside first — a fact about the operator's action, like the recently-reported lens orders by
+     * report time), then {@code r.id} DESC as a total tiebreak so pages never overlap or skip on equal
+     * timestamps.
+     */
+    @Query("""
+            select r from Review r
+            where r.orgId = :orgId and r.channelId = :channelId
+              and
+            """ + COMMITTED_REPLY_WORK_PREDICATE + """
+              and not
+            """ + NOT_DISMISSED_PREDICATE + """
+              and not
+            """ + REPORTED_SUBMISSION_PREDICATE + """
+            order by (select max(dord.dismissedAt) from ReviewReplyWorkDismissal dord
+                      where dord.orgId = r.orgId and dord.reviewId = r.id) desc,
+                     r.id desc
+            """)
+    Slice<Review> findDismissedReplyWorkByChannel(@Param("orgId") UUID orgId,
+                                                  @Param("channelId") UUID channelId,
+                                                  Pageable pageable);
 }

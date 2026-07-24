@@ -23,7 +23,9 @@ import type {
   ProposalResult,
   OperatorAttentionSummary,
   OperatorReplyWorkView,
+  OperatorDismissedReplyWorkView,
   ReviewReplyWorkDismissalResponse,
+  ReviewReplyWorkRestoreResponse,
   OperatorVocItemPage,
   OrderSummaryResponse,
   OperatorOutcomeName,
@@ -51,6 +53,8 @@ import {
   mockAttentionItems,
   mockReplyWork,
   mockDismissReplyWork,
+  mockDismissedReplyWork,
+  mockRestoreReplyWork,
   mockAuth,
   mockCapabilities,
   mockCapabilityOverview,
@@ -593,6 +597,25 @@ export const api = {
     );
     return data;
   },
+  // 제외한 작업: one page of the reviews the operator has set aside, so they can restore one. NOT
+  // window-scoped (a set-aside review stays reachable at any age), paged with `hasMore` ("더 보기")
+  // rather than a hard cap. Fail-closed and coverage-guarded like the reply-work read.
+  async getDismissedReplyWork(
+    accountId: string,
+    params?: { page?: number; size?: number },
+  ): Promise<OperatorDismissedReplyWorkView> {
+    if (USE_MOCKS) {
+      return mockDismissedReplyWork(accountId, params);
+    }
+    const search = new URLSearchParams();
+    if (params?.page != null) search.set("page", String(params.page));
+    if (params?.size != null) search.set("size", String(params.size));
+    const qs = search.toString();
+    const { data } = await http.get<OperatorDismissedReplyWorkView>(
+      `/api/seller-accounts/${accountId}/reply-work/dismissed${qs ? `?${qs}` : ""}`,
+    );
+    return data;
+  },
   // Drill-down: the metadata-only rows behind one attention signal (by signal type)
   // over the same [from, to] window, paginated. Fail-closed, like the summary read.
   async getAttentionItems(
@@ -779,6 +802,23 @@ export const api = {
     }
     const { data } = await http.post<ReviewReplyWorkDismissalResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply-work/dismiss`,
+      body,
+    );
+    return data;
+  },
+  // 복원: bring one set-aside review back onto the 내 답변 작업 to-do. Writes NOTHING about the reply —
+  // no draft change, no disposition change, no outcome, no completion. Idempotent on commandId; it
+  // outranks (never deletes) the dismissal it reverses.
+  async restoreReplyWork(
+    accountId: string,
+    actionRef: string,
+    body: { commandId: string },
+  ): Promise<ReviewReplyWorkRestoreResponse> {
+    if (USE_MOCKS) {
+      return mockRestoreReplyWork(actionRef);
+    }
+    const { data } = await http.post<ReviewReplyWorkRestoreResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply-work/restore`,
       body,
     );
     return data;

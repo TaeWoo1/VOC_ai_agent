@@ -21,7 +21,9 @@ import type {
   ItemAnalysis,
   OperatorAttentionSummary,
   OperatorReplyWorkView,
+  OperatorDismissedReplyWorkView,
   ReviewReplyWorkDismissalResponse,
+  ReviewReplyWorkRestoreResponse,
   OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
@@ -977,6 +979,30 @@ export function mockAccountAttention(
 // 작업에서 제외 (mock): acknowledges the set-aside without asserting anything about the reply.
 export function mockDismissReplyWork(actionRef: string): ReviewReplyWorkDismissalResponse {
   return { actionRef, replayed: false };
+}
+
+// 복원 (mock): acknowledges the restore without asserting anything about the reply.
+export function mockRestoreReplyWork(actionRef: string): ReviewReplyWorkRestoreResponse {
+  return { actionRef, replayed: false };
+}
+
+// 제외한 작업 (mock): an empty recovery page on a COVERED scope — the demo seeds no set-aside reviews,
+// and an unsupported channel declines rather than showing "nothing set aside".
+export function mockDismissedReplyWork(
+  accountId: string,
+  params?: { page?: number; size?: number },
+): OperatorDismissedReplyWorkView {
+  const channelName = mockChannelNameForAccount(accountId);
+  const unsupported = mockChannelCodeForAccount(accountId) !== "NAVER";
+  return {
+    sellerAccountId: accountId,
+    channel: channelName,
+    coverage: unsupported ? "UNCERTAIN_UNSUPPORTED_CHANNEL" : "COVERED",
+    items: [],
+    page: params?.page ?? 0,
+    size: params?.size ?? 20,
+    hasMore: false,
+  };
 }
 
 export function mockReplyWork(accountId: string): OperatorReplyWorkView {

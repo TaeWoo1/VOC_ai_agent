@@ -38,22 +38,26 @@ public class ReviewReplyWorkDismissalService {
     private final ReviewReplyWorkDismissalRepository dismissals;
     private final ReviewRepository reviews;
     private final SellerAccountRepository sellerAccounts;
+    private final ReplyWorkEventSequence eventSeq;
     private final Clock clock;
 
     @Autowired
     public ReviewReplyWorkDismissalService(ReviewReplyWorkDismissalRepository dismissals,
                                            ReviewRepository reviews,
-                                           SellerAccountRepository sellerAccounts) {
-        this(dismissals, reviews, sellerAccounts, Clock.systemUTC());
+                                           SellerAccountRepository sellerAccounts,
+                                           ReplyWorkEventSequence eventSeq) {
+        this(dismissals, reviews, sellerAccounts, eventSeq, Clock.systemUTC());
     }
 
     /** Test seam: an explicit {@link Clock} pins {@code dismissed_at}. */
     ReviewReplyWorkDismissalService(ReviewReplyWorkDismissalRepository dismissals,
                                     ReviewRepository reviews,
-                                    SellerAccountRepository sellerAccounts, Clock clock) {
+                                    SellerAccountRepository sellerAccounts,
+                                    ReplyWorkEventSequence eventSeq, Clock clock) {
         this.dismissals = dismissals;
         this.reviews = reviews;
         this.sellerAccounts = sellerAccounts;
+        this.eventSeq = eventSeq;
         this.clock = clock;
     }
 
@@ -99,6 +103,10 @@ public class ReviewReplyWorkDismissalService {
         d.setCommandId(commandId);
         d.setDismissedBy(actor);
         d.setDismissedAt(clock.instant());
+        // The shared reply-work position, so this dismissal orders against any restore deterministically
+        // even in the same clock tick. Allocated only past the idempotency fast-path — a replay must not
+        // burn a position or it would outrank a later restore it never actually followed.
+        d.setSeq(eventSeq.next());
         try {
             dismissals.save(d);
         } catch (DataIntegrityViolationException raced) {
