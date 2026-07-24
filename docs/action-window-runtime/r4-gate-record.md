@@ -527,6 +527,42 @@ R4 live-run approval — RUN 7 ATTEMPT 6 (export+ingest; reply-state C2/C4) — 
                       dialog discovery shape is green offline under a fresh G3/G6.
 ```
 
+```
+R4 live-run approval — RUN 7 ATTEMPT 7 + LIVE-DEBUG SPRINT (export+ingest; reply-state C2/C4) — CONSUMED (SUCCEEDED)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest (Reply-State Live Validation package)
+- approval model:     (a) attempt 7 (+retry) under a fresh single-use G3/G6 affirmed that turn (both CONSUMED);
+                      (b) a bounded LIVE-DEBUG SPRINT authorized by explicit operator instruction as ONE
+                      campaign under the unchanged scope (NAVER SmartStore / NAVER_DEV_SELLER_SELF_01 /
+                      export+ingest / disposable backend only / no composer / no REPLY_SUBMISSION / no reply
+                      flag). Per-attempt gate = operator "attempt N go"; ≤5 attempts / 90 min per seated run.
+- code under proof:   holder synced forward bed5379 → 97a4896 → e5863d5 → c3e9238 (all local, unpushed):
+                      contextual-dialog path B, DEV live-debug harness (AW_LIVE_DEBUG-gated; production path
+                      unchanged), boundary-match generic keywords + frame scan + retry classifier, and the
+                      modal-body/footer scope fix.
+- backend:            disposable sellerops_run7_20260724T144414 on 18080 (26 migrations, NAVER file-channel
+                      account registered, 0 reviews pre-run); ingest target confirmed loopback-only; dropped
+                      name-guarded at teardown, only sellerops survives.
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed.
+- outcome:            CONSUMED — SUCCEEDED. Attempt 7 (+retry) FAILED closed but the bed5379 fix REACHED the
+                      real export-context dialog (ambiguous:true / dialog:"export-dialog-no-action") — the
+                      first live detection of the consent modal. The seated live-debug campaign then surfaced
+                      the real DOM: (1) a substring match had tagged a persistent page button 사업자정보확인
+                      (fixed: leading word-boundary match); (2) the real 확인 splits notice-text (.modal-body)
+                      from buttons (.modal-footer) so the scope logic missed it (fixed: resolve scope at the
+                      role=dialog modal boundary). With both fixes the run drove once and COMPLETED: export
+                      OBSERVED → 확인 matched (checkpoints:1, dialog:"matched") → download → ingest SUCCESS
+                      (7 rows / 0 skip / 0 fail). The UNCHANGED verify.mjs then proved reply-state on the live
+                      data: C2 (answered:2 present in arrivals, 0 answered in the actionable low-rating queue,
+                      5 pending actionable) and C4 (answered → canStart=false → 409 ANSWERED gate; pending →
+                      approval gate) — ALL PASS, 7 checks. Zero public write, clean guarded teardown. C1
+                      compatibility + C2 queue-exclusion + C4 answered-refusal ALL PROVEN LIVE. Full record:
+                      dispatch §22.
+```
+
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
 > the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a

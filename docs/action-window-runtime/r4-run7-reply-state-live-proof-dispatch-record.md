@@ -880,3 +880,78 @@ unless evidence proves cross-frame).
 **G3 #6 / G6 #6 CONSUMED** (run FAILED closed). C1/C3 remain proven (attempts 3, 5); **C2/C4 still NOT
 demonstrated live.** No further live contact until the contextual-dialog discovery shape is green
 offline (headed synthetic + operator verification) under a fresh G3/G6.
+
+## 22. Execution record — 2026-07-24, attempt 7 + LIVE-DEBUG SPRINT — reply-state C2/C4 PROVEN LIVE
+
+### 22.1 Attempt 7 (+ retry): the fix reached the real dialog, then fail-closed on a non-unique action
+
+On the holder synced to `bed5379` (the contextual-dialog path B), attempt 7 drove once under a fresh
+single-use G3/G6. The operator clicked the export control (`aw.live.barrier {observed:true}`), the NAVER
+consent dialog appeared, and continuation discovery returned
+`aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:true, dialog:"export-dialog-no-action"}`.
+This is **strict progress over attempt 6** (`dialog:"none"`-class blind miss): path B **found the real
+export-context dialog** but fail-closed because its primary action was not unique. `DOWNLOAD_TIMEOUT`, 0
+ingest, 0 artifact, clean teardown. A retry reproduced the same signature. **G3 #7 / G6 #7 CONSUMED.**
+
+### 22.2 The live-debug sprint (operator-directed) — DEV harness, gated
+
+The operator reframed the work as ONE bounded seated **live-debug sprint** (approval standing for the
+campaign under the unchanged scope; per-attempt gate = "attempt N go"; ≤5 attempts / 90 min). A DEV-only
+harness was built, all gated behind `AW_LIVE_DEBUG` / `liveDebug` — **the production single-run path and
+matcher are byte-for-byte unchanged** (continuation 26/26, full 4850, typecheck green):
+
+- **Candidate labeling** (`inspectContinuationCandidates`): on a fail-closed continuation, overlay a
+  sanitized local label (`A1`/`B1`…) on every Path-A/Path-B candidate and record sanitized structural
+  buckets only (dialog / path-A / path-B / overlap counts + per-candidate tag-role bucket / enabled /
+  in-export-dialog). No page text, attributes, URLs, or content.
+- **Operator hint** (`continuationSelectLabel`): highlight the operator-identified candidate instead of
+  failing closed; unresolvable label falls through to the unchanged fail-closed; never auto-clicks.
+- **Per-frame scan** (`debugFrameScan`): sanitized per-frame candidate COUNTS to locate a cross-frame
+  control.
+- **Bounded retry loop** (`runDebugCampaign`): reuse one browser/context + the operator's on-page scope;
+  abort on non-loopback backend / profile loss / terminal surface-or-ingest failure; disposable backend
+  left intact; reply flag unreachable.
+
+### 22.3 What the live DOM revealed, and the two structural fixes
+
+Campaign run 1 (label `B1`) tagged a persistent page button **사업자정보확인** — a **substring** match had
+let it match the keyword `확인`. Fix: **leading word-boundary match** for the generic PRIMARY/CANCEL
+keywords (a keyword not preceded by a letter/number), excluding prefixed compounds (`정보확인`) while
+keeping suffixed action forms (`확인하기`, `동의합니다`). Own-wording/context stay substring.
+
+With that fixed, the driver still found **0 continuation candidates in the driven frame** though the
+per-frame scan showed the real primaries in the main frame — proving it was **not** cross-frame. The
+operator's DOM (angular-ui-bootstrap modal) showed why: the notice TEXT sits in `.modal-body` while
+`취소`/`확인` sit in `.modal-footer > .seller-btn-area`, so the innermost cancel-enclosing box has no
+export text. Fix: **resolve the dialog scope at the `role=dialog` modal boundary** (climb past the
+ctx-less footer to the ARIA dialog; context may live anywhere inside it), bounded to stop before `<body>`
+so page chrome can never be promoted. Fallback to the innermost cancel-enclosing ancestor with context on
+it (unchanged same-container behavior).
+
+Both fixes are proven by production-path tests reproducing the exact live shapes (persistent
+`사업자정보확인` never tagged; the split modal's `확인` matched via the `role=dialog` boundary).
+
+### 22.4 Result — reply-state PROVEN LIVE
+
+With both fixes (holder at `c3e9238`), the campaign drove once and **COMPLETED**: export OBSERVED → `확인`
+matched (`aw.live.continuation {checkpoints:1, observedLast:true, ambiguous:false, dialog:"matched"}`) →
+download → **ingest SUCCESS (7 rows / 0 skip / 0 fail)**. C1 compatibility proven on real data.
+
+The **UNCHANGED** `verify.mjs` then proved the reply-state headline on the live-ingested data — **ALL PASS,
+7 checks**:
+
+- **C2** — answered reviews present in NEW_REVIEW arrivals (`answeredArrivals:2 / totalArrivals:7`), **0
+  answered reviews in the actionable low-rating queue** (`answeredInActionable:0 / actionableTotal:5`), and
+  **5 pending reviews remain actionable** (non-vacuous).
+- **C4** — the answered review reports `channelReplyState:ANSWERED` + `canStartSubmissionRun:false`, its
+  guided run is **refused 409 on the ANSWERED gate**, and a PENDING review is NOT refused on that gate (it
+  hits the approval gate) — the answer-specific contrast.
+
+**No public reply, reply flag never passed, no composer interaction.** Guarded teardown clean: backend
+stopped, disposable DB dropped name-guarded, `sellerops` the only surviving DB, run-local creds + hint
+scrubbed, zero download artifacts, holder unheld.
+
+### 22.5 Gate state after the sprint
+
+**G3 #7 / G6 #7 CONSUMED; the live-debug campaign approval CONSUMED.** **C1 + C2 + C4 ALL PROVEN LIVE** on
+real NAVER-exported, ingested reply-state data. The Reply-State Live Validation package is COMPLETE.
