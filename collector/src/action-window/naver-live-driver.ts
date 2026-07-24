@@ -885,16 +885,26 @@ export class NaverLiveProbeDriver implements ProbeDriver {
         // page toolbar / heading at <body> level can never promote a non-export dialog. A dialog whose
         // buttons are footer-wrapped WITHOUT context in the footer is reported (no-export-dialog), not
         // force-matched — that is an honest signal to refine on evidence, not a speculative climb.
+        // The dialog SCOPE of a primary action (Run 7 attempt-7 live finding — the real NAVER consent
+        // modal splits its notice TEXT into `.modal-body` and its buttons into `.modal-footer`, so the
+        // innermost cancel-enclosing box `.seller-btn-area` has NO export text). Resolution order:
+        //   1) an ARIA dialog ancestor (`role=dialog/alertdialog/aria-modal`) is THE modal boundary —
+        //      climb PAST the ctx-less footer to it; context must live anywhere inside it. This is what
+        //      real framework modals (angular-ui-bootstrap etc.) expose, and it cannot promote page chrome
+        //      because the climb stops AT the dialog element, never at `<body>`.
+        //   2) else the innermost cancel-enclosing ancestor, context required ON it (unchanged tight
+        //      behavior for a same-container dialog; a role-less footer/body split is NOT force-matched).
+        // Bounded to stop before `<body>` so the page toolbar/heading can never become the scope.
         const dialogScopeFor = (node: Element): Element | null => {
           let el: Element | null = node.parentElement;
-          while (el) {
+          let cancelScope: Element | null = null; // innermost cancel-enclosing ancestor (non-ARIA fallback)
+          while (el && el !== document.body) {
             const cur = el; // stable capture: the nested closure must not see a reassignable `el`
-            if (isDialogRole(cur) || cancelCands.some((c) => cur.contains(c))) {
-              return ctxHas(cur) ? cur : null; // innermost dialog reached — context must be IN it
-            }
+            if (isDialogRole(cur)) return ctxHas(cur) ? cur : null; // ARIA dialog = the scope boundary
+            if (!cancelScope && cancelCands.some((c) => cur.contains(c))) cancelScope = cur;
             el = cur.parentElement;
           }
-          return null;
+          return cancelScope && ctxHas(cancelScope) ? cancelScope : null;
         };
         const bMatches: Element[] = [];
         const scopes: Element[] = [];
@@ -1063,12 +1073,14 @@ export class NaverLiveProbeDriver implements ProbeDriver {
         );
         const dialogScopeFor = (node: Element): Element | null => {
           let el: Element | null = node.parentElement;
-          while (el) {
+          let cancelScope: Element | null = null;
+          while (el && el !== document.body) {
             const cur = el;
-            if (isDialogRole(cur) || cancelCands.some((c) => cur.contains(c))) return ctxHas(cur) ? cur : null;
+            if (isDialogRole(cur)) return ctxHas(cur) ? cur : null; // ARIA dialog = the scope boundary
+            if (!cancelScope && cancelCands.some((c) => cur.contains(c))) cancelScope = cur;
             el = cur.parentElement;
           }
-          return null;
+          return cancelScope && ctxHas(cancelScope) ? cancelScope : null;
         };
         const bMatches: Element[] = [];
         const scopes: Element[] = [];

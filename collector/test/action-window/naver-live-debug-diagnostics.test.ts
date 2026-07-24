@@ -105,8 +105,45 @@ const pollutedConfirmPage = (): string => `<!doctype html><html><head><meta char
     </script>
   </body></html>`;
 
+/**
+ * The REAL NAVER consent modal shape (Run 7 attempt-7 live DOM): an ARIA dialog whose notice TEXT sits in
+ * `.modal-body` while the buttons sit in `.modal-footer > .seller-btn-area` — a body/footer split. The
+ * innermost cancel-enclosing box has no export text; only the `role="dialog"` boundary ties them together.
+ */
+const splitModalPage = (): string => `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{font-family:system-ui;margin:0;padding:24px} button,a{display:inline-block;padding:10px 18px}
+    .modal{position:fixed;inset:20% 18%;background:#fff;border:1px solid #888}
+  </style></head><body>
+    <h1>리뷰 관리 (합성 픽스처)</h1>
+    <div class="toolbar"><a id="exp" href="#">엑셀 다운로드</a></div>
+    <div id="host"></div>
+    <script>
+      (function(){
+        var blobUrl = URL.createObjectURL(new Blob([${XLSX_BLOB}], { type: 'application/octet-stream' }));
+        function fireDownload(){ var a=document.createElement('a'); a.href=blobUrl; a.download='review-export.xlsx'; document.body.appendChild(a); a.click(); }
+        function build(){
+          var wrap = document.createElement('div'); wrap.id='dlg1'; wrap.className='modal'; wrap.setAttribute('role','dialog'); wrap.setAttribute('aria-modal','true');
+          wrap.innerHTML =
+            '<div class="modal-dialog"><div class="modal-content">' +
+              '<div class="modal-body">' +
+                '<button class="close" id="close1" aria-label="Close">×</button>' +
+                '<p>리뷰 다운로드 및 활용에 유의해 주세요. 리뷰데이터 다운로드를 계속하시겠습니까? (합성 동의창)</p>' +
+              '</div>' +
+              '<div class="modal-footer"><div class="seller-btn-area">' +
+                '<span><button id="cancel1" class="btn btn-default">취소</button></span>' +
+                '<span><button id="ok1" class="btn btn-primary">확인</button></span>' +
+              '</div></div>' +
+            '</div></div>';
+          document.getElementById('host').appendChild(wrap);
+          document.getElementById('ok1').addEventListener('click', fireDownload);
+        }
+        document.getElementById('exp').addEventListener('click', function(e){ e.preventDefault(); setTimeout(build, ${DLG_DELAY_MS}); });
+      })();
+    </script>
+  </body></html>`;
+
 /** No synthetic page string may reach a driver-visible result. */
-const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "내려받기", "확인", "동의", "취소", "이용", "저장", "동의창", "사업자정보확인", "review-export", ".xlsx", "blob:", "dlg", "host", "ok1", "ok2", "bizinfo"];
+const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "내려받기", "확인", "동의", "취소", "이용", "저장", "동의창", "사업자정보확인", "review-export", ".xlsx", "blob:", "dlg", "host", "ok1", "ok2", "bizinfo", "modal", "seller-btn"];
 
 describe.skipIf(!RUN)("NaverLiveProbeDriver DEV live-debug diagnostics (Run 7 sprint)", () => {
   let browser: Browser;
@@ -211,6 +248,24 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver DEV live-debug diagnostics (Run 7 sp
       expect(await page.locator('[data-aw-label="review-export-continuation"]').count()).toBe(1);
       expect(await page.locator("#bizinfo[data-aw-target]").count()).toBe(0); // the page button is NEVER tagged
       expect(await page.locator("#dlg1-cancel[data-aw-target]").count()).toBe(0);
+      if (!HEADED) await page.click("#ok1");
+      const detected = await detectP;
+      expect(detected.detected).toBe(true);
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false, dialog: "matched" });
+      await driver.cleanup();
+    },
+    HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
+  );
+
+  it(
+    "split modal (real NAVER shape): notice text in .modal-body, buttons in .modal-footer → the 확인 is matched via the role=dialog boundary (production path)",
+    async () => {
+      const driver = await driveToDetectStart(DETECT_MS, {}, splitModalPage());
+      const detectP = driver.detectDownload();
+      await page.waitForSelector("#ok1[data-aw-target]", { timeout: DETECT_MS });
+      expect(await page.locator('[data-aw-label="review-export-continuation"]').count()).toBe(1);
+      expect(await page.locator("#cancel1[data-aw-target]").count()).toBe(0);
+      expect(await page.locator("#close1[data-aw-target]").count()).toBe(0);
       if (!HEADED) await page.click("#ok1");
       const detected = await detectP;
       expect(detected.detected).toBe(true);
