@@ -177,8 +177,9 @@ Append a dated entry; never rewrite prior entries — correct forward.
   channel supports.
 - **Ledger impact:** none.
 - **Gate state:** no gate consumed, no live contact. Live-run approval and the market-policy
-  clarification gate both remain closed. Any NAVER live proof stays **deferred while the operator
-  IP/environment is changed**.
+  clarification gate both remain closed. The operator's approved environment/IP is **restored**
+  (2026-07-24); a NAVER live proof is therefore **eligible only after a fresh in-turn G3/G6
+  approval** (never standing) — the record grants none.
 - **Blockers:** none new. ⚠ The **entire arc is offline/synthetic — no live evidence**; nothing
   promoted in §4.1. ⚠ A reported reply stays permanently **UNVERIFIED** — no read-back oracle, so the
   surface never says 완료. ⚠ The **carrier mode-switch decision stays open and separate**; a session
@@ -186,10 +187,11 @@ Append a dated entry; never rewrite prior entries — correct forward.
 - **Next:** a product-owner fork, not an effort question. The offline ACT surface is now as honest as
   it can be without live evidence; the next step that changes capability truth is a **bounded,
   human-in-the-loop NAVER live proof** (real export → ingest → reply state → guided handoff,
-  submitting no public reply), which needs the market-policy gate opened AND a fresh single-use
-  in-turn approval, and is blocked today by the changed operator environment. The standing
-  alternatives that need no live contact are **GENERALIZE** (select the second channel) and the
-  **`rules-v2`** body-polarity detector (needs the gated labeling session first).
+  submitting no public reply). With the operator environment restored (2026-07-24) that proof is now
+  eligible, but only under a fresh single-use in-turn **G3/G6** approval naming
+  channel/account/date/operator — a plan or a restored environment is never authorization. The
+  standing alternatives that need no live contact are **GENERALIZE** (select the second channel) and
+  the **`rules-v2`** body-polarity detector (needs the gated labeling session first).
 
 ### 2026-07-23 — Reply Runtime Injection v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the guided-reply terminal)
