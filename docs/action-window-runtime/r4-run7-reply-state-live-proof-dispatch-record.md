@@ -822,3 +822,61 @@ unpushed, **zero-behavior** change — runtime behavior is identical. Disposable
 success with the fixed runtime, no public write, clean teardown. `checkpoints:0` (direct variant); the
 one-consent-checkpoint normal flow + role-less discovery are proven by the headed operator verification
 and the synthetic proofs, and were simply not exercised by this range. **G3 #5 / G6 #5 CONSUMED.**
+
+## 21. Execution record — 2026-07-24, attempt 6 (reply-state headline C2/C4; sanitized)
+
+### 21.1 Dispatch
+
+Reply-State Live Validation package. Fresh G3 (`export+ingest`, five boxes, restored environment;
+Bridge N/A/CLI-loopback) + fresh single-use G6 (max live window 55 min, timer-derived; no-reply bound)
+affirmed in the dispatching turn, operator **seated and ready**. Code under proof: holder **`661bcca`**
+— which already contains the **PR #350 role-less continuation discovery fix** + scroll-tracking
+highlight + `readExportScope`. Disposable backend `sellerops_run7_20260724T133337` on 18080 (26
+migrations, NAVER file-channel account registered for the run-local org, 0 reviews pre-run), ingest
+target confirmed as `http://127.0.0.1:18080` before Chrome opened.
+
+### 21.2 Timeline (log times UTC)
+
+| Time | Event |
+|---|---|
+| 13:51:12 | `profile.launch {headless:false,channel:chrome}` — Chrome opened |
+| — | operator login + scope select; `readExportScope` reflected **2026.01.25–2026.07.24 · 스마트스토어 · 1점 · 정상** (operator confirmed on screen) |
+| 13:55:30 | `aw.live.barrier {observed:true}` — first export action observed |
+| — | NAVER showed a **second consent control** (operator: "another button waiting") |
+| 13:56:32 | `aw.live.run {status:FAILED, blockerCode:DOWNLOAD_TIMEOUT}` · `aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}` |
+
+### 21.3 The finding — the continuation-discovery miss REPEATS despite #350
+
+The **exact same `checkpoints:0` symptom as attempt 4**, now on `661bcca` which **includes the #350
+role-less discovery fix**. So #350 did **not** close the live gap: the real NAVER second control is
+matched by neither the native selector, the `cursor:pointer` role-less path, nor the keyword-name
+filter. Its structure differs from all five synthetic shapes AND the role-less `div` reproduced in
+`naver-live-continuation-shapes.test.ts`.
+
+Contrast with attempt 5 (§20): the *same* scope produced a **direct** download (`checkpoints:0`,
+succeeded) — NAVER **interposes** the consent modal only intermittently. When it does not, export
+succeeds; when it does, discovery misses it and the run fails closed. This matches the CLI prompt's own
+warning that NAVER "may interpose FURTHER steps."
+
+**Primary hypothesis (operator-directed):** the second control is a **generic `확인`/`동의`** action
+whose *export meaning lives in the surrounding modal context* (review-export / Excel / usage-consent),
+not in the button text — so keyword-name matching on the button alone cannot find it, and bare-`확인`
+global matching is unsafe. Prior evidence: the read-only frame-aware probe (2026-07-13) found the
+export **surface** in the **top document**; whether the consent **modal** is same-frame is a new,
+separately-diagnosed question (§21 fix adds sanitized frame diagnostics; iframe traversal stays out
+unless evidence proves cross-frame).
+
+### 21.4 Fail-closed evidence (sanitized)
+
+- **0 reviews ingested** (disposable DB `reviews` count 0 post-run) · **0 export artifact** (holder
+  `downloads/` held only a stale empty `diagnostic/` from 07-20) · browser closed by `finally` · **no
+  public write**.
+- **Teardown clean:** backend stopped, DB dropped name-guarded, `sellerops` the only surviving
+  `sellerops*` DB, run-local creds + scope scrubbed, ready sentinel cleared, holder unheld at
+  `661bcca`.
+
+### 21.5 Gate state after attempt 6
+
+**G3 #6 / G6 #6 CONSUMED** (run FAILED closed). C1/C3 remain proven (attempts 3, 5); **C2/C4 still NOT
+demonstrated live.** No further live contact until the contextual-dialog discovery shape is green
+offline (headed synthetic + operator verification) under a fresh G3/G6.

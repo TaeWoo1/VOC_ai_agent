@@ -498,6 +498,35 @@ R4 live-run approval — RUN 7 ATTEMPT 5 (export+ingest; export tutorial) — CO
                       The NAVER Review Export Tutorial's live-success criterion is MET.
 ```
 
+```
+R4 live-run approval — RUN 7 ATTEMPT 6 (export+ingest; reply-state C2/C4) — CONSUMED (run FAILED closed)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest (Reply-State Live Validation package)
+- code under proof:   holder 661bcca — INCLUDES the #350 role-less continuation discovery fix +
+                      scroll-track / readExportScope
+- backend:            disposable sellerops_run7_20260724T133337 on 18080 (26 migrations, NAVER
+                      file-channel account registered, 0 reviews pre-run); ingest target confirmed;
+                      dropped name-guarded at teardown, sellerops intact
+- max live window:    55 minutes, timer-derived; actual barrier→terminal ~62 s (13:55:30 observed →
+                      13:56:32 DOWNLOAD_TIMEOUT)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged; scope confirmed on screen via readExportScope before acting
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (export+ingest, five boxes, restored
+                      environment; Bridge N/A/CLI-loopback)
+- P6:                 ✅ signed on G6 + G3
+- outcome:            CONSUMED — drove once, FAILED closed DOWNLOAD_TIMEOUT. Export action OBSERVED
+                      (barrier observed:true), scope correct (2026.01.25–2026.07.24 · 1점 · 정상). A
+                      second NAVER consent control was visibly present, but continuation discovery
+                      returned aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}
+                      — the SAME miss as attempt 4, now REPEATED on code that includes #350. Zero
+                      ingest, zero artifact, no public write, clean teardown. C2/C4 still NOT proven
+                      live. Full record: dispatch §21. NO further live contact until the contextual-
+                      dialog discovery shape is green offline under a fresh G3/G6.
+```
+
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
 > the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a
