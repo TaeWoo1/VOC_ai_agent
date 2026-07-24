@@ -85,19 +85,22 @@ const OPERATOR_STEP_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Overlay label for a CONTINUATION checkpoint — a NAVER-native follow-up notification/dialog whose
- * download/confirm control the seller must act on before the actual browser download fires (the
- * Run 7 attempt-2 finding: the export choreography can carry more than one human step). Dev-overlay
- * copy only, same posture as `OPERATOR_STEP_LABELS`.
+ * Overlay label for the CONSENT checkpoint. In the normal NAVER review-export flow the export click
+ * raises ONE in-page consent/notice dialog; the seller clicks its confirm/agree control and the
+ * browser download then begins AUTOMATICALLY — it is NOT a separate "download button". This label
+ * highlights that one consent/confirm control and tells the seller the download follows on its own.
+ * (The engine can raise further checkpoints as a DEFENSIVE fallback — see `MAX_CONTINUATION_CHECKPOINTS`
+ * — but one consent step is the expected choreography.) Dev-overlay copy only, like `OPERATOR_STEP_LABELS`.
  */
 const CONTINUATION_STEP_LABEL =
-  "NAVER 알림창이 표시되었습니다. 알림창의 다운로드(확인) 버튼을 직접 클릭하세요.";
+  "NAVER 동의·확인 창이 나타났어요. 창의 확인·동의 버튼을 직접 클릭하시면 다운로드가 자동으로 시작됩니다.";
 
 /**
- * Upper bound on continuation checkpoints in one run. Two are real (the consent dialog can itself
- * carry download wording, then the follow-up notification carries the actual control); the cap only
- * guards against a pathological surface producing an unbounded highlight → wait loop. Hitting the
- * cap fails closed like any other undetected download.
+ * DEFENSIVE upper bound on post-export consent/continuation checkpoints — NOT the choreography. The
+ * NORMAL export flow is exactly ONE checkpoint: the export click raises a single in-page consent/notice
+ * dialog, the seller confirms it, and the download begins automatically. This ceiling only guards a
+ * pathological surface that keeps interposing further export-related controls without ever delivering a
+ * download; hitting it fails closed like any other undetected download.
  */
 const MAX_CONTINUATION_CHECKPOINTS = 3;
 
@@ -425,19 +428,25 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
-   * READ-ONLY detection, extended to the multi-checkpoint choreography (Run 7 attempt-2 finding).
+   * READ-ONLY download detection for the normal NAVER export choreography, with a defensive fallback.
    *
-   * The Run-4 shape — the seller's confirm fires the download directly — is still the fast path:
-   * the armed download is raced against the deadline and wins immediately. But the live surface can
-   * interpose further NAVER-native human checkpoints (a consent dialog whose confirm carries
-   * download wording, then an asynchronous notification whose control the seller must click before
-   * the browser download exists). While the race waits, the driver therefore polls read-only for a
-   * NEW single wording-matched control (the original stays excluded by identity); when exactly one
-   * appears it is re-tagged, HIGHLIGHTED, and the driver WAITS for the seller's own action on it —
-   * it never clicks. Only after that action does a fresh download deadline run. Bounded everywhere:
-   * ≥2 simultaneous candidates → ambiguous → fail closed; no action inside the continuation observe
-   * window → fail closed; more than `MAX_CONTINUATION_CHECKPOINTS` → fail closed; and absence of
-   * both a download and a checkpoint at any deadline → the unchanged `DOWNLOAD_TIMEOUT` shape.
+   * NORMAL FLOW — two seller clicks in total: the seller clicks the export control; NAVER raises ONE
+   * in-page consent/notice dialog; the driver detects that single consent/confirm control, re-tags and
+   * HIGHLIGHTS it, and WAITS for the seller's own click on it — it never clicks; the seller confirms,
+   * and the browser download then begins AUTOMATICALLY, which the armed listener detects. That is the
+   * whole expected path: exactly ONE consent checkpoint after the export click, then the download.
+   *
+   * Two variants the same loop absorbs: (a) the Run-4 shape, where the confirm fires the download with
+   * no separately-highlightable control — the armed download simply wins the race, ZERO checkpoints;
+   * and (b) a DEFENSIVE fallback — only if after the consent NO download follows AND another clearly
+   * export-related control appears is it highlighted as a further checkpoint, up to
+   * `MAX_CONTINUATION_CHECKPOINTS`. That guards a pathological surface; it is NOT the tutorial flow.
+   *
+   * While the race waits, the driver polls read-only for a NEW single wording-matched control (the
+   * original stays excluded by identity). Bounded everywhere: ≥2 simultaneous candidates → ambiguous →
+   * fail closed; no action inside the continuation observe window → fail closed; more than
+   * `MAX_CONTINUATION_CHECKPOINTS` → fail closed; and absence of both a download and a control at any
+   * deadline → the unchanged `DOWNLOAD_TIMEOUT` shape.
    *
    * A detected download is buffered into memory (bytes re-readable for validate + ingest), the
    * browser's own copy is dropped, and only a nonce-seeded opaque 16-hex ref is emitted — the
