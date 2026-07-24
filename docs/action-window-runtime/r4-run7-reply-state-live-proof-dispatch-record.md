@@ -822,3 +822,136 @@ unpushed, **zero-behavior** change — runtime behavior is identical. Disposable
 success with the fixed runtime, no public write, clean teardown. `checkpoints:0` (direct variant); the
 one-consent-checkpoint normal flow + role-less discovery are proven by the headed operator verification
 and the synthetic proofs, and were simply not exercised by this range. **G3 #5 / G6 #5 CONSUMED.**
+
+## 21. Execution record — 2026-07-24, attempt 6 (reply-state headline C2/C4; sanitized)
+
+### 21.1 Dispatch
+
+Reply-State Live Validation package. Fresh G3 (`export+ingest`, five boxes, restored environment;
+Bridge N/A/CLI-loopback) + fresh single-use G6 (max live window 55 min, timer-derived; no-reply bound)
+affirmed in the dispatching turn, operator **seated and ready**. Code under proof: holder **`661bcca`**
+— which already contains the **PR #350 role-less continuation discovery fix** + scroll-tracking
+highlight + `readExportScope`. Disposable backend `sellerops_run7_20260724T133337` on 18080 (26
+migrations, NAVER file-channel account registered for the run-local org, 0 reviews pre-run), ingest
+target confirmed as `http://127.0.0.1:18080` before Chrome opened.
+
+### 21.2 Timeline (log times UTC)
+
+| Time | Event |
+|---|---|
+| 13:51:12 | `profile.launch {headless:false,channel:chrome}` — Chrome opened |
+| — | operator login + scope select; `readExportScope` reflected **2026.01.25–2026.07.24 · 스마트스토어 · 1점 · 정상** (operator confirmed on screen) |
+| 13:55:30 | `aw.live.barrier {observed:true}` — first export action observed |
+| — | NAVER showed a **second consent control** (operator: "another button waiting") |
+| 13:56:32 | `aw.live.run {status:FAILED, blockerCode:DOWNLOAD_TIMEOUT}` · `aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}` |
+
+### 21.3 The finding — the continuation-discovery miss REPEATS despite #350
+
+The **exact same `checkpoints:0` symptom as attempt 4**, now on `661bcca` which **includes the #350
+role-less discovery fix**. So #350 did **not** close the live gap: the real NAVER second control is
+matched by neither the native selector, the `cursor:pointer` role-less path, nor the keyword-name
+filter. Its structure differs from all five synthetic shapes AND the role-less `div` reproduced in
+`naver-live-continuation-shapes.test.ts`.
+
+Contrast with attempt 5 (§20): the *same* scope produced a **direct** download (`checkpoints:0`,
+succeeded) — NAVER **interposes** the consent modal only intermittently. When it does not, export
+succeeds; when it does, discovery misses it and the run fails closed. This matches the CLI prompt's own
+warning that NAVER "may interpose FURTHER steps."
+
+**Primary hypothesis (operator-directed):** the second control is a **generic `확인`/`동의`** action
+whose *export meaning lives in the surrounding modal context* (review-export / Excel / usage-consent),
+not in the button text — so keyword-name matching on the button alone cannot find it, and bare-`확인`
+global matching is unsafe. Prior evidence: the read-only frame-aware probe (2026-07-13) found the
+export **surface** in the **top document**; whether the consent **modal** is same-frame is a new,
+separately-diagnosed question (§21 fix adds sanitized frame diagnostics; iframe traversal stays out
+unless evidence proves cross-frame).
+
+### 21.4 Fail-closed evidence (sanitized)
+
+- **0 reviews ingested** (disposable DB `reviews` count 0 post-run) · **0 export artifact** (holder
+  `downloads/` held only a stale empty `diagnostic/` from 07-20) · browser closed by `finally` · **no
+  public write**.
+- **Teardown clean:** backend stopped, DB dropped name-guarded, `sellerops` the only surviving
+  `sellerops*` DB, run-local creds + scope scrubbed, ready sentinel cleared, holder unheld at
+  `661bcca`.
+
+### 21.5 Gate state after attempt 6
+
+**G3 #6 / G6 #6 CONSUMED** (run FAILED closed). C1/C3 remain proven (attempts 3, 5); **C2/C4 still NOT
+demonstrated live.** No further live contact until the contextual-dialog discovery shape is green
+offline (headed synthetic + operator verification) under a fresh G3/G6.
+
+## 22. Execution record — 2026-07-24, attempt 7 + LIVE-DEBUG SPRINT — reply-state C2/C4 PROVEN LIVE
+
+### 22.1 Attempt 7 (+ retry): the fix reached the real dialog, then fail-closed on a non-unique action
+
+On the holder synced to `bed5379` (the contextual-dialog path B), attempt 7 drove once under a fresh
+single-use G3/G6. The operator clicked the export control (`aw.live.barrier {observed:true}`), the NAVER
+consent dialog appeared, and continuation discovery returned
+`aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:true, dialog:"export-dialog-no-action"}`.
+This is **strict progress over attempt 6** (`dialog:"none"`-class blind miss): path B **found the real
+export-context dialog** but fail-closed because its primary action was not unique. `DOWNLOAD_TIMEOUT`, 0
+ingest, 0 artifact, clean teardown. A retry reproduced the same signature. **G3 #7 / G6 #7 CONSUMED.**
+
+### 22.2 The live-debug sprint (operator-directed) — DEV harness, gated
+
+The operator reframed the work as ONE bounded seated **live-debug sprint** (approval standing for the
+campaign under the unchanged scope; per-attempt gate = "attempt N go"; ≤5 attempts / 90 min). A DEV-only
+harness was built, all gated behind `AW_LIVE_DEBUG` / `liveDebug` — **the production single-run path and
+matcher are byte-for-byte unchanged** (continuation 26/26, full 4850, typecheck green):
+
+- **Candidate labeling** (`inspectContinuationCandidates`): on a fail-closed continuation, overlay a
+  sanitized local label (`A1`/`B1`…) on every Path-A/Path-B candidate and record sanitized structural
+  buckets only (dialog / path-A / path-B / overlap counts + per-candidate tag-role bucket / enabled /
+  in-export-dialog). No page text, attributes, URLs, or content.
+- **Operator hint** (`continuationSelectLabel`): highlight the operator-identified candidate instead of
+  failing closed; unresolvable label falls through to the unchanged fail-closed; never auto-clicks.
+- **Per-frame scan** (`debugFrameScan`): sanitized per-frame candidate COUNTS to locate a cross-frame
+  control.
+- **Bounded retry loop** (`runDebugCampaign`): reuse one browser/context + the operator's on-page scope;
+  abort on non-loopback backend / profile loss / terminal surface-or-ingest failure; disposable backend
+  left intact; reply flag unreachable.
+
+### 22.3 What the live DOM revealed, and the two structural fixes
+
+Campaign run 1 (label `B1`) tagged a persistent page button **사업자정보확인** — a **substring** match had
+let it match the keyword `확인`. Fix: **leading word-boundary match** for the generic PRIMARY/CANCEL
+keywords (a keyword not preceded by a letter/number), excluding prefixed compounds (`정보확인`) while
+keeping suffixed action forms (`확인하기`, `동의합니다`). Own-wording/context stay substring.
+
+With that fixed, the driver still found **0 continuation candidates in the driven frame** though the
+per-frame scan showed the real primaries in the main frame — proving it was **not** cross-frame. The
+operator's DOM (angular-ui-bootstrap modal) showed why: the notice TEXT sits in `.modal-body` while
+`취소`/`확인` sit in `.modal-footer > .seller-btn-area`, so the innermost cancel-enclosing box has no
+export text. Fix: **resolve the dialog scope at the `role=dialog` modal boundary** (climb past the
+ctx-less footer to the ARIA dialog; context may live anywhere inside it), bounded to stop before `<body>`
+so page chrome can never be promoted. Fallback to the innermost cancel-enclosing ancestor with context on
+it (unchanged same-container behavior).
+
+Both fixes are proven by production-path tests reproducing the exact live shapes (persistent
+`사업자정보확인` never tagged; the split modal's `확인` matched via the `role=dialog` boundary).
+
+### 22.4 Result — reply-state PROVEN LIVE
+
+With both fixes (holder at `c3e9238`), the campaign drove once and **COMPLETED**: export OBSERVED → `확인`
+matched (`aw.live.continuation {checkpoints:1, observedLast:true, ambiguous:false, dialog:"matched"}`) →
+download → **ingest SUCCESS (7 rows / 0 skip / 0 fail)**. C1 compatibility proven on real data.
+
+The **UNCHANGED** `verify.mjs` then proved the reply-state headline on the live-ingested data — **ALL PASS,
+7 checks**:
+
+- **C2** — answered reviews present in NEW_REVIEW arrivals (`answeredArrivals:2 / totalArrivals:7`), **0
+  answered reviews in the actionable low-rating queue** (`answeredInActionable:0 / actionableTotal:5`), and
+  **5 pending reviews remain actionable** (non-vacuous).
+- **C4** — the answered review reports `channelReplyState:ANSWERED` + `canStartSubmissionRun:false`, its
+  guided run is **refused 409 on the ANSWERED gate**, and a PENDING review is NOT refused on that gate (it
+  hits the approval gate) — the answer-specific contrast.
+
+**No public reply, reply flag never passed, no composer interaction.** Guarded teardown clean: backend
+stopped, disposable DB dropped name-guarded, `sellerops` the only surviving DB, run-local creds + hint
+scrubbed, zero download artifacts, holder unheld.
+
+### 22.5 Gate state after the sprint
+
+**G3 #7 / G6 #7 CONSUMED; the live-debug campaign approval CONSUMED.** **C1 + C2 + C4 ALL PROVEN LIVE** on
+real NAVER-exported, ingested reply-state data. The Reply-State Live Validation package is COMPLETE.

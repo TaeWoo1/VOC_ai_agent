@@ -31,8 +31,8 @@
  * separate, per-run operator-approved step gated by R4 §3 G2/G3/G6 and the full §4 boundary — this
  * file grants none of that.
  */
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Page } from "playwright";
@@ -51,7 +51,7 @@ import {
   type CommandType,
   type EventType,
 } from "../../../contracts/action-window/v1/index";
-import { NaverLiveProbeDriver, type ExportScopeReadback } from "../action-window/naver-live-driver";
+import { NaverLiveProbeDriver, type CandidateInspection, type ExportScopeReadback } from "../action-window/naver-live-driver";
 import { NAVER_CHANNEL_CODE, NAVER_RUN_COPY_KEY } from "../action-window/naver-surface";
 import { defaultQuarantineDirFor } from "../action-window/quarantine";
 import { defaultOperationRunDirFor } from "../action-window/run-store";
@@ -137,6 +137,12 @@ export interface LiveRunDeps {
   downloadTimeoutMs: number;
   /** Run-scoped `--no-ingest` policy, threaded to the session executor. */
   declineIngest: boolean;
+  /**
+   * DEV-ONLY live-debug campaign switch (`AW_LIVE_DEBUG=1`, the seated NAVER live-debug sprint). Default
+   * `false` ⇒ the production single-run flow. When `true`, `main` runs the bounded retry campaign and the
+   * driver overlays sanitized candidate labels on a fail-closed continuation. Never product behavior.
+   */
+  liveDebug?: boolean;
 }
 
 /**
@@ -164,13 +170,14 @@ export function declinedIngestGuard(): AwIngestUploadFn {
 export function buildLiveRunDeps(
   cfg: CollectorConfig,
   collectorRoot: string,
-  opts?: { declineIngest?: boolean },
+  opts?: { declineIngest?: boolean; liveDebug?: boolean },
 ): LiveRunDeps {
   const declineIngest = opts?.declineIngest ?? false;
   return {
     quarantineDir: defaultQuarantineDirFor(collectorRoot),
     persistDir: defaultOperationRunDirFor(collectorRoot),
     declineIngest,
+    liveDebug: opts?.liveDebug ?? false,
     ingest: declineIngest
       ? declinedIngestGuard()
       : buildBackendIngestUpload({
@@ -468,7 +475,7 @@ export interface AssembledLiveRun {
  * Wire the live driver over the given `Page` into a persisted session on an in-process loopback, with
  * an attached automated operator client. This is the only place a real `Page` meets the engine.
  */
-export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun {
+export function assembleLiveRun(page: Page, deps: LiveRunDeps, selectLabel?: string): AssembledLiveRun {
   const channel = createLoopbackChannel();
   const driver = new NaverLiveProbeDriver(page, {
     quarantineDir: deps.quarantineDir,
@@ -476,6 +483,9 @@ export function assembleLiveRun(page: Page, deps: LiveRunDeps): AssembledLiveRun
     observeTimeoutMs: deps.observeTimeoutMs,
     downloadTimeoutMs: deps.downloadTimeoutMs,
     guidanceEnabled: true,
+    // DEV-ONLY: off on the production path (both undefined ⇒ unchanged driver behavior).
+    liveDebug: deps.liveDebug ?? false,
+    ...(selectLabel ? { continuationSelectLabel: selectLabel } : {}),
   });
   const opened = createPersistentRunSession(
     { dir: deps.persistDir, transport: channel.server, driver, declineIngest: deps.declineIngest },
@@ -763,6 +773,192 @@ export async function awaitFreshSentinel(path: string, timeoutMs: number, interv
   return waitForSentinel(path, timeoutMs, intervalMs);
 }
 
+/* ─────────────────────── DEV-ONLY live-debug campaign (sprint) ─────────────────────── */
+
+/** DEV-ONLY bounds for ONE seated live-debug campaign (2026-07-24 sprint). Not product behavior. */
+const MAX_DEBUG_ATTEMPTS = 5;
+const CAMPAIGN_BUDGET_MS = 90 * 60_000;
+
+/** The operator-identified disambiguation hint file, alongside the sentinel in the gitignored `.status`. */
+function debugHintPathFor(sentinelPath: string): string {
+  return join(dirname(sentinelPath), "aw-debug-selection.json");
+}
+
+/** Read a sanitized `{selectLabel:"B2"}` hint, accepting ONLY an `A#`/`B#` label. Anything else ⇒ none. */
+function readDebugHint(path: string): string | undefined {
+  try {
+    if (!existsSync(path)) return undefined;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { selectLabel?: unknown };
+    const label = typeof parsed.selectLabel === "string" ? parsed.selectLabel.trim() : "";
+    return /^[AB]\d+$/.test(label) ? label : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function removeDebugHint(path: string): void {
+  try {
+    if (existsSync(path)) unlinkSync(path);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Operator-local (stderr, never logged/transported) sanitized dump of the labelled candidates. */
+function debugCandidatesPrompt(ins: CandidateInspection): string {
+  const lines = [
+    "",
+    "  >> CANDIDATE CONTINUATION CONTROLS — sanitized labels are drawn ON the page (A=magenta, B=green) <<",
+    `     dialogs:${ins.dialogCount}  path-A:${ins.pathACount}  path-B:${ins.pathBCount}  overlap:${ins.overlapCount}`,
+  ];
+  if (ins.candidates.length === 0) {
+    lines.push("     (no eligible candidate in THIS frame — the real dialog may be cross-frame)");
+  }
+  for (const c of ins.candidates) {
+    lines.push(`       ${c.label}  via=${c.via}  kind=${c.tagBucket}  enabled=${c.enabled}  inDialog=${c.inExportDialog}`);
+  }
+  lines.push(
+    "     Which VISIBLE label is the real consent action? Set the hint, then say the next attempt go.",
+    "",
+  );
+  return lines.join("\n");
+}
+
+/** Operator-local (stderr) sanitized per-frame candidate scan — locates a cross-frame consent control. */
+function debugFramesPrompt(frames: Array<{ frame: number; primary: number; cancel: number; exportDialog: number }>): string {
+  const lines = ["", "  >> PER-FRAME SCAN (sanitized counts) — where the boundary-clean 확인/동의 live <<"];
+  for (const f of frames) {
+    lines.push(`       frame#${f.frame}  primary=${f.primary}  cancel=${f.cancel}  exportDialog=${f.exportDialog}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/** Short between-attempt prompt (session + scope are reused; the operator just re-arms). */
+function debugAttemptPrompt(attempt: number, remainingMin: number): string {
+  return [
+    "",
+    "─".repeat(64),
+    ` DEV LIVE-DEBUG — attempt ${attempt}/${MAX_DEBUG_ATTEMPTS} · ~${remainingMin} min left in this campaign`,
+    "─".repeat(64),
+    "  Same browser, same login, same selected scope — nothing is reloaded.",
+    "  Re-confirm your 1점 scope on screen, then act on the highlighted export control.",
+    "  The Runtime never clicks. A started+validated download ingests into the disposable backend.",
+    "",
+  ].join("\n");
+}
+
+/**
+ * DEV-ONLY seated live-debug campaign (the 2026-07-24 sprint). Reuses ONE browser/context + the
+ * operator's on-page scope across up to `MAX_DEBUG_ATTEMPTS` / `CAMPAIGN_BUDGET_MS`. Each attempt: wait
+ * for the operator's "attempt N go" sentinel, read back the export scope, drive one run. On the
+ * continuation fail-closed the driver has overlaid sanitized candidate labels — printed here so the
+ * operator can name the real consent action (written to the hint file, honored next attempt). Aborts
+ * immediately on backend-target drift (non-loopback), profile loss (page closed), or any terminal
+ * surface/ingest failure that is NOT the consent-dialog `DOWNLOAD_TIMEOUT`. Never clicks; the reply flag
+ * is never reachable here. The disposable backend is left intact (teardown is the operator's guarded step).
+ */
+async function runDebugCampaign(
+  page: Page,
+  deps: LiveRunDeps,
+  sentinelPath: string,
+  baseUrl: string,
+  onAssembled: (a: AssembledLiveRun) => void,
+): Promise<void> {
+  const loopback = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/i.test(baseUrl);
+  if (!loopback) {
+    log("aw.live.debug", { event: "abort-backend-target-drift" });
+    console.error("ABORT: live-debug campaign requires a loopback disposable backend; refusing.");
+    return;
+  }
+  const hintPath = debugHintPathFor(sentinelPath);
+  removeDebugHint(hintPath);
+  log("aw.live.debug", { event: "campaign-start", maxAttempts: MAX_DEBUG_ATTEMPTS });
+  const startedAt = Date.now();
+
+  for (let attempt = 1; attempt <= MAX_DEBUG_ATTEMPTS; attempt += 1) {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > CAMPAIGN_BUDGET_MS) {
+      log("aw.live.debug", { event: "campaign-timeout", attempt });
+      break;
+    }
+    const remainingMin = Math.max(0, Math.round((CAMPAIGN_BUDGET_MS - elapsed) / 60_000));
+    console.error(attempt === 1 ? confirmPrompt(deps.declineIngest) : debugAttemptPrompt(attempt, remainingMin));
+    console.error("  Sentinel file (create this when ready):");
+    console.error(`    ${sentinelPath}`);
+    console.error("");
+    const wait = await awaitFreshSentinel(sentinelPath, CONFIRM_TIMEOUT_MS, SENTINEL_POLL_INTERVAL_MS);
+    if (!wait.ready) {
+      log("aw.live.debug", { event: "sentinel-timeout", attempt });
+      break;
+    }
+    if (page.isClosed()) {
+      log("aw.live.debug", { event: "abort-profile-loss", attempt });
+      break;
+    }
+    await settleSpa(page);
+
+    const selectLabel = readDebugHint(hintPath);
+    const assembled = assembleLiveRun(page, deps, selectLabel);
+    onAssembled(assembled);
+    // Clear the PRIOR attempt's labels / seen-stamps now that the operator has answered — fresh DOM slate.
+    await assembled.driver.clearContinuationDebug();
+    console.error(exportScopePrompt(await assembled.driver.readExportScope()));
+    log("aw.live.debug", { event: "attempt-start", attempt, hinted: selectLabel !== undefined });
+
+    let view: ActionWindowRunView | undefined;
+    try {
+      view = await driveOneRun(assembled.session, assembled.client, { observeTimeoutMs: deps.observeTimeoutMs });
+    } catch {
+      // A non-convergence (`whenSettled did not converge`) or a transient page error: treat as a failed
+      // attempt (bounded), never a campaign crash. Nothing was clicked or captured.
+      log("aw.live.debug", { event: "drive-threw", attempt });
+      view = assembled.client.view;
+    }
+
+    const status = view?.status;
+    const blockerCode = view?.blocker?.code;
+    log("aw.live.run", { status, ...(blockerCode ? { blockerCode } : {}) });
+    const continuation = assembled.driver.lastContinuation();
+    if (continuation) log("aw.live.continuation", { ...continuation });
+    const inspection = assembled.driver.lastInspection();
+    if (inspection) {
+      log("aw.live.debug.candidates", {
+        attempt,
+        dialogCount: inspection.dialogCount,
+        pathACount: inspection.pathACount,
+        pathBCount: inspection.pathBCount,
+        overlapCount: inspection.overlapCount,
+        total: inspection.candidates.length,
+      });
+      console.error(debugCandidatesPrompt(inspection));
+      // If the frame we drove has no unique action, scan every frame — is the real control cross-frame?
+      const frames = await assembled.driver.debugFrameScan().catch(() => []);
+      log("aw.live.debug.frames", { attempt, frames: frames.length, withPrimary: frames.filter((f) => f.primary > 0).length });
+      console.error(debugFramesPrompt(frames));
+    }
+
+    if (status === "COMPLETED") {
+      log("aw.live.debug", { event: "success", attempt });
+      console.error(`\n  >> LIVE-DEBUG SUCCESS on attempt ${attempt}: export detected + ingested. <<\n`);
+      return;
+    }
+    // Abort ONLY on a genuine terminal surface/ingest failure (account/scope/surface drift, or a captured
+    // artifact that would not ingest). A DOWNLOAD_TIMEOUT (the consent-dialog case we are debugging), a
+    // thrown/non-convergent drive, or any transient status (PROCESSING/PREPARING/WAITING_FOR_HUMAN) is a
+    // RETRY — and retries are human-gated by the next "attempt N go", so the loop never spins on its own.
+    const ABORT_BLOCKERS = ["UNSUPPORTED_STATE", "TARGET_NOT_FOUND", "INGEST_FAILED", "ARTIFACT_INVALID"];
+    if (status === "FAILED" && blockerCode && ABORT_BLOCKERS.includes(blockerCode)) {
+      log("aw.live.debug", { event: "abort-terminal-failure", attempt, blockerCode });
+      console.error(`\n  ABORT: attempt ${attempt} ended in FAILED/${blockerCode} — surface/ingest drift, not the consent-dialog case. Stopping.\n`);
+      return;
+    }
+    // Consume the hint that just failed so a stale one never auto-applies; the operator re-sets it.
+    removeDebugHint(hintPath);
+  }
+  log("aw.live.debug", { event: "campaign-end" });
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const declineIngest = hasNoIngest(args);
@@ -783,7 +979,9 @@ async function main(): Promise<void> {
   }
 
   const collectorRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-  const deps = buildLiveRunDeps(cfg, collectorRoot, { declineIngest });
+  const liveDebug = (process.env.AW_LIVE_DEBUG ?? "") === "1";
+  if (liveDebug) log("aw.live.debug", { event: "enabled" });
+  const deps = buildLiveRunDeps(cfg, collectorRoot, { declineIngest, liveDebug });
   // The wire flattens a declined run and an operator cancel to the same CANCELLED. This fixed-enum
   // LOG is the only thing that tells them apart. Log only — never extend it to transport/persistence.
   if (declineIngest) log("aw.live.ingest_declined", { policy: "no-ingest" });
@@ -797,6 +995,14 @@ async function main(): Promise<void> {
   let assembled: AssembledLiveRun | undefined;
   try {
     await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
+
+    if (deps.liveDebug) {
+      // DEV-ONLY seated campaign — the outer finally still owns teardown (cleanup + sentinel + ctx.close).
+      await runDebugCampaign(page, deps, sentinelPath, cfg.baseUrl, (a) => {
+        assembled = a;
+      });
+      return;
+    }
 
     console.error(confirmPrompt(declineIngest, sessionRecovery));
     console.error("");
