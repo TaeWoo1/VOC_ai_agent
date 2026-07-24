@@ -1,6 +1,7 @@
 package com.sellerops.attention;
 
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorDismissedReplyWorkView;
 import com.sellerops.attention.dto.OperatorReplyWorkView;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
@@ -55,6 +56,23 @@ public class OperatorAttentionController {
             @RequestParam(required = false, defaultValue = "50") int todoLimit,
             @RequestParam(required = false, defaultValue = "5") int recentLimit) {
         return service.replyWork(principal.orgId(), accountId, todoLimit, recentLimit);
+    }
+
+    /**
+     * 제외한 작업: one page of the reviews the operator has set aside from their reply to-do, so they
+     * can bring one back (복원).
+     *
+     * <p><b>No window parameter</b>, like the reply-work read — a set-aside review stays reachable
+     * regardless of age. Paged with {@code hasMore} ("더 보기") rather than a hard cap; {@code size} is
+     * clamped server-side, and the response carries the same coverage verdict as the attention summary.
+     */
+    @GetMapping("/reply-work/dismissed")
+    public OperatorDismissedReplyWorkView dismissedReplyWork(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size) {
+        return service.dismissedReplyWork(principal.orgId(), accountId, page, size);
     }
 
     /**

@@ -4,7 +4,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MyReplyWork } from "./MyReplyWork";
 import { api } from "../lib/apiClient";
-import type { OperatorReplyWorkView, OperatorVocItem } from "../lib/types";
+import type {
+  OperatorDismissedReplyWorkView,
+  OperatorReplyWorkView,
+  OperatorVocItem,
+} from "../lib/types";
 
 // 내 답변 작업 — the operator's OWN committed reply work, with a home that survives a reload.
 // These pin what the surface promises: the to-do is what is still theirs to do, a reported reply
@@ -122,14 +126,14 @@ describe("MyReplyWork — 내 답변 작업", () => {
     const button = await screen.findByTestId("reply-work-dismiss");
     await userEvent.click(button);
 
-    // The confirmation states the four facts that keep this from reading as a completion or a
-    // deletion: it leaves ONLY this list, the draft/history survive, nothing is recorded as
-    // replied, and there is no separate dismissed-items view.
+    // The confirmation states the facts that keep this from reading as a completion or a deletion:
+    // it leaves ONLY this list, the draft/history survive, nothing is recorded as replied, and the
+    // review can be recovered from 제외한 작업.
     const confirm = await screen.findByTestId("reply-work-dismiss-confirm");
     expect(confirm).toHaveTextContent("'내 답변 작업'");
     expect(confirm).toHaveTextContent("저장한 초안과 기록은 그대로");
     expect(confirm).toHaveTextContent(/답변한 것으로\s*기록되지 않습니다/);
-    expect(confirm).toHaveTextContent("제외한 항목만 따로 모아 보는 화면은 아직 없어요");
+    expect(confirm).toHaveTextContent(/'제외한 작업'에서 다시 확인하고 복원/);
     // The click OPENS the confirmation — it must not have written anything yet.
     expect(dismiss).not.toHaveBeenCalled();
   });
@@ -253,5 +257,115 @@ describe("MyReplyWork — 내 답변 작업", () => {
       expect(screen.getByText(/답변 작업을 불러오지 못했습니다/)).toBeInTheDocument(),
     );
     expect(screen.queryByTestId("reply-work-todo-empty")).not.toBeInTheDocument();
+  });
+});
+
+// --- 제외한 작업 (recovery list + 복원) --------------------------------------------------------------
+
+function dismissedView(over: Partial<OperatorDismissedReplyWorkView> = {}): OperatorDismissedReplyWorkView {
+  return {
+    sellerAccountId: "acct-1",
+    channel: "네이버 스마트스토어",
+    coverage: "COVERED",
+    items: [],
+    page: 0,
+    size: 10,
+    hasMore: false,
+    ...over,
+  };
+}
+
+describe("MyReplyWork — 제외한 작업 (recovery)", () => {
+  it("is LAZY — the recovery list is not read until the seller opens it", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [] }));
+    const dismissed = vi.spyOn(api, "getDismissedReplyWork").mockResolvedValue(dismissedView());
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    // The toggle exists, but nothing was read on mount — the common load pays nothing for recovery.
+    const toggle = await screen.findByTestId("dismissed-work-toggle");
+    expect(dismissed).not.toHaveBeenCalled();
+
+    await userEvent.click(toggle);
+
+    await waitFor(() => expect(dismissed).toHaveBeenCalledTimes(1));
+  });
+
+  it("lists set-aside reviews and restores one — refetching the to-do, claiming no completion", async () => {
+    const ref = "review:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const replyWork = vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [] }));
+    vi.spyOn(api, "getDismissedReplyWork")
+      .mockResolvedValueOnce(dismissedView({ items: [item({ actionRef: ref })] })) // opened
+      .mockResolvedValue(dismissedView({ items: [] })); // after the restore re-signals it
+    const restore = vi
+      .spyOn(api, "restoreReplyWork")
+      .mockResolvedValue({ actionRef: ref, replayed: false });
+
+    render(<MyReplyWork accountId="acct-1" />);
+    await userEvent.click(await screen.findByTestId("dismissed-work-toggle"));
+
+    const restoreBtn = await screen.findByTestId("dismissed-work-restore");
+    await userEvent.click(restoreBtn);
+
+    // It calls restore with an idempotency key — never an outcome/completion write.
+    await waitFor(() => expect(restore).toHaveBeenCalledTimes(1));
+    const [, restoredRef, body] = restore.mock.calls[0]!;
+    expect(restoredRef).toBe(ref);
+    expect(body.commandId).toBeTruthy();
+    // The restored row leaves the recovery list, and the to-do refetches so it can reappear there.
+    await waitFor(() => expect(screen.queryAllByTestId("dismissed-work-restore")).toHaveLength(0));
+    expect(replyWork.mock.calls.length).toBeGreaterThan(1);
+    // Never a completion word on the recovery surface.
+    expect(screen.queryByText(/답변 완료/)).not.toBeInTheDocument();
+  });
+
+  it("pages with 더 보기 rather than hiding older set-aside items behind a cap", async () => {
+    const a = item({ actionRef: "review:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" });
+    const b = item({ actionRef: "review:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" });
+    const c = item({ actionRef: "review:cccccccc-cccc-cccc-cccc-cccccccccccc" });
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [] }));
+    vi.spyOn(api, "getDismissedReplyWork")
+      .mockResolvedValueOnce(dismissedView({ items: [a, b], hasMore: true, page: 0 }))
+      .mockResolvedValueOnce(dismissedView({ items: [c], hasMore: false, page: 1 }));
+
+    render(<MyReplyWork accountId="acct-1" />);
+    await userEvent.click(await screen.findByTestId("dismissed-work-toggle"));
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("dismissed-work-restore")).toHaveLength(2),
+    );
+    await userEvent.click(screen.getByTestId("dismissed-work-more"));
+
+    // 더 보기 appended the next page — nothing was permanently hidden.
+    await waitFor(() =>
+      expect(screen.getAllByTestId("dismissed-work-restore")).toHaveLength(3),
+    );
+    expect(screen.queryByTestId("dismissed-work-more")).not.toBeInTheDocument();
+  });
+
+  it("an unattributable scope declines — never a false 'nothing set aside'", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [] }));
+    vi.spyOn(api, "getDismissedReplyWork").mockResolvedValue(
+      dismissedView({ coverage: "UNCERTAIN_MULTI_ACCOUNT", items: [] }),
+    );
+
+    render(<MyReplyWork accountId="acct-1" />);
+    await userEvent.click(await screen.findByTestId("dismissed-work-toggle"));
+
+    expect(await screen.findByTestId("dismissed-work-coverage-uncertain")).toBeInTheDocument();
+    expect(screen.queryByTestId("dismissed-work-empty")).not.toBeInTheDocument();
+  });
+
+  it("a dead recovery read never renders as an empty recovery list", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [] }));
+    vi.spyOn(api, "getDismissedReplyWork").mockRejectedValue(new Error("backend down"));
+
+    render(<MyReplyWork accountId="acct-1" />);
+    await userEvent.click(await screen.findByTestId("dismissed-work-toggle"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/제외한 작업을 불러오지 못했습니다/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId("dismissed-work-empty")).not.toBeInTheDocument();
   });
 });

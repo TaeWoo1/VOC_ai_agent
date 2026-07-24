@@ -2,8 +2,10 @@ package com.sellerops.attention;
 
 import com.sellerops.attention.dto.AttentionSignal;
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorDismissedReplyWorkView;
 import com.sellerops.attention.dto.OperatorReplyWorkView;
 import com.sellerops.attention.dto.OperatorVocItemPage;
+import com.sellerops.attention.source.DismissedReplyWorkSlice;
 import com.sellerops.attention.source.IngestedReviewVocItemSource;
 import com.sellerops.attention.source.ReplyWorkSlice;
 import com.sellerops.attention.source.VocItemSlice;
@@ -134,6 +136,42 @@ public class OperatorAttentionService {
 
         return new OperatorReplyWorkView(
                 accountId, channelNameKo, coverage, slice.todo(), slice.recentlyReported());
+    }
+
+    /**
+     * One page of the 제외한 작업 recovery list — the reviews the operator has set aside from their
+     * reply to-do, so they can restore one. Mirrors {@link #replyWork}'s coverage handling: an
+     * uncertain scope yields an empty page paired with the verdict, never a false "nothing set aside".
+     *
+     * <p>Paged with {@code hasMore} ("더 보기") rather than a hard cap, so an aged-out set-aside review
+     * is never permanently hidden. {@code size} is clamped to {@code MAX_PAGE_SIZE}.
+     */
+    @Transactional(readOnly = true)
+    public OperatorDismissedReplyWorkView dismissedReplyWork(UUID orgId, UUID accountId,
+                                                             int page, int size) {
+        SellerAccount account = requireAccount(orgId, accountId);
+        Channel channel = channels.findById(account.getChannelId()).orElse(null);
+        String channelCode = channel == null ? null : channel.getCode();
+        String channelNameKo = channel == null ? null : channel.getNameKo();
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(size, MAX_PAGE_SIZE));
+
+        var source = sources.forChannel(channelCode);
+        AttentionCoverage coverage = source
+                .map(s -> s.coverage(orgId, accountId))
+                .orElse(AttentionCoverage.UNCERTAIN_UNSUPPORTED_CHANNEL);
+
+        DismissedReplyWorkSlice slice = coverage.isUncertain()
+                ? DismissedReplyWorkSlice.empty()
+                : source
+                        .filter(IngestedReviewVocItemSource.class::isInstance)
+                        .map(IngestedReviewVocItemSource.class::cast)
+                        .map(s -> s.dismissedReplyWork(orgId, accountId, channelCode, channelNameKo,
+                                safePage, safeSize))
+                        .orElse(DismissedReplyWorkSlice.empty());
+
+        return new OperatorDismissedReplyWorkView(
+                accountId, channelNameKo, coverage, slice.items(), safePage, safeSize, slice.hasMore());
     }
 
     /**

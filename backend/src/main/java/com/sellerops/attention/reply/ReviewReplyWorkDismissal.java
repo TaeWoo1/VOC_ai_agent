@@ -23,10 +23,14 @@ import lombok.Setter;
  * survive untouched, so the work can be resumed.
  *
  * <p><b>Removes it from the to-do ONLY, and only until superseded.</b> The reply-work read includes an
- * otherwise-eligible review again once its latest {@code RESPONSE_NEEDED} triage decision OR its
- * latest saved draft version is newer than its latest dismissal. Re-entry is therefore automatic and
- * read-time — this table only ever records dismissals; the two committing actions supersede by
- * timestamp. There is deliberately no "restore" row and no un-dismiss.
+ * otherwise-eligible review again once (a) an explicit {@link ReviewReplyWorkRestore} outranks this
+ * by {@link #seq}, or (b) its latest {@code RESPONSE_NEEDED} triage decision OR latest saved draft
+ * version is newer than its latest dismissal. Re-entry through (b) stays automatic and read-time; (a)
+ * is the explicit 복원 path added alongside the restore log.
+ *
+ * <p><b>{@code seq} is the shared reply-work event position.</b> Dismissal and restore both draw from
+ * one globally-monotonic sequence, so "which explicit action is latest" is a total order rather than a
+ * wall-clock comparison — two events in the same clock tick still order deterministically.
  *
  * <p><b>Append-only IS the history</b> — like {@link ReviewReplyOutcome} / {@link ReviewReplyDraft},
  * so it does NOT extend {@code BaseEntity} (no {@code updated_at}) and needs no separate audit table.
@@ -64,6 +68,14 @@ public class ReviewReplyWorkDismissal {
 
     @Column(name = "dismissed_at", nullable = false)
     private Instant dismissedAt;
+
+    /**
+     * Position in the shared reply-work event sequence — assigned by the service from
+     * {@code reply_work_event_seq}, never here, so it is globally monotonic across dismissal AND
+     * restore. The read compares MAX(seq) across both tables to find the latest explicit action.
+     */
+    @Column(name = "seq", nullable = false)
+    private Long seq;
 
     @PrePersist
     void onPersist() {

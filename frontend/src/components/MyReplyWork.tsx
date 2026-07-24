@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Section } from "./Section";
 import { VocItemCard } from "./VocItemCard";
+import { DismissedReplyWork } from "./DismissedReplyWork";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { attentionUncertaintyCopy } from "../lib/attention";
@@ -138,7 +139,8 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
                         <p className="text-sm text-muted">
                           이 리뷰를 <strong className="font-semibold text-ink">'내 답변 작업'</strong>{" "}
                           목록에서만 제외합니다. 저장한 초안과 기록은 그대로 남고, 답변한 것으로
-                          기록되지 않습니다. 제외한 항목만 따로 모아 보는 화면은 아직 없어요.
+                          기록되지 않습니다. 제외한 리뷰는 아래 '제외한 작업'에서 다시 확인하고 복원할 수
+                          있어요.
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <button
@@ -203,6 +205,15 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
               </ul>
             </div>
           ) : null}
+
+          {/* The recovery home for anything set aside — collapsed and lazy, so the common load pays
+              nothing. Restoring here bumps the to-do's reloadKey (via onRestored), which also
+              re-signals this list, so a restored review moves back to 내 답변 작업 without a reload. */}
+          <DismissedReplyWork
+            accountId={accountId}
+            refreshSignal={reloadKey}
+            onRestored={noteOutcomeRecorded}
+          />
         </>
       )}
     </Section>

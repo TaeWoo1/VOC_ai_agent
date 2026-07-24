@@ -42,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Component;
 
 /**
@@ -497,6 +498,27 @@ public class IngestedReviewVocItemSource implements VocItemSource {
         return new ReplyWorkSlice(
                 rowsFor(orgId, todo, channelCode, channelNameKo),
                 rowsFor(orgId, recent, channelCode, channelNameKo));
+    }
+
+    /**
+     * One page of the 제외한 작업 recovery list — reviews the operator has currently set aside, so they
+     * can bring one back (복원). Account/org scoped via {@link #unambiguousChannelFor}, exactly like
+     * {@link #replyWork}; an ambiguous scope yields an empty page, never a false "nothing set aside".
+     *
+     * <p>Read as a {@link Slice} so {@code hasMore} comes free (size+1, no count query): the recovery
+     * list pages with "더 보기" rather than truncating, so an aged-out set-aside review is never
+     * permanently hidden.
+     */
+    public DismissedReplyWorkSlice dismissedReplyWork(UUID orgId, UUID accountId, String channelCode,
+                                                      String channelNameKo, int page, int size) {
+        UUID channelId = unambiguousChannelFor(orgId, accountId);
+        if (channelId == null) {
+            return DismissedReplyWorkSlice.empty();
+        }
+        Slice<Review> slice = reviews
+                .findDismissedReplyWorkByChannel(orgId, channelId, PageRequest.of(page, size));
+        return new DismissedReplyWorkSlice(
+                rowsFor(orgId, slice.getContent(), channelCode, channelNameKo), slice.hasNext());
     }
 
     /** Stamp a row list through the shared batch reads + {@link #toItem} — one query set per list. */

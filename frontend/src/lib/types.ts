@@ -488,6 +488,29 @@ export interface OperatorReplyWorkView {
   recentlyReported: OperatorVocItem[];
 }
 
+// Mirrors com.sellerops.attention.reply.dto.ReviewReplyWorkRestoreResponse — the ack of a 복원 write.
+// Asserts nothing about the reply: no outcome, no verification, no completion — it only puts the
+// review back on the to-do, outranking (never deleting) the dismissal it reverses.
+export interface ReviewReplyWorkRestoreResponse {
+  actionRef: string;
+  replayed: boolean;
+}
+
+// Mirrors com.sellerops.attention.dto.OperatorDismissedReplyWorkView — one page of 제외한 작업, the
+// reviews the operator has set aside so they can restore one. NOT window-scoped: an aged-out set-aside
+// review stays reachable. Paged with `hasMore` ("더 보기") rather than a hard cap. `coverage` carries
+// the same false-calm guard — when uncertain, an empty page means the scope could not be attributed,
+// NOT that nothing is set aside. Being on this list means "set aside", never "completed".
+export interface OperatorDismissedReplyWorkView {
+  sellerAccountId: string;
+  channel: string | null;
+  coverage: AttentionCoverage;
+  items: OperatorVocItem[];
+  page: number;
+  size: number;
+  hasMore: boolean;
+}
+
 // Mirrors com.sellerops.attention.dto.OperatorVocItem — the channel-generic
 // drill-down unit behind one attention signal. No raw article title/content,
 // articleNo, or source/customer/order/product identifiers. `safePreview` is the one
