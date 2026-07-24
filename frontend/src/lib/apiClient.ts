@@ -23,6 +23,7 @@ import type {
   ProposalResult,
   OperatorAttentionSummary,
   OperatorReplyWorkView,
+  ReviewReplyWorkDismissalResponse,
   OperatorVocItemPage,
   OrderSummaryResponse,
   OperatorOutcomeName,
@@ -49,6 +50,7 @@ import {
   mockAccountDashboard,
   mockAttentionItems,
   mockReplyWork,
+  mockDismissReplyWork,
   mockAuth,
   mockCapabilities,
   mockCapabilityOverview,
@@ -764,6 +766,23 @@ export const api = {
   // ABSENT when the seller posted manually with no guided run.
   // The response carries no body. 409 when the binding is spent, stale, or the review is not
   // RESPONSE_NEEDED.
+  // 작업에서 제외: set one review aside from the 내 답변 작업 to-do. Writes NOTHING about the reply —
+  // no draft change, no outcome, no completion. Idempotent on commandId; the review re-enters on its
+  // own once re-marked 대응 필요 or a new draft is saved.
+  async dismissReplyWork(
+    accountId: string,
+    actionRef: string,
+    body: { commandId: string },
+  ): Promise<ReviewReplyWorkDismissalResponse> {
+    if (USE_MOCKS) {
+      return mockDismissReplyWork(actionRef);
+    }
+    const { data } = await http.post<ReviewReplyWorkDismissalResponse>(
+      `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply-work/dismiss`,
+      body,
+    );
+    return data;
+  },
   async recordReviewReplyOutcome(
     accountId: string,
     actionRef: string,

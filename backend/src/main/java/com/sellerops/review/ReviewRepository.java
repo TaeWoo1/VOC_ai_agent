@@ -365,6 +365,35 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             """;
 
     /**
+     * "This review is NOT currently set aside from the reply to-do" — the 작업에서 제외 rule.
+     *
+     * <p>A dismissal removes an otherwise-eligible review from the to-do, but only until superseded:
+     * the review re-enters the moment the operator takes a fresh COMMITTING action newer than their
+     * latest dismissal — a {@code RESPONSE_NEEDED} triage decision, or a saved draft version. So this
+     * holds when there is no dismissal at all, OR the latest such committing signal is newer than the
+     * latest dismissal. Re-entry is automatic and read-time; nothing "un-dismisses" a stored row.
+     *
+     * <p><b>Only decision/version timestamps count</b> — {@code ReviewTriage.decidedAt} changes only
+     * on a triage decision, and {@code ReviewReplyDraft.createdAt} only on a new saved version. An
+     * ordinary read, or an unrelated timestamp touch (e.g. a re-import bumping {@code reviews.updated_at}),
+     * moves neither, so it can never reactivate a dismissed review.
+     */
+    String NOT_DISMISSED_PREDICATE = """
+            (not exists (select 1 from ReviewReplyWorkDismissal dis
+                         where dis.orgId = r.orgId and dis.reviewId = r.id)
+             or exists (select 1 from ReviewTriage tdis
+                        where tdis.orgId = r.orgId and tdis.reviewId = r.id
+                          and tdis.disposition
+                              = com.sellerops.attention.triage.TriageDisposition.RESPONSE_NEEDED
+                          and tdis.decidedAt > (select max(d1.dismissedAt) from ReviewReplyWorkDismissal d1
+                                                where d1.orgId = r.orgId and d1.reviewId = r.id))
+             or exists (select 1 from ReviewReplyDraft ddis
+                        where ddis.orgId = r.orgId and ddis.reviewId = r.id
+                          and ddis.createdAt > (select max(d2.dismissedAt) from ReviewReplyWorkDismissal d2
+                                                where d2.orgId = r.orgId and d2.reviewId = r.id)))
+            """;
+
+    /**
      * The 내 답변 작업 TO-DO: reviews this operator committed to replying to and has not yet
      * reported posting. Account/org scoped via {@code channelId}, exactly like every other lens here.
      *
@@ -385,6 +414,8 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             where r.orgId = :orgId and r.channelId = :channelId
               and
             """ + COMMITTED_REPLY_WORK_PREDICATE + """
+              and
+            """ + NOT_DISMISSED_PREDICATE + """
               and not
             """ + REPORTED_SUBMISSION_PREDICATE + """
             order by case when r.rating is null then 1 else 0 end asc,
