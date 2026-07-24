@@ -216,6 +216,23 @@ export const TRIAGE_OPTIONS: ReadonlyArray<{ value: TriageDisposition; label: st
 /** The wire values, derived from the options above so the two can never drift apart. */
 const TRIAGE_VALUES: ReadonlySet<string> = new Set(TRIAGE_OPTIONS.map((o) => o.value));
 
+/** FE-owned label for a row nobody has decided yet — the same word the control shows in place of a choice. */
+export const TRIAGE_UNDECIDED_LABEL = "판단 전";
+
+/**
+ * A read-only label for a triage disposition — the SAME copy as the interactive control's options,
+ * sourced from {@link TRIAGE_OPTIONS} so the two can never drift, with an explicit 판단 전 for the
+ * undecided (null) case.
+ *
+ * This exists for surfaces that SHOW a decision without offering to change it — the 내 답변 작업
+ * worklist, where a full toggle group reads as a second, competing "take it off my list" control
+ * beside 작업에서 제외 and (for a drafted row) silently fails to remove anything. Triage editing stays
+ * where the decision is actually made: the arrival-signal drill-down.
+ */
+export function triageDispositionLabel(disposition: TriageDisposition | null): string {
+  return TRIAGE_OPTIONS.find((o) => o.value === disposition)?.label ?? TRIAGE_UNDECIDED_LABEL;
+}
+
 /**
  * A server-supplied disposition, or null if it is not one this client knows.
  *
