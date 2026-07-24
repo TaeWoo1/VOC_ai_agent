@@ -20,9 +20,13 @@
   public reply. **Import history is now persistent** (2026-07-23): the seller can see what each
   import brought after a reload. **The queue is a worklist** (2026-07-23): worst-first, each row
   showing its stored category and filterable by it — visibility and ordering only, the membership
-  rule is unchanged. Guided ACT remains offline. ⚠ **No live evidence for any of it** —
-  everything since Run 4 rests on synthetic fixtures. **Nothing promoted in §4.1.**
-- **Last updated:** 2026-07-23
+  rule is unchanged. **Committed reply work now has a persistent home with honest exits**
+  (2026-07-24): 내 답변 작업 survives a reload/window/session, a false-calm coverage guard declares
+  uncertainty instead of a bare empty, and a review can be set aside (작업에서 제외) and recovered
+  (제외한 작업 · 복원) — account-scoped, append-only, with no completion claim. Guided ACT remains
+  offline. ⚠ **No live evidence for any of it** — everything since Run 4 rests on synthetic
+  fixtures. **Nothing promoted in §4.1.**
+- **Last updated:** 2026-07-24
 - **Owner:** SellerOps product/engineering
 
 ---
@@ -149,6 +153,43 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ```
 
 ### Log
+
+### 2026-07-24 — Review-Reply Exit Arc — COMPLETE (offline)
+- **Loop stage(s):** ACT ⇄ PRIORITIZE (the committed-work surface and its honest exits)
+- **Did:** Closed the reply worklist as a coherent surface a seller can trust to hold their work and
+  leave it honestly. Six merged slices: a **false-calm coverage guard** so an unattributable scope
+  declares UNCERTAIN instead of rendering as "no work" (#343); **내 답변 작업**, a persistent,
+  non-window-scoped home for committed reply work — a 대응 필요 decision or a saved draft — that
+  survives a reload, a window change and a new session (#344); **작업에서 제외**, an append-only
+  operator-owned dismissal that sets a review aside without touching draft, disposition or outcome
+  (#345, V25); **exit clarity** — read-only triage on the worklist (no competing remove control), a
+  pre-dismissal confirmation and a post-dismissal acknowledgement (#346); **제외한 작업 + 복원**, a
+  lazy paginated recovery list with a shared monotonic reply-work event sequence arbitrating
+  dismiss-vs-restore deterministically (same-timestamp included), restore appending history only —
+  no draft/disposition/outcome mutation, no completion (#347, V26); and an **account-scoping fix** so
+  a dismissal acknowledgement earned on one account never reads as an action on the next (#348).
+- **Evidence:** PRs #343–#348 on `main` (2946629, 3a25cdc, 671a1ef, 6f806b7, ea6fc53, 02ac526); slice
+  docs `attention-coverage-false-calm-v1`, `my-reply-work-worklist-v1`, `reply-work-dismissal-v1`,
+  `reply-work-exit-clarity-v1`, `reply-work-recovery-v1` (the #348 audit fix carries no slice).
+  Backend + frontend; V25/V26 verified on a disposable PostgreSQL 15 DB; FE 827/827, typechecks
+  clean. No run-id — offline.
+- **§4.1 impact:** none. Changes what a seller sees and how they exit their own work, not what a
+  channel supports.
+- **Ledger impact:** none.
+- **Gate state:** no gate consumed, no live contact. Live-run approval and the market-policy
+  clarification gate both remain closed. Any NAVER live proof stays **deferred while the operator
+  IP/environment is changed**.
+- **Blockers:** none new. ⚠ The **entire arc is offline/synthetic — no live evidence**; nothing
+  promoted in §4.1. ⚠ A reported reply stays permanently **UNVERIFIED** — no read-back oracle, so the
+  surface never says 완료. ⚠ The **carrier mode-switch decision stays open and separate**; a session
+  is still born into one carrier and the agent hosts exactly one.
+- **Next:** a product-owner fork, not an effort question. The offline ACT surface is now as honest as
+  it can be without live evidence; the next step that changes capability truth is a **bounded,
+  human-in-the-loop NAVER live proof** (real export → ingest → reply state → guided handoff,
+  submitting no public reply), which needs the market-policy gate opened AND a fresh single-use
+  in-turn approval, and is blocked today by the changed operator environment. The standing
+  alternatives that need no live contact are **GENERALIZE** (select the second channel) and the
+  **`rules-v2`** body-polarity detector (needs the gated labeling session first).
 
 ### 2026-07-23 — Reply Runtime Injection v1 — IMPLEMENTED (offline)
 - **Loop stage(s):** ACT (the guided-reply terminal)
