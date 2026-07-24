@@ -70,6 +70,48 @@ import type { ProbeDriver } from "./session";
 export const EXPORT_TARGET_KEYWORDS: readonly string[] = ["엑셀", "다운로드", "내려받기", "excel", "download", "xlsx", "csv"];
 
 /**
+ * CONTEXT wording that marks a dialog as the review-export consent/notice dialog. Run 7 attempt 6
+ * (dispatch §21) failed closed with `checkpoints:0` AGAIN despite #350: the live second control is a
+ * GENERIC `확인`/`동의` whose export meaning lives in the surrounding modal body, not in the button
+ * text — so own-wording matching (`EXPORT_TARGET_KEYWORDS` on the control) can never find it, and bare
+ * global `확인` matching is unsafe. The contextual path (`markContinuationTarget` path B) requires the
+ * dialog BODY to carry export meaning. Deliberately the export/Excel/download words ONLY — NOT the bare
+ * review noun `리뷰`, which every review-management surface carries (a `리뷰 삭제` confirm dialog must not
+ * read as an export dialog). A control is eligible only when it sits inside such a dialog — never on
+ * wording alone, and the dialog scope is the INNERMOST cancel-enclosing container so page chrome (the
+ * export toolbar, the page heading) can never satisfy the context at the body level.
+ */
+export const EXPORT_CONTEXT_KEYWORDS: readonly string[] = [...EXPORT_TARGET_KEYWORDS];
+
+/**
+ * GENERIC primary-action wording for the consent dialog's confirm/agree control — matched ONLY inside a
+ * confirmed export-context dialog (never globally). These have no export meaning of their own; the
+ * dialog context is what makes exactly one of them the export continuation.
+ */
+export const PRIMARY_ACTION_KEYWORDS: readonly string[] = ["확인", "동의", "ok", "confirm", "agree"];
+
+/**
+ * CANCEL/dismiss wording. Two jobs: it is excluded from primary-action candidates (a `취소`/`닫기` is
+ * never the continuation), and a confirm+cancel pair inside a container is one of the signals that the
+ * container is a dialog (alongside `role=dialog`/`aria-modal`).
+ */
+export const CANCEL_ACTION_KEYWORDS: readonly string[] = ["취소", "cancel", "닫기", "close", "아니오"];
+
+/**
+ * Sanitized phase describing the export-consent-dialog search on the last continuation poll (enum only,
+ * no content — safe to log/introspect). Distinguishes the operator-requested diagnostics:
+ *   - `"matched"`                  an export-context dialog with exactly one primary action was tagged;
+ *   - `"export-dialog-no-action"`  an export-context dialog was found but it had no UNIQUE primary
+ *                                  action (0, or ≥2 → ambiguous fail-closed) — attempt 6's live symptom;
+ *   - `"no-export-dialog"`         NO export-context dialog was found in the CURRENT frame (the signal
+ *                                  that the modal may be cross-frame — iframe traversal stays a separate,
+ *                                  evidence-gated change, NOT done here);
+ *   - `"none"`                     the dialog path was not the decider (an own-wording control matched,
+ *                                  or nothing relevant appeared — e.g. the direct-download shape).
+ */
+export type DialogDiscoveryPhase = "none" | "matched" | "export-dialog-no-action" | "no-export-dialog";
+
+/**
  * Operator-legible overlay labels for the headed live run, keyed by the step's semantic `copyKey`.
  *
  * The headed live/CLI run has NO product FE, so the only thing in the real Chrome window is the
@@ -124,6 +166,12 @@ export interface ContinuationDiagnostic {
   observedLast: boolean;
   /** More than one candidate control appeared at once → failed closed on ambiguity. */
   ambiguous: boolean;
+  /**
+   * Sanitized export-consent-dialog search phase from the last poll (enum only). Lets a failed-closed
+   * run distinguish "an export dialog was there but its action wasn't unique" from "no export dialog in
+   * this frame at all" — the two cases the operator asked to tell apart after attempt 6.
+   */
+  dialog: DialogDiscoveryPhase;
 }
 
 export interface NaverLiveProbeDriverOptions {
@@ -456,19 +504,24 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     const timeoutMs = this.opts.downloadTimeoutMs ?? 15_000;
     const armed = this.pendingDownload ?? this.page.waitForEvent("download", { timeout: 0 }).catch(() => null);
     this.pendingDownload = armed;
-    const diagnostic: ContinuationDiagnostic = { checkpoints: 0, observedLast: false, ambiguous: false };
+    const diagnostic: ContinuationDiagnostic = { checkpoints: 0, observedLast: false, ambiguous: false, dialog: "none" };
     this.lastContinuationDiagnostic = diagnostic;
     try {
       for (let checkpoint = 0; checkpoint <= MAX_CONTINUATION_CHECKPOINTS; checkpoint += 1) {
         const outcome = await this.raceDownloadOrContinuation(armed, timeoutMs);
         if (outcome.kind === "download") return await this.bufferDetected(outcome.download);
-        if (outcome.kind === "timeout") return { detected: false };
+        if (outcome.kind === "timeout") {
+          diagnostic.dialog = outcome.dialog; // WHY no control was found this frame (sanitized enum)
+          return { detected: false };
+        }
         if (outcome.kind === "ambiguous") {
           diagnostic.ambiguous = true;
+          diagnostic.dialog = outcome.dialog;
           return { detected: false }; // fail closed: 2+ candidate controls is ambiguity, never a guess
         }
         // outcome.kind === "continuation": exactly ONE new control is now the tagged target.
         diagnostic.checkpoints = checkpoint + 1;
+        diagnostic.dialog = outcome.dialog;
         diagnostic.observedLast = false;
         const humanStep = STEP_PLAN[1]!;
         await mountOverlay(this.ctx(), {
@@ -502,23 +555,28 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     armed: Promise<Download | null>,
     deadlineMs: number,
   ): Promise<
-    { kind: "download"; download: Download } | { kind: "timeout" } | { kind: "ambiguous" } | { kind: "continuation" }
+    | { kind: "download"; download: Download }
+    | { kind: "timeout"; dialog: DialogDiscoveryPhase }
+    | { kind: "ambiguous"; dialog: DialogDiscoveryPhase }
+    | { kind: "continuation"; dialog: DialogDiscoveryPhase }
   > {
     const pollMs = this.opts.continuationPollMs ?? 500;
     const sleep = this.opts.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const maxChecks = Math.max(1, Math.ceil(deadlineMs / pollMs));
     const TICK = Symbol("tick");
+    let lastDialog: DialogDiscoveryPhase = "none"; // the most recent poll's dialog phase, for the timeout shape
     for (let i = 0; i < maxChecks; i += 1) {
       const winner = await Promise.race([armed, sleep(pollMs).then(() => TICK as typeof TICK)]);
       if (winner !== TICK) {
         // The armed promise settled: a download, or null (page/context gone) → the timeout shape.
-        return winner ? { kind: "download", download: winner as Download } : { kind: "timeout" };
+        return winner ? { kind: "download", download: winner as Download } : { kind: "timeout", dialog: lastDialog };
       }
-      const count = await this.markContinuationTarget().catch(() => 0);
-      if (count === 1) return { kind: "continuation" };
-      if (count >= 2) return { kind: "ambiguous" };
+      const { count, dialog } = await this.markContinuationTarget().catch(() => ({ count: 0, dialog: "none" as const }));
+      lastDialog = dialog;
+      if (count === 1) return { kind: "continuation", dialog };
+      if (count >= 2) return { kind: "ambiguous", dialog };
     }
-    return { kind: "timeout" };
+    return { kind: "timeout", dialog: lastDialog };
   }
 
   /** Buffer a detected download into memory and emit the opaque ref (shared detection tail). */
@@ -647,82 +705,161 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
-   * In-page, atomic: find a NEW single actionable control matching the confirmed export wording —
-   * the CURRENT `[data-aw-target]` element is excluded **by identity**, so the original export
-   * control (still present under the dialog) can never be re-matched. On exactly one match the tag
-   * MOVES: the old element loses its tag AND its observer click-listener (a stale click on the
-   * original control must not satisfy the continuation observation), the new element gains the tag
-   * with a `review-export-continuation` label. Returns the NEW-match count so the caller can fail
-   * closed on 0-keeps-waiting / ≥2-is-ambiguous. Read-only otherwise — it NEVER clicks.
+   * In-page, atomic: find the NEW single continuation control after the export click, by TWO
+   * disjoint paths, and (on exactly one combined match) MOVE the tag to it. The CURRENT
+   * `[data-aw-target]` and every `data-aw-seen` element are excluded, so the original export control
+   * can never be re-matched. Read-only otherwise — it NEVER clicks. Returns `{ count, dialog }`:
+   * `count` drives the race (0 keep waiting / 1 tag&continue / ≥2 ambiguous fail-closed); `dialog` is
+   * a sanitized enum for the failed-closed diagnosis (see `DialogDiscoveryPhase`).
+   *
+   *   Path A — OWN-WORDING control (unchanged from #350): a native-or-role-less clickable whose OWN
+   *   accessible name carries export wording (`엑셀 다운로드` etc.). Covers the labelled download
+   *   button and the attempt-4 role-less clickable.
+   *
+   *   Path B — CONTEXTUAL DIALOG (Run 7 attempt 6, dispatch §21): a GENERIC `확인`/`동의` control whose
+   *   export meaning lives in the SURROUNDING modal, not its text. Eligible ONLY when it sits inside an
+   *   export-context dialog — a container that (has `role=dialog`/`alertdialog`/`aria-modal` OR carries
+   *   a confirm+cancel footer) AND whose body text has export context. Never bare-`확인` global matching.
+   *
+   * Fail-closed carries over: ≥2 combined matches → ambiguous; ≥2 distinct export dialogs OR ≥2 primary
+   * actions → ambiguous; the cancel control is excluded. Frame scope is the CURRENT frame only — iframe
+   * traversal is deliberately NOT added here (a `dialog === "no-export-dialog"` diagnostic is what would
+   * later justify it, on evidence).
    */
-  private markContinuationTarget(): Promise<number> {
-    return this.ctx().evaluate((keywords: readonly string[]) => {
-      const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration } & Record<string, unknown>;
-      const current = document.querySelector("[data-aw-target]");
-      const kws = keywords.map((k) => k.toLowerCase());
-      // Persistent exclusion: `data-aw-seen` stamps every control this run has EVER highlighted. The
-      // by-identity `current` exclusion alone is not enough — a checkpoint control is typically
-      // REMOVED from the DOM by its own click, and the moment it goes, the original export control
-      // (untagged when the tag moved) would become matchable again and be re-highlighted at the
-      // seller as if it were new. Seen controls stay excluded for the whole run; `cleanup()` unstamps.
-      const seen = (el: Element): boolean => el.hasAttribute("data-aw-seen");
-      const visibleEnabled = (el: Element): boolean => {
-        const style = w.getComputedStyle(el);
-        if (style.display === "none" || style.visibility === "hidden") return false;
-        if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
-        if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
-        if (el.getAttribute("type") === "hidden") return false;
-        return true;
-      };
-      const accessibleName = (el: Element): string => {
-        const text = el.textContent ?? "";
-        const value = el.getAttribute("value") ?? "";
-        const aria = el.getAttribute("aria-label") ?? "";
-        const title = el.getAttribute("title") ?? "";
-        return `${text} ${value} ${aria} ${title}`.toLowerCase();
-      };
-      // Candidate set: native interactive controls UNION role-less clickables. Run 7 attempt-4 live
-      // finding (dispatch record §19.3): NAVER's SECOND download control was a custom clickable with
-      // no button/anchor/role, which the native-only selector missed (checkpoints:0, timed out).
-      //
-      // A role-less clickable is discriminated by an OWN pointer cursor. `cursor` INHERITS, so a bare
-      // `=== "pointer"` test would also match inheriting CHILDREN and instructional text under a
-      // pointer region — false candidates that read as ambiguity. Require the element to INTRODUCE the
-      // pointer (its parent is not pointer), so we match the clickable itself, not what it contains or
-      // what merely sits under it. Visible+enabled + export wording still gate; ambiguity still fails
-      // closed; the wording keyword set is unchanged.
-      const NATIVE = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
-      const introducesPointer = (el: Element): boolean => {
-        if (w.getComputedStyle(el).cursor !== "pointer") return false;
-        const parent = el.parentElement;
-        return !parent || w.getComputedStyle(parent).cursor !== "pointer";
-      };
-      let matches = Array.from(document.querySelectorAll("*")).filter((el) => {
-        if (el === current || seen(el)) return false;
-        if (!kws.some((k) => accessibleName(el).includes(k))) return false; // cheap wording gate first
-        if (!visibleEnabled(el)) return false;
-        return el.matches(NATIVE) || introducesPointer(el);
-      });
-      // Innermost-only: a native control nested inside a clickable wrapper (both match) collapses to
-      // the tightest; two SEPARATE wording-matched controls stay two (fail closed on ambiguity).
-      matches = matches.filter((el) => !matches.some((o) => o !== el && el.contains(o)));
-      if (matches.length === 1) {
-        if (current) {
-          const handler = w["__aw_observer_handler__"];
-          if (typeof handler === "function") current.removeEventListener("click", handler as EventListener);
-          current.removeAttribute("data-aw-target");
-          current.removeAttribute("data-aw-role");
-          current.removeAttribute("data-aw-label");
-          current.setAttribute("data-aw-seen", "");
+  private markContinuationTarget(): Promise<{ count: number; dialog: DialogDiscoveryPhase }> {
+    return this.ctx().evaluate(
+      (kw: { own: readonly string[]; context: readonly string[]; primary: readonly string[]; cancel: readonly string[] }) => {
+        const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration } & Record<string, unknown>;
+        const current = document.querySelector("[data-aw-target]");
+        const OWN = kw.own.map((k) => k.toLowerCase());
+        const CTX = kw.context.map((k) => k.toLowerCase());
+        const PRIMARY = kw.primary.map((k) => k.toLowerCase());
+        const CANCEL = kw.cancel.map((k) => k.toLowerCase());
+        // Persistent exclusion: `data-aw-seen` stamps every control this run has EVER highlighted, so a
+        // checkpoint removed by its own click cannot let the (untagged) original re-match. `cleanup()` unstamps.
+        const seen = (el: Element): boolean => el.hasAttribute("data-aw-seen");
+        const visibleEnabled = (el: Element): boolean => {
+          const style = w.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") return false;
+          if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+          if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
+          if (el.getAttribute("type") === "hidden") return false;
+          return true;
+        };
+        const accessibleName = (el: Element): string => {
+          const text = el.textContent ?? "";
+          const value = el.getAttribute("value") ?? "";
+          const aria = el.getAttribute("aria-label") ?? "";
+          const title = el.getAttribute("title") ?? "";
+          return `${text} ${value} ${aria} ${title}`.toLowerCase();
+        };
+        const nameHas = (el: Element, set: string[]): boolean => {
+          const n = accessibleName(el);
+          return set.some((k) => n.includes(k));
+        };
+        const ctxHas = (el: Element): boolean => {
+          const t = (el.textContent ?? "").toLowerCase();
+          return CTX.some((k) => t.includes(k));
+        };
+        // A role-less clickable is discriminated by an OWN pointer cursor (`cursor` INHERITS, so a bare
+        // `=== "pointer"` would also match inheriting children / instructional text — false candidates).
+        const NATIVE = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+        const introducesPointer = (el: Element): boolean => {
+          if (w.getComputedStyle(el).cursor !== "pointer") return false;
+          const parent = el.parentElement;
+          return !parent || w.getComputedStyle(parent).cursor !== "pointer";
+        };
+        const isClickable = (el: Element): boolean => el.matches(NATIVE) || introducesPointer(el);
+        const eligible = (el: Element): boolean => el !== current && !seen(el) && visibleEnabled(el);
+        const all = Array.from(document.querySelectorAll("*"));
+
+        // -------- Path A: OWN-WORDING controls (preserved #350 behavior) --------
+        let aMatches = all.filter((el) => eligible(el) && isClickable(el) && nameHas(el, OWN));
+        // Innermost-only: a native control nested in a clickable wrapper collapses to the tightest.
+        aMatches = aMatches.filter((el) => !aMatches.some((o) => o !== el && el.contains(o)));
+
+        // -------- Path B: GENERIC primary action inside an export-context dialog --------
+        const isDialogRole = (el: Element): boolean => {
+          const role = (el.getAttribute("role") ?? "").toLowerCase();
+          return role === "dialog" || role === "alertdialog" || el.getAttribute("aria-modal") === "true";
+        };
+        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHas(el, CANCEL));
+        const primaryCands = all.filter(
+          (el) => eligible(el) && isClickable(el) && nameHas(el, PRIMARY) && !nameHas(el, CANCEL),
+        );
+        // The dialog SCOPE of a primary action is the INNERMOST ancestor that encloses it AND either is
+        // an ARIA dialog OR contains a cancel candidate (a confirm+cancel container) — the confirm+cancel
+        // pair is the signal that over-matching the base page can't fake. We stop at that innermost
+        // container and require export context ON IT: we never keep climbing to a bigger ancestor, so the
+        // page toolbar / heading at <body> level can never promote a non-export dialog. A dialog whose
+        // buttons are footer-wrapped WITHOUT context in the footer is reported (no-export-dialog), not
+        // force-matched — that is an honest signal to refine on evidence, not a speculative climb.
+        const dialogScopeFor = (node: Element): Element | null => {
+          let el: Element | null = node.parentElement;
+          while (el) {
+            const cur = el; // stable capture: the nested closure must not see a reassignable `el`
+            if (isDialogRole(cur) || cancelCands.some((c) => cur.contains(c))) {
+              return ctxHas(cur) ? cur : null; // innermost dialog reached — context must be IN it
+            }
+            el = cur.parentElement;
+          }
+          return null;
+        };
+        const bMatches: Element[] = [];
+        const scopes: Element[] = [];
+        for (const p of primaryCands) {
+          const s = dialogScopeFor(p);
+          if (!s) continue;
+          bMatches.push(p);
+          if (!scopes.includes(s)) scopes.push(s);
         }
-        const el = matches[0]!;
-        el.setAttribute("data-aw-target", "");
-        el.setAttribute("data-aw-role", "primary-action");
-        el.setAttribute("data-aw-label", "review-export-continuation");
-        el.setAttribute("data-aw-seen", "");
-      }
-      return matches.length;
-    }, this.exportKeywords());
+        // Also count export-context ARIA dialogs that carry NO primary-keyword action at all, so a
+        // present-but-actionless dialog is still reported (export-dialog-no-action, not no-export-dialog).
+        const ariaExportDialogs = all.filter((el) => visibleEnabled(el) && isDialogRole(el) && ctxHas(el));
+        for (const d of ariaExportDialogs) if (!scopes.includes(d)) scopes.push(d);
+        const outerScopes = scopes.filter((s) => !scopes.some((o) => o !== s && o.contains(s)));
+        const exportDialogFound = outerScopes.length >= 1;
+        const multipleDialogs = outerScopes.length >= 2;
+
+        // -------- Combine, decide count + dialog phase --------
+        let combined: Element[] = [];
+        for (const el of aMatches) if (!combined.includes(el)) combined.push(el);
+        for (const el of bMatches) if (!combined.includes(el)) combined.push(el);
+        combined = combined.filter((el) => !combined.some((o) => o !== el && el.contains(o)));
+        let count = combined.length;
+        // Multiple distinct export dialogs fail closed even if only one exposed a unique action.
+        if (multipleDialogs && count < 2) count = 2;
+
+        let dialog: "none" | "matched" | "export-dialog-no-action" | "no-export-dialog";
+        if (aMatches.length >= 1) dialog = "none"; // own-wording path decided; dialog reasoning moot
+        else if (bMatches.length === 1 && !multipleDialogs) dialog = "matched";
+        else if (exportDialogFound) dialog = "export-dialog-no-action"; // dialog present, action not unique
+        else dialog = "no-export-dialog";
+
+        if (count === 1) {
+          if (current) {
+            const handler = w["__aw_observer_handler__"];
+            if (typeof handler === "function") current.removeEventListener("click", handler as EventListener);
+            current.removeAttribute("data-aw-target");
+            current.removeAttribute("data-aw-role");
+            current.removeAttribute("data-aw-label");
+            current.setAttribute("data-aw-seen", "");
+          }
+          const el = combined[0]!;
+          el.setAttribute("data-aw-target", "");
+          el.setAttribute("data-aw-role", "primary-action");
+          el.setAttribute("data-aw-label", "review-export-continuation");
+          el.setAttribute("data-aw-seen", "");
+        }
+        return { count, dialog };
+      },
+      {
+        own: EXPORT_TARGET_KEYWORDS,
+        context: EXPORT_CONTEXT_KEYWORDS,
+        primary: PRIMARY_ACTION_KEYWORDS,
+        cancel: CANCEL_ACTION_KEYWORDS,
+      },
+    );
   }
 
   private unmarkExportTarget(): Promise<void> {

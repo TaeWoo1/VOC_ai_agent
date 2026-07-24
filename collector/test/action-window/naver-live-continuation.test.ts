@@ -188,7 +188,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       const detected = await detectP; // the download begins automatically after the consent
       expect(detected.detected).toBe(true);
       expect(detected.artifactRef).toMatch(HEX16);
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false, dialog: "none" });
       assertSanitized(driver, detected);
       await driver.cleanup();
     },
@@ -214,7 +214,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       const detected = await detectP;
       expect(detected.detected).toBe(true);
       expect(detected.artifactRef).toMatch(HEX16);
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false, dialog: "none" });
       assertSanitized(driver, detected);
       await driver.cleanup();
     },
@@ -239,7 +239,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       if (!HEADED) await page.click("#dl1");
       const detected = await detectP;
       expect(detected.detected).toBe(true);
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 2, observedLast: true, ambiguous: false });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 2, observedLast: true, ambiguous: false, dialog: "none" });
       await driver.cleanup();
     },
     HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
@@ -253,7 +253,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       if (!HEADED) await page.click("#ok1");
       const detected = await detectP;
       expect(detected.detected).toBe(true);
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 0, observedLast: false, ambiguous: false });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 0, observedLast: false, ambiguous: false, dialog: "none" });
       await driver.cleanup();
     },
     HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
@@ -273,7 +273,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       // Nobody clicks. The continuation observe window lapses and the run fails closed.
       const detected = await detectP;
       expect(detected).toEqual({ detected: false });
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: false, ambiguous: false });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: false, ambiguous: false, dialog: "none" });
       await driver.cleanup();
     },
     HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
@@ -292,7 +292,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
       if (!HEADED) await page.click("#ok1");
       const detected = await detectP;
       expect(detected).toEqual({ detected: false });
-      expect(driver.lastContinuation()).toEqual({ checkpoints: 0, observedLast: false, ambiguous: true });
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 0, observedLast: false, ambiguous: true, dialog: "none" });
       // Neither candidate was tagged — ambiguity tags nothing.
       expect(await page.locator('[data-aw-label="review-export-continuation"]').count()).toBe(0);
       await driver.cleanup();
