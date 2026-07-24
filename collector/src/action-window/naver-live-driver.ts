@@ -174,6 +174,45 @@ export interface ContinuationDiagnostic {
   dialog: DialogDiscoveryPhase;
 }
 
+/**
+ * DEV-ONLY sanitized structural fingerprint of ONE eligible continuation candidate (the live-debug
+ * sprint, 2026-07-24). Carries a synthetic local label and coarse structural buckets ONLY — never the
+ * control's text, attributes, value, URL, or any user data. Safe to log and to show the operator.
+ */
+export interface CandidateLabel {
+  /** Synthetic local identifier for the seated operator (`A1`, `A2`, `B1`…). Not derived from content. */
+  label: string;
+  /**
+   * Which discovery path surfaced it: `"A"` own-wording, `"B"` generic-primary-in-export-dialog. Named
+   * `via` (not `path`) deliberately — a `path` key is a prohibited-field name (URL/filesystem leakage).
+   */
+  via: "A" | "B";
+  /** Coarse element-kind bucket — never the tag's text/attributes. */
+  tagBucket: "button" | "anchor" | "role-button" | "input" | "roleless" | "other";
+  /** Interactable (visible + enabled) at inspection time. */
+  enabled: boolean;
+  /** Sits inside a detected export-context dialog scope. */
+  inExportDialog: boolean;
+}
+
+/**
+ * DEV-ONLY sanitized inspection of the continuation candidates present on the failed poll (live-debug
+ * sprint). Counts + per-candidate structural buckets ONLY — the operator-requested diagnostics. No raw
+ * page text, attributes carrying user data, URLs, or content ever appear here.
+ */
+export interface CandidateInspection {
+  /** Distinct export-context dialog scopes detected (outer, non-nested). */
+  dialogCount: number;
+  /** Path-A (own-wording) candidate count. */
+  pathACount: number;
+  /** Path-B (generic-primary-in-dialog) candidate count. */
+  pathBCount: number;
+  /** Candidates surfaced by BOTH paths (same element) — the a∩b overlap. */
+  overlapCount: number;
+  /** Per-candidate sanitized fingerprints, each with its overlaid label. */
+  candidates: CandidateLabel[];
+}
+
 export interface NaverLiveProbeDriverOptions {
   /** The gitignored quarantine directory for the temporary validation save. */
   quarantineDir: string;
@@ -208,6 +247,22 @@ export interface NaverLiveProbeDriverOptions {
   continuationObserveTimeoutMs?: number;
   /** Poll cadence for continuation-checkpoint appearance during the download race. Default 500 ms. */
   continuationPollMs?: number;
+  /**
+   * DEV-ONLY live-debug switch (the seated NAVER live-debug sprint, 2026-07-24). Default `false` ⇒ the
+   * production continuation path is byte-for-byte unchanged. When `true`, a fail-closed continuation
+   * outcome additionally overlays SANITIZED candidate labels (`A1`/`B1`…) and records structural buckets
+   * via `inspectContinuationCandidates`, so a seated operator can name the real consent control. It never
+   * changes what is clicked (the driver still never clicks) and never relaxes fail-closed by itself.
+   */
+  liveDebug?: boolean;
+  /**
+   * DEV-ONLY disambiguation hint (only consulted when `liveDebug`). A sanitized label such as `"B2"` the
+   * operator identified as the real consent action. When set, `markContinuationTarget` HIGHLIGHTS the
+   * candidate carrying that label instead of failing closed on ambiguity — the operator still performs the
+   * click. An unresolvable/duplicate label falls through to the unchanged fail-closed decision. Never a
+   * bare page match: the label only ever selects among the same Path-A/Path-B candidates.
+   */
+  continuationSelectLabel?: string;
 }
 
 /** Some bundlers inject `__name(...)` into serialized evaluate bodies — a harmless identity shim. */
@@ -229,6 +284,8 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private lastParseVerdict: ArtifactParseVerdict | null = null;
   /** TEST-VISIBLE sanitized record of the continuation checkpoints the last detection pass walked. */
   private lastContinuationDiagnostic: ContinuationDiagnostic | null = null;
+  /** DEV-ONLY sanitized inspection of the candidates on the last fail-closed continuation poll. */
+  private lastInspectionResult: CandidateInspection | null = null;
   /** Armed BEFORE the user acts (a download can fire the instant they click); resolved lazily. */
   private pendingDownload: Promise<Download | null> | null = null;
   /** The detected artifact buffered in memory (bytes re-readable for validate + ingest). */
@@ -506,17 +563,20 @@ export class NaverLiveProbeDriver implements ProbeDriver {
     this.pendingDownload = armed;
     const diagnostic: ContinuationDiagnostic = { checkpoints: 0, observedLast: false, ambiguous: false, dialog: "none" };
     this.lastContinuationDiagnostic = diagnostic;
+    this.lastInspectionResult = null; // DEV: fresh per attempt
     try {
       for (let checkpoint = 0; checkpoint <= MAX_CONTINUATION_CHECKPOINTS; checkpoint += 1) {
         const outcome = await this.raceDownloadOrContinuation(armed, timeoutMs);
         if (outcome.kind === "download") return await this.bufferDetected(outcome.download);
         if (outcome.kind === "timeout") {
           diagnostic.dialog = outcome.dialog; // WHY no control was found this frame (sanitized enum)
+          if (this.opts.liveDebug) await this.captureInspection();
           return { detected: false };
         }
         if (outcome.kind === "ambiguous") {
           diagnostic.ambiguous = true;
           diagnostic.dialog = outcome.dialog;
+          if (this.opts.liveDebug) await this.captureInspection(); // DEV: label the candidates for the operator
           return { detected: false }; // fail closed: 2+ candidate controls is ambiguity, never a guess
         }
         // outcome.kind === "continuation": exactly ONE new control is now the tagged target.
@@ -595,6 +655,14 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    */
   lastContinuation(): ContinuationDiagnostic | null {
     return this.lastContinuationDiagnostic;
+  }
+
+  /**
+   * DEV-ONLY sanitized inspection of the continuation candidates on the last fail-closed poll (null
+   * until a `liveDebug` run inspects one). CLI logging + test introspection only — never transported.
+   */
+  lastInspection(): CandidateInspection | null {
+    return this.lastInspectionResult;
   }
 
   /**
@@ -728,7 +796,14 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    */
   private markContinuationTarget(): Promise<{ count: number; dialog: DialogDiscoveryPhase }> {
     return this.ctx().evaluate(
-      (kw: { own: readonly string[]; context: readonly string[]; primary: readonly string[]; cancel: readonly string[] }) => {
+      (kw: {
+        own: readonly string[];
+        context: readonly string[];
+        primary: readonly string[];
+        cancel: readonly string[];
+        /** DEV-ONLY operator-chosen label (`"B2"`); `null` on the production path — see below. */
+        selectLabel: string | null;
+      }) => {
         const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration } & Record<string, unknown>;
         const current = document.querySelector("[data-aw-target]");
         const OWN = kw.own.map((k) => k.toLowerCase());
@@ -813,6 +888,42 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           bMatches.push(p);
           if (!scopes.includes(s)) scopes.push(s);
         }
+
+        // Shared tag-move: drop the tag/observer from `current` and stamp it onto `el` (used by the
+        // DEV select branch and the production count===1 branch below — identical mechanics).
+        const moveTagTo = (el: Element): void => {
+          if (current) {
+            const handler = w["__aw_observer_handler__"];
+            if (typeof handler === "function") current.removeEventListener("click", handler as EventListener);
+            current.removeAttribute("data-aw-target");
+            current.removeAttribute("data-aw-role");
+            current.removeAttribute("data-aw-label");
+            current.setAttribute("data-aw-seen", "");
+          }
+          el.setAttribute("data-aw-target", "");
+          el.setAttribute("data-aw-role", "primary-action");
+          el.setAttribute("data-aw-label", "review-export-continuation");
+          el.setAttribute("data-aw-seen", "");
+        };
+
+        // -------- DEV select branch: honor the operator-identified label, else fall through --------
+        // Only reachable when the CLI passed a hint (liveDebug). Labels are assigned by path order over
+        // the SAME aMatches/bMatches the inspection overlays, so `"B2"` here is the same element the
+        // operator saw. It only HIGHLIGHTS that candidate — the operator still clicks. An unresolvable or
+        // duplicate label does NOT force a guess: it falls through to the unchanged decision (fail closed).
+        if (kw.selectLabel) {
+          const m = /^([AB])(\d+)$/.exec(kw.selectLabel);
+          if (m) {
+            const idx = parseInt(m[2]!, 10) - 1;
+            const arr = m[1] === "A" ? aMatches : bMatches;
+            const picked = idx >= 0 && idx < arr.length ? arr[idx]! : null;
+            if (picked && eligible(picked)) {
+              moveTagTo(picked);
+              return { count: 1, dialog: "matched" as const };
+            }
+          }
+          // hint unresolvable → do not force; continue to the unchanged production decision.
+        }
         // Also count export-context ARIA dialogs that carry NO primary-keyword action at all, so a
         // present-but-actionless dialog is still reported (export-dialog-no-action, not no-export-dialog).
         const ariaExportDialogs = all.filter((el) => visibleEnabled(el) && isDialogRole(el) && ctxHas(el));
@@ -858,8 +969,178 @@ export class NaverLiveProbeDriver implements ProbeDriver {
         context: EXPORT_CONTEXT_KEYWORDS,
         primary: PRIMARY_ACTION_KEYWORDS,
         cancel: CANCEL_ACTION_KEYWORDS,
+        // DEV-ONLY: null unless a liveDebug run supplied an operator-identified label. Off ⇒ unchanged.
+        selectLabel: this.opts.liveDebug ? (this.opts.continuationSelectLabel ?? null) : null,
       },
     );
+  }
+
+  /**
+   * DEV-ONLY (live-debug sprint): enumerate the SAME Path-A/Path-B continuation candidates
+   * `markContinuationTarget` would, overlay a sanitized local label (`A1`/`B1`…) on each so the seated
+   * operator can point at the real consent control, and return SANITIZED structural buckets only. It
+   * NEVER clicks, NEVER tags a target, and NEVER emits page text/attributes/URLs/content. Labels are
+   * assigned by path order over the identical candidate sets, so the labels the operator sees here match
+   * the `selectLabel` the matcher will honor next attempt.
+   */
+  private inspectContinuationCandidates(): Promise<CandidateInspection> {
+    return this.ctx().evaluate(
+      (kw: { own: readonly string[]; context: readonly string[]; primary: readonly string[]; cancel: readonly string[] }) => {
+        const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration } & Record<string, unknown>;
+        const current = document.querySelector("[data-aw-target]");
+        const OWN = kw.own.map((k) => k.toLowerCase());
+        const CTX = kw.context.map((k) => k.toLowerCase());
+        const PRIMARY = kw.primary.map((k) => k.toLowerCase());
+        const CANCEL = kw.cancel.map((k) => k.toLowerCase());
+        const seen = (el: Element): boolean => el.hasAttribute("data-aw-seen");
+        const visibleEnabled = (el: Element): boolean => {
+          const style = w.getComputedStyle(el);
+          if (style.display === "none" || style.visibility === "hidden") return false;
+          if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+          if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
+          if (el.getAttribute("type") === "hidden") return false;
+          return true;
+        };
+        const accessibleName = (el: Element): string => {
+          const text = el.textContent ?? "";
+          const value = el.getAttribute("value") ?? "";
+          const aria = el.getAttribute("aria-label") ?? "";
+          const title = el.getAttribute("title") ?? "";
+          return `${text} ${value} ${aria} ${title}`.toLowerCase();
+        };
+        const nameHas = (el: Element, set: string[]): boolean => set.some((k) => accessibleName(el).includes(k));
+        const ctxHas = (el: Element): boolean => {
+          const t = (el.textContent ?? "").toLowerCase();
+          return CTX.some((k) => t.includes(k));
+        };
+        const NATIVE = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+        const introducesPointer = (el: Element): boolean => {
+          if (w.getComputedStyle(el).cursor !== "pointer") return false;
+          const parent = el.parentElement;
+          return !parent || w.getComputedStyle(parent).cursor !== "pointer";
+        };
+        const isClickable = (el: Element): boolean => el.matches(NATIVE) || introducesPointer(el);
+        const eligible = (el: Element): boolean => el !== current && !seen(el) && visibleEnabled(el);
+        const all = Array.from(document.querySelectorAll("*"));
+
+        let aMatches = all.filter((el) => eligible(el) && isClickable(el) && nameHas(el, OWN));
+        aMatches = aMatches.filter((el) => !aMatches.some((o) => o !== el && el.contains(o)));
+
+        const isDialogRole = (el: Element): boolean => {
+          const role = (el.getAttribute("role") ?? "").toLowerCase();
+          return role === "dialog" || role === "alertdialog" || el.getAttribute("aria-modal") === "true";
+        };
+        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHas(el, CANCEL));
+        const primaryCands = all.filter(
+          (el) => eligible(el) && isClickable(el) && nameHas(el, PRIMARY) && !nameHas(el, CANCEL),
+        );
+        const dialogScopeFor = (node: Element): Element | null => {
+          let el: Element | null = node.parentElement;
+          while (el) {
+            const cur = el;
+            if (isDialogRole(cur) || cancelCands.some((c) => cur.contains(c))) return ctxHas(cur) ? cur : null;
+            el = cur.parentElement;
+          }
+          return null;
+        };
+        const bMatches: Element[] = [];
+        const scopes: Element[] = [];
+        for (const p of primaryCands) {
+          const s = dialogScopeFor(p);
+          if (!s) continue;
+          bMatches.push(p);
+          if (!scopes.includes(s)) scopes.push(s);
+        }
+        const ariaExportDialogs = all.filter((el) => visibleEnabled(el) && isDialogRole(el) && ctxHas(el));
+        for (const d of ariaExportDialogs) if (!scopes.includes(d)) scopes.push(d);
+        const outerScopes = scopes.filter((s) => !scopes.some((o) => o !== s && o.contains(s)));
+
+        const tagBucketOf = (el: Element): CandidateLabel["tagBucket"] => {
+          const tag = el.tagName.toLowerCase();
+          if (tag === "button") return "button";
+          if (tag === "a") return "anchor";
+          if (tag === "input") return "input";
+          if ((el.getAttribute("role") ?? "").toLowerCase() === "button") return "role-button";
+          if (el.matches(NATIVE)) return "other";
+          return "roleless";
+        };
+        const inExportDialog = (el: Element): boolean => outerScopes.some((s) => s.contains(el));
+        const overlap = aMatches.filter((el) => bMatches.includes(el));
+
+        // Remove any prior labels before overlaying this pass (idempotent).
+        document.querySelectorAll(".__aw_cand_label__").forEach((n) => n.remove());
+        const candidates: CandidateLabel[] = [];
+        const paint = (el: Element, label: string, path: "A" | "B"): void => {
+          const r = (el as Element).getBoundingClientRect();
+          const badge = document.createElement("div");
+          badge.className = "__aw_cand_label__";
+          badge.setAttribute("aria-hidden", "true");
+          badge.textContent = label; // synthetic identifier only — never page content
+          badge.style.cssText = [
+            "position:fixed",
+            "pointer-events:none",
+            "z-index:2147483600",
+            `left:${Math.round(r.left)}px`,
+            `top:${Math.round(Math.max(0, r.top - 18))}px`,
+            `background:${path === "A" ? "#c026d3" : "#059669"}`,
+            "color:#fff",
+            "font:bold 12px system-ui",
+            "padding:1px 6px",
+            "border-radius:4px",
+            "white-space:nowrap",
+          ].join(";");
+          document.body.appendChild(badge);
+        };
+        aMatches.forEach((el, i) => {
+          const label = `A${i + 1}`;
+          paint(el, label, "A");
+          candidates.push({ label, via: "A", tagBucket: tagBucketOf(el), enabled: visibleEnabled(el), inExportDialog: inExportDialog(el) });
+        });
+        bMatches.forEach((el, i) => {
+          const label = `B${i + 1}`;
+          paint(el, label, "B");
+          candidates.push({ label, via: "B", tagBucket: tagBucketOf(el), enabled: visibleEnabled(el), inExportDialog: true });
+        });
+        return {
+          dialogCount: outerScopes.length,
+          pathACount: aMatches.length,
+          pathBCount: bMatches.length,
+          overlapCount: overlap.length,
+          candidates,
+        };
+      },
+      {
+        own: EXPORT_TARGET_KEYWORDS,
+        context: EXPORT_CONTEXT_KEYWORDS,
+        primary: PRIMARY_ACTION_KEYWORDS,
+        cancel: CANCEL_ACTION_KEYWORDS,
+      },
+    );
+  }
+
+  /**
+   * DEV-ONLY (live-debug sprint): clear the per-attempt debug residue between retries — remove the
+   * candidate label badges and every `data-aw-seen`/`data-aw-target`/tag stamp — so the next attempt on
+   * the SAME page (reused context + operator's still-selected scope) starts from a clean DOM. Read-only
+   * apart from removing the driver's own annotations; never clicks, never touches page content.
+   */
+  async clearContinuationDebug(): Promise<void> {
+    await this.ctx()
+      .evaluate(() => {
+        document.querySelectorAll(".__aw_cand_label__").forEach((n) => n.remove());
+        document.querySelectorAll("[data-aw-seen]").forEach((el) => el.removeAttribute("data-aw-seen"));
+        document.querySelectorAll("[data-aw-target]").forEach((el) => {
+          el.removeAttribute("data-aw-target");
+          el.removeAttribute("data-aw-role");
+          el.removeAttribute("data-aw-label");
+        });
+      })
+      .catch(() => {});
+  }
+
+  /** DEV-ONLY: overlay + record the sanitized candidate inspection for the seated operator (best-effort). */
+  private async captureInspection(): Promise<void> {
+    this.lastInspectionResult = await this.inspectContinuationCandidates().catch(() => null);
   }
 
   private unmarkExportTarget(): Promise<void> {
