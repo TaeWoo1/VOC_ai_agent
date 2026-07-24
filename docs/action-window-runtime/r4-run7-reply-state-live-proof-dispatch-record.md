@@ -783,3 +783,42 @@ reached ingest.
 a **fresh G3 + G6 AND** an offline candidate-discovery fix, tracked separately as a focused collector
 change (its own PR). **This record stands on the observed facts regardless of whether that fix is ever
 merged** — the run was consumed and failed closed, and that is what it records.
+
+## 20. Execution record — 2026-07-24, attempt 5 (export tutorial live proof — COMPLETED · sanitized)
+
+### 20.1 Dispatch
+
+Re-scoped by the operator to the **NAVER Review Export Tutorial** — success = one bounded live
+export-and-ingest; C2/C4 answered-review checks are the separate Reply-State Live Validation package,
+captured only opportunistically. Fresh G3 (`export+ingest`, five boxes, current restored environment;
+Bridge N/A/CLI-loopback) + fresh single-use G6 (max live window 55 min, timer-derived; no-reply bound)
+affirmed in the dispatching turn, operator **seated and ready**, scope confirmed on screen via
+`readExportScope`. Code under proof: clean main **`661bcca`** (role-less continuation discovery #350 +
+scroll-tracking highlight + `readExportScope`), holder synced **forward** `b3864a7 → 661bcca`
+(fetch-only + `checkout --detach`; six preserved paths byte-identical; in-holder collector 4850 +
+RUN_INTEGRATION browser proofs 17/17). The consent-flow reframing (label/comments/tests) is a local,
+unpushed, **zero-behavior** change — runtime behavior is identical. Disposable backend
+`sellerops_run7_20260724T112501` on 18080, ingest target confirmed on the run's output.
+
+### 20.2 Timeline (log times UTC)
+
+| Time | Event |
+|---|---|
+| 12:10:59 | `aw.live.barrier {observed:true}` — export action observed (scope 2026.01.25–2026.07.24 confirmed via `readExportScope`) |
+| 12:11:04 | `login.ok` (`http://127.0.0.1:18080`) · `channel.resolved` NAVER · `upload.done SUCCESS` (rows few, 0 skipped, 0 failed) → **COMPLETED 3-of-3** |
+| — | `aw.live.continuation {checkpoints:0}` — the confirm fired the download directly (Run-4 direct variant; no separate consent control needed highlighting this range) |
+
+### 20.3 Evidence (sanitized census, captured before teardown)
+
+- Ingest **SUCCESS: 7 reviews, 0 skipped, 0 failed**.
+- Mapped-field census: `body` / `rating` / `received_at` / `external_id` / `reply_state` = **7/7 non-null** — **C1 compatibility on real data**.
+- `reply_state`: **ANSWERED 2 / PENDING 5 / UNKNOWN 0**; all 7 low-rating (1점 filter) → **2 answered low-rating reviews present**, reply-state preserved.
+- ⚠ `reviews` carry **no `seller_account_id`** (org/channel-scoped by design) → account-scoped C2/C4 API verification is the separate Reply-State Live Validation package; the DB census is the opportunistic evidence.
+- **Teardown clean:** DB dropped (name-guarded) · `sellerops` the only surviving `sellerops*` DB · quarantine / downloads / `~/Downloads` empty · profile unheld · holder at `661bcca` (not rolled back) · scope read-back + run-local creds scrubbed · **zero residual data**.
+
+### 20.4 Result
+
+**The NAVER Review Export Tutorial's completion criterion is MET** — one bounded live export-and-ingest
+success with the fixed runtime, no public write, clean teardown. `checkpoints:0` (direct variant); the
+one-consent-checkpoint normal flow + role-less discovery are proven by the headed operator verification
+and the synthetic proofs, and were simply not exercised by this range. **G3 #5 / G6 #5 CONSUMED.**

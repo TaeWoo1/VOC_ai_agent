@@ -154,6 +154,29 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-24 — NAVER Review Export Tutorial — LIVE export+ingest SUCCESS (attempt 5)
+- **Loop stage(s):** ACQUIRE (real export) → NORMALIZE → UNDERSTAND/PRIORITIZE (attention)
+- **Did:** A second live NAVER export ingested end-to-end on the FIXED runtime — clean main `661bcca`
+  (role-less continuation discovery, PR #350) + scroll-tracking highlight + `readExportScope`, with the
+  export choreography reframed to the normal two-click flow (export → ONE consent/confirm → automatic
+  download; up-to-3 continuation is a defensive ceiling). Headed operator verification of the two-click
+  flow, role-less discovery, ambiguity fail-closed, and scroll-following highlight all green before the
+  run. COMPLETED 3-of-3, `upload.done SUCCESS` **7 rows / 0 skipped / 0 failed**; direct-download
+  variant (`checkpoints:0`). **C1 compatibility PROVEN on real data** (all mapped fields 7/7).
+- **Evidence:** dispatch record §20; gate register RUN 7 ATTEMPT 5 CONSUMED. Sanitized census:
+  reply_state ANSWERED 2 / PENDING 5 (all low-rating) — reply-state preserved; **2 answered low-rating
+  reviews present**, so a range suitable for the separate Reply-State Live Validation package exists.
+  ⚠ `reviews` carry no `seller_account_id` (org/channel-scoped) → account-scoped C2/C4 is that separate
+  package. Clean guarded teardown, zero residual data, holder kept at `661bcca`.
+- **§4.1 impact:** none promoted — a second disposable-backend live export is added evidence, not
+  operational status; `운영 지원` stays file-upload-only.
+- **Ledger impact:** none.
+- **Gate state:** G3 #5 / G6 #5 (`export+ingest`) CONSUMED. No public write, reply flag never passed.
+- **Blockers:** none. ⚠ The reframing commit is LOCAL/unpushed (zero-behavior) pending the single NAVER
+  Review Export Tutorial PR.
+- **Next:** the separate Reply-State Live Validation package (C2 queue exclusion + C4 answered-review
+  reply-prep refusal), which needs its own fresh G3/G6 and an org/channel-scoped attention read.
+
 ### 2026-07-24 — Review-Reply Exit Arc — COMPLETE (offline)
 - **Loop stage(s):** ACT ⇄ PRIORITIZE (the committed-work surface and its honest exits)
 - **Did:** Closed the reply worklist as a coherent surface a seller can trust to hold their work and

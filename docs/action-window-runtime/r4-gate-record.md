@@ -464,7 +464,38 @@ R4 live-run approval — RUN 7 ATTEMPT 4 (export+ingest) — CONSUMED (run FAILE
                       checkpoints:0 (a candidate-DISCOVERY miss, dispatch record §19.3) and the 60 s
                       race lapsed. ZERO ingest, ZERO artifact, no public write, clean teardown.
                       C1/C3 stay PROVEN (attempt 3); C2/C4/C5 NOT DEMONSTRATED. A retry needs a fresh
-                      G3 + G6 AND the offline candidate-discovery fix (dispatch record §20).
+                      G3 + G6 AND the offline candidate-discovery fix (role-less discovery, PR #350).
+```
+
+```
+R4 live-run approval — RUN 7 ATTEMPT 5 (export+ingest; export tutorial) — CONSUMED (run COMPLETED)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest (re-scoped: NAVER Review Export Tutorial live proof)
+- code under proof:   661bcca (clean main — role-less continuation discovery #350 + scroll-track /
+                      readExportScope); holder synced FORWARD b3864a7→661bcca, preserved paths
+                      byte-identical, in-holder collector 4850 + RUN_INTEGRATION browser proofs 17/17.
+                      The consent-flow reframing is local/unpushed and zero-behavior.
+- backend:            disposable sellerops_run7_20260724T112501 on 18080, confirmed on the run's
+                      output; dropped name-guarded at teardown, sellerops intact
+- max live window:    55 minutes, timer-derived; actual barrier→terminal ~5 s (12:10:59 observed →
+                      12:11:04 COMPLETED)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions; scope confirmed on screen via
+                      readExportScope before acting
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (export+ingest, five boxes, current
+                      RESTORED environment; Bridge N/A/CLI-loopback)
+- P6:                 ✅ signed on G6 + G3 + G4-on-661bcca (in-holder collector 4850 + browser proofs
+                      17/17; headed operator verification of the two-click flow green)
+- outcome:            CONSUMED — drove once, COMPLETED 3-of-3: export OBSERVED → download (direct
+                      variant, checkpoints:0) → validate → parse-gate → ingest SUCCESS (7 rows, 0
+                      skipped/failed). C1 compatibility PROVEN on real data (all mapped fields 7/7).
+                      Opportunistic: the range held 2 answered + 5 pending low-rating reviews,
+                      reply-state preserved; account-scoped C2/C4 is the separate Reply-State package.
+                      No public write, clean teardown, zero residual data. Full record: dispatch §20.
+                      The NAVER Review Export Tutorial's live-success criterion is MET.
 ```
 
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)

@@ -1,21 +1,18 @@
 /**
- * **Continuation-checkpoint choreography proof (RUN_INTEGRATION=1; headed = AW_HEADED=1).** Run 7
- * attempt 2 (2026-07-24) was reclassified an INCOMPLETE HUMAN-CHECKPOINT WORKFLOW: after the seller
- * confirmed the export dialog, a NAVER-native in-page notification appeared with a control the
- * seller still had to act on before any browser download existed — a step the state machine neither
- * highlighted nor awaited, so the 60 s download deadline ran from the FIRST action and lapsed.
+ * **NAVER export consent/continuation proof (RUN_INTEGRATION=1; headed = AW_HEADED=1).**
  *
- * These tests drive the real `NaverLiveProbeDriver` over 100% synthetic pages (no marketplace
- * markup/trademark/data, no network) modeling the operator-described flow:
+ * NORMAL NAVER review-export flow — TWO seller clicks: (1) click the export control; NAVER raises ONE
+ * in-page consent/notice dialog; (2) click that dialog's confirm/agree control, and the browser
+ * download then begins AUTOMATICALLY. The driver highlights exactly ONE consent checkpoint after the
+ * export click, waits for the seller's click on it (it never clicks), and detects the download that
+ * follows. That single consent step is the expected choreography — NOT three clicks.
  *
- *   export click → confirmation dialog → asynchronous in-page notification →
- *   operator-required download control → browser download
- *
- * and prove the extended `detectDownload` state machine: the new control is detected read-only,
- * re-tagged, HIGHLIGHTED, and the download deadline restarts only after the OPERATOR's own click —
- * the Runtime never clicks. Fail-closed is pinned from every exit: unacted checkpoint, ambiguous
- * candidates, late delivery, and the checkpoint cap. The Run-4 direct-download shape is pinned
- * unchanged (checkpoints: 0).
+ * These drive the real `NaverLiveProbeDriver` over 100% synthetic pages (no marketplace markup/
+ * trademark/data, no network). They prove the normal one-consent flow, plus the two variants the same
+ * loop absorbs: the Run-4 direct shape (the confirm fires the download, ZERO checkpoints), and — only
+ * as a DEFENSIVE fallback (Run 7 attempt-2 finding) — a FURTHER export-related control appearing when
+ * the consent alone did not deliver a download. Fail-closed is pinned from every exit: unacted
+ * checkpoint, ambiguous candidates, and the defensive checkpoint cap. The Runtime never clicks.
  *
  *   # automated (TEST-ONLY simulated clicks), headless:
  *   RUN_INTEGRATION=1 npx vitest run test/action-window/naver-live-continuation.test.ts
@@ -172,7 +169,34 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
   }
 
   it(
-    "the operator-described flow: confirm → async notification → highlighted control → operator click → download DETECTED",
+    "the NORMAL two-click flow: export click → ONE consent/confirm control → automatic download",
+    async () => {
+      // The tutorial choreography. After the export click NAVER raises ONE in-page consent dialog whose
+      // confirm/agree control carries download wording. The driver highlights that SINGLE control, waits
+      // for the SELLER's click on it (never clicking), and the browser download then begins automatically.
+      const driver = await driveToDetectStart({
+        confirmLabel: "다운로드 동의", // the consent/confirm control (carries download wording)
+        afterConfirm: "direct-download", // confirming it makes the download begin automatically
+        dlgDelayMs: 250, // renders after verify, as the live surface does
+      });
+      const detectP = driver.detectDownload();
+      // Exactly ONE checkpoint: the consent control is detected, re-tagged, highlighted — never clicked by us.
+      await page.waitForSelector('#ok1[data-aw-target]', { timeout: DETECT_MS });
+      expect(await page.locator("#exp[data-aw-target]").count()).toBe(0); // tag moved off the export control
+      expect(await overlayMounted(page)).toBe(true);
+      if (!HEADED) await page.click("#ok1"); // TEST-ONLY: the seller clicks the consent/confirm control
+      const detected = await detectP; // the download begins automatically after the consent
+      expect(detected.detected).toBe(true);
+      expect(detected.artifactRef).toMatch(HEX16);
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false });
+      assertSanitized(driver, detected);
+      await driver.cleanup();
+    },
+    HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
+  );
+
+  it(
+    "variant: an unguided confirm, then a follow-up control the driver highlights (one checkpoint)",
     async () => {
       const driver = await driveToDetectStart({
         confirmLabel: "확인",
@@ -198,7 +222,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver continuation checkpoints (Run 7 atte
   );
 
   it(
-    "a consent-worded dialog is itself a checkpoint, then the notification is the SECOND (two checkpoints)",
+    "DEFENSIVE fallback: after the consent, a FURTHER export-related control appears — two checkpoints",
     async () => {
       const driver = await driveToDetectStart({
         confirmLabel: "리뷰데이터 다운로드 계속",
