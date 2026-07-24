@@ -22,14 +22,32 @@ import { attentionUncertaintyCopy } from "../lib/attention";
 const RECENT_LIMIT = 5;
 
 export function MyReplyWork({ accountId }: { accountId: string }) {
-  // Bumped when an operator records an outcome, so a finished row leaves the to-do and appears
-  // under 최근에 기록한 답변 without a manual reload.
+  // Bumped when an operator records an outcome OR sets a review aside, so a row leaves the to-do
+  // without a manual reload.
   const [reloadKey, setReloadKey] = useState(0);
   const noteOutcomeRecorded = useCallback(() => setReloadKey((k) => k + 1), []);
+  // The row currently being set aside, so its control can show progress and never fire twice.
+  const [dismissing, setDismissing] = useState<string | null>(null);
 
   const { data, loading, error } = useApiData(
     () => api.getReplyWork(accountId, { recentLimit: RECENT_LIMIT }),
     [accountId, reloadKey],
+  );
+
+  const dismiss = useCallback(
+    async (actionRef: string) => {
+      if (dismissing) return;
+      setDismissing(actionRef);
+      try {
+        // A fresh idempotency key PER intent — a retried click is the same dismissal, a new click
+        // (after re-entry) is a new one.
+        await api.dismissReplyWork(accountId, actionRef, { commandId: crypto.randomUUID() });
+        setReloadKey((k) => k + 1);
+      } finally {
+        setDismissing(null);
+      }
+    },
+    [accountId, dismissing],
   );
 
   // The same false-calm guard the attention surface carries: a scope we cannot attribute must never
@@ -72,6 +90,22 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
                     accountId={accountId}
                     onOutcomeRecorded={noteOutcomeRecorded}
                   />
+                  {item.actionRef ? (
+                    <div className="mt-2">
+                      {/* Sets the review aside from THIS list only — it does not delete the draft,
+                          does not record a reply, and does not claim completion. The review returns
+                          on its own when the operator re-marks 대응 필요 or saves a new draft. */}
+                      <button
+                        type="button"
+                        className="text-sm text-muted underline underline-offset-2 hover:text-ink disabled:opacity-50"
+                        onClick={() => dismiss(item.actionRef!)}
+                        disabled={dismissing === item.actionRef}
+                        data-testid="reply-work-dismiss"
+                      >
+                        {dismissing === item.actionRef ? "제외하는 중…" : "작업에서 제외"}
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>

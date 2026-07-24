@@ -1,6 +1,7 @@
 package com.sellerops.attention.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sellerops.attention.AttentionCoverage;
 import com.sellerops.attention.OperatorAttentionService;
@@ -14,11 +15,15 @@ import com.sellerops.attention.reply.ReviewReplyDraft;
 import com.sellerops.attention.reply.ReviewReplyDraftRepository;
 import com.sellerops.attention.reply.ReviewReplyOutcome;
 import com.sellerops.attention.reply.ReviewReplyOutcomeRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkDismissal;
+import com.sellerops.attention.reply.ReviewReplyWorkDismissalRepository;
+import com.sellerops.attention.reply.ReviewReplyWorkDismissalService;
 import com.sellerops.attention.reply.VerificationState;
 import com.sellerops.attention.triage.ReviewTriage;
 import com.sellerops.attention.triage.ReviewTriageRepository;
 import com.sellerops.attention.triage.TriageDisposition;
 import com.sellerops.channel.Channel;
+import com.sellerops.common.ApiException;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.channel.ChannelStatus;
 import com.sellerops.community.Cafe24CommunityArticleRepository;
@@ -61,10 +66,12 @@ class ReplyWorkWorklistTest {
     @Autowired ReviewReplyDraftRepository replyDrafts;
     @Autowired ReviewReplyApprovalRepository replyApprovals;
     @Autowired ReviewReplyOutcomeRepository replyOutcomes;
+    @Autowired ReviewReplyWorkDismissalRepository dismissals;
     @Autowired ItemAnalysisRepository itemAnalyses;
     @Autowired Cafe24CommunityArticleRepository communityArticles;
 
     private OperatorAttentionService service;
+    private ReviewReplyWorkDismissalService dismissalService;
     private final UUID org = UUID.randomUUID();
     private final UUID otherOrg = UUID.randomUUID();
     private UUID channelId;
@@ -79,6 +86,7 @@ class ReplyWorkWorklistTest {
                         new Cafe24VocItemSource(communityArticles),
                         new IngestedReviewVocItemSource(reviews, sellerAccounts, products, triage,
                                 replyDrafts, replyApprovals, replyOutcomes, itemAnalyses))));
+        dismissalService = new ReviewReplyWorkDismissalService(dismissals, reviews, sellerAccounts);
         Channel ch = new Channel();
         ch.setCode("NAVER");
         ch.setNameKo("네이버 스마트스토어");
@@ -118,17 +126,44 @@ class ReplyWorkWorklistTest {
     }
 
     private void draft(UUID reviewId, UUID ownerOrg) {
+        draftAt(reviewId, 1, WHEN, ownerOrg);
+    }
+
+    private void draftAt(UUID reviewId, int version, Instant createdAt, UUID ownerOrg) {
         ReviewReplyDraft d = new ReviewReplyDraft();
         d.setId(UUID.randomUUID());
         d.setOrgId(ownerOrg);
         d.setReviewId(reviewId);
-        d.setVersion(1);
-        d.setBody("합성 초안");
-        d.setContentFingerprint("fp-draft-1");
+        d.setVersion(version);
+        d.setBody("합성 초안 " + version);
+        d.setContentFingerprint("fp-draft-" + version);
         d.setFingerprintAlgorithm("review-reply-v1");
         d.setCreatedBy("operator@example.com");
-        d.setCreatedAt(WHEN);
+        d.setCreatedAt(createdAt);
         replyDrafts.save(d);
+    }
+
+    /** Directly seed a dismissal at an explicit time — for the timestamp-supersede re-entry rules. */
+    private void dismissAt(UUID reviewId, Instant dismissedAt, UUID ownerOrg) {
+        ReviewReplyWorkDismissal d = new ReviewReplyWorkDismissal();
+        d.setOrgId(ownerOrg);
+        d.setReviewId(reviewId);
+        d.setCommandId(UUID.randomUUID().toString());
+        d.setDismissedBy("SELLER:op");
+        d.setDismissedAt(dismissedAt);
+        dismissals.save(d);
+    }
+
+    /** Re-mark a review RESPONSE_NEEDED at an explicit decision time (triage is one-row-per-review). */
+    private void triageAt(UUID reviewId, TriageDisposition disposition, Instant decidedAt, UUID ownerOrg) {
+        ReviewTriage t = triage.findByOrgIdAndReviewId(ownerOrg, reviewId).orElseGet(ReviewTriage::new);
+        t.setOrgId(ownerOrg);
+        t.setReviewId(reviewId);
+        t.setChannelId(channelId);
+        t.setDisposition(disposition);
+        t.setDecidedBy("operator@example.com");
+        t.setDecidedAt(decidedAt);
+        triage.save(t);
     }
 
     private void approve(UUID reviewId, int version) {
@@ -257,6 +292,126 @@ class ReplyWorkWorklistTest {
         draft(theirs.getId(), otherOrg);
 
         assertThat(refs(work().todo())).containsExactly("review:" + mine.getId());
+    }
+
+    // --- 작업에서 제외 (set-aside / dismissal) ---------------------------------------------------
+
+    private static final Instant T1 = Instant.parse("2026-05-11T00:00:00Z");
+    private static final Instant T2 = Instant.parse("2026-05-12T00:00:00Z");
+    private static final Instant T3 = Instant.parse("2026-05-13T00:00:00Z");
+
+    @Test
+    void dismissingAReviewRemovesItFromTheToDo_leavingItsDraftAndHistoryIntact() {
+        Review r = review(1, WHEN);
+        triage(r.getId(), TriageDisposition.RESPONSE_NEEDED, org);
+        draft(r.getId(), org);
+        assertThat(refs(work().todo())).containsExactly("review:" + r.getId());
+
+        dismissalService.dismiss(org, accountId, "review:" + r.getId(), "cmd-1", "SELLER:op");
+
+        assertThat(work().todo()).isEmpty();
+        // The draft — and its version history — survive untouched, so the work can be resumed.
+        assertThat(replyDrafts.findTopByReviewIdOrderByVersionDesc(r.getId())).isPresent();
+        // And the DB-backed dismissal persists across a fresh read (reload persistence).
+        assertThat(work().todo()).isEmpty();
+    }
+
+    @Test
+    void repeatedDismissalWithTheSameCommandIdIsIdempotent_oneRowOneReplay() {
+        Review r = review(1, WHEN);
+        triage(r.getId(), TriageDisposition.RESPONSE_NEEDED, org);
+
+        var first = dismissalService.dismiss(org, accountId, "review:" + r.getId(), "cmd-dup", "SELLER:op");
+        var second = dismissalService.dismiss(org, accountId, "review:" + r.getId(), "cmd-dup", "SELLER:op");
+
+        assertThat(first.replayed()).isFalse();
+        assertThat(second.replayed()).isTrue();   // a repeat is idempotent success, not a second row
+        assertThat(dismissals.count()).isEqualTo(1);
+        assertThat(work().todo()).isEmpty();
+    }
+
+    @Test
+    void aDismissalIsNotACompletionClaim_noOutcome_noRecentlyReported() {
+        Review r = review(1, WHEN);
+        triage(r.getId(), TriageDisposition.RESPONSE_NEEDED, org);
+
+        dismissalService.dismiss(org, accountId, "review:" + r.getId(), "cmd-2", "SELLER:op");
+
+        OperatorReplyWorkView v = work();
+        assertThat(v.todo()).isEmpty();
+        // A set-aside is NOT a reported reply: it writes no outcome and appears in no reported section.
+        assertThat(v.recentlyReported()).isEmpty();
+        assertThat(replyOutcomes.count()).isZero();
+    }
+
+    @Test
+    void reEnters_whenReMarkedResponseNeededAfterTheDismissal() {
+        Review r = review(1, WHEN);
+        draftAt(r.getId(), 1, WHEN, org);        // committed via a draft
+        dismissAt(r.getId(), T2, org);           // then set aside
+        assertThat(work().todo()).isEmpty();
+
+        triageAt(r.getId(), TriageDisposition.RESPONSE_NEEDED, T3, org); // a fresh commitment, newer
+
+        assertThat(refs(work().todo())).containsExactly("review:" + r.getId());
+    }
+
+    @Test
+    void reEnters_whenANewDraftVersionIsSavedAfterTheDismissal() {
+        Review r = review(1, WHEN);
+        triageAt(r.getId(), TriageDisposition.RESPONSE_NEEDED, WHEN, org);
+        draftAt(r.getId(), 1, WHEN, org);
+        dismissAt(r.getId(), T2, org);
+        assertThat(work().todo()).isEmpty();
+
+        draftAt(r.getId(), 2, T3, org);          // a new saved version, newer than the dismissal
+
+        assertThat(refs(work().todo())).containsExactly("review:" + r.getId());
+    }
+
+    @Test
+    void staleSignalsDoNotReactivate_onlyAFreshCommittingActionSupersedes() {
+        Review r = review(1, WHEN);
+        triageAt(r.getId(), TriageDisposition.RESPONSE_NEEDED, T1, org); // committing signal BEFORE…
+        draftAt(r.getId(), 1, T1, org);                                  // …the dismissal
+        dismissAt(r.getId(), T2, org);                                   // dismissed after both
+
+        // Nothing newer than T2 happened — an ordinary read must NOT reactivate it.
+        assertThat(work().todo()).isEmpty();
+        assertThat(work().todo()).isEmpty(); // and a second read is still empty (no read-time drift)
+    }
+
+    @Test
+    void dismissalIsOrgScoped_anotherOrgsDismissalDoesNotHideMyReview() {
+        Review r = review(1, WHEN);
+        triage(r.getId(), TriageDisposition.RESPONSE_NEEDED, org);
+        dismissAt(r.getId(), T2, otherOrg); // a DIFFERENT org dismissed the same review row
+
+        // My review stays in MY to-do — the dismissal belongs to another tenant.
+        assertThat(refs(work().todo())).containsExactly("review:" + r.getId());
+    }
+
+    @Test
+    void dismissRefusesAnAccountThatDoesNotHostTheReviewsChannel() {
+        Review r = review(1, WHEN);
+        triage(r.getId(), TriageDisposition.RESPONSE_NEEDED, org);
+        Channel other = new Channel();
+        other.setCode("COUPANG");
+        other.setNameKo("쿠팡");
+        other.setStatus(ChannelStatus.AVAILABLE);
+        other.setSortOrder(1);
+        UUID otherChannelId = channels.save(other).getId();
+        SellerAccount wrong = new SellerAccount();
+        wrong.setOrgId(org);
+        wrong.setChannelId(otherChannelId);
+        wrong.setConnectionStatus(ChannelStatus.CONNECTED);
+        wrong.setFileUpload(true);
+        UUID wrongAccount = sellerAccounts.save(wrong).getId();
+
+        assertThatThrownBy(() ->
+                dismissalService.dismiss(org, wrongAccount, "review:" + r.getId(), "cmd-x", "SELLER:op"))
+                .isInstanceOf(ApiException.class);
+        assertThat(dismissals.count()).isZero();
     }
 
     @Test

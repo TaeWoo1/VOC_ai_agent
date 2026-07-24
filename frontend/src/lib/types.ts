@@ -473,6 +473,13 @@ export interface OperatorAttentionSummary {
 // Every `recentlyReported` row is UNVERIFIED — present it as 기록함 · 확인 안 함, never as 완료.
 // `coverage` carries the same false-calm guard as the attention summary: when uncertain, empty lists
 // mean the scope could not be attributed, NOT that there is no work.
+// Mirrors com.sellerops.attention.reply.dto.ReviewReplyWorkDismissalResponse — the ack of a
+// 작업에서 제외 write. Asserts nothing about the reply: no outcome, no verification, no completion.
+export interface ReviewReplyWorkDismissalResponse {
+  actionRef: string;
+  replayed: boolean;
+}
+
 export interface OperatorReplyWorkView {
   sellerAccountId: string;
   channel: string | null;

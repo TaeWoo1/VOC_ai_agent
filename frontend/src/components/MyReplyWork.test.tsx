@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MyReplyWork } from "./MyReplyWork";
 import { api } from "../lib/apiClient";
 import type { OperatorReplyWorkView, OperatorVocItem } from "../lib/types";
@@ -110,6 +111,36 @@ describe("MyReplyWork — 내 답변 작업", () => {
     const notice = await screen.findByTestId("reply-work-coverage-uncertain");
     expect(notice).toHaveTextContent("안전하게 판단할 수 없어요");
     expect(screen.queryByTestId("reply-work-todo-empty")).not.toBeInTheDocument();
+  });
+
+  it("작업에서 제외 sets the row aside and it leaves the list on refetch — no completion claim", async () => {
+    const firstRef = "review:11111111-1111-1111-1111-111111111111";
+    const kept = item({ actionRef: "review:22222222-2222-2222-2222-222222222222", rating: 3 });
+    const spy = vi
+      .spyOn(api, "getReplyWork")
+      .mockResolvedValueOnce(view({ todo: [item({ actionRef: firstRef }), kept] })) // before
+      .mockResolvedValueOnce(view({ todo: [kept] })); // after the dismissal refetch
+    const dismiss = vi
+      .spyOn(api, "dismissReplyWork")
+      .mockResolvedValue({ actionRef: firstRef, replayed: false });
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    const buttons = await screen.findAllByTestId("reply-work-dismiss");
+    await userEvent.click(buttons[0]!);
+
+    // It calls the dismiss endpoint (with an idempotency key), never an outcome/completion write.
+    await waitFor(() => expect(dismiss).toHaveBeenCalledTimes(1));
+    const [, ref, body] = dismiss.mock.calls[0]!;
+    expect(ref).toBe(firstRef);
+    expect(body.commandId).toBeTruthy();
+    // The list refetched and the set-aside row is gone; the other remains.
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("reply-work-dismiss")).toHaveLength(1),
+    );
+    // Never a completion word anywhere on the surface.
+    expect(screen.queryByText(/답변 완료/)).not.toBeInTheDocument();
   });
 
   it("a dead read never renders as an empty worklist", async () => {

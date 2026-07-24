@@ -21,6 +21,7 @@ import type {
   ItemAnalysis,
   OperatorAttentionSummary,
   OperatorReplyWorkView,
+  ReviewReplyWorkDismissalResponse,
   OperatorVocItem,
   OperatorVocItemPage,
   OrderSummaryResponse,
@@ -973,6 +974,11 @@ export function mockAccountAttention(
  * backend uses — RESPONSE_NEEDED and/or standing reply work, minus anything already reported — so the
  * demo cannot disagree with the product about what "mine to do" means. Not window-scoped.
  */
+// 작업에서 제외 (mock): acknowledges the set-aside without asserting anything about the reply.
+export function mockDismissReplyWork(actionRef: string): ReviewReplyWorkDismissalResponse {
+  return { actionRef, replayed: false };
+}
+
 export function mockReplyWork(accountId: string): OperatorReplyWorkView {
   const channelName = mockChannelNameForAccount(accountId);
   if (mockChannelCodeForAccount(accountId) !== "NAVER") {
