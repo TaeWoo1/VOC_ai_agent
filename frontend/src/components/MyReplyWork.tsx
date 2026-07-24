@@ -37,6 +37,18 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
   // confirmation opens, so it never lingers as stale reassurance.
   const [dismissedNotice, setDismissedNotice] = useState(false);
 
+  // This surface is REUSED, not remounted, when the seller switches channels on the multi-account
+  // worklist (OperationsWorklist swaps `accountId` on one instance). Its transient acknowledgements
+  // are account-specific: a '제외했어요' banner — or an open 작업에서 제외 confirmation — from one
+  // account must never carry onto the next, where the seller set nothing aside. Reset during render
+  // (the React idiom for prop-derived state) so it clears before the switched-to worklist paints.
+  const [notedAccount, setNotedAccount] = useState(accountId);
+  if (notedAccount !== accountId) {
+    setNotedAccount(accountId);
+    setDismissedNotice(false);
+    setConfirmingRef(null);
+  }
+
   const { data, loading, error } = useApiData(
     () => api.getReplyWork(accountId, { recentLimit: RECENT_LIMIT }),
     [accountId, reloadKey],
@@ -129,7 +141,7 @@ export function MyReplyWork({ accountId }: { accountId: string }) {
                       // The confirmation. 작업에서 제외 removes committed work, so the seller is told
                       // exactly what it does — and does not do — before it happens: it leaves THIS
                       // list only, the draft and history survive, nothing is recorded as replied,
-                      // and there is no separate place to see dismissed items.
+                      // and the review can be recovered from 제외한 작업 below.
                       <div
                         className="mt-2 flex flex-col gap-2 rounded-xl bg-canvas p-3"
                         role="group"
