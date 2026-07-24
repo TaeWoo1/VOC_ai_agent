@@ -824,6 +824,16 @@ function debugCandidatesPrompt(ins: CandidateInspection): string {
   return lines.join("\n");
 }
 
+/** Operator-local (stderr) sanitized per-frame candidate scan — locates a cross-frame consent control. */
+function debugFramesPrompt(frames: Array<{ frame: number; primary: number; cancel: number; exportDialog: number }>): string {
+  const lines = ["", "  >> PER-FRAME SCAN (sanitized counts) — where the boundary-clean 확인/동의 live <<"];
+  for (const f of frames) {
+    lines.push(`       frame#${f.frame}  primary=${f.primary}  cancel=${f.cancel}  exportDialog=${f.exportDialog}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 /** Short between-attempt prompt (session + scope are reused; the operator just re-arms). */
 function debugAttemptPrompt(attempt: number, remainingMin: number): string {
   return [
@@ -922,6 +932,10 @@ async function runDebugCampaign(
         total: inspection.candidates.length,
       });
       console.error(debugCandidatesPrompt(inspection));
+      // If the frame we drove has no unique action, scan every frame — is the real control cross-frame?
+      const frames = await assembled.driver.debugFrameScan().catch(() => []);
+      log("aw.live.debug.frames", { attempt, frames: frames.length, withPrimary: frames.filter((f) => f.primary > 0).length });
+      console.error(debugFramesPrompt(frames));
     }
 
     if (status === "COMPLETED") {
@@ -929,10 +943,14 @@ async function runDebugCampaign(
       console.error(`\n  >> LIVE-DEBUG SUCCESS on attempt ${attempt}: export detected + ingested. <<\n`);
       return;
     }
-    // Only the consent-dialog fail-closed retries; anything else terminal is drift/ingest → stop and report.
-    if (!(status === "FAILED" && blockerCode === "DOWNLOAD_TIMEOUT")) {
-      log("aw.live.debug", { event: "abort-non-continuation-failure", attempt, ...(blockerCode ? { blockerCode } : {}) });
-      console.error(`\n  ABORT: attempt ${attempt} ended in ${status ?? "unknown"}${blockerCode ? "/" + blockerCode : ""} — not the consent-dialog case. Stopping the campaign.\n`);
+    // Abort ONLY on a genuine terminal surface/ingest failure (account/scope/surface drift, or a captured
+    // artifact that would not ingest). A DOWNLOAD_TIMEOUT (the consent-dialog case we are debugging), a
+    // thrown/non-convergent drive, or any transient status (PROCESSING/PREPARING/WAITING_FOR_HUMAN) is a
+    // RETRY — and retries are human-gated by the next "attempt N go", so the loop never spins on its own.
+    const ABORT_BLOCKERS = ["UNSUPPORTED_STATE", "TARGET_NOT_FOUND", "INGEST_FAILED", "ARTIFACT_INVALID"];
+    if (status === "FAILED" && blockerCode && ABORT_BLOCKERS.includes(blockerCode)) {
+      log("aw.live.debug", { event: "abort-terminal-failure", attempt, blockerCode });
+      console.error(`\n  ABORT: attempt ${attempt} ended in FAILED/${blockerCode} — surface/ingest drift, not the consent-dialog case. Stopping.\n`);
       return;
     }
     // Consume the hint that just failed so a stale one never auto-applies; the operator re-sets it.

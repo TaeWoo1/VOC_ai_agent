@@ -75,8 +75,38 @@ const twoPrimariesPage = (): string => `<!doctype html><html><head><meta charset
     </script>
   </body></html>`;
 
+/**
+ * A review-export page carrying a PERSISTENT `사업자정보확인` page button (which contains `확인`), plus a
+ * consent dialog whose only primary action is a bare `확인`. Reproduces the Run 7 attempt-7 live bug: a
+ * substring match tagged `사업자정보확인` instead of the consent action. The boundary-aware match must tag
+ * ONLY the consent `확인`.
+ */
+const pollutedConfirmPage = (): string => `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{font-family:system-ui;margin:0;padding:24px} button,a{display:inline-block;padding:10px 18px}
+    .dlg{position:fixed;inset:28% 22%;background:#fff;border:1px solid #888;padding:20px}
+  </style></head><body>
+    <h1>리뷰 관리 (합성 픽스처)</h1>
+    <div class="toolbar"><a id="exp" href="#">엑셀 다운로드</a> <button id="bizinfo">사업자정보확인</button></div>
+    <table><tbody><tr><td>합성 행 A</td><td>★☆☆☆☆</td></tr></tbody></table>
+    <div id="host"></div>
+    <script>
+      (function(){
+        var blobUrl = URL.createObjectURL(new Blob([${XLSX_BLOB}], { type: 'application/octet-stream' }));
+        function fireDownload(){ var a=document.createElement('a'); a.href=blobUrl; a.download='review-export.xlsx'; document.body.appendChild(a); a.click(); }
+        function build(){
+          var d = document.createElement('div'); d.id='dlg1'; d.className='dlg';
+          var p = document.createElement('p'); p.textContent='리뷰 엑셀 다운로드 이용에 동의하시면 파일이 저장됩니다 (합성 동의창)'; d.appendChild(p);
+          var c = document.createElement('button'); c.id='dlg1-cancel'; c.textContent='취소'; d.appendChild(c);
+          var ok = document.createElement('button'); ok.id='ok1'; ok.textContent='확인'; ok.addEventListener('click', fireDownload); d.appendChild(ok);
+          document.getElementById('host').appendChild(d);
+        }
+        document.getElementById('exp').addEventListener('click', function(e){ e.preventDefault(); setTimeout(build, ${DLG_DELAY_MS}); });
+      })();
+    </script>
+  </body></html>`;
+
 /** No synthetic page string may reach a driver-visible result. */
-const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "내려받기", "확인", "동의", "취소", "이용", "저장", "동의창", "review-export", ".xlsx", "blob:", "dlg", "host", "ok1", "ok2"];
+const NEEDLES = ["리뷰 관리", "합성", "엑셀", "다운로드", "내려받기", "확인", "동의", "취소", "이용", "저장", "동의창", "사업자정보확인", "review-export", ".xlsx", "blob:", "dlg", "host", "ok1", "ok2", "bizinfo"];
 
 describe.skipIf(!RUN)("NaverLiveProbeDriver DEV live-debug diagnostics (Run 7 sprint)", () => {
   let browser: Browser;
@@ -108,10 +138,10 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver DEV live-debug diagnostics (Run 7 sp
     });
   }
 
-  async function driveToDetectStart(detectMs: number, opts: { liveDebug?: boolean; continuationSelectLabel?: string }): Promise<NaverLiveProbeDriver> {
+  async function driveToDetectStart(detectMs: number, opts: { liveDebug?: boolean; continuationSelectLabel?: string }, pageHtml: string = twoPrimariesPage()): Promise<NaverLiveProbeDriver> {
     page = await browser.newPage();
     const driver = newDriver(detectMs, opts);
-    await page.setContent(twoPrimariesPage());
+    await page.setContent(pageHtml);
     const located = await driver.locate();
     expect(located.count).toBe(1);
     await driver.highlight();
@@ -165,6 +195,25 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver DEV live-debug diagnostics (Run 7 sp
       const detected = await detectP;
       expect(detected.detected).toBe(true);
       expect(detected.artifactRef).toMatch(HEX16);
+      expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false, dialog: "matched" });
+      await driver.cleanup();
+    },
+    HEADED ? HEADED_TEST_TIMEOUT_MS : 30_000,
+  );
+
+  it(
+    "boundary match: a persistent 사업자정보확인 page button does NOT match 확인 — only the consent action is tagged (production path)",
+    async () => {
+      // No liveDebug: this proves the PRODUCTION matcher itself, not the DEV hint.
+      const driver = await driveToDetectStart(DETECT_MS, {}, pollutedConfirmPage());
+      const detectP = driver.detectDownload();
+      await page.waitForSelector("#ok1[data-aw-target]", { timeout: DETECT_MS });
+      expect(await page.locator('[data-aw-label="review-export-continuation"]').count()).toBe(1);
+      expect(await page.locator("#bizinfo[data-aw-target]").count()).toBe(0); // the page button is NEVER tagged
+      expect(await page.locator("#dlg1-cancel[data-aw-target]").count()).toBe(0);
+      if (!HEADED) await page.click("#ok1");
+      const detected = await detectP;
+      expect(detected.detected).toBe(true);
       expect(driver.lastContinuation()).toEqual({ checkpoints: 1, observedLast: true, ambiguous: false, dialog: "matched" });
       await driver.cleanup();
     },

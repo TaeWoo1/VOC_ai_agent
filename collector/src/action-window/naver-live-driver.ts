@@ -832,6 +832,22 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           const n = accessibleName(el);
           return set.some((k) => n.includes(k));
         };
+        // LEADING-boundary match for the GENERIC action keywords (Run 7 attempt-7 live finding): a bare
+        // substring made a persistent page button `사업자정보확인` match `확인` and get tagged instead of
+        // the consent action. Require the keyword NOT to be preceded by a letter/number, so a prefixed
+        // compound (`정보확인`) is excluded while a suffixed action form (`확인하기`, `동의합니다`) still
+        // matches. Used for PRIMARY + CANCEL only; own-wording/context stay substring.
+        const WORDCHAR = /[\p{L}\p{N}]/u;
+        const nameHasWord = (el: Element, set: string[]): boolean => {
+          const n = accessibleName(el);
+          return set.some((k) => {
+            for (let from = 0, idx = n.indexOf(k, from); idx !== -1; from = idx + 1, idx = n.indexOf(k, from)) {
+              const before = idx > 0 ? n[idx - 1]! : "";
+              if (!before || !WORDCHAR.test(before)) return true;
+            }
+            return false;
+          });
+        };
         const ctxHas = (el: Element): boolean => {
           const t = (el.textContent ?? "").toLowerCase();
           return CTX.some((k) => t.includes(k));
@@ -858,9 +874,9 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           const role = (el.getAttribute("role") ?? "").toLowerCase();
           return role === "dialog" || role === "alertdialog" || el.getAttribute("aria-modal") === "true";
         };
-        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHas(el, CANCEL));
+        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHasWord(el, CANCEL));
         const primaryCands = all.filter(
-          (el) => eligible(el) && isClickable(el) && nameHas(el, PRIMARY) && !nameHas(el, CANCEL),
+          (el) => eligible(el) && isClickable(el) && nameHasWord(el, PRIMARY) && !nameHasWord(el, CANCEL),
         );
         // The dialog SCOPE of a primary action is the INNERMOST ancestor that encloses it AND either is
         // an ARIA dialog OR contains a cancel candidate (a confirm+cancel container) — the confirm+cancel
@@ -1009,6 +1025,17 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           return `${text} ${value} ${aria} ${title}`.toLowerCase();
         };
         const nameHas = (el: Element, set: string[]): boolean => set.some((k) => accessibleName(el).includes(k));
+        const WORDCHAR = /[\p{L}\p{N}]/u;
+        const nameHasWord = (el: Element, set: string[]): boolean => {
+          const n = accessibleName(el);
+          return set.some((k) => {
+            for (let from = 0, idx = n.indexOf(k, from); idx !== -1; from = idx + 1, idx = n.indexOf(k, from)) {
+              const before = idx > 0 ? n[idx - 1]! : "";
+              if (!before || !WORDCHAR.test(before)) return true;
+            }
+            return false;
+          });
+        };
         const ctxHas = (el: Element): boolean => {
           const t = (el.textContent ?? "").toLowerCase();
           return CTX.some((k) => t.includes(k));
@@ -1030,9 +1057,9 @@ export class NaverLiveProbeDriver implements ProbeDriver {
           const role = (el.getAttribute("role") ?? "").toLowerCase();
           return role === "dialog" || role === "alertdialog" || el.getAttribute("aria-modal") === "true";
         };
-        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHas(el, CANCEL));
+        const cancelCands = all.filter((el) => visibleEnabled(el) && isClickable(el) && nameHasWord(el, CANCEL));
         const primaryCands = all.filter(
-          (el) => eligible(el) && isClickable(el) && nameHas(el, PRIMARY) && !nameHas(el, CANCEL),
+          (el) => eligible(el) && isClickable(el) && nameHasWord(el, PRIMARY) && !nameHasWord(el, CANCEL),
         );
         const dialogScopeFor = (node: Element): Element | null => {
           let el: Element | null = node.parentElement;
@@ -1141,6 +1168,69 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   /** DEV-ONLY: overlay + record the sanitized candidate inspection for the seated operator (best-effort). */
   private async captureInspection(): Promise<void> {
     this.lastInspectionResult = await this.inspectContinuationCandidates().catch(() => null);
+  }
+
+  /**
+   * DEV-ONLY (live-debug sprint): scan EVERY frame (top document + children) for boundary-clean generic
+   * action candidates, so a fail-closed run can tell whether the real consent control lives in a DIFFERENT
+   * frame than the export surface (`ctx()`). Sanitized COUNTS per frame only — no URLs, text, or content.
+   * This is the evidence that would justify (or refute) cross-frame continuation traversal.
+   */
+  async debugFrameScan(): Promise<Array<{ frame: number; primary: number; cancel: number; exportDialog: number }>> {
+    const out: Array<{ frame: number; primary: number; cancel: number; exportDialog: number }> = [];
+    const frames = this.page.frames();
+    for (let i = 0; i < frames.length; i += 1) {
+      const frame = frames[i]!;
+      const counts = await frame
+        .evaluate(
+          (kw: { context: readonly string[]; primary: readonly string[]; cancel: readonly string[] }) => {
+            const w = window as unknown as { getComputedStyle(e: Element): CSSStyleDeclaration };
+            const CTX = kw.context.map((k) => k.toLowerCase());
+            const PRIMARY = kw.primary.map((k) => k.toLowerCase());
+            const CANCEL = kw.cancel.map((k) => k.toLowerCase());
+            const visibleEnabled = (el: Element): boolean => {
+              const s = w.getComputedStyle(el);
+              if (s.display === "none" || s.visibility === "hidden") return false;
+              if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
+              if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true") return false;
+              return true;
+            };
+            const nameOf = (el: Element): string =>
+              `${el.textContent ?? ""} ${el.getAttribute("value") ?? ""} ${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("title") ?? ""}`.toLowerCase();
+            const WORDCHAR = /[\p{L}\p{N}]/u;
+            const hasWord = (el: Element, set: string[]): boolean => {
+              const n = nameOf(el);
+              return set.some((k) => {
+                for (let from = 0, idx = n.indexOf(k, from); idx !== -1; from = idx + 1, idx = n.indexOf(k, from)) {
+                  const b = idx > 0 ? n[idx - 1]! : "";
+                  if (!b || !WORDCHAR.test(b)) return true;
+                }
+                return false;
+              });
+            };
+            const NATIVE = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+            const clickable = (el: Element): boolean => {
+              if (el.matches(NATIVE)) return true;
+              if (w.getComputedStyle(el).cursor !== "pointer") return false;
+              const p = el.parentElement;
+              return !p || w.getComputedStyle(p).cursor !== "pointer";
+            };
+            const isDialog = (el: Element): boolean => {
+              const r = (el.getAttribute("role") ?? "").toLowerCase();
+              return r === "dialog" || r === "alertdialog" || el.getAttribute("aria-modal") === "true";
+            };
+            const all = Array.from(document.querySelectorAll("*"));
+            const primary = all.filter((el) => visibleEnabled(el) && clickable(el) && hasWord(el, PRIMARY) && !hasWord(el, CANCEL)).length;
+            const cancel = all.filter((el) => visibleEnabled(el) && clickable(el) && hasWord(el, CANCEL)).length;
+            const exportDialog = all.filter((el) => visibleEnabled(el) && isDialog(el) && CTX.some((k) => (el.textContent ?? "").toLowerCase().includes(k))).length;
+            return { primary, cancel, exportDialog };
+          },
+          { context: EXPORT_CONTEXT_KEYWORDS, primary: PRIMARY_ACTION_KEYWORDS, cancel: CANCEL_ACTION_KEYWORDS },
+        )
+        .catch(() => ({ primary: -1, cancel: -1, exportDialog: -1 })); // -1 = frame unreadable (detached/cross-origin)
+      out.push({ frame: i, ...counts });
+    }
+    return out;
   }
 
   private unmarkExportTarget(): Promise<void> {
