@@ -672,10 +672,31 @@ export class NaverLiveProbeDriver implements ProbeDriver {
         const title = el.getAttribute("title") ?? "";
         return `${text} ${value} ${aria} ${title}`.toLowerCase();
       };
-      const selector = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
-      const matches = Array.from(document.querySelectorAll(selector)).filter(
-        (el) => el !== current && !seen(el) && visibleEnabled(el) && kws.some((k) => accessibleName(el).includes(k)),
-      );
+      // Candidate set: native interactive controls UNION role-less clickables. Run 7 attempt-4 live
+      // finding (dispatch record §19.3): NAVER's SECOND download control was a custom clickable with
+      // no button/anchor/role, which the native-only selector missed (checkpoints:0, timed out).
+      //
+      // A role-less clickable is discriminated by an OWN pointer cursor. `cursor` INHERITS, so a bare
+      // `=== "pointer"` test would also match inheriting CHILDREN and instructional text under a
+      // pointer region — false candidates that read as ambiguity. Require the element to INTRODUCE the
+      // pointer (its parent is not pointer), so we match the clickable itself, not what it contains or
+      // what merely sits under it. Visible+enabled + export wording still gate; ambiguity still fails
+      // closed; the wording keyword set is unchanged.
+      const NATIVE = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+      const introducesPointer = (el: Element): boolean => {
+        if (w.getComputedStyle(el).cursor !== "pointer") return false;
+        const parent = el.parentElement;
+        return !parent || w.getComputedStyle(parent).cursor !== "pointer";
+      };
+      let matches = Array.from(document.querySelectorAll("*")).filter((el) => {
+        if (el === current || seen(el)) return false;
+        if (!kws.some((k) => accessibleName(el).includes(k))) return false; // cheap wording gate first
+        if (!visibleEnabled(el)) return false;
+        return el.matches(NATIVE) || introducesPointer(el);
+      });
+      // Innermost-only: a native control nested inside a clickable wrapper (both match) collapses to
+      // the tightest; two SEPARATE wording-matched controls stay two (fail closed on ambiguity).
+      matches = matches.filter((el) => !matches.some((o) => o !== el && el.contains(o)));
       if (matches.length === 1) {
         if (current) {
           const handler = w["__aw_observer_handler__"];
