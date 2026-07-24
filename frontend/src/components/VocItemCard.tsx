@@ -6,6 +6,7 @@ import {
   productLabel,
   replyStatusLabel,
   reportedSubmissionLabel,
+  triageDispositionLabel,
 } from "../lib/vocItems";
 import { VocItemReplyPrep } from "./VocItemReplyPrep";
 import { VocItemTriageControl } from "./VocItemTriageControl";
@@ -22,11 +23,22 @@ export function VocItemCard({
   item,
   accountId,
   onOutcomeRecorded,
+  triageMode = "edit",
 }: {
   item: OperatorVocItem;
   accountId: string;
   /** Bubbled to the list so the count and this row's badge reflect a reply the operator just posted. */
   onOutcomeRecorded?: () => void;
+  /**
+   * Whether this row offers to CHANGE the triage decision, or only shows it.
+   *
+   * "edit" (default) renders the interactive control — the arrival-signal drill-down, where the
+   * decision is actually made. "readonly" renders a compact label instead, for the 내 답변 작업
+   * worklist: there a full toggle group reads as a competing "take it off my list" control beside
+   * 작업에서 제외, and moving a DRAFTED row to 지켜보기 silently fails to remove it. The reply flow
+   * itself is unchanged in both modes — only the triage toggle is withheld.
+   */
+  triageMode?: "edit" | "readonly";
 }) {
   const reply = replyStatusLabel(item.replyStatus);
   const preview = previewText(item.safePreview);
@@ -128,12 +140,28 @@ export function VocItemCard({
           stays fully readable and simply offers nothing — rendering a disabled control
           would say "you may not", when the truth is "this row cannot be decided". */}
       {item.actionRef != null ? (
-        <VocItemTriageControl
-          accountId={accountId}
-          actionRef={item.actionRef}
-          disposition={item.triageDisposition}
-          onRecorded={setDecided}
-        />
+        triageMode === "readonly" ? (
+          // The decision, shown but not editable here — see `triageMode`. A label, never a
+          // disabled toggle: the operator is not being refused an action, the action simply
+          // lives on the drill-down. The word is the live decision (`decided`), so a row that
+          // arrived 대응 필요 says so.
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted">처리 상태</span>
+            <span
+              className="rounded-lg bg-canvas px-2.5 py-1 text-sm font-semibold text-ink"
+              data-testid="voc-triage-readonly"
+            >
+              {triageDispositionLabel(decided)}
+            </span>
+          </div>
+        ) : (
+          <VocItemTriageControl
+            accountId={accountId}
+            actionRef={item.actionRef}
+            disposition={item.triageDisposition}
+            onRecorded={setDecided}
+          />
+        )
       ) : null}
       {/* Reply preparation, for a row that can carry a decision AND either needs one now or
           already carries work. Mounting it opens a read, so it stays off rows that offer

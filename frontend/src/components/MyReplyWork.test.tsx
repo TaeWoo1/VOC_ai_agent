@@ -113,7 +113,44 @@ describe("MyReplyWork — 내 답변 작업", () => {
     expect(screen.queryByTestId("reply-work-todo-empty")).not.toBeInTheDocument();
   });
 
-  it("작업에서 제외 sets the row aside and it leaves the list on refetch — no completion claim", async () => {
+  it("작업에서 제외 asks first, explaining what it does and does NOT do — before any write", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
+    const dismiss = vi.spyOn(api, "dismissReplyWork");
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    const button = await screen.findByTestId("reply-work-dismiss");
+    await userEvent.click(button);
+
+    // The confirmation states the four facts that keep this from reading as a completion or a
+    // deletion: it leaves ONLY this list, the draft/history survive, nothing is recorded as
+    // replied, and there is no separate dismissed-items view.
+    const confirm = await screen.findByTestId("reply-work-dismiss-confirm");
+    expect(confirm).toHaveTextContent("'내 답변 작업'");
+    expect(confirm).toHaveTextContent("저장한 초안과 기록은 그대로");
+    expect(confirm).toHaveTextContent(/답변한 것으로\s*기록되지 않습니다/);
+    expect(confirm).toHaveTextContent("제외한 항목만 따로 모아 보는 화면은 아직 없어요");
+    // The click OPENS the confirmation — it must not have written anything yet.
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it("취소 backs out of 작업에서 제외 with nothing written and the row still present", async () => {
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
+    const dismiss = vi.spyOn(api, "dismissReplyWork");
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss"));
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss-cancel"));
+
+    // No write, the confirmation is gone, and the row (its dismiss control) is still here.
+    expect(dismiss).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("reply-work-dismiss-confirm")).not.toBeInTheDocument();
+    expect(screen.getByTestId("reply-work-dismiss")).toBeInTheDocument();
+    expect(screen.queryByTestId("reply-work-dismissed-notice")).not.toBeInTheDocument();
+  });
+
+  it("confirming 작업에서 제외 sets the row aside, feeds back success, and claims no completion", async () => {
     const firstRef = "review:11111111-1111-1111-1111-111111111111";
     const kept = item({ actionRef: "review:22222222-2222-2222-2222-222222222222", rating: 3 });
     const spy = vi
@@ -128,12 +165,18 @@ describe("MyReplyWork — 내 답변 작업", () => {
 
     const buttons = await screen.findAllByTestId("reply-work-dismiss");
     await userEvent.click(buttons[0]!);
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss-confirm-yes"));
 
     // It calls the dismiss endpoint (with an idempotency key), never an outcome/completion write.
     await waitFor(() => expect(dismiss).toHaveBeenCalledTimes(1));
     const [, ref, body] = dismiss.mock.calls[0]!;
     expect(ref).toBe(firstRef);
     expect(body.commandId).toBeTruthy();
+    // Success is ACKNOWLEDGED, not silent — and the acknowledgement itself repeats that the draft
+    // and record survive.
+    const notice = await screen.findByTestId("reply-work-dismissed-notice");
+    expect(notice).toHaveTextContent("제외했어요");
+    expect(notice).toHaveTextContent("저장한 초안과 기록은 그대로");
     // The list refetched and the set-aside row is gone; the other remains.
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
     await waitFor(() =>
@@ -141,6 +184,64 @@ describe("MyReplyWork — 내 답변 작업", () => {
     );
     // Never a completion word anywhere on the surface.
     expect(screen.queryByText(/답변 완료/)).not.toBeInTheDocument();
+  });
+
+  it("offers NO competing triage control — the decision is shown, not editable here", async () => {
+    // The defect this slice closes: a full 처리 상태 toggle beside 작업에서 제외 read as a second
+    // 'take it off my list' control, and moving a drafted row to 지켜보기 silently failed to remove
+    // it. The worklist now SHOWS the decision and sends editing back to the arrival-signal drill-down.
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    // The decision is present as a read-only label…
+    const label = await screen.findByTestId("voc-triage-readonly");
+    expect(label).toHaveTextContent("대응 필요");
+    // …and NONE of the interactive triage affordances are.
+    expect(screen.queryByRole("group", { name: "처리 상태" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "지켜보기" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "조치 불필요" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "대응 필요" })).not.toBeInTheDocument();
+  });
+
+  it("preserves the reply-preparation flow — a 대응 필요 row still opens 답변 준비", async () => {
+    // Withholding the triage TOGGLE must not withhold the reply flow: a committed 대응 필요 review is
+    // still fully answerable from this home.
+    vi.spyOn(api, "getReplyWork").mockResolvedValue(view({ todo: [item()] }));
+    vi.spyOn(api, "getReviewReplyPrep").mockResolvedValue({
+      actionRef: "review:11111111-1111-1111-1111-111111111111",
+      redactedBody: "합성-리뷰-본문",
+      bodyRedacted: false,
+      triageDisposition: "RESPONSE_NEEDED",
+      suggestion: {
+        body: "합성-추천",
+        category: "general_reply",
+        providerKind: "RULE_BASED",
+        providerName: "review-reply-template",
+        providerVersion: "templates-v1",
+      },
+      draft: null,
+      approval: null,
+      outcome: null,
+      capabilities: {
+        canSave: true,
+        canApprove: false,
+        canWithdraw: false,
+        canCopy: false,
+        canStartSubmissionRun: false,
+      },
+      channelReplyState: null,
+      productName: "합성 상품",
+      reviewDate: "2026-05-10",
+      rating: 1,
+    });
+
+    render(<MyReplyWork accountId="acct-1" />);
+
+    // The reply-preparation panel mounts and its editing entry point (초안 저장) is live — the flow
+    // is intact, only the triage toggle is gone.
+    expect(await screen.findByRole("heading", { name: "답변 준비" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "초안 저장" })).toBeInTheDocument();
   });
 
   it("a dead read never renders as an empty worklist", async () => {
