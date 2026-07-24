@@ -109,8 +109,9 @@ public class ReviewImportRunService {
 
     /**
      * Conclude that a segment's range cannot be covered (earlier than the earliest date NAVER lets the
-     * seller select, per the live UI). Coverage → MISSING, surfaced honestly; the segment stays reachable
-     * and this is NOT a failed attempt. Execution is left as-is (typically PENDING).
+     * seller select, per the live UI). Coverage → MISSING and execution → COMPLETED: this is a terminal
+     * operator CONCLUSION (no more attempts), not a failed attempt, and it reads to the seller as
+     * "가져올 수 없는 기간". The segment stays reachable and its attempt history (if any) is preserved.
      */
     @Transactional
     public ReviewImportSegment markMissing(UUID orgId, UUID segmentId) {
@@ -120,6 +121,7 @@ public class ReviewImportRunService {
             throw ApiException.conflict("분할되어 대체된 구간입니다.");
         }
         segment.setCoverageState(SegmentCoverageState.MISSING);
+        segment.setExecutionState(SegmentExecutionState.COMPLETED);
         segments.save(segment);
         planService.recomputePlanStatus(segment.getPlanId());
         return segment;

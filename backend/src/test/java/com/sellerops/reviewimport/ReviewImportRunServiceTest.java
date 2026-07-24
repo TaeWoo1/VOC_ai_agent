@@ -149,7 +149,7 @@ class ReviewImportRunServiceTest {
 
         ReviewImportSegment out = service.markMissing(orgId, segId);
         assertThat(out.getCoverageState()).isEqualTo(SegmentCoverageState.MISSING);
-        assertThat(out.getExecutionState()).isEqualTo(SegmentExecutionState.PENDING);
+        assertThat(out.getExecutionState()).isEqualTo(SegmentExecutionState.COMPLETED); // terminal conclusion
         verify(planService).recomputePlanStatus(planId);
     }
 }
