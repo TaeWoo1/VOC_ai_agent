@@ -14,6 +14,7 @@ import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
 import { ConnectNaver } from "./pages/ConnectNaver";
 import { Upload } from "./pages/Upload";
+import { ReviewImport } from "./pages/ReviewImport";
 import { ProductIssues } from "./pages/ProductIssues";
 import { Operations } from "./pages/Operations";
 import { OperationsHome } from "./pages/OperationsHome";
@@ -76,6 +77,7 @@ export function App() {
         <Route path="/settings/channels" element={<Channels />} />
         <Route path="/settings/channels/:accountId" element={<ChannelDetail />} />
         <Route path="/settings/upload" element={<Upload />} />
+        <Route path="/settings/review-import" element={<ReviewImport />} />
         <Route path="/settings/alerts" element={<AlertSettings />} />
 
         {/* Cafe24 OAuth connect flow (unchanged) */}

@@ -420,6 +420,83 @@ export interface ReviewImport {
   finishedAt: string | null;
 }
 
+// --- NAVER Initial Review Import (V1): plan / segment / attempt / coverage / health ---
+
+export interface DateRangeView {
+  start: string;
+  end: string;
+}
+
+/** One segment: both state axes surfaced separately. `executionState` / `coverageState` are enum names. */
+export interface ReviewImportSegmentView {
+  id: string;
+  ordinal: number;
+  segmentStart: string;
+  segmentEnd: string;
+  executionState: "PENDING" | "ACTIVE" | "COMPLETED" | "FAILED";
+  coverageState: "UNVERIFIED" | "COVERED" | "MISSING";
+  coveredRows: number | null;
+  rowsReconciled: boolean;
+  superseded: boolean;
+  parentSegmentId: string | null;
+}
+
+export interface ReviewImportAttemptView {
+  attemptNo: number;
+  result: "ACTIVE" | "SUCCEEDED" | "FAILED";
+  syncJobId: string | null;
+  scopeConfirmed: boolean;
+  rowsNew: number | null;
+  rowsDuplicate: number | null;
+  rowsFailed: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ReviewImportPlanView {
+  id: string;
+  sellerAccountId: string;
+  channelId: string;
+  requestedStart: string;
+  requestedEnd: string;
+  status: "DRAFT" | "ACTIVE" | "COMPLETED" | "ABANDONED";
+  createdAt: string;
+}
+
+export interface ReviewImportCoverageView {
+  covered: DateRangeView[];
+  missing: DateRangeView[];
+  remaining: DateRangeView[];
+  lastCoveredDate: string | null;
+  coveredRows: number;
+  coveredSegments: number;
+  remainingSegments: number;
+  missingSegments: number;
+}
+
+export interface ReviewImportPlanDetailView {
+  plan: ReviewImportPlanView;
+  segments: ReviewImportSegmentView[];
+  coverage: ReviewImportCoverageView;
+}
+
+export interface ReviewImportHealthView {
+  lastCoveredDate: string | null;
+  missingRanges: DateRangeView[];
+  newCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  nextRecommendedImport: string | null;
+}
+
+export interface CreateReviewImportPlanRequest {
+  sellerAccountId: string;
+  channelId: string;
+  requestedStart: string;
+  requestedEnd: string;
+}
+
 // Mirrors com.sellerops.attention.dto.AttentionSignal — METADATA ONLY. A typed,
 // severity-ranked count of collected review/inquiry rows that need a look. Carries
 // no raw article title/content, source identifiers, or customer PII; label and
