@@ -727,3 +727,59 @@ live "500" was a wrong-method test error; a real 405-masking defect was found + 
 reply-state *headline* (answered reviews leave the queue; guided reply refuses an answered review)
 still awaits a range that contains an answered low-rating review — a future run starts from a blank
 template.
+
+## 19. Execution record — 2026-07-24, attempt 4 (reply-state headline; sanitized)
+
+### 19.1 Dispatch
+
+Fresh G3 (`export+ingest`, five boxes for the current — **restored** — environment; Bridge
+N/A/CLI-loopback) + fresh single-use G6 (**max live window 55 min**, timer-derived: sentinel 10 +
+observe 10 + multi-checkpoint detect 34 + ~1 overhead; recovery budget excluded — no park; no-reply
+bound) affirmed in the dispatching turn, operator **seated and ready**. Code under proof: **clean main
+`b3864a7`** — carries `871fccd`'s multi-checkpoint continuation runtime AND `3c77499`'s scroll-tracking
+overlay + `readExportScope`. Holder `naver-r4` synced `871fccd → b3864a7` (fetch-only + `checkout
+--detach`; six preserved paths re-fingerprinted **byte-for-byte identical**; collector suite +
+`naver-live-visibility` RUN_INTEGRATION 4/4 green **inside the holder**). Disposable backend
+`sellerops_run7_20260724T094747` on 18080 (26 migrations, NAVER seeded, 0 reviews; run-local org
+registered), ingest target confirmed `http://127.0.0.1:18080` on the run's own output.
+
+### 19.2 Timeline (log times UTC)
+
+| Time | Event |
+|---|---|
+| 10:06:21 | `aw.live.barrier {observed:true}` — the export action was OBSERVED. `readExportScope` had reflected the operator's range **2026.01.25–2026.07.24** before they acted; scope confirmed on screen |
+| 10:07:21 | `DOWNLOAD_TIMEOUT` (exactly 60 s later) → **FAILED (2-of-3), fail-closed**; readiness green (`LOGGED_IN` · `READY` · `positive_count` · `selectedRangePresentLive:true`); exit 0 |
+| — | `aw.live.continuation {checkpoints:0, observedLast:false, ambiguous:false}` |
+
+Teardown immediately: backend stopped · **guarded drop** of the disposable DB · `sellerops` the only
+surviving `sellerops*` DB · run-local creds + the operator-local scope read-back **scrubbed** ·
+holder quarantine/downloads empty · profile unheld · `.env` byte-identical · **holder kept at
+`b3864a7`** (not rolled back).
+
+### 19.3 The finding — a continuation-candidate DISCOVERY miss (NOT a timing miss)
+
+After the observed export click, the live NAVER surface showed a **second operator-required download
+control** — exactly the multi-checkpoint case `§17` targets — but the continuation detector reported
+`checkpoints:0` across the whole 60 s race: `markContinuationTarget` matched **no** new control on any
+poll, so the deadline lapsed one human step short of the download. **Zero ingest, zero artifact, no
+public write.**
+
+This is **not** attempt 2's timing miss (there the state machine modeled only one human step). §17's
+multi-checkpoint runtime WAS on the tree and DID poll — it simply never **matched** the live second
+control. **Reclassified (operator direction): a continuation-candidate DISCOVERY defect.** The
+matcher's candidate set is `button, a, [role="button"], input[type=button|submit]` filtered by
+visible+enabled + `EXPORT_TARGET_KEYWORDS`; likely real shapes it misses — a **role-less custom
+clickable** (`div`/`span`), a control in a **different frame** than the resolved surface, or a bare
+**확인**-worded control — are the audit targets. Any fix belongs **OFFLINE** — tracked as a **separate,
+focused collector candidate-discovery change**, independent of this record; live is never the debugging
+environment (G4).
+
+Claim results: **C1/C3 remain PROVEN** from attempt 3; **C2/C4/C5 NOT DEMONSTRATED** — the run never
+reached ingest.
+
+### 19.4 Gate state after attempt 4
+
+**G3 #4 and G6 #4 (2026-07-24) are CONSUMED** — register updated. The reply-state headline still awaits
+a **fresh G3 + G6 AND** an offline candidate-discovery fix, tracked separately as a focused collector
+change (its own PR). **This record stands on the observed facts regardless of whether that fix is ever
+merged** — the run was consumed and failed closed, and that is what it records.

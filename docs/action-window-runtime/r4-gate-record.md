@@ -437,6 +437,36 @@ R4 live-run approval — RUN 7 ATTEMPT 3 (export+ingest) — CONSUMED (run COMPL
                       a fresh G3 + G6 AND a range that actually exports an answered low-rating review.
 ```
 
+```
+R4 live-run approval — RUN 7 ATTEMPT 4 (export+ingest) — CONSUMED (run FAILED closed)
+- channel:            NAVER SmartStore review export (read)
+- seller-account:     NAVER_DEV_SELLER_SELF_01
+- date:               2026-07-24
+- operator:           self (OPERATOR_SELF_01)
+- run scope:          export+ingest
+- code under proof:   b3864a7 (clean main — 871fccd continuation runtime + 3c77499 scroll-track /
+                      readExportScope); holder-synced 871fccd→b3864a7, preserved paths byte-identical,
+                      collector suite + visibility RUN_INTEGRATION 4/4 green in the holder
+- backend:            disposable sellerops_run7_20260724T094747 on 18080, confirmed on the run's
+                      output; dropped name-guarded at teardown, sellerops intact
+- max live window:    55 minutes, timer-derived (multi-checkpoint worst case); actual barrier→timeout
+                      ~60 s (10:06:21 observed → 10:07:21 DOWNLOAD_TIMEOUT)
+- no-reply bound:     acknowledged — no composer, no REPLY_SUBMISSION, reply flag never passed
+- §7 abort criteria:  acknowledged incl. Run 7's three additions; §8 read-back MECHANIZED
+                      (readExportScope), operator confirmed the scope on screen before acting
+- G2/G3/G5 state:     G2 ✅ · G5 ✅ · G3 ✅ affirmed this same turn (export+ingest, five boxes for the
+                      current RESTORED environment; Bridge N/A/CLI-loopback)
+- P6:                 ✅ signed on G6 + G3 + G4-on-b3864a7 (offline suites green: backend fresh ·
+                      collector 4850/104sk + in-holder + visibility 4/4 · frontend 827)
+- outcome:            CONSUMED — drove once, FAILED closed DOWNLOAD_TIMEOUT (2-of-3). The export
+                      action was OBSERVED; the live NAVER surface then showed a SECOND operator-
+                      required download control, but the continuation detector reported
+                      checkpoints:0 (a candidate-DISCOVERY miss, dispatch record §19.3) and the 60 s
+                      race lapsed. ZERO ingest, ZERO artifact, no public write, clean teardown.
+                      C1/C3 stay PROVEN (attempt 3); C2/C4/C5 NOT DEMONSTRATED. A retry needs a fresh
+                      G3 + G6 AND the offline candidate-discovery fix (dispatch record §20).
+```
+
 > **Read-only frame-aware probe — EXECUTED 2026-07-13:** [`r4-probe-dispatch-record.md`](r4-probe-dispatch-record.md)
 > ran once under a fresh read-only-scoped G6 (now **CONSUMED**). Read-only success — the export surface is in
 > the **top document** (child-frame hypothesis **refuted**), and Run-1 `UNSUPPORTED_STATE` is a
