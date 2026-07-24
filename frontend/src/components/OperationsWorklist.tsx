@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { AttentionSignalList } from "./AttentionSignalList";
+import { MyReplyWork } from "./MyReplyWork";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
 import { resolveWorklistAccounts, type WorklistAccount } from "../lib/worklistAccounts";
@@ -140,6 +141,9 @@ function NamedWorklist({
         {account.label}
       </p>
       <AttentionSignalList accountId={account.id} refreshKey={refreshKey} />
+      {/* The operator's OWN committed work, directly reachable and not window-scoped — so a draft
+          they started survives a reload instead of living only inside a signal drill-down. */}
+      <MyReplyWork accountId={account.id} />
     </div>
   );
 }

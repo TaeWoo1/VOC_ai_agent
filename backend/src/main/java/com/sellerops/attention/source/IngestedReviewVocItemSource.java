@@ -456,6 +456,65 @@ public class IngestedReviewVocItemSource implements VocItemSource {
                 : AttentionCoverage.COVERED;
     }
 
+    /**
+     * The 내 답변 작업 worklist for one account: the operator's OWN committed reply work, independent
+     * of the arrival-signal windows.
+     *
+     * <p><b>Why it exists.</b> Everything a seller committed to — a 대응 필요 decision, a saved draft —
+     * was reachable only by re-entering the exact arrival-signal drill-down that raised the row, which
+     * is window-, signal- and page-scoped and resets on any window or account change. An interrupted
+     * draft had no home; this is that home, and it is NOT window-scoped for exactly that reason.
+     *
+     * <p>Two sections, one read each, both mapped through the SAME {@link #toItem} as the drill-down
+     * so the existing reply-preparation panel drives them unchanged:
+     * <ul>
+     *   <li><b>to-do</b> — committed and not yet reported ({@code COMMITTED_REPLY_WORK_PREDICATE}),
+     *       worst-first;</li>
+     *   <li><b>recently reported</b> — bounded by {@code recentLimit}, most-recently-reported first,
+     *       every row {@code UNVERIFIED} by construction.</li>
+     * </ul>
+     *
+     * <p>Scope is the same account→channel resolution the rest of this source uses, so an ambiguous
+     * multi-account scope yields NOTHING here too — the caller pairs this with the coverage verdict
+     * rather than showing a list it cannot attribute.
+     *
+     * <p>The signal type stamped on each row is {@link AttentionSignalType#LOW_RATING_REVIEW}: these
+     * rows are not the product of a signal at all, and the field is the row's provenance label, so it
+     * carries the review lens the reply flow is reached through rather than inventing a new enum.
+     */
+    public ReplyWorkSlice replyWork(UUID orgId, UUID accountId, String channelCode, String channelNameKo,
+                                    int todoLimit, int recentLimit) {
+        UUID channelId = unambiguousChannelFor(orgId, accountId);
+        if (channelId == null) {
+            return ReplyWorkSlice.empty();
+        }
+        List<Review> todo = reviews
+                .findCommittedReplyWorkByChannel(orgId, channelId, PageRequest.of(0, todoLimit))
+                .getContent();
+        List<Review> recent = reviews
+                .findRecentlyReportedByChannel(orgId, channelId, PageRequest.of(0, recentLimit))
+                .getContent();
+        return new ReplyWorkSlice(
+                rowsFor(orgId, todo, channelCode, channelNameKo),
+                rowsFor(orgId, recent, channelCode, channelNameKo));
+    }
+
+    /** Stamp a row list through the shared batch reads + {@link #toItem} — one query set per list. */
+    private List<OperatorVocItem> rowsFor(UUID orgId, List<Review> rows, String channelCode, String channelNameKo) {
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, String> productNames = productNamesFor(orgId, rows);
+        Map<UUID, TriageDisposition> dispositions = dispositionsFor(orgId, rows);
+        Set<UUID> prepared = preparedFor(orgId, rows);
+        Map<UUID, String> categories = categoriesFor(orgId, rows);
+        Set<UUID> reported = reportedSubmissionsFor(orgId, rows);
+        return rows.stream()
+                .map(r -> toItem(r, AttentionSignalType.LOW_RATING_REVIEW, channelCode, channelNameKo,
+                        productNames, dispositions, prepared, categories, reported))
+                .toList();
+    }
+
     private UUID unambiguousChannelFor(UUID orgId, UUID accountId) {
         Optional<SellerAccount> account = sellerAccounts.findByIdAndOrgId(accountId, orgId);
         if (account.isEmpty()) {

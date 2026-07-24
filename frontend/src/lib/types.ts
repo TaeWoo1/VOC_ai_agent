@@ -467,6 +467,20 @@ export interface OperatorAttentionSummary {
   items: AttentionSignal[];
 }
 
+// Mirrors com.sellerops.attention.dto.OperatorReplyWorkView — 내 답변 작업.
+// NOT window-scoped, deliberately: a commitment (a 대응 필요 decision, a saved draft) is the
+// operator's until they finish or abandon it, so this survives reloads, window changes and sessions.
+// Every `recentlyReported` row is UNVERIFIED — present it as 기록함 · 확인 안 함, never as 완료.
+// `coverage` carries the same false-calm guard as the attention summary: when uncertain, empty lists
+// mean the scope could not be attributed, NOT that there is no work.
+export interface OperatorReplyWorkView {
+  sellerAccountId: string;
+  channel: string | null;
+  coverage: AttentionCoverage;
+  todo: OperatorVocItem[];
+  recentlyReported: OperatorVocItem[];
+}
+
 // Mirrors com.sellerops.attention.dto.OperatorVocItem — the channel-generic
 // drill-down unit behind one attention signal. No raw article title/content,
 // articleNo, or source/customer/order/product identifiers. `safePreview` is the one

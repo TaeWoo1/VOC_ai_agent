@@ -1,6 +1,7 @@
 package com.sellerops.attention;
 
 import com.sellerops.attention.dto.OperatorAttentionSummary;
+import com.sellerops.attention.dto.OperatorReplyWorkView;
 import com.sellerops.attention.dto.OperatorVocItemPage;
 import com.sellerops.auth.AuthPrincipal;
 import java.time.LocalDate;
@@ -37,6 +38,23 @@ public class OperatorAttentionController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return service.attention(principal.orgId(), accountId, from, to);
+    }
+
+    /**
+     * 내 답변 작업: the operator's OWN committed reply work for this account, plus a bounded record of
+     * what they recently reported posting.
+     *
+     * <p><b>No window parameter, deliberately</b> — a commitment is the operator's until they finish
+     * or abandon it, so this list must survive a reload, a window change and a new session. Limits are
+     * clamped server-side; the response carries the same coverage verdict as the attention summary.
+     */
+    @GetMapping("/reply-work")
+    public OperatorReplyWorkView replyWork(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID accountId,
+            @RequestParam(required = false, defaultValue = "50") int todoLimit,
+            @RequestParam(required = false, defaultValue = "5") int recentLimit) {
+        return service.replyWork(principal.orgId(), accountId, todoLimit, recentLimit);
     }
 
     /**
