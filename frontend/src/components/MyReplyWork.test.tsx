@@ -190,6 +190,41 @@ describe("MyReplyWork — 내 답변 작업", () => {
     expect(screen.queryByText(/답변 완료/)).not.toBeInTheDocument();
   });
 
+  it("does not carry a dismissal success banner across an account switch", async () => {
+    // 내 답변 작업 is reused, not remounted, when the seller switches channels on the multi-account
+    // worklist (OperationsWorklist keeps one instance and swaps `accountId`). The success banner is
+    // account-specific: a '제외했어요' acknowledgement from account A must never read as an action on
+    // account B, where the seller set nothing aside.
+    const ref = "review:11111111-1111-1111-1111-111111111111";
+    vi.spyOn(api, "getReplyWork")
+      .mockResolvedValueOnce(view({ todo: [item({ actionRef: ref })] })) // acct-1 initial
+      .mockResolvedValueOnce(view({ todo: [] })) // acct-1 refetch after dismiss
+      .mockResolvedValue(
+        view({
+          sellerAccountId: "acct-2",
+          todo: [
+            item({
+              actionRef: "review:22222222-2222-2222-2222-222222222222",
+              productName: "계정2-상품",
+            }),
+          ],
+        }),
+      ); // acct-2
+    vi.spyOn(api, "dismissReplyWork").mockResolvedValue({ actionRef: ref, replayed: false });
+
+    const { rerender } = render(<MyReplyWork accountId="acct-1" />);
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss"));
+    await userEvent.click(await screen.findByTestId("reply-work-dismiss-confirm-yes"));
+    await screen.findByTestId("reply-work-dismissed-notice");
+
+    // Switch channels on the same instance, and wait until acct-2's worklist has actually rendered —
+    // not the transient loading frame — before asserting the banner is gone.
+    rerender(<MyReplyWork accountId="acct-2" />);
+    await screen.findByText("계정2-상품");
+
+    expect(screen.queryByTestId("reply-work-dismissed-notice")).not.toBeInTheDocument();
+  });
+
   it("offers NO competing triage control — the decision is shown, not editable here", async () => {
     // The defect this slice closes: a full 처리 상태 toggle beside 작업에서 제외 read as a second
     // 'take it off my list' control, and moving a drafted row to 지켜보기 silently failed to remove
