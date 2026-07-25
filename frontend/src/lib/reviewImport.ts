@@ -12,6 +12,7 @@ import type {
   ReviewImportCoverageView,
   ReviewImportHealthView,
   ReviewImportSegmentView,
+  ScopeEvidence,
 } from "./types";
 
 /** Visual weight — mapped to classes by the component, never to a claim. */
@@ -152,6 +153,176 @@ export function coveredRowsText(segment: ReviewImportSegmentView): string {
   }
   const suffix = segment.rowsReconciled ? "" : " · 전체 건수 대사 전";
   return `${(segment.coveredRows ?? 0).toLocaleString()}건 커버됨${suffix}`;
+}
+
+/* ─────────────────── The guided flow (과거 리뷰 전체 연동하기) ─────────────────── */
+
+export interface ImportProgress {
+  done: number;
+  total: number;
+  /** `13개 구간 중 5개 완료` — the one progress line the seller reads. */
+  text: string;
+}
+
+/**
+ * Progress over the plan's LIVE segments (split parents are excluded — they were replaced, and counting
+ * them would inflate both numbers and make a finished import look unfinished).
+ *
+ * A concluded-MISSING segment counts as done: it needs no further work, and leaving it "remaining" forever
+ * would mean a plan whose unreachable months can never be finished.
+ */
+export function importProgress(segments: ReviewImportSegmentView[]): ImportProgress {
+  const live = segments.filter((s) => !s.superseded);
+  const done = live.filter((s) => s.coverageState === "COVERED" || s.coverageState === "MISSING").length;
+  return { done, total: live.length, text: `${live.length}개 구간 중 ${done}개 완료` };
+}
+
+/** The next segment the seller will be guided through, or null when nothing remains. */
+export function nextRemainingSegment(segments: ReviewImportSegmentView[]): ReviewImportSegmentView | null {
+  return (
+    segments
+      .filter((s) => !s.superseded)
+      .filter((s) => s.coverageState === "UNVERIFIED")
+      .filter((s) => s.executionState !== "ACTIVE")
+      .sort((a, b) => a.segmentStart.localeCompare(b.segmentStart))[0] ?? null
+  );
+}
+
+/** The primary action's label — first run versus resuming an interrupted one. */
+export function primaryActionLabel(hasActivePlan: boolean): string {
+  return hasActivePlan ? "계속 가져오기" : "과거 리뷰 전체 연동하기";
+}
+
+/** A segment's required window, as the guided run will state it. */
+export function segmentRangeText(segment: ReviewImportSegmentView): string {
+  return `${segment.segmentStart} ~ ${segment.segmentEnd}`;
+}
+
+/**
+ * Whether the local agent can host a guided run right now, and what to say when it cannot.
+ *
+ * The honest states matter more than the happy one: the seller must never press a button that silently does
+ * nothing, and "the agent isn't running" and "you haven't connected it" need different fixes.
+ */
+export type AgentAvailability = "ready" | "not_running" | "unpaired" | "wrong_carrier" | "incompatible";
+
+/**
+ * Map the Local Agent Bridge's connection phase to whether a guided import can start.
+ *
+ * `connecting` is grouped with "not running" on purpose: while we do not yet know, the honest thing is to
+ * withhold the guided CTA rather than let the seller press a button whose outcome we cannot predict. It
+ * resolves within a poll, so the cost is a brief wait, not a dead end.
+ */
+export function agentAvailabilityFromBridgePhase(phase: string): AgentAvailability {
+  switch (phase) {
+    case "paired":
+      return "ready";
+    case "unpaired":
+    case "pairing_pending":
+    case "pairing_denied":
+    case "revoked":
+      return "unpaired";
+    case "incompatible_version":
+      return "incompatible";
+    default:
+      // connecting / connecting_ws / unreachable / disconnected — the agent is not usable right now.
+      return "not_running";
+  }
+}
+
+export interface AgentAvailabilityCopy {
+  /** Whether the guided CTA can be pressed. */
+  canGuide: boolean;
+  message: string;
+  /** Whether to offer the manual file fallback instead. */
+  offerFallback: boolean;
+}
+
+export function agentAvailabilityCopy(state: AgentAvailability): AgentAvailabilityCopy {
+  switch (state) {
+    case "ready":
+      return { canGuide: true, message: "", offerFallback: false };
+    case "not_running":
+      return {
+        canGuide: false,
+        message: "SellerOps 로컬 도우미가 실행되지 않았어요. 실행한 뒤 다시 시도해 주세요.",
+        offerFallback: true,
+      };
+    case "unpaired":
+      return {
+        canGuide: false,
+        message: "로컬 도우미 연결이 필요해요. 연결을 먼저 완료해 주세요.",
+        offerFallback: true,
+      };
+    case "wrong_carrier":
+      return {
+        canGuide: false,
+        message: "로컬 도우미가 다른 작업을 실행하고 있어요. 그 작업을 끝낸 뒤 다시 시도해 주세요.",
+        offerFallback: true,
+      };
+    case "incompatible":
+      return {
+        canGuide: false,
+        message: "로컬 도우미 버전이 맞지 않아요. 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.",
+        offerFallback: true,
+      };
+  }
+}
+
+/**
+ * The guided-run stage copy. The runtime sends only dotted semantic keys; every word the seller reads is
+ * decided here (Action Window contract §6 — the FE owns all copy).
+ *
+ * `confirmRange` is deliberately phrased as the seller confirming, because that is what it is: it appears
+ * only when SellerOps could NOT read the selected range back.
+ */
+export const IMPORT_STAGE_COPY: Readonly<Record<string, string>> = {
+  "actionWindow.import.openReviewSurface": "판매자센터의 리뷰 관리 화면을 열어 주세요.",
+  "actionWindow.import.showRequiredRange": "이번에 가져올 기간이에요.",
+  "actionWindow.import.setStartDate": "표시된 시작일을 선택해 주세요.",
+  "actionWindow.import.setEndDate": "표시된 종료일을 선택해 주세요.",
+  "actionWindow.import.applyRange": "조회 버튼을 눌러 기간을 적용해 주세요.",
+  "actionWindow.import.confirmRange": "선택한 기간이 위 기간과 같은지 확인해 주세요.",
+  "actionWindow.import.export": "엑셀 다운로드 버튼을 눌러 주세요.",
+  "actionWindow.import.consent": "네이버 확인 창의 버튼을 눌러 주세요.",
+  "actionWindow.import.ingest": "받은 파일을 SellerOps가 정리하고 있어요.",
+};
+
+/** Copy for a runtime stage key. An unknown key degrades to a neutral line, never to a raw dotted key. */
+export function importStageText(copyKey: string): string {
+  return IMPORT_STAGE_COPY[copyKey] ?? "다음 안내를 따라 주세요.";
+}
+
+/**
+ * How the export scope was established, in the seller's words.
+ *
+ * The two never collapse into one phrase: an operator confirmation is described AS a confirmation. Calling
+ * it verification would claim SellerOps checked something it could not read.
+ */
+export function scopeEvidenceLabel(evidence: ScopeEvidence | null): string {
+  switch (evidence) {
+    case "MACHINE_MATCHED":
+      return "SellerOps가 선택된 기간을 확인했어요";
+    case "OPERATOR_CONFIRMED":
+      return "직접 확인한 기간이에요";
+    default:
+      return "확인 방법 기록 없음";
+  }
+}
+
+/**
+ * The completion line. Says what was actually done — the periods the marketplace let the seller select were
+ * exported and ingested — and never that every review NAVER holds is now present, which nothing here has
+ * measured.
+ */
+export function completionSummaryText(progress: ImportProgress): string {
+  if (progress.total === 0) {
+    return "가져올 구간이 없어요.";
+  }
+  if (progress.done < progress.total) {
+    return `${progress.text} · 남은 구간을 이어서 가져올 수 있어요.`;
+  }
+  return "NAVER에서 현재 선택 가능한 기간의 리뷰 파일을 가져왔습니다.";
 }
 
 function rangesText(ranges: { start: string; end: string }[]): string {

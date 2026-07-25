@@ -441,11 +441,41 @@ export interface ReviewImportSegmentView {
   parentSegmentId: string | null;
 }
 
+/**
+ * How a fact about scope was established. Kept as two distinct values everywhere it surfaces: a guided run
+ * reading the selected range off the live page and a seller ticking a box are different strengths of claim,
+ * and the UI must never present the second as the first.
+ */
+export type ScopeEvidence = "MACHINE_MATCHED" | "OPERATOR_CONFIRMED";
+export type RangeDiscoveryEvidence = "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED";
+
+/**
+ * A single-use authorization for one guided Action Window import run.
+ *
+ * The seller never sees the `launchRef` — it is the opaque binding the local agent presents to resolve what
+ * this run may touch.
+ */
+export interface ReviewImportLaunchView {
+  launchRef: string;
+  kind: "DISCOVERY" | "SEGMENT";
+  status: "ISSUED" | "CONSUMED" | "EXPIRED";
+  planId: string | null;
+  segmentId: string | null;
+  /** The dates the guided run will ask the seller to select (segment runs only). */
+  requiredStart: string | null;
+  requiredEnd: string | null;
+  discoveredStart: string | null;
+  discoveredEnd: string | null;
+  rangeEvidence: RangeDiscoveryEvidence | null;
+}
+
 export interface ReviewImportAttemptView {
   attemptNo: number;
   result: "ACTIVE" | "SUCCEEDED" | "FAILED";
   syncJobId: string | null;
   scopeConfirmed: boolean;
+  /** Null on attempts recorded before the column existed — genuinely unknown, not assumed. */
+  scopeEvidence: ScopeEvidence | null;
   rowsNew: number | null;
   rowsDuplicate: number | null;
   rowsFailed: number | null;

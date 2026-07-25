@@ -44,6 +44,7 @@ import type {
   DateRangeView,
   ReviewImportAttemptView,
   ReviewImportHealthView,
+  ReviewImportLaunchView,
   ReviewImportPlanDetailView,
   ReviewImportPlanView,
   ReviewImportSegmentView,
@@ -482,6 +483,34 @@ export const api = {
     const { data } = await http.post<ReviewImportSegmentView>(`/api/imports/reviews/segments/${segmentId}/missing`);
     return data;
   },
+  // The PRODUCT path: one click authorizes one guided Action Window run. The seller never handles a file.
+  // `launchRef` is an opaque single-use authorization — never rendered, only handed to the local agent.
+  async startReviewImportDiscovery(accountId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/launches/discovery?accountId=${accountId}`,
+    );
+    return data;
+  },
+  async launchNextReviewImportSegment(planId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/plans/${planId}/launches/next-segment`,
+    );
+    return data;
+  },
+  async launchReviewImportSegment(segmentId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/segments/${segmentId}/launch`,
+    );
+    return data;
+  },
+  async expireReviewImportLaunch(launchRef: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/launches/${launchRef}/expire`,
+    );
+    return data;
+  },
+
+  // The FALLBACK path (파일로 가져오기): only for when a guided run is unavailable. Not the default.
   async importReviewImportSegment(
     segmentId: string,
     scopeConfirmed: boolean,

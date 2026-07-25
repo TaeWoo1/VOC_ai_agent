@@ -55,6 +55,8 @@ describe("SegmentImportPanel — the scope-confirmation gate", () => {
       result: "SUCCEEDED",
       syncJobId: "job-1",
       scopeConfirmed: true,
+      // The manual path cannot read the export scope back, so its evidence is the operator's attestation.
+      scopeEvidence: "OPERATOR_CONFIRMED",
       rowsNew: 5,
       rowsDuplicate: 0,
       rowsFailed: 0,
