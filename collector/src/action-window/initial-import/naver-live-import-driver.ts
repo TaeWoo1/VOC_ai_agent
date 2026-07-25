@@ -92,6 +92,20 @@ export interface NaverLiveImportDriverOptions {
   guidanceEnabled?: boolean;
   /** Total steps, for the diagnostic overlay badge. Supplied by the run's own step plan. */
   totalSteps?: number;
+  /**
+   * Put SellerOps' own browser window in front of the seller, and return it to the review surface if it has
+   * drifted, at the start of a run.
+   *
+   * Injected, and absent by default, for the same reason this driver holds no `Page`: the decision needs the
+   * window and the configured surface URL, and neither belongs in here — a URL in this class is a URL that can
+   * end up in a log line. The approval-gated boot supplies it (`cli/local-agent.ts`), where both already live.
+   *
+   * It raises a window and follows a public application route. It clicks, types, submits and consents nothing,
+   * and it refuses to navigate away from an off-origin page so it can never interrupt a login the seller is
+   * performing — see `naver/surface-presentation.ts`. A driver without it simply does not present, and the run
+   * behaves exactly as it did before.
+   */
+  presentSurface?: () => Promise<void>;
 }
 
 export class NaverLiveImportDriver implements ImportProbeDriver {
@@ -142,8 +156,16 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     this.badgeTotalSteps = totalSteps;
   }
 
-  /** Delegated — the readiness settle and its fail-closed causes are already live-proven. */
-  prepareSurface(): Promise<boolean | SurfaceProbeResult> {
+  /**
+   * Bring the surface to the seller, then delegate the readiness verdict — which is already live-proven and is
+   * left exactly as it was.
+   *
+   * The presentation runs FIRST and is best-effort: a window that could not be raised is a worse experience, not
+   * a broken run, and swallowing the failure keeps a cosmetic problem from failing an import. Whether the page is
+   * actually usable is still decided entirely by the composed driver, which is the only thing that reads it.
+   */
+  async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
+    await this.opts.presentSurface?.().catch(() => {});
     return this.proven.prepareSurface();
   }
 

@@ -49,6 +49,7 @@ import type { ResolvedLaunchScope } from "../action-window/initial-import/import
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, login } from "../upload";
 import { launchNaverContext } from "../profile";
+import { decideSurfacePresentation } from "../naver/surface-presentation";
 import { log } from "../log";
 import {
   ACTION_WINDOW_IMPORT_FLAG,
@@ -254,10 +255,8 @@ export async function buildInitialImportConfig(
   // operator logs in here themselves — the collector never types NAVER credentials.
   const context = await launchNaverContext(cfg.profileDir);
   const page = context.pages()[0] ?? (await context.newPage());
-  // Open the review surface at BOOT, which is what the other live CLIs do. This is not the same thing as
-  // the rule against navigating for the seller MID-RUN: no run exists yet, and landing them on the page
-  // they are about to work on is the whole point of a guided mode. Once a run starts, the runtime only
-  // ever confirms the surface — it never navigates again.
+  // Open the review surface at BOOT, which is what the other live CLIs do. Landing the seller on the page they
+  // are about to work on is the whole point of a guided mode.
   //
   // The URL is never logged: raw URLs are prohibited output (roadmap §9), so only the fact of navigation is.
   await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
@@ -296,6 +295,30 @@ export async function buildInitialImportConfig(
   const driver = new NaverLiveImportDriver(proven, {
     guidanceEnabled: true,
     observeTimeoutMs: 120_000,
+    /**
+     * Put this window in front of the seller when a run starts, and return it to the review surface if it has
+     * drifted (product-owner request, 2026-07-26: pressing 연동 in SellerOps should bring up the seller center
+     * rather than asking them to go find the window).
+     *
+     * Both are actions on SellerOps' OWN window — raising it, and following the same public application route
+     * the boot already used. Nothing is clicked, typed, submitted or consented, and the decision refuses to
+     * navigate off-origin so it can never destroy a login or a 2FA step the seller is in the middle of; that
+     * case raises the window and lets `prepareSurface` report `LOGIN_REQUIRED`, which the seller clears
+     * themselves. See `naver/surface-presentation.ts`.
+     */
+    async presentSurface(): Promise<void> {
+      const decision = decideSurfacePresentation(page.url(), cfg.naverReviewUrl);
+      // Sanitized: the enum and two booleans. Never a URL — not the current one, not the configured one.
+      log("aw_import_surface_present", {
+        reason: decision.reason,
+        focus: decision.focus,
+        navigate: decision.navigate,
+      });
+      if (decision.focus) await page.bringToFront().catch(() => {});
+      if (decision.navigate) {
+        await page.goto(cfg.naverReviewUrl!, { waitUntil: "domcontentloaded" }).catch(() => {});
+      }
+    },
   });
   importDriver = driver;
 

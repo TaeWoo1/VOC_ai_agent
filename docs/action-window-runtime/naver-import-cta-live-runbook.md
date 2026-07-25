@@ -64,10 +64,17 @@ authorization. The operator performs every marketplace click; the runtime only d
    run exists any more.
 2. **Press 계속 가져오기 (ONE segment only).** The card attaches to the import carrier, hands the agent the
    guidance pack, mints a SEGMENT ticket for the **most recent** remaining month, and sends `START_RUN`.
-3. **Move to the SmartStore window and stay there.** A SellerOps panel appears bottom-left in that page: the
-   product name, `8단계 중 3`, what to do now, and 가져올 기간 for this segment. From here on the SellerOps tab is
-   a summary you do not have to watch — that is the property this run exists to test. Note whether the panel
-   ever sits over something you need.
+3. **The seller-center window comes up by itself** — the run raises it and, if it has drifted off the review
+   surface, navigates back (⚠ added AFTER the 2026-07-26 run, so this step is **not itself live-proven**; on that
+   run the operator had to find the window). A SellerOps panel appears bottom-left in that page: the product name,
+   `8단계 중 3`, what to do now, and 가져올 기간 for this segment. From here on the SellerOps tab is a summary you
+   do not have to watch — that is the property this run exists to test. Note whether the panel ever sits over
+   something you need.
+
+   It will NOT navigate while you are on a login, a 2FA prompt, or any other off-origin page — that would destroy
+   an authentication in progress. There the window is only raised, and the run then fails closed on
+   `LOGIN_REQUIRED`, which you clear yourself before pressing 계속 가져오기 again. `aw_import_surface_present`
+   logs which branch was taken (`already_there` / `drifted` / `off_origin` / `unconfigured` / `unreadable`).
 4. **Follow the highlights.** start date → end date → (조회, if the surface has one) → 엑셀 다운로드 → NAVER's own
    `확인`. A date field that **already holds the required value is skipped** — the panel moves on and the step is
    reported `SKIPPED` (finding 13). If the panel asks for a date the field already shows, that is a regression,

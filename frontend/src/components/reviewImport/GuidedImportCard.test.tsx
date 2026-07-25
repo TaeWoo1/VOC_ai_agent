@@ -521,8 +521,11 @@ describe("GuidedImportCard — the seller can act on what they are told", () => 
     await userEvent.click(screen.getByTestId("guided-import-cta"));
     await waitFor(() => expect(screen.getByTestId("guided-run-started")).toBeInTheDocument());
     const text = screen.getByTestId("guided-run-started").textContent ?? "";
-    expect(text).toMatch(/판매자센터 창/);
+    // The agent raises that window itself when the run starts, so the copy says it is up rather than asking the
+    // seller to go and find it.
+    expect(text).toMatch(/판매자센터 창을 띄웠어요/);
     expect(text).toMatch(/돌아오지 않아도/);
+    expect(text).not.toMatch(/이동해 주세요/);
   });
 });
 

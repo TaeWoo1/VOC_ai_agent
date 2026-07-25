@@ -270,7 +270,7 @@ export function GuidedImportCard({
 
       {launched && !running ? (
         <p className="rounded-xl bg-brand/5 px-4 py-3 text-sm text-ink break-keep" role="status" data-testid="guided-run-started">
-          판매자센터 창으로 이동해 주세요. 이 화면으로 돌아오지 않아도 그 창에서 안내가 계속 나와요.
+          판매자센터 창을 띄웠어요. 그 창에서 안내를 따라 주시면 되고, 이 화면으로 돌아오지 않아도 괜찮아요.
         </p>
       ) : null}
 

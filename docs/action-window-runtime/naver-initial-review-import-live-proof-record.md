@@ -365,8 +365,27 @@ Restarting the agent with the operator's own org was the whole fix; nothing was 
 - The operator called the **start-month picker UI poor** and asked for it to be improved. Recorded as a `[PO]`
   follow-up: the mechanism is proven, the presentation is not settled.
 
+## Added after the run, at the operator's request — and therefore NOT live-proven
+
+They asked that pressing 연동 in SellerOps **bring up the seller-center window** instead of leaving them to find
+it; on this run they had to go looking for it. A run now raises SellerOps' own window and, if it has drifted off
+the review surface, navigates back to it (`naver/surface-presentation.ts`, injected into the driver by the
+approval-gated boot so no URL ever enters the driver).
+
+Both are actions on our own window — raising it, and following the same public application route the boot already
+used. Nothing is clicked, typed, submitted or consented. The one refusal is load-bearing: **it never navigates
+away from an off-origin page**, because a seller part-way through a NAVER login or a 2FA step would lose it, and
+that is indistinguishable from SellerOps breaking their login. Off-origin, the window is raised and the run fails
+closed on `LOGIN_REQUIRED` as before. `aw_import_surface_present` logs the branch as an enum plus two booleans —
+never a URL.
+
+**Written down as unproven:** this was implemented after the live segment completed, so no live run has exercised
+it. The decision is pure and unit-tested (including every refusal branch), and the driver-level order — present
+first, then ask whether the surface is usable — is pinned by a source guard.
+
 ## Still unproven after this run
 
+- The window presentation above (added afterwards; see that section).
 - More than one segment in a single sitting, live (the bounded-proof limit held at one).
 - An apply-requiring surface; the segment `UNREADABLE` → `OPERATOR_CONFIRMED` branch; a live `SCOPE_MISMATCH`
   under the NEW panel (the gate matched on the first read, so the in-page blocker rendering — cause, repair,

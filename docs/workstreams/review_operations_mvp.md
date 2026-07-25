@@ -707,6 +707,11 @@ Append a dated entry; never rewrite prior entries — correct forward.
   apply-requiring surface; the segment `UNREADABLE` → `OPERATOR_CONFIRMED` branch; the pairing **approval**
   control (bypassed by `--dev-insecure-auto-approve` on both live runs now); whether the panel's fixed
   bottom-left position ever covers something the seller needs.
+- **Added after the live run, at the operator's request (and therefore NOT live-proven):** pressing 연동 now
+  **raises the seller-center window** and navigates it back to the review surface if it has drifted, so the seller
+  does not have to go find it. Actions on SellerOps' own window only — nothing clicked, typed or submitted — and it
+  **refuses to navigate off-origin**, so it can never destroy a login or 2FA step in progress
+  (`collector/src/naver/surface-presentation.ts`, pure + unit-tested on every branch).
 - **Next / `[PO]`:** (a) the **start-month picker UI** — the operator called it poor; the mechanism is proven, the
   presentation is not settled; (b) whether an unreachable month inside a chosen period should be surfaced during
   the plan rather than only as per-segment `MISSING`; (c) a live run that deliberately reaches `SCOPE_MISMATCH`

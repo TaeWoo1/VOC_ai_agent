@@ -210,3 +210,40 @@ describe("live import driver — stopping, skipping, and the panel", () => {
     expect(body).toContain("unmountGuidancePanel(this.ctx())");
   });
 });
+
+/*
+ * Bringing the window to the seller (product-owner request, 2026-07-26). Source-level, like the rest of this file:
+ * the properties that matter are about ORDER and about what this class is allowed to hold, and a behavioural test
+ * with a fake page would pass with the URL back in the driver.
+ */
+describe("live import driver — presenting the surface", () => {
+  it("presents BEFORE asking whether the surface is usable", () => {
+    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("async readSurfaceFacts"));
+    const present = body.indexOf("presentSurface");
+    const delegate = body.indexOf("this.proven.prepareSurface()");
+    expect(present).toBeGreaterThan(-1);
+    expect(delegate).toBeGreaterThan(-1);
+    // Raising the window after deciding the page is unusable would show the seller a window they cannot act in.
+    expect(present).toBeLessThan(delegate);
+  });
+
+  /**
+   * A window that could not be raised is a worse experience, not a broken import. The readiness verdict still
+   * comes entirely from the composed driver, which is the only thing that reads the page.
+   */
+  it("never lets a failed presentation fail the run", () => {
+    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("async readSurfaceFacts"));
+    expect(body).toContain("presentSurface?.().catch(() => {})");
+  });
+
+  /**
+   * The URL stays out of this class. It is the same rule as the missing page handle: a URL here is a URL that can
+   * reach a log line, and raw URLs are prohibited output.
+   */
+  it("holds no surface URL and no navigation of its own", () => {
+    expect(CODE).not.toContain("naverReviewUrl");
+    expect(CODE).not.toContain("goto");
+    expect(CODE).not.toContain("bringToFront");
+    expect(CODE).not.toMatch(/https?:\/\//);
+  });
+});

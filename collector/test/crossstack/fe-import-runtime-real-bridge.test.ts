@@ -24,8 +24,8 @@
  *   - `wsTransport.ts`   → `connectAwBridgeSession` with `expectedCarrier: import`,
  *   - `importRuntime.ts` → `createGuidedImportRuntime` (acknowledged START_RUN, view-adopted runId,
  *                          allowedCommands-gated sends),
- * over a genuine `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + the real discovery and
- * segment engines/sessions, connected by a real `ws` loopback socket. It mirrors `connectImportSession` exactly
+ * over a genuine `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + the real segment engine and
+ * session, connected by a real `ws` loopback socket. It mirrors `connectImportSession` exactly
  * MINUS its `import.meta.env` base-URL read and its non-injectable deps (only a browser could exercise those) —
  * the same shape the other two cross-stack suites use.
  *
@@ -453,7 +453,7 @@ describe("cross-stack: guidance rendered inside the marketplace page", () => {
     c.runtime.setGuidancePack(PACK);
     await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
     await waitFor(c.runtime, (s) => s.status === "WAITING_FOR_HUMAN", "first barrier");
-    await waitForPanel(driver, (p) => p.instruction === "PICK-START", "the start-date instruction");
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the start-date instruction");
 
     const panel = driver.lastGuidance();
     expect(panel?.product).toBe("SellerOps");
@@ -478,7 +478,7 @@ describe("cross-stack: guidance rendered inside the marketplace page", () => {
     c.runtime.setGuidancePack(PACK);
     await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
     await waitFor(c.runtime, (s) => s.blocker !== null, "scope block");
-    await waitForPanel(driver, (p) => p.blocked !== null, "the blocked panel");
+    await waitForPanel(driver, (p) => p?.blocked != null, "the blocked panel");
 
     const panel = driver.lastGuidance();
     // Cause AND repair, both in the window the seller is looking at.
@@ -514,7 +514,7 @@ describe("cross-stack: guidance rendered inside the marketplace page", () => {
     c.runtime.setGuidancePack(PACK);
     await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
     const atBarrier = await waitFor(c.runtime, (s) => s.status === "WAITING_FOR_HUMAN", "first barrier");
-    await waitForPanel(driver, (p) => p.instruction === "PICK-START", "the panel");
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the panel");
 
     // `SWITCH_TO_MANUAL` IS allowed by the runtime at this barrier — so this proves the panel gate, not the
     // command gate: the seller was never offered that button, so the page cannot press it for them.
