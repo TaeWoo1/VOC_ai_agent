@@ -420,6 +420,113 @@ export interface ReviewImport {
   finishedAt: string | null;
 }
 
+// --- NAVER Initial Review Import (V1): plan / segment / attempt / coverage / health ---
+
+export interface DateRangeView {
+  start: string;
+  end: string;
+}
+
+/** One segment: both state axes surfaced separately. `executionState` / `coverageState` are enum names. */
+export interface ReviewImportSegmentView {
+  id: string;
+  ordinal: number;
+  segmentStart: string;
+  segmentEnd: string;
+  executionState: "PENDING" | "ACTIVE" | "COMPLETED" | "FAILED";
+  coverageState: "UNVERIFIED" | "COVERED" | "MISSING";
+  coveredRows: number | null;
+  rowsReconciled: boolean;
+  superseded: boolean;
+  parentSegmentId: string | null;
+}
+
+/**
+ * How a fact about scope was established. Kept as two distinct values everywhere it surfaces: a guided run
+ * reading the selected range off the live page and a seller ticking a box are different strengths of claim,
+ * and the UI must never present the second as the first.
+ */
+export type ScopeEvidence = "MACHINE_MATCHED" | "OPERATOR_CONFIRMED";
+export type RangeDiscoveryEvidence = "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED";
+
+/**
+ * A single-use authorization for one guided Action Window import run.
+ *
+ * The seller never sees the `launchRef` — it is the opaque binding the local agent presents to resolve what
+ * this run may touch.
+ */
+export interface ReviewImportLaunchView {
+  launchRef: string;
+  kind: "DISCOVERY" | "SEGMENT";
+  status: "ISSUED" | "CONSUMED" | "EXPIRED";
+  planId: string | null;
+  segmentId: string | null;
+  /** The dates the guided run will ask the seller to select (segment runs only). */
+  requiredStart: string | null;
+  requiredEnd: string | null;
+  discoveredStart: string | null;
+  discoveredEnd: string | null;
+  rangeEvidence: RangeDiscoveryEvidence | null;
+}
+
+export interface ReviewImportAttemptView {
+  attemptNo: number;
+  result: "ACTIVE" | "SUCCEEDED" | "FAILED";
+  syncJobId: string | null;
+  scopeConfirmed: boolean;
+  /** Null on attempts recorded before the column existed — genuinely unknown, not assumed. */
+  scopeEvidence: ScopeEvidence | null;
+  rowsNew: number | null;
+  rowsDuplicate: number | null;
+  rowsFailed: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ReviewImportPlanView {
+  id: string;
+  sellerAccountId: string;
+  channelId: string;
+  requestedStart: string;
+  requestedEnd: string;
+  status: "DRAFT" | "ACTIVE" | "COMPLETED" | "ABANDONED";
+  createdAt: string;
+}
+
+export interface ReviewImportCoverageView {
+  covered: DateRangeView[];
+  missing: DateRangeView[];
+  remaining: DateRangeView[];
+  lastCoveredDate: string | null;
+  coveredRows: number;
+  coveredSegments: number;
+  remainingSegments: number;
+  missingSegments: number;
+}
+
+export interface ReviewImportPlanDetailView {
+  plan: ReviewImportPlanView;
+  segments: ReviewImportSegmentView[];
+  coverage: ReviewImportCoverageView;
+}
+
+export interface ReviewImportHealthView {
+  lastCoveredDate: string | null;
+  missingRanges: DateRangeView[];
+  newCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  nextRecommendedImport: string | null;
+}
+
+export interface CreateReviewImportPlanRequest {
+  sellerAccountId: string;
+  channelId: string;
+  requestedStart: string;
+  requestedEnd: string;
+}
+
 // Mirrors com.sellerops.attention.dto.AttentionSignal — METADATA ONLY. A typed,
 // severity-ranked count of collected review/inquiry rows that need a look. Carries
 // no raw article title/content, source identifiers, or customer PII; label and

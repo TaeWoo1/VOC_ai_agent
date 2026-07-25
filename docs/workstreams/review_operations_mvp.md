@@ -154,6 +154,97 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-25 — Guided import CTA path — LIVE E2E SUCCESS (discovery → plan → 1 segment, 61 rows)
+- **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage — the whole entry point, end to end
+- **Did:** A seller pressed **과거 리뷰 전체 연동하기** and a month of reviews landed in the database, with no
+  scratch client anywhere in the loop. Discovery ticket `CONSUMED` (range 2023-07-01 ~ 2026-07-25,
+  `OPERATOR_CONFIRMED` — the surface declares no bounds, so the operator established it), 37-segment plan
+  created, segment ticket `CONSUMED` with `MACHINE_MATCHED`, segment 1 `COMPLETED`+`COVERED`, attempt
+  `SUCCEEDED` **61 new / 0 duplicate / 0 failed**, 61 rows in the DB. Every marketplace click the operator's.
+- **Evidence:** `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md` Addendum 2.
+  Disposable `sellerops_riv_cta_*` on 18090, name-guarded, dropped; only `sellerops` survives; login profile
+  preserved.
+- **Newly proven:** the card's CTA starts a real run over the Bridge; discovery creates the plan on a real
+  surface where nothing is declared; and a `SCOPE_MISMATCH` is **visible to the person who can repair it** —
+  the gate blocked, the card said which repair, the operator corrected the dates, the recheck re-read `MATCH`.
+  Two runs in one sitting on one socket, each on a fresh runtime-minted identity.
+- **Findings (5 + 1 copy):** `SCOPE_BLOCKED` leaves the previous step's highlight on the marketplace page, so
+  the screen shows no stop signal; a date barrier cannot be satisfied when the required value is already in the
+  field (discovery leaves its own range behind, so this hits the FIRST segment of every plan); there is **no
+  seller path to pair the agent** (`VITE_ENABLE_AGENT_BRIDGE`); one-origin CORS + a login form that reports a
+  403 as bad credentials; **the premise of range discovery does not hold** — NAVER restricts nothing, so there
+  is no reachable limit to find and the seller is really choosing how far back to import (and the range becomes
+  the plan: three years is 37 segments, unwarned); and `REQUEST_STEP_RECHECK` reads "확인 완료" even at a
+  blocked scope. A wrong diagnosis of mine is recorded too.
+- **`[PO]` owed:** the discovery concept + copy + segment-count consequence (finding 16), and whether
+  「계속 가져오기」 should start from the oldest month or the newest.
+- **Product decision (owner, this session):** the seller chooses once in SellerOps, **everything else completes
+  inside the SmartStore page**, and they return when it is done. The frontend keeps copy ownership (contract §6)
+  and sends composed prose down for the runtime to display. Next slice.
+- **§4.1 impact:** note updated to say exactly what is live-proven and what is not. **No column promoted, 운영
+  지원 unchanged** — one account, one segment, a disposable local backend.
+- **Gate state:** ran under the fresh in-turn approval given this turn. ⚠ The **pairing approval control was
+  not exercised**: `dev_tty_stderr` needs a TTY this harness does not have, so the run used
+  `--dev-insecure-auto-approve`. Every other fence held — no auto-click, fail-closed everywhere, browser only in
+  the approval-gated import CLI, launch ref never persisted.
+- **Next:** the SmartStore-side guidance slice (the decision above), then findings 12–15.
+
+### 2026-07-25 — Guided import: the seller's own path (FE → Bridge → agent) — IMPLEMENTED (offline, cross-stack)
+- **Loop stage(s):** ACQUIRE (guided export) — the entry point, which until now had no product route
+- **Did:** Closed the two gaps the live segment proof left open (same day, entry above). (a) **Range
+  discovery is now a hosted run**: `ImportDiscoveryEngine` / `ImportDiscoverySession` +
+  `ImportDiscoveryDriver`, a fixed five-step plan, and `ImportSegmentHost` branching on the SERVER's
+  ticket kind — bounds declared by the date controls give `MACHINE_DISCOVERED`, and the live surface's
+  bare text inputs give the operator-guided path recorded as `OPERATOR_CONFIRMED`, never relabelled.
+  (b) **`GuidedImportCard`'s single CTA now sends a real `START_RUN`** over the import carrier, via
+  `importSession` + `createGuidedImportRuntime` + `useGuidedImport`, and renders the step, the required
+  window, and blockers — so a `SCOPE_MISMATCH` is finally visible to the person who has to repair it.
+  The scratch bridge client the live run used is **not** in the product path.
+- **Evidence:** `collector/test/crossstack/fe-import-runtime-real-bridge.test.ts` — the REAL frontend
+  runtime against a REAL `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + both real
+  engines over a real socket: discovery to COMPLETED, a segment to COMPLETED, `SCOPE_MISMATCH`
+  delivered and repaired by `REQUEST_STEP_RECHECK`, and a full sitting (discovery → segment → segment)
+  on ONE socket. collector 5,119 / 125 skipped (was 5,072), frontend 942 (was 886), backend 1,586
+  unchanged, contracts unchanged — the existing v2 contract already carried both intents.
+- **Defect found and fixed:** the host never released a finished session's transport subscription, so in
+  a real sitting every completed run stayed attached and kept publishing its own views alongside the
+  live one. Invisible on segment one; wrong from segment two onward.
+- **§4.1 impact:** recorded as a note — **segment execution live-proven, discovery and the CTA path
+  offline only**. Not promoted to live-verified: no frontend has yet driven a marketplace run.
+- **Ledger impact:** none — all of this is ours, not NAVER's.
+- **Gate state:** no live marketplace contact. No gate consumed. Code fences unchanged: no auto-click,
+  fail-closed everywhere, browser only in the approval-gated import CLI, launch ref never persisted.
+- **Blockers:** none offline. The live CTA E2E (discovery → 1 segment, driven only from the card) needs
+  a seated operator and a fresh in-turn approval.
+- **Next:** run that live CTA E2E; then the merge + single integrated PR.
+
+### 2026-07-25 — NAVER Initial Review Import — LIVE 1-segment proof SUCCESS
+- **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage
+- **Did:** One monthly segment guided end to end on the real seller center and ingested: **8/8 COMPLETED**,
+  ticket **CONSUMED**, segment **COMPLETED+COVERED**, attempt **SUCCEEDED** with **70 new / 0 duplicate**,
+  `scope_evidence = MACHINE_MATCHED`. **Every marketplace click was the operator's** — the runtime located,
+  highlighted, observed, then detected the download their clicks produced.
+- **Evidence:** `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`. Disposable
+  `sellerops_riv_live_*` on 18090 (V27/V28 applied), name-guarded, dropped after.
+- **What is newly proven:** the scope gate **blocked a wrong window live** (end date left at 07.01 →
+  `MISMATCH`, export never located/highlighted/armed), and the recovery path worked (correct the date →
+  `REQUEST_STEP_RECHECK` → `MATCH` → `confirm_range` SKIPPED → export). `MACHINE_MATCHED` is honest: the
+  runtime read both dates itself, and the SKIPPED confirm step is the observable proof it was not an operator
+  attestation.
+- **§4.1 impact:** candidate for promoting NAVER REVIEW import from Action-Window-implemented to
+  live-verified — **not applied here.** One segment on one account is thin, and §4.1 is the capability truth;
+  a product-owner call belongs on that promotion.
+- **Ledger impact:** none yet — the ten defects are recorded in the proof record above rather than as channel
+  lessons, since all ten were ours, not NAVER's.
+- **Gate state:** ran under the simplified per-campaign approval the product owner set this session (initial
+  approval + short re-run approvals). Code-level fences unchanged: no auto-click, fail-closed everywhere,
+  1-segment limit, approval-gated CLI, browser only in that mode.
+- **Blockers:** none for a repeat run.
+- **Next:** (a) DISCOVERY intent has never run live; (b) no frontend was in the loop — `START_RUN` came from a
+  scratch bridge client, so `GuidedImportCard` is still offline-only, and a `SCOPE_MISMATCH` is currently
+  invisible to the operator without it; (c) `UNREADABLE` → `OPERATOR_CONFIRMED` never fired; (d) a surface
+  that genuinely needs an apply press is untested.
+
 ### 2026-07-24 — NAVER Review Export Tutorial — LIVE export+ingest SUCCESS (attempt 5)
 - **Loop stage(s):** ACQUIRE (real export) → NORMALIZE → UNDERSTAND/PRIORITIZE (attention)
 - **Did:** A second live NAVER export ingested end-to-end on the FIXED runtime — clean main `661bcca`

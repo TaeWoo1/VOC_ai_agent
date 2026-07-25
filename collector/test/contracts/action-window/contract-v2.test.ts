@@ -21,6 +21,7 @@ import {
   COMMAND_TYPES,
   EVENT_TYPES,
   RUN_INTENTS,
+  INTENT_REQUIRED_REF,
   OPERATOR_OUTCOMES,
   VERIFICATION_STATES,
   validateRunView,
@@ -34,6 +35,13 @@ import {
   isOutOfOrderEvent,
   type ValidationResult,
 } from "../../../../contracts/action-window/v2/index";
+import { BLOCKER_CODES as V1_BLOCKER_CODES } from "../../../../contracts/action-window/v1/index";
+import {
+  AW_CARRIER_EXPORT,
+  AW_CARRIER_REPLY,
+  AW_CARRIER_IMPORT,
+  parseAwCarrierKind,
+} from "../../../../contracts/action-window/aw-carrier-kind";
 
 const V2 = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../contracts/action-window/v2");
 const FIX = join(V2, "fixtures");
@@ -107,6 +115,34 @@ describe("Action Window v2 — enum completeness & no duplicates", () => {
   it("has no CONFIRM_STEP_COMPLETED command (v1 guarantee preserved)", () => {
     expect((COMMAND_TYPES as readonly string[]).includes("CONFIRM_STEP_COMPLETED")).toBe(false);
   });
+
+  /**
+   * A scope mismatch needs a code of its own because the repair is specific — change the dates. Folded
+   * into UNSUPPORTED_STATE it would read as "this screen is not supported" and send the seller looking
+   * for the wrong thing; folded into nothing it would let a file covering the wrong window be ingested
+   * as though it covered this segment.
+   */
+  it("SCOPE_MISMATCH is its own blocker, distinct from UNSUPPORTED_STATE", () => {
+    expect((BLOCKER_CODES as readonly string[]).includes("SCOPE_MISMATCH")).toBe(true);
+    expect((BLOCKER_CODES as readonly string[]).includes("UNSUPPORTED_STATE")).toBe(true);
+  });
+
+  /**
+   * v2 omitted INGEST_FAILED while it existed only for reply submission, which has nothing to ingest.
+   * An import run does, so its terminal failure has to be expressible — otherwise a server-side ingest
+   * problem would have to masquerade as ARTIFACT_INVALID and blame the seller's file.
+   */
+  it("INGEST_FAILED is expressible now that v2 also carries import runs", () => {
+    expect((BLOCKER_CODES as readonly string[]).includes("INGEST_FAILED")).toBe(true);
+    expect((BLOCKER_CODES as readonly string[]).includes("ARTIFACT_INVALID")).toBe(true);
+  });
+
+  /** Every v1 blocker code stays expressible in v2 — v2 adds, it does not narrow. */
+  it("v2 blocker codes are a superset of v1's", () => {
+    for (const code of V1_BLOCKER_CODES) {
+      expect((BLOCKER_CODES as readonly string[]).includes(code), code).toBe(true);
+    }
+  });
 });
 
 describe("Action Window v2 — reply-submission command & event rules", () => {
@@ -154,6 +190,81 @@ describe("Action Window v2 — reply-submission command & event rules", () => {
     const view = readJson(join(FIX, "valid/run-view/13-operator-reported.json")) as Record<string, unknown>;
     const withBlocker = { ...view, blocker: { code: "UI_DRIFT", recoverable: true } };
     expect(errorCodes(validateRunView(withBlocker))).toContain("CONSTRAINT_VIOLATION");
+  });
+});
+
+describe("Action Window v2 — initial-review-import binding rules", () => {
+  const base = { protocolVersion: 2, commandId: "c", runId: "r", expectedRevision: 0, type: "START_RUN" as const };
+  const DISCOVERY = "0f1e2d3c4b5a6978";
+  const IMPORT = "9a8b7c6d5e4f3021";
+  const SUBMISSION = "a1b2c3d4e5f60718";
+
+  it("every intent declares which ref it requires (exhaustive, so a new intent cannot be unbound by omission)", () => {
+    for (const intent of RUN_INTENTS) {
+      expect(Object.prototype.hasOwnProperty.call(INTENT_REQUIRED_REF, intent)).toBe(true);
+    }
+    expect(INTENT_REQUIRED_REF.EXPORT).toBeNull();
+    expect(INTENT_REQUIRED_REF.INITIAL_REVIEW_IMPORT_DISCOVERY).toBe("discoveryRef");
+    expect(INTENT_REQUIRED_REF.INITIAL_REVIEW_IMPORT_SEGMENT).toBe("importRef");
+  });
+
+  it("discovery requires an opaque discoveryRef", () => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_DISCOVERY" } })))
+      .toContain("CONSTRAINT_VIOLATION");
+    // a date is exactly what must never ride here — and is not 16-hex, so it is refused
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_DISCOVERY", discoveryRef: "2026-06-01" } }).ok).toBe(false);
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_DISCOVERY", discoveryRef: DISCOVERY } })).toEqual({ ok: true });
+  });
+
+  it("a segment import requires an opaque importRef", () => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_SEGMENT" } })))
+      .toContain("CONSTRAINT_VIOLATION");
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_SEGMENT", importRef: IMPORT } })).toEqual({ ok: true });
+  });
+
+  // The whole point of one-ref-per-intent: a run bound to the wrong kind of approved work is the bug
+  // this rule exists to make unrepresentable, in BOTH directions.
+  it.each([
+    ["discovery carrying an importRef", { intent: "INITIAL_REVIEW_IMPORT_DISCOVERY", discoveryRef: DISCOVERY, importRef: IMPORT }],
+    ["discovery carrying a submissionRef", { intent: "INITIAL_REVIEW_IMPORT_DISCOVERY", discoveryRef: DISCOVERY, submissionRef: SUBMISSION }],
+    ["a segment import carrying a discoveryRef", { intent: "INITIAL_REVIEW_IMPORT_SEGMENT", importRef: IMPORT, discoveryRef: DISCOVERY }],
+    ["a segment import carrying a submissionRef", { intent: "INITIAL_REVIEW_IMPORT_SEGMENT", importRef: IMPORT, submissionRef: SUBMISSION }],
+    ["a reply carrying an importRef", { intent: "REPLY_SUBMISSION", submissionRef: SUBMISSION, importRef: IMPORT }],
+    ["an export carrying an importRef", { intent: "EXPORT", importRef: IMPORT }],
+    ["an export carrying a discoveryRef", { intent: "EXPORT", discoveryRef: DISCOVERY }],
+  ])("rejects %s", (_label, payload) => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", ...payload } }))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  it("an unknown intent cannot smuggle a binding through", () => {
+    const bad = { ...base, payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT", importRef: IMPORT } };
+    const codes = errorCodes(validateCommandEnvelope(bad));
+    expect(codes).toContain("UNKNOWN_ENUM"); // the intent itself
+    expect(codes).toContain("CONSTRAINT_VIOLATION"); // ...and the ref it tried to carry
+  });
+
+  it("treats discoveryRef and importRef as opaque refs (no path, selector, or date)", () => {
+    expect(findProhibitedFields({ discoveryRef: "/Users/seller/export.xlsx" }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ importRef: "#segment-1" }).length).toBeGreaterThan(0);
+    expect(findProhibitedFields({ discoveryRef: DISCOVERY, importRef: IMPORT })).toEqual([]);
+  });
+
+  // An import run is read-only export choreography, so it must reach the ordinary COMPLETED terminal —
+  // NOT the reply world's OPERATOR_REPORTED, which exists only because a post has no read-back oracle.
+  it("an import run reaches COMPLETED (it is not the unverifiable reply terminal)", () => {
+    const view = {
+      protocolVersion: 2, runId: "r", revision: 3, channelCode: "naver",
+      runCopyKey: "actionWindow.import.segment", status: "COMPLETED", executionMode: "AUTOMATIC_OPERATION",
+      intent: "INITIAL_REVIEW_IMPORT_SEGMENT", guidanceEnabled: true, allowedCommands: [],
+      progress: { completedSteps: 3, totalSteps: 3 }, updatedAt: "2026-07-25T00:00:00Z",
+    };
+    expect(validateRunView(view)).toEqual({ ok: true });
+  });
+
+  it("the import carrier is its own announceable kind — export/reply/import cannot cross-attach", () => {
+    expect(parseAwCarrierKind("import")).toBe("import");
+    expect(new Set([AW_CARRIER_EXPORT, AW_CARRIER_REPLY, AW_CARRIER_IMPORT]).size).toBe(3);
+    expect(parseAwCarrierKind("initial-import")).toBeNull(); // fail closed on anything unrecognised
   });
 });
 

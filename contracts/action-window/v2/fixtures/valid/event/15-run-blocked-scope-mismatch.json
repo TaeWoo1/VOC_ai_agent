@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 2,
+  "eventId": "evt_0015",
+  "runId": "run_0002",
+  "sequence": 15,
+  "revision": 15,
+  "type": "RUN_BLOCKED",
+  "occurredAt": "2026-07-25T04:11:00Z",
+  "payload": {
+    "code": "SCOPE_MISMATCH",
+    "recoverable": true
+  }
+}

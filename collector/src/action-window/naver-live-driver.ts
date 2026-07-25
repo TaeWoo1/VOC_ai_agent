@@ -316,6 +316,45 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
+   * The resolved surface context, for a driver that COMPOSES this one.
+   *
+   * Exposed because the import driver needs the same context for its own targets (the date inputs and the
+   * apply control), and the first live run failed precisely because it read the top document instead: the
+   * review surface is frame-hosted, so `page.content()` reported zero date inputs on a page that has them.
+   * Sharing the resolution is also what stops locate and read-back from ever disagreeing about which
+   * document they are looking at.
+   *
+   * Only meaningful after {@link prepareSurface} has run; before that it is the top document.
+   */
+  surfaceContext(): Page | Frame {
+    return this.ctx();
+  }
+
+  /**
+   * Whether a CHILD frame was resolved, as opposed to falling back to the top document.
+   *
+   * A diagnostic distinction that matters: "we looked in the right frame and found nothing" and "we never
+   * left the top document" have the same symptom — a zero count — and completely different fixes.
+   *
+   * ⚠ Compared against the main frame, NOT against null. `resolveSurfaceFrame` assigns the MAIN frame as
+   * its preference-3 fallback when nothing frame-hosts the surface, so a null check reports `true` for the
+   * top document and the flag says the opposite of the truth. The first version of this accessor did
+   * exactly that, and it made the second live run's log unreadable — a lying diagnostic is worse than none.
+   */
+  surfaceFrameResolved(): boolean {
+    return this.surfaceFrame !== null && this.surfaceFrame !== this.page.mainFrame();
+  }
+
+  /**
+   * How many child frames the page has, for the same diagnostic question. Structural: a count, never a URL
+   * or a host — `iframePresent` alone cannot distinguish "the surface is in one of three frames we scored"
+   * from "there is one unrelated analytics iframe".
+   */
+  childFrameCount(): number {
+    return Math.max(0, this.page.frames().length - 1);
+  }
+
+  /**
    * Pick the frame that hosts the export surface. Scores the top document + every child frame with the
    * SAME shared decisions used downstream (`naverSurfaceDecision` for session+readiness, `naverLocateDecision`
    * for the single export control), so the choice can never disagree with what `prepareSurface`/`locate`

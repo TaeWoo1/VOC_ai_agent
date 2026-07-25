@@ -39,6 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/settings/channels", label: "채널 연결", icon: "link" },
       { to: "/settings/upload", label: "자료 업로드", icon: "upload" },
+      { to: "/settings/review-import", label: "과거 리뷰 가져오기", icon: "review" },
       { to: "/settings/alerts", label: "연결 알림", icon: "bell" },
     ],
   },

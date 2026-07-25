@@ -16,6 +16,7 @@ describe("nav model", () => {
       "/reports",
       "/settings/channels",
       "/settings/upload",
+      "/settings/review-import",
       "/settings/alerts",
     ]);
     expect(routes).toContain(ALERTS_ROUTE);

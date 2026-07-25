@@ -40,6 +40,14 @@ import type {
   ScheduleView,
   SellerAccountResponse,
   ReviewImport,
+  CreateReviewImportPlanRequest,
+  DateRangeView,
+  ReviewImportAttemptView,
+  ReviewImportHealthView,
+  ReviewImportLaunchView,
+  ReviewImportPlanDetailView,
+  ReviewImportPlanView,
+  ReviewImportSegmentView,
   SyncJobView,
   SyncRunFilters,
   SyncRunView,
@@ -440,6 +448,97 @@ export const api = {
     form.append("uploadType", uploadType);
     form.append("file", file);
     const { data } = await http.post<IngestResult>("/api/uploads", form);
+    return data;
+  },
+
+  // --- NAVER Initial Review Import (V1). All strict (mutating or feature-scoped): surface errors to the UI. ---
+  async createReviewImportPlan(req: CreateReviewImportPlanRequest): Promise<ReviewImportPlanDetailView> {
+    const { data } = await http.post<ReviewImportPlanDetailView>("/api/imports/reviews/plans", req);
+    return data;
+  },
+  async listReviewImportPlans(accountId?: string): Promise<ReviewImportPlanView[]> {
+    const query = accountId ? `?accountId=${accountId}` : "";
+    const { data } = await http.get<ReviewImportPlanView[]>(`/api/imports/reviews/plans${query}`);
+    return data;
+  },
+  async getReviewImportPlan(planId: string): Promise<ReviewImportPlanDetailView> {
+    const { data } = await http.get<ReviewImportPlanDetailView>(`/api/imports/reviews/plans/${planId}`);
+    return data;
+  },
+  async splitReviewImportSegment(segmentId: string, children: DateRangeView[]): Promise<ReviewImportSegmentView[]> {
+    const { data } = await http.post<ReviewImportSegmentView[]>(
+      `/api/imports/reviews/segments/${segmentId}/split`,
+      { children },
+    );
+    return data;
+  },
+  async mergeReviewImportSegments(planId: string, segmentIds: string[]): Promise<ReviewImportSegmentView> {
+    const { data } = await http.post<ReviewImportSegmentView>(
+      `/api/imports/reviews/plans/${planId}/merge`,
+      { segmentIds },
+    );
+    return data;
+  },
+  async markReviewImportSegmentMissing(segmentId: string): Promise<ReviewImportSegmentView> {
+    const { data } = await http.post<ReviewImportSegmentView>(`/api/imports/reviews/segments/${segmentId}/missing`);
+    return data;
+  },
+  // The PRODUCT path: one click authorizes one guided Action Window run. The seller never handles a file.
+  // `launchRef` is an opaque single-use authorization — never rendered, only handed to the local agent.
+  async startReviewImportDiscovery(accountId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/launches/discovery?accountId=${accountId}`,
+    );
+    return data;
+  },
+  async launchNextReviewImportSegment(planId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/plans/${planId}/launches/next-segment`,
+    );
+    return data;
+  },
+  async launchReviewImportSegment(segmentId: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/segments/${segmentId}/launch`,
+    );
+    return data;
+  },
+  async expireReviewImportLaunch(launchRef: string): Promise<ReviewImportLaunchView> {
+    const { data } = await http.post<ReviewImportLaunchView>(
+      `/api/imports/reviews/launches/${launchRef}/expire`,
+    );
+    return data;
+  },
+
+  // The FALLBACK path (파일로 가져오기): only for when a guided run is unavailable. Not the default.
+  async importReviewImportSegment(
+    segmentId: string,
+    scopeConfirmed: boolean,
+    file: File,
+  ): Promise<ReviewImportAttemptView> {
+    const form = new FormData();
+    form.append("scopeConfirmed", String(scopeConfirmed));
+    form.append("file", file);
+    const { data } = await http.post<ReviewImportAttemptView>(
+      `/api/imports/reviews/segments/${segmentId}/import`,
+      form,
+    );
+    return data;
+  },
+  async getReviewImportSegmentAttempts(segmentId: string): Promise<ReviewImportAttemptView[]> {
+    const { data } = await http.get<ReviewImportAttemptView[]>(
+      `/api/imports/reviews/segments/${segmentId}/attempts`,
+    );
+    return data;
+  },
+  async getReviewImportHealth(accountId: string): Promise<ReviewImportHealthView> {
+    const { data } = await http.get<ReviewImportHealthView>(
+      `/api/imports/reviews/health?accountId=${accountId}`,
+    );
+    return data;
+  },
+  async abandonReviewImportPlan(planId: string): Promise<ReviewImportPlanView> {
+    const { data } = await http.post<ReviewImportPlanView>(`/api/imports/reviews/plans/${planId}/abandon`);
     return data;
   },
 

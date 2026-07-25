@@ -1,0 +1,12 @@
+{
+  "protocolVersion": 2,
+  "commandId": "cmd_08-start-run-import-segment",
+  "runId": "run_0004",
+  "expectedRevision": 0,
+  "type": "START_RUN",
+  "payload": {
+    "channelCode": "naver",
+    "intent": "INITIAL_REVIEW_IMPORT_SEGMENT",
+    "importRef": "9a8b7c6d5e4f3021"
+  }
+}
