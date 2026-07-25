@@ -41,7 +41,19 @@ import {
 import { humanSignalPathFor } from "../agent/local-agent-human-signal";
 import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
-import { createAgentBridge, type AgentActionWindowConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { createAgentBridge, type AgentActionWindowConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
+import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
+import { NaverLiveImportDriver } from "../action-window/initial-import/naver-live-import-driver";
+import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
+import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
+import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
+import { fetchLaunchScope, login } from "../upload";
+import { launchNaverContext } from "../profile";
+import {
+  ACTION_WINDOW_IMPORT_FLAG,
+  importModeRefusalMessage,
+  resolveImportMode,
+} from "./import-mode-gate";
 import { SyntheticProbeDriver } from "../action-window/session";
 import { SyntheticReplySubmitDriver } from "../action-window/reply-submission/reply-driver";
 import { defaultReplyRunDirFor, mintReplyRunId } from "../action-window/reply-submission/reply-dispatch";
@@ -204,6 +216,82 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
     channelCode: "naver",
     createDriver: () => new SyntheticReplySubmitDriver(),
     persistDir: defaultReplyRunDirFor(collectorRoot),
+  };
+}
+
+/**
+ * Build the {@link AgentImportConfig} for the approval-only import mode.
+ *
+ * **This is the one Local Agent path that launches a browser at startup** (product-owner decision,
+ * 2026-07-25). It is deliberate rather than convenient: a seated operator has to log into NAVER in that
+ * browser before any run can happen, so deferring the launch would only move the wait. The gate in
+ * `import-mode-gate.ts` is what keeps it off every other path — normal agent, production, scheduled and
+ * non-interactive hosts all refuse, and no other carrier flag may be combined with it.
+ *
+ * **A browser is NOT a run.** Launching Chrome starts nothing: `ImportSegmentHost` waits for a valid
+ * `START_RUN` carrying a launch ref, resolves that ref against the SERVER, and only then assembles a
+ * session. Until then the agent is a logged-in browser and an announced carrier, nothing more.
+ *
+ * **Nothing is resumed and no ref is stored.** The launch ref lives only in memory for the life of one
+ * run; `.import-runs/` markers carry no ref, and restart recovery ABANDONS rather than resuming (see
+ * `import-run-store`). The server holds the plan, so the next run picks the same segment up with a fresh
+ * ticket.
+ */
+export async function buildInitialImportConfig(env: NodeJS.ProcessEnv): Promise<AgentImportConfig> {
+  const cfg = loadConfig(env);
+  // Headed, dedicated profile, inside the collector tree (the profile path guard enforces that). The
+  // operator logs in here themselves — the collector never types NAVER credentials.
+  const context = await launchNaverContext(cfg.profileDir);
+  const page = context.pages()[0] ?? (await context.newPage());
+
+  // The launch ref and the scope evidence are BOTH only known per run, long after this capability is
+  // built — the ref arrives in START_RUN and the evidence depends on what the seller did with the dates.
+  // `buildSegmentIngestUpload` reads both inside the returned upload function rather than at build time,
+  // so a getter and a thunk are read at ingest time, which is when the answers exist.
+  let boundRef = "";
+  // Forward declaration: the evidence comes from the import driver's own scope read, because it is the
+  // only component that actually performed one.
+  let importDriver: NaverLiveImportDriver | null = null;
+  const proven = new NaverLiveProbeDriver(page, {
+    quarantineDir: defaultQuarantineDirFor(collectorRoot),
+    ingest: buildSegmentIngestUpload({
+      baseUrl: cfg.baseUrl,
+      email: cfg.email,
+      password: cfg.password,
+      get launchRef() {
+        return boundRef;
+      },
+      scopeEvidence: () => importDriver?.scopeEvidence() ?? "OPERATOR_CONFIRMED",
+    }),
+    guidanceEnabled: true,
+  });
+  const driver = new NaverLiveImportDriver(page, proven, { guidanceEnabled: true });
+  importDriver = driver;
+
+  return {
+    announceRunId: `run_${randomBytes(6).toString("hex")}`,
+    channelCode: NAVER_CHANNEL_CODE,
+    driver,
+    persistDir: defaultImportRunDirFor(collectorRoot),
+    async resolveScope(launchRef: string): Promise<ResolvedLaunchScope | null> {
+      try {
+        const token = await login(cfg.baseUrl, cfg.email, cfg.password);
+        const scope = await fetchLaunchScope(cfg.baseUrl, token, launchRef);
+        if (scope.kind !== "SEGMENT" || !scope.requiredStart || !scope.requiredEnd) return null;
+        // Bind the ref for the ingest capability only after the SERVER has accepted it.
+        boundRef = launchRef;
+        return {
+          kind: scope.kind,
+          channelCode: scope.channelCode,
+          requiredStart: scope.requiredStart,
+          requiredEnd: scope.requiredEnd,
+        };
+      } catch {
+        // One answer for every refusal — spent, expired, wrong org, never existed, backend down. A client
+        // that could tell them apart could probe the ref space.
+        return null;
+      }
+    },
   };
 }
 
@@ -501,8 +589,22 @@ async function main(): Promise<void> {
   // explicit ingest opt-in.
   // Reply-submission hosting (v2, ISOLATED) is mutually exclusive with the export channel and WINS when
   // requested — an agent hosts one carrier. The reply driver is synthetic (no browser, no live NAVER).
-  const hostReply = resolveReplySubmissionChannel(args, process.env);
-  const awChannel = hostReply ? null : resolveActionWindowChannel(args, process.env);
+  // ONE carrier per agent, decided here and nowhere else. Import is checked FIRST because it is the only
+  // mode that launches a browser, so its gate must run before anything else can claim the slot — and the
+  // gate REFUSES a command line that also names another carrier rather than quietly winning.
+  const importMode = resolveImportMode(args, process.env);
+  if (!importMode.host) {
+    const refusal = importModeRefusalMessage(importMode.reason);
+    // Silent for the ordinary case (the mode was not asked for); loud for every real refusal, because an
+    // operator who asked for a live browser and did not get one needs to know why.
+    if (refusal) console.error(`[local-agent] ${refusal}`);
+  }
+  const initialImport: AgentImportConfig | undefined = importMode.host
+    ? await buildInitialImportConfig(process.env)
+    : undefined;
+
+  const hostReply = initialImport ? false : resolveReplySubmissionChannel(args, process.env);
+  const awChannel = initialImport || hostReply ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
@@ -515,11 +617,12 @@ async function main(): Promise<void> {
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     ...(actionWindow ? { actionWindow } : {}),
     ...(replySubmission ? { replySubmission } : {}),
+    ...(initialImport ? { initialImport } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, initialImport: initialImport !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

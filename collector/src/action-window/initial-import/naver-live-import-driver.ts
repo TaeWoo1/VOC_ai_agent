@@ -69,6 +69,8 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   /** Cached result of the one consent+download race — see the module note. */
   private consentRace: DownloadDetectResult | null = null;
   private stepNumber = 1;
+  /** The last scope verdict this driver produced. It is the only component that actually made the read. */
+  private lastScopeVerdict: ScopeMatch | null = null;
 
   constructor(page: Page, proven: NaverLiveProbeDriver, opts: NaverLiveImportDriverOptions = {}) {
     this.page = page;
@@ -219,7 +221,21 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       datesParsed: verdict.datesParsed,
       spanDiffers: verdict.spanDiffers,
     });
+    this.lastScopeVerdict = verdict.match;
     return verdict.match;
+  }
+
+  /**
+   * How this run's scope was established, for the ingest capability.
+   *
+   * Derived from the driver's OWN read rather than passed in, because the driver is the only component that
+   * actually performed it. The mapping is the same one `gateOnScope` applies: a machine match is the only
+   * thing that may be recorded as a machine check, and everything else — including a read that never
+   * happened — records the seller's confirmation instead. Defaulting the other way would relabel an
+   * operator attestation as machine-verified, which is the one thing this flow must never do.
+   */
+  scopeEvidence(): "MACHINE_MATCHED" | "OPERATOR_CONFIRMED" {
+    return this.lastScopeVerdict === "MATCH" ? "MACHINE_MATCHED" : "OPERATOR_CONFIRMED";
   }
 
   /**
