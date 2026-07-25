@@ -17,8 +17,10 @@ import org.springframework.transaction.annotation.Transactional;
  * dedup (on {@code external_id} = 리뷰글번호) and reply-state/timestamp preservation carry over exactly.
  *
  * <p>Each call is one attempt: it links its own sync_job, so retry history is preserved. The
- * scope-confirmation gate is enforced here — the operator must have confirmed the actual readExportScope
- * matched this segment before the file is accepted (the per-segment equivalent of the export-scope gate).
+ * scope-confirmation gate is enforced here — the export scope must have been established to match this
+ * segment before the file is accepted — and {@link ScopeEvidence} records which way it was established.
+ * A guided Action Window run may read the selected range back off the live controls; the manual fallback
+ * cannot, so it is an operator attestation. Neither is described as the other.
  *
  * <p>Execution vs coverage stay separate: a hard ingest failure marks the attempt and the segment
  * {@link SegmentExecutionState#FAILED} with coverage untouched; a success (a valid EMPTY included) marks
@@ -48,12 +50,25 @@ public class ReviewImportRunService {
     }
 
     /**
-     * Import one segment's exported file. {@code scopeConfirmed} MUST be true — the operator confirmed the
-     * actual export scope matched this segment. Returns the recorded attempt (SUCCEEDED or FAILED); a
-     * FAILED attempt is a normal outcome the operator can retry, not an API error.
+     * Import one segment's exported file via the MANUAL fallback (the seller picked the file themselves).
+     * That path has no read-back of what was exported, so its evidence is by definition
+     * {@link ScopeEvidence#OPERATOR_CONFIRMED} — the operator's attestation, never a machine check.
      */
     @Transactional
     public ReviewImportSegmentAttempt importSegment(UUID orgId, UUID segmentId, boolean scopeConfirmed,
+                                                    String filename, InputStream data) {
+        return importSegment(orgId, segmentId, scopeConfirmed, ScopeEvidence.OPERATOR_CONFIRMED, filename, data);
+    }
+
+    /**
+     * Import one segment's exported file. {@code scopeConfirmed} MUST be true — the export scope was
+     * established to match this segment — and {@code scopeEvidence} records HOW (a guided run that read
+     * the range back off the page, versus an operator attestation). Returns the recorded attempt
+     * (SUCCEEDED or FAILED); a FAILED attempt is a normal outcome the operator can retry, not an API error.
+     */
+    @Transactional
+    public ReviewImportSegmentAttempt importSegment(UUID orgId, UUID segmentId, boolean scopeConfirmed,
+                                                    ScopeEvidence scopeEvidence,
                                                     String filename, InputStream data) {
         ReviewImportSegment segment = segments.findByIdAndOrgId(segmentId, orgId)
                 .orElseThrow(() -> ApiException.notFound("구간을 찾을 수 없습니다."));
@@ -74,6 +89,7 @@ public class ReviewImportRunService {
         attempt.setOrgId(orgId);
         attempt.setAttemptNo(attempts.nextAttemptNo(segmentId));
         attempt.setScopeConfirmed(true);
+        attempt.setScopeEvidence(scopeEvidence);
         attempt.setResult(SegmentAttemptResult.ACTIVE);
         attempt.setStartedAt(Instant.now());
         attempt = attempts.save(attempt);

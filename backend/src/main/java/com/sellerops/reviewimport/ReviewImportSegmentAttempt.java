@@ -36,9 +36,17 @@ public class ReviewImportSegmentAttempt extends BaseEntity {
     @Column(name = "sync_job_id")
     private UUID syncJobId;
 
-    /** The operator confirmed the actual readExportScope matched this segment before exporting. */
+    /** The export scope was established to match this segment before the file was accepted. */
     @Column(name = "scope_confirmed", nullable = false)
     private boolean scopeConfirmed = false;
+
+    /**
+     * HOW that scope was established — a guided run's read-back versus an operator attestation. Null only
+     * on attempts recorded before V28 added the column; back-filling either value would invent a fact.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope_evidence", length = 24)
+    private ScopeEvidence scopeEvidence;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
