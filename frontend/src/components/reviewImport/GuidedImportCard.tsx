@@ -6,33 +6,44 @@ import { useGuidedImport } from "../../lib/actionWindow/import/useGuidedImport";
 import type { GuidedImportRuntime } from "../../lib/actionWindow/import/importRuntime";
 import {
   agentAvailabilityCopy,
+  buildImportGuidancePack,
   completionSummaryText,
   importProgress,
   importStageText,
   nextRemainingSegment,
   primaryActionLabel,
+  recheckLabel,
   segmentRangeText,
   type AgentAvailability,
 } from "../../lib/reviewImport";
 import type { ReviewImportPlanDetailView, ReviewImportLaunchView, SellerAccountResponse } from "../../lib/types";
+import { AgentPairingPanel } from "./AgentPairingPanel";
+import { ImportRangeChooser } from "./ImportRangeChooser";
 
 /**
- * The seller's whole historical import, as ONE action.
+ * The seller's whole historical import: one decision here, then the work happens in their seller center.
  *
- * The seller does not choose a period, does not manage segments, and never touches a file: they press
- * 과거 리뷰 전체 연동하기, the local agent opens their seller center, a tutorial walks them through the
- * dates and the export, and the download is detected and merged automatically. The monthly plan,
- * segments, attempts, and coverage all still exist — as the internal orchestration this card summarises,
- * not as the workflow.
+ * ## The journey, as the product owner set it (2026-07-26)
  *
- * ## What one press actually does, in order
+ * The seller answers ONE question in SellerOps — how far back to import — sees the period and how many monthly
+ * exports it becomes, and confirms. From then on **everything is in the SmartStore window**: the local agent
+ * highlights each control, and a SellerOps panel in that same page says what to do, why a run stopped, and how to
+ * fix it. They come back here when it is done.
+ *
+ * That is a reversal of what shipped on 2026-07-25, and it was a measured failure rather than a preference: the
+ * old flow put the instructions in this window and the highlight in the other one, so the seller alternated
+ * between two tabs and a text change in the tab they were not watching was a text change nobody read. The scope
+ * gate stopped a run correctly and the operator kept changing a date for thirty seconds afterwards.
+ *
+ * ## What one press of the CTA does, in order
  *
  *  1. **Attach to the local agent's import carrier.** First, before anything is spent — an agent that cannot
  *     host a guided run must not cost the seller a single-use authorization they then have to wait out.
- *  2. **Mint the ticket.** No plan yet ⇒ range discovery, which finds what NAVER allows and creates the plan
- *     from it. A plan in progress ⇒ the next segment that still needs a run.
- *  3. **Send `START_RUN`,** binding the run to that ticket, and wait for the agent's acknowledgement.
- *  4. **Hand the ticket back** if the agent refuses or never answers, so a failed attempt costs nothing.
+ *  2. **Hand it the words.** The guidance pack is this frontend's copy; the runtime renders it in the
+ *     marketplace page and authors none of it (contract §6 held, not relaxed).
+ *  3. **Mint the ticket** for the next segment that still needs a run — most recent month first.
+ *  4. **Send `START_RUN`,** binding the run to that ticket, and wait for the agent's acknowledgement.
+ *  5. **Hand the ticket back** if the agent refuses or never answers, so a failed attempt costs nothing.
  *
  * From then on the card renders what the RUNTIME publishes: the current step, and a blocker when the run stops.
  * It completes no step and clears no blocker locally — `REQUEST_STEP_RECHECK` says "I did it, look again", and
@@ -42,10 +53,19 @@ import type { ReviewImportPlanDetailView, ReviewImportLaunchView, SellerAccountR
  */
 export interface GuidedImportCardProps {
   account: SellerAccountResponse;
-  /** The seller's current plan, or null before the first import. */
+  /** The seller's current plan, or null before they have chosen a period. */
   plan: ReviewImportPlanDetailView | null;
   /** Whether the local agent is paired and reachable at all (from the Bridge status channel). */
   agent: AgentAvailability;
+  /**
+   * The Bridge pairing surface, owned by the page.
+   *
+   * Passed in rather than hooked here so the pairing action can appear ON this card without a second bridge
+   * client on the same screen — the entry point the live run found missing entirely (finding 14).
+   */
+  pairing?: { phase: string; confirmationCode?: string | null; onConnect: () => void; onRetry: () => void };
+  /** Called once the seller's chosen period has become a plan, so the page can re-read it. */
+  onPlanCreated?: (plan: ReviewImportPlanDetailView) => void;
   /** Called after a launch is authorized, so the page can refresh plan state. */
   onLaunched?: (launch: ReviewImportLaunchView) => void;
   /** Called when a guided run reaches a terminal state, so the page can re-read the plan it just changed. */
@@ -63,6 +83,8 @@ export function GuidedImportCard({
   account,
   plan,
   agent,
+  pairing,
+  onPlanCreated,
   onLaunched,
   onRunSettled,
   onUseFileFallback,
@@ -105,11 +127,15 @@ export function GuidedImportCard({
         // `guided.unavailable` now explains why, in the same place every other unavailability is explained.
         return;
       }
-      // No plan yet ⇒ discovery first: the plan is built from the range NAVER actually allows, so there is
-      // nothing to resume and no period to ask the seller for.
-      const launch = plan
-        ? await api.launchNextReviewImportSegment(plan.plan.id)
-        : await api.startReviewImportDiscovery(account.id);
+      // The words the seller will read in their SmartStore window, before the run that renders them exists. The
+      // runtime re-sends this for each segment's session; it never writes a sentence of its own.
+      active.setGuidancePack(buildImportGuidancePack());
+      if (!plan) {
+        // Unreachable through the CTA — with no plan the card shows the chooser instead of this button — but a
+        // guard rather than a `!`: a launch minted against no plan would be a ticket for unknown work.
+        return;
+      }
+      const launch = await api.launchNextReviewImportSegment(plan.plan.id);
       try {
         await active.start({ launchRef: launch.launchRef, kind: launch.kind });
       } catch (e) {
@@ -132,7 +158,7 @@ export function GuidedImportCard({
       <header className="flex flex-col gap-1">
         <h3 className="text-base font-semibold text-ink">과거 리뷰 연동</h3>
         <p className="text-sm text-muted break-keep">
-          {account.alias ?? account.channelNameKo} · 판매자센터를 열어 순서대로 안내해 드려요.
+          {account.alias ?? account.channelNameKo} · 판매자센터 화면에서 순서대로 안내해 드려요.
         </p>
       </header>
 
@@ -146,8 +172,10 @@ export function GuidedImportCard({
           </div>
           {plan ? (
             <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-sm text-muted">가져올 수 있는 기간</dt>
-              <dd className="text-sm text-ink break-keep" data-testid="discovered-range">
+              {/* "가져올 기간", not "가져올 수 있는 기간": this is the period the SELLER chose, and nothing
+                  here has measured what the marketplace allows (finding 16). */}
+              <dt className="text-sm text-muted">가져올 기간</dt>
+              <dd className="text-sm text-ink break-keep" data-testid="selected-range">
                 {plan.plan.requestedStart} ~ {plan.plan.requestedEnd}
               </dd>
             </div>
@@ -175,6 +203,17 @@ export function GuidedImportCard({
         <p className="rounded-xl bg-warn/5 px-4 py-3 text-sm text-ink break-keep" role="status" data-testid="agent-unavailable">
           {availability.message}
         </p>
+      ) : null}
+
+      {/* And the way to FIX it, here, on the card that is blocked without it. The live run had no seller-facing
+          pairing entry point at all — it existed only behind a developer env flag (finding 14). */}
+      {!availability.canGuide && pairing ? (
+        <AgentPairingPanel
+          phase={pairing.phase}
+          confirmationCode={pairing.confirmationCode ?? null}
+          onConnect={pairing.onConnect}
+          onRetry={pairing.onRetry}
+        />
       ) : null}
 
       {error ? (
@@ -221,7 +260,9 @@ export function GuidedImportCard({
               data-testid={`guided-command-${type}`}
               className="rounded-xl border border-line px-4 py-2 text-sm font-medium text-ink transition hover:bg-line/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             >
-              {commandLabel(type)}
+              {type === "REQUEST_STEP_RECHECK"
+                ? recheckLabel({ copyKey: snapshot.step?.copyKey ?? null, blockerCode: snapshot.blocker?.code ?? null })
+                : commandLabel(type)}
             </button>
           ))}
         </div>
@@ -229,11 +270,18 @@ export function GuidedImportCard({
 
       {launched && !running ? (
         <p className="rounded-xl bg-brand/5 px-4 py-3 text-sm text-ink break-keep" role="status" data-testid="guided-run-started">
-          판매자센터 창에서 안내를 따라 주세요. 파일을 받으면 SellerOps가 자동으로 정리해요.
+          판매자센터 창으로 이동해 주세요. 이 화면으로 돌아오지 않아도 그 창에서 안내가 계속 나와요.
         </p>
       ) : null}
 
-      {!finished && !running ? (
+      {/* No plan yet ⇒ the ONE question this screen asks. A plan ⇒ the button that continues it. The chooser is
+          not gated on the agent: deciding how far back to import needs no local helper, and refusing to let the
+          seller answer until they have paired one is how an onboarding step becomes a dead end. */}
+      {!hasPlan && !running ? (
+        <ImportRangeChooser accountId={account.id} onCreated={(created) => onPlanCreated?.(created)} />
+      ) : null}
+
+      {hasPlan && !finished && !running ? (
         <div className="flex flex-col gap-2">
           <button
             type="button"

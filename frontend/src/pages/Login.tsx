@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import { loginFailure } from "../lib/loginError";
 
 export function Login() {
   const { login } = useAuth();
@@ -17,8 +18,10 @@ export function Login() {
     try {
       await login(email, password);
       navigate("/", { replace: true });
-    } catch {
-      setError("이메일 또는 비밀번호를 확인해 주세요.");
+    } catch (e) {
+      // "Check your password" for a request that never reached the backend sends the seller to change something
+      // that was never wrong — it cost most of an hour on 2026-07-25. See `loginError.ts`.
+      setError(loginFailure(e).message);
     } finally {
       setBusy(false);
     }

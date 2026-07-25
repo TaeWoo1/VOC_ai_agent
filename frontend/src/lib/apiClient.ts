@@ -47,6 +47,7 @@ import type {
   ReviewImportLaunchView,
   ReviewImportPlanDetailView,
   ReviewImportPlanView,
+  ReviewImportRangeSelectionView,
   ReviewImportSegmentView,
   SyncJobView,
   SyncRunFilters,
@@ -483,12 +484,27 @@ export const api = {
     const { data } = await http.post<ReviewImportSegmentView>(`/api/imports/reviews/segments/${segmentId}/missing`);
     return data;
   },
-  // The PRODUCT path: one click authorizes one guided Action Window run. The seller never handles a file.
-  // `launchRef` is an opaque single-use authorization — never rendered, only handed to the local agent.
-  async startReviewImportDiscovery(accountId: string): Promise<ReviewImportLaunchView> {
-    const { data } = await http.post<ReviewImportLaunchView>(
-      `/api/imports/reviews/launches/discovery?accountId=${accountId}`,
+  // The PRODUCT path: the seller chooses how far back to import, then each month is one guided Action Window
+  // run. They never handle a file. `launchRef` is an opaque single-use authorization — never rendered, only
+  // handed to the local agent.
+  //
+  // What starting from `startMonth` would create, WITHOUT creating it: the period and how many monthly exports
+  // it becomes. Both come from the server — "today" is its clock, and the count has to be the one the planner
+  // will really produce.
+  async previewReviewImportRange(accountId: string, startMonth: string): Promise<ReviewImportRangeSelectionView> {
+    const { data } = await http.get<ReviewImportRangeSelectionView>(
+      `/api/imports/reviews/plans/range-preview?accountId=${accountId}&startMonth=${startMonth}`,
     );
+    return data;
+  },
+  // Create the plan the seller confirmed. This replaced a guided range-DISCOVERY run: the 2026-07-25 live run
+  // established that NAVER's review calendar restricts nothing, so how far back to import is the seller's own
+  // decision and needs no marketplace window.
+  async selectReviewImportRange(accountId: string, startMonth: string): Promise<ReviewImportPlanDetailView> {
+    const { data } = await http.post<ReviewImportPlanDetailView>("/api/imports/reviews/plans/selected-range", {
+      sellerAccountId: accountId,
+      startMonth,
+    });
     return data;
   },
   async launchNextReviewImportSegment(planId: string): Promise<ReviewImportLaunchView> {

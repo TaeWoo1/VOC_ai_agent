@@ -17,18 +17,91 @@
  * 16-hex refs, dotted copy keys, primitive copy params). No selector, URL, path, id, credential,
  * cookie, token, or page content ever appears here — that invariant is inherited from `./index` and
  * asserted by `findProhibitedFields` in the integration tests.
+ *
+ * **One frame carries prose, in one direction: {@link AwGuidancePack}.** It is FE → Runtime, it is the
+ * frontend's own copy being handed to the surface that has to display it, and it is never echoed back. The
+ * Runtime→FE invariant above is therefore unchanged, and the normative contract in `./index` needed no edit.
+ * See that type's note for why this is §6 held rather than §6 relaxed.
  */
 import type { CommandEnvelope, EventEnvelope, ActionWindowRunView } from "./index";
 
 /** Bump on any breaking change to the *framing* below (independent of the message protocol version). */
 export const ACTION_WINDOW_TRANSPORT_VERSION = 1;
 
+/* ────────────────────────────── Guidance pack (FE → Runtime) ────────────────────────────── */
+
+/**
+ * **The prose the Runtime is allowed to render, authored by the frontend.**
+ *
+ * ## Why this exists, and why it does not weaken §6
+ *
+ * §6 says the Runtime supplies semantic identifiers and the FE owns every word. That held as long as every
+ * word was read in the SellerOps window. It stopped holding when guidance moved INTO the marketplace page:
+ * the seller works in the SmartStore tab, and a sentence that only exists in the other window is a sentence
+ * they never see (product-owner decision, 2026-07-26 — one start in SellerOps, then finish inside SmartStore).
+ *
+ * The rule §6 protects is *who decides the wording*, not *which process holds the string*. So the direction
+ * is inverted rather than relaxed: the FE composes the prose and hands it down, and the Runtime does lookup
+ * and `{param}` substitution — nothing else. A copy key with no entry here renders NO sentence; the Runtime
+ * has no fallback prose to fall back to, which is what makes "the FE owns all copy" structural instead of
+ * aspirational. (`collector` proves it: a source guard asserts the panel modules contain no Hangul.)
+ *
+ * ## What this frame is NOT
+ *
+ *  - It is **FE → Runtime only.** Nothing here is ever echoed back on an event, a view, or a resync reply,
+ *    so the Runtime→FE privacy invariant and `findProhibitedFields` are untouched — this is why the
+ *    normative message contract in `./index` needed no change at all.
+ *  - It is **never logged and never persisted.** The Runtime logs a count of entries, never a sentence.
+ *  - It carries **no run state**: no status, no step number, no blocker. Those still come from the Runtime,
+ *    which is the only thing that knows them. This is a dictionary, not a view.
+ */
+export interface AwGuidancePack {
+  /**
+   * Panel furniture. `stepCounter` may use `{step}` / `{total}`; `requiredRange` may use `{start}` / `{end}`.
+   * Present so even the frame around the guidance is the FE's wording and not the Runtime's.
+   */
+  chrome: {
+    product: string;
+    stepCounter: string;
+    requiredRange: string;
+    blockedLabel: string;
+  };
+  /** Step `copyKey` → sentence template. `{param}` placeholders are filled from that step's `copyParams`. */
+  steps: Record<string, string>;
+  /**
+   * `BlockerCode` → why it stopped and how to repair it.
+   *
+   * Two fields rather than one because a stopped run has two obligations to the seller, and collapsing them
+   * is what left the 2026-07-25 run's operator changing a date nobody was watching: `title` says what is
+   * wrong, `fix` says the one thing that clears it.
+   */
+  blockers: Record<string, { title: string; fix: string }>;
+  /** `CommandType` → button label for the controls the Runtime reports as allowed. */
+  commands: Record<string, string>;
+  /**
+   * Situation-specific wording for `REQUEST_STEP_RECHECK`, because one label cannot be right everywhere.
+   *
+   * "확인 완료" is correct at a date field and wrong at a download barrier, and on the 2026-07-25 run the
+   * operator could not find the button they had been told to press. Resolution order is blocker → step →
+   * fallback: what the run is BLOCKED on describes the repair better than what step it is nominally at.
+   */
+  recheck: {
+    byBlocker: Record<string, string>;
+    byStep: Record<string, string>;
+    fallback: string;
+  };
+}
+
 /* ────────────────────────────── Frames ────────────────────────────── */
 
-/** Frontend → Runtime. A command intent, or a reconnect resync request. */
+/**
+ * Frontend → Runtime. A command intent, a reconnect resync request, or the guidance prose the Runtime
+ * renders in the marketplace page ({@link AwGuidancePack}).
+ */
 export type AwClientFrame =
   | { kind: "aw_command"; command: CommandEnvelope }
-  | { kind: "aw_resync"; runId: string; sinceSequence: number };
+  | { kind: "aw_resync"; runId: string; sinceSequence: number }
+  | { kind: "aw_guidance_pack"; pack: AwGuidancePack };
 
 /** Runtime → Frontend. Ordered events, the latest sanitized View Model, a command ack, or a resync reply. */
 export type AwServerFrame =

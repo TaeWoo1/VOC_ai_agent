@@ -10,6 +10,12 @@
  * the whole chain or `whenSettled` returns while the run is mid-flight and a test asserts on a state that
  * is about to change.
  *
+ * **It also owns the in-page guidance panel** (2026-07-26). The seller works in the marketplace window, so
+ * every transition this session publishes to the frontend is ALSO drawn there — the step, the window to match,
+ * and, when the run stops, the cause and the one control that repairs it. The words are the frontend's: they
+ * arrive as an `aw_guidance_pack` and this session does lookup and `{param}` substitution, nothing more. A
+ * press on that panel comes back as an ordinary operator command, gated twice (see `applyPanelIntent`).
+ *
  * INVARIANTS (inherited, and structural here):
  *  - the session never performs a marketplace action — it arms observation and reacts to what the driver
  *    reports the SELLER did;
@@ -18,8 +24,11 @@
  *    duplicated observation cannot skip a step.
  */
 import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
-import type { AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
+import type { AwGuidancePack, AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
+import { guidancePanelStateFrom, isGuidancePack, PANEL_COMMANDS } from "../guidance-copy";
+import { log } from "../../log";
 import type { ImportEffect, ImportSegmentEngine } from "./import-engine";
+import { IMPORT_TERMINAL_STAGES } from "./import-stages";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
 
 export interface ImportSessionOptions {
@@ -33,6 +42,15 @@ export interface ImportSessionOptions {
    * peg a core. A re-arm is never a hot path, so a pause costs nothing and removes the hazard.
    */
   rearmDelayMs?: number;
+  /**
+   * How often the in-page guidance panel is checked for a press.
+   *
+   * A poll rather than a callback because the panel lives in the marketplace page and the only channel back
+   * is a value the driver reads. Slow on purpose: this is a human pressing a button, and a press that takes
+   * half a second to register costs nothing, while a tight loop would evaluate in the seller's page
+   * continuously for the whole sitting.
+   */
+  panelPollMs?: number;
 }
 
 export class ImportSegmentSession {
@@ -43,11 +61,22 @@ export class ImportSegmentSession {
   private readonly runId: string;
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
+  private readonly panelPollMs: number;
 
   private started = false;
   private publishedSeq = 0;
   private autoBusy = false;
   private unsubscribe: (() => void) | null = null;
+  /**
+   * The frontend's guidance prose, or null until it arrives.
+   *
+   * Null is not a degraded mode to paper over: with no pack the panel simply does not render, and the run
+   * behaves exactly as it did before guidance moved in-page. There is no runtime-authored substitute, which is
+   * how contract §6 stays structural (see `../guidance-copy.ts`).
+   */
+  private pack: AwGuidancePack | null = null;
+  private panelStopped = false;
+  private panelLoopRunning = false;
 
   constructor(
     engine: ImportSegmentEngine,
@@ -64,11 +93,25 @@ export class ImportSegmentSession {
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
+    this.panelPollMs = opts?.panelPollMs ?? 500;
   }
 
+  /**
+   * Subscribe to the transport and start watching the in-page panel.
+   *
+   * The returned function releases BOTH. It has to: the host builds one session per segment and releases the
+   * previous one, and a panel poller left running would keep reading a finished run's page and feeding its
+   * presses into an engine nobody is publishing.
+   */
   attach(): () => void {
     if (this.unsubscribe) return this.unsubscribe;
-    this.unsubscribe = this.transport.subscribe((frame) => this.handle(frame));
+    const stopTransport = this.transport.subscribe((frame) => this.handle(frame));
+    this.panelStopped = false;
+    void this.watchPanel();
+    this.unsubscribe = () => {
+      this.panelStopped = true;
+      stopTransport();
+    };
     return this.unsubscribe;
   }
 
@@ -82,6 +125,27 @@ export class ImportSegmentSession {
   }
 
   private handle(frame: AwClientFrame): void {
+    if (frame.kind === "aw_guidance_pack") {
+      if (!isGuidancePack(frame.pack)) {
+        // Fail closed on a malformed pack rather than render half a panel: a panel missing the sentence that
+        // says what to do is worse than no panel, because the seller cannot tell it is incomplete.
+        log("aw_import_guidance_pack_rejected", { accepted: false });
+        return;
+      }
+      this.pack = frame.pack;
+      // COUNTS only. The values are the frontend's copy and the seller's own language; a log line is not
+      // where they belong, and this line exists to prove a pack arrived, not to say what it said.
+      log("aw_import_guidance_pack", {
+        steps: Object.keys(frame.pack.steps).length,
+        blockers: Object.keys(frame.pack.blockers).length,
+        commands: Object.keys(frame.pack.commands).length,
+      });
+      this.queuePanelRender();
+      // Started lazily, and only from here: a run with no pack renders no panel, so there is nothing to
+      // press and nothing to poll for. That also keeps every pre-existing run shape byte-identical.
+      void this.watchPanel();
+      return;
+    }
     if (frame.kind === "aw_resync") {
       if (frame.runId !== this.runId || !this.started) {
         this.transport.send({ kind: "aw_resync_result", view: null, events: [] });
@@ -126,6 +190,15 @@ export class ImportSegmentSession {
       if ("locate" in effect) {
         const res = await this.driver.locateTarget(effect.locate);
         const next = this.engine.onTargetLocated(effect.locate, res);
+        this.publishState();
+        return this.drive(next);
+      }
+      if ("prefilled" in effect) {
+        // The driver compares in-process and answers with a boolean; no date value crosses back, exactly as
+        // with the scope read. A driver that cannot tell answers `false`, which asks the seller — the safe
+        // direction, since a wrong skip would hand an unchecked field to the gate.
+        const satisfied = await this.driver.isTargetPrefilled(effect.prefilled, this.required);
+        const next = this.engine.onTargetPrefilled(effect.prefilled, satisfied);
         this.publishState();
         return this.drive(next);
       }
@@ -183,6 +256,13 @@ export class ImportSegmentSession {
         const next = this.engine.onIngested(res);
         this.publishState();
         return this.drive(next);
+      }
+      case "CLEAR_HIGHLIGHT": {
+        // The run has stopped pointing at anything. The panel — already rendered with the cause and the
+        // repair by the publish that preceded this — is now the only thing on screen claiming attention,
+        // which is the honest state (finding 12).
+        await this.driver.clearTargetHighlight();
+        return;
       }
       case "CLEANUP": {
         await this.driver.cleanup();
@@ -248,9 +328,89 @@ export class ImportSegmentSession {
       }
     }
     this.transport.send({ kind: "aw_view", view: this.engine.view() });
+    // The seller is in the marketplace window, so the same transition is drawn there too. Queued rather
+    // than awaited: publishing state must not wait on a page evaluate, and it must not fail because of one.
+    this.queuePanelRender();
     // The run marker is saved AFTER the sanitized state is published, never before — a persisted record
     // must not lead the wire, or a resumed run could claim progress the frontend never saw.
     this.onStatePublished?.();
+  }
+
+  /* ── the in-page panel ─────────────────────────────────────────────────────── */
+
+  /**
+   * Draw the current state in the marketplace page.
+   *
+   * Serialized through one chain so two fast transitions cannot land out of order and leave the seller
+   * reading the earlier of the two. Errors are swallowed on purpose: the panel is how the seller is INFORMED,
+   * and a page that refused an evaluate (navigating, closed) must not take down a run that is otherwise fine.
+   */
+  private queuePanelRender(): void {
+    if (this.pack === null) return;
+    const state = guidancePanelStateFrom(this.engine.view(), this.pack);
+    this.panelRender = this.panelRender.then(() => this.driver.renderGuidance(state)).catch(() => {});
+  }
+
+  private panelRender: Promise<void> = Promise.resolve();
+
+  /**
+   * Watch the panel for the seller's presses until the run ends or the session is released.
+   *
+   * A poll, because the panel is in the seller's page and the only way back is a value the driver reads. It
+   * stops at a terminal stage: a finished run has no panel, and continuing to evaluate in someone's browser
+   * for nothing is not a cost worth paying.
+   */
+  private async watchPanel(): Promise<void> {
+    if (this.panelLoopRunning) return;
+    this.panelLoopRunning = true;
+    try {
+      while (!this.panelStopped) {
+        await new Promise<void>((resolve) => setTimeout(resolve, this.panelPollMs));
+        if (this.panelStopped) return;
+        if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
+        const intent = await this.driver.takeGuidanceIntent().catch(() => null);
+        if (intent) this.applyPanelIntent(intent);
+      }
+    } finally {
+      this.panelLoopRunning = false;
+    }
+  }
+
+  /**
+   * Apply a press on the in-page panel as an ordinary operator command.
+   *
+   * **Double-gated, and the first gate is the important one.** The intent arrives from a flag in the seller's
+   * own page, so it is treated as untrusted input rather than as our own UI talking to us: only the two
+   * commands the panel ever renders are accepted, so nothing else in that page can reach the engine through
+   * this path — no `SWITCH_TO_MANUAL`, no `START_RUN`, nothing that was not a button the seller saw. The
+   * second gate is the runtime's own `allowedCommands`, the same authority the frontend is held to.
+   *
+   * `REQUEST_STEP_RECHECK` still means "I did it, look again" here: it re-arms or re-reads, and completes
+   * nothing.
+   */
+  private applyPanelIntent(type: string): void {
+    if (!PANEL_COMMANDS.includes(type)) {
+      log("aw_import_panel_intent_refused", { known: false });
+      return;
+    }
+    const view = this.engine.view();
+    if (!view.allowedCommands.includes(type as never)) {
+      log("aw_import_panel_intent_refused", { allowed: false });
+      return;
+    }
+    // The panel is in-process, so it cannot be stale against the engine it is drawn from — the revision it
+    // presents is the one it just read.
+    const outcome = this.engine.command({ type, expectedRevision: view.revision });
+    log("aw_import_panel_intent", { accepted: outcome.ok });
+    this.publishState();
+    if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
+      this.autoBusy = true;
+      void this.drive(outcome.effect)
+        .catch(() => this.fatalCleanup())
+        .finally(() => {
+          this.autoBusy = false;
+        });
+    }
   }
 }
 

@@ -15,7 +15,12 @@ import type {
   CommandType,
 } from "../../../../../contracts/action-window/v2/index";
 import { validateCommandEnvelope } from "../../../../../contracts/action-window/v2/index";
-import type { AwClientFrame, AwClientTransport, AwServerFrame } from "../../../../../contracts/action-window/v2/transport";
+import type {
+  AwClientFrame,
+  AwClientTransport,
+  AwGuidancePack,
+  AwServerFrame,
+} from "../../../../../contracts/action-window/v2/transport";
 
 function view(over: Partial<ActionWindowRunView> = {}): ActionWindowRunView {
   return {
@@ -296,5 +301,92 @@ describe("published state mirrors the runtime, and nothing else", () => {
     runtime.send("REQUEST_STEP_RECHECK");
     expect(commandsOf(t.sent)).toEqual([]);
     expect(t.listenerCount()).toBe(0);
+  });
+});
+
+/* ─────────────────── the words the agent renders in the marketplace page ─────────────────── */
+
+const PACK: AwGuidancePack = {
+  chrome: { product: "SellerOps", stepCounter: "{step}/{total}", requiredRange: "{start}-{end}", blockedLabel: "!" },
+  steps: { "actionWindow.import.setStartDate": "PICK-START" },
+  blockers: { SCOPE_MISMATCH: { title: "T", fix: "F" } },
+  commands: { REQUEST_STEP_RECHECK: "R", CANCEL_RUN: "C" },
+  recheck: { byBlocker: {}, byStep: {}, fallback: "R" },
+};
+
+const packsOf = (frames: AwClientFrame[]): AwGuidancePack[] =>
+  frames
+    .filter((f): f is Extract<AwClientFrame, { kind: "aw_guidance_pack" }> => f.kind === "aw_guidance_pack")
+    .map((f) => f.pack);
+
+describe("the guidance pack travels down, per run", () => {
+  /**
+   * The agent builds a FRESH session per segment, and a new session starts with no copy at all. Without a
+   * re-send the seller would get guidance on their first segment and a silent panel on every segment after —
+   * worse than never having had it, because by then they rely on it.
+   */
+  it("is re-sent on every successful start, not only the first", async () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    runtime.setGuidancePack(PACK);
+
+    const first = runtime.start({ launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT" });
+    t.ack();
+    await first;
+    const second = runtime.start({ launchRef: "1122334455667788", kind: "SEGMENT" });
+    t.ack();
+    await second;
+
+    // One on `setGuidancePack` (a session may already be live after a refresh) plus one per started run.
+    expect(packsOf(t.sent)).toHaveLength(3);
+    expect(packsOf(t.sent)[0]!.steps["actionWindow.import.setStartDate"]).toBe("PICK-START");
+  });
+
+  /**
+   * Sent AFTER the acknowledgement, never before. The host assembles a session only once it has resolved the
+   * launch ref, so a pack sent earlier would arrive at a listener that does not exist yet.
+   */
+  it("waits for the agent's acknowledgement before handing over the copy", async () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    runtime.setGuidancePack(PACK);
+    const before = packsOf(t.sent).length;
+
+    const started = runtime.start({ launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT" });
+    // The command is out; nothing has answered yet.
+    expect(packsOf(t.sent).length).toBe(before);
+    t.ack();
+    await started;
+    expect(packsOf(t.sent).length).toBe(before + 1);
+  });
+
+  it("sends no copy for a run the agent refused", async () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    runtime.setGuidancePack(PACK);
+    const before = packsOf(t.sent).length;
+
+    const started = runtime.start({ launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT" });
+    t.ack(false, "INVALID_FOR_STATE");
+    await expect(started).rejects.toBeInstanceOf(GuidedImportStartRejectedError);
+    expect(packsOf(t.sent).length).toBe(before);
+  });
+
+  /** With no pack there is nothing on the wire — and the agent has no fallback prose of its own to render. */
+  it("puts nothing on the wire when the card supplied no words", async () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    const started = runtime.start({ launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT" });
+    t.ack();
+    await started;
+    expect(packsOf(t.sent)).toEqual([]);
+  });
+
+  it("stops sending once released", async () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    runtime.dispose();
+    runtime.setGuidancePack(PACK);
+    expect(packsOf(t.sent)).toEqual([]);
   });
 });

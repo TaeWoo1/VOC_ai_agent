@@ -8,6 +8,8 @@
 //     says "100% of all reviews".
 //   * MISSING is a coverage conclusion ("가져올 수 없는 기간"), never a failed attempt.
 
+import type { AwGuidancePack } from "../../../contracts/action-window/v2/transport";
+import { blockerView, commandLabel } from "./actionWindow/copy";
 import type {
   ReviewImportCoverageView,
   ReviewImportHealthView,
@@ -177,14 +179,21 @@ export function importProgress(segments: ReviewImportSegmentView[]): ImportProgr
   return { done, total: live.length, text: `${live.length}개 구간 중 ${done}개 완료` };
 }
 
-/** The next segment the seller will be guided through, or null when nothing remains. */
+/**
+ * The next segment the seller will be guided through, or null when nothing remains.
+ *
+ * **Most recent month first** (product-owner decision, 2026-07-26). A plan can be 37 exports the seller performs
+ * by hand, and they may stop part-way: the recent months hold the reviews that still need answering, so the
+ * value has to arrive in the first segment rather than the last. Mirrors the backend's own `nextRemainingSegment`
+ * — the two must agree, or the card names one month and the ticket authorizes another.
+ */
 export function nextRemainingSegment(segments: ReviewImportSegmentView[]): ReviewImportSegmentView | null {
   return (
     segments
       .filter((s) => !s.superseded)
       .filter((s) => s.coverageState === "UNVERIFIED")
       .filter((s) => s.executionState !== "ACTIVE")
-      .sort((a, b) => a.segmentStart.localeCompare(b.segmentStart))[0] ?? null
+      .sort((a, b) => b.segmentStart.localeCompare(a.segmentStart))[0] ?? null
   );
 }
 
@@ -287,24 +296,157 @@ export const IMPORT_STAGE_COPY: Readonly<Record<string, string>> = {
   "actionWindow.import.consent": "네이버 확인 창의 버튼을 눌러 주세요.",
   "actionWindow.import.ingest": "받은 파일을 SellerOps가 정리하고 있어요.",
 
-  // The range-discovery run: the step BEFORE any plan exists. Its two barriers appear only when SellerOps could
-  // not read the limits itself, so the copy describes the seller ESTABLISHING the range, never verifying it.
-  //
-  // ⚠ KNOWN-WRONG WORDING, pending a product-owner pass (proof record, finding 16). The 2026-07-25 live run
-  // established that NAVER's review calendar restricts nothing, so "선택할 수 있는 가장 이전 날짜" asks the
-  // seller about a limit that does not exist — what they are really choosing is how far back to import. The
-  // copy also says nothing about the consequence: the range they pick becomes the plan, one segment per month,
-  // so three years is 37 of them. Do not "fix" this by softening the words alone; the concept is what changed.
-  "actionWindow.importDiscovery.openReviewSurface": "판매자센터의 리뷰 관리 화면을 열어 주세요.",
-  "actionWindow.importDiscovery.readBounds": "가져올 수 있는 기간을 확인하고 있어요.",
-  "actionWindow.importDiscovery.setEarliest": "달력에서 선택할 수 있는 가장 이전 날짜를 시작일로 골라 주세요.",
-  "actionWindow.importDiscovery.setLatest": "종료일에는 가장 최근 날짜를 골라 주세요.",
-  "actionWindow.importDiscovery.report": "가져올 기간을 정리하고 있어요.",
+  // The `actionWindow.importDiscovery.*` keys are GONE, and that is the fix for finding 16 rather than a
+  // rewording of it. They described a run that asked the seller to find the earliest date NAVER's calendar
+  // allowed — a limit the 2026-07-25 live run established does not exist. What the seller is really deciding is
+  // how far back to import, which is now a choice they make in SellerOps before any marketplace window opens
+  // (see RANGE_CHOICE_COPY), so there is no run and no step copy to soften.
 };
 
 /** Copy for a runtime stage key. An unknown key degrades to a neutral line, never to a raw dotted key. */
 export function importStageText(copyKey: string): string {
   return IMPORT_STAGE_COPY[copyKey] ?? "다음 안내를 따라 주세요.";
+}
+
+/* ─────────────────── "다시 확인" is not one sentence ─────────────────── */
+
+/**
+ * What `REQUEST_STEP_RECHECK` should SAY, here, now.
+ *
+ * One fixed label cannot be right everywhere, and the cost of pretending otherwise was measured: on the
+ * 2026-07-25 live run the operator was told to press a button labelled 확인 완료 and could not match it to
+ * anything they had just done. The command means "I did the thing — look again", so the label has to name the
+ * thing.
+ *
+ * Blocker first, then step: what a run is STOPPED on describes the repair better than the step it is nominally
+ * sitting at. A stop at the scope gate is nominally still "the end date step", but what the seller has to do is
+ * fix the dates.
+ */
+const RECHECK_BY_BLOCKER: Readonly<Record<string, string>> = {
+  SCOPE_MISMATCH: "날짜 다시 확인",
+};
+
+const RECHECK_BY_STEP: Readonly<Record<string, string>> = {
+  "actionWindow.import.setStartDate": "시작일 입력했어요",
+  "actionWindow.import.setEndDate": "종료일 입력했어요",
+  "actionWindow.import.applyRange": "조회 눌렀어요",
+  "actionWindow.import.confirmRange": "기간이 같아요",
+  "actionWindow.import.export": "엑셀 다운로드 눌렀어요",
+  "actionWindow.import.consent": "확인 눌렀어요",
+};
+
+/** Neutral and still true of every barrier: the runtime is being asked to look, not told the step is done. */
+export const RECHECK_FALLBACK_LABEL = "다시 확인";
+
+export function recheckLabel(context: { copyKey?: string | null; blockerCode?: string | null }): string {
+  const byBlocker = context.blockerCode ? RECHECK_BY_BLOCKER[context.blockerCode] : undefined;
+  if (byBlocker) return byBlocker;
+  const byStep = context.copyKey ? RECHECK_BY_STEP[context.copyKey] : undefined;
+  return byStep ?? RECHECK_FALLBACK_LABEL;
+}
+
+/* ─────────────────── The words the marketplace-side panel renders ─────────────────── */
+
+/**
+ * Every sentence the seller reads INSIDE their SmartStore window, handed to the runtime as a pack.
+ *
+ * Guidance moved into the marketplace page (product-owner decision, 2026-07-26): the seller works there, so a
+ * sentence that only exists in the SellerOps tab is a sentence they never see. Copy ownership did not move with
+ * it — this function is where the words live, the runtime does lookup and `{param}` substitution, and a key
+ * missing here renders NO sentence rather than a runtime-authored one.
+ *
+ * Blocker wording is reused from `blockerView` rather than restated, so the two windows cannot disagree about
+ * why a run stopped.
+ */
+export function buildImportGuidancePack(): AwGuidancePack {
+  const blockerCodes = [
+    "SCOPE_MISMATCH",
+    "LOGIN_REQUIRED",
+    "SESSION_EXPIRED",
+    "UNSUPPORTED_STATE",
+    "TARGET_NOT_FOUND",
+    "TARGET_AMBIGUOUS",
+    "DOWNLOAD_TIMEOUT",
+    "ARTIFACT_INVALID",
+    "INGEST_FAILED",
+  ];
+  const blockers: Record<string, { title: string; fix: string }> = {};
+  for (const code of blockerCodes) {
+    const view = blockerView(code);
+    blockers[code] = { title: view.title, fix: view.body };
+  }
+  return {
+    chrome: {
+      // Named, because this panel appears on someone else's site and the seller has to know whose it is.
+      product: "SellerOps 안내",
+      stepCounter: "{total}단계 중 {step}",
+      requiredRange: "가져올 기간: {start} ~ {end}",
+      blockedLabel: "잠깐 멈췄어요",
+    },
+    steps: { ...IMPORT_STAGE_COPY },
+    blockers,
+    commands: {
+      REQUEST_STEP_RECHECK: RECHECK_FALLBACK_LABEL,
+      CANCEL_RUN: commandLabel("CANCEL_RUN"),
+    },
+    recheck: {
+      byBlocker: { ...RECHECK_BY_BLOCKER },
+      byStep: { ...RECHECK_BY_STEP },
+      fallback: RECHECK_FALLBACK_LABEL,
+    },
+  };
+}
+
+/* ─────────────────── "얼마나 가져올까요" — the seller's own range choice ─────────────────── */
+
+/**
+ * The screen that replaced range discovery.
+ *
+ * The wording is about DEPTH, not about limits: nothing here suggests the marketplace restricts anything,
+ * because the live run established that it does not. And the confirmation states the consequence in the unit the
+ * seller pays it in — one export per month, performed by hand — since that is what turns a date into a decision.
+ */
+export const RANGE_CHOICE_COPY = {
+  title: "언제부터 가져올까요?",
+  body: "고른 달부터 오늘까지의 리뷰를 가져와요. 한 달에 한 번씩 판매자센터에서 파일을 내려받게 안내해 드려요.",
+  monthLabel: "시작 월",
+  confirm: "이 기간으로 시작하기",
+  confirming: "준비하는 중…",
+  previewFailed: "기간을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.",
+  createFailed: "가져오기를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.",
+} as const;
+
+/**
+ * The period and its cost, in one line.
+ *
+ * The segment count comes from the SERVER's preview, never from a count done here: "today" is the server's, and
+ * a browser clock an hour off would show a seller one number and create a plan with another.
+ */
+export function rangeChoiceSummary(preview: { start: string; end: string; segmentCount: number }): string {
+  return `${preview.start} ~ ${preview.end} · ${preview.segmentCount}개 구간`;
+}
+
+/**
+ * Month options for the chooser, newest first, back to `monthsBack` months before `today`.
+ *
+ * `today` is passed in rather than read from the clock so this is pure and testable; the component supplies the
+ * server's own end date once the first preview lands, and falls back to the browser's month before that (only
+ * ever to populate a list — the period that gets created is always the server's).
+ */
+export function monthOptions(today: string, monthsBack = 72): { value: string; label: string }[] {
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return [];
+  const out: { value: string; label: string }[] = [];
+  for (let back = 0; back <= monthsBack; back += 1) {
+    const total = year * 12 + (month - 1) - back;
+    const y = Math.floor(total / 12);
+    const m = (total % 12) + 1;
+    if (y < 2010) break;
+    const value = `${y}-${String(m).padStart(2, "0")}`;
+    out.push({ value, label: `${y}년 ${m}월` });
+  }
+  return out;
 }
 
 /**

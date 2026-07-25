@@ -505,6 +505,19 @@ export interface ReviewImportCoverageView {
   missingSegments: number;
 }
 
+/**
+ * What a chosen start month would create, before it is created.
+ *
+ * `segmentCount` is the number of separate exports the seller will perform by hand — the fact that makes the
+ * choice a decision rather than a date entry. Server-computed, including `end` (today): a browser clock an hour
+ * off would show one period and create another.
+ */
+export interface ReviewImportRangeSelectionView {
+  start: string;
+  end: string;
+  segmentCount: number;
+}
+
 export interface ReviewImportPlanDetailView {
   plan: ReviewImportPlanView;
   segments: ReviewImportSegmentView[];

@@ -8,8 +8,10 @@
  * **The three things this engine exists to guarantee:**
  *
  *  1. **It never acts on the marketplace.** There is no effect that clicks, types, exports or consents.
- *     The effects are PREPARE / LOCATE / HIGHLIGHT / OBSERVE / READ_SCOPE / DETECT_DOWNLOAD /
- *     VALIDATE / INGEST / CLEANUP — all observation, annotation, or work on a file the seller produced.
+ *     The effects are PREPARE / LOCATE / PREFILLED / HIGHLIGHT / OBSERVE / READ_SCOPE / CLEAR_HIGHLIGHT /
+ *     DETECT_DOWNLOAD / VALIDATE / INGEST / CLEANUP — all observation, annotation, or work on a file the
+ *     seller produced. The two added on 2026-07-26 are the smallest kind of both: PREFILLED asks a control
+ *     what it already contains, and CLEAR_HIGHLIGHT takes an annotation off.
  *  2. **The scope gate is unbypassable.** `EXPORT` is unreachable except through `READ_SCOPE`, and a
  *     `MISMATCH` parks the run at `SCOPE_BLOCKED` instead. A file covering the wrong window ingested as
  *     though it covered this segment is the worst outcome available here — worse than not importing.
@@ -49,9 +51,13 @@ export type ImportEffect =
   | "PREPARE"
   | "READ_FACTS"
   | { locate: ImportTarget }
+  /** Ask whether this date control already holds what the gate will accept (finding 13). */
+  | { prefilled: ImportTarget }
   | { highlight: ImportTarget }
   | { observe: ImportTarget }
   | "READ_SCOPE"
+  /** Take the annotation off the control the run has stopped pointing at (finding 12). */
+  | "CLEAR_HIGHLIGHT"
   | "DETECT_DOWNLOAD"
   | "VALIDATE_ARTIFACT"
   | "INGEST"
@@ -253,8 +259,33 @@ export class ImportSegmentEngine {
     if (res.count > 1) return this.fail("TARGET_AMBIGUOUS");
     if (res.count === 0 || !res.sig) return this.fail("TARGET_NOT_FOUND");
     this.targetSig[target] = res.sig;
+    // A date control is asked one question before anything is annotated: does it already hold the value this
+    // segment needs? Asked BEFORE the highlight rather than after, so a step the seller does not have to
+    // perform never flashes an annotation at them (finding 13).
+    if (target === "start_date" || target === "end_date") {
+      this.stage = this.highlightStageFor(target);
+      return { prefilled: target };
+    }
     this.stage = this.highlightStageFor(target);
     return { highlight: target };
+  }
+
+  /**
+   * The date control's current value, as a verdict.
+   *
+   * `true` completes the step as `SKIPPED` — the seller has nothing to do, and asking them to change a
+   * correct date so a change listener fires is the defect this closes, not a workaround for it. The step keeps
+   * its slot in the plan and its number, exactly as `CONFIRM_RANGE` does, so `totalSteps` never moves under
+   * the frontend. The scope gate still runs afterwards and is still the only thing that can reach the export
+   * control: a skipped step is a step nobody needed, not a check nobody made.
+   */
+  onTargetPrefilled(target: ImportTarget, satisfied: boolean): ImportEffect {
+    if (this.isTerminal()) return "NONE";
+    if (this.stage !== this.highlightStageFor(target)) return "NONE";
+    if (!satisfied) return { highlight: target };
+    this.completedSteps = this.activeStepIndex;
+    this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "SKIPPED" });
+    return this.advanceAfterBarrier(target);
   }
 
   /**
@@ -337,13 +368,12 @@ export class ImportSegmentEngine {
       this.stage = "SCOPE_BLOCKED";
       this.emit("RUN_BLOCKED", { code: "SCOPE_MISMATCH", recoverable: true });
       this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
-      // KNOWN GAP (proof record, finding 12): `NONE` leaves the marketplace page exactly as it was, so the
-      // previous step's highlight is still sitting on the date field the seller just left. On the 2026-07-25
-      // CTA run that read as "still waiting for the end date" on a run that had stopped 30 seconds earlier,
-      // and the operator kept changing a date nobody was watching. The stop is only visible in the SellerOps
-      // window — which is the whole reason the product owner moved guidance into the marketplace page. The
-      // fix belongs to that slice, not to a quiet effect added here.
-      return "NONE";
+      // FIXED (proof record, finding 12). This used to return `NONE`, which left the page exactly as it was —
+      // so the previous step's highlight sat on the date field the seller had just left, reading as "still
+      // waiting for this" on a run that had stopped 30 seconds earlier, and the operator kept changing a date
+      // no barrier was watching. The annotation comes off, and the session then renders the stop — cause, fix
+      // and the recheck control — in the marketplace page where the seller actually is.
+      return "CLEAR_HIGHLIGHT";
     }
     // Advance past the CONFIRM_RANGE slot. It always exists in the plan; when the runtime read the range
     // itself the slot is reported SKIPPED rather than removed, so totalSteps never moves.

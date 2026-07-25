@@ -10,17 +10,11 @@
  * reaching production would report imports that never happened. `import-dispatch.test.ts` asserts the
  * production wiring does not reference this module.
  */
-import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
+import type { GuidancePanelState } from "../guidance-panel";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, SurfaceProbeResult } from "../engine";
-import type {
-  DiscoveredRange,
-  ImportDiscoveryDriver,
-  ImportProbeDriver,
-  ImportTarget,
-  RequiredRange,
-} from "./import-driver";
+import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
 
 export interface ImportFixtureScript {
   surface?: boolean | SurfaceProbeResult;
@@ -36,13 +30,11 @@ export interface ImportFixtureScript {
   validate?: ArtifactValidateResult;
   ingest?: IngestResult;
 
-  /* ── range discovery ── */
-  /** What the range controls declare. Missing → nothing declared, which is the live NAVER surface's answer. */
-  bounds?: RangeControlProbe;
-  /** What the seller ends up having selected. Missing → a readable range. `null` → unreadable. */
-  selectedRange?: DiscoveredRange | null;
-  /** Whether the server accepts the reported range. Missing → it does. */
-  reportOk?: boolean;
+  /**
+   * Which date controls already hold the required value. Missing → none do, which is the ordinary case and
+   * the one every pre-existing test was written against.
+   */
+  prefilled?: Partial<Record<ImportTarget, boolean>>;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -55,11 +47,17 @@ function sigFor(target: ImportTarget): string {
   return hash.toString(16).padStart(8, "0").repeat(2).slice(0, 16);
 }
 
-export class ImportFixtureDriver implements ImportProbeDriver, ImportDiscoveryDriver {
+export class ImportFixtureDriver implements ImportProbeDriver {
   private readonly script: ImportFixtureScript;
   /** Every call, in order — so a test can assert the runtime never armed a control it should not have. */
   readonly calls: string[] = [];
+  /**
+   * Panel renders, newest last. Kept OUT of {@link calls} on purpose: a panel render is not choreography, and
+   * mixing it in would rewrite the call sequence every existing test asserts on.
+   */
+  readonly guidanceRenders: (GuidancePanelState | null)[] = [];
   private cleanedUp = 0;
+  private pendingIntent: string | null = null;
 
   constructor(script: ImportFixtureScript = {}) {
     this.script = script;
@@ -119,29 +117,34 @@ export class ImportFixtureDriver implements ImportProbeDriver, ImportDiscoveryDr
     return this.script.ingest ?? { ok: true, processed: 42 };
   }
 
-  async readRangeControls(): Promise<RangeControlProbe> {
-    this.calls.push("readRangeControls");
-    // Default: the controls declare nothing. That is what the live NAVER surface does — its date inputs are
-    // calendar-backed text fields with no `min`/`max` — so the default exercises the path a live run takes.
-    return this.script.bounds ?? { minAttrs: [], maxAttrs: [], noticeTexts: [] };
+  async clearTargetHighlight(): Promise<void> {
+    this.calls.push("clearHighlight");
   }
 
-  async readSelectedRange(): Promise<DiscoveredRange | null> {
-    this.calls.push("readSelectedRange");
-    // `selectedRange: null` is a scripted UNREADABLE, distinct from an absent key.
-    return this.script.selectedRange === undefined
-      ? { start: "2024-01-01", end: "2026-06-30" }
-      : this.script.selectedRange;
+  async isTargetPrefilled(target: ImportTarget, required: RequiredRange): Promise<boolean> {
+    // The required window is recorded, never a value read off a control — the same rule as `readSelectedScope`.
+    this.calls.push(`prefilled:${target}:${required.start}..${required.end}`);
+    return this.script.prefilled?.[target] ?? false;
   }
 
-  async reportDiscoveredRange(
-    range: DiscoveredRange,
-    evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED",
-  ): Promise<boolean> {
-    // The evidence is recorded so a test can assert it was never upgraded — the range dates belong here
-    // (the fixture IS the server end) but the evidence is what a bug would silently change.
-    this.calls.push(`reportRange:${evidence}:${range.start}..${range.end}`);
-    return this.script.reportOk ?? true;
+  async renderGuidance(state: GuidancePanelState | null): Promise<void> {
+    this.guidanceRenders.push(state);
+  }
+
+  async takeGuidanceIntent(): Promise<string | null> {
+    const intent = this.pendingIntent;
+    this.pendingIntent = null;
+    return intent;
+  }
+
+  /** Test helper: the seller presses a button on the in-page panel. Consumed once, like the real flag. */
+  pressPanel(command: string): void {
+    this.pendingIntent = command;
+  }
+
+  /** The most recent panel state, or null when nothing has been rendered. */
+  lastGuidance(): GuidancePanelState | null {
+    return this.guidanceRenders.length === 0 ? null : (this.guidanceRenders[this.guidanceRenders.length - 1] ?? null);
   }
 
   async cleanup(): Promise<void> {

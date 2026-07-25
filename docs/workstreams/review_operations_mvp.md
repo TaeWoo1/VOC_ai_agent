@@ -26,7 +26,14 @@
   (제외한 작업 · 복원) — account-scoped, append-only, with no completion claim. Guided ACT remains
   offline. ⚠ **No live evidence for any of it** — everything since Run 4 rests on synthetic
   fixtures. **Nothing promoted in §4.1.**
-- **Last updated:** 2026-07-24
+  **The onboarding import ran live once (2026-07-25)** — one seller CTA reached one ingested month, 61 rows —
+  and that run's own findings then **reshaped the journey (2026-07-26)**: the seller now chooses how far back to
+  import in SellerOps and finishes each month inside their SmartStore window, guided by a SellerOps panel there.
+  The range-**discovery** run was deleted (there was no marketplace limit to discover). **The reshaped journey ran
+  live the same day** — one segment, 62 rows, two marketplace interactions, the seller working only in their
+  SmartStore window. ⚠ The panel's **blocked** state is still offline-proven only (the gate matched on the first
+  read), and §4.1 promotes nothing.
+- **Last updated:** 2026-07-26
 - **Owner:** SellerOps product/engineering
 
 ---
@@ -642,6 +649,68 @@ Append a dated entry; never rewrite prior entries — correct forward.
   + `replied_at` (Flyway V21) → populate the existing `replyStatus` DTO field, plus a `[PO]` decision:
   are answered reviews **excluded** from "needs a look" or **badged**? Separately, a `[PO]` wording
   approval is owed for the `decisions.md` entry covering the live-path validate tightening.
+
+### 2026-07-26 — the journey moves into the SmartStore window (offline)
+
+- **What changed:** the seller now answers ONE question in SellerOps — how far back to import — and finishes each
+  month inside their own seller-center page, guided by a SellerOps panel there. Reversal of the 2026-07-25 shape,
+  and a measured one: instructions in one window and highlights in the other meant a `SCOPE_MISMATCH` was reported
+  correctly while the operator kept changing a date for 30 seconds, because the only thing that changed was text
+  in a tab nobody was watching.
+- **Product-owner decisions recorded (this session):**
+  1. Range selection is the seller choosing **how far back to import**, not discovery of a marketplace limit
+     (finding 16 — NAVER's review calendar restricts nothing).
+  2. End date = today; the seller picks the **start month**.
+  3. The **period AND its monthly-segment count** are confirmed before a plan is created.
+  4. Processing order is **most recent month first**.
+  5. A date step whose field already holds the required value is **`SKIPPED`**.
+  6. On a block: **remove the previous highlight** and show cause · repair · recheck in the marketplace-page panel.
+  7. **The frontend composes the panel's sentences** and sends them down (contract §6 held, not relaxed).
+  8. **Every NAVER click stays the operator's** — unchanged, and structural.
+- **What was removed rather than reworded:** the Action Window **range-discovery run** — engine, session, stages,
+  driver role, dispatch and host branch — and the `actionWindow.importDiscovery.*` copy keys. A `DISCOVERY` ticket
+  is now refused fail-closed by the host. The ticket KIND survives as the single-use authorization for one plan
+  creation, spent over HTTP with `range_evidence = OPERATOR_SELECTED`.
+- **How prose crosses without the runtime owning it:** a new FE → Runtime `aw_guidance_pack` frame in
+  `contracts/action-window/v2/transport.ts`. The normative message contract (`v2/index.ts`) is untouched — no
+  enum, envelope, view model or validator changed — and a source guard asserts there is **no Korean string
+  literal** in either panel module, so a runtime-authored sentence cannot be added without failing a test. A copy
+  key with no entry renders **no sentence**.
+- **Fixed from the live run:** finding 12 (stale highlight on a stopped run), finding 13 (a date barrier that a
+  correct value could never satisfy), finding 14 (no seller-facing pairing path — now on the import card,
+  ungated), finding 15 (login form blamed credentials for a request that never reached the backend), finding 16
+  (the concept), plus per-situation `REQUEST_STEP_RECHECK` wording.
+- **Evidence:** `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md` Addendum 3;
+  runbook rewritten (`naver-import-cta-live-runbook.md`). collector 5137 (was 5121) / frontend 990 (was 942) /
+  backend 1595 (was 1586); frontend production build green; `tools/ci/check-contract-importers.sh` green after
+  adding `frontend/src/components/reviewImport/**` to the Collector CI path filter (those cards now consume the
+  contract).
+- **§4.1 impact:** notes only, **no column promoted**. DISCOVERY is recorded as RETIRED rather than verified; the
+  in-page journey is recorded as **offline-proven, live-unproven**. `운영 지원` and the seller-facing wording are
+  unchanged.
+- **Ledger impact:** none.
+- **Live proof (2026-07-26, same session, fresh in-turn approval):** the new journey ran end to end on the real
+  surface — plan from a chosen start month with `OPERATOR_SELECTED` and **no marketplace window**, newest month
+  first, the frontend's guidance pack delivered over the socket (`steps: 9, blockers: 9, commands: 2`), the
+  current month's end date probed `prefilled: true` and its step reported **`SKIPPED`** (finding 13 closed live),
+  gate `MATCH` on the first read, `SUCCEEDED` with 62 new / 0 duplicate / 0 failed, segment `COMPLETED+COVERED`,
+  both tickets accounted for, and **zero refs, dates or URLs in the log**. Two marketplace interactions total.
+  Evidence: proof record Addendum 4.
+- **One failure, diagnosed not guessed:** the first `계속 가져오기` was refused (`aw_import_host_scope_refused`)
+  because the login form's pre-filled demo credentials put the operator in a different org from the agent. An
+  environment trap, now runbook trap 6; it also demonstrated that a refused `START_RUN` hands the ticket back
+  (`EXPIRED`) and costs nothing.
+- **Gate state:** one live-run gate consumed (NAVER, own test seller account, 2026-07-26, seated operator).
+  Bounded at ONE segment, disposable local backend, dropped afterwards.
+- **Blockers / still unproven:** the panel's **blocked** rendering on a live surface (cause · repair · contextual
+  recheck) — the gate matched first time, so it never appeared; more than one segment in a live sitting; an
+  apply-requiring surface; the segment `UNREADABLE` → `OPERATOR_CONFIRMED` branch; the pairing **approval**
+  control (bypassed by `--dev-insecure-auto-approve` on both live runs now); whether the panel's fixed
+  bottom-left position ever covers something the seller needs.
+- **Next / `[PO]`:** (a) the **start-month picker UI** — the operator called it poor; the mechanism is proven, the
+  presentation is not settled; (b) whether an unreachable month inside a chosen period should be surfaced during
+  the plan rather than only as per-segment `MISSING`; (c) a live run that deliberately reaches `SCOPE_MISMATCH`
+  so the in-page blocker is proven where it matters.
 
 ---
 

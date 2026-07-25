@@ -23,7 +23,7 @@ import {
   type CommandType,
   type RunIntent,
 } from "../../../../../contracts/action-window/v2/index";
-import type { AwClientTransport } from "../../../../../contracts/action-window/v2/transport";
+import type { AwClientTransport, AwGuidancePack } from "../../../../../contracts/action-window/v2/transport";
 import { newCommandId } from "../../commandId";
 
 /** What the card renders. A projection of the runtime's view — never assembled from local guesses. */
@@ -59,6 +59,15 @@ export interface GuidedImportRuntime {
    * reason: the ticket it just minted is unspent, and it can be handed back.
    */
   start(input: { launchRef: string; kind: GuidedImportKind }): Promise<void>;
+  /**
+   * Hand the agent the prose it renders in the marketplace page.
+   *
+   * Held and RE-SENT after every successful `start`, because the agent builds a fresh session per segment and a
+   * new session starts with no copy at all. Without the re-send the seller would get a guidance panel on their
+   * first segment and a silent one on every segment after it — which is worse than never having had it, because
+   * they would have learned to rely on it.
+   */
+  setGuidancePack(pack: AwGuidancePack): void;
   /** Forward an operator command. Refuses anything the current view does not allow. */
   send(type: CommandType): void;
   /** Ask the agent to replay the run it is hosting — recovers a guided view after a page refresh. */
@@ -138,6 +147,8 @@ export function createGuidedImportRuntime(
   let runId = session.runId;
   let latest: GuidedImportSnapshot | null = null;
   let disposed = false;
+  /** The guidance prose to hand to each run this session hosts. Null until the card supplies it. */
+  let guidancePack: AwGuidancePack | null = null;
   const listeners = new Set<(snapshot: GuidedImportSnapshot | null) => void>();
 
   const publish = (next: GuidedImportSnapshot | null): void => {
@@ -176,11 +187,23 @@ export function createGuidedImportRuntime(
     ...(payload ? { payload } : {}),
   });
 
+  const sendPack = (): void => {
+    if (!guidancePack) return;
+    transport.send({ kind: "aw_guidance_pack", pack: guidancePack });
+  };
+
   return {
     snapshot: () => latest,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    setGuidancePack(pack) {
+      if (disposed) return;
+      guidancePack = pack;
+      // Sent now as well as per-run: a page reopened mid-run has a live session on the agent that is drawing a
+      // panel with no words in it until someone hands it some.
+      sendPack();
     },
     start(input) {
       if (disposed) return Promise.reject(new GuidedImportDisposedError());
@@ -206,8 +229,13 @@ export function createGuidedImportRuntime(
         } as CommandEnvelope["payload"]);
         stopResults = transport.subscribe((frame) => {
           if (frame.kind !== "aw_command_result" || frame.commandId !== command.commandId) return;
-          if (frame.accepted) settle(() => resolve());
-          else settle(() => reject(new GuidedImportStartRejectedError(frame.reason ?? null)));
+          if (frame.accepted) {
+            // The agent has built the session for THIS run, so now there is something to give the copy to.
+            // Before the acknowledgement there was not: the host assembles a session only once it has resolved
+            // the launch ref, and a pack sent earlier would arrive at a listener that does not exist yet.
+            sendPack();
+            settle(() => resolve());
+          } else settle(() => reject(new GuidedImportStartRejectedError(frame.reason ?? null)));
         });
         // A transport that replays synchronously inside subscribe() would settle before the assignment above
         // completes, leaving the listener attached to a finished promise.

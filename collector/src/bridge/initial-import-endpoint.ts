@@ -14,9 +14,9 @@
  *     agent, build a correctly-versioned client, and sit dormant.
  *
  * **Why this endpoint re-arms and the other two do not.** An export or reply agent hosts exactly one run for
- * its lifetime. An onboarding import is inherently a SEQUENCE — range discovery, then one run per monthly
- * segment, each authorized by its own single-use launch ref — and the seller works through them in one
- * sitting without restarting their agent. So {@link InitialImportEndpoint.armRun} replaces the announced run
+ * its lifetime. An onboarding import is inherently a SEQUENCE — one run per monthly segment, each authorized
+ * by its own single-use launch ref — and the seller works through them in one sitting without restarting
+ * their agent. So {@link InitialImportEndpoint.armRun} replaces the announced run
  * identity and re-announces it to attached clients. Run identity is still minted by the Runtime and never by
  * the FE; what the FE supplies is the launch ref inside `START_RUN`, which the server resolves.
  *
@@ -83,7 +83,7 @@ export class InitialImportEndpoint implements AwCarrierEndpoint {
   }
 
   /**
-   * Host a NEW import run — the next segment in the sequence, or the discovery run that precedes the plan.
+   * Host a NEW import run — the next segment in the sequence.
    *
    * Re-announces to every attached client so a frontend that is already connected learns the new run
    * identity without reconnecting; otherwise it would keep addressing commands to the finished run and its
@@ -120,7 +120,11 @@ export class InitialImportEndpoint implements AwCarrierEndpoint {
     let frame: AwClientFrame | null = null;
     try {
       const parsed = deserializeFrame(payload);
-      if (parsed.kind === "aw_command" || parsed.kind === "aw_resync") frame = parsed;
+      // The three client-frame kinds, allow-listed rather than assumed: a server frame arriving on the
+      // inbound path would be a client trying to publish run state, and it is dropped.
+      if (parsed.kind === "aw_command" || parsed.kind === "aw_resync" || parsed.kind === "aw_guidance_pack") {
+        frame = parsed;
+      }
     } catch {
       frame = null;
     }

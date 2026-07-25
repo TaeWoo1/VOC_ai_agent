@@ -23,6 +23,9 @@ FILTERED_PREFIXES=(
   "frontend/src/lib/"
   "frontend/src/components/actionWindow/"
   "frontend/src/components/bridge/"
+  # Added 2026-07-26: the review-import cards compose the guidance pack the runtime renders inside the
+  # marketplace page, so they consume the shared contract directly.
+  "frontend/src/components/reviewImport/"
 )
 
 echo "== every frontend contract importer must sit under a filtered path =="

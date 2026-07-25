@@ -47,7 +47,7 @@ import { NaverLiveImportDriver } from "../action-window/initial-import/naver-liv
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
-import { fetchLaunchScope, login, reportDiscoveredRange } from "../upload";
+import { fetchLaunchScope, login } from "../upload";
 import { launchNaverContext } from "../profile";
 import { log } from "../log";
 import {
@@ -296,20 +296,6 @@ export async function buildInitialImportConfig(
   const driver = new NaverLiveImportDriver(proven, {
     guidanceEnabled: true,
     observeTimeoutMs: 120_000,
-    // The range-discovery run's terminal: report what was established, which creates the plan server-side.
-    // Bound to the same account credentials as the ingest and to the ref the SERVER has already accepted, so
-    // a discovery run can only ever write to the ticket it was started with.
-    async reportRange(range, evidence): Promise<boolean> {
-      if (!boundRef) return false;
-      try {
-        const token = await login(cfg.baseUrl, cfg.email, cfg.password);
-        await reportDiscoveredRange(cfg.baseUrl, token, boundRef, range.start, range.end, evidence);
-        return true;
-      } catch {
-        // One answer for every refusal, as with `resolveScope`: spent, expired, wrong org, backend down.
-        return false;
-      }
-    },
   });
   importDriver = driver;
 

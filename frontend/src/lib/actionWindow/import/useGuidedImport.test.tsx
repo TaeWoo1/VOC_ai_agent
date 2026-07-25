@@ -22,6 +22,7 @@ function stubRuntime() {
       return () => listeners.delete(listener);
     },
     start: async () => {},
+    setGuidancePack: () => {},
     send: () => {},
     resync: () => {
       resynced += 1;

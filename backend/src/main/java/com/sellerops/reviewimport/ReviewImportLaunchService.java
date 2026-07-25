@@ -7,12 +7,17 @@ import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.io.InputStream;
 import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.ZoneId;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,10 +30,13 @@ import org.springframework.transaction.annotation.Transactional;
  * turn that ref back into scope. That keeps the wire clean AND means the server, not the runtime, decides
  * what a run is allowed to touch.
  *
- * <p><b>The two kinds are a consequence, not a preference.</b> A seller's first click has no plan to point
- * at: the plan is built from whatever historical range the marketplace turns out to allow. So DISCOVERY
- * runs first with no plan, and {@link #recordDiscoveredRange} is what creates the plan and its monthly
- * segments. Only then can SEGMENT tickets exist.
+ * <p><b>A plan exists before any run does</b> (2026-07-26). The seller decides how far back to import in
+ * SellerOps — start month, end date today, period and segment count confirmed — and {@link #recordSelectedRange}
+ * creates the plan from that choice. Only then can SEGMENT tickets exist. The DISCOVERY ticket kind survives
+ * as the single-use authorization for that one plan creation (and as the row that records its provenance), but
+ * nothing hosts a discovery RUN any more: there was no marketplace limit to discover, so asking the seller to
+ * find one was asking about a constraint that does not exist. {@link #recordDiscoveredRange} remains for the
+ * rows that were created that way.
  *
  * <p><b>Single use.</b> A ticket is the whole authorization for one run, so spending it is terminal.
  * Minting is nonetheless idempotent — a seller re-clicking hands back the ticket they already have rather
@@ -47,7 +55,23 @@ public class ReviewImportLaunchService {
     private final ReviewImportRunService runService;
     private final SellerAccountRepository sellerAccounts;
     private final ChannelRepository channels;
+    private final Clock clock;
 
+    /**
+     * The seller's "today". KST rather than UTC because the end of the period is the date the seller sees on
+     * their own calendar, and for a Korean seller a UTC "today" is yesterday for nine hours every night.
+     */
+    static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    /**
+     * The earliest month a seller may choose to import from.
+     *
+     * A floor, not a marketplace limit — nothing here claims NAVER can reach it. It exists so a typo cannot
+     * plan two thousand monthly segments, and it is far enough back to cover any real seller's history.
+     */
+    static final YearMonth EARLIEST_SELECTABLE_MONTH = YearMonth.of(2010, 1);
+
+    @Autowired
     public ReviewImportLaunchService(ReviewImportLaunchRepository launches,
                                     ReviewImportPlanRepository plans,
                                     ReviewImportSegmentRepository segments,
@@ -55,6 +79,18 @@ public class ReviewImportLaunchService {
                                     ReviewImportRunService runService,
                                     SellerAccountRepository sellerAccounts,
                                     ChannelRepository channels) {
+        this(launches, plans, segments, planService, runService, sellerAccounts, channels, Clock.system(KST));
+    }
+
+    /** Test seam: an explicit {@link Clock} pins the "today" a selected period ends on. */
+    ReviewImportLaunchService(ReviewImportLaunchRepository launches,
+                             ReviewImportPlanRepository plans,
+                             ReviewImportSegmentRepository segments,
+                             ReviewImportPlanService planService,
+                             ReviewImportRunService runService,
+                             SellerAccountRepository sellerAccounts,
+                             ChannelRepository channels,
+                             Clock clock) {
         this.launches = launches;
         this.plans = plans;
         this.segments = segments;
@@ -62,6 +98,7 @@ public class ReviewImportLaunchService {
         this.runService = runService;
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
+        this.clock = clock;
     }
 
     /* ─────────────────────────── Issue ─────────────────────────── */
@@ -169,6 +206,89 @@ public class ReviewImportLaunchService {
                 .orElse(null);
     }
 
+    /* ────────────────── The seller's own range selection ────────────────── */
+
+    /**
+     * What choosing {@code startMonth} would actually create — WITHOUT creating it.
+     *
+     * <p>Exists because the consequence of the choice is not obvious from the choice: three years of history is
+     * 37 monthly segments, and each one is an export the seller performs by hand. The product owner's rule is
+     * that they see the period and the segment count and confirm before a plan exists, so this is the read that
+     * confirmation screen is built from.
+     *
+     * <p>The end date and the count are computed HERE rather than in the browser: "today" from a client clock is
+     * a plan whose last segment can be wrong, and the count has to be the one the planner will really produce.
+     */
+    @Transactional(readOnly = true)
+    public RangeSelection previewSelection(UUID orgId, UUID sellerAccountId, String startMonth) {
+        sellerAccounts.findByIdAndOrgId(sellerAccountId, orgId)
+                .orElseThrow(() -> ApiException.notFound("연동할 채널 계정을 찾을 수 없습니다."));
+        return selectionFor(startMonth);
+    }
+
+    /**
+     * Create the plan the seller chose: their start month through today, one segment per calendar month.
+     *
+     * <p>Spends a DISCOVERY ticket even though no run happens, and that is deliberate rather than vestigial. The
+     * ticket is what makes plan creation single-use per account (V28's partial unique index) and what records
+     * the provenance of the range: {@link RangeDiscoveryEvidence#OPERATOR_SELECTED}, the period, and the plan it
+     * produced. A second plan for an account that is already working through one is refused — resuming is the
+     * action for that, and two live plans over overlapping months would double every remaining export.
+     */
+    @Transactional
+    public ReviewImportPlan recordSelectedRange(UUID orgId, UUID sellerAccountId, String startMonth) {
+        RangeSelection selection = previewSelection(orgId, sellerAccountId, startMonth);
+        for (ReviewImportPlan existing : plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, sellerAccountId)) {
+            if (existing.getStatus() == ReviewImportPlanStatus.DRAFT || existing.getStatus() == ReviewImportPlanStatus.ACTIVE) {
+                throw ApiException.conflict("이미 진행 중인 가져오기가 있습니다. 이어서 진행해 주세요.");
+            }
+        }
+        ReviewImportLaunch ticket = mintDiscovery(orgId, sellerAccountId);
+        ReviewImportPlan plan = planService.createPlan(orgId, ticket.getSellerAccountId(), ticket.getChannelId(),
+                selection.start(), selection.end());
+
+        ticket.setDiscoveredStart(selection.start());
+        ticket.setDiscoveredEnd(selection.end());
+        // Never MACHINE_DISCOVERED: nothing was measured. The seller decided.
+        ticket.setRangeEvidence(RangeDiscoveryEvidence.OPERATOR_SELECTED);
+        ticket.setPlanId(plan.getId());
+        consume(ticket);
+        return plan;
+    }
+
+    /** Resolve `YYYY-MM` against today, failing closed on anything unusable. */
+    private RangeSelection selectionFor(String startMonth) {
+        YearMonth month = parseMonth(startMonth);
+        LocalDate today = LocalDate.now(clock);
+        YearMonth current = YearMonth.from(today);
+        if (month.isAfter(current)) {
+            throw ApiException.badRequest("아직 오지 않은 달부터 가져올 수는 없어요.");
+        }
+        if (month.isBefore(EARLIEST_SELECTABLE_MONTH)) {
+            throw ApiException.badRequest("가져오기 시작 월이 너무 이릅니다. 더 최근 달을 선택해 주세요.");
+        }
+        LocalDate start = month.atDay(1);
+        int segmentCount = ReviewImportSegmentPlanner.monthlySegments(start, today).size();
+        return new RangeSelection(start, today, segmentCount);
+    }
+
+    private static YearMonth parseMonth(String startMonth) {
+        try {
+            return YearMonth.parse(startMonth == null ? "" : startMonth.trim());
+        } catch (DateTimeException e) {
+            throw ApiException.badRequest("가져오기를 시작할 달을 YYYY-MM 형식으로 선택해 주세요.");
+        }
+    }
+
+    /**
+     * A period the seller chose, and what it costs them.
+     *
+     * {@code segmentCount} is part of the answer rather than something the caller derives: it is the number of
+     * separate exports the seller will perform, which is the fact that makes the choice a decision.
+     */
+    public record RangeSelection(LocalDate start, LocalDate end, int segmentCount) {
+    }
+
     /* ─────────────────────────── Spend ─────────────────────────── */
 
     /**
@@ -245,7 +365,16 @@ public class ReviewImportLaunchService {
 
     /* ─────────────────────────── Internals ─────────────────────────── */
 
-    /** The earliest live segment still needing a run: PENDING or retryable FAILED, and not concluded MISSING. */
+    /**
+     * The MOST RECENT live segment still needing a run: PENDING or retryable FAILED, and not concluded MISSING.
+     *
+     * <p>Newest first (product-owner decision, 2026-07-26), reversing the original oldest-first order. Two
+     * reasons, both about a seller who may stop part-way through 37 manual exports: the recent months are the
+     * ones whose reviews still need answering, so the value arrives in the first segment rather than the last;
+     * and the current month is the segment that keeps growing, so importing it while it is fresh is worth more
+     * than importing it after the older ones. A seller who abandons a plan half-done is left holding the half
+     * that matters.
+     */
     @Transactional(readOnly = true)
     public Optional<ReviewImportSegment> nextRemainingSegment(UUID orgId, UUID planId) {
         planService.getPlan(orgId, planId); // authorize
@@ -254,7 +383,7 @@ public class ReviewImportLaunchService {
         return live.stream()
                 .filter(s -> s.getExecutionState().isRemaining())
                 .filter(s -> s.getCoverageState() != SegmentCoverageState.MISSING)
-                .findFirst();
+                .reduce((earlier, later) -> later);
     }
 
     private ReviewImportLaunch requireTicket(UUID orgId, String launchRef) {
