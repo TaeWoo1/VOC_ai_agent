@@ -458,14 +458,97 @@ describe("import segment session — protocol behaviour", () => {
     expect(io.eventTypes()).not.toContain("RUN_COMPLETED");
   });
 
-  it("a seller who does not act leaves the run resting at the barrier", async () => {
-    const { io, engine, session } = build({ action: { start_date: false } });
+  /**
+   * An expired observation window means the seller has not acted YET, so the barrier re-arms and the run keeps
+   * watching. The first live attempt stranded here: a 15-second window expired while the operator was working,
+   * the watcher returned, and nothing was left observing a run whose status still said WAITING_FOR_HUMAN. A
+   * status claiming we are waiting has to mean we are actually watching.
+   */
+  it("re-arms a barrier whose observation window expired, instead of stranding the run", async () => {
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    let looks = 0;
+    const driver = new ImportFixtureDriver();
+    driver.waitForTargetAction = async (target) => {
+      driver.calls.push(`wait:${target}`);
+      if (target !== "start_date") return true;
+      looks += 1;
+      return looks >= 3;
+    };
+    const session = new ImportSegmentSession(engine, driver, io.transport, REQUIRED, { rearmDelayMs: 1 });
+    session.attach();
+
+    startRun(io);
+    // `whenSettled` returns while the watcher is detached and paused between re-arms — that is the point of a
+    // barrier being idle — so wait for the third look rather than assuming one settle covers it.
+    for (let i = 0; i < 200 && looks < 3; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    await session.whenSettled();
+
+    expect(looks).toBe(3);
+    expect(driver.calls.filter((c) => c === "observe:start_date")).toHaveLength(3);
+    expect(engine.currentStage()).toBe("COMPLETED");
+  });
+
+  /** And it stops the moment the barrier is no longer open — a cancel must not spin. */
+  it("stops watching once the run leaves the barrier", async () => {
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    const driver = new ImportFixtureDriver();
+    let looks = 0;
+    driver.waitForTargetAction = async (target) => {
+      driver.calls.push(`wait:${target}`);
+      if (target !== "start_date") return true;
+      looks += 1;
+      if (looks === 2) engine.command({ type: "CANCEL_RUN", expectedRevision: engine.view().revision });
+      return false;
+    };
+    const session = new ImportSegmentSession(engine, driver, io.transport, REQUIRED, { rearmDelayMs: 1 });
+    session.attach();
+
+    startRun(io);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(engine.currentStage()).toBe("CANCELLED");
+    expect(looks).toBeLessThanOrEqual(3);
+  });
+
+  /**
+   * A seller who has not acted YET leaves the run at the barrier and still watching — not stranded. The run is
+   * ended with a cancel, which also proves the re-arm loop is bounded by the barrier being open.
+   */
+  it("keeps watching a barrier the seller has not acted on yet", async () => {
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    const driver = new ImportFixtureDriver({ action: { start_date: false } });
+    const session = new ImportSegmentSession(engine, driver, io.transport, REQUIRED, { rearmDelayMs: 1 });
+    session.attach();
+
     startRun(io);
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("WAIT_FOR_START");
     expect(engine.isAtBarrier()).toBe(true);
     expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+
+    command(io, "CANCEL_RUN", io.lastView()!.revision);
+    await session.whenSettled();
+    await new Promise((r) => setTimeout(r, 40));
+    const arms = driver.calls.filter((c) => c === "observe:start_date").length;
+    await new Promise((r) => setTimeout(r, 40));
+    expect(driver.calls.filter((c) => c === "observe:start_date").length).toBe(arms);
+    expect(engine.currentStage()).toBe("CANCELLED");
   });
 
   it("refuses a malformed launch ref at construction", () => {

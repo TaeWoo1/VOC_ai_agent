@@ -154,6 +154,33 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-25 — NAVER Initial Review Import — LIVE 1-segment proof SUCCESS
+- **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage
+- **Did:** One monthly segment guided end to end on the real seller center and ingested: **8/8 COMPLETED**,
+  ticket **CONSUMED**, segment **COMPLETED+COVERED**, attempt **SUCCEEDED** with **70 new / 0 duplicate**,
+  `scope_evidence = MACHINE_MATCHED`. **Every marketplace click was the operator's** — the runtime located,
+  highlighted, observed, then detected the download their clicks produced.
+- **Evidence:** `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`. Disposable
+  `sellerops_riv_live_*` on 18090 (V27/V28 applied), name-guarded, dropped after.
+- **What is newly proven:** the scope gate **blocked a wrong window live** (end date left at 07.01 →
+  `MISMATCH`, export never located/highlighted/armed), and the recovery path worked (correct the date →
+  `REQUEST_STEP_RECHECK` → `MATCH` → `confirm_range` SKIPPED → export). `MACHINE_MATCHED` is honest: the
+  runtime read both dates itself, and the SKIPPED confirm step is the observable proof it was not an operator
+  attestation.
+- **§4.1 impact:** candidate for promoting NAVER REVIEW import from Action-Window-implemented to
+  live-verified — **not applied here.** One segment on one account is thin, and §4.1 is the capability truth;
+  a product-owner call belongs on that promotion.
+- **Ledger impact:** none yet — the ten defects are recorded in the proof record above rather than as channel
+  lessons, since all ten were ours, not NAVER's.
+- **Gate state:** ran under the simplified per-campaign approval the product owner set this session (initial
+  approval + short re-run approvals). Code-level fences unchanged: no auto-click, fail-closed everywhere,
+  1-segment limit, approval-gated CLI, browser only in that mode.
+- **Blockers:** none for a repeat run.
+- **Next:** (a) DISCOVERY intent has never run live; (b) no frontend was in the loop — `START_RUN` came from a
+  scratch bridge client, so `GuidedImportCard` is still offline-only, and a `SCOPE_MISMATCH` is currently
+  invisible to the operator without it; (c) `UNREADABLE` → `OPERATOR_CONFIRMED` never fired; (d) a surface
+  that genuinely needs an apply press is untested.
+
 ### 2026-07-24 — NAVER Review Export Tutorial — LIVE export+ingest SUCCESS (attempt 5)
 - **Loop stage(s):** ACQUIRE (real export) → NORMALIZE → UNDERSTAND/PRIORITIZE (attention)
 - **Did:** A second live NAVER export ingested end-to-end on the FIXED runtime — clean main `661bcca`

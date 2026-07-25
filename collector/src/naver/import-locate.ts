@@ -41,8 +41,27 @@ export interface ImportLocateDecision {
  * about when the model turns out to be wrong.
  */
 export interface ImportLocateDiagnostic {
-  /** How many inputs matched the grounded date predicate. */
+  /**
+   * How many inputs matched the date predicate at all, BEFORE any actionability filter.
+   *
+   * Separate from {@link ImportLocateDiagnostic.dateInputCount} because one number could not distinguish
+   * "the predicate matches nothing" from "it matched and our own filter threw them away" — and the second
+   * is what happened on the first live run. A diagnostic that applies the same filter as the decision it
+   * explains cannot explain that decision.
+   */
+  dateInputTotal: number;
+  /** How many of those the seller could act on. */
   dateInputCount: number;
+  /**
+   * Why the rest were excluded, per rule. A total and an actionable count still cannot say WHICH exclusion
+   * fired, and three live runs were spent on exclusions nobody could see.
+   *
+   * FLAT scalars, not a nested object: the log sanitizer collapses any non-scalar to a type tag, so a
+   * nested bag reached the log as `"[object]"` and was useless exactly when it was needed.
+   */
+  dateExcludedDisabled: number;
+  dateExcludedHidden: number;
+  dateExcludedDisplayNone: number;
   /** Whether any element carried apply-like wording. */
   applyWordingPresent: boolean;
   /** How many elements carried apply-like wording. */
@@ -77,16 +96,44 @@ export function dateInputTags(html: string): string[] {
 }
 
 /**
- * Hidden or disabled inputs are not controls the seller can act on, so highlighting one would leave them
- * hunting. Excluded before counting, which is also what keeps a template/off-screen picker from making the
- * match ambiguous.
+ * Hidden or disabled controls are not ones the seller can act on, so highlighting one would leave them
+ * hunting. Excluded before counting, which also keeps a template/off-screen picker from making a match
+ * ambiguous.
+ *
+ * WARNING: `readonly` is NOT a disqualifier, and that correction came from a live run. The 2026-07-25 run
+ * reported zero date inputs on a surface where the operator confirmed two were visible from page load. A
+ * calendar-backed date field is almost always `readonly` — it means "do not type", not "cannot use", and
+ * the seller drives it through the picker. Excluding it dropped exactly the controls this module exists to
+ * find. `readExportScope`, which has read real values from this same surface, applies no such filter, which
+ * is the other half of why the two disagreed.
  */
+function exclusionReason(tag: string): "disabled" | "hidden" | "displayNone" | null {
+  if (isTrulyDisabled(tag)) return "disabled";
+  if (/type\s*=\s*["']?hidden["']?/i.test(tag)) return "hidden";
+  if (/style\s*=\s*["'][^"']*display\s*:\s*none/i.test(tag)) return "displayNone";
+  return null;
+}
+
+/**
+ * A REAL `disabled` boolean attribute — not the substring "disabled" anywhere in the tag.
+ *
+ * A word-boundary search matches `aria-disabled="false"`, `data-disabled="0"` and a class like
+ * `is-disabled`, so an input explicitly declaring itself ENABLED was excluded as disabled. That produced
+ * `dateInputTotal: 2, dateInputCount: 0` on the 2026-07-25 run: the predicate found both date fields and
+ * this rule threw them both away.
+ *
+ * Accepts the HTML boolean forms and requires the attribute to begin at a boundary, so it cannot be the
+ * tail of a longer attribute name.
+ */
+function isTrulyDisabled(tag: string): boolean {
+  const match = /(?:^|\s)disabled(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/i.exec(tag);
+  if (!match) return false;
+  const value = (match[1] ?? match[2] ?? match[3] ?? "").trim().toLowerCase();
+  return value !== "false" && value !== "0";
+}
+
 function isActionable(tag: string): boolean {
-  if (/\bdisabled\b/i.test(tag)) return false;
-  if (/type\s*=\s*["']?hidden["']?/i.test(tag)) return false;
-  if (/\breadonly\b/i.test(tag)) return false;
-  if (/style\s*=\s*["'][^"']*display\s*:\s*none/i.test(tag)) return false;
-  return true;
+  return exclusionReason(tag) === null;
 }
 
 /**
@@ -149,8 +196,18 @@ export function inferRequiresApply(html: string): boolean {
 /** Sanitized diagnostics for a failed locate. Counts and booleans only. */
 export function importLocateDiagnostic(html: string): ImportLocateDiagnostic {
   const applyCandidates = controlTags(html).filter((tag) => isActionable(tag) && hasApplyWording(tag));
+  const dateTags = dateInputTags(html);
+  const dateExcluded = { disabled: 0, hidden: 0, displayNone: 0 };
+  for (const tag of dateTags) {
+    const reason = exclusionReason(tag);
+    if (reason) dateExcluded[reason] += 1;
+  }
   return {
-    dateInputCount: dateInputTags(html).filter(isActionable).length,
+    dateInputTotal: dateTags.length,
+    dateInputCount: dateTags.filter(isActionable).length,
+    dateExcludedDisabled: dateExcluded.disabled,
+    dateExcludedHidden: dateExcluded.hidden,
+    dateExcludedDisplayNone: dateExcluded.displayNone,
     applyWordingPresent: applyCandidates.length > 0,
     applyCandidateCount: applyCandidates.length,
     iframePresent: /<iframe\b/i.test(html),

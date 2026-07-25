@@ -25,6 +25,14 @@ import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-dr
 export interface ImportSessionOptions {
   /** Fires after every published transition — the persistence hook. */
   onStatePublished?: () => void;
+  /**
+   * Floor delay between barrier re-arms.
+   *
+   * Not a tuning knob — a safety floor. With a long observation window (the live driver waits two minutes)
+   * the loop is naturally slow, but with a driver that returns immediately it would spin at full speed and
+   * peg a core. A re-arm is never a hot path, so a pause costs nothing and removes the hazard.
+   */
+  rearmDelayMs?: number;
 }
 
 export class ImportSegmentSession {
@@ -34,6 +42,7 @@ export class ImportSegmentSession {
   private readonly required: RequiredRange;
   private readonly runId: string;
   private readonly onStatePublished: (() => void) | undefined;
+  private readonly rearmDelayMs: number;
 
   private started = false;
   private publishedSeq = 0;
@@ -54,6 +63,7 @@ export class ImportSegmentSession {
     this.runId = engine.view().runId;
     this.started = engine.isStarted();
     this.onStatePublished = opts?.onStatePublished;
+    this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
   }
 
   attach(): () => void {
@@ -192,8 +202,24 @@ export class ImportSegmentSession {
    * that, `whenSettled` could return between the observation and the work it triggers.
    */
   private async watchBarrier(target: ImportTarget): Promise<void> {
-    const acted = await this.driver.waitForTargetAction(target);
-    if (!acted) return;
+    // A human barrier has no deadline that should kill the run. An observation window expiring means the
+    // seller has not acted YET — they are reading, or picking from a calendar, or were interrupted — so the
+    // observation is re-armed and we keep watching for as long as the engine is still resting on this
+    // target. The first live attempt stranded here: a 15-second window expired while the operator was
+    // working, the watcher returned, and nothing was left observing a run that still said
+    // WAITING_FOR_HUMAN. A status that claims we are waiting has to mean we are actually watching.
+    //
+    // Bounded anyway: the loop exits the moment the engine leaves this barrier — a cancel, a pause, a
+    // scope block or a completed step all move it — so this cannot spin on a finished run.
+    let acted = await this.driver.waitForTargetAction(target);
+    while (!acted) {
+      if (this.engine.currentStage() !== this.barrierStageFor(target)) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, this.rearmDelayMs));
+      // Re-check after the pause: the run may have been cancelled or paused while we waited.
+      if (this.engine.currentStage() !== this.barrierStageFor(target)) return;
+      await this.driver.armTargetObserve(target);
+      acted = await this.driver.waitForTargetAction(target);
+    }
     this.autoBusy = true;
     try {
       const next = this.engine.onTargetActionObserved(target);
@@ -204,6 +230,10 @@ export class ImportSegmentSession {
     } finally {
       this.autoBusy = false;
     }
+  }
+
+  private barrierStageFor(target: ImportTarget): string {
+    return BARRIER_STAGE_FOR[target];
   }
 
   private async fatalCleanup(): Promise<void> {
@@ -223,6 +253,18 @@ export class ImportSegmentSession {
     this.onStatePublished?.();
   }
 }
+
+/**
+ * The barrier stage the engine sits at while resting on one target. Mirrored here (rather than exported from
+ * the engine) so the session can ask "is this barrier still open" without reaching into engine internals.
+ */
+const BARRIER_STAGE_FOR: Readonly<Record<ImportTarget, string>> = {
+  start_date: "WAIT_FOR_START",
+  end_date: "WAIT_FOR_END",
+  apply_range: "WAIT_FOR_APPLY",
+  export: "WAIT_FOR_EXPORT",
+  consent: "WAIT_FOR_CONSENT",
+};
 
 function isNoop(effect: ImportEffect): boolean {
   return effect === "NONE";

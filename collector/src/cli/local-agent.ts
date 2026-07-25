@@ -49,6 +49,7 @@ import type { ResolvedLaunchScope } from "../action-window/initial-import/import
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, login } from "../upload";
 import { launchNaverContext } from "../profile";
+import { log } from "../log";
 import {
   ACTION_WINDOW_IMPORT_FLAG,
   importModeRefusalMessage,
@@ -237,12 +238,30 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
  * `import-run-store`). The server holds the plan, so the next run picks the same segment up with a fresh
  * ticket.
  */
-export async function buildInitialImportConfig(env: NodeJS.ProcessEnv): Promise<AgentImportConfig> {
+export async function buildInitialImportConfig(
+  env: NodeJS.ProcessEnv,
+): Promise<{ config: AgentImportConfig; close: () => Promise<void> }> {
   const cfg = loadConfig(env);
+  // Same requirement every other live NAVER CLI in this package has. Fail closed BEFORE launching a
+  // browser: an agent that opens a blank window and then announces itself ready looks like it is working
+  // and is not — the first version of this boot did exactly that.
+  if (!cfg.naverReviewUrl) {
+    throw new Error(
+      "NAVER_REVIEW_URL is not set. The import mode needs the review-management page URL; set it in the environment before starting the agent.",
+    );
+  }
   // Headed, dedicated profile, inside the collector tree (the profile path guard enforces that). The
   // operator logs in here themselves — the collector never types NAVER credentials.
   const context = await launchNaverContext(cfg.profileDir);
   const page = context.pages()[0] ?? (await context.newPage());
+  // Open the review surface at BOOT, which is what the other live CLIs do. This is not the same thing as
+  // the rule against navigating for the seller MID-RUN: no run exists yet, and landing them on the page
+  // they are about to work on is the whole point of a guided mode. Once a run starts, the runtime only
+  // ever confirms the surface — it never navigates again.
+  //
+  // The URL is never logged: raw URLs are prohibited output (roadmap §9), so only the fact of navigation is.
+  await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
+  log("aw_import_surface_opened", {});
 
   // The launch ref and the scope evidence are BOTH only known per run, long after this capability is
   // built — the ref arrives in START_RUN and the evidence depends on what the seller did with the dates.
@@ -264,11 +283,20 @@ export async function buildInitialImportConfig(env: NodeJS.ProcessEnv): Promise<
       scopeEvidence: () => importDriver?.scopeEvidence() ?? "OPERATOR_CONFIRMED",
     }),
     guidanceEnabled: true,
+    // A seated seller working through six barriers is slower than the export CLI's own coordination, and a
+    // short window reported "they did not act" about someone mid-interaction.
+    observeTimeoutMs: 120_000,
+    // Enabled on this seated path so a fail-closed CONSENT outcome immediately overlays sanitized candidate
+    // labels (A1/B1…) for the operator to name, instead of costing another export window to learn that it
+    // failed. It never changes what is clicked — the driver still never clicks — and never relaxes
+    // fail-closed by itself. The seller's consent control is likely to need it: NAVER's button reads 확인,
+    // which is not export wording, and the continuation matcher looks for export wording.
+    liveDebug: true,
   });
-  const driver = new NaverLiveImportDriver(page, proven, { guidanceEnabled: true });
+  const driver = new NaverLiveImportDriver(proven, { guidanceEnabled: true, observeTimeoutMs: 120_000 });
   importDriver = driver;
 
-  return {
+  const config: AgentImportConfig = {
     announceRunId: `run_${randomBytes(6).toString("hex")}`,
     channelCode: NAVER_CHANNEL_CODE,
     driver,
@@ -293,6 +321,67 @@ export async function buildInitialImportConfig(env: NodeJS.ProcessEnv): Promise<
       }
     },
   };
+  return { config, close: () => context.close() };
+}
+
+/**
+ * The import mode's OWN boot path.
+ *
+ * It runs before the connections gate on purpose. Hosting a NAVER import has nothing to do with the ESM
+ * connector lineage the normal boot manages, so requiring a connections file would mean fabricating an
+ * unrelated ESM connection — and the live boot launches one Chrome per runnable connection, so that
+ * fabrication would open a browser nobody asked for. The first attempt at this wiring had exactly that
+ * coupling; this is the fix.
+ *
+ * What it deliberately does NOT do: no connector startup, no per-connection Chrome, no status sentinels.
+ * One browser for the seller to log into, one bridge for the frontend to attach to, nothing else.
+ */
+async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
+  let built: { config: AgentImportConfig; close: () => Promise<void> };
+  try {
+    built = await buildInitialImportConfig(env);
+  } catch (err) {
+    // A missing precondition is an operator message, not a stack trace — and nothing has been launched.
+    console.error(`[local-agent] ${(err as Error).message}`);
+    process.exit(6);
+    return;
+  }
+  const { config, close } = built;
+  const approvalKind = decideApprovalPresenter(env, process.platform);
+  const bridge = createAgentBridge({
+    ...resolveAgentBridgeConfig(args, env),
+    approvalPresenter: createApprovalPresenterFor(approvalKind),
+    initialImport: config,
+  });
+  const listen = await bridge.listen();
+  console.log(
+    JSON.stringify({
+      mode: "IMPORT_ONLY",
+      ...listen,
+      initialImport: true,
+      approvalPresenter: approvalKind,
+      // Sanitized: no launch ref (none exists yet — it arrives in START_RUN), no dates, no account.
+      browserLaunched: true,
+    }),
+  );
+  bridge.markAgentStarted();
+
+  // Stay alive until the seated operator stops it. Idempotent shutdown closes the bridge and the browser
+  // exactly once, on every path.
+  let stopped = false;
+  const shutdown = async (): Promise<void> => {
+    if (stopped) return;
+    stopped = true;
+    bridge.markAgentStopping();
+    await bridge.close().catch(() => {});
+    await close().catch(() => {});
+    console.log(JSON.stringify({ mode: "IMPORT_ONLY", stopped: true }));
+  };
+  process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
+  process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+  await new Promise<void>(() => {
+    /* run until signalled */
+  });
 }
 
 /**
@@ -528,6 +617,17 @@ function usage(): string {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // The import mode is its own boot and is decided BEFORE anything else, including the connections gate —
+  // see runImportOnlyBoot for why coupling it to the connector lineage was wrong.
+  const importGate = resolveImportMode(args, process.env);
+  if (importGate.host) {
+    await runImportOnlyBoot(args, process.env);
+    return;
+  }
+  const importRefusal = importModeRefusalMessage(importGate.reason);
+  if (importRefusal) console.error(`[local-agent] ${importRefusal}`);
+
   const connectionsPath = flagValue(args, "--connections");
   if (!connectionsPath) {
     console.error(`missing-connections-path\n${usage()}`);
@@ -592,19 +692,11 @@ async function main(): Promise<void> {
   // ONE carrier per agent, decided here and nowhere else. Import is checked FIRST because it is the only
   // mode that launches a browser, so its gate must run before anything else can claim the slot — and the
   // gate REFUSES a command line that also names another carrier rather than quietly winning.
-  const importMode = resolveImportMode(args, process.env);
-  if (!importMode.host) {
-    const refusal = importModeRefusalMessage(importMode.reason);
-    // Silent for the ordinary case (the mode was not asked for); loud for every real refusal, because an
-    // operator who asked for a live browser and did not get one needs to know why.
-    if (refusal) console.error(`[local-agent] ${refusal}`);
-  }
-  const initialImport: AgentImportConfig | undefined = importMode.host
-    ? await buildInitialImportConfig(process.env)
-    : undefined;
-
-  const hostReply = initialImport ? false : resolveReplySubmissionChannel(args, process.env);
-  const awChannel = initialImport || hostReply ? null : resolveActionWindowChannel(args, process.env);
+  // The import carrier never reaches here: it has its own boot at the top of main(), so this path hosts
+  // only the export or reply carrier. Keeping the mutual exclusion visible anyway would be dead code that
+  // implies a case that cannot occur.
+  const hostReply = resolveReplySubmissionChannel(args, process.env);
+  const awChannel = hostReply ? null : resolveActionWindowChannel(args, process.env);
   const actionWindow: AgentActionWindowConfig | undefined = awChannel
     ? buildActionWindowConfig(awChannel, args, process.env)
     : undefined;
@@ -617,12 +709,11 @@ async function main(): Promise<void> {
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     ...(actionWindow ? { actionWindow } : {}),
     ...(replySubmission ? { replySubmission } : {}),
-    ...(initialImport ? { initialImport } : {}),
   });
   const bridgeListen = await bridge.listen();
   // Sanitized: the presenter KIND only (an enum) — never a code, origin, or pairing detail. Makes it visible
   // that this host can (or cannot) show an approval code, which decides whether pairing can succeed at all.
-  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, initialImport: initialImport !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
+  console.log(JSON.stringify({ event: "BRIDGE", ...bridgeListen, actionWindow: actionWindow !== undefined, replySubmission: replySubmission !== undefined, approvalPresenter: approvalKind, ...(awChannel ? { actionWindowChannel: awChannel } : {}) }));
   bridge.seed(decision.parsed.connections.map((c) => c.connectionId));
 
   // ONE observer into the startup: keep the sanitized stdout printer AND feed the bridge snapshot/events.

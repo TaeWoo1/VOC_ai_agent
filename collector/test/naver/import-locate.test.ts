@@ -69,10 +69,59 @@ describe("date control locate", () => {
       <input type="date" />
       <input type="hidden" class="date-template" />
       <input type="date" disabled />
-      <input type="date" readonly />
       <input type="date" style="display:none" />`;
     // Only the two real controls count, so an off-screen template cannot make the match ambiguous.
     expect(locateDateDecision(html, "end")).toEqual({ count: 1, index: 1 });
+  });
+
+  /**
+   * A calendar-backed date field is almost always readonly — "do not type", not "cannot use". The
+   * 2026-07-25 live run reported zero date inputs on a surface where the operator confirmed two were
+   * visible from page load, because this filter had thrown them away. `readExportScope`, which has read
+   * real values from that surface, applies no such filter.
+   */
+  it("counts a readonly date field — the seller drives it through the picker", () => {
+    const html = `<input type="text" class="date-input" readonly /><input type="text" class="date-input" readonly />`;
+    expect(locateDateDecision(html, "start")).toEqual({ count: 1, index: 0 });
+    expect(locateDateDecision(html, "end")).toEqual({ count: 1, index: 1 });
+    expect(importLocateDiagnostic(html).dateInputCount).toBe(2);
+  });
+
+  /**
+   * The diagnostic must be able to explain the decision it accompanies. Applying the same actionability
+   * filter to both is what hid the readonly exclusion on the first live run.
+   */
+  /**
+   * The exclusion that cost three live runs: `aria-disabled="false"` says the control IS enabled, and a
+   * word-boundary search for "disabled" excluded it anyway.
+   */
+  it("does not treat aria-disabled=false or a disabled-ish class as disabled", () => {
+    for (const attrs of ['aria-disabled="false"', 'data-disabled="0"', 'class="date-input is-disabled-x"']) {
+      const html = `<input type="date" ${attrs} /><input type="date" ${attrs} />`;
+      expect(locateDateDecision(html, "start"), attrs).toEqual({ count: 1, index: 0 });
+      expect(importLocateDiagnostic(html).dateExcludedDisabled, attrs).toBe(0);
+    }
+  });
+
+  it("still excludes a genuinely disabled control, in every boolean form", () => {
+    for (const attrs of ["disabled", 'disabled=""', 'disabled="disabled"', 'disabled="true"']) {
+      const html = `<input type="date" ${attrs} /><input type="date" />`;
+      expect(importLocateDiagnostic(html).dateExcludedDisabled, attrs).toBe(1);
+      expect(locateDateDecision(html, "start"), attrs).toEqual({ count: 1 });
+    }
+  });
+
+  it("says which rule excluded a control", () => {
+    const html = `<input type="date" disabled /><input type="hidden" class="date-x" /><input type="date" style="display:none" />`;
+    const d = importLocateDiagnostic(html);
+    expect([d.dateExcludedDisabled, d.dateExcludedHidden, d.dateExcludedDisplayNone]).toEqual([1, 1, 1]);
+  });
+
+  it("reports matched-before-filter separately from actionable", () => {
+    const html = `<input type="date" /><input type="date" disabled /><input type="date" style="display:none" />`;
+    const d = importLocateDiagnostic(html);
+    expect(d.dateInputTotal).toBe(3);
+    expect(d.dateInputCount).toBe(1);
   });
 });
 
@@ -118,11 +167,16 @@ describe("sanitized diagnostics", () => {
   it("reports counts and booleans only", () => {
     const diagnostic = importLocateDiagnostic(RANGE);
     expect(diagnostic).toEqual({
+      dateInputTotal: 2,
       dateInputCount: 2,
+      dateExcludedDisabled: 0,
+      dateExcludedHidden: 0,
+      dateExcludedDisplayNone: 0,
       applyWordingPresent: true,
       applyCandidateCount: 1,
       iframePresent: false,
     });
+    // Flat scalars only — a nested bag reaches the log sanitizer as "[object]" and is useless there.
     for (const value of Object.values(diagnostic)) {
       expect(["number", "boolean"]).toContain(typeof value);
     }

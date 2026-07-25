@@ -23,13 +23,24 @@
  * The engine's ordering is unaffected and still correct: consent is asked about only after the export
  * barrier has been observed. What changes is only WHERE the live work happens.
  *
+ * ## Frame resolution is SHARED, not re-derived — a live finding
+ *
+ * The first live run (2026-07-25) failed closed at `TARGET_NOT_FOUND` on the start-date control with
+ * `dateInputCount: 0` and `iframePresent: true`. The cause was this driver reading `page.content()` — the
+ * TOP document — while the NAVER review surface is frame-hosted. The composed driver already resolves that
+ * frame (`resolveSurfaceFrame`, scored with the same shared decisions used downstream) and every proven
+ * method works through it, so reaching for the raw page here was the one place this driver stopped
+ * composing and started re-deriving. It now uses {@link NaverLiveProbeDriver.surfaceContext} and holds no
+ * page handle at all, so the mistake cannot recur — and locate and the scope read-back can never disagree
+ * about which document they are reading.
+ *
  * ## The seller's two clicks map to one live race
  *
  * `waitForTargetAction("consent")` runs that race and caches its outcome; `detectDownload` then returns the
  * cached result instead of racing twice. Racing twice would arm a second download listener after the first
  * had already consumed the event, so the second would time out on a run that had actually succeeded.
  */
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import { matchExportScope } from "../../naver/export-scope-match";
 import {
@@ -55,13 +66,29 @@ const DEFERRED_CONSENT_SIG = "c0c0c0c0c0c0c0c0";
 export interface NaverLiveImportDriverOptions {
   /** Bounded window for the seated seller to act on a highlighted control. */
   observeTimeoutMs?: number;
+  /**
+   * Bounded window to let the date controls render before a locate is decided.
+   *
+   * The proven driver already polls for the review grid (`settleSurface`) because this surface renders
+   * client-side after navigation. The date controls are on the same surface and get the same treatment: a
+   * single-shot read can legitimately see nothing on a page that is still hydrating, and calling that
+   * TARGET_NOT_FOUND blames the surface for our timing.
+   */
+  dateSettleTimeoutMs?: number;
+  /** Poll cadence for that settle. */
+  dateSettleIntervalMs?: number;
+  /**
+   * Bounded window for the seller to actually pick a date. Longer than a click barrier by default: choosing
+   * from a calendar widget takes longer than pressing a button, and a short window would report "they did
+   * not act" about someone mid-interaction.
+   */
+  dateObserveTimeoutMs?: number;
   guidanceEnabled?: boolean;
   /** Total steps, for the diagnostic overlay badge. Supplied by the run's own step plan. */
   totalSteps?: number;
 }
 
 export class NaverLiveImportDriver implements ImportProbeDriver {
-  private readonly page: Page;
   private readonly proven: NaverLiveProbeDriver;
   private readonly opts: NaverLiveImportDriverOptions;
   /** Signatures handed out per target, so highlight can re-validate against what locate decided. */
@@ -72,10 +99,23 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   /** The last scope verdict this driver produced. It is the only component that actually made the read. */
   private lastScopeVerdict: ScopeMatch | null = null;
 
-  constructor(page: Page, proven: NaverLiveProbeDriver, opts: NaverLiveImportDriverOptions = {}) {
-    this.page = page;
+  /**
+   * Takes NO `Page`. That is deliberate and is the structural half of the frame fix: with no page handle
+   * there is no way to read the top document by accident, so the failure that produced
+   * `dateInputCount: 0` on a frame-hosted surface cannot recur by someone reaching for the convenient
+   * object. The only context available is the composed driver's resolved one.
+   */
+  constructor(proven: NaverLiveProbeDriver, opts: NaverLiveImportDriverOptions = {}) {
     this.proven = proven;
     this.opts = opts;
+  }
+
+  /**
+   * The context every surface read and annotation goes through — the composed driver's resolved frame, or
+   * the top document before resolution. There is no page handle to reach instead — see the constructor.
+   */
+  private ctx(): Page | Frame {
+    return this.proven.surfaceContext();
   }
 
   /** Which step the diagnostic overlay badge should show. Set by the session as the run advances. */
@@ -95,12 +135,46 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * it is part of the plan. Reporting `true` would add a step the tutorial has no target for.
    */
   async readSurfaceFacts(): Promise<ImportSurfaceFacts> {
-    const html = await this.page.content();
+    // Settle first: the facts fix the step plan for the whole run, so deciding them off a half-hydrated
+    // page would pick the wrong plan and there is no second chance to change it.
+    const html = await this.settleDateControls();
     const facts: ImportSurfaceFacts = { requiresApply: inferRequiresApply(html), requiresFilters: false };
     // Sanitized: booleans and counts only. Logged because the answer fixes the step plan for the whole
     // run, so an operator reading a transcript needs to see which plan was chosen and why.
-    log("aw_import_surface_facts", { ...facts, ...importLocateDiagnostic(html) });
+    // `frameResolved` is the distinction that made the first live failure diagnosable at all: a zero count
+    // in the right frame and a zero count because we never left the top document look identical otherwise.
+    log("aw_import_surface_facts", {
+      ...facts,
+      frameResolved: this.proven.surfaceFrameResolved(),
+      childFrames: this.proven.childFrameCount(),
+      ...importLocateDiagnostic(html),
+    });
     return facts;
+  }
+
+  /**
+   * Bounded, read-only poll until the two date controls are present, or the window expires.
+   *
+   * Returns the last HTML read either way — a timeout is not an error here, it is the honest last
+   * observation, and the caller fails closed on it with the diagnostic attached. No click, no navigation.
+   */
+  private async settleDateControls(): Promise<string> {
+    const timeoutMs = this.opts.dateSettleTimeoutMs ?? 8_000;
+    const intervalMs = this.opts.dateSettleIntervalMs ?? 500;
+    const deadline = Date.now() + timeoutMs;
+    let html = await this.ctx().content();
+    let polls = 0;
+    while (importLocateDiagnostic(html).dateInputCount !== 2 && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+      polls += 1;
+      html = await this.ctx().content();
+    }
+    if (polls > 0) {
+      // Sanitized: how many polls it took, never what was on the page. Worth logging because "resolved on
+      // the first read" and "resolved after six seconds" are different facts about this surface.
+      log("aw_import_date_settle", { polls, resolved: importLocateDiagnostic(html).dateInputCount === 2 });
+    }
+    return html;
   }
 
   async locateTarget(target: ImportTarget): Promise<LocateResult> {
@@ -115,7 +189,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       return { count: 1, sig: DEFERRED_CONSENT_SIG };
     }
 
-    const html = await this.page.content();
+    const html = target === "apply_range" ? await this.ctx().content() : await this.settleDateControls();
     const decision =
       target === "apply_range"
         ? locateApplyDecision(html)
@@ -127,6 +201,8 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       log("aw_import_locate_unresolved", {
         target,
         count: decision.count,
+        frameResolved: this.proven.surfaceFrameResolved(),
+        childFrames: this.proven.childFrameCount(),
         ...importLocateDiagnostic(html),
       });
       return { count: decision.count };
@@ -135,10 +211,14 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     // Bind in-page and cross-check the tag count. Any disagreement between the string decision and what
     // is actually on the page fails closed with no tag left behind — the same anti-divergence rule the
     // proven export locate uses.
-    const tagged = await this.tagTarget(target, decision.index);
+    const diagnostic = importLocateDiagnostic(html);
+    const expectedTotal = target === "apply_range" ? diagnostic.applyCandidateCount : diagnostic.dateInputTotal;
+    const tagged = await this.tagTarget(target, decision.index, expectedTotal);
     if (tagged !== 1) {
-      log("aw_import_locate_tag_divergence", { target, tagged });
-      return { count: tagged };
+      // -1 means the in-page count disagreed with the pure one: real drift between two reads of a live
+      // page, not a filter mismatch. Reported distinctly so it is not confused with "found nothing".
+      log("aw_import_locate_tag_divergence", { target, tagged, expectedTotal, drift: tagged === -1 });
+      return { count: tagged === -1 ? 0 : tagged };
     }
     const sig = await this.readTargetSig();
     if (!sig) return { count: 0 };
@@ -166,8 +246,8 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     const revalidated = await this.locateTarget(target);
     if (revalidated.count !== 1) return revalidated;
 
-    await this.page.evaluate(NAME_SHIM);
-    await mountOverlay(this.page, {
+    await this.ctx().evaluate(NAME_SHIM);
+    await mountOverlay(this.ctx(), {
       stepNumber: this.stepNumber,
       totalSteps: this.opts.totalSteps ?? 8,
       copyKey: `actionWindow.import.${target}`,
@@ -176,7 +256,56 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     return revalidated;
   }
 
+  /**
+   * Observe that a DATE was actually set — not that the field was touched.
+   *
+   * The shared `armObserver` binds `click`, which is right for a button and wrong for a date field: clicking
+   * a calendar-backed input opens the picker, and the seller may then close it without choosing anything.
+   * Treating that click as "step done" would advance the run on an unset date and hand a wrong window to the
+   * scope gate. So this watches the input's VALUE property instead, which is both the honest signal and the
+   * same thing the gate will later verify — the two converge rather than disagree.
+   *
+   * The value is compared IN-PAGE against a baseline captured here; only a boolean ever crosses back. Angular
+   * writes the value programmatically when the picker closes and may fire no input event at all, so a bounded
+   * poll backs up the listeners.
+   */
+  private async armDateObserve(): Promise<void> {
+    await this.ctx().evaluate(() => {
+      const w = window as unknown as Record<string, unknown>;
+      const el = document.querySelector("[data-aw-target]") as HTMLInputElement | null;
+      const prior = w["__aw_import_date_poll__"];
+      if (typeof prior === "number") clearInterval(prior);
+      w["__aw_import_date_changed__"] = false;
+      if (!el) return;
+      // Baseline stays in the page. A date the seller has on screen is theirs; it never crosses to the agent.
+      const baseline = el.value ?? "";
+      const check = (): void => {
+        const now = el.value ?? "";
+        if (now.trim() !== "" && now !== baseline) w["__aw_import_date_changed__"] = true;
+      };
+      for (const ev of ["change", "input", "blur"]) el.addEventListener(ev, check);
+      w["__aw_import_date_poll__"] = setInterval(check, 250) as unknown as number;
+    });
+  }
+
+  private async waitForDateSet(timeoutMs: number): Promise<boolean> {
+    try {
+      await this.ctx().waitForFunction(
+        () => (window as unknown as Record<string, unknown>)["__aw_import_date_changed__"] === true,
+        undefined,
+        { timeout: timeoutMs, polling: 250 },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async armTargetObserve(target: ImportTarget): Promise<void> {
+    if (target === "start_date" || target === "end_date") {
+      await this.armDateObserve();
+      return;
+    }
     if (target === "export") {
       // Arms the download listener EARLY as well: a sync export can fire on the click itself.
       await this.proven.armObserve();
@@ -185,8 +314,8 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     // Consent needs no arming here — the proven race owns it.
     if (target === "consent") return;
 
-    await this.page.evaluate(NAME_SHIM);
-    await armObserver(this.page);
+    await this.ctx().evaluate(NAME_SHIM);
+    await armObserver(this.ctx());
   }
 
   /**
@@ -201,8 +330,12 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       this.consentRace = await this.proven.detectDownload();
       return this.consentRace.detected;
     }
+    if (target === "start_date" || target === "end_date") {
+      // A generous window: the seller is picking a date from a calendar, which is slower than a click.
+      return this.waitForDateSet(this.opts.dateObserveTimeoutMs ?? 120_000);
+    }
     if (target === "export") return this.proven.waitForUserAction();
-    return waitForUserAction(this.page, { timeoutMs: this.opts.observeTimeoutMs ?? 15_000 });
+    return waitForUserAction(this.ctx(), { timeoutMs: this.opts.observeTimeoutMs ?? 15_000 });
   }
 
   /**
@@ -261,6 +394,15 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   async cleanup(): Promise<void> {
     this.consentRace = null;
     this.sigs.clear();
+    // Stop the value poll, or it keeps running in the page after the run ends.
+    await this.ctx()
+      .evaluate(() => {
+        const w = window as unknown as Record<string, unknown>;
+        const handle = w["__aw_import_date_poll__"];
+        if (typeof handle === "number") clearInterval(handle);
+        w["__aw_import_date_poll__"] = undefined;
+      })
+      .catch(() => {});
     await this.proven.cleanup();
   }
 
@@ -269,45 +411,37 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * observers can never attach to a stale control. Returns how many ended up tagged — the caller fails
    * closed on anything but 1.
    */
-  private async tagTarget(target: ImportTarget, index: number): Promise<number> {
-    await this.page.evaluate(NAME_SHIM);
-    return this.page.evaluate(
-      ({ kind, wanted }) => {
+  private async tagTarget(target: ImportTarget, index: number, expectedTotal: number): Promise<number> {
+    await this.ctx().evaluate(NAME_SHIM);
+    return this.ctx().evaluate(
+      ({ kind, wanted, total }) => {
         for (const stale of Array.from(document.querySelectorAll("[data-aw-target]"))) {
           stale.removeAttribute("data-aw-target");
         }
-        const actionable = (el: Element): boolean => {
-          const input = el as HTMLInputElement;
-          if (input.disabled || input.readOnly) return false;
-          if (input.type === "hidden") return false;
-          const style = window.getComputedStyle(el);
-          return style.display !== "none" && style.visibility !== "hidden";
-        };
-        let candidates: Element[];
-        if (kind === "apply_range") {
-          const words = ["조회", "검색", "적용", "search"];
-          candidates = Array.from(document.querySelectorAll("button, a, input[type=button], input[type=submit]"))
-            .filter(actionable)
-            .filter((el) => {
-              const text = `${el.textContent ?? ""} ${(el as HTMLInputElement).value ?? ""}`.toLowerCase();
-              return words.some((w) => text.includes(w.toLowerCase()));
-            });
-        } else {
-          candidates = Array.from(
-            document.querySelectorAll(
-              'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]',
-            ),
-          ).filter(actionable);
-          // The date pair must be exactly two here as well; the pure decision already required it, and
-          // re-checking in-page is what catches a surface that changed between the two reads.
-          if (candidates.length !== 2) return candidates.length;
-        }
+        // NO actionability re-check in here. The pure decision already made that judgement, and a second
+        // implementation of it in-page is how this driver failed three times: `readonly` was corrected in
+        // the pure module and left in place here, so the two disagreed and the tag count came back 0.
+        // In-page work is now selection only, and the count assertion below is what detects real drift.
+        const candidates =
+          kind === "apply_range"
+            ? Array.from(document.querySelectorAll("button, a, input[type=button], input[type=submit]")).filter((el) => {
+                const text = `${el.textContent ?? ""} ${(el as HTMLInputElement).value ?? ""}`.toLowerCase();
+                return ["조회", "검색", "적용", "search"].some((w) => text.includes(w.toLowerCase()));
+              })
+            : Array.from(
+                document.querySelectorAll(
+                  'input[type="date"], input[class*="date"], input[class*="calendar"], input[class*="picker"]',
+                ),
+              );
+        // The pure decision counted `total` of these a moment ago. A different number now means the DOM
+        // moved between the two reads — that is drift, and it fails closed with no tag left behind.
+        if (candidates.length !== total) return -1;
         const chosen = candidates[wanted];
         if (!chosen) return 0;
         chosen.setAttribute("data-aw-target", "1");
         return document.querySelectorAll("[data-aw-target]").length;
       },
-      { kind: target, wanted: index },
+      { kind: target, wanted: index, total: expectedTotal },
     );
   }
 
@@ -317,7 +451,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * across two reads to detect drift, and one built from content would change when content changed.
    */
   private async readTargetSig(): Promise<string | null> {
-    return this.page.evaluate(() => {
+    return this.ctx().evaluate(() => {
       const el = document.querySelector("[data-aw-target]");
       if (!el) return null;
       const siblings = el.parentElement ? Array.from(el.parentElement.children) : [el];

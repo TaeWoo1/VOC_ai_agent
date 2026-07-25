@@ -27,6 +27,11 @@ findings/*.local.md
 # Persisted reply-submission runs (isolated v2 store, agent-local only, never committed)
 .reply-runs/
 
+# Import-run markers (v2 initial-review-import). Sanitized by design — no launch ref, no dates, no paths —
+# but they are per-run local state, not source. The design called this dir gitignored from the start; the
+# entry was missing until the first live run produced markers.
+.import-runs/
+
 # Guided reply target hint (privacy-safe match metadata, single-use, owner-only; never committed)
 .reply-target/
 

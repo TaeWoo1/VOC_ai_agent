@@ -138,14 +138,52 @@ describe("browser launch reachability", () => {
     expect(calls[0]!).toBeLessThan(builderEnd);
   });
 
-  it("invokes that builder only when the gate says host", () => {
-    expect(cli).toMatch(/importMode\.host\s*\n?\s*\?\s*await buildInitialImportConfig/);
+  it("invokes that builder only from the gated boot", () => {
+    // The builder is called exactly once, and inside runImportOnlyBoot — which itself is only reached
+    // when the gate says host.
+    const calls = [...cli.matchAll(/await buildInitialImportConfig\(/g)].map((m) => m.index!);
+    expect(calls).toHaveLength(1);
+    const bootStart = cli.indexOf("async function runImportOnlyBoot");
+    const bootEnd = cli.indexOf("async function main()");
+    expect(calls[0]!).toBeGreaterThan(bootStart);
+    expect(calls[0]!).toBeLessThan(bootEnd);
   });
 
-  /** The normal and scheduled paths must not be able to claim the carrier slot from a live browser. */
-  it("stands the other carriers down when import is hosting", () => {
-    expect(cli).toContain("const hostReply = initialImport ? false : resolveReplySubmissionChannel");
-    expect(cli).toContain("const awChannel = initialImport || hostReply ? null : resolveActionWindowChannel");
+  /**
+   * The import mode has its OWN boot, decided before the connections gate.
+   *
+   * The first version of this wiring put the gate inside the live boot, which coupled a NAVER import to the
+   * ESM connector lineage: it required a connections file, and the live boot launches one Chrome per
+   * runnable connection — so satisfying it would have opened a browser nobody asked for. The gate running
+   * first is the fix, and this pins it.
+   */
+  it("decides the import mode before the connections gate", () => {
+    const gateAt = cli.indexOf("const importGate = resolveImportMode(args, process.env)");
+    const connectionsAt = cli.indexOf('const connectionsPath = flagValue(args, "--connections")');
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(connectionsAt).toBeGreaterThan(-1);
+    expect(gateAt).toBeLessThan(connectionsAt);
+  });
+
+  it("returns from its own boot rather than falling through to the connector path", () => {
+    expect(cli).toContain("await runImportOnlyBoot(args, process.env);");
+    const gateAt = cli.indexOf("if (importGate.host) {");
+    const returnAt = cli.indexOf("return;", gateAt);
+    expect(gateAt).toBeGreaterThan(-1);
+    expect(returnAt).toBeGreaterThan(gateAt);
+    expect(returnAt - gateAt).toBeLessThan(200);
+  });
+
+  /** The import boot must not start the connector lifecycle or a per-connection browser. */
+  it("its boot hosts only the bridge and the one browser", () => {
+    const start = cli.indexOf("async function runImportOnlyBoot");
+    const end = cli.indexOf("async function main()");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const boot = cli.slice(start, end);
+    for (const token of ["createLocalAgentConnectorStartup", "startup.boot(", "writeStatus"]) {
+      expect(boot, token).not.toContain(token);
+    }
   });
 
   it("uses the real live driver on the product path, never the fixture one", () => {
