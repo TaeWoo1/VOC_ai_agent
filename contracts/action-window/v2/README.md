@@ -1,9 +1,44 @@
-# Action Window Protocol — v1
+# Action Window Protocol — v2
 
-**Status:** normative contract, protocol version **1**. Defines the *only* FE ↔ Runtime
+**Status:** normative contract, protocol version **2**. Defines the *only* FE ↔ Runtime
 protocol truth for the Action Window. This slice ships the **contract + fixtures + conformance
 tests only** — no Runtime engine, FE screens, Chrome/overlay, Bridge handlers, persistence, or
 live channel behavior.
+
+> The body of this file below still describes the shared v1 surface (v2 is a superset — same
+> envelopes, transport, privacy boundary, and command semantics). **What v2 adds is in
+> "§2 v2 additions"**; `index.ts` is authoritative where the two disagree.
+
+## §2 v2 additions
+
+**Run intents.** `START_RUN` may carry an `intent`; absent ⇒ `EXPORT` (the v1 read chain, so a v1
+command shape stays valid).
+
+| intent | what it drives | terminal |
+|---|---|---|
+| `EXPORT` | the v1 export read chain | `COMPLETED` |
+| `REPLY_SUBMISSION` | guided, human-performed reply post | `OPERATOR_REPORTED` (no read-back oracle) |
+| `INITIAL_REVIEW_IMPORT_DISCOVERY` | find the historical range the marketplace currently allows | `COMPLETED` |
+| `INITIAL_REVIEW_IMPORT_SEGMENT` | guide ONE planned monthly segment to a downloaded, ingested file | `COMPLETED` |
+
+Both import intents are read-only export choreography — the seller clicks every marketplace
+control — so they need no new status. Discovery is separate because the **first** command has no
+plan yet: there is nothing to bind a segment ref to until the available range is known.
+
+**One binding ref per intent** (`INTENT_REQUIRED_REF`). Each intent requires exactly one opaque
+16-hex ref and **prohibits every other**: `submissionRef` iff `REPLY_SUBMISSION`, `discoveryRef` iff
+`INITIAL_REVIEW_IMPORT_DISCOVERY`, `importRef` iff `INITIAL_REVIEW_IMPORT_SEGMENT`; `EXPORT` carries
+none. A run bound to the wrong kind of approved work is thereby unrepresentable, and an *unknown*
+intent requires none — so a rejected intent cannot smuggle a binding through.
+
+Refs resolve **server-side** to a seller account, plan, and segment. No plan id, segment id, or
+date crosses this boundary; required dates reach the seller as sanitized primitive `copyParams`
+under an FE-owned copy key, like any other step copy.
+
+**Carrier kind.** v2 envelopes are spoken by two different agent worlds, so
+`contracts/action-window/aw-carrier-kind.ts` announces which: `export` (v1), `reply` (v2), `import`
+(v2). Version alone cannot separate `reply` from `import`; an unrecognised or absent value fails
+closed rather than defaulting.
 
 ## Location & ownership
 

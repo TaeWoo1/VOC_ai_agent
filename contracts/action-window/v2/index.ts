@@ -10,6 +10,12 @@
  * **What v2 adds on top of v1 (everything else is identical):**
  *  - a `REPLY_SUBMISSION` run intent + an opaque `submissionRef` on `START_RUN` (binds the run to an
  *    approved reply without ever carrying the reply text);
+ *  - the two `INITIAL_REVIEW_IMPORT_*` intents (onboarding historical backfill) + their opaque
+ *    `discoveryRef` / `importRef` bindings. These are read-only export choreography — the seller
+ *    clicks every marketplace control and the run reaches the ordinary `COMPLETED` terminal — so they
+ *    add no status. Their bindings resolve **server-side** to a seller account, plan, and segment, so
+ *    no plan id, segment id, or date ever crosses this boundary; the required dates reach the seller
+ *    as sanitized primitive `copyParams` under an FE-owned copy key, like any other step copy;
  *  - a terminal `OPERATOR_REPORTED` run/step status (a reply post has NO read-back verifier, so it can
  *    never reach `COMPLETED` — see `docs/action-window-runtime/contract-boundary.md` §2);
  *  - a `SUBMISSION_REPORTED` event + `RUN_OPERATOR_REPORTED` terminal event, both carrying **two
@@ -86,9 +92,43 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
 /**
  * Run intent (v2). Selects the step plan. `EXPORT` is the v1 read chain; `REPLY_SUBMISSION` is the
  * guided, human-performed reply-post. Absent intent on `START_RUN` means `EXPORT` (v1-compatible).
+ *
+ * The two `INITIAL_REVIEW_IMPORT_*` intents are the onboarding historical backfill, split in two
+ * because the first command has **no plan yet**:
+ *  - `INITIAL_REVIEW_IMPORT_DISCOVERY` — find the historical range NAVER currently lets this seller
+ *    reach, so the plan can be built from what is actually available rather than a guessed period. It
+ *    carries a `discoveryRef` (no plan/segment exists to bind to).
+ *  - `INITIAL_REVIEW_IMPORT_SEGMENT` — guide ONE already-planned monthly segment to a downloaded,
+ *    ingested file. It carries an `importRef` bound server-side to that segment.
+ *
+ * Both are read-only export choreography — the seller clicks every marketplace control — so they reach
+ * the ordinary `COMPLETED` terminal, unlike `REPLY_SUBMISSION`.
  */
-export const RUN_INTENTS = ["EXPORT", "REPLY_SUBMISSION"] as const;
+export const RUN_INTENTS = [
+  "EXPORT",
+  "REPLY_SUBMISSION",
+  "INITIAL_REVIEW_IMPORT_DISCOVERY",
+  "INITIAL_REVIEW_IMPORT_SEGMENT",
+] as const;
 export type RunIntent = (typeof RUN_INTENTS)[number];
+
+/**
+ * Which opaque ref each intent MUST carry on `START_RUN` — and, by exclusion, which it must NOT.
+ *
+ * <p>One table instead of a per-intent branch: every ref is single-purpose (a `submissionRef` on an
+ * import run, or an `importRef` on a reply run, is a wiring bug that would bind a run to the wrong
+ * approved work), so "required for exactly this intent, prohibited for every other" is the rule for
+ * all of them and is stated once. `EXPORT` maps to no ref — it binds to nothing.
+ */
+export const INTENT_REQUIRED_REF: Readonly<Record<RunIntent, "submissionRef" | "discoveryRef" | "importRef" | null>> = {
+  EXPORT: null,
+  REPLY_SUBMISSION: "submissionRef",
+  INITIAL_REVIEW_IMPORT_DISCOVERY: "discoveryRef",
+  INITIAL_REVIEW_IMPORT_SEGMENT: "importRef",
+};
+
+/** Every binding ref a `START_RUN` payload may carry (exactly one, chosen by intent). */
+export const START_RUN_REF_KEYS = ["submissionRef", "discoveryRef", "importRef"] as const;
 
 /**
  * What the operator reports happened at the submit barrier (v2). Kept SEPARATE from `verification`.
@@ -161,7 +201,8 @@ export interface CommandEnvelope {
 }
 
 export type CommandPayload =
-  | { channelCode: string; intent?: RunIntent; submissionRef?: string } // START_RUN (submissionRef required when intent = REPLY_SUBMISSION)
+  // START_RUN — exactly one binding ref, selected by intent (see INTENT_REQUIRED_REF).
+  | { channelCode: string; intent?: RunIntent; submissionRef?: string; discoveryRef?: string; importRef?: string }
   | { enabled: boolean } // SET_GUIDANCE_ENABLED
   | Record<string, never>; // commands with no payload
 
@@ -200,6 +241,10 @@ export interface EventPayload {
   verification?: VerificationState;
   /** v2: opaque 16-hex binding to an approved reply — NEVER the reply text or a review id. */
   submissionRef?: string;
+  /** v2: opaque 16-hex binding to a range-discovery ticket — NEVER an account id or a date. */
+  discoveryRef?: string;
+  /** v2: opaque 16-hex binding to one planned import segment — NEVER a plan/segment id or a date. */
+  importRef?: string;
 }
 
 /** Primitive, interpolation-safe copy parameter value (FE owns final copy). */
@@ -302,7 +347,7 @@ export const PROHIBITED_KEYS: readonly string[] = [
   "reviewContent",
 ];
 
-const REF_KEYS: readonly string[] = ["targetRef", "artifactRef", "submissionRef"];
+const REF_KEYS: readonly string[] = ["targetRef", "artifactRef", "submissionRef", "discoveryRef", "importRef"];
 const HEX16 = /^[0-9a-f]{16}$/;
 /** A dotted semantic copy key (e.g. `actionWindow.review.ready`) — never final prose. */
 const COPY_KEY = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/;
@@ -378,12 +423,18 @@ const COMMAND_PAYLOAD_REQUIRED: Partial<Record<CommandType, (p: Record<string, u
     const e: ValidationError[] = [];
     if (!(typeof p.channelCode === "string" && SEMANTIC_CODE.test(p.channelCode))) e.push(err("MISSING_FIELD", "$.payload.channelCode"));
     // intent is optional (absent ⇒ EXPORT); when present it must be a known intent.
-    if (p.intent !== undefined && !(RUN_INTENTS as readonly string[]).includes(p.intent as string)) e.push(err("UNKNOWN_ENUM", "$.payload.intent"));
-    // A reply submission MUST carry an opaque submissionRef; an export MUST NOT.
-    if (p.intent === "REPLY_SUBMISSION") {
-      if (!(typeof p.submissionRef === "string" && HEX16.test(p.submissionRef))) e.push(err("CONSTRAINT_VIOLATION", "$.payload.submissionRef"));
-    } else if (p.submissionRef !== undefined) {
-      e.push(err("CONSTRAINT_VIOLATION", "$.payload.submissionRef")); // submissionRef only belongs to a REPLY_SUBMISSION
+    const known = p.intent === undefined || (RUN_INTENTS as readonly string[]).includes(p.intent as string);
+    if (!known) e.push(err("UNKNOWN_ENUM", "$.payload.intent"));
+    // Exactly one binding ref, chosen by intent: the one this intent requires must be a clean opaque
+    // ref, and EVERY other ref must be absent. An unknown intent requires none, so all refs are
+    // prohibited — a rejected intent can never smuggle a binding through.
+    const required = known && p.intent !== undefined ? INTENT_REQUIRED_REF[p.intent as RunIntent] : null;
+    for (const key of START_RUN_REF_KEYS) {
+      if (key === required) {
+        if (!(typeof p[key] === "string" && HEX16.test(p[key] as string))) e.push(err("CONSTRAINT_VIOLATION", `$.payload.${key}`));
+      } else if (p[key] !== undefined) {
+        e.push(err("CONSTRAINT_VIOLATION", `$.payload.${key}`)); // a ref belongs to exactly one intent
+      }
     }
     return e;
   },

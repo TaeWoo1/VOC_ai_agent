@@ -29,7 +29,7 @@
  * (`createAgentBridge` throws when both are configured), so this reports a fact about the agent, not
  * a menu to choose from.
  */
-export const AW_CARRIER_KINDS = ["export", "reply"] as const;
+export const AW_CARRIER_KINDS = ["export", "reply", "import"] as const;
 
 export type AwCarrierKind = (typeof AW_CARRIER_KINDS)[number];
 
@@ -45,6 +45,19 @@ export const AW_CARRIER_EXPORT = "export";
 
 /** The v2 reply-submission carrier. Unannotated for the same reason as {@link AW_CARRIER_EXPORT}. */
 export const AW_CARRIER_REPLY = "reply";
+
+/**
+ * The v2 **initial-review-import** carrier — the onboarding historical-backfill world.
+ *
+ * <p>Like `reply`, it speaks v2 envelopes, so version alone cannot separate the two: a client attaching
+ * to an import agent while expecting reply-submission runs would build a correctly-versioned client and
+ * then sit dormant, which is precisely the failure this field exists to make impossible. An import run
+ * is also read-only export choreography (guide → operator clicks → download → ingest), NOT a
+ * marketplace-mutating post, so collapsing it into `reply` would misdescribe what the agent does.
+ *
+ * <p>Unannotated for the same reason as {@link AW_CARRIER_EXPORT}.
+ */
+export const AW_CARRIER_IMPORT = "import";
 
 /**
  * Narrow an announced value to a known carrier, or `null` when it is absent or unrecognised.

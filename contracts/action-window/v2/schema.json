@@ -32,8 +32,8 @@
     },
     "RunIntent": {
       "type": "string",
-      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post.",
-      "enum": ["EXPORT", "REPLY_SUBMISSION"]
+      "description": "v2: selects the step plan. EXPORT is the v1 read chain; REPLY_SUBMISSION is the guided human-performed reply post. INITIAL_REVIEW_IMPORT_DISCOVERY finds the historical range the marketplace currently allows (no plan exists yet, so it binds a discoveryRef); INITIAL_REVIEW_IMPORT_SEGMENT guides one already-planned segment to a downloaded, ingested file (binds an importRef). Both import intents are read-only export choreography and reach the ordinary COMPLETED terminal.",
+      "enum": ["EXPORT", "REPLY_SUBMISSION", "INITIAL_REVIEW_IMPORT_DISCOVERY", "INITIAL_REVIEW_IMPORT_SEGMENT"]
     },
     "OperatorOutcome": {
       "type": "string",
@@ -77,11 +77,13 @@
         "type": { "$ref": "#/$defs/CommandType" },
         "payload": {
           "type": "object",
-          "description": "Typed payload when required. START_RUN requires { channelCode } and optionally { intent, submissionRef } — submissionRef is required iff intent = REPLY_SUBMISSION. SET_GUIDANCE_ENABLED requires { enabled }.",
+          "description": "Typed payload when required. START_RUN requires { channelCode } and optionally { intent } plus EXACTLY ONE binding ref chosen by that intent: submissionRef iff REPLY_SUBMISSION, discoveryRef iff INITIAL_REVIEW_IMPORT_DISCOVERY, importRef iff INITIAL_REVIEW_IMPORT_SEGMENT. EXPORT (and an absent intent) carries none, and every ref not required by the intent is prohibited. SET_GUIDANCE_ENABLED requires { enabled }.",
           "properties": {
             "channelCode": { "$ref": "#/$defs/SemanticCode" },
             "intent": { "$ref": "#/$defs/RunIntent" },
             "submissionRef": { "$ref": "#/$defs/OpaqueRef" },
+            "discoveryRef": { "$ref": "#/$defs/OpaqueRef" },
+            "importRef": { "$ref": "#/$defs/OpaqueRef" },
             "enabled": { "type": "boolean" }
           }
         }
@@ -115,7 +117,9 @@
             "recoverable": { "type": "boolean" },
             "operatorOutcome": { "$ref": "#/$defs/OperatorOutcome" },
             "verification": { "$ref": "#/$defs/VerificationState" },
-            "submissionRef": { "$ref": "#/$defs/OpaqueRef" }
+            "submissionRef": { "$ref": "#/$defs/OpaqueRef" },
+            "discoveryRef": { "$ref": "#/$defs/OpaqueRef" },
+            "importRef": { "$ref": "#/$defs/OpaqueRef" }
           }
         }
       }
