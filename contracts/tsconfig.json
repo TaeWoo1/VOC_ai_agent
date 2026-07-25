@@ -1,0 +1,24 @@
+{
+  // Standalone type-check project for the shared contracts.
+  //
+  // These files are the normative FE ↔ Runtime truth, but until now they were only ever checked
+  // TRANSITIVELY — as imports of whichever consumer happened to pull them in. So a contract could be broken
+  // in a way no single package's own typecheck was guaranteed to surface, and CI had no stage that named
+  // "the contracts" as the thing that failed.
+  //
+  // Verify with: npx tsc -p contracts/tsconfig.json
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    // No DOM and no @types/node on purpose: these modules are pure types + validators shared by a browser
+    // bundle AND a Node runtime, so anything reachable from only one of the two is a portability bug this
+    // project exists to catch.
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["."]
+}

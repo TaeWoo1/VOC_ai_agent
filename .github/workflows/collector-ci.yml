@@ -1,15 +1,32 @@
-# Collector CI — runs the collector local-agent package's typecheck / test on PRs and on
-# pushes to main, so the collector safety net is enforced automatically, not only locally.
-# Scoped to the self-contained `collector/` npm package plus the inputs it consumes:
-# shared `contracts/` and the frontend contract shims under `frontend/src/lib/`.
+# Collector CI — automatic verification of the SellerOps runtime boundary.
+#
+# The high-risk surface this guards is the FE ↔ Local Agent boundary: the shared Action Window contracts,
+# the collector runtime that speaks them, and the frontend clients that consume them. Those three are
+# separate npm/typecheck worlds that can only break each other at their seams, so nothing inside any ONE
+# package's own CI is guaranteed to notice.
+#
+# What it deliberately does NOT do: no live NAVER, no headed Chrome, no marketplace network, no disposable
+# backend, no approval-gated suite. Those are seated, operator-authorized runs by design (collector
+# CLAUDE.md §4: a live run requires explicit per-run approval and a human performing login/2FA/CAPTCHA), so a
+# CI job that could start one would be a standing authorization — exactly what the safety model forbids. See
+# `docs/ci-coverage.md` for the full covered/excluded list.
 name: Collector CI
 
+# The two path lists below are duplicated verbatim, and must stay in lockstep. They are NOT factored into a
+# YAML anchor: the GitHub Actions workflow parser does not support anchors/aliases, so an anchor here would
+# not be shared — it would be a filter that quietly fails to apply.
 on:
   pull_request:
     paths:
       - 'collector/**'
       - 'contracts/**'
+      # The frontend's contract + bridge clients. Kept broad at `lib/**` on purpose: a narrower filter is a
+      # thing that silently rots, and `tools/ci/check-contract-importers.sh` fails the build if an importer
+      # ever appears outside these prefixes.
       - 'frontend/src/lib/**'
+      - 'frontend/src/components/actionWindow/**'
+      - 'frontend/src/components/bridge/**'
+      - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
   push:
     branches: [main]
@@ -17,6 +34,9 @@ on:
       - 'collector/**'
       - 'contracts/**'
       - 'frontend/src/lib/**'
+      - 'frontend/src/components/actionWindow/**'
+      - 'frontend/src/components/bridge/**'
+      - 'tools/ci/check-contract-importers.sh'
       - '.github/workflows/collector-ci.yml'
 
 # One run per ref; cancel superseded runs when new commits are pushed.
@@ -24,16 +44,75 @@ concurrency:
   group: collector-ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Least privilege — the job only reads the checkout.
+# Least privilege — the jobs only read the checkout. No secrets are referenced anywhere in this workflow, so
+# it runs identically on a fork PR.
 permissions:
   contents: read
 
+# Pinned BLANK, not merely left unset. Every browser / live-backend / headed suite in the collector is gated
+# on one of these two being exactly "1" (`describe.skipIf(!RUN)` / `it.skipIf(!HEADED)`), so stating them
+# here means a repository- or environment-level default can never quietly arm a live run inside CI.
+env:
+  RUN_INTEGRATION: ''
+  AW_HEADED: ''
+
 jobs:
+  # Job id kept as `collector`, and deliberately given NO `name:` — GitHub derives the status-check name from
+  # `name` when present, so adding one would silently rename the check and break any branch-protection rule
+  # that requires "Collector CI / collector".
   collector:
     runs-on: ubuntu-latest
-    defaults:
-      run:
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # No .nvmrc or package.json engines exists in this repo; 20 is the version all three workflows
+          # already standardise on. See docs/ci-coverage.md for why that is worth pinning properly one day.
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: collector/package-lock.json
+
+      # Runs BEFORE the install: it needs no dependencies, and a stale path filter or a missing fixture set
+      # would otherwise be discovered only as a suspiciously green run.
+      - name: Guard path filter + contract fixtures
+        run: bash tools/ci/check-contract-importers.sh
+
+      - name: Install collector dependencies
         working-directory: collector
+        run: npm ci
+
+      # The contracts are the normative FE ↔ Runtime truth but have no package of their own, so these two
+      # steps are what make "the contracts broke" an attributable CI failure rather than a symptom that
+      # surfaces inside whichever consumer happened to import them.
+      - name: Contracts typecheck
+        working-directory: collector
+        run: npx tsc -p ../contracts/tsconfig.json
+
+      - name: Contracts conformance tests
+        working-directory: collector
+        run: npx vitest run test/contracts
+
+      - name: Collector typecheck
+        working-directory: collector
+        # `npm run typecheck` is two projects: the collector itself, and test/crossstack, which type-checks
+        # REAL frontend source alongside collector source. That second project is the boundary check.
+        run: npm run typecheck
+
+      - name: Collector hermetic unit + integration tests
+        working-directory: collector
+        # Hermetic by construction: no network, no browser, and the gated suites stay skipped because
+        # RUN_INTEGRATION / AW_HEADED are blank. Verified locally to pass with frontend/node_modules absent,
+        # which is exactly this job's condition — the crossstack tests reach frontend SOURCE, not its deps.
+        run: npm test
+
+  frontend-contract-client:
+    name: frontend contract + bridge clients
+    runs-on: ubuntu-latest
+    # A separate job, not a step, so "the frontend client broke" is distinguishable at a glance from "the
+    # collector broke" — and so it installs only its own dependencies.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,13 +122,27 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: collector/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install frontend dependencies
+        working-directory: frontend
         run: npm ci
 
-      - name: Typecheck
+      - name: Frontend typecheck
+        working-directory: frontend
+        # App-wide on purpose: a contract change breaks the frontend at the TYPE level first, and it can
+        # surface in any file, not only the ones that import the contract directly.
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
+      - name: Frontend contract + bridge client tests
+        working-directory: frontend
+        # The runtime half: the contract clients, the bridge client/transport, the guided-connection session,
+        # and the components that render from the contract view model. Deliberately NOT the whole frontend
+        # suite — frontend-ci.yml owns that, and covers `contracts/**` too, so a contract change gets both.
+        run: >-
+          npx vitest run
+          src/lib/actionWindow
+          src/lib/bridge
+          src/lib/guidedConnection
+          src/components/actionWindow
+          src/components/bridge
