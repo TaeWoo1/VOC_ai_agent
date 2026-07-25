@@ -8,10 +8,15 @@ on:
     branches: [main]
     paths:
       - 'frontend/**'
-      # The frontend consumes the shared contract via
-      # frontend/src/lib/actionWindow/contract.ts → ../../../../contracts/action-window/v1,
-      # so a contract change can affect the FE typecheck/build and must run this check.
-      - 'contracts/action-window/v1/**'
+      # The frontend consumes the shared contract, so a contract change can break the FE typecheck/build and
+      # must run this check.
+      #
+      # This was 'contracts/action-window/v1/**' and that was a real hole: the frontend also imports v2
+      # (reply/replyRuntime, reply/replyFrameTransport, reply/replyBridge) and aw-carrier-kind.ts
+      # (wsTransport, operationsStore) — so a v2 or carrier-kind change could break the frontend with no CI
+      # signal at all. Widened to the whole directory rather than enumerating versions, because enumerating
+      # them is what went stale the moment v2 was added.
+      - 'contracts/**'
       - '.github/workflows/frontend-ci.yml'
 
 # One run per PR ref; cancel superseded runs when new commits are pushed.
