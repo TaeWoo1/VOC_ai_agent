@@ -10,10 +10,17 @@
  * reaching production would report imports that never happened. `import-dispatch.test.ts` asserts the
  * production wiring does not reference this module.
  */
+import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, SurfaceProbeResult } from "../engine";
-import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import type {
+  DiscoveredRange,
+  ImportDiscoveryDriver,
+  ImportProbeDriver,
+  ImportTarget,
+  RequiredRange,
+} from "./import-driver";
 
 export interface ImportFixtureScript {
   surface?: boolean | SurfaceProbeResult;
@@ -28,6 +35,14 @@ export interface ImportFixtureScript {
   download?: DownloadDetectResult;
   validate?: ArtifactValidateResult;
   ingest?: IngestResult;
+
+  /* ── range discovery ── */
+  /** What the range controls declare. Missing → nothing declared, which is the live NAVER surface's answer. */
+  bounds?: RangeControlProbe;
+  /** What the seller ends up having selected. Missing → a readable range. `null` → unreadable. */
+  selectedRange?: DiscoveredRange | null;
+  /** Whether the server accepts the reported range. Missing → it does. */
+  reportOk?: boolean;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -40,7 +55,7 @@ function sigFor(target: ImportTarget): string {
   return hash.toString(16).padStart(8, "0").repeat(2).slice(0, 16);
 }
 
-export class ImportFixtureDriver implements ImportProbeDriver {
+export class ImportFixtureDriver implements ImportProbeDriver, ImportDiscoveryDriver {
   private readonly script: ImportFixtureScript;
   /** Every call, in order — so a test can assert the runtime never armed a control it should not have. */
   readonly calls: string[] = [];
@@ -102,6 +117,31 @@ export class ImportFixtureDriver implements ImportProbeDriver {
   async ingest(artifactRef: string): Promise<IngestResult> {
     this.calls.push(`ingest:${artifactRef}`);
     return this.script.ingest ?? { ok: true, processed: 42 };
+  }
+
+  async readRangeControls(): Promise<RangeControlProbe> {
+    this.calls.push("readRangeControls");
+    // Default: the controls declare nothing. That is what the live NAVER surface does — its date inputs are
+    // calendar-backed text fields with no `min`/`max` — so the default exercises the path a live run takes.
+    return this.script.bounds ?? { minAttrs: [], maxAttrs: [], noticeTexts: [] };
+  }
+
+  async readSelectedRange(): Promise<DiscoveredRange | null> {
+    this.calls.push("readSelectedRange");
+    // `selectedRange: null` is a scripted UNREADABLE, distinct from an absent key.
+    return this.script.selectedRange === undefined
+      ? { start: "2024-01-01", end: "2026-06-30" }
+      : this.script.selectedRange;
+  }
+
+  async reportDiscoveredRange(
+    range: DiscoveredRange,
+    evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED",
+  ): Promise<boolean> {
+    // The evidence is recorded so a test can assert it was never upgraded — the range dates belong here
+    // (the fixture IS the server end) but the evidence is what a bug would silently change.
+    this.calls.push(`reportRange:${evidence}:${range.start}..${range.end}`);
+    return this.script.reportOk ?? true;
   }
 
   async cleanup(): Promise<void> {

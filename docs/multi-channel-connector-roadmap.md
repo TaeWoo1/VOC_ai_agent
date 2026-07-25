@@ -10,6 +10,10 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 > 참조한다. UI의 셀러 표기 문구도 이 표의 "셀러 표기" 열을 따른다.
 >
 > 변경 이력:
+> - 2026-07-25 — §4.1에 **초기 리뷰 연동(가이드형 세그먼트 import) 노트만 추가**. 표의 어떤 열도 갱신하지
+>   않음: 세그먼트 실행만 1회 라이브 증명이고, 기간 탐색과 셀러 CTA 경로는 오프라인 검증뿐이다.
+>   근거: `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`.
+>   **운영 지원·셀러 표기 변경 없음.**
 > - 2026-07-15 — **NAVER REVIEW 라이브 검증 상태만 갱신**(§4.1 현행표 · §1 collector 서술 · §5.1 범위
 >   한정). 근거: Run 4 (`docs/action-window-runtime/r4-evidence-pack.md` §8-17) — export→ingest
 >   end-to-end 실행. **운영 지원 단계·셀러 표기 변경 없음**; 그 외 채널·항목은 이전 기준 유지.
@@ -189,6 +193,25 @@ ChannelCollectionAdapter {
 **요약 문장 (다른 문서가 인용할 한 줄):** 운영 지원(production-supported) 수준은 현재
 **파일 업로드(전 채널)뿐**이다. NAVER·Cafe24의 ORDER_SUMMARY와 NAVER 리뷰 감독형 캡처는
 **라이브 검증됨**(상시 운영 아님), 나머지는 구현/골격/후보 단계다.
+
+> **NAVER REVIEW 과거 리뷰 초기 연동(가이드형 세그먼트 import) — 2026-07-25 기준, 부분 라이브.**
+> 위 REVIEW 행은 **단일 export → ingest** 능력이다. 초기 연동은 그 위에 **월 단위 세그먼트를 순서대로
+> 안내해 과거 구간을 채우는** 별개 실행이며, 상태는 **한 줄로 요약할 수 없으므로 분리해 기록한다.**
+>
+> - **세그먼트 실행(SEGMENT) = 라이브 증명됨(1회).** 2026-07-25, 실제 판매자센터에서 1개 월 구간을
+>   8/8 `COMPLETED`, ticket `CONSUMED`, segment `COMPLETED+COVERED`, attempt `SUCCEEDED`
+>   (신규 70 / 중복 0), `scope_evidence = MACHINE_MATCHED`. **모든 마켓플레이스 클릭은 운영자 수행**이며
+>   런타임은 탐지·강조·관찰만 했다. 범위 게이트가 잘못된 기간을 **라이브로 차단**하고 recheck 복구까지
+>   증명됨. 증거: `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`.
+>   ⚠ **1계정·1구간·일회용 로컬 백엔드**다. 운영 지원(production-supported) 아님.
+> - **기간 탐색(DISCOVERY) = 오프라인만.** 계획을 만드는 첫 실행은 아직 라이브로 돌지 않았다.
+> - **셀러 경로(FE 단일 CTA → Bridge → 로컬 에이전트) = 오프라인 cross-stack 증명만.** 라이브 1회는
+>   스크래치 브리지 클라이언트로 실행됐다. 제품 경로는 구현·소켓 수준까지 검증됐으나
+>   (`collector/test/crossstack/fe-import-runtime-real-bridge.test.ts`) **셀러 화면이 마켓플레이스 실행을
+>   구동한 적은 없다.**
+>
+> **따라서 위 표의 `라이브 검증` 열은 초기 연동으로 인해 갱신되지 않는다.** "과거 리뷰 전체 연동 지원"
+> 류의 표기는 금지. 정직 표기는 현행 "네이버 리뷰 export 업로드 지원"을 유지한다.
 
 > **NAVER REVIEW 답변 제출(가이드형) — v1.6, 계획·오프라인·미검증.** 위 표의 REVIEW 행은 **수집(read)**
 > 능력이다. v1.6은 별개 축으로 **답변 제출(write)** 을 추가하나, 이 표의 "지원"과 혼동 금지: **가이드형·사람

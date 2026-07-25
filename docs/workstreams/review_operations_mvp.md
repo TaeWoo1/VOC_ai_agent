@@ -154,6 +154,35 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-25 — Guided import: the seller's own path (FE → Bridge → agent) — IMPLEMENTED (offline, cross-stack)
+- **Loop stage(s):** ACQUIRE (guided export) — the entry point, which until now had no product route
+- **Did:** Closed the two gaps the live segment proof left open (same day, entry above). (a) **Range
+  discovery is now a hosted run**: `ImportDiscoveryEngine` / `ImportDiscoverySession` +
+  `ImportDiscoveryDriver`, a fixed five-step plan, and `ImportSegmentHost` branching on the SERVER's
+  ticket kind — bounds declared by the date controls give `MACHINE_DISCOVERED`, and the live surface's
+  bare text inputs give the operator-guided path recorded as `OPERATOR_CONFIRMED`, never relabelled.
+  (b) **`GuidedImportCard`'s single CTA now sends a real `START_RUN`** over the import carrier, via
+  `importSession` + `createGuidedImportRuntime` + `useGuidedImport`, and renders the step, the required
+  window, and blockers — so a `SCOPE_MISMATCH` is finally visible to the person who has to repair it.
+  The scratch bridge client the live run used is **not** in the product path.
+- **Evidence:** `collector/test/crossstack/fe-import-runtime-real-bridge.test.ts` — the REAL frontend
+  runtime against a REAL `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + both real
+  engines over a real socket: discovery to COMPLETED, a segment to COMPLETED, `SCOPE_MISMATCH`
+  delivered and repaired by `REQUEST_STEP_RECHECK`, and a full sitting (discovery → segment → segment)
+  on ONE socket. collector 5,119 / 125 skipped (was 5,072), frontend 942 (was 886), backend 1,586
+  unchanged, contracts unchanged — the existing v2 contract already carried both intents.
+- **Defect found and fixed:** the host never released a finished session's transport subscription, so in
+  a real sitting every completed run stayed attached and kept publishing its own views alongside the
+  live one. Invisible on segment one; wrong from segment two onward.
+- **§4.1 impact:** recorded as a note — **segment execution live-proven, discovery and the CTA path
+  offline only**. Not promoted to live-verified: no frontend has yet driven a marketplace run.
+- **Ledger impact:** none — all of this is ours, not NAVER's.
+- **Gate state:** no live marketplace contact. No gate consumed. Code fences unchanged: no auto-click,
+  fail-closed everywhere, browser only in the approval-gated import CLI, launch ref never persisted.
+- **Blockers:** none offline. The live CTA E2E (discovery → 1 segment, driven only from the card) needs
+  a seated operator and a fresh in-turn approval.
+- **Next:** run that live CTA E2E; then the merge + single integrated PR.
+
 ### 2026-07-25 — NAVER Initial Review Import — LIVE 1-segment proof SUCCESS
 - **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage
 - **Did:** One monthly segment guided end to end on the real seller center and ingested: **8/8 COMPLETED**,

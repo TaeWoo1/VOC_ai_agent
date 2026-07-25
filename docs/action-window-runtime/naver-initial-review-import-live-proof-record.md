@@ -87,3 +87,67 @@ these very failures legible. Both are now asserted by tests.
 - A `SCOPE_MISMATCH` is invisible to the operator without a frontend. The runtime reported it correctly and
   the browser overlay did not change, so the operator could not tell why nothing advanced. `blockerView`
   already has the copy; wiring the FE to this carrier is what closes it.
+
+---
+
+# Addendum (2026-07-25, same day) — the seller's own path, and what it does NOT yet prove
+
+The last two "not proven" items above were about a missing route, not a missing capability: the run existed and
+nothing in the product could start it. That route now exists, and range discovery — the step that creates the
+plan — is a hosted run rather than a gap.
+
+## Proven offline, across a real socket
+
+`collector/test/crossstack/fe-import-runtime-real-bridge.test.ts` drives the REAL frontend runtime
+(`connectAwBridgeSession` with `expectedCarrier: import`, `createGuidedImportRuntime`) against a REAL
+`BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + both real engines, over a real `ws` socket:
+
+| | |
+|---|---|
+| Range discovery | `START_RUN(INITIAL_REVIEW_IMPORT_DISCOVERY, discoveryRef)` → `COMPLETED`, 5 steps |
+| One segment | `START_RUN(INITIAL_REVIEW_IMPORT_SEGMENT, importRef)` → `COMPLETED`, required window on every view |
+| `SCOPE_MISMATCH` | delivered to the frontend, `recoverable: true`, repaired by `REQUEST_STEP_RECHECK` |
+| A whole sitting | discovery → segment → segment on ONE socket, each on a new runtime-minted identity |
+| Refused ticket | a ref the server rejects gives a bounded failure, never a run that looks started |
+| Wrong carrier | an export-expecting client refuses instead of half-attaching |
+
+**One defect this found, which no single-sided test could.** `ImportSegmentHost` dropped its reference to a
+finished session without releasing that session's transport subscription. Every completed run therefore stayed
+attached for the agent's whole life, still answering commands and publishing its own views — invisible on
+segment one, and from segment two onward a frontend would receive interleaved state from two runs, with
+whichever had the higher revision winning. Now released before the next run is assembled, and pinned by a
+listener count on the endpoint.
+
+## Design decisions this slice settled
+
+- **The SERVER decides the run kind, not the frontend's intent.** The host resolves the ticket and branches on
+  what the ticket authorizes. A declared intent that disagrees with the server's answer fails closed rather
+  than picking either: running the server's kind would guide a choreography the frontend is not rendering, and
+  running the client's would spend a ticket on work it does not authorize.
+- **Attach before minting.** The card connects to the import carrier FIRST and only then asks the backend for a
+  launch ticket, and it hands the ticket back (`/launches/{ref}/expire`) if `START_RUN` is refused or never
+  acknowledged. A single-use authorization must not be spent by an agent that could never have hosted the run.
+- **Discovery's two barriers always occupy a step slot.** Whether the seller must pick the dates is only known
+  once the bounds read answers, mid-run. Publishing four steps on one path and six on the other would move
+  `totalSteps` under the frontend — the same reason `CONFIRM_RANGE` is `SKIPPED` rather than absent in a
+  segment run.
+- **Discovery is the one place dates leave the driver, and it is not a leak.** There the range IS the product:
+  the backend stores it as the plan's range and the card shows it as 가져올 수 있는 기간. It goes to the server
+  over the account's own authenticated channel, and never to a log, a local file, or the Action Window wire.
+- **`noticeTexts` is deliberately empty.** The pure verdict can also read a per-query span cap out of page
+  notices, but nothing consumes one (segmentation is monthly unconditionally), and scraping text off a live
+  seller surface for an unused value is exposure with no purpose.
+- **The failed-report blocker reuses `INGEST_FAILED`.** Same failure class — the runtime did its part and the
+  server did not accept the result — and the frontend's existing copy for it is scope-neutral. A new blocker
+  code would have been a contract change that bought a synonym.
+
+## Still NOT proven
+
+- **No frontend has ever driven a marketplace run.** The card is proven against a fixture driver over a real
+  socket; the live segment above was driven by a scratch client. A live CTA-driven E2E is the open item.
+- **`INITIAL_REVIEW_IMPORT_DISCOVERY` has still never touched NAVER.** The bounds read is expected to return
+  `UNREADABLE` on the real surface — its date inputs are calendar-backed text fields with no `min`/`max` — so
+  the live path will be the operator-guided one recorded as `OPERATOR_CONFIRMED`. That is a prediction from the
+  element structure the operator pasted during the live run, not a measurement.
+- The three remaining items from the original record (apply-requiring surface, segment `UNREADABLE` →
+  `OPERATOR_CONFIRMED`, more than one segment) are unchanged.

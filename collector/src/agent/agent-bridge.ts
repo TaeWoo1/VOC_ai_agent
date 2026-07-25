@@ -30,7 +30,7 @@ import type { ReplyRunMode } from "../action-window/reply-submission/reply-stage
 import type { ReplySubmitSession } from "../action-window/reply-submission/reply-session";
 import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial-import/import-dispatch";
-import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
+import type { ImportDiscoveryDriver, ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import { ImportSegmentHost, type ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
@@ -124,8 +124,11 @@ export interface AgentImportConfig {
   /**
    * The driver. No default and no factory fallback: on the product path this is the LIVE driver, and a
    * fixture driver reaching production would report imports that never happened.
+   *
+   * It fills BOTH roles because both hosted run kinds drive the same two date controls on the same surface:
+   * range discovery, which creates the plan, and one guided monthly segment.
    */
-  driver: ImportProbeDriver;
+  driver: ImportProbeDriver & ImportDiscoveryDriver;
   /** Gitignored `.import-runs/` persistence dir. Restart recovery ABANDONS; it never re-drives. */
   persistDir?: string;
 }

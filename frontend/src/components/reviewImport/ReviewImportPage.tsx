@@ -106,6 +106,9 @@ export function ReviewImportPage() {
           plan={currentDetail.data ?? null}
           agent={agentAvailabilityFromBridgePhase(bridge.state.phase)}
           onLaunched={() => setPlansKey((k) => k + 1)}
+          // A guided run that finished changed the plan server-side — a discovery run CREATED it, a segment run
+          // covered a month of it — so the card's own summary is re-read from the backend rather than inferred.
+          onRunSettled={() => setPlansKey((k) => k + 1)}
           onUseFileFallback={() => currentPlan && setPlanId(currentPlan.id)}
         />
       ) : null}

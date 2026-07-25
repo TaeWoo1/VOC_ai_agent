@@ -47,7 +47,7 @@ import { NaverLiveImportDriver } from "../action-window/initial-import/naver-liv
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
-import { fetchLaunchScope, login } from "../upload";
+import { fetchLaunchScope, login, reportDiscoveredRange } from "../upload";
 import { launchNaverContext } from "../profile";
 import { log } from "../log";
 import {
@@ -293,7 +293,24 @@ export async function buildInitialImportConfig(
     // which is not export wording, and the continuation matcher looks for export wording.
     liveDebug: true,
   });
-  const driver = new NaverLiveImportDriver(proven, { guidanceEnabled: true, observeTimeoutMs: 120_000 });
+  const driver = new NaverLiveImportDriver(proven, {
+    guidanceEnabled: true,
+    observeTimeoutMs: 120_000,
+    // The range-discovery run's terminal: report what was established, which creates the plan server-side.
+    // Bound to the same account credentials as the ingest and to the ref the SERVER has already accepted, so
+    // a discovery run can only ever write to the ticket it was started with.
+    async reportRange(range, evidence): Promise<boolean> {
+      if (!boundRef) return false;
+      try {
+        const token = await login(cfg.baseUrl, cfg.email, cfg.password);
+        await reportDiscoveredRange(cfg.baseUrl, token, boundRef, range.start, range.end, evidence);
+        return true;
+      } catch {
+        // One answer for every refusal, as with `resolveScope`: spent, expired, wrong org, backend down.
+        return false;
+      }
+    },
+  });
   importDriver = driver;
 
   const config: AgentImportConfig = {
@@ -305,14 +322,17 @@ export async function buildInitialImportConfig(
       try {
         const token = await login(cfg.baseUrl, cfg.email, cfg.password);
         const scope = await fetchLaunchScope(cfg.baseUrl, token, launchRef);
-        if (scope.kind !== "SEGMENT" || !scope.requiredStart || !scope.requiredEnd) return null;
-        // Bind the ref for the ingest capability only after the SERVER has accepted it.
+        // Both kinds are hostable. A SEGMENT needs its window; a DISCOVERY has none yet — it is the run that
+        // finds one out — so requiring dates for both would have made the product's first step unreachable.
+        if (scope.kind !== "SEGMENT" && scope.kind !== "DISCOVERY") return null;
+        if (scope.kind === "SEGMENT" && (!scope.requiredStart || !scope.requiredEnd)) return null;
+        // Bind the ref for the ingest / range-report capability only after the SERVER has accepted it.
         boundRef = launchRef;
         return {
           kind: scope.kind,
           channelCode: scope.channelCode,
-          requiredStart: scope.requiredStart,
-          requiredEnd: scope.requiredEnd,
+          requiredStart: scope.requiredStart ?? "",
+          requiredEnd: scope.requiredEnd ?? "",
         };
       } catch {
         // One answer for every refusal — spent, expired, wrong org, never existed, backend down. A client

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   IMPORT_STAGE_COPY,
   agentAvailabilityCopy,
@@ -253,6 +256,41 @@ describe("importStageText", () => {
   it("asks the seller to press every marketplace control themselves", () => {
     for (const key of ["actionWindow.import.export", "actionWindow.import.consent"]) {
       expect(importStageText(key)).toMatch(/눌러 주세요/);
+    }
+  });
+
+  /**
+   * Drift guard across the stack boundary.
+   *
+   * The Runtime sends dotted semantic keys and the FE owns every word (contract §6), which means a key added
+   * to a runtime step plan with no entry here does not break anything visibly — it silently degrades the
+   * seller's guidance to "다음 안내를 따라 주세요" at the exact step that needed instructions. Read from the
+   * runtime's own source so adding a step cannot pass this file by.
+   */
+  it("has copy for every step key the runtime's plans publish", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const sources = [
+      "../../../collector/src/action-window/initial-import/discovery-stages.ts",
+      "../../../collector/src/naver/import-guidance-plan.ts",
+    ].map((rel) => readFileSync(resolve(here, rel), "utf8"));
+    const keys = new Set(
+      sources.flatMap((source) => [...source.matchAll(/"(actionWindow\.import[A-Za-z]*\.[A-Za-z]+)"/g)].map((m) => m[1]!)),
+    );
+    expect(keys.size).toBeGreaterThan(10);
+    for (const key of keys) {
+      expect(Object.keys(IMPORT_STAGE_COPY), key).toContain(key);
+    }
+  });
+
+  /**
+   * The discovery run's copy describes the seller ESTABLISHING the range, never SellerOps verifying it — the
+   * evidence recorded for that path is `OPERATOR_CONFIRMED`, and copy that said "확인했어요" would describe a
+   * check nobody performed.
+   */
+  it("describes the discovery barriers as the seller's own selection", () => {
+    for (const key of ["actionWindow.importDiscovery.setEarliest", "actionWindow.importDiscovery.setLatest"]) {
+      expect(importStageText(key)).toMatch(/골라 주세요/);
+      expect(importStageText(key)).not.toMatch(/확인했|검증/);
     }
   });
 });

@@ -153,6 +153,18 @@ export class InitialImportEndpoint implements AwCarrierEndpoint {
     return this.sockets.size;
   }
 
+  /**
+   * How many Runtime-side listeners are attached.
+   *
+   * A measurement seam for the one invariant a sequence of runs can quietly break: exactly ONE hosted session
+   * may be subscribed at a time (plus the host itself). A finished session left attached keeps answering
+   * commands and publishing its own views, and the symptom — a frontend seeing interleaved state from two runs
+   * — appears only on the second segment, which is past where an offline test usually looks.
+   */
+  runtimeListenerCount(): number {
+    return this.listeners.size;
+  }
+
   close(): void {
     this.sockets.clear();
     this.listeners.clear();

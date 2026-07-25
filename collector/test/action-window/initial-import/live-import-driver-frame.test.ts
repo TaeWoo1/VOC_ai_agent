@@ -103,3 +103,47 @@ describe("live import driver — frame resolution is shared", () => {
     }
   });
 });
+
+/**
+ * The discovery capability, pinned where it is a privacy question rather than a behavioural one.
+ *
+ * Discovery is the ONE place the driver returns dates instead of a verdict, because there the range is the
+ * run's product rather than incidental page content. That makes "which reads exist, and what they may log" the
+ * property worth pinning structurally — a behavioural test with a fake page would pass with a `log` line that
+ * shipped the seller's dates.
+ */
+describe("live import driver — range discovery", () => {
+  it("reads the declared bounds off the same settled date controls a run drives", () => {
+    const body = CODE.slice(CODE.indexOf("async readRangeControls"), CODE.indexOf("async readSelectedRange"));
+    expect(body).toContain("this.settleDateControls()");
+    expect(body).toContain("dateBoundsProbe(html)");
+    // No page text: the span-cap read would mean scraping notices off a live seller surface for a value
+    // nothing downstream consumes.
+    expect(body).toContain("noticeTexts: []");
+  });
+
+  it("reads the selection back through the SAME path the segment gate uses", () => {
+    const body = CODE.slice(CODE.indexOf("async readSelectedRange"), CODE.indexOf("async reportDiscoveredRange"));
+    expect(body).toContain("this.proven.readExportScope()");
+    expect(body).toContain("extractDates(readback.rangeValues)");
+  });
+
+  it("logs counts and enums about discovery, never a date", () => {
+    const discovery = CODE.slice(CODE.indexOf("async readRangeControls"), CODE.indexOf("scopeEvidence()"));
+    for (const line of discovery.split("\n")) {
+      if (!line.includes("log(")) continue;
+      for (const forbidden of ["range.start", "range.end", "dates[", "minAttrs[", "maxAttrs["]) {
+        expect(line, forbidden).not.toContain(forbidden);
+      }
+    }
+    expect(discovery).toContain("datesParsed: dates.length");
+    expect(discovery).toContain("minAttrs: bounds.minAttrs.length");
+  });
+
+  /** No reporter ⇒ false. A silent success would return the seller to a card offering a plan that does not exist. */
+  it("fails closed when no range reporter is injected", () => {
+    const body = CODE.slice(CODE.indexOf("async reportDiscoveredRange"), CODE.indexOf("scopeEvidence()"));
+    expect(body).toContain("if (!report)");
+    expect(body).toContain("return false");
+  });
+});

@@ -15,6 +15,7 @@
  * ({@link ImportGuidanceStage}), and a per-control method set would have to be kept in lockstep with it by
  * hand.
  */
+import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type {
@@ -90,4 +91,59 @@ export interface ImportProbeDriver {
 
   /** Remove every annotation. Must be safe to call twice and on a half-built run. */
   cleanup(): Promise<void>;
+}
+
+/** The historical range a discovery run established. Dates, because the range IS this run's product. */
+export interface DiscoveredRange {
+  start: string;
+  end: string;
+}
+
+/**
+ * **What the DOM side must provide for a range-DISCOVERY run.**
+ *
+ * The run that precedes the plan: it answers "how far back does this marketplace currently let this seller
+ * reach?", so the monthly segments are planned from what exists rather than a period the seller guessed.
+ *
+ * It reuses the segment driver's observation surface for the two date controls — same locate, same
+ * highlight, same barrier — because it is literally the same two controls, and a second implementation of
+ * that choreography would be a second thing to keep correct. What is new is only reading BOUNDS, reading
+ * the selected VALUES, and reporting the result.
+ *
+ * ## The one place dates deliberately leave the driver, and why that is not a leak
+ *
+ * `readSelectedScope` on the segment driver returns a verdict precisely so a seller's dates stay in-process.
+ * {@link readSelectedRange} returns the dates themselves — because here they are not incidental page content,
+ * they are the run's OUTPUT: the backend stores them as the plan's range and the frontend shows the seller
+ * "가져올 수 있는 기간". The rule that survives is the one that matters: they go to the SERVER over the
+ * account's own authenticated channel and are never logged, never persisted locally, and never put on the
+ * Action Window wire (no v2 event or view payload carries a date; only `copyParams` does, for a window the
+ * server itself resolved).
+ */
+export interface ImportDiscoveryDriver
+  extends Pick<
+    ImportProbeDriver,
+    "prepareSurface" | "locateTarget" | "highlightTarget" | "armTargetObserve" | "waitForTargetAction" | "cleanup"
+  > {
+  /** What the range controls DECLARE as reachable — bounds, not the current selection. */
+  readRangeControls(): Promise<RangeControlProbe>;
+
+  /**
+   * The dates currently selected on screen, or null when fewer than two are readable.
+   *
+   * Null is a first-class answer: "we could not read it" and "the seller chose nothing" both mean the run
+   * must not report a range, and inventing one here would be indistinguishable downstream from a measured
+   * value.
+   */
+  readSelectedRange(): Promise<DiscoveredRange | null>;
+
+  /**
+   * Report the established range to the server, which creates the plan over it and spends the ticket.
+   *
+   * `evidence` is passed rather than derived because only the engine knows which path produced the range,
+   * and the server refuses to default it — a machine read and a human's confirmation must never be
+   * relabelled as each other. Returns false on refusal; the engine fails the run rather than claiming a plan
+   * exists.
+   */
+  reportDiscoveredRange(range: DiscoveredRange, evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED"): Promise<boolean>;
 }

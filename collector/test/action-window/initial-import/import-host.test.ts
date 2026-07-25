@@ -4,7 +4,12 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { InitialImportEndpoint } from "../../../src/bridge/initial-import-endpoint";
-import { ImportSegmentHost, importRefFromStartRun, type ResolvedLaunchScope } from "../../../src/action-window/initial-import/import-host";
+import {
+  ImportSegmentHost,
+  declaredImportKindFromStartRun,
+  importRefFromStartRun,
+  type ResolvedLaunchScope,
+} from "../../../src/action-window/initial-import/import-host";
 import { ImportFixtureDriver } from "../../../src/action-window/initial-import/import-fixture-driver";
 import { clearLogSink, getLogSink } from "../../../src/log";
 import type { AwClientFrame } from "../../../../contracts/action-window/v2/transport";
@@ -228,5 +233,169 @@ describe("import segment host", () => {
     endpoint.replayClientFrame(startRun(REF_A));
     await new Promise((r) => setTimeout(r, 0));
     expect(resolve).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ONE hosted session at a time.
+   *
+   * Every session subscribes to the endpoint, and the host used to drop its reference without releasing that
+   * subscription — so in a real sitting (discovery, then segment after segment) every finished run stayed
+   * attached, answering commands and publishing its own views. A frontend part-way through segment two would
+   * receive interleaved state from segment one, with whichever run had the higher revision winning.
+   */
+  it("releases the previous run's subscription when it hosts the next one", async () => {
+    const { endpoint, host } = build(async () => scope());
+    // The host's own listener, before any run exists.
+    const baseline = endpoint.runtimeListenerCount();
+
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+    const first = host.activeSession();
+    expect(endpoint.runtimeListenerCount()).toBe(baseline + 1);
+
+    endpoint.replayClientFrame(startRun(REF_B));
+    await settle(host);
+
+    expect(host.activeSession()).not.toBe(first);
+    // Still exactly one hosted session — not two runs publishing over each other.
+    expect(endpoint.runtimeListenerCount()).toBe(baseline + 1);
+  });
+
+  it("hosts nothing at all after close, and leaves no session attached", async () => {
+    const { endpoint, host } = build(async () => scope());
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+    expect(host.activeSession()).not.toBeNull();
+
+    await host.close();
+    expect(host.activeSession()).toBeNull();
+    expect(host.activeDiscoverySession()).toBeNull();
+  });
+});
+
+/* ────────────────────────── the discovery run kind ────────────────────────── */
+
+function discoveryStartRun(discoveryRef: string): AwClientFrame {
+  return {
+    kind: "aw_command",
+    command: {
+      protocolVersion: 2,
+      commandId: "c1",
+      runId: "run_announce",
+      expectedRevision: 0,
+      type: "START_RUN",
+      payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_DISCOVERY", discoveryRef },
+    },
+  } as AwClientFrame;
+}
+
+const DISCOVERY_SCOPE: ResolvedLaunchScope = {
+  kind: "DISCOVERY",
+  channelCode: "naver",
+  requiredStart: "",
+  requiredEnd: "",
+};
+
+describe("launch ref extraction — discovery", () => {
+  it("reads a discovery ref when the intent says discovery", () => {
+    expect(importRefFromStartRun(discoveryStartRun(REF_A))).toBe(REF_A);
+  });
+
+  it("refuses a segment intent carrying only a discovery ref", () => {
+    const frame = startRun(REF_A) as { command: { payload: Record<string, unknown> } };
+    delete frame.command.payload.importRef;
+    frame.command.payload.discoveryRef = REF_A;
+    expect(importRefFromStartRun(frame as unknown as AwClientFrame)).toBeNull();
+  });
+
+  /** A caller presenting both does not know which run it is starting; picking one would be a guess. */
+  it("refuses a start carrying both import and discovery refs", () => {
+    expect(importRefFromStartRun(startRun(REF_A, { discoveryRef: REF_B }))).toBeNull();
+  });
+
+  it("reports the declared kind, for cross-checking only", () => {
+    expect(declaredImportKindFromStartRun(discoveryStartRun(REF_A))).toBe("DISCOVERY");
+    expect(declaredImportKindFromStartRun(startRun(REF_A))).toBe("SEGMENT");
+    expect(declaredImportKindFromStartRun({ kind: "aw_resync", runId: "r", sinceSequence: 0 })).toBeNull();
+  });
+});
+
+describe("import host — discovery runs", () => {
+  it("hosts a discovery run on a runtime-minted identity and drives it", async () => {
+    const resolve = vi.fn(async () => DISCOVERY_SCOPE);
+    const { endpoint, host, driver } = build(resolve);
+
+    endpoint.replayClientFrame(discoveryStartRun(REF_A));
+    await settle(host);
+    await host.activeDiscoverySession()?.whenSettled();
+
+    expect(resolve).toHaveBeenCalledWith(REF_A);
+    expect(host.activeDiscoverySession()).not.toBeNull();
+    expect(host.activeSession()).toBeNull();
+    expect(driver.calls).toContain("readRangeControls");
+    expect(driver.calls.some((c) => c.startsWith("reportRange:"))).toBe(true);
+    expect(endpoint.hostedRunId()).not.toBe("run_announce");
+  });
+
+  /** The whole point of the sequence: discovery, then the first segment, no restart in between. */
+  it("hosts a segment run after a discovery run in the same sitting", async () => {
+    const scopes: ResolvedLaunchScope[] = [DISCOVERY_SCOPE, scope()];
+    const { endpoint, host } = build(async () => scopes.shift() ?? null);
+
+    endpoint.replayClientFrame(discoveryStartRun(REF_A));
+    await settle(host);
+    await host.activeDiscoverySession()?.whenSettled();
+    endpoint.replayClientFrame(startRun(REF_B));
+    await settle(host);
+
+    expect(host.activeSession()).not.toBeNull();
+    // The finished discovery run is released, not left publishing alongside the segment run.
+    expect(host.activeDiscoverySession()).toBeNull();
+  });
+
+  /** The client declared one kind and holds the other's ticket. Neither answer is safe. */
+  it("refuses when the declared intent disagrees with the server's kind", async () => {
+    const { endpoint, host, driver } = build(async () => DISCOVERY_SCOPE);
+
+    // Declares SEGMENT, presents a ticket the server says is a DISCOVERY one.
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+
+    expect(host.activeSession()).toBeNull();
+    expect(host.activeDiscoverySession()).toBeNull();
+    expect(driver.calls).toEqual([]);
+  });
+
+  /** A window-less SEGMENT ticket has no gate to pass; a file could be ingested against an unknown period. */
+  it("refuses a segment scope with no window", async () => {
+    const { endpoint, host, driver } = build(async () => scope({ requiredStart: "", requiredEnd: "" }));
+
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+
+    expect(host.activeSession()).toBeNull();
+    expect(driver.calls).toEqual([]);
+  });
+
+  it("refuses an unrecognised kind rather than guess a choreography", async () => {
+    const { endpoint, host, driver } = build(async () => scope({ kind: "SOMETHING_NEW" }));
+
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+
+    expect(host.activeSession()).toBeNull();
+    expect(driver.calls).toEqual([]);
+  });
+
+  it("never logs the discovery ref", async () => {
+    clearLogSink();
+    const { endpoint, host } = build(async () => DISCOVERY_SCOPE);
+
+    endpoint.replayClientFrame(discoveryStartRun(REF_A));
+    await settle(host);
+    await host.activeDiscoverySession()?.whenSettled();
+
+    expect(JSON.stringify(getLogSink())).not.toContain(REF_A);
+    clearLogSink();
   });
 });

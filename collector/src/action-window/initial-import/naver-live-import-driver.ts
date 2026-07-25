@@ -41,9 +41,11 @@
  * had already consumed the event, so the second would time out on a run that had actually succeeded.
  */
 import type { Frame, Page } from "playwright";
+import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
-import { matchExportScope } from "../../naver/export-scope-match";
+import { extractDates, matchExportScope } from "../../naver/export-scope-match";
 import {
+  dateBoundsProbe,
   importLocateDiagnostic,
   inferRequiresApply,
   locateApplyDecision,
@@ -55,7 +57,13 @@ import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, Locate
 import { armObserver, waitForUserAction } from "../observer";
 import { mountOverlay } from "../overlay";
 import type { NaverLiveProbeDriver } from "../naver-live-driver";
-import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import type {
+  DiscoveredRange,
+  ImportDiscoveryDriver,
+  ImportProbeDriver,
+  ImportTarget,
+  RequiredRange,
+} from "./import-driver";
 
 /** Some bundlers inject `__name(...)` into serialized evaluate bodies — a harmless identity shim. */
 const NAME_SHIM = "globalThis.__name = globalThis.__name || function (f) { return f; };";
@@ -86,9 +94,17 @@ export interface NaverLiveImportDriverOptions {
   guidanceEnabled?: boolean;
   /** Total steps, for the diagnostic overlay badge. Supplied by the run's own step plan. */
   totalSteps?: number;
+  /**
+   * Report an established historical range to the SellerOps backend, which creates the plan over it.
+   *
+   * Injected, and absent by default: a driver with no way to report must not silently succeed, and a default
+   * implementation would inevitably be a stub that made a discovery run look like it had created a plan.
+   * Only the approval-gated import boot supplies it, bound to the same account credentials the ingest uses.
+   */
+  reportRange?: (range: DiscoveredRange, evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED") => Promise<boolean>;
 }
 
-export class NaverLiveImportDriver implements ImportProbeDriver {
+export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscoveryDriver {
   private readonly proven: NaverLiveProbeDriver;
   private readonly opts: NaverLiveImportDriverOptions;
   /** Signatures handed out per target, so highlight can re-validate against what locate decided. */
@@ -96,6 +112,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   /** Cached result of the one consent+download race — see the module note. */
   private consentRace: DownloadDetectResult | null = null;
   private stepNumber = 1;
+  private badgeTotalSteps: number | null = null;
   /** The last scope verdict this driver produced. It is the only component that actually made the read. */
   private lastScopeVerdict: ScopeMatch | null = null;
 
@@ -121,6 +138,17 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   /** Which step the diagnostic overlay badge should show. Set by the session as the run advances. */
   setStepNumber(stepNumber: number): void {
     this.stepNumber = stepNumber;
+  }
+
+  /**
+   * The denominator of that badge, per run.
+   *
+   * One driver instance serves every run this agent hosts, and the two run kinds have different lengths — a
+   * five-step discovery showing `1/8` on the seated operator's own screen while the frontend says "5단계 중 1"
+   * is a contradiction they have to resolve mid-run. Dev-only diagnostic; it changes nothing that is clicked.
+   */
+  setBadgeTotalSteps(totalSteps: number | null): void {
+    this.badgeTotalSteps = totalSteps;
   }
 
   /** Delegated — the readiness settle and its fail-closed causes are already live-proven. */
@@ -249,7 +277,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     await this.ctx().evaluate(NAME_SHIM);
     await mountOverlay(this.ctx(), {
       stepNumber: this.stepNumber,
-      totalSteps: this.opts.totalSteps ?? 8,
+      totalSteps: this.badgeTotalSteps ?? this.opts.totalSteps ?? 8,
       copyKey: `actionWindow.import.${target}`,
       guidanceEnabled: this.opts.guidanceEnabled ?? true,
     });
@@ -356,6 +384,75 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     });
     this.lastScopeVerdict = verdict.match;
     return verdict.match;
+  }
+
+  /* ── range discovery (the run that precedes the plan) ─────────────────────── */
+
+  /**
+   * What the date controls DECLARE as reachable — `min`/`max`, read off the same inputs a segment run drives.
+   *
+   * **`noticeTexts` is deliberately empty, and that is a decision rather than an omission.** The pure verdict
+   * can also read a per-query span cap out of range-area notices (`조회 기간은 최대 3개월`), but nothing
+   * downstream consumes one: the backend segments a plan by calendar month unconditionally, so a cap changes
+   * no behaviour. Reading arbitrary page text off a live seller surface — where review bodies and customer
+   * names live — to compute a value nobody uses is exposure with no purpose. If a cap ever becomes
+   * load-bearing, `readSpanCapMonths` is already written and tested; what is missing then is a BOUNDED,
+   * notice-scoped read, not this one.
+   */
+  async readRangeControls(): Promise<RangeControlProbe> {
+    const html = await this.settleDateControls();
+    const bounds = dateBoundsProbe(html);
+    // Sanitized: how many bounds were declared, never their values. This is the fact that decides whether the
+    // seller is asked to pick the dates themselves, so an operator reading a transcript needs to see it.
+    log("aw_import_discovery_bounds", {
+      minAttrs: bounds.minAttrs.length,
+      maxAttrs: bounds.maxAttrs.length,
+      frameResolved: this.proven.surfaceFrameResolved(),
+      dateInputCount: importLocateDiagnostic(html).dateInputCount,
+    });
+    return { ...bounds, noticeTexts: [] };
+  }
+
+  /**
+   * The dates the seller selected, read back through the SAME path the segment gate uses.
+   *
+   * Reusing `readExportScope` is what keeps discovery and the later per-segment verification from disagreeing
+   * about what is selected on this surface — a disagreement would show up as a segment blocked on a window
+   * discovery had just reported as reachable.
+   *
+   * Fewer than two readable dates returns null. It is not an error and must not be turned into one: the
+   * engine's obligation on null is to fail the run rather than report a range, and a thrown error would be
+   * indistinguishable from a driver fault.
+   */
+  async readSelectedRange(): Promise<DiscoveredRange | null> {
+    const readback = await this.proven.readExportScope();
+    const dates = extractDates(readback.rangeValues);
+    // COUNT only. The values are this run's product and go to the server; they are never logged.
+    log("aw_import_discovery_selected", { datesParsed: dates.length });
+    if (dates.length < 2) return null;
+    const start = dates[0]!;
+    const end = dates[dates.length - 1]!;
+    return start <= end ? { start, end } : null;
+  }
+
+  /**
+   * Hand the established range to the injected reporter. No reporter ⇒ false, never a silent success:
+   * a discovery run that could not create a plan must fail, or the seller is returned to a card that offers
+   * to continue an import that does not exist.
+   */
+  async reportDiscoveredRange(
+    range: DiscoveredRange,
+    evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED",
+  ): Promise<boolean> {
+    const report = this.opts.reportRange;
+    if (!report) {
+      log("aw_import_discovery_no_reporter", { reported: false });
+      return false;
+    }
+    const ok = await report(range, evidence).catch(() => false);
+    // The evidence enum and the outcome — never the dates.
+    log("aw_import_discovery_reported", { ok, evidence });
+    return ok;
   }
 
   /**

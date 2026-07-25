@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   IMPORT_DOM_QUESTION_KEYS,
+  dateBoundsProbe,
   dateInputTags,
   importDomQuestionsFor,
   importLocateDiagnostic,
@@ -263,6 +264,40 @@ describe("the DOM questions asked when the model is wrong", () => {
     for (const key of IMPORT_DOM_QUESTION_KEYS) {
       expect(key).toMatch(/^dom\.question\.(dateInput|applyControl)\.[A-Za-z]+$/);
     }
+  });
+});
+
+describe("declared range bounds", () => {
+  it("reads min/max off the same inputs a run later drives", () => {
+    const html = `
+      <input type="date" min="2022-05-01" max="2026-07-25">
+      <input type="date" min="2022-05-01" max="2026-07-25">
+    `;
+    expect(dateBoundsProbe(html)).toEqual({
+      minAttrs: ["2022-05-01", "2022-05-01"],
+      maxAttrs: ["2026-07-25", "2026-07-25"],
+    });
+  });
+
+  /** The live NAVER surface: calendar-backed text inputs that declare nothing. */
+  it("reports nothing declared when the controls carry no bounds", () => {
+    const html = `<input type="text" class="form-control" title="날짜 입력" readonly="readOnly">`;
+    expect(dateBoundsProbe(html)).toEqual({ minAttrs: [], maxAttrs: [] });
+  });
+
+  /** Same actionability rule as the locate decision — a hidden template input declares nothing usable. */
+  it("ignores controls the seller cannot act on", () => {
+    const html = `
+      <input type="hidden" class="date" min="1999-01-01" max="1999-12-31">
+      <input type="date" min="2022-05-01" max="2026-07-25">
+    `;
+    expect(dateBoundsProbe(html)).toEqual({ minAttrs: ["2022-05-01"], maxAttrs: ["2026-07-25"] });
+  });
+
+  /** `min`/`max` must be real attributes, not the tail of `data-min-date` or an Angular binding. */
+  it("does not read a neighbouring attribute as a bound", () => {
+    const html = `<input type="date" data-min="2000-01-01" ng-max="vm.max">`;
+    expect(dateBoundsProbe(html)).toEqual({ minAttrs: [], maxAttrs: [] });
   });
 });
 

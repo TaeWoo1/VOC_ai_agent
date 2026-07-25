@@ -215,6 +215,31 @@ export function importLocateDiagnostic(html: string): ImportLocateDiagnostic {
 }
 
 /**
+ * The `min`/`max` bounds the date controls declare, if any do.
+ *
+ * Lives here rather than in `available-range-discovery.ts` for the same reason the date predicate does: the
+ * bounds must be read off THE SAME inputs the run later highlights and reads back. A second predicate would
+ * let range discovery answer about one pair of controls while the segment run drives another, and the two
+ * would disagree without either being wrong on its own terms.
+ *
+ * Returns raw attribute strings. They are dates, not page prose, and the caller reduces them in-process
+ * (`discoverAvailableRange`) before anything crosses a boundary.
+ */
+export function dateBoundsProbe(html: string): { minAttrs: string[]; maxAttrs: string[] } {
+  const minAttrs: string[] = [];
+  const maxAttrs: string[] = [];
+  for (const tag of dateInputTags(html).filter(isActionable)) {
+    const min = /(?:^|\s)min\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+    const max = /(?:^|\s)max\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag);
+    const minValue = (min?.[1] ?? min?.[2] ?? min?.[3] ?? "").trim();
+    const maxValue = (max?.[1] ?? max?.[2] ?? max?.[3] ?? "").trim();
+    if (minValue !== "") minAttrs.push(minValue);
+    if (maxValue !== "") maxAttrs.push(maxValue);
+  }
+  return { minAttrs, maxAttrs };
+}
+
+/**
  * The minimum structural questions to ask an operator when a locate fails live.
  *
  * Returned as fixed dotted keys rather than prose so the questions cannot drift into asking for something
