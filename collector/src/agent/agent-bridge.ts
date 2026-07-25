@@ -28,6 +28,10 @@ import type { ReplySubmitProbeDriver } from "../action-window/reply-submission/r
 import type { ReplyTargetHint } from "../action-window/reply-submission/reply-surface";
 import type { ReplyRunMode } from "../action-window/reply-submission/reply-stages";
 import type { ReplySubmitSession } from "../action-window/reply-submission/reply-session";
+import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
+import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial-import/import-dispatch";
+import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
+import { ImportSegmentHost, type ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
@@ -94,6 +98,38 @@ export interface AgentReplySubmissionConfig {
   persistDir?: string;
 }
 
+/**
+ * One guided initial-review-import segment, hosted over the same opaque `/bridge/ws` passthrough.
+ *
+ * Mutually exclusive with both `actionWindow` and `replySubmission` — an agent hosts ONE carrier, and the
+ * three are different carrier kinds precisely so a frontend cannot attach to the wrong one.
+ */
+export interface AgentImportConfig {
+  /**
+   * Placeholder run identity for the FIRST announcement only. The real per-segment identity is minted by
+   * {@link ImportSegmentHost} when a launch ref actually arrives — this exists so a frontend attaching
+   * before any run has started still sees that an agent is present.
+   */
+  announceRunId: string;
+  /** Sanitized channel identity (SEMANTIC_CODE, e.g. `naver`). */
+  channelCode: string;
+  /**
+   * Ask the SERVER what a launch ref authorizes.
+   *
+   * The ref is NOT known at boot — it arrives inside `START_RUN`, one per segment — and the required
+   * window must come from the server rather than the client, or a frontend could widen its own import
+   * scope. That asymmetry is the whole reason an import needs a host and the other two carriers do not.
+   */
+  resolveScope: (launchRef: string) => Promise<ResolvedLaunchScope | null>;
+  /**
+   * The driver. No default and no factory fallback: on the product path this is the LIVE driver, and a
+   * fixture driver reaching production would report imports that never happened.
+   */
+  driver: ImportProbeDriver;
+  /** Gitignored `.import-runs/` persistence dir. Restart recovery ABANDONS; it never re-drives. */
+  persistDir?: string;
+}
+
 export interface AgentBridgeConfig {
   port: number;
   allowedOrigins: string[];
@@ -116,6 +152,8 @@ export interface AgentBridgeConfig {
   actionWindow?: AgentActionWindowConfig;
   /** When present, hosts one ISOLATED reply-submission session (v2). Mutually exclusive with `actionWindow`. */
   replySubmission?: AgentReplySubmissionConfig;
+  /** When present, hosts one ISOLATED import segment (v2). Mutually exclusive with the other two. */
+  initialImport?: AgentImportConfig;
 }
 
 export type AgentBridgeListenResult =
@@ -139,6 +177,8 @@ export interface AgentBridge {
   readonly actionWindowSession: ActionWindowSession | undefined;
   /** Test-only access to the hosted reply-submission session (undefined unless configured). */
   readonly replySubmissionSession: ReplySubmitSession | undefined;
+  /** The import segment host, when this agent hosts the import carrier. Assembles one run per segment. */
+  readonly importHost: ImportSegmentHost | undefined;
 }
 
 export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
@@ -218,7 +258,43 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     log("aw_reply_run_hosted", {});
   }
 
-  const carrier: AwCarrierEndpoint | undefined = replyEndpoint ?? actionWindow;
+  // ISOLATED import hosting (v2). Restart recovery ABANDONS any interrupted run — it is never resumed,
+  // because resuming would require the launch ref to have been persisted, and an importRef is a
+  // single-use ingest authorization (see import-run-store). The segment itself is not lost: the server
+  // holds the plan and coverage, so the next run picks it up with a fresh ticket.
+  let importEndpoint: InitialImportEndpoint | undefined;
+  let importHost: ImportSegmentHost | undefined;
+  if (cfg.initialImport) {
+    const im = cfg.initialImport;
+    if (im.persistDir) {
+      const { abandoned, abandonedAfterDownload } = recoverImportRuns(im.persistDir, makeImportRunMarker());
+      if (abandoned.length > 0) {
+        // The two counts mean different things to a seller: one group cost them nothing, the other cost
+        // them an export window they will have to repeat.
+        log("aw_import_run_abandoned", {
+          count: abandoned.length,
+          afterDownload: abandonedAfterDownload.length,
+        });
+      }
+    }
+    importEndpoint = new InitialImportEndpoint({ runId: im.announceRunId, channelCode: im.channelCode });
+    // The host owns per-segment assembly. Nothing is built here, because at boot the agent does not know
+    // which segment it is about to guide — see AgentImportConfig.resolveScope.
+    importHost = new ImportSegmentHost({
+      endpoint: importEndpoint,
+      channelCode: im.channelCode,
+      resolveScope: im.resolveScope,
+      driver: im.driver,
+      ...(im.persistDir ? { persistDir: im.persistDir } : {}),
+    });
+    importHost.attach();
+    log("aw_import_host_ready", {});
+  }
+
+  // ONE carrier per agent. The order states the precedence explicitly rather than relying on which
+  // config the CLI happened to build: import wins over reply, reply over export. The CLI already refuses
+  // to build more than one, so this is defence in depth, not the decision point.
+  const carrier: AwCarrierEndpoint | undefined = importEndpoint ?? replyEndpoint ?? actionWindow;
   const server = new BridgeServer({
     store,
     allowedOrigins: cfg.allowedOrigins,
@@ -236,6 +312,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     server,
     actionWindowSession,
     replySubmissionSession,
+    importHost,
     observer: { onConnectionSettled: (r) => settle.onConnectionSettled(r) },
     async listen(): Promise<AgentBridgeListenResult> {
       try {

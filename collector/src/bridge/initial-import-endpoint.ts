@@ -136,6 +136,19 @@ export class InitialImportEndpoint implements AwCarrierEndpoint {
     }
   }
 
+  /**
+   * Deliver a client frame to every Runtime listener WITHOUT a socket.
+   *
+   * Exists for one caller: {@link ImportSegmentHost} has to replay the `START_RUN` that triggered it into
+   * the session it then built, because the client sent that command once and must not have to send it twice
+   * just because the runtime needed to resolve a launch ref first. It is deliberately not a general inbound
+   * path — {@link onClientPayload} is, and it requires an authenticated socket. Nothing here originates a
+   * frame; it only re-delivers one that already arrived over an authenticated socket.
+   */
+  replayClientFrame(frame: AwClientFrame): void {
+    for (const listener of [...this.listeners]) listener(frame);
+  }
+
   clientCount(): number {
     return this.sockets.size;
   }
