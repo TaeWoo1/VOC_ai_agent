@@ -35,6 +35,7 @@ import {
   isOutOfOrderEvent,
   type ValidationResult,
 } from "../../../../contracts/action-window/v2/index";
+import { BLOCKER_CODES as V1_BLOCKER_CODES } from "../../../../contracts/action-window/v1/index";
 import {
   AW_CARRIER_EXPORT,
   AW_CARRIER_REPLY,
@@ -113,6 +114,34 @@ describe("Action Window v2 — enum completeness & no duplicates", () => {
   });
   it("has no CONFIRM_STEP_COMPLETED command (v1 guarantee preserved)", () => {
     expect((COMMAND_TYPES as readonly string[]).includes("CONFIRM_STEP_COMPLETED")).toBe(false);
+  });
+
+  /**
+   * A scope mismatch needs a code of its own because the repair is specific — change the dates. Folded
+   * into UNSUPPORTED_STATE it would read as "this screen is not supported" and send the seller looking
+   * for the wrong thing; folded into nothing it would let a file covering the wrong window be ingested
+   * as though it covered this segment.
+   */
+  it("SCOPE_MISMATCH is its own blocker, distinct from UNSUPPORTED_STATE", () => {
+    expect((BLOCKER_CODES as readonly string[]).includes("SCOPE_MISMATCH")).toBe(true);
+    expect((BLOCKER_CODES as readonly string[]).includes("UNSUPPORTED_STATE")).toBe(true);
+  });
+
+  /**
+   * v2 omitted INGEST_FAILED while it existed only for reply submission, which has nothing to ingest.
+   * An import run does, so its terminal failure has to be expressible — otherwise a server-side ingest
+   * problem would have to masquerade as ARTIFACT_INVALID and blame the seller's file.
+   */
+  it("INGEST_FAILED is expressible now that v2 also carries import runs", () => {
+    expect((BLOCKER_CODES as readonly string[]).includes("INGEST_FAILED")).toBe(true);
+    expect((BLOCKER_CODES as readonly string[]).includes("ARTIFACT_INVALID")).toBe(true);
+  });
+
+  /** Every v1 blocker code stays expressible in v2 — v2 adds, it does not narrow. */
+  it("v2 blocker codes are a superset of v1's", () => {
+    for (const code of V1_BLOCKER_CODES) {
+      expect((BLOCKER_CODES as readonly string[]).includes(code), code).toBe(true);
+    }
   });
 });
 

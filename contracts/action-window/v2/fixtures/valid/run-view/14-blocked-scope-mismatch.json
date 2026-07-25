@@ -1,0 +1,38 @@
+{
+  "protocolVersion": 2,
+  "runId": "run_0002",
+  "revision": 7,
+  "channelCode": "naver",
+  "runCopyKey": "actionWindow.run.naverInitialReviewImportSegment",
+  "status": "WAITING_FOR_HUMAN",
+  "executionMode": "ACTION_WINDOW",
+  "intent": "INITIAL_REVIEW_IMPORT_SEGMENT",
+  "importRef": "9f2a1c7b4e6d0835",
+  "currentStep": {
+    "stepId": "aw.import_set_end_date",
+    "stepNumber": 4,
+    "totalSteps": 8,
+    "copyKey": "actionWindow.import.setEndDate",
+    "copyParams": {
+      "targetKind": "end_date"
+    },
+    "status": "AWAITING_USER"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "REQUEST_STEP_RECHECK",
+    "PAUSE_RUN",
+    "CANCEL_RUN",
+    "SWITCH_TO_MANUAL",
+    "SET_GUIDANCE_ENABLED"
+  ],
+  "blocker": {
+    "code": "SCOPE_MISMATCH",
+    "recoverable": true
+  },
+  "progress": {
+    "completedSteps": 3,
+    "totalSteps": 8
+  },
+  "updatedAt": "2026-07-25T04:11:00Z"
+}

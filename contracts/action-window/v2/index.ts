@@ -145,6 +145,25 @@ export type OperatorOutcome = (typeof OPERATOR_OUTCOMES)[number];
 export const VERIFICATION_STATES = ["UNVERIFIED"] as const;
 export type VerificationState = (typeof VERIFICATION_STATES)[number];
 
+/**
+ * Why a run stopped.
+ *
+ * <p>The last two are import-run additions, and both close a real hole rather than adding vocabulary:
+ *
+ * <ul>
+ *   <li><b>{@code SCOPE_MISMATCH}</b> — the seller's selected date range does not agree with the segment
+ *       being imported, so the run stops BEFORE the export control is highlighted. It needs its own code
+ *       because the repair is specific: change the dates. Reported as {@code UNSUPPORTED_STATE} it would
+ *       read as "this screen is not supported" and send the seller looking for the wrong thing, and
+ *       reported as nothing at all it would let a file covering the wrong window be ingested as though it
+ *       covered this segment. Recoverable — fixing the dates and re-checking is the normal repair, not a
+ *       failed run.</li>
+ *   <li><b>{@code INGEST_FAILED}</b> — present in v1 and deliberately absent from v2 until now, because
+ *       v2 existed only for reply submission, which has nothing to ingest. An import run DOES ingest, so
+ *       its terminal failure mode has to be expressible. Without it an ingest failure would have to
+ *       masquerade as {@code ARTIFACT_INVALID} — blaming the seller's file for a server-side problem.</li>
+ * </ul>
+ */
 export const BLOCKER_CODES = [
   "LOGIN_REQUIRED",
   "UI_DRIFT",
@@ -154,6 +173,8 @@ export const BLOCKER_CODES = [
   "UNSUPPORTED_STATE",
   "DOWNLOAD_TIMEOUT",
   "ARTIFACT_INVALID",
+  "SCOPE_MISMATCH",
+  "INGEST_FAILED",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 

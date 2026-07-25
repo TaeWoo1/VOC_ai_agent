@@ -119,8 +119,38 @@ const BLOCKER_VIEW: Record<BlockerCode, BlockerView> = {
   ARTIFACT_INVALID: { title: "받은 파일을 확인할 수 없어요", body: "다시 내려받아 주세요." },
   INGEST_FAILED: { title: "저장 중 문제가 생겼어요", body: "잠시 후 다시 시도해 주세요." },
 };
-export function blockerView(code: BlockerCode): BlockerView {
-  return BLOCKER_VIEW[code];
+
+/**
+ * Codes that exist in v2 but not v1. `BlockerCode` above is v1's (see `contract.ts`), and until the
+ * import runs arrived every v2 code happened to be a v1 code too — so one map covered both by accident.
+ * Adding `SCOPE_MISMATCH` to v2 ends that, and enumerating the difference here is what keeps the
+ * accident from silently reappearing.
+ */
+const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
+  SCOPE_MISMATCH: {
+    title: "선택한 기간이 달라요",
+    // Says exactly which repair is needed. Reported as "지원하지 않는 화면" the seller would go looking
+    // for the wrong problem entirely.
+    body: "가져오려는 기간과 화면에 선택된 기간이 일치하지 않아요. 날짜를 다시 선택해 주세요.",
+  },
+};
+
+/**
+ * FE copy for a blocker code.
+ *
+ * <p>Falls back instead of returning `undefined`. The previous direct lookup meant a code the FE did not
+ * know — a newer runtime, or a v2-only code like this — rendered a blank blocker card: the run is stopped
+ * and the seller is told nothing, which is the worst of the available outcomes. The fallback says the run
+ * stopped and that it needs a look, which is true of every blocker by definition.
+ */
+export function blockerView(code: BlockerCode | string): BlockerView {
+  return (
+    BLOCKER_VIEW[code as BlockerCode] ??
+    V2_ONLY_BLOCKER_VIEW[code] ?? {
+      title: "진행이 멈췄어요",
+      body: "지금 화면을 확인해 주세요.",
+    }
+  );
 }
 
 // Connection resilience states (FE-2.5) — FE-owned copy for UI states the source
