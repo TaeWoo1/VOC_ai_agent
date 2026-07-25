@@ -61,13 +61,15 @@ env:
 Pinned rather than merely unset, so no repository- or environment-level default can quietly arm a live run
 inside CI. In a normal run this leaves ~15 files / ~125 assertions skipped, which is expected and correct.
 
-Also excluded: the **disposable-backend harnesses** under `tools/review-import-validation/` and
-`tools/reply-state-validation/`. They create and drop real Postgres databases and boot a real backend; they
+Also excluded: the **disposable-backend harnesses** under `tools/reply-state-validation/` and
+`tools/review-issue-validation/`. They create and drop real Postgres databases and boot a real backend; they
 are operator-run, and their name-guarded teardown assumes a human is watching.
 
 Consequence worth stating plainly: **CI does not validate Flyway migrations.** The backend suite runs H2 with
 Flyway disabled, so a broken migration is green here. Migrations are validated by booting a real backend —
-which is what the disposable-backend harnesses do.
+which is what the disposable-backend harnesses do. `tools/review-issue-validation/run-synthetic.sh` is
+currently the only thing that executes `V29__review_issue_memory.sql` at all, and it asserts
+`flyway_schema_history` recorded it as successful rather than assuming the boot implies it.
 
 ## The silence problem this workflow is designed around
 

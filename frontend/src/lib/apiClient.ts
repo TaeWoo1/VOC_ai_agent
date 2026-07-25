@@ -54,6 +54,8 @@ import type {
   SyncRunView,
   UploadType,
   UserView,
+  ReviewIssueView,
+  ReviewIssueDetailView,
 } from "./types";
 import {
   mockAccountArticles,
@@ -974,6 +976,82 @@ export const api = {
     const { data } = await http.post<ReviewReplyOutcomeResponse>(
       `/api/seller-accounts/${accountId}/attention/items/${encodeURIComponent(actionRef)}/reply/outcome`,
       body,
+    );
+    return data;
+  },
+
+  // --- Review Issue Memory ---------------------------------------------------
+  //
+  // STRICT ONLY, no mock fallback. These endpoints answer "has something changed
+  // in what customers are telling you", and a seeded mock would be a fabricated
+  // answer to that question — worse than an error, because the operator cannot
+  // tell the difference. The global VITE_USE_MOCKS demo switch is deliberately
+  // not honored here for the same reason.
+
+  /**
+   * The working list, or the 중요하지 않음 list when `dismissed` is true. Two calls rather than one
+   * merged list, so issues the operator set aside never reappear among the ones asking for attention.
+   */
+  async getReviewIssuesStrict(
+    options: { referenceDate?: string; dismissed?: boolean } = {},
+  ): Promise<ReviewIssueView[]> {
+    const params = new URLSearchParams();
+    if (options.referenceDate) {
+      params.set("referenceDate", options.referenceDate);
+    }
+    if (options.dismissed) {
+      params.set("dismissed", "true");
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const { data } = await http.get<ReviewIssueView[]>(`/api/review-issues${query}`);
+    return data;
+  },
+
+  async getReviewIssueDetailStrict(
+    issueId: string,
+    referenceDate?: string,
+  ): Promise<ReviewIssueDetailView> {
+    const query = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    const { data } = await http.get<ReviewIssueDetailView>(
+      `/api/review-issues/${encodeURIComponent(issueId)}${query}`,
+    );
+    return data;
+  },
+
+  /** 확인 필요 → 조치 중. The note is the operator's own record of what they are doing. */
+  async startReviewIssueAction(issueId: string, note?: string): Promise<ReviewIssueView> {
+    const { data } = await http.post<ReviewIssueView>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/acting`,
+      { note: note ?? null },
+    );
+    return data;
+  },
+
+  /**
+   * 조치 중 → 개선 확인 중. There is deliberately no "mark resolved" call: 해결됨 is
+   * reachable only from here after enough quiet weeks, so the conclusion rests on
+   * observed evidence rather than on someone asserting it.
+   */
+  async markReviewIssueRemediated(issueId: string, note?: string): Promise<ReviewIssueView> {
+    const { data } = await http.post<ReviewIssueView>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/remediated`,
+      { note: note ?? null },
+    );
+    return data;
+  },
+
+  async dismissReviewIssue(issueId: string): Promise<ReviewIssueView> {
+    const { data } = await http.post<ReviewIssueView>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/dismiss`,
+      {},
+    );
+    return data;
+  },
+
+  async restoreReviewIssue(issueId: string): Promise<ReviewIssueView> {
+    const { data } = await http.post<ReviewIssueView>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/restore`,
+      {},
     );
     return data;
   },

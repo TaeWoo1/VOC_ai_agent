@@ -984,3 +984,94 @@ export interface ProposalResult {
   phase: string;
   proposal: ProposalView;
 }
+
+// ---------------------------------------------------------------------------
+// Review Issue Memory — mirrors com.sellerops.reviewissue.dto.*
+//
+// These are 이슈 후보 / 운영 신호, never a diagnosis, and they carry no cause. The
+// extractor behind them is rule-based and its accuracy is UNMEASURED (the
+// contracts/review-eval/naver/v1 label seed is empty), so no surface built on
+// these types may assert why something is happening.
+// ---------------------------------------------------------------------------
+
+/** NEW | SURGING | PERSISTENT | CONCENTRATED | IMPROVED. */
+export type IssueChangeKind =
+  | "NEW"
+  | "SURGING"
+  | "PERSISTENT"
+  | "CONCENTRATED"
+  | "IMPROVED";
+
+export type IssueLifecycleState =
+  | "OBSERVING"
+  | "NEEDS_REVIEW"
+  | "ACTING"
+  | "VERIFYING"
+  | "RESOLVED";
+
+export type IssueSeverity = "HIGH" | "NORMAL" | "LOW";
+
+/**
+ * The judgements for one issue plus the numbers a quantified surge line needs.
+ * `labelsKo` comes from the server alongside `kinds` so a client cannot invent a
+ * fifth category by mistranslating an enum — but the sentence around them is the
+ * frontend's to write.
+ */
+export interface IssueChangeView {
+  kinds: IssueChangeKind[];
+  labelsKo: string[];
+  highSurge: boolean;
+  surgeWindowCount: number;
+  surgeBaselineWeekly: number;
+}
+
+export interface ReviewIssueView {
+  id: string;
+  title: string;
+  aspect: string;
+  problem: string;
+  severity: IssueSeverity;
+  lifecycleState: IssueLifecycleState;
+  lifecycleLabelKo: string;
+  evidenceCount: number;
+  firstEvidenceOn: string | null;
+  lastEvidenceOn: string | null;
+  dominantProductId: string | null;
+  /** Null when nothing is attributable — render as absent, never as "기타". */
+  dominantProductName: string | null;
+  dismissed: boolean;
+  extractorKind: string;
+  change: IssueChangeView;
+}
+
+/**
+ * One 근거 리뷰. `quote` is the masked opinion unit and is null when the
+ * sanitizer suppressed it; a null must render as nothing, never as an empty
+ * quote, which would imply the customer said nothing.
+ */
+export interface IssueEvidenceView {
+  reviewId: string;
+  unitOrdinal: number;
+  occurredOn: string;
+  productId: string | null;
+  productName: string | null;
+  rating: number | null;
+  quote: string | null;
+}
+
+export interface IssueStateEventView {
+  fromState: IssueLifecycleState | null;
+  toState: IssueLifecycleState;
+  toStateLabelKo: string;
+  /** SYSTEM or OPERATOR — "SellerOps raised this" and "you decided this" differ. */
+  actor: "SYSTEM" | "OPERATOR";
+  reason: string;
+  note: string | null;
+  at: string;
+}
+
+export interface ReviewIssueDetailView {
+  issue: ReviewIssueView;
+  evidence: IssueEvidenceView[];
+  history: IssueStateEventView[];
+}
