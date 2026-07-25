@@ -287,9 +287,14 @@ export const IMPORT_STAGE_COPY: Readonly<Record<string, string>> = {
   "actionWindow.import.consent": "네이버 확인 창의 버튼을 눌러 주세요.",
   "actionWindow.import.ingest": "받은 파일을 SellerOps가 정리하고 있어요.",
 
-  // The range-discovery run: the step BEFORE any plan exists. It asks what the marketplace actually allows
-  // instead of asking the seller to guess a period, and its two barriers appear only when SellerOps could not
-  // read the limits itself — so the copy describes the seller establishing the range, never verifying it.
+  // The range-discovery run: the step BEFORE any plan exists. Its two barriers appear only when SellerOps could
+  // not read the limits itself, so the copy describes the seller ESTABLISHING the range, never verifying it.
+  //
+  // ⚠ KNOWN-WRONG WORDING, pending a product-owner pass (proof record, finding 16). The 2026-07-25 live run
+  // established that NAVER's review calendar restricts nothing, so "선택할 수 있는 가장 이전 날짜" asks the
+  // seller about a limit that does not exist — what they are really choosing is how far back to import. The
+  // copy also says nothing about the consequence: the range they pick becomes the plan, one segment per month,
+  // so three years is 37 of them. Do not "fix" this by softening the words alone; the concept is what changed.
   "actionWindow.importDiscovery.openReviewSurface": "판매자센터의 리뷰 관리 화면을 열어 주세요.",
   "actionWindow.importDiscovery.readBounds": "가져올 수 있는 기간을 확인하고 있어요.",
   "actionWindow.importDiscovery.setEarliest": "달력에서 선택할 수 있는 가장 이전 날짜를 시작일로 골라 주세요.",

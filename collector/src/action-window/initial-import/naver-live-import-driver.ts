@@ -305,11 +305,16 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
       w["__aw_import_date_changed__"] = false;
       // The tagged element, RE-RESOLVED on every check rather than captured once.
       //
-      // Live finding (2026-07-25, second run): the operator changed the end date repeatedly and nothing
-      // advanced. A captured reference goes stale the moment Angular re-renders the conditions area — the
-      // closure then polls a DETACHED node whose value can never change again, so the barrier watches
-      // forever while the seller does everything right. Re-resolving costs one querySelector per 250ms and
-      // removes the whole failure class. Same selector, same tag: nothing is widened.
+      // NOT a diagnosed live failure — read this before citing it as one. It was written during the
+      // 2026-07-25 CTA run on the theory that Angular had replaced the tagged node, and that theory was
+      // DISPROVED in the same run: the operator's own inspection showed `data-aw-target` still on the input,
+      // and the log showed the barrier had already passed with the run parked at the scope gate (the real
+      // cause was a stale highlight left on the page — see the proof record, finding 12).
+      //
+      // It stays because the hazard it removes is real on its own terms: a captured reference to a node that
+      // gets replaced polls a DETACHED element whose value can never change again, and the barrier would
+      // then watch forever while the seller does everything right. One querySelector per 250ms, same
+      // selector, same tag — nothing widened, and nothing about this is evidence that it ever fired.
       const resolve = (): HTMLInputElement | null =>
         document.querySelector("[data-aw-target]") as HTMLInputElement | null;
       const first = resolve();
@@ -320,10 +325,16 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
       //
       // Treating `blur` as "they acted" would pass the barrier when the seller focuses the field and clicks
       // away without choosing anything — defect #8 in a new coat, and it would hand an unset date to the
-      // gate. The known cost of keeping the diff rule is recorded rather than fixed here: when the value the
-      // run needs is ALREADY on screen (the end date defaults to today, so the current-month segment), a
-      // re-selection of the same date produces no diff and cannot satisfy the barrier. That case needs an
-      // engine-level answer — the driver is not told the required window, by design — not a looser signal.
+      // gate.
+      //
+      // The cost of keeping the diff rule is recorded rather than fixed here, and it is NOT a corner case:
+      // when the value the run needs is ALREADY on screen, re-selecting the same date produces no diff and
+      // the barrier cannot be satisfied. That happens on the FIRST segment of every plan — range discovery
+      // leaves its own start date in the field, and the first segment starts on the same day — and again on
+      // the current-month segment, whose end date is today by default. The 2026-07-25 CTA run had to set a
+      // deliberately wrong start date and correct it afterwards. The fix is engine-level (report the step
+      // SKIPPED when the field already holds what the gate will accept); the driver is not told the required
+      // window, by design, so a looser signal here is not the answer. See the proof record, finding 13.
       const poll = (): void => {
         const el = resolve();
         if (!el) return;

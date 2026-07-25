@@ -337,6 +337,12 @@ export class ImportSegmentEngine {
       this.stage = "SCOPE_BLOCKED";
       this.emit("RUN_BLOCKED", { code: "SCOPE_MISMATCH", recoverable: true });
       this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+      // KNOWN GAP (proof record, finding 12): `NONE` leaves the marketplace page exactly as it was, so the
+      // previous step's highlight is still sitting on the date field the seller just left. On the 2026-07-25
+      // CTA run that read as "still waiting for the end date" on a run that had stopped 30 seconds earlier,
+      // and the operator kept changing a date nobody was watching. The stop is only visible in the SellerOps
+      // window — which is the whole reason the product owner moved guidance into the marketplace page. The
+      // fix belongs to that slice, not to a quiet effect added here.
       return "NONE";
     }
     // Advance past the CONFIRM_RANGE slot. It always exists in the plan; when the runtime read the range

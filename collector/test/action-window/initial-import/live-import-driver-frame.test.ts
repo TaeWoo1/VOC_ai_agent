@@ -93,10 +93,14 @@ describe("live import driver — frame resolution is shared", () => {
   });
 
   /**
-   * The stall the second live run produced: the operator changed the end date over and over and nothing
-   * advanced. A captured node reference goes stale when Angular re-renders the conditions area, and the poll
-   * then watches a DETACHED input whose value can never change again — so the barrier waits forever while the
-   * seller does everything right. Re-resolving each poll removes the failure class; same selector, same tag.
+   * A hazard, not a diagnosed failure — the distinction is the point.
+   *
+   * A captured node reference goes stale when Angular re-renders the conditions area, and the poll then
+   * watches a DETACHED input whose value can never change again, so the barrier would wait forever while the
+   * seller does everything right. This was written on the theory that it had caused the 2026-07-25 stall; the
+   * operator's inspection disproved that (the tag was still on the input, and the run had actually passed the
+   * barrier and parked at the scope gate). The property is worth holding anyway, and this test says so
+   * without claiming evidence it does not have.
    */
   it("re-resolves the tagged input on every poll instead of capturing it once", () => {
     const arm = CODE.slice(CODE.indexOf("private async armDateObserve"), CODE.indexOf("private async waitForDateSet"));

@@ -168,11 +168,16 @@ Append a dated entry; never rewrite prior entries — correct forward.
   surface where nothing is declared; and a `SCOPE_MISMATCH` is **visible to the person who can repair it** —
   the gate blocked, the card said which repair, the operator corrected the dates, the recheck re-read `MATCH`.
   Two runs in one sitting on one socket, each on a fresh runtime-minted identity.
-- **Findings (4 ours + 1 copy):** `SCOPE_BLOCKED` leaves the previous step's highlight on the marketplace page,
-  so the screen shows no stop signal; a date barrier cannot be satisfied when the required value is already in
-  the field (discovery leaves its own range behind); there is **no seller path to pair the agent**
-  (`VITE_ENABLE_AGENT_BRIDGE`); one-origin CORS + a login form that reports a 403 as bad credentials; and
-  `REQUEST_STEP_RECHECK` reads "확인 완료" even at a blocked scope. A wrong diagnosis of mine is recorded too.
+- **Findings (5 + 1 copy):** `SCOPE_BLOCKED` leaves the previous step's highlight on the marketplace page, so
+  the screen shows no stop signal; a date barrier cannot be satisfied when the required value is already in the
+  field (discovery leaves its own range behind, so this hits the FIRST segment of every plan); there is **no
+  seller path to pair the agent** (`VITE_ENABLE_AGENT_BRIDGE`); one-origin CORS + a login form that reports a
+  403 as bad credentials; **the premise of range discovery does not hold** — NAVER restricts nothing, so there
+  is no reachable limit to find and the seller is really choosing how far back to import (and the range becomes
+  the plan: three years is 37 segments, unwarned); and `REQUEST_STEP_RECHECK` reads "확인 완료" even at a
+  blocked scope. A wrong diagnosis of mine is recorded too.
+- **`[PO]` owed:** the discovery concept + copy + segment-count consequence (finding 16), and whether
+  「계속 가져오기」 should start from the oldest month or the newest.
 - **Product decision (owner, this session):** the seller chooses once in SellerOps, **everything else completes
   inside the SmartStore page**, and they return when it is done. The frontend keeps copy ownership (contract §6)
   and sends composed prose down for the runtime to display. Next slice.
