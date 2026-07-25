@@ -17,7 +17,15 @@
  * stays network-free and its source guard is unchanged. This module IS the one allowed to reach
  * `../upload`; it never throws (a failure degrades to a fail-closed `{ ok:false, processed:0 }`).
  */
-import { login, resolveChannelId, uploadReviewBytes, type IngestResult, type UploadMethod } from "../upload";
+import {
+  login,
+  resolveChannelId,
+  uploadReviewBytes,
+  uploadSegmentReviewBytes,
+  type IngestResult,
+  type ScopeEvidenceWire,
+  type UploadMethod,
+} from "../upload";
 import { ARTIFACT_REF_SHAPE } from "./artifact";
 
 /** The validated artifact bytes plus the opaque ref already emitted for this download. */
@@ -100,6 +108,52 @@ export function buildBackendIngestUpload(opts: BackendIngestUploadOpts): AwInges
         neutralUploadName(src.artifactRef),
         fetchImpl,
         opts.method ?? "SELLER_CENTER_EXPORT",
+      );
+      return sanitizeBackendIngest(result);
+    } catch {
+      return { ok: false, processed: 0 };
+    }
+  };
+}
+
+export interface SegmentIngestUploadOpts {
+  baseUrl: string;
+  email: string;
+  password: string;
+  /** The opaque launch ref this run is authorized by. It, not the runtime, names the target segment. */
+  launchRef: string;
+  /**
+   * How the exported scope was established — a machine read-back of the selected range, or the seller's
+   * confirmation when it could not be read. Supplied as a THUNK because the answer is only known once the
+   * seller has actually set the dates, which happens long after this capability is built and injected.
+   */
+  scopeEvidence: () => ScopeEvidenceWire;
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Build the ingest capability for a guided SEGMENT import run: the downloaded file goes straight into the
+ * segment its launch ref is bound to, so the seller never locates or uploads it.
+ *
+ * Differs from {@link buildBackendIngestUpload} only in the destination and in carrying scope evidence — it
+ * keeps the identical privacy posture: the neutral `artifactRef`-derived filename (never the platform's
+ * suggested name), the same `{ ok, processed }` reduction, and the same never-throws contract so a login /
+ * upload failure fails the run closed instead of surfacing a response body. It resolves no channel: the
+ * server already knows the segment's channel from the ticket.
+ */
+export function buildSegmentIngestUpload(opts: SegmentIngestUploadOpts): AwIngestUploadFn {
+  return async (src: AwIngestSource): Promise<AwIngestOutcome> => {
+    try {
+      const fetchImpl = opts.fetchImpl ?? fetch;
+      const token = await login(opts.baseUrl, opts.email, opts.password, fetchImpl);
+      const result = await uploadSegmentReviewBytes(
+        opts.baseUrl,
+        token,
+        opts.launchRef,
+        src.bytes(),
+        neutralUploadName(src.artifactRef),
+        opts.scopeEvidence(),
+        fetchImpl,
       );
       return sanitizeBackendIngest(result);
     } catch {

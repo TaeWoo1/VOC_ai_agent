@@ -332,6 +332,118 @@ export async function uploadReviewBytes(
   return result;
 }
 
+/** Sanitized scope-evidence value the backend records on the attempt. Mirrors the backend enum. */
+export type ScopeEvidenceWire = "MACHINE_MATCHED" | "OPERATOR_CONFIRMED";
+
+/** What a guided run learns when it resolves its launch ref. Identity-free by design. */
+export interface LaunchScopeResponse {
+  kind: "DISCOVERY" | "SEGMENT";
+  channelCode: string;
+  /** ISO `YYYY-MM-DD`, present for a SEGMENT run only. */
+  requiredStart: string | null;
+  requiredEnd: string | null;
+}
+
+/**
+ * Resolve a launch ref to the scope this guided run may know. The runtime learns the channel and the dates
+ * to guide the seller to — never a plan, segment, or account id, so the Action Window wire stays
+ * identity-free even though the run is bound to one specific segment.
+ */
+export async function fetchLaunchScope(
+  baseUrl: string,
+  token: string,
+  launchRef: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<LaunchScopeResponse> {
+  const res = await fetchImpl(`${baseUrl}/api/imports/reviews/launches/${launchRef}/scope`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new UploadError("launch scope resolve failed", "upload", res.status);
+  return (await res.json()) as LaunchScopeResponse;
+}
+
+/**
+ * Report what a discovery run found, which creates the import plan over that range server-side.
+ * `evidence` must state how the range was established — the server refuses to default it, because
+ * defaulting would silently pick between a machine read and a human's confirmation.
+ */
+export async function reportDiscoveredRange(
+  baseUrl: string,
+  token: string,
+  launchRef: string,
+  availableStart: string,
+  availableEnd: string,
+  evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED",
+  fetchImpl: FetchImpl = fetch,
+): Promise<void> {
+  const res = await fetchImpl(`${baseUrl}/api/imports/reviews/launches/${launchRef}/discovered-range`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ availableStart, availableEnd, evidence }),
+  });
+  if (!res.ok) throw new UploadError("discovered range report failed", "upload", res.status);
+}
+
+/**
+ * Upload the bytes a guided segment run downloaded, into the segment its launch ref is bound to.
+ *
+ * The runtime never names the segment: the ref does. Same neutral opaque filename rule as the plain export
+ * path — the platform's suggested filename can carry store/date identity and is never sent.
+ */
+export async function uploadSegmentReviewBytes(
+  baseUrl: string,
+  token: string,
+  launchRef: string,
+  bytes: Uint8Array,
+  filename: string,
+  scopeEvidence: ScopeEvidenceWire,
+  fetchImpl: FetchImpl = fetch,
+): Promise<IngestResult> {
+  const form = new FormData();
+  form.append("scopeEvidence", scopeEvidence);
+  form.append("file", new Blob([new Uint8Array(bytes)]), filename);
+
+  const res = await fetchImpl(`${baseUrl}/api/imports/reviews/launches/${launchRef}/ingest`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) throw new UploadError("segment upload failed", "upload", res.status);
+  const result = (await res.json()) as SegmentAttemptResponse;
+  // Same sanitization rule as `uploadReviewBytes`: buckets in the log, exact counts only RETURNED to the
+  // caller, which reduces them itself. The launch ref is never logged — it is a run authorization.
+  log("upload.segment.done", {
+    result: result.result,
+    rowsNewBucket: rowCountBucket(result.rowsNew ?? 0),
+    rowsDuplicateBucket: rowCountBucket(result.rowsDuplicate ?? 0),
+    rowsFailedBucket: rowCountBucket(result.rowsFailed ?? 0),
+  });
+  // Re-shape to the IngestResult the AW ingest handoff already knows how to sanitize, so the segment path
+  // reuses that one reduction instead of inventing a second, divergent notion of "did the ingest succeed".
+  return {
+    syncJobId: result.syncJobId ?? "",
+    uploadType: "REVIEW",
+    status: result.result === "SUCCEEDED" ? "SUCCESS" : "FAILED",
+    totalRows: (result.rowsNew ?? 0) + (result.rowsDuplicate ?? 0) + (result.rowsFailed ?? 0),
+    successRows: result.rowsNew ?? 0,
+    skippedRows: result.rowsDuplicate ?? 0,
+    failedRows: result.rowsFailed ?? 0,
+    errorMessage: result.errorMessage ?? null,
+    sampleErrors: [],
+  };
+}
+
+/** The attempt the backend recorded for a segment ingest (`ReviewImportAttemptView`). */
+interface SegmentAttemptResponse {
+  attemptNo: number;
+  result: "ACTIVE" | "SUCCEEDED" | "FAILED";
+  syncJobId?: string;
+  rowsNew?: number;
+  rowsDuplicate?: number;
+  rowsFailed?: number;
+  errorMessage?: string;
+}
+
 /**
  * Upload a captured review export FILE to the existing `/api/uploads` endpoint as
  * a REVIEW file. Thin wrapper over {@link uploadReviewBytes} that reads the file
