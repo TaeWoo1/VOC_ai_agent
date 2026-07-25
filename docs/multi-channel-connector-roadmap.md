@@ -10,9 +10,10 @@ SellerOps를 NAVER 단일 collector에서 **multi-commerce connector platform**�
 > 참조한다. UI의 셀러 표기 문구도 이 표의 "셀러 표기" 열을 따른다.
 >
 > 변경 이력:
-> - 2026-07-25 — §4.1에 **초기 리뷰 연동(가이드형 세그먼트 import) 노트만 추가**. 표의 어떤 열도 갱신하지
->   않음: 세그먼트 실행만 1회 라이브 증명이고, 기간 탐색과 셀러 CTA 경로는 오프라인 검증뿐이다.
->   근거: `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`.
+> - 2026-07-25 — §4.1에 **초기 리뷰 연동(가이드형 세그먼트 import) 노트만 추가·갱신**. 표의 어떤 열도
+>   갱신하지 않음: 세그먼트 실행·기간 탐색·셀러 CTA 경로가 각각 1회 라이브 실행됐을 뿐이며(1계정·1구간·
+>   일회용 로컬 백엔드), 페어링 승인 통제는 아직 미검증이다. 근거:
+>   `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md` (Addendum 2).
 >   **운영 지원·셀러 표기 변경 없음.**
 > - 2026-07-15 — **NAVER REVIEW 라이브 검증 상태만 갱신**(§4.1 현행표 · §1 collector 서술 · §5.1 범위
 >   한정). 근거: Run 4 (`docs/action-window-runtime/r4-evidence-pack.md` §8-17) — export→ingest
@@ -204,13 +205,17 @@ ChannelCollectionAdapter {
 >   런타임은 탐지·강조·관찰만 했다. 범위 게이트가 잘못된 기간을 **라이브로 차단**하고 recheck 복구까지
 >   증명됨. 증거: `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`.
 >   ⚠ **1계정·1구간·일회용 로컬 백엔드**다. 운영 지원(production-supported) 아님.
-> - **기간 탐색(DISCOVERY) = 오프라인만.** 계획을 만드는 첫 실행은 아직 라이브로 돌지 않았다.
-> - **셀러 경로(FE 단일 CTA → Bridge → 로컬 에이전트) = 오프라인 cross-stack 증명만.** 라이브 1회는
->   스크래치 브리지 클라이언트로 실행됐다. 제품 경로는 구현·소켓 수준까지 검증됐으나
->   (`collector/test/crossstack/fe-import-runtime-real-bridge.test.ts`) **셀러 화면이 마켓플레이스 실행을
->   구동한 적은 없다.**
+> - **기간 탐색(DISCOVERY) = 라이브 증명됨(1회).** 2026-07-25 착석 실행에서 셀러 CTA로 시작해 계획이
+>   생성됨(범위 2023-07-01 ~ 2026-07-25, 37개 월 구간). 표면이 `min`/`max`를 선언하지 않아 운영자가 범위를
+>   정했고, 그 사실이 `range_evidence = OPERATOR_CONFIRMED`로 기록됨 — 기계 판독으로 승격하지 않았다.
+> - **셀러 경로(FE 단일 CTA → Bridge → 로컬 에이전트) = 라이브 증명됨(1회).** 같은 실행에서 스크래치
+>   클라이언트 없이 카드의 버튼 하나로 탐색 → 계획 → 1개 구간 적재(신규 61 / 중복 0)까지 도달. `SCOPE_MISMATCH`
+>   차단이 **셀러 화면에 표시되고** 날짜 수정 + recheck로 복구되는 경로도 이때 처음 라이브로 증명됨.
+>   ⚠ 이 실행에서 **로컬 에이전트 페어링 승인 통제는 검증되지 않았다**(하네스에 TTY가 없어 dev 자동승인 사용).
+>   또한 **셀러가 에이전트를 페어링할 제품 경로가 아직 없다**(pairing UI가 `VITE_ENABLE_AGENT_BRIDGE` 뒤에 있음).
 >
-> **따라서 위 표의 `라이브 검증` 열은 초기 연동으로 인해 갱신되지 않는다.** "과거 리뷰 전체 연동 지원"
+> **따라서 위 표의 `라이브 검증` 열은 초기 연동으로 인해 갱신되지 않는다.** 세 갈래 모두 **1계정·1구간·
+> 일회용 로컬 백엔드** 위에서 각 1회 실행된 증거이고, 운영 지원과는 다른 층위다. "과거 리뷰 전체 연동 지원"
 > 류의 표기는 금지. 정직 표기는 현행 "네이버 리뷰 export 업로드 지원"을 유지한다.
 
 > **NAVER REVIEW 답변 제출(가이드형) — v1.6, 계획·오프라인·미검증.** 위 표의 REVIEW 행은 **수집(read)**

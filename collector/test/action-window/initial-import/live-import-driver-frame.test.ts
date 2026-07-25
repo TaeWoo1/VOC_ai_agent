@@ -86,10 +86,38 @@ describe("live import driver — frame resolution is shared", () => {
   /** The seller's own date never crosses back to the agent — only a boolean does. */
   it("compares the date value in-page and returns only a boolean", () => {
     const arm = CODE.slice(CODE.indexOf("private async armDateObserve"), CODE.indexOf("private async waitForDateSet"));
-    expect(arm).toContain("const baseline = el.value");
+    expect(arm).toContain("const baseline = first.value");
     // No return of a value, and nothing that would ship it out of the page.
-    expect(arm).not.toMatch(/return\s+el\.value/);
+    expect(arm).not.toMatch(/return\s+(el|first)\.value/);
     expect(CODE).toContain("waitForDateSet(timeoutMs: number): Promise<boolean>");
+  });
+
+  /**
+   * The stall the second live run produced: the operator changed the end date over and over and nothing
+   * advanced. A captured node reference goes stale when Angular re-renders the conditions area, and the poll
+   * then watches a DETACHED input whose value can never change again — so the barrier waits forever while the
+   * seller does everything right. Re-resolving each poll removes the failure class; same selector, same tag.
+   */
+  it("re-resolves the tagged input on every poll instead of capturing it once", () => {
+    const arm = CODE.slice(CODE.indexOf("private async armDateObserve"), CODE.indexOf("private async waitForDateSet"));
+    expect(arm).toContain("const resolve = ()");
+    const pollBody = arm.slice(arm.indexOf("const poll = ()"));
+    expect(pollBody).toContain("const el = resolve();");
+    // The poll must not close over an element captured at arm time.
+    expect(pollBody).not.toMatch(/\bfirst\.value\b/);
+  });
+
+  /**
+   * `blur` must not mean "they acted".
+   *
+   * Focusing a calendar-backed field and clicking away is not a selection, and passing the barrier on it would
+   * hand an unset date to the scope gate — the same class of mistake as advancing on a click.
+   */
+  it("never treats a focus loss alone as a date selection", () => {
+    const arm = CODE.slice(CODE.indexOf("private async armDateObserve"), CODE.indexOf("private async waitForDateSet"));
+    // Every listener runs the same value-diff poll; none sets the flag directly.
+    expect(arm).toMatch(/for \(const ev of \["change", "input", "blur"\]\) first\.addEventListener\(ev, poll\)/);
+    expect(arm).not.toMatch(/addEventListener\("blur",\s*(done|onCommit)/);
   });
 
   it("stops the value poll on cleanup so it cannot outlive the run", () => {

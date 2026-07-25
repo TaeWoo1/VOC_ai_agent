@@ -154,6 +154,36 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-25 — Guided import CTA path — LIVE E2E SUCCESS (discovery → plan → 1 segment, 61 rows)
+- **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage — the whole entry point, end to end
+- **Did:** A seller pressed **과거 리뷰 전체 연동하기** and a month of reviews landed in the database, with no
+  scratch client anywhere in the loop. Discovery ticket `CONSUMED` (range 2023-07-01 ~ 2026-07-25,
+  `OPERATOR_CONFIRMED` — the surface declares no bounds, so the operator established it), 37-segment plan
+  created, segment ticket `CONSUMED` with `MACHINE_MATCHED`, segment 1 `COMPLETED`+`COVERED`, attempt
+  `SUCCEEDED` **61 new / 0 duplicate / 0 failed**, 61 rows in the DB. Every marketplace click the operator's.
+- **Evidence:** `docs/action-window-runtime/naver-initial-review-import-live-proof-record.md` Addendum 2.
+  Disposable `sellerops_riv_cta_*` on 18090, name-guarded, dropped; only `sellerops` survives; login profile
+  preserved.
+- **Newly proven:** the card's CTA starts a real run over the Bridge; discovery creates the plan on a real
+  surface where nothing is declared; and a `SCOPE_MISMATCH` is **visible to the person who can repair it** —
+  the gate blocked, the card said which repair, the operator corrected the dates, the recheck re-read `MATCH`.
+  Two runs in one sitting on one socket, each on a fresh runtime-minted identity.
+- **Findings (4 ours + 1 copy):** `SCOPE_BLOCKED` leaves the previous step's highlight on the marketplace page,
+  so the screen shows no stop signal; a date barrier cannot be satisfied when the required value is already in
+  the field (discovery leaves its own range behind); there is **no seller path to pair the agent**
+  (`VITE_ENABLE_AGENT_BRIDGE`); one-origin CORS + a login form that reports a 403 as bad credentials; and
+  `REQUEST_STEP_RECHECK` reads "확인 완료" even at a blocked scope. A wrong diagnosis of mine is recorded too.
+- **Product decision (owner, this session):** the seller chooses once in SellerOps, **everything else completes
+  inside the SmartStore page**, and they return when it is done. The frontend keeps copy ownership (contract §6)
+  and sends composed prose down for the runtime to display. Next slice.
+- **§4.1 impact:** note updated to say exactly what is live-proven and what is not. **No column promoted, 운영
+  지원 unchanged** — one account, one segment, a disposable local backend.
+- **Gate state:** ran under the fresh in-turn approval given this turn. ⚠ The **pairing approval control was
+  not exercised**: `dev_tty_stderr` needs a TTY this harness does not have, so the run used
+  `--dev-insecure-auto-approve`. Every other fence held — no auto-click, fail-closed everywhere, browser only in
+  the approval-gated import CLI, launch ref never persisted.
+- **Next:** the SmartStore-side guidance slice (the decision above), then findings 12–15.
+
 ### 2026-07-25 — Guided import: the seller's own path (FE → Bridge → agent) — IMPLEMENTED (offline, cross-stack)
 - **Loop stage(s):** ACQUIRE (guided export) — the entry point, which until now had no product route
 - **Did:** Closed the two gaps the live segment proof left open (same day, entry above). (a) **Range

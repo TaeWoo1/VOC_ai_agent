@@ -19,6 +19,21 @@ authorization. The operator performs every marketplace click; the runtime only d
 | Pairing | the agent shows the approval code through its own human channel (macOS: a native dialog). Approve it from the SellerOps UI's connection flow. |
 | Login | the operator logs into NAVER themselves, in the browser the agent opened. |
 
+### Three harness facts that each cost a wrong diagnosis on the first attempt
+
+1. **Browse `http://localhost:5173`, not `127.0.0.1:5173`.** The backend allows exactly ONE CORS origin
+   (`sellerops.cors.origin`, default `http://localhost:5173`), so the other spelling fails the preflight with
+   403 — and the login form reports any failure as 이메일 또는 비밀번호를 확인해 주세요, which reads as bad
+   credentials.
+2. **The pairing UI is behind `VITE_ENABLE_AGENT_BRIDGE=true`.** `BridgeStatus` is the only surface with a
+   연결하기 button, and `AppShell` mounts it only under that opt-in flag. Without it there is no way for a
+   seller to pair the agent the guided import requires — a real gap in the product path, not just a dev
+   inconvenience.
+3. **`dev_tty_stderr` needs a real TTY.** Under a harness that redirects stderr the approval presenter has no
+   human channel, so the bridge correctly refuses to pair (`bridge_pair_refused approval_unavailable`). Running
+   the agent from an interactive terminal is the honest fix; `--dev-insecure-auto-approve` bypasses the
+   out-of-band approval and any run that uses it must say so — that control is then NOT exercised.
+
 ## The run
 
 1. **Press 과거 리뷰 전체 연동하기.** No plan exists, so the card attaches to the import carrier, mints a

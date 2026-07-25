@@ -151,3 +151,74 @@ listener count on the endpoint.
   element structure the operator pasted during the live run, not a measurement.
 - The three remaining items from the original record (apply-requiring surface, segment `UNREADABLE` →
   `OPERATOR_CONFIRMED`, more than one segment) are unchanged.
+
+---
+
+# Addendum 2 (2026-07-25, seated live run) — the CTA path, proven end to end
+
+Both open items above are now closed. A seller pressed **과거 리뷰 전체 연동하기** in SellerOps, and a month of
+reviews landed in the database without any scratch client in the loop.
+
+## Result
+
+| | |
+|---|---|
+| Discovery ticket | **`CONSUMED`** · range **2023-07-01 ~ 2026-07-25** · `range_evidence = OPERATOR_CONFIRMED` |
+| Plan created | 37 monthly segments, `ACTIVE` — built from what discovery established, no period asked of the seller |
+| Segment ticket | **`CONSUMED`** · `scope_evidence = MACHINE_MATCHED` |
+| Segment 1 (2023-07-01 .. 2023-07-31) | **`COMPLETED` + `COVERED`** · 61 rows |
+| Attempt | **`SUCCEEDED`** · rows_new **61** · duplicate 0 · failed 0 |
+| Rows in DB | **61** · coverage 1/37 |
+| Backend | disposable `sellerops_riv_cta_*` on 18090, V27/V28, name-guarded, dropped after |
+
+**Every marketplace click was the operator's.** The prediction above held exactly: the bounds read returned
+nothing declared (`minAttrs: 0, maxAttrs: 0` on two correctly-found inputs), so discovery took the
+operator-guided path and recorded `OPERATOR_CONFIRMED` — never relabelled as a machine read.
+
+## What this proves that the cross-stack suite could not
+
+- **The seller's own button starts a real run.** `aw_import_host_run_hosted {kind: DISCOVERY}` arrived from the
+  card's `START_RUN` over the Bridge, and the SERVER decided the kind from the ticket.
+- **Discovery creates the plan on a real surface.** The step that had a pure decision module and no runtime
+  around it now has one, and it works where the marketplace declares no bounds at all.
+- **A `SCOPE_MISMATCH` is finally visible to the person who can repair it.** The gate blocked (the screen held
+  discovery's own range, not the segment's), the card rendered "선택한 기간이 달라요 / 날짜를 다시 선택해
+  주세요", the operator corrected the dates and pressed the recheck, and the gate re-read `MATCH`. On the
+  previous live run the runtime reported this correctly and the seller's screen said nothing.
+- **Two runs, one sitting, one socket.** Discovery then a segment, each on a fresh runtime-minted identity,
+  with no agent restart and no reconnect.
+
+## Findings — four of them are ours, and one is a journey decision
+
+| # | Finding | Where it bites |
+|---|---|---|
+| 12 | **`SCOPE_BLOCKED` leaves the previous step's highlight on the marketplace page.** Nothing unmounts it, so the seller sees "still waiting for the end date" on a run that has stopped and needs a repair. | The operator concluded the date field was broken and kept changing it; the run had already blocked 30 seconds earlier. |
+| 13 | **A date barrier cannot be satisfied when the required value is ALREADY in the field.** The observer requires a value change, and discovery leaves its own range in the inputs — so the first segment's start date is usually already correct, and the end date defaults to today. | The seller must set a wrong date and correct it. Needs an engine-level answer (report the step `SKIPPED` when the field already holds what the gate will accept); the driver is not told the required window, by design. |
+| 14 | **There is no seller path to pair the local agent.** `BridgeStatus` is the only surface with a 연결하기 button and `AppShell` mounts it only under `VITE_ENABLE_AGENT_BRIDGE=true`. | A guided import requires a paired agent; without the flag the CTA can never succeed. |
+| 15 | **The backend allows exactly one CORS origin and the login form reports a network failure as bad credentials.** `127.0.0.1:5173` fails the preflight while `localhost:5173` passes. | Twenty minutes lost to a "wrong password" that was a 403. |
+| — | **`REQUEST_STEP_RECHECK`'s label is "확인 완료" at every barrier.** At a blocked scope the seller has not confirmed anything — they corrected dates. | Per-barrier copy is owed. |
+
+**A diagnosis I got wrong, recorded because the reasoning matters.** When the operator reported the end date
+not advancing, I concluded Angular had replaced the tagged node and made the poll re-resolve `[data-aw-target]`
+on every tick. The operator's own evidence disproved it — the tag was still on the input — and the log showed
+the barrier had in fact passed and the run was parked at the gate (finding 12). The re-resolution change is
+kept: it removes a real failure class (a detached node's value can never change again) and costs one
+`querySelector` per 250ms. But it fixed nothing here, and calling it the fix would have been wrong.
+
+**Recorded product decision (product owner, this session).** The current design makes the seller alternate
+between two windows, and a blocker that only changes text in the *other* window is invisible — which is exactly
+what happened. Going forward: **the seller chooses the import once in SellerOps, everything else completes
+inside the SmartStore page, and they return when it is done.** The frontend keeps ownership of every sentence
+(contract §6): it sends the already-composed prose down for the runtime to display, rather than the runtime
+holding a copy map. Any control placed in the marketplace page must be unmistakably SellerOps' own and must
+never click anything on NAVER.
+
+## Limitations of this run, stated
+
+- **The pairing approval control was NOT exercised.** `dev_tty_stderr` needs a real TTY and this harness
+  redirects stderr, so the bridge correctly refused to pair; the run continued under
+  `--dev-insecure-auto-approve`. The out-of-band approval remains unproven on this path.
+- One account, one segment, a disposable local backend. Not operational status.
+- The segment's `UNREADABLE` → `OPERATOR_CONFIRMED` branch and an apply-requiring surface are still untested.
+- The card opened five import sockets over the sitting (dev remounts). Harmless for display — one session
+  publishes to all — but worth a look before this ships.

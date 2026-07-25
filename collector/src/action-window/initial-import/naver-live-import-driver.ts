@@ -300,19 +300,38 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
   private async armDateObserve(): Promise<void> {
     await this.ctx().evaluate(() => {
       const w = window as unknown as Record<string, unknown>;
-      const el = document.querySelector("[data-aw-target]") as HTMLInputElement | null;
       const prior = w["__aw_import_date_poll__"];
       if (typeof prior === "number") clearInterval(prior);
       w["__aw_import_date_changed__"] = false;
-      if (!el) return;
+      // The tagged element, RE-RESOLVED on every check rather than captured once.
+      //
+      // Live finding (2026-07-25, second run): the operator changed the end date repeatedly and nothing
+      // advanced. A captured reference goes stale the moment Angular re-renders the conditions area — the
+      // closure then polls a DETACHED node whose value can never change again, so the barrier watches
+      // forever while the seller does everything right. Re-resolving costs one querySelector per 250ms and
+      // removes the whole failure class. Same selector, same tag: nothing is widened.
+      const resolve = (): HTMLInputElement | null =>
+        document.querySelector("[data-aw-target]") as HTMLInputElement | null;
+      const first = resolve();
+      if (!first) return;
       // Baseline stays in the page. A date the seller has on screen is theirs; it never crosses to the agent.
-      const baseline = el.value ?? "";
-      const check = (): void => {
+      const baseline = first.value ?? "";
+      // Still a VALUE change, and deliberately not a commit event.
+      //
+      // Treating `blur` as "they acted" would pass the barrier when the seller focuses the field and clicks
+      // away without choosing anything — defect #8 in a new coat, and it would hand an unset date to the
+      // gate. The known cost of keeping the diff rule is recorded rather than fixed here: when the value the
+      // run needs is ALREADY on screen (the end date defaults to today, so the current-month segment), a
+      // re-selection of the same date produces no diff and cannot satisfy the barrier. That case needs an
+      // engine-level answer — the driver is not told the required window, by design — not a looser signal.
+      const poll = (): void => {
+        const el = resolve();
+        if (!el) return;
         const now = el.value ?? "";
         if (now.trim() !== "" && now !== baseline) w["__aw_import_date_changed__"] = true;
       };
-      for (const ev of ["change", "input", "blur"]) el.addEventListener(ev, check);
-      w["__aw_import_date_poll__"] = setInterval(check, 250) as unknown as number;
+      for (const ev of ["change", "input", "blur"]) first.addEventListener(ev, poll);
+      w["__aw_import_date_poll__"] = setInterval(poll, 250) as unknown as number;
     });
   }
 
