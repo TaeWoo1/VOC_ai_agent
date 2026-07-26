@@ -9,6 +9,7 @@ import type {
   GuidedImportRuntime,
   GuidedImportSnapshot,
 } from "../../lib/actionWindow/import/importRuntime";
+import type { AwGuidancePack } from "../../../../contracts/action-window/v2/transport";
 import type {
   ReviewImportPlanDetailView,
   ReviewImportSegmentView,
@@ -27,11 +28,15 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
   let snapshot: GuidedImportSnapshot | null = null;
   const starts: { launchRef: string; kind: GuidedImportKind }[] = [];
   const sent: string[] = [];
+  const packs: AwGuidancePack[] = [];
   const runtime: GuidedImportRuntime = {
     snapshot: () => snapshot,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    setGuidancePack(pack) {
+      packs.push(pack);
     },
     async start(input) {
       starts.push(input);
@@ -59,7 +64,7 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
           };
     for (const l of [...listeners]) l(snapshot);
   };
-  return { runtime, starts, sent, publish, attach: opts.attach ?? true };
+  return { runtime, starts, sent, packs, publish, attach: opts.attach ?? true };
 }
 
 const account: SellerAccountResponse = {
@@ -115,38 +120,74 @@ afterEach(() => {
 });
 
 describe("GuidedImportCard — one action carries the import", () => {
-  it("offers the full import before any plan exists, and asks for no period", async () => {
-    render(<GuidedImportCard account={account} plan={null} agent="ready" />);
-    expect(screen.getByTestId("guided-import-cta")).toHaveTextContent("과거 리뷰 전체 연동하기");
-    // the seller is never asked to choose a historical period — discovery finds it
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByLabelText(/시작일|기간/)).toBeNull();
-  });
-
-  it("starting with no plan runs DISCOVERY (there is no plan to resume yet)", async () => {
-    const discovery = vi.spyOn(api, "startReviewImportDiscovery").mockResolvedValue({
-      launchRef: "0f1e2d3c4b5a6978", kind: "DISCOVERY", status: "ISSUED", planId: null, segmentId: null,
-      requiredStart: null, requiredEnd: null, discoveredStart: null, discoveredEnd: null, rangeEvidence: null,
+  /**
+   * With no plan the card asks the ONE question, and asks it here rather than in the marketplace window.
+   *
+   * This reverses what shipped on 2026-07-25, where the first press opened the seller center and walked the
+   * seller through NAVER's date pickers to find the earliest date it allowed. The live run established that it
+   * allows everything, so the question was about a limit that does not exist (finding 16).
+   */
+  it("asks how far back to import before any plan exists, instead of offering a run", async () => {
+    vi.spyOn(api, "previewReviewImportRange").mockResolvedValue({
+      start: "2025-07-01", end: "2026-07-26", segmentCount: 13,
     });
-    const next = vi.spyOn(api, "launchNextReviewImportSegment");
-    const fake = fakeRuntime();
+    render(<GuidedImportCard account={account} plan={null} agent="ready" />);
 
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
-    await userEvent.click(screen.getByTestId("guided-import-cta"));
-
-    await waitFor(() => expect(discovery).toHaveBeenCalledWith("acc-1"));
-    expect(next).not.toHaveBeenCalled();
-    // The ticket is not merely minted — it is bound to a real run on the agent.
-    expect(fake.starts).toEqual([{ launchRef: "0f1e2d3c4b5a6978", kind: "DISCOVERY" }]);
+    expect(screen.getByTestId("range-chooser")).toBeInTheDocument();
+    // No guided run is offered yet: there is nothing to guide until the seller has decided a period.
+    expect(screen.queryByTestId("guided-import-cta")).toBeNull();
+    // And the choice is a MONTH, because segments are calendar months.
+    expect(screen.getByTestId("range-start-month")).toBeInTheDocument();
   });
 
-  it("with a plan in progress it resumes the next segment instead of re-discovering", async () => {
+  /** The count is the fact that makes the choice a decision: 13 months is 13 exports done by hand. */
+  it("shows the period AND how many monthly exports it becomes, before creating anything", async () => {
+    const preview = vi.spyOn(api, "previewReviewImportRange").mockResolvedValue({
+      start: "2025-07-01", end: "2026-07-26", segmentCount: 13,
+    });
+    const create = vi.spyOn(api, "selectReviewImportRange");
+    render(<GuidedImportCard account={account} plan={null} agent="ready" />);
+
+    await waitFor(() => expect(screen.getByTestId("range-preview")).toHaveTextContent("13개 구간"));
+    expect(screen.getByTestId("range-preview")).toHaveTextContent("2025-07-01 ~ 2026-07-26");
+    expect(preview).toHaveBeenCalled();
+    // Nothing was created by looking.
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("creates the plan only when the seller confirms the period they were shown", async () => {
+    vi.spyOn(api, "previewReviewImportRange").mockResolvedValue({
+      start: "2025-07-01", end: "2026-07-26", segmentCount: 13,
+    });
+    const create = vi.spyOn(api, "selectReviewImportRange").mockResolvedValue(plan([seg()]));
+    const onPlanCreated = vi.fn();
+    render(<GuidedImportCard account={account} plan={null} agent="ready" onPlanCreated={onPlanCreated} />);
+    await waitFor(() => expect(screen.getByTestId("range-preview")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("range-confirm"));
+
+    await waitFor(() => expect(onPlanCreated).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledWith("acc-1", expect.stringMatching(/^\d{4}-\d{2}$/));
+  });
+
+  /**
+   * Deciding how far back to import needs no local helper. Gating the question on pairing would make an
+   * onboarding step a dead end for a seller who has not installed anything yet.
+   */
+  it("asks the question even when no agent is available", () => {
+    vi.spyOn(api, "previewReviewImportRange").mockResolvedValue({
+      start: "2025-07-01", end: "2026-07-26", segmentCount: 13,
+    });
+    render(<GuidedImportCard account={account} plan={null} agent="not_running" />);
+    expect(screen.getByTestId("range-chooser")).toBeInTheDocument();
+  });
+
+  it("with a plan it launches the next segment", async () => {
     const next = vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue({
       launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT", status: "ISSUED", planId: "plan-1", segmentId: "s2",
       requiredStart: "2026-04-01", requiredEnd: "2026-04-30", discoveredStart: null, discoveredEnd: null,
       rangeEvidence: null,
     });
-    const discovery = vi.spyOn(api, "startReviewImportDiscovery");
     const fake = fakeRuntime();
 
     render(
@@ -161,11 +202,13 @@ describe("GuidedImportCard — one action carries the import", () => {
     await userEvent.click(screen.getByTestId("guided-import-cta"));
 
     await waitFor(() => expect(next).toHaveBeenCalledWith("plan-1"));
-    expect(discovery).not.toHaveBeenCalled();
     expect(fake.starts).toEqual([{ launchRef: "9a8b7c6d5e4f3021", kind: "SEGMENT" }]);
+    // The words the seller will read in their SmartStore window went down BEFORE the run started.
+    expect(fake.packs.length).toBe(1);
+    expect(fake.packs[0]!.steps["actionWindow.import.export"]).toContain("엑셀");
   });
 
-  it("shows progress, the allowed range, and the next segment — not segment management", () => {
+  it("shows progress, the CHOSEN period, and the next segment — not segment management", () => {
     render(
       <GuidedImportCard
         account={account}
@@ -174,7 +217,10 @@ describe("GuidedImportCard — one action carries the import", () => {
       />,
     );
     expect(screen.getByTestId("import-progress")).toHaveTextContent("2개 구간 중 1개 완료");
-    expect(screen.getByTestId("discovered-range")).toHaveTextContent("2026-03-01 ~ 2026-04-30");
+    // "가져올 기간" — the seller's own choice. Nothing here has measured what the marketplace allows.
+    expect(screen.getByTestId("selected-range")).toHaveTextContent("2026-03-01 ~ 2026-04-30");
+    expect(screen.queryByText("가져올 수 있는 기간")).toBeNull();
+    // Newest month first: whoever stops half-way through 13 exports keeps the half that matters.
     expect(screen.getByTestId("next-segment-range")).toHaveTextContent("2026-04-01 ~ 2026-04-30");
     // no split / merge / missing controls on the seller's card
     expect(screen.queryByText(/나누기|합치기/)).toBeNull();
@@ -193,7 +239,7 @@ describe("GuidedImportCard — honest unavailability", () => {
     ["unpaired", /연결이 필요해요/],
     ["incompatible", /버전이 맞지 않아요/],
   ] as const)("explains %s and disables the CTA rather than failing silently", (agent, pattern) => {
-    render(<GuidedImportCard account={account} plan={null} agent={agent} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent={agent} />);
     expect(screen.getByTestId("agent-unavailable")).toHaveTextContent(pattern);
     expect(screen.getByTestId("guided-import-cta")).toBeDisabled();
   });
@@ -201,19 +247,19 @@ describe("GuidedImportCard — honest unavailability", () => {
   it("offers the manual file path ONLY when a guided run cannot happen", () => {
     const onUseFileFallback = vi.fn();
     const { rerender } = render(
-      <GuidedImportCard account={account} plan={null} agent="ready" onUseFileFallback={onUseFileFallback} />,
+      <GuidedImportCard account={account} plan={plan([seg()])} agent="ready" onUseFileFallback={onUseFileFallback} />,
     );
     expect(screen.queryByTestId("file-fallback-link")).toBeNull();
 
     rerender(
-      <GuidedImportCard account={account} plan={null} agent="not_running" onUseFileFallback={onUseFileFallback} />,
+      <GuidedImportCard account={account} plan={plan([seg()])} agent="not_running" onUseFileFallback={onUseFileFallback} />,
     );
     expect(screen.getByTestId("file-fallback-link")).toHaveTextContent("파일로 가져오기");
   });
 
   it("surfaces a launch failure instead of leaving the button looking successful", async () => {
-    vi.spyOn(api, "startReviewImportDiscovery").mockRejectedValue(new Error("boom"));
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fakeRuntime().runtime} />);
+    vi.spyOn(api, "launchNextReviewImportSegment").mockRejectedValue(new Error("boom"));
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fakeRuntime().runtime} />);
     await userEvent.click(screen.getByTestId("guided-import-cta"));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/시작하지 못했어요/));
     expect(screen.queryByTestId("guided-run-started")).toBeNull();
@@ -248,13 +294,14 @@ describe("GuidedImportCard — completion is claimed honestly", () => {
 describe("GuidedImportCard — the launch ref is not seller-facing", () => {
   it("never renders the opaque authorization it just minted", async () => {
     const ref = "0f1e2d3c4b5a6978";
-    vi.spyOn(api, "startReviewImportDiscovery").mockResolvedValue({
-      launchRef: ref, kind: "DISCOVERY", status: "ISSUED", planId: null, segmentId: null,
-      requiredStart: null, requiredEnd: null, discoveredStart: null, discoveredEnd: null, rangeEvidence: null,
+    vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue({
+      launchRef: ref, kind: "SEGMENT", status: "ISSUED", planId: "plan-1", segmentId: "s1",
+      requiredStart: "2026-03-01", requiredEnd: "2026-03-31", discoveredStart: null, discoveredEnd: null,
+      rangeEvidence: null,
     });
     const fake = fakeRuntime();
     const { container } = render(
-      <GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />,
+      <GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />,
     );
     await userEvent.click(screen.getByTestId("guided-import-cta"));
 
@@ -266,39 +313,38 @@ describe("GuidedImportCard — the launch ref is not seller-facing", () => {
 
 /* ─────────────── the run itself, once the agent is driving it ─────────────── */
 
-const DISCOVERY_LAUNCH = {
-  launchRef: "0f1e2d3c4b5a6978", kind: "DISCOVERY" as const, status: "ISSUED" as const, planId: null,
-  segmentId: null, requiredStart: null, requiredEnd: null, discoveredStart: null, discoveredEnd: null,
-  rangeEvidence: null,
+const SEGMENT_LAUNCH = {
+  launchRef: "0f1e2d3c4b5a6978", kind: "SEGMENT" as const, status: "ISSUED" as const, planId: "plan-1",
+  segmentId: "s1", requiredStart: "2026-03-01", requiredEnd: "2026-03-31", discoveredStart: null,
+  discoveredEnd: null, rangeEvidence: null,
 };
 
 describe("GuidedImportCard — it renders what the runtime publishes", () => {
   it("shows the current step from the runtime's own copy key and counter", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
 
     act(() => {
       fake.publish({
-        intent: "INITIAL_REVIEW_IMPORT_DISCOVERY",
         step: {
           stepNumber: 3,
-          totalSteps: 5,
-          copyKey: "actionWindow.importDiscovery.setEarliest",
+          totalSteps: 8,
+          copyKey: "actionWindow.import.setStartDate",
           copyParams: { targetKind: "start_date" },
           status: "AWAITING_USER",
         },
       });
     });
 
-    expect(screen.getByTestId("guided-step-count")).toHaveTextContent("5단계 중 3");
-    expect(screen.getByTestId("guided-run-progress")).toHaveTextContent(/가장 이전 날짜/);
+    expect(screen.getByTestId("guided-step-count")).toHaveTextContent("8단계 중 3");
+    expect(screen.getByTestId("guided-run-progress")).toHaveTextContent(/시작일/);
     // The dotted key itself is never shown to the seller — the FE owns every word.
     expect(screen.getByTestId("guided-run-progress").textContent).not.toContain("actionWindow.");
   });
 
   it("shows the window a segment run is asking for, so a highlighted date field is not a guess", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
 
     act(() => {
       fake.publish({
@@ -319,7 +365,7 @@ describe("GuidedImportCard — it renders what the runtime publishes", () => {
    */
   it("explains a SCOPE_MISMATCH and names the repair", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
 
     act(() => {
       fake.publish({
@@ -336,7 +382,7 @@ describe("GuidedImportCard — it renders what the runtime publishes", () => {
 
   it("renders command buttons only from allowedCommands, and sends what it renders", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
 
     act(() => {
       fake.publish({ allowedCommands: ["REQUEST_STEP_RECHECK", "PAUSE_RUN", "SET_GUIDANCE_ENABLED"] });
@@ -352,14 +398,14 @@ describe("GuidedImportCard — it renders what the runtime publishes", () => {
 
   it("offers no command at all when the runtime allows none", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
     act(() => fake.publish({ allowedCommands: [] }));
     expect(screen.getByTestId("guided-run-commands")).toBeEmptyDOMElement();
   });
 
   it("hides the CTA while a run is in flight, so one seller cannot start two", async () => {
     const fake = fakeRuntime();
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
     act(() => fake.publish({ status: "WAITING_FOR_HUMAN" }));
     expect(screen.queryByTestId("guided-import-cta")).toBeNull();
   });
@@ -368,7 +414,7 @@ describe("GuidedImportCard — it renders what the runtime publishes", () => {
     const onRunSettled = vi.fn();
     const fake = fakeRuntime();
     render(
-      <GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} onRunSettled={onRunSettled} />,
+      <GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} onRunSettled={onRunSettled} />,
     );
 
     act(() => fake.publish({ status: "WAITING_FOR_HUMAN" }));
@@ -383,33 +429,131 @@ describe("GuidedImportCard — it renders what the runtime publishes", () => {
   });
 });
 
+describe("GuidedImportCard — the seller can act on what they are told", () => {
+  /**
+   * The recheck control names what the seller just did. A single fixed label ("확인 완료") was wording the
+   * 2026-07-25 operator could not match to anything on their screen.
+   */
+  it("labels the recheck control for the step it is offered at", () => {
+    const fake = fakeRuntime();
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
+
+    act(() => {
+      fake.publish({
+        step: {
+          stepNumber: 6,
+          totalSteps: 8,
+          copyKey: "actionWindow.import.export",
+          copyParams: { targetKind: "export" },
+          status: "AWAITING_USER",
+        },
+        allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN"],
+      });
+    });
+
+    expect(screen.getByTestId("guided-command-REQUEST_STEP_RECHECK")).toHaveTextContent("엑셀 다운로드 눌렀어요");
+  });
+
+  /** A stop at the scope gate is nominally still a date step; what the seller must do is fix the dates. */
+  it("labels it for the BLOCKER when the run is stopped", () => {
+    const fake = fakeRuntime();
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
+
+    act(() => {
+      fake.publish({
+        step: {
+          stepNumber: 4,
+          totalSteps: 8,
+          copyKey: "actionWindow.import.setEndDate",
+          copyParams: { targetKind: "end_date" },
+          status: "AWAITING_USER",
+        },
+        blocker: { code: "SCOPE_MISMATCH", recoverable: true },
+        allowedCommands: ["REQUEST_STEP_RECHECK", "CANCEL_RUN"],
+      });
+    });
+
+    expect(screen.getByTestId("guided-command-REQUEST_STEP_RECHECK")).toHaveTextContent("날짜 다시 확인");
+  });
+
+  /**
+   * The pairing action appears on the card that is blocked without it. Before this, connecting a local helper
+   * was reachable only behind a developer env flag, so a seller had no way to start at all (finding 14).
+   */
+  it("offers the pairing action right where the run is blocked", async () => {
+    const onConnect = vi.fn();
+    render(
+      <GuidedImportCard
+        account={account}
+        plan={plan([seg()])}
+        agent="unpaired"
+        pairing={{ phase: "unpaired", confirmationCode: null, onConnect, onRetry: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByTestId("agent-unavailable")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("agent-pairing-connect"));
+    expect(onConnect).toHaveBeenCalled();
+  });
+
+  it("hides the pairing action once an agent can host the run", () => {
+    render(
+      <GuidedImportCard
+        account={account}
+        plan={plan([seg()])}
+        agent="ready"
+        pairing={{ phase: "paired", confirmationCode: null, onConnect: vi.fn(), onRetry: vi.fn() }}
+      />,
+    );
+    expect(screen.queryByTestId("agent-pairing")).toBeNull();
+  });
+
+  /**
+   * The seller works in the SmartStore window from here on, so the card must not tell them to watch this one.
+   * The old copy did, and the result was an operator alternating between two tabs and missing the tab that
+   * mattered.
+   */
+  it("sends the seller to the marketplace window and does not ask them to come back", async () => {
+    vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue(SEGMENT_LAUNCH);
+    const fake = fakeRuntime();
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
+
+    await userEvent.click(screen.getByTestId("guided-import-cta"));
+    await waitFor(() => expect(screen.getByTestId("guided-run-started")).toBeInTheDocument());
+    const text = screen.getByTestId("guided-run-started").textContent ?? "";
+    // The agent raises that window itself when the run starts, so the copy says it is up rather than asking the
+    // seller to go and find it.
+    expect(text).toMatch(/판매자센터 창을 띄웠어요/);
+    expect(text).toMatch(/돌아오지 않아도/);
+    expect(text).not.toMatch(/이동해 주세요/);
+  });
+});
+
 describe("GuidedImportCard — a launch ticket is never wasted", () => {
   /** Connect first: a refused attach after minting leaves an unspent authorization the seller must wait out. */
   it("does not mint a ticket when no agent can host the run", async () => {
-    const discovery = vi.spyOn(api, "startReviewImportDiscovery");
-    const fake = fakeRuntime();
+    const mint = vi.spyOn(api, "launchNextReviewImportSegment");
     // An injected runtime models an attached agent, so the refusal is modelled by withholding it: the card
     // falls back to the real hook, which cannot reach a bridge in jsdom.
-    render(<GuidedImportCard account={account} plan={null} agent="ready" />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" />);
     await userEvent.click(screen.getByTestId("guided-import-cta"));
 
     await waitFor(() => expect(screen.getByTestId("agent-unavailable")).toBeInTheDocument());
-    expect(discovery).not.toHaveBeenCalled();
-    expect(fake.starts).toEqual([]);
+    expect(mint).not.toHaveBeenCalled();
   });
 
   it("hands the ticket back when the agent refuses START_RUN", async () => {
-    vi.spyOn(api, "startReviewImportDiscovery").mockResolvedValue(DISCOVERY_LAUNCH);
+    vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue(SEGMENT_LAUNCH);
     const expire = vi.spyOn(api, "expireReviewImportLaunch").mockResolvedValue({
-      ...DISCOVERY_LAUNCH,
+      ...SEGMENT_LAUNCH,
       status: "EXPIRED",
     });
     const fake = fakeRuntime({ startRejects: new Error("INVALID_FOR_STATE") });
 
-    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" runtime={fake.runtime} />);
     await userEvent.click(screen.getByTestId("guided-import-cta"));
 
-    await waitFor(() => expect(expire).toHaveBeenCalledWith(DISCOVERY_LAUNCH.launchRef));
+    await waitFor(() => expect(expire).toHaveBeenCalledWith(SEGMENT_LAUNCH.launchRef));
     expect(screen.getByRole("alert")).toHaveTextContent(/시작하지 못했어요/);
     expect(screen.queryByTestId("guided-run-started")).toBeNull();
   });

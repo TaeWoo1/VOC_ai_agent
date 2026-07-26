@@ -9,8 +9,8 @@
  * it server-side. So at boot the agent knows the channel and the driver and nothing else — it does not know
  * which segment it is about to guide, and it must not guess.
  *
- * And an onboarding import is a sequence: range discovery, then one run per monthly segment, each with its
- * own ticket, all in one sitting without the seller restarting their agent. So this host:
+ * And an onboarding import is a sequence: one run per monthly segment, each with its own ticket, all in one
+ * sitting without the seller restarting their agent. So this host:
  *
  *  1. announces the import carrier immediately (so a frontend can attach and see an agent is present);
  *  2. intercepts the first `START_RUN`, reads the launch ref out of it, and asks the SERVER what window
@@ -19,10 +19,12 @@
  *     command into the freshly built session;
  *  4. does the same again for the next segment, without a restart.
  *
- * **Two run kinds, one host.** The SERVER decides which: a `DISCOVERY` ticket assembles the range-discovery
- * run that creates the plan, a `SEGMENT` ticket assembles one guided monthly export. The host never infers the
- * kind from the frontend's intent — the ref is the authorization and the server is the authority on what it
- * authorizes, so a client cannot start a discovery run with a segment's ticket by relabelling its command.
+ * **One hostable kind, and the SERVER still decides.** Only a `SEGMENT` ticket assembles a run. A `DISCOVERY`
+ * ticket is refused, because as of 2026-07-26 there is no discovery run to host: how far back to import is the
+ * seller's own choice, made in SellerOps before any marketplace window opens (see `import-driver.ts` on why
+ * that role was removed). The kind still comes from the server rather than the frontend's intent — the ref is
+ * the authorization and the server is the authority on what it authorizes, so a client cannot get a run hosted
+ * by relabelling its command.
  *
  * **Run identity stays Runtime-assigned.** The frontend supplies a launch ref; it never supplies or
  * influences a runId. And the ref is never logged — it authorizes an ingest, so it is treated as a
@@ -34,14 +36,16 @@
 import { deserializeFrame, type AwClientFrame } from "../../../../contracts/action-window/v2/transport";
 import type { InitialImportEndpoint } from "../../bridge/initial-import-endpoint";
 import { log } from "../../log";
-import { assembleDiscoveryRun, assembleImportRun, makeImportRunMarker, mintImportRunId } from "./import-dispatch";
-import type { ImportDiscoveryDriver, ImportProbeDriver, RequiredRange } from "./import-driver";
-import type { ImportDiscoverySession } from "./discovery-session";
+import { assembleImportRun, makeImportRunMarker, mintImportRunId } from "./import-dispatch";
+import type { ImportProbeDriver, RequiredRange } from "./import-driver";
 import type { ImportSegmentSession } from "./import-session";
 
 /** What the server says a launch ref authorizes. Identity-free by design — no plan or segment id. */
 export interface ResolvedLaunchScope {
-  /** DISCOVERY or SEGMENT. The SERVER decides; the host never infers it from the client's command. */
+  /**
+   * What the ticket authorizes, as the SERVER reports it. Only `SEGMENT` is hostable; the host never infers
+   * the kind from the client's command.
+   */
   kind: string;
   channelCode: string;
   /** The window to guide, for a SEGMENT run. Empty on a DISCOVERY run, which has no window yet. */
@@ -57,11 +61,8 @@ export interface ImportHostDeps {
    * collector's `upload.ts` `fetchLaunchScope` is the only place that speaks to the backend.
    */
   resolveScope: (launchRef: string) => Promise<ResolvedLaunchScope | null>;
-  /**
-   * The driver for each hosted run. On the product path, the LIVE one — which implements both roles, because
-   * both run kinds drive the same two date controls on the same surface.
-   */
-  driver: ImportProbeDriver & ImportDiscoveryDriver;
+  /** The driver for each hosted run. On the product path, the LIVE one. */
+  driver: ImportProbeDriver;
   persistDir?: string;
 }
 
@@ -121,7 +122,6 @@ export function declaredImportKindFromStartRun(frame: AwClientFrame): DeclaredIm
 export class ImportSegmentHost {
   private readonly deps: ImportHostDeps;
   private session: ImportSegmentSession | null = null;
-  private discoverySession: ImportDiscoverySession | null = null;
   /**
    * The hosted session's own transport subscription.
    *
@@ -153,11 +153,6 @@ export class ImportSegmentHost {
     return this.session;
   }
 
-  /** The currently hosted discovery session, if a discovery run has been started. */
-  activeDiscoverySession(): ImportDiscoverySession | null {
-    return this.discoverySession;
-  }
-
   async close(): Promise<void> {
     this.detach?.();
     this.detach = null;
@@ -170,7 +165,6 @@ export class ImportSegmentHost {
     this.sessionDetach?.();
     this.sessionDetach = null;
     this.session = null;
-    this.discoverySession = null;
   }
 
   private async onFrame(frame: AwClientFrame): Promise<void> {
@@ -195,9 +189,10 @@ export class ImportSegmentHost {
         log("aw_import_host_scope_refused", {});
         return;
       }
-      if (scope.kind !== "SEGMENT" && scope.kind !== "DISCOVERY") {
-        // An unrecognised kind is a newer server talking to an older agent. Fail closed rather than guess
-        // which choreography it meant.
+      if (scope.kind !== "SEGMENT") {
+        // Everything that is not a segment is refused, including a `DISCOVERY` ticket: there is no discovery
+        // run to host any more (the seller chooses the range in SellerOps), and an unrecognised kind is a
+        // newer server talking to an older agent. Both fail closed rather than guess at a choreography.
         log("aw_import_host_wrong_kind", { hostable: false });
         return;
       }
@@ -209,7 +204,7 @@ export class ImportSegmentHost {
         log("aw_import_host_kind_mismatch", { hostable: false });
         return;
       }
-      if (scope.kind === "SEGMENT" && (!scope.requiredStart || !scope.requiredEnd)) {
+      if (!scope.requiredStart || !scope.requiredEnd) {
         // A segment run with no window to match has no gate to pass. Refusing here is what keeps a file
         // covering an unknown period from being ingested as though it covered a planned one.
         log("aw_import_host_scope_incomplete", { hostable: false });
@@ -223,21 +218,6 @@ export class ImportSegmentHost {
       this.deps.endpoint.armRun(runId, channelCode);
       // Release the previous run's subscription first: one hosted session at a time, always.
       this.releaseHostedSession();
-
-      if (scope.kind === "DISCOVERY") {
-        const assembly = assembleDiscoveryRun(this.deps.endpoint.transport, {
-          runId,
-          channelCode,
-          discoveryRef: ref,
-          driver: this.deps.driver,
-        });
-        this.discoverySession = assembly.session;
-        this.hostedRef = ref;
-        this.sessionDetach = assembly.session.attach();
-        log("aw_import_host_run_hosted", { kind: "DISCOVERY" });
-        this.replay(frame, runId);
-        return;
-      }
 
       const required: RequiredRange = { start: scope.requiredStart, end: scope.requiredEnd };
       const assembly = assembleImportRun(this.deps.endpoint.transport, {

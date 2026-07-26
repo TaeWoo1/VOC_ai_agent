@@ -269,7 +269,6 @@ describe("import segment host", () => {
 
     await host.close();
     expect(host.activeSession()).toBeNull();
-    expect(host.activeDiscoverySession()).toBeNull();
   });
 });
 
@@ -320,37 +319,26 @@ describe("launch ref extraction — discovery", () => {
   });
 });
 
-describe("import host — discovery runs", () => {
-  it("hosts a discovery run on a runtime-minted identity and drives it", async () => {
+/*
+ * A `DISCOVERY` ticket is no longer hostable (2026-07-26). How far back to import is the seller's own choice,
+ * made in SellerOps before any marketplace window opens, so there is no run to host and nothing for the
+ * runtime to drive. These tests pin the REFUSAL, because the ticket kind still exists server-side and an
+ * agent that quietly hosted something for it would be guiding a choreography that no longer exists.
+ */
+describe("import host — a discovery ticket is refused", () => {
+  it("hosts nothing and touches no driver when the server reports a DISCOVERY ticket", async () => {
     const resolve = vi.fn(async () => DISCOVERY_SCOPE);
     const { endpoint, host, driver } = build(resolve);
 
     endpoint.replayClientFrame(discoveryStartRun(REF_A));
     await settle(host);
-    await host.activeDiscoverySession()?.whenSettled();
 
     expect(resolve).toHaveBeenCalledWith(REF_A);
-    expect(host.activeDiscoverySession()).not.toBeNull();
     expect(host.activeSession()).toBeNull();
-    expect(driver.calls).toContain("readRangeControls");
-    expect(driver.calls.some((c) => c.startsWith("reportRange:"))).toBe(true);
-    expect(endpoint.hostedRunId()).not.toBe("run_announce");
-  });
-
-  /** The whole point of the sequence: discovery, then the first segment, no restart in between. */
-  it("hosts a segment run after a discovery run in the same sitting", async () => {
-    const scopes: ResolvedLaunchScope[] = [DISCOVERY_SCOPE, scope()];
-    const { endpoint, host } = build(async () => scopes.shift() ?? null);
-
-    endpoint.replayClientFrame(discoveryStartRun(REF_A));
-    await settle(host);
-    await host.activeDiscoverySession()?.whenSettled();
-    endpoint.replayClientFrame(startRun(REF_B));
-    await settle(host);
-
-    expect(host.activeSession()).not.toBeNull();
-    // The finished discovery run is released, not left publishing alongside the segment run.
-    expect(host.activeDiscoverySession()).toBeNull();
+    // Nothing was located, highlighted or observed — the refusal happens before the surface is touched.
+    expect(driver.calls).toEqual([]);
+    // And the announced identity is unchanged: no run was minted for work that cannot be hosted.
+    expect(endpoint.hostedRunId()).toBe("run_announce");
   });
 
   /** The client declared one kind and holds the other's ticket. Neither answer is safe. */
@@ -362,11 +350,20 @@ describe("import host — discovery runs", () => {
     await settle(host);
 
     expect(host.activeSession()).toBeNull();
-    expect(host.activeDiscoverySession()).toBeNull();
     expect(driver.calls).toEqual([]);
   });
 
-  /** A window-less SEGMENT ticket has no gate to pass; a file could be ingested against an unknown period. */
+  it("never logs the refused ref", async () => {
+    clearLogSink();
+    const { endpoint, host } = build(async () => DISCOVERY_SCOPE);
+
+    endpoint.replayClientFrame(discoveryStartRun(REF_A));
+    await settle(host);
+
+    expect(JSON.stringify(getLogSink())).not.toContain(REF_A);
+    clearLogSink();
+  });
+
   it("refuses a segment scope with no window", async () => {
     const { endpoint, host, driver } = build(async () => scope({ requiredStart: "", requiredEnd: "" }));
 
@@ -387,15 +384,4 @@ describe("import host — discovery runs", () => {
     expect(driver.calls).toEqual([]);
   });
 
-  it("never logs the discovery ref", async () => {
-    clearLogSink();
-    const { endpoint, host } = build(async () => DISCOVERY_SCOPE);
-
-    endpoint.replayClientFrame(discoveryStartRun(REF_A));
-    await settle(host);
-    await host.activeDiscoverySession()?.whenSettled();
-
-    expect(JSON.stringify(getLogSink())).not.toContain(REF_A);
-    clearLogSink();
-  });
 });

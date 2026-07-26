@@ -144,6 +144,27 @@ degrade gracefully via the existing capability/`supportedEvents` advertisement.
 **This slice does not implement message handling** — it defines and tests the contract only, and
 does not modify `collector/src/bridge/protocol.ts`.
 
+### §8.1 One frame carries prose, FE → Runtime only (added 2026-07-26)
+
+`transport.ts` gained a third client frame, `aw_guidance_pack`. It exists because guidance moved **into the
+marketplace page**: the seller works in their SmartStore window, so a sentence that lives only in the SellerOps
+window is a sentence they never read (product-owner decision; evidence in
+`docs/action-window-runtime/naver-initial-review-import-live-proof-record.md`).
+
+Nothing in this README's §6 is relaxed by it, and `index.ts` is unchanged — no enum, envelope, view model or
+validator moved:
+
+- **§6 protects who decides the wording, not which process holds the string.** The frontend composes every
+  sentence and hands it down; the Runtime does dictionary lookup and `{param}` substitution and nothing else.
+- **A copy key with no pack entry renders NO sentence.** There is no Runtime fallback prose to fall back to. The
+  collector proves it structurally: a source guard asserts its two panel modules contain no Korean string
+  literal.
+- **The direction is one-way.** The pack is never echoed on an event, a view, or a resync reply, so the
+  Runtime→FE privacy invariant and `findProhibitedFields` are exactly as before. It is never persisted, and it is
+  logged only as counts.
+- **It carries no run state** — no status, no step number, no blocker. Those still come from the Runtime, which
+  is the only thing that knows them.
+
 ## Fixtures & tests
 
 - Valid fixtures: `fixtures/valid/{run-view,event,command}/` — usable directly as FE mock states

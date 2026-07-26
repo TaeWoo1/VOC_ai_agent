@@ -12,7 +12,9 @@ import com.sellerops.reviewimport.dto.ReviewImportLaunchScopeView;
 import com.sellerops.reviewimport.dto.ReviewImportLaunchView;
 import com.sellerops.reviewimport.dto.ReviewImportPlanDetailView;
 import com.sellerops.reviewimport.dto.ReviewImportPlanView;
+import com.sellerops.reviewimport.dto.ReviewImportRangeSelectionView;
 import com.sellerops.reviewimport.dto.ReviewImportSegmentView;
+import com.sellerops.reviewimport.dto.SelectImportRangeRequest;
 import com.sellerops.reviewimport.dto.SplitSegmentRequest;
 import jakarta.validation.Valid;
 import java.io.IOException;
@@ -33,9 +35,10 @@ import org.springframework.web.multipart.MultipartFile;
  * The NAVER Initial Review Import surface. Two ways in, deliberately unequal:
  *
  * <ul>
- *   <li><b>The product path</b> — {@code /launches/*}. The seller clicks once; a single-use ticket
- *       authorizes one guided Action Window run; discovery finds the range NAVER actually allows and
- *       creates the plan from it; each segment's download is detected and ingested automatically.</li>
+ *   <li><b>The product path</b> — {@code /plans/range-preview} → {@code /plans/selected-range} → {@code
+ *       /launches/*}. The seller picks how far back to import and confirms the period and the number of monthly
+ *       exports it becomes; each segment is then a single-use ticket authorizing one guided Action Window run,
+ *       whose download is detected and ingested automatically.</li>
  *   <li><b>The fallback</b> — {@code /segments/{id}/import} plus the explicit {@code /plans} creation.
  *       Kept because a guided run can be unavailable (no local agent), but it asks the seller to find and
  *       upload a file themselves, so it is not the default experience.</li>
@@ -64,11 +67,45 @@ public class ReviewImportPlanController {
         this.launchService = launchService;
     }
 
-    /* ─────────────── The product path: guided-run authorizations ─────────────── */
+    /* ─────────────── The product path: the seller's choice, then guided runs ─────────────── */
 
     /**
-     * "과거 리뷰 전체 연동하기" — authorize a range-discovery run for a connected account. No plan is created
-     * here: the plan is built from whatever range discovery finds.
+     * What starting from {@code startMonth} would create — the period and how many monthly exports it becomes.
+     *
+     * Read-only and creates nothing: this is the screen the seller confirms on, and the count is the fact that
+     * makes their choice a decision rather than a date entry.
+     */
+    @GetMapping("/plans/range-preview")
+    public ReviewImportRangeSelectionView previewRange(@AuthenticationPrincipal AuthPrincipal principal,
+                                                       @RequestParam UUID accountId,
+                                                       @RequestParam String startMonth) {
+        return ReviewImportRangeSelectionView.from(
+                launchService.previewSelection(principal.orgId(), accountId, startMonth));
+    }
+
+    /**
+     * "과거 리뷰 전체 연동하기" — create the plan the seller chose: their start month through today, one segment
+     * per calendar month.
+     *
+     * This replaced a guided range-DISCOVERY run (2026-07-26). That run drove the seller through NAVER's date
+     * pickers to find how far back the marketplace would let them reach; the 2026-07-25 live run established
+     * that it restricts nothing, so the question was about a limit that does not exist. How much history to
+     * import is the seller's decision, and it needs no marketplace window at all.
+     */
+    @PostMapping("/plans/selected-range")
+    public ReviewImportPlanDetailView selectRange(@AuthenticationPrincipal AuthPrincipal principal,
+                                                 @Valid @RequestBody SelectImportRangeRequest req) {
+        ReviewImportPlan plan = launchService.recordSelectedRange(principal.orgId(), req.sellerAccountId(),
+                req.startMonth());
+        return queryService.planDetail(principal.orgId(), plan.getId());
+    }
+
+    /**
+     * Authorize a plan creation for a connected account without performing it.
+     *
+     * Retained for the ticket's own sake: it is the single-use authorization that makes plan creation
+     * idempotent per account. {@link #selectRange} mints and spends one in a single call, so a caller
+     * normally never needs this.
      */
     @PostMapping("/launches/discovery")
     public ReviewImportLaunchView startDiscovery(@AuthenticationPrincipal AuthPrincipal principal,

@@ -13,8 +13,9 @@ import { ReviewImportEntry } from "./ReviewImportEntry";
 import { ReviewImportPlanDetail } from "./ReviewImportPlanDetail";
 
 /**
- * The historical-import screen. ONE action carries it — 과거 리뷰 전체 연동하기 — and everything the seller
- * needs (progress, the range NAVER allows, the next segment, completion) sits on that card.
+ * The historical-import screen. ONE decision carries it — how far back to import — and from then on the work
+ * happens in the seller's own SmartStore window; this card holds the summary they come back to (progress, the
+ * period they chose, the next segment, completion).
  *
  * The segment/attempt machinery below it is real and still reachable, but as DIAGNOSTICS behind an
  * expander: it is how an operator inspects or repairs an import, not how a seller performs one. Making it
@@ -105,9 +106,20 @@ export function ReviewImportPage() {
           account={active}
           plan={currentDetail.data ?? null}
           agent={agentAvailabilityFromBridgePhase(bridge.state.phase)}
+          // The pairing surface belongs to the page (it owns the bridge client) but has to APPEAR on the card,
+          // which is the screen that is blocked without it. The live run found no seller-facing pairing entry
+          // point at all — it existed only behind a developer env flag (finding 14).
+          pairing={{
+            phase: bridge.state.phase,
+            confirmationCode: "confirmationCode" in bridge.state ? bridge.state.confirmationCode : null,
+            onConnect: bridge.requestPairing,
+            onRetry: bridge.retry,
+          }}
+          // The seller's chosen period became a plan, so the card's summary is re-read from the backend rather
+          // than inferred from what was posted.
+          onPlanCreated={() => setPlansKey((k) => k + 1)}
           onLaunched={() => setPlansKey((k) => k + 1)}
-          // A guided run that finished changed the plan server-side — a discovery run CREATED it, a segment run
-          // covered a month of it — so the card's own summary is re-read from the backend rather than inferred.
+          // A finished segment run covered a month of the plan server-side, so the same re-read applies.
           onRunSettled={() => setPlansKey((k) => k + 1)}
           onUseFileFallback={() => currentPlan && setPlanId(currentPlan.id)}
         />

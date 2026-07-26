@@ -5,20 +5,27 @@
  *
  * ## Why this suite has to exist, specifically for import
  *
- * Every other import test proves ONE side against a stand-in: the collector's `discovery-session.test.ts` and
- * `import-session.test.ts` drive the real engines over an in-process loopback, and the frontend's
- * `import/*.test.ts` drive the real runtime against a fake transport. Neither crosses a socket — and the import
- * carrier is the one carrier where the seam between them carries load, because **run identity changes mid-
- * session**. An export or reply agent hosts one run for its lifetime; an onboarding import is a sequence, so
- * `ImportSegmentHost` mints a new identity per run and re-announces it. A frontend that kept its attach-time
- * runId would address the second run's commands to the first one forever, and no single-sided test can see it.
+ * Every other import test proves ONE side against a stand-in: the collector's `import-session.test.ts` drives
+ * the real engine over an in-process loopback, and the frontend's `import/*.test.ts` drive the real runtime
+ * against a fake transport. Neither crosses a socket — and the import carrier is the one carrier where the seam
+ * between them carries load, for two reasons.
+ *
+ * **Run identity changes mid-session.** An export or reply agent hosts one run for its lifetime; an onboarding
+ * import is a sequence, so `ImportSegmentHost` mints a new identity per run and re-announces it. A frontend that
+ * kept its attach-time runId would address the second run's commands to the first one forever.
+ *
+ * **And copy now travels the other way.** Guidance moved into the marketplace page (2026-07-26), so the
+ * frontend hands its prose down as an `aw_guidance_pack` and the agent renders it there. That crossing is only
+ * real over a socket: the pack has to survive serialization, reach the session the host just built, and be
+ * re-sent for the NEXT segment's session — and a press on that in-page panel has to come back as an ordinary
+ * gated command. Neither side alone can show any of it.
  *
  * So this runs the ACTUAL frontend modules —
  *   - `wsTransport.ts`   → `connectAwBridgeSession` with `expectedCarrier: import`,
  *   - `importRuntime.ts` → `createGuidedImportRuntime` (acknowledged START_RUN, view-adopted runId,
  *                          allowedCommands-gated sends),
- * over a genuine `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + the real discovery and
- * segment engines/sessions, connected by a real `ws` loopback socket. It mirrors `connectImportSession` exactly
+ * over a genuine `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + the real segment engine and
+ * session, connected by a real `ws` loopback socket. It mirrors `connectImportSession` exactly
  * MINUS its `import.meta.env` base-URL read and its non-injectable deps (only a browser could exercise those) —
  * the same shape the other two cross-stack suites use.
  *
@@ -50,7 +57,10 @@ import {
   type GuidedImportRuntime,
   type GuidedImportSnapshot,
 } from "../../../frontend/src/lib/actionWindow/import/importRuntime";
-import type { AwClientTransport as AwClientTransportV2 } from "../../../contracts/action-window/v2/transport";
+import type {
+  AwClientTransport as AwClientTransportV2,
+  AwGuidancePack,
+} from "../../../contracts/action-window/v2/transport";
 import { AW_CARRIER_IMPORT, AW_CARRIER_EXPORT, type AwCarrierKind } from "../../../contracts/action-window/aw-carrier-kind";
 import { BRIDGE_TOKEN_KEY, type StorageLike, type WebSocketLike } from "../../../frontend/src/lib/bridge/bridgeClient";
 
@@ -68,11 +78,45 @@ const SEGMENT_SCOPE: ResolvedLaunchScope = {
   requiredStart: "2026-06-01",
   requiredEnd: "2026-06-30",
 };
+/**
+ * A ticket kind the agent no longer hosts. Kept in this suite precisely to prove the refusal crosses the wire
+ * as silence-then-timeout rather than as a run that appears to start (see the test below).
+ */
 const DISCOVERY_SCOPE: ResolvedLaunchScope = {
   kind: "DISCOVERY",
   channelCode: CHANNEL,
   requiredStart: "",
   requiredEnd: "",
+};
+
+/**
+ * A guidance pack in the shape the frontend actually sends, trimmed to what these tests read.
+ *
+ * The words are deliberately recognizable rather than realistic: what is being proven is that the RUNTIME
+ * renders exactly what the FRONTEND wrote, and a marker string makes a substitution failure obvious. The real
+ * seller-facing pack is built by `frontend/src/lib/reviewImport.ts` and pinned by its own tests.
+ */
+const PACK: AwGuidancePack = {
+  chrome: {
+    product: "SellerOps",
+    stepCounter: "STEP {step}/{total}",
+    requiredRange: "WINDOW {start} - {end}",
+    blockedLabel: "STOPPED",
+  },
+  steps: {
+    "actionWindow.import.setStartDate": "PICK-START",
+    "actionWindow.import.setEndDate": "PICK-END",
+    "actionWindow.import.applyRange": "PRESS-APPLY",
+    "actionWindow.import.export": "PRESS-EXPORT",
+    "actionWindow.import.consent": "PRESS-CONFIRM",
+  },
+  blockers: { SCOPE_MISMATCH: { title: "WRONG-WINDOW", fix: "FIX-THE-DATES" } },
+  commands: { CANCEL_RUN: "STOP", REQUEST_STEP_RECHECK: "RECHECK" },
+  recheck: {
+    byBlocker: { SCOPE_MISMATCH: "RECHECK-DATES" },
+    byStep: { "actionWindow.import.export": "RECHECK-EXPORT" },
+    fallback: "RECHECK",
+  },
 };
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -227,25 +271,50 @@ async function waitFor(
   throw new Error(`cross-stack import: timed out waiting for ${label} (last: ${JSON.stringify(runtime.snapshot())})`);
 }
 
+/**
+ * Wait until the panel the driver was last asked to render satisfies a predicate.
+ *
+ * Separate from {@link waitFor} because the panel is a SECOND publication of the same transition, on a queue: the
+ * frontend can already be showing a blocker while the page render is still in flight, and asserting on the panel
+ * the moment the snapshot changes would be a race.
+ */
+async function waitForPanel(
+  driver: ImportFixtureDriver,
+  predicate: (panel: ReturnType<ImportFixtureDriver["lastGuidance"]>) => boolean,
+  label: string,
+  timeoutMs = 6000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (driver.guidanceRenders.length > 0 && predicate(driver.lastGuidance())) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(
+    `cross-stack import: timed out waiting for ${label} (last panel: ${JSON.stringify(driver.lastGuidance())})`,
+  );
+}
+
 describe("cross-stack: FE guided-import runtime ↔ real agent-hosted IMPORT carrier", () => {
-  it("runs range DISCOVERY from the frontend's own START_RUN, to COMPLETED", async () => {
+  /**
+   * Range discovery is gone from the product path (2026-07-26): how far back to import is the seller's own
+   * choice, made in SellerOps before any marketplace window opens. What a stale client presenting a DISCOVERY
+   * ticket must NOT get is a run that looks started, and the bounded start is what makes the refusal legible.
+   */
+  it("hosts nothing for a DISCOVERY ticket, and says so instead of hanging", async () => {
     const opened: WebSocket[] = [];
-    const { port, resolved } = await startImportServer({
-      script: { selectedRange: { start: "2023-08-01", end: "2026-07-25" } },
-    });
-    const c = await connectImportRuntime(port, opened);
+    const { port, resolved, driver } = await startImportServer();
+    const c = await connectImportRuntime(port, opened, AW_CARRIER_IMPORT, { startTimeoutMs: 400 });
     expect(c.ok).toBe(true);
     if (!c.ok) return;
 
-    await c.runtime.start({ launchRef: DISCOVERY_REF, kind: "DISCOVERY" });
-
-    // The SERVER decided the kind; the ref is what was presented.
+    await expect(c.runtime.start({ launchRef: DISCOVERY_REF, kind: "DISCOVERY" })).rejects.toThrow(
+      /never acknowledged/,
+    );
+    // It reached the server and was refused THERE, on the kind — not shortcut on the client.
     expect(resolved).toEqual([DISCOVERY_REF]);
-    const done = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "discovery completion");
-    expect(done.intent).toBe("INITIAL_REVIEW_IMPORT_DISCOVERY");
-    expect(done.step?.totalSteps).toBe(5);
-    // A finished run offers nothing to press.
-    expect(done.allowedCommands).toEqual([]);
+    // And the marketplace surface was never touched for work that cannot be hosted.
+    expect(driver.calls).toEqual([]);
+    expect(c.runtime.snapshot()).toBeNull();
   });
 
   it("guides a SEGMENT run to COMPLETED, showing the seller the window it must match", async () => {
@@ -296,32 +365,6 @@ describe("cross-stack: FE guided-import runtime ↔ real agent-hosted IMPORT car
    * The property no single-sided test can see: the host mints a NEW identity per run, so the frontend has to
    * adopt it from the view stream or spend the rest of the sitting addressing a finished run.
    */
-  it("carries a full sitting — discovery then a segment — on ONE socket, adopting each new run identity", async () => {
-    const opened: WebSocket[] = [];
-    const { port } = await startImportServer();
-    const c = await connectImportRuntime(port, opened);
-    expect(c.ok).toBe(true);
-    if (!c.ok) return;
-
-    await c.runtime.start({ launchRef: DISCOVERY_REF, kind: "DISCOVERY" });
-    const discovery = await waitFor(
-      c.runtime,
-      (s) => s.status === "COMPLETED" && s.intent === "INITIAL_REVIEW_IMPORT_DISCOVERY",
-      "discovery completion",
-    );
-
-    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
-    const segment = await waitFor(
-      c.runtime,
-      (s) => s.status === "COMPLETED" && s.intent === "INITIAL_REVIEW_IMPORT_SEGMENT",
-      "segment completion",
-    );
-
-    expect(segment.runId).not.toBe(discovery.runId);
-    expect(segment.runId).toMatch(/^run_[0-9a-f]{12}$/);
-    // One socket for the whole sitting: no reconnect was needed to host a second run.
-    expect(opened).toHaveLength(1);
-  });
 
   it("runs a second segment after the first, still on the same socket", async () => {
     const opened: WebSocket[] = [];
@@ -388,6 +431,176 @@ describe("cross-stack: FE guided-import runtime ↔ real agent-hosted IMPORT car
     const published = JSON.stringify(c.seen);
     expect(published).not.toContain(SEGMENT_REF);
     expect(published).not.toContain(DISCOVERY_REF);
+  });
+});
+
+/**
+ * **The journey the product owner asked for: one start in SellerOps, then finish inside the marketplace window.**
+ *
+ * Everything here crosses the socket. The pack is authored on the frontend, serialized, delivered to the session
+ * the host built, rendered as fully-worded panel state by the runtime, and pressed by the seller — and the press
+ * comes back through the same gates a frontend command goes through.
+ */
+describe("cross-stack: guidance rendered inside the marketplace page", () => {
+  it("renders the FRONTEND's words, with the runtime's own step numbers and window", async () => {
+    const opened: WebSocket[] = [];
+    // No apply control, and the seller does not act — so the run rests at the first date barrier and stays there.
+    const { port, driver } = await startImportServer({ script: { action: { start_date: false } } });
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    c.runtime.setGuidancePack(PACK);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    await waitFor(c.runtime, (s) => s.status === "WAITING_FOR_HUMAN", "first barrier");
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the start-date instruction");
+
+    const panel = driver.lastGuidance();
+    expect(panel?.product).toBe("SellerOps");
+    // The counter and the window are the RUNTIME's facts substituted into the FRONTEND's templates: neither side
+    // could have produced this line alone.
+    expect(panel?.stepLine).toBe("STEP 3/8");
+    expect(panel?.requiredRange).toBe("WINDOW 2026-06-01 - 2026-06-30");
+    expect(panel?.blocked).toBeNull();
+  });
+
+  /**
+   * The 2026-07-25 failure, closed where it happened. The gate stopped the run, and the seller — who was in the
+   * marketplace window — saw an unchanged page with a stale highlight on the field they had just left.
+   */
+  it("shows the stop, its repair, and a situation-specific recheck control, and takes the highlight down", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver, script } = await startImportServer({ script: { scope: "MISMATCH" } });
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    c.runtime.setGuidancePack(PACK);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    await waitFor(c.runtime, (s) => s.blocker !== null, "scope block");
+    await waitForPanel(driver, (p) => p?.blocked != null, "the blocked panel");
+
+    const panel = driver.lastGuidance();
+    // Cause AND repair, both in the window the seller is looking at.
+    expect(panel?.blocked).toEqual({ label: "STOPPED", title: "WRONG-WINDOW", fix: "FIX-THE-DATES" });
+    // The recheck label is the one for THIS blocker, not the generic fallback (contextual copy).
+    expect(panel?.actions).toEqual([
+      { command: "REQUEST_STEP_RECHECK", label: "RECHECK-DATES" },
+      { command: "CANCEL_RUN", label: "STOP" },
+    ]);
+    // finding 12: nothing is left pointing at a control the run has stopped waiting for.
+    expect(driver.calls).toContain("clearHighlight");
+
+    // And the seller repairs it WITHOUT going back to SellerOps: they fix the dates, then press our panel.
+    script.scope = "MATCH";
+    driver.pressPanel("REQUEST_STEP_RECHECK");
+    const done = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "recovery from the panel alone");
+    expect(done.blocker).toBeNull();
+    // The panel comes down with the run — a finished run's instructions must not linger on the seller's page.
+    await waitForPanel(driver, (p) => p === null, "the panel being removed");
+  });
+
+  /**
+   * The in-page flag lives in the seller's own page, so it is untrusted input. Only the two commands the panel
+   * ever renders may come back through it.
+   */
+  it("refuses a panel intent that was never a button", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver } = await startImportServer({ script: { action: { start_date: false } } });
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    c.runtime.setGuidancePack(PACK);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const atBarrier = await waitFor(c.runtime, (s) => s.status === "WAITING_FOR_HUMAN", "first barrier");
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the panel");
+
+    // `SWITCH_TO_MANUAL` IS allowed by the runtime at this barrier — so this proves the panel gate, not the
+    // command gate: the seller was never offered that button, so the page cannot press it for them.
+    expect(atBarrier.allowedCommands).toContain("SWITCH_TO_MANUAL");
+    driver.pressPanel("SWITCH_TO_MANUAL");
+    await new Promise((r) => setTimeout(r, 900));
+    expect(c.runtime.snapshot()?.status).toBe("WAITING_FOR_HUMAN");
+  });
+
+  /**
+   * Each segment gets a NEW session on the agent, and a new session starts with no copy at all. Without a
+   * re-send the seller would get a guidance panel on their first segment and a silent one on every segment
+   * after — worse than never having had it, because by then they are relying on it.
+   */
+  it("re-sends the pack for the next segment, so the panel is never silent after the first one", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver, script } = await startImportServer();
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    c.runtime.setGuidancePack(PACK);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const first = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "first segment");
+
+    // Park the SECOND run at its first barrier, so there is a live panel to read rather than a finished run's
+    // teardown. This is also the honest shape of a sitting: the seller works one segment at a time.
+    script.action = { start_date: false };
+    await c.runtime.start({ launchRef: SEGMENT_REF_2, kind: "SEGMENT" });
+    const second = await waitFor(
+      c.runtime,
+      (s) => s.status === "WAITING_FOR_HUMAN" && s.runId !== first.runId,
+      "second segment's first barrier",
+    );
+    expect(second.runId).not.toBe(first.runId);
+
+    // The second run drew its own panel, in the frontend's words: the pack reached the session the host built
+    // for it, not just the one it was first sent to.
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the second run's panel");
+    expect(driver.lastGuidance()?.product).toBe("SellerOps");
+    expect(opened).toHaveLength(1);
+  });
+
+  /**
+   * finding 13. The date barrier advances on a value CHANGE, so a field already holding the right date could
+   * never satisfy it — the current-month segment's end date defaults to today, and the live run had to set a
+   * deliberately wrong date and correct it. The step is skipped instead, and `totalSteps` does not move.
+   */
+  it("skips a date step whose field already holds the required value, without moving totalSteps", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver } = await startImportServer({
+      script: { prefilled: { start_date: true, end_date: true } },
+    });
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const done = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "segment completion");
+
+    // Neither date control was annotated, armed, or awaited — the seller was asked for nothing they had
+    // already done.
+    expect(driver.calls).not.toContain("highlight:start_date");
+    expect(driver.calls).not.toContain("observe:end_date");
+    expect(driver.calls).toContain("prefilled:start_date:2026-06-01..2026-06-30");
+    // The gate still ran: a skipped step is a step nobody needed, not a check nobody made.
+    expect(driver.calls).toContain("scope:2026-06-01..2026-06-30");
+    // Same denominator as a run where both dates were set by hand.
+    expect(done.step?.totalSteps).toBe(8);
+    const totals = new Set(c.seen.map((s) => s.step?.totalSteps));
+    expect([...totals]).toEqual([8]);
+  });
+
+  it("never renders a panel at all when the frontend has sent no words", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver } = await startImportServer({ script: { action: { start_date: false } } });
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    // No `setGuidancePack`. There is no runtime-authored fallback to fall back to — that absence is what makes
+    // "the frontend owns every word" structural rather than remembered.
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    await waitFor(c.runtime, (s) => s.status === "WAITING_FOR_HUMAN", "first barrier");
+    await new Promise((r) => setTimeout(r, 700));
+    expect(driver.guidanceRenders).toEqual([]);
   });
 });
 

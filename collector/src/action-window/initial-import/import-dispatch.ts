@@ -15,12 +15,9 @@
  */
 import { randomBytes } from "node:crypto";
 import type { AwServerTransport } from "../../../../contracts/action-window/v2/transport";
-import { DISCOVERY_TOTAL_STEPS } from "./discovery-stages";
-import { ImportDiscoveryEngine, type DiscoveryClock } from "./discovery-engine";
-import { ImportDiscoverySession } from "./discovery-session";
 import { ImportSegmentEngine, type ImportClock } from "./import-engine";
 import { ImportSegmentSession } from "./import-session";
-import type { ImportDiscoveryDriver, ImportProbeDriver, RequiredRange } from "./import-driver";
+import type { ImportProbeDriver, RequiredRange } from "./import-driver";
 import { IMPORT_RUN_SCHEMA_VERSION, saveImportRun, type ImportRunRecord } from "./import-run-store";
 
 export { defaultImportRunDirFor, recoverImportRuns } from "./import-run-store";
@@ -79,53 +76,13 @@ function recordFrom(engine: ImportSegmentEngine, now: () => string): ImportRunRe
 /**
  * Tell a driver how many steps THIS run has, for the headed diagnostic overlay's badge.
  *
- * Optional capability, not part of either driver interface: it affects a dev-only badge and nothing that is
- * clicked, so a driver without it is fully usable. `null` restores the driver's own default — needed because
- * one driver instance serves every run in a sequence, and a five-step discovery must not leave its denominator
- * behind on the eight-step segment run that follows.
+ * Optional capability, not part of the driver interface: it affects a dev-only badge and nothing that is
+ * clicked, so a driver without it is fully usable. `null` restores the driver's own default, so one run in a
+ * sequence never leaves its denominator behind on the next.
  */
 function setBadgeTotalSteps(driver: unknown, totalSteps: number | null): void {
   const badged = driver as { setBadgeTotalSteps?: (n: number | null) => void };
   badged.setBadgeTotalSteps?.(totalSteps);
-}
-
-export interface DiscoveryRunAssembly {
-  runId: string;
-  engine: ImportDiscoveryEngine;
-  session: ImportDiscoverySession;
-}
-
-export interface DiscoveryDispatchConfig {
-  runId: string;
-  channelCode: string;
-  /** Opaque 16-hex single-use authorization for THIS discovery. Never persisted, never emitted. */
-  discoveryRef: string;
-  driver: ImportDiscoveryDriver;
-  clock?: DiscoveryClock;
-}
-
-/**
- * Assemble the range-discovery run.
- *
- * **Not persisted, and that is the point.** The segment assembly writes a sanitized run marker so a restart
- * can ABANDON an interrupted run honestly. A discovery run has nothing worth recovering: it produced no
- * export window, cost the seller no marketplace action they cannot repeat, and its whole output is a single
- * server-side plan creation that either happened or did not. Writing a marker would add a file whose only use
- * would be to describe a run nobody can resume — resumption needs the launch ref on disk, which is exactly
- * what this runtime refuses to do.
- */
-export function assembleDiscoveryRun(
-  transport: AwServerTransport,
-  cfg: DiscoveryDispatchConfig,
-): DiscoveryRunAssembly {
-  const engine = new ImportDiscoveryEngine(
-    { runId: cfg.runId, channelCode: cfg.channelCode, discoveryRef: cfg.discoveryRef },
-    cfg.clock ? { clock: cfg.clock } : undefined,
-  );
-  // Keep the headed diagnostic badge's denominator honest for THIS run kind, when the driver has one.
-  setBadgeTotalSteps(cfg.driver, DISCOVERY_TOTAL_STEPS);
-  const session = new ImportDiscoverySession(engine, cfg.driver, transport);
-  return { runId: cfg.runId, engine, session };
 }
 
 export function assembleImportRun(

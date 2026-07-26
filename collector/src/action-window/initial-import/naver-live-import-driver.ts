@@ -41,11 +41,9 @@
  * had already consumed the event, so the second would time out on a run that had actually succeeded.
  */
 import type { Frame, Page } from "playwright";
-import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
-import { extractDates, matchExportScope } from "../../naver/export-scope-match";
+import { matchExportScope } from "../../naver/export-scope-match";
 import {
-  dateBoundsProbe,
   importLocateDiagnostic,
   inferRequiresApply,
   locateApplyDecision,
@@ -55,15 +53,15 @@ import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import { log } from "../../log";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, SurfaceProbeResult } from "../engine";
 import { armObserver, waitForUserAction } from "../observer";
-import { mountOverlay } from "../overlay";
+import { mountOverlay, unmountOverlay } from "../overlay";
+import {
+  mountGuidancePanel,
+  takeGuidanceIntent,
+  unmountGuidancePanel,
+  type GuidancePanelState,
+} from "../guidance-panel";
 import type { NaverLiveProbeDriver } from "../naver-live-driver";
-import type {
-  DiscoveredRange,
-  ImportDiscoveryDriver,
-  ImportProbeDriver,
-  ImportTarget,
-  RequiredRange,
-} from "./import-driver";
+import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
 
 /** Some bundlers inject `__name(...)` into serialized evaluate bodies — a harmless identity shim. */
 const NAME_SHIM = "globalThis.__name = globalThis.__name || function (f) { return f; };";
@@ -95,16 +93,22 @@ export interface NaverLiveImportDriverOptions {
   /** Total steps, for the diagnostic overlay badge. Supplied by the run's own step plan. */
   totalSteps?: number;
   /**
-   * Report an established historical range to the SellerOps backend, which creates the plan over it.
+   * Put SellerOps' own browser window in front of the seller, and return it to the review surface if it has
+   * drifted, at the start of a run.
    *
-   * Injected, and absent by default: a driver with no way to report must not silently succeed, and a default
-   * implementation would inevitably be a stub that made a discovery run look like it had created a plan.
-   * Only the approval-gated import boot supplies it, bound to the same account credentials the ingest uses.
+   * Injected, and absent by default, for the same reason this driver holds no `Page`: the decision needs the
+   * window and the configured surface URL, and neither belongs in here — a URL in this class is a URL that can
+   * end up in a log line. The approval-gated boot supplies it (`cli/local-agent.ts`), where both already live.
+   *
+   * It raises a window and follows a public application route. It clicks, types, submits and consents nothing,
+   * and it refuses to navigate away from an off-origin page so it can never interrupt a login the seller is
+   * performing — see `naver/surface-presentation.ts`. A driver without it simply does not present, and the run
+   * behaves exactly as it did before.
    */
-  reportRange?: (range: DiscoveredRange, evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED") => Promise<boolean>;
+  presentSurface?: () => Promise<void>;
 }
 
-export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscoveryDriver {
+export class NaverLiveImportDriver implements ImportProbeDriver {
   private readonly proven: NaverLiveProbeDriver;
   private readonly opts: NaverLiveImportDriverOptions;
   /** Signatures handed out per target, so highlight can re-validate against what locate decided. */
@@ -143,16 +147,25 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
   /**
    * The denominator of that badge, per run.
    *
-   * One driver instance serves every run this agent hosts, and the two run kinds have different lengths — a
-   * five-step discovery showing `1/8` on the seated operator's own screen while the frontend says "5단계 중 1"
-   * is a contradiction they have to resolve mid-run. Dev-only diagnostic; it changes nothing that is clicked.
+   * One driver instance serves every run this agent hosts, and a plan's segments can differ in length (an
+   * apply control is present on some surfaces and absent on others), so a badge showing `1/8` while the run has
+   * seven steps is a contradiction the seated operator has to resolve mid-run. Dev-only diagnostic; it changes
+   * nothing that is clicked, and the seller reads the guidance panel, not this badge.
    */
   setBadgeTotalSteps(totalSteps: number | null): void {
     this.badgeTotalSteps = totalSteps;
   }
 
-  /** Delegated — the readiness settle and its fail-closed causes are already live-proven. */
-  prepareSurface(): Promise<boolean | SurfaceProbeResult> {
+  /**
+   * Bring the surface to the seller, then delegate the readiness verdict — which is already live-proven and is
+   * left exactly as it was.
+   *
+   * The presentation runs FIRST and is best-effort: a window that could not be raised is a worse experience, not
+   * a broken run, and swallowing the failure keeps a cosmetic problem from failing an import. Whether the page is
+   * actually usable is still decided entirely by the composed driver, which is the only thing that reads it.
+   */
+  async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
+    await this.opts.presentSurface?.().catch(() => {});
     return this.proven.prepareSurface();
   }
 
@@ -327,14 +340,13 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
       // away without choosing anything — defect #8 in a new coat, and it would hand an unset date to the
       // gate.
       //
-      // The cost of keeping the diff rule is recorded rather than fixed here, and it is NOT a corner case:
-      // when the value the run needs is ALREADY on screen, re-selecting the same date produces no diff and
-      // the barrier cannot be satisfied. That happens on the FIRST segment of every plan — range discovery
-      // leaves its own start date in the field, and the first segment starts on the same day — and again on
-      // the current-month segment, whose end date is today by default. The 2026-07-25 CTA run had to set a
-      // deliberately wrong start date and correct it afterwards. The fix is engine-level (report the step
-      // SKIPPED when the field already holds what the gate will accept); the driver is not told the required
-      // window, by design, so a looser signal here is not the answer. See the proof record, finding 13.
+      // The cost of the diff rule is real and is now paid ELSEWHERE rather than here (finding 13, fixed
+      // 2026-07-26): when the value the run needs is already on screen, re-selecting the same date produces no
+      // diff and this barrier can never be satisfied — the current-month segment's end date is today by
+      // default, and the 2026-07-25 run had to set a deliberately wrong date and correct it. The engine now
+      // asks `isTargetPrefilled` BEFORE arming and reports the step `SKIPPED`, so this listener is only ever
+      // armed on a field that genuinely has to change. Loosening the signal here would still be wrong: it
+      // would pass the barrier on a field the seller touched without setting.
       const poll = (): void => {
         const el = resolve();
         if (!el) return;
@@ -416,73 +428,71 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
     return verdict.match;
   }
 
-  /* ── range discovery (the run that precedes the plan) ─────────────────────── */
+  /* ── stopping, skipping, and the in-page panel ─────────────────────────────── */
 
   /**
-   * What the date controls DECLARE as reachable — `min`/`max`, read off the same inputs a segment run drives.
+   * Take the spotlight off whatever it is on.
    *
-   * **`noticeTexts` is deliberately empty, and that is a decision rather than an omission.** The pure verdict
-   * can also read a per-query span cap out of range-area notices (`조회 기간은 최대 3개월`), but nothing
-   * downstream consumes one: the backend segments a plan by calendar month unconditionally, so a cap changes
-   * no behaviour. Reading arbitrary page text off a live seller surface — where review bodies and customer
-   * names live — to compute a value nobody uses is exposure with no purpose. If a cap ever becomes
-   * load-bearing, `readSpanCapMonths` is already written and tested; what is missing then is a BOUNDED,
-   * notice-scoped read, not this one.
+   * The whole fix for finding 12 on the live side: the annotation is removed, and the tag with it, so nothing
+   * on the page still points at a control the run has stopped waiting for. The date poll is stopped too —
+   * it would otherwise keep watching a field whose barrier is no longer open.
    */
-  async readRangeControls(): Promise<RangeControlProbe> {
-    const html = await this.settleDateControls();
-    const bounds = dateBoundsProbe(html);
-    // Sanitized: how many bounds were declared, never their values. This is the fact that decides whether the
-    // seller is asked to pick the dates themselves, so an operator reading a transcript needs to see it.
-    log("aw_import_discovery_bounds", {
-      minAttrs: bounds.minAttrs.length,
-      maxAttrs: bounds.maxAttrs.length,
-      frameResolved: this.proven.surfaceFrameResolved(),
-      dateInputCount: importLocateDiagnostic(html).dateInputCount,
-    });
-    return { ...bounds, noticeTexts: [] };
+  async clearTargetHighlight(): Promise<void> {
+    await unmountOverlay(this.ctx()).catch(() => {});
+    await this.ctx()
+      .evaluate(() => {
+        const w = window as unknown as Record<string, unknown>;
+        const handle = w["__aw_import_date_poll__"];
+        if (typeof handle === "number") clearInterval(handle);
+        w["__aw_import_date_poll__"] = undefined;
+        for (const stale of Array.from(document.querySelectorAll("[data-aw-target]"))) {
+          stale.removeAttribute("data-aw-target");
+        }
+      })
+      .catch(() => {});
   }
 
   /**
-   * The dates the seller selected, read back through the SAME path the segment gate uses.
+   * Does the located date control ALREADY hold the date this segment needs?
    *
-   * Reusing `readExportScope` is what keeps discovery and the later per-segment verification from disagreeing
-   * about what is selected on this surface — a disagreement would show up as a segment blocked on a window
-   * discovery had just reported as reachable.
+   * Read through the same path the gate uses (`readExportScope` → `matchExportScope`) rather than a second
+   * value read, so the skip decision and the later verification can never disagree about what is on screen —
+   * a disagreement here would skip a step and then block the run on the field it skipped.
    *
-   * Fewer than two readable dates returns null. It is not an error and must not be turned into one: the
-   * engine's obligation on null is to fail the run rather than report a range, and a thrown error would be
-   * indistinguishable from a driver fault.
+   * Only the boolean leaves this method. The comparison is on the pair, then narrowed to the one control being
+   * asked about: a MATCH means both ends already agree, which is precisely when neither date needs touching.
+   * Anything less than a full match answers `false` and the seller is asked — the safe direction, because a
+   * wrong skip would hand an unchecked field to the gate.
    */
-  async readSelectedRange(): Promise<DiscoveredRange | null> {
+  async isTargetPrefilled(target: ImportTarget, required: RequiredRange): Promise<boolean> {
+    if (target !== "start_date" && target !== "end_date") return false;
     const readback = await this.proven.readExportScope();
-    const dates = extractDates(readback.rangeValues);
-    // COUNT only. The values are this run's product and go to the server; they are never logged.
-    log("aw_import_discovery_selected", { datesParsed: dates.length });
-    if (dates.length < 2) return null;
-    const start = dates[0]!;
-    const end = dates[dates.length - 1]!;
-    return start <= end ? { start, end } : null;
+    const verdict = matchExportScope(readback.rangeValues, { start: required.start, end: required.end });
+    const prefilled = verdict.match === "MATCH";
+    // The verdict class and the answer — never a date value, never the required window.
+    log("aw_import_prefilled_probe", { target, prefilled, datesParsed: verdict.datesParsed });
+    return prefilled;
   }
 
   /**
-   * Hand the established range to the injected reporter. No reporter ⇒ false, never a silent success:
-   * a discovery run that could not create a plan must fail, or the seller is returned to a card that offers
-   * to continue an import that does not exist.
+   * Draw (or remove) the SellerOps guidance panel in the seller's page.
+   *
+   * The state arrives fully worded from the frontend's pack; this method chooses nothing about what it says.
+   * It goes in the SAME context as the spotlight, so the panel is never in a different document from the
+   * control it is describing.
    */
-  async reportDiscoveredRange(
-    range: DiscoveredRange,
-    evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED",
-  ): Promise<boolean> {
-    const report = this.opts.reportRange;
-    if (!report) {
-      log("aw_import_discovery_no_reporter", { reported: false });
-      return false;
+  async renderGuidance(state: GuidancePanelState | null): Promise<void> {
+    if (!state) {
+      await unmountGuidancePanel(this.ctx()).catch(() => {});
+      return;
     }
-    const ok = await report(range, evidence).catch(() => false);
-    // The evidence enum and the outcome — never the dates.
-    log("aw_import_discovery_reported", { ok, evidence });
-    return ok;
+    await this.ctx().evaluate(NAME_SHIM);
+    await mountGuidancePanel(this.ctx(), state);
+  }
+
+  /** The seller's last press on that panel. Take-once; a failed read is "they pressed nothing". */
+  async takeGuidanceIntent(): Promise<string | null> {
+    return takeGuidanceIntent(this.ctx()).catch(() => null);
   }
 
   /**
@@ -521,6 +531,9 @@ export class NaverLiveImportDriver implements ImportProbeDriver, ImportDiscovery
   async cleanup(): Promise<void> {
     this.consentRace = null;
     this.sigs.clear();
+    // The panel goes with the run. A finished run's instructions left on the seller's page would be the
+    // in-marketplace version of the stale highlight this slice exists to remove.
+    await unmountGuidancePanel(this.ctx()).catch(() => {});
     // Stop the value poll, or it keeps running in the page after the run ends.
     await this.ctx()
       .evaluate(() => {

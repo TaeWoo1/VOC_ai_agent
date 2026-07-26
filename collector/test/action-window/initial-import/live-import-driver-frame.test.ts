@@ -144,38 +144,106 @@ describe("live import driver — frame resolution is shared", () => {
  * property worth pinning structurally — a behavioural test with a fake page would pass with a `log` line that
  * shipped the seller's dates.
  */
-describe("live import driver — range discovery", () => {
-  it("reads the declared bounds off the same settled date controls a run drives", () => {
-    const body = CODE.slice(CODE.indexOf("async readRangeControls"), CODE.indexOf("async readSelectedRange"));
-    expect(body).toContain("this.settleDateControls()");
-    expect(body).toContain("dateBoundsProbe(html)");
-    // No page text: the span-cap read would mean scraping notices off a live seller surface for a value
-    // nothing downstream consumes.
-    expect(body).toContain("noticeTexts: []");
+/*
+ * The two live defects the 2026-07-25 CTA run left behind, and the panel that replaced the "look at the other
+ * window" assumption. Source-level for the same reason as the frame tests above: these are properties about
+ * what this class can and cannot do — which context it reads, and what leaves a method — and a behavioural
+ * test against a fake page would pass even if the property were broken.
+ */
+describe("live import driver — stopping, skipping, and the panel", () => {
+  /** finding 12: a stopped run must not keep pointing at a control the seller has left. */
+  it("clears the annotation AND the tag AND the date poll when the run stops", () => {
+    const body = CODE.slice(CODE.indexOf("async clearTargetHighlight"), CODE.indexOf("async isTargetPrefilled"));
+    expect(body).toContain("unmountOverlay(this.ctx())");
+    expect(body).toContain('removeAttribute("data-aw-target")');
+    // The poll would otherwise keep watching a field whose barrier is no longer open.
+    expect(body).toContain("clearInterval");
   });
 
-  it("reads the selection back through the SAME path the segment gate uses", () => {
-    const body = CODE.slice(CODE.indexOf("async readSelectedRange"), CODE.indexOf("async reportDiscoveredRange"));
+  /**
+   * finding 13: the prefilled probe goes through the SAME read the gate uses. A second, independent value
+   * read could disagree with the gate — which would skip a step and then block the run on the field it skipped.
+   */
+  it("answers the prefilled question through the gate's own read, and returns only a boolean", () => {
+    const body = CODE.slice(CODE.indexOf("async isTargetPrefilled"), CODE.indexOf("async renderGuidance"));
     expect(body).toContain("this.proven.readExportScope()");
-    expect(body).toContain("extractDates(readback.rangeValues)");
+    expect(body).toContain("matchExportScope(readback.rangeValues");
+    expect(body).toContain('verdict.match === "MATCH"');
+    // Anything short of a full match asks the seller — the safe direction.
+    expect(body).not.toContain("return true");
   });
 
-  it("logs counts and enums about discovery, never a date", () => {
-    const discovery = CODE.slice(CODE.indexOf("async readRangeControls"), CODE.indexOf("scopeEvidence()"));
-    for (const line of discovery.split("\n")) {
+  it("logs the prefilled verdict as a class and a boolean, never a date", () => {
+    const body = CODE.slice(CODE.indexOf("async isTargetPrefilled"), CODE.indexOf("async renderGuidance"));
+    for (const line of body.split("\n")) {
       if (!line.includes("log(")) continue;
-      for (const forbidden of ["range.start", "range.end", "dates[", "minAttrs[", "maxAttrs["]) {
+      for (const forbidden of ["required.start", "required.end", "rangeValues"]) {
         expect(line, forbidden).not.toContain(forbidden);
       }
     }
-    expect(discovery).toContain("datesParsed: dates.length");
-    expect(discovery).toContain("minAttrs: bounds.minAttrs.length");
+    expect(body).toContain("prefilled, datesParsed: verdict.datesParsed");
   });
 
-  /** No reporter ⇒ false. A silent success would return the seller to a card offering a plan that does not exist. */
-  it("fails closed when no range reporter is injected", () => {
-    const body = CODE.slice(CODE.indexOf("async reportDiscoveredRange"), CODE.indexOf("scopeEvidence()"));
-    expect(body).toContain("if (!report)");
-    expect(body).toContain("return false");
+  /**
+   * The panel is drawn in the SAME context as the spotlight. In a different document it would be describing a
+   * control the seller cannot see next to it.
+   */
+  it("renders the panel in the resolved surface context, and unmounts on null", () => {
+    const body = CODE.slice(CODE.indexOf("async renderGuidance"), CODE.indexOf("async takeGuidanceIntent"));
+    expect(body).toContain("mountGuidancePanel(this.ctx()");
+    expect(body).toContain("unmountGuidancePanel(this.ctx())");
+  });
+
+  /**
+   * The runtime writes none of the panel's words: `renderGuidance` takes a fully-worded state and passes it
+   * through. A string literal built here would be runtime-authored copy, which contract §6 gives to the FE.
+   */
+  it("authors no panel copy of its own", () => {
+    const body = CODE.slice(CODE.indexOf("async renderGuidance"), CODE.indexOf("async takeGuidanceIntent"));
+    expect(body).not.toMatch(/[가-힣]/);
+    expect(body).toContain("state");
+  });
+
+  /** A finished run's instructions left on the seller's page are the in-page version of a stale highlight. */
+  it("takes the panel down on cleanup", () => {
+    const body = CODE.slice(CODE.indexOf("async cleanup()"));
+    expect(body).toContain("unmountGuidancePanel(this.ctx())");
+  });
+});
+
+/*
+ * Bringing the window to the seller (product-owner request, 2026-07-26). Source-level, like the rest of this file:
+ * the properties that matter are about ORDER and about what this class is allowed to hold, and a behavioural test
+ * with a fake page would pass with the URL back in the driver.
+ */
+describe("live import driver — presenting the surface", () => {
+  it("presents BEFORE asking whether the surface is usable", () => {
+    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("async readSurfaceFacts"));
+    const present = body.indexOf("presentSurface");
+    const delegate = body.indexOf("this.proven.prepareSurface()");
+    expect(present).toBeGreaterThan(-1);
+    expect(delegate).toBeGreaterThan(-1);
+    // Raising the window after deciding the page is unusable would show the seller a window they cannot act in.
+    expect(present).toBeLessThan(delegate);
+  });
+
+  /**
+   * A window that could not be raised is a worse experience, not a broken import. The readiness verdict still
+   * comes entirely from the composed driver, which is the only thing that reads the page.
+   */
+  it("never lets a failed presentation fail the run", () => {
+    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("async readSurfaceFacts"));
+    expect(body).toContain("presentSurface?.().catch(() => {})");
+  });
+
+  /**
+   * The URL stays out of this class. It is the same rule as the missing page handle: a URL here is a URL that can
+   * reach a log line, and raw URLs are prohibited output.
+   */
+  it("holds no surface URL and no navigation of its own", () => {
+    expect(CODE).not.toContain("naverReviewUrl");
+    expect(CODE).not.toContain("goto");
+    expect(CODE).not.toContain("bringToFront");
+    expect(CODE).not.toMatch(/https?:\/\//);
   });
 });

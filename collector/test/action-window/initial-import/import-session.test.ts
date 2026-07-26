@@ -91,14 +91,20 @@ describe("import segment session — the happy path", () => {
     expect(engine.currentStage()).toBe("COMPLETED");
     expect(io.lastView()?.status).toBe("COMPLETED");
     // Every seller control was located, highlighted, armed and awaited — in order, and never "clicked".
+    //
+    // Each date control is ASKED what it already holds before it is annotated (finding 13). Asked before the
+    // highlight, not after: a step the seller does not have to perform must not flash an annotation at them.
+    // Here nothing is prefilled, so both barriers run in full.
     expect(driver.calls).toEqual([
       "prepareSurface",
       "readSurfaceFacts",
       "locate:start_date",
+      "prefilled:start_date:2026-01-01..2026-01-31",
       "highlight:start_date",
       "observe:start_date",
       "wait:start_date",
       "locate:end_date",
+      "prefilled:end_date:2026-01-01..2026-01-31",
       "highlight:end_date",
       "observe:end_date",
       "wait:end_date",

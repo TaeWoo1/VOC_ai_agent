@@ -63,6 +63,10 @@ export class ReplySubmitSession {
       this.transport.send({ kind: "aw_resync_result", view: this.engine.view(), events });
       return;
     }
+    // A guided reply posts one reply on the seller's own screen and has no in-page guidance panel, so an
+    // `aw_guidance_pack` is not a frame this runtime has anything to do with. Ignored rather than answered:
+    // there is no command to reject and nothing to acknowledge.
+    if (frame.kind !== "aw_command") return;
     const command = frame.command;
     const valid = validateCommandEnvelope(command);
     if (!valid.ok) {

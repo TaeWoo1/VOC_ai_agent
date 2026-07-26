@@ -15,9 +15,9 @@
  * ({@link ImportGuidanceStage}), and a per-control method set would have to be kept in lockstep with it by
  * hand.
  */
-import type { RangeControlProbe } from "../../naver/available-range-discovery";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
+import type { GuidancePanelState } from "../guidance-panel";
 import type {
   ArtifactValidateResult,
   DownloadDetectResult,
@@ -66,6 +66,48 @@ export interface ImportProbeDriver {
    */
   highlightTarget(target: ImportTarget): Promise<LocateResult>;
 
+  /**
+   * Take the annotation off whatever is currently highlighted.
+   *
+   * Exists because of a live defect, not for symmetry (proof record, finding 12): when the scope gate stopped
+   * the 2026-07-25 run, the previous step's highlight stayed on the date field the seller had just left. It
+   * read as "still waiting for this" on a run that had stopped 30 seconds earlier, and the operator kept
+   * changing a date no barrier was watching. A stopped run must not keep pointing at a control.
+   */
+  clearTargetHighlight(): Promise<void>;
+
+  /**
+   * Does {@code target} ALREADY hold the date this segment needs?
+   *
+   * The other live defect (finding 13). The date barrier advances on a value CHANGE — deliberately, because
+   * treating focus or blur as "they acted" would pass the barrier on an unset field. The cost is that a field
+   * already holding the right value can never satisfy it: re-picking the same date produces no change. That is
+   * not a corner case — the current-month segment's end date defaults to today — and the 2026-07-25 run had to
+   * set a deliberately wrong date and correct it afterwards. So the engine asks first and SKIPS the step,
+   * rather than asking the seller to fake a change.
+   *
+   * Reads the control's value IN-PROCESS and returns only a boolean, exactly as {@link readSelectedScope}
+   * does: the value never reaches a log, the wire, or disk.
+   */
+  isTargetPrefilled(target: ImportTarget, required: RequiredRange): Promise<boolean>;
+
+  /**
+   * Render (or, with {@code null}, remove) the SellerOps guidance panel in the marketplace page.
+   *
+   * The state arrives fully worded — the runtime assembles it from the frontend's pack and authors no
+   * sentence of its own (see `../guidance-copy.ts`). This is what makes the journey completable without
+   * looking back at the SellerOps window.
+   */
+  renderGuidance(state: GuidancePanelState | null): Promise<void>;
+
+  /**
+   * The seller's last press on that panel, or null.
+   *
+   * A press on OUR panel, never on a marketplace control — the same class of event as satisfying a barrier.
+   * Take-once: an intent left set would replay as a stream of rechecks.
+   */
+  takeGuidanceIntent(): Promise<string | null>;
+
   /** Arm observation of the seller's own action on {@code target}. Never performs it. */
   armTargetObserve(target: ImportTarget): Promise<void>;
 
@@ -93,57 +135,18 @@ export interface ImportProbeDriver {
   cleanup(): Promise<void>;
 }
 
-/** The historical range a discovery run established. Dates, because the range IS this run's product. */
-export interface DiscoveredRange {
-  start: string;
-  end: string;
-}
-
-/**
- * **What the DOM side must provide for a range-DISCOVERY run.**
+/*
+ * **There is no `ImportDiscoveryDriver` any more, and its absence is a product decision.**
  *
- * The run that precedes the plan: it answers "how far back does this marketplace currently let this seller
- * reach?", so the monthly segments are planned from what exists rather than a period the seller guessed.
+ * Until 2026-07-26 a run PRECEDED the plan: it drove the seller through NAVER's own date pickers to find how
+ * far back the marketplace would let them reach, and the plan was built from that. The 2026-07-25 live run
+ * established that NAVER's review calendar restricts nothing — there was no limit to discover — so the
+ * choreography was asking the seller a question about a constraint that does not exist (proof record,
+ * finding 16).
  *
- * It reuses the segment driver's observation surface for the two date controls — same locate, same
- * highlight, same barrier — because it is literally the same two controls, and a second implementation of
- * that choreography would be a second thing to keep correct. What is new is only reading BOUNDS, reading
- * the selected VALUES, and reporting the result.
- *
- * ## The one place dates deliberately leave the driver, and why that is not a leak
- *
- * `readSelectedScope` on the segment driver returns a verdict precisely so a seller's dates stay in-process.
- * {@link readSelectedRange} returns the dates themselves — because here they are not incidental page content,
- * they are the run's OUTPUT: the backend stores them as the plan's range and the frontend shows the seller
- * "가져올 수 있는 기간". The rule that survives is the one that matters: they go to the SERVER over the
- * account's own authenticated channel and are never logged, never persisted locally, and never put on the
- * Action Window wire (no v2 event or view payload carries a date; only `copyParams` does, for a window the
- * server itself resolved).
+ * The product owner reframed it: how far back to import is the SELLER's choice, made once in SellerOps
+ * (end date = today, they pick the start month, and they confirm the period and how many monthly segments it
+ * becomes before anything is created). That needs no marketplace interaction at all, so the run, its engine,
+ * its session, and this driver role were removed rather than left unreachable. What remains here is the one
+ * choreography that genuinely needs the marketplace: guiding ONE planned segment to a downloaded file.
  */
-export interface ImportDiscoveryDriver
-  extends Pick<
-    ImportProbeDriver,
-    "prepareSurface" | "locateTarget" | "highlightTarget" | "armTargetObserve" | "waitForTargetAction" | "cleanup"
-  > {
-  /** What the range controls DECLARE as reachable — bounds, not the current selection. */
-  readRangeControls(): Promise<RangeControlProbe>;
-
-  /**
-   * The dates currently selected on screen, or null when fewer than two are readable.
-   *
-   * Null is a first-class answer: "we could not read it" and "the seller chose nothing" both mean the run
-   * must not report a range, and inventing one here would be indistinguishable downstream from a measured
-   * value.
-   */
-  readSelectedRange(): Promise<DiscoveredRange | null>;
-
-  /**
-   * Report the established range to the server, which creates the plan over it and spends the ticket.
-   *
-   * `evidence` is passed rather than derived because only the engine knows which path produced the range,
-   * and the server refuses to default it — a machine read and a human's confirmation must never be
-   * relabelled as each other. Returns false on refusal; the engine fails the run rather than claiming a plan
-   * exists.
-   */
-  reportDiscoveredRange(range: DiscoveredRange, evidence: "MACHINE_DISCOVERED" | "OPERATOR_CONFIRMED"): Promise<boolean>;
-}

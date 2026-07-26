@@ -16,6 +16,8 @@ import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -43,6 +45,16 @@ class ReviewImportLaunchServiceTest {
 
     private final ReviewImportLaunchService service = new ReviewImportLaunchService(
             launches, plans, segments, planService, runService, sellerAccounts, channels);
+
+    /**
+     * A second instance with "today" pinned to 2026-07-26 KST, for the seller's range selection.
+     *
+     * The end of a selected period is today, so every assertion about it would otherwise be a test that changes
+     * meaning tomorrow.
+     */
+    private final ReviewImportLaunchService dated = new ReviewImportLaunchService(
+            launches, plans, segments, planService, runService, sellerAccounts, channels,
+            Clock.fixed(Instant.parse("2026-07-26T01:00:00Z"), ReviewImportLaunchService.KST));
 
     private final UUID orgId = UUID.randomUUID();
     private final UUID otherOrgId = UUID.randomUUID();
@@ -197,7 +209,7 @@ class ReviewImportLaunchServiceTest {
     }
 
     @Test
-    void nextSegmentSkipsCoveredAndMissingAndPicksTheEarliestRemaining() {
+    void nextSegmentSkipsCoveredAndMissing() {
         ReviewImportSegment covered = segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.COVERED);
         ReviewImportSegment missing = segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.MISSING);
         ReviewImportSegment remaining = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
@@ -208,11 +220,171 @@ class ReviewImportLaunchServiceTest {
         assertThat(service.nextRemainingSegment(orgId, planId)).containsSame(remaining);
     }
 
+    /**
+     * Newest first (product-owner decision, 2026-07-26), reversing the original oldest-first order.
+     *
+     * <p>A plan can be 37 manual exports and a seller may stop part-way. The recent months hold the reviews that
+     * still need answering, so the value has to arrive in the FIRST segment rather than the last — whoever
+     * abandons a plan half-done should be left holding the half that matters.
+     */
+    @Test
+    void nextSegmentIsTheMostRecentRemainingOne() {
+        ReviewImportSegment january = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        january.setId(UUID.randomUUID());
+        january.setSegmentStart(LocalDate.parse("2026-01-01"));
+        january.setSegmentEnd(LocalDate.parse("2026-01-31"));
+        ReviewImportSegment july = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        july.setId(UUID.randomUUID());
+        july.setSegmentStart(LocalDate.parse("2026-07-01"));
+        july.setSegmentEnd(LocalDate.parse("2026-07-26"));
+        // The repository returns them oldest-first; the CHOICE is what reversed, not the storage order.
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
+                .thenReturn(List.of(january, july));
+
+        assertThat(service.nextRemainingSegment(orgId, planId)).containsSame(july);
+    }
+
+    /** A covered newest month must not stall the plan — the next remaining one is still offered. */
+    @Test
+    void nextSegmentWalksBackwardsPastAlreadyCoveredMonths() {
+        ReviewImportSegment january = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        january.setId(UUID.randomUUID());
+        january.setSegmentStart(LocalDate.parse("2026-01-01"));
+        january.setSegmentEnd(LocalDate.parse("2026-01-31"));
+        ReviewImportSegment july = segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.COVERED);
+        july.setId(UUID.randomUUID());
+        july.setSegmentStart(LocalDate.parse("2026-07-01"));
+        july.setSegmentEnd(LocalDate.parse("2026-07-26"));
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
+                .thenReturn(List.of(january, july));
+
+        assertThat(service.nextRemainingSegment(orgId, planId)).containsSame(january);
+    }
+
     @Test
     void continuingWithNothingLeftFailsClosedRatherThanInventingWork() {
         when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
                 .thenReturn(List.of(segment(SegmentExecutionState.COMPLETED, SegmentCoverageState.COVERED)));
         assertThatThrownBy(() -> service.mintNextSegment(orgId, planId)).isInstanceOf(ApiException.class);
+    }
+
+    /* ─────────────── the seller's own range selection ─────────────── */
+
+    /**
+     * The confirmation screen's whole content: the period, and how many separate manual exports it becomes.
+     *
+     * The count is the fact that makes the choice a decision — three years reads like one click and is 37.
+     */
+    @Test
+    void previewSaysWhatTheChosenPeriodWouldCostBeforeAnythingIsCreated() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+
+        ReviewImportLaunchService.RangeSelection preview = dated.previewSelection(orgId, accountId, "2026-05");
+
+        assertThat(preview.start()).isEqualTo(LocalDate.parse("2026-05-01"));
+        // Today, from the server's KST clock — not a date the browser supplied.
+        assertThat(preview.end()).isEqualTo(LocalDate.parse("2026-07-26"));
+        assertThat(preview.segmentCount()).isEqualTo(3);
+        // A preview creates nothing at all.
+        verify(launches, never()).save(any());
+        verify(planService, never()).createPlan(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void previewRefusesAFutureMonthAndAnAbsurdlyEarlyOne() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+
+        assertThatThrownBy(() -> dated.previewSelection(orgId, accountId, "2026-08"))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> dated.previewSelection(orgId, accountId, "1999-01"))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void previewRefusesAMonthItCannotParseRatherThanGuessingOne() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+
+        for (String bad : new String[] {"", "2026", "2026-13", "last-year", "2026-07-01"}) {
+            assertThatThrownBy(() -> dated.previewSelection(orgId, accountId, bad))
+                    .as(bad)
+                    .isInstanceOf(ApiException.class);
+        }
+    }
+
+    /** A month the seller cannot see must not be previewable through a raw account id. */
+    @Test
+    void previewRefusesAnAccountFromAnotherOrgAsIfItDidNotExist() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, otherOrgId)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> dated.previewSelection(otherOrgId, accountId, "2026-05"))
+                .isInstanceOf(ApiException.class);
+    }
+
+    /**
+     * The plan is created from the seller's decision, and the ticket records that provenance:
+     * OPERATOR_SELECTED — never MACHINE_DISCOVERED, because nothing was measured.
+     */
+    @Test
+    void selectingARangeCreatesThePlanAndRecordsItAsTheSellersOwnChoice() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of());
+        when(launches.findByOrgIdAndSellerAccountIdAndKindAndStatus(
+                orgId, accountId, ReviewImportLaunchKind.DISCOVERY, ReviewImportLaunchStatus.ISSUED))
+                .thenReturn(Optional.empty());
+        stubSave();
+        when(planService.createPlan(eq(orgId), eq(accountId), eq(channelId), any(), any())).thenReturn(plan());
+
+        ReviewImportPlan created = dated.recordSelectedRange(orgId, accountId, "2026-05");
+
+        assertThat(created.getId()).isEqualTo(planId);
+        verify(planService).createPlan(orgId, accountId, channelId,
+                LocalDate.parse("2026-05-01"), LocalDate.parse("2026-07-26"));
+
+        org.mockito.ArgumentCaptor<ReviewImportLaunch> saved =
+                org.mockito.ArgumentCaptor.forClass(ReviewImportLaunch.class);
+        verify(launches, org.mockito.Mockito.atLeastOnce()).save(saved.capture());
+        ReviewImportLaunch ticket = saved.getAllValues().get(saved.getAllValues().size() - 1);
+        assertThat(ticket.getRangeEvidence()).isEqualTo(RangeDiscoveryEvidence.OPERATOR_SELECTED);
+        assertThat(ticket.getStatus()).isEqualTo(ReviewImportLaunchStatus.CONSUMED);
+        assertThat(ticket.getDiscoveredStart()).isEqualTo(LocalDate.parse("2026-05-01"));
+        assertThat(ticket.getDiscoveredEnd()).isEqualTo(LocalDate.parse("2026-07-26"));
+        // The ticket keeps the provenance of the plan it produced.
+        assertThat(ticket.getPlanId()).isEqualTo(planId);
+    }
+
+    /**
+     * Two live plans over overlapping months would double every remaining export the seller has to perform by
+     * hand. Resuming is the action for an unfinished plan, so a second one is refused rather than merged.
+     */
+    @Test
+    void selectingARangeRefusesWhenTheAccountIsAlreadyWorkingThroughAPlan() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+        ReviewImportPlan active = plan();
+        active.setStatus(ReviewImportPlanStatus.ACTIVE);
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of(active));
+
+        assertThatThrownBy(() -> dated.recordSelectedRange(orgId, accountId, "2026-05"))
+                .isInstanceOf(ApiException.class);
+        verify(planService, never()).createPlan(any(), any(), any(), any(), any());
+        verify(launches, never()).save(any());
+    }
+
+    /** A finished or abandoned plan is history, not work in progress: starting again is allowed. */
+    @Test
+    void selectingARangeIsAllowedAfterAFinishedOrAbandonedPlan() {
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+        ReviewImportPlan done = plan();
+        done.setStatus(ReviewImportPlanStatus.COMPLETED);
+        ReviewImportPlan abandoned = plan();
+        abandoned.setStatus(ReviewImportPlanStatus.ABANDONED);
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId))
+                .thenReturn(List.of(done, abandoned));
+        when(launches.findByOrgIdAndSellerAccountIdAndKindAndStatus(
+                orgId, accountId, ReviewImportLaunchKind.DISCOVERY, ReviewImportLaunchStatus.ISSUED))
+                .thenReturn(Optional.empty());
+        stubSave();
+        when(planService.createPlan(eq(orgId), eq(accountId), eq(channelId), any(), any())).thenReturn(plan());
+
+        assertThat(dated.recordSelectedRange(orgId, accountId, "2026-05")).isNotNull();
     }
 
     /* ─────────────── resolve ─────────────── */

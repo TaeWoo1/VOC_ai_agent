@@ -4,8 +4,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   IMPORT_STAGE_COPY,
+  RANGE_CHOICE_COPY,
+  RECHECK_FALLBACK_LABEL,
   agentAvailabilityCopy,
   agentAvailabilityFromBridgePhase,
+  buildImportGuidancePack,
   canImport,
   canMarkMissing,
   canSplit,
@@ -16,7 +19,10 @@ import {
   importProgress,
   importStageText,
   isUnattempted,
+  monthOptions,
   nextRemainingSegment,
+  rangeChoiceSummary,
+  recheckLabel,
   planStatusLabel,
   primaryActionLabel,
   scopeEvidenceLabel,
@@ -188,10 +194,26 @@ describe("importProgress", () => {
 });
 
 describe("nextRemainingSegment", () => {
-  it("picks the earliest segment still needing work", () => {
+  /**
+   * The MOST RECENT month first (product-owner decision, 2026-07-26), reversing the original oldest-first order.
+   *
+   * A plan can be 37 exports the seller performs by hand and they may stop part-way: the recent months hold the
+   * reviews that still need answering, so whoever abandons a plan half-done keeps the half that matters. Must
+   * match the backend's own `nextRemainingSegment`, or this card names one month while the ticket authorizes
+   * another.
+   */
+  it("picks the most recent segment still needing work", () => {
     const later = seg({ segmentStart: "2026-04-01", segmentEnd: "2026-04-30" });
     const earlier = seg({ segmentStart: "2026-03-01", segmentEnd: "2026-03-31" });
-    expect(nextRemainingSegment([later, earlier])?.segmentStart).toBe("2026-03-01");
+    expect(nextRemainingSegment([later, earlier])?.segmentStart).toBe("2026-04-01");
+    expect(nextRemainingSegment([earlier, later])?.segmentStart).toBe("2026-04-01");
+  });
+
+  /** A covered newest month must not stall the plan: the next remaining one is still offered. */
+  it("walks backwards past months that are already covered", () => {
+    const covered = seg({ segmentStart: "2026-04-01", segmentEnd: "2026-04-30", executionState: "COMPLETED", coverageState: "COVERED" });
+    const remaining = seg({ segmentStart: "2026-03-01", segmentEnd: "2026-03-31" });
+    expect(nextRemainingSegment([remaining, covered])?.segmentStart).toBe("2026-03-01");
   });
 
   it("offers a FAILED segment again (retry is the normal recovery)", () => {
@@ -269,29 +291,28 @@ describe("importStageText", () => {
    */
   it("has copy for every step key the runtime's plans publish", () => {
     const here = dirname(fileURLToPath(import.meta.url));
-    const sources = [
-      "../../../collector/src/action-window/initial-import/discovery-stages.ts",
-      "../../../collector/src/naver/import-guidance-plan.ts",
-    ].map((rel) => readFileSync(resolve(here, rel), "utf8"));
+    const sources = ["../../../collector/src/naver/import-guidance-plan.ts"].map((rel) =>
+      readFileSync(resolve(here, rel), "utf8"),
+    );
     const keys = new Set(
       sources.flatMap((source) => [...source.matchAll(/"(actionWindow\.import[A-Za-z]*\.[A-Za-z]+)"/g)].map((m) => m[1]!)),
     );
-    expect(keys.size).toBeGreaterThan(10);
+    expect(keys.size).toBeGreaterThan(5);
     for (const key of keys) {
       expect(Object.keys(IMPORT_STAGE_COPY), key).toContain(key);
     }
   });
 
   /**
-   * The discovery run's copy describes the seller ESTABLISHING the range, never SellerOps verifying it — the
-   * evidence recorded for that path is `OPERATOR_CONFIRMED`, and copy that said "확인했어요" would describe a
-   * check nobody performed.
+   * The `importDiscovery.*` keys are gone, and their absence is the fix for finding 16 rather than a rewording.
+   *
+   * They described a run that asked the seller to find the earliest date NAVER's calendar allowed — a limit the
+   * 2026-07-25 live run established does not exist. If one of those keys ever reappears here, the concept has
+   * come back with it.
    */
-  it("describes the discovery barriers as the seller's own selection", () => {
-    for (const key of ["actionWindow.importDiscovery.setEarliest", "actionWindow.importDiscovery.setLatest"]) {
-      expect(importStageText(key)).toMatch(/골라 주세요/);
-      expect(importStageText(key)).not.toMatch(/확인했|검증/);
-    }
+  it("has no copy for the retired range-discovery run", () => {
+    const discoveryKeys = Object.keys(IMPORT_STAGE_COPY).filter((k) => k.startsWith("actionWindow.importDiscovery."));
+    expect(discoveryKeys).toEqual([]);
   });
 });
 
@@ -345,5 +366,134 @@ describe("agentAvailabilityFromBridgePhase", () => {
       expect(agentAvailabilityFromBridgePhase(p)).toBe("not_running");
       expect(agentAvailabilityCopy(agentAvailabilityFromBridgePhase(p)).canGuide).toBe(false);
     }
+  });
+});
+
+/* ─────────────────── "다시 확인" is not one sentence ─────────────────── */
+
+describe("recheckLabel", () => {
+  /**
+   * On the 2026-07-25 live run the operator was told to press a button labelled 확인 완료 and could not match it
+   * to anything they had just done. The command means "I did the thing — look again", so the label has to name
+   * the thing.
+   */
+  it("names what the seller just did, per step", () => {
+    expect(recheckLabel({ copyKey: "actionWindow.import.setStartDate" })).toBe("시작일 입력했어요");
+    expect(recheckLabel({ copyKey: "actionWindow.import.export" })).toBe("엑셀 다운로드 눌렀어요");
+    expect(recheckLabel({ copyKey: "actionWindow.import.consent" })).toBe("확인 눌렀어요");
+  });
+
+  /**
+   * A stop at the scope gate is nominally still "the end date step", but what the seller has to do is fix the
+   * dates — so the blocker wins over the step.
+   */
+  it("describes the repair when the run is blocked, not the step it is sitting at", () => {
+    expect(recheckLabel({ copyKey: "actionWindow.import.setEndDate", blockerCode: "SCOPE_MISMATCH" })).toBe(
+      "날짜 다시 확인",
+    );
+  });
+
+  it("falls back to a label that is true of every barrier", () => {
+    expect(recheckLabel({})).toBe(RECHECK_FALLBACK_LABEL);
+    expect(recheckLabel({ copyKey: "actionWindow.import.ingest" })).toBe(RECHECK_FALLBACK_LABEL);
+    // Never claims the step is done — the runtime alone decides that, by observing.
+    expect(RECHECK_FALLBACK_LABEL).not.toMatch(/완료/);
+  });
+});
+
+/* ─────────────────── the words the marketplace-side panel renders ─────────────────── */
+
+describe("buildImportGuidancePack", () => {
+  /**
+   * Guidance moved into the seller's SmartStore window, so these sentences are read there. Copy ownership did
+   * NOT move: this function is where the words live, and the runtime does lookup and substitution only.
+   */
+  it("carries a sentence for every step the segment runtime publishes", () => {
+    const pack = buildImportGuidancePack();
+    for (const key of Object.keys(IMPORT_STAGE_COPY)) {
+      expect(pack.steps[key], key).toBe(IMPORT_STAGE_COPY[key]);
+    }
+  });
+
+  it("names the product, so a panel on someone else's site says whose it is", () => {
+    expect(buildImportGuidancePack().chrome.product).toContain("SellerOps");
+  });
+
+  /** The templates the runtime substitutes ITS facts into: neither side can produce these lines alone. */
+  it("leaves the runtime's own numbers and dates as placeholders", () => {
+    const pack = buildImportGuidancePack();
+    expect(pack.chrome.stepCounter).toContain("{step}");
+    expect(pack.chrome.stepCounter).toContain("{total}");
+    expect(pack.chrome.requiredRange).toContain("{start}");
+    expect(pack.chrome.requiredRange).toContain("{end}");
+  });
+
+  /** A stopped run owes the seller two things: what is wrong, and the one action that clears it. */
+  it("states both the cause and the repair for a scope mismatch", () => {
+    const blocker = buildImportGuidancePack().blockers.SCOPE_MISMATCH!;
+    expect(blocker.title).toContain("기간");
+    expect(blocker.fix).toMatch(/날짜/);
+  });
+
+  it("offers only the two controls a seller has decisions about", () => {
+    const pack = buildImportGuidancePack();
+    expect(Object.keys(pack.commands).sort()).toEqual(["CANCEL_RUN", "REQUEST_STEP_RECHECK"]);
+  });
+
+  it("carries the situation-specific recheck wording the panel resolves against", () => {
+    const pack = buildImportGuidancePack();
+    expect(pack.recheck.byBlocker.SCOPE_MISMATCH).toBe("날짜 다시 확인");
+    expect(pack.recheck.byStep["actionWindow.import.export"]).toBe("엑셀 다운로드 눌렀어요");
+    expect(pack.recheck.fallback).toBe(RECHECK_FALLBACK_LABEL);
+  });
+
+  /** Nothing in the pack may carry an identifier, a path, or markup into someone else's page. */
+  it("contains no dotted copy key, selector, or markup as VALUES", () => {
+    const values = JSON.stringify(buildImportGuidancePack());
+    expect(values).not.toMatch(/<[a-z]/i);
+    expect(values).not.toMatch(/https?:\/\//);
+  });
+});
+
+/* ─────────────────── the seller's own range choice ─────────────────── */
+
+describe("monthOptions", () => {
+  it("lists months newest first, starting from the given month", () => {
+    const options = monthOptions("2026-07", 3);
+    expect(options.map((o) => o.value)).toEqual(["2026-07", "2026-06", "2026-05", "2026-04"]);
+    expect(options[0]!.label).toBe("2026년 7월");
+  });
+
+  it("rolls back across a year boundary", () => {
+    expect(monthOptions("2026-02", 3).map((o) => o.value)).toEqual(["2026-02", "2026-01", "2025-12", "2025-11"]);
+  });
+
+  it("stops at the earliest selectable year rather than listing forever", () => {
+    const options = monthOptions("2010-03", 60);
+    expect(options[options.length - 1]!.value).toBe("2010-01");
+  });
+
+  it("returns nothing for an unusable month rather than guessing one", () => {
+    expect(monthOptions("nonsense")).toEqual([]);
+    expect(monthOptions("2026-13")).toEqual([]);
+  });
+});
+
+describe("rangeChoiceSummary", () => {
+  /**
+   * The period AND its cost, always together: three years reads like one click and is 37 exports the seller
+   * performs by hand. Agreeing to a period without seeing that is agreeing to work nobody mentioned.
+   */
+  it("states the period and how many monthly exports it becomes", () => {
+    expect(rangeChoiceSummary({ start: "2023-07-01", end: "2026-07-26", segmentCount: 37 })).toBe(
+      "2023-07-01 ~ 2026-07-26 · 37개 구간",
+    );
+  });
+
+  /** Nothing on this screen claims the marketplace limits anything — that was the concept finding 16 removed. */
+  it("asks about depth, never about what the marketplace allows", () => {
+    const words = `${RANGE_CHOICE_COPY.title} ${RANGE_CHOICE_COPY.body} ${RANGE_CHOICE_COPY.monthLabel}`;
+    expect(words).not.toMatch(/가져올 수 있는|선택할 수 있는|가능한 기간|최대/);
+    expect(RANGE_CHOICE_COPY.body).toMatch(/오늘까지/);
   });
 });
