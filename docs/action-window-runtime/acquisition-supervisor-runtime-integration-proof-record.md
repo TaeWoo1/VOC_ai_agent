@@ -59,11 +59,34 @@ All green, hermetic (`npm test`, no `RUN_INTEGRATION`, no browser):
 - **FE-independence.** The new modules are added to the `journey-ports.test.ts` source guard (no React / FE /
   component import).
 
-## Boundaries (still locked; not done here)
+## Live proof — 2026-07-27 (single-use approval, seated operator)
 
-- **No live run.** Binding the adapter id to the engine is not taking a live run. A run against a REAL
-  marketplace session remains a separately-approved, single-use, in-turn step (§4.7 product-boundary check),
-  never standing.
+Run under a fresh single-use in-turn approval (channel NAVER · test demo org/account · 2026-07-27 · seated
+operator; §4.1 pause lifted for the one run). Product path: real backend (disposable DB) → SellerOps frontend
+(bridge mode) → paired collector agent → guided export on a REAL NAVER SmartStore review page. The operator
+performed every marketplace action (NAVER login, date picks, export, consent, download); the collector only
+observed. **All four probe moments observed live**, sanitized enums only:
+
+| moment | live evidence (sanitized) |
+|---|---|
+| AGENT_START | `readiness_probe {naver, UNOBSERVED_EXTERNAL, AGENT_START}` at boot |
+| BEFORE_WORK admission + adapter binding | `acquisition_admit {adapter: NAVER_ACTION_WINDOW_IMPORT, admit: true}` |
+| DISPATCH → existing Import Host | `aw_import_host_run_hosted {SEGMENT}` |
+| SESSION_FAILURE (fail-closed on a not-logged-in session) | `readiness_probe {naver, EXPIRED, SESSION_FAILURE}` |
+| probe-permissive admission (recovery not deadlocked) | recovery run `acquisition_admit {decision: ASK_SELLER, admit: true}` — a stale not-ready readiness did NOT refuse the retry |
+| MANUAL_RECHECK → auto-resume | after the operator logged into NAVER + retried: `readiness_probe {naver, READY, MANUAL_RECHECK}` → `aw_import_scope_verdict {MATCH}` → highlights rendered → export downloaded |
+
+The single human checkpoint / hold is the engine's fail-closed `block()` on the not-usable session (the
+supervisor recorded it as `SESSION_FAILURE`); the NAVER engine, the single-use ticket, and the authorization
+path were unchanged. The trial-and-error that preceded a clean run (contract ESM load, FE/backend/bridge port
++ CORS + origin config, and a session-probe-timing recovery-flow gap) is captured in
+`live-import-run-preflight-gotchas.md` so future live runs skip it.
+
+## Boundaries (still locked)
+
+- **The live run above was the only marketplace contact, under a single-use approval.** Any further live run
+  needs a fresh, single-use, in-turn approval (§4.7 product-boundary check), never standing. Binding the
+  adapter id to the engine is not, by itself, a live run.
 - **No backend persistence** of any supervisor/coordinator state; **no new frontend**; **no NAVER engine edit**;
   **no second channel** (`ORDER_SUMMARY`/others stay §4.1-omitted → `INTEGRATION_PENDING`); **#355 untouched.**
 - The §1.7 carve-out still bounds this to the resolve/decide/coordinate seam; `OperationRun`/`CapabilityPolicy`
