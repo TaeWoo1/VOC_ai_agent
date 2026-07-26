@@ -21,9 +21,17 @@
  *    `JourneyShadow`, fed the same readiness observation, drops it (see `journey-projection`), so the journey
  *    stays at divergence 0.
  *
- * Sanitized throughout: the only things that cross are a channel-code enum and readiness/reason/action enums —
- * never a token, cookie, seller/account id, URL, or page text. This module imports no FE, no React, no browser,
- * and no network; a source guard pins that.
+ * Sanitized throughout: the only things that cross are a channel-code enum, readiness/reason/action enums, and
+ * an OPTIONAL opaque per-account slot (never a real seller/account id, email, or PII) — never a token, cookie,
+ * URL, or page text. This module imports no FE, no React, no browser, and no network; a source guard pins that.
+ *
+ * ## Not yet driven by the live agent loop (deliberate boundary)
+ *
+ * This slice provides the classify-and-project SEAM and its four probe reasons; it does NOT yet call the probe
+ * from the live agent runtime at those four moments (`local-agent` invokes nothing here). Wiring the invocation
+ * runs against a real marketplace session, so it is a separately-approved follow-up — the reasons are the
+ * vocabulary that wiring will use, not a claim that it is already connected. `probeNaver` reads the same
+ * sanitized `SessionVerdictInput` the live session probe already derives, so the seam is real, not a toy.
  */
 import { log } from "../../log";
 import { classifySessionVerdict, type SessionVerdict, type SessionVerdictInput } from "../../naver/session-verdict";
@@ -84,9 +92,15 @@ export function naverVerdictToReadiness(verdict: SessionVerdict): SessionReadine
  * It drives nothing: it reads booleans a probe already derived, and never touches a live page.
  */
 export class SessionReadinessProbe {
+  /**
+   * @param accountKey an OPTIONAL sanitized, opaque per-account slot. Supply it when one channel carries more
+   *   than one account (two NAVER stores) so their readiness never collapses into one; omit it for the
+   *   single-account case. It must NOT be a real seller/account id, an email, or any PII.
+   */
   constructor(
     private readonly port: JourneyProjectionPort,
     private readonly channelCode: string = NAVER_CHANNEL_CODE,
+    private readonly accountKey?: string,
   ) {}
 
   /**
@@ -108,10 +122,15 @@ export class SessionReadinessProbe {
   }
 
   private project(state: SessionReadinessState, reason: ReadinessProbeReason): void {
-    // Sanitized: a channel-code enum and three enums. No token, cookie, seller/account id, URL, or page text —
-    // and the log keys avoid the logger's forbidden substrings, so none of this is dropped or leaked.
+    // Sanitized: a channel-code enum and three enums. The account slot is deliberately NOT logged (even though
+    // it is opaque) to keep the log surface minimal; the log keys also avoid the logger's forbidden substrings,
+    // so nothing here is dropped or leaked.
     log("readiness_probe", { channelCode: this.channelCode, readiness: state, reason });
-    void this.port.observe({ kind: "session_readiness", channelCode: this.channelCode, state, reason });
+    void this.port.observe(
+      this.accountKey === undefined
+        ? { kind: "session_readiness", channelCode: this.channelCode, state, reason }
+        : { kind: "session_readiness", channelCode: this.channelCode, accountKey: this.accountKey, state, reason },
+    );
   }
 }
 
@@ -123,25 +142,44 @@ export class SessionReadinessProbe {
 export class SessionReadinessProjector implements JourneyProjectionPort {
   private readonly latest = new Map<string, SessionReadinessObservation>();
 
+  /**
+   * The map key is (channel, account slot), so two accounts on the SAME channel never collapse into one
+   * readiness. A NUL joins them — it cannot occur inside a channel code or an opaque slot — and an absent slot
+   * is the single-account channel's own key.
+   */
+  private static key(channelCode: string, accountKey?: string): string {
+    return `${channelCode}\u0000${accountKey ?? ""}`;
+  }
+
   observe(obs: JourneyObservation): void {
     if (obs.kind !== "session_readiness") return;
-    this.latest.set(obs.channelCode, readinessObservation(obs.channelCode, obs.state, obs.reason));
+    this.latest.set(
+      SessionReadinessProjector.key(obs.channelCode, obs.accountKey),
+      readinessObservation(obs.channelCode, obs.state, obs.reason, obs.accountKey),
+    );
   }
 
   /**
-   * The latest readiness for a channel, or a first-class `UNOBSERVED_EXTERNAL` when none was observed. The
-   * default is a "not seen", never a guessed READY.
+   * The latest readiness for a channel (and account slot), or a first-class `UNOBSERVED_EXTERNAL` when none was
+   * observed. The default is a "not seen", never a guessed READY.
    */
-  current(channelCode: string, reason: ReadinessProbeReason = "AGENT_START"): SessionReadinessObservation {
-    return this.latest.get(channelCode) ?? unobservedReadiness(channelCode, reason);
+  current(
+    channelCode: string,
+    accountKey?: string,
+    reason: ReadinessProbeReason = "AGENT_START",
+  ): SessionReadinessObservation {
+    return (
+      this.latest.get(SessionReadinessProjector.key(channelCode, accountKey)) ??
+      unobservedReadiness(channelCode, reason, accountKey)
+    );
   }
 
-  /** The single action to offer the seller for a channel right now — the "exactly one thing" guarantee. */
-  singleAction(channelCode: string): ReadinessAction {
-    return singleActionForReadiness(this.current(channelCode).state);
+  /** The single action to offer the seller for a channel/account right now — the "exactly one thing" guarantee. */
+  singleAction(channelCode: string, accountKey?: string): ReadinessAction {
+    return singleActionForReadiness(this.current(channelCode, accountKey).state);
   }
 
-  /** Every channel observed so far, as sanitized observations. Order is insertion order. */
+  /** Every (channel, account) observed so far, as sanitized observations. Order is insertion order. */
   snapshot(): readonly SessionReadinessObservation[] {
     return [...this.latest.values()];
   }

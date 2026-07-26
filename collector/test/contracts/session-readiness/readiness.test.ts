@@ -73,4 +73,18 @@ describe("session-readiness contract — observation builder", () => {
     expect(obs.action).toBe("NONE");
     expect(isReadyToWork(obs.state)).toBe(false);
   });
+
+  it("carries an optional opaque account slot only when supplied — single-account stays slot-free", () => {
+    const single = readinessObservation("naver", "READY", "AGENT_START");
+    expect("accountKey" in single).toBe(false);
+    const perAccount = readinessObservation("naver", "READY", "AGENT_START", "slot-a");
+    expect(perAccount.accountKey).toBe("slot-a");
+    expect(unobservedReadiness("naver", "AGENT_START", "slot-b").accountKey).toBe("slot-b");
+  });
+
+  it("EXPIRED asks the seller to log in — the fail-closed unconfirmed bucket, not a claim it was ready", () => {
+    const obs = readinessObservation("naver", "EXPIRED", "SESSION_FAILURE");
+    expect(obs.action).toBe("LOG_IN");
+    expect(isReadyToWork("EXPIRED")).toBe(false);
+  });
 });

@@ -15,7 +15,7 @@ no logging, no browser, no clock — and type-checks under `contracts/tsconfig.j
 | `LOGIN_REQUIRED` | a real marketplace login is required | `LOG_IN` |
 | `TWO_FACTOR_REQUIRED` | a 2FA / OTP / CAPTCHA challenge is in front of the session | `COMPLETE_AUTH_CHALLENGE` |
 | `ACCOUNT_AMBIGUOUS` | session present, but which account/store is unresolved | `SELECT_ACCOUNT` |
-| `EXPIRED` | session was there, no longer confirmed usable | `LOG_IN` |
+| `EXPIRED` | **not confirmed usable** (lapsed *or* observed-but-ambiguous); fail-closed — does not assert the session ever existed | `LOG_IN` |
 | `UNOBSERVED_EXTERNAL` | not observed at all — **not inferred as ready** | none |
 
 `singleActionForReadiness(state)` is the **exactly-one-thing** guarantee: every non-ready state maps to one
@@ -24,9 +24,13 @@ so the offered action can never drift from that mapping.
 
 ## Boundaries
 
-- **Sanitized only.** An observation is a channel-code enum plus enums (`state`, `reason`, `action`). There is
-  nowhere in it for a token, cookie, seller/account id, URL, or page text. A probe derives the state from those
-  upstream and drops them before anything reaches this contract.
+- **Sanitized only.** An observation is a channel-code enum plus enums (`state`, `reason`, `action`), and an
+  optional **opaque per-account slot** (`accountKey`). There is nowhere in it for a token, cookie, seller/account
+  id, email, URL, or page text. A probe derives the state from those upstream and drops them before anything
+  reaches this contract.
+- **Per-account, not just per-channel.** Two accounts on one channel (two NAVER stores) are kept apart by the
+  optional `accountKey` slot, so their readiness is never silently collapsed. The slot is a caller-chosen,
+  sanitized, opaque label — **not** the marketplace account id. Omit it for the single-account case.
 - **Never infer.** A channel the Agent has not observed is `UNOBSERVED_EXTERNAL`, mirroring the journey
   kernel's discipline for the unobserved upper journey (`../../review-import-journey/v1`). It is "not seen",
   not "probably ready".
@@ -42,3 +46,8 @@ not here. The collector's NAVER probe
 these states and projects sanitized observations through the existing `JourneyProjectionPort` — no FE, no
 mounted component. Backend persistence of readiness is intentionally deferred (a follow-up), so this slice
 adds no migration.
+
+**Deliberate boundary:** this slice ships the classify-and-project *seam* and the four `ReadinessProbeReason`
+moments as the vocabulary; it does **not** yet invoke the probe from the live agent loop at those moments
+(`local-agent` calls nothing here). Wiring the invocation runs against a real marketplace session, so it is a
+separately-approved follow-up — the reasons are what that wiring will use, not a claim it is already connected.

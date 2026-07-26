@@ -38,6 +38,8 @@ export type JourneyObservation =
   | {
       readonly kind: "session_readiness";
       readonly channelCode: string;
+      /** Optional sanitized, opaque per-account slot — distinguishes two accounts on one channel. Never an id. */
+      readonly accountKey?: string;
       readonly state: SessionReadinessState;
       readonly reason: ReadinessProbeReason;
     }

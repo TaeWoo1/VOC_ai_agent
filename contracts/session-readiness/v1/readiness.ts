@@ -35,7 +35,10 @@
  *   clear it. SellerOps never solves or bypasses it (CLAUDE.md safety fence).
  * - `ACCOUNT_AMBIGUOUS` — the session is present but which account/store is unresolved (an account chooser or
  *   reconnect interstitial); the seller must pick, and the Agent must never click through it.
- * - `EXPIRED` — the session was there and is no longer confirmed usable; treat as needing a fresh login.
+ * - `EXPIRED` — the session is NOT confirmed usable and nothing more specific was read (a lapsed session, or an
+ *   observed-but-ambiguous page); the fail-closed bucket that resolves to "log in again". It does NOT assert
+ *   the session was ever established — only that the Agent may not proceed on it. Distinct from
+ *   `UNOBSERVED_EXTERNAL`, which is "not observed at all".
  * - `UNOBSERVED_EXTERNAL` — the Agent has not observed this channel's session at all. NOT inferred as ready.
  */
 export type SessionReadinessState =
@@ -75,6 +78,13 @@ export type ReadinessAction = "NONE" | "LOG_IN" | "COMPLETE_AUTH_CHALLENGE" | "S
 export interface SessionReadinessObservation {
   /** The marketplace channel code (a sanitized enum, e.g. "naver"); never a seller or account id. */
   readonly channelCode: string;
+  /**
+   * An OPTIONAL sanitized, opaque per-account slot that distinguishes two accounts on the SAME channel (e.g.
+   * two NAVER stores), so their readiness is never silently collapsed. It is a caller-chosen slot label — NOT
+   * the marketplace seller/account id, NOT an email, NOT PII. Omitted for the single-account case, where the
+   * channel is the whole key.
+   */
+  readonly accountKey?: string;
   readonly state: SessionReadinessState;
   /** Why the probe ran that produced this state. */
   readonly reason: ReadinessProbeReason;
@@ -122,8 +132,12 @@ export function readinessObservation(
   channelCode: string,
   state: SessionReadinessState,
   reason: ReadinessProbeReason,
+  accountKey?: string,
 ): SessionReadinessObservation {
-  return { channelCode, state, reason, action: singleActionForReadiness(state) };
+  const base = { channelCode, state, reason, action: singleActionForReadiness(state) };
+  // Only carry the slot when a caller actually distinguishes accounts, so the single-account observation stays
+  // exactly channel + enums (no `accountKey: undefined` noise).
+  return accountKey === undefined ? base : { ...base, accountKey };
 }
 
 /**
@@ -133,6 +147,7 @@ export function readinessObservation(
 export function unobservedReadiness(
   channelCode: string,
   reason: ReadinessProbeReason = "AGENT_START",
+  accountKey?: string,
 ): SessionReadinessObservation {
-  return readinessObservation(channelCode, "UNOBSERVED_EXTERNAL", reason);
+  return readinessObservation(channelCode, "UNOBSERVED_EXTERNAL", reason, accountKey);
 }

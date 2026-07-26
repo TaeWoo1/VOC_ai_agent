@@ -123,6 +123,25 @@ describe("SessionReadinessProjector — headless projection through the port", (
     expect(projector.singleAction("cafe24")).toBe("NONE");
   });
 
+  it("keeps two accounts on the SAME channel apart — readiness never collapses per channel", () => {
+    const projector = new SessionReadinessProjector();
+    // Two NAVER stores, distinguished only by an opaque, sanitized slot.
+    const storeA = new SessionReadinessProbe(projector, NAVER_CHANNEL_CODE, "slot-a");
+    const storeB = new SessionReadinessProbe(projector, NAVER_CHANNEL_CODE, "slot-b");
+
+    storeA.probeNaver(signals(), "AGENT_START"); // A: READY
+    storeB.probeNaver(signals({ authChallengePresent: true }), "AGENT_START"); // B: TWO_FACTOR_REQUIRED
+
+    expect(projector.current("naver", "slot-a").state).toBe("READY");
+    expect(projector.current("naver", "slot-b").state).toBe("TWO_FACTOR_REQUIRED");
+    expect(projector.singleAction("naver", "slot-a")).toBe("NONE");
+    expect(projector.singleAction("naver", "slot-b")).toBe("COMPLETE_AUTH_CHALLENGE");
+    // Both accounts survive as distinct entries; neither clobbered the other.
+    expect(projector.snapshot()).toHaveLength(2);
+    // The single-account key (no slot) is a THIRD, still-unseen entry — not either store.
+    expect(projector.current("naver").state).toBe("UNOBSERVED_EXTERNAL");
+  });
+
   it("ignores non-readiness signals on the shared stream", () => {
     const projector = new SessionReadinessProjector();
     projector.observe({ kind: "run_status", status: "RUNNING" });
