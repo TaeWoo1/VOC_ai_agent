@@ -133,24 +133,47 @@ export function assertNoExternalTracing(env: Record<string, string | undefined> 
 export class JourneyShadow {
   private readonly graph = buildJourneyShadowGraph();
   private readonly thread: string;
-  private phaseValue: JourneyPhase = INITIAL_JOURNEY_STATE.phase;
+  private phaseValue: JourneyPhase;
   private divergences = 0;
+  /** Serializes observations: the graph is not safe under concurrent invocations on one checkpoint thread. */
+  private tail: Promise<void> = Promise.resolve();
 
-  /** @param thread a synthetic checkpoint thread id — NEVER a launch ref or any real identity. */
-  constructor(thread = "journey-shadow") {
+  /**
+   * @param thread a synthetic checkpoint thread id — NEVER a launch ref or any real identity.
+   * @param initialPhase where the observer starts. `START` (default) drives the full journey from the top; a
+   *   live observer connected only to the segment runtime starts at `UNOBSERVED_EXTERNAL` — it did not witness
+   *   auth/account/plan and must not infer them.
+   */
+  constructor(thread = "journey-shadow", initialPhase: JourneyPhase = INITIAL_JOURNEY_STATE.phase) {
     // Fail closed if the environment would trace this graph to LangSmith — the shadow must never egress.
     assertNoExternalTracing();
     this.thread = thread;
+    this.phaseValue = initialPhase;
   }
 
-  /** Project one observation, advance the shadow graph, and (at a run status) check for divergence. */
-  async observe(obs: JourneyObservation): Promise<void> {
+  /**
+   * Observe one signal. Observations are serialized through the graph — a synchronous producer (the transport
+   * tap) may push several in a burst, and concurrent invocations on one checkpoint thread would race. Returns
+   * when THIS observation has been applied; `whenIdle()` awaits the whole queue.
+   */
+  observe(obs: JourneyObservation): Promise<void> {
+    this.tail = this.tail.then(() => this.processOne(obs));
+    return this.tail;
+  }
+
+  /** Resolves when every observation queued so far has been applied. */
+  whenIdle(): Promise<void> {
+    return this.tail;
+  }
+
+  private async processOne(obs: JourneyObservation): Promise<void> {
     const event = projectJourneyEvent(obs);
     if (event) {
+      // The shadow holds the authoritative phase and passes it into each step; the graph is the pure reducer.
       // `callbacks: []` is defence-in-depth against inherited handlers; the load-bearing guarantee is the
       // constructor's fail-closed tracing check.
       const out = await this.graph.invoke(
-        { event },
+        { phase: this.phaseValue, event },
         { configurable: { thread_id: this.thread }, callbacks: [] },
       );
       this.phaseValue = out.phase;

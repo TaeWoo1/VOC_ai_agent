@@ -29,6 +29,13 @@
 /** The milestones of the whole journey. One segment RUN is a single phase; its internal stages stay in the engine. */
 export type JourneyPhase =
   | "START"
+  /**
+   * The upper journey (auth, account, pairing, plan) happened OUTSIDE what this observer can see, and is
+   * explicitly NOT inferred. A shadow connected only to the collector's segment runtime starts here rather
+   * than pretending to know the auth/account/plan outcome; it is a launchable boundary — a first observed
+   * segment run proceeds from it exactly as it would from PLAN_READY.
+   */
+  | "UNOBSERVED_EXTERNAL"
   | "AUTH_VERIFYING"
   | "AUTH_FAILED"
   | "ACCOUNT_READY"
@@ -104,6 +111,8 @@ const LAUNCHABLE_PHASES: ReadonlySet<JourneyPhase> = new Set<JourneyPhase>([
   "PLAN_READY",
   "SEGMENT_DONE",
   "SEGMENT_FAILED",
+  // The live observer's boundary: it did not see the plan become ready, only the segment run begin.
+  "UNOBSERVED_EXTERNAL",
 ]);
 
 const STAY: (phase: JourneyPhase) => JourneyTransition = (phase) => ({ phase, effect: "NONE" });
