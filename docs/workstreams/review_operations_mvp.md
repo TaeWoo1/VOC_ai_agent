@@ -11,6 +11,11 @@
 
 - **Workstream:** Review Operations (acquisition → normalize → prioritize → guided response)
 - **Wedge channel:** NAVER (Action Window reference precedent). Second channel not yet selected.
+- **FE posture (2026-07-26):** existing FE is **frozen for new features** and kept only as a temporary
+  compatibility adapter; FE = Agent Control Plane projection/command adapter, owns no journey state or
+  execution order (`docs/action-window-runtime/agent-first-ui-light-adr.md`, product-scope §1.7). This
+  wedge's remaining FE work is compatibility-adapter only; the one open execution dependency is that
+  the next-segment ticket mint is still FE-initiated (recorded, to move under Agent-first later).
 - **Status:** ACQUIRE live-verified once (NAVER, 2026-07-15, Run 4 — supervised, dev seller, local
   dev backend). **NORMALIZE + visibility proven end-to-end against a running local backend
   2026-07-23** over committed golden exports at the **real 25-column schema**

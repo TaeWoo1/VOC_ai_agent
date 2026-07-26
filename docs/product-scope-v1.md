@@ -1,11 +1,46 @@
-# Product Scope v1.1 — Drift Guard
+# Product Scope v1.7 — Drift Guard
 
 SellerOps 제품 범위를 **하나의 합의된 정의로 고정**하기 위한 문서. 목적은 "무엇을 만드는가"보다
 **"무엇을 지금 만들지 않는가"를 못 박는 것**이다. 멀티채널 확장(`docs/multi-channel-connector-roadmap.md`)이
 구체화되면서 범위가 넓어지는 자연스러운 drift를 막는다.
 
-> Status: SCOPE LOCK **v1.6** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
+> Status: SCOPE LOCK **v1.7** (planning only). 본 문서는 코드를 바꾸지 않으며, 라이브 접속/브라우저/업로드/
 > DB 변경을 지시하지 않는다. 범위 변경은 이 문서를 고쳐 합의한 뒤에만 이뤄진다.
+>
+> v1.7 변경 (2026-07-26, 제품 오너 결정 반영): **Agent-first / pull-first 제품 정본 갱신.** 최신 제품 결정을
+> 범위 계약에 반영한다. 아래 결정은 이전 서술 중 상충하는 부분을 **명시적으로 대체**한다(대체 대상은 삭제하지
+> 않고 supersede로 표기). 능력·라이브 **비승격 규율(운영 지원 = 파일 업로드뿐, `honest_capability_wording`)은
+> 불변**이며, 이 갱신은 어떤 채널 capability도 승격하지 않는다.
+> ① **멀티채널 고객운영 Agent 재확인** — SellerOps는 NAVER 전용 리뷰 도구가 아니라 NAVER·Coupang·Cafe24·
+>   ESM+·11번가·오늘의집 등으로 확장되는 멀티채널 고객운영 Agent다. 채널 집합은 **열려 있다**(§1.2 재확인,
+>   canonical §1). NAVER는 wedge이지 제품의 경계가 아니다.
+> ② **기본 UX = pull-first / exception-push** (§1.8 신설) — 사용자는 **필요할 때 다시 확인**한다. 일반 처리
+>   결과는 재접속 시 또는 일일 요약으로 보고, **즉시 알림은 정해진 예외 트리거에만** 발생한다. **"대시보드를
+>   매일 여는 1차 내비게이션으로" 두던 §1.1·§5·§8 서술은 pull-first + minimal Control Center로 대체된다**
+>   (§1.1·§5 supersede 표기). Control Center는 **확인할 일·진행 중·완료 결과·연결 상태**만 갖는다.
+> ③ **Session Readiness** (§1.8) — 채널별 세션 살아있음(로그인/2FA/만료)을 확인해, 정상 시 사용자는 **하루 한
+>   번 로그인 상태만 확인**하고 나머지는 개입하지 않는다. §1.2 "예외에만 개입" 원칙에 이름과 **1순위**를 준다.
+> ④ **답변 초안 = Company Voice 기반 AI, 발송 = 승인 후 Capability 기반** (§1.6·§5.2 갱신) — 리뷰·문의 답변
+>   초안을 **기업별 말투(Company Voice)로 AI 생성**한다. **v1.4의 "결정론적 RULE_BASED·AI 없음" 잠금은 이
+>   결정으로 대체된다.** MVP 기본은 **사용자 승인 후 발송**이고, 실제 발송은 **채널별 Capability(공식 API)가
+>   지원할 때만** 수행하며 이때 **승인이 곧 human-checkpoint**다. 미지원 채널은 초안 또는 Action Window 최종
+>   플랫폼 행동(운영자 수행)만 제공한다. **제한적 무승인 자동 발송은 후속 범위.** 발송 경계·"등록/발송 지원"
+>   금지·검증 불가 채널 `UNVERIFIED`·별도 라이브 게이트(G3/G6)는 **그대로 유지**된다(§9, canonical §6). AI-voice
+>   대체는 **초안 생성 메커니즘만** 바꾸며, R4 답변-제출 증거(abort-only·`UNVERIFIED`·gate-lock)를 승격하지 않는다.
+> ⑤ **Product Knowledge Pack + Company Voice Profile** (§5.2 신설) — 상품명·옵션·설명·규격·사용/설치·주의·
+>   상세페이지 텍스트/이미지·FAQ·매뉴얼·교환/환불/CS 정책·사용자 확인 지식을 입력으로 받는다. **상세 이미지에서
+>   추출한 정보는 출처·신뢰도를 기록하고 확인 전에는 확정 사실로 쓰지 않는다.** Company Voice는 **사실 정보와
+>   문체를 분리**한다.
+> ⑥ **Issue Operations disclosure 대조** (§5.2) — 고객 불만과 상품 정보를 대조해 `NOT_DISCLOSED` /
+>   `DISCLOSED_BUT_WEAK` / `DISCLOSED_AND_CLEAR` / `FAILURE_DESPITE_CORRECT_USE` / `UNKNOWN` 후보를 구분한다.
+>   **이 결과로 고객 책임을 단정하거나 불만을 자동 기각하지 않는다.**
+> ⑦ **stale 정정** — §1.5·§6.1·§7-15의 Action Window "미구현" 표기는 §4.1(NAVER 리뷰 Run 4 라이브 검증)에
+>   맞춰 **"NAVER 리뷰 한정 라이브 검증됨(1계정·disposable·운영 지원 아님), 그 외 채널 미구현"**으로 정정한다
+>   (canonical drift D6 해소). 운영 지원 = 파일 업로드뿐이라는 판정은 불변.
+> ⑧ **FE 경계** — FE는 **Agent Control Plane projection/command adapter**이며 실행 순서·Journey 상태를 소유하지
+>   않는다. 기존 FE 신규 기능은 **동결**하고 임시 호환 어댑터로만 유지한다(정본:
+>   `docs/action-window-runtime/agent-first-ui-light-adr.md`, Frontend Spec 2026-07-26 갱신). 미래엔 공통
+>   OperationView + HumanCheckpoint의 minimal Control Center로 교체한다.
 >
 > v1.6 변경 (2026-07-18, 제품 오너 결정 반영): **리뷰 답변 제출(Review Response Completion) — 가이드형
 > Action Window 실행 v1 허용**(§5·§9, NAVER 전용). 승인된 답변에 한해 SellerOps가 판매자센터 창을
@@ -101,8 +136,12 @@ SellerOps는 **수집 + 통합 + 운영 보조** 제품이다. 다음이 아니�
 
 ### 1.1 Frontstage / Backstage (제품 표면의 2층 구조)
 
-- **Frontstage(전면 — 매일의 커머스 운영)**: 대시보드, 주문·매출, 고객 응대(문의·리뷰), 상품 이슈,
-  리포트. 셀러가 매일 여는 화면이며 제품 내비게이션의 1차 위계다.
+- **Frontstage(전면 — 커머스 운영 표면)**: 대시보드, 주문·매출, 고객 응대(문의·리뷰), 상품 이슈,
+  리포트. 제품 내비게이션의 1차 위계다.
+  > **v1.7 supersede.** "셀러가 **매일 여는** 화면"이라는 프레이밍은 대체된다 — 기본 UX는 **pull-first /
+  > exception-push**(§1.8)다. 사용자는 필요할 때 다시 확인하고, 일반 결과는 재접속·일일 요약으로 본다.
+  > Frontstage는 "매일 여는 대시보드"가 아니라 **확인할 일·진행 중·완료 결과·연결 상태**만 있는 minimal
+  > Control Center로 수렴한다(FE 경계: agent-first-ui-light-adr.md).
 - **Backstage(후면 — 연결·수집 관리)**: 채널 연결, 자격증명, 동기화 설정, 수집 이력, 기간 지정 수집,
   파일 업로드, 연결 복구·알림. 온보딩·장애 복구 때 들어가는 관리 영역이며 2차 위계다.
   기존 커넥터·수집 화면(`/channels`, 채널 상세 등)은 이 영역으로 **재배치해 재사용**한다.
@@ -175,10 +214,10 @@ SellerOps는 **수집 + 통합 + 운영 보조** 제품이다. 다음이 아니�
 ### 1.5 기본 production 리뷰 수집 모드 = ACTION_WINDOW
 
 - **모든 마켓 채널의 기본 production 리뷰 수집 모드는 ACTION_WINDOW**다(계약: `docs/slices/action-window-v1.md`,
-  Connector Roadmap §5.1). **이는 승인된 기본 production 설계이며 아직 구현·라이브 검증되지 않았다(approved
-  default production design, not yet implemented or live-verified).** 현재 운영 검증된 수집은 여전히 §4.1
-  현행표가 말하는 것(운영 지원 = 파일 업로드)뿐이고, **어떤 문서·UI도 Action Window가 이미 셀러에게 제공된다고
-  암시하지 않는다.** 설계상 실제 전용 Chrome 창을 열거나 앞으로 가져와, **실제 마켓 페이지를 사용자가 직접
+  Connector Roadmap §5.1). **v1.7 정정(drift D6):** Action Window는 **NAVER 리뷰 한정으로 라이브 검증됐다**
+  (§4.1, Run 4 등 — **1계정·disposable dev backend, 운영 지원 아님**); **그 외 모든 채널·범용 렌더러는 여전히
+  미구현**이다. 현재 운영 검증된(운영 지원) 수집은 여전히 §4.1 현행표가 말하는 것(**파일 업로드**)뿐이고,
+  **어떤 문서·UI도 Action Window가 이미 셀러에게 상시 제공된다고 암시하지 않는다.** 설계상 실제 전용 Chrome 창을 열거나 앞으로 가져와, **실제 마켓 페이지를 사용자가 직접
   제어**하고, SellerOps는 그 위에 **선택적 게임-튜토리얼 오버레이**(다음 요소 하이라이트·다음 행동 설명·의미
   진행 추적)를 얹는다. **사용자가 실제 마켓 요소를 직접 클릭**하며, **SellerOps는 한 사용자 행동을 몰래
   마켓 클릭 시퀀스로 번역하지 않는다.** 안내는 켜고 끌 수 있고, 신뢰 부족 시 fail-closed로 사용자가 수동
@@ -201,9 +240,13 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
 실패/부분 수집 후 복구.
 - **사람 체크포인트는 전체 워크플로를 사용자에게 되돌리지 않는다.** 막힌 **그 조작만** 멈추고, 완료 후
   다운스트림 실행을 이어서 재개한다(ESCALATE→RESUME).
-- **v1 outbound 경계 유지(정직)**: ACT는 **현재 허용된 액션**(획득·정규화·분류·점수·리포트·초안 제안)에
-  한한다. 채널로의 **쓰기(답변 발송·주문 상태 변경)는 v1 범위 밖**이며(§2·§7), 답변은 **초안·유형 제안까지**
-  이고 **발송은 escalation/미래**다. 운영 루프의 ACT를 outbound 자동 발송으로 확대 해석하지 않는다.
+- **outbound 경계(정직, v1.7 갱신)**: ACT는 **허용된 액션**(획득·정규화·분류·점수·리포트·**Company Voice 기반
+  답변 초안**)에 더해, **사용자 승인 후 발송**을 포함한다 — 단 **실제 발송은 채널별 Capability(공식 API)가 지원할
+  때만** 수행하고, 그때 **승인이 곧 human-checkpoint**다(§5.2·§1.7 block ④). **미지원 채널은 초안 또는 Action
+  Window 최종 플랫폼 행동(운영자 수행)**만 제공한다. **무승인 자동 발송은 여전히 범위 밖**이며(제한적 무승인
+  자동 발송은 후속 범위), 운영 루프의 ACT를 무승인 outbound 자동 발송으로 확대 해석하지 않는다. 주문 상태 변경
+  등 그 외 쓰기는 v1 범위 밖 유지(§2·§7). ~~"답변은 초안·유형 제안까지이고 발송은 escalation/미래"~~는 이 갱신으로
+  대체된다.
 
 ### 1.7 Operation Run 도메인 방향 (기록만 — 구현 금지)
 
@@ -213,6 +256,22 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   ESM+ Gmarket 리뷰 import → Action Window; ESM+ Auction 리뷰 import → Action Window; 리뷰 정규화·분석 →
   의존성 완료 후 automatic.
 - **이 방향을 이번에 코드로 확장하지 않는다.** 착수는 실행 모드·체크포인트가 안정된 뒤 별도 킥오프(§8 개발 순서).
+
+### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
+
+기본 UX를 **pull-first / exception-push**로 고정한다. 이는 §1.1의 "매일 여는 대시보드" 프레이밍을 대체한다.
+
+- **pull-first**: 사용자는 **필요할 때 SellerOps를 다시 확인**한다. 일반 처리 결과(수집·정규화·분석 완료 등)는
+  **재접속했을 때 또는 일일 요약**으로 본다. 제품은 상시 응시를 요구하지 않는다.
+- **exception-push (즉시 알림 트리거, 명시)**: 아래에만 즉시 알림한다 — ① **새 문의**, ② **심각한 부정 리뷰**,
+  ③ **급증(spike)**, ④ **안전·환불·법적 위험**, ⑤ **답변 지연**, ⑥ **중요한 수집 중단**. 그 외는 push하지 않는다.
+  이는 기존 "사용자 설정 cadence prompting" 모델을 **대체**하는 정본 트리거 집합이다.
+- **Session Readiness (하루 시작)**: 채널별 세션이 살아있는지(로그인/2FA/만료)를 확인하는 **per-channel readiness**.
+  정상 시 사용자는 **하루 한 번 로그인 상태만 확인**하고 나머지는 개입하지 않는다. 예외(세션 만료·2FA·CAPTCHA·
+  비밀번호 변경·신규 권한 동의·모호한 계정 선택)에만 개입한다(§1.2 "예외에만 개입" 원칙의 명명·1순위화).
+- **minimal Control Center 방향**: 미래 FE는 **확인할 일 · 진행 중 · 완료 결과 · 연결 상태**만 있는 최소 화면으로
+  수렴한다. 방향은 `docs/action-window-runtime/agent-first-ui-light-adr.md`(공통 OperationView + HumanCheckpoint).
+  본 절은 방향을 고정하며 화면 산출은 별도 슬라이스다(구현 지시 아님).
 
 ---
 
@@ -298,10 +357,12 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
 
 ---
 
-## 5. 판매자센터형 Dashboard 범위
+## 5. 판매자센터형 운영 표면 범위
 
-Seller Track의 1차 surface. **"판매자센터를 대체"가 아니라 "여러 판매자센터를 한 인박스로"**가 범위다.
+Seller Track의 1차 surface. **"판매자센터를 대체"가 아니라 "여러 판매자센터를 한 곳으로"**가 범위다.
 화면·IA·여정 상세는 Frontend Spec이 정본이며, 본 절은 범위 경계만 고정한다.
+> **v1.7 supersede.** 이 표면은 "매일 여는 대시보드"가 아니라 **pull-first / exception-push**(§1.8)로 운영된다 —
+> 일반 결과는 재접속·일일 요약, 즉시 알림은 §1.8의 6개 트리거에만. 미래 FE는 minimal Control Center로 수렴한다.
 
 범위 내(v1):
 - **Frontstage(§1.1)**: 대시보드, 주문·매출, 고객 응대(문의·리뷰 통합), 상품 이슈, 리포트.
@@ -333,9 +394,10 @@ Seller Track의 1차 surface. **"판매자센터를 대체"가 아니라 "여러
         작업을 지우지 않는다.
       - **복사는 승인된 head 버전·지문만** 사용한다(서버가 해당 버전 본문을 제공). 편집 중인 버퍼는
         복사 대상이 아니다 — 아무도 승인하지 않은 문장이 공개 답변으로 붙여넣어지지 않게 하기 위함이다.
-      - **AI 아님**: 추천은 결정론적 **규칙 기반**이며 그렇게 표기한다(§10.3). 어떤 템플릿도 환불·교환·
-        보상·배송일을 약속하지 않고 고객을 탓하지 않는다 — 구체적 약속은 운영자가 쓴다. 라이브 LLM은
-        별도 승인 전까지 없다.
+      - **초안 생성(v1.7 갱신)**: 추천 초안은 **Company Voice 기반 AI 생성**이다(§5.2). ~~"AI 아님·결정론적
+        규칙 기반"~~ 잠금은 v1.7으로 대체된다. 안전 규율은 **유지**: 어떤 초안도 환불·교환·보상·배송일을 약속하지
+        않고 고객을 탓하지 않으며(사실은 Product Knowledge·운영자 확인에서만 옴), 초안은 **approval-gated**이고,
+        승인은 텍스트를 고정할 뿐이며, 실제 발송은 §1.7 block ④(Capability 지원 + 승인)를 따른다.
       - 현재 **NAVER 전용**(트리아지 앵커와 동일).
 - **Backstage(§1.1)**: 채널 연결·자격증명·동기화 설정·수집 이력·기간 지정 수집·업로드·복구.
   - **연결 상태(connection health) 뷰**: 각 (채널×수집방식)의 마지막 수집 상태/건강성. method와
@@ -358,6 +420,22 @@ Seller Track의 1차 surface. **"판매자센터를 대체"가 아니라 "여러
 UI 정직성: "다음 단계 제공" 류 로드맵 문구 금지. **현재 사용 가능한 채널 capability만 "지원"으로
 표기**하며, 그 판정은 Connector Roadmap §4.1 현행표(운영 지원 열)를 따른다. 없는 채널·없는
 method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, `honest_capability_wording` 준수).
+
+### 5.2 Company Voice · Product Knowledge · Issue Operations (v1.7 신설)
+
+응답 운영을 뒷받침하는 세 입력·판정을 범위 정본으로 고정한다. **모두 설계 방향이며 구현 지시가 아니다**;
+착수·순서는 §8 개발 순서와 별도 슬라이스를 따른다.
+
+- **Company Voice Profile** — 리뷰·문의 답변 **초안을 기업별 말투로 AI 생성**하기 위한 입력: Company Voice
+  Profile + **브랜드·채널·상황별 정책** + **승인된 최종 답변 검색** + **사용자 수정 이력**. **사실 정보와 문체를
+  분리**한다 — 말투는 Voice에서, 사실은 Product Knowledge·운영자 확인에서 온다. v1.4의 "결정론적 RULE_BASED·
+  AI 없음" 잠금을 대체한다(§1.7 block ④). 초안은 approval-gated, 발송 경계는 §1.6·§1.7 block ④.
+- **Product Knowledge Pack** — 입력으로 받을 수 있어야 하는 것: 상품명·옵션·설명·규격 / 사용·설치 방법과
+  주의사항 / 상세페이지 텍스트·이미지 / FAQ·매뉴얼 / 교환·환불·CS 정책 / **사용자 확인 지식**. **상세 이미지에서
+  추출한 정보는 출처·신뢰도를 기록하고, 확인 전에는 확정 사실로 사용하지 않는다.**
+- **Issue Operations (disclosure 대조)** — 고객 불만과 상품 정보를 대조해 다음 후보를 구분한다:
+  `NOT_DISCLOSED` / `DISCLOSED_BUT_WEAK` / `DISCLOSED_AND_CLEAR` / `FAILURE_DESPITE_CORRECT_USE` / `UNKNOWN`.
+  **이 결과는 고객 책임을 단정하거나 불만을 자동 기각하는 데 사용하지 않는다** — 운영자 판단을 돕는 후보 분류일 뿐이다.
 
 ---
 
@@ -385,7 +463,7 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 |---|---|
 | 로컬 모드(사용자 PC), macOS 파일럿 | Windows 회사 PC 배포, 클라우드 관리형 런타임 |
 | 감독형 브라우저 세션 + 전용 프로필(실제 Chrome+CDP) | — |
-| **Action Window = 기본 리뷰 수집 모드**(실제 창 직접 행동 + 오버레이; 계약 초안 `action-window-v1.md`, 미구현) | 채널별 라이브 Action Window 보정(별도 승인·정책 게이트) |
+| **Action Window = 기본 리뷰 수집 모드**(실제 창 직접 행동 + 오버레이; **NAVER 리뷰 라이브 검증됨 — 1계정·disposable·운영 지원 아님(§4.1); 그 외 채널·범용 렌더러 미구현**) | 채널별 라이브 Action Window 보정(별도 승인·정책 게이트) |
 | **채널-중립 브라우저 프로젝션 V0**(커밋 `a0e4f6f`, 로컬 픽스처, **마켓 미승인**, **비-기본 렌더러**) | Projected Direct Action(채널별 정책·제품 리뷰 후 활성화 가능) |
 | 전용 프로필 세션 보존 + 사람 재로그인 | OS 자격증명 저장소(Device Vault) + 자동 재로그인 |
 | 자격증명은 백엔드 Vault(API 키) / 브라우저 세션은 기기 로컬 | 자동 자격증명 입력 |
@@ -428,8 +506,9 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
     사람이 항상 수행한다(§1.2, `connection-onboarding.md`).
 14. **사람 통제 결정의 자동화** — 계정/스토어 선택, 권한·동의, 법적 의미가 있는 판단은 자동화 금지
     (§1.2). 편의 단계만 자동화한다.
-15. **미래·미승인 범위를 "지원"으로 표기** — Device Vault·자동 재로그인·Windows 지원·클라우드 런타임·
-    **Action Window**(계약 초안, 미구현)를 구현 전 "제공"으로 적지 않는다. **브라우저 프로젝션 V0은
+15. **미래·미승인 범위를 "지원"으로 표기** — Device Vault·자동 재로그인·Windows 지원·클라우드 런타임을
+    구현 전 "제공"으로 적지 않는다. **Action Window**는 NAVER 리뷰 한정 라이브 검증됐으나(§4.1·§1.5)
+    **운영 지원 아님**이므로 셀러에게 "상시 제공"으로 표기하지 않으며, 그 외 채널은 미구현으로 다룬다. **브라우저 프로젝션 V0은
     구현됐으나**(채널-중립, 커밋) **마켓 사용 미승인·비-기본 렌더러**이므로 "마켓 리뷰를 프로젝션으로
     수집한다/NAVER 승인됨"으로 표기하지 않는다(§1.5·§6.1).
 16. **Action Window/Projection의 실제 마켓 사용을 정책 게이트 전에 진행** — 실제 마켓 대상 Action Window·
@@ -476,11 +555,15 @@ method는 "미지원"으로 표기하거나 숨김(`no_roadmap_language_in_ui`, 
 - **현재 작업은 Seller Track**이다. Manufacturer Track 요구가 Seller 프론트에 섞이면 멈추고 §3 경계를
   확인한다. 두 Track은 **같은 canonical 모델을 공유**하며, 수집 코어를 Track별로 분기시키는 요청은
   거절한다.
-- **Frontstage(매일 운영) 1차, Backstage(연결·수집 관리) 2차**의 위계를 흔드는 IA 요청은 Frontend
-  Spec을 먼저 고쳐 합의한다.
+- **Frontstage(운영 표면) 1차, Backstage(연결·수집 관리) 2차**의 위계를 흔드는 IA 요청은 Frontend
+  Spec을 먼저 고쳐 합의한다. 단 기본 UX는 **pull-first / exception-push**(§1.8)이고 FE는 **Agent Control Plane
+  projection/command adapter**이며 신규 기능은 동결이다 — 새 화면/카드/훅을 능력마다 추가하는 요청은 멈추고
+  ADR(`agent-first-ui-light-adr.md`)·§1.8을 확인한다.
 - 새 채널/Track은 **어댑터·매핑·뷰**로 흡수한다. canonical raw 스키마 확장으로 푸는 요청은 멈추고 검토.
-- v1은 **읽기·식별·우선순위까지**다. 채널로의 쓰기(outbound), 무인 자동화, 자동 제품 매칭은 v1 범위 밖.
-  - **좁은 예외 (v1.6, NAVER 리뷰 답변 제출만):** SellerOps가 **직접 쓰는 것은 여전히 금지**다. 허용되는
+- v1은 **읽기·식별·우선순위 + Company Voice 답변 초안 + 승인 후 Capability 기반 발송**까지다(v1.7, §1.6·§5.2).
+  **무승인 자동 발송·무인 자동화·자동 제품 매칭·그 외 채널 쓰기(주문 상태 변경 등)는 v1 범위 밖.** 실제 발송은
+  채널별 Capability(공식 API)가 지원할 때만, 승인을 human-checkpoint로 하여 수행한다.
+  - **좁은 예외 (v1.6, NAVER 리뷰 답변 제출만 — 공식 API 부재 채널):** SellerOps가 **직접 쓰는 것은 여전히 금지**다. 허용되는
     것은 **가이드형·사람 수행·관찰 전용** 실행뿐 — 창을 앞으로 가져오고 답변란을 하이라이트하고 판매자의
     제출을 관찰한다. SellerOps는 입력·제출·클릭을 하지 않고, 무인/스케줄 실행도 없다. 결과는 **운영자 보고 +
     명시적 UNVERIFIED**로만 기록되며 게시 여부를 **검증하지 않는다**(NAVER REVIEW API 부재). 제출은 멱등이

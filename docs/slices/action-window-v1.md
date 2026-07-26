@@ -14,6 +14,11 @@
 > `docs/multi-channel-connector-roadmap.md` §5·§5.1·§11, 런타임 경계·인증 불변식
 > `docs/sellerops_local_agent_runtime_adr.md` §3·§4·§6, 브리지 `docs/slices/local-agent-bridge.md`(G1),
 > 프로젝션 `docs/slices/browser-projection-v0.md`(G2), 가이드 상태 엔진 `docs/slices/naver-guided-connection.md`(G3).
+>
+> **방향 pointer (2026-07-26).** 이 슬라이스는 **리뷰 수집 모드**로 좁게 스코프된다(범위 확장 아님). Action
+> Window는 장기적으로 범용 **HumanCheckpoint**의 한 형태이며, FE는 그 상태를 **projection/command adapter**로만
+> 투영한다 — 방향 정본은 `docs/action-window-runtime/agent-first-ui-light-adr.md`(공통 OperationView +
+> HumanCheckpoint). 본 슬라이스의 계약은 그대로 유지된다.
 > 본 문서는 그들 위에 **Action Window 렌더러 + 직접-행동 오버레이 + 다운로드→인입 핸드오프** 계약을 소유한다.
 >
 > **정직성 경계.** 실제 마켓 페이지 위에 오버레이를 그리고 다운로드 완료를 감지하는 Action Window
