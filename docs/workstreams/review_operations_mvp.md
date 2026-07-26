@@ -717,6 +717,31 @@ Append a dated entry; never rewrite prior entries — correct forward.
   the plan rather than only as per-segment `MISSING`; (c) a live run that deliberately reaches `SCOPE_MISMATCH`
   so the in-page blocker is proven where it matters.
 
+### 2026-07-26 (later the same day) — the whole plan continues from the marketplace panel (offline)
+
+- **What changed:** a `COMPLETED` segment no longer takes its panel down. It leaves the completion, the next month,
+  how many remain, and `다음 구간 계속하기` — so a seller working through thirteen monthly exports never returns to
+  the SellerOps tab between them. Pressing 계속 가져오기 in SellerOps is now a once-per-sitting act.
+- **Authorization did not move, and that was checked first.** The repository says the backend is the only minter
+  (`mintNextSegment`, org from the JWT), the frontend the only party that can ask (it alone holds plan identity —
+  the AW wire carries none, deliberately), and the local agent has **no minting path at all**. So the press is a
+  **request**: one closed-set enum on a new `aw_guidance_intent` frame, answered by the frontend through the same
+  endpoint its own button uses. No new endpoint, caller, parameter or permission.
+- **Untrusted-input posture kept:** the flag lives in the seller's page, so a press is accepted only if it is in a
+  closed set AND appears in the panel actually rendered — which replaces the `allowedCommands` gate, since a
+  completed run allows no commands at all.
+- **Proven offline, across a real socket:** two segments completed back to back from panel presses alone — two run
+  identities, **two distinct single-use tickets**, one connection, two ingests; the second segment draws its own
+  panel; a frontend that declines hosts nothing; the frame carries no ref, dates or identity. Plus the ticket
+  sequence at the service level (selection → plan → newest-first ticket → ingest → the *next* ticket → the spent one
+  refused → nothing-left fails closed). Evidence: proof record Addendum 5.
+- **One defect only the cross-stack suite could find:** the frontend's `wsTransport` allow-lists server frame kinds,
+  so the new frame was silently dropped and the button did nothing — with every unit test on both sides green.
+- **Gate state:** no live-run gate consumed. **This slice is offline-proven only.**
+- **Still unproven:** two segments in one live sitting (the bounded live proof for this change); the 15-minute idle
+  budget at its real value; whether a seller reads the green completion box as "done, carry on". Everything the
+  2026-07-26 entry lists as unproven remains so.
+
 ---
 
 ## 3. Gate register (review-ops specific)

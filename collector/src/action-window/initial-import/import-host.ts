@@ -34,6 +34,10 @@
  * widen its own import scope; asking the server is what makes the required range trustworthy.
  */
 import { deserializeFrame, type AwClientFrame } from "../../../../contracts/action-window/v2/transport";
+import {
+  decideSegmentEntry,
+  type SegmentEntryRefusal,
+} from "../../../../contracts/review-import-journey/v1/index";
 import type { InitialImportEndpoint } from "../../bridge/initial-import-endpoint";
 import { log } from "../../log";
 import { assembleImportRun, makeImportRunMarker, mintImportRunId } from "./import-dispatch";
@@ -119,6 +123,20 @@ export function declaredImportKindFromStartRun(frame: AwClientFrame): DeclaredIm
   return null;
 }
 
+/**
+ * The exact log line each kernel refusal maps to. Extracting the DECISION to the pure kernel must not change
+ * what the host RECORDS: these keys and their metadata are unchanged from the pre-extraction host, and the
+ * `scope_refused` case still logs no `hostable` field, exactly as before. The rationale for each refusal lives
+ * at the decision site in `contracts/review-import-journey/v1`.
+ */
+const REFUSAL_LOG: Record<SegmentEntryRefusal, { key: string; meta: Record<string, unknown> }> = {
+  scope_refused: { key: "aw_import_host_scope_refused", meta: {} },
+  wrong_kind: { key: "aw_import_host_wrong_kind", meta: { hostable: false } },
+  kind_mismatch: { key: "aw_import_host_kind_mismatch", meta: { hostable: false } },
+  scope_incomplete: { key: "aw_import_host_scope_incomplete", meta: { hostable: false } },
+  channel_mismatch: { key: "aw_import_host_channel_mismatch", meta: { hostable: false } },
+};
+
 export class ImportSegmentHost {
   private readonly deps: ImportHostDeps;
   private session: ImportSegmentSession | null = null;
@@ -170,48 +188,39 @@ export class ImportSegmentHost {
   private async onFrame(frame: AwClientFrame): Promise<void> {
     const ref = importRefFromStartRun(frame);
     if (!ref) return;
+    const declared = declaredImportKindFromStartRun(frame);
 
-    // A replayed START_RUN for the run we are already hosting is idempotent — the session's own engine
-    // answers it. Rebuilding here would mint a second runId for one authorization.
-    if (ref === this.hostedRef) return;
-    // Two clients racing a start would otherwise build two sessions for one ticket.
-    if (this.building) {
+    // Phase 1 — the pre-resolve entry decision (idempotent same-ref, concurrent-start race). The pure kernel
+    // decides; the host still owns the `building` flag and the exact log line for a deferred start.
+    const entry = decideSegmentEntry(
+      { hostedRef: this.hostedRef, building: this.building },
+      { type: "START_RUN_RECEIVED", ref, declaredKind: declared },
+    );
+    if (entry.type === "IGNORE_ALREADY_HOSTED") return;
+    if (entry.type === "IGNORE_BUSY") {
       log("aw_import_host_start_ignored_busy", {});
       return;
     }
+    // entry.type === "RESOLVE_SCOPE"
 
     this.building = true;
     try {
       const scope = await this.deps.resolveScope(ref);
-      if (!scope) {
-        // The server refused: spent, expired, wrong org, or never existed. All the same answer on purpose
-        // — a client must not be able to tell them apart by probing.
-        log("aw_import_host_scope_refused", {});
+      // Phase 2 — the post-resolve entry decision (scope kind, declared-vs-server agreement, required range,
+      // channel). Same guard order, same outcomes; the host maps a refusal to its existing, unchanged log line.
+      const decision = decideSegmentEntry(
+        { hostedRef: this.hostedRef, building: this.building },
+        { type: "SCOPE_RESOLVED", ref, declaredKind: declared, scope, hostChannelCode: this.deps.channelCode },
+      );
+      if (decision.type === "REFUSE") {
+        const line = REFUSAL_LOG[decision.reason];
+        log(line.key, line.meta);
         return;
       }
-      if (scope.kind !== "SEGMENT") {
-        // Everything that is not a segment is refused, including a `DISCOVERY` ticket: there is no discovery
-        // run to host any more (the seller chooses the range in SellerOps), and an unrecognised kind is a
-        // newer server talking to an older agent. Both fail closed rather than guess at a choreography.
-        log("aw_import_host_wrong_kind", { hostable: false });
-        return;
-      }
-      const declared = declaredImportKindFromStartRun(frame);
-      if (declared !== null && declared !== scope.kind) {
-        // The client asked for one choreography and holds the other's ticket. Neither answer is safe: running
-        // the server's kind guides a run the frontend is not rendering, and running the client's would spend a
-        // ticket on work it does not authorize.
-        log("aw_import_host_kind_mismatch", { hostable: false });
-        return;
-      }
-      if (!scope.requiredStart || !scope.requiredEnd) {
-        // A segment run with no window to match has no gate to pass. Refusing here is what keeps a file
-        // covering an unknown period from being ingested as though it covered a planned one.
-        log("aw_import_host_scope_incomplete", { hostable: false });
-        return;
-      }
-
-      const channelCode = scope.channelCode || this.deps.channelCode;
+      // A SCOPE_RESOLVED event only ever yields REFUSE or HOST_SEGMENT; the other effects are unreachable
+      // here. This guard keeps the type honest (narrowing `decision` to HOST_SEGMENT) and fails closed.
+      if (decision.type !== "HOST_SEGMENT") return;
+      const { channelCode } = decision;
       const runId = mintImportRunId();
       // Re-announce BEFORE the session exists, so an already-attached frontend learns the new run identity
       // and its next command carries a revision the new engine will accept.
@@ -219,7 +228,7 @@ export class ImportSegmentHost {
       // Release the previous run's subscription first: one hosted session at a time, always.
       this.releaseHostedSession();
 
-      const required: RequiredRange = { start: scope.requiredStart, end: scope.requiredEnd };
+      const required: RequiredRange = { start: decision.required.start, end: decision.required.end };
       const assembly = assembleImportRun(this.deps.endpoint.transport, {
         runId,
         channelCode,

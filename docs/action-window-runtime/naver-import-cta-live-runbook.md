@@ -1,11 +1,15 @@
-# Live CTA E2E runbook — 과거 리뷰 연동, one segment finished inside the SmartStore window
+# Live CTA E2E runbook — 과거 리뷰 연동, the plan finished inside the SmartStore window
 
-**The procedure, current as of 2026-07-26, and RAN ONCE that day** — one segment, 62 rows, two operator
-interactions with the marketplace (Addendum 4 in `naver-initial-review-import-live-proof-record.md`). The
-2026-07-25 run (Addendum 2) used the PREVIOUS flow, which this replaces.
+**The procedure, current as of 2026-07-26.** Its one-segment form RAN ONCE on 2026-07-26 — one segment, 62 rows, two
+operator interactions with the marketplace (Addendum 4 in `naver-initial-review-import-live-proof-record.md`). The
+2026-07-25 run (Addendum 2) used the flow before that, which this replaces.
 
-Still untested live even after that run: a `SCOPE_MISMATCH` under the new in-page panel (the gate matched on the
-first read), more than one segment in a sitting, an apply-requiring surface, and the pairing approval control.
+**New later that same day, and NOT yet live-run: step 6.** A finished segment now leaves a panel offering the next month,
+so the operator continues **from the marketplace window** instead of returning to SellerOps between exports
+(Addendum 5; offline-proven across a real socket only).
+
+Still untested live: two segments in one sitting, a `SCOPE_MISMATCH` under the in-page panel (the gate matched on the
+first read), an apply-requiring surface, and the pairing approval control.
 
 Everything here is rehearsed offline against a real socket
 (`collector/test/crossstack/fe-import-runtime-real-bridge.test.ts`); a live run adds the one thing a fixture
@@ -62,8 +66,11 @@ authorization. The operator performs every marketplace click; the runtime only d
    created by looking. Press 이 기간으로 시작하기 → `POST /plans/selected-range` creates the plan with
    `range_evidence = OPERATOR_SELECTED`. **No marketplace window opens for this step**, and no range discovery
    run exists any more.
-2. **Press 계속 가져오기 (ONE segment only).** The card attaches to the import carrier, hands the agent the
-   guidance pack, mints a SEGMENT ticket for the **most recent** remaining month, and sends `START_RUN`.
+2. **Press 계속 가져오기 — once, and only once for the whole sitting.** The card attaches to the import carrier, hands
+   the agent the guidance pack (now including what to say when the segment finishes), mints a SEGMENT ticket for the
+   **most recent** remaining month, and sends `START_RUN`. Every segment after this one is started from the
+   marketplace window in step 6 — if you find yourself pressing this button a second time, note it: that is the
+   failure this slice exists to remove.
 3. **The seller-center window comes up by itself** — the run raises it and, if it has drifted off the review
    surface, navigates back (⚠ added AFTER the 2026-07-26 run, so this step is **not itself live-proven**; on that
    run the operator had to find the window). A SellerOps panel appears bottom-left in that page: the product name,
@@ -84,13 +91,29 @@ authorization. The operator performs every marketplace click; the runtime only d
    repair (날짜를 다시 선택해 주세요) and a button labelled for the repair — **날짜 다시 확인**, not 확인 완료.
    Fix the dates in the page, press it, and the gate re-reads. Everything in this step happens in the
    marketplace window; nothing requires the SellerOps tab.
-6. **Stop after that segment completes.** The bounded-proof limit is unchanged.
+6. **When the segment completes, the panel does not disappear — it hands you the next one.** A green box appears in
+   the same panel: 이 구간 완료, then the next month and how many are left, and 다음 구간 계속하기. Pressing it starts
+   the next segment **without touching the SellerOps window**: the press is forwarded to the frontend, which mints a
+   fresh single-use ticket through the same `POST /plans/{planId}/launches/next-segment` its own button uses, and the
+   agent hosts the new run on the same connection. Verify in the log: `aw_import_panel_intent_forwarded`, then
+   `aw_import_run_armed` + `aw_import_run_hosted` with no new socket.
+
+   On the LAST segment the same box says the plan is finished and offers **no** control. And if nobody presses it for
+   fifteen minutes the panel comes down (`aw_import_panel_idle_closed`) — that is deliberate, not a fault; continue
+   from the SellerOps card.
+
+7. **Stop after the SECOND segment completes.** The bounded-proof limit is now two, and it is what makes this a
+   proof of the continuation rather than of one more segment. Do not run a third.
 
 ## What must be true afterwards
 
-- attempt `SUCCEEDED` with a row count from the backend, segment `COMPLETED` + `COVERED`, the SEGMENT ticket
-  `CONSUMED`; the plan's `range_evidence` is `OPERATOR_SELECTED` and is never upgraded to a machine claim.
-- The operator never had to read the SellerOps window to finish the segment. If they did, say where.
+- **Two** attempts `SUCCEEDED` with row counts from the backend, both segments `COMPLETED` + `COVERED`, and **two
+  distinct SEGMENT tickets** both `CONSUMED` — never one ticket spent twice. Check:
+  `psql -d $DB -c "select kind, status, segment_id from review_import_launch order by issued_at"`.
+- The two segments are the **two most recent** remaining months, newest first.
+- The plan's `range_evidence` is `OPERATOR_SELECTED` and is never upgraded to a machine claim.
+- The operator never had to read the SellerOps window after the first press — including between the two segments.
+  If they did, say where.
 - No launch ref, date, filename, path or URL in any log or wire frame. `aw_import_guidance_pack` logs COUNTS
   only — if a sentence appears in a log line, that is a defect.
 - Every marketplace click attributable to the operator. The panel's own buttons are SellerOps controls and are

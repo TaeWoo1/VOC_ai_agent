@@ -22,6 +22,7 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.auth.JwtAuthFilter;
 import com.sellerops.auth.JwtTokenProvider;
 import com.sellerops.config.SecurityConfig;
+import com.sellerops.organization.OrganizationRepository;
 import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -60,6 +61,11 @@ class OperatorReviewReplyControllerTest {
     @Autowired MockMvc mockMvc;
     @MockBean ReviewReplyService service;
     @MockBean JwtTokenProvider tokenProvider;
+    /**
+     * The token's organization has to exist for the request to be authenticated at all: `JwtAuthFilter` checks,
+     * because an org-scoped read against a vanished org succeeds and returns nothing (see that filter).
+     */
+    @MockBean OrganizationRepository organizations;
 
     private static final String TOKEN = "test-only-token-never-a-real-jwt";
     private final UUID orgId = UUID.randomUUID();
@@ -76,6 +82,7 @@ class OperatorReviewReplyControllerTest {
     void setUp() {
         when(tokenProvider.parse(TOKEN))
                 .thenReturn(new AuthPrincipal(userId, orgId, "op@example.com"));
+        when(organizations.existsById(orgId)).thenReturn(true);
     }
 
     private static ReviewReplyPrepView prepView(String ref) {

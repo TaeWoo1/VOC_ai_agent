@@ -13,6 +13,7 @@ import type { AgentAvailability } from "../../reviewImport";
 import { connectImportSession, type ImportBridgeSession } from "./importSession";
 import { createGuidedImportRuntime, type GuidedImportRuntime, type GuidedImportSnapshot } from "./importRuntime";
 import type { AwRefusalReason } from "../wsTransport";
+import type { AwGuidanceIntent } from "../../../../../contracts/action-window/v2/transport";
 
 /** Map a transport refusal onto the card's existing availability vocabulary. */
 export function availabilityFromRefusal(reason: AwRefusalReason): AgentAvailability {
@@ -46,21 +47,35 @@ export interface GuidedImportBinding {
 /**
  * @param inject Test seam. Supplying a runtime skips the socket entirely — the same seam the card's own tests
  *   use, so a component test never depends on a bridge being reachable.
+ * @param onIntent Called when the seller presses a control on the in-page panel that only this side can act on
+ *   (`CONTINUE_NEXT_SEGMENT`). Held in a ref and subscribed once per runtime, so a caller may pass a fresh
+ *   closure on every render without re-subscribing — and without the listener going stale, which would make the
+ *   panel's continue button work once and then silently stop.
  */
-export function useGuidedImport(inject?: GuidedImportRuntime): GuidedImportBinding {
+export function useGuidedImport(
+  inject?: GuidedImportRuntime,
+  onIntent?: (intent: AwGuidanceIntent) => void,
+): GuidedImportBinding {
   const [snapshot, setSnapshot] = useState<GuidedImportSnapshot | null>(inject?.snapshot() ?? null);
   const [unavailable, setUnavailable] = useState<AgentAvailability | null>(null);
   const runtimeRef = useRef<GuidedImportRuntime | null>(inject ?? null);
   const sessionRef = useRef<ImportBridgeSession | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
+  const stopIntentRef = useRef<(() => void) | null>(null);
   const connectingRef = useRef<Promise<GuidedImportRuntime | null> | null>(null);
   const liveRef = useRef(true);
+  const intentRef = useRef(onIntent);
+  intentRef.current = onIntent;
 
   const adopt = useCallback((runtime: GuidedImportRuntime) => {
     stopRef.current?.();
     stopRef.current = runtime.subscribe((next) => {
       // A late frame from a released session must not repaint a card that has moved on.
       if (liveRef.current) setSnapshot(next);
+    });
+    stopIntentRef.current?.();
+    stopIntentRef.current = runtime.subscribeIntent((intent) => {
+      if (liveRef.current) intentRef.current?.(intent);
     });
   }, []);
 
@@ -71,6 +86,8 @@ export function useGuidedImport(inject?: GuidedImportRuntime): GuidedImportBindi
       liveRef.current = false;
       stopRef.current?.();
       stopRef.current = null;
+      stopIntentRef.current?.();
+      stopIntentRef.current = null;
       // Only tear down what this hook created. An injected runtime belongs to its owner.
       if (!inject) {
         runtimeRef.current?.dispose();

@@ -331,6 +331,17 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   }
 
   /**
+   * The top-level PAGE, whatever frame {@link surfaceContext} currently resolves to.
+   *
+   * Exposed for one purpose: lifecycle events belong to the page, not to a frame. The import driver listens for
+   * `load` so it can re-draw its guidance panel after a navigation erases it — the login the run itself asked for
+   * is the navigation that does this (see `naver-live-import-driver.keepPanelAcrossNavigation`).
+   */
+  surfacePage(): Page {
+    return this.page;
+  }
+
+  /**
    * Whether a CHILD frame was resolved, as opposed to falling back to the top document.
    *
    * A diagnostic distinction that matters: "we looked in the right frame and found nothing" and "we never

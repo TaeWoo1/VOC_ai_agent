@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { availabilityFromRefusal, useGuidedImport } from "./useGuidedImport";
 import type { GuidedImportRuntime, GuidedImportSnapshot } from "./importRuntime";
+import type { AwGuidanceIntent } from "../../../../../contracts/action-window/v2/transport";
 
 const connectImportSession = vi.fn();
 vi.mock("./importSession", () => ({
@@ -13,6 +14,7 @@ vi.mock("./importSession", () => ({
 
 function stubRuntime() {
   const listeners = new Set<(s: GuidedImportSnapshot | null) => void>();
+  const intentListeners = new Set<(intent: AwGuidanceIntent) => void>();
   let disposed = false;
   let resynced = 0;
   const runtime: GuidedImportRuntime = {
@@ -20,6 +22,10 @@ function stubRuntime() {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    subscribeIntent(listener) {
+      intentListeners.add(listener);
+      return () => intentListeners.delete(listener);
     },
     start: async () => {},
     setGuidancePack: () => {},
@@ -34,6 +40,10 @@ function stubRuntime() {
   return {
     runtime,
     listenerCount: () => listeners.size,
+    intentListenerCount: () => intentListeners.size,
+    pressPanel: (intent: AwGuidanceIntent) => {
+      for (const l of [...intentListeners]) l(intent);
+    },
     isDisposed: () => disposed,
     resyncCount: () => resynced,
     publish: (s: GuidedImportSnapshot | null) => {
@@ -186,5 +196,40 @@ describe("useGuidedImport", () => {
       await pending;
     });
     expect(close).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The in-page panel's presses reach the caller through here, and the two hazards are lifecycle ones — which is
+ * why they belong to the hook rather than to the runtime.
+ */
+describe("useGuidedImport — presses from the marketplace panel", () => {
+  it("delivers an intent to the current callback, not the one the runtime was adopted with", () => {
+    const stub = stubRuntime();
+    const first = vi.fn();
+    const second = vi.fn();
+    const { rerender } = renderHook(({ cb }: { cb: (i: AwGuidanceIntent) => void }) => useGuidedImport(stub.runtime, cb), {
+      initialProps: { cb: first },
+    });
+
+    // A component that re-renders with a fresh closure every time — which is every component — must not end up
+    // with a listener that still points at the first one. That would make the panel's continue button work once.
+    rerender({ cb: second });
+    act(() => stub.pressPanel("CONTINUE_NEXT_SEGMENT"));
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith("CONTINUE_NEXT_SEGMENT");
+    // One subscription, not one per render.
+    expect(stub.intentListenerCount()).toBe(1);
+  });
+
+  it("stops delivering after unmount", () => {
+    const stub = stubRuntime();
+    const onIntent = vi.fn();
+    const { unmount } = renderHook(() => useGuidedImport(stub.runtime, onIntent));
+    unmount();
+    act(() => stub.pressPanel("CONTINUE_NEXT_SEGMENT"));
+    expect(onIntent).not.toHaveBeenCalled();
+    expect(stub.intentListenerCount()).toBe(0);
   });
 });

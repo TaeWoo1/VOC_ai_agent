@@ -23,14 +23,43 @@ import { ReviewImportPlanDetail } from "./ReviewImportPlanDetail";
  *
  * Fail-closed on a dead accounts read.
  */
+/**
+ * The channel the guided import can actually drive.
+ *
+ * One entry, and it is a statement of fact rather than a limit we chose here: the local agent hosts a NAVER
+ * review surface (`collector/.../naver-live-import-driver.ts`) and the roadmap's §4.1 table lists no other. A
+ * ticket for any other channel is refused by the runtime, which is where that rule belongs — this constant only
+ * keeps the screen from leading a seller somewhere the runtime will stop them.
+ */
+const GUIDED_CHANNEL_CODES: readonly string[] = ["NAVER"];
+
 export function ReviewImportPage() {
   const accounts = useApiData<SellerAccountResponse[]>(() => api.getSellerAccountsStrict(), []);
+  // Read for ONE purpose: accounts carry a channel id and a display name, not a channel code, so this is the only
+  // way to tell which of them the guided flow can serve. A failed read degrades to "no preference", never to a
+  // blocked screen.
+  const channels = useApiData(() => api.getChannels(), []);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
   const [plansKey, setPlansKey] = useState(0);
   const bridge = useBridge();
 
-  const active = accounts.data?.find((a) => a.id === accountId) ?? accounts.data?.[0] ?? null;
+  const guidedChannelIds = (channels.data ?? [])
+    .filter((c) => GUIDED_CHANNEL_CODES.includes(c.code))
+    .map((c) => c.id);
+  /**
+   * The account this screen works on.
+   *
+   * Defaults to one the guided flow can actually drive, NOT to whichever came back first. On 2026-07-26 the
+   * demo org's first account was a Coupang one, so a seller reached "이 기간으로 시작하기" with 쿠팡 named on the
+   * card — while every step after it guides NAVER. Picking arbitrarily is how a screen offers work that cannot
+   * be done; the runtime now refuses such a ticket outright, and this stops the seller being sent there at all.
+   */
+  const active =
+    accounts.data?.find((a) => a.id === accountId) ??
+    accounts.data?.find((a) => guidedChannelIds.includes(a.channelId)) ??
+    accounts.data?.[0] ??
+    null;
 
   const plans = useApiData<ReviewImportPlanView[]>(
     () => (active ? api.listReviewImportPlans(active.id) : Promise.resolve([])),
@@ -93,8 +122,11 @@ export function ReviewImportPage() {
             className="ml-2 rounded-lg border border-line px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
           >
             {accounts.data.map((a) => (
+              // The channel is always shown, even when the seller gave the account a nickname. An alias like
+              // "라이브 2구간 테스트" tells you nothing about WHICH marketplace it is, and this screen's whole
+              // choreography is marketplace-specific.
               <option key={a.id} value={a.id}>
-                {a.alias ?? a.channelNameKo}
+                {a.alias ? `${a.alias} · ${a.channelNameKo}` : a.channelNameKo}
               </option>
             ))}
           </select>

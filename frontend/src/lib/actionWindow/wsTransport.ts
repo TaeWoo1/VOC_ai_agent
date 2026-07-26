@@ -90,7 +90,21 @@ interface ResolvedDeps {
   expectedCarrier: AwCarrierKind;
 }
 
-const SERVER_FRAME_KINDS = new Set(["aw_event", "aw_view", "aw_command_result", "aw_resync_result"]);
+/**
+ * The server frames this transport will deliver — allow-listed rather than assumed, so a client frame arriving on
+ * the inbound path (something trying to look like the agent) is dropped instead of dispatched.
+ *
+ * `aw_guidance_intent` joined them on 2026-07-26: a press on the panel in the seller's marketplace window, which
+ * the runtime forwards because only this side can act on it (a ticket comes from the backend). Without it in this
+ * set the frame is silently dropped and the panel's continue button does nothing at all.
+ */
+const SERVER_FRAME_KINDS = new Set([
+  "aw_event",
+  "aw_view",
+  "aw_command_result",
+  "aw_resync_result",
+  "aw_guidance_intent",
+]);
 
 function resolveDeps(deps: AwWsDeps): ResolvedDeps {
   return {

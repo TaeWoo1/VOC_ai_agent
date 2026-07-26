@@ -153,7 +153,26 @@ export const api = {
     return data;
   },
 
-  getMe: (): Promise<UserView> => getOrMock("/api/users/me", mockMe),
+  /**
+   * Who the stored token belongs to — **no mock fallback, deliberately.**
+   *
+   * This is the one read where a silent fallback fabricates a SESSION. It used `getOrMock`, so a rejected token
+   * returned a mock user, `AuthProvider` hydrated "successfully", and the app rendered as though signed in — with
+   * every real read behind it failing. On 2026-07-26 that produced "계정을 불러오지 못했어요" on the import screen
+   * for a seller whose actual problem was an expired session, and there was nothing on screen to suggest logging
+   * in again.
+   *
+   * Failing here is what makes the session honest: `AuthProvider` clears the token and the seller sees the login
+   * form, which is the true state. `VITE_USE_MOCKS` still works — an explicit demo mode is a choice, not a
+   * fallback taken behind the user's back.
+   */
+  getMe: async (): Promise<UserView> => {
+    if (USE_MOCKS) {
+      return mockMe();
+    }
+    const { data } = await http.get<UserView>("/api/users/me");
+    return data;
+  },
   getChannels: (): Promise<ChannelResponse[]> => getOrMock("/api/channels", mockChannels),
   // Strict variants for the Naver collection workflow (ChannelDetail): no silent
   // mock fallback, so a dead/wrong backend fails closed instead of rendering a

@@ -165,6 +165,28 @@ validator moved:
 - **It carries no run state** — no status, no step number, no blocker. Those still come from the Runtime, which
   is the only thing that knows them.
 
+### §8.2 And one frame carries a press back, Runtime → FE (added 2026-07-26)
+
+`transport.ts` gained a server frame, `aw_guidance_intent`, carrying one value from a closed set
+(`CONTINUE_NEXT_SEGMENT`). It exists so a seller who has just finished one monthly segment can start the next one
+**from the panel in their SmartStore window**, instead of hunting for the SellerOps tab between every export.
+
+It is deliberately not a command, and that follows from where authorization already lives:
+
+- a run is authorized by a **single-use launch ref minted by the backend** (`mintNextSegment`, org from the JWT);
+- only the **frontend** can ask for one — the Action Window wire carries no plan or segment identity, so the
+  Runtime cannot name "the next segment" even if it wanted to;
+- the **Local Agent has no minting path at all**, and adding one to serve a button would be a new authorization
+  route invented for a UI affordance.
+
+So the frame is a *request*, and the frontend is free to refuse it. What crosses the wire is one enum value: no
+plan id, no segment id, no dates, no ref, no run state. `findProhibitedFields` has nothing new to inspect, and
+`index.ts` is again unchanged.
+
+The pack's optional `continuation` block is the other half: because the Runtime holds no plan, those lines arrive
+as **final text with no placeholders**, and the panel chooses between "here is the next one" and "everything is
+done" by whether `nextLine` is empty. Even that branch is the frontend's decision.
+
 ## Fixtures & tests
 
 - Valid fixtures: `fixtures/valid/{run-view,event,command}/` — usable directly as FE mock states
