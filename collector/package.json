@@ -38,6 +38,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "@langchain/langgraph": "^1.4.8",
     "ws": "^8.21.0"
   }
 }
