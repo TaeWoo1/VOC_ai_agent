@@ -222,6 +222,16 @@ describe("nextRemainingSegment", () => {
     expect(nextRemainingSegment([seg({ executionState: "FAILED" })])).not.toBeNull();
   });
 
+  /**
+   * "Remaining" is decided on the EXECUTION axis, exactly as the backend's `selectNextRemaining` — a COMPLETED
+   * segment is never remaining regardless of coverage — so this client's filter can never drift from the
+   * segment the backend authorizes next (and neither can the continuation panel's follow-up and count).
+   */
+  it("decides remaining on the execution axis, matching the backend rule", () => {
+    expect(nextRemainingSegment([seg({ executionState: "COMPLETED", coverageState: "UNVERIFIED" })])).toBeNull();
+    expect(nextRemainingSegment([seg({ executionState: "PENDING", coverageState: "UNVERIFIED" })])).not.toBeNull();
+  });
+
   it("skips covered, missing, superseded, and in-flight segments", () => {
     expect(
       nextRemainingSegment([

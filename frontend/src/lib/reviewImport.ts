@@ -188,10 +188,14 @@ export function importProgress(segments: ReviewImportSegmentView[]): ImportProgr
  * — the two must agree, or the card names one month and the ticket authorizes another.
  */
 export function remainingSegments(segments: ReviewImportSegmentView[]): ReviewImportSegmentView[] {
+  // The SAME predicate the backend's `selectNextRemaining` uses — a still-remaining segment (execution PENDING
+  // or FAILED, never ACTIVE or COMPLETED) whose coverage is not a concluded MISSING. Expressed on the execution
+  // axis like the backend, rather than the coverage axis, so the panel's follow-up segment and remaining count
+  // are computed by the identical rule and cannot drift from the segment the backend would authorize next.
   return segments
     .filter((s) => !s.superseded)
-    .filter((s) => s.coverageState === "UNVERIFIED")
-    .filter((s) => s.executionState !== "ACTIVE")
+    .filter((s) => s.executionState === "PENDING" || s.executionState === "FAILED")
+    .filter((s) => s.coverageState !== "MISSING")
     .sort((a, b) => b.segmentStart.localeCompare(a.segmentStart));
 }
 
