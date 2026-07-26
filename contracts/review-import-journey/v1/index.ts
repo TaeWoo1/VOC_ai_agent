@@ -28,6 +28,10 @@
  * `docs/action-window-runtime/review-import-journey-langgraph-migration-plan.md`.
  */
 
+// The full upper-journey reducer (auth → account → pairing → session → plan → segment loop → complete/abandon).
+// Kept in its own module; the segment-entry decision below is one step within it.
+export * from "./journey";
+
 /** A marketplace channel code, e.g. the host's own driver channel or a ticket's authorized channel. */
 export type ImportChannelCode = string;
 
