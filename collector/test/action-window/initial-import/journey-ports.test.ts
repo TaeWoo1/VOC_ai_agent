@@ -101,6 +101,8 @@ describe("FE-independence source guard", () => {
     const files: Array<[string, string]> = [
       ["journey.ts", "../../../../contracts/review-import-journey/v1"],
       ["readiness.ts", "../../../../contracts/session-readiness/v1"],
+      ["acquisition.ts", "../../../../contracts/acquisition/v1"],
+      ["acquisition-supervisor.ts", "../../../src/action-window"],
       ["journey-shadow.ts", "../../../src/action-window/initial-import"],
       ["journey-projection.ts", "../../../src/action-window/initial-import"],
       ["journey-ports.ts", "../../../src/action-window/initial-import"],
