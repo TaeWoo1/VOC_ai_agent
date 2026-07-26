@@ -187,14 +187,16 @@ export function importProgress(segments: ReviewImportSegmentView[]): ImportProgr
  * value has to arrive in the first segment rather than the last. Mirrors the backend's own `nextRemainingSegment`
  * — the two must agree, or the card names one month and the ticket authorizes another.
  */
+export function remainingSegments(segments: ReviewImportSegmentView[]): ReviewImportSegmentView[] {
+  return segments
+    .filter((s) => !s.superseded)
+    .filter((s) => s.coverageState === "UNVERIFIED")
+    .filter((s) => s.executionState !== "ACTIVE")
+    .sort((a, b) => b.segmentStart.localeCompare(a.segmentStart));
+}
+
 export function nextRemainingSegment(segments: ReviewImportSegmentView[]): ReviewImportSegmentView | null {
-  return (
-    segments
-      .filter((s) => !s.superseded)
-      .filter((s) => s.coverageState === "UNVERIFIED")
-      .filter((s) => s.executionState !== "ACTIVE")
-      .sort((a, b) => b.segmentStart.localeCompare(a.segmentStart))[0] ?? null
-  );
+  return remainingSegments(segments)[0] ?? null;
 }
 
 /** The primary action's label — first run versus resuming an interrupted one. */
@@ -357,8 +359,13 @@ export function recheckLabel(context: { copyKey?: string | null; blockerCode?: s
  *
  * Blocker wording is reused from `blockerView` rather than restated, so the two windows cannot disagree about
  * why a run stopped.
+ *
+ * @param continuation What the panel says once the run FINISHES — the next segment and how many are left, or the
+ *   whole-plan completion. Omitted ⇒ a finished run takes its panel down, the 2026-07-26 behaviour. Composed
+ *   here as final sentences because the runtime holds no plan: it is handed one segment at a time and cannot see
+ *   what comes after it (see `continuationCopy`).
  */
-export function buildImportGuidancePack(): AwGuidancePack {
+export function buildImportGuidancePack(continuation?: ImportContinuation | null): AwGuidancePack {
   const blockerCodes = [
     "SCOPE_MISMATCH",
     "LOGIN_REQUIRED",
@@ -394,6 +401,64 @@ export function buildImportGuidancePack(): AwGuidancePack {
       byStep: { ...RECHECK_BY_STEP },
       fallback: RECHECK_FALLBACK_LABEL,
     },
+    ...(continuation ? { continuation: continuationCopy(continuation) } : {}),
+  };
+}
+
+/* ─────────────────── One segment ends, the next begins — without leaving SmartStore ─────────────────── */
+
+/**
+ * What follows the run that is about to start: the segment after it, and how many are still left after that.
+ *
+ * Both are plan facts, and the plan is something only SellerOps can see — the Action Window wire carries no plan
+ * or segment identity by design, so the runtime cannot work either of them out. That is why the sentences below
+ * are composed here and shipped as finished text.
+ */
+export interface ImportContinuation {
+  /** The segment the seller would do next, or null when this run finishes the plan. */
+  next: { segmentStart: string; segmentEnd: string } | null;
+  /** How many segments still need a run AFTER the one that is about to start. */
+  remaining: number;
+}
+
+/**
+ * The panel's closing words, and the button that starts the next segment.
+ *
+ * The product owner's decision (2026-07-26): a seller who has just finished one of thirteen monthly exports
+ * should not have to go and find the SellerOps tab to start the fourteenth. So the panel that says "this part is
+ * done" is also the panel that starts the next part, and the SellerOps window is somewhere they may return when
+ * everything is finished rather than between every export.
+ *
+ * `nextLine` is empty exactly when nothing remains — that emptiness is how the runtime chooses between "here is
+ * the next one" and "you are finished", so it is a decision made here rather than there.
+ */
+export function continuationCopy(continuation: ImportContinuation): NonNullable<AwGuidancePack["continuation"]> {
+  const next = continuation.next;
+  return {
+    doneLabel: "이 구간 완료",
+    nextLine: next
+      ? `다음 구간은 ${next.segmentStart} ~ ${next.segmentEnd}이고, ${continuation.remaining}개 남았어요.`
+      : "",
+    // The same honesty rule as `completionSummaryText`: what was done is that the selected periods were exported
+    // and ingested. Never that every review NAVER holds is now present, which nothing has measured.
+    allDoneLine: "과거 리뷰 가져오기를 모두 마쳤어요. 이 창은 닫으셔도 괜찮아요.",
+    continueLabel: "다음 구간 계속하기",
+  };
+}
+
+/**
+ * Read the continuation out of a plan's segments, from the point of view of the run about to start.
+ *
+ * The first remaining segment is the one being launched, so it is dropped: what the panel needs is what comes
+ * AFTER it. Ordering is `remainingSegments`' — newest first — so this and the ticket the backend mints always
+ * name the same month.
+ */
+export function continuationAfterNext(segments: ReviewImportSegmentView[]): ImportContinuation {
+  const [, ...rest] = remainingSegments(segments);
+  const next = rest[0];
+  return {
+    next: next ? { segmentStart: next.segmentStart, segmentEnd: next.segmentEnd } : null,
+    remaining: rest.length,
   };
 }
 

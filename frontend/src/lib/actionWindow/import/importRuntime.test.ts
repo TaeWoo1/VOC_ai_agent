@@ -390,3 +390,55 @@ describe("the guidance pack travels down, per run", () => {
     expect(packsOf(t.sent)).toEqual([]);
   });
 });
+
+/**
+ * **A press on the panel in the marketplace window comes back up here.**
+ *
+ * It is reported, never acted on: what the seller asked for is a new run, and a run needs a single-use ticket that
+ * only the backend mints. This module's job is to hand the request to the component that can make it — and to keep
+ * it out of the snapshot, because a state field would replay one press on every re-render.
+ */
+describe("a panel press reaches the card", () => {
+  it("delivers the intent to every subscriber", () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    const a: string[] = [];
+    const b: string[] = [];
+    runtime.subscribeIntent((i) => a.push(i));
+    const stopB = runtime.subscribeIntent((i) => b.push(i));
+
+    t.deliver({ kind: "aw_guidance_intent", intent: "CONTINUE_NEXT_SEGMENT" });
+    stopB();
+    t.deliver({ kind: "aw_guidance_intent", intent: "CONTINUE_NEXT_SEGMENT" });
+
+    expect(a).toEqual(["CONTINUE_NEXT_SEGMENT", "CONTINUE_NEXT_SEGMENT"]);
+    expect(b).toEqual(["CONTINUE_NEXT_SEGMENT"]);
+  });
+
+  /** Not run state. A snapshot carrying it would make one press look like a standing condition. */
+  it("does not touch the published snapshot, and sends nothing back", () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    const seen: (GuidedImportSnapshot | null)[] = [];
+    runtime.subscribe((s) => seen.push(s));
+    t.deliver({ kind: "aw_view", view: view({ status: "COMPLETED" }) });
+    const before = seen.length;
+
+    t.deliver({ kind: "aw_guidance_intent", intent: "CONTINUE_NEXT_SEGMENT" });
+
+    expect(seen.length).toBe(before);
+    expect(runtime.snapshot()?.status).toBe("COMPLETED");
+    // A press is not an acknowledgement of anything: nothing goes back down the wire because of it.
+    expect(t.sent).toEqual([]);
+  });
+
+  it("stops delivering once released", () => {
+    const t = fakeTransport();
+    const runtime = createGuidedImportRuntime({ transport: t.transport, runId: "run_announce01", channelCode: "naver" });
+    const seen: string[] = [];
+    runtime.subscribeIntent((i) => seen.push(i));
+    runtime.dispose();
+    t.deliver({ kind: "aw_guidance_intent", intent: "CONTINUE_NEXT_SEGMENT" });
+    expect(seen).toEqual([]);
+  });
+});

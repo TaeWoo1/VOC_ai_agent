@@ -21,6 +21,7 @@ import com.sellerops.config.SecurityConfig;
 import com.sellerops.connector.FileUploadConnector;
 import com.sellerops.ingest.IngestResult;
 import com.sellerops.ingest.UploadType;
+import com.sellerops.organization.OrganizationRepository;
 import java.io.InputStream;
 import java.util.List;
 import java.util.UUID;
@@ -66,6 +67,11 @@ class UploadControllerContractTest {
     @Autowired MockMvc mockMvc;
     @MockBean FileUploadConnector connector;
     @MockBean JwtTokenProvider tokenProvider;
+    /**
+     * The token's organization has to exist for the request to be authenticated at all: `JwtAuthFilter` checks,
+     * because an org-scoped read against a vanished org succeeds and returns nothing (see that filter).
+     */
+    @MockBean OrganizationRepository organizations;
 
     private static final String TOKEN = "test-only-token-never-a-real-jwt";
     private final UUID orgId = UUID.randomUUID();
@@ -77,6 +83,7 @@ class UploadControllerContractTest {
     void setUp() {
         // The filter is real; only the token→principal step is stubbed.
         when(tokenProvider.parse(TOKEN)).thenReturn(new AuthPrincipal(userId, orgId, "test@example.com"));
+        when(organizations.existsById(orgId)).thenReturn(true);
     }
 
     @Test

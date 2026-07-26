@@ -93,6 +93,24 @@ export interface BridgeServerDeps {
    * the typed G1 `ClientMessage`/`ServerMessage` unions and their handling are unchanged.
    */
   actionWindow?: AwCarrierEndpoint;
+  /**
+   * Called when SellerOps has ASKED to be connected to this agent — a pairing approved, or an authenticated tab
+   * attaching to the status socket.
+   *
+   * Exists for one caller and one reason: the import mode brings the seller's marketplace window up here
+   * (product-owner decision, 2026-07-26). The order matters to them and was stated as a sequence — open
+   * SellerOps, request the connection, and THEN the seller center appears. Opening it any earlier means a
+   * window arriving before the seller has asked for anything; opening it only when a run starts means they meet
+   * it in the middle of a guided step rather than at the moment they asked to be connected.
+   *
+   * Deliberately NOT fired on a pairing REQUEST that has not been approved: an unapproved request is any page on
+   * an allowed origin asking, and a page must not be able to open a window on someone's machine. Approval, or an
+   * already-approved tab attaching, is the seller.
+   *
+   * Fired possibly many times (every reconnect). The handler is expected to be idempotent and must not throw —
+   * this hook is on the bridge's accept path, and nothing about a hosted browser may break pairing.
+   */
+  onSellerOpsConnected?: () => void;
 }
 
 export class BridgeServer {
@@ -108,6 +126,7 @@ export class BridgeServer {
   private readonly heartbeatMs: number;
   private readonly projection: ProjectionEndpoint | undefined;
   private readonly actionWindow: AwCarrierEndpoint | undefined;
+  private readonly onSellerOpsConnected: (() => void) | undefined;
   private readonly projectionWss: WebSocketServer | undefined;
   private projectionTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
@@ -128,6 +147,7 @@ export class BridgeServer {
     this.heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
     this.projection = deps.projection;
     this.actionWindow = deps.actionWindow;
+    this.onSellerOpsConnected = deps.onSellerOpsConnected;
     if (this.autoApprovePairing) log("bridge_dev_auto_approve_active", { warning: true });
     this.http = createServer((req, res) => void this.onRequest(req, res));
     // We validate origin + ticket ourselves, THEN hand the raw socket to `ws`. `noServer` = we own upgrade.
@@ -331,6 +351,7 @@ export class BridgeServer {
         this.store.registry.undoConfirm(requestId);
       }
       log("bridge_pair_requested", { requestId, autoApproved: true });
+      this.sellerOpsConnected();
       sendJson(res, 200, { requestId, confirmationCode, confirmUrl: confirmUrlFor(requestId) });
       return;
     }
@@ -428,6 +449,8 @@ export class BridgeServer {
       }
     }
     log("bridge_pair_confirmed", { ok: result.ok, allowed: decision === "allow" });
+    // Only a pairing that actually took effect is the seller connecting. A denial or a stale requestId is not.
+    if (result.ok && decision === "allow") this.sellerOpsConnected();
     sendJson(res, result.ok ? 200 : 409, { ok: result.ok });
   }
 
@@ -638,6 +661,24 @@ export class BridgeServer {
     this.sendTo(ws, { type: "snapshot", snapshot: this.snapshot() });
     // Announce the hosted Action Window run (if any) AFTER the standard hello+snapshot negotiation.
     this.actionWindow?.onClientConnected(ws);
+    // An already-paired tab reaching this point is SellerOps asking to be connected, exactly as a first-time
+    // pairing is — and it is the only signal a returning seller produces, because they never pair again.
+    this.sellerOpsConnected();
+  }
+
+  /**
+   * Tell the host that SellerOps asked to be connected.
+   *
+   * Swallows everything. This runs on the pairing and socket-accept paths, and a hosted browser failing to come
+   * up must never be able to refuse a pairing or drop a tab's connection — the run itself will report a surface
+   * problem later, in the place the seller can act on it.
+   */
+  private sellerOpsConnected(): void {
+    try {
+      this.onSellerOpsConnected?.();
+    } catch {
+      /* never let a host-side hook break pairing or the status socket */
+    }
   }
 
   private dropSocketsWithoutValidPairing(): void {

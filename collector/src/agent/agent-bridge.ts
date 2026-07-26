@@ -157,6 +157,12 @@ export interface AgentBridgeConfig {
   replySubmission?: AgentReplySubmissionConfig;
   /** When present, hosts one ISOLATED import segment (v2). Mutually exclusive with the other two. */
   initialImport?: AgentImportConfig;
+  /**
+   * Called when SellerOps asked to be connected to this agent — a pairing approved, or an authenticated tab
+   * attaching. Passed straight through to {@link BridgeServer}; see its note for why the import mode brings the
+   * seller's marketplace window up at this moment and not earlier or later.
+   */
+  onSellerOpsConnected?: () => void;
 }
 
 export type AgentBridgeListenResult =
@@ -307,6 +313,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
     ...(cfg.approvalPresenter ? { approvalPresenter: cfg.approvalPresenter } : {}),
     projection,
     actionWindow: carrier,
+    ...(cfg.onSellerOpsConnected ? { onSellerOpsConnected: cfg.onSellerOpsConnected } : {}),
   });
   const settle = settleObserverToPort(server.events, cfg.refSalt);
   let active = false;

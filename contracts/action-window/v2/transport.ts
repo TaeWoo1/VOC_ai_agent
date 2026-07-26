@@ -22,6 +22,11 @@
  * frontend's own copy being handed to the surface that has to display it, and it is never echoed back. The
  * Runtime→FE invariant above is therefore unchanged, and the normative contract in `./index` needed no edit.
  * See that type's note for why this is §6 held rather than §6 relaxed.
+ *
+ * **And one frame carries a press back: {@link AwGuidanceIntent}.** Runtime → FE, a single closed-set enum and
+ * nothing else. It is deliberately NOT a command envelope: the thing the seller asked for is work the FRONTEND
+ * has to authorize (see that type's note), so putting it on the command path would be modelling it as something
+ * the Runtime can act on alone.
  */
 import type { CommandEnvelope, EventEnvelope, ActionWindowRunView } from "./index";
 
@@ -90,7 +95,69 @@ export interface AwGuidancePack {
     byStep: Record<string, string>;
     fallback: string;
   };
+  /**
+   * What the panel says once THIS run has finished, and whether it offers to continue.
+   *
+   * Absent ⇒ a finished run takes its panel down, which is what shipped on 2026-07-26. The product owner's
+   * next decision (2026-07-26) is that a seller who has just finished one of thirteen monthly exports should
+   * not have to find the SellerOps tab to start the fourteenth, so the panel now closes one segment and opens
+   * the next from inside the marketplace window.
+   *
+   * **Every field is FINAL TEXT with no placeholders, unlike the rest of this pack.** The continuation lines
+   * name a date range and a count, and both are facts about the PLAN — which segment comes next, how many are
+   * left. The Runtime holds no plan: it is handed one ref at a time and cannot see past it. So there is nothing
+   * for it to substitute, and asking it to would mean shipping plan state down this frame. The frontend composes
+   * the sentences whole and the Runtime prints them.
+   *
+   * The branch is chosen by emptiness, so even that decision stays the frontend's:
+   *  - `nextLine` non-empty ⇒ there IS a next segment; the panel shows it and offers `continueLabel`;
+   *  - `nextLine` empty ⇒ nothing remains; the panel shows `allDoneLine` and offers no control.
+   */
+  continuation?: {
+    /** Heading for a finished segment, e.g. a "this part is done" label. */
+    doneLabel: string;
+    /** The next segment and how many are left, fully composed. Empty ⇒ this was the last one. */
+    nextLine: string;
+    /** Shown instead of {@link nextLine} when the whole plan is finished. */
+    allDoneLine: string;
+    /** Label for the continue control. Empty ⇒ no control, whatever else this block says. */
+    continueLabel: string;
+  };
 }
+
+/* ────────────────────────── Guidance intent (Runtime → FE) ────────────────────────── */
+
+/**
+ * **A press on the in-page panel that the RUNTIME cannot answer by itself.**
+ *
+ * ## Why this is not a command
+ *
+ * The panel's other two buttons (`REQUEST_STEP_RECHECK`, `CANCEL_RUN`) are contract commands: they act on the
+ * run the Runtime is hosting, so it applies them locally. "Continue with the next segment" is a different kind
+ * of thing entirely, and the repository says so:
+ *
+ *  - a run is authorized by a single-use launch ref, minted by the BACKEND
+ *    (`ReviewImportLaunchService.mintNextSegment`, `POST /plans/{planId}/launches/next-segment`, org from the
+ *    JWT);
+ *  - only the FRONTEND can ask for one, because the Action Window wire carries no plan or segment identity by
+ *    design — the Runtime is handed a ref and resolves it, and has no way to name "the next segment";
+ *  - the Local Agent has no minting path at all, and giving it one would be a new authorization route created
+ *    to serve a UI affordance.
+ *
+ * So the press travels: seller's page → Runtime → this frame → frontend → backend mint → `START_RUN` on the
+ * SAME socket. Nothing about who may authorize a run changes; only where the button lives.
+ *
+ * ## What it carries
+ *
+ * One enum value. No plan id, no segment id, no dates, no ref, no run state — a request, not an instruction,
+ * and the frontend is free to refuse it (no plan, nothing remaining, a run already in flight). The seller's
+ * page is where the flag that produces this lives, so the Runtime treats it as untrusted input and forwards
+ * only a value the panel actually offered.
+ */
+export type AwGuidanceIntent = "CONTINUE_NEXT_SEGMENT";
+
+/** The closed set, for runtime validation on both ends. */
+export const AW_GUIDANCE_INTENTS: readonly AwGuidanceIntent[] = ["CONTINUE_NEXT_SEGMENT"];
 
 /* ────────────────────────────── Frames ────────────────────────────── */
 
@@ -103,12 +170,16 @@ export type AwClientFrame =
   | { kind: "aw_resync"; runId: string; sinceSequence: number }
   | { kind: "aw_guidance_pack"; pack: AwGuidancePack };
 
-/** Runtime → Frontend. Ordered events, the latest sanitized View Model, a command ack, or a resync reply. */
+/**
+ * Runtime → Frontend. Ordered events, the latest sanitized View Model, a command ack, a resync reply, or a
+ * press on the in-page panel that only the frontend can act on ({@link AwGuidanceIntent}).
+ */
 export type AwServerFrame =
   | { kind: "aw_event"; event: EventEnvelope }
   | { kind: "aw_view"; view: ActionWindowRunView }
   | { kind: "aw_command_result"; commandId: string; accepted: boolean; reason?: string }
-  | { kind: "aw_resync_result"; view: ActionWindowRunView | null; events: readonly EventEnvelope[] };
+  | { kind: "aw_resync_result"; view: ActionWindowRunView | null; events: readonly EventEnvelope[] }
+  | { kind: "aw_guidance_intent"; intent: AwGuidanceIntent };
 
 export type AwFrame = AwClientFrame | AwServerFrame;
 

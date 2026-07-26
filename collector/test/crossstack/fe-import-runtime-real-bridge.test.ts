@@ -119,6 +119,23 @@ const PACK: AwGuidancePack = {
   },
 };
 
+/**
+ * The same pack, plus the words a FINISHED segment leaves on the page.
+ *
+ * Kept separate from {@link PACK} rather than folded into it, because their absence is itself a behaviour worth
+ * keeping covered: with no continuation a finished run takes its panel down, which is what the tests above assert.
+ * The lines are final text with no placeholders — the runtime holds no plan, so there is nothing to substitute.
+ */
+const PACK_WITH_CONTINUATION: AwGuidancePack = {
+  ...PACK,
+  continuation: {
+    doneLabel: "PART-DONE",
+    nextLine: "NEXT-IS-MAY-1-LEFT",
+    allDoneLine: "ALL-DONE",
+    continueLabel: "CONTINUE",
+  },
+};
+
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!();
@@ -603,6 +620,172 @@ describe("cross-stack: guidance rendered inside the marketplace page", () => {
     expect(driver.guidanceRenders).toEqual([]);
   });
 });
+
+/**
+ * **The whole plan, finished without going back to the SellerOps window.**
+ *
+ * This is the property the slice exists for, and the only place it can be seen: the press happens in the agent's
+ * page, the intent crosses a real socket, the frontend answers it by minting the next ticket and sending a fresh
+ * `START_RUN`, and the agent hosts a second run on the SAME connection. Every side alone shows a fragment.
+ *
+ * The ONE thing standing in for production here is the mint (`mintNext` below) — the same substitution
+ * `resolveScope` already makes, and for the same reason: it needs a Postgres, an org and a seller account. What it
+ * stands in for is a plain `POST /plans/{id}/launches/next-segment`, which the frontend already calls for its own
+ * button; the backend's own tests cover the ticket rules.
+ */
+describe("cross-stack: two segments in a row, driven from the marketplace panel", () => {
+  /**
+   * The frontend's half of the continuation, as `GuidedImportCard.start` does it: a press arrives, a fresh
+   * single-use ticket is minted, its copy goes down, and the run starts. No ticket is ever reused.
+   */
+  function continueOnPress(
+    runtime: GuidedImportRuntime,
+    refs: string[],
+  ): { minted: string[]; presses: number } {
+    const state = { minted: [] as string[], presses: 0 };
+    runtime.subscribeIntent((intent) => {
+      if (intent !== "CONTINUE_NEXT_SEGMENT") return;
+      state.presses += 1;
+      const ref = refs.shift();
+      if (!ref) return;
+      state.minted.push(ref);
+      runtime.setGuidancePack(PACK_WITH_CONTINUATION);
+      void runtime.start({ launchRef: ref, kind: "SEGMENT" });
+    });
+    return state;
+  }
+
+  it("finishes one segment, offers the next in the page, and runs it on the same socket", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver, resolved } = await startImportServer();
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    const fe = continueOnPress(c.runtime, [SEGMENT_REF_2]);
+    c.runtime.setGuidancePack(PACK_WITH_CONTINUATION);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const first = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "the first segment");
+
+    // The panel does not disappear when the run ends: it says the part is done and offers the next month.
+    await waitForPanel(driver, (p) => p?.completion != null, "the completion panel");
+    expect(driver.lastGuidance()?.completion).toEqual({ doneLabel: "PART-DONE", line: "NEXT-IS-MAY-1-LEFT" });
+    expect(driver.lastGuidance()?.actions).toEqual([{ command: "CONTINUE_NEXT_SEGMENT", label: "CONTINUE" }]);
+
+    // The seller presses it. Everything after this is the frontend and the backend doing what the SellerOps
+    // button does — from a page in a different window.
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+
+    const second = await waitFor(
+      c.runtime,
+      (s) => s.status === "COMPLETED" && s.runId !== first.runId,
+      "the second segment",
+    );
+    expect(second.runId).not.toBe(first.runId);
+    // A SECOND ticket, resolved server-side like the first — never a replay of one authorization.
+    expect(fe.minted).toEqual([SEGMENT_REF_2]);
+    expect(resolved).toEqual([SEGMENT_REF, SEGMENT_REF_2]);
+    // Two runs, two files ingested, one connection, and the seller never left the marketplace window.
+    expect(driver.calls.filter((call) => call.startsWith("ingest:"))).toHaveLength(2);
+    expect(opened).toHaveLength(1);
+  });
+
+  /**
+   * The second segment's panel has to work as well as the first's. A new session starts with no copy at all, so
+   * the frontend re-sends the pack — and if it did not, the seller would reach segment two and find a panel that
+   * had gone quiet exactly when they had learned to rely on it.
+   */
+  it("draws the second segment's panel too, and can hand on again from it", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver, script } = await startImportServer();
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    const fe = continueOnPress(c.runtime, [SEGMENT_REF_2]);
+    c.runtime.setGuidancePack(PACK_WITH_CONTINUATION);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const first = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "the first segment");
+    await waitForPanel(driver, (p) => p?.completion != null, "the first completion panel");
+
+    // Park the second run at its first barrier, so there is a live panel to read rather than another teardown.
+    script.action = { start_date: false };
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await waitFor(
+      c.runtime,
+      (s) => s.status === "WAITING_FOR_HUMAN" && s.runId !== first.runId,
+      "the second segment's first barrier",
+    );
+
+    // The second run's own panel, in the frontend's words, with the runtime's own step numbers.
+    await waitForPanel(driver, (p) => p?.instruction === "PICK-START", "the second run's panel");
+    expect(driver.lastGuidance()?.completion).toBeNull();
+    expect(fe.presses).toBe(1);
+    expect(opened).toHaveLength(1);
+  });
+
+  /**
+   * The press is a REQUEST, and the frontend may refuse it. Nothing in the runtime starts a run on its own — it
+   * cannot: it holds no plan identity and has no way to mint a ticket.
+   */
+  it("hosts nothing when the frontend does not answer the press", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver, resolved } = await startImportServer();
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    // A frontend that hears the press and declines — no plan, nothing remaining, a refused mint.
+    const fe = continueOnPress(c.runtime, []);
+    c.runtime.setGuidancePack(PACK_WITH_CONTINUATION);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    const first = await waitFor(c.runtime, (s) => s.status === "COMPLETED", "the first segment");
+    await waitForPanel(driver, (p) => p?.completion != null, "the completion panel");
+
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 900));
+
+    expect(fe.presses).toBe(1);
+    // One ticket resolved, one run hosted, one file ingested. The runtime waited to be told.
+    expect(resolved).toEqual([SEGMENT_REF]);
+    expect(c.runtime.snapshot()?.runId).toBe(first.runId);
+    expect(driver.calls.filter((call) => call.startsWith("ingest:"))).toHaveLength(1);
+  });
+
+  /** The forwarded press carries one enum value. No ref, no dates, no plan or segment identity, ever. */
+  it("puts nothing but the intent on the wire", async () => {
+    const opened: WebSocket[] = [];
+    const { port, driver } = await startImportServer();
+    const c = await connectImportRuntime(port, opened);
+    expect(c.ok).toBe(true);
+    if (!c.ok) return;
+
+    const seen: string[] = [];
+    (c.runtime as GuidedImportRuntime).subscribeIntent((intent) => seen.push(JSON.stringify(intent)));
+    c.runtime.setGuidancePack(PACK_WITH_CONTINUATION);
+    await c.runtime.start({ launchRef: SEGMENT_REF, kind: "SEGMENT" });
+    await waitFor(c.runtime, (s) => s.status === "COMPLETED", "the first segment");
+    await waitForPanel(driver, (p) => p?.completion != null, "the completion panel");
+
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await waitForIntent(seen);
+
+    expect(seen).toEqual(['"CONTINUE_NEXT_SEGMENT"']);
+    const wire = seen.join("");
+    expect(wire).not.toContain(SEGMENT_REF);
+    expect(wire).not.toContain("2026-06");
+  });
+});
+
+/** Wait for the frontend to observe a forwarded panel press. */
+async function waitForIntent(seen: string[], timeoutMs = 4000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (seen.length > 0) return;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error("cross-stack import: the panel press never reached the frontend");
+}
 
 describe("cross-stack: the frontend cannot drive what the runtime does not allow", () => {
   it("a command absent from allowedCommands never reaches the agent", async () => {

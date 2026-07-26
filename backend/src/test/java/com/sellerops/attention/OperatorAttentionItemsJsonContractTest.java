@@ -18,6 +18,7 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.auth.JwtAuthFilter;
 import com.sellerops.auth.JwtTokenProvider;
 import com.sellerops.config.SecurityConfig;
+import com.sellerops.organization.OrganizationRepository;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
@@ -65,6 +66,11 @@ class OperatorAttentionItemsJsonContractTest {
     @Autowired MockMvc mockMvc;
     @MockBean OperatorAttentionService service;
     @MockBean JwtTokenProvider tokenProvider;
+    /**
+     * The token's organization has to exist for the request to be authenticated at all: `JwtAuthFilter` checks,
+     * because an org-scoped read against a vanished org succeeds and returns nothing (see that filter).
+     */
+    @MockBean OrganizationRepository organizations;
 
     private static final String TOKEN = "test-only-token-never-a-real-jwt";
     /** A synthetic ref in the shape the ingested-review source mints; never a real row. */
@@ -79,6 +85,7 @@ class OperatorAttentionItemsJsonContractTest {
     void setUp() {
         // The filter is real; only the token→principal step is stubbed.
         when(tokenProvider.parse(TOKEN)).thenReturn(new AuthPrincipal(userId, orgId, "op@example.com"));
+        when(organizations.existsById(orgId)).thenReturn(true);
     }
 
     @Test

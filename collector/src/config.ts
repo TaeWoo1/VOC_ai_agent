@@ -29,6 +29,17 @@ export interface CollectorConfig {
   /** Review-management/export URL (live layer; unknown until milestone 1). */
   naverReviewUrl: string | undefined;
   /**
+   * The SellerOps web app's own origin — the page the seated import agent opens FIRST.
+   *
+   * The guided import journey is "open SellerOps, ask to connect, then the seller center appears" (product-owner
+   * decision, 2026-07-26), and all of it happens in ONE browser profile: two profiles means two sessions and an
+   * account picker the seller has to get right twice. So the agent's browser starts on SellerOps and the
+   * marketplace tab is opened later, next to it.
+   *
+   * Dev default because import mode is seated and gated (`import-mode-gate.ts`) — it never runs in production.
+   */
+  appUrl: string;
+  /**
    * ESM+ (Gmarket / Auction) review-management/export URL (live layer; the model-C
    * REVIEW discovery track). Gate-1 observed a `/Home/v2/manage-feedback`-like route
    * on an esmplus host; the exact URL is supplied out-of-band, never committed.
@@ -131,6 +142,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CollectorConfi
     downloadDir: env.COLLECTOR_DOWNLOAD_DIR ?? resolve(root, "downloads"),
     statusFile: env.COLLECTOR_STATUS_FILE ?? resolve(root, ".status/naver.json"),
     naverReviewUrl: env.NAVER_REVIEW_URL,
+    appUrl: env.SELLEROPS_APP_URL ?? "http://localhost:5173",
     esmReviewUrl: env.ESM_REVIEW_URL,
     browserChannel: env.COLLECTOR_BROWSER_CHANNEL,
     storageProbeSalt: env.STORAGE_PROBE_SALT,

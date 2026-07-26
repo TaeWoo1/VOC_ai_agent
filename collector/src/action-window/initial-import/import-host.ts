@@ -210,6 +210,20 @@ export class ImportSegmentHost {
         log("aw_import_host_scope_incomplete", { hostable: false });
         return;
       }
+      if (scope.channelCode && scope.channelCode !== this.deps.channelCode) {
+        // The ticket authorizes work on a DIFFERENT marketplace from the one this agent drives.
+        //
+        // Found on 2026-07-26, before it could happen: the SellerOps screen defaulted to whichever connected
+        // account came first — a Coupang one — so the seller could have created a plan for that account and
+        // minted a ticket for it, while the only driver present guides NAVER. Nothing downstream would have
+        // noticed. The run would have walked them through NAVER's own export and ingested the result into the
+        // Coupang plan's segment, which is a file covering one marketplace recorded as covering another.
+        //
+        // The channel is a platform target, so an unexpected one fails closed rather than being coerced to the
+        // one we happen to host.
+        log("aw_import_host_channel_mismatch", { hostable: false });
+        return;
+      }
 
       const channelCode = scope.channelCode || this.deps.channelCode;
       const runId = mintImportRunId();

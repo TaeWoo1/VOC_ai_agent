@@ -23,7 +23,11 @@ import {
   type CommandType,
   type RunIntent,
 } from "../../../../../contracts/action-window/v2/index";
-import type { AwClientTransport, AwGuidancePack } from "../../../../../contracts/action-window/v2/transport";
+import type {
+  AwClientTransport,
+  AwGuidanceIntent,
+  AwGuidancePack,
+} from "../../../../../contracts/action-window/v2/transport";
 import { newCommandId } from "../../commandId";
 
 /** What the card renders. A projection of the runtime's view — never assembled from local guesses. */
@@ -68,6 +72,15 @@ export interface GuidedImportRuntime {
    * they would have learned to rely on it.
    */
   setGuidancePack(pack: AwGuidancePack): void;
+  /**
+   * A press on the in-page panel that only THIS side can act on.
+   *
+   * One value arrives today: `CONTINUE_NEXT_SEGMENT`, the seller asking — from inside their SmartStore window —
+   * for the next monthly segment. It is a request, not a command: a run is authorized by a single-use ticket the
+   * backend mints, and this frontend is the only party that holds the plan identity needed to ask for one. So the
+   * listener does what the SellerOps button does, through the same endpoint, and may refuse.
+   */
+  subscribeIntent(listener: (intent: AwGuidanceIntent) => void): () => void;
   /** Forward an operator command. Refuses anything the current view does not allow. */
   send(type: CommandType): void;
   /** Ask the agent to replay the run it is hosting — recovers a guided view after a page refresh. */
@@ -150,6 +163,7 @@ export function createGuidedImportRuntime(
   /** The guidance prose to hand to each run this session hosts. Null until the card supplies it. */
   let guidancePack: AwGuidancePack | null = null;
   const listeners = new Set<(snapshot: GuidedImportSnapshot | null) => void>();
+  const intentListeners = new Set<(intent: AwGuidanceIntent) => void>();
 
   const publish = (next: GuidedImportSnapshot | null): void => {
     latest = next;
@@ -158,6 +172,12 @@ export function createGuidedImportRuntime(
 
   const stopViews = transport.subscribe((frame) => {
     if (disposed) return;
+    if (frame.kind === "aw_guidance_intent") {
+      // Deliberately NOT folded into the snapshot: this is not run state, it is a thing the seller asked for
+      // once, and a state field would replay it on every re-render.
+      for (const listener of [...intentListeners]) listener(frame.intent);
+      return;
+    }
     if (frame.kind === "aw_view") {
       runId = frame.view.runId;
       publish(project(frame.view));
@@ -197,6 +217,10 @@ export function createGuidedImportRuntime(
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    subscribeIntent(listener) {
+      intentListeners.add(listener);
+      return () => intentListeners.delete(listener);
     },
     setGuidancePack(pack) {
       if (disposed) return;
@@ -266,6 +290,7 @@ export function createGuidedImportRuntime(
       disposed = true;
       stopViews();
       listeners.clear();
+      intentListeners.clear();
     },
   };
 }

@@ -534,6 +534,101 @@ class ReviewImportLaunchServiceTest {
         assertThatThrownBy(() -> service.expire(orgId, "00112233445566aa")).isInstanceOf(ApiException.class);
     }
 
+    /* ─────────────── a whole sitting: one choice, then segment after segment ─────────────── */
+
+    /**
+     * The sequence the seller actually performs, with no range-discovery run anywhere in it: they choose a start
+     * month, a plan appears, and then each month is authorized on its own.
+     *
+     * <p>This is the authorization half of the journey the panel in the marketplace window now drives (2026-07-26).
+     * The seller presses "continue" there instead of returning to SellerOps, and it changes NOTHING here — the
+     * frontend still calls {@link ReviewImportLaunchService#mintNextSegment}, this service still decides which
+     * segment that is, and each run still costs one fresh single-use ticket. What is pinned is that a second
+     * segment is a second AUTHORIZATION: a distinct ref, chosen newest-first, with the spent one unusable.
+     */
+    @Test
+    void aSelectedRangeBecomesAPlanAndThenOneFreshTicketPerSegment() {
+        List<ReviewImportLaunch> saved = new java.util.ArrayList<>();
+        when(launches.save(any())).thenAnswer(inv -> {
+            ReviewImportLaunch t = inv.getArgument(0);
+            saved.removeIf(existing -> existing.getLaunchRef().equals(t.getLaunchRef()));
+            saved.add(t);
+            return t;
+        });
+        when(launches.findByLaunchRef(any())).thenAnswer(inv -> saved.stream()
+                .filter(t -> t.getLaunchRef().equals(inv.getArgument(0)))
+                .findFirst());
+
+        // 1. The choice. Two months, no marketplace window opened to find them.
+        when(sellerAccounts.findByIdAndOrgId(accountId, orgId)).thenReturn(Optional.of(account()));
+        when(plans.findByOrgIdAndSellerAccountIdOrderByCreatedAtDesc(orgId, accountId)).thenReturn(List.of());
+        when(launches.findByOrgIdAndSellerAccountIdAndKindAndStatus(
+                orgId, accountId, ReviewImportLaunchKind.DISCOVERY, ReviewImportLaunchStatus.ISSUED))
+                .thenReturn(Optional.empty());
+        when(planService.createPlan(eq(orgId), eq(accountId), eq(channelId), any(), any())).thenReturn(plan());
+
+        assertThat(dated.recordSelectedRange(orgId, accountId, "2026-06").getId()).isEqualTo(planId);
+        verify(planService).createPlan(orgId, accountId, channelId,
+                LocalDate.parse("2026-06-01"), LocalDate.parse("2026-07-26"));
+
+        ReviewImportSegment june = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        june.setId(UUID.randomUUID());
+        june.setSegmentStart(LocalDate.parse("2026-06-01"));
+        june.setSegmentEnd(LocalDate.parse("2026-06-30"));
+        ReviewImportSegment july = segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED);
+        july.setId(UUID.randomUUID());
+        july.setSegmentStart(LocalDate.parse("2026-07-01"));
+        july.setSegmentEnd(LocalDate.parse("2026-07-26"));
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId))
+                .thenReturn(List.of(june, july));
+        when(segments.findByIdAndOrgId(june.getId(), orgId)).thenReturn(Optional.of(june));
+        when(segments.findByIdAndOrgId(july.getId(), orgId)).thenReturn(Optional.of(july));
+        when(segments.findById(june.getId())).thenReturn(Optional.of(june));
+        when(segments.findById(july.getId())).thenReturn(Optional.of(july));
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(plan()));
+        when(launches.findBySegmentIdAndStatus(any(), eq(ReviewImportLaunchStatus.ISSUED)))
+                .thenReturn(Optional.empty());
+        Channel channel = new Channel();
+        channel.setId(channelId);
+        channel.setCode("NAVER");
+        when(channels.findById(channelId)).thenReturn(Optional.of(channel));
+
+        // 2. The first segment: the most recent month, because whoever stops half-way keeps the half that matters.
+        ReviewImportLaunch first = dated.mintNextSegment(orgId, planId);
+        assertThat(first.getSegmentId()).isEqualTo(july.getId());
+        assertThat(first.getStatus()).isEqualTo(ReviewImportLaunchStatus.ISSUED);
+        // The window the runtime is told about is July's, and carries no plan or segment identity.
+        ReviewImportLaunchService.LaunchScope scope = dated.resolveScope(orgId, first.getLaunchRef());
+        assertThat(scope.requiredStart()).isEqualTo(LocalDate.parse("2026-07-01"));
+        assertThat(scope.requiredEnd()).isEqualTo(LocalDate.parse("2026-07-26"));
+
+        // 3. That run finishes: the file is ingested against the segment its ticket is bound to, and the ticket
+        //    is spent. July is covered from here on.
+        dated.ingestForLaunch(orgId, first.getLaunchRef(), ScopeEvidence.MACHINE_MATCHED, "export.xlsx", file());
+        verify(runService).importSegment(eq(orgId), eq(july.getId()), eq(true), eq(ScopeEvidence.MACHINE_MATCHED),
+                eq("export.xlsx"), any());
+        assertThat(first.getStatus()).isEqualTo(ReviewImportLaunchStatus.CONSUMED);
+        july.setExecutionState(SegmentExecutionState.COMPLETED);
+        july.setCoverageState(SegmentCoverageState.COVERED);
+
+        // 4. "Continue" — whether pressed on the card or in the seller's SmartStore window — is a SECOND
+        //    authorization for the next month back, never a replay of the first.
+        ReviewImportLaunch second = dated.mintNextSegment(orgId, planId);
+        assertThat(second.getSegmentId()).isEqualTo(june.getId());
+        assertThat(second.getLaunchRef()).isNotEqualTo(first.getLaunchRef());
+        assertThat(dated.resolveScope(orgId, second.getLaunchRef()).requiredStart())
+                .isEqualTo(LocalDate.parse("2026-06-01"));
+
+        // And the spent one is dead: a second run cannot be had by presenting it again.
+        assertThatThrownBy(() -> dated.resolveScope(orgId, first.getLaunchRef()))
+                .isInstanceOf(ApiException.class);
+
+        // 5. Both months done ⇒ nothing left to authorize. It fails closed rather than inventing work.
+        june.setExecutionState(SegmentExecutionState.COMPLETED);
+        june.setCoverageState(SegmentCoverageState.COVERED);
+        assertThatThrownBy(() -> dated.mintNextSegment(orgId, planId)).isInstanceOf(ApiException.class);
+    }
+
     private static ApiException catchApi(Runnable r) {
         try {
             r.run();

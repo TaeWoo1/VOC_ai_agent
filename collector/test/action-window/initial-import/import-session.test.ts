@@ -589,3 +589,175 @@ describe("import segment session — protocol behaviour", () => {
     }
   });
 });
+
+/**
+ * **A finished segment hands the seller on to the next one, from inside the marketplace page.**
+ *
+ * The 2026-07-26 slice let the seller finish ONE segment there. A plan is thirteen of them, and the seller was
+ * still expected to return to the SellerOps tab between each — which is the same "watch two windows" cost that
+ * slice existed to remove, paid twelve more times. Product-owner decision (2026-07-26): the panel that closes one
+ * segment starts the next.
+ *
+ * What this session may and may not do about that is the whole point of these tests. It may draw the offer and
+ * report the press. It may NOT start the run: a run is authorized by a single-use ticket that the backend mints
+ * and only the frontend can ask for, and this runtime holds no plan identity at all.
+ */
+describe("import segment session — continuing to the next segment", () => {
+  const PACK = {
+    chrome: { product: "SellerOps", stepCounter: "STEP {step}/{total}", requiredRange: "W {start}-{end}", blockedLabel: "STOP" },
+    steps: { "actionWindow.import.setStartDate": "PICK-START" },
+    blockers: { SCOPE_MISMATCH: { title: "WRONG", fix: "FIX" } },
+    commands: { REQUEST_STEP_RECHECK: "RECHECK", CANCEL_RUN: "CANCEL" },
+    recheck: { byBlocker: {}, byStep: {}, fallback: "RECHECK" },
+    continuation: { doneLabel: "DONE", nextLine: "NEXT-JUNE-2-LEFT", allDoneLine: "ALL-DONE", continueLabel: "CONTINUE" },
+  };
+
+  /** A session with a fast panel poll, so a press is picked up inside a test rather than in half a second. */
+  function panelSession(script: ImportFixtureScript = {}, pack: unknown = PACK) {
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    const driver = new ImportFixtureDriver(script);
+    const session = new ImportSegmentSession(engine, driver, io.transport, REQUIRED, { panelPollMs: 5 });
+    const detach = session.attach();
+    io.send({ kind: "aw_guidance_pack", pack: pack as never });
+    return { io, engine, driver, session, detach };
+  }
+
+  const intents = (io: ReturnType<typeof loopback>): string[] =>
+    io.sent
+      .filter((f) => f.kind === "aw_guidance_intent")
+      .map((f) => (f as { intent: string }).intent);
+
+  /** Wait for a condition the panel poll drives, rather than sleeping a fixed amount. */
+  async function until(predicate: () => boolean, label: string, timeoutMs = 2000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (predicate()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error(`import session: timed out waiting for ${label}`);
+  }
+
+  it("leaves the completion and the offer on the page after the run has finished", async () => {
+    const { io, driver, session } = panelSession();
+    startRun(io);
+    await session.whenSettled();
+    expect(io.lastView()?.status).toBe("COMPLETED");
+
+    // The last thing drawn is the hand-off, NOT a removal — even though the run's cleanup took the panel down on
+    // its way out. A finished segment's panel is the seller's only way onward, so it is re-drawn after cleanup.
+    await until(() => driver.lastGuidance()?.completion != null, "the completion panel");
+    expect(driver.lastGuidance()?.completion).toEqual({ doneLabel: "DONE", line: "NEXT-JUNE-2-LEFT" });
+    expect(driver.lastGuidance()?.actions).toEqual([{ command: "CONTINUE_NEXT_SEGMENT", label: "CONTINUE" }]);
+  });
+
+  it("forwards the press to the frontend instead of acting on it", async () => {
+    const { io, engine, driver, session } = panelSession();
+    startRun(io);
+    await session.whenSettled();
+    await until(() => driver.lastGuidance()?.completion != null, "the completion panel");
+
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await until(() => intents(io).length > 0, "the forwarded intent");
+
+    // Exactly the contract's value, and nothing else — no ref, no dates, no plan or segment identity.
+    expect(io.sent.filter((f) => f.kind === "aw_guidance_intent")).toEqual([
+      { kind: "aw_guidance_intent", intent: "CONTINUE_NEXT_SEGMENT" },
+    ]);
+    // And the runtime did NOT start anything: the run it was hosting is over and stays over. The next one exists
+    // only once the frontend has a fresh ticket for it.
+    expect(engine.currentStage()).toBe("COMPLETED");
+    expect(driver.calls.filter((c) => c === "prepareSurface")).toHaveLength(1);
+  });
+
+  /**
+   * The flag lives in the seller's own page, so it is untrusted input. A press is forwarded only when the panel
+   * ACTUALLY offered it — and mid-run it does not, because there is nothing finished to continue from.
+   */
+  it("refuses a continue press while the run is still going", async () => {
+    const { io, driver, session } = panelSession({ action: { start_date: false } });
+    startRun(io);
+    await session.whenSettled();
+    await until(() => driver.lastGuidance()?.instruction === "PICK-START", "the live panel");
+
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(intents(io)).toEqual([]);
+  });
+
+  /** No continuation copy ⇒ no offer ⇒ nothing to press, and a press invents no offer. */
+  it("refuses a continue press when the frontend sent no continuation", async () => {
+    const { continuation: _omitted, ...withoutContinuation } = PACK;
+    const { io, driver, session } = panelSession({}, withoutContinuation);
+    startRun(io);
+    await session.whenSettled();
+
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(intents(io)).toEqual([]);
+    // And the panel really did come down, exactly as it did before any of this existed.
+    expect(driver.lastGuidance()).toBeNull();
+  });
+
+  /** A finished plan says so and offers nothing. The seller is done; there is nothing to press. */
+  it("closes the plan with no control when nothing remains", async () => {
+    const { io, driver, session } = panelSession({}, { ...PACK, continuation: { ...PACK.continuation, nextLine: "" } });
+    startRun(io);
+    await session.whenSettled();
+    await until(() => driver.lastGuidance()?.completion != null, "the closing panel");
+
+    expect(driver.lastGuidance()?.completion?.line).toBe("ALL-DONE");
+    expect(driver.lastGuidance()?.actions).toEqual([]);
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(intents(io)).toEqual([]);
+  });
+
+  /**
+   * Releasing the session stops the poll. The host builds one session per segment and releases the previous one,
+   * so a poller left running would keep reading a finished run's page and forwarding presses for a run nobody is
+   * publishing any more.
+   */
+  it("stops watching the panel once the session is released", async () => {
+    const { io, driver, session, detach } = panelSession();
+    startRun(io);
+    await session.whenSettled();
+    await until(() => driver.lastGuidance()?.completion != null, "the completion panel");
+
+    detach();
+    await new Promise((r) => setTimeout(r, 30));
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(intents(io)).toEqual([]);
+  });
+
+  /**
+   * A panel nobody has pressed for a long time comes down. It is the honest end state: the seller can still
+   * continue from the SellerOps window, and a control that keeps being polled in someone's browser all afternoon
+   * is a cost with no one to benefit from it.
+   */
+  it("takes the offer down after nobody presses it, rather than polling forever", async () => {
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    const driver = new ImportFixtureDriver();
+    const session = new ImportSegmentSession(engine, driver, io.transport, REQUIRED, {
+      panelPollMs: 5,
+      terminalPanelBudgetMs: 20,
+    });
+    session.attach();
+    io.send({ kind: "aw_guidance_pack", pack: PACK as never });
+    startRun(io);
+    await session.whenSettled();
+
+    await until(() => driver.lastGuidance() === null, "the offer being withdrawn");
+    driver.pressPanel("CONTINUE_NEXT_SEGMENT");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(intents(io)).toEqual([]);
+  });
+});

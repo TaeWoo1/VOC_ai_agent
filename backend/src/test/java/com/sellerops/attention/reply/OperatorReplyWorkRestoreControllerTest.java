@@ -13,6 +13,7 @@ import com.sellerops.attention.reply.dto.ReviewReplyWorkRestoreResponse;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.auth.JwtTokenProvider;
 import com.sellerops.config.SecurityConfig;
+import com.sellerops.organization.OrganizationRepository;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,11 @@ class OperatorReplyWorkRestoreControllerTest {
     @Autowired MockMvc mockMvc;
     @MockBean ReviewReplyWorkRestoreService service;
     @MockBean JwtTokenProvider tokenProvider;
+    /**
+     * The token's organization has to exist for the request to be authenticated at all: `JwtAuthFilter` checks,
+     * because an org-scoped read against a vanished org succeeds and returns nothing (see that filter).
+     */
+    @MockBean OrganizationRepository organizations;
 
     private static final String TOKEN = "test-only-token-never-a-real-jwt";
     private final UUID orgId = UUID.randomUUID();
@@ -48,6 +54,7 @@ class OperatorReplyWorkRestoreControllerTest {
     @BeforeEach
     void setUp() {
         when(tokenProvider.parse(TOKEN)).thenReturn(new AuthPrincipal(userId, orgId, "op@example.com"));
+        when(organizations.existsById(orgId)).thenReturn(true);
     }
 
     @Test

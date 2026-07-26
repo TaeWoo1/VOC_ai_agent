@@ -16,6 +16,13 @@
  * arrive as an `aw_guidance_pack` and this session does lookup and `{param}` substitution, nothing more. A
  * press on that panel comes back as an ordinary operator command, gated twice (see `applyPanelIntent`).
  *
+ * **And the panel now outlives the run it belongs to, by one state** (2026-07-26). A segment that COMPLETES
+ * leaves a panel saying so, and — when the frontend's pack says a segment remains — a control that starts the
+ * next one. That press is the one thing this session cannot answer: a run needs a single-use ticket only the
+ * backend mints and only the frontend can ask for, so it is forwarded as an `aw_guidance_intent` and the
+ * frontend does exactly what its own button does. The seller never leaves the marketplace window; the
+ * authorization path is unchanged.
+ *
  * INVARIANTS (inherited, and structural here):
  *  - the session never performs a marketplace action — it arms observation and reacts to what the driver
  *    reports the SELLER did;
@@ -24,8 +31,15 @@
  *    duplicated observation cannot skip a step.
  */
 import { validateCommandEnvelope } from "../../../../contracts/action-window/v2/index";
-import type { AwGuidancePack, AwClientFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
-import { guidancePanelStateFrom, isGuidancePack, PANEL_COMMANDS } from "../guidance-copy";
+import {
+  AW_GUIDANCE_INTENTS,
+  type AwGuidanceIntent,
+  type AwGuidancePack,
+  type AwClientFrame,
+  type AwServerTransport,
+} from "../../../../contracts/action-window/v2/transport";
+import { guidancePanelStateFrom, isGuidancePack, PANEL_COMMANDS, PANEL_INTENTS } from "../guidance-copy";
+import type { GuidancePanelState } from "../guidance-panel";
 import { log } from "../../log";
 import type { ImportEffect, ImportSegmentEngine } from "./import-engine";
 import { IMPORT_TERMINAL_STAGES } from "./import-stages";
@@ -51,6 +65,15 @@ export interface ImportSessionOptions {
    * continuously for the whole sitting.
    */
   panelPollMs?: number;
+  /**
+   * How long the panel keeps waiting for a press AFTER the run has finished.
+   *
+   * A finished segment's panel offers to start the next one, so the poll cannot stop the moment the run ends —
+   * but it must not keep evaluating in someone's browser for the rest of the day either. When the budget runs
+   * out the panel comes down: a control that no longer works must not stay on screen looking like it does, and
+   * the SellerOps window can still continue the plan.
+   */
+  terminalPanelBudgetMs?: number;
 }
 
 export class ImportSegmentSession {
@@ -62,6 +85,7 @@ export class ImportSegmentSession {
   private readonly onStatePublished: (() => void) | undefined;
   private readonly rearmDelayMs: number;
   private readonly panelPollMs: number;
+  private readonly terminalPanelBudgetMs: number;
 
   private started = false;
   private publishedSeq = 0;
@@ -94,6 +118,9 @@ export class ImportSegmentSession {
     this.onStatePublished = opts?.onStatePublished;
     this.rearmDelayMs = opts?.rearmDelayMs ?? 250;
     this.panelPollMs = opts?.panelPollMs ?? 500;
+    // Fifteen minutes: long enough that a seller who steps away between two monthly exports still finds the
+    // control, short enough that an abandoned sitting stops touching their page the same afternoon.
+    this.terminalPanelBudgetMs = opts?.terminalPanelBudgetMs ?? 15 * 60_000;
   }
 
   /**
@@ -266,6 +293,11 @@ export class ImportSegmentSession {
       }
       case "CLEANUP": {
         await this.driver.cleanup();
+        // Re-drawn AFTER cleanup, deliberately. The driver's cleanup takes the panel down with the run's
+        // annotations — correct for a run that has nothing more to say, wrong for one that has just finished a
+        // segment and is offering the next. The panel is the seller's only surface here, so the last word on it
+        // has to be the completion rather than an empty page.
+        this.queuePanelRender();
         return;
       }
       case "NONE":
@@ -353,21 +385,42 @@ export class ImportSegmentSession {
 
   private panelRender: Promise<void> = Promise.resolve();
 
+  /** What the panel is currently showing, as the same projection the render queue draws. */
+  private panelState(): GuidancePanelState | null {
+    return this.pack === null ? null : guidancePanelStateFrom(this.engine.view(), this.pack);
+  }
+
   /**
-   * Watch the panel for the seller's presses until the run ends or the session is released.
+   * Watch the panel for the seller's presses until it has nothing pressable left, or the session is released.
    *
-   * A poll, because the panel is in the seller's page and the only way back is a value the driver reads. It
-   * stops at a terminal stage: a finished run has no panel, and continuing to evaluate in someone's browser
-   * for nothing is not a cost worth paying.
+   * A poll, because the panel is in the seller's page and the only way back is a value the driver reads.
+   *
+   * **It does not stop the instant the run ends.** It used to, and that was right when a finished run took its
+   * panel down. A finished segment now offers to start the next one from that same panel (product-owner decision,
+   * 2026-07-26 — a seller working through thirteen monthly exports should not have to find the SellerOps tab
+   * between each one), and a button nobody is watching is worse than no button. So a terminal run keeps polling
+   * only while its panel still offers something, and only for {@link terminalPanelBudgetMs} — after which the
+   * panel comes down rather than sit there dead.
    */
   private async watchPanel(): Promise<void> {
     if (this.panelLoopRunning) return;
     this.panelLoopRunning = true;
+    let terminalWaitedMs = 0;
     try {
       while (!this.panelStopped) {
         await new Promise<void>((resolve) => setTimeout(resolve, this.panelPollMs));
         if (this.panelStopped) return;
-        if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
+        if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) {
+          const offered = this.panelState()?.actions ?? [];
+          // Nothing to press: a run that failed, was cancelled, or finished a plan with nothing left in it.
+          if (offered.length === 0) return;
+          terminalWaitedMs += this.panelPollMs;
+          if (terminalWaitedMs >= this.terminalPanelBudgetMs) {
+            log("aw_import_panel_idle_closed", { offered: offered.length });
+            this.panelRender = this.panelRender.then(() => this.driver.renderGuidance(null)).catch(() => {});
+            return;
+          }
+        }
         const intent = await this.driver.takeGuidanceIntent().catch(() => null);
         if (intent) this.applyPanelIntent(intent);
       }
@@ -377,18 +430,28 @@ export class ImportSegmentSession {
   }
 
   /**
-   * Apply a press on the in-page panel as an ordinary operator command.
+   * Apply a press on the in-page panel — as an operator command, or as an intent forwarded to the frontend.
    *
    * **Double-gated, and the first gate is the important one.** The intent arrives from a flag in the seller's
-   * own page, so it is treated as untrusted input rather than as our own UI talking to us: only the two
-   * commands the panel ever renders are accepted, so nothing else in that page can reach the engine through
-   * this path — no `SWITCH_TO_MANUAL`, no `START_RUN`, nothing that was not a button the seller saw. The
-   * second gate is the runtime's own `allowedCommands`, the same authority the frontend is held to.
+   * own page, so it is treated as untrusted input rather than as our own UI talking to us: only the presses the
+   * panel actually renders are accepted, so nothing else in that page can reach the engine through this path —
+   * no `SWITCH_TO_MANUAL`, no `START_RUN`, nothing that was not a button the seller saw. The second gate is the
+   * runtime's own `allowedCommands`, the same authority the frontend is held to.
    *
-   * `REQUEST_STEP_RECHECK` still means "I did it, look again" here: it re-arms or re-reads, and completes
-   * nothing.
+   * The two routes are not interchangeable:
+   *
+   *  - a {@link PANEL_COMMANDS} press acts on THIS run, so the engine answers it locally.
+   *    `REQUEST_STEP_RECHECK` still means "I did it, look again": it re-arms or re-reads and completes nothing.
+   *  - a {@link PANEL_INTENTS} press asks for something this runtime cannot do. Continuing to the next segment
+   *    needs a fresh single-use ticket, and the backend is the only thing that mints one while the frontend is
+   *    the only thing that can ask (the wire carries no plan identity, on purpose). So it is forwarded, and the
+   *    frontend decides — the authorization path is exactly the one the SellerOps button already uses.
    */
   private applyPanelIntent(type: string): void {
+    if (PANEL_INTENTS.includes(type)) {
+      this.forwardPanelIntent(type);
+      return;
+    }
     if (!PANEL_COMMANDS.includes(type)) {
       log("aw_import_panel_intent_refused", { known: false });
       return;
@@ -411,6 +474,33 @@ export class ImportSegmentSession {
           this.autoBusy = false;
         });
     }
+  }
+
+  /**
+   * Hand a panel press the runtime cannot act on to the frontend.
+   *
+   * Gated on the panel the seller is ACTUALLY looking at, not on a list of things that might be pressable: the
+   * projection is recomputed and the press must appear in its actions. That is the same shape as the
+   * `allowedCommands` gate on the command path, and it is the gate that matters here because a finished run
+   * allows no commands at all — there is no engine authority to lean on, so the rendered panel is the authority.
+   *
+   * Forwards a value from the contract's closed set and nothing else: no run state, no ref, no dates. The
+   * frontend is free to refuse it.
+   */
+  private forwardPanelIntent(type: string): void {
+    const offered = this.panelState()?.actions ?? [];
+    if (!offered.some((action) => action.command === type)) {
+      log("aw_import_panel_intent_refused", { offered: false });
+      return;
+    }
+    if (!AW_GUIDANCE_INTENTS.includes(type as AwGuidanceIntent)) {
+      // Unreachable while PANEL_INTENTS is a subset of the contract's set, and kept as the thing that makes it
+      // one: a press is never forwarded on the strength of a local constant alone.
+      log("aw_import_panel_intent_refused", { contract: false });
+      return;
+    }
+    log("aw_import_panel_intent_forwarded", { forwarded: true });
+    this.transport.send({ kind: "aw_guidance_intent", intent: type as AwGuidanceIntent });
   }
 }
 

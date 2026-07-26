@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GuidedImportCard } from "./GuidedImportCard";
@@ -9,7 +9,7 @@ import type {
   GuidedImportRuntime,
   GuidedImportSnapshot,
 } from "../../lib/actionWindow/import/importRuntime";
-import type { AwGuidancePack } from "../../../../contracts/action-window/v2/transport";
+import type { AwGuidanceIntent, AwGuidancePack } from "../../../../contracts/action-window/v2/transport";
 import type {
   ReviewImportPlanDetailView,
   ReviewImportSegmentView,
@@ -25,6 +25,7 @@ import type {
  */
 function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
   const listeners = new Set<(s: GuidedImportSnapshot | null) => void>();
+  const intentListeners = new Set<(intent: AwGuidanceIntent) => void>();
   let snapshot: GuidedImportSnapshot | null = null;
   const starts: { launchRef: string; kind: GuidedImportKind }[] = [];
   const sent: string[] = [];
@@ -34,6 +35,10 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    subscribeIntent(listener) {
+      intentListeners.add(listener);
+      return () => intentListeners.delete(listener);
     },
     setGuidancePack(pack) {
       packs.push(pack);
@@ -47,6 +52,10 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
     },
     resync() {},
     dispose() {},
+  };
+  /** The seller presses a SellerOps control inside their SmartStore window. */
+  const pressPanel = (intent: AwGuidanceIntent): void => {
+    for (const l of [...intentListeners]) l(intent);
   };
   const publish = (next: Partial<GuidedImportSnapshot> | null): void => {
     snapshot =
@@ -64,7 +73,7 @@ function fakeRuntime(opts: { attach?: boolean; startRejects?: Error } = {}) {
           };
     for (const l of [...listeners]) l(snapshot);
   };
-  return { runtime, starts, sent, packs, publish, attach: opts.attach ?? true };
+  return { runtime, starts, sent, packs, publish, pressPanel, attach: opts.attach ?? true };
 }
 
 const account: SellerAccountResponse = {
@@ -112,6 +121,17 @@ const plan = (segments: ReviewImportSegmentView[]): ReviewImportPlanDetailView =
     remainingSegments: segments.length,
     missingSegments: 0,
   },
+});
+
+/**
+ * The card re-reads its plan before every launch, so the plain launch tests would otherwise reach for a network.
+ *
+ * Defaulted to a REJECTION rather than a canned plan: the card falls back to the plan it was given, which is the
+ * behaviour every one of those tests was written against. A test that cares what the continuation copy says
+ * overrides it with the detail it wants read back.
+ */
+beforeEach(() => {
+  vi.spyOn(api, "getReviewImportPlan").mockRejectedValue(new Error("not stubbed in this test"));
 });
 
 afterEach(() => {
@@ -188,16 +208,14 @@ describe("GuidedImportCard — one action carries the import", () => {
       requiredStart: "2026-04-01", requiredEnd: "2026-04-30", discoveredStart: null, discoveredEnd: null,
       rangeEvidence: null,
     });
+    const detail = plan([
+      seg({ executionState: "COMPLETED", coverageState: "COVERED" }),
+      seg({ id: "s2", segmentStart: "2026-04-01", segmentEnd: "2026-04-30" }),
+    ]);
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
     const fake = fakeRuntime();
 
-    render(
-      <GuidedImportCard
-        account={account}
-        plan={plan([seg({ executionState: "COMPLETED", coverageState: "COVERED" }), seg({ id: "s2", segmentStart: "2026-04-01", segmentEnd: "2026-04-30" })])}
-        agent="ready"
-        runtime={fake.runtime}
-      />,
-    );
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
     expect(screen.getByTestId("guided-import-cta")).toHaveTextContent("계속 가져오기");
     await userEvent.click(screen.getByTestId("guided-import-cta"));
 
@@ -288,6 +306,149 @@ describe("GuidedImportCard — completion is claimed honestly", () => {
     render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" />);
     expect(screen.queryByTestId("completion-summary")).toBeNull();
     expect(screen.getByTestId("guided-import-cta")).toBeInTheDocument();
+  });
+});
+
+/**
+ * **The whole plan, finished inside the SmartStore window (2026-07-26).**
+ *
+ * The seller does not come back here between monthly exports. The panel in their marketplace window closes one
+ * segment and starts the next, and every one of those starts still goes through the backend mint — this card's own
+ * `start`, the same endpoint, the same agent connection. What follows pins both halves: that the words the panel
+ * will need are handed down before the run, and that a press on it does exactly what the button here does.
+ */
+describe("GuidedImportCard — the next segment starts from the marketplace window", () => {
+  const twoLeft = () =>
+    plan([
+      seg({ id: "s1", segmentStart: "2026-05-01", segmentEnd: "2026-05-31" }),
+      seg({ id: "s2", segmentStart: "2026-06-01", segmentEnd: "2026-06-30" }),
+      seg({ id: "s3", segmentStart: "2026-07-01", segmentEnd: "2026-07-26" }),
+    ]);
+
+  const launchOf = (segmentId: string, launchRef: string) => ({
+    launchRef, kind: "SEGMENT" as const, status: "ISSUED" as const, planId: "plan-1", segmentId,
+    requiredStart: "2026-07-01", requiredEnd: "2026-07-26", discoveredStart: null, discoveredEnd: null,
+    rangeEvidence: null,
+  });
+
+  /**
+   * The continuation names the segment AFTER the one being launched, because that is the one the panel will offer
+   * when this run finishes. Composed here as a finished sentence: the runtime is handed one segment at a time and
+   * cannot see a plan, so there is nothing for it to substitute.
+   */
+  it("hands down the next month and the remaining count before the run starts", async () => {
+    const detail = twoLeft();
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
+    vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue(launchOf("s3", "9a8b7c6d5e4f3021"));
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
+    await userEvent.click(screen.getByTestId("guided-import-cta"));
+    await waitFor(() => expect(fake.starts.length).toBe(1));
+
+    const continuation = fake.packs[0]!.continuation;
+    // Newest first, so July is running and June is next — with two still to go after July.
+    expect(continuation?.nextLine).toContain("2026-06-01 ~ 2026-06-30");
+    expect(continuation?.nextLine).toContain("2개 남았어요");
+    expect(continuation?.continueLabel).toBe("다음 구간 계속하기");
+    // No placeholder survives to the runtime: every one of these lines is final text.
+    expect(JSON.stringify(continuation)).not.toMatch(/\{\w+\}/);
+  });
+
+  /** The last segment hands on to nothing, and the emptiness is how the panel knows to say so. */
+  it("sends an empty next line on the final segment, so the panel closes the plan instead of offering more", async () => {
+    const detail = plan([
+      seg({ id: "s1", executionState: "COMPLETED", coverageState: "COVERED" }),
+      seg({ id: "s2", segmentStart: "2026-07-01", segmentEnd: "2026-07-26" }),
+    ]);
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
+    vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue(launchOf("s2", "9a8b7c6d5e4f3021"));
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
+    await userEvent.click(screen.getByTestId("guided-import-cta"));
+    await waitFor(() => expect(fake.starts.length).toBe(1));
+
+    expect(fake.packs[0]!.continuation?.nextLine).toBe("");
+    expect(fake.packs[0]!.continuation?.allDoneLine).toContain("모두 마쳤어요");
+    // Still honest about what was imported: the periods that were exported, never "every review".
+    expect(fake.packs[0]!.continuation?.allDoneLine).not.toMatch(/100%|모든 리뷰|전체 리뷰/);
+  });
+
+  /**
+   * The point of the slice. A press on the in-page panel mints a FRESH single-use ticket and starts the next run —
+   * with nobody touching this window.
+   */
+  it("mints a new ticket and starts the next run when the seller presses continue in SmartStore", async () => {
+    const detail = twoLeft();
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
+    const mint = vi
+      .spyOn(api, "launchNextReviewImportSegment")
+      .mockResolvedValueOnce(launchOf("s3", "9a8b7c6d5e4f3021"))
+      .mockResolvedValueOnce(launchOf("s2", "1122334455667788"));
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
+    await userEvent.click(screen.getByTestId("guided-import-cta"));
+    await waitFor(() => expect(fake.starts.length).toBe(1));
+
+    // The first run finishes and the seller presses the panel's own control, in the other window.
+    act(() => fake.publish({ status: "COMPLETED" }));
+    await act(async () => {
+      fake.pressPanel("CONTINUE_NEXT_SEGMENT");
+    });
+
+    await waitFor(() => expect(fake.starts.length).toBe(2));
+    // A SECOND ticket, not a reuse: each run is authorized once, by the server.
+    expect(mint).toHaveBeenCalledTimes(2);
+    expect(fake.starts[1]).toEqual({ launchRef: "1122334455667788", kind: "SEGMENT" });
+    // And its own copy went down first, so the second segment's panel is never wordless.
+    expect(fake.packs.length).toBe(2);
+  });
+
+  /** An intent the card does not act on must not mint anything — it is a request from a page, not a command. */
+  it("ignores a press that is not the continue intent", async () => {
+    const detail = twoLeft();
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
+    const mint = vi.spyOn(api, "launchNextReviewImportSegment");
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
+    await act(async () => {
+      fake.pressPanel("SOMETHING_ELSE" as AwGuidanceIntent);
+    });
+    expect(mint).not.toHaveBeenCalled();
+  });
+
+  /** With no plan there is no next segment, and a ticket minted against nothing would authorize unknown work. */
+  it("mints nothing when a press arrives with no plan", async () => {
+    const mint = vi.spyOn(api, "launchNextReviewImportSegment");
+    vi.spyOn(api, "previewReviewImportRange").mockResolvedValue({
+      start: "2025-07-01", end: "2026-07-26", segmentCount: 13,
+    });
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={null} agent="ready" runtime={fake.runtime} />);
+    await act(async () => {
+      fake.pressPanel("CONTINUE_NEXT_SEGMENT");
+    });
+    expect(mint).not.toHaveBeenCalled();
+  });
+
+  /** Two presses are one launch. Otherwise an impatient double-press spends two tickets on one segment. */
+  it("does not mint twice when the panel is pressed while a launch is already in flight", async () => {
+    const detail = twoLeft();
+    vi.spyOn(api, "getReviewImportPlan").mockResolvedValue(detail);
+    const mint = vi.spyOn(api, "launchNextReviewImportSegment").mockResolvedValue(launchOf("s3", "9a8b7c6d5e4f3021"));
+    const fake = fakeRuntime();
+
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" runtime={fake.runtime} />);
+    await act(async () => {
+      fake.pressPanel("CONTINUE_NEXT_SEGMENT");
+      fake.pressPanel("CONTINUE_NEXT_SEGMENT");
+    });
+    await waitFor(() => expect(fake.starts.length).toBe(1));
+    expect(mint).toHaveBeenCalledTimes(1);
   });
 });
 

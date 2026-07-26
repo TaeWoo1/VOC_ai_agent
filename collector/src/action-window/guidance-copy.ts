@@ -26,7 +26,18 @@ import type { GuidancePanelAction, GuidancePanelState } from "./guidance-panel";
  */
 export const PANEL_COMMANDS: readonly string[] = ["REQUEST_STEP_RECHECK", "CANCEL_RUN"];
 
-/** Statuses where a panel would be describing work that is over. */
+/**
+ * Panel presses that are NOT commands — the session forwards these to the frontend instead of applying them.
+ *
+ * One member, and it is a request for work the Runtime is structurally unable to do: continuing to the next
+ * segment needs a single-use ticket that only the backend mints and only the frontend can ask for (the wire
+ * carries no plan identity). Keeping it out of {@link PANEL_COMMANDS} is what stops it being handed to an engine
+ * that would refuse it, and keeping both sets closed is what stops the seller's own page reaching either path
+ * with anything that was not a button they saw.
+ */
+export const PANEL_INTENTS: readonly string[] = ["CONTINUE_NEXT_SEGMENT"];
+
+/** Statuses where the run is over, whatever the panel goes on to say about it. */
 const TERMINAL: readonly string[] = ["COMPLETED", "OPERATOR_REPORTED", "FAILED", "CANCELLED"];
 
 function interpolate(template: string, params: CopyParams): string {
@@ -58,19 +69,53 @@ export function panelCommandLabel(
 }
 
 /**
+ * The panel a FINISHED segment leaves behind, or null when it should leave none.
+ *
+ * Only `COMPLETED` earns one, and only when the frontend supplied continuation copy. The other terminal statuses
+ * take the panel down as before: a run that FAILED or was CANCELLED has nothing to hand on, and a stopped run's
+ * last instruction left on screen is how a finished import ends up looking like an unfinished one.
+ *
+ * The seller reads a completion and, when a segment remains, a control that starts it. Nothing here decides
+ * whether one remains — `nextLine` being non-empty is the frontend's answer to that, since it is the only side
+ * that can see the plan.
+ */
+function completionPanelFrom(view: ActionWindowRunView, pack: AwGuidancePack): GuidancePanelState | null {
+  if (view.status !== "COMPLETED") return null;
+  const done = pack.continuation;
+  if (!done) return null;
+  const more = done.nextLine !== "";
+  const line = more ? done.nextLine : done.allDoneLine;
+  // Nothing to say ⇒ no panel, the same rule every other lookup here follows. A completion box with an empty
+  // sentence in it would be the runtime inventing the fact that something happened.
+  if (!line) return null;
+  return {
+    product: pack.chrome.product,
+    stepLine: "",
+    instruction: "",
+    requiredRange: "",
+    blocked: null,
+    completion: { doneLabel: done.doneLabel, line },
+    // A finished run allows no commands, so this is the one intent — offered only when there is a next segment to
+    // offer it for, and only when the frontend named the button.
+    actions: more && done.continueLabel ? [{ command: "CONTINUE_NEXT_SEGMENT", label: done.continueLabel }] : [],
+  };
+}
+
+/**
  * Project a published run view onto the panel, or null when there should be no panel.
  *
- * Null on two conditions, both meaning "the seller has nothing to do here": a terminal run, and a run whose
- * guidance the operator has switched off. A terminal run leaving its last instruction on screen is how a
- * finished import ends up looking like an unfinished one.
+ * Three outcomes: a live run's guidance, a finished segment's hand-off ({@link completionPanelFrom}), or null —
+ * for a run with no pack, a run whose guidance the operator switched off, and every terminal status that has
+ * nothing left to say.
  */
 export function guidancePanelStateFrom(
   view: ActionWindowRunView,
   pack: AwGuidancePack | null,
 ): GuidancePanelState | null {
   if (!pack) return null;
-  if (TERMINAL.includes(view.status)) return null;
+  // Checked before the terminal branch: guidance switched off means no panel at all, including the completion.
   if (!view.guidanceEnabled) return null;
+  if (TERMINAL.includes(view.status)) return completionPanelFrom(view, pack);
 
   const step = view.currentStep;
   const params: CopyParams = { ...(step?.copyParams ?? {}) };
@@ -115,6 +160,7 @@ export function guidancePanelStateFrom(
     instruction,
     requiredRange,
     blocked,
+    completion: null,
     actions,
   };
 }
@@ -142,8 +188,17 @@ export function isGuidancePack(value: unknown): value is AwGuidancePack {
   const recheck = pack.recheck as Record<string, unknown> | undefined;
   if (!recheck || typeof recheck.fallback !== "string") return false;
   if (!isStringMap(recheck.byBlocker) || !isStringMap(recheck.byStep)) return false;
+  // Optional, but a malformed one rejects the WHOLE pack rather than being dropped: the panel it would draw is
+  // the one that hands the seller on to the next segment, and half of that is worse than none of it.
+  if (pack.continuation !== undefined) {
+    const done = pack.continuation as unknown;
+    if (!isRecord(done)) return false;
+    if (!CONTINUATION_FIELDS.every((field) => typeof done[field] === "string")) return false;
+  }
   return true;
 }
+
+const CONTINUATION_FIELDS: readonly string[] = ["doneLabel", "nextLine", "allDoneLine", "continueLabel"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -170,6 +170,40 @@ describe("import segment host", () => {
     expect(endpoint.hostedRunId()).toBe("run_announce");
   });
 
+  /**
+   * **A ticket for another marketplace is refused, not coerced.**
+   *
+   * Found on 2026-07-26 before it could happen live: the SellerOps import screen defaulted to whichever connected
+   * account came first, which was a COUPANG one. A seller could have created a plan for that account and minted a
+   * ticket against it, while the only driver present guides NAVER — and nothing downstream compared the two. The
+   * run would have walked them through NAVER's own export and ingested the result into the Coupang plan's
+   * segment: a file covering one marketplace recorded as covering another.
+   *
+   * The channel is a platform target, so an unexpected one fails closed. Nothing is assembled and the marketplace
+   * surface is never touched.
+   */
+  it("refuses a ticket whose channel is not the one this agent drives", async () => {
+    const { endpoint, host, driver } = build(async () => scope({ channelCode: "coupang" }));
+
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+
+    expect(host.activeSession()).toBeNull();
+    expect(driver.calls).toEqual([]);
+    // No re-announcement either: a refused ticket must not move the hosted run identity.
+    expect(endpoint.hostedRunId()).toBe("run_announce");
+  });
+
+  /** An empty channel is the server declining to name one, and the agent's own channel still applies. */
+  it("still hosts a scope that names no channel at all", async () => {
+    const { endpoint, host } = build(async () => scope({ channelCode: "" }));
+
+    endpoint.replayClientFrame(startRun(REF_A));
+    await settle(host);
+
+    expect(host.activeSession()).not.toBeNull();
+  });
+
   /** A discovery ticket is not a segment run — guiding a window nobody planned is worse than refusing. */
   it("refuses to host a discovery ticket as a segment", async () => {
     const { endpoint, host, driver } = build(async () => scope({ kind: "DISCOVERY" }));

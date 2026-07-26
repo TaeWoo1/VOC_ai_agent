@@ -139,6 +139,11 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     return this.proven.surfaceContext();
   }
 
+  /** The panel state last drawn, so a navigation can restore it. `null` = deliberately taken down. */
+  private lastPanelState: GuidancePanelState | null = null;
+  /** One `load` listener per driver, however many times a panel is drawn. */
+  private panelReattachBound = false;
+
   /** Which step the diagnostic overlay badge should show. Set by the session as the run advances. */
   setStepNumber(stepNumber: number): void {
     this.stepNumber = stepNumber;
@@ -482,12 +487,45 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * control it is describing.
    */
   async renderGuidance(state: GuidancePanelState | null): Promise<void> {
+    // Remembered so a navigation can put it back — see `keepPanelAcrossNavigation`.
+    this.lastPanelState = state;
     if (!state) {
       await unmountGuidancePanel(this.ctx()).catch(() => {});
       return;
     }
+    this.keepPanelAcrossNavigation();
     await this.ctx().evaluate(NAME_SHIM);
     await mountGuidancePanel(this.ctx(), state);
+  }
+
+  /**
+   * Re-draw the panel after the page navigates.
+   *
+   * **The panel is injected DOM, so a navigation erases it — and the one navigation this run is GUARANTEED to
+   * cause is the one it asked for.** On 2026-07-26 the surface probe reported `LOGIN_REQUIRED`, the panel said so
+   * and offered 다시 확인, the operator logged into NAVER — and the login navigated the page, taking the
+   * instruction and the recovery control with it. The run was parked waiting to be asked to look again, so nothing
+   * published a new state, so nothing re-drew the panel. The seller was left on a logged-in page with no way
+   * forward and no explanation, which is precisely the failure this panel exists to prevent.
+   *
+   * Re-mounting the LAST state is correct rather than convenient: the panel is a projection of run state, the run
+   * state did not change across the navigation, so the panel after it should say exactly what it said before.
+   * Registered once; `null` (the panel was taken down deliberately) re-mounts nothing.
+   */
+  private keepPanelAcrossNavigation(): void {
+    if (this.panelReattachBound) return;
+    this.panelReattachBound = true;
+    this.proven.surfacePage().on("load", () => {
+      const state = this.lastPanelState;
+      if (!state) return;
+      void (async () => {
+        await this.ctx().evaluate(NAME_SHIM);
+        await mountGuidancePanel(this.ctx(), state);
+        log("aw_import_panel_remounted", { afterNavigation: true });
+      })().catch(() => {
+        // A page that is navigating again, or closing. The next published state re-draws it.
+      });
+    });
   }
 
   /** The seller's last press on that panel. Take-once; a failed read is "they pressed nothing". */

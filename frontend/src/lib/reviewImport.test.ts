@@ -13,6 +13,8 @@ import {
   canMarkMissing,
   canSplit,
   completionSummaryText,
+  continuationAfterNext,
+  continuationCopy,
   coverageSummary,
   coveredRowsText,
   healthSummary,
@@ -452,6 +454,101 @@ describe("buildImportGuidancePack", () => {
     const values = JSON.stringify(buildImportGuidancePack());
     expect(values).not.toMatch(/<[a-z]/i);
     expect(values).not.toMatch(/https?:\/\//);
+  });
+
+  /** No continuation ⇒ a finished run takes its panel down, which is what shipped on 2026-07-26. */
+  it("omits the continuation unless one is supplied", () => {
+    expect(buildImportGuidancePack().continuation).toBeUndefined();
+    expect(buildImportGuidancePack(null).continuation).toBeUndefined();
+  });
+});
+
+/* ─────────────────── one segment ends, the next begins, in the same window ─────────────────── */
+
+/**
+ * **The words a finished segment leaves in the seller's SmartStore window.**
+ *
+ * Composed here as FINISHED sentences, unlike the rest of the pack: they name a month and a count, and both are
+ * facts about the plan. The runtime is handed one launch ref at a time and cannot see a plan at all, so there is
+ * nothing for it to substitute — and a `{remaining}` it could not fill would render as an empty gap.
+ */
+describe("continuationCopy", () => {
+  it("names the next month and how many are left", () => {
+    const copy = continuationCopy({ next: { segmentStart: "2026-06-01", segmentEnd: "2026-06-30" }, remaining: 2 });
+    expect(copy.nextLine).toContain("2026-06-01 ~ 2026-06-30");
+    expect(copy.nextLine).toContain("2개");
+    expect(copy.continueLabel).toBe("다음 구간 계속하기");
+  });
+
+  it("leaves no placeholder for the runtime to fill", () => {
+    const copy = continuationCopy({ next: { segmentStart: "2026-06-01", segmentEnd: "2026-06-30" }, remaining: 1 });
+    expect(JSON.stringify(copy)).not.toMatch(/\{\w+\}/);
+  });
+
+  /** The empty next line is how the panel knows to close the plan instead of offering more. */
+  it("empties the next line when nothing remains, and closes the plan honestly", () => {
+    const copy = continuationCopy({ next: null, remaining: 0 });
+    expect(copy.nextLine).toBe("");
+    expect(copy.allDoneLine).toContain("모두 마쳤어요");
+    // The same rule as `completionSummaryText`: never a claim that every review NAVER holds is now present.
+    expect(copy.allDoneLine).not.toMatch(/100%|모든 리뷰|전체 리뷰/);
+  });
+});
+
+describe("continuationAfterNext", () => {
+  const seg = (start: string, end: string, over: Partial<ReviewImportSegmentView> = {}): ReviewImportSegmentView => ({
+    id: start,
+    ordinal: 0,
+    segmentStart: start,
+    segmentEnd: end,
+    executionState: "PENDING",
+    coverageState: "UNVERIFIED",
+    coveredRows: null,
+    rowsReconciled: false,
+    superseded: false,
+    parentSegmentId: null,
+    ...over,
+  });
+
+  /**
+   * The FIRST remaining segment is the one about to run, so what the panel needs is the SECOND. Newest-first, the
+   * same order the backend's own `nextRemainingSegment` uses — the two must agree, or the panel names one month
+   * and the ticket authorizes another.
+   */
+  it("skips the segment being launched and describes the one after it", () => {
+    const continuation = continuationAfterNext([
+      seg("2026-05-01", "2026-05-31"),
+      seg("2026-06-01", "2026-06-30"),
+      seg("2026-07-01", "2026-07-26"),
+    ]);
+    expect(continuation.next).toEqual({ segmentStart: "2026-06-01", segmentEnd: "2026-06-30" });
+    expect(continuation.remaining).toBe(2);
+  });
+
+  it("has nothing to hand on when the launch finishes the plan", () => {
+    const continuation = continuationAfterNext([
+      seg("2026-06-01", "2026-06-30", { executionState: "COMPLETED", coverageState: "COVERED" }),
+      seg("2026-07-01", "2026-07-26"),
+    ]);
+    expect(continuation.next).toBeNull();
+    expect(continuation.remaining).toBe(0);
+  });
+
+  /** A concluded-MISSING month needs no run, so it must never be offered as the next one. */
+  it("ignores covered, missing, superseded and active segments", () => {
+    const continuation = continuationAfterNext([
+      seg("2026-03-01", "2026-03-31", { coverageState: "MISSING", executionState: "COMPLETED" }),
+      seg("2026-04-01", "2026-04-30", { superseded: true }),
+      seg("2026-05-01", "2026-05-31", { executionState: "ACTIVE" }),
+      seg("2026-06-01", "2026-06-30"),
+      seg("2026-07-01", "2026-07-26"),
+    ]);
+    expect(continuation.next).toEqual({ segmentStart: "2026-06-01", segmentEnd: "2026-06-30" });
+    expect(continuation.remaining).toBe(1);
+  });
+
+  it("has nothing to hand on from an empty plan", () => {
+    expect(continuationAfterNext([])).toEqual({ next: null, remaining: 0 });
   });
 });
 

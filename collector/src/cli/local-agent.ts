@@ -45,10 +45,12 @@ import { createAgentBridge, type AgentActionWindowConfig, type AgentImportConfig
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
 import { NaverLiveImportDriver } from "../action-window/initial-import/naver-live-import-driver";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
+import { LazyImportDriver } from "../action-window/initial-import/lazy-import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, login } from "../upload";
 import { launchNaverContext } from "../profile";
+import type { Page } from "playwright";
 import { decideSurfacePresentation } from "../naver/surface-presentation";
 import { log } from "../log";
 import {
@@ -222,17 +224,61 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
 }
 
 /**
+ * Raise the OS window a page lives in — best effort, never fatal.
+ *
+ * `page.bringToFront()` activates a TAB inside its window; it does not raise the window itself. When SellerOps and
+ * the seller center are in the same window that is enough, and when they are not it is invisible: on 2026-07-26 the
+ * operator pressed 계속 가져오기 from a SellerOps tab in a different browser window and nothing appeared to happen,
+ * because the tab we activated was in a window behind it.
+ *
+ * There is no Playwright API for "raise this window", so this goes through CDP's `Browser` domain — the same
+ * browser we launched, asking about its own window. It restores a minimized window and re-asserts its bounds,
+ * which is as far as a browser can push without the OS-level focus stealing that no page should be able to do.
+ *
+ * Returns whether it worked, because the caller LOGS it: a claim that a window was raised has to be a measurement,
+ * not an intention.
+ */
+async function raiseWindowOf(page: Page): Promise<boolean> {
+  try {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const { windowId } = (await cdp.send("Browser.getWindowForTarget")) as { windowId: number };
+      await cdp.send("Browser.setWindowBounds", { windowId, bounds: { windowState: "normal" } });
+      return true;
+    } finally {
+      await cdp.detach().catch(() => {});
+    }
+  } catch {
+    // A browser that would not answer, or a build without the Browser domain. The run continues: the seller can
+    // still switch to the tab, and the panel in it says what to do.
+    return false;
+  }
+}
+
+/**
  * Build the {@link AgentImportConfig} for the approval-only import mode.
  *
- * **This is the one Local Agent path that launches a browser at startup** (product-owner decision,
- * 2026-07-25). It is deliberate rather than convenient: a seated operator has to log into NAVER in that
- * browser before any run can happen, so deferring the launch would only move the wait. The gate in
- * `import-mode-gate.ts` is what keeps it off every other path — normal agent, production, scheduled and
- * non-interactive hosts all refuse, and no other carrier flag may be combined with it.
+ * **The browser opens on SELLEROPS, and the marketplace tab comes later** (product-owner decision, 2026-07-26,
+ * reversing 2026-07-25). It used to launch straight into the NAVER review surface while starting up, on the
+ * reasoning that the operator has to log in there anyway. Watching it in use answered that twice over: a
+ * marketplace window that appears before the seller has asked for anything arrives while they are still in
+ * SellerOps deciding how far back to import — and splitting the two across separate browser profiles gives them
+ * two sessions and an account picker to get right twice.
  *
- * **A browser is NOT a run.** Launching Chrome starts nothing: `ImportSegmentHost` waits for a valid
- * `START_RUN` carrying a launch ref, resolves that ref against the SERVER, and only then assembles a
- * session. Until then the agent is a logged-in browser and an announced carrier, nothing more.
+ * So the journey is one profile, in the order the seller experiences it:
+ *
+ *  1. **boot** — launch the profile and open SellerOps. Nothing marketplace-facing exists yet.
+ *  2. **the seller asks to be connected** (a pairing approved, or their tab attaching) — the bridge's
+ *     `onSellerOpsConnected` hook warms the surface up, and the seller center opens as a second tab.
+ *  3. **a run** — `START_RUN` with a server-resolved ticket. If step 2 never happened, the first call that needs
+ *     the page opens it; `LazyImportDriver` also spells out the four calls that must never cause one.
+ *
+ * The gate in `import-mode-gate.ts` still keeps this mode off every other path — normal agent, production,
+ * scheduled and non-interactive hosts all refuse, and no other carrier flag may be combined with it.
+ *
+ * **A browser is NOT a run.** `ImportSegmentHost` waits for a valid `START_RUN` carrying a launch ref and
+ * resolves that ref against the SERVER before assembling anything. An open seller center is a window the seller
+ * asked for, not work in progress.
  *
  * **Nothing is resumed and no ref is stored.** The launch ref lives only in memory for the life of one
  * run; `.import-runs/` markers carry no ref, and restart recovery ABANDONS rather than resuming (see
@@ -241,26 +287,33 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
  */
 export async function buildInitialImportConfig(
   env: NodeJS.ProcessEnv,
-): Promise<{ config: AgentImportConfig; close: () => Promise<void> }> {
+): Promise<{ config: AgentImportConfig; close: () => Promise<void>; warmUpSurface: () => Promise<void> }> {
   const cfg = loadConfig(env);
-  // Same requirement every other live NAVER CLI in this package has. Fail closed BEFORE launching a
-  // browser: an agent that opens a blank window and then announces itself ready looks like it is working
-  // and is not — the first version of this boot did exactly that.
+  // Same requirement every other live NAVER CLI in this package has, and it is checked HERE — at boot, before
+  // the seller has pressed anything — precisely because the browser no longer opens at boot. A misconfigured
+  // agent must fail while an operator is still looking at its output, not halfway through a guided run.
   if (!cfg.naverReviewUrl) {
     throw new Error(
       "NAVER_REVIEW_URL is not set. The import mode needs the review-management page URL; set it in the environment before starting the agent.",
     );
   }
-  // Headed, dedicated profile, inside the collector tree (the profile path guard enforces that). The
-  // operator logs in here themselves — the collector never types NAVER credentials.
+  const reviewUrl = cfg.naverReviewUrl;
+
+  /**
+   * ONE browser profile for the whole journey, opened on SellerOps.
+   *
+   * The seller works in a single window: SellerOps first, and the seller center appears next to it when they ask
+   * to be connected. Two profiles would mean two sessions and an account picker they have to get right twice —
+   * which is what the product owner flagged, and the reason this launches here rather than leaving the seller to
+   * find SellerOps in whichever browser their machine happens to default to.
+   *
+   * The marketplace tab is deliberately NOT opened here; see `openSurface` below.
+   */
   const context = await launchNaverContext(cfg.profileDir);
-  const page = context.pages()[0] ?? (await context.newPage());
-  // Open the review surface at BOOT, which is what the other live CLIs do. Landing the seller on the page they
-  // are about to work on is the whole point of a guided mode.
-  //
-  // The URL is never logged: raw URLs are prohibited output (roadmap §9), so only the fact of navigation is.
-  await page.goto(cfg.naverReviewUrl, { waitUntil: "domcontentloaded" });
-  log("aw_import_surface_opened", {});
+  const appPage = context.pages()[0] ?? (await context.newPage());
+  // Neither URL is ever logged: raw URLs are prohibited output (roadmap §9), so only the fact is.
+  await appPage.goto(cfg.appUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+  log("aw_import_app_opened", {});
 
   // The launch ref and the scope evidence are BOTH only known per run, long after this capability is
   // built — the ref arrives in START_RUN and the evidence depends on what the seller did with the dates.
@@ -270,57 +323,97 @@ export async function buildInitialImportConfig(
   // Forward declaration: the evidence comes from the import driver's own scope read, because it is the
   // only component that actually performed one.
   let importDriver: NaverLiveImportDriver | null = null;
-  const proven = new NaverLiveProbeDriver(page, {
-    quarantineDir: defaultQuarantineDirFor(collectorRoot),
-    ingest: buildSegmentIngestUpload({
-      baseUrl: cfg.baseUrl,
-      email: cfg.email,
-      password: cfg.password,
-      get launchRef() {
-        return boundRef;
+  /**
+   * Open the MARKETPLACE tab, next to SellerOps, and build the real driver.
+   *
+   * Called at most once, by {@link LazyImportDriver} — from the bridge's connect hook when the seller asks to be
+   * connected, or, failing that, by the first run that needs the page.
+   *
+   * A NEW page in the SAME context, never `pages()[0]`: that one is SellerOps. Binding the driver to it would
+   * point every locate, highlight and observation at our own app, and the seller would be guided to click
+   * controls in the wrong window.
+   */
+  const openSurface = async (): Promise<NaverLiveImportDriver> => {
+    // The operator logs into NAVER here themselves — the collector never types NAVER credentials.
+    const page = await context.newPage();
+    await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
+    await page.bringToFront().catch(() => {});
+    log("aw_import_surface_opened", {});
+
+    const proven = new NaverLiveProbeDriver(page, {
+      quarantineDir: defaultQuarantineDirFor(collectorRoot),
+      ingest: buildSegmentIngestUpload({
+        baseUrl: cfg.baseUrl,
+        email: cfg.email,
+        password: cfg.password,
+        get launchRef() {
+          return boundRef;
+        },
+        scopeEvidence: () => importDriver?.scopeEvidence() ?? "OPERATOR_CONFIRMED",
+      }),
+      guidanceEnabled: true,
+      // A seated seller working through six barriers is slower than the export CLI's own coordination, and a
+      // short window reported "they did not act" about someone mid-interaction.
+      observeTimeoutMs: 120_000,
+      // Enabled on this seated path so a fail-closed CONSENT outcome immediately overlays sanitized candidate
+      // labels (A1/B1…) for the operator to name, instead of costing another export window to learn that it
+      // failed. It never changes what is clicked — the driver still never clicks — and never relaxes
+      // fail-closed by itself. The seller's consent control is likely to need it: NAVER's button reads 확인,
+      // which is not export wording, and the continuation matcher looks for export wording.
+      liveDebug: true,
+    });
+    const driver = new NaverLiveImportDriver(proven, {
+      guidanceEnabled: true,
+      observeTimeoutMs: 120_000,
+      /**
+       * Put this window in front of the seller when a run starts, and return it to the review surface if it has
+       * drifted (product-owner request, 2026-07-26: pressing 연동 in SellerOps should bring up the seller center
+       * rather than asking them to go find the window).
+       *
+       * Both are actions on SellerOps' OWN window — raising it, and following the same public application route
+       * the launch already used. Nothing is clicked, typed, submitted or consented, and the decision refuses to
+       * navigate off-origin so it can never destroy a login or a 2FA step the seller is in the middle of; that
+       * case raises the window and lets `prepareSurface` report `LOGIN_REQUIRED`, which the seller clears
+       * themselves. See `naver/surface-presentation.ts`.
+       *
+       * On the FIRST run this is nearly a no-op — the launch that just happened navigated there — and it still
+       * runs, because "nearly" is not "always": the seller may have moved that window between the launch and the
+       * first probe.
+       */
+      async presentSurface(): Promise<void> {
+        const decision = decideSurfacePresentation(page.url(), reviewUrl);
+        let focused = false;
+        let raised = false;
+        if (decision.focus) {
+          // Activates the TAB. On its own this is not enough, and the gap is what the seller notices: if their
+          // SellerOps tab lives in a different OS window, activating a tab in ours changes nothing they can see
+          // (2026-07-26 — the operator pressed 계속 가져오기 and no seller center appeared).
+          focused = await page
+            .bringToFront()
+            .then(() => true)
+            .catch(() => false);
+          raised = await raiseWindowOf(page);
+        }
+        if (decision.navigate) {
+          await page.goto(reviewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+        }
+        // The DECISION plus what actually happened. `focus: true` alone used to be logged before either call was
+        // made, so a failed raise was indistinguishable from a successful one — and this is exactly the line
+        // someone reads to find out why a window did not appear.
+        log("aw_import_surface_present", {
+          reason: decision.reason,
+          focus: decision.focus,
+          navigate: decision.navigate,
+          focused,
+          raised,
+        });
       },
-      scopeEvidence: () => importDriver?.scopeEvidence() ?? "OPERATOR_CONFIRMED",
-    }),
-    guidanceEnabled: true,
-    // A seated seller working through six barriers is slower than the export CLI's own coordination, and a
-    // short window reported "they did not act" about someone mid-interaction.
-    observeTimeoutMs: 120_000,
-    // Enabled on this seated path so a fail-closed CONSENT outcome immediately overlays sanitized candidate
-    // labels (A1/B1…) for the operator to name, instead of costing another export window to learn that it
-    // failed. It never changes what is clicked — the driver still never clicks — and never relaxes
-    // fail-closed by itself. The seller's consent control is likely to need it: NAVER's button reads 확인,
-    // which is not export wording, and the continuation matcher looks for export wording.
-    liveDebug: true,
-  });
-  const driver = new NaverLiveImportDriver(proven, {
-    guidanceEnabled: true,
-    observeTimeoutMs: 120_000,
-    /**
-     * Put this window in front of the seller when a run starts, and return it to the review surface if it has
-     * drifted (product-owner request, 2026-07-26: pressing 연동 in SellerOps should bring up the seller center
-     * rather than asking them to go find the window).
-     *
-     * Both are actions on SellerOps' OWN window — raising it, and following the same public application route
-     * the boot already used. Nothing is clicked, typed, submitted or consented, and the decision refuses to
-     * navigate off-origin so it can never destroy a login or a 2FA step the seller is in the middle of; that
-     * case raises the window and lets `prepareSurface` report `LOGIN_REQUIRED`, which the seller clears
-     * themselves. See `naver/surface-presentation.ts`.
-     */
-    async presentSurface(): Promise<void> {
-      const decision = decideSurfacePresentation(page.url(), cfg.naverReviewUrl);
-      // Sanitized: the enum and two booleans. Never a URL — not the current one, not the configured one.
-      log("aw_import_surface_present", {
-        reason: decision.reason,
-        focus: decision.focus,
-        navigate: decision.navigate,
-      });
-      if (decision.focus) await page.bringToFront().catch(() => {});
-      if (decision.navigate) {
-        await page.goto(cfg.naverReviewUrl!, { waitUntil: "domcontentloaded" }).catch(() => {});
-      }
-    },
-  });
-  importDriver = driver;
+    });
+    importDriver = driver;
+    return driver;
+  };
+
+  const driver = new LazyImportDriver({ open: openSurface });
 
   const config: AgentImportConfig = {
     announceRunId: `run_${randomBytes(6).toString("hex")}`,
@@ -350,7 +443,13 @@ export async function buildInitialImportConfig(
       }
     },
   };
-  return { config, close: () => context.close() };
+  return {
+    config,
+    close: () => context.close(),
+    // The middle arrow of the journey the product owner described — open SellerOps, ask to connect, and THEN the
+    // seller center appears. The boot hands this to the bridge, which calls it when SellerOps connects.
+    warmUpSurface: () => driver.warmUp(),
+  };
 }
 
 /**
@@ -366,7 +465,7 @@ export async function buildInitialImportConfig(
  * One browser for the seller to log into, one bridge for the frontend to attach to, nothing else.
  */
 async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
-  let built: { config: AgentImportConfig; close: () => Promise<void> };
+  let built: { config: AgentImportConfig; close: () => Promise<void>; warmUpSurface: () => Promise<void> };
   try {
     built = await buildInitialImportConfig(env);
   } catch (err) {
@@ -375,12 +474,22 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
     process.exit(6);
     return;
   }
-  const { config, close } = built;
+  const { config, close, warmUpSurface } = built;
   const approvalKind = decideApprovalPresenter(env, process.platform);
   const bridge = createAgentBridge({
     ...resolveAgentBridgeConfig(args, env),
     approvalPresenter: createApprovalPresenterFor(approvalKind),
     initialImport: config,
+    /**
+     * The seller opened SellerOps and asked to be connected — so bring their seller center up now.
+     *
+     * This is the sequence the product owner asked for, and the reason it is here rather than at boot or at
+     * `START_RUN`: at boot the window arrives before they have asked for anything, and at `START_RUN` they meet
+     * it in the middle of a guided step. Warming up is not a run: nothing is probed and no ticket exists yet.
+     *
+     * Fired on every reconnect and swallowed on failure; the launch itself is idempotent.
+     */
+    onSellerOpsConnected: () => void warmUpSurface(),
   });
   const listen = await bridge.listen();
   console.log(
@@ -390,7 +499,11 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
       initialImport: true,
       approvalPresenter: approvalKind,
       // Sanitized: no launch ref (none exists yet — it arrives in START_RUN), no dates, no account.
+      //
+      // Two booleans rather than one, because an operator reads this line to decide which window to look for: a
+      // browser IS up and showing SellerOps, and the seller center is NOT — it opens when they ask to connect.
       browserLaunched: true,
+      marketplaceOpened: false,
     }),
   );
   bridge.markAgentStarted();

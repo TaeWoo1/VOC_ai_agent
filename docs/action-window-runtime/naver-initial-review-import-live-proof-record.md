@@ -393,3 +393,92 @@ first, then ask whether the surface is usable — is pinned by a source guard.
 - The pairing **approval** control: `--dev-insecure-auto-approve` again, for the same TTY reason. Two live runs
   have now skipped it.
 - Whether the panel's fixed bottom-left position ever covers something the seller needs.
+
+---
+
+# Addendum 5 — the whole plan, finished inside the SmartStore window (offline, 2026-07-26, later the same day)
+
+Addendum 3/4 got the seller through **one** segment without watching two windows. A plan is thirteen of them.
+Between each one they still had to find the SellerOps tab and press 계속 가져오기, which is the same alternating-window
+cost that slice existed to remove, paid twelve more times. Product-owner decision (2026-07-26): after one start in
+SellerOps, the whole plan finishes in the marketplace window.
+
+## The question asked first: who is allowed to issue the next ticket
+
+The instruction was to establish this from the repository before designing anything, and not to invent an
+authorization path. What the code says:
+
+| Party | What it can do about a launch ticket | Evidence |
+| --- | --- | --- |
+| **Backend** | The only thing that mints one. `mintNextSegment` picks the segment (newest-first) and `mintSegment` enforces the rules; org comes from the JWT, never a parameter; V28's partial unique index stops two open tickets for one segment. | `ReviewImportLaunchService`, `ReviewImportPlanController` (`POST /plans/{planId}/launches/next-segment`) |
+| **Frontend** | The only thing that can *ask*. It holds the plan and segment identity — which the Action Window wire deliberately does not carry — and the seller's session. | `apiClient.launchNextReviewImportSegment`, `GuidedImportCard.start` |
+| **Local Agent** | **No minting path at all.** It resolves a ref it was handed (`GET /launches/{ref}/scope`) and ingests against it. It cannot name "the next segment", because nothing ever tells it there is a plan. | `import-host.ts` (`resolveScope` injected), `upload.ts` |
+
+So the panel could not be made to start the next segment by giving the runtime a new capability. It was made to
+**ask**: the press crosses the wire as a request, the frontend answers it exactly as its own button does, and the
+backend remains the only authority. `POST /plans/{planId}/launches/next-segment` gained no new caller, no new
+parameter, and no new permission.
+
+## What changed
+
+- **Contract** — one server frame, `aw_guidance_intent`, carrying one closed-set enum (`CONTINUE_NEXT_SEGMENT`) and
+  nothing else. Plus an optional `continuation` block on the existing `aw_guidance_pack`. `v2/index.ts` is again
+  untouched, so the Runtime→FE privacy invariant and `findProhibitedFields` are unchanged (README §8.2).
+- **Runtime** — a `COMPLETED` segment now leaves a panel instead of removing one: what finished, what is next, and
+  one control. The panel poll survives the run's end so the control is watched, bounded by a 15-minute budget after
+  which the panel comes down rather than sit there dead.
+- **Frontend** — `start()` is now the single path for both entry points, and the pack it sends carries the
+  continuation copy composed for the segment *after* the one being launched.
+
+## Why the continuation copy is final text, unlike the rest of the pack
+
+Every other pack entry is a template the runtime substitutes its own facts into. These lines name a month and a
+count, and both are facts about the **plan** — which the runtime cannot see, because it is handed one launch ref at a
+time and no more. There is nothing for it to substitute, and a `{remaining}` it could not fill would render as a
+gap. So the frontend composes the sentence whole; even the branch between "here is the next one" and "you are
+finished" is the frontend's, expressed by leaving `nextLine` empty. Contract §6 holds in the same inverted form
+Addendum 3 established, and the collector's no-Hangul source guard still proves it structurally.
+
+## The press is treated as untrusted input, because it is
+
+The flag lives in the seller's own page. Two gates, and the first is the one that matters:
+
+1. the press must be in a closed set — `PANEL_INTENTS` for forwarding, `PANEL_COMMANDS` for the engine, and nothing
+   in that page can reach either path with anything else;
+2. it must appear in the panel the seller is **actually looking at** — the projection is recomputed and the press
+   matched against its rendered actions. This replaces the `allowedCommands` gate for intents, and has to: a
+   completed run allows no commands at all, so there is no engine authority to lean on.
+
+Then the frontend gates it again (no plan ⇒ no mint; a launch already in flight ⇒ no second mint) and the backend
+refuses anything it should (nothing remaining, already covered, already active, a spent ticket).
+
+## Proven offline, across a real socket
+
+`collector/test/crossstack/fe-import-runtime-real-bridge.test.ts` — the real frontend runtime and transport against
+a real `BridgeServer` + `InitialImportEndpoint` + `ImportSegmentHost` + the real engine and session:
+
+- one segment completes, the panel shows the completion and the offer, the seller presses it in the page, and a
+  **second segment runs to COMPLETED on the same socket** — two ingests, two distinct run identities, one connection;
+- the second segment draws its own panel in the frontend's words, so it can hand on again;
+- a frontend that declines the press hosts nothing: one ticket resolved, one run, one ingest;
+- the forwarded frame carries the enum and nothing else — no ref, no dates, no plan or segment identity.
+
+Also pinned: the ticket sequence at the service level (`aSelectedRangeBecomesAPlanAndThenOneFreshTicketPerSegment` —
+selection → plan → July's ticket → ingest → June's *distinct* ticket → the spent one refused → nothing left fails
+closed), the panel projection and its refusals (`guidance-copy.test.ts`), the session's routing and its 15-minute
+budget (`import-session.test.ts`), the intent's delivery (`importRuntime.test.ts`, `useGuidedImport.test.tsx`), and
+the card's two entry points converging on one launch (`GuidedImportCard.test.tsx`).
+
+**One CI-visible defect this found, in a place neither side alone would have:** the frontend's `wsTransport`
+allow-lists server frame kinds (the mirror of the collector endpoint's client-frame allow-list). The new frame was
+silently dropped there, so the button did nothing at all — with every unit test on both sides green. Only the
+cross-stack suite failed.
+
+## Still unproven after this slice
+
+- **Live: two segments in one sitting driven from the panel.** This slice is offline-proven only.
+- Everything Addendum 4 lists as unproven remains so — the window presentation, an apply-requiring surface, the
+  `UNREADABLE` branch, a live `SCOPE_MISMATCH` under the panel, the pairing approval control.
+- The 15-minute idle budget: unit-proven with a 20 ms budget, never observed at its real value.
+- Whether a seller reads the completion panel as "done, carry on" — the panel colours it green and says so, but
+  nothing here has watched anyone use it.

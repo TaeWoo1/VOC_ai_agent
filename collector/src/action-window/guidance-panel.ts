@@ -17,9 +17,10 @@
  *     no Hangul in this file — `guidance-panel-purity.test.ts` asserts that, so contract §6 (the FE owns all
  *     copy) is structural here rather than remembered.
  *  2. **It clicks nothing on the marketplace.** The panel's own buttons set a flag in the page; the driver
- *     reads it and hands it to the engine as an ordinary operator command. They are SellerOps controls the
- *     seller presses, exactly like a barrier the seller satisfies — the runtime still never presses a
- *     platform control, and `REQUEST_STEP_RECHECK` still only means "look again".
+ *     reads it and the session either hands it to the engine as an ordinary operator command or forwards it to
+ *     the frontend as an intent. They are SellerOps controls the seller presses, exactly like a barrier the
+ *     seller satisfies — the runtime still never presses a platform control, and `REQUEST_STEP_RECHECK` still
+ *     only means "look again".
  *  3. **It never covers the control it is talking about.** The spotlight
  *     ({@link import("./overlay").mountOverlay}) keeps `pointer-events: none` so it can never intercept the
  *     seller's click. This panel DOES take pointer events — it has buttons — so it is pinned to a corner,
@@ -30,7 +31,15 @@ import type { Frame, Page } from "playwright";
 /** Only `.evaluate` is used, which a `Frame` exposes identically to a `Page` (same rule as the overlay). */
 type PageOrFrame = Page | Frame;
 
-/** One control the panel offers. `command` is a v2 `CommandType`; `label` is the frontend's wording. */
+/**
+ * One control the panel offers.
+ *
+ * `command` is either a v2 `CommandType` the Runtime applies to the run it is hosting, or a guidance INTENT the
+ * Runtime forwards to the frontend because it cannot act on it alone (`CONTINUE_NEXT_SEGMENT` needs a ticket only
+ * the backend mints). This module does not know or care which: it renders a labelled button and reports the press.
+ * The routing decision belongs to `guidance-copy.ts` and `import-session.ts`, which is where the two closed sets
+ * live.
+ */
 export interface GuidancePanelAction {
   command: string;
   label: string;
@@ -53,7 +62,18 @@ export interface GuidancePanelState {
   requiredRange: string;
   /** Present only while the run is stopped: what is wrong, and the one thing that clears it. */
   blocked: { label: string; title: string; fix: string } | null;
-  /** Rendered from the runtime's `allowedCommands` alone — never from what the panel assumes. */
+  /**
+   * Present only when the run has FINISHED: that it is done, and what comes next.
+   *
+   * A segment ending used to take the panel down, which meant the seller's next act was to find the SellerOps
+   * tab — thirteen times for thirteen months. `line` is either the next window and how many are left, or the
+   * whole-plan completion, and the frontend decided which before it ever reached this module.
+   */
+  completion: { doneLabel: string; line: string } | null;
+  /**
+   * Rendered from the runtime's `allowedCommands` alone while a run is live — never from what the panel assumes.
+   * A finished run allows no commands at all, so the one control it can carry is a guidance intent.
+   */
   actions: readonly GuidancePanelAction[];
 }
 
@@ -148,6 +168,24 @@ export async function mountGuidancePanel(page: PageOrFrame, state: GuidancePanel
       box.appendChild(label);
       box.appendChild(title);
       box.appendChild(fix);
+      panel.appendChild(box);
+    }
+    if (s.completion) {
+      // Green rather than amber: a finished segment is the one panel state that is good news, and the seller has
+      // to be able to tell "done, carry on" from "stopped, fix something" at a glance in someone else's UI.
+      const box = document.createElement("div");
+      box.setAttribute("data-aw-panel-completion", "");
+      box.style.cssText =
+        "margin-top:10px;padding:10px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0";
+      const label = document.createElement("div");
+      label.textContent = s.completion.doneLabel;
+      label.style.cssText = "font-size:11px;font-weight:700;color:#15803d;letter-spacing:0.04em";
+      const line = document.createElement("div");
+      line.setAttribute("data-aw-panel-completion-line", "");
+      line.textContent = s.completion.line;
+      line.style.cssText = "margin-top:2px;font-weight:600;word-break:keep-all";
+      box.appendChild(label);
+      box.appendChild(line);
       panel.appendChild(box);
     }
     if (s.actions.length > 0) {
