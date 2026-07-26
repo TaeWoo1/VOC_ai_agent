@@ -96,7 +96,7 @@ describe("LazyImportDriver — nothing opens until a run needs the page", () => 
     await l.driver.waitForTargetAction("start_date");
     await l.driver.detectDownload();
     await l.driver.validateArtifact("a1b2c3d4e5f60718");
-    await l.driver.ingest("a1b2c3d4e5f60718");
+    await l.driver.ingest("a1b2c3d4e5f60718", "MACHINE_MATCHED");
     expect(l.inner.calls).toEqual([
       "prepareSurface",
       "highlight:start_date",

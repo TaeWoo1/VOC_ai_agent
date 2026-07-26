@@ -33,6 +33,17 @@ export interface AwIngestSource {
   bytes(): Uint8Array;
   /** The opaque 16-hex ref the engine emitted for this artifact — the ONLY wire-naming input. */
   artifactRef: string;
+  /**
+   * How this run's scope was established, as recorded by the ENGINE — the single authority for this run's
+   * evidence. Supplied per ingest call by the session (from `engine.recordedScopeEvidence()`), not derived by
+   * the driver, so the value the backend records and the value the engine holds can never diverge.
+   *
+   * Optional only because this source type is shared with the EXPORT/reply carriers, whose `ProbeDriver.ingest`
+   * takes no evidence and whose upload goes through `buildBackendIngestUpload` (which ignores it). On the
+   * SEGMENT import path it is always present: `ImportProbeDriver.ingest` requires it and the session always
+   * passes the engine's record.
+   */
+  scopeEvidence?: ScopeEvidenceWire;
 }
 
 /**
@@ -122,12 +133,6 @@ export interface SegmentIngestUploadOpts {
   password: string;
   /** The opaque launch ref this run is authorized by. It, not the runtime, names the target segment. */
   launchRef: string;
-  /**
-   * How the exported scope was established — a machine read-back of the selected range, or the seller's
-   * confirmation when it could not be read. Supplied as a THUNK because the answer is only known once the
-   * seller has actually set the dates, which happens long after this capability is built and injected.
-   */
-  scopeEvidence: () => ScopeEvidenceWire;
   fetchImpl?: typeof fetch;
 }
 
@@ -152,7 +157,9 @@ export function buildSegmentIngestUpload(opts: SegmentIngestUploadOpts): AwInges
         opts.launchRef,
         src.bytes(),
         neutralUploadName(src.artifactRef),
-        opts.scopeEvidence(),
+        // Always present on the segment path (the session passes the engine's record); the fallback only guards
+        // the impossible unset case and matches the previous default.
+        src.scopeEvidence ?? "OPERATOR_CONFIRMED",
         fetchImpl,
       );
       return sanitizeBackendIngest(result);

@@ -51,6 +51,7 @@ import {
 } from "./naver-surface";
 import { selectedRangeFromValues } from "../naver/export-click-signals";
 import type { AwIngestUploadFn } from "./ingest-handoff";
+import type { ScopeEvidenceWire } from "./scope-evidence";
 import type {
   ArtifactValidateResult,
   DownloadDetectResult,
@@ -751,11 +752,13 @@ export class NaverLiveProbeDriver implements ProbeDriver {
    * platform's suggested filename is never passed). Only the sanitized `{ ok, processed }` crosses
    * back; a non-`ok` outcome fails the run closed (`INGEST_FAILED`, per the engine).
    */
-  async ingest(artifactRef: string): Promise<IngestResult> {
+  async ingest(artifactRef: string, scopeEvidence?: ScopeEvidenceWire): Promise<IngestResult> {
+    // `scopeEvidence` is optional here ONLY so this driver still satisfies the export `ProbeDriver` (whose
+    // ingest takes no evidence). On the SEGMENT import path the session always passes the engine's record.
     const retained = this.retained;
     this.retained = null;
     if (!retained) return { ok: false, processed: 0 };
-    const outcome = await this.opts.ingest({ bytes: () => retained.bytes(), artifactRef });
+    const outcome = await this.opts.ingest({ bytes: () => retained.bytes(), artifactRef, scopeEvidence });
     return { ok: outcome.ok, processed: outcome.processed };
   }
 

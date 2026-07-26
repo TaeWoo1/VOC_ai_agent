@@ -378,9 +378,21 @@ public class ReviewImportLaunchService {
     @Transactional(readOnly = true)
     public Optional<ReviewImportSegment> nextRemainingSegment(UUID orgId, UUID planId) {
         planService.getPlan(orgId, planId); // authorize
-        List<ReviewImportSegment> live =
-                segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId);
-        return live.stream()
+        return selectNextRemaining(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId));
+    }
+
+    /**
+     * The ONE rule for which live segment gets the next ticket: the NEWEST still-remaining, non-MISSING one.
+     *
+     * Pure and shared on purpose. Both the mint (this service) and the read side (the plan detail's
+     * {@code nextSegmentId}, via {@code ReviewImportQueryService}) select through here, so the segment the card
+     * shows as "next" is always the exact segment the ticket authorizes — the card can never name one month
+     * while the ticket names another.
+     *
+     * @param liveAsc the plan's non-superseded segments in ascending start order
+     */
+    public static Optional<ReviewImportSegment> selectNextRemaining(List<ReviewImportSegment> liveAsc) {
+        return liveAsc.stream()
                 .filter(s -> s.getExecutionState().isRemaining())
                 .filter(s -> s.getCoverageState() != SegmentCoverageState.MISSING)
                 .reduce((earlier, later) -> later);

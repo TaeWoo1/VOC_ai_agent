@@ -5,8 +5,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.sellerops.reviewimport.dto.ReviewImportHealthView;
+import com.sellerops.reviewimport.dto.ReviewImportPlanDetailView;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +37,11 @@ class ReviewImportQueryServiceTest {
         s.setSegmentEnd(LocalDate.parse(end));
         s.setCoverageState(cov);
         s.setCoveredRows(rows);
+        // A segment still needing work is PENDING (remaining); a covered/missing one is COMPLETED (not
+        // remaining). This is what `selectNextRemaining` filters on.
+        s.setExecutionState(cov == SegmentCoverageState.UNVERIFIED
+                ? SegmentExecutionState.PENDING
+                : SegmentExecutionState.COMPLETED);
         return s;
     }
 
@@ -94,5 +101,47 @@ class ReviewImportQueryServiceTest {
 
         ReviewImportHealthView health = service.health(orgId, accountId);
         assertThat(health.nextRecommendedImport()).isEqualTo(LocalDate.parse("2026-02-01"));
+    }
+
+    /**
+     * AR-ORD: the plan detail's {@code nextSegmentId} is the SAME segment the mint would ticket — one rule
+     * ({@link ReviewImportLaunchService#selectNextRemaining}) drives both, so the card shows exactly the segment
+     * the ticket authorizes and can never name a different month.
+     */
+    @Test
+    void planDetailNextSegmentIsTheSameSegmentTheMintWouldTicket() {
+        ReviewImportPlan plan = new ReviewImportPlan();
+        plan.setId(planId);
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(plan));
+
+        UUID olderRemaining = UUID.randomUUID();
+        UUID coveredMiddle = UUID.randomUUID();
+        UUID newerRemaining = UUID.randomUUID();
+        List<ReviewImportSegment> ordered = List.of(
+                seg(olderRemaining, "2026-01-01", "2026-01-31", SegmentCoverageState.UNVERIFIED, null),
+                seg(coveredMiddle, "2026-02-01", "2026-02-28", SegmentCoverageState.COVERED, 5),
+                seg(newerRemaining, "2026-03-01", "2026-03-31", SegmentCoverageState.UNVERIFIED, null));
+        when(segments.findByPlanIdOrderBySegmentStartAsc(planId)).thenReturn(ordered);
+
+        ReviewImportPlanDetailView detail = service.planDetail(orgId, planId);
+
+        // Newest remaining wins — and it is exactly what the mint's own selector returns.
+        assertThat(detail.nextSegmentId()).isEqualTo(newerRemaining);
+        assertThat(detail.nextSegmentId()).isEqualTo(
+                ReviewImportLaunchService.selectNextRemaining(ordered)
+                        .map(ReviewImportSegment::getId)
+                        .orElseThrow());
+    }
+
+    @Test
+    void planDetailNextSegmentIsNullWhenNothingRemains() {
+        ReviewImportPlan plan = new ReviewImportPlan();
+        plan.setId(planId);
+        when(plans.findByIdAndOrgId(planId, orgId)).thenReturn(Optional.of(plan));
+        when(segments.findByPlanIdOrderBySegmentStartAsc(planId)).thenReturn(List.of(
+                seg(UUID.randomUUID(), "2026-01-01", "2026-01-31", SegmentCoverageState.COVERED, 3),
+                seg(UUID.randomUUID(), "2026-02-01", "2026-02-28", SegmentCoverageState.MISSING, null)));
+
+        assertThat(service.planDetail(orgId, planId).nextSegmentId()).isNull();
     }
 }

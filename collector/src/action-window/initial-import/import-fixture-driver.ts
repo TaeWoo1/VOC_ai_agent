@@ -10,6 +10,7 @@
  * reaching production would report imports that never happened. `import-dispatch.test.ts` asserts the
  * production wiring does not reference this module.
  */
+import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type { GuidancePanelState } from "../guidance-panel";
@@ -112,7 +113,12 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     return this.script.validate ?? { valid: true };
   }
 
-  async ingest(artifactRef: string): Promise<IngestResult> {
+  /** The scope evidence the session handed to the most recent ingest, or null before any ingest. */
+  lastIngestEvidence: ScopeEvidenceWire | null = null;
+
+  async ingest(artifactRef: string, scopeEvidence: ScopeEvidenceWire): Promise<IngestResult> {
+    // Record what the SESSION passed in (from the engine's single record) — the fixture never derives its own.
+    this.lastIngestEvidence = scopeEvidence;
     this.calls.push(`ingest:${artifactRef}`);
     return this.script.ingest ?? { ok: true, processed: 42 };
   }

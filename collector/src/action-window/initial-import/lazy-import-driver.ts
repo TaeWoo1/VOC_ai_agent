@@ -33,6 +33,7 @@
  * including "open exactly once, even under concurrent calls" — is unit-testable offline.
  */
 import { log } from "../../log";
+import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type { GuidancePanelState } from "../guidance-panel";
@@ -154,8 +155,8 @@ export class LazyImportDriver implements ImportProbeDriver {
     return (await this.surface()).validateArtifact(artifactRef);
   }
 
-  async ingest(artifactRef: string): Promise<IngestResult> {
-    return (await this.surface()).ingest(artifactRef);
+  async ingest(artifactRef: string, scopeEvidence: ScopeEvidenceWire): Promise<IngestResult> {
+    return (await this.surface()).ingest(artifactRef, scopeEvidence);
   }
 
   /**

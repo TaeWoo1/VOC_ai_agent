@@ -42,6 +42,7 @@ const detail: ReviewImportPlanDetailView = {
     seg({ segmentStart: "2026-02-01", segmentEnd: "2026-02-28", executionState: "FAILED", coverageState: "UNVERIFIED" }),
     seg({ segmentStart: "2026-03-01", segmentEnd: "2026-03-31", executionState: "PENDING", coverageState: "UNVERIFIED" }),
   ],
+  nextSegmentId: null,
   coverage: {
     covered: [{ start: "2025-12-01", end: "2026-01-31" }],
     missing: [{ start: "2025-11-01", end: "2025-11-30" }],

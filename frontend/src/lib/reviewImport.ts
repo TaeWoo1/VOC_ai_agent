@@ -188,10 +188,14 @@ export function importProgress(segments: ReviewImportSegmentView[]): ImportProgr
  * — the two must agree, or the card names one month and the ticket authorizes another.
  */
 export function remainingSegments(segments: ReviewImportSegmentView[]): ReviewImportSegmentView[] {
+  // The SAME predicate the backend's `selectNextRemaining` uses — a still-remaining segment (execution PENDING
+  // or FAILED, never ACTIVE or COMPLETED) whose coverage is not a concluded MISSING. Expressed on the execution
+  // axis like the backend, rather than the coverage axis, so the panel's follow-up segment and remaining count
+  // are computed by the identical rule and cannot drift from the segment the backend would authorize next.
   return segments
     .filter((s) => !s.superseded)
-    .filter((s) => s.coverageState === "UNVERIFIED")
-    .filter((s) => s.executionState !== "ACTIVE")
+    .filter((s) => s.executionState === "PENDING" || s.executionState === "FAILED")
+    .filter((s) => s.coverageState !== "MISSING")
     .sort((a, b) => b.segmentStart.localeCompare(a.segmentStart));
 }
 
@@ -449,12 +453,17 @@ export function continuationCopy(continuation: ImportContinuation): NonNullable<
 /**
  * Read the continuation out of a plan's segments, from the point of view of the run about to start.
  *
- * The first remaining segment is the one being launched, so it is dropped: what the panel needs is what comes
- * AFTER it. Ordering is `remainingSegments`' — newest first — so this and the ticket the backend mints always
- * name the same month.
+ * The segment being launched is the backend's authoritative choice (`nextSegmentId`), so it is dropped: what
+ * the panel needs is what comes AFTER it. Anchoring on the backend id — rather than re-deciding which segment
+ * is "first" here — is what keeps the panel and the minted ticket naming the same months, even if this client's
+ * own ordering ever drifted.
  */
-export function continuationAfterNext(segments: ReviewImportSegmentView[]): ImportContinuation {
-  const [, ...rest] = remainingSegments(segments);
+export function continuationAfterNext(
+  segments: ReviewImportSegmentView[],
+  currentSegmentId: string | null,
+): ImportContinuation {
+  // Drop the segment the ticket authorizes now (the backend's next); the rest, newest first, is what follows.
+  const rest = remainingSegments(segments).filter((s) => s.id !== currentSegmentId);
   const next = rest[0];
   return {
     next: next ? { segmentStart: next.segmentStart, segmentEnd: next.segmentEnd } : null,

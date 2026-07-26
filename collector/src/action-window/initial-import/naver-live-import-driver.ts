@@ -41,6 +41,7 @@
  * had already consumed the event, so the second would time out on a run that had actually succeeded.
  */
 import type { Frame, Page } from "playwright";
+import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import { matchExportScope } from "../../naver/export-scope-match";
 import {
@@ -117,8 +118,6 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   private consentRace: DownloadDetectResult | null = null;
   private stepNumber = 1;
   private badgeTotalSteps: number | null = null;
-  /** The last scope verdict this driver produced. It is the only component that actually made the read. */
-  private lastScopeVerdict: ScopeMatch | null = null;
 
   /**
    * Takes NO `Page`. That is deliberate and is the structural half of the frame fix: with no page handle
@@ -429,7 +428,9 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       datesParsed: verdict.datesParsed,
       spanDiffers: verdict.spanDiffers,
     });
-    this.lastScopeVerdict = verdict.match;
+    // Only the sanitized verdict leaves this method. How that verdict becomes recorded evidence
+    // (MACHINE_MATCHED vs OPERATOR_CONFIRMED) is the ENGINE's decision, not the driver's — see the engine's
+    // `onScopeRead`. The driver no longer keeps or derives an evidence value of its own.
     return verdict.match;
   }
 
@@ -534,19 +535,6 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   }
 
   /**
-   * How this run's scope was established, for the ingest capability.
-   *
-   * Derived from the driver's OWN read rather than passed in, because the driver is the only component that
-   * actually performed it. The mapping is the same one `gateOnScope` applies: a machine match is the only
-   * thing that may be recorded as a machine check, and everything else — including a read that never
-   * happened — records the seller's confirmation instead. Defaulting the other way would relabel an
-   * operator attestation as machine-verified, which is the one thing this flow must never do.
-   */
-  scopeEvidence(): "MACHINE_MATCHED" | "OPERATOR_CONFIRMED" {
-    return this.lastScopeVerdict === "MATCH" ? "MACHINE_MATCHED" : "OPERATOR_CONFIRMED";
-  }
-
-  /**
    * The download the consent race already found. Racing again would arm a second listener after the first
    * consumed the event, so a successful run would report a timeout.
    */
@@ -562,8 +550,8 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     return this.proven.validateArtifact(artifactRef);
   }
 
-  ingest(artifactRef: string): Promise<IngestResult> {
-    return this.proven.ingest(artifactRef);
+  ingest(artifactRef: string, scopeEvidence: ScopeEvidenceWire): Promise<IngestResult> {
+    return this.proven.ingest(artifactRef, scopeEvidence);
   }
 
   async cleanup(): Promise<void> {

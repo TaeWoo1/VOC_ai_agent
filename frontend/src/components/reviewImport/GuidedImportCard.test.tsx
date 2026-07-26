@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { GuidedImportCard } from "./GuidedImportCard";
+import { nextRemainingSegment } from "../../lib/reviewImport";
 import { api } from "../../lib/apiClient";
 import type {
   GuidedImportKind,
@@ -111,6 +112,8 @@ const plan = (segments: ReviewImportSegmentView[]): ReviewImportPlanDetailView =
     createdAt: "2026-07-25T00:00:00Z",
   } as ReviewImportPlanDetailView["plan"],
   segments,
+  // Simulate the backend's authoritative choice: the newest still-remaining segment.
+  nextSegmentId: nextRemainingSegment(segments)?.id ?? null,
   coverage: {
     covered: [],
     missing: [],
@@ -248,6 +251,19 @@ describe("GuidedImportCard — one action carries the import", () => {
     render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" />);
     expect(screen.queryByTestId("file-fallback-link")).toBeNull();
     expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  /**
+   * AR-ORD: the card names the segment the BACKEND chose (`nextSegmentId`) — the one the ticket authorizes —
+   * not one it re-derived. Here both months remain and a newest-first re-derivation would pick April, but the
+   * backend says March; the card must obey it, so the month shown and the month ticketed are always the same.
+   */
+  it("names the backend's chosen next segment even when it is not the newest — consumes nextSegmentId", () => {
+    const older = seg({ id: "s-old", segmentStart: "2026-03-01", segmentEnd: "2026-03-31" });
+    const newer = seg({ id: "s-new", segmentStart: "2026-04-01", segmentEnd: "2026-04-30" });
+    const detail = { ...plan([older, newer]), nextSegmentId: "s-old" };
+    render(<GuidedImportCard account={account} plan={detail} agent="ready" />);
+    expect(screen.getByTestId("next-segment-range")).toHaveTextContent("2026-03-01 ~ 2026-03-31");
   });
 });
 

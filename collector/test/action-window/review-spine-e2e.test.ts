@@ -203,7 +203,7 @@ describe.skipIf(!RUN)("Review Acquisition Spine — synthetic Action Window → 
   it("re-handing the same artifact is idempotent and moves nothing", async () => {
     const before = await attentionSummary(BASE_URL, token, accountId, EXPECTED.window);
 
-    const outcome = await ingest({ bytes: () => reviewExportBytes(), artifactRef: "00ff00ff00ff00ff" });
+    const outcome = await ingest({ bytes: () => reviewExportBytes(), artifactRef: "00ff00ff00ff00ff", scopeEvidence: "MACHINE_MATCHED" });
 
     expect(outcome).toEqual({ ok: true, processed: 0 }); // all-duplicate → idempotent success
     expect(await attentionSummary(BASE_URL, token, accountId, EXPECTED.window)).toEqual(before);

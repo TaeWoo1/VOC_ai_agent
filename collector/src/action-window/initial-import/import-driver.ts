@@ -15,6 +15,7 @@
  * ({@link ImportGuidanceStage}), and a per-control method set would have to be kept in lockstep with it by
  * hand.
  */
+import type { ScopeEvidenceWire } from "../scope-evidence";
 import type { ScopeMatch } from "../../naver/export-scope-match";
 import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type { GuidancePanelState } from "../guidance-panel";
@@ -128,8 +129,13 @@ export interface ImportProbeDriver {
 
   validateArtifact(artifactRef: string): Promise<ArtifactValidateResult>;
 
-  /** Hand the validated artifact to the ingest path bound to this run's launch ref. */
-  ingest(artifactRef: string): Promise<IngestResult>;
+  /**
+   * Hand the validated artifact to the ingest path bound to this run's launch ref.
+   *
+   * The scope evidence is PASSED IN by the session from the engine's single record — the driver does not
+   * derive it. This is what keeps the value the backend records identical to the value the engine holds.
+   */
+  ingest(artifactRef: string, scopeEvidence: ScopeEvidenceWire): Promise<IngestResult>;
 
   /** Remove every annotation. Must be safe to call twice and on a half-built run. */
   cleanup(): Promise<void>;
