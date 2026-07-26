@@ -50,17 +50,16 @@ Four independently-configured surfaces (backend, frontend, bridge, browser). Mos
    `bridge … skipped … already_running` and the FE pairs with the wrong (old-code) agent. Check
    `lsof -iTCP:47615`; run the new agent on a fresh `BRIDGE_PORT` and point the FE's `VITE_BRIDGE_URL` at it.
    The agent uses a persistent Chrome profile (single lock) — kill your own prior agent before relaunching.
-6. **Session-probe timing → a hard-to-recover fail-closed.** The run probes the NAVER session the instant it
-   starts. If the seller has not finished NAVER login, the probe reads not-usable → `SESSION_FAILURE`
-   (`EXPIRED`/`LOGIN_REQUIRED`) → `block()` → **terminal `FAILED`**. `FAILED` allows **no commands**, so 다시 확인
-   is not offered, and the single-use ticket stays OPEN while the host still "owns" its ref — so re-clicking
-   start is a no-op (idempotent mint returns the same ref, host ignores a replayed `START_RUN`). **Avoid it:**
-   the seller logs into NAVER **before** pressing start (so the first probe reads READY). **Recover it:**
-   `POST /api/imports/reviews/launches/{ref}/expire` → the FE mints a fresh ticket → press start again → the
-   same agent re-probes the now-logged-in session (`READY`, `MANUAL_RECHECK`) and resumes. This
-   recovery-flow limitation is a **pre-existing import-runtime gap** (not the supervisor) — candidate follow-up:
-   make a recoverable session block re-probable in place (allow `REQUEST_STEP_RECHECK` to re-issue `PREPARE`)
-   instead of terminal `FAILED`.
+6. **Session-probe timing.** The run probes the NAVER session the instant it starts. If the seller has not
+   finished NAVER login, the probe reads not-usable → `SESSION_FAILURE` (`EXPIRED`/`LOGIN_REQUIRED`). **Best
+   practice:** the seller logs into NAVER **before** pressing start, so the first probe reads READY.
+   **Recovery is now clean (FIXED in PR #365):** a recoverable session block parks at `SESSION_BLOCKED`, not
+   terminal `FAILED`. The card/panel offers 다시 확인 (`REQUEST_STEP_RECHECK`); after the seller logs in, pressing
+   it re-runs the session probe on the **same segment and ticket** (`READY`, `MANUAL_RECHECK`) and the run
+   resumes — no ticket expire, no re-mint, no fresh run.
+   *Historical note (2026-07-27, before the fix):* the block was then terminal `FAILED` (no commands, ticket
+   stuck OPEN), and recovery required a manual `POST /api/imports/reviews/launches/{ref}/expire` → FE re-mint →
+   start again. That workaround is no longer needed.
 7. **Launching the live agent is gated by the Claude Code classifier** (separate from the product approval).
    Expect a permission prompt on `npm run local-agent -- … --i-understand-this-opens-live-naver`; the operator
    allows it (or adds a Bash rule) once per session, or runs the command themselves.

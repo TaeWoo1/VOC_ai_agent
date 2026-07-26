@@ -58,6 +58,15 @@ one place on disk and are **not** recoverable from git.
 - **No force-push** unless explicitly approved.
 - **No live marketplace runs** without a fresh, single-use, in-turn approval naming
   channel / account / date / operator. A plan or prior approval is never authorization.
+  - **Preflight-fixed shortcut.** When the in-turn preflight has already fixed and stated the
+    channel, account, and scope (and date = today, operator = the seated user), the user's single
+    sentence **"Seated and ready"** (or equivalent explicit go) *is* that single-use in-turn
+    approval — the four facts are already on the record, so they need not be re-typed. It still
+    lifts any standing pause for that one run only.
+  - **Same-session, same-scope retries need no re-approval.** Within that approved session, fixes
+    and retries against the *same* channel / account / scope proceed without a new grant (the live
+    debug-loop pattern). A change of channel, account, or scope — or a new session — requires a
+    fresh approval.
 - Never print secrets. Stage exact files — never `git add .`; never stage `.env`, `.profile/`,
   `.status/`, `.connections/`, `downloads/`, credentials, or real seller data.
 

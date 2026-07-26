@@ -281,13 +281,52 @@ describe("import segment session — the scope gate", () => {
 });
 
 describe("import segment session — fail-closed causes", () => {
-  it("parks recoverably on a login requirement the seller can clear themselves", async () => {
-    const { io, engine, session } = build({ surface: { ok: false, blockerCode: "LOGIN_REQUIRED" } });
+  it("parks recoverably on a login requirement, and the seller's re-check resumes the SAME run", async () => {
+    const script: ImportFixtureScript = { surface: { ok: false, blockerCode: "LOGIN_REQUIRED" } };
+    const { io, engine, driver, session } = build(script);
     startRun(io);
     await session.whenSettled();
 
-    expect(engine.currentStage()).toBe("FAILED");
-    expect(io.blockers()).toContainEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    // Recoverable session block: WAITING at SESSION_BLOCKED, NOT terminal FAILED, no RUN_FAILED — the seller
+    // logs in on their own screen. The re-check control is offered.
+    expect(engine.currentStage()).toBe("SESSION_BLOCKED");
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(io.lastView()?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
+    expect(io.lastView()?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+
+    // The seller logs in, then re-checks. Same segment, same ticket — no new authorization, no fresh mint.
+    script.surface = true;
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+
+    // The re-check re-ran PREPARE (a second probe) and, seeing a usable session, drove the run to completion.
+    expect(engine.currentStage()).toBe("COMPLETED");
+    expect(driver.calls.filter((c) => c === "prepareSurface")).toHaveLength(2);
+    expect(driver.calls.filter((c) => c.startsWith("ingest:"))).toHaveLength(1); // ingested exactly once
+  });
+
+  it("re-parks on a re-check while still blocked, and never resumes twice", async () => {
+    const script: ImportFixtureScript = { surface: { ok: false, blockerCode: "SESSION_EXPIRED" } };
+    const { io, engine, driver, session } = build(script);
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("SESSION_BLOCKED");
+
+    // Seller re-checks but is still not logged in → re-park, no failure, no progress past the gate.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("SESSION_BLOCKED");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    expect(driver.calls.some((c) => c === "readSurfaceFacts")).toBe(false); // never advanced past PREPARE
+
+    // Now logged in; a single re-check resumes to completion — exactly once (no double-drive).
+    script.surface = true;
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("COMPLETED");
+    expect(driver.calls.filter((c) => c.startsWith("ingest:"))).toHaveLength(1);
+    expect(driver.calls.filter((c) => c === "prepareSurface")).toHaveLength(3); // initial + 2 re-checks
   });
 
   it("fails terminally on an unrecognised surface — a login does not fix that", async () => {

@@ -198,6 +198,17 @@ export class ImportSegmentEngine {
       this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
       return "READ_SCOPE";
     }
+    if (this.stage === "SESSION_BLOCKED") {
+      // "I logged in, look again." Re-run the session probe on the SAME segment and ticket. If it is now
+      // usable the run proceeds from `onSurfaceReady`; if not, it parks at `SESSION_BLOCKED` again. Moving to
+      // `PREPARE_SESSION` first is what makes a duplicate re-check safe: `PREPARE_SESSION` allows no
+      // `REQUEST_STEP_RECHECK`, so a second press while the probe is in flight is rejected, not a second probe.
+      this.blockerCode = null;
+      this.blockerRecoverable = false;
+      this.stage = "PREPARE_SESSION";
+      this.emit("RUN_STATUS_CHANGED", { status: "PREPARING" });
+      return "PREPARE";
+    }
     if (this.stage === "WAIT_FOR_RANGE_CONFIRM") {
       // The seller confirming the range IS the evidence here; there is no control to observe.
       return this.onRangeConfirmed();
@@ -477,13 +488,30 @@ export class ImportSegmentEngine {
     return "CLEANUP";
   }
 
+  /**
+   * The session gate stopped the run. A `LOGIN_REQUIRED` / `SESSION_EXPIRED` session is recoverable — the
+   * seller clears it on their own screen — so it PARKS at `SESSION_BLOCKED` (waiting on the human), NOT at
+   * terminal `FAILED`. It emits `RUN_BLOCKED { recoverable: true }` and stops, but no `RUN_FAILED`: the run is
+   * not over. `REQUEST_STEP_RECHECK` re-runs `PREPARE` on the SAME segment and ticket (see {@link recheck}),
+   * so recovery needs neither a new authorization nor a fresh ticket. Nothing is highlighted at the session
+   * gate (it is the first step), so there is nothing to clear — the effect is `NONE`.
+   *
+   * A non-recoverable session code is impossible from `onSurfaceReady` (it routes only login/expired here),
+   * but the guard is kept honest: were one ever passed, it fails terminal rather than parking forever.
+   */
   private block(code: "LOGIN_REQUIRED" | "SESSION_EXPIRED", recoverable: boolean): ImportEffect {
     this.blockerCode = code;
     this.blockerRecoverable = recoverable;
-    this.stage = "FAILED";
-    this.emit("RUN_BLOCKED", { code, recoverable });
-    this.emit("RUN_FAILED", { code });
-    return "CLEANUP";
+    if (!recoverable) {
+      this.stage = "FAILED";
+      this.emit("RUN_BLOCKED", { code, recoverable });
+      this.emit("RUN_FAILED", { code });
+      return "CLEANUP";
+    }
+    this.stage = "SESSION_BLOCKED";
+    this.emit("RUN_BLOCKED", { code, recoverable: true });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return "NONE";
   }
 
   private fail(code: ImportBlockerCode): ImportEffect {
@@ -583,9 +611,9 @@ export class ImportSegmentEngine {
       progress: { completedSteps: this.completedSteps, totalSteps },
       updatedAt: this.clock(),
     };
-    // A blocker is exposed while the run is stopped for it — including the recoverable scope park, which
-    // is NOT a failure and must not be rendered as one.
-    if (this.blockerCode && (this.stage === "FAILED" || this.stage === "SCOPE_BLOCKED")) {
+    // A blocker is exposed while the run is stopped for it — including the recoverable scope and session
+    // parks, which are NOT failures and must not be rendered as ones.
+    if (this.blockerCode && (this.stage === "FAILED" || this.stage === "SCOPE_BLOCKED" || this.stage === "SESSION_BLOCKED")) {
       view.blocker = { code: this.blockerCode as never, recoverable: this.blockerRecoverable };
     }
     return view;

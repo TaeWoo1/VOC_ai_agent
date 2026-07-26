@@ -26,7 +26,10 @@ import {
 } from "../../../src/action-window/initial-import/import-fixture-driver";
 import { ImportAcquisitionCoordinator } from "../../../src/action-window/initial-import/import-acquisition-coordinator";
 import { ReadinessObservingImportDriver } from "../../../src/action-window/initial-import/readiness-observing-driver";
-import type { AwClientFrame } from "../../../../contracts/action-window/v2/transport";
+import { ImportSegmentEngine, makeImportClock } from "../../../src/action-window/initial-import/import-engine";
+import { ImportSegmentSession } from "../../../src/action-window/initial-import/import-session";
+import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
+import type { AwClientFrame, AwServerFrame } from "../../../../contracts/action-window/v2/transport";
 
 const REF_A = "9f2a1c7b4e6d0835";
 const REF_B = "1122334455667788";
@@ -179,5 +182,80 @@ describe("offline E2E: supervisor-gated import runtime", () => {
     // nothing the run can see. (The fixture's `calls` excludes panel renders by design, so this is the full
     // marketplace-facing sequence.)
     expect(wired.fixture.calls).toEqual(base.fixture.calls);
+  });
+});
+
+/**
+ * The in-run recovery, observed by the supervisor. A session block no longer ends the run at terminal FAILED
+ * with a stuck ticket — it parks at SESSION_BLOCKED, and REQUEST_STEP_RECHECK re-probes the SAME segment and
+ * ticket. Driven at the engine+session level (recovery is a session concern; the host only assembles), with
+ * the real coordinator + decorator wired so the readiness sequence is proven end to end.
+ */
+const REC_WINDOW = { start: "2026-06-01", end: "2026-06-30" };
+
+function loopback() {
+  let listener: ((f: AwClientFrame) => void) | null = null;
+  const sent: AwServerFrame[] = [];
+  const transport = {
+    subscribe: (l: (f: AwClientFrame) => void) => {
+      listener = l;
+      return () => {
+        listener = null;
+      };
+    },
+    send: (f: AwServerFrame) => void sent.push(f),
+  };
+  return {
+    transport,
+    send: (f: AwClientFrame) => listener?.(f),
+    lastView: (): ActionWindowRunView | undefined => {
+      const views = sent.filter((f) => f.kind === "aw_view") as Array<{ view: ActionWindowRunView }>;
+      return views[views.length - 1]?.view;
+    },
+  };
+}
+
+function clientFrame(runId: string, expectedRevision: number, type: string, extra: Record<string, unknown> = {}): AwClientFrame {
+  return {
+    kind: "aw_command",
+    command: { protocolVersion: 2, commandId: `c-${type}-${expectedRevision}`, runId, expectedRevision, type, ...extra },
+  } as AwClientFrame;
+}
+
+describe("offline E2E: supervisor observes the in-run recoverable-session recovery", () => {
+  it("SESSION_FAILURE parks recoverably; the seller's re-check re-observes READY (MANUAL_RECHECK) on the SAME ticket", async () => {
+    const coordinator = new ImportAcquisitionCoordinator("naver");
+    const script: ImportFixtureScript = { surface: { ok: false, blockerCode: "LOGIN_REQUIRED" } };
+    const fixture = new ImportFixtureDriver(script);
+    const driver = new ReadinessObservingImportDriver(fixture, (res) => coordinator.observeSurfaceReading(res));
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_rec01", channelCode: "naver", importRef: REF_A, required: REC_WINDOW },
+      { clock: makeImportClock() },
+    );
+    const session = new ImportSegmentSession(engine, driver, io.transport, REC_WINDOW);
+    session.attach();
+
+    // Start: the session probe finds a not-usable (not-logged-in) session → recoverable park, not FAILED.
+    io.send(clientFrame("run_rec01", 0, "START_RUN", { payload: { channelCode: "naver", intent: "INITIAL_REVIEW_IMPORT_SEGMENT", importRef: REF_A } }));
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("SESSION_BLOCKED");
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(io.lastView()?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(coordinator.readiness()).toBe("LOGIN_REQUIRED");
+    expect(readinessProbes().at(-1)?.meta).toMatchObject({ reason: "SESSION_FAILURE", readiness: "LOGIN_REQUIRED" });
+
+    // The seller logs in on their own screen, then presses re-check. No ticket expire, no re-mint.
+    script.surface = true;
+    io.send(clientFrame("run_rec01", io.lastView()!.revision, "REQUEST_STEP_RECHECK"));
+    await session.whenSettled();
+
+    // The re-check re-ran PREPARE, the coordinator recorded the recovery as MANUAL_RECHECK, and the run drove
+    // to completion — one ingest, one authorization.
+    expect(engine.currentStage()).toBe("COMPLETED");
+    expect(coordinator.readiness()).toBe("READY");
+    expect(readinessProbes().at(-1)?.meta).toMatchObject({ reason: "MANUAL_RECHECK", readiness: "READY" });
+    expect(fixture.calls.filter((c) => c.startsWith("ingest:"))).toHaveLength(1);
+    expect(fixture.calls.filter((c) => c === "prepareSurface")).toHaveLength(2);
   });
 });

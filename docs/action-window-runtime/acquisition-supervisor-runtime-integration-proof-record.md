@@ -33,8 +33,12 @@ what the existing NAVER import path does.
   `singleActionForReadiness`; HOLD_UNSUPPORTED is enforced at admission (no adapter). The session hold itself is
   enforced by the engine's fail-closed `block()` — the supervisor records it, it does not replace it.
 - **Auto-resume after observed action.** Two mechanics, both offline-proven: within a run, each of the six
-  barriers advances automatically once the driver reports the seller acted; across a recoverable session
-  failure, the seller logs in and a fresh run's re-check reads READY and dispatches.
+  barriers advances automatically once the driver reports the seller acted; and a recoverable session block
+  (`LOGIN_REQUIRED` / `SESSION_EXPIRED`) parks at `SESSION_BLOCKED` — not terminal `FAILED` — so after the
+  seller logs in, `REQUEST_STEP_RECHECK` re-runs the session probe on the **same segment and ticket** and, on a
+  now-usable session, drives the run to completion (`SESSION_FAILURE` → `MANUAL_RECHECK`). No ticket expire or
+  re-mint. (Corrected: the first live run, 2026-07-27, predated this fix — the session block was then terminal,
+  and recovery there required a ticket expire + re-mint workaround; see the live section and the follow-up.)
 
 ## Offline evidence
 
@@ -74,13 +78,20 @@ observed. **All four probe moments observed live**, sanitized enums only:
 | DISPATCH → existing Import Host | `aw_import_host_run_hosted {SEGMENT}` |
 | SESSION_FAILURE (fail-closed on a not-logged-in session) | `readiness_probe {naver, EXPIRED, SESSION_FAILURE}` |
 | probe-permissive admission (recovery not deadlocked) | recovery run `acquisition_admit {decision: ASK_SELLER, admit: true}` — a stale not-ready readiness did NOT refuse the retry |
-| MANUAL_RECHECK → auto-resume | after the operator logged into NAVER + retried: `readiness_probe {naver, READY, MANUAL_RECHECK}` → `aw_import_scope_verdict {MATCH}` → highlights rendered → export downloaded |
+| MANUAL_RECHECK → resume | after the operator logged into NAVER + retried: `readiness_probe {naver, READY, MANUAL_RECHECK}` → `aw_import_scope_verdict {MATCH}` → highlights rendered → export downloaded |
 
-The single human checkpoint / hold is the engine's fail-closed `block()` on the not-usable session (the
-supervisor recorded it as `SESSION_FAILURE`); the NAVER engine, the single-use ticket, and the authorization
-path were unchanged. The trial-and-error that preceded a clean run (contract ESM load, FE/backend/bridge port
-+ CORS + origin config, and a session-probe-timing recovery-flow gap) is captured in
-`live-import-run-preflight-gotchas.md` so future live runs skip it.
+**Recovery-path correction.** On 2026-07-27 the recoverable session block (`EXPIRED`) was still terminal
+`FAILED`, so `REQUEST_STEP_RECHECK` was not available and the single-use ticket stayed OPEN — recovery there
+required a **manual ticket expire + re-mint** and a fresh `START_RUN` (a new run), not an in-run re-check. That
+is a runtime limitation the live run surfaced, not the supervisor. **Follow-up (same PR):** a recoverable
+session now parks at `SESSION_BLOCKED` (not `FAILED`) and `REQUEST_STEP_RECHECK` re-probes the SAME segment and
+ticket to resume — proven offline (`import-session.test.ts`, `import-acquisition-runtime.e2e.test.ts`) and
+re-verified live (see below).
+
+The single human checkpoint / hold is the engine's fail-closed session block (the supervisor recorded it as
+`SESSION_FAILURE`); the NAVER engine, the single-use ticket, and the authorization path were unchanged. The
+trial-and-error that preceded a clean run (contract ESM load, FE/backend/bridge port + CORS + origin config, and
+the now-fixed session-block recovery gap) is captured in `live-import-run-preflight-gotchas.md`.
 
 ## Boundaries (still locked)
 
