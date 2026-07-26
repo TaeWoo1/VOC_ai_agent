@@ -11,7 +11,6 @@ import {
   continuationAfterNext,
   importProgress,
   importStageText,
-  nextRemainingSegment,
   primaryActionLabel,
   recheckLabel,
   segmentRangeText,
@@ -129,7 +128,9 @@ export function GuidedImportCard({
 
   const segments = plan?.segments ?? [];
   const progress = importProgress(segments);
-  const next = nextRemainingSegment(segments);
+  // The next segment is the BACKEND's authoritative choice (the same one the ticket authorizes) — not a local
+  // re-derivation. The card only resolves that id to the segment it should name.
+  const next = plan?.nextSegmentId ? (segments.find((s) => s.id === plan.nextSegmentId) ?? null) : null;
   const hasPlan = plan !== null && progress.total > 0;
   const finished = hasPlan && next === null;
   // The status channel answers "is there an agent at all"; the carrier attach answers "can it host THIS".
@@ -206,7 +207,7 @@ export function GuidedImportCard({
       // The words the seller will read in their SmartStore window, before the run that renders them exists —
       // including what to do once it finishes. The runtime re-sends this for each segment's session; it never
       // writes a sentence of its own.
-      active.setGuidancePack(buildImportGuidancePack(continuationAfterNext(fresh.segments)));
+      active.setGuidancePack(buildImportGuidancePack(continuationAfterNext(fresh.segments, fresh.nextSegmentId)));
       const launch = await api.launchNextReviewImportSegment(plan.plan.id);
       try {
         await active.start({ launchRef: launch.launchRef, kind: launch.kind });

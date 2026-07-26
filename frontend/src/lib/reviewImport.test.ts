@@ -520,7 +520,7 @@ describe("continuationAfterNext", () => {
       seg("2026-05-01", "2026-05-31"),
       seg("2026-06-01", "2026-06-30"),
       seg("2026-07-01", "2026-07-26"),
-    ]);
+    ], "2026-07-01");
     expect(continuation.next).toEqual({ segmentStart: "2026-06-01", segmentEnd: "2026-06-30" });
     expect(continuation.remaining).toBe(2);
   });
@@ -529,7 +529,7 @@ describe("continuationAfterNext", () => {
     const continuation = continuationAfterNext([
       seg("2026-06-01", "2026-06-30", { executionState: "COMPLETED", coverageState: "COVERED" }),
       seg("2026-07-01", "2026-07-26"),
-    ]);
+    ], "2026-07-01");
     expect(continuation.next).toBeNull();
     expect(continuation.remaining).toBe(0);
   });
@@ -542,13 +542,13 @@ describe("continuationAfterNext", () => {
       seg("2026-05-01", "2026-05-31", { executionState: "ACTIVE" }),
       seg("2026-06-01", "2026-06-30"),
       seg("2026-07-01", "2026-07-26"),
-    ]);
+    ], "2026-07-01");
     expect(continuation.next).toEqual({ segmentStart: "2026-06-01", segmentEnd: "2026-06-30" });
     expect(continuation.remaining).toBe(1);
   });
 
   it("has nothing to hand on from an empty plan", () => {
-    expect(continuationAfterNext([])).toEqual({ next: null, remaining: 0 });
+    expect(continuationAfterNext([], null)).toEqual({ next: null, remaining: 0 });
   });
 });
 

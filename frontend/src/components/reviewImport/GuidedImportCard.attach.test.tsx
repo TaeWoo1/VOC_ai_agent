@@ -59,6 +59,7 @@ const plan: ReviewImportPlanDetailView = {
     createdAt: "2026-07-26T00:00:00Z",
   } as ReviewImportPlanDetailView["plan"],
   segments: [segment],
+  nextSegmentId: segment.id,
   coverage: {
     covered: [],
     missing: [],

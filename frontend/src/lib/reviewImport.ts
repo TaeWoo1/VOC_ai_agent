@@ -449,12 +449,17 @@ export function continuationCopy(continuation: ImportContinuation): NonNullable<
 /**
  * Read the continuation out of a plan's segments, from the point of view of the run about to start.
  *
- * The first remaining segment is the one being launched, so it is dropped: what the panel needs is what comes
- * AFTER it. Ordering is `remainingSegments`' — newest first — so this and the ticket the backend mints always
- * name the same month.
+ * The segment being launched is the backend's authoritative choice (`nextSegmentId`), so it is dropped: what
+ * the panel needs is what comes AFTER it. Anchoring on the backend id — rather than re-deciding which segment
+ * is "first" here — is what keeps the panel and the minted ticket naming the same months, even if this client's
+ * own ordering ever drifted.
  */
-export function continuationAfterNext(segments: ReviewImportSegmentView[]): ImportContinuation {
-  const [, ...rest] = remainingSegments(segments);
+export function continuationAfterNext(
+  segments: ReviewImportSegmentView[],
+  currentSegmentId: string | null,
+): ImportContinuation {
+  // Drop the segment the ticket authorizes now (the backend's next); the rest, newest first, is what follows.
+  const rest = remainingSegments(segments).filter((s) => s.id !== currentSegmentId);
   const next = rest[0];
   return {
     next: next ? { segmentStart: next.segmentStart, segmentEnd: next.segmentEnd } : null,

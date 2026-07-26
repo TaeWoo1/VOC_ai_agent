@@ -522,6 +522,12 @@ export interface ReviewImportPlanDetailView {
   plan: ReviewImportPlanView;
   segments: ReviewImportSegmentView[];
   coverage: ReviewImportCoverageView;
+  /**
+   * The segment the "continue" ticket would authorize next, chosen by the backend's own rule (the same one the
+   * mint uses). The card displays THIS rather than re-deriving an order of its own, so the segment shown as next
+   * is always the segment the ticket authorizes. Null when nothing remains.
+   */
+  nextSegmentId: string | null;
 }
 
 export interface ReviewImportHealthView {

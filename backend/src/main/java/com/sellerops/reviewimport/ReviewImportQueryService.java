@@ -42,10 +42,16 @@ public class ReviewImportQueryService {
                 .orElseThrow(() -> ApiException.notFound("가져오기 계획을 찾을 수 없습니다."));
         List<ReviewImportSegment> all = segments.findByPlanIdOrderBySegmentStartAsc(planId);
         List<ReviewImportSegment> live = all.stream().filter(s -> !s.isSuperseded()).toList();
+        // The next segment to guide, chosen by the SAME rule the mint uses — so the frontend can display the
+        // authoritative choice instead of re-deriving one that might disagree with the ticket.
+        UUID nextSegmentId = ReviewImportLaunchService.selectNextRemaining(live)
+                .map(ReviewImportSegment::getId)
+                .orElse(null);
         return new ReviewImportPlanDetailView(
                 ReviewImportPlanView.from(plan),
                 all.stream().map(ReviewImportSegmentView::from).toList(),
-                ReviewImportCoverageView.from(ReviewImportCoverage.of(live)));
+                ReviewImportCoverageView.from(ReviewImportCoverage.of(live)),
+                nextSegmentId);
     }
 
     @Transactional(readOnly = true)
