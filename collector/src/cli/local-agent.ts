@@ -315,14 +315,12 @@ export async function buildInitialImportConfig(
   await appPage.goto(cfg.appUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
   log("aw_import_app_opened", {});
 
-  // The launch ref and the scope evidence are BOTH only known per run, long after this capability is
-  // built — the ref arrives in START_RUN and the evidence depends on what the seller did with the dates.
-  // `buildSegmentIngestUpload` reads both inside the returned upload function rather than at build time,
-  // so a getter and a thunk are read at ingest time, which is when the answers exist.
+  // The launch ref is only known per run, long after this capability is built — it arrives in START_RUN.
+  // `buildSegmentIngestUpload` reads it inside the returned upload function via a getter, so the answer is
+  // read at ingest time, which is when it exists. The scope evidence is NOT read here: the session passes the
+  // engine's single record into `driver.ingest` at ingest time (see import-session's INGEST case), so the
+  // driver never derives an evidence value of its own.
   let boundRef = "";
-  // Forward declaration: the evidence comes from the import driver's own scope read, because it is the
-  // only component that actually performed one.
-  let importDriver: NaverLiveImportDriver | null = null;
   /**
    * Open the MARKETPLACE tab, next to SellerOps, and build the real driver.
    *
@@ -349,7 +347,6 @@ export async function buildInitialImportConfig(
         get launchRef() {
           return boundRef;
         },
-        scopeEvidence: () => importDriver?.scopeEvidence() ?? "OPERATOR_CONFIRMED",
       }),
       guidanceEnabled: true,
       // A seated seller working through six barriers is slower than the export CLI's own coordination, and a
@@ -409,7 +406,6 @@ export async function buildInitialImportConfig(
         });
       },
     });
-    importDriver = driver;
     return driver;
   };
 

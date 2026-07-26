@@ -132,13 +132,13 @@ describe("run-action-window-live-naver — downstream deps assembly (pure, no br
     // Barrier 2. The session declines before reaching this seam; if it ever did reach it, it must be
     // loud rather than quietly upload. Reaching this is a programming error, not a run outcome.
     await expect(async () =>
-      deps.ingest({ bytes: () => new Uint8Array([1, 2, 3]), artifactRef: REF }),
+      deps.ingest({ bytes: () => new Uint8Array([1, 2, 3]), artifactRef: REF, scopeEvidence: "MACHINE_MATCHED" }),
     ).rejects.toThrow(/must decline before this seam/i);
   });
 
   it("declinedIngestGuard closes over no credentials and reaches no backend", () => {
     // A guard built with no config at all still behaves identically — it has nothing to upload with.
-    expect(() => declinedIngestGuard()({ bytes: () => new Uint8Array(), artifactRef: REF })).toThrow();
+    expect(() => declinedIngestGuard()({ bytes: () => new Uint8Array(), artifactRef: REF, scopeEvidence: "MACHINE_MATCHED" })).toThrow();
   });
 });
 

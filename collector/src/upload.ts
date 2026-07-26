@@ -332,8 +332,10 @@ export async function uploadReviewBytes(
   return result;
 }
 
-/** Sanitized scope-evidence value the backend records on the attempt. Mirrors the backend enum. */
-export type ScopeEvidenceWire = "MACHINE_MATCHED" | "OPERATOR_CONFIRMED";
+/** Sanitized scope-evidence value the backend records on the attempt. Defined in a zero-import leaf so the
+ * browser drivers can carry it without importing this network module; re-exported here for existing callers. */
+import type { ScopeEvidenceWire } from "./action-window/scope-evidence";
+export type { ScopeEvidenceWire };
 
 /** What a guided run learns when it resolves its launch ref. Identity-free by design. */
 export interface LaunchScopeResponse {

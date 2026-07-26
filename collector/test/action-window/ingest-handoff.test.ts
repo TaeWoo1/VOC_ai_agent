@@ -62,7 +62,11 @@ function fakeBackend(opts: { uploadResult?: IngestResult; uploadStatus?: number;
   return { fetchImpl, captured };
 }
 
-const source = (): AwIngestSource => ({ bytes: () => PK_BYTES, artifactRef: REF });
+const source = (scopeEvidence: "MACHINE_MATCHED" | "OPERATOR_CONFIRMED" = "MACHINE_MATCHED"): AwIngestSource => ({
+  bytes: () => PK_BYTES,
+  artifactRef: REF,
+  scopeEvidence,
+});
 
 describe("sanitizeBackendIngest", () => {
   it("clean SUCCESS → ok with the processed row count", () => {
@@ -201,8 +205,7 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
   it("posts to the launch ref's ingest endpoint under the NEUTRAL name, with the scope evidence", async () => {
     const { fetchImpl, captured } = fakeSegmentBackend();
     const outcome = await buildSegmentIngestUpload({
-      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-      scopeEvidence: () => "MACHINE_MATCHED", fetchImpl,
+      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
     })(source());
 
     // rowsNew=4 processed; the duplicate is accounted for but not "processed"
@@ -217,16 +220,15 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
   });
 
   // The evidence is only knowable once the seller has actually set the dates, which is long after this
-  // capability is built — so it must be read at ingest time, not captured at construction.
-  it("reads the scope evidence at ingest time, not when the capability was built", async () => {
+  // capability is built — so it travels WITH the artifact at ingest time (the session supplies the engine's
+  // single record per call), not captured at construction and not derived here.
+  it("carries the scope evidence supplied with the source at ingest time", async () => {
     const { fetchImpl, captured } = fakeSegmentBackend();
-    let evidence: "MACHINE_MATCHED" | "OPERATOR_CONFIRMED" = "MACHINE_MATCHED";
     const ingest = buildSegmentIngestUpload({
-      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-      scopeEvidence: () => evidence, fetchImpl,
+      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
     });
-    evidence = "OPERATOR_CONFIRMED"; // the read-back turned out to be unreadable
-    await ingest(source());
+    // The read-back turned out to be unreadable, so the engine recorded OPERATOR_CONFIRMED — passed per call.
+    await ingest(source("OPERATOR_CONFIRMED"));
     expect(captured.form?.get("scopeEvidence")).toBe("OPERATOR_CONFIRMED");
   });
 
@@ -236,8 +238,7 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
     });
     expect(
       await buildSegmentIngestUpload({
-        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-        scopeEvidence: () => "MACHINE_MATCHED", fetchImpl,
+        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
       })(source()),
     ).toEqual({ ok: true, processed: 0 });
   });
@@ -248,8 +249,7 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
     });
     expect(
       await buildSegmentIngestUpload({
-        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-        scopeEvidence: () => "MACHINE_MATCHED", fetchImpl,
+        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
       })(source()),
     ).toEqual({ ok: false, processed: 0 });
   });
@@ -261,8 +261,7 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
     const { fetchImpl } = fakeSegmentBackend(over);
     await expect(
       buildSegmentIngestUpload({
-        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-        scopeEvidence: () => "MACHINE_MATCHED", fetchImpl,
+        baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
       })(source()),
     ).resolves.toEqual({ ok: false, processed: 0 });
   });
@@ -272,8 +271,7 @@ describe("buildSegmentIngestUpload (hermetic)", () => {
       attempt: { attemptNo: 1, result: "FAILED", syncJobId: "job-secret", errorMessage: "raw backend text" },
     });
     const outcome = await buildSegmentIngestUpload({
-      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH,
-      scopeEvidence: () => "OPERATOR_CONFIRMED", fetchImpl,
+      baseUrl: "http://backend", email: "e", password: "p", launchRef: LAUNCH, fetchImpl,
     })(source());
     expect(Object.keys(outcome).sort()).toEqual(["ok", "processed"]);
     expect(JSON.stringify(outcome)).not.toContain("job-secret");

@@ -5,6 +5,9 @@
  * fail-closed cause, the recoverable repair — is pinned here where it is free.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { AwClientFrame, AwServerFrame, AwServerTransport } from "../../../../contracts/action-window/v2/transport";
 import { ImportSegmentEngine, makeImportClock } from "../../../src/action-window/initial-import/import-engine";
 import { ImportFixtureDriver, type ImportFixtureScript } from "../../../src/action-window/initial-import/import-fixture-driver";
@@ -759,5 +762,55 @@ describe("import segment session — continuing to the next segment", () => {
     driver.pressPanel("CONTINUE_NEXT_SEGMENT");
     await new Promise((r) => setTimeout(r, 60));
     expect(intents(io)).toEqual([]);
+  });
+});
+
+/**
+ * Scope evidence has ONE authority: the engine. The driver reads the range and returns a sanitized verdict;
+ * the engine decides what evidence that verdict records; the session hands the engine's record to the ingest.
+ * These pin the acceptance requirements for the authority consolidation (AR-EV1..3): the value the ingest
+ * carries and the value the engine holds come from the same place and cannot diverge, and the driver derives
+ * no evidence of its own.
+ */
+describe("import segment session — scope evidence single source (AR-EV1..3)", () => {
+  it("AR-EV1: the ingest carries the ENGINE's recorded evidence, not the driver's own — MATCH → MACHINE_MATCHED", async () => {
+    const { io, engine, driver, session } = build({ scope: "MATCH" });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("COMPLETED");
+    expect(engine.recordedScopeEvidence()).toBe("MACHINE_MATCHED");
+    // The value the session handed to ingest is exactly the engine's record — one source for wire and ingest.
+    expect(driver.lastIngestEvidence).toBe("MACHINE_MATCHED");
+    expect(driver.lastIngestEvidence).toBe(engine.recordedScopeEvidence());
+  });
+
+  it("AR-EV3: the two records cannot diverge — the confirm path also matches, OPERATOR_CONFIRMED end to end", async () => {
+    const { io, engine, driver, session } = build({ scope: "UNREADABLE" });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.recordedScopeEvidence()).toBe("OPERATOR_CONFIRMED");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("COMPLETED");
+    // The engine never upgraded the operator's attestation to a machine check, and the ingest carries exactly
+    // what the engine holds — the driver contributed no competing value.
+    expect(engine.recordedScopeEvidence()).toBe("OPERATOR_CONFIRMED");
+    expect(driver.lastIngestEvidence).toBe("OPERATOR_CONFIRMED");
+    expect(driver.lastIngestEvidence).toBe(engine.recordedScopeEvidence());
+  });
+
+  it("AR-EV2: the live import driver derives NO evidence of its own — no scopeEvidence() method, no verdict cache", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(
+      resolve(here, "../../../src/action-window/initial-import/naver-live-import-driver.ts"),
+      "utf8",
+    );
+    // The authorization getter and its backing field are gone: the driver returns only the sanitized ScopeMatch
+    // from readSelectedScope, and the engine is the sole authority on the evidence value.
+    expect(src).not.toMatch(/\bscopeEvidence\s*\(/);
+    expect(src).not.toContain("lastScopeVerdict");
   });
 });

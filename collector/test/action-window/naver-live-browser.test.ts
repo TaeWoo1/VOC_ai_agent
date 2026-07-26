@@ -127,11 +127,11 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver real-DOM seams (locate-tag → overl
     expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: true });
     expect(readdirSync(quarantineDir)).toEqual([]); // deleted after validate
 
-    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: true, processed: 1 });
+    expect(await driver.ingest(detected.artifactRef!, "MACHINE_MATCHED")).toEqual({ ok: true, processed: 1 });
     // The injected ingest received the validated OOXML bytes under the opaque ref — no filename.
     expect(box.captured!.bytesHead).toEqual([0x50, 0x4b, 0x03, 0x04]);
     expect(box.captured!.artifactRef).toBe(detected.artifactRef);
-    expect(box.captured!.keys).toEqual(["bytes", "artifactRef"]);
+    expect(box.captured!.keys).toEqual(["bytes", "artifactRef", "scopeEvidence"]);
 
     await driver.cleanup();
     expect(await overlayMounted(page)).toBe(false);
@@ -188,7 +188,7 @@ describe.skipIf(!RUN)("NaverLiveProbeDriver real-DOM seams (locate-tag → overl
     expect(detected.detected).toBe(true);
     expect(await driver.validateArtifact(detected.artifactRef!)).toEqual({ valid: true });
     expect(readdirSync(quarantineDir)).toEqual([]);
-    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: true, processed: 1 });
+    expect(await driver.ingest(detected.artifactRef!, "MACHINE_MATCHED")).toEqual({ ok: true, processed: 1 });
     await driver.cleanup();
     await page.close();
   }, HEADED_TEST_TIMEOUT_MS);

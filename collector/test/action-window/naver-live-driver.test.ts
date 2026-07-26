@@ -384,7 +384,7 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
     await driver.cleanup();
 
     // Observable proof the retained bytes are gone: ingest can no longer find anything to send.
-    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: false, processed: 0 });
+    expect(await driver.ingest(detected.artifactRef!, "MACHINE_MATCHED")).toEqual({ ok: false, processed: 0 });
   });
 
   it("the quarantine file is deleted at validate and the dir is swept at cleanup", async () => {
@@ -429,7 +429,7 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
     expect(files.size).toBe(0);
 
     // …and an invalid artifact is never retained, so the handoff has nothing to upload.
-    expect(await driver.ingest(detected.artifactRef!)).toEqual({ ok: false, processed: 0 });
+    expect(await driver.ingest(detected.artifactRef!, "MACHINE_MATCHED")).toEqual({ ok: false, processed: 0 });
   });
 
   it("an empty-but-valid workbook still validates — an empty export is a legitimate outcome", async () => {
@@ -452,7 +452,7 @@ describe("NaverLiveProbeDriver — declined ingest drops the artifact (leak-safe
   it("declining never fabricates a completion — a nothing-retained ingest is not success", async () => {
     // The invariant behind `ingest` being required on the live path: no synthetic completion.
     const driver = driverForPage(fakePage(SELLER_URL, LOGGED_IN_READY), { quarantineDir: "/q" });
-    expect(await driver.ingest("0f1e2d3c4b5a6978")).toEqual({ ok: false, processed: 0 });
+    expect(await driver.ingest("0f1e2d3c4b5a6978", "MACHINE_MATCHED")).toEqual({ ok: false, processed: 0 });
   });
 });
 

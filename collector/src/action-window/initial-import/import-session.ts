@@ -279,7 +279,11 @@ export class ImportSegmentSession {
       case "INGEST": {
         const ref = this.engine.detectedArtifactRef();
         if (!ref) return;
-        const res = await this.driver.ingest(ref);
+        // The engine is the single authority on how this run's scope was established. The driver no longer
+        // derives its own evidence; the session hands the engine's record to the ingest, so the value the
+        // backend records can never diverge from the value the engine holds. (Unreachable-null defaults to the
+        // operator-confirmed side, exactly as the previous default did.)
+        const res = await this.driver.ingest(ref, this.engine.recordedScopeEvidence() ?? "OPERATOR_CONFIRMED");
         const next = this.engine.onIngested(res);
         this.publishState();
         return this.drive(next);
