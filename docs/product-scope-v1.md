@@ -256,6 +256,11 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   ESM+ Gmarket 리뷰 import → Action Window; ESM+ Auction 리뷰 import → Action Window; 리뷰 정규화·분석 →
   의존성 완료 후 automatic.
 - **이 방향을 이번에 코드로 확장하지 않는다.** 착수는 실행 모드·체크포인트가 안정된 뒤 별도 킥오프(§8 개발 순서).
+- **carve-out (2026-07-26, 제품 오너 승인):** Acquisition Supervisor의 **순수 resolver/decide seam**은 이 lock의
+  예외로 허용한다 — `ExecutionMode`(기존 Action Window enum) 재사용 + `(channel × capability) → mode` 해석 +
+  Session Readiness 게이트 결정(DISPATCH / ASK_SELLER / HOLD)에 한한다. **무-live·무-durable·무-FE**: live
+  dispatch 배선, backend 지속화, 신규 FE, `OperationRun`/`CapabilityPolicy` 본체는 **여전히 lock**이며 별도
+  승인 대상이다. 구현: `contracts/acquisition/v1` + `collector/.../acquisition-supervisor.ts`(관찰 전용, 미배선).
 
 ### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
 
