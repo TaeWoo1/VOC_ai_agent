@@ -203,6 +203,13 @@ describe("journey kernel — deterministic under a messy stream (dup / delayed /
     expect(phaseAfter(messy)).toBe("PLAN_COMPLETE");
   });
 
+  it("an unknown (any-typed) event is a fail-safe no-op — the phase is kept, never corrupted", () => {
+    expect(reduceJourney({ phase: "PLAN_READY" }, { type: "BOGUS" } as unknown as JourneyEvent)).toEqual({
+      phase: "PLAN_READY",
+      effect: "NONE",
+    });
+  });
+
   it("a late success frame cannot resurrect an abandoned journey", () => {
     expect(
       phaseAfter([

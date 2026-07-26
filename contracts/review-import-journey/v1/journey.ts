@@ -19,7 +19,11 @@
  * Real events arrive duplicated, late, and out of order. Every transition is GUARDED on the current phase: an
  * event that does not apply to where the journey is resolves to `NONE` and leaves the phase untouched. So a
  * duplicated completion, a stale launch, or a reordered pairing cannot move the phase twice or backwards — the
- * reducer is idempotent per phase and the folded result depends only on the phase-relevant subsequence.
+ * reducer is a deterministic, idempotent-per-phase function of (state, event). The guards are deliberately
+ * CAUSAL, not confluent: an event whose precondition has not been reached yet is dropped rather than buffered,
+ * so a genuinely out-of-causal-order stream (an account resolve before its auth) settles differently — which is
+ * correct, because in reality those events are causally ordered. Determinism is per step; ordering that matters
+ * is the ordering reality already imposes.
  */
 
 /** The milestones of the whole journey. One segment RUN is a single phase; its internal stages stay in the engine. */
@@ -204,8 +208,11 @@ export function reduceJourney(state: JourneyState, event: JourneyEvent): Journey
       return STAY(phase);
     }
     default: {
-      const unreachable: never = event;
-      return STAY((unreachable as JourneyState["phase"]) ?? phase);
+      // Exhaustiveness: a missing event variant is a compile error here. At runtime an unknown (only reachable
+      // via an `any`-typed caller) is a FAIL-SAFE no-op — keep the current phase rather than corrupt it.
+      const _exhaustive: never = event;
+      void _exhaustive;
+      return STAY(phase);
     }
   }
 }

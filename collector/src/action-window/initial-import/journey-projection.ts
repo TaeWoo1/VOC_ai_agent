@@ -28,8 +28,12 @@ export type JourneyObservation =
   | { readonly kind: "next_segment"; readonly hasRemaining: boolean }
   | { readonly kind: "abandoned" };
 
-/** v2 RunStatus values that mean the segment run has ended in success. */
-const COMPLETED_STATUSES: ReadonlySet<string> = new Set(["COMPLETED", "OPERATOR_REPORTED"]);
+/**
+ * The v2 RunStatus that means an IMPORT segment run ended in success — only `COMPLETED`. `OPERATOR_REPORTED`
+ * is the honest terminal for a guided REPLY submission (no machine verifier), not a review import, so it is
+ * deliberately not treated as an import completion here.
+ */
+const COMPLETED_STATUSES: ReadonlySet<string> = new Set(["COMPLETED"]);
 /** v2 RunStatus values that mean the segment run has ended in failure. */
 const FAILED_STATUSES: ReadonlySet<string> = new Set(["FAILED"]);
 
@@ -72,8 +76,11 @@ export function projectJourneyEvent(obs: JourneyObservation): JourneyEvent | nul
     case "abandoned":
       return { type: "PLAN_ABANDONED" };
     default: {
-      const unreachable: never = obs;
-      return unreachable;
+      // Exhaustiveness: a missing kind is a compile error. An unknown observation (only reachable via an
+      // `any`-typed caller) is DROPPED — never fabricated into an event that could move the shadow.
+      const _exhaustive: never = obs;
+      void _exhaustive;
+      return null;
     }
   }
 }

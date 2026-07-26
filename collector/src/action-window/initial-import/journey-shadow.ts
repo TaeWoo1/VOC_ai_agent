@@ -16,7 +16,10 @@
  *
  * Phase is threaded across per-event invocations by an in-memory `MemorySaver`, keyed by a synthetic thread id
  * (never a launch ref). It is deliberately in-memory and per-instance — it does NOT persist and does NOT
- * replace the abandon-only run-store. No external tracing: LangSmith is neither imported nor enabled.
+ * replace the abandon-only run-store. No external tracing: LangSmith is never imported, and the runner FAILS
+ * CLOSED (`assertNoExternalTracing`) rather than run while a tracing env flag is set — because LangGraph's
+ * `invoke` would otherwise attach the global tracer from ambient env, which no argument this module passes can
+ * suppress.
  *
  * ## Divergence
  *
@@ -66,18 +69,27 @@ export function buildJourneyShadowGraph() {
   return graph.compile({ checkpointer: new MemorySaver() });
 }
 
-/** v2 run statuses that mean the segment run ended in success / failure. */
-const COMPLETED_STATUSES: ReadonlySet<string> = new Set(["COMPLETED", "OPERATOR_REPORTED"]);
+/** The v2 run status that means an IMPORT segment run ended in success — only COMPLETED (see the projection). */
+const COMPLETED_STATUSES: ReadonlySet<string> = new Set(["COMPLETED"]);
 const FAILED_STATUSES: ReadonlySet<string> = new Set(["FAILED"]);
 
-/** The journey phases each observed run status permits — the shadow must be in one of them, or it has diverged. */
+/**
+ * The journey phases each observed run status permits — the shadow must be in one of them, or it has diverged.
+ *
+ * A COMPLETED status permits ONLY the phases a completion actually produces: SEGMENT_DONE (the completion event
+ * moved the shadow there) or PLAN_COMPLETE (it was the last segment). PLAN_READY is deliberately EXCLUDED —
+ * including it would mask the real "the runtime completed a run the shadow never saw launch" divergence, in
+ * which the shadow is stuck at PLAN_READY and the completion event no-ops.
+ */
 function allowedPhasesForStatus(status: string): ReadonlySet<JourneyPhase> {
-  if (COMPLETED_STATUSES.has(status)) {
-    // After a completion the next-segment signal may already have advanced the shadow.
-    return new Set<JourneyPhase>(["SEGMENT_DONE", "PLAN_READY", "PLAN_COMPLETE"]);
-  }
+  if (COMPLETED_STATUSES.has(status)) return new Set<JourneyPhase>(["SEGMENT_DONE", "PLAN_COMPLETE"]);
   if (FAILED_STATUSES.has(status)) return new Set<JourneyPhase>(["SEGMENT_FAILED"]);
-  if (status === "CANCELLED") return new Set<JourneyPhase>(["ABANDONED", "SEGMENT_FAILED"]);
+  if (status === "CANCELLED") {
+    // Abandon is signalled by its own observation, which the projection does NOT infer from a cancel. Until
+    // that observation moves the shadow, a cancel is consistent with a run that was still in flight — so
+    // SEGMENT_RUNNING is permitted, and only a cancel with no run at all (e.g. PLAN_READY) is a divergence.
+    return new Set<JourneyPhase>(["ABANDONED", "SEGMENT_FAILED", "SEGMENT_RUNNING"]);
+  }
   // Every intermediate status means the segment is still running.
   return new Set<JourneyPhase>(["SEGMENT_RUNNING"]);
 }
@@ -94,6 +106,26 @@ export function detectRunDivergence(shadowPhase: JourneyPhase, status: string): 
   return { consistent: allowedPhasesForStatus(status).has(shadowPhase), shadowPhase, observedStatus: status };
 }
 
+/** Env flags that would turn on LangSmith's global tracer. */
+const TRACING_ENV_KEYS = ["LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING"] as const;
+
+/**
+ * Refuse to run when external tracing is enabled in the environment.
+ *
+ * "No LangSmith" cannot rest on an unset env — LangGraph's `invoke` attaches the global tracer from ambient
+ * env, not from anything this module passes. So the shadow FAILS CLOSED: if any tracing flag is on it throws
+ * instead of running, which structurally guarantees it can never egress a graph run. It never enables tracing
+ * itself, and imports nothing from LangSmith.
+ */
+export function assertNoExternalTracing(env: Record<string, string | undefined> = process.env): void {
+  const on = (v: string | undefined) => v === "true" || v === "1";
+  if (TRACING_ENV_KEYS.some((k) => on(env[k]))) {
+    throw new Error(
+      "JourneyShadow refuses to run with external tracing enabled: it is observe-only and must never egress.",
+    );
+  }
+}
+
 /**
  * The observe-only shadow runner: feed it the observations a run emits, and it tracks the expected journey
  * phase and counts divergences. It drives nothing and holds no runtime handle.
@@ -106,6 +138,8 @@ export class JourneyShadow {
 
   /** @param thread a synthetic checkpoint thread id — NEVER a launch ref or any real identity. */
   constructor(thread = "journey-shadow") {
+    // Fail closed if the environment would trace this graph to LangSmith — the shadow must never egress.
+    assertNoExternalTracing();
     this.thread = thread;
   }
 
@@ -113,7 +147,12 @@ export class JourneyShadow {
   async observe(obs: JourneyObservation): Promise<void> {
     const event = projectJourneyEvent(obs);
     if (event) {
-      const out = await this.graph.invoke({ event }, { configurable: { thread_id: this.thread } });
+      // `callbacks: []` is defence-in-depth against inherited handlers; the load-bearing guarantee is the
+      // constructor's fail-closed tracing check.
+      const out = await this.graph.invoke(
+        { event },
+        { configurable: { thread_id: this.thread }, callbacks: [] },
+      );
       this.phaseValue = out.phase;
     }
     if (obs.kind === "run_status") {
