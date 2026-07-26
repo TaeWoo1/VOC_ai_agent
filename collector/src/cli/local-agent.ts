@@ -43,9 +43,12 @@ import type { UserActionCategory } from "../agent/progressive-reconnect";
 import type { ConnectorOrchestratorObserver, ConnectorStartupResult } from "../connector/connector-orchestrator";
 import { createAgentBridge, type AgentActionWindowConfig, type AgentImportConfig, type AgentReplySubmissionConfig } from "../agent/agent-bridge";
 import { NaverLiveProbeDriver } from "../action-window/naver-live-driver";
-import { NaverLiveImportDriver } from "../action-window/initial-import/naver-live-import-driver";
+import { createNaverActionWindowImportDriver } from "../action-window/naver-acquisition-adapter";
 import { defaultImportRunDirFor } from "../action-window/initial-import/import-dispatch";
 import { LazyImportDriver } from "../action-window/initial-import/lazy-import-driver";
+import { ReadinessObservingImportDriver } from "../action-window/initial-import/readiness-observing-driver";
+import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
+import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
 import { fetchLaunchScope, login } from "../upload";
@@ -287,7 +290,13 @@ async function raiseWindowOf(page: Page): Promise<boolean> {
  */
 export async function buildInitialImportConfig(
   env: NodeJS.ProcessEnv,
-): Promise<{ config: AgentImportConfig; close: () => Promise<void>; warmUpSurface: () => Promise<void> }> {
+): Promise<{
+  config: AgentImportConfig;
+  close: () => Promise<void>;
+  warmUpSurface: () => Promise<void>;
+  /** AGENT_START readiness probe — the boot fires it once the agent is up (no marketplace tab exists yet). */
+  onAgentStart: () => void;
+}> {
   const cfg = loadConfig(env);
   // Same requirement every other live NAVER CLI in this package has, and it is checked HERE — at boot, before
   // the seller has pressed anything — precisely because the browser no longer opens at boot. A misconfigured
@@ -331,7 +340,7 @@ export async function buildInitialImportConfig(
    * point every locate, highlight and observation at our own app, and the seller would be guided to click
    * controls in the wrong window.
    */
-  const openSurface = async (): Promise<NaverLiveImportDriver> => {
+  const openSurface = async (): Promise<ImportProbeDriver> => {
     // The operator logs into NAVER here themselves — the collector never types NAVER credentials.
     const page = await context.newPage();
     await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
@@ -359,7 +368,11 @@ export async function buildInitialImportConfig(
       // which is not export wording, and the continuation matcher looks for export wording.
       liveDebug: true,
     });
-    const driver = new NaverLiveImportDriver(proven, {
+    // Bind the supervisor's `NAVER_ACTION_WINDOW_IMPORT` adapter id to the concrete engine. This is the one
+    // place that id becomes a driver, and it does so by composing the existing, live-proven engine unchanged
+    // (`naver-acquisition-adapter` returns `new NaverLiveImportDriver(proven, opts)`). Every DOM decision still
+    // lives in `proven`; nothing about export wording, consent, or the session moves here.
+    const driver = createNaverActionWindowImportDriver(proven, {
       guidanceEnabled: true,
       observeTimeoutMs: 120_000,
       /**
@@ -409,12 +422,25 @@ export async function buildInitialImportConfig(
     return driver;
   };
 
-  const driver = new LazyImportDriver({ open: openSurface });
+  const lazy = new LazyImportDriver({ open: openSurface });
+
+  // The Acquisition Supervisor, wired in front of the live import runtime (previously a deliberately-unwired
+  // seam). It reads session readiness at the four probe moments (AGENT_START at boot, then BEFORE_WORK /
+  // SESSION_FAILURE / MANUAL_RECHECK off each run's own `prepareSurface`) and gates admission on adapter
+  // availability. It owns no durable or pure state; the backend and the readiness projector own those.
+  const coordinator = new ImportAcquisitionCoordinator(NAVER_CHANNEL_CODE);
+  // A transparent decorator so a run's `prepareSurface` reading feeds readiness WITHOUT changing what the run
+  // sees — this is what keeps the existing NAVER import path byte-for-byte equivalent with the supervisor wired.
+  const driver = new ReadinessObservingImportDriver(lazy, (res) => coordinator.observeSurfaceReading(res));
 
   const config: AgentImportConfig = {
     announceRunId: `run_${randomBytes(6).toString("hex")}`,
     channelCode: NAVER_CHANNEL_CODE,
     driver,
+    // BEFORE_WORK admission: refuse a run only when no adapter is bound for (channel × REVIEW). For NAVER the
+    // adapter is `NAVER_ACTION_WINDOW_IMPORT`, so this always admits and the live path is unchanged; the guard
+    // exists so a build with no bound adapter can never start a run whose work has nowhere to go.
+    admit: () => coordinator.admitSegment(),
     persistDir: defaultImportRunDirFor(collectorRoot),
     async resolveScope(launchRef: string): Promise<ResolvedLaunchScope | null> {
       try {
@@ -443,8 +469,10 @@ export async function buildInitialImportConfig(
     config,
     close: () => context.close(),
     // The middle arrow of the journey the product owner described — open SellerOps, ask to connect, and THEN the
-    // seller center appears. The boot hands this to the bridge, which calls it when SellerOps connects.
-    warmUpSurface: () => driver.warmUp(),
+    // seller center appears. The boot hands this to the bridge, which calls it when SellerOps connects. It warms
+    // up the LAZY driver directly (not through the readiness decorator, which only observes `prepareSurface`).
+    warmUpSurface: () => lazy.warmUp(),
+    onAgentStart: () => coordinator.onAgentStart(),
   };
 }
 
@@ -461,7 +489,12 @@ export async function buildInitialImportConfig(
  * One browser for the seller to log into, one bridge for the frontend to attach to, nothing else.
  */
 async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
-  let built: { config: AgentImportConfig; close: () => Promise<void>; warmUpSurface: () => Promise<void> };
+  let built: {
+    config: AgentImportConfig;
+    close: () => Promise<void>;
+    warmUpSurface: () => Promise<void>;
+    onAgentStart: () => void;
+  };
   try {
     built = await buildInitialImportConfig(env);
   } catch (err) {
@@ -470,7 +503,7 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
     process.exit(6);
     return;
   }
-  const { config, close, warmUpSurface } = built;
+  const { config, close, warmUpSurface, onAgentStart } = built;
   const approvalKind = decideApprovalPresenter(env, process.platform);
   const bridge = createAgentBridge({
     ...resolveAgentBridgeConfig(args, env),
@@ -503,6 +536,10 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
     }),
   );
   bridge.markAgentStarted();
+  // AGENT_START readiness probe — the ~once-a-day check-in moment. No marketplace tab exists at boot (it opens
+  // when the seller asks to be connected), so this records the channel as UNOBSERVED_EXTERNAL, never a guessed
+  // READY. The first run's PREPARE is what actually observes the session.
+  onAgentStart();
 
   // Stay alive until the seated operator stops it. Idempotent shutdown closes the bridge and the browser
   // exactly once, on every path.

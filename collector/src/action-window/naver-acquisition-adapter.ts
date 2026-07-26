@@ -15,13 +15,14 @@
  * so this adapter cannot drift from what a live run proved. A source guard pins that (it must import the
  * engine and must not redefine its constants).
  *
- * ## Not invoked in this slice (deliberate boundary)
+ * ## Wiring status (deliberate boundary)
  *
- * Nothing calls this factory yet. The supervisor returns adapter *ids*; wiring an id to this factory and
- * running it against a real marketplace session is a separately-approved live follow-up. This module exists so
- * the selection has a real, type-checked binding to the preserved engine — not so a run happens now. Because
- * it imports the live driver, it is never pulled into the offline unit tests; it is checked by `tsc` and read
- * by a source guard.
+ * The composition root (`cli/local-agent.ts` → `buildInitialImportConfig`) now calls this factory to bind the
+ * supervisor's `NAVER_ACTION_WINDOW_IMPORT` id to the concrete engine — replacing the direct
+ * `new NaverLiveImportDriver(...)` it used before. Because it imports the live driver, it is still never pulled
+ * into the offline unit tests; it is checked by `tsc` and read by a source guard. Actually *running* this
+ * driver reaches a real marketplace session and remains a separately-approved live step — binding the id to the
+ * engine is not the same as taking a live run.
  */
 import type { ImportProbeDriver } from "./initial-import/import-driver";
 import {

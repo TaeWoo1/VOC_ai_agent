@@ -57,6 +57,19 @@ export interface ResolvedLaunchScope {
   requiredEnd: string;
 }
 
+/**
+ * The acquisition admission a host consults immediately before assembling a run — the BEFORE_WORK gate. A
+ * sanitized shape: an admit boolean plus the supervisor decision kind and the bound adapter id, both enums.
+ * The host does not compute it (that is the acquisition coordinator's job); it only honours a refusal.
+ */
+export interface SegmentAdmission {
+  readonly admit: boolean;
+  /** The supervisor decision kind (e.g. `DISPATCH` / `ASK_SELLER` / `HOLD_UNSUPPORTED`). Sanitized enum. */
+  readonly decision: string;
+  /** The bound adapter id (e.g. `NAVER_ACTION_WINDOW_IMPORT` / `NONE`). Sanitized enum. */
+  readonly adapter: string;
+}
+
 export interface ImportHostDeps {
   endpoint: InitialImportEndpoint;
   channelCode: string;
@@ -67,6 +80,14 @@ export interface ImportHostDeps {
   resolveScope: (launchRef: string) => Promise<ResolvedLaunchScope | null>;
   /** The driver for each hosted run. On the product path, the LIVE one. */
   driver: ImportProbeDriver;
+  /**
+   * OPTIONAL acquisition admission gate (BEFORE_WORK). Consulted after the server has resolved a hostable
+   * SEGMENT and immediately before the run is assembled. A refusal means no adapter can carry this segment, so
+   * the run is NOT started. It gates on adapter availability only — never on live session readiness, which the
+   * run's own PREPARE checks and fails closed on. When ABSENT (the default, and every pre-existing caller),
+   * every resolved segment is hosted exactly as before: the gate adds no behaviour to the audited path.
+   */
+  admit?: () => SegmentAdmission;
   persistDir?: string;
 }
 
@@ -220,6 +241,19 @@ export class ImportSegmentHost {
       // A SCOPE_RESOLVED event only ever yields REFUSE or HOST_SEGMENT; the other effects are unreachable
       // here. This guard keeps the type honest (narrowing `decision` to HOST_SEGMENT) and fails closed.
       if (decision.type !== "HOST_SEGMENT") return;
+
+      // BEFORE_WORK acquisition admission (optional). The server has authorized a hostable segment, but if no
+      // adapter is bound for this (channel × capability) there is nowhere for the work to go — so do not start
+      // a run that could not run. Gated on adapter availability only; the run's own PREPARE is the live session
+      // gate. Absent gate → unchanged: every resolved segment is hosted.
+      if (this.deps.admit) {
+        const admission = this.deps.admit();
+        if (!admission.admit) {
+          log("aw_import_host_acquisition_refused", { decision: admission.decision, adapter: admission.adapter });
+          return;
+        }
+      }
+
       const { channelCode } = decision;
       const runId = mintImportRunId();
       // Re-announce BEFORE the session exists, so an already-attached frontend learns the new run identity

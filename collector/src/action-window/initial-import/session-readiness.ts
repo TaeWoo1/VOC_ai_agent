@@ -121,6 +121,19 @@ export class SessionReadinessProbe {
     this.project("UNOBSERVED_EXTERNAL", reason);
   }
 
+  /**
+   * Project an already-derived readiness state (not raw signals) under a given probe reason.
+   *
+   * Used when another part of the runtime has ALREADY classified a coarse, sanitized session reading and the
+   * caller only needs to record the resulting state — notably the import run's `prepareSurface` result, which
+   * the live NAVER driver derives from the same session-verdict machinery `probeNaver` would run. It is the
+   * same sanitized projection + log as {@link probeNaver}; it just skips a re-classification that would only
+   * repeat work already done. Still OBSERVE-ONLY: it records a reading, it never drives a page.
+   */
+  observeState(state: SessionReadinessState, reason: ReadinessProbeReason): void {
+    this.project(state, reason);
+  }
+
   private project(state: SessionReadinessState, reason: ReadinessProbeReason): void {
     // Sanitized: a channel-code enum and three enums. The account slot is deliberately NOT logged (even though
     // it is opaque) to keep the log surface minimal; the log keys also avoid the logger's forbidden substrings,
