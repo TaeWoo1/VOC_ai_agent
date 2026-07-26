@@ -100,10 +100,12 @@ describe("FE-independence source guard", () => {
   it("the kernel, graph, projection, ports, and live adapter import no React, FE module, or component", () => {
     const files: Array<[string, string]> = [
       ["journey.ts", "../../../../contracts/review-import-journey/v1"],
+      ["readiness.ts", "../../../../contracts/session-readiness/v1"],
       ["journey-shadow.ts", "../../../src/action-window/initial-import"],
       ["journey-projection.ts", "../../../src/action-window/initial-import"],
       ["journey-ports.ts", "../../../src/action-window/initial-import"],
       ["journey-live.ts", "../../../src/action-window/initial-import"],
+      ["session-readiness.ts", "../../../src/action-window/initial-import"],
     ];
     for (const [rel, base] of files) {
       const src = readSrc(rel, base)

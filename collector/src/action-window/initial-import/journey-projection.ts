@@ -10,6 +10,10 @@
  * shadow drops. The map never invents a transition the runtime did not signal.
  */
 import type { JourneyEvent, SegmentEntryEffect } from "../../../../contracts/review-import-journey/v1/index";
+import type {
+  ReadinessProbeReason,
+  SessionReadinessState,
+} from "../../../../contracts/session-readiness/v1/index";
 
 /** The sanitized runtime signals the shadow observes. Each mirrors something the runtime already emits. */
 export type JourneyObservation =
@@ -26,6 +30,19 @@ export type JourneyObservation =
   /** A v2 run status the runtime published for the in-flight segment. */
   | { readonly kind: "run_status"; readonly status: string }
   | { readonly kind: "next_segment"; readonly hasRemaining: boolean }
+  /**
+   * A per-channel session-readiness reading. It is NOT a journey transition — the journey reducer does not
+   * move on it — so it projects to `null` and the shadow drops it. It rides the same OBSERVE-ONLY projection
+   * port purely so a readiness projector can be one more consumer of the same sanitized stream, with no FE.
+   */
+  | {
+      readonly kind: "session_readiness";
+      readonly channelCode: string;
+      /** Optional sanitized, opaque per-account slot — distinguishes two accounts on one channel. Never an id. */
+      readonly accountKey?: string;
+      readonly state: SessionReadinessState;
+      readonly reason: ReadinessProbeReason;
+    }
   | { readonly kind: "abandoned" };
 
 /**
@@ -73,6 +90,10 @@ export function projectJourneyEvent(obs: JourneyObservation): JourneyEvent | nul
     }
     case "next_segment":
       return { type: "NEXT_SEGMENT_AVAILABLE", hasRemaining: obs.hasRemaining };
+    case "session_readiness":
+      // Readiness is orthogonal to the journey phase — it never moves the reducer. A readiness projector
+      // consumes it off the port directly; here it is a deliberate no-op so the shadow stays at divergence 0.
+      return null;
     case "abandoned":
       return { type: "PLAN_ABANDONED" };
     default: {
