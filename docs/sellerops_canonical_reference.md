@@ -117,6 +117,45 @@ whole (`docs/product-scope-v1.md` §1.4):
 (`docs/multi-channel-connector-roadmap.md` §5.1). This is an approved default **design**; it is
 realized today on NAVER only.
 
+### 1.5 Product-canon update (2026-07-26) — pull-first, Agent-first
+
+Identity-level decisions carried here; scope detail lives in `docs/product-scope-v1.md` **§1.7 / §1.8 /
+§5.2** (scope lock **v1.7**), and the FE boundary in
+`docs/action-window-runtime/agent-first-ui-light-adr.md`. This section states the identity/strategy
+facets and points; it does not restate scope.
+
+- **Multi-channel from the start.** SellerOps is a multi-channel customer-operations agent across
+  NAVER · Coupang · Cafe24 · ESM+ · 11번가 · 오늘의집 and beyond — never a NAVER-only review tool. The
+  channel set is open (§1). NAVER is the wedge, not the boundary.
+- **Default experience is pull-first / exception-push.** The seller re-checks when needed; routine
+  results surface on return or as a daily summary; only defined exceptions push immediately (new
+  inquiry, severe negative review, spike, safety/refund/legal risk, reply delay, important collection
+  interruption). This supersedes any "a dashboard they open every day" framing.
+- **Session Readiness.** Per-channel session liveness (login / 2FA / expiry) so that, when healthy, the
+  seller checks login status roughly **once a day** and otherwise does not intervene.
+- **Reply drafting in Company Voice (AI); send after approval, capability-gated.** Drafts are generated
+  in the company's voice; MVP default is send-only-after-approval; a real send happens **only where a
+  per-channel Capability (official API) supports it**, with the approval serving as the human
+  checkpoint; unsupported channels get a draft or an operator-performed Action Window. Unapproved
+  auto-send is later scope. This **supersedes** the earlier "rule-based only, no AI" reply stance
+  (product-scope v1.4) — it changes the drafting mechanism only; the send fences (§6), the
+  never-submit-without-capability boundary, `UNVERIFIED` for unverifiable channels, and the gated live
+  submission (§6.2, §8-6) all stand, and no R4 reply-submission evidence is promoted.
+- **Product Knowledge + disclosure Issue Operations (direction).** A Product Knowledge Pack (catalog,
+  policies, detail-page text/images, FAQ, CS policy, operator-confirmed knowledge) feeds drafting;
+  **detail-image-extracted facts record source/confidence and are not treated as confirmed before
+  verification.** Complaint-vs-product comparison yields `NOT_DISCLOSED` / `DISCLOSED_BUT_WEAK` /
+  `DISCLOSED_AND_CLEAR` / `FAILURE_DESPITE_CORRECT_USE` / `UNKNOWN` candidates — **never used to assign
+  customer fault or auto-dismiss a complaint.**
+- **FE is a Control Plane projection + command adapter.** It owns no journey state or execution order;
+  new FE features are frozen and the existing FE is kept only as a temporary compatibility adapter. The
+  direction is a minimal Control Center (things to check · in-progress · completed results · connection
+  status) converging on a common OperationView + HumanCheckpoint
+  (`docs/action-window-runtime/agent-first-ui-light-adr.md`, Accepted 2026-07-26).
+
+> **Non-promotion.** This update advertises no channel capability and promotes no live claim. Capability
+> truth remains §4.1 (production-supported = file upload only); live-verification status is unchanged.
+
 ---
 
 ## 2. Strategy
@@ -232,6 +271,13 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
 | **Implemented, not live-verified** | NAVER guided onboarding wizard (offline-green on synthetic fixtures); NAVER reply preparation + guided reply session; ESM marketplace verification gate; Browser Projection V0 (unwired, State B) |
 | **Documented / ruled only** | v1 completion rulings; onboarding "real backend boundary" clause; `OperationRun` direction |
 | **Production-supported** | **File upload only.** |
+
+> **Forward-pointer (2026-07-26).** This ledger is anchored at `ca470e2` and is not rebased. Later
+> supervised live runs — the guided-import CTA E2E and the reshaped in-page NAVER review-import journey
+> (2026-07-25/26, single account, disposable dev backend) and the retirement of the range-discovery run
+> — are recorded in the workstream home `docs/workstreams/review_operations_mvp.md`, which outranks this
+> summary for runtime state. **None of them changed production-support** (still file upload only) or
+> promoted any §4.1 row.
 
 ---
 
@@ -439,6 +485,17 @@ files, real NAVER/ESM/review data, or credentials. No force-push.
 
 Direction and sequence. **No dates.** Each step requires its own approval.
 
+> **Operational-capability roadmap (2026-07-26, v1.7).** Alongside the channel-capability sequence
+> below, the operational build order is: **Session Readiness (per-channel) → Acquisition Supervisor
+> (stable multi-channel pipeline) → common Tutorial / HumanCheckpoint → FE-independent headless
+> acquisition → Notification Intent (the exception-push triggers) → Product Knowledge → Response
+> draft / approval / (capability-gated) send → Issue detection → minimal Control Center.** Two
+> repo-reality adjustments: FE-independent headless acquisition is already proven as a seam
+> (`collector/test/crossstack/journey-live-headless.test.ts`) so it may move earlier; and real *send*
+> stays gated and late because most channels have no official reply API. Session Readiness is the
+> explicit first step — it is the precondition for repeatable acquisition and has the most existing
+> primitives (pairing, profile persistence, login-org guard).
+
 1. **Declare v1 closed.** No document currently records the transition; the phase fences still read
    as if v1 is running. This is the precondition for everything below.
 2. **Honest capability refresh** — §4.1 rows for NAVER reply-submission, ESM attribution, and
@@ -467,7 +524,7 @@ Direction and sequence. **No dates.** Each step requires its own approval.
 When sources conflict, this order wins:
 
 1. explicit product-owner decisions from the current task
-2. `docs/product-scope-v1.md` — product scope contract, **scope lock v1.6**
+2. `docs/product-scope-v1.md` — product scope contract, **scope lock v1.7**
 3. `docs/sellerops_frontend_spec.md` — frontend source of truth
 4. `docs/sellerops_local_agent_runtime_adr.md` — runtime boundary ADR
 5. `docs/multi-channel-connector-roadmap.md` §4.1 — the living capability table
@@ -489,7 +546,7 @@ router.**
 | Document | Owns |
 |---|---|
 | **this document** | Product identity, strategy, honest state, authority map, standing fences |
-| `docs/product-scope-v1.md` (lock **v1.6**) | Product scope contract, operating loop, autonomy modes, registration decisions, Manufacturer Track |
+| `docs/product-scope-v1.md` (lock **v1.7**) | Product scope contract, operating loop, autonomy modes, pull-first/exception-push, Session Readiness, Company Voice, registration decisions, Manufacturer Track |
 | `docs/sellerops_frontend_spec.md` | Frontend IA, screens, journeys, frontstage/backstage |
 | `docs/multi-channel-connector-roadmap.md` | Collection strategy; **§4.1 = capability truth**; §5.1, §5.2, §11 |
 | `docs/sellerops_local_agent_runtime_adr.md` | Local-agent runtime boundary, projection direction |
@@ -563,12 +620,12 @@ in this section is fixed by this document.
 | D1 | root `CLAUDE.md`, "Current phase" | Freeze text — "No push / PR / merge / rebase / remote sync … until the single final v1 integration" and "the branch stays local". #317/#318/#319 are merged. |
 | D2 | root `CLAUDE.md`, "Working directory" | Names `/Users/taewookang/Downloads/workspace/aiagent-sellerops` — **that directory does not exist**. |
 | D3 | root `CLAUDE.md`, "Scope fence" | "Coupang and Cafe24 … Do not start them" — #319 merged Cafe24 tooling; Cafe24 REVIEW/INQUIRY are already `CONFIRMED` in code. Superseded by §6.3 here. |
-| D4 | root `CLAUDE.md`, required reading order | Cites `product-scope-v1.md` as **v1.1**; the actual lock is **v1.6**. |
+| D4 | root `CLAUDE.md`, required reading order | Cites `product-scope-v1.md` as **v1.1**; the actual lock is **v1.7** (2026-07-26). The doc title itself is now v1.7; `CLAUDE.md` still lags. |
 | D5 | `docs/sellerops_current_state.md` §1, §9, §10 | Baseline 2026-07-08 with two stacked partial-update banners; §10 predates #316–#319; §9 "Truth snapshot" still says the Action Window is not implemented. **Deliberately not rebased** (§0). |
-| D6 | `docs/product-scope-v1.md` §1.5, §6.1, §7-15 | Still states Action Window is **미구현**, contradicting its own delegate (§4.1: NAVER live-verified, Run 4). |
+| D6 | `docs/product-scope-v1.md` §1.5, §6.1, §7-15 | ~~Still states Action Window is 미구현~~ — **RESOLVED (v1.7, 2026-07-26):** corrected to "NAVER 리뷰 라이브 검증됨(1계정·disposable·운영 지원 아님), 그 외 미구현", consistent with §4.1. |
 | D7 | `docs/sellerops_frontend_spec.md` §18 | Same 미구현 claim for the Action Window review screen. Also cites product-scope as v1.2 in its appendix. |
 | D8 | `docs/multi-channel-connector-roadmap.md` §4.1 | Header reads "그 외 행·열은 2026-07-07 기준"; rows not refreshed for #316–#318. Note: `HANDOFF.md` instructs that this staleness be **reported, not edited** from a runtime branch. |
-| D9 | `docs/channel-capability-registration-matrix.md` | Dated 2026-07-08; **no row exists for the reply-submission (write) axis** despite scope lock v1.6. |
+| D9 | `docs/channel-capability-registration-matrix.md` | Dated 2026-07-08; **no row exists for the reply-submission (write) axis** despite scope lock v1.7. Still open — the matrix is derived from §4.1, and reply submission stays guided/observe-only/`UNVERIFIED`/gate-locked (not a supported capability), so this is a registration-tracking gap, not a promotion. |
 | D10 | `docs/esm/decisions.md` D2, `live-capture-plan.md` §1/§3-G2 | Still encode the **tablist** model (index 0 = GMARKET, 1 = AUCTION) that #318 disproved. |
 | D11 | `collector/src/esm/esm-marketplace-verify.ts` | Ships `MARKETPLACE_VERIFICATION_METHOD = "selected-tab-label"` — a code-level name for a contract the same PR states is unknown. **Code-level drift, not doc-level.** |
 | D12 | `docs/esm/live-capture-checklist.md` | G1/G2 marked `[x]` PASSED on a signal later shown to be non-discriminating; a "Next single action" line contradicts the "not currently runnable" blocker 60 lines below. |

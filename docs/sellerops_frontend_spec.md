@@ -3,6 +3,21 @@
 > Status: **CANONICAL (frontend).** SellerOps 프론트엔드 리디자인의 단일 source of truth.
 > 작성 2026-07-07. 근거: 프론트 정찰(코드 전수 열람)·문서 감사(2026-07-07 세션) + 제품 결정.
 >
+> **2026-07-26 갱신 (Agent-first / UI-light — 제품 오너 결정 반영).** 정본:
+> `docs/action-window-runtime/agent-first-ui-light-adr.md`(Accepted), 범위: `docs/product-scope-v1.md`
+> §1.7·§1.8·§5.2(lock v1.7). ① **FE = Agent Control Plane projection/command adapter** — FE는 Journey
+> 상태나 실행 순서를 **소유하지 않는다**; 런타임이 투영하는 것을 렌더하고 런타임이 인가하는 command만
+> 보낸다(포트: `JourneyProjectionPort`/`JourneyCommandPort`, 기존 Bridge/WS 전송은 그 한 어댑터). 실행은
+> 컴포넌트 mount에 의존하지 않는다. ② **기존 FE 신규 기능 동결** — 능력마다 전용 page/card/hook을 더하지
+> 않는다; 신규 능력은 기본적으로 기존 포트로 투영되는 **state/command**이지 새 화면이 아니다. 기존 FE는
+> 삭제하지 않고 **임시 호환 어댑터**로만 유지한다. ③ **기본 UX = pull-first / exception-push**
+> (product-scope §1.8) — "매일 여는 대시보드" 프레이밍은 대체된다(§3 규칙 1·§9 supersede). 미래 FE는 **확인할
+> 일·진행 중·완료 결과·연결 상태**만 있는 minimal Control Center로 수렴하고, 방향은 공통 **OperationView +
+> HumanCheckpoint**다. ④ **답변 초안 = Company Voice 기반 AI**(product-scope §5.2) — §10.3의 "규칙 기반·AI
+> 없음"은 대체된다; 단 **발송 없음/승인 후 Capability 발송·"발송/등록" 라벨 금지·`UNVERIFIED` 쌍 표기**의
+> FE 정직성 경계(§10.2·§15·§18)는 **그대로 유지**된다(FE가 라벨을 소유). 이 갱신은 어떤 채널 capability도
+> 승격하지 않는다(§15).
+>
 > 2026-07-08 갱신(제품 오너 결정 반영): ① **frontstage 초점 재정의** — 에이전트 활동·완료된 자동 작업·
 > 사람 체크포인트·긴급 운영 신호·실패/정체 연결·제안 다음 행동·운영 결과 중심(§3·§9). 셀러가 제품을
 > 커넥터-관리 콘솔로 경험하지 않게 하고, 연결·자격증명·브라우저 프로필·등록은 backstage 설정으로 유지.
@@ -57,6 +72,9 @@
   기간 지정 수집, 파일 업로드, 연결 알림·복구. 연결·자격증명·프로필·등록은 **backstage 설정으로 유지**한다.
 - 규칙:
   1. Frontstage가 1차 내비게이션이다. Backstage는 "설정/연결 관리" 성격의 2차 위계로 묶는다.
+     > **2026-07-26 supersede.** "매일 여는 화면"이라는 기대는 대체된다 — 기본 UX는 **pull-first /
+     > exception-push**(product-scope §1.8)다. Frontstage는 상시 응시 대상이 아니라, 미래엔 **확인할 일·진행
+     > 중·완료 결과·연결 상태**만 있는 minimal Control Center로 수렴한다. FE는 상태·실행 순서를 소유하지 않는다.
   2. **기존 커넥터·수집 화면은 버리지 않고 Backstage로 재배치해 재사용**한다 — `/channels`,
      채널 상세(자동 수집 관리), `/upload`, `/alerts`는 온보딩·채널 관리·복구 플로우의 부품이 된다.
   3. Frontstage 화면에는 수집 파이프라인 용어(트리거, 커서, capability 등)가 노출되지 않는다(§12).
@@ -231,9 +249,12 @@ Backstage (2차 위계 — "연결·설정")
      — 운영자가 복사·붙여넣기를 직접 수행한다.
    - 두 표면이 다른 이유: 리뷰에는 초안이 있고 문의에는 없다. 문의 답변 워크플로 노출은 여전히 별도
      결정이다(아래 4).
-3. 분석·추천 표기는 **"규칙 기반"** — "AI"로 과장하지 않는다(현행 `InboxFeed.tsx:124` 원칙 유지).
-   리뷰 답변 추천 초안도 동일하게 **규칙 기반**으로 표기한다(`providerKind=RULE_BASED`를 그대로 신뢰하지
-   말고 FE가 라벨을 소유). 라이브 LLM은 별도 승인 전까지 없다.
+3. **분석·추천 표기(2026-07-26 갱신).** 분석 신호 표기는 여전히 과장하지 않는다(현행 `InboxFeed.tsx:124`
+   원칙 유지 — FE가 라벨을 소유). **리뷰·문의 답변 초안은 Company Voice 기반 AI 생성**이다(product-scope §5.2)
+   — ~~"규칙 기반·라이브 LLM 없음"~~ 잠금은 대체된다. 그러나 **정직성 경계는 그대로**: 초안은 발송이 아니고
+   (§10.2·§15·§18), 승인은 텍스트를 고정할 뿐이며, 실제 발송은 Capability 지원 + 승인일 때만, "발송/전송/등록"
+   라벨과 발송 암시 표시는 금지, 검증 불가 채널은 `UNVERIFIED`를 쌍으로 표기한다. FE는 초안이 사실을 지어내지
+   않도록(사실은 Product Knowledge·운영자 확인) 표기·경고를 소유한다.
 4. [BE-DEP] 인박스 페이징(`GET /api/inbox` 무페이징), 문의 답변 워크플로(백엔드
    draft/verify/confirm-publish는 존재하나 미연결 — 노출 시점은 별도 결정).
    - ~~리뷰 본문 노출 정책~~ → **v1.4에서 확정**: 답변 준비 화면은 **redacted 리뷰 본문**을 노출한다
@@ -463,9 +484,9 @@ Backstage (2차 위계 — "연결·설정")
 ## 18. Action Window · 리뷰 운영 화면 (프론트 정본, 미구현)
 
 **Action Window = 라이브 마켓 리뷰 수집의 기본 production 모드**(제품 결정 `docs/product-scope-v1.md`
-§1.5, 계약 `docs/slices/action-window-v1.md`). **승인된 기본 production 설계이며 아직 구현·라이브 검증되지
-않았다(approved default production design, not yet implemented or live-verified)** — 화면·문구로 셀러에게
-"이미 제공"으로 보이게 하지 않는다. 본 절은 그 위의 **프론트 화면·상호작용 정본**이며 §16(가이드 연결)과
+§1.5, 계약 `docs/slices/action-window-v1.md`). **2026-07-26 정정:** Action Window는 **NAVER 리뷰 한정으로
+라이브 검증**됐으나(product-scope §1.5·§4.1 — 1계정·disposable·**운영 지원 아님**), 범용 렌더러·그 외 채널은
+미구현이다 — 화면·문구로 셀러에게 **"상시 제공"**으로 보이게 하지 않는다. 본 절은 그 위의 **프론트 화면·상호작용 정본**이며 §16(가이드 연결)과
 같은 정직성 경계·셀러 언어를 계승한다. **시각 세부(스포트라이트 모양·색·애니메이션·문구)는
 [UX-DECISION]** — 확정하지 않는다.
 
@@ -500,8 +521,10 @@ Backstage (2차 위계 — "연결·설정")
 ---
 
 ### 부록 — 근거 문서
-- 범위·Track·frontstage/backstage·가이드 연결·운영 에이전트·자율 모드·Action Window 기본:
-  `docs/product-scope-v1.md` (v1.2) §1.2·§1.4·§1.5·§1.6·§6.1
+- 범위·Track·frontstage/backstage·가이드 연결·운영 에이전트·자율 모드·pull-first·Session Readiness·Company
+  Voice·Action Window 기본: `docs/product-scope-v1.md` (lock v1.7) §1.2·§1.4·§1.5·§1.6·§1.7·§1.8·§5.2·§6.1
+- FE 경계(Agent Control Plane projection/command adapter, 동결, minimal Control Center 방향):
+  `docs/action-window-runtime/agent-first-ui-light-adr.md`
 - 채널 capability 현행표·수집 전략·Action Window 기본·채널 결정: `docs/multi-channel-connector-roadmap.md`
   §4.1·§5·§5.1·§5.2·§11·부록 A
 - Action Window 계약·리뷰 운영 화면: `docs/slices/action-window-v1.md`
