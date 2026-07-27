@@ -163,6 +163,16 @@ export type VerificationState = (typeof VERIFICATION_STATES)[number];
  *       its terminal failure mode has to be expressible. Without it an ingest failure would have to
  *       masquerade as {@code ARTIFACT_INVALID} — blaming the seller's file for a server-side problem.</li>
  * </ul>
+ *
+ * <p>The last seven are the <b>Guided Acquisition Reliability</b> additions (2026-07-27). They are the
+ * seller-facing projection of the sanitized {@code AcquisitionFailureState} diagnostics
+ * (`../../acquisition/v1/reliability`) — every one names a place the guided import used to fall <em>silent</em>
+ * (the window would not open, PREPARE never ran, the surface never hydrated, the guidance pack was rejected,
+ * the overlay threw or painted nothing, or the seller closed the window) and gives it an explicit, recoverable
+ * blocker with its own repair. All are recoverable: the run parks and a recheck (or an automatic reopen, for
+ * {@code SURFACE_CLOSED}) resumes it. {@code SESSION_NOT_READY} is deliberately NOT here — a login/expired
+ * session is already expressible as {@code LOGIN_REQUIRED} / {@code SESSION_EXPIRED}, and adding a third code
+ * for the same repair would only split the copy.
  */
 export const BLOCKER_CODES = [
   "LOGIN_REQUIRED",
@@ -175,6 +185,13 @@ export const BLOCKER_CODES = [
   "ARTIFACT_INVALID",
   "SCOPE_MISMATCH",
   "INGEST_FAILED",
+  "SURFACE_OPEN_FAILED",
+  "PREPARE_NOT_STARTED",
+  "SURFACE_SETTLE_TIMEOUT",
+  "GUIDANCE_PACK_REJECTED",
+  "OVERLAY_MOUNT_FAILED",
+  "OVERLAY_NOT_VISIBLE",
+  "SURFACE_CLOSED",
 ] as const;
 export type BlockerCode = (typeof BLOCKER_CODES)[number];
 

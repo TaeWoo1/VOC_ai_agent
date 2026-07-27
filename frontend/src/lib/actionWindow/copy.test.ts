@@ -59,3 +59,39 @@ describe("FE-owned copy registry", () => {
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("offline");
   });
 });
+
+describe("Guided Acquisition Reliability — blocker copy", () => {
+  const RELIABILITY_CODES = [
+    "SURFACE_OPEN_FAILED",
+    "PREPARE_NOT_STARTED",
+    "SURFACE_SETTLE_TIMEOUT",
+    "GUIDANCE_PACK_REJECTED",
+    "OVERLAY_MOUNT_FAILED",
+    "OVERLAY_NOT_VISIBLE",
+    "SURFACE_CLOSED",
+  ] as const;
+
+  it("gives every reliability code its own real copy, not the generic fallback", () => {
+    for (const code of RELIABILITY_CODES) {
+      const view = blockerView(code);
+      expect(view.title).not.toBe("진행이 멈췄어요");
+      expect(view.title.length).toBeGreaterThan(0);
+      expect(view.body.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("never leaks a raw enum / selector / path into the copy", () => {
+    for (const code of RELIABILITY_CODES) {
+      const view = blockerView(code);
+      expect(view.title).not.toMatch(/[A-Z_]{6,}/);
+      expect(view.body).not.toContain("aw_");
+      expect(view.body).not.toContain("http");
+    }
+  });
+
+  it("names the real Korean screen and one recovery action for the closed-window case", () => {
+    const view = blockerView("SURFACE_CLOSED");
+    expect(view.title).toContain("판매자센터");
+    expect(view.body).toContain("다시 확인");
+  });
+});

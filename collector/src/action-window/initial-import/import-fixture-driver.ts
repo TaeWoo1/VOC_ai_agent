@@ -16,6 +16,8 @@ import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import type { GuidancePanelState } from "../guidance-panel";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, SurfaceProbeResult } from "../engine";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import { ReliabilityFailure } from "./reliability-failure";
+import type { ReliabilityBlockerCode } from "./import-engine";
 
 export interface ImportFixtureScript {
   surface?: boolean | SurfaceProbeResult;
@@ -36,6 +38,20 @@ export interface ImportFixtureScript {
    * the one every pre-existing test was written against.
    */
   prefilled?: Partial<Record<ImportTarget, boolean>>;
+
+  /**
+   * **Guided Acquisition Reliability hooks.**
+   *
+   * `prepareFail` — a per-call sequence of reliability codes `prepareSurface` throws (indexed by how many times
+   * it has been called). A `null` at an index means "succeed that call", so `[ "SURFACE_SETTLE_TIMEOUT", null ]`
+   * models a run that stalls once and recovers on the re-check. `highlightFail` — throw a reliability failure
+   * the FIRST time a given target is highlighted, then succeed (so a re-check past an overlay failure proceeds).
+   */
+  prepareFail?: (ReliabilityBlockerCode | null)[];
+  highlightFail?: Partial<Record<ImportTarget, ReliabilityBlockerCode>>;
+  /** When set, `prepareSurface` never resolves nor rejects — models the surface that just never comes up, the
+   * case the session's PREPARE watchdog is the last backstop for. */
+  prepareHang?: boolean;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -59,6 +75,12 @@ export class ImportFixtureDriver implements ImportProbeDriver {
   readonly guidanceRenders: (GuidancePanelState | null)[] = [];
   private cleanedUp = 0;
   private pendingIntent: string | null = null;
+  /** How many times `prepareSurface` has run — indexes `prepareFail` and counts re-opens. */
+  private prepareCount = 0;
+  /** Targets already highlighted once, so `highlightFail` fires only on the first attempt then recovers. */
+  private readonly highlighted = new Set<ImportTarget>();
+  /** The current window's close resolver; a fresh one is minted per `whenSurfaceClosed` call (per re-open). */
+  private closeResolve: (() => void) | null = null;
 
   constructor(script: ImportFixtureScript = {}) {
     this.script = script;
@@ -66,7 +88,31 @@ export class ImportFixtureDriver implements ImportProbeDriver {
 
   async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
     this.calls.push("prepareSurface");
+    const index = this.prepareCount;
+    this.prepareCount += 1;
+    if (this.script.prepareHang) return new Promise<never>(() => {});
+    const fail = this.script.prepareFail?.[index] ?? null;
+    if (fail) throw new ReliabilityFailure(fail);
     return this.script.surface ?? true;
+  }
+
+  /** How many times the surface was prepared — a re-open (after a close/park + re-check) increments it. */
+  prepareCalls(): number {
+    return this.prepareCount;
+  }
+
+  /** Resolve when the current window closes — the session parks on SURFACE_CLOSED. Re-armed per re-open. */
+  whenSurfaceClosed(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.closeResolve = resolve;
+    });
+  }
+
+  /** Test helper: the seller closes the marketplace window. Fires the current close watch, once. */
+  closeSurface(): void {
+    const resolve = this.closeResolve;
+    this.closeResolve = null;
+    resolve?.();
   }
 
   async readSurfaceFacts(): Promise<ImportSurfaceFacts> {
@@ -81,6 +127,12 @@ export class ImportFixtureDriver implements ImportProbeDriver {
 
   async highlightTarget(target: ImportTarget): Promise<LocateResult> {
     this.calls.push(`highlight:${target}`);
+    const fail = this.script.highlightFail?.[target];
+    if (fail && !this.highlighted.has(target)) {
+      // Fire once per target, then let a re-check past the overlay failure proceed.
+      this.highlighted.add(target);
+      throw new ReliabilityFailure(fail);
+    }
     return (
       this.script.highlight?.[target] ??
       this.script.locate?.[target] ?? { count: 1, sig: sigFor(target) }

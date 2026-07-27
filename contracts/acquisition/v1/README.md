@@ -83,3 +83,26 @@ backend persistence of any supervisor state, and any new frontend. The whole wir
 `collector/test/action-window/initial-import/import-acquisition-runtime.e2e.test.ts` runs the real host +
 coordinator + decorator over a scripted driver, including an equivalence check that the coordinator adds
 nothing the run can see.
+
+## Reliability diagnostics (`./reliability`) — 2026-07-27
+
+The guided import can accept a command and still never reach the seller's hands. `./reliability` is the pure,
+sanitized vocabulary for that span — from the press through backend/bridge self-check, opening the window, the
+session probe, `PREPARE`, surface settle, the guidance pack, and the overlay, up to visible guidance:
+
+- **`AcquisitionStage`** — the ordered pipeline (`SELF_CHECK → SURFACE_OPEN → SESSION_PROBE → PREPARE →
+  SURFACE_SETTLE → GUIDANCE_PACK → OVERLAY_MOUNT → OVERLAY_VISIBLE → READY`). Collector instrumentation emits
+  one sanitized marker per boundary, so a run that goes silent leaves a trail ending at where it stopped.
+- **`AcquisitionFailureState`** — the eight recoverable stalls in that span (`SURFACE_OPEN_FAILED`,
+  `SESSION_NOT_READY`, `PREPARE_NOT_STARTED`, `SURFACE_SETTLE_TIMEOUT`, `GUIDANCE_PACK_REJECTED`,
+  `OVERLAY_MOUNT_FAILED`, `OVERLAY_NOT_VISIBLE`, `SURFACE_CLOSED`). Each was a *silent* outcome before this
+  slice named it. `failureStateToBlocker` projects each to the seller-facing Action Window `BlockerCode` so the
+  existing blocker → panel → card path shows one recovery action; `SESSION_NOT_READY` reuses the existing
+  session blockers rather than adding a redundant code.
+- **`AcquisitionOutcome`** = `OK | AcquisitionFailureState` — the terminal classification every guided run gets,
+  and the discipline the adversarial root-cause loop enforces: hold account / profile / guidance pack / entry
+  point fixed, vary exactly one `AdversarialVariable` per run, and discard any run whose outcome cannot be
+  attributed to that one axis (never record it as evidence).
+
+Still sanitized and still pure: a failure state is a *category*, never a message, selector, URL, filename,
+account, or count. The FE owns every seller-facing sentence (Action Window §6).

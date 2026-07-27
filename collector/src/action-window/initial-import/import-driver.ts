@@ -139,6 +139,16 @@ export interface ImportProbeDriver {
 
   /** Remove every annotation. Must be safe to call twice and on a half-built run. */
   cleanup(): Promise<void>;
+
+  /**
+   * **Guided Acquisition Reliability — resolve when the marketplace window closes.**
+   *
+   * Optional. A driver that owns a real window (the live NAVER driver) resolves this promise when the seller
+   * closes it, so the session can park the run on `SURFACE_CLOSED` instead of re-arming an observation on a
+   * dead page forever. A driver with no window (every scripted test driver) omits it, and the session watches
+   * nothing — behaviour for those drivers is byte-identical. Resolves at most once per opened window.
+   */
+  whenSurfaceClosed?(): Promise<void>;
 }
 
 /*

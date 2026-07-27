@@ -44,6 +44,8 @@ import { log } from "../../log";
 import type { ImportEffect, ImportSegmentEngine } from "./import-engine";
 import { IMPORT_TERMINAL_STAGES } from "./import-stages";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import { recordFailure, recordStage } from "./reliability-instrumentation";
+import { isReliabilityFailure } from "./reliability-failure";
 
 export interface ImportSessionOptions {
   /** Fires after every published transition — the persistence hook. */
@@ -74,6 +76,16 @@ export interface ImportSessionOptions {
    * the SellerOps window can still continue the plan.
    */
   terminalPanelBudgetMs?: number;
+  /**
+   * **Guided Acquisition Reliability — the PREPARE-start watchdog.**
+   *
+   * How long after a run is accepted the drive loop has to PRODUCE a surface result before the session
+   * concludes the run went silent and parks it as `PREPARE_NOT_STARTED`. This is the exact failure the first
+   * live proof hit — the command was accepted, but no `PREPARE` ever completed and the page just sat there. It
+   * is the last backstop: a stalled open or settle surfaces sooner as its own reliability failure. `0` disables
+   * the watchdog (offline tests that drive the loop by hand set it off so a fake clock never fires).
+   */
+  prepareStartGuardMs?: number;
 }
 
 export class ImportSegmentSession {
@@ -86,11 +98,18 @@ export class ImportSegmentSession {
   private readonly rearmDelayMs: number;
   private readonly panelPollMs: number;
   private readonly terminalPanelBudgetMs: number;
+  private readonly prepareStartGuardMs: number;
 
   private started = false;
   private publishedSeq = 0;
   private autoBusy = false;
   private unsubscribe: (() => void) | null = null;
+  /** The PREPARE-start watchdog handle; cleared the moment the drive loop enters PREPARE. */
+  private prepareWatchdog: ReturnType<typeof setTimeout> | null = null;
+  /** Monotonic id of the window whose close-watch is current; a stale window's close is ignored. */
+  private surfaceCloseToken = 0;
+  /** Set once the run has reached the seller with visible guidance, so `READY` is recorded only once. */
+  private reachedReady = false;
   /**
    * The frontend's guidance prose, or null until it arrives.
    *
@@ -121,6 +140,11 @@ export class ImportSegmentSession {
     // Fifteen minutes: long enough that a seller who steps away between two monthly exports still finds the
     // control, short enough that an abandoned sitting stops touching their page the same afternoon.
     this.terminalPanelBudgetMs = opts?.terminalPanelBudgetMs ?? 15 * 60_000;
+    // Sixty seconds: deliberately longer than the driver's own surface-settle guard, so a healthy (if slow)
+    // PREPARE always produces a result — ready or a settle-timeout park — before this fires. It is the last
+    // backstop for a prepare that neither resolves nor rejects at all. Not a tuning knob — a floor under "the
+    // run went silent". `0` disables it (hand-driven offline tests).
+    this.prepareStartGuardMs = opts?.prepareStartGuardMs ?? 60_000;
   }
 
   /**
@@ -137,9 +161,47 @@ export class ImportSegmentSession {
     void this.watchPanel();
     this.unsubscribe = () => {
       this.panelStopped = true;
+      this.clearPrepareWatchdog();
+      // Retire the current window's close watch so a late close after release cannot park a released run.
+      this.surfaceCloseToken += 1;
       stopTransport();
     };
     return this.unsubscribe;
+  }
+
+  /**
+   * **Guided Acquisition Reliability — watch the CURRENT marketplace window for a close.**
+   *
+   * Armed fresh after each PREPARE, because each PREPARE opens (or re-opens) the window: a driver that owns a
+   * real page resolves {@link ImportProbeDriver.whenSurfaceClosed} when the seller closes it. Before this, a
+   * close stranded the run — the barrier loop re-armed an observation on a dead page forever while the view
+   * still said WAITING_FOR_HUMAN. Now the session parks on `SURFACE_CLOSED` (recoverable: a re-check re-opens
+   * the window and re-runs PREPARE). The token makes it window-specific: only the LATEST window's close acts,
+   * so a stale promise from a window we already recovered from cannot re-park a healthy run. A driver with no
+   * window (every scripted test driver) omits the method and nothing is watched.
+   */
+  private watchSurfaceClose(): void {
+    const whenClosed = this.driver.whenSurfaceClosed?.bind(this.driver);
+    if (!whenClosed) return;
+    this.surfaceCloseToken += 1;
+    const token = this.surfaceCloseToken;
+    void whenClosed().then(() => this.onSurfaceClosed(token));
+  }
+
+  /** The marketplace window closed. Park the run visibly rather than let the barrier loop spin on a dead page. */
+  private onSurfaceClosed(token: number): void {
+    // Ignore a close from a window we have already moved past (a reopened run, or a released session).
+    if (token !== this.surfaceCloseToken) return;
+    if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
+    if (this.engine.currentStage() === "SURFACE_BLOCKED") return;
+    recordFailure("SURFACE_CLOSED");
+    this.engine.reliabilityPark("SURFACE_CLOSED");
+    // A parked run points at nothing; drop any stale highlight so the page does not keep a spotlight on a
+    // control the seller can no longer reach once they re-open.
+    void this.driver
+      .clearTargetHighlight()
+      .catch((e) => log("aw_import_clear_highlight_failed", { reason: errName(e) }, "warn"));
+    this.publishState();
   }
 
   /** Resolves once no automatic drive is in flight (test-facing determinism hook). */
@@ -154,12 +216,19 @@ export class ImportSegmentSession {
   private handle(frame: AwClientFrame): void {
     if (frame.kind === "aw_guidance_pack") {
       if (!isGuidancePack(frame.pack)) {
-        // Fail closed on a malformed pack rather than render half a panel: a panel missing the sentence that
-        // says what to do is worse than no panel, because the seller cannot tell it is incomplete.
+        // A malformed pack used to be logged and dropped in silence — the run kept going with no panel, and the
+        // seller had no way to tell the guidance was missing. Now it is an EXPLICIT, recoverable failure state:
+        // rendering half a panel is worse than none, but silently rendering none is worse still. Park it so the
+        // seller sees "안내를 불러오지 못했어요" on the SellerOps card (which needs no pack) with one recovery action;
+        // a re-check re-runs PREPARE and the frontend re-sends a valid pack.
         log("aw_import_guidance_pack_rejected", { accepted: false });
+        recordFailure("GUIDANCE_PACK_REJECTED");
+        this.engine.reliabilityPark("GUIDANCE_PACK_REJECTED");
+        this.publishState();
         return;
       }
       this.pack = frame.pack;
+      recordStage("GUIDANCE_PACK");
       // COUNTS only. The values are the frontend's copy and the seller's own language; a log line is not
       // where they belong, and this line exists to prove a pack arrived, not to say what it said.
       log("aw_import_guidance_pack", {
@@ -201,14 +270,61 @@ export class ImportSegmentSession {
       ...(outcome.ok ? {} : { reason: outcome.reason }),
     });
     this.publishState();
-    if (command.type === "START_RUN" && outcome.ok) this.started = true;
+    if (command.type === "START_RUN" && outcome.ok) {
+      this.started = true;
+      // Arm the PREPARE-start watchdog: from here the drive loop has a bounded window to actually enter
+      // PREPARE, or the run is parked as PREPARE_NOT_STARTED rather than sitting silent forever.
+      this.armPrepareWatchdog();
+    }
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
       this.autoBusy = true;
       void this.drive(outcome.effect)
-        .catch(() => this.fatalCleanup())
+        .catch((e) => this.onDriveError(e))
         .finally(() => {
           this.autoBusy = false;
         });
+    }
+  }
+
+  /**
+   * A drive chain threw. A {@link ReliabilityFailure} is an EXPECTED, recoverable stall (window would not open,
+   * surface never settled, overlay failed) — record it and park the run with one recovery action, never tear it
+   * down. Anything else is a genuine fault and still fails closed via the fatal cleanup.
+   */
+  private onDriveError(e: unknown): void {
+    // A drive chain that threw has demonstrably run, so the PREPARE watchdog is moot either way.
+    this.clearPrepareWatchdog();
+    if (isReliabilityFailure(e)) {
+      recordFailure(e.code);
+      this.engine.reliabilityPark(e.code);
+      this.publishState();
+      return;
+    }
+    void this.fatalCleanup();
+  }
+
+  /** Arm (or re-arm) the PREPARE-start watchdog. A `0` guard disables it (hand-driven offline tests). */
+  private armPrepareWatchdog(): void {
+    if (this.prepareStartGuardMs <= 0) return;
+    this.clearPrepareWatchdog();
+    this.prepareWatchdog = setTimeout(() => {
+      this.prepareWatchdog = null;
+      // The window elapsed and no PREPARE ever ran. If the run has since moved on (a fast PREPARE cleared this
+      // in time, or it was cancelled), do nothing; otherwise park it visibly.
+      if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
+      if (this.engine.currentStage() !== "PREPARE_SESSION") return;
+      recordFailure("PREPARE_NOT_STARTED");
+      this.engine.reliabilityPark("PREPARE_NOT_STARTED");
+      this.publishState();
+    }, this.prepareStartGuardMs);
+    // Never keep the process alive just for the watchdog.
+    this.prepareWatchdog.unref?.();
+  }
+
+  private clearPrepareWatchdog(): void {
+    if (this.prepareWatchdog) {
+      clearTimeout(this.prepareWatchdog);
+      this.prepareWatchdog = null;
     }
   }
 
@@ -236,15 +352,34 @@ export class ImportSegmentSession {
         return this.drive(next);
       }
       // `observe` rests at a seller barrier. The watcher runs detached so the drive chain unwinds and the
-      // run is genuinely idle while the seller works on NAVER.
+      // run is genuinely idle while the seller works on NAVER. Reaching the first barrier means the guidance is
+      // up and the seller can act — the run reached them, which is the pipeline's terminal `READY` marker.
+      if (!this.reachedReady) {
+        this.reachedReady = true;
+        recordStage("READY");
+      }
       await this.driver.armTargetObserve(effect.observe);
       void this.watchBarrier(effect.observe);
       return;
     }
     switch (effect) {
       case "PREPARE": {
+        // The drive loop entered PREPARE — the run did NOT go silent, so cancel the watchdog. Any stall from
+        // here on (window open, surface settle) surfaces as a ReliabilityFailure the driver throws.
+        recordStage("PREPARE");
         const res = await this.driver.prepareSurface();
+        // PREPARE produced a result — the run did not go silent, so cancel the watchdog. (A prepare that never
+        // resolves nor rejects never reaches here, and the watchdog is what catches that.) Any explicit stall is
+        // a ReliabilityFailure the driver threw, cleared in `onDriveError`.
+        this.clearPrepareWatchdog();
+        // The window is up (prepareSurface did not throw) — arm a close-watch for THIS window, replacing any
+        // watch on a window we have re-opened past. Do it before onSurfaceReady so a close during the probe is
+        // still caught.
+        this.watchSurfaceClose();
         const next = this.engine.onSurfaceReady(res);
+        // A recoverable session park (login/expired) is the reliability pipeline's `SESSION_NOT_READY` — record
+        // it so the trail shows the surface probe is where this run stopped.
+        if (this.engine.currentStage() === "SESSION_BLOCKED") recordFailure("SESSION_NOT_READY");
         this.publishState();
         return this.drive(next);
       }
@@ -353,7 +488,10 @@ export class ImportSegmentSession {
   }
 
   private async fatalCleanup(): Promise<void> {
-    await this.driver.cleanup().catch(() => {});
+    this.clearPrepareWatchdog();
+    // Not swallowed silently: a cleanup that fails during fatal teardown is still worth a sanitized line, so a
+    // transcript shows the teardown was attempted and what it hit — it just must not throw out of teardown.
+    await this.driver.cleanup().catch((e) => log("aw_import_fatal_cleanup_failed", { reason: errName(e) }, "warn"));
   }
 
   private publishState(): void {
@@ -384,7 +522,12 @@ export class ImportSegmentSession {
   private queuePanelRender(): void {
     if (this.pack === null) return;
     const state = guidancePanelStateFrom(this.engine.view(), this.pack);
-    this.panelRender = this.panelRender.then(() => this.driver.renderGuidance(state)).catch(() => {});
+    // A render failure must not take down an otherwise-fine run (the page may be navigating or closed), but it
+    // is no longer swallowed in silence: a sanitized line records that a panel draw was refused, so a run that
+    // shows the seller nothing leaves a reason why instead of looking like it rendered.
+    this.panelRender = this.panelRender
+      .then(() => this.driver.renderGuidance(state))
+      .catch((e) => log("aw_import_panel_render_failed", { reason: errName(e) }, "warn"));
   }
 
   private panelRender: Promise<void> = Promise.resolve();
@@ -421,10 +564,15 @@ export class ImportSegmentSession {
           terminalWaitedMs += this.panelPollMs;
           if (terminalWaitedMs >= this.terminalPanelBudgetMs) {
             log("aw_import_panel_idle_closed", { offered: offered.length });
-            this.panelRender = this.panelRender.then(() => this.driver.renderGuidance(null)).catch(() => {});
+            this.panelRender = this.panelRender
+              .then(() => this.driver.renderGuidance(null))
+              .catch((e) => log("aw_import_panel_takedown_failed", { reason: errName(e) }, "warn"));
             return;
           }
         }
+        // A failed read of the in-page press flag is "no press this tick", not a run failure — the next poll
+        // reads it again. Deliberately not logged: it would fire on every poll of a navigating page and drown
+        // the transcript, and it carries no reliability signal (the surface-close watch owns "window is gone").
         const intent = await this.driver.takeGuidanceIntent().catch(() => null);
         if (intent) this.applyPanelIntent(intent);
       }
@@ -471,9 +619,12 @@ export class ImportSegmentSession {
     log("aw_import_panel_intent", { accepted: outcome.ok });
     this.publishState();
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
+      // A panel-triggered re-check re-runs PREPARE, which can hit a reliability stall (the window is still
+      // closed, say). Route it through the same reliability-aware handler so it parks visibly rather than
+      // tearing the run down.
       this.autoBusy = true;
       void this.drive(outcome.effect)
-        .catch(() => this.fatalCleanup())
+        .catch((e) => this.onDriveError(e))
         .finally(() => {
           this.autoBusy = false;
         });
@@ -527,4 +678,14 @@ function isNoop(effect: ImportEffect): boolean {
 function safeCommandId(command: unknown): string {
   const id = (command as { commandId?: unknown })?.commandId;
   return typeof id === "string" ? id : "unknown";
+}
+
+/**
+ * A sanitized label for a caught error — its constructor name only, never its message. A Playwright page error
+ * can carry a URL or selector in `.message`; the class name (`TimeoutError`, `Error`) cannot, so it is the one
+ * safe thing to log about a swallowed-but-not-silent failure.
+ */
+function errName(e: unknown): string {
+  if (e instanceof Error) return e.name || "Error";
+  return typeof e;
 }

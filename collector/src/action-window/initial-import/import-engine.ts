@@ -76,7 +76,35 @@ export type ImportBlockerCode =
   | "SCOPE_MISMATCH"
   | "DOWNLOAD_TIMEOUT"
   | "ARTIFACT_INVALID"
-  | "INGEST_FAILED";
+  | "INGEST_FAILED"
+  // Guided Acquisition Reliability parks — every one a place the run used to fall silent. All recoverable
+  // (re-check re-runs PREPARE). `SESSION_NOT_READY` is deliberately absent: a login/expired session already
+  // has `LOGIN_REQUIRED` / `SESSION_EXPIRED`, so it reuses those rather than a redundant code.
+  | ReliabilityBlockerCode;
+
+/**
+ * The seven recoverable reliability parks, named to match the `AcquisitionFailureState` diagnostics
+ * (`contracts/acquisition/v1/reliability`) they project from. Kept as its own union so
+ * {@link ImportSegmentEngine.reliabilityPark} accepts exactly these and nothing else.
+ */
+export type ReliabilityBlockerCode =
+  | "SURFACE_OPEN_FAILED"
+  | "PREPARE_NOT_STARTED"
+  | "SURFACE_SETTLE_TIMEOUT"
+  | "GUIDANCE_PACK_REJECTED"
+  | "OVERLAY_MOUNT_FAILED"
+  | "OVERLAY_NOT_VISIBLE"
+  | "SURFACE_CLOSED";
+
+export const RELIABILITY_BLOCKER_CODES: readonly ReliabilityBlockerCode[] = [
+  "SURFACE_OPEN_FAILED",
+  "PREPARE_NOT_STARTED",
+  "SURFACE_SETTLE_TIMEOUT",
+  "GUIDANCE_PACK_REJECTED",
+  "OVERLAY_MOUNT_FAILED",
+  "OVERLAY_NOT_VISIBLE",
+  "SURFACE_CLOSED",
+];
 
 export type ImportCommandOutcome =
   | { ok: true; idempotent: boolean; effect: ImportEffect }
@@ -198,11 +226,13 @@ export class ImportSegmentEngine {
       this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
       return "READ_SCOPE";
     }
-    if (this.stage === "SESSION_BLOCKED") {
-      // "I logged in, look again." Re-run the session probe on the SAME segment and ticket. If it is now
-      // usable the run proceeds from `onSurfaceReady`; if not, it parks at `SESSION_BLOCKED` again. Moving to
-      // `PREPARE_SESSION` first is what makes a duplicate re-check safe: `PREPARE_SESSION` allows no
-      // `REQUEST_STEP_RECHECK`, so a second press while the probe is in flight is rejected, not a second probe.
+    if (this.stage === "SESSION_BLOCKED" || this.stage === "SURFACE_BLOCKED") {
+      // "I logged in / re-opened the window, look again." Re-run PREPARE on the SAME segment and ticket. For a
+      // session block this re-probes the session; for a reliability block it re-opens the window (if closed),
+      // re-runs the surface settle, and re-mounts the overlay. If it is now usable the run proceeds from
+      // `onSurfaceReady`; if not, it parks again. Moving to `PREPARE_SESSION` first is what makes a duplicate
+      // re-check safe: `PREPARE_SESSION` allows no `REQUEST_STEP_RECHECK`, so a second press while the probe is
+      // in flight is rejected, not a second probe.
       this.blockerCode = null;
       this.blockerRecoverable = false;
       this.stage = "PREPARE_SESSION";
@@ -523,6 +553,30 @@ export class ImportSegmentEngine {
     return "CLEANUP";
   }
 
+  /**
+   * **Guided Acquisition Reliability — park on a recoverable reliability stall.**
+   *
+   * Called by the session when the guided run reached the seller in none of the ways it should have: the
+   * window would not open, `PREPARE` never started, the surface never settled, the guidance pack was rejected,
+   * the overlay threw or painted nothing, or the seller closed the window. Every one of these used to be a
+   * SILENT or frozen outcome; this turns it into a visible, recoverable `SURFACE_BLOCKED` park with exactly one
+   * recovery action — a re-check that re-runs `PREPARE` on the SAME segment and ticket (re-opening the window
+   * if it was closed). It is idempotent while already parked (a second close/timeout for the same run does not
+   * re-emit), and it never fires on a terminal run.
+   */
+  reliabilityPark(code: ReliabilityBlockerCode): ImportEffect {
+    if (this.isTerminal()) return "NONE";
+    // Already parked on this exact cause — do not re-emit (a late close after a timeout park, say). A DIFFERENT
+    // reliability cause is allowed to replace the current one, so the seller always sees the latest reason.
+    if (this.stage === "SURFACE_BLOCKED" && this.blockerCode === code) return "NONE";
+    this.blockerCode = code;
+    this.blockerRecoverable = true;
+    this.stage = "SURFACE_BLOCKED";
+    this.emit("RUN_BLOCKED", { code, recoverable: true });
+    this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
+    return "NONE";
+  }
+
   /* ── stage helpers ────────────────────────────────────────────────────────── */
 
   private highlightStageFor(target: ImportTarget): ImportStage {
@@ -613,7 +667,13 @@ export class ImportSegmentEngine {
     };
     // A blocker is exposed while the run is stopped for it — including the recoverable scope and session
     // parks, which are NOT failures and must not be rendered as ones.
-    if (this.blockerCode && (this.stage === "FAILED" || this.stage === "SCOPE_BLOCKED" || this.stage === "SESSION_BLOCKED")) {
+    if (
+      this.blockerCode &&
+      (this.stage === "FAILED" ||
+        this.stage === "SCOPE_BLOCKED" ||
+        this.stage === "SESSION_BLOCKED" ||
+        this.stage === "SURFACE_BLOCKED")
+    ) {
       view.blocker = { code: this.blockerCode as never, recoverable: this.blockerRecoverable };
     }
     return view;

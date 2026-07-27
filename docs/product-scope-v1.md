@@ -289,6 +289,22 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   없음**. issue-memory 판정은 THRESHOLDS **DRAFT**이므로 언제나 "검증되지 않은 이슈 후보·운영 신호"로만 표현한다.
   라이브 NAVER 검증은 **fresh·single-use·in-turn 승인**(채널/계정/날짜/운영자)에서만 — 이 문서는 라이브 승인을
   부여하지 않는다.
+- **carve-out 확장 (2026-07-27, 제품 오너 승인 — Guided Acquisition Reliability):** 위 "NAVER 리뷰 운영 루프"
+  carve-out이 허용한 ④ 복구를, 이미 라이브 검증된 guided-import 세로 스택의 **신뢰성 하드닝**으로 구체화한다 —
+  즉 과거 리뷰 연동 진입부터 로그인·가이드 표시·다운로드 감지·ingest 완료까지 셀러가 **침묵·복구 불가 상태**를
+  만나지 않게 한다. 범위: ① guided span 전 구간(pack→PREPARE→settle→overlay)의 **sanitized 상태 계측**, ②
+  8개 **실패 상태**(`SURFACE_OPEN_FAILED·SESSION_NOT_READY·PREPARE_NOT_STARTED·SURFACE_SETTLE_TIMEOUT·
+  GUIDANCE_PACK_REJECTED·OVERLAY_MOUNT_FAILED·OVERLAY_NOT_VISIBLE·SURFACE_CLOSED`)을 **일시적 run-state
+  projection**(기존 blocker 코드 계열, 신규 durable 도메인 아님)으로 노출, ③ backend·bridge·origin·agent
+  **사전 self-check** + 한 가지 한국어 복구 행동, ④ 로그인 후 다시 확인이 session probe와 PREPARE를 실제
+  재실행, NAVER 창 종료 감지 후 **같은 in-memory run/ticket**으로 재오픈(디스크 재개 없음 = credential-at-rest
+  유지), UUID 임시 다운로드를 정상 파일명·관리 경로로 인계, `.catch(()=>{})` 침묵 제거. 경계 유지: **신규
+  durable 도메인·`OperationRun`/`ResumeState`·DB 마이그레이션 없음**(복구는 기존 in-memory run + single-use
+  `launchRef` 재사용만), **신규 FE 화면 없음**(기존 `GuidedImportCard`/in-page 패널 copy만 확장), **자동 로그인·
+  마켓플레이스 클릭·2FA·CAPTCHA 없음**(export는 §4.7 human-driven 유지), **두 번째 채널 없음**. 라이브 원인
+  분석은 controlled adversarial loop(계정·프로필·pack·진입점 고정, run당 변수 하나, runId+sessionId+surfaceId
+  격리, 동시 1개 run, 종료 상태 필수, 단일 축 귀속 실패 시 폐기)로 수행하며, 라이브 검증은 **fresh·single-use·
+  in-turn 승인**에서만.
 
 ### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
 

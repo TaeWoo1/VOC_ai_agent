@@ -133,6 +133,37 @@ const V2_ONLY_BLOCKER_VIEW: Record<string, BlockerView> = {
     // for the wrong problem entirely.
     body: "가져오려는 기간과 화면에 선택된 기간이 일치하지 않아요. 날짜를 다시 선택해 주세요.",
   },
+  // Guided Acquisition Reliability parks. Each was a place the guided import used to fall silent; each now
+  // names the real screen and gives ONE recovery action. All recoverable — a 다시 확인 re-runs the guided
+  // preparation (re-opening the 판매자센터 window if it was closed).
+  SURFACE_OPEN_FAILED: {
+    title: "판매자센터 창을 열지 못했어요",
+    body: "'과거 리뷰 연동'을 다시 눌러 판매자센터 창을 열어 주세요.",
+  },
+  PREPARE_NOT_STARTED: {
+    title: "시작이 지연되고 있어요",
+    body: "잠시 기다린 뒤 '다시 확인'을 눌러 주세요.",
+  },
+  SURFACE_SETTLE_TIMEOUT: {
+    title: "화면이 아직 준비되지 않았어요",
+    body: "판매자센터의 리뷰 관리 화면이 모두 뜬 뒤 '다시 확인'을 눌러 주세요.",
+  },
+  GUIDANCE_PACK_REJECTED: {
+    title: "안내를 불러오지 못했어요",
+    body: "'다시 확인'을 눌러 안내를 다시 불러와 주세요.",
+  },
+  OVERLAY_MOUNT_FAILED: {
+    title: "안내 표시를 그리지 못했어요",
+    body: "'다시 확인'을 눌러 주세요.",
+  },
+  OVERLAY_NOT_VISIBLE: {
+    title: "안내 표시가 보이지 않아요",
+    body: "판매자센터 화면을 위로 올린 뒤 '다시 확인'을 눌러 주세요.",
+  },
+  SURFACE_CLOSED: {
+    title: "판매자센터 창이 닫혔어요",
+    body: "'다시 확인'을 누르면 판매자센터 창을 다시 열어 드릴게요.",
+  },
 };
 
 /**

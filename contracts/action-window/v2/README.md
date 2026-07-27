@@ -69,8 +69,12 @@ closed rather than defaulting.
   COMPLETED · FAILED · SKIPPED`.
 - **ExecutionMode:** `AUTOMATIC_OPERATION · ACTION_WINDOW · FILE_IMPORT · INTEGRATION_PENDING`.
 - **BlockerCode:** `LOGIN_REQUIRED · UI_DRIFT · TARGET_NOT_FOUND · TARGET_AMBIGUOUS ·
-  SESSION_EXPIRED · UNSUPPORTED_STATE · DOWNLOAD_TIMEOUT · ARTIFACT_INVALID`. Blocker codes are
-  **not** Run statuses.
+  SESSION_EXPIRED · UNSUPPORTED_STATE · DOWNLOAD_TIMEOUT · ARTIFACT_INVALID · SCOPE_MISMATCH ·
+  INGEST_FAILED`, plus the **Guided Acquisition Reliability** codes (2026-07-27) `SURFACE_OPEN_FAILED ·
+  PREPARE_NOT_STARTED · SURFACE_SETTLE_TIMEOUT · GUIDANCE_PACK_REJECTED · OVERLAY_MOUNT_FAILED ·
+  OVERLAY_NOT_VISIBLE · SURFACE_CLOSED` — the seller-facing projection of the sanitized
+  `AcquisitionFailureState` diagnostics (`../../acquisition/v1/reliability`), each a *recoverable* park
+  where the guided import previously fell silent. Blocker codes are **not** Run statuses.
 
 ## Commands (FE → Runtime)
 

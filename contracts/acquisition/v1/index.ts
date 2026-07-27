@@ -8,3 +8,4 @@
  * `./acquisition` for the full doc.
  */
 export * from "./acquisition";
+export * from "./reliability";

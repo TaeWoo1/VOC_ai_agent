@@ -54,7 +54,9 @@ import type { ImportSurfaceFacts } from "../../naver/import-guidance-plan";
 import { log } from "../../log";
 import type { ArtifactValidateResult, DownloadDetectResult, IngestResult, LocateResult, SurfaceProbeResult } from "../engine";
 import { armObserver, waitForUserAction } from "../observer";
-import { mountOverlay, unmountOverlay } from "../overlay";
+import { mountOverlay, overlayMounted, unmountOverlay } from "../overlay";
+import { ReliabilityFailure } from "./reliability-failure";
+import { recordStage } from "./reliability-instrumentation";
 import {
   mountGuidancePanel,
   takeGuidanceIntent,
@@ -107,6 +109,22 @@ export interface NaverLiveImportDriverOptions {
    * behaves exactly as it did before.
    */
   presentSurface?: () => Promise<void>;
+  /**
+   * **Guided Acquisition Reliability — resolve when the marketplace window closes.**
+   *
+   * Supplied by the boot, which owns the `page` and wires `page.once("close", …)`. Exposed to the session via
+   * {@link NaverLiveImportDriver.whenSurfaceClosed} so a closed window parks the run on `SURFACE_CLOSED` instead
+   * of stranding it. Absent for a driver with no window.
+   */
+  whenSurfaceClosed?: () => Promise<void>;
+  /**
+   * **Guided Acquisition Reliability — the surface-settle guard.**
+   *
+   * The longest `prepareSurface` may take before the session concludes the surface never came up and parks the
+   * run on `SURFACE_SETTLE_TIMEOUT`. Comfortably longer than the proven driver's internal grid settle so it only
+   * fires on a genuine no-show (the "idle CPU, page never rendered" shape). `0` disables the guard.
+   */
+  surfaceSettleGuardMs?: number;
 }
 
 export class NaverLiveImportDriver implements ImportProbeDriver {
@@ -165,12 +183,47 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * left exactly as it was.
    *
    * The presentation runs FIRST and is best-effort: a window that could not be raised is a worse experience, not
-   * a broken run, and swallowing the failure keeps a cosmetic problem from failing an import. Whether the page is
-   * actually usable is still decided entirely by the composed driver, which is the only thing that reads it.
+   * a broken run. But it is no longer swallowed in SILENCE — a failed raise is logged (sanitized) so a run that
+   * never came to the front leaves a reason. Whether the page is actually usable is still decided entirely by
+   * the composed driver, which is the only thing that reads it.
+   *
+   * The composed probe is wrapped in a settle guard: if it does not resolve within `surfaceSettleGuardMs`, the
+   * surface never came up (the "idle CPU, page never rendered" failure), and this throws a
+   * {@link ReliabilityFailure} the session parks as `SURFACE_SETTLE_TIMEOUT` rather than hanging forever.
    */
   async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
-    await this.opts.presentSurface?.().catch(() => {});
-    return this.proven.prepareSurface();
+    await this.opts
+      .presentSurface?.()
+      .catch((e) => log("aw_import_surface_present_failed", { reason: errName(e) }, "warn"));
+    recordStage("SESSION_PROBE");
+    const result = await this.withSettleGuard(this.proven.prepareSurface());
+    recordStage("SURFACE_SETTLE");
+    return result;
+  }
+
+  /**
+   * Race the composed probe against the settle guard. A guard of `0` (or unset default) disables it so a
+   * scripted offline driver is never timed out by a fake clock. The guard timer is cleared whichever way the
+   * probe resolves, so a settled surface leaves nothing pending.
+   */
+  private async withSettleGuard<T>(probe: Promise<T>): Promise<T> {
+    const guardMs = this.opts.surfaceSettleGuardMs ?? 0;
+    if (guardMs <= 0) return probe;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const guard = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new ReliabilityFailure("SURFACE_SETTLE_TIMEOUT")), guardMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([probe, guard]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** Resolve when the marketplace window closes — the boot wires the real `page.once("close", …)`. */
+  whenSurfaceClosed(): Promise<void> {
+    return this.opts.whenSurfaceClosed?.() ?? new Promise<void>(() => {});
   }
 
   /**
@@ -278,6 +331,10 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
   async highlightTarget(target: ImportTarget): Promise<LocateResult> {
     if (target === "export") {
       await this.proven.highlight();
+      // The proven overlay is mounted the same way; verify it actually painted, so a silent no-highlight
+      // export step becomes a visible OVERLAY_NOT_VISIBLE rather than a run that looks fine and points at
+      // nothing (the "logged in, no highlight" shape from the first live proof).
+      await this.verifyOverlayVisible();
       const sig = this.sigs.get("export");
       return sig ? { count: 1, sig } : { count: 0 };
     }
@@ -291,14 +348,38 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     const revalidated = await this.locateTarget(target);
     if (revalidated.count !== 1) return revalidated;
 
-    await this.ctx().evaluate(NAME_SHIM);
-    await mountOverlay(this.ctx(), {
-      stepNumber: this.stepNumber,
-      totalSteps: this.badgeTotalSteps ?? this.opts.totalSteps ?? 8,
-      copyKey: `actionWindow.import.${target}`,
-      guidanceEnabled: this.opts.guidanceEnabled ?? true,
-    });
+    recordStage("OVERLAY_MOUNT");
+    // Mounting evaluates a closure in the seller's page. A navigating or closed page THROWS here — previously
+    // that propagated raw; now it is an explicit, recoverable OVERLAY_MOUNT_FAILED the session parks with one
+    // recovery action.
+    try {
+      await this.ctx().evaluate(NAME_SHIM);
+      await mountOverlay(this.ctx(), {
+        stepNumber: this.stepNumber,
+        totalSteps: this.badgeTotalSteps ?? this.opts.totalSteps ?? 8,
+        copyKey: `actionWindow.import.${target}`,
+        guidanceEnabled: this.opts.guidanceEnabled ?? true,
+      });
+    } catch {
+      throw new ReliabilityFailure("OVERLAY_MOUNT_FAILED");
+    }
+    await this.verifyOverlayVisible();
     return revalidated;
+  }
+
+  /**
+   * **Guided Acquisition Reliability — prove the overlay actually painted.**
+   *
+   * `mountOverlay` returns `void` and silently does nothing when its target is absent (`if (!target) return`),
+   * which is exactly the case that produced a mounted-nothing, no-highlight run with no signal. This reads the
+   * one sanitized fact that distinguishes "the spotlight is on the page" from "it is not" and, when it is not,
+   * throws `OVERLAY_NOT_VISIBLE` so the seller sees a recoverable state instead of a frozen, unhighlighted page.
+   * Records the `OVERLAY_VISIBLE` marker on success so the pipeline trail reaches the seller.
+   */
+  private async verifyOverlayVisible(): Promise<void> {
+    const mounted = await overlayMounted(this.ctx()).catch(() => false);
+    if (!mounted) throw new ReliabilityFailure("OVERLAY_NOT_VISIBLE");
+    recordStage("OVERLAY_VISIBLE");
   }
 
   /**
@@ -444,7 +525,9 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
    * it would otherwise keep watching a field whose barrier is no longer open.
    */
   async clearTargetHighlight(): Promise<void> {
-    await unmountOverlay(this.ctx()).catch(() => {});
+    // Sanitized, not silent: removing the spotlight on a navigating/closed page can fail, and that must not
+    // throw out of a stop — but it leaves a line so a stuck highlight has a recorded reason.
+    await unmountOverlay(this.ctx()).catch((e) => log("aw_import_unmount_overlay_failed", { reason: errName(e) }, "warn"));
     await this.ctx()
       .evaluate(() => {
         const w = window as unknown as Record<string, unknown>;
@@ -455,7 +538,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
           stale.removeAttribute("data-aw-target");
         }
       })
-      .catch(() => {});
+      .catch((e) => log("aw_import_clear_datepoll_failed", { reason: errName(e) }, "warn"));
   }
 
   /**
@@ -491,7 +574,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     // Remembered so a navigation can put it back — see `keepPanelAcrossNavigation`.
     this.lastPanelState = state;
     if (!state) {
-      await unmountGuidancePanel(this.ctx()).catch(() => {});
+      await unmountGuidancePanel(this.ctx()).catch((e) => log("aw_import_unmount_panel_failed", { reason: errName(e) }, "warn"));
       return;
     }
     this.keepPanelAcrossNavigation();
@@ -559,7 +642,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
     this.sigs.clear();
     // The panel goes with the run. A finished run's instructions left on the seller's page would be the
     // in-marketplace version of the stale highlight this slice exists to remove.
-    await unmountGuidancePanel(this.ctx()).catch(() => {});
+    await unmountGuidancePanel(this.ctx()).catch((e) => log("aw_import_cleanup_panel_failed", { reason: errName(e) }, "warn"));
     // Stop the value poll, or it keeps running in the page after the run ends.
     await this.ctx()
       .evaluate(() => {
@@ -568,7 +651,7 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
         if (typeof handle === "number") clearInterval(handle);
         w["__aw_import_date_poll__"] = undefined;
       })
-      .catch(() => {});
+      .catch((e) => log("aw_import_cleanup_datepoll_failed", { reason: errName(e) }, "warn"));
     await this.proven.cleanup();
   }
 
@@ -630,4 +713,14 @@ export class NaverLiveImportDriver implements ImportProbeDriver {
       return hash.toString(16).padStart(8, "0").repeat(2).slice(0, 16);
     });
   }
+}
+
+/**
+ * A sanitized label for a caught error — its constructor name only. A Playwright page error can carry a URL or
+ * selector in `.message`; the class name (`TimeoutError`, `Error`) cannot, so it is the one safe thing to log
+ * about a swallowed-but-not-silent teardown failure.
+ */
+function errName(e: unknown): string {
+  if (e instanceof Error) return e.name || "Error";
+  return typeof e;
 }

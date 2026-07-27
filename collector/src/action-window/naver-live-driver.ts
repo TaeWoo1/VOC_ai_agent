@@ -29,6 +29,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Download, Frame, Page } from "playwright";
+import { log } from "../log";
 import { artifactRefFor } from "./artifact";
 import { artifactParseVerdict, type ArtifactParseVerdict } from "./artifact-parse";
 import {
@@ -217,6 +218,18 @@ export interface CandidateInspection {
 export interface NaverLiveProbeDriverOptions {
   /** The gitignored quarantine directory for the temporary validation save. */
   quarantineDir: string;
+  /**
+   * **Guided Acquisition Reliability — hand the detected download to a managed, properly-named copy.**
+   *
+   * A download detected on the product path is buffered into memory and Playwright's own temp copy is deleted,
+   * so the only on-disk artifact the seller ever sees is a GUID under `playwright-artifacts-*` — unopenable and
+   * unnamed (the file the operator hit on 2026-07-27). When this callback is supplied (the boot wires it to the
+   * gitignored `downloadDir`), the detected bytes are ALSO written to a stable, seller-named file there, so a
+   * real, openable copy exists at a known location. INJECTED so this module imports no `fs`/`path` and stays
+   * offline-testable: the boot owns the directory and the write, sanitizes the name, and never logs it. A
+   * failure to save is best-effort — the in-memory buffer still ingests — and never fails the run.
+   */
+  saveManagedCopy?: (suggestedFilename: string, bytes: Uint8Array) => Promise<void>;
   /**
    * INJECTED ingest capability — the driver never imports `../upload`. Required on the live path: a
    * synthetic completion is never fabricated. Tests inject a fake returning `{ ok, processed }`.
@@ -694,8 +707,18 @@ export class NaverLiveProbeDriver implements ProbeDriver {
   private async bufferDetected(download: Download): Promise<DownloadDetectResult> {
     const filename = download.suggestedFilename();
     const bytes = await bufferDownload(download);
+    // Hand the bytes to a managed, seller-named copy on disk BEFORE dropping the browser's temp file, so the
+    // operator has a real, openable export at a known path instead of an unnamed GUID artifact. Best-effort and
+    // sanitized: a save failure is logged by class only (never the name/path) and never fails the run, and it
+    // is skipped entirely when no managed dir was wired (every offline test), keeping behaviour identical there.
+    if (this.opts.saveManagedCopy) {
+      await this.opts
+        .saveManagedCopy(filename, bytes)
+        .then(() => log("aw_naver_managed_copy_saved", { saved: true }))
+        .catch((e) => log("aw_naver_managed_copy_failed", { reason: e instanceof Error ? e.name : typeof e }, "warn"));
+    }
     // We hold the bytes in memory; the browser's own temp copy is no longer needed.
-    await download.delete().catch(() => {});
+    await download.delete().catch((e) => log("aw_naver_download_delete_failed", { reason: e instanceof Error ? e.name : typeof e }, "warn"));
     this.retained = { suggestedFilename: () => filename, bytes: () => bytes };
     return { detected: true, artifactRef: artifactRefFor(["aw-naver-live-download", randomUUID()]) };
   }
