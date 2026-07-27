@@ -49,6 +49,7 @@ import type {
   ReviewImportPlanView,
   ReviewImportRangeSelectionView,
   ReviewImportSegmentView,
+  ReviewOpsLoopSummary,
   SyncJobView,
   SyncRunFilters,
   SyncRunView,
@@ -537,6 +538,23 @@ export const api = {
   async launchReviewImportSegment(segmentId: string): Promise<ReviewImportLaunchView> {
     const { data } = await http.post<ReviewImportLaunchView>(
       `/api/imports/reviews/segments/${segmentId}/launch`,
+    );
+    return data;
+  },
+  // Carry an existing plan forward to cover the period that has arrived since it was last extended,
+  // up to today. Idempotent on the server; returns the refreshed plan (a COMPLETED plan reopens to
+  // ACTIVE with the new PENDING segment as its next). The repeated loop's incremental step.
+  async extendReviewImportPlan(planId: string): Promise<ReviewImportPlanDetailView> {
+    const { data } = await http.post<ReviewImportPlanDetailView>(
+      `/api/imports/reviews/plans/${planId}/extend`,
+    );
+    return data;
+  },
+  // The loop's completion result + change summary for one account, derived at read time.
+  async getReviewOpsLoopSummary(accountId: string, referenceDate?: string): Promise<ReviewOpsLoopSummary> {
+    const ref = referenceDate ? `&referenceDate=${referenceDate}` : "";
+    const { data } = await http.get<ReviewOpsLoopSummary>(
+      `/api/review-ops/loop-summary?accountId=${accountId}${ref}`,
     );
     return data;
   },

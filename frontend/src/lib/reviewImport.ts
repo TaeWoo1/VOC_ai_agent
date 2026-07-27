@@ -14,6 +14,7 @@ import type {
   ReviewImportCoverageView,
   ReviewImportHealthView,
   ReviewImportSegmentView,
+  ReviewOpsLoopSummary,
   ScopeEvidence,
 } from "./types";
 
@@ -553,6 +554,59 @@ export function completionSummaryText(progress: ImportProgress): string {
     return `${progress.text} · 남은 구간을 이어서 가져올 수 있어요.`;
   }
   return "NAVER에서 현재 선택 가능한 기간의 리뷰 파일을 가져왔습니다.";
+}
+
+/* ─────────────────── The repeated loop's 완료 결과 + 변화 요약 ─────────────────── */
+
+/**
+ * The collection result of the loop, as glanceable lines. New vs already-present carry over the same
+ * honesty as everywhere else — "가져온" reviews, never "all NAVER holds". Failures are shown only when
+ * there were any, so a clean run reads clean.
+ */
+export function loopCollectedLines(summary: ReviewOpsLoopSummary): CoverageSummaryLine[] {
+  const lines: CoverageSummaryLine[] = [
+    { label: "새로 추가", value: `${summary.newCount.toLocaleString()}건` },
+    { label: "이미 있던 리뷰", value: `${summary.duplicateCount.toLocaleString()}건` },
+  ];
+  if (summary.failedCount > 0) {
+    lines.push({ label: "실패", value: `${summary.failedCount.toLocaleString()}건` });
+  }
+  return lines;
+}
+
+/**
+ * The change summary, phrased as UNVALIDATED candidate signals — never a diagnosis, never "문제 N개".
+ * The issue thresholds are DRAFT and the extractor's accuracy is unmeasured, so this only ever points
+ * the seller AT the issue surface; the judgement itself lives there, framed the same way.
+ *
+ * Priority: things that ask for a look first (확인 필요), then newly-seen / surging as the notable
+ * changes; a quiet run says so rather than inventing a signal.
+ */
+export function loopChangeSummaryText(summary: ReviewOpsLoopSummary): string {
+  const c = summary.issueChange;
+  if (c.needsReview > 0) {
+    return `확인이 필요한 변화 ${c.needsReview}건이 있어요. 리뷰 이슈에서 확인해 보세요.`;
+  }
+  const notable = c.newlyRaised + c.surging;
+  if (notable > 0) {
+    const parts: string[] = [];
+    if (c.newlyRaised > 0) parts.push(`새로 눈에 띈 이슈 후보 ${c.newlyRaised}건`);
+    if (c.surging > 0) parts.push(`늘고 있는 이슈 후보 ${c.surging}건`);
+    return `${parts.join(" · ")} — 리뷰 이슈에서 확인해 보세요.`;
+  }
+  return "새로 확인할 변화는 없어요.";
+}
+
+/** Whether there is a newer period to carry the plan forward to (coverage is behind the reference date). */
+export function hasNewPeriodToImport(summary: ReviewOpsLoopSummary): boolean {
+  return !summary.upToDate;
+}
+
+/** One line on how current the collection is — up to date, or a new period is available to pull. */
+export function loopFreshnessText(summary: ReviewOpsLoopSummary): string {
+  return summary.upToDate
+    ? "지금 기준으로 최신이에요."
+    : "그 뒤로 새로 들어온 기간이 있어요. 이어서 가져올 수 있어요.";
 }
 
 function rangesText(ranges: { start: string; end: string }[]): string {

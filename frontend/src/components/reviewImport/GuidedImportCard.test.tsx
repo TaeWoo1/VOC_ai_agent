@@ -14,6 +14,7 @@ import type { AwGuidanceIntent, AwGuidancePack } from "../../../../contracts/act
 import type {
   ReviewImportPlanDetailView,
   ReviewImportSegmentView,
+  ReviewOpsLoopSummary,
   SellerAccountResponse,
 } from "../../lib/types";
 
@@ -135,6 +136,10 @@ const plan = (segments: ReviewImportSegmentView[]): ReviewImportPlanDetailView =
  */
 beforeEach(() => {
   vi.spyOn(api, "getReviewImportPlan").mockRejectedValue(new Error("not stubbed in this test"));
+  // The loop summary is fetched on a finished plan. Default to a rejection so a test that does not care
+  // about it never reaches the network and the completion box just shows its prose — the loop tests below
+  // override this with the summary they want to render.
+  vi.spyOn(api, "getReviewOpsLoopSummary").mockRejectedValue(new Error("not stubbed in this test"));
 });
 
 afterEach(() => {
@@ -322,6 +327,74 @@ describe("GuidedImportCard — completion is claimed honestly", () => {
     render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" />);
     expect(screen.queryByTestId("completion-summary")).toBeNull();
     expect(screen.getByTestId("guided-import-cta")).toBeInTheDocument();
+  });
+});
+
+const loopSummary = (over: Partial<ReviewOpsLoopSummary> = {}): ReviewOpsLoopSummary => ({
+  referenceDate: "2026-07-27",
+  lastCoveredDate: "2026-04-30",
+  missingRanges: [],
+  nextRecommendedImport: null,
+  upToDate: true,
+  newCount: 42,
+  duplicateCount: 8,
+  failedCount: 0,
+  issueChange: {
+    workingTotal: 0,
+    needsReview: 0,
+    newlyRaised: 0,
+    surging: 0,
+    persistent: 0,
+    concentrated: 0,
+    improved: 0,
+  },
+  ...over,
+});
+
+const FINISHED = () => plan([seg({ executionState: "COMPLETED", coverageState: "COVERED" })]);
+
+describe("GuidedImportCard — the repeated loop's completion result + change summary", () => {
+  it("shows collection totals and the change summary as unvalidated candidate signals", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(
+      loopSummary({ newCount: 42, duplicateCount: 8, issueChange: { ...loopSummary().issueChange, workingTotal: 3, needsReview: 2 } }),
+    );
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" />);
+
+    await waitFor(() => expect(screen.getByTestId("loop-collected")).toBeInTheDocument());
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("새로 추가");
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("42건");
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("이미 있던 리뷰");
+    const change = screen.getByTestId("loop-change-summary");
+    expect(change).toHaveTextContent("확인이 필요한 변화 2건");
+    // Candidate-signal framing only — never a diagnosis or a cause.
+    expect(change.textContent ?? "").not.toMatch(/원인|문제가.*(입니다|이다)/);
+  });
+
+  it("says the collection is up to date and offers no forward-extension when nothing new exists", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ upToDate: true }));
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" />);
+
+    await waitFor(() => expect(screen.getByTestId("loop-freshness")).toHaveTextContent("최신이에요"));
+    expect(screen.queryByTestId("loop-extend-cta")).toBeNull();
+  });
+
+  it("offers an operator-initiated forward-extension when a newer period exists", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(
+      loopSummary({ upToDate: false, nextRecommendedImport: "2026-05-01" }),
+    );
+    const extend = vi
+      .spyOn(api, "extendReviewImportPlan")
+      .mockResolvedValue(plan([seg({ id: "s-new", executionState: "PENDING", coverageState: "UNVERIFIED" })]));
+    const onPlanCreated = vi.fn();
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" onPlanCreated={onPlanCreated} />);
+
+    const cta = await screen.findByTestId("loop-extend-cta");
+    expect(screen.getByTestId("loop-freshness")).toHaveTextContent("새로 들어온 기간이 있어요");
+    await userEvent.click(cta);
+
+    await waitFor(() => expect(extend).toHaveBeenCalledWith("plan-1"));
+    // Extension only reopens the plan; the seller still presses 계속 가져오기 and exports themselves.
+    expect(onPlanCreated).toHaveBeenCalled();
   });
 });
 
