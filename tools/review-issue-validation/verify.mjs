@@ -1,6 +1,6 @@
 // Issue-memory proof assertions against a RUNNING backend (disposable, seeded by run-synthetic.sh).
 //
-// This is the only place V29 + the JPA mapping + the change judgements are exercised together against
+// This is the only place V31 + the JPA mapping + the change judgements are exercised together against
 // real Postgres. The JVM suite runs H2 with Flyway disabled, so a migration that disagreed with the
 // entities is green there and fails only here.
 //

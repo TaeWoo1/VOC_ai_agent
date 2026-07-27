@@ -259,7 +259,7 @@ Append a dated entry; never rewrite prior entries — correct forward.
 ### 2026-07-25 — Review Issue Memory (Phase A) — IMPLEMENTED (offline + disposable-backend proof)
 - **Loop stage(s):** UNDERSTAND / PRIORITIZE
 - **Did:** Repeated customer issues now have an identity that outlives a page load
-  (`V29__review_issue_memory.sql`, `com.sellerops.reviewissue`), so change can be asked about at all:
+  (`V31__review_issue_memory.sql`, `com.sellerops.reviewissue`), so change can be asked about at all:
   four judgements (새로 나타남 / 증가 중 / 계속 발생 / 특정 상품 집중) plus 개선됨, a five-state
   lifecycle whose only automatic transitions are 관찰 중→확인 필요 and 개선 확인 중→해결됨, and an
   `IssueSignatureExtractor` port whose first implementation is deterministic. Opinion-unit splitting is
@@ -271,7 +271,7 @@ Append a dated entry; never rewrite prior entries — correct forward.
   masking path).
 - **Evidence:** backend 1,644 (103 new) / 0 failures; frontend 879 + typecheck + build; contracts +
   collector typecheck; `tools/review-issue-validation/run-synthetic.sh` **48/48** on a disposable
-  Postgres — the only thing that executes V29 at all, and it asserts `flyway_schema_history` recorded
+  Postgres — the only thing that executes V31 at all, and it asserts `flyway_schema_history` recorded
   it successful rather than inferring it from a clean boot.
 - **⚠ Scope of that evidence:** **behaviour, not detection quality.** It shows the judgements fire in
   their contracted windows, the suppression rules hold, re-runs are idempotent and the needs-a-look
@@ -289,9 +289,11 @@ Append a dated entry; never rewrite prior entries — correct forward.
   is still empty, so nothing here has been measured against the rubric's bars. It is therefore wired to
   feed issue aggregation ONLY; `ReviewIssueQueueIsolationTest` and the harness both prove the
   needs-a-look queue's `LOW_RATING_REVIEW` count cannot move (RUBRIC.md §5 regression gate).
-- **Merge order (hard):** `V29` is numbered around the paused NAVER branch's `V27`/`V28`, and Flyway
-  `out-of-order` is off, so **this must merge after `feat/naver-initial-review-import`**. If it has to
-  go first, renumber V29 to V27 on this branch — never renumber the paused one.
+- **Merge order (resolved 2026-07-27):** authored as `V29` while `feat/naver-initial-review-import`
+  (V27/V28) was unmerged. That branch has since merged, and V29/V30 were then taken by other merged work
+  (V30 = `account_session_slot`). Flyway `out-of-order` is off, so this file was **renumbered to `V31`** —
+  strictly above main's current max — making it a clean forward migration on both a fresh and an
+  already-migrated database. No merge-order constraint remains.
 - **Next:** confirm or revise the THRESHOLDS.md draft numbers. 반복 칭찬 (repeated praise) is
   deliberately NOT in this package — a praise vocabulary carries the same measurement problem and needs
   its own bar. Option-level attribution is also out: `reviews` has no option column and whether the

@@ -22,7 +22,7 @@ import org.springframework.test.context.ActiveProfiles;
  * The issue memory over a real (H2) database: extraction, idempotency, and the lifecycle fence.
  *
  * <p>⚠ This validates the JPA mapping, not the migration. The suite runs H2 with Flyway disabled
- * ({@code application-test.properties}), so {@code V29__review_issue_memory.sql} is never executed
+ * ({@code application-test.properties}), so {@code V31__review_issue_memory.sql} is never executed
  * here and a mismatch between it and these entities would still be green. That is what the
  * disposable-backend harness under {@code tools/review-issue-validation/} exists for.
  */

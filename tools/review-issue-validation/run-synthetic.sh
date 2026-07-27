@@ -2,7 +2,7 @@
 # Review Issue Memory — SYNTHETIC proof runner (no live contact, no NAVER, no Chrome, no browser).
 #
 # Stands up a fresh disposable backend on a real Postgres database, which is the ONLY thing that
-# executes V29__review_issue_memory.sql: the JVM suite runs H2 with Flyway disabled, so a migration
+# executes V31__review_issue_memory.sql: the JVM suite runs H2 with Flyway disabled, so a migration
 # that disagreed with the entities is green there and fails only here.
 #
 # Then it seeds two corpora through the SAME upload path a real export uses —
@@ -53,7 +53,7 @@ echo "== name-guard falsification (must refuse every persistent DB) =="
 guarded_dropdb sellerops || echo "  sellerops correctly refused"
 guarded_dropdb sellerops_dev || echo "  sellerops_dev correctly refused"
 
-echo "== fresh disposable backend (this is what runs Flyway V1..V29 for real) =="
+echo "== fresh disposable backend (this is what runs Flyway V1..V31 for real) =="
 createdb "${RUNDB}"; echo "  created ${RUNDB}"
 ( cd "${REPO}/backend" && SERVER_PORT="${PORT}" \
     SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5432/${RUNDB}" \
@@ -67,12 +67,12 @@ for _ in $(seq 1 90); do
 done
 [ -n "${UP}" ] || { echo " backend did not come up"; tail -40 "${WORK}/backend.log"; exit 1; }
 
-echo "== confirm V29 actually applied (not skipped, not failed) =="
+echo "== confirm V31 actually applied (not skipped, not failed) =="
 psql -qtA -d "${RUNDB}" -c \
-  "select version || ' ' || success || ' ' || description from flyway_schema_history where version = '29';" \
+  "select version || ' ' || success || ' ' || description from flyway_schema_history where version = '31';" \
   | sed 's/^/  /'
-APPLIED="$(psql -qtA -d "${RUNDB}" -c "select count(*) from flyway_schema_history where version='29' and success;")"
-[ "${APPLIED}" = "1" ] || { echo "  V29 did not apply"; exit 1; }
+APPLIED="$(psql -qtA -d "${RUNDB}" -c "select count(*) from flyway_schema_history where version='31' and success;")"
+[ "${APPLIED}" = "1" ] || { echo "  V31 did not apply"; exit 1; }
 for t in review_issues review_issue_evidence review_issue_unknown_units review_issue_state_events; do
   n="$(psql -qtA -d "${RUNDB}" -c "select count(*) from information_schema.tables where table_name='${t}';")"
   echo "  table ${t}: ${n}"

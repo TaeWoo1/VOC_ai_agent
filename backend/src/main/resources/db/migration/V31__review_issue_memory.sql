@@ -6,15 +6,14 @@
 -- "개선됐다" is unprovable. This schema gives an issue an identity that outlives one page load.
 --
 -- ============================================================================================
--- VERSION NUMBERING — READ BEFORE MERGING
--- V27 and V28 are RESERVED by the paused branch `feat/naver-initial-review-import`
--- (review_import_plan / review_import_launch), which is local-only at bb82105 and must not be
--- modified. This file is V29 so its FILENAME cannot collide with those.
---
--- CONSEQUENCE: this package must merge AFTER that branch. Flyway `out-of-order` is not enabled
--- (application.yml sets only `enabled` + `baseline-on-migrate`), so V27/V28 arriving at a database
--- that already applied V29 would fail the boot. If this package has to merge FIRST, renumber
--- THIS file to V27 — never renumber the paused branch.
+-- VERSION NUMBERING
+-- This file is V31 — the next free version above everything already on main. History: it was
+-- authored as V29 while `feat/naver-initial-review-import` (V27/V28) was still an unmerged branch;
+-- that branch has since merged, and V29/V30 were then taken by other merged work
+-- (V30 = account_session_slot). Flyway `out-of-order` is NOT enabled (application.yml sets only
+-- `enabled` + `baseline-on-migrate`), so a version below main's current max would fail the boot on
+-- any database that has already migrated past it. V31 is strictly greater than main's max, so it is
+-- a clean forward migration on both a fresh database and an already-migrated one.
 -- ============================================================================================
 
 -- One issue = one thing customers repeatedly say. Identity is the extractor's signature key, so

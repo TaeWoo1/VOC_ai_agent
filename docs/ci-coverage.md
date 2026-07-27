@@ -68,7 +68,7 @@ are operator-run, and their name-guarded teardown assumes a human is watching.
 Consequence worth stating plainly: **CI does not validate Flyway migrations.** The backend suite runs H2 with
 Flyway disabled, so a broken migration is green here. Migrations are validated by booting a real backend —
 which is what the disposable-backend harnesses do. `tools/review-issue-validation/run-synthetic.sh` is
-currently the only thing that executes `V29__review_issue_memory.sql` at all, and it asserts
+currently the only thing that executes `V31__review_issue_memory.sql` at all, and it asserts
 `flyway_schema_history` recorded it as successful rather than assuming the boot implies it.
 
 ## The silence problem this workflow is designed around

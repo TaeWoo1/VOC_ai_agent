@@ -1,4 +1,4 @@
-# review-issue-validation — the only proof that V29 and the judgements agree
+# review-issue-validation — the only proof that V31 and the judgements agree
 
 Operator-run. No live contact, no NAVER, no Chrome, no marketplace network, no secrets.
 
@@ -26,10 +26,10 @@ Requires local Postgres, JDK 17 + Gradle, node 20+. Takes about a minute, most o
 Two things the JVM suite structurally cannot check:
 
 1. **The migration.** `application-test.properties` runs H2 with `spring.flyway.enabled=false` and
-   builds the schema from the entities, so `V29__review_issue_memory.sql` is never executed there. A
+   builds the schema from the entities, so `V31__review_issue_memory.sql` is never executed there. A
    migration that disagreed with the entities would be green in `./gradlew test` and break on the
    first real deploy. This harness boots a real backend against a real Postgres database, then asserts
-   `flyway_schema_history` recorded version 29 as successful and that all four tables and their
+   `flyway_schema_history` recorded version 31 as successful and that all four tables and their
    indexes exist.
 2. **The judgements end to end.** `IssueChangeRulesTest` proves the arithmetic on hand-built
    snapshots. It cannot prove that the queries which build those snapshots select the right rows —
