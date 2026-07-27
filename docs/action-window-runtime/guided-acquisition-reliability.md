@@ -132,3 +132,34 @@ in or clicked.
 **Sanitized throughout:** every marker carried enums/booleans/coarse counts only — no account id, slot, cookie,
 token, URL, or filename in any log. Test env torn down after: disposable DB dropped (name-guarded), agent/FE/
 backend stopped, export file + profile are gitignored.
+
+## Operating procedure & trial-and-error (from the 2026-07-27 live run)
+
+**The normal, working flow:**
+1. **Self-check backend / FE / bridge / origin before anything opens.** The agent's boot pre-flight logs
+   `aw_guided_preflight_summary {ok:true, issues:0}` only when the backend is reachable, the bridge allow-list
+   is set, and the SellerOps origin is actually in it (the `:5174` vs `:5173` gotcha). A red pre-flight names the
+   one thing to fix.
+2. **Guidance uses real Korean screen names** — 리뷰 관리 / 리뷰 검색 / 다시 확인 / 계속 가져오기 — never a
+   translated URL or an internal enum.
+3. **Starting on the login page or a different NAVER screen is now safe.** It parks recoverably ("화면이 아직
+   준비되지 않았어요 — 리뷰 관리 화면이 뜬 뒤 다시 확인"); the seller opens 리뷰 검색 and presses **다시 확인**,
+   which re-runs PREPARE **on the same run and ticket**. No terminal FAILED, no stranded ticket.
+4. **Success criteria for a guided run:** `OVERLAY_VISIBLE` (the guidance actually reached the seller) →
+   download detected → ingest succeeded (segment `COVERED`, attempt `SUCCEEDED`, review rows in the backend).
+5. **Verify the MANAGED download, not the Playwright temp.** A detected download must land as a stable,
+   seller-named `review_*.xlsx` under the gitignored `downloads/` dir (`aw_naver_managed_copy_saved {saved:true}`)
+   — never the GUID `playwright-artifacts-*` temp the operator saw in #367.
+
+**Trial-and-error / gotchas that cost a cycle:**
+- **Restarting the collector agent (to reload code) may require a NAVER re-login.** Killing the agent closes the
+  headed Chrome, and a SIGTERM'd persistent context does not reliably flush the NAVER session — so after each
+  collector code change + agent restart, expect the seller to log into NAVER again. Budget for it when iterating.
+- **Live root-cause is single-variable.** Hold the baseline fixed (account, profile, guidance pack, entry point)
+  and change exactly one variable per run (timing / session-freshness / overlay-timing / navigation / recheck),
+  so a difference in outcome attributes to that one axis. A run whose difference can't be attributed is discarded.
+- **Kill processes by the EXACT PID / process group saved at launch — never a string `pgrep`/`grep`.** A broad
+  `pgrep -f local-agent` match caught the npm parent of a *different* (protected) agent and took down the stale
+  `:47615` process that was explicitly to be left alone. Save each launched PID and terminate only that tree.
+- **Never touch a process designated protected.** The stale `:47615` agent (a leftover from a prior session) was
+  on the do-not-touch list; it must be left running and only its own owner may stop it.

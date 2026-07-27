@@ -193,7 +193,9 @@ export class ImportSegmentSession {
     // Ignore a close from a window we have already moved past (a reopened run, or a released session).
     if (token !== this.surfaceCloseToken) return;
     if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
-    if (this.engine.currentStage() === "SURFACE_BLOCKED") return;
+    // A window close is the most accurate reason to show, even if the run was already parked on a DIFFERENT
+    // reliability cause (say OVERLAY_NOT_VISIBLE) — `reliabilityPark` replaces a different cause and no-ops on an
+    // existing SURFACE_CLOSED, so re-entry is safe and the seller sees "창이 닫혔어요", not a stale reason.
     recordFailure("SURFACE_CLOSED");
     this.engine.reliabilityPark("SURFACE_CLOSED");
     // A parked run points at nothing; drop any stale highlight so the page does not keep a spotlight on a
@@ -479,8 +481,13 @@ export class ImportSegmentSession {
       const next = this.engine.onTargetActionObserved(target);
       this.publishState();
       await this.drive(next);
-    } catch {
-      await this.fatalCleanup();
+    } catch (e) {
+      // Reliability-aware, exactly like the command/panel drive entries: a barrier continuation drives the
+      // steps AFTER the first seller barrier — the scope gate, the export highlight, the consent highlight — so
+      // an overlay that throws `OVERLAY_MOUNT_FAILED` / `OVERLAY_NOT_VISIBLE` HERE must park recoverably, not be
+      // swallowed into a fatal teardown that leaves a stuck, blocker-less ghost run. `onDriveError` parks a
+      // ReliabilityFailure and falls back to the fatal cleanup for anything genuinely fatal.
+      this.onDriveError(e);
     } finally {
       this.autoBusy = false;
     }

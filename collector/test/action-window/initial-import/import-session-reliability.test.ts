@@ -135,6 +135,21 @@ describe("Guided Acquisition Reliability — the session parks silent failures v
     await session.whenSettled();
     expect(io.lastView()?.blocker).toEqual({ code: "SURFACE_OPEN_FAILED", recoverable: true });
   });
+
+  it("an overlay failure on the EXPORT step (reached AFTER the date barriers) parks recoverably, not a ghost run", async () => {
+    // Regression guard for the watchBarrier catch: every step past the first seller barrier — the scope gate,
+    // the export highlight, the consent highlight — is driven from inside watchBarrier. Its catch must be
+    // reliability-aware, or an overlay failure there is swallowed into a fatal teardown that leaves a stuck,
+    // blocker-less RUNNING ghost — the exact silent state this slice removes. The export overlay is the "logged
+    // in, no highlight" case that motivated the whole PR.
+    const { io, session } = build({ highlightFail: { export: "OVERLAY_NOT_VISIBLE" } });
+    startRun(io);
+    await session.whenSettled();
+    const view = io.lastView();
+    expect(view?.status).toBe("WAITING_FOR_HUMAN");
+    expect(view?.blocker).toEqual({ code: "OVERLAY_NOT_VISIBLE", recoverable: true });
+    expect(view?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+  });
 });
 
 describe("Guided Acquisition Reliability — the seller closing the window", () => {
