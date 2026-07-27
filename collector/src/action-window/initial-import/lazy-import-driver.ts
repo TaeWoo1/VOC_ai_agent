@@ -45,6 +45,8 @@ import type {
   SurfaceProbeResult,
 } from "../engine";
 import type { ImportProbeDriver, ImportTarget, RequiredRange } from "./import-driver";
+import { ReliabilityFailure } from "./reliability-failure";
+import { recordStage } from "./reliability-instrumentation";
 
 export interface LazyImportDriverDeps {
   /**
@@ -69,6 +71,28 @@ export class LazyImportDriver implements ImportProbeDriver {
   /** Whether the surface has been brought up — a sanitized boolean, for the boot's teardown and for tests. */
   isOpen(): boolean {
     return this.opened !== null;
+  }
+
+  /**
+   * **Guided Acquisition Reliability — forget the closed surface so the next run re-opens it.**
+   *
+   * The seller closed the marketplace window. The boot's close handler calls this so the cached driver — now
+   * bound to a dead page — is dropped; the next `prepareSurface` (a re-check re-runs PREPARE) goes back through
+   * `deps.open()` and brings a fresh window up in the SAME persistent profile, so the session survives. Safe to
+   * call more than once and before anything opened.
+   */
+  markClosed(): void {
+    this.opened = null;
+    this.opening = null;
+  }
+
+  /**
+   * Resolve when the currently-open surface closes. Only meaningful once opened — before that there is no window
+   * to close, so it never resolves. Delegated to the underlying driver, which owns the real page.
+   */
+  async whenSurfaceClosed(): Promise<void> {
+    if (!this.opened) return new Promise<void>(() => {});
+    return this.opened.whenSurfaceClosed?.() ?? new Promise<void>(() => {});
   }
 
   /**
@@ -116,7 +140,18 @@ export class LazyImportDriver implements ImportProbeDriver {
   /* ── needs the page ─────────────────────────────────────────────────────── */
 
   async prepareSurface(): Promise<boolean | SurfaceProbeResult> {
-    return (await this.surface()).prepareSurface();
+    // Opening the marketplace window is the first place a guided run can fail. Before this, an open that
+    // threw propagated raw and the run died silently; now it is an explicit, recoverable SURFACE_OPEN_FAILED —
+    // a re-check re-runs PREPARE and tries the open again. A throw from the driver's OWN prepareSurface (a
+    // settle timeout, say) is already a ReliabilityFailure and passes through untouched.
+    let driver: ImportProbeDriver;
+    try {
+      driver = await this.surface();
+    } catch {
+      throw new ReliabilityFailure("SURFACE_OPEN_FAILED");
+    }
+    recordStage("SURFACE_OPEN");
+    return driver.prepareSurface();
   }
 
   async readSurfaceFacts(): Promise<ImportSurfaceFacts> {

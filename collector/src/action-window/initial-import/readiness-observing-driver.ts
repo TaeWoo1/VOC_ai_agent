@@ -102,6 +102,16 @@ export class ReadinessObservingImportDriver implements ImportProbeDriver {
     return this.inner.cleanup();
   }
 
+  /**
+   * Forward the optional surface-close signal. MUST be forwarded or the whole SURFACE_CLOSED recovery is inert
+   * on the live path: this decorator is what the boot wraps the real driver in, so a session holding THIS object
+   * would see `whenSurfaceClosed` as `undefined` and never arm the close watch. Only present when the inner
+   * driver has it (the scripted test driver and the live import driver do; a bare driver does not).
+   */
+  whenSurfaceClosed(): Promise<void> {
+    return this.inner.whenSurfaceClosed?.() ?? new Promise<void>(() => {});
+  }
+
   /** Forward the optional dev-only badge capability the dispatch layer duck-types, so it is never dropped. */
   setBadgeTotalSteps(totalSteps: number | null): void {
     (this.inner as { setBadgeTotalSteps?: (n: number | null) => void }).setBadgeTotalSteps?.(totalSteps);

@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { LazyImportDriver } from "../../../src/action-window/initial-import/lazy-import-driver";
 import { ImportFixtureDriver } from "../../../src/action-window/initial-import/import-fixture-driver";
+import { ReliabilityFailure } from "../../../src/action-window/initial-import/reliability-failure";
 
 const REQUIRED = { start: "2026-06-01", end: "2026-06-30" };
 
@@ -77,10 +78,20 @@ describe("LazyImportDriver — nothing opens until a run needs the page", () => 
     expect(l.opens()).toBe(1);
   });
 
-  /** A launch that failed once must not poison the agent: the seller's next attempt tries again. */
-  it("does not cache a failed launch", async () => {
+  /**
+   * A launch that failed once must not poison the agent: the seller's next attempt tries again. And the failure
+   * the run sees is the explicit, recoverable SURFACE_OPEN_FAILED (Guided Acquisition Reliability) — the raw
+   * open error is caught and re-raised as the sanitized reliability code, so the session parks it with one
+   * recovery action rather than tearing the run down on an opaque "profile locked".
+   */
+  it("does not cache a failed launch, and surfaces SURFACE_OPEN_FAILED", async () => {
     const l = lazy({ failFirst: true });
-    await expect(l.driver.prepareSurface()).rejects.toThrow(/profile locked/);
+    const err = await l.driver.prepareSurface().then(
+      () => null,
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(ReliabilityFailure);
+    expect((err as ReliabilityFailure).code).toBe("SURFACE_OPEN_FAILED");
     expect(l.driver.isOpen()).toBe(false);
 
     await l.driver.prepareSurface();

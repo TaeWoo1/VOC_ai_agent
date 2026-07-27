@@ -26,7 +26,8 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "../config";
 import {
@@ -48,6 +49,7 @@ import { defaultImportRunDirFor } from "../action-window/initial-import/import-d
 import { LazyImportDriver } from "../action-window/initial-import/lazy-import-driver";
 import { ReadinessObservingImportDriver } from "../action-window/initial-import/readiness-observing-driver";
 import { ImportAcquisitionCoordinator } from "../action-window/initial-import/import-acquisition-coordinator";
+import { checkGuidedPreflight, PREFLIGHT_RECOVERY } from "../action-window/initial-import/guided-preflight";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
@@ -308,6 +310,23 @@ export async function buildInitialImportConfig(
   }
   const reviewUrl = cfg.naverReviewUrl;
 
+  // **Guided Acquisition Reliability — agent-side pre-flight self-check.** Catches, at boot, the exact wiring
+  // faults the first live runs hit: a backend that is down, an empty bridge allow-list, or a SellerOps origin
+  // the bridge will reject (the `:5174` vs `:5173` gotcha that shows the seller "로컬 도우미가 실행되지 않았어요"
+  // with no cause). Sanitized: only the issue enum and its one recovery-action key are logged — never a URL,
+  // host, or port. It WARNS rather than refuses: the operator is still at the terminal and can fix env before
+  // seating, and a false alarm must not block a correctly-tunnelled setup.
+  const backendReachable = await probeBackendReachable(cfg.baseUrl);
+  const preflight = checkGuidedPreflight({
+    appUrl: cfg.appUrl,
+    allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
+    backendReachable,
+  });
+  for (const issue of preflight.issues) {
+    log("aw_guided_preflight", { issue, recovery: PREFLIGHT_RECOVERY[issue] }, "warn");
+  }
+  log("aw_guided_preflight_summary", { ok: preflight.ok, issues: preflight.issues.length });
+
   /**
    * ONE browser profile for the whole journey, opened on SellerOps.
    *
@@ -365,8 +384,10 @@ export async function buildInitialImportConfig(
         ? accountScopedProfileDirFor(cfg.profileBaseDir, NAVER_CHANNEL_CODE, boundAccountSlot)
         : cfg.profileDir;
     // A dedicated persistent context: the account's NAVER cookies persist here across agent restarts, and a
-    // different account resolves to a different directory so their sessions can never mix.
-    naverContext = await launchNaverContext(profileDir);
+    // different account resolves to a different directory so their sessions can never mix. REUSED across a
+    // re-open: if the seller closed only the tab, the context (and its cookies) survives, so a re-open makes a
+    // fresh page in the SAME context rather than re-launching a persistent context on a locked profile dir.
+    if (!naverContext) naverContext = await launchNaverContext(profileDir);
     // The operator logs into NAVER here themselves — the collector never types NAVER credentials.
     const page = naverContext.pages()[0] ?? (await naverContext.newPage());
     await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
@@ -375,8 +396,27 @@ export async function buildInitialImportConfig(
     // log, or in a trace).
     log("aw_import_surface_opened", { accountScoped: boundAccountSlot.length > 0 });
 
+    // **Guided Acquisition Reliability — detect the seller closing the marketplace window.** Resolved when this
+    // page closes; the session parks the run on SURFACE_CLOSED instead of re-arming an observation on a dead
+    // page forever. `markClosed()` drops the LazyImportDriver's cached driver so the next PREPARE (a re-check)
+    // re-opens a fresh page in the SAME persistent context. One-shot per window; a re-open wires a new one.
+    const surfaceClosed = new Promise<void>((resolveClosed) => {
+      page.once("close", () => {
+        log("aw_import_surface_closed", {});
+        lazy.markClosed();
+        resolveClosed();
+      });
+    });
+
     const proven = new NaverLiveProbeDriver(page, {
       quarantineDir: defaultQuarantineDirFor(collectorRoot),
+      // Hand a detected download to a managed, seller-named copy under the gitignored downloads dir, so the
+      // operator gets a real, openable file instead of an unnamed GUID temp artifact. The name is sanitized to
+      // a basename (no path separators, no traversal) and NEVER logged; the write is best-effort.
+      saveManagedCopy: async (suggestedFilename: string, bytes: Uint8Array): Promise<void> => {
+        await mkdir(cfg.downloadDir, { recursive: true });
+        await writeFile(resolve(cfg.downloadDir, safeExportFilename(suggestedFilename)), bytes);
+      },
       ingest: buildSegmentIngestUpload({
         baseUrl: cfg.baseUrl,
         email: cfg.email,
@@ -403,6 +443,12 @@ export async function buildInitialImportConfig(
     const driver = createNaverActionWindowImportDriver(proven, {
       guidanceEnabled: true,
       observeTimeoutMs: 120_000,
+      // Resolve when the seller closes this window, so the session parks the run on SURFACE_CLOSED and a
+      // re-check re-opens it — instead of the run stranding on a dead page.
+      whenSurfaceClosed: () => surfaceClosed,
+      // If the surface never comes up within this window (the "idle CPU, page never rendered" failure), the
+      // run parks on SURFACE_SETTLE_TIMEOUT rather than hanging. Comfortably longer than the grid settle.
+      surfaceSettleGuardMs: 45_000,
       /**
        * Put this window in front of the seller when a run starts, and return it to the review surface if it has
        * drifted (product-owner request, 2026-07-26: pressing 연동 in SellerOps should bring up the seller center
@@ -433,7 +479,11 @@ export async function buildInitialImportConfig(
           raised = await raiseWindowOf(page);
         }
         if (decision.navigate) {
-          await page.goto(reviewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+          // Bounded: presentation is best-effort, so a slow re-navigation must not stretch prepareSurface (the
+          // PREPARE watchdog is sized against the driver's bounded legs, and an unbounded goto here would break
+          // that budget). A timeout just means the window did not return to the surface — the settle probe that
+          // follows decides usability regardless.
+          await page.goto(reviewUrl, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
         }
         // The DECISION plus what actually happened. `focus: true` alone used to be logged before either call was
         // made, so a failed raise was indistinguishable from a successful one — and this is exactly the line
@@ -698,6 +748,36 @@ export function createApprovalPresenterFor(kind: ApprovalPresenterKind): Approva
     case "none":
       return nullApprovalPresenter;
   }
+}
+
+/**
+ * Reduce a download's suggested filename to a safe basename for the managed copy: no directory component, no
+ * traversal, never empty. The seller's own export name (e.g. a Korean-titled `.xlsx`) is kept as-is when it is a
+ * plain basename; anything path-like or empty falls back to a fixed name. Never logged — the sanitization is for
+ * the filesystem, not for output.
+ */
+/**
+ * Best-effort backend reachability probe for the pre-flight self-check. A short-timeout GET to the public
+ * `/health` endpoint; ANY failure (down, refused, timed out) answers `false`. Never throws, never logs a URL —
+ * the caller logs only the boolean verdict. Kept tiny and dependency-free so the boot can await it cheaply.
+ */
+export async function probeBackendReachable(baseUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/health`, { signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function safeExportFilename(suggested: string): string {
+  const base = basename(suggested).replace(/[/\\]/g, "").trim();
+  if (base === "" || base === "." || base === "..") return "review-export.xlsx";
+  return base;
 }
 
 function flagValue(args: readonly string[], name: string): string | undefined {

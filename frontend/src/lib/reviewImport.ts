@@ -381,6 +381,16 @@ export function buildImportGuidancePack(continuation?: ImportContinuation | null
     "DOWNLOAD_TIMEOUT",
     "ARTIFACT_INVALID",
     "INGEST_FAILED",
+    // Guided Acquisition Reliability parks — included so the in-page panel renders the cause + repair for each,
+    // never a blank box. Their wording comes from `blockerView` (copy.ts), so the panel and the SellerOps card
+    // cannot disagree about why the run stopped.
+    "SURFACE_OPEN_FAILED",
+    "PREPARE_NOT_STARTED",
+    "SURFACE_SETTLE_TIMEOUT",
+    "GUIDANCE_PACK_REJECTED",
+    "OVERLAY_MOUNT_FAILED",
+    "OVERLAY_NOT_VISIBLE",
+    "SURFACE_CLOSED",
   ];
   const blockers: Record<string, { title: string; fix: string }> = {};
   for (const code of blockerCodes) {

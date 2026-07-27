@@ -231,9 +231,15 @@ describe("live import driver — presenting the surface", () => {
    * A window that could not be raised is a worse experience, not a broken import. The readiness verdict still
    * comes entirely from the composed driver, which is the only thing that reads the page.
    */
-  it("never lets a failed presentation fail the run", () => {
-    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("async readSurfaceFacts"));
-    expect(body).toContain("presentSurface?.().catch(() => {})");
+  it("never lets a failed presentation fail the run — caught, and no longer silent", () => {
+    const body = CODE.slice(CODE.indexOf("async prepareSurface"), CODE.indexOf("private async withSettleGuard"));
+    // The presentation call is still caught so a failed raise cannot fail the run — but the catch now records a
+    // sanitized line instead of swallowing in silence (Guided Acquisition Reliability).
+    expect(body).toContain("presentSurface?.()");
+    expect(body).toContain(".catch((e) => log(");
+    expect(body).toContain("aw_import_surface_present_failed");
+    // And it must NOT be the old silent swallow.
+    expect(body).not.toContain("presentSurface?.().catch(() => {})");
   });
 
   /**

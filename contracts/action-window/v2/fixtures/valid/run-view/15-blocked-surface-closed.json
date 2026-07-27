@@ -1,0 +1,33 @@
+{
+  "protocolVersion": 2,
+  "runId": "run_0003",
+  "revision": 5,
+  "channelCode": "naver",
+  "runCopyKey": "actionWindow.run.naverInitialReviewImportSegment",
+  "status": "WAITING_FOR_HUMAN",
+  "executionMode": "ACTION_WINDOW",
+  "intent": "INITIAL_REVIEW_IMPORT_SEGMENT",
+  "importRef": "3c9d1a7e5b208f46",
+  "currentStep": {
+    "stepId": "aw.import_open_surface",
+    "stepNumber": 1,
+    "totalSteps": 8,
+    "copyKey": "actionWindow.import.openSurface",
+    "status": "AWAITING_USER"
+  },
+  "guidanceEnabled": true,
+  "allowedCommands": [
+    "REQUEST_STEP_RECHECK",
+    "CANCEL_RUN",
+    "SWITCH_TO_MANUAL"
+  ],
+  "blocker": {
+    "code": "SURFACE_CLOSED",
+    "recoverable": true
+  },
+  "progress": {
+    "completedSteps": 0,
+    "totalSteps": 8
+  },
+  "updatedAt": "2026-07-27T02:20:00Z"
+}

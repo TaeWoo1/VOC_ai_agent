@@ -329,13 +329,30 @@ describe("import segment session — fail-closed causes", () => {
     expect(driver.calls.filter((c) => c === "prepareSurface")).toHaveLength(3); // initial + 2 re-checks
   });
 
-  it("fails terminally on an unrecognised surface — a login does not fix that", async () => {
-    const { io, engine, session } = build({ surface: false });
+  it("parks RECOVERABLY on a not-usable review surface — the seller is not on 리뷰 검색 yet, not a dead end", async () => {
+    // Guided Acquisition Reliability (live finding, 2026-07-27): an unrecognised surface for a GUIDED IMPORT is
+    // the seller not being on the review page YET (still logging in / a redirect / grid not hydrated), not a
+    // permanent dead end. Terminating stranded the single-use ticket; now it parks recoverably and a re-check
+    // re-runs PREPARE on the SAME ticket. (Two live runs hit the old terminal-strand.)
+    const { io, engine, driver, session } = build({ surface: false });
     startRun(io);
     await session.whenSettled();
 
-    expect(engine.currentStage()).toBe("FAILED");
-    expect(io.blockers()).toContainEqual({ code: "UNSUPPORTED_STATE", recoverable: false });
+    expect(engine.currentStage()).toBe("SURFACE_BLOCKED");
+    expect(engine.view().status).toBe("WAITING_FOR_HUMAN");
+    expect(engine.view().blocker).toEqual({ code: "SURFACE_SETTLE_TIMEOUT", recoverable: true });
+    expect(engine.view().allowedCommands).toContain("REQUEST_STEP_RECHECK");
+
+    // The seller opens the review surface and re-checks: PREPARE re-runs, and with a usable surface the run
+    // proceeds (no new ticket).
+    driver.setSurface(true);
+    io.send({
+      kind: "aw_command",
+      command: { protocolVersion: 2, commandId: "rc1", runId: "run_import01", expectedRevision: engine.view().revision, type: "REQUEST_STEP_RECHECK" },
+    });
+    await session.whenSettled();
+    expect(engine.view().blocker).toBeUndefined();
+    expect(engine.currentStage()).not.toBe("SURFACE_BLOCKED");
   });
 
   it("refuses to guess when a control is ambiguous", async () => {
@@ -403,7 +420,8 @@ describe("import segment session — fail-closed causes", () => {
   it("cleans up on every terminal path", async () => {
     for (const script of [
       {},
-      { surface: false } as ImportFixtureScript,
+      // NOTE: `{ surface: false }` is no longer here — a not-usable review surface now parks RECOVERABLY
+      // (SURFACE_BLOCKED), it is not a terminal path, so it deliberately does not CLEANUP.
       { download: { detected: false } } as ImportFixtureScript,
       { ingest: { ok: false, processed: 0 } } as ImportFixtureScript,
     ]) {

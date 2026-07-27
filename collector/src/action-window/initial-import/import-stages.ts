@@ -67,6 +67,17 @@ export type ImportStage =
    * Distinct from `FAILED` precisely so a recoverable login never becomes a terminal, ticket-stuck dead end.
    */
   | "SESSION_BLOCKED"
+  /**
+   * Recoverable stop for a **Guided Acquisition Reliability** stall — the guided run reached the seller in
+   * none of the ways it was supposed to: the window would not open (`SURFACE_OPEN_FAILED`), `PREPARE` never
+   * started (`PREPARE_NOT_STARTED`), the surface never settled (`SURFACE_SETTLE_TIMEOUT`), the guidance pack
+   * was rejected (`GUIDANCE_PACK_REJECTED`), the overlay threw or painted nothing (`OVERLAY_MOUNT_FAILED` /
+   * `OVERLAY_NOT_VISIBLE`), or the seller closed the window (`SURFACE_CLOSED`). Every one used to be a SILENT
+   * or frozen outcome; parking here makes it a visible, recoverable state. A re-check re-runs `PREPARE` on the
+   * SAME segment and ticket — re-opening the window if it was closed — so recovery needs no new ticket. Like
+   * `SESSION_BLOCKED`, it is NOT a failure; distinct from `FAILED` so the seller never meets a dead end.
+   */
+  | "SURFACE_BLOCKED"
   /** Seller barrier, reached ONLY when the runtime could not read the range back. */
   | "WAIT_FOR_RANGE_CONFIRM"
   | "LOCATE_EXPORT"
@@ -209,6 +220,9 @@ export function importStageToRunStatus(stage: ImportStage): RunStatus {
     // A session block is the same shape: the seller logs in on their own screen, then re-checks. Waiting,
     // not failed.
     case "SESSION_BLOCKED":
+    // A reliability block is recoverable too: the run parks with a visible cause and one recovery action
+    // (re-check re-runs PREPARE), rather than freezing silently. Waiting, never failed.
+    case "SURFACE_BLOCKED":
       return "WAITING_FOR_HUMAN";
     case "DETECT_DOWNLOAD":
     case "VALIDATE_ARTIFACT":
@@ -250,6 +264,7 @@ export function importStageToStepStatus(stage: ImportStage): StepStatus {
     case "WAIT_FOR_CONSENT":
     case "SCOPE_BLOCKED":
     case "SESSION_BLOCKED":
+    case "SURFACE_BLOCKED":
       return "AWAITING_USER";
     case "READ_SCOPE":
       return "OBSERVING";
@@ -279,10 +294,12 @@ export function importStageToStepStatus(stage: ImportStage): StepStatus {
 export function importAllowedCommands(stage: ImportStage): readonly CommandType[] {
   if (IMPORT_TERMINAL_STAGES.includes(stage)) return [];
   if (stage === "PAUSED") return ["RESUME_RUN", "CANCEL_RUN"];
-  if (stage === "SESSION_BLOCKED") {
-    // Re-check re-probes the session (PREPARE); the seller may also leave for the manual path or cancel.
-    // Deliberately NO PAUSE_RUN: resume() has no barrier target here and would jump to READ_SCOPE, skipping
-    // the session gate — the recheck path is the only way forward, and it re-observes the session first.
+  if (stage === "SESSION_BLOCKED" || stage === "SURFACE_BLOCKED") {
+    // Re-check re-runs PREPARE (re-probing the session, and re-opening the window if it was closed); the
+    // seller may also leave for the manual path or cancel. Deliberately NO PAUSE_RUN: resume() has no barrier
+    // target here and would jump to READ_SCOPE, skipping the gate — re-check is the only way forward, and it
+    // re-observes the surface first. A duplicate press mid-probe is safe because recheck moves to
+    // PREPARE_SESSION first, and PREPARE_SESSION allows no REQUEST_STEP_RECHECK.
     return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
   }
   if (isImportBarrier(stage) || stage === "SCOPE_BLOCKED") {
