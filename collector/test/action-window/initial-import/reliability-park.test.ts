@@ -51,9 +51,12 @@ describe("engine reliability park", () => {
 
   it("never parks a terminal run", () => {
     const e = engine();
-    // Drive to a terminal FAILED via an unsupported surface.
+    // Drive to a terminal FAILED via a target that cannot be located (a genuine post-surface dead end — a
+    // not-usable SURFACE now parks recoverably, so it is no longer a terminal path).
     e.command({ type: "START_RUN", expectedRevision: 0 });
-    e.onSurfaceReady({ ok: false, blockerCode: "UNSUPPORTED_STATE" });
+    e.onSurfaceReady(true);
+    e.onFactsRead({ requiresApply: false, requiresFilters: false });
+    e.onTargetLocated("start_date", { count: 0 });
     expect(e.currentStage()).toBe("FAILED");
     const before = e.events().length;
     expect(e.reliabilityPark("SURFACE_CLOSED")).toBe("NONE");

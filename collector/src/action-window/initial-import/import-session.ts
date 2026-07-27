@@ -378,9 +378,11 @@ export class ImportSegmentSession {
         // still caught.
         this.watchSurfaceClose();
         const next = this.engine.onSurfaceReady(res);
-        // A recoverable session park (login/expired) is the reliability pipeline's `SESSION_NOT_READY` — record
-        // it so the trail shows the surface probe is where this run stopped.
+        // Record where the surface probe stopped, so the trail names it. A login/expired park is
+        // `SESSION_NOT_READY`; a not-usable-yet review surface parks recoverably as `SURFACE_SETTLE_TIMEOUT`
+        // (the guided-import "you're not on the 리뷰 검색 page yet" case) instead of a stranding terminal.
         if (this.engine.currentStage() === "SESSION_BLOCKED") recordFailure("SESSION_NOT_READY");
+        else if (this.engine.currentStage() === "SURFACE_BLOCKED") recordFailure("SURFACE_SETTLE_TIMEOUT");
         this.publishState();
         return this.drive(next);
       }

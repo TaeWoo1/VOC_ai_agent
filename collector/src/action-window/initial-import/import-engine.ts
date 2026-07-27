@@ -264,9 +264,16 @@ export class ImportSegmentEngine {
     if (!ok) {
       const code = typeof res === "object" && res.blockerCode ? res.blockerCode : "UNSUPPORTED_STATE";
       // A login or expired session is something the seller clears on their own screen — recoverable.
-      // An unrecognised surface is not, and stays terminal.
-      const recoverable = code === "LOGIN_REQUIRED" || code === "SESSION_EXPIRED";
-      return recoverable ? this.block(code, true) : this.fail(code);
+      if (code === "LOGIN_REQUIRED" || code === "SESSION_EXPIRED") return this.block(code, true);
+      // **Guided Acquisition Reliability (live finding, 2026-07-27).** For the reply/export runtimes an
+      // unrecognised surface is a terminal dead end, but a GUIDED IMPORT has no permanently-unsupported review
+      // surface: an `UNSUPPORTED_STATE` here means the seller is not on the 리뷰 검색 page YET (still logging in,
+      // a redirect, the grid not hydrated). Terminating strands the single-use ticket and leaves the seller with
+      // a run they cannot restart — the exact unrecoverable state this slice exists to remove (two live runs hit
+      // it). So it parks RECOVERABLY: the seller opens the review surface and a 다시 확인 re-runs PREPARE on the
+      // SAME ticket. `SURFACE_SETTLE_TIMEOUT` carries the honest "the review screen isn't ready — open it and
+      // re-check" copy.
+      return this.reliabilityPark("SURFACE_SETTLE_TIMEOUT");
     }
     return "READ_FACTS";
   }

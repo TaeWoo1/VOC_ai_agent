@@ -115,6 +115,11 @@ export class ImportFixtureDriver implements ImportProbeDriver {
     resolve?.();
   }
 
+  /** Test helper: change what the NEXT `prepareSurface` reports (e.g. a not-ready surface becoming ready). */
+  setSurface(surface: boolean | SurfaceProbeResult): void {
+    this.script.surface = surface;
+  }
+
   async readSurfaceFacts(): Promise<ImportSurfaceFacts> {
     this.calls.push("readSurfaceFacts");
     return this.script.facts ?? { requiresApply: false, requiresFilters: false };

@@ -93,11 +93,42 @@ separately-approved live step.
   same context recovers.
 - Frontend: `tsc` + full suite; `copy.test.ts` locks the new blocker copy.
 
-## Live proof — PENDING
+## Live proof — DONE (2026-07-27, real NAVER SmartStore, seated single-use approval)
 
-To be completed IN THIS PR under a fresh single-use in-turn approval (channel / account / date / operator), on
-the real NAVER seller center, via the disposable-DB backend → FE bridge → collector chain. The adversarial loop
-drives the root-cause pass one variable at a time; each confirmed cause is fixed, re-verified offline, and
-re-tried live. Export stays human-driven (`collector/CLAUDE.md` §4.7) — SellerOps never logs in or clicks.
+Verified end-to-end on the real seller center via the disposable-DB backend (`sellerops_gar_live`) → FE `:5174`
+→ bridge `:47620` → collector agent → headed Chrome. Export stayed human-driven (§4.7); SellerOps never logged
+in or clicked.
 
-_This section is filled after the run; until then the slice is honestly offline-complete only._
+**A root cause found live, fixed in-branch, and re-proven** (the adversarial-loop discipline in practice):
+
+- **Two runs terminated on a not-ready surface.** The seller pressed 시작 while the NAVER window was still on the
+  login / a redirect (not the 리뷰 검색 page). The surface probe returned `UNSUPPORTED_STATE`, which the guided
+  engine treated as a **terminal `FAILED`** — and a terminal run **stranded the single-use ticket**, so
+  "계속 가져오기" could not restart it (DB: one launch `CONSUMED`, one dangling `ISSUED`, plan stuck). That is
+  exactly the *unrecoverable* state this slice exists to remove. Instrumentation made it legible: the trail
+  ended at `SURFACE_SETTLE`, and the persisted stage was `FAILED` at the 2nd publish.
+- **Fix:** a guided import has no permanently-unsupported review surface — an unrecognised surface means "not on
+  리뷰 검색 yet". `import-engine.onSurfaceReady` now parks it **recoverably** (`SURFACE_SETTLE_TIMEOUT`, "화면이
+  아직 준비되지 않았어요 — 리뷰 관리 화면이 뜬 뒤 다시 확인") instead of terminating. Offline-verified (collector
+  suite green), then re-tried live.
+
+**The clean run after the fix (`run_8409dc63ff49`), one continuous marker trail:**
+
+- boot `aw_guided_preflight_summary {ok:true, issues:0}` — the self-check passed (backend/bridge/origin/agent);
+- `PREPARE → GUIDANCE_PACK {blockers:16}` (9 + the 7 new reliability codes) `→ SURFACE_OPEN → SESSION_PROBE →
+  SURFACE_SETTLE` → **`aw_acquisition_failure {SURFACE_SETTLE_TIMEOUT, recoverable:true}`** — the not-ready
+  surface now parks recoverably (was the terminal strand);
+- seller opens 리뷰 검색, presses **다시 확인** → **`PREPARE` re-runs on the SAME ticket** → `aw_import_surface_facts
+  {dateInputCount:2}` → **`OVERLAY_MOUNT → OVERLAY_VISIBLE`** — the guided overlay rendered and was verified
+  visible (the #367 silent-overlay gap, closed) → **`READY`**;
+- seller sets dates → `scope_verdict {match:MATCH}` → export highlighted → download detected →
+  **`aw_naver_managed_copy_saved {saved:true}`** → run store `stage: COMPLETED, artifactDetected:true`.
+- Backend: **`reviews: 59`** ingested, segment **`COMPLETED | COVERED`**, attempt **`SUCCEEDED`**; the managed
+  copy on disk is a real **`review_<dd>_<t>.xlsx`** (seller-named, not a GUID temp — the #367 artifact problem,
+  fixed); the after-ingest issue-memory refresh fired (`review_issue_unknown_units: 84`). No-silent-catch was
+  live too: `aw_import_panel_render_failed {reason:"Error"}` was logged (not swallowed) when the panel could not
+  draw on the login page.
+
+**Sanitized throughout:** every marker carried enums/booleans/coarse counts only — no account id, slot, cookie,
+token, URL, or filename in any log. Test env torn down after: disposable DB dropped (name-guarded), agent/FE/
+backend stopped, export file + profile are gitignored.
