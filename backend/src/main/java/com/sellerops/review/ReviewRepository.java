@@ -34,6 +34,21 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
             + "and a.sourceType = 'REVIEW' and a.sourceId = r.id) order by r.receivedAt desc")
     List<Review> findUnanalyzedByOrgId(@Param("orgId") UUID orgId, Pageable pageable);
 
+    /**
+     * Reviews for this org in a stable order, for paging through the corpus during issue extraction.
+     *
+     * <p>Ordered by {@code receivedAt desc, id asc} rather than date alone. {@code received_at} is
+     * date-granular on the file import path, so many rows share a value; without the id tiebreak the
+     * page boundaries would be undefined and a paged backfill could revisit or skip rows.
+     *
+     * <p>There is deliberately no "not yet extracted" predicate to match
+     * {@link #findUnanalyzedByOrgId}: issue extraction stores no marker on the review, because it is
+     * idempotent by key — re-running it over an already-processed review attaches nothing. Paging is
+     * therefore the caller's job, and a re-run is cheap rather than incorrect.
+     */
+    @Query("select r from Review r where r.orgId = :orgId order by r.receivedAt desc, r.id asc")
+    List<Review> findForIssueExtraction(@Param("orgId") UUID orgId, Pageable pageable);
+
     /** Count of reviews for this org still missing an item_analyses row. */
     @Query("select count(r) from Review r where r.orgId = :orgId and not exists "
             + "(select 1 from ItemAnalysis a where a.orgId = r.orgId "

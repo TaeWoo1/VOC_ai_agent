@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Section } from "../components/Section";
+import { ReviewIssueSection } from "../components/reviewIssues/ReviewIssueSection";
 import { StatCard } from "../components/StatCard";
 import { useApiData } from "../lib/useApiData";
 import { api } from "../lib/apiClient";
@@ -108,12 +109,18 @@ export function ProductIssues() {
       <div>
         <h1 className="text-2xl font-bold">상품 이슈</h1>
         <p className="mt-1 text-lg text-muted">
-          문의·리뷰에서 반복되는 상품별 운영 이슈 후보를 모아봅니다.
+          반복되는 고객 문제와 그 변화를 추적합니다.
         </p>
         <p className="mt-1 text-sm text-muted">
           운영 신호를 모은 “후보”이며, 최종 진단이 아닙니다. 실제 원인은 내부 확인이 필요합니다.
         </p>
       </div>
+
+      {/* The persistent issue memory leads the page: it is the only part that can answer whether
+          anything CHANGED. The per-load candidate view below is kept — it joins the inbox feed to
+          stored analyses and so covers 문의 as well as 리뷰, which the issue memory does not — but it
+          is demoted, because an operator opening this page is asking "what is different now". */}
+      <ReviewIssueSection />
 
       {loading ? (
         <p className="text-muted">불러오는 중…</p>

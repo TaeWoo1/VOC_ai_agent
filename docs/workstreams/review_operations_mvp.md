@@ -256,6 +256,49 @@ Append a dated entry; never rewrite prior entries — correct forward.
   scratch bridge client, so `GuidedImportCard` is still offline-only, and a `SCOPE_MISMATCH` is currently
   invisible to the operator without it; (c) `UNREADABLE` → `OPERATOR_CONFIRMED` never fired; (d) a surface
   that genuinely needs an apply press is untested.
+### 2026-07-25 — Review Issue Memory (Phase A) — IMPLEMENTED (offline + disposable-backend proof)
+- **Loop stage(s):** UNDERSTAND / PRIORITIZE
+- **Did:** Repeated customer issues now have an identity that outlives a page load
+  (`V31__review_issue_memory.sql`, `com.sellerops.reviewissue`), so change can be asked about at all:
+  four judgements (새로 나타남 / 증가 중 / 계속 발생 / 특정 상품 집중) plus 개선됨, a five-state
+  lifecycle whose only automatic transitions are 관찰 중→확인 필요 and 개선 확인 중→해결됨, and an
+  `IssueSignatureExtractor` port whose first implementation is deterministic. Opinion-unit splitting is
+  the load-bearing part: a complaint inside a 5★ review is analysed on its own, with no reference to
+  rating. Thresholds were fixed in `contracts/review-issue/v1/THRESHOLDS.md` (**DRAFT — product-owner
+  confirmation pending**) before the code could produce a verdict. Review of the finished diff closed
+  two gaps: dismissal had no way back (the archive is now readable, so 중요하지 않음 is undoable), and
+  근거 리뷰 / 대표 고객 표현 was specified but unwired (now an on-demand drill-down through the existing
+  masking path).
+- **Evidence:** backend 1,644 (103 new) / 0 failures; frontend 879 + typecheck + build; contracts +
+  collector typecheck; `tools/review-issue-validation/run-synthetic.sh` **48/48** on a disposable
+  Postgres — the only thing that executes V31 at all, and it asserts `flyway_schema_history` recorded
+  it successful rather than inferring it from a clean boot.
+- **⚠ Scope of that evidence:** **behaviour, not detection quality.** It shows the judgements fire in
+  their contracted windows, the suppression rules hold, re-runs are idempotent and the needs-a-look
+  queue does not move. It shows nothing about whether the issues are the right issues. Do not quote it
+  as evidence that repeated-VOC detection works.
+- **§4.1 impact:** none — no channel capability changed, no marketplace contact.
+- **Ledger impact:** none.
+- **Gate state:** no live-run gate involved (no browser, no marketplace). Two product-owner gates remain
+  CLOSED and this package does not touch either: **D1** the LLM gate (scope lock v1.6 ② keeps `ai`
+  reserved; sending review bodies to an external model is additionally a new data-egress decision) and
+  **D2** a labeling session. Note the LLM gate's cited authority, `roadmap §9.2`, **does not exist** —
+  roadmap §9 is the sanitized-logging rule and has no subsections. That stale cross-reference should be
+  resolved before D1 is decided.
+- **Blockers:** the extractor's accuracy is **UNMEASURED** — `contracts/review-eval/naver/v1/labels.json`
+  is still empty, so nothing here has been measured against the rubric's bars. It is therefore wired to
+  feed issue aggregation ONLY; `ReviewIssueQueueIsolationTest` and the harness both prove the
+  needs-a-look queue's `LOW_RATING_REVIEW` count cannot move (RUBRIC.md §5 regression gate).
+- **Merge order (resolved 2026-07-27):** authored as `V29` while `feat/naver-initial-review-import`
+  (V27/V28) was unmerged. That branch has since merged, and V29/V30 were then taken by other merged work
+  (V30 = `account_session_slot`). Flyway `out-of-order` is off, so this file was **renumbered to `V31`** —
+  strictly above main's current max — making it a clean forward migration on both a fresh and an
+  already-migrated database. No merge-order constraint remains.
+- **Next:** confirm or revise the THRESHOLDS.md draft numbers. 반복 칭찬 (repeated praise) is
+  deliberately NOT in this package — a praise vocabulary carries the same measurement problem and needs
+  its own bar. Option-level attribution is also out: `reviews` has no option column and whether the
+  NAVER export carries one is unverified. The UNKNOWN pen is written and counted but nothing surfaces
+  its size yet; clustering it needs D1.
 
 ### 2026-07-24 — NAVER Review Export Tutorial — LIVE export+ingest SUCCESS (attempt 5)
 - **Loop stage(s):** ACQUIRE (real export) → NORMALIZE → UNDERSTAND/PRIORITIZE (attention)
