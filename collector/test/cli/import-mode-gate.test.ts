@@ -126,16 +126,21 @@ describe("refusal messages", () => {
 describe("browser launch reachability", () => {
   const cli = readFileSync(join(__dirname, "../../src/cli/local-agent.ts"), "utf8");
 
-  it("launches a browser in exactly one place, inside the gated builder", () => {
+  it("launches a browser only inside the gated builder", () => {
+    // Two launches now: the boot's SellerOps context, and the account-scoped seller-center context opened at
+    // run start. The property that matters is unchanged — EVERY launch is inside `buildInitialImportConfig`,
+    // so none can be reached except through the gate.
     const calls = [...cli.matchAll(/launchNaverContext\(/g)].map((m) => m.index!);
-    expect(calls).toHaveLength(1);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
 
     const builderStart = cli.indexOf("export async function buildInitialImportConfig");
     const builderEnd = cli.indexOf("/**\n * Build the {@link AgentActionWindowConfig}");
     expect(builderStart).toBeGreaterThan(-1);
     expect(builderEnd).toBeGreaterThan(builderStart);
-    expect(calls[0]!).toBeGreaterThan(builderStart);
-    expect(calls[0]!).toBeLessThan(builderEnd);
+    for (const at of calls) {
+      expect(at).toBeGreaterThan(builderStart);
+      expect(at).toBeLessThan(builderEnd);
+    }
   });
 
   it("invokes that builder only from the gated boot", () => {

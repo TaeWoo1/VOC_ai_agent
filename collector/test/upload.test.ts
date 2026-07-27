@@ -7,7 +7,9 @@ import { decideState } from "../src/status";
 import {
   fetchApprovedReplyDraft,
   fetchItemAnalysisCount,
+  fetchLaunchScope,
   login,
+  reportSessionReadiness,
   resolveChannelId,
   submitReplyOutcome,
   uploadReviewBytes,
@@ -479,4 +481,68 @@ describe("live-backend integration (gated)", () => {
       expect(afterSecond).toBe(afterFirst);
     },
   );
+});
+
+describe("fetchLaunchScope — carries the opaque account slot", () => {
+  it("passes the server's accountSlot through unchanged", async () => {
+    const fakeFetch = async () =>
+      jsonResponse({
+        kind: "SEGMENT",
+        channelCode: "naver",
+        accountSlot: "aabbccddeeff00112233abcd",
+        requiredStart: "2026-06-01",
+        requiredEnd: "2026-06-30",
+      });
+    const scope = await fetchLaunchScope("http://x", "tok", "deadbeefdeadbeef", fakeFetch as typeof fetch);
+    expect(scope.accountSlot).toBe("aabbccddeeff00112233abcd");
+    expect(scope.channelCode).toBe("naver");
+  });
+
+  it("tolerates a legacy server with no accountSlot", async () => {
+    const fakeFetch = async () =>
+      jsonResponse({ kind: "SEGMENT", channelCode: "naver", requiredStart: "2026-06-01", requiredEnd: "2026-06-30" });
+    const scope = await fetchLaunchScope("http://x", "tok", "deadbeefdeadbeef", fakeFetch as typeof fetch);
+    expect(scope.accountSlot ?? "").toBe("");
+  });
+});
+
+describe("reportSessionReadiness — sanitized, ref-scoped persistence", () => {
+  it("POSTs only state + reason to the ref-scoped endpoint, carrying no identity", async () => {
+    let captured: { url: string; init: RequestInit } | null = null;
+    const fakeFetch = async (url: string | URL | Request, init?: RequestInit) => {
+      captured = { url: String(url), init: init ?? {} };
+      return new Response(null, { status: 204 });
+    };
+    const ok = await reportSessionReadiness(
+      "http://x",
+      SECRET_TOKEN,
+      "deadbeefdeadbeef",
+      "LOGIN_REQUIRED",
+      "SESSION_FAILURE",
+      fakeFetch as typeof fetch,
+    );
+    expect(ok).toBe(true);
+    expect(captured!.url).toBe("http://x/api/imports/reviews/launches/deadbeefdeadbeef/session-readiness");
+    expect(captured!.init.method).toBe("POST");
+    // The body is exactly the two sanitized enums — no account id, no cookie, no slot.
+    expect(JSON.parse(captured!.init.body as string)).toEqual({
+      state: "LOGIN_REQUIRED",
+      reason: "SESSION_FAILURE",
+    });
+    // The token rides the Authorization header (as every call does), never the body.
+    expect(captured!.init.body as string).not.toContain(SECRET_TOKEN);
+  });
+
+  it("returns false (does not throw) when the server rejects the report", async () => {
+    const fakeFetch = async () => new Response("no", { status: 409 });
+    const ok = await reportSessionReadiness(
+      "http://x",
+      "tok",
+      "deadbeefdeadbeef",
+      "READY",
+      "MANUAL_RECHECK",
+      fakeFetch as typeof fetch,
+    );
+    expect(ok).toBe(false);
+  });
 });

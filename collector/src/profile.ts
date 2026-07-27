@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,6 +60,40 @@ export function resolveProfileDir(profileDir: string, root: string = collectorRo
     throw new Error("profile dir must live inside the collector directory");
   }
   return resolved;
+}
+
+/**
+ * Sanitize a channel code for use as a human-readable directory prefix — only lowercase alphanumerics
+ * survive, so an unexpected value can never inject a path separator or `..`. Directory uniqueness comes from
+ * the hash below, not this prefix, so a prefix collision is harmless.
+ */
+function channelPrefix(channelCode: string): string {
+  const safe = channelCode.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return safe.length > 0 ? safe : "ch";
+}
+
+/**
+ * The account-scoped persistent-profile directory: `${profileBaseDir}/<channel>-agent-<24 hex>`.
+ *
+ * The leaf is a one-way hash of `(channelCode, accountSlot)`, so two accounts on one channel — or the same
+ * account on two channels — never share a directory, and no raw slot, path separator, or `..` reaches the
+ * filesystem name. The slot is already an opaque server surrogate (never the seller-account id), so nothing
+ * here is reversible to an identity. Deterministic on `(channelCode, accountSlot)` alone: the SAME account
+ * resolves to the SAME directory every run, which is exactly what lets a login survive an agent restart. The
+ * in-tree guard ({@link resolveProfileDir}) still runs, so this cannot escape the collector tree. Distinct
+ * from the ESM reconnect path's `esm-agent-<hash>` leaves, so the two never collide.
+ */
+export function accountScopedProfileDirFor(
+  profileBaseDir: string,
+  channelCode: string,
+  accountSlot: string,
+): string {
+  const digest = createHash("sha256")
+    .update(`account-session-profile ${channelCode}\u0000${accountSlot}`)
+    .digest("hex")
+    .slice(0, 24);
+  const leaf = `${channelPrefix(channelCode)}-agent-${digest}`;
+  return resolveProfileDir(resolve(profileBaseDir, leaf));
 }
 
 /** Persistent-context launch options the collector controls. */

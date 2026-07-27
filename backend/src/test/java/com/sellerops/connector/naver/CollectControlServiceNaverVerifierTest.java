@@ -75,6 +75,7 @@ class CollectControlServiceNaverVerifierTest {
     @Autowired SyncScheduleRepository schedules;
     @Autowired ConnectorCapabilityRepository capabilities;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.selleraccount.AccountSessionSlotRepository accountSlotRepo;
 
     private final UUID org = UUID.randomUUID();
     private final String clientSecret = BCrypt.gensalt(); // Naver secrets are bcrypt salts
@@ -97,7 +98,8 @@ class CollectControlServiceNaverVerifierTest {
         SyncRunExecutor executor = new SyncRunExecutor(
                 sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
-                connectionStatus, capabilities, registry, executor, vault);
+                connectionStatus, capabilities, registry, executor, vault,
+                new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo));
     }
 
     @Test

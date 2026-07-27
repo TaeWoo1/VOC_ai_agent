@@ -75,6 +75,7 @@ const SEGMENT_REF_2 = "1122334455667788";
 const SEGMENT_SCOPE: ResolvedLaunchScope = {
   kind: "SEGMENT",
   channelCode: CHANNEL,
+  accountSlot: "aabbccddeeff00112233abcd",
   requiredStart: "2026-06-01",
   requiredEnd: "2026-06-30",
 };
@@ -85,6 +86,7 @@ const SEGMENT_SCOPE: ResolvedLaunchScope = {
 const DISCOVERY_SCOPE: ResolvedLaunchScope = {
   kind: "DISCOVERY",
   channelCode: CHANNEL,
+  accountSlot: "aabbccddeeff00112233abcd",
   requiredStart: "",
   requiredEnd: "",
 };

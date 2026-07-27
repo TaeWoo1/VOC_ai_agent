@@ -3,8 +3,11 @@ package com.sellerops.reviewimport;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.selleraccount.SessionProbeReason;
+import com.sellerops.selleraccount.SessionReadinessState;
 import java.io.InputStream;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -55,6 +58,7 @@ public class ReviewImportLaunchService {
     private final ReviewImportRunService runService;
     private final SellerAccountRepository sellerAccounts;
     private final ChannelRepository channels;
+    private final AccountSessionSlotService accountSlots;
     private final Clock clock;
 
     /**
@@ -78,8 +82,10 @@ public class ReviewImportLaunchService {
                                     ReviewImportPlanService planService,
                                     ReviewImportRunService runService,
                                     SellerAccountRepository sellerAccounts,
-                                    ChannelRepository channels) {
-        this(launches, plans, segments, planService, runService, sellerAccounts, channels, Clock.system(KST));
+                                    ChannelRepository channels,
+                                    AccountSessionSlotService accountSlots) {
+        this(launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots,
+                Clock.system(KST));
     }
 
     /** Test seam: an explicit {@link Clock} pins the "today" a selected period ends on. */
@@ -90,6 +96,7 @@ public class ReviewImportLaunchService {
                              ReviewImportRunService runService,
                              SellerAccountRepository sellerAccounts,
                              ChannelRepository channels,
+                             AccountSessionSlotService accountSlots,
                              Clock clock) {
         this.launches = launches;
         this.plans = plans;
@@ -98,6 +105,7 @@ public class ReviewImportLaunchService {
         this.runService = runService;
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
+        this.accountSlots = accountSlots;
         this.clock = clock;
     }
 
@@ -164,11 +172,16 @@ public class ReviewImportLaunchService {
     /* ─────────────────────────── Resolve ─────────────────────────── */
 
     /**
-     * What the runtime is allowed to know: the kind of run, the channel to open, and — for a segment — the
-     * exact dates to guide the seller to. Deliberately carries no plan/segment/account id: the runtime has
-     * no use for them, and everything it does flows back through the ref.
+     * What the runtime is allowed to know: the kind of run, the channel to open, the opaque per-account
+     * slot to bind its persistent profile to, and — for a segment — the exact dates to guide the seller to.
+     * Deliberately carries no plan/segment/account id: the runtime picks a per-account profile from the
+     * opaque {@code accountSlot}, which the server owns and which is NOT reversible to the seller-account
+     * id, so the wire stays identity-free even though the profile is now account-specific.
+     *
+     * <p>Not {@code readOnly}: the first resolve for an account mints its stable slot (find-or-create), so
+     * the runtime always receives one. Minting is idempotent, so this stays a no-op on every later resolve.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public LaunchScope resolveScope(UUID orgId, String launchRef) {
         ReviewImportLaunch ticket = requireOpen(orgId, launchRef);
         Channel channel = channels.findById(ticket.getChannelId())
@@ -176,14 +189,35 @@ public class ReviewImportLaunchService {
         // The Action Window contract's channelCode is a lowercase semantic code (`naver`), while the
         // channel table stores the display-side code (`NAVER`).
         String channelCode = channel.getCode().toLowerCase(java.util.Locale.ROOT);
+        // The opaque, stable per-account key the runtime binds its persistent browser profile to. Resolved
+        // from the ticket's account (never sent to the wire) and minted here on first use.
+        String accountSlot = accountSlots.resolveSlot(
+                ticket.getOrgId(), ticket.getSellerAccountId(), ticket.getChannelId());
 
         if (ticket.getKind() == ReviewImportLaunchKind.DISCOVERY) {
-            return new LaunchScope(ReviewImportLaunchKind.DISCOVERY, channelCode, null, null);
+            return new LaunchScope(ReviewImportLaunchKind.DISCOVERY, channelCode, accountSlot, null, null);
         }
         ReviewImportSegment segment = segments.findById(ticket.getSegmentId())
                 .orElseThrow(() -> ApiException.notFound("구간을 찾을 수 없습니다."));
-        return new LaunchScope(ReviewImportLaunchKind.SEGMENT, channelCode,
+        return new LaunchScope(ReviewImportLaunchKind.SEGMENT, channelCode, accountSlot,
                 segment.getSegmentStart(), segment.getSegmentEnd());
+    }
+
+    /**
+     * Persist what a session-readiness probe observed for the account this ref belongs to.
+     *
+     * <p>The runtime posts only its opaque launch ref plus sanitized enums (state + probe moment); the
+     * server resolves the ref back to the account and records readiness on the account's slot, so the
+     * durable state survives an agent restart without the wire ever carrying an account id. Uses
+     * {@code requireTicket} (any status) rather than {@code requireOpen}: a readiness report is diagnostic
+     * and must still land after the ticket that started the run has been consumed.
+     */
+    @Transactional
+    public void recordSessionReadiness(UUID orgId, String launchRef,
+                                       SessionReadinessState state, SessionProbeReason reason) {
+        ReviewImportLaunch ticket = requireTicket(orgId, launchRef);
+        accountSlots.recordReadiness(
+                ticket.getOrgId(), ticket.getSellerAccountId(), ticket.getChannelId(), state, reason);
     }
 
     /** Read a ticket for the frontend (which, unlike the runtime, already owns the plan/segment identity). */
@@ -447,8 +481,12 @@ public class ReviewImportLaunchService {
         return HexFormat.of().formatHex(bytes);
     }
 
-    /** Sanitized scope for the runtime: no plan/segment/account identity, just what to guide. */
-    public record LaunchScope(ReviewImportLaunchKind kind, String channelCode,
+    /**
+     * Sanitized scope for the runtime: no plan/segment/account identity. {@code accountSlot} is the opaque,
+     * stable per-account key the runtime binds its persistent profile to — a surrogate the server owns, not
+     * an identity.
+     */
+    public record LaunchScope(ReviewImportLaunchKind kind, String channelCode, String accountSlot,
                               LocalDate requiredStart, LocalDate requiredEnd) {
     }
 }

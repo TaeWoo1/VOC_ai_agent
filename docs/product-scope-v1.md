@@ -261,6 +261,16 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   Session Readiness 게이트 결정(DISPATCH / ASK_SELLER / HOLD)에 한한다. **무-live·무-durable·무-FE**: live
   dispatch 배선, backend 지속화, 신규 FE, `OperationRun`/`CapabilityPolicy` 본체는 **여전히 lock**이며 별도
   승인 대상이다. 구현: `contracts/acquisition/v1` + `collector/.../acquisition-supervisor.ts`(관찰 전용, 미배선).
+- **carve-out 확장 (2026-07-27, 제품 오너 승인):** 위 carve-out이 "별도 승인 대상"으로 남긴 **backend 지속화** 중
+  **Account-scoped Persistent Session Runtime에 한해** durable persistence를 허용한다 — ① seller account별
+  **opaque·stable account slot**을 backend가 소유(`account_session_slot`, 마이그레이션 `V29`), ② **Session
+  Readiness의 durable 지속화**(같은 테이블의 `readiness_state`), ③ 기존 connection-health(`channel_connection_status`)
+  와의 **read-side 정합**(기존 `ConnectionStatusView` projection에 필드 추가). 경계는 유지: **신규 FE 화면 없음**
+  (기존 connection-status projection만 확장), **자동 로그인·2FA·CAPTCHA 없음**, **두 번째 채널 어댑터·프로필
+  업로드/동기화 없음**, `OperationRun`/`CapabilityPolicy` 본체·automatic dispatch는 **여전히 lock**. account slot은
+  seller-account id가 **아니며 역산 불가**한 surrogate이고, wire·log·trace·에이전트 파일 경로에 실제 식별자를 노출하지
+  않는다. 구현: `V29__account_session_slot.sql` + `com.sellerops.selleraccount.AccountSessionSlot*` +
+  `collector/.../profile.ts`(account-scoped 프로필) + `POST /api/imports/reviews/launches/{ref}/session-readiness`.
 
 ### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
 

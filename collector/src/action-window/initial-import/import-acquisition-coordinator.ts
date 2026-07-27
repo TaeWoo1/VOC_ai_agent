@@ -52,6 +52,14 @@ import type {
 export const IMPORT_CAPABILITY: AcquisitionCapability = "REVIEW";
 
 /**
+ * A sink for a readiness observation the coordinator just recorded, so the boot can persist it (durable
+ * backend readiness). Sanitized: state + probe moment only — the account is resolved server-side from the
+ * opaque launch ref the boot holds, never passed here. Best-effort by contract: an implementation must never
+ * throw in a way that could fail a run (the coordinator calls it fire-and-forget).
+ */
+export type ReadinessReport = (state: SessionReadinessState, reason: ReadinessProbeReason) => void;
+
+/**
  * The admission a coordinator returns for a segment — the sanitized shape the host consults. Enums only: an
  * admit boolean, the supervisor decision kind, and the bound adapter id. There is nowhere in it for a token,
  * account, ref, or date.
@@ -97,9 +105,11 @@ export class ImportAcquisitionCoordinator {
   private readonly probe: SessionReadinessProbe;
   private readonly channelCode: string;
   private readonly boundAdapterId: AcquisitionAdapterId;
+  private readonly report: ReadinessReport;
 
-  constructor(channelCode: string = NAVER_CHANNEL_CODE) {
+  constructor(channelCode: string = NAVER_CHANNEL_CODE, report: ReadinessReport = () => {}) {
     this.channelCode = channelCode;
+    this.report = report;
     this.supervisor = new AcquisitionSupervisor(this.projector);
     this.probe = new SessionReadinessProbe(this.projector, channelCode);
     // Bound once, from the matrix: which adapter would run this carrier's (channel × REVIEW). For NAVER this
@@ -159,6 +169,9 @@ export class ImportAcquisitionCoordinator {
           ? "BEFORE_WORK"
           : "MANUAL_RECHECK";
     this.probe.observeState(state, reason);
+    // Persist the observation (durable backend readiness). Fire-and-forget: the reporter is best-effort and
+    // must never fail a run — the run's own engine, not this, owns the session hold.
+    this.report(state, reason);
     return state;
   }
 }

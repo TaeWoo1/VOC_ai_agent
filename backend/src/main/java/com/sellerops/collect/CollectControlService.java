@@ -27,8 +27,11 @@ import com.sellerops.credential.CredentialMetadata;
 import com.sellerops.credential.CredentialTemplates;
 import com.sellerops.credential.CredentialTemplates.CredentialTemplate;
 import com.sellerops.credential.CredentialVault;
+import com.sellerops.selleraccount.AccountSessionSlot;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.selleraccount.SessionReadinessState;
 import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.sync.SyncSchedule;
@@ -78,12 +81,14 @@ public class CollectControlService {
     private final ConnectorRegistry registry;
     private final SyncRunExecutor executor;
     private final CredentialVault vault;
+    private final AccountSessionSlotService accountSlots;
 
     public CollectControlService(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                                  SyncScheduleRepository schedules, SyncJobRepository syncJobs,
                                  ChannelConnectionStatusRepository connectionStatus,
                                  ConnectorCapabilityRepository capabilities, ConnectorRegistry registry,
-                                 SyncRunExecutor executor, CredentialVault vault) {
+                                 SyncRunExecutor executor, CredentialVault vault,
+                                 AccountSessionSlotService accountSlots) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.schedules = schedules;
@@ -93,6 +98,7 @@ public class CollectControlService {
         this.registry = registry;
         this.executor = executor;
         this.vault = vault;
+        this.accountSlots = accountSlots;
     }
 
     public List<ScheduleView> listSchedules(UUID orgId, UUID sellerAccountId) {
@@ -177,6 +183,12 @@ public class CollectControlService {
                 .filter(t -> t != null)
                 .min(Comparator.naturalOrder())
                 .orElse(null);
+        // Reconcile the session-readiness axis onto the same panel. No slot yet (the account has never been
+        // guided through a live run) reads as UNOBSERVED_EXTERNAL — the fail-closed default, not READY.
+        AccountSessionSlot slot = accountSlots.findBySellerAccount(sellerAccountId).orElse(null);
+        String sessionReadiness =
+                (slot != null ? slot.getReadinessState() : SessionReadinessState.UNOBSERVED_EXTERNAL).name();
+        Instant sessionObservedAt = slot != null ? slot.getLastObservedAt() : null;
         return new ConnectionStatusView(
                 sellerAccountId,
                 health != null ? health.getState() : "NOT_COLLECTED",
@@ -184,7 +196,9 @@ public class CollectControlService {
                 health != null ? health.getConsecutiveFailures() : 0,
                 health != null ? health.getLastError() : null,
                 account.getLastSyncedAt(),
-                nextScheduledAt);
+                nextScheduledAt,
+                sessionReadiness,
+                sessionObservedAt);
     }
 
     /**

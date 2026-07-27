@@ -42,6 +42,8 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.product.ProductService;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.selleraccount.SellerAccount;
+import com.sellerops.selleraccount.AccountSessionSlotRepository;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
@@ -88,6 +90,7 @@ class CollectControlServiceTest {
     @Autowired ChannelConnectionStatusRepository connectionStatus;
     @Autowired SyncScheduleRepository schedules;
     @Autowired ConnectorCapabilityRepository capabilities;
+    @Autowired AccountSessionSlotRepository accountSlotRepo;
     @Autowired ConnectorCredentialRepository credentials;
 
     private MockApiConnector mock;
@@ -108,7 +111,8 @@ class CollectControlServiceTest {
 
     private CollectControlService serviceWith(CredentialVault vault) {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
-                connectionStatus, capabilities, registry, executor, vault);
+                connectionStatus, capabilities, registry, executor, vault,
+                new AccountSessionSlotService(accountSlotRepo));
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -596,7 +600,8 @@ class CollectControlServiceTest {
 
     private CollectControlService serviceWith(ConnectorRegistry reg, CredentialVault vault) {
         return new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
-                connectionStatus, capabilities, reg, executor, vault);
+                connectionStatus, capabilities, reg, executor, vault,
+                new AccountSessionSlotService(accountSlotRepo));
     }
 
     /**
