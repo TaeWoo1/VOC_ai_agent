@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type BrowserContext } from "playwright";
 import { log } from "./log";
@@ -133,6 +133,33 @@ export function buildLaunchOptions(channel?: string): NaverLaunchOptions {
 }
 
 /**
+ * Mark a persistent profile as having exited cleanly, BEFORE the next launch.
+ *
+ * Playwright terminates Chromium without running Chrome's own clean-exit path, so a profile it has used is
+ * left flagged as a crash — and on the next launch Chrome shows a "restore pages / didn't shut down
+ * correctly" bubble over the page. For an account-scoped session runtime that reopens the SAME profile on
+ * every agent restart, that bubble would appear every single time and sit on top of the seller-center. This
+ * rewrites the two flags Chrome reads at startup so the bubble never shows. It changes nothing about the
+ * session itself (cookies/login are untouched) — only the crash-restore prompt — and is best-effort: a
+ * missing or unreadable Preferences file (a brand-new profile has none yet) is simply left alone.
+ */
+export function markProfileCleanExit(userDataDir: string): void {
+  const prefsPath = join(userDataDir, "Default", "Preferences");
+  try {
+    const prefs = JSON.parse(readFileSync(prefsPath, "utf8")) as {
+      profile?: { exit_type?: string; exited_cleanly?: boolean };
+    };
+    if (!prefs.profile) prefs.profile = {};
+    if (prefs.profile.exit_type === "Normal" && prefs.profile.exited_cleanly === true) return;
+    prefs.profile.exit_type = "Normal";
+    prefs.profile.exited_cleanly = true;
+    writeFileSync(prefsPath, JSON.stringify(prefs));
+  } catch {
+    // No Preferences yet (fresh profile) or unreadable JSON — nothing to clean, and this must never fail a launch.
+  }
+}
+
+/**
  * Launch a headed, persistent context against the local profile dir. Headed so a
  * human can log into NAVER and clear any 2FA/CAPTCHA themselves — the collector
  * never types credentials. Downloads are accepted so a sync export can be
@@ -149,6 +176,9 @@ export async function launchNaverContext(
 ): Promise<BrowserContext> {
   const userDataDir = resolveProfileDir(profileDir);
   mkdirSync(userDataDir, { recursive: true });
+  // Suppress Chrome's crash-restore bubble on this reopen — Playwright left the profile flagged dirty when it
+  // tore the previous browser down. Cookies/login are untouched; only the restore prompt is cleared.
+  markProfileCleanExit(userDataDir);
   const options = buildLaunchOptions(channel);
   log("profile.launch", { headless: options.headless, channel: options.channel ?? "bundled" });
   return chromium.launchPersistentContext(userDataDir, options);

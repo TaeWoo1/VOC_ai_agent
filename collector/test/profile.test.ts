@@ -1,7 +1,14 @@
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { accountScopedProfileDirFor, buildLaunchOptions, resolveProfileDir } from "../src/profile";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  accountScopedProfileDirFor,
+  buildLaunchOptions,
+  markProfileCleanExit,
+  resolveProfileDir,
+} from "../src/profile";
 
 const ROOT = "/tmp/collector-root";
 
@@ -75,6 +82,43 @@ describe("accountScopedProfileDirFor", () => {
     expect(dir.startsWith(`${BASE}/`)).toBe(true);
     // A base outside the collector tree is refused by the in-tree guard.
     expect(() => accountScopedProfileDirFor("/tmp/evil", "naver", SLOT_A)).toThrow(/inside the collector/);
+  });
+});
+
+describe("markProfileCleanExit", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  function profileWith(prefs: unknown): string {
+    const root = mkdtempSync(join(tmpdir(), "sellerops-prof-"));
+    dirs.push(root);
+    mkdirSync(join(root, "Default"), { recursive: true });
+    if (prefs !== undefined) writeFileSync(join(root, "Default", "Preferences"), JSON.stringify(prefs));
+    return root;
+  }
+
+  it("flips a crashed profile to a clean exit so no restore bubble shows next launch", () => {
+    const root = profileWith({ profile: { exit_type: "Crashed", exited_cleanly: false }, other: { keep: 1 } });
+    markProfileCleanExit(root);
+    const after = JSON.parse(readFileSync(join(root, "Default", "Preferences"), "utf8"));
+    expect(after.profile.exit_type).toBe("Normal");
+    expect(after.profile.exited_cleanly).toBe(true);
+    // Unrelated preferences are preserved — we touch only the crash-restore flags.
+    expect(after.other).toEqual({ keep: 1 });
+  });
+
+  it("is a no-op that never throws when the profile has no Preferences yet (fresh profile)", () => {
+    const root = profileWith(undefined);
+    expect(() => markProfileCleanExit(root)).not.toThrow();
+  });
+
+  it("never throws on unreadable/garbage Preferences", () => {
+    const root = mkdtempSync(join(tmpdir(), "sellerops-prof-"));
+    dirs.push(root);
+    mkdirSync(join(root, "Default"), { recursive: true });
+    writeFileSync(join(root, "Default", "Preferences"), "not json {{{");
+    expect(() => markProfileCleanExit(root)).not.toThrow();
   });
 });
 

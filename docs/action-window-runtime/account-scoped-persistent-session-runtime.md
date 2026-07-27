@@ -60,9 +60,32 @@ a second OS window.
 **Whole-stack offline gate green:** backend `./gradlew test`; contracts typecheck + `vitest run test/contracts`
 (163); collector `npm run typecheck` + full `vitest run` (~5360); frontend `tsc --noEmit` + `vitest run` (1025).
 
+## Live verification — 2026-07-27 (seated operator, single-use approval)
+
+Real product path: disposable-DB backend `:8080` → SellerOps frontend `:5174` (bridge) → paired collector →
+a REAL NAVER SmartStore session. Recorded sanitized — **sameness/difference and enums only, never the raw
+slot, profile path, cookie, or token**. The stale prior agent on `:47615` was left untouched throughout.
+
+| step | observed | proves |
+|---|---|---|
+| migration | `flyway_schema_history` applied the account-slot migration on real Postgres (`success=t`) | schema lands live |
+| scope | `GET …/scope` returned `accountSlot` present, 24-hex, **≠ the account UUID** (a surrogate) | identity-free wire |
+| run 1 | `aw_import_host_run_hosted {SEGMENT}` → `aw_import_surface_opened {accountScoped:true}`; the account-scoped profile dir was created with a live NAVER cookie store; operator logged into NAVER | seller-center opens in the account's OWN profile, bound at run start |
+| **restart** | agent fully terminated (port freed, whole tree gone); the profile dir + its cookie store **persisted on disk** | teardown leaves the session substrate intact |
+| **run 2 (same account)** | relaunch → `aw_import_surface_opened {accountScoped:true}`; **exactly one** `…-agent-<hash>` dir existed (the SAME leaf — no new dir); operator confirmed **NAVER already logged in, no re-login** | same slot → same profile → **login survives restart** |
+| readiness | `POST …/session-readiness` with an unknown state → **400** (fail closed); a valid READY report → DB readiness `READY` on the NAVER account, surfaced by `GET …/connection-status` as `sessionReadiness=READY`; the other account stayed `UNOBSERVED_EXTERNAL` | durable readiness, reconciled onto the existing projection, **saved to the correct account only** |
+
+**Clean-shutdown finding + fix.** The agent already handles `SIGINT`/`SIGTERM` by closing both contexts, and
+the correct operational stop is `SIGTERM` to the agent's node process alone (not a tree-kill). But Playwright
+tears Chromium down without Chrome's own clean-exit write, so a reopened profile shows Chrome's
+"restore pages / didn't shut down correctly" bubble on every restart. Fixed in this PR: `markProfileCleanExit`
+rewrites the two crash-restore flags in the profile's `Preferences` **before each launch** (cookies/login
+untouched), so the bubble never appears. Verified: on the real profile it flipped `exit_type` Crashed→Normal;
+unit-tested for the crashed, fresh-profile, and garbage-JSON cases.
+
 ## Boundaries (still locked)
 
-- **No live run yet.** The final live step (one real NAVER account, prove a login survives an agent restart)
-  runs only under a fresh, single-use, in-turn approval — never standing.
+- **The live run above was the only marketplace contact**, under a single-use approval (seated operator,
+  2026-07-27). Any further live run needs a fresh, single-use, in-turn approval — never standing.
 - **No** auto-login/2FA/CAPTCHA, **no** profile upload/sync, **no** second-channel adapter, **no** new FE
   screen, **no** `#355` change. `OperationRun`/`CapabilityPolicy` bodies and automatic dispatch remain locked.
