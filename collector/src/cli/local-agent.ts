@@ -479,7 +479,11 @@ export async function buildInitialImportConfig(
           raised = await raiseWindowOf(page);
         }
         if (decision.navigate) {
-          await page.goto(reviewUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+          // Bounded: presentation is best-effort, so a slow re-navigation must not stretch prepareSurface (the
+          // PREPARE watchdog is sized against the driver's bounded legs, and an unbounded goto here would break
+          // that budget). A timeout just means the window did not return to the surface — the settle probe that
+          // follows decides usability regardless.
+          await page.goto(reviewUrl, { waitUntil: "domcontentloaded", timeout: 10_000 }).catch(() => {});
         }
         // The DECISION plus what actually happened. `focus: true` alone used to be logged before either call was
         // made, so a failed raise was indistinguishable from a successful one — and this is exactly the line

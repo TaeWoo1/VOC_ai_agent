@@ -136,6 +136,14 @@ export function attributeRootCause(baseline: AdversarialRunResult, variants: rea
   if (axes.size > 1) {
     return { kind: "INCONCLUSIVE", reason: "more than one variable changed the outcome; cause is not isolated to one axis" };
   }
-  const first = differing[0]!;
-  return { kind: "CONFIRMED", variable: first.spec.variable, outcome: first.outcome! };
+  // Exactly one axis differs — but it must do so CONSISTENTLY. If two runs of that same axis produced different
+  // non-baseline outcomes, or one of its runs matched the baseline while another differed, the axis's effect is
+  // flaky and not a confirmable cause. Only a single, repeatable outcome across every run of that axis confirms.
+  const axis = differing[0]!.spec.variable;
+  const axisRuns = variants.filter((v) => v.outcome !== null && v.spec.variable === axis);
+  const axisOutcomes = new Set(axisRuns.map((v) => v.outcome));
+  if (axisOutcomes.size !== 1) {
+    return { kind: "INCONCLUSIVE", reason: "the one differing axis produced inconsistent outcomes across its runs; effect is not repeatable" };
+  }
+  return { kind: "CONFIRMED", variable: axis, outcome: differing[0]!.outcome! };
 }

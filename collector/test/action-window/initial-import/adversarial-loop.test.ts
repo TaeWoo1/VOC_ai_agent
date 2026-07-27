@@ -131,4 +131,32 @@ describe("adversarial loop — attribution refuses to guess", () => {
   it("is INCONCLUSIVE when the baseline itself reached no terminal outcome", () => {
     expect(attributeRootCause(result(baselineSpec, null), []).kind).toBe("INCONCLUSIVE");
   });
+
+  it("is INCONCLUSIVE when one axis produced inconsistent outcomes — a flaky axis is not a confirmed cause", () => {
+    const variants = [
+      result(spec("r1", "TIMING"), "SURFACE_CLOSED"),
+      result(spec("r2", "TIMING"), "OVERLAY_NOT_VISIBLE"),
+    ];
+    expect(attributeRootCause(base, variants).kind).toBe("INCONCLUSIVE");
+  });
+
+  it("is INCONCLUSIVE when one run of the differing axis matched baseline while another differed", () => {
+    const variants = [
+      result(spec("r1", "OVERLAY_TIMING"), "OVERLAY_NOT_VISIBLE"),
+      result(spec("r2", "OVERLAY_TIMING"), "OK"),
+    ];
+    expect(attributeRootCause(base, variants).kind).toBe("INCONCLUSIVE");
+  });
+
+  it("CONFIRMS when the same axis repeats the same outcome across runs", () => {
+    const variants = [
+      result(spec("r1", "OVERLAY_TIMING"), "OVERLAY_NOT_VISIBLE"),
+      result(spec("r2", "OVERLAY_TIMING"), "OVERLAY_NOT_VISIBLE"),
+    ];
+    expect(attributeRootCause(base, variants)).toEqual({
+      kind: "CONFIRMED",
+      variable: "OVERLAY_TIMING",
+      outcome: "OVERLAY_NOT_VISIBLE",
+    });
+  });
 });

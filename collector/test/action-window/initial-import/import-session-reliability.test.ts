@@ -11,6 +11,7 @@ import type { AwClientFrame, AwServerFrame, AwServerTransport } from "../../../.
 import { ImportSegmentEngine, makeImportClock } from "../../../src/action-window/initial-import/import-engine";
 import { ImportFixtureDriver, type ImportFixtureScript } from "../../../src/action-window/initial-import/import-fixture-driver";
 import { ImportSegmentSession, type ImportSessionOptions } from "../../../src/action-window/initial-import/import-session";
+import { ReadinessObservingImportDriver } from "../../../src/action-window/initial-import/readiness-observing-driver";
 import type { ActionWindowRunView } from "../../../../contracts/action-window/v2/index";
 
 const REF = "9f2a1c7b4e6d0835";
@@ -156,6 +157,27 @@ describe("Guided Acquisition Reliability — the seller closing the window", () 
     // The re-check re-opened the window: a second PREPARE ran.
     expect(driver.prepareCalls()).toBe(2);
     expect(io.lastView()?.blocker).toBeUndefined();
+  });
+
+  it("parks SURFACE_CLOSED even through the ReadinessObservingImportDriver the live boot wraps the driver in", async () => {
+    // Regression guard for the wrapper-forwarding gap: the live path holds a ReadinessObservingImportDriver, not
+    // the raw driver, so if it drops the optional whenSurfaceClosed() the whole close recovery is inert live.
+    const io = loopback();
+    const engine = new ImportSegmentEngine(
+      { runId: "run_import01", channelCode: "naver", importRef: REF, required: REQUIRED },
+      { clock: makeImportClock() },
+    );
+    const fixture = new ImportFixtureDriver({ action: { start_date: false } });
+    const wrapped = new ReadinessObservingImportDriver(fixture, () => {});
+    const session = new ImportSegmentSession(engine, wrapped, io.transport, REQUIRED, { prepareStartGuardMs: 0 });
+    session.attach();
+    startRun(io);
+    await session.whenSettled();
+
+    fixture.closeSurface();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(io.lastView()?.blocker).toEqual({ code: "SURFACE_CLOSED", recoverable: true });
   });
 
   it("ignores a close from a window it has already recovered past (no double-park)", async () => {

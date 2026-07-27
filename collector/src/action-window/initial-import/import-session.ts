@@ -140,11 +140,11 @@ export class ImportSegmentSession {
     // Fifteen minutes: long enough that a seller who steps away between two monthly exports still finds the
     // control, short enough that an abandoned sitting stops touching their page the same afternoon.
     this.terminalPanelBudgetMs = opts?.terminalPanelBudgetMs ?? 15 * 60_000;
-    // Sixty seconds: deliberately longer than the driver's own surface-settle guard, so a healthy (if slow)
-    // PREPARE always produces a result — ready or a settle-timeout park — before this fires. It is the last
-    // backstop for a prepare that neither resolves nor rejects at all. Not a tuning knob — a floor under "the
-    // run went silent". `0` disables it (hand-driven offline tests).
-    this.prepareStartGuardMs = opts?.prepareStartGuardMs ?? 60_000;
+    // 120s: comfortably longer than the SUM of the driver's own bounded prepare legs (a navigation timeout plus
+    // the surface-settle guard), so a healthy-but-slow PREPARE always produces a result — ready, or a specific
+    // open/settle-timeout failure — before this fires. Armed per-PREPARE (scoped to the prepare, not to queue
+    // time), it is the last backstop for a prepare that neither resolves nor rejects at all. `0` disables it.
+    this.prepareStartGuardMs = opts?.prepareStartGuardMs ?? 120_000;
   }
 
   /**
@@ -270,12 +270,7 @@ export class ImportSegmentSession {
       ...(outcome.ok ? {} : { reason: outcome.reason }),
     });
     this.publishState();
-    if (command.type === "START_RUN" && outcome.ok) {
-      this.started = true;
-      // Arm the PREPARE-start watchdog: from here the drive loop has a bounded window to actually enter
-      // PREPARE, or the run is parked as PREPARE_NOT_STARTED rather than sitting silent forever.
-      this.armPrepareWatchdog();
-    }
+    if (command.type === "START_RUN" && outcome.ok) this.started = true;
     if (outcome.ok && "effect" in outcome && !isNoop(outcome.effect)) {
       this.autoBusy = true;
       void this.drive(outcome.effect)
@@ -303,14 +298,15 @@ export class ImportSegmentSession {
     void this.fatalCleanup();
   }
 
-  /** Arm (or re-arm) the PREPARE-start watchdog. A `0` guard disables it (hand-driven offline tests). */
+  /** Arm (or re-arm) the PREPARE watchdog for the current prepare. A `0` guard disables it (offline tests). */
   private armPrepareWatchdog(): void {
     if (this.prepareStartGuardMs <= 0) return;
     this.clearPrepareWatchdog();
     this.prepareWatchdog = setTimeout(() => {
       this.prepareWatchdog = null;
-      // The window elapsed and no PREPARE ever ran. If the run has since moved on (a fast PREPARE cleared this
-      // in time, or it was cancelled), do nothing; otherwise park it visibly.
+      // The window elapsed and PREPARE never produced a result. If the run has since moved on (PREPARE resolved
+      // and cleared this, or it was cancelled), do nothing; otherwise park it visibly. The `PREPARE_SESSION`
+      // guard is what makes it safe: a prepare that resolved advances the stage, so a late timer cannot re-park.
       if (IMPORT_TERMINAL_STAGES.includes(this.engine.currentStage())) return;
       if (this.engine.currentStage() !== "PREPARE_SESSION") return;
       recordFailure("PREPARE_NOT_STARTED");
@@ -367,10 +363,15 @@ export class ImportSegmentSession {
         // The drive loop entered PREPARE — the run did NOT go silent, so cancel the watchdog. Any stall from
         // here on (window open, surface settle) surfaces as a ReliabilityFailure the driver throws.
         recordStage("PREPARE");
+        // Arm the watchdog HERE — scoped to the prepare itself, not to queue time before the loop ran — so it
+        // measures only how long PREPARE takes to produce a result. It is the last backstop for a prepare that
+        // neither resolves nor rejects (the driver's own open/settle guards catch a bounded stall sooner, with a
+        // specific failure state).
+        this.armPrepareWatchdog();
         const res = await this.driver.prepareSurface();
-        // PREPARE produced a result — the run did not go silent, so cancel the watchdog. (A prepare that never
-        // resolves nor rejects never reaches here, and the watchdog is what catches that.) Any explicit stall is
-        // a ReliabilityFailure the driver threw, cleared in `onDriveError`.
+        // PREPARE produced a result — the run did not go silent, so cancel the watchdog. A prepare that never
+        // resolves never reaches here, and the watchdog is what catches that. An explicit stall is a
+        // ReliabilityFailure the driver threw, cleared in `onDriveError`.
         this.clearPrepareWatchdog();
         // The window is up (prepareSurface did not throw) — arm a close-watch for THIS window, replacing any
         // watch on a window we have re-opened past. Do it before onSurfaceReady so a close during the probe is
