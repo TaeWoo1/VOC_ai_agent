@@ -561,9 +561,13 @@ export interface ReviewOpsLoopSummary {
   missingRanges: DateRangeView[];
   nextRecommendedImport: string | null;
   upToDate: boolean;
+  // Account-cumulative (each live segment's latest attempt across the account's plans), NOT this run.
   newCount: number;
   duplicateCount: number;
   failedCount: number;
+  // false when the account has reviews but issue-memory is still empty — the after-ingest refresh has not
+  // run or silently failed; the surface must then say "분석 미갱신", never "no change".
+  issueMemoryReady: boolean;
   issueChange: IssueChangeCounts;
 }
 

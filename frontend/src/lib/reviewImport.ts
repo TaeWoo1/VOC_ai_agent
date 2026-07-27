@@ -559,9 +559,10 @@ export function completionSummaryText(progress: ImportProgress): string {
 /* ─────────────────── The repeated loop's 완료 결과 + 변화 요약 ─────────────────── */
 
 /**
- * The collection result of the loop, as glanceable lines. New vs already-present carry over the same
- * honesty as everywhere else — "가져온" reviews, never "all NAVER holds". Failures are shown only when
- * there were any, so a clean run reads clean.
+ * The collection result, as glanceable lines. These are **account-cumulative** (each segment's latest
+ * attempt across the account's plans), NOT this one run — see {@link loopCollectedCaption}. New vs
+ * already-present carry the same honesty as everywhere else — "가져온" reviews, never "all NAVER holds".
+ * Failures are shown only when there were any, so a clean run reads clean.
  */
 export function loopCollectedLines(summary: ReviewOpsLoopSummary): CoverageSummaryLine[] {
   const lines: CoverageSummaryLine[] = [
@@ -574,15 +575,23 @@ export function loopCollectedLines(summary: ReviewOpsLoopSummary): CoverageSumma
   return lines;
 }
 
+/** The caption that keeps {@link loopCollectedLines} honest about scope — a running account total, not this run. */
+export const LOOP_COLLECTED_CAPTION = "이 계정에서 지금까지 가져온 리뷰 (누적)";
+
 /**
  * The change summary, phrased as UNVALIDATED candidate signals — never a diagnosis, never "문제 N개".
  * The issue thresholds are DRAFT and the extractor's accuracy is unmeasured, so this only ever points
  * the seller AT the issue surface; the judgement itself lives there, framed the same way.
  *
- * Priority: things that ask for a look first (확인 필요), then newly-seen / surging as the notable
- * changes; a quiet run says so rather than inventing a signal.
+ * Honesty about freshness first: if the after-ingest analysis has not caught up
+ * ({@code issueMemoryReady === false}), say so — never present a not-yet-run/failed refresh as
+ * "no change". Then: things that ask for a look (확인 필요), then newly-seen / surging. A genuinely
+ * quiet result is phrased "지금까지 확인된" (so far), not a completeness claim.
  */
 export function loopChangeSummaryText(summary: ReviewOpsLoopSummary): string {
+  if (!summary.issueMemoryReady) {
+    return "리뷰 분석을 아직 갱신하지 못했어요. 잠시 후 다시 확인해 주세요.";
+  }
   const c = summary.issueChange;
   if (c.needsReview > 0) {
     return `확인이 필요한 변화 ${c.needsReview}건이 있어요. 리뷰 이슈에서 확인해 보세요.`;
@@ -594,19 +603,37 @@ export function loopChangeSummaryText(summary: ReviewOpsLoopSummary): string {
     if (c.surging > 0) parts.push(`늘고 있는 이슈 후보 ${c.surging}건`);
     return `${parts.join(" · ")} — 리뷰 이슈에서 확인해 보세요.`;
   }
-  return "새로 확인할 변화는 없어요.";
+  return "지금까지 확인된 변화는 없어요.";
 }
 
-/** Whether there is a newer period to carry the plan forward to (coverage is behind the reference date). */
-export function hasNewPeriodToImport(summary: ReviewOpsLoopSummary): boolean {
-  return !summary.upToDate;
+/**
+ * The forward edge of a plan's coverage: the latest end date over its LIVE (non-superseded) segments,
+ * or null when it has none. This is the exact quantity the backend's {@code extendPlanForward} advances
+ * from, so a CTA gated on it can never be inert.
+ */
+export function latestLiveSegmentEnd(segments: ReviewImportSegmentView[]): string | null {
+  return segments
+    .filter((s) => !s.superseded)
+    .map((s) => s.segmentEnd)
+    .reduce<string | null>((max, end) => (max === null || end > max ? end : max), null);
 }
 
-/** One line on how current the collection is — up to date, or a new period is available to pull. */
-export function loopFreshnessText(summary: ReviewOpsLoopSummary): string {
-  return summary.upToDate
-    ? "지금 기준으로 최신이에요."
-    : "그 뒤로 새로 들어온 기간이 있어요. 이어서 가져올 수 있어요.";
+/**
+ * Whether carrying THIS plan forward would actually add a new period — its latest live segment ends
+ * before `todayIso` (ISO `YYYY-MM-DD`, compared lexicographically = chronologically). Gated on the
+ * plan's own segments, not the account-level summary, so a concluded-MISSING range elsewhere can never
+ * light an extend button that then no-ops.
+ */
+export function hasForwardPeriodToImport(segments: ReviewImportSegmentView[], todayIso: string): boolean {
+  const edge = latestLiveSegmentEnd(segments);
+  return edge !== null && edge < todayIso;
+}
+
+/** One line on how current the plan's coverage is — up to date, or a new period is available to pull. */
+export function forwardPeriodText(hasForwardPeriod: boolean): string {
+  return hasForwardPeriod
+    ? "그 뒤로 새로 들어온 기간이 있어요. 이어서 가져올 수 있어요."
+    : "지금 기준으로 최신이에요.";
 }
 
 function rangesText(ranges: { start: string; end: string }[]): string {

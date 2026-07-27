@@ -9,12 +9,13 @@ import {
   buildImportGuidancePack,
   completionSummaryText,
   continuationAfterNext,
-  hasNewPeriodToImport,
+  forwardPeriodText,
+  hasForwardPeriodToImport,
   importProgress,
   importStageText,
   loopChangeSummaryText,
   loopCollectedLines,
-  loopFreshnessText,
+  LOOP_COLLECTED_CAPTION,
   primaryActionLabel,
   recheckLabel,
   segmentRangeText,
@@ -328,6 +329,8 @@ export function GuidedImportCard({
           <p className="text-sm text-ink break-keep">{completionSummaryText(progress)}</p>
           {summary ? (
             <>
+              {/* Honest scope: these are the account's running totals, not this one run's numbers. */}
+              <p className="text-xs text-muted">{LOOP_COLLECTED_CAPTION}</p>
               <dl className="flex flex-col gap-1" data-testid="loop-collected">
                 {loopCollectedLines(summary).map((line) => (
                   <div key={line.label} className="flex items-baseline justify-between gap-3">
@@ -336,14 +339,18 @@ export function GuidedImportCard({
                   </div>
                 ))}
               </dl>
-              {/* Unvalidated candidate signals — points at the issue surface, never a diagnosis here. */}
+              {/* Unvalidated candidate signals — points at the issue surface, never a diagnosis here; and
+                  never presents a not-yet-run/failed analysis refresh as "no change". */}
               <p className="text-sm text-ink break-keep" data-testid="loop-change-summary">
                 {loopChangeSummaryText(summary)}
               </p>
+              {/* Freshness + the forward-extension CTA are gated on THIS plan's own forward edge (its latest
+                  live segment vs the backend's reference date), so the button is offered only when carrying
+                  the plan forward would actually add a period — never inert. */}
               <p className="text-sm text-muted break-keep" data-testid="loop-freshness">
-                {loopFreshnessText(summary)}
+                {forwardPeriodText(hasForwardPeriodToImport(segments, summary.referenceDate))}
               </p>
-              {hasNewPeriodToImport(summary) ? (
+              {hasForwardPeriodToImport(segments, summary.referenceDate) ? (
                 <button
                   type="button"
                   onClick={() => void extendForward()}

@@ -19,14 +19,20 @@ import java.util.List;
  * @param lastCoveredDate the forward edge of coverage across the account's plans, or null if nothing covered
  * @param missingRanges date ranges concluded uncoverable (fail-closed MISSING), never silently dropped
  * @param nextRecommendedImport the next date to pull from, or null when nothing is outstanding
- * @param upToDate true when coverage reaches the reference date and nothing is outstanding
- * @param newCount rows newly added by the account's latest attempts
- * @param duplicateCount rows already present (overlap-safe dedup), reported not hidden
- * @param failedCount rows that failed to ingest
+ * @param upToDate true when coverage's forward edge reaches the reference date (no importable period is
+ *     outstanding). A concluded-MISSING range is a settled conclusion, not outstanding work, so it does
+ *     NOT by itself make a summary "not up to date".
+ * @param newCount rows newly added — <b>account-cumulative</b> across the account's plans (each live
+ *     segment's latest attempt), NOT a single run's total; the surface must not present it as this-run
+ * @param duplicateCount rows already present (overlap-safe dedup), account-cumulative, reported not hidden
+ * @param failedCount rows that failed to ingest, account-cumulative
+ * @param issueMemoryReady false when the account has reviews but the issue memory is still empty — the
+ *     after-ingest refresh has not run (or silently failed). A surface must then say "analysis not yet
+ *     updated", never "no change", so a swallowed refresh is never read as a clean result.
  * @param issueChange counts of change judgements over the working issues (candidate signals)
  */
 public record ReviewOpsLoopSummaryView(LocalDate referenceDate, LocalDate lastCoveredDate,
                                        List<DateRangeView> missingRanges, LocalDate nextRecommendedImport,
                                        boolean upToDate, int newCount, int duplicateCount, int failedCount,
-                                       IssueChangeCountsView issueChange) {
+                                       boolean issueMemoryReady, IssueChangeCountsView issueChange) {
 }

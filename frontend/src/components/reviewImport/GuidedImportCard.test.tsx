@@ -339,6 +339,7 @@ const loopSummary = (over: Partial<ReviewOpsLoopSummary> = {}): ReviewOpsLoopSum
   newCount: 42,
   duplicateCount: 8,
   failedCount: 0,
+  issueMemoryReady: true,
   issueChange: {
     workingTotal: 0,
     needsReview: 0,
@@ -351,10 +352,14 @@ const loopSummary = (over: Partial<ReviewOpsLoopSummary> = {}): ReviewOpsLoopSum
   ...over,
 });
 
-const FINISHED = () => plan([seg({ executionState: "COMPLETED", coverageState: "COVERED" })]);
+// A finished plan whose forward edge (segment end) is BEFORE the summary reference date → a new period exists.
+const FINISHED = () => plan([seg({ executionState: "COMPLETED", coverageState: "COVERED" })]); // ends 2026-03-31
+// A finished plan whose coverage reaches the reference date → nothing new to pull.
+const FINISHED_AT_TODAY = () =>
+  plan([seg({ executionState: "COMPLETED", coverageState: "COVERED", segmentStart: "2026-07-01", segmentEnd: "2026-07-31" })]);
 
 describe("GuidedImportCard — the repeated loop's completion result + change summary", () => {
-  it("shows collection totals and the change summary as unvalidated candidate signals", async () => {
+  it("shows account-cumulative totals (labeled) and the change summary as unvalidated candidate signals", async () => {
     vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(
       loopSummary({ newCount: 42, duplicateCount: 8, issueChange: { ...loopSummary().issueChange, workingTotal: 3, needsReview: 2 } }),
     );
@@ -364,24 +369,34 @@ describe("GuidedImportCard — the repeated loop's completion result + change su
     expect(screen.getByTestId("loop-collected")).toHaveTextContent("새로 추가");
     expect(screen.getByTestId("loop-collected")).toHaveTextContent("42건");
     expect(screen.getByTestId("loop-collected")).toHaveTextContent("이미 있던 리뷰");
+    // Scope is honest: the totals are labeled account-cumulative, not this run's.
+    expect(screen.getByTestId("completion-summary")).toHaveTextContent("누적");
     const change = screen.getByTestId("loop-change-summary");
     expect(change).toHaveTextContent("확인이 필요한 변화 2건");
     // Candidate-signal framing only — never a diagnosis or a cause.
     expect(change.textContent ?? "").not.toMatch(/원인|문제가.*(입니다|이다)/);
   });
 
-  it("says the collection is up to date and offers no forward-extension when nothing new exists", async () => {
-    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ upToDate: true }));
+  it("says '분석 미갱신', never 'no change', when the after-ingest refresh has not caught up", async () => {
+    // Reviews imported but issue memory empty (refresh not run / failed) → must not read as "no change".
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ issueMemoryReady: false }));
     render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" />);
+
+    const change = await screen.findByTestId("loop-change-summary");
+    expect(change).toHaveTextContent("리뷰 분석을 아직 갱신하지 못했어요");
+    expect(change.textContent ?? "").not.toMatch(/변화는 없어요/); // never the all-clear on a stale refresh
+  });
+
+  it("says the collection is up to date and offers no forward-extension when coverage reaches today", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary());
+    render(<GuidedImportCard account={account} plan={FINISHED_AT_TODAY()} agent="ready" />);
 
     await waitFor(() => expect(screen.getByTestId("loop-freshness")).toHaveTextContent("최신이에요"));
     expect(screen.queryByTestId("loop-extend-cta")).toBeNull();
   });
 
-  it("offers an operator-initiated forward-extension when a newer period exists", async () => {
-    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(
-      loopSummary({ upToDate: false, nextRecommendedImport: "2026-05-01" }),
-    );
+  it("offers an operator-initiated forward-extension only when the plan's forward edge is behind today", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ upToDate: false }));
     const extend = vi
       .spyOn(api, "extendReviewImportPlan")
       .mockResolvedValue(plan([seg({ id: "s-new", executionState: "PENDING", coverageState: "UNVERIFIED" })]));

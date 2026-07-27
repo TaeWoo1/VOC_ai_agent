@@ -172,7 +172,11 @@ public class ReviewImportPlanService {
      */
     @Transactional
     public List<ReviewImportSegment> extendPlanForward(UUID orgId, UUID planId, LocalDate today) {
-        ReviewImportPlan plan = getPlan(orgId, planId); // authorize
+        // Row-lock the plan so two concurrent extends serialize: the second waits, then re-reads the
+        // segments the first materialized and no-ops instead of inserting a duplicate month. Without this,
+        // a double-click across two tabs would create two live PENDING segments for the same forward month.
+        ReviewImportPlan plan = plans.findByIdAndOrgIdForUpdate(planId, orgId)
+                .orElseThrow(() -> ApiException.notFound("가져오기 계획을 찾을 수 없습니다."));
         if (plan.getStatus() == ReviewImportPlanStatus.ABANDONED) {
             throw ApiException.conflict("종료된 가져오기 계획은 이어서 확장할 수 없습니다.");
         }

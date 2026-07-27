@@ -185,7 +185,7 @@ class ReviewImportPlanServiceTest {
     void extendMaterializesMonthsAfterLatestSegmentUpToToday() {
         stubSaves();
         ReviewImportPlan plan = planWith(ReviewImportPlanStatus.COMPLETED, "2026-03-31");
-        when(plans.findByIdAndOrgId(planId, org)).thenReturn(Optional.of(plan));
+        when(plans.findByIdAndOrgIdForUpdate(planId, org)).thenReturn(Optional.of(plan));
         when(plans.findById(planId)).thenReturn(Optional.of(plan));
         ReviewImportSegment march = seg(UUID.randomUUID(), "2026-03-01", "2026-03-31", SegmentExecutionState.COMPLETED);
         march.setOrdinal(2);
@@ -208,7 +208,7 @@ class ReviewImportPlanServiceTest {
     @Test
     void extendIsIdempotentNoOpWhenAlreadyReachingToday() {
         ReviewImportPlan plan = planWith(ReviewImportPlanStatus.COMPLETED, "2026-05-31");
-        when(plans.findByIdAndOrgId(planId, org)).thenReturn(Optional.of(plan));
+        when(plans.findByIdAndOrgIdForUpdate(planId, org)).thenReturn(Optional.of(plan));
         ReviewImportSegment may = seg(UUID.randomUUID(), "2026-05-01", "2026-05-31", SegmentExecutionState.COMPLETED);
         when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId)).thenReturn(List.of(may));
 
@@ -220,7 +220,7 @@ class ReviewImportPlanServiceTest {
 
     @Test
     void extendRejectsAnAbandonedPlan() {
-        when(plans.findByIdAndOrgId(planId, org))
+        when(plans.findByIdAndOrgIdForUpdate(planId, org))
                 .thenReturn(Optional.of(planWith(ReviewImportPlanStatus.ABANDONED, "2026-03-31")));
         assertThatThrownBy(() -> service.extendPlanForward(org, planId, LocalDate.parse("2026-05-10")))
                 .isInstanceOf(ApiException.class);

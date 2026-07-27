@@ -3,6 +3,8 @@ package com.sellerops.reviewops;
 import com.sellerops.reviewimport.ReviewImportQueryService;
 import com.sellerops.reviewimport.dto.ReviewImportHealthView;
 import com.sellerops.reviewissue.ReviewIssueQueryService;
+import com.sellerops.reviewissue.ReviewIssueRepository;
+import com.sellerops.reviewissue.ReviewIssueUnknownUnitRepository;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
 import com.sellerops.reviewops.dto.IssueChangeCountsView;
 import com.sellerops.reviewops.dto.ReviewOpsLoopSummaryView;
@@ -34,10 +36,16 @@ public class ReviewOpsLoopSummaryService {
 
     private final ReviewImportQueryService imports;
     private final ReviewIssueQueryService issues;
+    private final ReviewIssueRepository issueRepo;
+    private final ReviewIssueUnknownUnitRepository unknownRepo;
 
-    public ReviewOpsLoopSummaryService(ReviewImportQueryService imports, ReviewIssueQueryService issues) {
+    public ReviewOpsLoopSummaryService(ReviewImportQueryService imports, ReviewIssueQueryService issues,
+                                       ReviewIssueRepository issueRepo,
+                                       ReviewIssueUnknownUnitRepository unknownRepo) {
         this.imports = imports;
         this.issues = issues;
+        this.issueRepo = issueRepo;
+        this.unknownRepo = unknownRepo;
     }
 
     @Transactional(readOnly = true)
@@ -73,9 +81,20 @@ public class ReviewOpsLoopSummaryService {
             }
         }
 
+        // Up to date = coverage's forward edge reaches today. `nextRecommendedImport` is the earliest
+        // still-remaining start when importable work remains, else lastCovered+1; either way it is > today
+        // only when nothing importable is outstanding. A concluded-MISSING range is settled, NOT outstanding
+        // work, so it must not force "not up to date" — that was a bug that made a MISSING plan permanently
+        // stale and lit an inert extend button.
         LocalDate next = health.nextRecommendedImport();
-        boolean upToDate = health.missingRanges().isEmpty()
-                && (next == null || next.isAfter(referenceDate));
+        boolean upToDate = next == null || next.isAfter(referenceDate);
+
+        // "Has the after-ingest refresh run?" — an account with reviews accounted for but a completely empty
+        // issue memory (no issues AND no UNKNOWN units) has not been extracted, so its zero change-counts
+        // must read as "not yet updated", never as "no change". Read-derived; no durable state.
+        boolean anyReviewsAccounted = health.newCount() + health.duplicateCount() > 0;
+        boolean issueMemoryReady = !anyReviewsAccounted
+                || issueRepo.existsByOrgId(orgId) || unknownRepo.existsByOrgId(orgId);
 
         return new ReviewOpsLoopSummaryView(
                 referenceDate,
@@ -86,6 +105,7 @@ public class ReviewOpsLoopSummaryService {
                 health.newCount(),
                 health.duplicateCount(),
                 health.failedCount(),
+                issueMemoryReady,
                 new IssueChangeCountsView(working.size(), needsReview, newlyRaised, surging,
                         persistent, concentrated, improved));
     }
