@@ -271,6 +271,24 @@ VOC 감지 · 긴급/위험 점수 · **답변 초안(draft) 제안** · 지연 
   seller-account id가 **아니며 역산 불가**한 surrogate이고, wire·log·trace·에이전트 파일 경로에 실제 식별자를 노출하지
   않는다. 구현: `V30__account_session_slot.sql` + `com.sellerops.selleraccount.AccountSessionSlot*` +
   `collector/.../profile.ts`(account-scoped 프로필) + `POST /api/imports/reviews/launches/{ref}/session-readiness`.
+- **carve-out 확장 (2026-07-27, 제품 오너 승인 — NAVER 리뷰 운영 루프):** 위 두 carve-out이 record-only로 남긴
+  방향 중 **NAVER 리뷰 반복 수집·정규화 루프에 한해** "운영"을 허용한다 — 즉 이미 라이브 검증된 세로 스택
+  (Acquisition Supervisor 배선 + account-scoped 세션 + export HumanCheckpoint)을 **반복 가능한 증분 루프**로 잇는다:
+  ① **증분 forward-extension** — 기존 review-import plan/segment 도메인 안에서, 마지막 covered 범위 이후 오늘까지를
+  덮는 세그먼트를 **materialize**(신규 도메인 아님, `reviewimport.*` 확장), ② **ingest 후 Review Issue Memory 자동
+  갱신** — segment ingest 성공 직후 bounded·idempotent extract + lifecycle-pass 실행(이미 수집된 데이터의
+  정규화·분석 방향, §1.7 예시 "리뷰 정규화·분석 → 의존성 완료 후 automatic"과 정합), ③ **완료 결과 + 변화 요약
+  projection** — 기존 read-side view(`ReviewImportHealthView`/`ReviewImportCoverageView`/`ReviewImportAttemptView`)
+  + issue-memory delta에서 **read 시점에 파생**(신규 durable 도메인 없음), ④ **재시작·세션 만료·중복 실행 복구**를
+  기존 durable truth(single-use `launchRef`, segment coverage 2축, attempt row, account-slot readiness)만으로
+  처리. 경계는 유지: **`OperationRun`/`OperationTask`/`CapabilityPolicy` 본체·`ResumeState` 신규 durable 테이블·완전
+  자동 dispatch는 여전히 lock**(복구·완료결과는 신규 도메인 없이 기존 truth 재사용/read-파생만), **export는 항상 한
+  개의 HumanCheckpoint를 통해서만**(셀러가 클릭·동의·다운로드; SellerOps는 감지·검증·처리만 — `collector/CLAUDE.md`
+  §4.7), **자동 로그인·마켓플레이스 클릭·2FA·CAPTCHA 없음**, **신규 FE 화면 없음**(기존 `GuidedImportCard` 완료
+  박스 + `ReviewIssueSection` + `ConnectionStatusView` projection만 확장), **두 번째 채널 어댑터·프로필 업로드/동기화
+  없음**. issue-memory 판정은 THRESHOLDS **DRAFT**이므로 언제나 "검증되지 않은 이슈 후보·운영 신호"로만 표현한다.
+  라이브 NAVER 검증은 **fresh·single-use·in-turn 승인**(채널/계정/날짜/운영자)에서만 — 이 문서는 라이브 승인을
+  부여하지 않는다.
 
 ### 1.8 기본 일상 경험 · 알림 · Session Readiness (v1.7 신설)
 

@@ -7,7 +7,10 @@ import com.sellerops.ingest.IngestResult;
 import com.sellerops.ingest.UploadType;
 import java.io.InputStream;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,17 +39,20 @@ public class ReviewImportRunService {
     private final ReviewImportSegmentAttemptRepository attempts;
     private final FileUploadConnector uploadConnector;
     private final ReviewImportPlanService planService;
+    private final ApplicationEventPublisher events;
 
     public ReviewImportRunService(ReviewImportPlanRepository plans,
                                   ReviewImportSegmentRepository segments,
                                   ReviewImportSegmentAttemptRepository attempts,
                                   FileUploadConnector uploadConnector,
-                                  ReviewImportPlanService planService) {
+                                  ReviewImportPlanService planService,
+                                  ApplicationEventPublisher events) {
         this.plans = plans;
         this.segments = segments;
         this.attempts = attempts;
         this.uploadConnector = uploadConnector;
         this.planService = planService;
+        this.events = events;
     }
 
     /**
@@ -120,6 +126,13 @@ public class ReviewImportRunService {
         attempts.save(attempt);
         segments.save(segment);
         planService.recomputePlanStatus(plan.getId());
+
+        // A COVERED segment means new reviews may have landed; let downstream analysis refresh off them.
+        // Fired only on success, AFTER_COMMIT-consumed and best-effort, so it never affects this ingest.
+        if (attempt.getResult() == SegmentAttemptResult.SUCCEEDED) {
+            events.publishEvent(
+                    new ReviewSegmentIngestedEvent(orgId, plan.getChannelId(), LocalDate.now(ZoneOffset.UTC)));
+        }
         return attempt;
     }
 

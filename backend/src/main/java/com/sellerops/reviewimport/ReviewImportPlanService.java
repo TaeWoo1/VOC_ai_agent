@@ -156,6 +156,50 @@ public class ReviewImportPlanService {
     }
 
     /**
+     * Extend a plan FORWARD to {@code today}: materialize new PENDING calendar-month segments covering the
+     * span AFTER the plan's current latest live segment, up to today. This is the repeated review-operations
+     * loop's incremental step — a plan created weeks ago over [start, then] is carried forward to cover the
+     * reviews that have arrived since, WITHOUT creating a second plan (a second plan is refused while one is
+     * live; extending the same plan is the sanctioned way to continue). Idempotent: if the plan already
+     * reaches today, nothing is added and the plan is returned unchanged.
+     *
+     * <p>Structure only, like {@link #createPlan}: it appends PENDING segments and bumps {@code requestedEnd}
+     * to today; it runs no export and ingests nothing. A COMPLETED plan that gains new PENDING segments
+     * recomputes back to ACTIVE — that reopening IS the loop. Overlap-safe dedup means even if the newest
+     * existing segment's month is re-run, no row is double-counted, so the forward edge never needs to be
+     * pixel-perfect. Fails closed on a MISSING-only tail the same as elsewhere: a concluded MISSING segment
+     * does not block the forward edge because the new span starts after the latest segment end.
+     */
+    @Transactional
+    public List<ReviewImportSegment> extendPlanForward(UUID orgId, UUID planId, LocalDate today) {
+        ReviewImportPlan plan = getPlan(orgId, planId); // authorize
+        if (plan.getStatus() == ReviewImportPlanStatus.ABANDONED) {
+            throw ApiException.conflict("종료된 가져오기 계획은 이어서 확장할 수 없습니다.");
+        }
+        if (today == null) {
+            throw ApiException.badRequest("확장 기준 날짜가 필요합니다.");
+        }
+        List<ReviewImportSegment> live = segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId);
+        LocalDate latestEnd = live.stream()
+                .map(ReviewImportSegment::getSegmentEnd)
+                .reduce((a, b) -> b.isAfter(a) ? b : a)
+                .orElse(plan.getRequestedEnd());
+        LocalDate newStart = latestEnd.plusDays(1);
+        if (newStart.isAfter(today)) {
+            return List.of(); // already carried forward to today — idempotent no-op
+        }
+        int ordinal = live.stream().mapToInt(ReviewImportSegment::getOrdinal).max().orElse(-1) + 1;
+        List<ReviewImportSegment> created = new java.util.ArrayList<>();
+        for (DateRange r : ReviewImportSegmentPlanner.monthlySegments(newStart, today)) {
+            created.add(segments.save(newSegment(planId, orgId, null, ordinal++, r.start(), r.end())));
+        }
+        plan.setRequestedEnd(today);
+        plans.save(plan);
+        recomputePlanStatus(planId);
+        return created;
+    }
+
+    /**
      * Recompute the plan's derived status from its live (non-superseded) segments: DRAFT if none has been
      * attempted, COMPLETED if none remains (each COMPLETED or concluded MISSING), else ACTIVE. Never
      * downgrades an ABANDONED plan — that is an operator terminal state.
