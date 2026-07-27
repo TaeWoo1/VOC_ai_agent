@@ -10,8 +10,10 @@ no logging, no browser, no clock — and type-checks under `contracts/tsconfig.j
 
 > **Status: DRAFT.** This is the thin classify-and-decide seam recorded under the approved `product-scope-v1.md`
 > §1.7 carve-out (the pure resolver/decide seam is exempted from the §1.7 implementation lock; the
-> `OperationRun` domain, live dispatch, and backend persistence remain locked). It is **not yet wired to the
-> live agent loop** — see "Deliberate boundary" below.
+> `OperationRun` domain, live dispatch, and backend persistence remain locked). It is now **wired into the live
+> import boot and proven offline** (the collector's `ImportAcquisitionCoordinator` reads readiness at the four
+> probe moments and gates admission on adapter availability); a run against a REAL marketplace session is still
+> a separately-approved step — see "Wiring status" below.
 
 ## The two questions it answers
 
@@ -59,10 +61,25 @@ acquisition "one thing" can never drift from the readiness "one thing" or the hu
 - **SellerOps performs none of the actions.** As with readiness, `ASK_SELLER.action` is copy intent for the
   seller. SellerOps never logs in, solves a challenge, picks an account, clicks the marketplace, or auto-runs.
 
-## Deliberate boundary — not yet driven by the live agent loop
+## Wiring status — driven by the live import boot, proven offline
 
-This slice ships the pure `resolveAcquisition` / `decideAcquisition` seam and the collector coordinator that
-reads readiness and selects the existing NAVER adapter. It does **not** wire the supervisor into the live boot
-(`buildInitialImportConfig` / `local-agent` call nothing here), does not run any live acquisition, and adds no
-backend persistence. Live dispatch touches a real marketplace session, so it is a separately-approved
-follow-up — the modes and decisions are the vocabulary that wiring will use, not a claim it is connected.
+The pure `resolveAcquisition` / `decideAcquisition` seam is now called by the live import runtime. In the
+collector, `ImportAcquisitionCoordinator` (`collector/src/action-window/initial-import/`) owns a
+`SessionReadinessProjector` + `AcquisitionSupervisor` and is wired by `buildInitialImportConfig`:
+
+- **AGENT_START** — fired at boot; no marketplace tab exists yet, so the channel is `UNOBSERVED_EXTERNAL`.
+- **BEFORE_WORK** — the `ImportSegmentHost` consults the coordinator's `admitSegment` immediately before it
+  assembles a run. Admission is **probe-permissive**: it refuses only when no adapter is bound
+  (`adapterId === "NONE"` → `HOLD_UNSUPPORTED`), never on a stale not-ready readiness (that would deadlock
+  recovery, since only a run's own `prepareSurface` refreshes readiness).
+- **SESSION_FAILURE / MANUAL_RECHECK** — a transparent `ReadinessObservingImportDriver` decorator feeds each
+  run's `prepareSurface` reading back to the coordinator, so a not-usable session is recorded as a session
+  failure and a usable reading after a prior failure is the seller's manual re-check.
+
+The NAVER adapter id is bound to the existing engine at the composition root
+(`createNaverActionWindowImportDriver`). What is **still deliberately out of scope**, locked by
+`product-scope-v1.md` §1.7: a run against a REAL marketplace session (separately approved, never standing),
+backend persistence of any supervisor state, and any new frontend. The whole wiring is proven offline —
+`collector/test/action-window/initial-import/import-acquisition-runtime.e2e.test.ts` runs the real host +
+coordinator + decorator over a scripted driver, including an equivalence check that the coordinator adds
+nothing the run can see.

@@ -60,6 +60,13 @@ export type ImportStage =
    * control. The seller fixes the dates and asks for a re-check, which returns to `READ_SCOPE`.
    */
   | "SCOPE_BLOCKED"
+  /**
+   * Recoverable stop at the session gate. The review surface is not usable yet — the seller is not logged
+   * in, or the session expired (`LOGIN_REQUIRED` / `SESSION_EXPIRED`). It is NOT a failure: the seller logs
+   * in on their own screen and asks for a re-check, which re-runs `PREPARE` on the SAME segment and ticket.
+   * Distinct from `FAILED` precisely so a recoverable login never becomes a terminal, ticket-stuck dead end.
+   */
+  | "SESSION_BLOCKED"
   /** Seller barrier, reached ONLY when the runtime could not read the range back. */
   | "WAIT_FOR_RANGE_CONFIRM"
   | "LOCATE_EXPORT"
@@ -199,6 +206,9 @@ export function importStageToRunStatus(stage: ImportStage): RunStatus {
     // A blocked scope is still waiting on the seller — they change the dates. Reporting it as FAILED
     // would tell them the run is over when the repair is one control away.
     case "SCOPE_BLOCKED":
+    // A session block is the same shape: the seller logs in on their own screen, then re-checks. Waiting,
+    // not failed.
+    case "SESSION_BLOCKED":
       return "WAITING_FOR_HUMAN";
     case "DETECT_DOWNLOAD":
     case "VALIDATE_ARTIFACT":
@@ -239,6 +249,7 @@ export function importStageToStepStatus(stage: ImportStage): StepStatus {
     case "WAIT_FOR_EXPORT":
     case "WAIT_FOR_CONSENT":
     case "SCOPE_BLOCKED":
+    case "SESSION_BLOCKED":
       return "AWAITING_USER";
     case "READ_SCOPE":
       return "OBSERVING";
@@ -268,6 +279,12 @@ export function importStageToStepStatus(stage: ImportStage): StepStatus {
 export function importAllowedCommands(stage: ImportStage): readonly CommandType[] {
   if (IMPORT_TERMINAL_STAGES.includes(stage)) return [];
   if (stage === "PAUSED") return ["RESUME_RUN", "CANCEL_RUN"];
+  if (stage === "SESSION_BLOCKED") {
+    // Re-check re-probes the session (PREPARE); the seller may also leave for the manual path or cancel.
+    // Deliberately NO PAUSE_RUN: resume() has no barrier target here and would jump to READ_SCOPE, skipping
+    // the session gate — the recheck path is the only way forward, and it re-observes the session first.
+    return ["REQUEST_STEP_RECHECK", "CANCEL_RUN", "SWITCH_TO_MANUAL", "SET_GUIDANCE_ENABLED", "FIND_CURRENT_STEP"];
+  }
   if (isImportBarrier(stage) || stage === "SCOPE_BLOCKED") {
     return [
       "REQUEST_STEP_RECHECK",

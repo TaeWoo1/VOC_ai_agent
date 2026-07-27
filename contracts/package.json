@@ -1,0 +1,6 @@
+{
+  "name": "@sellerops/contracts",
+  "private": true,
+  "type": "module",
+  "description": "Shared SellerOps contracts (Action Window, session readiness, acquisition, review-import journey). ESM TypeScript source consumed by the collector (tsx/vitest), the frontend (vite), and type-checked by tsc. Declared `type: module` so `export *` barrels re-export as real ESM named exports at runtime (a CJS load turns `export *` into a dynamic re-export whose names static imports cannot see)."
+}

@@ -31,7 +31,7 @@ import type { ReplySubmitSession } from "../action-window/reply-submission/reply
 import { InitialImportEndpoint } from "../bridge/initial-import-endpoint";
 import { makeImportRunMarker, recoverImportRuns } from "../action-window/initial-import/import-dispatch";
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
-import { ImportSegmentHost, type ResolvedLaunchScope } from "../action-window/initial-import/import-host";
+import { ImportSegmentHost, type ResolvedLaunchScope, type SegmentAdmission } from "../action-window/initial-import/import-host";
 import type { AwCarrierEndpoint } from "../bridge/aw-carrier";
 import type { ConnectorOrchestratorObserver } from "../connector/connector-orchestrator";
 import { log } from "../log";
@@ -129,6 +129,12 @@ export interface AgentImportConfig {
    * range discovery, which creates the plan, and one guided monthly segment.
    */
   driver: ImportProbeDriver;
+  /**
+   * OPTIONAL acquisition admission gate (BEFORE_WORK), passed straight through to {@link ImportSegmentHost}.
+   * The live boot supplies the acquisition coordinator's `admitSegment`; absent → every resolved segment hosts,
+   * exactly as before.
+   */
+  admit?: () => SegmentAdmission;
   /** Gitignored `.import-runs/` persistence dir. Restart recovery ABANDONS; it never re-drives. */
   persistDir?: string;
 }
@@ -294,6 +300,7 @@ export function createAgentBridge(cfg: AgentBridgeConfig): AgentBridge {
       channelCode: im.channelCode,
       resolveScope: im.resolveScope,
       driver: im.driver,
+      ...(im.admit ? { admit: im.admit } : {}),
       ...(im.persistDir ? { persistDir: im.persistDir } : {}),
     });
     importHost.attach();

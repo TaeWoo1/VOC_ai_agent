@@ -16,12 +16,13 @@
  * coordinator: resolve → gate → (later) hand to the right vertical stack. That is why it is fully offline-
  * testable.
  *
- * ## Not yet driven by the live agent loop (deliberate boundary)
+ * ## Wiring status (deliberate boundary)
  *
- * This slice provides the resolve-and-decide seam and the adapter *selection*; it does NOT wire the supervisor
- * into the live boot (`buildInitialImportConfig` / `local-agent` call nothing here), run any live acquisition,
- * or persist anything. Binding a selected adapter id to a live driver, and calling readiness at the four probe
- * moments, run against a real marketplace session, so they are a separately-approved follow-up. See
+ * This module is the resolve-and-decide + adapter-*selection* coordinator. It is now driven by the live import
+ * boot through `initial-import/import-acquisition-coordinator.ts`, which owns a projector + this supervisor and
+ * is wired by `buildInitialImportConfig` at the four readiness probe moments; the selected adapter id is bound
+ * to the existing engine by `createNaverActionWindowImportDriver`. What is still out of scope and separately
+ * approved: a run against a REAL marketplace session, backend persistence, and any new frontend. See
  * `../../../contracts/acquisition/v1/README.md`.
  */
 import { log } from "../log";

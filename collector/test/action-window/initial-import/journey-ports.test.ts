@@ -108,6 +108,8 @@ describe("FE-independence source guard", () => {
       ["journey-ports.ts", "../../../src/action-window/initial-import"],
       ["journey-live.ts", "../../../src/action-window/initial-import"],
       ["session-readiness.ts", "../../../src/action-window/initial-import"],
+      ["import-acquisition-coordinator.ts", "../../../src/action-window/initial-import"],
+      ["readiness-observing-driver.ts", "../../../src/action-window/initial-import"],
     ];
     for (const [rel, base] of files) {
       const src = readSrc(rel, base)
