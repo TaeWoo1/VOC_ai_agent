@@ -16,7 +16,7 @@ profile (`.profile/naver`) for every account, and the Action Window wire refuses
 id. So two accounts on one channel would have shared cookies. This slice threads a **server-owned, opaque,
 stable per-account slot** end-to-end:
 
-- **Backend owns it.** `account_session_slot` (migration `V29`) holds one row per seller account with a
+- **Backend owns it.** `account_session_slot` (migration `V30`) holds one row per seller account with a
   stable opaque `account_slot` (24-hex, minted once via `AccountSessionSlotService.resolveSlot`, find-or-
   create/idempotent — the *reuse* is what makes a profile stable across restarts). It is **not** the
   seller-account id and is **not reversible** to it.

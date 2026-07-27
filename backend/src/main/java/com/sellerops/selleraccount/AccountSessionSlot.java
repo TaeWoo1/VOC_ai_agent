@@ -31,7 +31,7 @@ import lombok.Setter;
  * that previously lived only in the agent's memory and was lost on restart. It is reconciled with — never
  * conflated with — the sync-run health {@code ChannelConnectionStatus} owns.
  *
- * <p>See {@code V29__account_session_slot.sql}.
+ * <p>See {@code V30__account_session_slot.sql}.
  */
 @Getter
 @Setter

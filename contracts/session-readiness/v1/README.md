@@ -47,7 +47,7 @@ these states and projects sanitized observations through the existing `JourneyPr
 mounted component.
 
 Backend persistence of readiness now EXISTS (Account-scoped Persistent Session Runtime, migration
-`V29__account_session_slot.sql`, product-scope §1.7 carve-out extension approved 2026-07-27): the runtime
+`V30__account_session_slot.sql`, product-scope §1.7 carve-out extension approved 2026-07-27): the runtime
 posts each observation (opaque launch ref + these enums only) to
 `POST /api/imports/reviews/launches/{ref}/session-readiness`, and the state is stored on the account's slot
 and surfaced through the existing connection-status projection. The `accountKey` field on
