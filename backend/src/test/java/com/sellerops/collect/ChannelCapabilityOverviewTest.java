@@ -35,7 +35,7 @@ class ChannelCapabilityOverviewTest {
     private CollectControlService serviceWith(ConnectorRegistry registry) {
         // Only channels + registry are touched by channelCapabilityOverview; the rest
         // are unused for this read and may be null.
-        return new CollectControlService(null, channels, null, null, null, null, registry, null, null);
+        return new CollectControlService(null, channels, null, null, null, null, registry, null, null, null);
     }
 
     @Test

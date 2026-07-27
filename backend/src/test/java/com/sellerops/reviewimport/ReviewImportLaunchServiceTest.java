@@ -12,8 +12,11 @@ import static org.mockito.Mockito.when;
 import com.sellerops.channel.Channel;
 import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
+import com.sellerops.selleraccount.AccountSessionSlotService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
+import com.sellerops.selleraccount.SessionProbeReason;
+import com.sellerops.selleraccount.SessionReadinessState;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.time.Clock;
@@ -42,9 +45,10 @@ class ReviewImportLaunchServiceTest {
     private final ReviewImportRunService runService = mock(ReviewImportRunService.class);
     private final SellerAccountRepository sellerAccounts = mock(SellerAccountRepository.class);
     private final ChannelRepository channels = mock(ChannelRepository.class);
+    private final AccountSessionSlotService accountSlots = mock(AccountSessionSlotService.class);
 
     private final ReviewImportLaunchService service = new ReviewImportLaunchService(
-            launches, plans, segments, planService, runService, sellerAccounts, channels);
+            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots);
 
     /**
      * A second instance with "today" pinned to 2026-07-26 KST, for the seller's range selection.
@@ -53,7 +57,7 @@ class ReviewImportLaunchServiceTest {
      * meaning tomorrow.
      */
     private final ReviewImportLaunchService dated = new ReviewImportLaunchService(
-            launches, plans, segments, planService, runService, sellerAccounts, channels,
+            launches, plans, segments, planService, runService, sellerAccounts, channels, accountSlots,
             Clock.fixed(Instant.parse("2026-07-26T01:00:00Z"), ReviewImportLaunchService.KST));
 
     private final UUID orgId = UUID.randomUUID();
@@ -399,6 +403,8 @@ class ReviewImportLaunchServiceTest {
         when(channels.findById(channelId)).thenReturn(Optional.of(channel));
         when(segments.findById(segId))
                 .thenReturn(Optional.of(segment(SegmentExecutionState.PENDING, SegmentCoverageState.UNVERIFIED)));
+        // The opaque per-account slot the runtime binds its profile to, resolved from the ticket's account.
+        when(accountSlots.resolveSlot(orgId, accountId, channelId)).thenReturn("aabbccddeeff00112233abcd");
 
         ReviewImportLaunchService.LaunchScope scope = service.resolveScope(orgId, "00112233445566aa");
 
@@ -407,8 +413,12 @@ class ReviewImportLaunchServiceTest {
         assertThat(scope.channelCode()).isEqualTo("naver");
         assertThat(scope.requiredStart()).isEqualTo(LocalDate.parse("2026-03-01"));
         assertThat(scope.requiredEnd()).isEqualTo(LocalDate.parse("2026-03-31"));
-        // LaunchScope is a 4-field record by design — adding an id here would leak identity to the runtime
-        assertThat(scope.toString()).doesNotContain(segId.toString()).doesNotContain(planId.toString());
+        // The runtime learns the opaque slot, never the account/segment/plan identity behind it.
+        assertThat(scope.accountSlot()).isEqualTo("aabbccddeeff00112233abcd");
+        assertThat(scope.toString())
+                .doesNotContain(segId.toString())
+                .doesNotContain(planId.toString())
+                .doesNotContain(accountId.toString());
     }
 
     @Test
@@ -423,6 +433,21 @@ class ReviewImportLaunchServiceTest {
         ReviewImportLaunchService.LaunchScope scope = service.resolveScope(orgId, "00112233445566aa");
         assertThat(scope.requiredStart()).isNull();
         assertThat(scope.requiredEnd()).isNull();
+    }
+
+    @Test
+    void aReadinessReportResolvesTheRefToItsAccountAndPersistsOnTheSlot() {
+        when(launches.findByLaunchRef("00112233445566aa"))
+                .thenReturn(Optional.of(ticket(ReviewImportLaunchKind.SEGMENT, ReviewImportLaunchStatus.CONSUMED)));
+
+        service.recordSessionReadiness(orgId, "00112233445566aa",
+                SessionReadinessState.LOGIN_REQUIRED, SessionProbeReason.SESSION_FAILURE);
+
+        // The wire carried only the opaque ref + enums; the account is resolved server-side and readiness
+        // lands on that account's slot. A CONSUMED ticket still accepts the report — it is diagnostic, not a
+        // run start, so it must land after the run's ticket has been spent.
+        verify(accountSlots).recordReadiness(orgId, accountId, channelId,
+                SessionReadinessState.LOGIN_REQUIRED, SessionProbeReason.SESSION_FAILURE);
     }
 
     @Test

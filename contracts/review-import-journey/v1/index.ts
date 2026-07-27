@@ -45,6 +45,12 @@ export interface SegmentLaunchScope {
   /** What the ticket authorizes, as the SERVER reports it. Only `SEGMENT` is hostable. */
   readonly kind: string;
   readonly channelCode: ImportChannelCode;
+  /**
+   * The opaque, server-owned per-account slot the runtime binds its persistent browser profile to. A
+   * stable surrogate — NOT the seller-account id and not reversible to it — so the wire stays identity-free
+   * even though the profile is account-specific. Empty string on a legacy scope that predates the slot.
+   */
+  readonly accountSlot: string;
   /** The window to guide, for a SEGMENT run. Empty on a DISCOVERY run, which has no window yet. */
   readonly requiredStart: string;
   readonly requiredEnd: string;

@@ -52,6 +52,13 @@ export interface ResolvedLaunchScope {
    */
   kind: string;
   channelCode: string;
+  /**
+   * The opaque, server-owned per-account slot the runtime binds its persistent profile to. Passed straight
+   * through by the host (which never inspects it); the boot reads it to choose the account-scoped profile.
+   * Empty on a legacy server that predates the slot. Kept here so this stays structurally identical to the
+   * contract's `SegmentLaunchScope`.
+   */
+  accountSlot: string;
   /** The window to guide, for a SEGMENT run. Empty on a DISCOVERY run, which has no window yet. */
   requiredStart: string;
   requiredEnd: string;

@@ -15,7 +15,10 @@ import com.sellerops.reviewimport.dto.ReviewImportPlanView;
 import com.sellerops.reviewimport.dto.ReviewImportRangeSelectionView;
 import com.sellerops.reviewimport.dto.ReviewImportSegmentView;
 import com.sellerops.reviewimport.dto.SelectImportRangeRequest;
+import com.sellerops.reviewimport.dto.SessionReadinessReportRequest;
 import com.sellerops.reviewimport.dto.SplitSegmentRequest;
+import com.sellerops.selleraccount.SessionProbeReason;
+import com.sellerops.selleraccount.SessionReadinessState;
 import jakarta.validation.Valid;
 import java.io.IOException;
 import java.util.List;
@@ -121,6 +124,29 @@ public class ReviewImportPlanController {
     public ReviewImportLaunchScopeView launchScope(@AuthenticationPrincipal AuthPrincipal principal,
                                                    @PathVariable String launchRef) {
         return ReviewImportLaunchScopeView.from(launchService.resolveScope(principal.orgId(), launchRef));
+    }
+
+    /**
+     * Persist what a session-readiness probe observed, so the account's session state (login / 2FA / expiry)
+     * survives an agent restart and surfaces through the existing connection-status projection.
+     *
+     * <p>The runtime presents only the opaque launch ref plus two sanitized enums; the server resolves the
+     * ref to the account and records readiness on that account's slot. Unknown enum values fail closed as a
+     * 400 rather than defaulting to a usable state — a bad report must never be read as "session is fine".
+     */
+    @PostMapping("/launches/{launchRef}/session-readiness")
+    public void reportSessionReadiness(@AuthenticationPrincipal AuthPrincipal principal,
+                                       @PathVariable String launchRef,
+                                       @Valid @RequestBody SessionReadinessReportRequest req) {
+        SessionReadinessState state;
+        SessionProbeReason reason;
+        try {
+            state = SessionReadinessState.fromWire(req.state());
+            reason = SessionProbeReason.fromWire(req.reason());
+        } catch (IllegalArgumentException bad) {
+            throw ApiException.badRequest("세션 상태 보고 값을 인식할 수 없습니다.");
+        }
+        launchService.recordSessionReadiness(principal.orgId(), launchRef, state, reason);
     }
 
     /**

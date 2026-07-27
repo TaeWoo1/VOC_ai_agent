@@ -21,6 +21,7 @@ function scope(overrides: Partial<ResolvedLaunchScope> = {}): ResolvedLaunchScop
   return {
     kind: "SEGMENT",
     channelCode: "naver",
+    accountSlot: "aabbccddeeff00112233abcd",
     requiredStart: "2026-01-01",
     requiredEnd: "2026-01-31",
     ...overrides,
@@ -325,6 +326,7 @@ function discoveryStartRun(discoveryRef: string): AwClientFrame {
 const DISCOVERY_SCOPE: ResolvedLaunchScope = {
   kind: "DISCOVERY",
   channelCode: "naver",
+  accountSlot: "aabbccddeeff00112233abcd",
   requiredStart: "",
   requiredEnd: "",
 };

@@ -51,9 +51,9 @@ import { ImportAcquisitionCoordinator } from "../action-window/initial-import/im
 import type { ImportProbeDriver } from "../action-window/initial-import/import-driver";
 import type { ResolvedLaunchScope } from "../action-window/initial-import/import-host";
 import { buildSegmentIngestUpload } from "../action-window/ingest-handoff";
-import { fetchLaunchScope, login } from "../upload";
-import { launchNaverContext } from "../profile";
-import type { Page } from "playwright";
+import { fetchLaunchScope, login, reportSessionReadiness } from "../upload";
+import { accountScopedProfileDirFor, launchNaverContext } from "../profile";
+import type { BrowserContext, Page } from "playwright";
 import { decideSurfacePresentation } from "../naver/surface-presentation";
 import { log } from "../log";
 import {
@@ -330,6 +330,15 @@ export async function buildInitialImportConfig(
   // engine's single record into `driver.ingest` at ingest time (see import-session's INGEST case), so the
   // driver never derives an evidence value of its own.
   let boundRef = "";
+  // The bearer token and opaque account slot the scope resolve learned, reused by the readiness reporter and
+  // the account-scoped profile selection. `boundAccountSlot` is null until a scope has been resolved: the
+  // seller-center tab is DEFERRED (not opened) at connect-time warm-up until then, so it is only ever opened
+  // once the account it belongs to is known (product-owner decision 2026-07-27 — bind at run start).
+  let boundToken = "";
+  let boundAccountSlot: string | null = null;
+  // The account-scoped persistent context the seller center lives in — separate from the boot context that
+  // holds SellerOps, so two accounts' cookies never share a profile. Opened lazily by `openSurface`.
+  let naverContext: BrowserContext | null = null;
   /**
    * Open the MARKETPLACE tab, next to SellerOps, and build the real driver.
    *
@@ -341,11 +350,30 @@ export async function buildInitialImportConfig(
    * controls in the wrong window.
    */
   const openSurface = async (): Promise<ImportProbeDriver> => {
+    // The seller center belongs to ONE account, so it lives in that account's own persistent profile — never
+    // the boot/SellerOps profile, and never a profile shared with another account. The account is known only
+    // once a run's scope has been resolved, so a warm-up that arrives before then is DEFERRED: throwing here
+    // leaves the surface closed (LazyImportDriver.warmUp swallows it and does not cache the failure), and the
+    // first run — which resolves the scope before it touches the driver — opens it in the right profile.
+    if (boundAccountSlot === null) {
+      throw new Error("seller center deferred until the run's account slot is known");
+    }
+    // A non-empty slot picks the account-scoped profile (isolated per channel × account); an empty slot is a
+    // legacy server with no slot, and we fall back to the shared boot profile — the pre-account behaviour.
+    const profileDir =
+      boundAccountSlot.length > 0
+        ? accountScopedProfileDirFor(cfg.profileBaseDir, NAVER_CHANNEL_CODE, boundAccountSlot)
+        : cfg.profileDir;
+    // A dedicated persistent context: the account's NAVER cookies persist here across agent restarts, and a
+    // different account resolves to a different directory so their sessions can never mix.
+    naverContext = await launchNaverContext(profileDir);
     // The operator logs into NAVER here themselves — the collector never types NAVER credentials.
-    const page = await context.newPage();
+    const page = naverContext.pages()[0] ?? (await naverContext.newPage());
     await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
     await page.bringToFront().catch(() => {});
-    log("aw_import_surface_opened", {});
+    // Enum/boolean only — the opaque slot and the profile path are never logged (no identity on the wire, in a
+    // log, or in a trace).
+    log("aw_import_surface_opened", { accountScoped: boundAccountSlot.length > 0 });
 
     const proven = new NaverLiveProbeDriver(page, {
       quarantineDir: defaultQuarantineDirFor(collectorRoot),
@@ -428,7 +456,12 @@ export async function buildInitialImportConfig(
   // seam). It reads session readiness at the four probe moments (AGENT_START at boot, then BEFORE_WORK /
   // SESSION_FAILURE / MANUAL_RECHECK off each run's own `prepareSurface`) and gates admission on adapter
   // availability. It owns no durable or pure state; the backend and the readiness projector own those.
-  const coordinator = new ImportAcquisitionCoordinator(NAVER_CHANNEL_CODE);
+  const coordinator = new ImportAcquisitionCoordinator(NAVER_CHANNEL_CODE, (state, reason) => {
+    // Persist what the probe observed (durable backend readiness), keyed by the opaque ref the server resolves
+    // to the account. Best-effort: only once a run has bound its ref + token, and never allowed to fail a run.
+    if (!boundRef || !boundToken) return;
+    void reportSessionReadiness(cfg.baseUrl, boundToken, boundRef, state, reason).catch(() => undefined);
+  });
   // A transparent decorator so a run's `prepareSurface` reading feeds readiness WITHOUT changing what the run
   // sees — this is what keeps the existing NAVER import path byte-for-byte equivalent with the supervisor wired.
   const driver = new ReadinessObservingImportDriver(lazy, (res) => coordinator.observeSurfaceReading(res));
@@ -452,9 +485,14 @@ export async function buildInitialImportConfig(
         if (scope.kind === "SEGMENT" && (!scope.requiredStart || !scope.requiredEnd)) return null;
         // Bind the ref for the ingest / range-report capability only after the SERVER has accepted it.
         boundRef = launchRef;
+        boundToken = token;
+        // The opaque account slot the seller center's profile is bound to. Setting it (even to "") is what
+        // lifts the warm-up deferral in `openSurface`: the account is now known, so the surface may open.
+        boundAccountSlot = scope.accountSlot ?? "";
         return {
           kind: scope.kind,
           channelCode: scope.channelCode,
+          accountSlot: boundAccountSlot,
           requiredStart: scope.requiredStart ?? "",
           requiredEnd: scope.requiredEnd ?? "",
         };
@@ -467,10 +505,16 @@ export async function buildInitialImportConfig(
   };
   return {
     config,
-    close: () => context.close(),
+    // Close both windows: the boot/SellerOps context and, if a run opened it, the account-scoped seller-center
+    // context. The account context is closed first so its persistent profile is flushed cleanly on the way out.
+    close: async () => {
+      if (naverContext) await naverContext.close().catch(() => undefined);
+      await context.close();
+    },
     // The middle arrow of the journey the product owner described — open SellerOps, ask to connect, and THEN the
-    // seller center appears. The boot hands this to the bridge, which calls it when SellerOps connects. It warms
-    // up the LAZY driver directly (not through the readiness decorator, which only observes `prepareSurface`).
+    // seller center appears. It warms up the LAZY driver directly (not through the readiness decorator, which
+    // only observes `prepareSurface`). Until a run has resolved its account slot the warm-up is a deliberate
+    // no-op (see `openSurface`): the seller center opens with the run, in the account's own profile.
     warmUpSurface: () => lazy.warmUp(),
     onAgentStart: () => coordinator.onAgentStart(),
   };

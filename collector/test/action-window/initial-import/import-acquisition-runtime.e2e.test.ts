@@ -35,7 +35,13 @@ const REF_A = "9f2a1c7b4e6d0835";
 const REF_B = "1122334455667788";
 
 function scope(): ResolvedLaunchScope {
-  return { kind: "SEGMENT", channelCode: "naver", requiredStart: "2026-06-01", requiredEnd: "2026-06-30" };
+  return {
+    kind: "SEGMENT",
+    channelCode: "naver",
+    accountSlot: "aabbccddeeff00112233abcd",
+    requiredStart: "2026-06-01",
+    requiredEnd: "2026-06-30",
+  };
 }
 
 function startRun(importRef: string): AwClientFrame {

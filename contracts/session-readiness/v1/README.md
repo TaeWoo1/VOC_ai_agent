@@ -44,8 +44,14 @@ The per-channel classification of raw signals into a state lives in each channel
 not here. The collector's NAVER probe
 (`collector/src/action-window/initial-import/session-readiness.ts`) maps its existing `SessionVerdict` into
 these states and projects sanitized observations through the existing `JourneyProjectionPort` — no FE, no
-mounted component. Backend persistence of readiness is intentionally deferred (a follow-up), so this slice
-adds no migration.
+mounted component.
+
+Backend persistence of readiness now EXISTS (Account-scoped Persistent Session Runtime, migration
+`V30__account_session_slot.sql`, product-scope §1.7 carve-out extension approved 2026-07-27): the runtime
+posts each observation (opaque launch ref + these enums only) to
+`POST /api/imports/reviews/launches/{ref}/session-readiness`, and the state is stored on the account's slot
+and surfaced through the existing connection-status projection. The `accountKey` field on
+`SessionReadinessObservation` is that opaque slot — never a marketplace id.
 
 **Deliberate boundary:** this slice ships the classify-and-project *seam* and the four `ReadinessProbeReason`
 moments as the vocabulary; it does **not** yet invoke the probe from the live agent loop at those moments

@@ -15,7 +15,14 @@ const NAVER = "NAVER";
 const idle: SegmentEntryState = { hostedRef: null, building: false };
 
 function segmentScope(over: Partial<SegmentLaunchScope> = {}): SegmentLaunchScope {
-  return { kind: "SEGMENT", channelCode: NAVER, requiredStart: "2026-06-01", requiredEnd: "2026-06-30", ...over };
+  return {
+    kind: "SEGMENT",
+    channelCode: NAVER,
+    accountSlot: "aabbccddeeff00112233abcd",
+    requiredStart: "2026-06-01",
+    requiredEnd: "2026-06-30",
+    ...over,
+  };
 }
 
 function resolved(scope: SegmentLaunchScope | null, over: { declaredKind?: "SEGMENT" | "DISCOVERY" | null; host?: string } = {}) {

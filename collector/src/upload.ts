@@ -341,6 +341,12 @@ export type { ScopeEvidenceWire };
 export interface LaunchScopeResponse {
   kind: "DISCOVERY" | "SEGMENT";
   channelCode: string;
+  /**
+   * The opaque, server-owned per-account slot the runtime binds its persistent browser profile to. A stable
+   * surrogate — NOT the seller-account id and not reversible to it. Absent on a legacy server that predates
+   * the slot; the runtime then falls back to its shared profile.
+   */
+  accountSlot?: string | null;
   /** ISO `YYYY-MM-DD`, present for a SEGMENT run only. */
   requiredStart: string | null;
   requiredEnd: string | null;
@@ -362,6 +368,31 @@ export async function fetchLaunchScope(
   });
   if (!res.ok) throw new UploadError("launch scope resolve failed", "upload", res.status);
   return (await res.json()) as LaunchScopeResponse;
+}
+
+/**
+ * Persist what a session-readiness probe observed, so the account's session state survives an agent restart
+ * and surfaces through the existing connection-status projection.
+ *
+ * Sanitized by construction: the body carries only the readiness state and the probe moment (closed enum
+ * sets from `contracts/session-readiness/v1`); the account is resolved server-side from the opaque launch
+ * ref in the path, never sent here. Best-effort — a persistence failure must never fail a run — so callers
+ * swallow a rejection; the boolean return only says whether the server accepted it.
+ */
+export async function reportSessionReadiness(
+  baseUrl: string,
+  token: string,
+  launchRef: string,
+  state: string,
+  reason: string,
+  fetchImpl: FetchImpl = fetch,
+): Promise<boolean> {
+  const res = await fetchImpl(`${baseUrl}/api/imports/reviews/launches/${launchRef}/session-readiness`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ state, reason }),
+  });
+  return res.ok;
 }
 
 /**
