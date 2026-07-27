@@ -21,6 +21,8 @@ import com.sellerops.selleraccount.SessionProbeReason;
 import com.sellerops.selleraccount.SessionReadinessState;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.MediaType;
@@ -169,6 +171,19 @@ public class ReviewImportPlanController {
     public ReviewImportLaunchView launchNextSegment(@AuthenticationPrincipal AuthPrincipal principal,
                                                     @PathVariable UUID planId) {
         return launchView(launchService.mintNextSegment(principal.orgId(), planId));
+    }
+
+    /**
+     * "새로 들어온 기간 이어가기" — the repeated loop's incremental step. Carry an existing plan forward to
+     * cover the span that has arrived since it was last extended, up to today (UTC), by materializing new
+     * PENDING calendar-month segments on the SAME plan. Idempotent: a plan already reaching today gains
+     * nothing. Returns the refreshed plan detail so the next segment to run is authoritative.
+     */
+    @PostMapping("/plans/{planId}/extend")
+    public ReviewImportPlanDetailView extendPlan(@AuthenticationPrincipal AuthPrincipal principal,
+                                                 @PathVariable UUID planId) {
+        planService.extendPlanForward(principal.orgId(), planId, LocalDate.now(ZoneOffset.UTC));
+        return queryService.planDetail(principal.orgId(), planId);
     }
 
     /** Authorize a run for one specific segment — also the retry path after a failure. */

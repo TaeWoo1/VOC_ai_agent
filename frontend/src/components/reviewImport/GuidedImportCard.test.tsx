@@ -14,6 +14,7 @@ import type { AwGuidanceIntent, AwGuidancePack } from "../../../../contracts/act
 import type {
   ReviewImportPlanDetailView,
   ReviewImportSegmentView,
+  ReviewOpsLoopSummary,
   SellerAccountResponse,
 } from "../../lib/types";
 
@@ -135,6 +136,10 @@ const plan = (segments: ReviewImportSegmentView[]): ReviewImportPlanDetailView =
  */
 beforeEach(() => {
   vi.spyOn(api, "getReviewImportPlan").mockRejectedValue(new Error("not stubbed in this test"));
+  // The loop summary is fetched on a finished plan. Default to a rejection so a test that does not care
+  // about it never reaches the network and the completion box just shows its prose — the loop tests below
+  // override this with the summary they want to render.
+  vi.spyOn(api, "getReviewOpsLoopSummary").mockRejectedValue(new Error("not stubbed in this test"));
 });
 
 afterEach(() => {
@@ -322,6 +327,89 @@ describe("GuidedImportCard — completion is claimed honestly", () => {
     render(<GuidedImportCard account={account} plan={plan([seg()])} agent="ready" />);
     expect(screen.queryByTestId("completion-summary")).toBeNull();
     expect(screen.getByTestId("guided-import-cta")).toBeInTheDocument();
+  });
+});
+
+const loopSummary = (over: Partial<ReviewOpsLoopSummary> = {}): ReviewOpsLoopSummary => ({
+  referenceDate: "2026-07-27",
+  lastCoveredDate: "2026-04-30",
+  missingRanges: [],
+  nextRecommendedImport: null,
+  upToDate: true,
+  newCount: 42,
+  duplicateCount: 8,
+  failedCount: 0,
+  issueMemoryReady: true,
+  issueChange: {
+    workingTotal: 0,
+    needsReview: 0,
+    newlyRaised: 0,
+    surging: 0,
+    persistent: 0,
+    concentrated: 0,
+    improved: 0,
+  },
+  ...over,
+});
+
+// A finished plan whose forward edge (segment end) is BEFORE the summary reference date → a new period exists.
+const FINISHED = () => plan([seg({ executionState: "COMPLETED", coverageState: "COVERED" })]); // ends 2026-03-31
+// A finished plan whose coverage reaches the reference date → nothing new to pull.
+const FINISHED_AT_TODAY = () =>
+  plan([seg({ executionState: "COMPLETED", coverageState: "COVERED", segmentStart: "2026-07-01", segmentEnd: "2026-07-31" })]);
+
+describe("GuidedImportCard — the repeated loop's completion result + change summary", () => {
+  it("shows account-cumulative totals (labeled) and the change summary as unvalidated candidate signals", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(
+      loopSummary({ newCount: 42, duplicateCount: 8, issueChange: { ...loopSummary().issueChange, workingTotal: 3, needsReview: 2 } }),
+    );
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" />);
+
+    await waitFor(() => expect(screen.getByTestId("loop-collected")).toBeInTheDocument());
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("새로 추가");
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("42건");
+    expect(screen.getByTestId("loop-collected")).toHaveTextContent("이미 있던 리뷰");
+    // Scope is honest: the totals are labeled account-cumulative, not this run's.
+    expect(screen.getByTestId("completion-summary")).toHaveTextContent("누적");
+    const change = screen.getByTestId("loop-change-summary");
+    expect(change).toHaveTextContent("확인이 필요한 변화 2건");
+    // Candidate-signal framing only — never a diagnosis or a cause.
+    expect(change.textContent ?? "").not.toMatch(/원인|문제가.*(입니다|이다)/);
+  });
+
+  it("says '분석 미갱신', never 'no change', when the after-ingest refresh has not caught up", async () => {
+    // Reviews imported but issue memory empty (refresh not run / failed) → must not read as "no change".
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ issueMemoryReady: false }));
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" />);
+
+    const change = await screen.findByTestId("loop-change-summary");
+    expect(change).toHaveTextContent("리뷰 분석을 아직 갱신하지 못했어요");
+    expect(change.textContent ?? "").not.toMatch(/변화는 없어요/); // never the all-clear on a stale refresh
+  });
+
+  it("says the collection is up to date and offers no forward-extension when coverage reaches today", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary());
+    render(<GuidedImportCard account={account} plan={FINISHED_AT_TODAY()} agent="ready" />);
+
+    await waitFor(() => expect(screen.getByTestId("loop-freshness")).toHaveTextContent("최신이에요"));
+    expect(screen.queryByTestId("loop-extend-cta")).toBeNull();
+  });
+
+  it("offers an operator-initiated forward-extension only when the plan's forward edge is behind today", async () => {
+    vi.spyOn(api, "getReviewOpsLoopSummary").mockResolvedValue(loopSummary({ upToDate: false }));
+    const extend = vi
+      .spyOn(api, "extendReviewImportPlan")
+      .mockResolvedValue(plan([seg({ id: "s-new", executionState: "PENDING", coverageState: "UNVERIFIED" })]));
+    const onPlanCreated = vi.fn();
+    render(<GuidedImportCard account={account} plan={FINISHED()} agent="ready" onPlanCreated={onPlanCreated} />);
+
+    const cta = await screen.findByTestId("loop-extend-cta");
+    expect(screen.getByTestId("loop-freshness")).toHaveTextContent("새로 들어온 기간이 있어요");
+    await userEvent.click(cta);
+
+    await waitFor(() => expect(extend).toHaveBeenCalledWith("plan-1"));
+    // Extension only reopens the plan; the seller still presses 계속 가져오기 and exports themselves.
+    expect(onPlanCreated).toHaveBeenCalled();
   });
 });
 

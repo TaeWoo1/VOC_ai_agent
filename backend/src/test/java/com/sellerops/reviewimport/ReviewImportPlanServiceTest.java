@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -166,5 +167,62 @@ class ReviewImportPlanServiceTest {
         when(segments.findByIdAndOrgId(b, org))
                 .thenReturn(Optional.of(seg(b, "2026-02-01", "2026-02-28", SegmentExecutionState.COMPLETED)));
         assertThatThrownBy(() -> service.mergeSegments(org, List.of(a, b))).isInstanceOf(ApiException.class);
+    }
+
+    private ReviewImportPlan planWith(ReviewImportPlanStatus status, String requestedEnd) {
+        ReviewImportPlan p = new ReviewImportPlan();
+        p.setId(planId);
+        p.setOrgId(org);
+        p.setSellerAccountId(account);
+        p.setChannelId(channel);
+        p.setRequestedStart(LocalDate.parse("2026-01-01"));
+        p.setRequestedEnd(LocalDate.parse(requestedEnd));
+        p.setStatus(status);
+        return p;
+    }
+
+    @Test
+    void extendMaterializesMonthsAfterLatestSegmentUpToToday() {
+        stubSaves();
+        ReviewImportPlan plan = planWith(ReviewImportPlanStatus.COMPLETED, "2026-03-31");
+        when(plans.findByIdAndOrgIdForUpdate(planId, org)).thenReturn(Optional.of(plan));
+        when(plans.findById(planId)).thenReturn(Optional.of(plan));
+        ReviewImportSegment march = seg(UUID.randomUUID(), "2026-03-01", "2026-03-31", SegmentExecutionState.COMPLETED);
+        march.setOrdinal(2);
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId)).thenReturn(List.of(march));
+
+        List<ReviewImportSegment> created = service.extendPlanForward(org, planId, LocalDate.parse("2026-05-10"));
+
+        assertThat(created).extracting(ReviewImportSegment::getSegmentStart, ReviewImportSegment::getSegmentEnd,
+                        ReviewImportSegment::getOrdinal)
+                .containsExactly(
+                        Tuple.tuple(LocalDate.parse("2026-04-01"), LocalDate.parse("2026-04-30"), 3),
+                        Tuple.tuple(LocalDate.parse("2026-05-01"), LocalDate.parse("2026-05-10"), 4));
+        assertThat(created).allSatisfy(s -> {
+            assertThat(s.getExecutionState()).isEqualTo(SegmentExecutionState.PENDING);
+            assertThat(s.getCoverageState()).isEqualTo(SegmentCoverageState.UNVERIFIED);
+        });
+        assertThat(plan.getRequestedEnd()).isEqualTo(LocalDate.parse("2026-05-10")); // forward edge advanced
+    }
+
+    @Test
+    void extendIsIdempotentNoOpWhenAlreadyReachingToday() {
+        ReviewImportPlan plan = planWith(ReviewImportPlanStatus.COMPLETED, "2026-05-31");
+        when(plans.findByIdAndOrgIdForUpdate(planId, org)).thenReturn(Optional.of(plan));
+        ReviewImportSegment may = seg(UUID.randomUUID(), "2026-05-01", "2026-05-31", SegmentExecutionState.COMPLETED);
+        when(segments.findByPlanIdAndSupersededFalseOrderBySegmentStartAsc(planId)).thenReturn(List.of(may));
+
+        List<ReviewImportSegment> created = service.extendPlanForward(org, planId, LocalDate.parse("2026-05-10"));
+
+        assertThat(created).isEmpty();
+        verify(segments, never()).save(any());
+    }
+
+    @Test
+    void extendRejectsAnAbandonedPlan() {
+        when(plans.findByIdAndOrgIdForUpdate(planId, org))
+                .thenReturn(Optional.of(planWith(ReviewImportPlanStatus.ABANDONED, "2026-03-31")));
+        assertThatThrownBy(() -> service.extendPlanForward(org, planId, LocalDate.parse("2026-05-10")))
+                .isInstanceOf(ApiException.class);
     }
 }

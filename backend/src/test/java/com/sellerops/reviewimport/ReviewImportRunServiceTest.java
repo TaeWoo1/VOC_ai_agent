@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * Segment run lifecycle, with the upload connector + repositories mocked. Pins: the scope-confirmation
@@ -33,8 +34,9 @@ class ReviewImportRunServiceTest {
     private final ReviewImportSegmentAttemptRepository attempts = mock(ReviewImportSegmentAttemptRepository.class);
     private final FileUploadConnector uploadConnector = mock(FileUploadConnector.class);
     private final ReviewImportPlanService planService = mock(ReviewImportPlanService.class);
+    private final ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
     private final ReviewImportRunService service =
-            new ReviewImportRunService(plans, segments, attempts, uploadConnector, planService);
+            new ReviewImportRunService(plans, segments, attempts, uploadConnector, planService, events);
 
     private final UUID orgId = UUID.randomUUID();
     private final UUID channelId = UUID.randomUUID();
@@ -90,6 +92,8 @@ class ReviewImportRunServiceTest {
         assertThat(segment.getCoveredRows()).isEqualTo(7);
         assertThat(segment.isRowsReconciled()).isFalse();
         verify(planService).recomputePlanStatus(planId);
+        // A COVERED segment publishes the refresh event so issue-memory can catch up off the new reviews.
+        verify(events).publishEvent(any(ReviewSegmentIngestedEvent.class));
     }
 
     @Test
@@ -119,6 +123,8 @@ class ReviewImportRunServiceTest {
         assertThat(attempt.getErrorMessage()).isNotBlank();
         assertThat(segment.getExecutionState()).isEqualTo(SegmentExecutionState.FAILED);
         assertThat(segment.getCoverageState()).isEqualTo(SegmentCoverageState.UNVERIFIED);
+        // A failed ingest is not a coverage conclusion, so it must not fire the refresh event.
+        verify(events, never()).publishEvent(any(ReviewSegmentIngestedEvent.class));
     }
 
     @Test

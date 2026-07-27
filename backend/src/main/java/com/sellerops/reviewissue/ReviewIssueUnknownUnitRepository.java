@@ -8,6 +8,9 @@ public interface ReviewIssueUnknownUnitRepository
 
     boolean existsByOrgIdAndReviewIdAndUnitOrdinal(UUID orgId, UUID reviewId, int unitOrdinal);
 
+    /** Whether this org has any UNKNOWN unit — half of the "has extraction run at all?" signal. */
+    boolean existsByOrgId(UUID orgId);
+
     /**
      * Pen size by reason. <b>No product surface reads this yet</b> — it exists so the tests and the
      * disposable-backend harness can assert that unattributable units land here with the right reason

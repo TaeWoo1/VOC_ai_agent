@@ -9,14 +9,24 @@ import {
   buildImportGuidancePack,
   completionSummaryText,
   continuationAfterNext,
+  forwardPeriodText,
+  hasForwardPeriodToImport,
   importProgress,
   importStageText,
+  loopChangeSummaryText,
+  loopCollectedLines,
+  LOOP_COLLECTED_CAPTION,
   primaryActionLabel,
   recheckLabel,
   segmentRangeText,
   type AgentAvailability,
 } from "../../lib/reviewImport";
-import type { ReviewImportPlanDetailView, ReviewImportLaunchView, SellerAccountResponse } from "../../lib/types";
+import type {
+  ReviewImportPlanDetailView,
+  ReviewImportLaunchView,
+  ReviewOpsLoopSummary,
+  SellerAccountResponse,
+} from "../../lib/types";
 import { AgentPairingPanel } from "./AgentPairingPanel";
 import { ImportRangeChooser } from "./ImportRangeChooser";
 
@@ -173,6 +183,49 @@ export function GuidedImportCard({
   }, [snapshot, onRunSettled]);
 
   /**
+   * The loop's 완료 결과 + 변화 요약, fetched once the plan is fully covered. It is a derived read — the
+   * collection totals and the (unvalidated) issue-change counts — so it is re-fetched whenever coverage
+   * advances (a completed run bumps `progress.done`). Failure is silent: the completion prose still shows;
+   * only the extra detail is missing.
+   */
+  const [summary, setSummary] = useState<ReviewOpsLoopSummary | null>(null);
+  const [extendBusy, setExtendBusy] = useState(false);
+  useEffect(() => {
+    if (!hasPlan || next !== null || running) return; // only when finished and idle
+    let cancelled = false;
+    void api
+      .getReviewOpsLoopSummary(account.id)
+      .then((s) => {
+        if (!cancelled) setSummary(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // progress.done/total change when a completed run advances coverage → re-read the summary.
+  }, [hasPlan, next, running, account.id, progress.done, progress.total]);
+
+  /**
+   * Carry the plan forward to the period that has arrived since — the repeated loop's incremental step.
+   * Operator-initiated (never automatic), idempotent on the server. It only reopens the plan with a new
+   * PENDING segment; the seller then presses 계속 가져오기 and performs the export in their own window, so
+   * every safety fence (one human checkpoint, no auto-click) is unchanged.
+   */
+  const extendForward = useCallback(async (): Promise<void> => {
+    if (!plan || extendBusy) return;
+    setExtendBusy(true);
+    setError(null);
+    try {
+      const extended = await api.extendReviewImportPlan(plan.plan.id);
+      onPlanCreated?.(extended);
+    } catch {
+      setError("새로 들어온 기간을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setExtendBusy(false);
+    }
+  }, [plan, extendBusy, onPlanCreated]);
+
+  /**
    * Start the next segment — from the button on this card, or from the panel in the seller's SmartStore window.
    *
    * ONE function for both on purpose. The in-page press does not shortcut anything: it arrives as a request, and
@@ -272,9 +325,45 @@ export function GuidedImportCard({
       ) : null}
 
       {finished && !running ? (
-        <p className="rounded-xl bg-good/5 px-4 py-3 text-sm text-ink break-keep" data-testid="completion-summary">
-          {completionSummaryText(progress)}
-        </p>
+        <div className="flex flex-col gap-3 rounded-xl bg-good/5 px-4 py-3" data-testid="completion-summary">
+          <p className="text-sm text-ink break-keep">{completionSummaryText(progress)}</p>
+          {summary ? (
+            <>
+              {/* Honest scope: these are the account's running totals, not this one run's numbers. */}
+              <p className="text-xs text-muted">{LOOP_COLLECTED_CAPTION}</p>
+              <dl className="flex flex-col gap-1" data-testid="loop-collected">
+                {loopCollectedLines(summary).map((line) => (
+                  <div key={line.label} className="flex items-baseline justify-between gap-3">
+                    <dt className="text-sm text-muted">{line.label}</dt>
+                    <dd className="text-sm text-ink">{line.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              {/* Unvalidated candidate signals — points at the issue surface, never a diagnosis here; and
+                  never presents a not-yet-run/failed analysis refresh as "no change". */}
+              <p className="text-sm text-ink break-keep" data-testid="loop-change-summary">
+                {loopChangeSummaryText(summary)}
+              </p>
+              {/* Freshness + the forward-extension CTA are gated on THIS plan's own forward edge (its latest
+                  live segment vs the backend's reference date), so the button is offered only when carrying
+                  the plan forward would actually add a period — never inert. */}
+              <p className="text-sm text-muted break-keep" data-testid="loop-freshness">
+                {forwardPeriodText(hasForwardPeriodToImport(segments, summary.referenceDate))}
+              </p>
+              {hasForwardPeriodToImport(segments, summary.referenceDate) ? (
+                <button
+                  type="button"
+                  onClick={() => void extendForward()}
+                  disabled={extendBusy}
+                  data-testid="loop-extend-cta"
+                  className="self-start rounded-xl border border-brand px-4 py-2 text-sm font-semibold text-brand transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  {extendBusy ? "확인하는 중…" : "새로 들어온 기간 가져오기"}
+                </button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       ) : null}
 
       {/* An unavailable agent explains itself. Collapsing every cause into "offline" is what leaves a

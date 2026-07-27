@@ -539,6 +539,38 @@ export interface ReviewImportHealthView {
   nextRecommendedImport: string | null;
 }
 
+// Mirrors com.sellerops.reviewops.dto.IssueChangeCountsView. Counts of UNVALIDATED candidate
+// signals — the issue thresholds are DRAFT and the extractor's accuracy is UNMEASURED. A surface
+// renders these as "확인이 필요한 변화 / 이슈 후보", never "문제 N개 발견".
+export interface IssueChangeCounts {
+  workingTotal: number;
+  needsReview: number;
+  newlyRaised: number;
+  surging: number;
+  persistent: number;
+  concentrated: number;
+  improved: number;
+}
+
+// Mirrors com.sellerops.reviewops.dto.ReviewOpsLoopSummaryView. The repeated review-operations
+// loop's "완료 결과 + 변화 요약", derived at read from import health + issue-memory change — no
+// durable state of its own. `upToDate` is true when coverage reaches the reference date.
+export interface ReviewOpsLoopSummary {
+  referenceDate: string;
+  lastCoveredDate: string | null;
+  missingRanges: DateRangeView[];
+  nextRecommendedImport: string | null;
+  upToDate: boolean;
+  // Account-cumulative (each live segment's latest attempt across the account's plans), NOT this run.
+  newCount: number;
+  duplicateCount: number;
+  failedCount: number;
+  // false when the account has reviews but issue-memory is still empty — the after-ingest refresh has not
+  // run or silently failed; the surface must then say "분석 미갱신", never "no change".
+  issueMemoryReady: boolean;
+  issueChange: IssueChangeCounts;
+}
+
 export interface CreateReviewImportPlanRequest {
   sellerAccountId: string;
   channelId: string;
