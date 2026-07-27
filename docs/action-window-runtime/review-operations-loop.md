@@ -89,21 +89,33 @@ loop-summary (read)  ── upToDate? ──no──▶  extend plan forward (op
 **Whole-stack offline gate green (2026-07-27):** backend `./gradlew test`; frontend `tsc --noEmit` +
 `vitest` (1080); collector `npm run typecheck` + `vitest` (5349); contracts typecheck + `vitest` (163).
 
-## Live verification — PENDING (fresh single-use in-turn approval required)
+## Live verification — 2026-07-27 (seated operator, single-use approval)
 
-This record grants **no** live authorization. The live NAVER proof runs only under a fresh, single-use,
-in-turn approval naming channel / account / date / operator, and will record — sanitized (sameness /
-enums / counts only, never a raw slot, path, cookie, token, or personal data):
+Real product path: disposable-DB backend `:8080` → SellerOps frontend `:5174` (bridge) → paired collector
+`:47620` → a REAL NAVER SmartStore account. Recorded **sanitized** — counts, enums, and sameness only,
+never a raw slot, profile leaf, cookie, token, account id, or personal data. The stale prior agent on
+`:47615` was left untouched throughout. The disposable DB started **empty** (0 reviews, 0 issue rows).
 
-| step | to observe | proves |
+| step | observed | proves |
 |---|---|---|
-| migration | (none new) V30/V31 already applied | loop adds no schema |
-| iteration 1 | run a segment; COVERED ingest | the existing guided path still works end to end |
-| refresh | issue-memory changed after ingest without a manual `/extract` | AFTER_COMMIT refresh fired |
-| summary | `GET …/loop-summary` returns collection totals + candidate-signal change counts | derived projection |
-| forward-extend | `POST …/plans/{id}/extend` adds a segment for the new period; plan reopens to ACTIVE | incremental loop |
-| iteration 2 | run the newly-added segment from the SAME account session (no re-login) | session reuse across the loop |
-| recovery | kill mid-run → restart → same segment re-mints (no re-login, no double-count) | recovery over existing truth |
+| migration | Flyway applied V1..**V31** on real Postgres (`V28 → V30 → V31`, no V29); **0 new migrations** from this slice | loop adds no schema |
+| ingest | the operator exported **May 2026** reviews **on NAVER themselves**, and the file ingested through the product file-import path: **310 new, 0 duplicate, 0 failed**; the May segment → COMPLETED/COVERED/310 | real download·ingest·coverage on real data |
+| dedupe | re-ingesting the **same** file → **0 new / 310 duplicate**; `reviews` stayed 310 | overlap-safe dedup on 리뷰글번호 |
+| **refresh** | with **no** manual `POST /extract` or `/lifecycle-pass`, the issue memory went 0 → **2 issues, 3 evidence, 474 UNKNOWN units, 2 lifecycle state-events** immediately after the ingest committed | the AFTER_COMMIT `ReviewSegmentIngestedEvent` fired the bounded, idempotent refresh |
+| summary | `GET /api/review-ops/loop-summary` returned `lastCoveredDate`, `newCount`, `nextRecommendedImport`, `upToDate=false`, and `issueChange.workingTotal=2` — all derived at read | completion + change-summary projection, no durable state |
+| **forward-extend** | from a plan simulated to last reach 2026-06-30, `POST …/plans/{id}/extend` materialized a new **2026-07-01…07-27 PENDING** segment, advanced `requestedEnd` to today, and reopened the plan to **ACTIVE**; a second extend added nothing | incremental loop, idempotent |
+| account profile | exactly **one** account-scoped profile dir (`naver-agent-<hash>`) was created for the account, holding the operator's NAVER session | account-scoped session binding (#366) |
+| recovery | an agent restart mid-run ABANDONED the in-flight run, wrote **no launch ref to disk**, and the server kept the same ISSUED ticket with all segments still PENDING (no double-count) — the same segment was re-hostable on relaunch | recovery over existing durable truth |
+
+**Honest limitation (recorded, not hidden).** The guided **in-page highlight/overlay** export leg did not
+render in this session's headed browser — the run opened the account-scoped NAVER window but
+`prepareSurface` did not drive the overlay, so no highlight appeared. That path is **unchanged collector
+runtime** (this slice touches none of it) and was live-proven in #365/#366; rather than debug an unrelated
+runtime issue blind, the live ingest above used the **sanctioned human-driven alternative** — the operator
+exports on NAVER, SellerOps processes the resulting file (`collector/CLAUDE.md` §4.7). Every new piece this
+slice adds (forward-extension, after-ingest refresh, loop-summary, recovery) fires on **any** COVERED
+ingest, so all were verified on the real data above. Re-proving the guided overlay is a separate,
+already-covered concern.
 
 ## Boundaries (still locked)
 
