@@ -93,6 +93,33 @@ The single human checkpoint / hold is the engine's fail-closed session block (th
 trial-and-error that preceded a clean run (contract ESM load, FE/backend/bridge port + CORS + origin config, and
 the now-fixed session-block recovery gap) is captured in `live-import-run-preflight-gotchas.md`.
 
+## Live re-verification — recoverable session flow, 2026-07-27 (same PR, single-use approval)
+
+Run under a fresh single-use in-turn approval ("Seated and ready"; channel NAVER · test demo org/account ·
+2026-07-27 · seated operator; §4.1 pause lifted for the one run). Same product path (disposable-DB backend →
+SellerOps frontend bridge mode → paired collector → real NAVER SmartStore review page), on the branch head that
+carries the recoverable-session fix. This run's purpose was to exercise the block→recheck→resume path the first
+live run could not (it predated the fix). The seller started the run with **NAVER logged out** so the first
+probe would read not-usable — the exact condition that used to end terminal `FAILED`.
+
+Observed live, sanitized enums/buckets only:
+
+| moment | live evidence (sanitized) | proves |
+|---|---|---|
+| AGENT_START | `readiness_probe {naver, UNOBSERVED_EXTERNAL, AGENT_START}` at boot | no guessed READY |
+| BEFORE_WORK admission | `acquisition_admit {NAVER_ACTION_WINDOW_IMPORT, HOLD_UNOBSERVED, admit: true}` | probe-permissive — a stale not-ready readiness did not refuse the run |
+| DISPATCH → Import Host | `aw_import_host_run_hosted {SEGMENT}` | existing host path entered |
+| **park, not fail** | `readiness_probe {naver, LOGIN_REQUIRED, SESSION_FAILURE}`; **`RUN_FAILED` count = 0** | recoverable `SESSION_BLOCKED`, ticket stays live — the fix |
+| **safe re-park** | a second `readiness_probe {naver, LOGIN_REQUIRED, SESSION_FAILURE}` after a `REQUEST_STEP_RECHECK` pressed while still logged out | still-blocked recheck re-parks — no failure, no infinite retry |
+| **MANUAL_RECHECK → resume** | after the seller logged into NAVER + pressed 다시 확인: `readiness_probe {naver, READY, MANUAL_RECHECK}` → `aw_import_scope_verdict {MATCH}` → `upload.segment.done {SUCCEEDED, rowsNew: few, rowsDuplicate: tens, rowsFailed: zero}` | resume on the **same segment and ticket** to completion |
+
+Backend truth after the run: the segment moved to `execution_state = COMPLETED`, `coverage_state = COVERED`;
+its single-use launch is `CONSUMED` exactly once — **no ticket expire, no re-mint** across the whole
+block → re-park → login → recheck → resume → complete sequence. The card surfaced the recoverable checkpoint
+("잠깐 멈췄어요 / 다시 로그인이 필요해요"), not a terminal failure. This closes the recovery-path gap the first live
+run surfaced: the earlier "auto-resume" claim (corrected above) is now backed by an in-run `REQUEST_STEP_RECHECK`
+re-check, not a manual expire + re-mint workaround.
+
 ## Boundaries (still locked)
 
 - **The live run above was the only marketplace contact, under a single-use approval.** Any further live run

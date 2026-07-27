@@ -53,10 +53,14 @@ Four independently-configured surfaces (backend, frontend, bridge, browser). Mos
 6. **Session-probe timing.** The run probes the NAVER session the instant it starts. If the seller has not
    finished NAVER login, the probe reads not-usable → `SESSION_FAILURE` (`EXPIRED`/`LOGIN_REQUIRED`). **Best
    practice:** the seller logs into NAVER **before** pressing start, so the first probe reads READY.
-   **Recovery is now clean (FIXED in PR #365):** a recoverable session block parks at `SESSION_BLOCKED`, not
-   terminal `FAILED`. The card/panel offers 다시 확인 (`REQUEST_STEP_RECHECK`); after the seller logs in, pressing
-   it re-runs the session probe on the **same segment and ticket** (`READY`, `MANUAL_RECHECK`) and the run
-   resumes — no ticket expire, no re-mint, no fresh run.
+   **Recovery is now clean (FIXED in PR #365, live-verified 2026-07-27):** a recoverable session block parks at
+   `SESSION_BLOCKED`, not terminal `FAILED`. The card/panel offers 다시 확인 (`REQUEST_STEP_RECHECK`); after the
+   seller logs in, pressing it re-runs the session probe on the **same segment and ticket** (`READY`,
+   `MANUAL_RECHECK`) and the run resumes — no ticket expire, no re-mint, no fresh run. Live-verified in a
+   logged-out-first run: `SESSION_FAILURE` (park, `RUN_FAILED`=0) → a still-logged-out 다시 확인 re-parks safely →
+   post-login 다시 확인 → `MANUAL_RECHECK` → `upload.segment.done {SUCCEEDED}`; ticket `CONSUMED` once. To exercise
+   this deliberately, launch the agent on a **fresh in-tree profile** (e.g. `COLLECTOR_PROFILE_DIR=$(pwd)/.profile/naver-<slug>`)
+   so NAVER starts logged out, and press 시작하기 before logging into NAVER.
    *Historical note (2026-07-27, before the fix):* the block was then terminal `FAILED` (no commands, ticket
    stuck OPEN), and recovery required a manual `POST /api/imports/reviews/launches/{ref}/expire` → FE re-mint →
    start again. That workaround is no longer needed.
