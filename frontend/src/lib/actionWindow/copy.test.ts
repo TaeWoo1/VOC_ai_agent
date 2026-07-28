@@ -12,6 +12,8 @@ import {
   CHANNEL_FALLBACK,
   CONNECTION_VIEW,
   CONNECTION_RETRY_FAILED_NOTE,
+  RUNTIME_RECOVERY_VIEW,
+  runtimeRecoveryView,
 } from "./copy";
 
 describe("FE-owned copy registry", () => {
@@ -57,6 +59,26 @@ describe("FE-owned copy registry", () => {
     expect(CONNECTION_RETRY_FAILED_NOTE.length).toBeGreaterThan(0);
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("aw_");
     expect(CONNECTION_RETRY_FAILED_NOTE).not.toContain("offline");
+  });
+});
+
+describe("Pilot runtime — self-check recovery copy", () => {
+  it("gives every recovery key a real screen name + exactly one action (never a raw enum)", () => {
+    for (const [key, view] of Object.entries(RUNTIME_RECOVERY_VIEW)) {
+      expect(view.title.length).toBeGreaterThan(0);
+      expect(view.action.length).toBeGreaterThan(0);
+      // No SHOUTING_ENUM leaking into the copy.
+      expect(view.title).not.toMatch(/[A-Z_]{5,}/);
+      expect(view.action).not.toMatch(/[A-Z_]{5,}/);
+      expect(view.title).not.toContain(key);
+    }
+  });
+
+  it("resolves a known key and falls back safely for an unknown one (never leaks the key)", () => {
+    expect(runtimeRecoveryView("SET_REVIEW_URL").title).toContain("리뷰");
+    const fallback = runtimeRecoveryView("SOME_UNKNOWN_KEY");
+    expect(fallback.title).toBe(COPY_FALLBACK);
+    expect(fallback.title).not.toContain("SOME_UNKNOWN_KEY");
   });
 });
 

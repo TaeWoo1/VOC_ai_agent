@@ -57,7 +57,7 @@ import { fetchLaunchScope, login, reportSessionReadiness } from "../upload";
 import { accountScopedProfileDirFor, launchNaverContext } from "../profile";
 import type { BrowserContext, Page } from "playwright";
 import { decideSurfacePresentation } from "../naver/surface-presentation";
-import { log } from "../log";
+import { log, getLogSink } from "../log";
 import {
   ACTION_WINDOW_IMPORT_FLAG,
   importModeRefusalMessage,
@@ -74,6 +74,23 @@ import { parseAllowedOrigins } from "../bridge/origin-policy";
 import { nullApprovalPresenter, type ApprovalPresenter } from "../bridge/approval-presenter";
 import { createStderrApprovalPresenter } from "../bridge/stderr-approval-presenter";
 import { createMacOsApprovalPresenter } from "../bridge/macos-approval-presenter";
+import { createWindowsApprovalPresenter } from "../bridge/windows-approval-presenter";
+import {
+  acquirePilotRuntime,
+  buildSelfCheckInput,
+  isPilotMode,
+  runtimeSelfCheckFor,
+  type PilotRuntime,
+} from "../runtime/runtime-supervisor";
+import { RUNTIME_SELF_CHECK_RECOVERY } from "../runtime/self-check";
+import type { OwnedProcessRegistry } from "../runtime/owned-process-registry";
+import {
+  decideImportBoot,
+  importBootRefusalMessage,
+  readImportConsent,
+} from "../runtime/production-import-gate";
+import { buildDiagnosticBundle, writeDiagnosticExport } from "../runtime/diagnostics-export";
+import { currentRuntimePaths } from "../runtime/runtime-paths";
 
 /**
  * Collector package root — derived ONLY for the local Bridge pairing-file path (`.bridge/pairings.json`).
@@ -153,6 +170,9 @@ async function waitForHumanCompletions(
 
 /** Explicit per-run approval: booting a runnable browser connection launches a local Chrome. */
 export const LOCAL_AGENT_APPROVAL_FLAG = "--i-understand-this-launches-local-agent-chrome";
+
+/** One-shot support flag: run the self-check and write a sanitized diagnostics bundle, then exit. */
+export const EXPORT_DIAGNOSTICS_FLAG = "--export-diagnostics";
 
 /** DEV/TEST ONLY: auto-approve bridge pairing (never honored under NODE_ENV=production). */
 const BRIDGE_DEV_AUTO_APPROVE_FLAG = "--dev-insecure-auto-approve";
@@ -243,6 +263,40 @@ export function buildReplySubmissionConfig(): AgentReplySubmissionConfig {
  * Returns whether it worked, because the caller LOGS it: a claim that a window was raised has to be a measurement,
  * not an intention.
  */
+/**
+ * Record the pid of the Chrome process behind `page` in the owned-process registry, so a crash-recovering
+ * instance can reap it and the shutdown force-backstop has something to act on. Playwright's persistent
+ * context exposes no browser pid publicly, so we ask the browser itself over CDP: `SystemInfo.getProcessInfo`
+ * returns every browser-side process with its OS pid and type; the `"browser"` entry is the main process.
+ *
+ * Best-effort and never fatal: if the method is unavailable, the browser is still torn down by
+ * `context.close()` (Playwright's exact handle), and a crash orphan of a persistent Chrome self-terminates
+ * when the driver pipe closes. Returns the registered pid (to deregister on clean close), or null.
+ */
+async function registerBrowserProcess(page: Page, registry: OwnedProcessRegistry | undefined): Promise<number | null> {
+  if (!registry) return null;
+  try {
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const info = (await cdp.send("SystemInfo.getProcessInfo")) as {
+        processInfo?: Array<{ type?: string; id?: number }>;
+      };
+      const browser = info.processInfo?.find((p) => p.type === "browser");
+      if (browser && typeof browser.id === "number" && Number.isInteger(browser.id) && browser.id > 0) {
+        registry.register(browser.id, { kind: "browser" });
+        return browser.id;
+      }
+    } finally {
+      await cdp.detach().catch(() => {});
+    }
+  } catch {
+    // SystemInfo.getProcessInfo unavailable, or a browser that would not answer — the exact-handle
+    // context.close() teardown and Playwright's pipe-close self-termination still apply. Sanitized silence:
+    // a missing pid is a coarse fact, not a failure worth a line.
+  }
+  return null;
+}
+
 async function raiseWindowOf(page: Page): Promise<boolean> {
   try {
     const cdp = await page.context().newCDPSession(page);
@@ -292,6 +346,7 @@ async function raiseWindowOf(page: Page): Promise<boolean> {
  */
 export async function buildInitialImportConfig(
   env: NodeJS.ProcessEnv,
+  ownedProcesses?: OwnedProcessRegistry,
 ): Promise<{
   config: AgentImportConfig;
   close: () => Promise<void>;
@@ -339,6 +394,9 @@ export async function buildInitialImportConfig(
    */
   const context = await launchNaverContext(cfg.profileDir);
   const appPage = context.pages()[0] ?? (await context.newPage());
+  // Own the Chrome we just started (pilot only — `ownedProcesses` is undefined in dev/tests). Recorded by
+  // exact pid so a crash-recovering instance can reap it and shutdown can force-close it if needed.
+  const bootBrowserPid = await registerBrowserProcess(appPage, ownedProcesses);
   // Neither URL is ever logged: raw URLs are prohibited output (roadmap §9), so only the fact is.
   await appPage.goto(cfg.appUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
   log("aw_import_app_opened", {});
@@ -358,6 +416,8 @@ export async function buildInitialImportConfig(
   // The account-scoped persistent context the seller center lives in — separate from the boot context that
   // holds SellerOps, so two accounts' cookies never share a profile. Opened lazily by `openSurface`.
   let naverContext: BrowserContext | null = null;
+  // The account-context Chrome pid, once opened — registered as owned (pilot only) and deregistered on close.
+  let surfaceBrowserPid: number | null = null;
   /**
    * Open the MARKETPLACE tab, next to SellerOps, and build the real driver.
    *
@@ -390,6 +450,8 @@ export async function buildInitialImportConfig(
     if (!naverContext) naverContext = await launchNaverContext(profileDir);
     // The operator logs into NAVER here themselves — the collector never types NAVER credentials.
     const page = naverContext.pages()[0] ?? (await naverContext.newPage());
+    // Own the account-context Chrome (pilot only). Once: the context (and its pid) survives a tab re-open.
+    if (surfaceBrowserPid === null) surfaceBrowserPid = await registerBrowserProcess(page, ownedProcesses);
     await page.goto(reviewUrl, { waitUntil: "domcontentloaded" });
     await page.bringToFront().catch(() => {});
     // Enum/boolean only — the opaque slot and the profile path are never logged (no identity on the wire, in a
@@ -558,6 +620,10 @@ export async function buildInitialImportConfig(
     // Close both windows: the boot/SellerOps context and, if a run opened it, the account-scoped seller-center
     // context. The account context is closed first so its persistent profile is flushed cleanly on the way out.
     close: async () => {
+      // Deregister the browsers we own BEFORE closing them: context.close() is the clean exact-handle
+      // teardown, so once closed they are no longer ours to force-kill (and their pids may be recycled).
+      if (bootBrowserPid !== null) ownedProcesses?.deregister(bootBrowserPid);
+      if (surfaceBrowserPid !== null) ownedProcesses?.deregister(surfaceBrowserPid);
       if (naverContext) await naverContext.close().catch(() => undefined);
       await context.close();
     },
@@ -582,7 +648,42 @@ export async function buildInitialImportConfig(
  * What it deliberately does NOT do: no connector startup, no per-connection Chrome, no status sentinels.
  * One browser for the seller to log into, one bridge for the frontend to attach to, nothing else.
  */
-async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
+async function runImportOnlyBoot(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  pilot: PilotRuntime | null,
+): Promise<void> {
+  // The approval presenter is decided FIRST — before anything launches — because its availability is a
+  // self-check input (a Windows/Linux host with no adapter cannot pair, and the seller should learn that at
+  // boot, not when they press 연동). Building it is side-effect-free.
+  const approvalKind = decideApprovalPresenter(env, process.platform);
+  const approvalPresenter = createApprovalPresenterFor(approvalKind);
+
+  // **Pilot pre-flight self-check (backend · bridge · origin · version · capability).** Runs before the
+  // browser launches; each issue is logged as a sanitized enum + its one recovery-action key — never a URL,
+  // host, port, or path. It WARNS rather than refuses: an operator can still fix env, and a false alarm must
+  // not block a correct-but-unusual setup.
+  const cfg = loadConfig(env);
+  const backendReachable = await probeBackendReachable(cfg.baseUrl);
+  const selfCheck = runtimeSelfCheckFor(
+    buildSelfCheckInput({
+      appUrl: cfg.appUrl,
+      allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
+      backendReachable,
+      agentVersion: AGENT_VERSION,
+      requiredAgentVersion: env.SELLEROPS_MIN_AGENT_VERSION,
+      reviewUrlPresent: Boolean(cfg.naverReviewUrl),
+      browserChannel: cfg.browserChannel,
+      platform: process.platform,
+      profilesDir: cfg.profileBaseDir,
+      approvalChannelAvailable: approvalPresenter.available(),
+    }),
+  );
+  for (const issue of selfCheck.issues) {
+    log("aw_runtime_self_check", { issue, recovery: RUNTIME_SELF_CHECK_RECOVERY[issue] }, "warn");
+  }
+  log("aw_runtime_self_check_summary", { ok: selfCheck.ok, issues: selfCheck.issues.length });
+
   let built: {
     config: AgentImportConfig;
     close: () => Promise<void>;
@@ -590,18 +691,19 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
     onAgentStart: () => void;
   };
   try {
-    built = await buildInitialImportConfig(env);
+    built = await buildInitialImportConfig(env, pilot?.ownedProcesses);
   } catch (err) {
     // A missing precondition is an operator message, not a stack trace — and nothing has been launched.
     console.error(`[local-agent] ${(err as Error).message}`);
+    pilot?.releaseLock();
     process.exit(6);
     return;
   }
   const { config, close, warmUpSurface, onAgentStart } = built;
-  const approvalKind = decideApprovalPresenter(env, process.platform);
+  const bridgeCfg = resolveAgentBridgeConfig(args, env);
   const bridge = createAgentBridge({
-    ...resolveAgentBridgeConfig(args, env),
-    approvalPresenter: createApprovalPresenterFor(approvalKind),
+    ...bridgeCfg,
+    approvalPresenter,
     initialImport: config,
     /**
      * The seller opened SellerOps and asked to be connected — so bring their seller center up now.
@@ -643,11 +745,27 @@ async function runImportOnlyBoot(args: readonly string[], env: NodeJS.ProcessEnv
     stopped = true;
     bridge.markAgentStopping();
     await bridge.close().catch(() => {});
+    // `close()` tears the browser down through Playwright (the exact process we launched). The owned-process
+    // registry is a force backstop for anything that survived — it only ever signals pids WE recorded, never
+    // a pattern, so the seller's own Chrome and any other SellerOps process are untouched.
     await close().catch(() => {});
+    if (pilot) {
+      pilot.ownedProcesses.terminateAll("force");
+      writePilotDiagnostics(pilot, selfCheck, {
+        bound: true,
+        port: bridgeCfg.port,
+        originsConfigured: bridgeCfg.allowedOrigins.length,
+        paired: safeLiveClientCount(bridge) > 0,
+      });
+      pilot.releaseLock();
+    }
     console.log(JSON.stringify({ mode: "IMPORT_ONLY", stopped: true }));
   };
   process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
   process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));
+  // Final sync net (symmetric with the connector boot): even an abnormal exit releases the lock. Idempotent
+  // with shutdown's releaseLock; a lingering lock would be dead-pid-reaped next start anyway.
+  if (pilot) process.on("exit", () => pilot.releaseLock());
   await new Promise<void>(() => {
     /* run until signalled */
   });
@@ -695,6 +813,8 @@ export function buildActionWindowConfig(
   };
 }
 const DEFAULT_BRIDGE_PORT = 47615;
+/** The agent build version — surfaced to the FE over the bridge and stamped into the single-instance lock. */
+export const AGENT_VERSION = "0.0.1-poc";
 /** Dev-convenience default allow-list (Vite dev server); production MUST set BRIDGE_ALLOWED_ORIGINS. */
 const DEV_DEFAULT_BRIDGE_ORIGINS = "http://localhost:5173 http://127.0.0.1:5173";
 
@@ -704,11 +824,21 @@ export function resolveAgentBridgeConfig(
   env: NodeJS.ProcessEnv,
 ): { port: number; allowedOrigins: string[]; pairingFile: string; agentVersion: string; refSalt: string; autoApprovePairing: boolean } {
   const port = env.BRIDGE_PORT ? Number(env.BRIDGE_PORT) : DEFAULT_BRIDGE_PORT;
+  // The dev-origin fallback is DEV ONLY. In production a missing allow-list must NOT silently bind the bridge
+  // to `localhost:5173` — it fails closed (empty allow-list → no FE origin is accepted), and the self-check
+  // surfaces `BRIDGE_ORIGINS_EMPTY` with its recovery. So a mis-configured pilot install refuses connections
+  // rather than trusting a dev origin.
+  const originsRaw = env.BRIDGE_ALLOWED_ORIGINS ?? (env.NODE_ENV === "production" ? "" : DEV_DEFAULT_BRIDGE_ORIGINS);
   return {
     port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : DEFAULT_BRIDGE_PORT,
-    allowedOrigins: parseAllowedOrigins(env.BRIDGE_ALLOWED_ORIGINS ?? DEV_DEFAULT_BRIDGE_ORIGINS),
-    pairingFile: resolve(collectorRoot, ".bridge", "pairings.json"),
-    agentVersion: "0.0.1-poc",
+    allowedOrigins: parseAllowedOrigins(originsRaw),
+    // The durable pairing store. In-tree by default (dev); relocated to the per-user data root by the pilot
+    // runtime (`SELLEROPS_BRIDGE_PAIRING_FILE`) so an in-place update keeps the pairing — the seller does not
+    // have to re-pair after every update.
+    pairingFile: env.SELLEROPS_BRIDGE_PAIRING_FILE?.trim()
+      ? resolve(env.SELLEROPS_BRIDGE_PAIRING_FILE.trim())
+      : resolve(collectorRoot, ".bridge", "pairings.json"),
+    agentVersion: AGENT_VERSION,
     refSalt: env.BRIDGE_REF_SALT ?? env.STORAGE_PROBE_SALT ?? "sellerops-bridge",
     autoApprovePairing: args.includes(BRIDGE_DEV_AUTO_APPROVE_FLAG) && env.NODE_ENV !== "production",
   };
@@ -720,7 +850,7 @@ export function resolveAgentBridgeConfig(
  * - `dev_tty_stderr` — DEV: the agent's own terminal. Itself unavailable when stderr is redirected.
  * - `none` — no human channel exists → the bridge fails closed (`503 approval_unavailable`).
  */
-export type ApprovalPresenterKind = "macos_native" | "dev_tty_stderr" | "none";
+export type ApprovalPresenterKind = "macos_native" | "windows_native" | "dev_tty_stderr" | "none";
 
 /**
  * **PURE decision: which approval presenter should this boot wire?** (no I/O, no adapter construction).
@@ -734,7 +864,14 @@ export type ApprovalPresenterKind = "macos_native" | "dev_tty_stderr" | "none";
  * than degrading to a confirm any local process could forge.
  */
 export function decideApprovalPresenter(env: NodeJS.ProcessEnv, platform: string): ApprovalPresenterKind {
-  if (env.NODE_ENV === "production") return platform === "darwin" ? "macos_native" : "none";
+  if (env.NODE_ENV === "production") {
+    // Windows now has a native adapter (the pilot target), so a packaged Windows agent can pair — it no
+    // longer fails closed the way `none` did. macOS keeps its dialog; every other host still fails closed
+    // until its adapter exists (ADR §3.3), which is honest, not a regression.
+    if (platform === "darwin") return "macos_native";
+    if (platform === "win32") return "windows_native";
+    return "none";
+  }
   return "dev_tty_stderr";
 }
 
@@ -743,6 +880,8 @@ export function createApprovalPresenterFor(kind: ApprovalPresenterKind): Approva
   switch (kind) {
     case "macos_native":
       return createMacOsApprovalPresenter();
+    case "windows_native":
+      return createWindowsApprovalPresenter();
     case "dev_tty_stderr":
       return createStderrApprovalPresenter();
     case "none":
@@ -778,6 +917,79 @@ export function safeExportFilename(suggested: string): string {
   const base = basename(suggested).replace(/[/\\]/g, "").trim();
   if (base === "" || base === "." || base === "..") return "review-export.xlsx";
   return base;
+}
+
+/**
+ * One-shot diagnostics export: run the self-check and write a sanitized bundle (self-check + a scrubbed log
+ * tail + agent facts), then print where it landed. Launches nothing, so it is safe on any host. The file path
+ * is shown to the SELLER on their own machine (stderr), never emitted to the wire.
+ */
+async function runDiagnosticsExport(args: readonly string[], env: NodeJS.ProcessEnv): Promise<void> {
+  const cfg = loadConfig(env);
+  const approvalPresenter = createApprovalPresenterFor(decideApprovalPresenter(env, process.platform));
+  const backendReachable = await probeBackendReachable(cfg.baseUrl);
+  const bridgeCfg = resolveAgentBridgeConfig(args, env);
+  const selfCheck = runtimeSelfCheckFor(
+    buildSelfCheckInput({
+      appUrl: cfg.appUrl,
+      allowedOrigins: bridgeCfg.allowedOrigins,
+      backendReachable,
+      agentVersion: AGENT_VERSION,
+      requiredAgentVersion: env.SELLEROPS_MIN_AGENT_VERSION,
+      reviewUrlPresent: Boolean(cfg.naverReviewUrl),
+      browserChannel: cfg.browserChannel,
+      platform: process.platform,
+      profilesDir: cfg.profileBaseDir,
+      approvalChannelAvailable: approvalPresenter.available(),
+    }),
+  );
+  const diagnosticsDir = isPilotMode(env) ? currentRuntimePaths(env).diagnosticsDir : resolve(collectorRoot, ".diagnostics");
+  const bundle = buildDiagnosticBundle({
+    now: new Date().toISOString(),
+    agent: { version: AGENT_VERSION, protocolVersion: 1, platform: process.platform },
+    selfCheck: { ok: selfCheck.ok, issues: [...selfCheck.issues] },
+    lifecycle: { lockRecovered: false, ownedProcessCount: 0 },
+    bridge: { bound: false, port: bridgeCfg.port, originsConfigured: bridgeCfg.allowedOrigins.length, paired: false },
+    logTail: getLogSink(),
+  });
+  const path = writeDiagnosticExport(diagnosticsDir, bundle);
+  console.log(JSON.stringify({ event: "DIAGNOSTICS_EXPORTED", ok: selfCheck.ok, issues: selfCheck.issues.length }));
+  console.error(`진단 파일을 저장했어요. 지원팀에 이 파일을 보내주세요: ${path}`);
+}
+
+/** Best-effort live-client count from the bridge (structural, guarded) — for the diagnostics `paired` boolean. */
+function safeLiveClientCount(bridge: { server?: { liveClientCount?: () => number } }): number {
+  try {
+    return bridge.server?.liveClientCount?.() ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Write a sanitized diagnostics bundle to the data root on shutdown, so support always has the last state
+ * without the seller having to reproduce a fault. Never blocks or fails a shutdown; the bundle carries only
+ * enums/booleans/counts and a scrubbed metadata-only log tail (see `diagnostics-export`).
+ */
+function writePilotDiagnostics(
+  pilot: PilotRuntime,
+  selfCheck: { ok: boolean; issues: readonly string[] },
+  bridge: { bound: boolean; port: number; originsConfigured: number; paired: boolean },
+): void {
+  try {
+    const bundle = buildDiagnosticBundle({
+      now: new Date().toISOString(),
+      // Protocol version is the bridge's `BRIDGE_PROTOCOL_VERSION` (currently 1) — a fixed integer, not a secret.
+      agent: { version: pilot.agentVersion, protocolVersion: 1, platform: process.platform },
+      selfCheck: { ok: selfCheck.ok, issues: [...selfCheck.issues] },
+      lifecycle: { lockRecovered: pilot.lockRecovered, ownedProcessCount: pilot.ownedProcesses.snapshot().length },
+      bridge,
+      logTail: getLogSink(),
+    });
+    writeDiagnosticExport(pilot.paths.diagnosticsDir, bundle);
+  } catch {
+    /* diagnostics must never block shutdown */
+  }
 }
 
 function flagValue(args: readonly string[], name: string): string | undefined {
@@ -917,15 +1129,68 @@ function usage(): string {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // The import mode is its own boot and is decided BEFORE anything else, including the connections gate —
-  // see runImportOnlyBoot for why coupling it to the connector lineage was wrong.
-  const importGate = resolveImportMode(args, process.env);
-  if (importGate.host) {
-    await runImportOnlyBoot(args, process.env);
+  // **Diagnostics export (one-shot).** A support tool the seller can run without a live agent: it runs the
+  // self-check and writes a sanitized bundle, then exits. Allowed on every path (it launches nothing).
+  if (args.includes(EXPORT_DIAGNOSTICS_FLAG)) {
+    await runDiagnosticsExport(args, process.env);
     return;
   }
-  const importRefusal = importModeRefusalMessage(importGate.reason);
-  if (importRefusal) console.error(`[local-agent] ${importRefusal}`);
+
+  // **Pilot runtime lifecycle.** In pilot mode (a packaged production agent, or SELLEROPS_PILOT_RUNTIME) take
+  // the single-instance lock and relocate the durable paths onto the per-user data root BEFORE any boot path
+  // reads config. A live holder → refuse (duplicate prevention); a dead holder → take over and reap its
+  // orphans (crash recovery). In dev this is a no-op, so the existing suite/CLIs are unchanged.
+  let pilot: PilotRuntime | null = null;
+  if (isPilotMode(process.env)) {
+    const acquired = acquirePilotRuntime({ env: process.env, platform: process.platform, agentVersion: AGENT_VERSION });
+    if (!acquired.ok) {
+      // A sanitized fact — a pid, never a token/path. The launcher treats this as "already running", not a crash.
+      console.error(JSON.stringify({ event: "ALREADY_RUNNING", holderPid: acquired.holderPid }));
+      process.exit(0);
+      return;
+    }
+    pilot = acquired.runtime;
+    if (pilot.lockRecovered) {
+      log("aw_runtime_crash_recovered", { reapedOrphans: pilot.reapTally?.signaled ?? 0 });
+    }
+  }
+
+  // The import mode is its own boot and is decided BEFORE anything else, including the connections gate —
+  // see runImportOnlyBoot for why coupling it to the connector lineage was wrong. In production it is admitted
+  // by a recorded install-time consent (no dev flag); in dev the flag gate is unchanged.
+  const configDir = pilot ? pilot.paths.configDir : resolve(collectorRoot, "config");
+  const importBoot = decideImportBoot(args, process.env, readImportConsent(resolve(configDir, "import-consent.json")));
+  if (importBoot.host) {
+    await runImportOnlyBoot(args, process.env, pilot);
+    return;
+  }
+  // Preserve the precise DEV refusal message (approval missing, carrier conflict, …); production reasons use
+  // the seller-facing copy. Either way, `NOT_REQUESTED` prints nothing — a normal agent boot is not a failure.
+  if (importBoot.reason === "DEV_GATE_REFUSED") {
+    const dev = resolveImportMode(args, process.env);
+    if (!dev.host) {
+      const m = importModeRefusalMessage(dev.reason);
+      if (m) console.error(`[local-agent] ${m}`);
+    }
+  } else {
+    const m = importBootRefusalMessage(importBoot.reason);
+    if (m) console.error(`[local-agent] ${m}`);
+  }
+  // The connector boot must release the pilot lock on exit too — thread the handle into its shutdown below,
+  // and register a final sync net so even an early error-exit removes the lock (a lingering lock is still
+  // safe — the next start reaps a dead-pid lock — but releasing is cleaner).
+  const pilotForConnector = pilot;
+  if (pilotForConnector) process.on("exit", () => pilotForConnector.releaseLock());
+
+  // A pilot agent is import-only for v1. If import did not host (e.g. consent not yet recorded) and there is
+  // no connections file, there is nothing to boot — exit cleanly (the message above already told the seller
+  // what to do) rather than falling into the connector's "missing-connections-path" error. releaseLock is
+  // idempotent with the exit net above.
+  if (pilotForConnector && !flagValue(args, "--connections")) {
+    pilotForConnector.releaseLock();
+    process.exit(0);
+    return;
+  }
 
   const connectionsPath = flagValue(args, "--connections");
   if (!connectionsPath) {
@@ -1038,6 +1303,12 @@ async function main(): Promise<void> {
     const report = await startup.shutdown();
     console.log(JSON.stringify({ event: "SHUTDOWN", ...report }));
     await bridge.close();
+    // Pilot: force-terminate any owned processes the connector runtime did not close (only recorded pids —
+    // never a pattern), then release the single-instance lock so the next launch can bind.
+    if (pilotForConnector) {
+      pilotForConnector.ownedProcesses.terminateAll("force");
+      pilotForConnector.releaseLock();
+    }
   });
   const onSignal = (): void => void guardedShutdown().then(() => process.exit(0));
   process.on("SIGINT", onSignal);

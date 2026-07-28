@@ -49,3 +49,10 @@ findings/*.local.md
 
 # Store-identity diagnostic records (key names + digest prefixes only, but agent-local; never committed)
 .store-identity-diagnostics/
+
+# Windows packaging build artifact (bundled Node + app + node_modules). Assembled by the packager, never
+# committed — it can be hundreds of MB and would carry a Node runtime + Playwright browsers into git.
+packaging/windows/payload/
+
+# Per-user pilot data root, if a dev sets SELLEROPS_AGENT_DATA_DIR inside the tree (profiles/pairing/logs).
+.agent-data/

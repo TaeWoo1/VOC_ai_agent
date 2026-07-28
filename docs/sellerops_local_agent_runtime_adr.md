@@ -71,9 +71,16 @@
 ### 3.3 AgentLifecycle 경계
 - **책임**: 에이전트 기동/종료/자동시작/백그라운드 주기 실행(세션 점검·설정된 수집), 웹 UI와 독립된 수명.
 - **현행 증거**: `local-agent.ts`가 SIGINT/SIGTERM idempotent shutdown, 브라우저 연결은 상주(WAITING/
-  HUMAN 핸드오프). **트레이·인스톨러·OS 자동시작은 명시적으로 미구현**(주석). 주기 실행(catch-up)은
-  "not-yet-existing slice".
-- **어댑터 축**: OS별 자동시작/설치(전부 미구현).
+  HUMAN 핸드오프). 주기 실행(catch-up)은 "not-yet-existing slice".
+- **[상태 갱신 2026-07-28 — Pilot-Ready Local Agent Runtime v1]**: **Windows 어댑터가 구현됨**(오프라인
+  완료, 온-디바이스 검증 대기). 단일 인스턴스 락(라이브니스 기반)+크래시 복구, 소유 프로세스만
+  PID/프로세스그룹으로 종료(이름 매칭 금지), per-user 데이터 루트(업데이트 시 프로필/페어링 보존),
+  부트 self-check(backend·bridge·origin·version·capability), 진단 내보내기, 그리고 **로그인 시 자동 시작
+  (Startup 폴더 바로가기 — Windows 서비스 아님: 헤드 Chrome은 사용자 세션에서 떠야 함)**.
+  설치·업데이트·제거 스크립트는 `collector/packaging/windows/`, 설계·검증표는
+  `docs/action-window-runtime/pilot-ready-local-agent-runtime.md`. 자동 재로그인·Device Vault는 여전히
+  미구현이며, 세션 재사용은 영속 프로필 쿠키로만 이뤄진다(§3.2/§4 유지).
+- **어댑터 축**: **Windows — 구현됨(위)**; macOS 자동시작/인스톨러는 미구현.
 - **네이티브 승인 presenter — macOS 지원, 그 외 미구현 (2026-07-15)**: 페어링 승인 비밀은
   `ApprovalPresenter` 포트로만 사람에게 전달되며(`collector/src/bridge/approval-presenter.ts`,
   계약은 `docs/slices/local-agent-bridge.md` §0.2.1), 승인은 **모든 환경에서 fail-closed**다 —
@@ -102,7 +109,13 @@
       `{status:"declined"}` → 브리지는 요청을 **즉시 폐기**하고 `403 approval_declined`
       (≠ `503 approval_unavailable`)로 응답한다. 무시되어 자동 닫힘(gave up)은 `presented` —
       코드는 읽힐 시간 동안 표시되었고 사람이 브라우저에 입력 중일 수 있다(설계상 의도, 라이브 미관측).
-    - **Windows — 미구현**: PowerShell MessageBox 등. 동일 규칙(stdin 전용·argv 금지·인젝션 이스케이프) 적용.
+    - **Windows — 구현됨 (2026-07-28, Pilot-Ready v1; 온-디바이스 미검증)**:
+      `bridge/windows-approval-presenter.ts` — PowerShell `MessageBox`(OK/취소), 절대경로
+      `powershell.exe`·`shell:false`, 스크립트는 **stdin**(`-Command -`), 동적 값(오리진·라벨·승인 코드)은
+      전부 stdin에만(argv는 상수 플래그뿐), PowerShell 단일따옴표 리터럴 이스케이프(`'`→`''`)+제어문자
+      제거, fail-closed(비-win32·powershell 부재·오류·타임아웃→unavailable, 취소→declined). macOS와 동일
+      규칙. **온-스크린 표시는 라이브 미검증**(주입 시임으로만 테스트) — §4.6 정직성 규칙대로 운영자
+      실행 전까지 미확정. `decideApprovalPresenter`가 production+win32 → `windows_native`로 배선.
     - **Linux — 미구현**: `zenity`/`kdialog` 등. 동일 규칙 적용.
     - **DEV 전용**: TTY stderr presenter(`stderr-approval-presenter.ts`) — 리다이렉트된 stderr는
       사람 채널이 아니므로 unavailable, `NODE_ENV=production`에서 거부.

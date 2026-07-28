@@ -30,8 +30,12 @@ describe("decideApprovalPresenter (pure host decision)", () => {
     expect(decideApprovalPresenter(PROD, "darwin")).toBe("macos_native");
   });
 
-  it("production off macOS → none (fail-closed; no adapter exists yet)", () => {
-    for (const platform of ["linux", "win32", "freebsd"]) {
+  it("production on Windows → the native dialog (the pilot adapter — pairing no longer fails closed)", () => {
+    expect(decideApprovalPresenter(PROD, "win32")).toBe("windows_native");
+  });
+
+  it("production on a host with no adapter yet → none (fail-closed)", () => {
+    for (const platform of ["linux", "freebsd"]) {
       expect(decideApprovalPresenter(PROD, platform)).toBe("none");
     }
   });
@@ -55,7 +59,7 @@ describe("createApprovalPresenterFor", () => {
   });
 
   it("builds a presenter for every kind without performing I/O", () => {
-    for (const kind of ["macos_native", "dev_tty_stderr", "none"] as const) {
+    for (const kind of ["macos_native", "windows_native", "dev_tty_stderr", "none"] as const) {
       const p = createApprovalPresenterFor(kind);
       expect(typeof p.available).toBe("function");
       expect(typeof p.present).toBe("function");

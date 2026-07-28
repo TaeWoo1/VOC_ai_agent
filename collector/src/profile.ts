@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type BrowserContext } from "playwright";
 import { log } from "./log";
@@ -49,17 +49,22 @@ export interface PwDownload {
 }
 
 /**
- * Resolve and guard the persistent-profile directory. The POC keeps the NAVER
- * session inside the collector tree only; refuse any path that escapes it so a
- * misconfiguration cannot scatter session data across the filesystem.
+ * Resolve and guard the persistent-profile directory. A profile must live under a *controlled* base so a
+ * misconfiguration cannot scatter session data across the filesystem — but there are now two legitimate
+ * bases: the in-tree `.profile` (dev), and the pilot's per-user data root (`COLLECTOR_PROFILE_BASE_DIR`,
+ * e.g. `%LOCALAPPDATA%\SellerOps\Agent\profiles`) where the login survives an in-place update. Any path under
+ * EITHER is allowed; anything escaping both is refused. Uses `path.sep`, so the containment check is correct
+ * on Windows (where `resolve` yields `\` separators) as well as POSIX.
  */
 export function resolveProfileDir(profileDir: string, root: string = collectorRoot): string {
   const resolved = resolve(profileDir);
-  const base = resolve(root);
-  if (resolved !== base && !resolved.startsWith(base + "/")) {
-    throw new Error("profile dir must live inside the collector directory");
+  const bases = new Set<string>([resolve(root)]);
+  const pilotBase = process.env.COLLECTOR_PROFILE_BASE_DIR?.trim();
+  if (pilotBase) bases.add(resolve(pilotBase));
+  for (const base of bases) {
+    if (resolved === base || resolved.startsWith(base + sep)) return resolved;
   }
-  return resolved;
+  throw new Error("profile dir must live inside a controlled profile base");
 }
 
 /**

@@ -29,16 +29,30 @@ describe("resolveProfileDir", () => {
   });
 
   it("rejects an absolute path outside the collector root", () => {
-    expect(() => resolveProfileDir("/etc/passwd", ROOT)).toThrow(/inside the collector/);
+    expect(() => resolveProfileDir("/etc/passwd", ROOT)).toThrow(/controlled profile base/);
   });
 
   it("rejects a traversal that escapes the collector root", () => {
-    expect(() => resolveProfileDir(`${ROOT}/../evil`, ROOT)).toThrow(/inside the collector/);
+    expect(() => resolveProfileDir(`${ROOT}/../evil`, ROOT)).toThrow(/controlled profile base/);
   });
 
   it("rejects a sibling whose name only prefixes the root", () => {
     // `${ROOT}-evil` shares the string prefix but is NOT under `${ROOT}/`.
-    expect(() => resolveProfileDir(`${ROOT}-evil/profile`, ROOT)).toThrow(/inside the collector/);
+    expect(() => resolveProfileDir(`${ROOT}-evil/profile`, ROOT)).toThrow(/controlled profile base/);
+  });
+
+  it("accepts a path under the pilot data-root base (COLLECTOR_PROFILE_BASE_DIR) even when outside the tree", () => {
+    const prev = process.env.COLLECTOR_PROFILE_BASE_DIR;
+    process.env.COLLECTOR_PROFILE_BASE_DIR = "/data/root/profiles";
+    try {
+      // A profile under the relocated pilot base is allowed (survives an update)...
+      expect(resolveProfileDir("/data/root/profiles/naver")).toBe("/data/root/profiles/naver");
+      // ...but a path under neither the tree nor the pilot base is still refused.
+      expect(() => resolveProfileDir("/somewhere/else/profile")).toThrow(/controlled profile base/);
+    } finally {
+      if (prev === undefined) delete process.env.COLLECTOR_PROFILE_BASE_DIR;
+      else process.env.COLLECTOR_PROFILE_BASE_DIR = prev;
+    }
   });
 });
 
@@ -81,7 +95,7 @@ describe("accountScopedProfileDirFor", () => {
     const dir = accountScopedProfileDirFor(BASE, "../../etc", SLOT_A);
     expect(dir.startsWith(`${BASE}/`)).toBe(true);
     // A base outside the collector tree is refused by the in-tree guard.
-    expect(() => accountScopedProfileDirFor("/tmp/evil", "naver", SLOT_A)).toThrow(/inside the collector/);
+    expect(() => accountScopedProfileDirFor("/tmp/evil", "naver", SLOT_A)).toThrow(/controlled profile base/);
   });
 });
 
