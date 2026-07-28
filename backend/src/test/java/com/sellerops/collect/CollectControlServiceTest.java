@@ -85,6 +85,8 @@ class CollectControlServiceTest {
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.order.ChannelOrderStatusEventRepository channelOrderStatusEvents;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -104,8 +106,10 @@ class CollectControlServiceTest {
         mock = new MockApiConnector();
         registry = new ConnectorRegistry(List.of(mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
+        com.sellerops.order.ChannelOrderIngestionService orderIngestion =
+                new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         executor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
         service = serviceWith(vaultWithKey(randomKeyBase64()));
     }
 

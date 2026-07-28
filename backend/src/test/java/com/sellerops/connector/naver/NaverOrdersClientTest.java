@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
+import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.time.Clock;
 import java.time.Instant;
@@ -146,6 +147,55 @@ class NaverOrdersClientTest {
         assertThat(detail.uri().getPath()).isEqualTo("/external/v1/pay-order/seller/product-orders/query");
         assertThat(detail.jsonBody()).contains("PO1").contains("PO2").contains("PO3")
                 .contains("productOrderIds");
+    }
+
+    @Test
+    void emitsPerOrderRecordsConsistentWithTheDailySummary() {
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null,
+                lcsItem("PO1", "O1", "2026-06-11T22:00:00+09:00"),
+                lcsItem("PO2", "O1", "2026-06-11T23:30:00+09:00"),
+                lcsItem("PO3", "O2", "2026-06-12T01:00:00+09:00"))));
+        http.enqueue(FakeNaverHttpClient.ok(detailBody(
+                detailItem("PO1", 10000L), detailItem("PO2", 20000L), detailItem("PO3", 5000L))));
+
+        FetchPage page = client.fetchOrderSummaryPage(TOKEN, null);
+
+        List<CanonicalOrder> orders = page.orders().stream().map(CanonicalOrder.class::cast).toList();
+        assertThat(orders).hasSize(3);
+        CanonicalOrder po1 = orders.stream().filter(o -> o.externalOrderId().equals("PO1")).findFirst().orElseThrow();
+        assertThat(po1.parentOrderId()).isEqualTo("O1");
+        assertThat(po1.rawStatusCode()).isEqualTo("PAYED");
+        assertThat(po1.paymentAmount()).isEqualTo(10000L);
+        assertThat(po1.summaryDate()).isEqualTo(LocalDate.parse("2026-06-11"));
+        assertThat(po1.paidAt()).isEqualTo(OffsetDateTime.parse("2026-06-11T22:00:00+09:00").toInstant());
+        assertThat(po1.statusChangedAt()).isEqualTo(OffsetDateTime.parse("2026-06-11T22:00:00+09:00").toInstant());
+
+        // Consistency: for every date the per-order aggregate equals the daily summary — both derive
+        // from the same countable set, so this can never silently drift.
+        List<CanonicalOrderSummary> summaries = page.records().stream()
+                .map(CanonicalOrderSummary.class::cast).toList();
+        for (CanonicalOrderSummary summary : summaries) {
+            List<CanonicalOrder> forDate = orders.stream()
+                    .filter(o -> o.summaryDate().equals(summary.summaryDate())).toList();
+            assertThat(forDate).hasSize(summary.orderCount());
+            assertThat(forDate.stream().mapToLong(CanonicalOrder::paymentAmount).sum())
+                    .isEqualTo(summary.salesAmount());
+        }
+    }
+
+    @Test
+    void missingProductOrderStatusFailsClosed() {
+        // The one required per-order status field, absent → fail closed for the page (symmetric with
+        // the amount invariant), never a per-order row carrying a null status.
+        String itemNoStatus = "{\"productOrderId\":\"PO1\",\"orderId\":\"O1\","
+                + "\"lastChangedType\":\"PAYED\",\"lastChangedDate\":\"2026-06-11T22:00:00+09:00\","
+                + "\"paymentDate\":\"2026-06-11T22:00:00+09:00\"}";
+        http.enqueue(FakeNaverHttpClient.ok(lcsBody(null, itemNoStatus)));
+        http.enqueue(FakeNaverHttpClient.ok(detailBody(detailItem("PO1", 10000L))));
+
+        assertThatThrownBy(() -> client.fetchOrderSummaryPage(TOKEN, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("주문 상태");
     }
 
     @Test

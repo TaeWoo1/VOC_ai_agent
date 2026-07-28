@@ -69,6 +69,8 @@ class CollectControlServiceNaverVerifierTest {
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.order.ChannelOrderStatusEventRepository channelOrderStatusEvents;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -95,8 +97,10 @@ class CollectControlServiceNaverVerifierTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver));
         IngestionService ingestion =
                 new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
+        com.sellerops.order.ChannelOrderIngestionService orderIngestion =
+                new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         SyncRunExecutor executor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
         service = new CollectControlService(sellerAccounts, channels, schedules, syncJobs,
                 connectionStatus, capabilities, registry, executor, vault,
                 new com.sellerops.selleraccount.AccountSessionSlotService(accountSlotRepo));

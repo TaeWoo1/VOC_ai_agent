@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sellerops.connector.DataType;
 import com.sellerops.connector.FetchPage;
+import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -123,9 +124,10 @@ public class NaverOrdersClient {
                 : cursor.advanced(now, KST, merged, countable.edgeIds());
         boolean hasMore = windowContinues || !next.isCaughtUp(now);
 
-        return FetchPage.of(DataType.ORDER_SUMMARY,
-                summaries(merged, countable.touchedDates()), serialize(next), hasMore,
-                NaverApiConnector.KIND);
+        return FetchPage.ofWithOrders(DataType.ORDER_SUMMARY,
+                summaries(merged, countable.touchedDates()),
+                perOrderRecords(countable.items(), amounts),
+                serialize(next), hasMore, NaverApiConnector.KIND);
     }
 
     /**
@@ -331,6 +333,40 @@ public class NaverOrdersClient {
         for (String date : touchedDates) {
             NaverOrdersCursor.DayTotal total = merged.get(date);
             out.add(new CanonicalOrderSummary(LocalDate.parse(date), total.orders(), total.amount(), row++));
+        }
+        return out;
+    }
+
+    /**
+     * The per-order projection of this page's countable items — the SAME deduped, in-horizon set the
+     * daily total is built from, so the two aggregations stay consistent by construction. Each paid
+     * product order carries only fields the API returns (id, parent id, raw status, amount, payment
+     * and status-change times) keyed to the same KST summary date; buyer PII is never read here.
+     */
+    private static List<CanonicalOrder> perOrderRecords(List<LastChangeStatus> items, Map<String, Long> amounts) {
+        List<CanonicalOrder> out = new ArrayList<>();
+        int row = 1;
+        for (LastChangeStatus item : items) {
+            Long amount = amounts.get(item.productOrderId());
+            if (amount == null) {
+                // Same invariant the daily merge enforces: no truthful record without the amount.
+                throw new IllegalStateException("네이버 주문 상세 응답에 누락된 상품주문이 있습니다.");
+            }
+            String rawStatus = item.productOrderStatus();
+            if (rawStatus == null || rawStatus.isBlank()) {
+                // Fail closed on the one required status field, symmetric with the amount check —
+                // a per-order row must never carry a null/blank status into persistence.
+                throw new IllegalStateException("네이버 변경 주문 응답에 주문 상태(productOrderStatus)가 없습니다.");
+            }
+            out.add(new CanonicalOrder(
+                    item.productOrderId(),
+                    item.orderId(),
+                    rawStatus,
+                    amount,
+                    LocalDate.parse(summaryDate(item)),
+                    parseInstantOrNull(item.paymentDate()),
+                    parseInstantOrNull(item.lastChangedDate()),
+                    row++));
         }
         return out;
     }

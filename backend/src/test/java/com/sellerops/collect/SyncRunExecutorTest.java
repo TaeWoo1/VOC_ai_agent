@@ -69,17 +69,23 @@ class SyncRunExecutorTest {
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
     @Autowired ConnectorCredentialRepository credentials;
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.order.ChannelOrderStatusEventRepository channelOrderStatusEvents;
 
     private MockApiConnector mock;
     private SyncRunExecutor executor;
+    // Stable across every executor built below — depends only on the two order repos + txManager.
+    private com.sellerops.order.ChannelOrderIngestionService orderIngestion;
     private final UUID org = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         mock = new MockApiConnector();
+        orderIngestion = new com.sellerops.order.ChannelOrderIngestionService(
+                channelOrders, channelOrderStatusEvents, txManager);
         ConnectorRegistry registry = new ConnectorRegistry(List.of(mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+        executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
     }
 
     private SellerAccount account(String channelCode) {
@@ -235,7 +241,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(flaky));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor flakyExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = flakyExecutor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL");
 
@@ -265,7 +271,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(naver, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         return new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
     }
 
     @Test
@@ -301,7 +307,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(coupang, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor coupangExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = coupangExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
 
@@ -342,7 +348,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = cafe24Executor.execute(org, acc.getId(), DataType.PRODUCT, "MANUAL");
 
@@ -366,7 +372,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(esm, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor esmExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = esmExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
 
@@ -390,7 +396,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(elevenst, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor elevenstExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = elevenstExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
 
@@ -414,7 +420,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(ssg, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor ssgExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = ssgExecutor.execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
 
@@ -462,6 +468,51 @@ class SyncRunExecutorTest {
         assertThat(cursor(acc.getId(), DataType.ORDER_SUMMARY).getCursorValue()).contains("windowFrom");
         assertThat(connectionStatus.findBySellerAccountId(acc.getId()).orElseThrow().getState())
                 .isEqualTo("CONNECTED");
+    }
+
+    @Test
+    void naverOrderSummaryPersistsPerOrderRowsAndCountsThem() {
+        // Two product orders on one KST date: the per-order rows are the counted unit (successRows=2)
+        // while the daily summary stays a single aggregated row — and each per-order row gets an
+        // initial status event. Proves the additive per-order path lands through the full chain.
+        SellerAccount acc = account("NAVER");
+        String masterKey = java.util.Base64.getEncoder().encodeToString(new byte[32]);
+        CredentialVault vault = new CredentialVault(
+                credentials, new com.fasterxml.jackson.databind.ObjectMapper(), masterKey, "test-key");
+        vault.store(org, acc.getId(), "API", "OAUTH2",
+                java.util.Map.of("client_id", "cid", "client_secret", BCrypt.gensalt()),
+                null, null, null);
+
+        QueueingNaverHttpClient http = new QueueingNaverHttpClient();
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"access_token\":\"tok-1\",\"expires_in\":3000,\"token_type\":\"Bearer\"}", java.util.Map.of()));
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"data\":{\"lastChangeStatuses\":["
+                        + "{\"productOrderId\":\"PO1\",\"orderId\":\"O1\",\"productOrderStatus\":\"PAYED\","
+                        + "\"lastChangedType\":\"PAYED\",\"lastChangedDate\":\"2026-06-11T22:00:00+09:00\","
+                        + "\"paymentDate\":\"2026-06-11T22:00:00+09:00\"},"
+                        + "{\"productOrderId\":\"PO2\",\"orderId\":\"O1\",\"productOrderStatus\":\"PAYED\","
+                        + "\"lastChangedType\":\"PAYED\",\"lastChangedDate\":\"2026-06-11T23:30:00+09:00\","
+                        + "\"paymentDate\":\"2026-06-11T23:30:00+09:00\"}]}}", java.util.Map.of()));
+        http.responses.add(new NaverHttpClient.Response(200,
+                "{\"data\":[{\"productOrder\":{\"productOrderId\":\"PO1\",\"initialPaymentAmount\":12000}},"
+                        + "{\"productOrder\":{\"productOrderId\":\"PO2\",\"initialPaymentAmount\":8000}}]}",
+                java.util.Map.of()));
+
+        SyncJob job = naverExecutor(http, vault).execute(org, acc.getId(), DataType.ORDER_SUMMARY, "MANUAL");
+
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
+        assertThat(job.getSuccessRows()).isEqualTo(2); // per-order rows are the counted unit
+        // Per-order rows persisted and isolated to this org/account.
+        var perOrder = channelOrders.findAllByOrgIdAndSellerAccountId(org, acc.getId());
+        assertThat(perOrder).hasSize(2);
+        assertThat(channelOrderStatusEvents.count()).isEqualTo(2); // one initial event each
+        // The daily aggregate is unchanged: one row for the date, count/sum consistent with per-order.
+        assertThat(orders.count()).isEqualTo(1);
+        var summary = orders.findAll().get(0);
+        assertThat(summary.getOrderCount()).isEqualTo(2);
+        assertThat(summary.getSalesAmount()).isEqualTo(20000L);
+        assertThat(perOrder.stream().mapToLong(o -> o.getPaymentAmount()).sum()).isEqualTo(20000L);
     }
 
     /** All methods refuse — proves a code path can never reach HTTP. */
@@ -532,7 +583,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(endless));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor endlessExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = endlessExecutor.execute(org, acc.getId(), DataType.INQUIRY, "MANUAL");
 
@@ -568,7 +619,7 @@ class SyncRunExecutorTest {
         ConnectorRegistry registry = new ConnectorRegistry(List.of(endlessAfterData));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor endlessExecutor = new SyncRunExecutor(
-                sellerAccounts, channels, registry, ingestion, syncJobs, cursors, connectionStatus);
+                sellerAccounts, channels, registry, ingestion, orderIngestion, syncJobs, cursors, connectionStatus);
 
         SyncJob job = endlessExecutor.execute(org, acc.getId(), DataType.REVIEW, "MANUAL");
 
