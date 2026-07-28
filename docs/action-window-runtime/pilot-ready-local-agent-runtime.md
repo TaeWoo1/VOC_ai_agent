@@ -12,8 +12,8 @@ seller), requested separately.
 ## Preservation record
 
 - **Branch:** `feat/pilot-ready-local-agent-runtime` (off `main` @ `fbbc90a`).
-- **Feat commit:** `5dd1cef` (this doc's branch head is the immediate follow-up docs commit). PR: **Draft** —
-  do NOT merge until the on-device Windows proof lands.
+- **Feat commit:** `5dd1cef`. **PR #369 (Draft, base `main`)** — do NOT merge until the on-device Windows
+  proof lands.
 - **Completed offline gate (2026-07-28):** collector `tsc --noEmit` + crossstack tsconfig clean, **5,516**
   vitest tests; frontend typecheck clean, **1,086** tests. Contracts untouched (no contract change). No Flyway
   migration. Two independent reviews' findings fixed in-branch.
