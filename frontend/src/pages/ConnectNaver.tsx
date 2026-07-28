@@ -7,7 +7,7 @@ import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
 import { guidedConnectionReducer, INITIAL_STATE, resolveNaverSession } from "../lib/guidedConnection";
 import { bridgeSessionDetection } from "../lib/guidedConnection/bridgeSession";
-import type { CredentialTemplateView, SyncRunView } from "../lib/types";
+import type { ConnectionStatusView, CredentialTemplateView, SyncRunView } from "../lib/types";
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
 
 /**
@@ -45,8 +45,12 @@ export function ConnectNaver() {
   const [template, setTemplate] = useState<CredentialTemplateView | null>(null);
   const [loading, setLoading] = useState(true);
   const [resolveError, setResolveError] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
 
-  // Resolve the NAVER account + credential template once (existing backend boundary, fail-closed).
+  // Resolve (or START) the NAVER connection: find the API-mode account this org attaches credentials
+  // to, and if a first-time seller has none, create it. Creating a PENDING account is the "연결 시작"
+  // step — it records the account only (idempotent server-side, no secret, no live provider call), so
+  // the wizard is never stranded with nothing to register against. Existing backend boundary, fail-closed.
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -57,9 +61,19 @@ export function ConnectNaver() {
           api.getCredentialTemplateStrict("NAVER"),
         ]);
         if (!alive) return;
-        const naver = channels.find((c) => c.code === "NAVER") ?? null;
-        setAccountId(naver ? selectChannelAccount(accounts, naver.id)?.id ?? null : null);
         setTemplate(tmpl);
+        const naver = channels.find((c) => c.code === "NAVER") ?? null;
+        if (!naver) {
+          setAccountId(null);
+          return;
+        }
+        const existing = selectChannelAccount(accounts, naver.id);
+        if (existing) {
+          setAccountId(existing.id);
+          return;
+        }
+        const created = await api.createApiChannelAccount(naver.id);
+        if (alive) setAccountId(created.id);
       } catch {
         if (alive) setResolveError(true);
       } finally {
@@ -70,6 +84,25 @@ export function ConnectNaver() {
       alive = false;
     };
   }, []);
+
+  // On completion, read the real connection health so the seller sees the connection state + last
+  // successful collection time (§2 step 6). Non-fatal: a read failure just omits the status line — the
+  // journey is already `completed` from the registration→test→sync milestones, not from this read.
+  useEffect(() => {
+    if (state.phase !== "completed" || !accountId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const status = await api.getConnectionStatusStrict(accountId);
+        if (alive) setConnectionStatus(status);
+      } catch {
+        /* status line omitted on failure; completion stands on its milestones */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [state.phase, accountId]);
 
   // Feed pairing (+ the seller's login attestation) into the readiness gate. READINESS is idempotent
   // and a no-op past the gate, so re-dispatching on every bridge tick is safe.
@@ -87,7 +120,9 @@ export function ConnectNaver() {
       naverSession: signal,
       sessionSource: source,
     });
-  }, [agentPaired, naverAttested, detected]);
+    // `state.phase` is a dep so the gate re-evaluates the moment the saved-credential check hands off to
+    // `readiness_checking` (READINESS is a no-op in any non-gate phase, so this cannot loop).
+  }, [agentPaired, naverAttested, detected, state.phase]);
 
   const runFirstSync = useCallback(async () => {
     if (!accountId) return;
@@ -116,6 +151,32 @@ export function ConnectNaver() {
     }
   }, [accountId, runFirstSync]);
 
+  // Saved-credential check (§flow 1): once the account is known, ask the backend whether a credential is
+  // already on file. If so, reuse it — go straight to the connection test with NO re-entry (a stored key
+  // means registration already happened). A failed/absent read fails closed to the normal gate/entry path,
+  // never a false reuse. The `phase === check_saved_credential` guard makes this fire exactly once per
+  // journey: the dispatch moves the phase off the entry, so any later run early-returns. (No ref guard —
+  // a ref would persist across StrictMode's remount and suppress the only surviving dispatch; the phase
+  // guard + `alive` handle StrictMode correctly, at worst one extra harmless GET in dev.)
+  useEffect(() => {
+    if (!accountId || state.phase !== "check_saved_credential") return;
+    let alive = true;
+    (async () => {
+      let hasSaved = false;
+      try {
+        hasSaved = (await api.getConnectionInfoStrict(accountId)) !== null;
+      } catch {
+        hasSaved = false; // fail closed: never reuse a key we could not confirm
+      }
+      if (!alive) return;
+      dispatch({ type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: hasSaved });
+      if (hasSaved) void runTest();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [accountId, state.phase, runTest]);
+
   const onSubmitCredentials = useCallback(
     async (secrets: Record<string, string>) => {
       if (!accountId || !template) return;
@@ -141,9 +202,11 @@ export function ConnectNaver() {
 
   const onConfirmLogin = useCallback(() => setNaverAttested(true), []);
   const onRecheck = useCallback(() => bridge.retry(), [bridge]);
+  // Hand off to the existing past-review-import track (§0 review-export-readiness). Reviews are NOT
+  // collected here — this only carries the connected seller into the Action Window export journey.
   const onGoToReviewExport = useCallback(() => {
-    navigate(accountId ? `/settings/channels/${accountId}` : "/settings/channels");
-  }, [navigate, accountId]);
+    navigate("/settings/review-import");
+  }, [navigate]);
 
   const credentialUnavailable = useMemo(
     () => !loading && !resolveError && (!accountId || !template),
@@ -176,6 +239,7 @@ export function ConnectNaver() {
             state={state}
             template={template}
             busy={busy}
+            connectionStatus={connectionStatus}
             dispatch={dispatch}
             onRecheck={onRecheck}
             onConfirmLogin={onConfirmLogin}

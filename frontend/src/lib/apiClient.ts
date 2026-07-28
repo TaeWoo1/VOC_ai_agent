@@ -464,6 +464,19 @@ export const api = {
     return data;
   },
 
+  // Mutating: start an official-API channel connection — find-or-create the PENDING API-mode seller
+  // account the guided-connection wizard attaches credentials to. Idempotent server-side (re-entering
+  // returns the existing account, never downgrading a settled one), and it records the account only:
+  // no secret, no live provider call. No mock fallback — like registerFileChannel it requires a live
+  // backend and must fail closed (never a fake account) so the wizard cannot proceed against nothing.
+  async createApiChannelAccount(channelId: string): Promise<SellerAccountResponse> {
+    const { data } = await http.post<SellerAccountResponse>(
+      "/api/seller-accounts/api-channel",
+      { channelId },
+    );
+    return data;
+  },
+
   // Mutating: no mock fallback. Requires a live backend; surfaces errors to the UI.
   async uploadFile(channelId: string, uploadType: UploadType, file: File): Promise<IngestResult> {
     const form = new FormData();

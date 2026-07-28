@@ -1,6 +1,7 @@
 package com.sellerops.selleraccount;
 
 import com.sellerops.auth.AuthPrincipal;
+import com.sellerops.selleraccount.dto.ApiChannelRequest;
 import com.sellerops.selleraccount.dto.FileChannelRequest;
 import com.sellerops.selleraccount.dto.SellerAccountResponse;
 import jakarta.validation.Valid;
@@ -32,5 +33,17 @@ public class SellerAccountController {
             @AuthenticationPrincipal AuthPrincipal principal,
             @Valid @RequestBody FileChannelRequest request) {
         return service.registerFileChannel(principal.orgId(), request);
+    }
+
+    /**
+     * Start an official-API channel connection (e.g. the NAVER guided-connection wizard): find-or-create
+     * the PENDING API-mode account this org will attach credentials to. Idempotent — re-entering the
+     * wizard returns the existing account without downgrading a settled connection.
+     */
+    @PostMapping("/api-channel")
+    public SellerAccountResponse registerApiChannel(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @Valid @RequestBody ApiChannelRequest request) {
+        return service.registerApiChannel(principal.orgId(), request);
     }
 }
