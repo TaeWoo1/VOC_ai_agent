@@ -383,6 +383,19 @@ G3 준비 요건은 특정 렌더러가 아니라 아래로 정의한다:
 
 > 계약 본문은 불변. 이 절은 **오프라인 완성 델타(G3-A/G3-B)** 로 실제 병합된 것을 기록만 한다. **G3-C/G3-D·플래그 활성·라이브 NAVER는 여전히 게이트**(§0 RULED 2026-07-21, §20-3).
 
+### 보존 기록 (Preservation record, 2026-07-28)
+
+- **Branch:** `feat/naver-guided-api-connection` (off `main` @ `fbbc90a`). **Head SHA:** `b02cc79`.
+- **Draft PR #370** (base `main`, DRAFT) — **상태: offline-complete / NAVER API Center live recon and first
+  real sync pending.** 라이브 검증 전 **merge 금지**. `sellerops.connector.naver.enabled` **OFF 유지**, 라이브
+  NAVER 호출 없음, Flyway 마이그레이션 없음.
+- **Gate (offline):** 백엔드 suite **BUILD SUCCESSFUL**(락 구조 테스트 + Cafe24 2행 회귀 테스트 포함); 프론트
+  **1116 tests + typecheck clean**(9개 E2E: 신규/기존/모름/저장키 성공/저장키 실패/Secret 분실/삭제 취소/0건/읽기
+  오류 fail-closed). 독립 리뷰 2회 반영.
+- **남은 라이브 확인 항목(게이트 뒤):** ① 기존 앱 Secret 재확인·교체·재발급 가능 여부 + 실제 화면명; ② 기존 앱
+  삭제 경고·화면명·삭제 정책; ③ 권한 부족/호출 IP 불일치의 실제 backend reason code(permission/IP 상태 라이브
+  라우팅); ④ 연결 테스트 + 0건 포함 첫 실주문 sync(플래그 활성 승인 + fresh single-use live approval 선결).
+
 ### 2026-07-28 — 오프라인 완성 델타 (branch `feat/naver-guided-api-connection`, base `main` @ `fbbc90a`)
 
 PR #317/#357이 남긴 갭 중 **오프라인으로 채울 수 있는 것만** 마감:
