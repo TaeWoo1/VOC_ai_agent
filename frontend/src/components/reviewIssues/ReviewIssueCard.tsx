@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { ReviewIssueView } from "../../lib/types";
 import { IssueEvidencePanel } from "./IssueEvidencePanel";
+import { IssueFeedbackControl } from "./IssueFeedbackControl";
+import { IssueReplyLauncher } from "./IssueReplyLauncher";
 import {
   CHANGE_EXPLANATION_KO,
   SEVERITY_LABEL_KO,
@@ -44,6 +46,7 @@ export function ReviewIssueCard({
   busy: boolean;
 }) {
   const [showEvidence, setShowEvidence] = useState(false);
+  const [showReply, setShowReply] = useState(false);
   const badges = changeBadges(issue.change);
   const surge = surgeLine(issue.change);
   const product = productLineKo(issue);
@@ -87,6 +90,14 @@ export function ReviewIssueCard({
         </ul>
       ) : null}
 
+      {/* Honesty: these are candidate signals from an UNMEASURED detector, never a confirmed
+          diagnosis. Stated once here so no badge above reads as "문제 확정". */}
+      {badges.length > 0 ? (
+        <p className="mt-2 text-xs text-muted">
+          미검증 후보 신호입니다 · 근거 리뷰로 직접 확인하세요 ({issue.extractorKind})
+        </p>
+      ) : null}
+
       {surge ? <p className="mt-2 text-sm font-medium text-ink">{surge}</p> : null}
       {product ? <p className="mt-1 text-sm text-muted">{product}</p> : null}
 
@@ -113,6 +124,17 @@ export function ReviewIssueCard({
         >
           {showEvidence ? "근거 리뷰 접기" : "근거 리뷰 보기"}
         </button>
+        {/* Only for the working list — a dismissed issue is set aside, not something to reply to now. */}
+        {onRestore ? null : (
+          <button
+            type="button"
+            className="btn-ghost"
+            aria-expanded={showReply}
+            onClick={() => setShowReply((open) => !open)}
+          >
+            {showReply ? "답변 준비 접기" : "답변 준비"}
+          </button>
+        )}
         {onRestore ? (
           <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(issue)}>
             되돌리기
@@ -125,6 +147,11 @@ export function ReviewIssueCard({
       </div>
 
       {showEvidence ? <IssueEvidencePanel issueId={issue.id} /> : null}
+      {showReply && !onRestore ? <IssueReplyLauncher issueId={issue.id} /> : null}
+
+      {/* Offline eval feedback — withheld on the dismissed list, where the operator has already
+          judged the issue not worth attention. */}
+      {onRestore ? null : <IssueFeedbackControl issueId={issue.id} />}
     </li>
   );
 }

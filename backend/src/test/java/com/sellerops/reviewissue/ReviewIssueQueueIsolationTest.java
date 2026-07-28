@@ -40,6 +40,30 @@ class ReviewIssueQueueIsolationTest {
             "OperatorAttention",
             "VocItemSource");
 
+    /**
+     * The two — and only two — {@code com.sellerops.attention} symbols this package may reference,
+     * added for the Review Issue → Guided Reply action loop (v1):
+     *
+     * <ul>
+     *   <li>{@code VocItemRef} — the attention surface's ADDRESSING helper. The issue → reply bridge
+     *       ({@code ReviewIssueReplyCandidatesService}) mints {@code review:<uuid>} through it rather
+     *       than duplicating the format. It is a pure string helper; it decides no queue membership.
+     *   <li>{@code IssueMemoryRefreshPort} — the seam the reply loop calls (implemented here by
+     *       {@code ReviewReplyIssueMemoryRefreshAdapter}) to refresh issue AGGREGATION after a
+     *       reported reply. It touches issue memory, never the queue.
+     * </ul>
+     *
+     * <p>Neither reaches a queue-decision mechanism ({@code ItemAnalysis}, {@code AttentionSignal},
+     * {@code OperatorAttention}, {@code VocItemSource}) — those bans stay, and the no-writes and
+     * reflection checks below still hold — so the RUBRIC.md §5 gate's real intent is intact: an
+     * UNMEASURED extractor still cannot move who is in the needs-a-look queue. Any OTHER
+     * {@code com.sellerops.attention} reference (e.g. a reply/queue service or writer) is still an
+     * offence.
+     */
+    private static final List<String> ALLOWED_ATTENTION_REFERENCES = List.of(
+            "com.sellerops.attention.VocItemRef",
+            "com.sellerops.attention.reply.IssueMemoryRefreshPort");
+
     @Test
     void thePackageIsNotEmptySoThisTestCannotPassVacuously() throws IOException {
         assertThat(sources()).isNotEmpty();
@@ -51,8 +75,17 @@ class ReviewIssueQueueIsolationTest {
         List<String> offences = new ArrayList<>();
         for (Path source : sources()) {
             String code = stripComments(Files.readString(source));
+            // Blank out the sanctioned bridge symbols before the package-prefix scan, so an allowed
+            // reference does not read as an offence — while any OTHER com.sellerops.attention reference
+            // (a reply/queue service, a writer) still does. The specific queue-mechanism names below
+            // are checked against the ORIGINAL code, so the allow-list can never smuggle one in.
+            String withoutAllowed = code;
+            for (String allowed : ALLOWED_ATTENTION_REFERENCES) {
+                withoutAllowed = withoutAllowed.replace(allowed, "");
+            }
             for (String forbidden : FORBIDDEN_REFERENCES) {
-                if (code.contains(forbidden)) {
+                String scanned = "com.sellerops.attention".equals(forbidden) ? withoutAllowed : code;
+                if (scanned.contains(forbidden)) {
                     offences.add(source.getFileName() + " → " + forbidden);
                 }
             }
@@ -60,6 +93,14 @@ class ReviewIssueQueueIsolationTest {
         assertThat(offences)
                 .as("이슈 패키지는 확인 필요 큐의 판정 경로에 닿을 수 없습니다 (RUBRIC.md §5 회귀 게이트)")
                 .isEmpty();
+    }
+
+    /** The allow-list must be exact FQNs, or it could blanket-permit the whole attention package. */
+    @Test
+    void theAttentionAllowListIsSpecificSymbolsNotThePackage() {
+        assertThat(ALLOWED_ATTENTION_REFERENCES)
+                .allSatisfy(ref -> assertThat(ref).startsWith("com.sellerops.attention.")
+                        .isNotEqualTo("com.sellerops.attention"));
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.sellerops.review;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -454,6 +455,22 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     Page<Review> findCommittedReplyWorkByChannel(@Param("orgId") UUID orgId,
                                                 @Param("channelId") UUID channelId,
                                                 Pageable pageable);
+
+    /**
+     * Of the given review ids (org-scoped), those SellerOps has already recorded a reported
+     * submission for against the standing approval — the operator-side "already answered" set.
+     *
+     * <p>Reuses {@link #REPORTED_SUBMISSION_PREDICATE} verbatim, so the issue-candidate selection
+     * excludes exactly what the worklist count excludes and the guided-run 409 refuses — one
+     * definition of "reported", never a second that could disagree. An empty {@code reviewIds} is a
+     * safe empty result. Existence-based (a later abort does not un-post an earlier reported post).
+     */
+    @Query("""
+            select r.id from Review r
+            where r.orgId = :orgId and r.id in :reviewIds and
+            """ + REPORTED_SUBMISSION_PREDICATE)
+    List<UUID> findReportedSubmittedReviewIds(@Param("orgId") UUID orgId,
+                                              @Param("reviewIds") Collection<UUID> reviewIds);
 
     /**
      * The 내 답변 작업 RECENTLY REPORTED section: reviews whose reply the operator reported posting,

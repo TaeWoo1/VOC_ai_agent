@@ -79,6 +79,7 @@ public class ReviewReplyService {
     private final ReviewReplyApprovalService approvals;
     private final ReviewReplyOutcomeService outcomes;
     private final ReviewReplyProposalProvider provider;
+    private final IssueMemoryRefreshPort issueMemoryRefresh;
     private final Clock clock;
 
     @Autowired
@@ -87,9 +88,10 @@ public class ReviewReplyService {
                               ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                               ReviewReplyApprovalService approvals,
                               ReviewReplyOutcomeService outcomes,
-                              ReviewReplyProposalProvider provider) {
+                              ReviewReplyProposalProvider provider,
+                              IssueMemoryRefreshPort issueMemoryRefresh) {
         this(reviews, products, sellerAccounts, triages, drafts, approvals, outcomes, provider,
-                Clock.systemUTC());
+                issueMemoryRefresh, Clock.systemUTC());
     }
 
     /** Test seam: an explicit {@link Clock} pins the KST as-of date used for the recency bucket. */
@@ -98,7 +100,8 @@ public class ReviewReplyService {
                        ReviewTriageRepository triages, ReviewReplyDraftService drafts,
                        ReviewReplyApprovalService approvals,
                        ReviewReplyOutcomeService outcomes,
-                       ReviewReplyProposalProvider provider, Clock clock) {
+                       ReviewReplyProposalProvider provider,
+                       IssueMemoryRefreshPort issueMemoryRefresh, Clock clock) {
         this.reviews = reviews;
         this.products = products;
         this.sellerAccounts = sellerAccounts;
@@ -107,6 +110,7 @@ public class ReviewReplyService {
         this.approvals = approvals;
         this.outcomes = outcomes;
         this.provider = provider;
+        this.issueMemoryRefresh = issueMemoryRefresh;
         this.clock = clock;
     }
 
@@ -311,8 +315,23 @@ public class ReviewReplyService {
                 .map(ReviewReplyDraft::getFingerprintAlgorithm)
                 .orElseThrow(() -> new IllegalStateException(
                         "review_reply_submission_ref binds a draft version that does not exist"));
-        return outcomes.record(orgId, reviewId, actionRef, ref, binding.getBoundVersion(),
-                binding.getBoundFingerprint(), algorithm, operatorOutcome, runRef, command, actor);
+        ReviewReplyOutcomeResponse response = outcomes.record(orgId, reviewId, actionRef, ref,
+                binding.getBoundVersion(), binding.getBoundFingerprint(), algorithm, operatorOutcome,
+                runRef, command, actor);
+
+        // The reported reply now stands (committed above). Only a FRESH reported-submitted post
+        // triggers the best-effort Issue-Memory refresh — a replay must not re-run it, and an abort
+        // ("I did not post it") changes no reply state, so it refreshes nothing. The refresh failing
+        // never rolls back the reported outcome; its success/failure surfaces on the response so the UI
+        // can show "분석 미갱신" instead of a stale view reading as "변화 없음". referenceDate is UTC to
+        // match how reviews.received_at and the issue windows are keyed (THRESHOLDS.md §1).
+        if (operatorOutcome == OperatorOutcome.OPERATOR_REPORTED_SUBMITTED
+                && response.recorded() && !response.replayed()) {
+            LocalDate referenceDate = clock.instant().atZone(java.time.ZoneOffset.UTC).toLocalDate();
+            boolean refreshed = issueMemoryRefresh.refreshAfterReply(orgId, referenceDate);
+            return response.withIssueMemoryRefreshed(refreshed);
+        }
+        return response;
     }
 
     /** As {@link #gateOrReplay}, but the idempotency ledger is the outcome table, not the approval trail. */
@@ -484,6 +503,10 @@ public class ReviewReplyService {
                 new ReviewReplyProposalProvider.ReviewReplyContext(orgId, review.getId(),
                         body.text(), review.getRating()));
 
+        ReviewReplyOutcomeView outcome = outcomeView(orgId, review.getId(), approval, approved);
+        ReviewActionLoopState state =
+                projectActionLoopState(responseNeeded, head != null, approved, channelAnswered, outcome);
+
         return new ReviewReplyPrepView(
                 actionRef,
                 body.text(),
@@ -494,7 +517,7 @@ public class ReviewReplyService {
                         suggestion.providerVersion()),
                 head == null ? null : ReviewReplyDraftView.of(head),
                 approvalView(review.getId(), approval, capabilities.canCopy()),
-                outcomeView(orgId, review.getId(), approval, approved),
+                outcome,
                 capabilities,
                 // One-way; null when the review was ingested without a channel-side id. The raw
                 // external id is read here and immediately digested — it never reaches the response.
@@ -507,7 +530,48 @@ public class ReviewReplyService {
                 // rule is shared rather than re-implemented, so this panel cannot start rendering a
                 // SKU while the row beside it withholds one.
                 productDisplayName(orgId, review),
-                kstDate(review.getReceivedAt()));
+                kstDate(review.getReceivedAt()),
+                state.name());
+    }
+
+    /**
+     * Project the action-loop state from the durable facts, stated once so the surface never
+     * re-derives it. Precedence is outcome → approval → draft, and each branch is exhaustive:
+     *
+     * <ul>
+     *   <li>A recorded outcome wins: {@code VERIFIED} → {@code SUBMITTED_VERIFIED} (reserved,
+     *       unreachable for NAVER), {@code OPERATOR_REPORTED_SUBMITTED} → {@code UNVERIFIED},
+     *       {@code SUBMISSION_ABORTED} → {@code ABORTED}. (The outcome is only ever present for the
+     *       current approved head — see {@link #outcomeView}.)
+     *   <li>An approval with no outcome is {@code APPROVED}, or {@code STALE} when the channel has since
+     *       answered (the only post-approval invalidation — the draft is frozen while approved).
+     *   <li>Otherwise {@code RESPONSE_NEEDED} with a draft is {@code DRAFT}, without one is
+     *       {@code REVIEW_REQUIRED}; anything else is {@code NONE}.
+     * </ul>
+     */
+    static ReviewActionLoopState projectActionLoopState(boolean responseNeeded, boolean hasDraft,
+                                                        boolean approved, boolean channelAnswered,
+                                                        ReviewReplyOutcomeView outcome) {
+        if (outcome != null) {
+            // Compared as a literal, NOT VerificationState.VERIFIED — that member deliberately does
+            // not exist (no read-back oracle), so this branch is structurally unreachable in
+            // production. It stays here to document the reserved state and to let a unit test exercise
+            // the mapping through a synthetic oracle should one ever be added.
+            if ("VERIFIED".equals(outcome.verification())) {
+                return ReviewActionLoopState.SUBMITTED_VERIFIED;
+            }
+            if (OperatorOutcome.OPERATOR_REPORTED_SUBMITTED.name().equals(outcome.operatorOutcome())) {
+                return ReviewActionLoopState.UNVERIFIED;
+            }
+            return ReviewActionLoopState.ABORTED;
+        }
+        if (approved) {
+            return channelAnswered ? ReviewActionLoopState.STALE : ReviewActionLoopState.APPROVED;
+        }
+        if (responseNeeded) {
+            return hasDraft ? ReviewActionLoopState.DRAFT : ReviewActionLoopState.REVIEW_REQUIRED;
+        }
+        return ReviewActionLoopState.NONE;
     }
 
     /**

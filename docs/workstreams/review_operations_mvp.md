@@ -166,6 +166,46 @@ Append a dated entry; never rewrite prior entries — correct forward.
 
 ### Log
 
+### 2026-07-28 — Review Issue Triage → Guided Reply Action Loop v1 — IMPLEMENTED (offline)
+- **Loop stage(s):** UNDERSTAND/PRIORITIZE → ACT — the missing ENTRY from a repeated-issue candidate
+  into the existing reply flow, closed as one operator journey on `/issues`.
+- **Did:** Connected the shipped Review Issue Memory (candidate signals + evidence reviews) to the
+  shipped reply preparation → approval → guided submission → operator-reported outcome chain, reuse-first
+  and offline. New backend: `GET /api/review-issues/{id}/reply-candidates` (the org-global issue ↔
+  account-scoped reply BRIDGE — resolves each evidence review to its `actionRef` + org+channel account,
+  fail-closed when >1 account on a channel, excludes already-answered/reported reviews from selection AND
+  execution via the SAME `REPORTED_SUBMISSION_PREDICATE` the queue uses); a server-computed
+  `actionLoopState` on the reply prep view (an 8-state PROJECTION over existing durable rows — no new
+  state table); a best-effort after-reply Issue-Memory refresh (dependency-inverted `IssueMemoryRefreshPort`,
+  its own transaction, failure surfaced as `issueMemoryRefreshed=false` and never a rollback); and issue
+  candidate feedback (유용함 / 관련 없음 / 나중에 보기 → append-only `review_issue_feedback`, **V32**,
+  offline eval data only — no lifecycle/queue/judgement effect). New FE inside ProductIssues (no new
+  dashboard): `IssueReplyLauncher` embeds the existing `VocItemTriageControl` + `VocItemReplyPrep`;
+  `IssueFeedbackControl`; a DRAFT-candidate disclaimer on the card.
+- **Honesty fence (PO-confirmed this session):** `SUBMITTED_VERIFIED` is a RESERVED, oracle-only terminal
+  **structurally unreachable for NAVER** (`VerificationState` has only `UNVERIFIED`); the real guided-reply
+  terminal is `UNVERIFIED`, which updates reply-state, leaves the queue, and triggers the refresh but is
+  NEVER shown as 완료 — consistent with `reported-replies-leave-the-queue-v1`. `STALE` = an approved reply
+  whose review the channel has since answered (guided run withheld by the existing 409).
+- **Evidence:** slice `docs/slices/review-issue-action-loop-v1.md`. Backend **1748 / 0 fail / 2 skip**
+  (+~104: candidates 5, feedback 6, action-loop projection/refresh 10, isolation-gate +1, reused suites);
+  frontend **1094** + typecheck + build; collector typecheck + reply/session suites **1472 / 0 fail**
+  unchanged; contracts typecheck clean; `git diff --check` + new-file whitespace clean; leak scan clean.
+  Two independent adversarial reviews (backend + FE) — **no confirmed defects**; one FE defensive
+  hardening applied (reply button gated on a resolved account, matching the mount guard). All 13 offline
+  E2E scenarios covered (mix of new tests + reused concurrency/authorize suites).
+- **§4.1 impact:** none — no channel capability changed, no marketplace contact.
+- **Ledger impact:** none.
+- **Gate state:** no live-run gate involved (no browser, no marketplace). The D1 LLM gate stays CLOSED and
+  is untouched — draft generation is the existing RULE-BASED provider (no review body leaves the machine).
+- **Blockers:** ⚠ **Entirely offline/synthetic — no live evidence.** The real NAVER Guided Reply live proof
+  (issue → select unanswered review → draft → approve → guided post → reported UNVERIFIED → refresh) needs a
+  seated operator + a fresh single-use in-turn G3/G6 approval, and is deferred. ⚠ Like V31, **V32 is
+  JPA-mapping-validated only** (H2 with Flyway disabled in the suite); the migration SQL itself is executed
+  only by the disposable-Postgres harness / a live backend, not by `./gradlew test`.
+- **Next:** the gated live NAVER Guided Reply proof; and confirming/revising the DRAFT `review-issue/v1`
+  thresholds (still owed, unchanged by this slice).
+
 ### 2026-07-25 — Guided import CTA path — LIVE E2E SUCCESS (discovery → plan → 1 segment, 61 rows)
 - **Loop stage(s):** ACQUIRE (guided export) → NORMALIZE → coverage — the whole entry point, end to end
 - **Did:** A seller pressed **과거 리뷰 전체 연동하기** and a month of reviews landed in the database, with no

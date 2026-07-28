@@ -97,7 +97,7 @@ class OperatorReviewReplyControllerTest {
                 new ReviewReplyCapabilities(false, false, true, true, false),
                 "a".repeat(64),
                 1,
-                "PENDING", null, null);
+                "PENDING", null, null, "APPROVED");
     }
 
     @Test
