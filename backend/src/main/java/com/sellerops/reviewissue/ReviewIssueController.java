@@ -4,6 +4,9 @@ import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.reviewissue.dto.ReviewIssueDetailView;
+import com.sellerops.reviewissue.dto.ReviewIssueFeedbackRequest;
+import com.sellerops.reviewissue.dto.ReviewIssueFeedbackResponse;
+import com.sellerops.reviewissue.dto.ReviewIssueReplyCandidatesView;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -39,15 +42,21 @@ public class ReviewIssueController {
     private final ReviewIssueQueryService query;
     private final ReviewIssueLifecycleService lifecycle;
     private final ReviewIssueExtractionService extraction;
+    private final ReviewIssueReplyCandidatesService replyCandidates;
+    private final ReviewIssueFeedbackService feedback;
     private final ReviewRepository reviews;
 
     public ReviewIssueController(ReviewIssueQueryService query,
                                  ReviewIssueLifecycleService lifecycle,
                                  ReviewIssueExtractionService extraction,
+                                 ReviewIssueReplyCandidatesService replyCandidates,
+                                 ReviewIssueFeedbackService feedback,
                                  ReviewRepository reviews) {
         this.query = query;
         this.lifecycle = lifecycle;
         this.extraction = extraction;
+        this.replyCandidates = replyCandidates;
+        this.feedback = feedback;
         this.reviews = reviews;
     }
 
@@ -68,6 +77,33 @@ public class ReviewIssueController {
                                        @PathVariable UUID issueId,
                                        @RequestParam(required = false) LocalDate referenceDate) {
         return query.detail(principal.orgId(), issueId, orToday(referenceDate));
+    }
+
+    /**
+     * The evidence reviews of one issue, resolved for the reply flow: each carries its attention
+     * {@code actionRef} and the {@code accountId} the reply endpoints need, plus an honest
+     * {@code selectable} flag that excludes already-answered reviews. This is the entry bridge for the
+     * Issue → 근거 → 리뷰 선택 → 초안 승인 → Guided Reply flow on {@code /issues}. Read-only; org-scoped.
+     */
+    @GetMapping("/{issueId}/reply-candidates")
+    public ReviewIssueReplyCandidatesView replyCandidates(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID issueId) {
+        return replyCandidates.candidates(principal.orgId(), issueId);
+    }
+
+    /**
+     * Record the operator's judgement about this issue CANDIDATE — 유용함 / 관련 없음 / 나중에 보기.
+     * OFFLINE EVALUATION DATA ONLY: it moves no lifecycle state, no queue, and no judgement. Idempotent
+     * on {@code (org, commandId)}. 404 when the issue is not in this org.
+     */
+    @PostMapping("/{issueId}/feedback")
+    public ReviewIssueFeedbackResponse recordFeedback(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @PathVariable UUID issueId,
+            @RequestBody ReviewIssueFeedbackRequest request) {
+        return feedback.record(principal.orgId(), issueId, request.kind(), request.commandId(),
+                "SELLER:" + principal.userId());
     }
 
     /**

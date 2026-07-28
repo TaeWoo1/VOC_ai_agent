@@ -1107,3 +1107,45 @@ export interface ReviewIssueDetailView {
   evidence: IssueEvidenceView[];
   history: IssueStateEventView[];
 }
+
+/**
+ * One evidence review of an issue, resolved for the reply flow — the Issue → 근거 → 리뷰 선택 bridge.
+ * `actionRef` and `accountId` are what the existing reply panel needs; `accountId` is an INTERNAL
+ * SellerOps id used only to call the reply API, never rendered. `selectable` is the single honest
+ * "may the operator start a reply here" flag (unanswered, not already reported, account resolvable).
+ */
+export interface ReviewIssueReplyCandidate {
+  reviewId: string;
+  actionRef: string;
+  unitOrdinal: number | null;
+  /** Masked opinion-unit clause — the "포함 이유"; null when the sanitizer suppressed it. */
+  quote: string | null;
+  rating: number | null;
+  productName: string | null;
+  reviewDate: string | null;
+  /** PENDING | ANSWERED | UNKNOWN — the channel's own last word, never SellerOps' record. */
+  channelReplyState: string;
+  reportedSubmitted: boolean;
+  selectable: boolean;
+  accountId: string | null;
+  accountAmbiguous: boolean;
+}
+
+export interface ReviewIssueReplyCandidates {
+  issueId: string;
+  /** Provenance of the DRAFT/UNMEASURED candidate signal (e.g. RULE_BASED). */
+  extractorKind: string;
+  /** The review-issue thresholds contract version this signal was judged under (DRAFT). */
+  thresholdsVersion: string;
+  selectableCount: number;
+  candidates: ReviewIssueReplyCandidate[];
+}
+
+/** 유용함 / 관련 없음 / 나중에 보기 — offline evaluation feedback about an issue candidate. */
+export type ReviewIssueFeedbackKind = "USEFUL" | "NOT_RELEVANT" | "LATER";
+
+export interface ReviewIssueFeedbackResponse {
+  issueId: string;
+  kind: ReviewIssueFeedbackKind;
+  replayed: boolean;
+}

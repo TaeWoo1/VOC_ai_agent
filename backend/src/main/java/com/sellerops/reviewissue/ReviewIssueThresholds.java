@@ -15,6 +15,13 @@ package com.sellerops.reviewissue;
  */
 public final class ReviewIssueThresholds {
 
+    /**
+     * The contract version these numbers mirror ({@code contracts/review-issue/v1}). Surfaced to the
+     * client alongside {@code extractorKind} so a candidate signal can be labelled with the version of
+     * the DRAFT thresholds it was judged under — never presented as a settled, versionless fact.
+     */
+    public static final String CONTRACT_VERSION = "review-issue/v1";
+
     // ---- Common (THRESHOLDS.md §1) -----------------------------------------------------------
     /**
      * Windows are whole days because {@code reviews.received_at} is date-granular on the file

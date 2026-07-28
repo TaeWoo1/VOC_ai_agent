@@ -457,7 +457,7 @@ class ReviewReplyApprovalConcurrencyTest {
                         new ReviewReplyApprovalWriter(approvals, audits, txManager)),
                 new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
-                new RuleBasedReviewReplyProvider());
+                new RuleBasedReviewReplyProvider(), IssueMemoryRefreshPort.NO_OP);
     }
 
     // --- helpers ---------------------------------------------------------------------

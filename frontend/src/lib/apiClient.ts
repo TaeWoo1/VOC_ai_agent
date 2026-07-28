@@ -57,6 +57,9 @@ import type {
   UserView,
   ReviewIssueView,
   ReviewIssueDetailView,
+  ReviewIssueReplyCandidates,
+  ReviewIssueFeedbackKind,
+  ReviewIssueFeedbackResponse,
 } from "./types";
 import {
   mockAccountArticles,
@@ -1070,6 +1073,34 @@ export const api = {
     const { data } = await http.post<ReviewIssueView>(
       `/api/review-issues/${encodeURIComponent(issueId)}/restore`,
       {},
+    );
+    return data;
+  },
+
+  /**
+   * The evidence reviews of one issue, resolved for the reply flow: each carries its attention
+   * actionRef and the accountId the reply endpoints need, plus a `selectable` flag that excludes
+   * already-answered reviews. The entry read for Issue → 근거 → 리뷰 선택 → 초안 승인 → Guided Reply.
+   */
+  async getReviewIssueReplyCandidatesStrict(issueId: string): Promise<ReviewIssueReplyCandidates> {
+    const { data } = await http.get<ReviewIssueReplyCandidates>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/reply-candidates`,
+    );
+    return data;
+  },
+
+  /**
+   * Record 유용함 / 관련 없음 / 나중에 보기 about an issue candidate — OFFLINE EVALUATION DATA only,
+   * changing no lifecycle, queue, or judgement. `commandId` is the idempotency key (stable across a
+   * retry of one feedback, fresh for a new one).
+   */
+  async recordReviewIssueFeedback(
+    issueId: string,
+    body: { commandId: string; kind: ReviewIssueFeedbackKind },
+  ): Promise<ReviewIssueFeedbackResponse> {
+    const { data } = await http.post<ReviewIssueFeedbackResponse>(
+      `/api/review-issues/${encodeURIComponent(issueId)}/feedback`,
+      body,
     );
     return data;
   },

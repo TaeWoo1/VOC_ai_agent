@@ -112,7 +112,9 @@ public class ReviewReplyOutcomeService {
         try {
             writer.appendOutcome(orgId, reviewId, submissionRef, recordedVersion, recordedFingerprint,
                     fingerprintAlgorithm, operatorOutcome, runRef, command, actor);
-            return new ReviewReplyOutcomeResponse(actionRef, true, false);
+            // issueMemoryRefreshed is null here — the refresh (if any) is the orchestrator's follow-on,
+            // attached in ReviewReplyService after this outcome has committed.
+            return new ReviewReplyOutcomeResponse(actionRef, true, false, null);
         } catch (DataIntegrityViolationException race) {
             return resolveRace(race, orgId, reviewId, actionRef, submissionRef, operatorOutcome, command);
         }
@@ -154,7 +156,7 @@ public class ReviewReplyOutcomeService {
         if (!sameReview || !sameBinding || prior.getOperatorOutcome() != operatorOutcome) {
             throw ApiException.conflict("commandId가 이미 다른 결정에 사용되었습니다.");
         }
-        return new ReviewReplyOutcomeResponse(actionRef, true, true);
+        return new ReviewReplyOutcomeResponse(actionRef, true, true, null);
     }
 
     /** A fresh opaque 16-hex token (8 random bytes) — matches the contract's {@code submissionRef} shape. */

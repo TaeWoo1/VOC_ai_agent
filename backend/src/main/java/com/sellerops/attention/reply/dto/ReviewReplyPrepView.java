@@ -64,6 +64,13 @@ package com.sellerops.attention.reply.dto;
  * has a reply, the surface can say so instead of showing a dead control. A closed enum name only —
  * no reply text, no reply timestamp.
  *
+ * <p>{@code actionLoopState} is the server-computed Review Issue → Guided Reply state for this review
+ * — a {@link com.sellerops.attention.reply.ReviewActionLoopState} name carried as a String. It is a
+ * pure projection over the fields above (disposition · draft · approval · channel reply state ·
+ * outcome), stated once by the server so the surface renders one honest state (including {@code STALE}
+ * and the never-완료 {@code UNVERIFIED}) rather than re-deriving it. See
+ * {@code docs/slices/review-issue-action-loop-v1.md}.
+ *
  * <p>Deliberately carries no customer identity, no order/product identifier, no <b>raw</b>
  * channel-side id, and no raw timestamp beyond the draft's and approval's own — every field it does
  * not carry is a field that cannot leak.
@@ -82,5 +89,6 @@ public record ReviewReplyPrepView(
         Integer rating,
         String channelReplyState,
         String productName,
-        String reviewDate) {
+        String reviewDate,
+        String actionLoopState) {
 }

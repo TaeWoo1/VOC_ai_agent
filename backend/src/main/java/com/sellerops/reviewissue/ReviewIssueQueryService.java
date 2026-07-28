@@ -166,7 +166,7 @@ public class ReviewIssueQueryService {
      * to the whole body. Silently widening a quote to the entire review would show text the issue was
      * never evidence for.
      */
-    private static String quoteFor(Review review, int unitOrdinal) {
+    static String quoteFor(Review review, int unitOrdinal) {
         if (review == null) {
             return null;
         }

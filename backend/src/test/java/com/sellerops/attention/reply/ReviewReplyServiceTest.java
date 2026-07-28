@@ -88,6 +88,26 @@ class ReviewReplyServiceTest {
 
     private ReviewReplyService service;
     private ReviewTriageService triageService;
+    private RecordingRefreshPort refreshPort;
+
+    /**
+     * A controllable {@link IssueMemoryRefreshPort} stub: records whether the after-reply refresh was
+     * invoked (and with what reference date) and can be told to fail, so the two follow-on scenarios —
+     * refresh fires on a reported submission, and a refresh failure never rolls back the reported
+     * outcome — are testable without a real issue-memory pass.
+     */
+    static final class RecordingRefreshPort implements IssueMemoryRefreshPort {
+        int calls;
+        java.time.LocalDate lastReferenceDate;
+        boolean succeed = true;
+
+        @Override
+        public boolean refreshAfterReply(UUID orgId, java.time.LocalDate referenceDate) {
+            calls++;
+            lastReferenceDate = referenceDate;
+            return succeed;
+        }
+    }
 
     private final UUID org = UUID.randomUUID();
     private final UUID user = UUID.randomUUID();
@@ -108,13 +128,14 @@ class ReviewReplyServiceTest {
         // Hand-constructed, exactly as Spring would wire it — the writers take explicit
         // TransactionTemplates rather than relying on a @Transactional proxy, so their
         // atomicity holds here too.
+        refreshPort = new RecordingRefreshPort();
         service = new ReviewReplyService(reviews, products, sellerAccounts, triages,
                 new ReviewReplyDraftService(draftRepo),
                 new ReviewReplyApprovalService(approvalRepo, approvalAudits,
                         new ReviewReplyApprovalWriter(approvalRepo, approvalAudits, txManager)),
                 new ReviewReplyOutcomeService(submissionRefRepo, outcomeRepo,
                         new ReviewReplyOutcomeWriter(outcomeRepo, txManager)),
-                new RuleBasedReviewReplyProvider(), FIXED_CLOCK);
+                new RuleBasedReviewReplyProvider(), refreshPort, FIXED_CLOCK);
         triageService = new ReviewTriageService(triages, triageAudits, reviews, sellerAccounts,
                 new ReviewTriageWriter(triages, triageAudits, txManager));
         naverChannel = seedChannel("NAVER", "네이버 스마트스토어");
@@ -196,6 +217,137 @@ class ReviewReplyServiceTest {
             String submissionRef, OperatorOutcome outcome, String commandId) {
         return service.recordSubmissionReported(org, account, ref, submissionRef, outcome.name(),
                 "awrun-synthetic-01", commandId, user);
+    }
+
+    // ---- Review Issue → Guided Reply action-loop projection + refresh (v1) -------------------
+
+    @Test
+    void actionLoopStateProgressesReviewRequiredThenDraftThenApproved() {
+        assertThat(view().actionLoopState()).isEqualTo("NONE");
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        assertThat(view().actionLoopState()).isEqualTo("REVIEW_REQUIRED");
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        assertThat(view().actionLoopState()).isEqualTo("DRAFT");
+        approveHead();
+        assertThat(view().actionLoopState()).isEqualTo("APPROVED");
+    }
+
+    @Test
+    void anApprovalWhoseReviewTheChannelAnsweredIsStaleAndRefusesTheGuidedRun() {
+        triage(TriageDisposition.RESPONSE_NEEDED);
+        service.saveDraft(org, account, ref, "합성-답변 초안", 0, user);
+        approveHead();
+        assertThat(view().actionLoopState()).isEqualTo("APPROVED");
+
+        // The channel now reports the review as answered — the approved reply is stale.
+        review.setReplyState(com.sellerops.review.ReviewReplyState.ANSWERED);
+        reviews.save(review);
+
+        assertThat(view().actionLoopState()).isEqualTo("STALE");
+        assertThatThrownBy(() -> service.startSubmissionRun(org, account, ref, user))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("이미 답변이 등록된");
+    }
+
+    @Test
+    void aReportedSubmissionProjectsUnverifiedAndIsNeverVerifiedOrComplete() {
+        String submissionRef = approveAndStart();
+        record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, UUID.randomUUID().toString());
+
+        ReviewReplyPrepView v = view();
+        assertThat(v.actionLoopState()).isEqualTo("UNVERIFIED");
+        assertThat(v.actionLoopState()).isNotEqualTo("SUBMITTED_VERIFIED");
+        // The honesty fence: the recorded verification is UNVERIFIED, always — never a completion.
+        assertThat(v.outcome().verification()).isEqualTo("UNVERIFIED");
+    }
+
+    @Test
+    void anAbortedSubmissionProjectsAbortedAndTriggersNoRefresh() {
+        String submissionRef = approveAndStart();
+        var response = record(submissionRef, OperatorOutcome.SUBMISSION_ABORTED,
+                UUID.randomUUID().toString());
+
+        assertThat(view().actionLoopState()).isEqualTo("ABORTED");
+        // "I did not post it" changes no reply state, so nothing is refreshed and no flag is set.
+        assertThat(response.issueMemoryRefreshed()).isNull();
+        assertThat(refreshPort.calls).isZero();
+    }
+
+    @Test
+    void aReportedSubmissionTriggersTheIssueMemoryRefreshOnceWithAUtcReferenceDate() {
+        String submissionRef = approveAndStart();
+        var response = record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString());
+
+        assertThat(refreshPort.calls).isEqualTo(1);
+        // UTC, matching how reviews.received_at and the issue windows are keyed (THRESHOLDS.md §1).
+        assertThat(refreshPort.lastReferenceDate).isEqualTo(java.time.LocalDate.of(2026, 5, 12));
+        assertThat(response.issueMemoryRefreshed()).isTrue();
+    }
+
+    @Test
+    void aFailedRefreshKeepsTheReportedOutcomeAndSurfacesAsNotRefreshed() {
+        refreshPort.succeed = false;
+        String submissionRef = approveAndStart();
+        var response = record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED,
+                UUID.randomUUID().toString());
+
+        // The reply record stands; the refresh failing only says "분석 미갱신", never a rollback.
+        assertThat(response.recorded()).isTrue();
+        assertThat(response.issueMemoryRefreshed()).isFalse();
+        assertThat(view().actionLoopState()).isEqualTo("UNVERIFIED");
+        assertThat(reviews.findReportedSubmittedReviewIds(org, java.util.Set.of(review.getId())))
+                .containsExactly(review.getId());
+    }
+
+    @Test
+    void aReplayedReportDoesNotReRunTheRefresh() {
+        String submissionRef = approveAndStart();
+        String command = UUID.randomUUID().toString();
+        record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command);
+        var replay = record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, command);
+
+        assertThat(replay.replayed()).isTrue();
+        assertThat(replay.issueMemoryRefreshed()).isNull();
+        assertThat(refreshPort.calls).isEqualTo(1);
+    }
+
+    @Test
+    void findReportedSubmittedReviewIdsReflectsAReportedSubmission() {
+        assertThat(reviews.findReportedSubmittedReviewIds(org, java.util.Set.of(review.getId())))
+                .isEmpty();
+        String submissionRef = approveAndStart();
+        record(submissionRef, OperatorOutcome.OPERATOR_REPORTED_SUBMITTED, UUID.randomUUID().toString());
+
+        assertThat(reviews.findReportedSubmittedReviewIds(org, java.util.Set.of(review.getId())))
+                .containsExactly(review.getId());
+    }
+
+    @Test
+    void theProjectionMapsAVerifiedOracleToSubmittedVerifiedThoughNaverCannotReachIt() {
+        // The synthetic oracle: a VERIFIED verification is structurally unreachable for NAVER
+        // (VerificationState has no VERIFIED member), so this proves only the projection's mapping —
+        // the ONE place SUBMITTED_VERIFIED could ever be produced, kept honest and tested.
+        var verified = new com.sellerops.attention.reply.dto.ReviewReplyOutcomeView(
+                "OPERATOR_REPORTED_SUBMITTED", "VERIFIED", 1, "f".repeat(64), null,
+                Instant.parse("2026-05-12T00:00:00Z"));
+        assertThat(ReviewReplyService.projectActionLoopState(true, true, true, false, verified))
+                .isEqualTo(ReviewActionLoopState.SUBMITTED_VERIFIED);
+
+        var unverified = new com.sellerops.attention.reply.dto.ReviewReplyOutcomeView(
+                "OPERATOR_REPORTED_SUBMITTED", "UNVERIFIED", 1, "f".repeat(64), null,
+                Instant.parse("2026-05-12T00:00:00Z"));
+        assertThat(ReviewReplyService.projectActionLoopState(true, true, true, false, unverified))
+                .isEqualTo(ReviewActionLoopState.UNVERIFIED);
+    }
+
+    @Test
+    void restartRecoversTheApprovedStateFromDurableRecordsAndAllowsAReMint() {
+        approveAndStart();
+        // A fresh read (as after a restart) re-derives from durable rows: still APPROVED, re-mintable.
+        assertThat(view().actionLoopState()).isEqualTo("APPROVED");
+        assertThat(view().capabilities().canStartSubmissionRun()).isTrue();
+        assertThat(service.startSubmissionRun(org, account, ref, user).submissionRef()).isNotBlank();
     }
 
     @Test
