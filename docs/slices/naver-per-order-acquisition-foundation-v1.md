@@ -106,6 +106,29 @@ introduced here). And a per-order row's `payment_amount` is refreshed only on a 
 the current PAYED-only scope `initialPaymentAmount` is immutable per order, so this cannot drift — a
 corrected-amount-without-status-change case is out of scope until the request filter widens.
 
+## Disposable-Postgres proof (2026-07-28)
+
+Beyond the H2 gate, the whole thing was proven on a throwaway PostgreSQL 15 via a gated opt-in
+integration test (`ChannelOrderPostgresProofIT`, `@EnabledIfEnvironmentVariable SELLEROPS_PG_PROOF=1`
+— skipped in the normal suite/CI, which have no Postgres):
+
+- **Real Flyway applied V1→V32** on a clean DB: `Successfully applied 31 migrations … now at version
+  v32`; `flyway_schema_history` shows `32 | channel orders | success=true`. V32 applies cleanly on top
+  of the whole chain — no SQL error.
+- **Schema (psql `\d`)**: both tables exist with the expected columns/types/nullability; the identity
+  **`uq_channel_orders_identity` UNIQUE (org_id, seller_account_id, external_order_id)** index; and the
+  real **foreign keys the H2 test schema did not generate** — `channel_orders` → organizations /
+  seller_accounts / channels, and `channel_order_status_events` → channel_orders / organizations.
+  (Those FKs surfaced a test-only harness gap — random parent ids — that H2 silently allowed; the
+  product code was unaffected.)
+- **Behavior on the real schema**: synthetic ingest → re-collect (dedup, no duplicate) → status change
+  (`PAYED→DELIVERED`, one event appended, normalized `UNKNOWN`) → restart (fresh service instance,
+  idempotent); and a full NAVER sync (fake HTTP) landing **both** the daily summary and per-order rows,
+  with `count(channel_orders)==order_daily_summaries.order_count` and matching amount sums.
+- **Privacy**: every stored value is an order id / status code / amount / date — no buyer PII; no
+  `text`/`json`/`jsonb` free-form column exists; and the app logs carried **0** raw response bodies or
+  order ids (connector sanitization holds end-to-end).
+
 ## Migration note (V32)
 
 `order_daily_summaries` cannot express per-order rows or status history (it is one aggregate row per
