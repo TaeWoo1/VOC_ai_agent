@@ -52,6 +52,46 @@ Operator, in the real NAVER Commerce API Center, report **screen/menu names and 
 6. Current API group, call IP, status, and whether each is editable.
 7. Record screen names + behaviour **only** — no ID / Secret / account / store value.
 
+### Phase 0 — EXECUTED (2026-07-29, correct-IP env, seated operator; no NAVER change, no values recorded)
+
+**Tooling used (dev-only):** `collector/tools/naver-api-observe-recon.ts` — a dev-only Playwright **read-only**
+API-center observer. **One supervisor process** owns the persistent context from `launchNaverContext(profileDir,
+"chrome")` (headed real Chrome, no extension / no `--load-extension` / no stealth, default args + real sandbox)
+to `context.close()`. It creates **one fixed Page**, pins its identity with `window.name` (`addInitScript`, so it
+survives the cross-origin login redirects), foregrounds it, and observes **only that page** — a per-observe
+validity gate (context alive, page open + in context, `window.name` match, host = API center) **fails closed**,
+never reading a fallback URL or another tab. Signals: an **observe sentinel** (read) and a **close sentinel**
+(graceful `context.close()`); `SIGINT/SIGTERM` also close the context. **No credential / login automation** (the
+human logs in on the fixed tab; the tool never types credentials, never handles 2FA/CAPTCHA, never touches the
+login screen). Labels are read with `locator(sel).allInnerTexts()` per selector (isolated: one selector's failure
+is recorded and never zeroes the others). The **screenshot is in-memory only** (byte size reported, image never
+written). **No raw application ID / Secret / store name / call IP / token** is read, printed, or saved (only UI
+label text, element counts, `recencyBucket`-style structure). Refuses to run without
+`--i-understand-this-opens-live-naver` (fail-closed, no browser launched).
+
+**Observation-capability findings (sanitized):**
+- **Claude-in-Chrome extension hard-blocks the API-center host** (`apicenter.commerce.naver.com`): both DOM read
+  and screenshot return `"This site is blocked"`. So the coding-agent's Chrome tools cannot observe NAVER — the
+  human-observes / agent-records safety model is enforced at the extension layer. (Chrome control itself was
+  proven separately on a harmless page.)
+- **Playwright headed persistent context CAN observe** the API center (read + screenshot).
+- The API center is an **Angular SPA**, content in the **top document — no iframe** (`frameCount = 1`).
+- **LNB selectors** that work: section labels `p.title-menu`, items `a.item-menu`, bottom `.btn-area button`.
+- **Stable fixed-Page ownership proven** — `window.name` held across **3** observations, DevTools `a.item-menu`
+  count matched Playwright's (16), survived the restored tab being closed (`pageCount` 2→1), screenshot bytes
+  varied (live). (An earlier `page.evaluate` label extractor was a bug returning `[]`; the locator extractor fixed it.)
+
+**Baseline findings (sanitized — values never recorded):**
+- **App status = 활성 (active)** (operator-confirmed; a `일시중단` button implies a running app).
+- **Application ID (Client ID) re-checkable** — a `복사` (copy) control is present.
+- **Secret re-checkable + reissue affordance present** — `보기` (view) and `재발급` (reissue) buttons on the app
+  detail. **Reissue was NOT pressed** (that is Phase 2, still gated).
+- **Registered call IP matches the current environment** (operator-confirmed; raw IP not recorded). This run was
+  on the correct-IP environment, resolving the earlier IP-mismatch defer.
+- Detail field labels present: 애플리케이션 이름 / 스토어명 / 상태 / 최근 수정일·회원 / 인증 기한 / 애플리케이션 ID /
+  애플리케이션 시크릿 / 설명 / API호출 IP / API그룹명·리소스 유형. Action buttons: 일시중단 · 사용현황 · 수정 ·
+  보기 · 복사 · 재발급 · 취소 · 저장 · 추가.
+
 ## Phase 1 — baseline connection (SellerOps live, non-destructive)
 
 1. Operator enters the current app's ID/Secret into the SellerOps secure field.
@@ -97,9 +137,9 @@ Operator, in the real NAVER Commerce API Center, report **screen/menu names and 
 
 | # | Hypothesis | Verdict | Evidence (sanitized) |
 |---|---|---|---|
-| 1 | Existing application ID re-checkable / copyable | | |
-| 2 | Existing Secret re-checkable / copyable | | |
-| 3 | Secret alone replaceable / reissuable | | |
+| 1 | Existing application ID re-checkable / copyable | `CONFIRMED` | `복사` control on the app detail (Phase 0, read-only) |
+| 2 | Existing Secret re-checkable / copyable | `CONFIRMED` | `보기` control on the app detail (Phase 0, read-only) |
+| 3 | Secret alone replaceable / reissuable | `CONFIRMED (affordance)` | `재발급` button present on the app detail; **not pressed** — pressing is Phase 2 (gated) |
 | 4 | On Secret replace, application ID unchanged | | |
 | 5 | On Secret replace, old Secret invalidated immediately | | |
 | 6 | On Secret replace, old access token invalidated immediately | | |
@@ -165,8 +205,10 @@ without changing any product launcher. Sanitized outcomes:
 
 ## Boundary — what stays true until the seated session runs
 
-Nothing here has run. `sellerops.connector.naver.enabled` stays **OFF**, no live NAVER call, no first real
-sync, no merge; Pilot Runtime PR #369 untouched; no new Flyway migration. The operator performs the read-only
-baseline (Phase 0) and reports it; the agent requests `Seated and ready — destructive NAVER API recon` before
-recording any Phase-2/Phase-3 destructive result. Within one approved session, the same channel/account/scope
-replace / delete / reissue / connection-test / first-sync proceed without re-approval.
+**Phase 0 (read-only baseline) HAS run — 2026-07-29** (results above); **nothing beyond it has.**
+`sellerops.connector.naver.enabled` stays **OFF**, no SellerOps connection test (Phase 1), no first real sync,
+no Secret replace / app delete / reissue (Phase 2/3), no merge; Pilot Runtime PR #369 untouched; no new Flyway
+migration. The agent requests `Seated and ready — destructive NAVER API recon` before recording any
+Phase-2/Phase-3 destructive result, and a fresh single-use live approval before the Phase-1 connection test /
+first sync. Within one approved session, the same channel/account/scope replace / delete / reissue /
+connection-test / first-sync proceed without re-approval.
