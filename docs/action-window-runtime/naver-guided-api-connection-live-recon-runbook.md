@@ -131,6 +131,38 @@ Operator, in the real NAVER Commerce API Center, report **screen/menu names and 
 - On reissue failure: no repeated deletes, no account switching, no unofficial workaround.
 - Do not extend to solution-provider OAuth or an automatic issuance flow.
 
+## Recon environment setup — findings (2026-07-28, offline, no NAVER touched)
+
+Established how a seated operator attaches "Claude in Chrome" to a headed real Chrome for recon,
+without changing any product launcher. Sanitized outcomes:
+
+- **Dev-only recon launcher** added: `collector/tools/naver-api-recon-chrome.ts` (NOT a product path).
+  Reuses the product path helper (`accountScopedProfileDirFor`) but the product launcher
+  (`src/profile.ts`), account-scoped runtime, Pilot Runtime, and the normal NAVER profile are
+  **unchanged**. Recon-only deviation: `ignoreDefaultArgs: ["--disable-extensions"]`, `channel:"chrome"`,
+  `headless:false`. Never `--load-extension`, never a local side-load, never a detection-bypass flag.
+- **Recon-only opaque profile** (leaf `naver-agent-<24hex>` from an opaque recon slot) is distinct from
+  the existing verified profiles — those were never touched or read.
+- **Playwright default `--disable-extensions` is real** (verified in `playwright-core`), alongside
+  `--enable-automation` + `--remote-debugging-pipe`. So the product launcher can never carry a Web-Store
+  extension, and modifying it to do so is out (matches the no-side-load prohibition).
+- **A Web-Store extension DOES load under Playwright automation** once `--disable-extensions` is dropped:
+  the extension service worker was active (confirmed via Playwright's worker list AND a CDP
+  `Target.getTargets` probe).
+- **BLOCKER — Google refuses account login in the automation-flagged window.** Signing into the extension
+  (Google auth) inside the Playwright `--enable-automation` Chrome hits Google's anti-automation wall
+  ("이 브라우저 또는 앱이 안전하지 않을 수 있습니다 / 다른 브라우저를 사용해 보세요"). Not defeatable without a
+  detection-bypass flag, which is prohibited. Google login DOES work in **plain** Chrome (no automation).
+- **`/chrome` is not usable from the coding-agent session:** no browser-control tool is exposed to the
+  agent, so even a connected `/chrome` gives the agent no page-reading ability. This is fine — the safety
+  model is human-observes / agent-records, agent never reads raw page content.
+- **Resolved approach:** Phase 0 read-only recon runs in **plain Chrome + Claude-in-Chrome** (operator's
+  side); the SellerOps **product** verification stays in a **separate Playwright run** (its own isolated
+  profile). Isolation only matters for the product run, not for the operator eyeballing NAVER screens.
+- **Phase 0 deferred:** the current network is on a **different call-IP** than the app's allowed IP, which
+  would make a connection test / sync fail on IP mismatch and give a misleading verdict. Phase 0 (and all
+  live steps) resume from the **correct-IP environment**.
+
 ## Boundary — what stays true until the seated session runs
 
 Nothing here has run. `sellerops.connector.naver.enabled` stays **OFF**, no live NAVER call, no first real
