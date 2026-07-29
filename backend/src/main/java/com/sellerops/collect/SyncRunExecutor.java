@@ -10,10 +10,13 @@ import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.ingest.IngestOutcome;
 import com.sellerops.ingest.IngestionService;
+import com.sellerops.ingest.map.RowError;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
+import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
+import com.sellerops.order.ChannelOrderIngestionService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
 import com.sellerops.sync.SyncCursor;
@@ -23,6 +26,7 @@ import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,18 +61,21 @@ public class SyncRunExecutor {
     private final ChannelRepository channels;
     private final ConnectorRegistry registry;
     private final IngestionService ingestionService;
+    private final ChannelOrderIngestionService orderIngestionService;
     private final SyncJobRepository syncJobs;
     private final SyncCursorRepository cursors;
     private final ChannelConnectionStatusRepository connectionStatus;
 
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                            ConnectorRegistry registry, IngestionService ingestionService,
+                           ChannelOrderIngestionService orderIngestionService,
                            SyncJobRepository syncJobs, SyncCursorRepository cursors,
                            ChannelConnectionStatusRepository connectionStatus) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.registry = registry;
         this.ingestionService = ingestionService;
+        this.orderIngestionService = orderIngestionService;
         this.syncJobs = syncJobs;
         this.cursors = cursors;
         this.connectionStatus = connectionStatus;
@@ -226,10 +233,39 @@ public class SyncRunExecutor {
             case REVIEW -> ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
             case INQUIRY -> ingestionService.ingestInquiries(orgId, channelId, sellerAccountId,
                     typed(page, CanonicalInquiry.class));
-            case ORDER_SUMMARY -> ingestionService.ingestOrderSummaries(orgId, channelId, typed(page, CanonicalOrderSummary.class));
+            case ORDER_SUMMARY -> ingestOrderPage(page, orgId, channelId, sellerAccountId);
             // No canonical type yet; the mock returns empty pages. Routing is deferred.
             case PRODUCT, SALES -> new IngestOutcome(0, 0, 0, List.of(), List.of());
         };
+    }
+
+    /**
+     * The daily summary always lands (the aggregate table is unchanged). For a per-order channel
+     * (the page also carries per-order records) the per-order rows are the counted unit — the daily
+     * upsert is a derived mirror; for an aggregate-only channel (no per-order records) the daily rows
+     * remain the counted unit, exactly as before. A 1-order run therefore still reports one row.
+     */
+    private IngestOutcome ingestOrderPage(FetchPage page, UUID orgId, UUID channelId, UUID sellerAccountId) {
+        IngestOutcome daily = ingestionService.ingestOrderSummaries(
+                orgId, channelId, typed(page, CanonicalOrderSummary.class));
+        List<CanonicalOrder> perOrder = ordersTyped(page);
+        if (perOrder.isEmpty()) {
+            return daily;
+        }
+        IngestOutcome orders = orderIngestionService.ingest(orgId, channelId, sellerAccountId, perOrder);
+        if (daily.failed() == 0) {
+            return orders;
+        }
+        // Per-order rows are the counted unit, but a daily-summary failure must not vanish — fold its
+        // failed rows and errors in so the run reflects them (PARTIAL/FAILED) rather than a false SUCCESS.
+        List<RowError> errors = new ArrayList<>(orders.errors());
+        errors.addAll(daily.errors());
+        return new IngestOutcome(orders.success(), orders.skipped(), orders.failed() + daily.failed(),
+                errors, orders.insertedIds());
+    }
+
+    private static List<CanonicalOrder> ordersTyped(FetchPage page) {
+        return page.orders().stream().map(CanonicalOrder.class::cast).toList();
     }
 
     private static boolean isCommunityArticlePage(FetchPage page) {

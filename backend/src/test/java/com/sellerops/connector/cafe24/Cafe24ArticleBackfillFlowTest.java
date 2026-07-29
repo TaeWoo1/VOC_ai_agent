@@ -81,6 +81,8 @@ class Cafe24ArticleBackfillFlowTest {
     @Autowired InquiryWorkItemRepository workItems;
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired PlatformTransactionManager txManager;
+    @Autowired com.sellerops.order.ChannelOrderRepository channelOrders;
+    @Autowired com.sellerops.order.ChannelOrderStatusEventRepository channelOrderStatusEvents;
     @Autowired SyncJobRepository syncJobs;
     @Autowired SyncCursorRepository cursors;
     @Autowired ChannelConnectionStatusRepository connectionStatus;
@@ -127,8 +129,10 @@ class Cafe24ArticleBackfillFlowTest {
                 new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC(),
                 "app-client-id", "app-client-secret");
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
+        com.sellerops.order.ChannelOrderIngestionService orderIngestion =
+                new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);
         executor = new SyncRunExecutor(sellerAccounts, channels, registry, ingestion,
-                syncJobs, cursors, connectionStatus);
+                orderIngestion, syncJobs, cursors, connectionStatus);
     }
 
     /** Enqueue one fetch's worth of responses: the token grant then a one-page article list. */
