@@ -197,7 +197,7 @@ Client ID/Secret UI = 복사 / 보기 / 재발급.
   (`frontend/src/lib/guidedConnection/copy.ts`, `state.ts`).
 - If Secret re-check is impossible, guide existing-app users in order: key-on-hand? → **Secret 재발급
   (reissue) on the existing app** (store-wide rotation — warn it affects every consumer of that app).
-  **There is no delete/reissue path — NAVER offers no app delete (see Phase 2/3 — CLOSED).**
+  **There is no delete/reissue path — NAVER offers no app delete (see Phase 3 — CLOSED).**
 - ~~Delete is not recommended by default; shown only after the no-other-program confirmation.~~ **App delete
   does not exist. The `delete_reissue_confirm` phase and its copy (built on that REFUTED assumption) HAVE been
   retired in the guided FE (`frontend/src/lib/guidedConnection/state.ts`, `copy.ts`) on branch
