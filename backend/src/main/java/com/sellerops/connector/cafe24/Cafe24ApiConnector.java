@@ -6,8 +6,6 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedDataTypeException;
-import com.sellerops.credential.CredentialVault;
-import com.sellerops.credential.DecryptedCredential;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
@@ -15,7 +13,6 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -90,29 +87,23 @@ public class Cafe24ApiConnector implements PullConnector {
     /** Safety bound on internal pages (200k orders) — caps a runaway loop. */
     static final int MAX_ORDER_PAGES = 200;
 
-    private final Cafe24TokenClient tokenClient;
-    private final CredentialVault vault;
+    /**
+     * The shared credential-authorization seam (vault open → refresh → single-use
+     * rotation write-back). Extracted so this connector and the diagnostic
+     * live-proof use one path; see {@link Cafe24Authorizer}.
+     */
+    private final Cafe24Authorizer authorizer;
     private final Cafe24OrdersClient ordersClient;
     private final Cafe24BoardArticlesClient articlesClient;
     private final Clock clock;
-    /**
-     * App-level OAuth credentials of the ONE registered SellerOps Cafe24 app — server
-     * configuration, identical for every mall, NEVER per-seller vault material. The
-     * vault holds only seller-connection values (mall_id, refresh_token).
-     */
-    private final String appClientId;
-    private final String appClientSecret;
 
-    public Cafe24ApiConnector(Cafe24TokenClient tokenClient, CredentialVault vault,
+    public Cafe24ApiConnector(Cafe24Authorizer authorizer,
                               Cafe24OrdersClient ordersClient, Cafe24BoardArticlesClient articlesClient,
-                              Clock clock, String appClientId, String appClientSecret) {
-        this.tokenClient = tokenClient;
-        this.vault = vault;
+                              Clock clock) {
+        this.authorizer = authorizer;
         this.ordersClient = ordersClient;
         this.articlesClient = articlesClient;
         this.clock = clock;
-        this.appClientId = appClientId;
-        this.appClientSecret = appClientSecret;
     }
 
     @Override
@@ -170,7 +161,7 @@ public class Cafe24ApiConnector implements PullConnector {
      */
     private FetchPage fetchOrderSummary(FetchRequest request) {
         try {
-            Authorized auth = authorize(request);
+            Cafe24Authorizer.Authorized auth = authorize(request);
 
             // Fixed trailing window in the explicit Cafe24 zone. Re-collecting the
             // same window each run and upserting (last-wins per day) is idempotent
@@ -227,7 +218,7 @@ public class Cafe24ApiConnector implements PullConnector {
         int boardNo = primaryBoard(request.dataType());
         Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
         try {
-            Authorized auth = authorize(request);
+            Cafe24Authorizer.Authorized auth = authorize(request);
             // A windowed cursor (backfill seed) bounds the sweep to [start, end]; an
             // unseeded cursor sweeps by offset only. advance() preserves the window.
             List<Cafe24BoardArticleRow> rows = articlesClient.fetchPage(
@@ -304,39 +295,14 @@ public class Cafe24ApiConnector implements PullConnector {
     }
 
     /**
-     * Fail-closed credential chain shared by every data type: vault open (missing
-     * credential / master key throws here) → secret-shape check → refresh-token
-     * grant → <b>immediate single-use rotation write-back</b>. Returns the mall id
-     * and a fresh access token. A {@link Cafe24RateLimitedException} on refresh
-     * propagates before any write-back; a failed refresh leaves the stored
-     * credential untouched.
+     * Delegate to the shared {@link Cafe24Authorizer} seam (vault open →
+     * secret-shape check → refresh-token grant → immediate single-use rotation
+     * write-back). A {@link Cafe24RateLimitedException} on refresh propagates
+     * before any write-back; a failed refresh leaves the stored credential
+     * untouched.
      */
-    private Authorized authorize(FetchRequest request) {
-        DecryptedCredential credential = vault.open(request.orgId(), request.sellerAccountId());
-        String mallId = credential.secrets().get("mall_id");
-        String refreshToken = credential.secrets().get("refresh_token");
-        if (isBlank(mallId) || isBlank(refreshToken)) {
-            throw new IllegalStateException(
-                    "카페24 자격 증명에 mall_id 또는 refresh_token이 없습니다.");
-        }
-        if (isBlank(appClientId) || isBlank(appClientSecret)) {
-            // App-level OAuth credentials are server configuration — a run cannot
-            // proceed without them, and they are never read from the vault.
-            throw new IllegalStateException(
-                    "카페24 앱 자격 증명(client_id/client_secret)이 설정되지 않았습니다.");
-        }
-
-        Cafe24TokenResult token = tokenClient.refresh(mallId, appClientId, appClientSecret, refreshToken);
-
-        // Single-use rotation: persist the replacement before anything else can
-        // fail. rotateSecrets re-encrypts the payload only — connector class, auth
-        // type, creator, and the separate refresh-token slot are preserved.
-        if (token.rotatedFrom(refreshToken)) {
-            Map<String, String> rotated = new LinkedHashMap<>(credential.secrets());
-            rotated.put("refresh_token", token.refreshToken());
-            vault.rotateSecrets(request.orgId(), request.sellerAccountId(), rotated);
-        }
-        return new Authorized(mallId, token.accessToken());
+    private Cafe24Authorizer.Authorized authorize(FetchRequest request) {
+        return authorizer.authorize(request.orgId(), request.sellerAccountId());
     }
 
     private FetchPage rateLimited(FetchRequest request, Cafe24RateLimitedException e) {
@@ -345,10 +311,4 @@ public class Cafe24ApiConnector implements PullConnector {
         return FetchPage.rateLimited(request.dataType(), request.cursorValue(), retryAfter, KIND);
     }
 
-    private record Authorized(String mallId, String accessToken) {
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
-    }
 }

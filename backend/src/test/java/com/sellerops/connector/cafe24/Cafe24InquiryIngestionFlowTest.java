@@ -88,8 +88,9 @@ class Cafe24InquiryIngestionFlowTest {
                 null, null, null);
         ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products),
                 communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault, new Cafe24OrdersClient(http),
-                new Cafe24BoardArticlesClient(http), Clock.systemUTC(), "app-client-id", "app-client-secret");
+        connector = new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "app-client-id", "app-client-secret"),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
     }
 
     /** Fetch one board-6 page through the connector, then ingest for (org, account). */

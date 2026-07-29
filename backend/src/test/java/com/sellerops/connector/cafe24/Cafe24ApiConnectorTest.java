@@ -69,8 +69,9 @@ class Cafe24ApiConnectorTest {
     private static final String APP_CLIENT_SECRET = "test-app-client-secret";
 
     private Cafe24ApiConnector connectorWith(CredentialVault v) {
-        return new Cafe24ApiConnector(new Cafe24TokenClient(http), v, new Cafe24OrdersClient(http),
-                new Cafe24BoardArticlesClient(http), CLOCK, APP_CLIENT_ID, APP_CLIENT_SECRET);
+        return new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), v, APP_CLIENT_ID, APP_CLIENT_SECRET),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -202,8 +203,9 @@ class Cafe24ApiConnectorTest {
         // The app client_id/client_secret are server config; absent config must fail
         // closed before any token grant — never read from the vault.
         storeCafe24Credential();
-        Cafe24ApiConnector noAppCreds = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
-                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK, "", "");
+        Cafe24ApiConnector noAppCreds = new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "", ""),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK);
 
         assertThatThrownBy(() -> noAppCreds.fetch(request(DataType.ORDER_SUMMARY, null)))
                 .isInstanceOf(IllegalStateException.class)
