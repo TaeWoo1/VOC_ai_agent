@@ -1,8 +1,11 @@
 # NAVER Per-Order Acquisition Foundation v1
 
-**Status:** Offline-complete; the real NAVER response field set and status range are
-`correct-IP live proof pending`. No live NAVER call, no connector-flag production activation,
-no marketplace write. Additive only. One narrow migration (V32).
+**Status:** Offline-complete **and live-proven for the current `PAYED` window** (see
+[Live proof (A5)](#live-proof-a5--2026-07-29)). A single real `ORDER_SUMMARY` sync succeeded on a real
+seller; the observed field set and the `PAYED → PAID` mapping match this slice exactly, and no code change
+was forced. Status **transitions**, non-`PAYED` codes, multi-page/multi-day, and race/in-batch-duplicate
+paths remain **UNMEASURED** (not observed in a `PAYED`-only single-page window — not failures). Additive
+only. One narrow migration (V32).
 
 ## Why this slice exists
 
@@ -164,3 +167,46 @@ unmerged — also claims V32, so whichever lands second renumbers, per the V29�
 Order-risk policy, delay/cancel/return/claim classification, operations UI, widening the request
 `lastChangedType`, any live NAVER call, connector-flag production activation, other channels, a
 generic workflow/OperationRun engine.
+
+## Live proof (A5) — 2026-07-29
+
+One real `ORDER_SUMMARY` sync was run against a real NAVER seller account on a **disposable, throwaway
+Postgres** (real Flyway V1→V32), with the connector flag enabled by an **environment variable only** and
+the credential provisioned as an operator-entered `API_KEY` in the vault. Sanitized results below (no
+store identity, no credential, no call IP, no raw order ids, no revenue figures — counts and status
+vocabulary only). The disposable database and dev-only harness were removed afterward.
+
+**Proven in this run:**
+
+- **Real `ORDER_SUMMARY` sync succeeded — 15 orders** (`SUCCESS`, 15 success / 0 skipped / 0 failed).
+- **Real status vocabulary observed: `PAYED → PAID`** — the only `productOrderStatus` present in the
+  window, normalized exactly as this slice specifies.
+- **Daily ↔ per-order consistency matched** — `order_daily_summaries` count and amount equal the
+  `channel_orders` aggregate for the date (exact, by construction).
+- **Cursor-advance re-sync returned 0 rows — normal.** NAVER's last-changed cursor advanced past the
+  window after the first run, so a plain re-sync correctly ingested nothing (no error).
+- **Idempotency proven by re-presenting the same window.** After a **disposable-only** reset of the local
+  sync cursor (local runtime state — *not* a NAVER change, *not* a status change), the same **15 orders
+  were re-presented and all 15 were `SKIPPED`** (0 new rows, 0 new events).
+- **No duplication, no spurious events:** order count **15 → 15**, status events **15 → 15** (one initial
+  event per order; max one event per order).
+- **No PII, no raw payload, no credential exposure** in the persisted schema or logs (no PII/free-form/JSON
+  columns; no order data in any log statement; credential encrypted at rest and dropped with the DB).
+- **Backend full gate passed** (`BUILD SUCCESSFUL`) and an **independent review passed** — the real
+  response is handled correctly on every axis it touched.
+- **No code change was forced by the real response** — every field read was present and every persisted
+  field populated; `"PAYED"` matches the normalizer literal exactly.
+
+**Still UNMEASURED — not observed in this `PAYED`-only, single-page window (these are unobserved scope, not
+failures):**
+
+- **Real status-change events** (a `from → to` transition appended to history) — no order changed status
+  in-window.
+- **`UNKNOWN` normalization / fail-closed** for a non-`PAYED` code — no other code appeared, so `PAID` is
+  observed and `UNKNOWN` remains unexercised live.
+- **Multi-page continuation and multi-date consistency** — the window was a single page on a single date.
+- **Concurrent-insert (`DataIntegrityViolation`) race** — single writer only.
+- **In-batch duplicate collapse within one page** — all 15 identities were distinct.
+
+Exercising these requires a window that spans a real status transition and/or widening the request
+`lastChangedType` (out of scope here) — they remain `live proof pending`.
