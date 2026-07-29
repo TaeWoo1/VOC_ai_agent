@@ -148,8 +148,19 @@ label text, element counts, `recencyBucket`-style structure). Refuses to run wit
 | 9 | On delete, existing access token invalidated immediately | | |
 | 10 | After delete, same store re-registerable immediately | | |
 | 11 | On re-registration, API group / call IP reset | | |
-| 12 | New app → SellerOps connection test passes | | |
-| 13 | New app → first order sync (incl. 0-row) passes | | |
+| 12 | New app → SellerOps connection test passes | | (Phase 3 — not run; but see baseline below) |
+| 13 | New app → first order sync (incl. 0-row) passes | | (Phase 3 — not run; but see baseline below) |
+
+**Phase 1 baseline (existing app, non-destructive) — 2026-07-29:**
+
+| # | Hypothesis | Verdict | Evidence (sanitized) |
+|---|---|---|---|
+| B1 | Existing app → SellerOps connection test passes | `CONFIRMED` | `test-connection` → SUCCESS on the real Commerce API, correct-IP env |
+| B2 | Existing app → first order sync passes | `CONFIRMED` | `ORDER_SUMMARY` sync → SUCCESS, 15 orders, PAYED→PAID, daily↔per-order consistent |
+| B3 | 0-row sync = success, distinct from failure | `CONFIRMED` | same-scope re-sync after cursor advance → SUCCESS counts 0 |
+| B4 | permission-insufficient / call-IP-mismatch reason codes | `NOT_OBSERVED` | happy path succeeded; failure branches never triggered (IP matched, auth OK) |
+
+Rows 4–13 (Secret-replace and delete/reissue effects) remain **unrun** — destructive, Phase 2/3, gated.
 
 ---
 
@@ -203,12 +214,36 @@ without changing any product launcher. Sanitized outcomes:
   would make a connection test / sync fail on IP mismatch and give a misleading verdict. Phase 0 (and all
   live steps) resume from the **correct-IP environment**.
 
+## Phase 1 — EXECUTED (2026-07-29, non-destructive, correct-IP env, seated operator)
+
+Baseline connection + first real sync on the **existing** app (no Secret replace, no delete, no reissue). Run
+against the real NAVER Commerce API through the **product backend boundaries** the guided FE drives
+(`POST …/test-connection`, `POST …/sync {ORDER_SUMMARY}`) on a **disposable throwaway Postgres** with the
+connector flag enabled by an **environment variable only** (torn down afterward; the product
+`sellerops.connector.naver.enabled` was never changed). Operator entered the existing app's Client ID/Secret
+into the vault (`API_KEY`); values never surfaced. Sanitized outcomes:
+
+- **Connection test PASS** (`status=SUCCESS`, no reason code) — the real client-credentials token mint was
+  accepted → credentials valid + call IP accepted + auth permission sufficient. (Runbook Phase 1 step 2.)
+- **First order sync SUCCESS — 15 orders** (`ORDER_SUMMARY`, 15 success / 0 skip / 0 fail). Real status
+  vocabulary `PAYED → PAID`; daily ↔ per-order count + amount consistent. (Phase 1 step 3.)
+- **0-row case = success, distinct from failure** — a follow-up same-scope sync returned `totalRows=0`
+  (`SUCCESS`, counts 0) because the last-changed cursor advanced; "수집됨, 신규 주문 없음", not an error.
+  (Confirms slice §12 / §17.9.)
+- **Idempotency** — re-presenting the same window (disposable cursor reset only; not a NAVER change) skipped
+  all 15 (0 new rows, 0 spurious events).
+
+> **Caveat (honest scope):** this exercised the **backend** connection-test + ORDER_SUMMARY boundaries and the
+> real NAVER API with the existing app's credentials — **not** a live end-to-end walk of the guided FE wizard
+> (§17.10 does not require live NAVER for implementation validation). Distinct failure reason codes
+> (permission-insufficient / call-IP-mismatch) were **not observed** because the happy path succeeded.
+
 ## Boundary — what stays true until the seated session runs
 
-**Phase 0 (read-only baseline) HAS run — 2026-07-29** (results above); **nothing beyond it has.**
-`sellerops.connector.naver.enabled` stays **OFF**, no SellerOps connection test (Phase 1), no first real sync,
-no Secret replace / app delete / reissue (Phase 2/3), no merge; Pilot Runtime PR #369 untouched; no new Flyway
-migration. The agent requests `Seated and ready — destructive NAVER API recon` before recording any
-Phase-2/Phase-3 destructive result, and a fresh single-use live approval before the Phase-1 connection test /
-first sync. Within one approved session, the same channel/account/scope replace / delete / reissue /
-connection-test / first-sync proceed without re-approval.
+**Phase 0 (read-only recon) and Phase 1 (baseline connection test + first order sync, non-destructive) HAVE
+run — 2026-07-29** (results above). **Phase 2 / Phase 3 (destructive) have NOT run.**
+`sellerops.connector.naver.enabled` stays **OFF in the product** (Phase 1 used an env-only override on a
+disposable backend, torn down), no **Secret replace / app delete / reissue** (Phase 2/3); Pilot Runtime PR #369
+untouched; no new Flyway migration on this branch. The agent requests `Seated and ready — destructive NAVER API
+recon` before recording any Phase-2/Phase-3 destructive result. Within one approved session, the same
+channel/account/scope replace / delete / reissue proceed without re-approval.
