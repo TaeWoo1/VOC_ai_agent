@@ -104,11 +104,16 @@ describe("three-path fork — reuse first, issue only when there is no app (§fl
     expect(s.path).toBe("existing");
   });
 
-  it("'new' → account_store_choice_required → issuance", () => {
-    const s = reduce(fork, { type: "APPLICATION_PATH", choice: "new" });
-    expect(s.phase).toBe("account_store_choice_required");
-    expect(s.path).toBe("new");
-    expect(reduce(s, { type: "ACCOUNT_STORE_RESOLVED" }).phase).toBe("application_issuance");
+  it("'new' → app-absence check FIRST (never straight to issuance): no app → issuance, app found → forced reuse", () => {
+    const check = reduce(fork, { type: "APPLICATION_PATH", choice: "new" });
+    expect(check.phase).toBe("application_status_unknown"); // must verify the store has no app before issuing
+    // app absent → issuance may proceed
+    const none = reduce(check, { type: "APPLICATION_LIST_RESULT", found: false });
+    expect(none.phase).toBe("account_store_choice_required");
+    expect(none.path).toBe("new");
+    expect(reduce(none, { type: "ACCOUNT_STORE_RESOLVED" }).phase).toBe("application_issuance");
+    // app already exists → forced reuse, NOT a second app
+    expect(reduce(check, { type: "APPLICATION_LIST_RESULT", found: true }).phase).toBe("existing_credential_entry");
   });
 
   it("'unknown' → application_status_unknown; the seller self-checks NAVER's list and reports", () => {
@@ -147,7 +152,7 @@ describe("full journeys → completed only after registered ∧ tested ∧ synce
   });
 });
 
-describe("credential recovery when the Secret is lost (§flow 4/8/9)", () => {
+describe("credential recovery when the Secret is lost (§flow 4) — reissue on the existing app, never delete", () => {
   const recovery = run(SECRET_LOST_EVENTS); // credential_recovery_required
 
   it("an existing-app seller who cannot produce the Secret lands in recovery, not issuance", () => {
@@ -156,35 +161,38 @@ describe("credential recovery when the Secret is lost (§flow 4/8/9)", () => {
     expect(recovery.path).toBe("existing");
   });
 
-  it("re-checking the Secret returns to entry; delete-reissue is a separate opt-in", () => {
-    expect(reduce(recovery, { type: "SECRET_RECHECKED" }).phase).toBe("existing_credential_entry");
-    expect(reduce(recovery, { type: "BEGIN_DELETE_REISSUE" }).phase).toBe("delete_reissue_confirm");
+  it("obtaining the Secret again (re-view or reissue on the SAME app) returns to entry, staying on the existing path", () => {
+    const back = reduce(recovery, { type: "SECRET_RECHECKED" });
+    expect(back.phase).toBe("existing_credential_entry");
+    expect(back.path).toBe("existing"); // never re-routed to a "new" app — there is no delete-and-recreate
   });
 
-  it("delete-reissue proceeds to fresh issuance only on the explicit confirmation; cancel returns", () => {
-    const confirm = reduce(recovery, { type: "BEGIN_DELETE_REISSUE" }); // delete_reissue_confirm
-    const proceed = reduce(confirm, { type: "CONFIRM_NO_OTHER_PROGRAM" });
-    expect(proceed.phase).toBe("application_issuance");
-    expect(proceed.path).toBe("new"); // a genuinely new app after the seller deletes the old one at NAVER
-    expect(reduce(confirm, { type: "CANCEL_DELETE_REISSUE" }).phase).toBe("credential_recovery_required");
+  it("recovery never leaves the existing app: an unmodeled event is a no-op (no delete-reissue branch exists)", () => {
+    // The former BEGIN_DELETE_REISSUE / CONFIRM_NO_OTHER_PROGRAM / CANCEL_DELETE_REISSUE events are gone;
+    // recovery advances ONLY by re-obtaining the Secret. Any other event stays put (fail-closed).
+    expect(reduce(recovery, { type: "ISSUANCE_COMPLETE" })).toBe(recovery);
+    expect(reduce(recovery, { type: "ACCOUNT_STORE_RESOLVED" })).toBe(recovery);
   });
 });
 
 describe("the seller's decisions cannot be skipped (§17.2)", () => {
   it("cannot skip account/store resolution on the new path", () => {
-    const store = reduce(reduce(gateEntry, READY_SIGNAL), { type: "APPLICATION_PATH", choice: "new" });
+    // new → app-absence check → (no app) account_store_choice_required; issuance must not be skippable here.
+    const fork = reduce(reduce(gateEntry, READY_SIGNAL), { type: "APPLICATION_PATH", choice: "new" });
+    const store = reduce(fork, { type: "APPLICATION_LIST_RESULT", found: false });
+    expect(store.phase).toBe("account_store_choice_required");
     expect(reduce(store, { type: "ISSUANCE_COMPLETE" })).toBe(store); // no-op
   });
 
   it("cannot skip issuance", () => {
-    const issuance = run(HAPPY_PATH_EVENTS.slice(0, 4)); // application_issuance
+    const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance
     expect(issuance.phase).toBe("application_issuance");
     expect(reduce(issuance, { type: "BEGIN_CREDENTIAL_ENTRY" })).toBe(issuance); // no-op
   });
 });
 
 describe("test-connection result mapping (§12, §5)", () => {
-  const toTest = HAPPY_PATH_EVENTS.slice(0, 8); // reach connection_testing (…CREDENTIAL_REGISTERED)
+  const toTest = HAPPY_PATH_EVENTS.slice(0, 9); // reach connection_testing (…CREDENTIAL_REGISTERED)
 
   it("reaches connection_testing after registration, tested still false", () => {
     const s = run(toTest);
@@ -234,7 +242,7 @@ describe("test-connection result mapping (§12, §5)", () => {
 });
 
 describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
-  const toSync = HAPPY_PATH_EVENTS.slice(0, 9); // reach first_order_sync
+  const toSync = HAPPY_PATH_EVENTS.slice(0, 10); // reach first_order_sync
 
   it("SUCCESS (incl. zero new orders) → completed", () => {
     expect(reduce(run(toSync), { type: "SYNC_RESULT", status: "SUCCESS" }).phase).toBe("completed");
@@ -252,7 +260,7 @@ describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
 });
 
 describe("global regressions preserve milestones for resume (§13)", () => {
-  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 9)); // first_order_sync, registered+tested
+  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 10)); // first_order_sync, registered+tested
 
   it("AGENT_LOST → agent_unavailable, milestones kept", () => {
     const s = reduce(midJourney, { type: "AGENT_LOST" });
@@ -268,7 +276,7 @@ describe("global regressions preserve milestones for resume (§13)", () => {
 
 describe("READINESS does not clobber journey progress past the gate", () => {
   it("a readiness signal during connection_testing is a no-op (regress only via AGENT_LOST)", () => {
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 8));
+    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9));
     expect(testing.phase).toBe("connection_testing");
     const s = reduce(testing, readiness({ agentPaired: false, rendererAvailable: false, naverSession: "logged_out", sessionSource: "detected" }));
     expect(s).toBe(testing); // unchanged
@@ -276,7 +284,7 @@ describe("READINESS does not clobber journey progress past the gate", () => {
 });
 
 describe("B4 — dedicated-profile session continuity", () => {
-  const issuance = run(HAPPY_PATH_EVENTS.slice(0, 4)); // application_issuance (session-sensitive)
+  const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance (session-sensitive)
   const completed = run(HAPPY_PATH_EVENTS);
 
   it("resolveNaverSession: live detection outranks attestation, and there is no conflict", () => {
@@ -310,7 +318,7 @@ describe("B4 — dedicated-profile session continuity", () => {
 
   it("a NAVER session drop regresses ONLY from session-sensitive phases", () => {
     expect(reduce(issuance, { type: "NAVER_LOGGED_OUT" }).phase).toBe("naver_login_required"); // sensitive
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 8)); // connection_testing — backend, not session-sensitive
+    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9)); // connection_testing — backend, not session-sensitive
     expect(reduce(testing, { type: "NAVER_LOGGED_OUT" })).toBe(testing); // no-op
   });
 });
@@ -334,12 +342,12 @@ describe("misc invariants", () => {
     expect(actorFor("check_saved_credential")).toBe("SELLEROPS_AUTOMATED");
     expect(actorFor("application_path_choice")).toBe("USER_REQUIRED");
     expect(actorFor("existing_credential_entry")).toBe("USER_REQUIRED");
-    expect(actorFor("delete_reissue_confirm")).toBe("USER_REQUIRED");
+    expect(actorFor("credential_recovery_required")).toBe("USER_REQUIRED");
     expect(actorFor("permission_review_required")).toBe("USER_REQUIRED");
   });
 
   it("is pure — does not mutate the previous state's milestones", () => {
-    const before = run(HAPPY_PATH_EVENTS.slice(0, 7)); // credential_registration
+    const before = run(HAPPY_PATH_EVENTS.slice(0, 8)); // credential_registration
     const snapshot = JSON.stringify(before);
     reduce(before, { type: "CREDENTIAL_REGISTERED" });
     expect(JSON.stringify(before)).toBe(snapshot);

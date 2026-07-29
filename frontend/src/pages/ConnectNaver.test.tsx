@@ -91,10 +91,13 @@ function renderPage() {
   );
 }
 
-// Shared step helpers for the new-app path (login → path fork "new" → issuance → credential entry).
+// Shared step helpers for the new-app path (login → path fork "new" → app-absence check → issuance →
+// credential entry). Choosing "new" now first routes through the app-absence check (one app per store,
+// no delete): the seller confirms the store has no app before issuance can proceed.
 async function loginThenNewApp() {
   await userEvent.click(await screen.findByRole("button", { name: "로그인했어요" }));
   await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
+  await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
   await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
   await userEvent.click(await screen.findByRole("button", { name: "발급을 완료했어요" }));
   await userEvent.click(await screen.findByRole("button", { name: /발급된 정보를 입력/ }));
@@ -206,26 +209,25 @@ describe("ConnectNaver — reuse an existing connection / application (§discove
   });
 });
 
-describe("ConnectNaver — credential recovery when the Secret is lost (§flow 4/8/9)", () => {
+describe("ConnectNaver — credential recovery when the Secret is lost (§flow 4) — reissue, never delete", () => {
   it("Secret lost: existing entry → 'secret not found' → recovery (never a forced new app)", async () => {
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "로그인했어요" }));
     await userEvent.click(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" }));
     await userEvent.click(await screen.findByRole("button", { name: "시크릿을 찾지 못했어요" }));
-    expect(await screen.findByRole("heading", { name: "시크릿 확인 필요" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "시크릿 재확인 필요" })).toBeInTheDocument();
   });
 
-  it("delete cancel: the last-resort delete path can be entered and CANCELLED back to recovery", async () => {
+  it("recovery offers NO app-delete; re-obtaining the Secret (re-view/reissue) returns to existing entry", async () => {
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "로그인했어요" }));
     await userEvent.click(await screen.findByRole("button", { name: "이미 애플리케이션이 있어요" }));
     await userEvent.click(await screen.findByRole("button", { name: "시크릿을 찾지 못했어요" }));
-    await userEvent.click(await screen.findByRole("button", { name: /삭제 후 재발급/ }));
-    expect(await screen.findByRole("heading", { name: /삭제 후 재발급/ })).toBeInTheDocument();
-    // Proceed is gated behind the "no other program uses it" confirmation.
-    expect(screen.getByRole("button", { name: "확인했고 재발급으로 진행" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "취소" }));
-    expect(await screen.findByRole("heading", { name: "시크릿 확인 필요" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "시크릿 재확인 필요" })).toBeInTheDocument();
+    // No delete-then-reissue affordance exists — NAVER provides no app delete.
+    expect(screen.queryByRole("button", { name: /삭제/ })).toBeNull();
+    await userEvent.click(await screen.findByRole("button", { name: "시크릿을 다시 확인했거나 재발급했어요" }));
+    expect(await screen.findByRole("heading", { name: "기존 연결 정보 입력" })).toBeInTheDocument();
   });
 });
 

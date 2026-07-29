@@ -19,19 +19,15 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
   },
   application_status_unknown: {
     title: "애플리케이션 목록 확인",
-    body: "NAVER 커머스 API 센터의 애플리케이션 목록을 직접 확인한 뒤, 앱이 있는지 선택해 주세요. (스토어별 애플리케이션은 1개만 만들 수 있습니다.)",
+    body: "새 앱을 발급하기 전에, NAVER 커머스 API 센터의 애플리케이션 목록을 직접 확인해 주세요. 스토어별 애플리케이션은 1개만 만들 수 있고 삭제할 수 없으므로, 이미 앱이 있으면 새로 만들지 않고 그 앱을 그대로 재사용합니다. 앱이 없을 때만 신규 발급으로 진행합니다.",
   },
   existing_credential_entry: {
     title: "기존 연결 정보 입력",
-    body: "이미 발급된 애플리케이션 ID와 시크릿을 SellerOps 보안 입력란에 직접 입력해 주세요. 새 앱을 만들 필요가 없습니다.",
+    body: "이미 발급된 애플리케이션 ID와 시크릿을 SellerOps 보안 입력란에 직접 입력해 주세요. 새 앱을 만들 필요가 없습니다. 이 시크릿은 해당 스토어 애플리케이션의 공용 자격 증명이라, 같은 앱을 쓰는 다른 프로그램과 동일한 값입니다. 나중에 시크릿을 재발급하면 그 앱을 쓰는 모든 프로그램의 연결이 함께 끊깁니다.",
   },
   credential_recovery_required: {
-    title: "시크릿 확인 필요",
-    body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터에서 기존 애플리케이션의 시크릿을 다시 확인할 수 있는지 화면에서 직접 확인해 주세요. SellerOps는 시크릿을 대신 확인하거나 재발급하지 않으며, 정확한 화면·절차는 확인 후 안내됩니다.",
-  },
-  delete_reissue_confirm: {
-    title: "삭제 후 재발급 (최후 수단)",
-    body: "삭제 후 재발급은 다른 방법이 없을 때만 쓰는 최후 수단입니다. 이 애플리케이션을 다른 프로그램에서 사용하고 있지 않은지 반드시 먼저 확인해 주세요. 삭제·재발급 화면과 절차는 아직 확인되지 않았으므로, NAVER 화면에서 직접 확인해 진행해 주세요. SellerOps는 앱을 대신 삭제하지 않습니다.",
+    title: "시크릿 재확인 필요",
+    body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터의 기존 애플리케이션 화면에서 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. 앱을 삭제할 필요는 없습니다 (NAVER는 앱 삭제 기능을 제공하지 않습니다). 다만 시크릿을 재발급하면 이 앱을 사용하는 다른 프로그램의 연결도 함께 끊기므로, 다른 프로그램에서 사용 중인지 먼저 확인해 주세요. SellerOps는 시크릿을 대신 확인하거나 재발급하지 않습니다.",
   },
   agent_unavailable: {
     title: "로컬 에이전트 필요",
@@ -115,6 +111,17 @@ export const ACTOR_COPY: Record<GuidedActor, string> = {
   UNSUPPORTED: "지원하지 않음",
 };
 
+/**
+ * Disconnect ≠ NAVER deactivation guardrail (design-audit item D). Surfaced once the connection is live so
+ * the seller understands the correct way to stop using SellerOps: SellerOps removes ONLY its own saved
+ * connection info from its vault; it never deactivates or touches the NAVER application (which is the store's
+ * single, non-deletable app shared by every tool). Never instruct 비활성화/삭제 of the NAVER app to leave SellerOps.
+ */
+export const DISCONNECT_GUARDRAIL_COPY = {
+  title: "연결 해제 안내",
+  body: "SellerOps 연결을 해제하면 SellerOps에 저장된 연결 정보만 삭제됩니다. NAVER 애플리케이션은 비활성화하거나 삭제하지 않습니다. NAVER 앱은 스토어당 1개뿐이고 삭제할 수 없으며 다른 프로그램도 함께 쓸 수 있으므로, SellerOps 연결 해제를 위해 NAVER 앱을 비활성화·삭제하지 마세요.",
+} as const;
+
 export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   AGENT_UNAVAILABLE: "로컬 에이전트에 연결하지 못했습니다. 에이전트 실행 상태를 확인해 주세요.",
   RENDERER_UNAVAILABLE: "작업 창을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
@@ -123,7 +130,7 @@ export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",
   CALL_ENVIRONMENT_MISMATCH: "허용된 호출 환경과 일치하지 않을 수 있습니다. 애플리케이션의 호출 IP 설정을 확인해 주세요.",
-  SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 시크릿을 다시 확인하거나, 최후 수단으로 삭제 후 재발급을 검토할 수 있습니다. (삭제·재발급 화면·절차는 NAVER에서 직접 확인해 주세요.)",
+  SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 애플리케이션의 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. (앱 삭제는 필요하지 않으며 NAVER도 제공하지 않습니다. 단, 재발급은 같은 앱을 쓰는 모든 프로그램의 연결을 함께 끊습니다.)",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   TEST_UNSUPPORTED: "이 연결 방식은 아직 지원되지 않습니다.",

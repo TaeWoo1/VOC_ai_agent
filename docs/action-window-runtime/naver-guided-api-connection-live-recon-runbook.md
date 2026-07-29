@@ -143,13 +143,13 @@ label text, element counts, `recencyBucket`-style structure). Refuses to run wit
 | 4 | On Secret replace, application ID unchanged | | |
 | 5 | On Secret replace, old Secret invalidated immediately | | |
 | 6 | On Secret replace, old access token invalidated immediately | | |
-| 7 | Application deletable | | |
-| 8 | On delete, existing ID/Secret invalidated immediately | | |
-| 9 | On delete, existing access token invalidated immediately | | |
-| 10 | After delete, same store re-registerable immediately | | |
-| 11 | On re-registration, API group / call IP reset | | |
-| 12 | New app → SellerOps connection test passes | | (Phase 3 — not run; but see baseline below) |
-| 13 | New app → first order sync (incl. 0-row) passes | | (Phase 3 — not run; but see baseline below) |
+| 7 | Application deletable | `REFUTED` | **내 스토어 애플리케이션 has no delete function** — official CS: unused apps are **비활성화(deactivate)** only. Observed `삭제` in the detail button area is an **IP/API-group row delete**, not an app delete. |
+| 8 | On delete, existing ID/Secret invalidated immediately | `NOT_APPLICABLE` | predicated on a delete that does not exist |
+| 9 | On delete, existing access token invalidated immediately | `NOT_APPLICABLE` | predicated on a delete that does not exist |
+| 10 | After delete, same store re-registerable immediately | `NOT_APPLICABLE` | predicated on a delete that does not exist |
+| 11 | On re-registration, API group / call IP reset | `NOT_APPLICABLE` | predicated on a delete that does not exist |
+| 12 | New app → SellerOps connection test passes | `NOT_APPLICABLE` | same-store new issuance is blocked by the 1-app-per-store limit (existing app non-deletable) |
+| 13 | New app → first order sync (incl. 0-row) passes | `NOT_APPLICABLE` | as above; see the existing-app baseline (B2) instead |
 
 **Phase 1 baseline (existing app, non-destructive) — 2026-07-29:**
 
@@ -160,7 +160,33 @@ label text, element counts, `recencyBucket`-style structure). Refuses to run wit
 | B3 | 0-row sync = success, distinct from failure | `CONFIRMED` | same-scope re-sync after cursor advance → SUCCESS counts 0 |
 | B4 | permission-insufficient / call-IP-mismatch reason codes | `NOT_OBSERVED` | happy path succeeded; failure branches never triggered (IP matched, auth OK) |
 
-Rows 4–13 (Secret-replace and delete/reissue effects) remain **unrun** — destructive, Phase 2/3, gated.
+Rows 4–6 (Secret-replace effects) remain **unrun** — destructive, Phase 2, gated. Rows 7–13
+(delete/reissue effects) are **closed as REFUTED / NOT_APPLICABLE** — NAVER provides no app-delete (see
+"Phase 3 — CLOSED" below), so the entire delete-then-reissue branch cannot be executed.
+
+## Phase 3 — CLOSED: app-delete capability absent (delete-then-reissue branch, 2026-07-29, no NAVER change)
+
+An operator-approved destructive dry-run (`delete existing app → re-register on the same store`) was
+**aborted before any action** because the premise is invalid. Sanitized findings:
+
+- **내 스토어 애플리케이션 provides no delete on the current screen.** The seated operator could not
+  locate an app-delete control; NAVER Commerce API CS confirms deletion is **not offered** — unused apps
+  must be **비활성화(deactivate)** instead.
+- **The observed `삭제` label was not an app delete.** The read-only observer saw `삭제` in the detail
+  button area (`.btn-area button`), but it is a **row-level delete for a 호출 IP / API 그룹 entry**, not
+  an application delete. (App-level actions on the detail screen: `일시중단 · 사용현황 · 수정`.)
+- **Same-store new-app issuance is blocked** by the 1-app-per-store limit while the existing (non-deletable)
+  app is present, so the from-scratch **issuance-form walk cannot run on this store**. It needs an
+  **app-free store**, or the **solution-provider path** (out of pilot scope).
+- **The `삭제 후 재발급` (delete-then-reissue) recovery assumption is DISCARDED.** Recovery for a lost
+  Secret is **재발급 (Secret reissue) on the existing app** (the `재발급` affordance seen in Phase 0), which
+  rotates the **store-wide** Secret for every consumer — not a delete-and-recreate.
+- **The existing 전선몰딩 app was fully preserved** — no delete, no 비활성화, no 수정, no 재발급. The
+  read-only observer closed gracefully (context.close, cookies flushed); nothing on NAVER was mutated.
+
+Pre-delete recovery baseline captured (sanitized, values never recorded): app 상태 = 활성; API groups
+selected = 문의 / 주문 판매자 / 상품·N배송 / 정산 (all "모든 리소스 유형"); 호출 IP entries = 1 (count only);
+Client ID/Secret UI = 복사 / 보기 / 재발급.
 
 ---
 
@@ -169,8 +195,13 @@ Rows 4–13 (Secret-replace and delete/reissue effects) remain **unrun** — des
 - Default new-user CTA / first path = `처음 발급해요`; `이미 애플리케이션이 있어요` / `있는지 모르겠어요` stay secondary.
 - Put only **confirmed** screen names / warnings / recovery behaviour into copy + state machine
   (`frontend/src/lib/guidedConnection/copy.ts`, `state.ts`).
-- If Secret re-check is impossible, guide existing-app users in order: key-on-hand? → replaceable? → last-resort delete/reissue.
-- Delete is not recommended by default; shown only after the no-other-program confirmation.
+- If Secret re-check is impossible, guide existing-app users in order: key-on-hand? → **Secret 재발급
+  (reissue) on the existing app** (store-wide rotation — warn it affects every consumer of that app).
+  **There is no delete/reissue path — NAVER offers no app delete (see Phase 2/3 — CLOSED).**
+- ~~Delete is not recommended by default; shown only after the no-other-program confirmation.~~ **App delete
+  does not exist. The `delete_reissue_confirm` phase and its copy (built on that REFUTED assumption) HAVE been
+  retired in the guided FE (`frontend/src/lib/guidedConnection/state.ts`, `copy.ts`) on branch
+  `feat/naver-connection-strategy-v1`; recovery now guides Secret reissue on the existing app.**
 - If real reason codes are obtained, update the 인증 실패 / 권한 부족 / 호출 IP 불일치 mapping
   (`afterTestFailure`, backend reason codes) — no branching on guesses, no cause asserted from an unclassified error.
 
@@ -241,7 +272,9 @@ into the vault (`API_KEY`); values never surfaced. Sanitized outcomes:
 ## Boundary — what stays true until the seated session runs
 
 **Phase 0 (read-only recon) and Phase 1 (baseline connection test + first order sync, non-destructive) HAVE
-run — 2026-07-29** (results above). **Phase 2 / Phase 3 (destructive) have NOT run.**
+run — 2026-07-29** (results above). **Phase 3 (delete + reissue) is CLOSED as REFUTED — NAVER offers no
+app-delete, so the branch cannot run** (see "Phase 3 — CLOSED"). **Phase 2 (Secret replace/reissue effects)
+has NOT run** — still destructive, still gated.
 `sellerops.connector.naver.enabled` stays **OFF in the product** (Phase 1 used an env-only override on a
 disposable backend, torn down), no **Secret replace / app delete / reissue** (Phase 2/3); Pilot Runtime PR #369
 untouched; no new Flyway migration on this branch. The agent requests `Seated and ready — destructive NAVER API

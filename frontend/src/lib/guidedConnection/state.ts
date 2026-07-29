@@ -44,7 +44,6 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   sellerops_credential_entry: "USER_REQUIRED",
   existing_credential_entry: "USER_REQUIRED",
   credential_recovery_required: "USER_REQUIRED",
-  delete_reissue_confirm: "USER_REQUIRED",
   credential_registration: "SELLEROPS_AUTOMATED",
   connection_testing: "SELLEROPS_AUTOMATED",
   permission_review_required: "USER_REQUIRED",
@@ -72,9 +71,9 @@ const GATE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
  * Phases where a live NAVER **browser** session is actually in use — the gate plus the API-center
  * discovery/issuance walk (B4). A NAVER session drop regresses ONLY from here; once the seller has moved
  * on to typing credentials, the remaining steps are backend calls and `completed` is durable, so a
- * browser-session change there is a no-op (login is never assumed permanent). Credential entry, recovery,
- * and delete-confirm are past the value-reading point, so — like the original `sellerops_credential_entry`
- * — they are NOT session-sensitive.
+ * browser-session change there is a no-op (login is never assumed permanent). Credential entry and recovery
+ * are past the value-reading point, so — like the original `sellerops_credential_entry` — they are NOT
+ * session-sensitive.
  */
 const SESSION_SENSITIVE_PHASES: ReadonlySet<GuidedPhase> = new Set<GuidedPhase>([
   "readiness_checking",
@@ -257,14 +256,18 @@ export function guidedConnectionReducer(
   switch (prev.phase) {
     case "application_path_choice":
       if (event.type === "APPLICATION_PATH") {
-        if (event.choice === "new") return state("account_store_choice_required", m, null, "none", "new");
+        // "have" reuses the existing app. Both "new" and "unknown" must FIRST verify the store has no app:
+        // NAVER allows one app per store and offers no app-delete, so a store that already holds an app can
+        // never issue a second — issuance is reachable only after an explicit app-absence check (§flow 6/7).
         if (event.choice === "have") return state("existing_credential_entry", m, null, "none", "existing");
-        return state("application_status_unknown", m, null, "none", "unknown"); // choice === "unknown"
+        return state("application_status_unknown", m, null, "none", "unknown");
       }
       return prev;
 
     case "application_status_unknown":
-      // The seller checked NAVER's application list themselves (§flow 7) and reports the result.
+      // The seller checked NAVER's application list themselves (§flow 7) and reports the result. An app
+      // FOUND → forced reuse (never a second app); NONE found → the app-absence gate is cleared and only
+      // then may issuance proceed.
       if (event.type === "APPLICATION_LIST_RESULT") {
         return event.found
           ? state("existing_credential_entry", m, null, "none", "existing")
@@ -297,18 +300,10 @@ export function guidedConnectionReducer(
       return prev;
 
     case "credential_recovery_required":
+      // Recovery for a lost Secret is to obtain it again on the SAME existing app — re-view it, or reissue
+      // it at NAVER (which rotates the store-wide Secret for every consumer). There is NO delete-then-recreate
+      // path: NAVER provides no app-delete (live-confirmed 2026-07-29), and the store already holds its one app.
       if (event.type === "SECRET_RECHECKED") return state("existing_credential_entry", m, null, "none", p);
-      // Delete-then-reissue is the LAST resort, gated behind an explicit confirmation next (§flow 8/9).
-      if (event.type === "BEGIN_DELETE_REISSUE") return state("delete_reissue_confirm", m, null, "none", p);
-      return prev;
-
-    case "delete_reissue_confirm":
-      // Only after the seller confirms no other program uses the app (§flow 9) do we proceed to a fresh
-      // issuance. SellerOps never deletes anything — the deletion happens by the seller's own hand at NAVER.
-      if (event.type === "CONFIRM_NO_OTHER_PROGRAM") return state("application_issuance", m, null, "none", "new");
-      if (event.type === "CANCEL_DELETE_REISSUE") {
-        return state("credential_recovery_required", m, "SECRET_UNRECOVERABLE", "none", p);
-      }
       return prev;
 
     case "credential_registration":

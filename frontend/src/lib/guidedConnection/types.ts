@@ -24,7 +24,9 @@ export type GuidedPhase =
   | "renderer_unavailable"
   | "naver_login_required"
   | "naver_reconnect_required"
-  // Three-path fork: reuse an existing app, or issue a new one only when there is none.
+  // Three-path fork: reuse an existing app, or issue a new one ONLY when the store verifiably has none.
+  // A store that already holds an app is routed to reuse — NAVER allows one app per store and provides no
+  // app-delete (live-confirmed 2026-07-29), so a "new" issuance is only reachable after an app-absence check.
   | "application_path_choice"
   | "application_status_unknown"
   | "account_store_choice_required"
@@ -33,7 +35,6 @@ export type GuidedPhase =
   | "sellerops_credential_entry"
   | "existing_credential_entry"
   | "credential_recovery_required"
-  | "delete_reissue_confirm"
   | "credential_registration"
   | "connection_testing"
   // Distinct connection-test failure states (§5). permission/call-environment are MODELED but routed to
@@ -50,9 +51,10 @@ export type GuidedPhase =
 
 /**
  * Which onboarding path the seller is on (§discovery). `saved` = a stored key was found (reuse without
- * re-entry); `existing` = an app exists at NAVER but SellerOps has no key (enter it); `new` = no app,
- * issue one; `unknown` = existence not yet determined. Threaded through the reducer so a failure returns
- * the seller to the RIGHT entry (existing vs new) and never nudges an existing-app seller into issuance.
+ * re-entry); `existing` = an app exists at NAVER but SellerOps has no key (enter it); `new` = the store has
+ * NO app (confirmed via the app-absence check) so one is issued; `unknown` = existence not yet determined.
+ * Threaded through the reducer so a failure returns the seller to the RIGHT entry (existing vs new) and
+ * never nudges an existing-app seller into issuance (which NAVER would block: one app per store, no delete).
  */
 export type GuidedPath = "unknown" | "saved" | "new" | "existing";
 
@@ -144,14 +146,11 @@ export type GuidedEvent =
   | { type: "APPLICATION_LIST_RESULT"; found: boolean }
   /** At existing-credential entry, the seller could not obtain the Secret → recovery (§flow 4). */
   | { type: "SECRET_UNAVAILABLE" }
-  /** From recovery, the seller re-checked and found the Secret → back to entering it. */
+  /**
+   * From recovery, the seller now HAS the Secret again — either they re-viewed it, or they reissued it on
+   * the SAME existing app (NAVER provides no app-delete; reissue is the only recovery). → back to entering it.
+   */
   | { type: "SECRET_RECHECKED" }
-  /** From recovery, the seller opts into the last-resort delete-then-reissue path (§flow 8). */
-  | { type: "BEGIN_DELETE_REISSUE" }
-  /** The seller confirmed no other program uses the app → proceed to fresh issuance (§flow 9). */
-  | { type: "CONFIRM_NO_OTHER_PROGRAM" }
-  /** The seller backed out of delete-then-reissue → return to recovery (§flow 8 cancel). */
-  | { type: "CANCEL_DELETE_REISSUE" }
   | { type: "ACCOUNT_STORE_RESOLVED" }
   | { type: "ISSUANCE_COMPLETE" }
   | { type: "BEGIN_CREDENTIAL_ENTRY" }
