@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
 import type { ConnectionStatusView, CredentialTemplateView } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import {
   ACTOR_COPY,
+  DISCONNECT_GUARDRAIL_COPY,
   FAILURE_COPY,
   PHASE_COPY,
   type GuidedConnectionState,
@@ -62,13 +62,6 @@ export function GuidedConnectionWizard({
   onGoToReviewExport,
 }: GuidedConnectionWizardProps) {
   const { phase, failureReason } = state;
-  const [noOtherProgram, setNoOtherProgram] = useState(false);
-  // The "no other program uses this app" confirmation must be re-affirmed for EVERY delete-reissue
-  // attempt (§flow 9). Reset it whenever we are not on that phase so a stale check can never pre-satisfy
-  // the gate on a later re-entry.
-  useEffect(() => {
-    if (phase !== "delete_reissue_confirm") setNoOtherProgram(false);
-  }, [phase]);
 
   return (
     <section className="card p-6" aria-label="NAVER 연결 마법사">
@@ -244,47 +237,7 @@ export function GuidedConnectionWizard({
               className="btn-primary block w-full"
               onClick={() => dispatch({ type: "SECRET_RECHECKED" })}
             >
-              시크릿을 다시 확인했어요
-            </button>
-            <button
-              type="button"
-              className="btn-ghost block w-full"
-              onClick={() => dispatch({ type: "BEGIN_DELETE_REISSUE" })}
-            >
-              삭제 후 재발급 (최후 수단)
-            </button>
-          </div>
-        )}
-
-        {phase === "delete_reissue_confirm" && (
-          <div className="space-y-3">
-            <p className="text-muted">{PHASE_COPY.delete_reissue_confirm.body}</p>
-            <label className="flex items-start gap-2 text-base text-ink">
-              <input
-                type="checkbox"
-                checked={noOtherProgram}
-                onChange={(e) => setNoOtherProgram(e.target.checked)}
-                className="mt-1"
-              />
-              <span>이 애플리케이션을 다른 프로그램에서 사용하고 있지 않음을 확인했습니다.</span>
-            </label>
-            <button
-              type="button"
-              className="btn-primary block w-full"
-              disabled={!noOtherProgram}
-              onClick={() => dispatch({ type: "CONFIRM_NO_OTHER_PROGRAM" })}
-            >
-              확인했고 재발급으로 진행
-            </button>
-            <button
-              type="button"
-              className="btn-ghost block w-full"
-              onClick={() => {
-                setNoOtherProgram(false);
-                dispatch({ type: "CANCEL_DELETE_REISSUE" });
-              }}
-            >
-              취소
+              시크릿을 다시 확인했거나 재발급했어요
             </button>
           </div>
         )}
@@ -332,6 +285,10 @@ export function GuidedConnectionWizard({
         {phase === "completed" && (
           <div className="space-y-4">
             <ConnectionSummary status={connectionStatus} />
+            <div className="rounded-lg bg-canvas px-4 py-3" role="note">
+              <p className="text-sm font-medium text-muted">{DISCONNECT_GUARDRAIL_COPY.title}</p>
+              <p className="mt-1 text-sm text-muted">{DISCONNECT_GUARDRAIL_COPY.body}</p>
+            </div>
             <button
               type="button"
               className="btn-primary"

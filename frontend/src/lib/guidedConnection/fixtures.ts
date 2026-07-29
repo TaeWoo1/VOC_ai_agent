@@ -41,11 +41,16 @@ export const READY_SIGNAL: Extract<GuidedEvent, { type: "READINESS" }> = {
   sessionSource: "attested",
 };
 
-/** No stored key → the browser gate runs; from the fork the seller chooses to issue a NEW app. */
+/**
+ * No stored key → the browser gate runs; the seller chooses to issue a NEW app. Choosing "new" first routes
+ * through the app-absence check (one app per store, no delete) — issuance proceeds only once the seller
+ * confirms the store has no application (`APPLICATION_LIST_RESULT{ found: false }`).
+ */
 const NEW_APP_ISSUANCE: GuidedEvent[] = [
   { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
   READY_SIGNAL,
   { type: "APPLICATION_PATH", choice: "new" },
+  { type: "APPLICATION_LIST_RESULT", found: false },
   { type: "ACCOUNT_STORE_RESOLVED" },
   { type: "ISSUANCE_COMPLETE" },
   { type: "BEGIN_CREDENTIAL_ENTRY" },

@@ -6,7 +6,7 @@ import { render } from "@testing-library/react";
 import { screen, userEvent } from "../../test/renderWithRouter";
 import { expectNoAxeViolations } from "../../test/axe";
 import { GuidedConnectionWizard, type GuidedConnectionWizardProps } from "./GuidedConnectionWizard";
-import { actorFor, NAVER_LIKE_TEMPLATE } from "../../lib/guidedConnection";
+import { actorFor, DISCONNECT_GUARDRAIL_COPY, NAVER_LIKE_TEMPLATE } from "../../lib/guidedConnection";
 import type { GuidedConnectionState, GuidedFailureReason, GuidedPhase } from "../../lib/guidedConnection";
 
 function stateAt(phase: GuidedPhase, failureReason: GuidedFailureReason | null = null): GuidedConnectionState {
@@ -201,46 +201,21 @@ describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () =>
     expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_UNAVAILABLE" });
   });
 
-  it("credential_recovery_required → recheck OR opt into last-resort delete-reissue", async () => {
+  it("credential_recovery_required → recover by re-viewing/reissuing the Secret; NO app-delete option is offered", async () => {
     const { props } = renderWizard(stateAt("credential_recovery_required", "SECRET_UNRECOVERABLE"));
-    await userEvent.click(screen.getByRole("button", { name: "시크릿을 다시 확인했어요" }));
+    await userEvent.click(screen.getByRole("button", { name: "시크릿을 다시 확인했거나 재발급했어요" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_RECHECKED" });
-    await userEvent.click(screen.getByRole("button", { name: /삭제 후 재발급/ }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "BEGIN_DELETE_REISSUE" });
+    // The delete-then-reissue path is gone — no delete affordance should exist (NAVER offers no app delete).
+    expect(screen.queryByRole("button", { name: /삭제/ })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("delete_reissue_confirm → proceed is GATED behind the 'no other program' confirmation", async () => {
-    const { props } = renderWizard(stateAt("delete_reissue_confirm"));
-    const proceed = screen.getByRole("button", { name: "확인했고 재발급으로 진행" });
-    expect(proceed).toBeDisabled(); // cannot proceed without confirming
-    await userEvent.click(proceed);
-    expect(props.dispatch).not.toHaveBeenCalledWith({ type: "CONFIRM_NO_OTHER_PROGRAM" });
-    await userEvent.click(screen.getByRole("checkbox"));
-    expect(proceed).toBeEnabled();
-    await userEvent.click(proceed);
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "CONFIRM_NO_OTHER_PROGRAM" });
-  });
-
-  it("delete_reissue_confirm → cancel returns to recovery (deletion is never automatic)", async () => {
-    const { props } = renderWizard(stateAt("delete_reissue_confirm"));
-    await userEvent.click(screen.getByRole("button", { name: "취소" }));
-    expect(props.dispatch).toHaveBeenCalledWith({ type: "CANCEL_DELETE_REISSUE" });
-  });
-
-  it("delete_reissue_confirm → the confirmation is re-required on re-entry (no stale check)", async () => {
-    const base = {
-      template: NAVER_LIKE_TEMPLATE, busy: false, connectionStatus: null,
-      dispatch: vi.fn(), onRecheck: vi.fn(), onConfirmLogin: vi.fn(), onSubmitCredentials: vi.fn(),
-      onRetryTest: vi.fn(), onRetrySync: vi.fn(), onGoToReviewExport: vi.fn(),
-    } as const;
-    const { rerender } = render(<GuidedConnectionWizard {...base} state={stateAt("delete_reissue_confirm")} />);
-    await userEvent.click(screen.getByRole("checkbox"));
-    expect(screen.getByRole("button", { name: "확인했고 재발급으로 진행" })).toBeEnabled();
-    // Leave the phase (back to recovery) and re-enter: the mandatory confirmation must NOT persist.
-    rerender(<GuidedConnectionWizard {...base} state={stateAt("credential_recovery_required", "SECRET_UNRECOVERABLE")} />);
-    rerender(<GuidedConnectionWizard {...base} state={stateAt("delete_reissue_confirm")} />);
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "확인했고 재발급으로 진행" })).toBeDisabled();
+  it("completed → surfaces the disconnect≠NAVER-deactivation guardrail (remove SellerOps credential, not the NAVER app)", () => {
+    renderWizard(stateAt("completed"));
+    const note = screen.getByRole("note");
+    expect(note).toHaveTextContent(DISCONNECT_GUARDRAIL_COPY.title);
+    // The guardrail must tell the seller NOT to deactivate/delete the NAVER app to leave SellerOps.
+    expect(note.textContent ?? "").toMatch(/비활성화/);
   });
 
   it("permission_review_required / call_environment_mismatch → re-test after the seller fixes it at NAVER", async () => {
