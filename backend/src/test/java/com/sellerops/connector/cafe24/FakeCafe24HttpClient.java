@@ -97,10 +97,23 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
      * One article object literal with the capture fields. {@code title}/{@code content}
      * are emitted as JSON null when null; {@code productNo}/{@code rating}/
      * {@code createdDate}/{@code replyStatus} are omitted when null (so a row can carry
-     * only {@code article_no}).
+     * only {@code article_no}). Defaults {@code secret} to {@code "F"} (public), the
+     * common case, so existing review/inquiry fixtures model a public board article.
      */
     static String article(long articleNo, String title, String content, Long productNo,
                           Integer rating, String createdDate, String replyStatus) {
+        return article(articleNo, title, content, productNo, rating, createdDate, replyStatus, "F");
+    }
+
+    /**
+     * As {@link #article}, but with an explicit Cafe24 {@code secret} flag. A non-null
+     * {@code secret} is emitted verbatim (e.g. {@code "T"} 비밀글, {@code "F"} 공개, or an
+     * unexpected token); a {@code null} {@code secret} <b>omits the field entirely</b> —
+     * modelling a response with no {@code secret} key (which the review path treats
+     * fail-closed as not-public).
+     */
+    static String article(long articleNo, String title, String content, Long productNo,
+                          Integer rating, String createdDate, String replyStatus, String secret) {
         StringBuilder sb = new StringBuilder("{\"article_no\":").append(articleNo);
         sb.append(",\"title\":").append(jsonStringOrNull(title));
         sb.append(",\"content\":").append(jsonStringOrNull(content));
@@ -115,6 +128,9 @@ final class FakeCafe24HttpClient implements Cafe24HttpClient {
         }
         if (replyStatus != null) {
             sb.append(",\"reply_status\":\"").append(replyStatus).append('"');
+        }
+        if (secret != null) {
+            sb.append(",\"secret\":\"").append(secret).append('"');
         }
         return sb.append('}').toString();
     }

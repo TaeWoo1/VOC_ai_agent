@@ -70,6 +70,22 @@ class Cafe24BoardArticlesClientTest {
         assertThat(row.rating()).isEqualTo(5);
         assertThat(row.createdDate()).isEqualTo("2026-06-20T10:00:00+09:00");
         assertThat(row.replyStatus()).isEqualTo("N");
+        assertThat(row.secret()).isEqualTo("F"); // 공개 flag parsed from the response
+    }
+
+    @Test
+    void parsesSecretFlagAndTreatsAMissingFlagAsNull() {
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(3001L, "t", "c", null, 5, null, "N", "T"),
+                FakeCafe24HttpClient.article(3002L, "t", "c", null, 5, null, "N", null)));
+
+        List<Cafe24BoardArticleRow> rows = client.fetchPage("access-1", "samplemall", 4, null, null, 50, 0);
+
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).secret()).isEqualTo("T"); // 비밀글 flag parsed verbatim
+        assertThat(rows.get(0).isPublicPost()).isFalse();
+        assertThat(rows.get(1).secret()).isNull(); // absent key → null → fail-closed
+        assertThat(rows.get(1).isPublicPost()).isFalse();
     }
 
     @Test

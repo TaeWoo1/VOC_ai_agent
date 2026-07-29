@@ -102,6 +102,58 @@ class Cafe24ArticlePersistenceFlowTest {
         return ingestion.ingestCommunityArticles(org, channel, account, records);
     }
 
+    /** Drive one bounded REVIEW pass over an explicit page of raw article JSON literals. */
+    private IngestOutcome runReviewPass(String... articleJson) {
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(articleJson));
+        String cursor = Cafe24ArticleCursor.window(4, START, END).encode();
+        FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", DataType.REVIEW, cursor, 3));
+        @SuppressWarnings("unchecked")
+        List<CanonicalCommunityArticle> records = (List<CanonicalCommunityArticle>) page.records();
+        return ingestion.ingestCommunityArticles(org, channel, account, records);
+    }
+
+    @Test
+    void secretReviewPostsAreNeverPersistedThroughTheNormalPath() {
+        IngestOutcome outcome = runReviewPass(
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"),
+                FakeCafe24HttpClient.article(4003L, "누락 제목", "누락 본문", 77L, 5, null, "N", null));
+
+        // Only the public row is ingested at all — the secret / missing-flag rows were
+        // dropped by the connector before mapping, so ingestion never sees them.
+        assertThat(outcome.success()).isEqualTo(1);
+        assertThat(outcome.insertedIds()).hasSize(1);
+
+        List<Cafe24CommunityArticle> rows = communityArticles.findAllByOrgId(org);
+        assertThat(rows).hasSize(1);
+        Cafe24CommunityArticle a = rows.get(0);
+        assertThat(a.getArticleNo()).isEqualTo(4001L);
+        assertThat(a.getContent()).isEqualTo("공개 본문");
+        // No secret post's article number, title, or body ever reaches the DB.
+        assertThat(rows).noneMatch(r -> r.getArticleNo() == 4002L || r.getArticleNo() == 4003L);
+        assertThat(rows).noneMatch(r -> "비밀 본문".equals(r.getContent()) || "누락 본문".equals(r.getContent()));
+        assertThat(rows).noneMatch(r -> "비밀 제목".equals(r.getTitle()) || "누락 제목".equals(r.getTitle()));
+    }
+
+    @Test
+    void replayingAMixedPageStoresOnlyPublicRowsWithoutDuplicating() {
+        runReviewPass(
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"));
+        IngestOutcome second = runReviewPass(
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"));
+
+        // Replay is a no-op for the public row and the secret row never appears — the
+        // count stays 1, no duplicate.
+        assertThat(second.success()).isZero();
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(communityArticles.countByOrgIdAndSellerAccountId(org, account)).isEqualTo(1);
+        assertThat(communityArticles.findAllByOrgId(org)).singleElement()
+                .satisfies(r -> assertThat(r.getArticleNo()).isEqualTo(4001L));
+    }
+
     @Test
     void reviewArticlesPersistThroughTheNormalPathWithWindowedFetch() {
         IngestOutcome outcome = runPass(DataType.REVIEW, 4, 2001L, "잘 쓰고 있어요", "N");
