@@ -16,6 +16,7 @@ function stateAt(phase: GuidedPhase, failureReason: GuidedFailureReason | null =
     failureReason,
     milestones: { registered: false, tested: false, synced: false },
     sessionSource: "none",
+    path: "unknown",
   };
 }
 
@@ -27,6 +28,7 @@ function renderWizard(
     state,
     template: NAVER_LIKE_TEMPLATE,
     busy: false,
+    connectionStatus: null,
     dispatch: vi.fn(),
     onRecheck: vi.fn(),
     onConfirmLogin: vi.fn(),
@@ -133,8 +135,31 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
 
   it("completed → dispatches CONTINUE_TO_REVIEW_EXPORT (the review handoff)", async () => {
     const { props } = renderWizard(stateAt("completed"));
-    await userEvent.click(screen.getByRole("button", { name: "리뷰 수집 준비로 이동" }));
+    await userEvent.click(screen.getByRole("button", { name: "과거 리뷰 가져오기로 이동" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "CONTINUE_TO_REVIEW_EXPORT" });
+  });
+
+  it("completed → shows the connection health + last successful collection time when a status is read", () => {
+    renderWizard(stateAt("completed"), {
+      connectionStatus: {
+        sellerAccountId: "acc-1",
+        state: "CONNECTED",
+        lastSuccessAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        consecutiveFailures: 0,
+        lastError: null,
+        lastSyncedAt: null,
+        nextScheduledAt: null,
+      },
+    });
+    expect(screen.getByText("연결 상태")).toBeInTheDocument();
+    expect(screen.getByText("정상 수집 중")).toBeInTheDocument(); // HealthBadge for CONNECTED
+    expect(screen.getByText(/마지막 성공 수집: .*분 전/)).toBeInTheDocument();
+  });
+
+  it("completed with no status read yet → the summary block is omitted, CTA still shows", () => {
+    renderWizard(stateAt("completed"), { connectionStatus: null });
+    expect(screen.queryByText("연결 상태")).toBeNull();
+    expect(screen.getByRole("button", { name: "과거 리뷰 가져오기로 이동" })).toBeInTheDocument();
   });
 
   it("review_export_readiness → navigates via onGoToReviewExport (handoff, not in-wizard collection)", async () => {
@@ -147,6 +172,85 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     const { props } = renderWizard(stateAt("unsupported_state", "UNKNOWN_STATE"));
     await userEvent.click(screen.getByRole("button", { name: /화면을 확인했어요/ }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "RESUME" });
+  });
+});
+
+describe("GuidedConnectionWizard — discovery / reuse / recovery phases", () => {
+  it("application_path_choice → three explicit paths (have / unknown / new), no auto-issuance", async () => {
+    const { props } = renderWizard(stateAt("application_path_choice"));
+    await userEvent.click(screen.getByRole("button", { name: "이미 애플리케이션이 있어요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_PATH", choice: "have" });
+    await userEvent.click(screen.getByRole("button", { name: "있는지 잘 모르겠어요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_PATH", choice: "unknown" });
+    await userEvent.click(screen.getByRole("button", { name: "처음 발급할게요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_PATH", choice: "new" });
+  });
+
+  it("application_status_unknown → the seller reports what they found in NAVER's list", async () => {
+    const { props } = renderWizard(stateAt("application_status_unknown"));
+    await userEvent.click(screen.getByRole("button", { name: /찾았어요/ }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_LIST_RESULT", found: true });
+    await userEvent.click(screen.getByRole("button", { name: "애플리케이션이 없어요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_LIST_RESULT", found: false });
+  });
+
+  it("existing_credential_entry → the secure form, plus a 'secret not found' exit to recovery", async () => {
+    const { props } = renderWizard(stateAt("existing_credential_entry"));
+    expect(screen.getByRole("button", { name: "연결 정보 저장" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "시크릿을 찾지 못했어요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_UNAVAILABLE" });
+  });
+
+  it("credential_recovery_required → recheck OR opt into last-resort delete-reissue", async () => {
+    const { props } = renderWizard(stateAt("credential_recovery_required", "SECRET_UNRECOVERABLE"));
+    await userEvent.click(screen.getByRole("button", { name: "시크릿을 다시 확인했어요" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "SECRET_RECHECKED" });
+    await userEvent.click(screen.getByRole("button", { name: /삭제 후 재발급/ }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "BEGIN_DELETE_REISSUE" });
+  });
+
+  it("delete_reissue_confirm → proceed is GATED behind the 'no other program' confirmation", async () => {
+    const { props } = renderWizard(stateAt("delete_reissue_confirm"));
+    const proceed = screen.getByRole("button", { name: "확인했고 재발급으로 진행" });
+    expect(proceed).toBeDisabled(); // cannot proceed without confirming
+    await userEvent.click(proceed);
+    expect(props.dispatch).not.toHaveBeenCalledWith({ type: "CONFIRM_NO_OTHER_PROGRAM" });
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(proceed).toBeEnabled();
+    await userEvent.click(proceed);
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "CONFIRM_NO_OTHER_PROGRAM" });
+  });
+
+  it("delete_reissue_confirm → cancel returns to recovery (deletion is never automatic)", async () => {
+    const { props } = renderWizard(stateAt("delete_reissue_confirm"));
+    await userEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "CANCEL_DELETE_REISSUE" });
+  });
+
+  it("delete_reissue_confirm → the confirmation is re-required on re-entry (no stale check)", async () => {
+    const base = {
+      template: NAVER_LIKE_TEMPLATE, busy: false, connectionStatus: null,
+      dispatch: vi.fn(), onRecheck: vi.fn(), onConfirmLogin: vi.fn(), onSubmitCredentials: vi.fn(),
+      onRetryTest: vi.fn(), onRetrySync: vi.fn(), onGoToReviewExport: vi.fn(),
+    } as const;
+    const { rerender } = render(<GuidedConnectionWizard {...base} state={stateAt("delete_reissue_confirm")} />);
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(screen.getByRole("button", { name: "확인했고 재발급으로 진행" })).toBeEnabled();
+    // Leave the phase (back to recovery) and re-enter: the mandatory confirmation must NOT persist.
+    rerender(<GuidedConnectionWizard {...base} state={stateAt("credential_recovery_required", "SECRET_UNRECOVERABLE")} />);
+    rerender(<GuidedConnectionWizard {...base} state={stateAt("delete_reissue_confirm")} />);
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "확인했고 재발급으로 진행" })).toBeDisabled();
+  });
+
+  it("permission_review_required / call_environment_mismatch → re-test after the seller fixes it at NAVER", async () => {
+    const perm = renderWizard(stateAt("permission_review_required", "PERMISSION_INSUFFICIENT"));
+    await userEvent.click(screen.getByRole("button", { name: /권한을 확인했어요/ }));
+    expect(perm.props.onRetryTest).toHaveBeenCalledOnce();
+
+    const env = renderWizard(stateAt("call_environment_mismatch", "CALL_ENVIRONMENT_MISMATCH"));
+    await userEvent.click(screen.getByRole("button", { name: /호출 환경을 확인했어요/ }));
+    expect(env.props.onRetryTest).toHaveBeenCalledOnce();
   });
 });
 

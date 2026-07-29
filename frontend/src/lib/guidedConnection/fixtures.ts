@@ -41,12 +41,19 @@ export const READY_SIGNAL: Extract<GuidedEvent, { type: "READINESS" }> = {
   sessionSource: "attested",
 };
 
-/** Happy path: readiness → issuance → credentials → registration → test → sync → completed. */
-export const HAPPY_PATH_EVENTS: GuidedEvent[] = [
+/** No stored key → the browser gate runs; from the fork the seller chooses to issue a NEW app. */
+const NEW_APP_ISSUANCE: GuidedEvent[] = [
+  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
   READY_SIGNAL,
+  { type: "APPLICATION_PATH", choice: "new" },
   { type: "ACCOUNT_STORE_RESOLVED" },
   { type: "ISSUANCE_COMPLETE" },
   { type: "BEGIN_CREDENTIAL_ENTRY" },
+];
+
+/** Happy path (new app): discovery → gate → issuance → credentials → registration → test → sync → completed. */
+export const HAPPY_PATH_EVENTS: GuidedEvent[] = [
+  ...NEW_APP_ISSUANCE,
   { type: "SUBMIT_CREDENTIALS" },
   { type: "CREDENTIAL_REGISTERED" },
   { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
@@ -58,11 +65,34 @@ export const ZERO_COUNT_SYNC_EVENTS: GuidedEvent[] = [...HAPPY_PATH_EVENTS];
 
 /** Reaches the test step, then a bad credential bounces the seller back to entry (§12). */
 export const INVALID_CREDENTIAL_EVENTS: GuidedEvent[] = [
-  READY_SIGNAL,
-  { type: "ACCOUNT_STORE_RESOLVED" },
-  { type: "ISSUANCE_COMPLETE" },
-  { type: "BEGIN_CREDENTIAL_ENTRY" },
+  ...NEW_APP_ISSUANCE,
   { type: "SUBMIT_CREDENTIALS" },
   { type: "CREDENTIAL_REGISTERED" },
   { type: "TEST_RESULT", status: "FAILED", reasonCode: "INVALID_CREDENTIAL" },
+];
+
+/** Reuse: a stored key is found → straight to the test, no re-entry, no gate → sync → completed (§flow 1–2). */
+export const SAVED_CREDENTIAL_REUSE_EVENTS: GuidedEvent[] = [
+  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: true },
+  { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
+  { type: "SYNC_RESULT", status: "SUCCESS" },
+];
+
+/** Existing app, no stored key: gate → "have" → enter existing key → register → test → sync (§flow 3). */
+export const EXISTING_APP_EVENTS: GuidedEvent[] = [
+  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
+  READY_SIGNAL,
+  { type: "APPLICATION_PATH", choice: "have" },
+  { type: "SUBMIT_CREDENTIALS" },
+  { type: "CREDENTIAL_REGISTERED" },
+  { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
+  { type: "SYNC_RESULT", status: "SUCCESS" },
+];
+
+/** Existing app but the Secret cannot be produced → credential recovery (§flow 4). */
+export const SECRET_LOST_EVENTS: GuidedEvent[] = [
+  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
+  READY_SIGNAL,
+  { type: "APPLICATION_PATH", choice: "have" },
+  { type: "SECRET_UNAVAILABLE" },
 ];

@@ -133,6 +133,32 @@ class Cafe24OnboardingServiceTest {
     }
 
     @Test
+    void startToleratesFileUploadAndApiAccountsCoexistingOnTheSameChannel() {
+        // An org may now hold BOTH a file-upload and an API-mode account on one channel (the file-channel
+        // and API-channel start flows keep separate rows). The unscoped single-result finder would throw
+        // IncorrectResultSizeDataAccessException on that; Cafe24 onboarding must reuse only its API-mode row.
+        SellerAccount fileAcct = new SellerAccount();
+        fileAcct.setOrgId(org);
+        fileAcct.setChannelId(cafe24ChannelId);
+        fileAcct.setAlias("파일 업로드");
+        fileAcct.setConnectionStatus(ChannelStatus.CONNECTED);
+        fileAcct.setFileUpload(true);
+        accounts.save(fileAcct);
+        SellerAccount apiAcct = new SellerAccount();
+        apiAcct.setOrgId(org);
+        apiAcct.setChannelId(cafe24ChannelId);
+        apiAcct.setAlias("API");
+        apiAcct.setConnectionStatus(ChannelStatus.PENDING);
+        apiAcct.setFileUpload(false);
+        UUID apiId = accounts.save(apiAcct).getId();
+
+        StartResult r = service.start(org, user, "samplemall");
+
+        assertThat(r.sellerAccountId()).isEqualTo(apiId); // reused the existing API row — no non-unique error
+        assertThat(accounts.findAll()).hasSize(2); // no third row created; the two modes coexist
+    }
+
+    @Test
     void onlyTheStateHashIsPersistedNeverTheRawToken() {
         StartResult r = service.start(org, user, "samplemall");
         String raw = rawStateOf(r);

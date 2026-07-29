@@ -379,6 +379,108 @@ G3 준비 요건은 특정 렌더러가 아니라 아래로 정의한다:
 
 ---
 
+## 21. 구현 진행 기록 (Implementation progress)
+
+> 계약 본문은 불변. 이 절은 **오프라인 완성 델타(G3-A/G3-B)** 로 실제 병합된 것을 기록만 한다. **G3-C/G3-D·플래그 활성·라이브 NAVER는 여전히 게이트**(§0 RULED 2026-07-21, §20-3).
+
+### 보존 기록 (Preservation record, 2026-07-28)
+
+- **Branch:** `feat/naver-guided-api-connection` (off `main` @ `fbbc90a`). **Head SHA:** `b02cc79`.
+- **Draft PR #370** (base `main`, DRAFT) — **상태: offline-complete / NAVER API Center live recon and first
+  real sync pending.** 라이브 검증 전 **merge 금지**. `sellerops.connector.naver.enabled` **OFF 유지**, 라이브
+  NAVER 호출 없음, Flyway 마이그레이션 없음.
+- **Gate (offline):** 백엔드 suite **BUILD SUCCESSFUL**(락 구조 테스트 + Cafe24 2행 회귀 테스트 포함); 프론트
+  **1116 tests + typecheck clean**(9개 E2E: 신규/기존/모름/저장키 성공/저장키 실패/Secret 분실/삭제 취소/0건/읽기
+  오류 fail-closed). 독립 리뷰 2회 반영.
+- **남은 라이브 확인 항목(게이트 뒤):** ① 기존 앱 Secret 재확인·교체·재발급 가능 여부 + 실제 화면명; ② 기존 앱
+  삭제 경고·화면명·삭제 정책; ③ 권한 부족/호출 IP 불일치의 실제 backend reason code(permission/IP 상태 라이브
+  라우팅); ④ 연결 테스트 + 0건 포함 첫 실주문 sync(플래그 활성 승인 + fresh single-use live approval 선결).
+
+### 2026-07-28 — 오프라인 완성 델타 (branch `feat/naver-guided-api-connection`, base `main` @ `fbbc90a`)
+
+PR #317/#357이 남긴 갭 중 **오프라인으로 채울 수 있는 것만** 마감:
+
+- **연결 시작 = seller-account 생성 (백엔드, §3.2 갭 해소).** `POST /api/seller-accounts/api-channel`
+  (`SellerAccountController` → `SellerAccountService.registerApiChannel`) — (org, channel)의 단일 API-모드
+  계정을 **find-or-create**. 신규는 `PENDING`(자격증명·테스트·sync 전), **멱등**하며 이미 settled된
+  CONNECTED를 **강등하지 않는다**. 자격증명·라이브 호출 없음(계정 레코드만). 파일-업로드 계정과 분리
+  (`findByOrgIdAndChannelIdAndFileUpload`). 이전에는 첫 셀러가 붙일 계정이 없어 위저드가 막혔음.
+- **FE 위저드 배선.** `ConnectNaver`가 첫 진입 시 NAVER API 계정이 없으면 위 엔드포인트로 **PENDING 계정을
+  생성**해 "연결 시작"을 성립시킨다. 완료 CTA는 이제 **`/settings/review-import`(과거 리뷰 가져오기)** 로
+  핸드오프(§0 review-export-readiness — 위저드 안에서 리뷰를 수집하지 않음). 완료 화면은 실제 연결 상태 +
+  마지막 성공 수집 시각을 표시(§2 ⑥, `getConnectionStatusStrict` + `HealthBadge`). 발급 가이드는 **§4 확인된
+  사실만**으로 보강(통합매니저 권한, 스토어별 앱 1개) — 버튼 문구/2FA 지점 등 불안정 세부는 여전히 미기재.
+- **불변 유지.** NAVER 엔진 파일(`NaverTokenClient`/`NaverApiConnector`/`NaverOrdersClient`) 무변경,
+  `sellerops.connector.naver.enabled` **OFF 유지**(§20-3 PO 게이트), 라이브 NAVER 없음, Flyway 마이그레이션
+  없음, 신규 백엔드 능력 없음. **더 세분한 실패 구분(IP 불일치·권한 부족)은 G3-C 라이브 정찰 소관이라 도입하지
+  않음** — 기존 안전 범주(`INVALID_CREDENTIAL`/`TEMPORARY_PROVIDER_ERROR`/`PROVIDER_UNAVAILABLE`)만 매핑.
+  `CollectControlService:324-335` stale 주석은 범위 밖으로 그대로 둠(§3.2 보고).
+- **독립 리뷰 반영.** (HIGH) 동시 연결 시작이 중복 API 계정 행을 만들 수 있는 레이스 → `registerApiChannel`이
+  **채널 행을 `PESSIMISTIC_WRITE`(SELECT … FOR UPDATE)로 잠근 뒤** API-모드 계정을 재조회·생성하도록 해 동일
+  `(org, channel, fileUpload=false)`에 대한 동시 시작을 **직렬화**(정상 생성 경로의 단일-계정 보장은 이 락이
+  담당). 마이그레이션 없음. 방어적 `findFirst…OrderByCreatedAtAsc`(LIMIT 1, 예외 없음)는 **과거 레거시 중복
+  데이터에 대한 방어적 조회로만** 유지(정상 경로의 중복 허용 해결책이 아님). 구조 고정 테스트
+  `SellerAccountServiceLockTest`(락 애노테이션 + 계정 조회 전 락 순서 + `findById` 미사용). (MED)
+  `registerFileChannel`을 `fileUpload=true`로 스코프해 파일 채널 등록이 진행 중인 API 계정을 **덮어쓰지 않게**
+  대칭화(양방향 격리 테스트 추가). (최종 diff 리뷰 MED) 위 대칭화로 (org, channel)에 두 행 공존이 가능해지자
+  `Cafe24OnboardingService`의 단일-결과 `findByOrgIdAndChannelId`가 non-unique로 throw할 수 있는 회귀 →
+  Cafe24 조회도 **모드-스코프 finder(`fileUpload=false`)** 로 전환(파일+API 공존 회귀 테스트 추가).
+- **검증(오프라인).** 백엔드 `SellerAccountServiceTest`(생성·멱등·무강등·파일계정 분리·파일↔API 무간섭·미지
+  채널 fail-closed); FE `ConnectNaver.test`(무계정→생성→등록, 완료 상태 표시, 리뷰-임포트 핸드오프) +
+  `GuidedConnectionWizard.test`(완료 상태 패널). 라이브 NAVER 불필요(§17.10). 솔루션-제공자·NAVER 승인 주장 없음(§17.11).
+
+### 2026-07-28 (2차) — 기존 앱 발견·재사용·복구 흐름 (같은 PR, FE-only, 신규 백엔드 능력 없음)
+
+직선형 신규 발급을 넘어, 온보딩을 **발견·재사용·복구**로 확장한다. 상태 머신은 이제 브라우저 게이트가 아니라
+**저장된 자격증명 확인(`check_saved_credential`)** 에서 시작한다:
+
+- **저장 키 재사용(§flow 1–2).** Vault에 키가 있으면(`getConnectionInfoStrict ≠ null`) **재입력·에이전트·로그인
+  없이** 바로 연결 테스트 → 성공 시 기존 앱 그대로 재사용. 실패(INVALID)면 `existing_credential_entry`로.
+- **세 경로 분기(§flow 3/6/7).** 게이트 통과 후 `application_path_choice` 에서 셀러가 선택:
+  `이미 있음`→기존 자격증명 입력, `모름`→`application_status_unknown`(셀러가 NAVER 애플리케이션 목록을 직접
+  확인 후 있음/없음 선택), `처음`→신규 발급. **기존 앱이 있으면 새 앱 생성으로 자동 유도하지 않는다.**
+- **자격증명 복구(§flow 4/8/9/10).** 앱은 있으나 시크릿 미확보 → `credential_recovery_required`. 다시 확인하면
+  입력으로 복귀; **삭제 후 재발급은 기본이 아니라 최후 수단**(`delete_reissue_confirm`)이며, **다른 프로그램
+  미사용 확인 체크박스** 통과 전에는 진행 불가. 기존 앱의 시크릿 재확인·교체·재발급·삭제 **가능 여부와 실제
+  화면명은 라이브 확인 전 fail-closed**(추측한 버튼명·삭제 정책·재발급 기능을 사실처럼 구현하지 않음). SellerOps는
+  앱을 대신 삭제하지 않는다.
+- **구분된 실패 상태(§flow 5).** `permission_review_required`·`call_environment_mismatch`·인증 실패를 별도
+  사용자 상태로 **모델링**. 단 권한/호출환경은 **명시적 backend reason code**로만 라우팅 — 현 backend는 이를
+  구분하지 못하므로(라이브 정찰 G3-C 필요, §4/§20-2) **fail-closed**: 미분류 실패는 추측하지 않고 test 단계의
+  일시 재시도로 남는다.
+- **불변 유지.** FE-only(백엔드 무변경, 기존 경계 `getConnectionInfoStrict`/`testConnection`/`storeCredential`/
+  `manualSync` 재사용), 기존 연결 사용자 Seller Account **중복 생성 없음**(멱등 create + 기존 계정 우선), Secret
+  재표시·로깅 없음, 앱 자동 삭제 없음, 라이브 NAVER 없음, 마이그레이션 없음.
+- **검증(오프라인 E2E).** reducer `state.test`(43) + `GuidedConnectionWizard.test`(26) + `ConnectNaver.test`(18):
+  신규/기존/모름/저장키 성공/저장키 실패/Secret 분실/삭제 취소/0건 첫 동기화 전부 커버.
+
+> **여전히 게이트(라이브)** — 기존 앱의 시크릿 복구·교체·삭제의 **정확한 NAVER 화면·절차·가능 여부**는 라이브
+> 커머스 API 센터에서 확인해야 한다. 이 확인은 §14 정책 게이트/§20-3 PO 결정 뒤에 있으며, 그 시점에 실제 한국어
+> 화면명으로 사용자 확인을 요청한다(이 PR에서는 수행하지 않음).
+
+### 2026-07-29 — 라이브 핵심-흐름 확인 (Phase 0 정찰 + Phase 1 baseline; 비파괴)
+
+착석 운영자·정상 호출-IP 환경에서 **비파괴** 범위만 라이브로 확인했다. NAVER 화면은 운영자가 직접 조작,
+에이전트는 관찰·기록만. 자격증명·시크릿·토큰·스토어·raw IP는 출력/기록하지 않음. 상세 sanitized 기록:
+`docs/action-window-runtime/naver-guided-api-connection-live-recon-runbook.md`(Phase 0/1 EXECUTED + 판정표 B1–B4).
+
+- **§4 공식 흐름 = Playwright 읽기전용 관찰로 확인** — API 센터(`apicenter.commerce.naver.com`, Angular SPA,
+  단일 top frame). 앱 목록→상세, 상태 **활성**, 필드/버튼 라벨 실물 확보(라벨만).
+- **§13 재사용·복구 능력(일부 확인).** 애플리케이션 ID **재조회 가능(`복사`)**, 시크릿 **재조회(`보기`)+재발급
+  (`재발급`) 어포던스 존재**, 호출 IP **현재 환경과 일치**. → §21 보존기록의 남은-라이브 ①(시크릿 재확인/재발급
+  가능 여부+실화면명)이 **어포던스 수준에서 해소**. 단 **재발급을 누르지 않음**(파괴적, Phase 2 게이트).
+- **§2 ④·⑤ / §17.6·§17.7·§17.9 = 라이브 확인.** 기존 앱 자격증명으로 **연결 테스트 PASS**(실 커머스 API 토큰
+  발급 수락), **첫 ORDER_SUMMARY sync SUCCESS = 15건**(PAYED→PAID, daily↔per-order 정합), 커서 진행 후 **0건
+  재동기화 = SUCCESS(=수집됨·신규없음, 실패와 구분)**. 멱등(동일 창 재노출 시 15건 전부 SKIP). — 제품 성공 기준
+  §2의 등록→테스트→첫 실주문 수집→결과 표시(③④⑤⑥)가 **backend 경계 수준에서 라이브 성립**.
+- **정직한 범위:** 위는 **제품 backend 경계**(`test-connection`/`sync`)를 실 NAVER API로 검증한 것 — **가이드 FE
+  위저드의 라이브 end-to-end 워크는 아님**(§17.10: 구현 검증에 라이브 NAVER 불필요). 별도 disposable Postgres +
+  env-only 플래그로 수행 후 철거; 제품 `sellerops.connector.naver.enabled`는 계속 **OFF**.
+- **여전히 미확인/게이트:** ② 앱 **삭제** 경고·화면·정책(파괴적), 시크릿 **교체**(재발급 실행, 파괴적), ③
+  권한부족·호출IP불일치 **실패 reason code**(정상경로 성공으로 미관찰). 판정표 4–13행 미실행.
+
+---
+
 ### 부록 — 근거 문서·파일·출처
 - 제품 원칙: `docs/product-scope-v1.md` §1.2·§6.1(셀러 소유 파일럿 ≠ 솔루션-제공자)
 - 프론트 여정·완료: `docs/sellerops_frontend_spec.md` §16.10·§16.11·§17-B G3

@@ -17,23 +17,44 @@ import type { ConnectionTestStatus } from "../types";
  * the existing Action Window export track (§0 ratification) — it never collects reviews here.
  */
 export type GuidedPhase =
+  // Discovery front (before the browser gate): reuse a stored key with no re-entry when possible.
+  | "check_saved_credential"
   | "readiness_checking"
   | "agent_unavailable"
   | "renderer_unavailable"
   | "naver_login_required"
   | "naver_reconnect_required"
+  // Three-path fork: reuse an existing app, or issue a new one only when there is none.
+  | "application_path_choice"
+  | "application_status_unknown"
   | "account_store_choice_required"
   | "application_issuance"
   | "credential_issued"
   | "sellerops_credential_entry"
+  | "existing_credential_entry"
+  | "credential_recovery_required"
+  | "delete_reissue_confirm"
   | "credential_registration"
   | "connection_testing"
+  // Distinct connection-test failure states (§5). permission/call-environment are MODELED but routed to
+  // only by an explicit backend reason code — the current backend cannot classify them, so they stay
+  // fail-closed pending live NAVER recon (G3-C, §4/§20-2); nothing guesses its way into them.
+  | "permission_review_required"
+  | "call_environment_mismatch"
   | "first_order_sync"
   | "completed"
   | "review_export_readiness"
   | "recoverable_ui_drift"
   | "unsupported_state"
   | "terminal_failure";
+
+/**
+ * Which onboarding path the seller is on (§discovery). `saved` = a stored key was found (reuse without
+ * re-entry); `existing` = an app exists at NAVER but SellerOps has no key (enter it); `new` = no app,
+ * issue one; `unknown` = existence not yet determined. Threaded through the reducer so a failure returns
+ * the seller to the RIGHT entry (existing vs new) and never nudges an existing-app seller into issuance.
+ */
+export type GuidedPath = "unknown" | "saved" | "new" | "existing";
 
 /** Actor boundary (§6). Automation is confined to deterministic/local concerns; login, 2FA,
  *  account/store selection, consent, and the Client Secret are always the seller's. */
@@ -51,6 +72,9 @@ export type GuidedFailureReason =
   | "NAVER_LOGIN_REQUIRED"
   | "RECONNECT_REQUIRED"
   | "INVALID_CREDENTIAL"
+  | "PERMISSION_INSUFFICIENT"
+  | "CALL_ENVIRONMENT_MISMATCH"
+  | "SECRET_UNRECOVERABLE"
   | "TEMPORARY_PROVIDER_ERROR"
   | "PROVIDER_UNAVAILABLE"
   | "TEST_UNSUPPORTED"
@@ -77,6 +101,8 @@ export interface GuidedConnectionState {
   milestones: GuidedMilestones;
   /** Where the current NAVER-session-derived phase came from (B4 — makes readiness source explicit). */
   sessionSource: NaverSessionSource;
+  /** Which discovery path the seller is on (§discovery) — decides existing-vs-new entry on a failure. */
+  path: GuidedPath;
 }
 
 /**
@@ -110,6 +136,22 @@ export type GuidedEvent =
       /** Provenance of `naverSession` (B4). A detected reconnect can never be cleared by attestation. */
       sessionSource: NaverSessionSource;
     }
+  /** Result of the Vault saved-credential check (§flow 1). true → reuse the stored key without re-entry. */
+  | { type: "SAVED_CREDENTIAL_CHECKED"; hasSavedCredential: boolean }
+  /** The seller's answer to "do you already have a NAVER API app?" (§discovery three-path fork). */
+  | { type: "APPLICATION_PATH"; choice: "have" | "unknown" | "new" }
+  /** The seller's self-check of NAVER's application list when they were unsure (§flow 7). */
+  | { type: "APPLICATION_LIST_RESULT"; found: boolean }
+  /** At existing-credential entry, the seller could not obtain the Secret → recovery (§flow 4). */
+  | { type: "SECRET_UNAVAILABLE" }
+  /** From recovery, the seller re-checked and found the Secret → back to entering it. */
+  | { type: "SECRET_RECHECKED" }
+  /** From recovery, the seller opts into the last-resort delete-then-reissue path (§flow 8). */
+  | { type: "BEGIN_DELETE_REISSUE" }
+  /** The seller confirmed no other program uses the app → proceed to fresh issuance (§flow 9). */
+  | { type: "CONFIRM_NO_OTHER_PROGRAM" }
+  /** The seller backed out of delete-then-reissue → return to recovery (§flow 8 cancel). */
+  | { type: "CANCEL_DELETE_REISSUE" }
   | { type: "ACCOUNT_STORE_RESOLVED" }
   | { type: "ISSUANCE_COMPLETE" }
   | { type: "BEGIN_CREDENTIAL_ENTRY" }

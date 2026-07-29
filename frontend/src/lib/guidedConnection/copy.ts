@@ -5,9 +5,33 @@
 import type { GuidedActor, GuidedFailureReason, GuidedPhase } from "./types";
 
 export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = {
+  check_saved_credential: {
+    title: "저장된 연결 정보 확인",
+    body: "SellerOps에 저장된 NAVER 연결 정보가 있는지 확인하고 있습니다. 있으면 다시 입력하지 않고 바로 연결을 확인합니다.",
+  },
   readiness_checking: {
     title: "연결 준비 확인 중",
     body: "내 PC의 로컬 에이전트와 NAVER 로그인 상태를 확인하고 있습니다.",
+  },
+  application_path_choice: {
+    title: "애플리케이션 확인",
+    body: "NAVER 커머스 API 애플리케이션 상황을 선택해 주세요. 이미 있으면 기존 앱을 그대로 재사용하고, 없을 때만 새로 발급합니다.",
+  },
+  application_status_unknown: {
+    title: "애플리케이션 목록 확인",
+    body: "NAVER 커머스 API 센터의 애플리케이션 목록을 직접 확인한 뒤, 앱이 있는지 선택해 주세요. (스토어별 애플리케이션은 1개만 만들 수 있습니다.)",
+  },
+  existing_credential_entry: {
+    title: "기존 연결 정보 입력",
+    body: "이미 발급된 애플리케이션 ID와 시크릿을 SellerOps 보안 입력란에 직접 입력해 주세요. 새 앱을 만들 필요가 없습니다.",
+  },
+  credential_recovery_required: {
+    title: "시크릿 확인 필요",
+    body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터에서 기존 애플리케이션의 시크릿을 다시 확인할 수 있는지 화면에서 직접 확인해 주세요. SellerOps는 시크릿을 대신 확인하거나 재발급하지 않으며, 정확한 화면·절차는 확인 후 안내됩니다.",
+  },
+  delete_reissue_confirm: {
+    title: "삭제 후 재발급 (최후 수단)",
+    body: "삭제 후 재발급은 다른 방법이 없을 때만 쓰는 최후 수단입니다. 이 애플리케이션을 다른 프로그램에서 사용하고 있지 않은지 반드시 먼저 확인해 주세요. 삭제·재발급 화면과 절차는 아직 확인되지 않았으므로, NAVER 화면에서 직접 확인해 진행해 주세요. SellerOps는 앱을 대신 삭제하지 않습니다.",
   },
   agent_unavailable: {
     title: "로컬 에이전트 필요",
@@ -49,6 +73,14 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
     title: "연결 확인 중",
     body: "저장된 연결 정보로 인증만 확인합니다. (아직 데이터를 수집하지 않습니다.)",
   },
+  permission_review_required: {
+    title: "권한 확인 필요",
+    body: "연결에 필요한 API 권한이 부족할 수 있습니다. NAVER 커머스 API 센터에서 애플리케이션의 API 그룹·권한을 확인한 뒤 다시 시도해 주세요.",
+  },
+  call_environment_mismatch: {
+    title: "호출 환경 확인 필요",
+    body: "허용된 호출 환경(예: 호출 IP)과 일치하지 않을 수 있습니다. NAVER 커머스 API 센터에서 애플리케이션의 호출 IP 설정을 확인한 뒤 다시 시도해 주세요.",
+  },
   first_order_sync: {
     title: "첫 주문 수집 중",
     body: "주문 요약 데이터를 처음으로 가져오고 있습니다.",
@@ -89,6 +121,9 @@ export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   NAVER_LOGIN_REQUIRED: "전용 작업 창에서 NAVER 로그인이 필요합니다. 직접 로그인해 주세요.",
   RECONNECT_REQUIRED: "전용 작업 창의 NAVER 세션이 만료되었습니다. 전용 창에서 다시 로그인해 주세요.",
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
+  PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",
+  CALL_ENVIRONMENT_MISMATCH: "허용된 호출 환경과 일치하지 않을 수 있습니다. 애플리케이션의 호출 IP 설정을 확인해 주세요.",
+  SECRET_UNRECOVERABLE: "시크릿을 확보하지 못했습니다. 기존 시크릿을 다시 확인하거나, 최후 수단으로 삭제 후 재발급을 검토할 수 있습니다. (삭제·재발급 화면·절차는 NAVER에서 직접 확인해 주세요.)",
   TEMPORARY_PROVIDER_ERROR: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
   PROVIDER_UNAVAILABLE: "NAVER 서비스에 일시적으로 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   TEST_UNSUPPORTED: "이 연결 방식은 아직 지원되지 않습니다.",

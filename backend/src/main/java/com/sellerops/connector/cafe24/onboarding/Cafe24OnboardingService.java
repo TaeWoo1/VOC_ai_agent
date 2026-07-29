@@ -112,7 +112,11 @@ public class Cafe24OnboardingService {
                 .orElseThrow(() -> ApiException.notFound("채널을 찾을 수 없습니다."));
 
         return tx.execute(status -> {
-            SellerAccount account = accounts.findByOrgIdAndChannelId(orgId, channel.getId())
+            // Mode-scoped lookup: an org may now hold BOTH an API-mode and a file-upload account on one
+            // channel (the file-channel/API-channel flows keep separate rows), so the unscoped single-result
+            // finder would throw on a non-unique result. Cafe24 onboarding owns the API-mode row only.
+            SellerAccount account = accounts
+                    .findFirstByOrgIdAndChannelIdAndFileUploadOrderByCreatedAtAsc(orgId, channel.getId(), false)
                     .orElseGet(SellerAccount::new);
             account.setOrgId(orgId);
             account.setChannelId(channel.getId());

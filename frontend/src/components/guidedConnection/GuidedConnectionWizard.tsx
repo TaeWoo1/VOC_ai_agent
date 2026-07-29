@@ -1,4 +1,6 @@
-import type { CredentialTemplateView } from "../../lib/types";
+import { useEffect, useState } from "react";
+import type { ConnectionStatusView, CredentialTemplateView } from "../../lib/types";
+import { relativeTime } from "../../lib/format";
 import {
   ACTOR_COPY,
   FAILURE_COPY,
@@ -6,6 +8,7 @@ import {
   type GuidedConnectionState,
   type GuidedEvent,
 } from "../../lib/guidedConnection";
+import { HealthBadge } from "../HealthBadge";
 import { SecureCredentialForm } from "./SecureCredentialForm";
 
 /**
@@ -23,6 +26,9 @@ export interface GuidedConnectionWizardProps {
   state: GuidedConnectionState;
   template: CredentialTemplateView | null;
   busy: boolean;
+  /** Real connection health, read after completion so the seller sees the state + last success time
+   *  (§2 step 6). `null` until read (or if the read fails) — the completion CTA stands regardless. */
+  connectionStatus: ConnectionStatusView | null;
   dispatch: (event: GuidedEvent) => void;
   onRecheck: () => void;
   onConfirmLogin: () => void;
@@ -32,17 +38,21 @@ export interface GuidedConnectionWizardProps {
   onGoToReviewExport: () => void;
 }
 
+// Issuance guidance uses ONLY facts confirmed from the official NAVER commerce-API docs (slice §4):
+// integration-manager permission, the app + API-group + call-IP registration, one app per store, and the
+// ID/secret issuance. Exact button labels / layout / 2FA point stay unstated (deferred to live recon, §4).
 const ISSUANCE_STEPS = [
-  "NAVER 커머스 API 센터에 접속합니다.",
-  "애플리케이션을 생성하고 상품·주문(판매자) 등 필요한 API 그룹을 추가합니다.",
+  "NAVER 커머스 API 센터에 접속합니다. (애플리케이션 발급에는 통합 매니저 권한이 필요합니다.)",
+  "애플리케이션을 생성하고 상품·주문(판매자) 등 필요한 API 그룹을 추가합니다. (스토어별 애플리케이션은 1개만 만들 수 있습니다.)",
   "권한과 호출 IP 설정을 검토한 뒤 발급을 확정합니다.",
-  "발급된 애플리케이션 ID와 시크릿을 확인합니다.",
+  "발급된 애플리케이션 ID와 시크릿을 확인합니다. (시크릿은 다음 단계에서 SellerOps 보안 입력란에 직접 입력합니다.)",
 ] as const;
 
 export function GuidedConnectionWizard({
   state,
   template,
   busy,
+  connectionStatus,
   dispatch,
   onRecheck,
   onConfirmLogin,
@@ -52,16 +62,73 @@ export function GuidedConnectionWizard({
   onGoToReviewExport,
 }: GuidedConnectionWizardProps) {
   const { phase, failureReason } = state;
+  const [noOtherProgram, setNoOtherProgram] = useState(false);
+  // The "no other program uses this app" confirmation must be re-affirmed for EVERY delete-reissue
+  // attempt (§flow 9). Reset it whenever we are not on that phase so a stale check can never pre-satisfy
+  // the gate on a later re-entry.
+  useEffect(() => {
+    if (phase !== "delete_reissue_confirm") setNoOtherProgram(false);
+  }, [phase]);
 
   return (
     <section className="card p-6" aria-label="NAVER 연결 마법사">
       <StatusPanel state={state} />
 
       <div className="mt-5">
-        {(phase === "readiness_checking" || phase === "credential_registration") && (
+        {(phase === "readiness_checking" ||
+          phase === "credential_registration" ||
+          phase === "check_saved_credential") && (
           <p className="text-muted" role="status" aria-live="polite">
             {PHASE_COPY[phase].body}
           </p>
+        )}
+
+        {phase === "application_path_choice" && (
+          <div className="space-y-2">
+            <button
+              type="button"
+              className="btn-primary block w-full"
+              onClick={() => dispatch({ type: "APPLICATION_PATH", choice: "have" })}
+            >
+              이미 애플리케이션이 있어요
+            </button>
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => dispatch({ type: "APPLICATION_PATH", choice: "unknown" })}
+            >
+              있는지 잘 모르겠어요
+            </button>
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => dispatch({ type: "APPLICATION_PATH", choice: "new" })}
+            >
+              처음 발급할게요
+            </button>
+          </div>
+        )}
+
+        {phase === "application_status_unknown" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.application_status_unknown.body}</p>
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="btn-primary block w-full"
+                onClick={() => dispatch({ type: "APPLICATION_LIST_RESULT", found: true })}
+              >
+                목록에서 애플리케이션을 찾았어요
+              </button>
+              <button
+                type="button"
+                className="btn-ghost block w-full"
+                onClick={() => dispatch({ type: "APPLICATION_LIST_RESULT", found: false })}
+              >
+                애플리케이션이 없어요
+              </button>
+            </div>
+          </div>
         )}
 
         {(phase === "agent_unavailable" || phase === "renderer_unavailable") && (
@@ -150,6 +217,78 @@ export function GuidedConnectionWizard({
             </p>
           ))}
 
+        {phase === "existing_credential_entry" &&
+          (template ? (
+            <div className="space-y-3">
+              <SecureCredentialForm template={template} onSubmit={onSubmitCredentials} submitting={busy} />
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => dispatch({ type: "SECRET_UNAVAILABLE" })}
+                disabled={busy}
+              >
+                시크릿을 찾지 못했어요
+              </button>
+            </div>
+          ) : (
+            <p className="text-muted" role="status">
+              연결에 필요한 정보를 불러오는 중입니다…
+            </p>
+          ))}
+
+        {phase === "credential_recovery_required" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.credential_recovery_required.body}</p>
+            <button
+              type="button"
+              className="btn-primary block w-full"
+              onClick={() => dispatch({ type: "SECRET_RECHECKED" })}
+            >
+              시크릿을 다시 확인했어요
+            </button>
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => dispatch({ type: "BEGIN_DELETE_REISSUE" })}
+            >
+              삭제 후 재발급 (최후 수단)
+            </button>
+          </div>
+        )}
+
+        {phase === "delete_reissue_confirm" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.delete_reissue_confirm.body}</p>
+            <label className="flex items-start gap-2 text-base text-ink">
+              <input
+                type="checkbox"
+                checked={noOtherProgram}
+                onChange={(e) => setNoOtherProgram(e.target.checked)}
+                className="mt-1"
+              />
+              <span>이 애플리케이션을 다른 프로그램에서 사용하고 있지 않음을 확인했습니다.</span>
+            </label>
+            <button
+              type="button"
+              className="btn-primary block w-full"
+              disabled={!noOtherProgram}
+              onClick={() => dispatch({ type: "CONFIRM_NO_OTHER_PROGRAM" })}
+            >
+              확인했고 재발급으로 진행
+            </button>
+            <button
+              type="button"
+              className="btn-ghost block w-full"
+              onClick={() => {
+                setNoOtherProgram(false);
+                dispatch({ type: "CANCEL_DELETE_REISSUE" });
+              }}
+            >
+              취소
+            </button>
+          </div>
+        )}
+
         {phase === "connection_testing" && (
           <div className="space-y-3" role="status" aria-live="polite">
             <p className="text-muted">{PHASE_COPY.connection_testing.body}</p>
@@ -158,6 +297,24 @@ export function GuidedConnectionWizard({
                 다시 확인
               </button>
             )}
+          </div>
+        )}
+
+        {phase === "permission_review_required" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.permission_review_required.body}</p>
+            <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
+              권한을 확인했어요, 다시 시도
+            </button>
+          </div>
+        )}
+
+        {phase === "call_environment_mismatch" && (
+          <div className="space-y-3">
+            <p className="text-muted">{PHASE_COPY.call_environment_mismatch.body}</p>
+            <button type="button" className="btn-primary" onClick={onRetryTest} disabled={busy}>
+              호출 환경을 확인했어요, 다시 시도
+            </button>
           </div>
         )}
 
@@ -173,13 +330,16 @@ export function GuidedConnectionWizard({
         )}
 
         {phase === "completed" && (
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => dispatch({ type: "CONTINUE_TO_REVIEW_EXPORT" })}
-          >
-            리뷰 수집 준비로 이동
-          </button>
+          <div className="space-y-4">
+            <ConnectionSummary status={connectionStatus} />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => dispatch({ type: "CONTINUE_TO_REVIEW_EXPORT" })}
+            >
+              과거 리뷰 가져오기로 이동
+            </button>
+          </div>
         )}
 
         {phase === "review_export_readiness" && (
@@ -198,6 +358,23 @@ export function GuidedConnectionWizard({
         )}
       </div>
     </section>
+  );
+}
+
+/** Post-completion connection summary: the real connection health + last successful collection time
+ *  (§2 step 6). Rendered only once a status has been read; a null status simply omits the block. */
+function ConnectionSummary({ status }: { status: ConnectionStatusView | null }) {
+  if (!status) return null;
+  return (
+    <div className="space-y-2 rounded-lg bg-canvas px-4 py-3" role="status">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-medium text-muted">연결 상태</span>
+        <HealthBadge state={status.state} />
+      </div>
+      <p className="text-sm text-muted">
+        마지막 성공 수집: {status.lastSuccessAt ? relativeTime(status.lastSuccessAt) : "아직 없음"}
+      </p>
+    </div>
   );
 }
 
