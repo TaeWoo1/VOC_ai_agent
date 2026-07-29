@@ -97,7 +97,8 @@ class EsmConnectorConfigurationTest {
                         "sellerops.connector.esm.enabled=true",
                         "sellerops.connector.naver.enabled=true",
                         "sellerops.connector.coupang.enabled=true",
-                        "sellerops.connector.cafe24.enabled=true")
+                        "sellerops.connector.cafe24.enabled=true",
+                        "sellerops.connector.cafe24.api-version=2025-12-01")
                 .run(ctx -> {
                     ConnectorRegistry registry = ctx.getBean(ConnectorRegistry.class);
                     assertThat(registry.resolvePullConnector("GMARKET"))

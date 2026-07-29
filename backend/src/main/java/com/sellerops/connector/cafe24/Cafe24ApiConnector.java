@@ -82,9 +82,16 @@ public class Cafe24ApiConnector implements PullConnector {
 
     /** v1 collects a fixed trailing window; re-collection upserts (idempotent). */
     static final int LOOKBACK_DAYS = 14;
-    /** Cafe24's max page size; the connector pages internally to cover the window. */
-    static final int ORDER_PAGE_LIMIT = 1000;
-    /** Safety bound on internal pages (200k orders) — caps a runaway loop. */
+    /**
+     * Cafe24 Admin list endpoints cap {@code limit} at the documented 100; the
+     * connector pages internally (offset) to cover the window. A full page (==
+     * this limit) means "there may be more, fetch the next"; a short page ends
+     * the window. Requesting 100 makes that end-of-data signal exact — a value
+     * above the server cap would silently return ≤100 and be mis-read as the last
+     * page (silent truncation). Do not raise without a documented higher per-endpoint cap.
+     */
+    static final int ORDER_PAGE_LIMIT = 100;
+    /** Safety bound on internal pages (100 × 200 = 20k orders) — caps a runaway loop. */
     static final int MAX_ORDER_PAGES = 200;
 
     /**
@@ -171,14 +178,23 @@ public class Cafe24ApiConnector implements PullConnector {
 
             List<Cafe24OrderRow> orders = new ArrayList<>();
             int offset = 0;
+            boolean reachedEnd = false;
             for (int page = 0; page < MAX_ORDER_PAGES; page++) {
                 List<Cafe24OrderRow> batch = ordersClient.fetchPage(
                         auth.accessToken(), auth.mallId(), startDate, endDate, ORDER_PAGE_LIMIT, offset);
                 orders.addAll(batch);
                 if (batch.size() < ORDER_PAGE_LIMIT) {
+                    reachedEnd = true;
                     break;
                 }
                 offset += ORDER_PAGE_LIMIT;
+            }
+            if (!reachedEnd) {
+                // The page budget ran out while the last page was still full — more
+                // orders exist. Fail closed (loud) rather than silently drop the
+                // overflow; the fixed-window run is retried next cycle.
+                throw new IllegalStateException(
+                        "카페24 주문 수집이 최대 페이지 수(MAX_ORDER_PAGES)를 초과했습니다.");
             }
             List<CanonicalOrderSummary> summaries = Cafe24OrderAggregator.aggregate(orders, KST);
             return FetchPage.of(DataType.ORDER_SUMMARY, summaries, endDate.toString(), false, KIND);

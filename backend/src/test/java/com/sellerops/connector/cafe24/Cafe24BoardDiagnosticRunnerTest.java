@@ -176,6 +176,8 @@ class Cafe24BoardDiagnosticRunnerTest {
                 .withBean(CredentialVault.class, () -> mock(CredentialVault.class))
                 .withBean(ConnectorCredentialRepository.class, () -> mock(ConnectorCredentialRepository.class))
                 .withBean(SellerAccountRepository.class, () -> mock(SellerAccountRepository.class))
+                // Admin-API version is required once cafe24 is enabled (fail-closed if blank).
+                .withPropertyValues("sellerops.connector.cafe24.api-version=2025-12-01")
                 .withConfiguration(UserConfigurations.of(Cafe24ConnectorConfiguration.class));
     }
 

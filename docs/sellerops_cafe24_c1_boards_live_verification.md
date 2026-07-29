@@ -68,6 +68,7 @@ Exactly one refresh grant + one `GET /api/v2/admin/boards` (metadata only).
 
 - One-time supervised diagnostic run on a disposable env; the runner is committed and
   reproducible (double-gated), but no committed test hits live Cafe24 — CI evidence stays synthetic.
-- Not covered here: ORDER_SUMMARY collection (Phase C2, gated on an order-count check because the
-  connector's `ORDER_PAGE_LIMIT` vs the documented per-endpoint max is still unresolved — see the
-  Cafe24 audit finding), and any REVIEW/INQUIRY article collection.
+- Not covered here: ORDER_SUMMARY collection (Phase C2 —
+  `docs/sellerops_cafe24_c2_order_summary_live_verification.md`; the `ORDER_PAGE_LIMIT` vs
+  documented-max question is resolved there, `ORDER_PAGE_LIMIT=100`), and REVIEW/INQUIRY article
+  collection.

@@ -89,6 +89,12 @@ sellerops:
       # IP may be flagged abnormal (verified 2026-06-12). Reserved for request
       # pacing in later collection slices.
       rate-limit-rps: ${SELLEROPS_CONNECTOR_CAFE24_RATE_LIMIT_RPS:2}
+      # Pinned Cafe24 Admin-API version, sent as X-Cafe24-Api-Version on admin
+      # (v2) data calls. Blank FAILS CLOSED (the transport throws at startup), so
+      # an enabled connector never calls an unspecified version (Cafe24 would
+      # otherwise apply the app default, which can shift behavior silently). Not
+      # sent on the OAuth token/authorize endpoints. Current verified value: 2025-12-01.
+      api-version: ${SELLEROPS_CONNECTOR_CAFE24_API_VERSION:}
       # "Connect Cafe24" OAuth onboarding (behind the same enabled flag). The
       # client-id/secret are the ONE registered SellerOps Cafe24 app's — app-level
       # config, never per-seller vault material; empty by default (flow unusable

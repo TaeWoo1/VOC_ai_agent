@@ -21,9 +21,15 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(name = "sellerops.connector.cafe24.enabled", havingValue = "true")
 public class Cafe24ConnectorConfiguration {
 
+    /**
+     * The transport pins the Cafe24 Admin-API version. A blank value fails closed
+     * (the client throws at construction, so the enabled connector never issues an
+     * admin call against an unspecified version). Current verified value: 2025-12-01.
+     */
     @Bean
-    Cafe24HttpClient cafe24HttpClient() {
-        return new JdkCafe24HttpClient();
+    Cafe24HttpClient cafe24HttpClient(
+            @Value("${sellerops.connector.cafe24.api-version:}") String apiVersion) {
+        return new JdkCafe24HttpClient(apiVersion);
     }
 
     @Bean

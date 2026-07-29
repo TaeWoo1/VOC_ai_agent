@@ -141,6 +141,7 @@ class SsgConnectorConfigurationTest {
                         "sellerops.connector.naver.enabled=true",
                         "sellerops.connector.coupang.enabled=true",
                         "sellerops.connector.cafe24.enabled=true",
+                        "sellerops.connector.cafe24.api-version=2025-12-01",
                         "sellerops.connector.esm.enabled=true",
                         "sellerops.connector.elevenst.enabled=true")
                 .run(ctx -> {
