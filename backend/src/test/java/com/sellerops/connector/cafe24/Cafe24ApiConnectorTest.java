@@ -516,6 +516,66 @@ class Cafe24ApiConnectorTest {
     }
 
     @Test
+    void reviewFetchExcludesSecretAndUnknownPostsStoringOnlyPublic() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(9001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(9002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"),
+                FakeCafe24HttpClient.article(9003L, "누락 제목", "누락 본문", 77L, 5, null, "N", null),
+                FakeCafe24HttpClient.article(9004L, "알수없음 제목", "알수없음 본문", 77L, 5, null, "N", "X")));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, null));
+
+        // Only the positively-public row is stored; secret / missing / unknown are excluded.
+        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).articleNo()).isEqualTo(9001L);
+        // The excluded rows' identity and body never reach the emitted records.
+        assertThat(rows).noneMatch(a -> a.articleNo() == 9002L || a.articleNo() == 9003L || a.articleNo() == 9004L);
+        assertThat(rows).allSatisfy(a -> {
+            assertThat(a.title()).isEqualTo("공개 제목");
+            assertThat(a.content()).isEqualTo("공개 본문");
+        });
+        // The cursor advances by the number of rows FETCHED (4), not stored (1), so a
+        // mixed public/private page still pages correctly.
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o4");
+        assertThat(page.hasMore()).isFalse();
+    }
+
+    @Test
+    void reviewFetchOnAnAllSecretPageStoresNothingButStillAdvancesCursor() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(9101L, "비밀1", "본문1", 77L, 5, null, "N", "T"),
+                FakeCafe24HttpClient.article(9102L, "비밀2", "본문2", 77L, 5, null, "N", "T")));
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, null));
+
+        assertThat(articles(page)).isEmpty();
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o2");
+        assertThat(page.hasMore()).isFalse();
+    }
+
+    @Test
+    void inquiryFetchIgnoresSecretFlagSoBoard6IsUnchanged() {
+        // The 비밀글 gate is scoped to the review (board 4) path — INQUIRY (board 6)
+        // behavior is unchanged: a secret board-6 row still becomes a canonical inquiry.
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(6001L, "곡면 가능?", "곡면에도 붙나요", 88L, null, null, "N", "T")));
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, null));
+
+        assertThat(page.records()).hasSize(1);
+        assertThat(page.records().get(0)).isInstanceOf(CanonicalInquiry.class);
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o1");
+        assertThat(http.sent.get(1).uri().toString()).contains("/api/v2/admin/boards/6/articles?");
+    }
+
+    @Test
     void articleFetchUsesDateWindowFromSeededCursorAndPreservesIt() {
         storeCafe24Credential();
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));

@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The real Cafe24 Admin API connector. It collects {@code ORDER_SUMMARY}: a
@@ -64,6 +66,8 @@ public class Cafe24ApiConnector implements PullConnector {
     public static final String KIND = "CAFE24_API";
     public static final String CONNECTOR_CLASS = "API";
     public static final String CHANNEL_CODE = "CAFE24";
+
+    private static final Logger log = LoggerFactory.getLogger(Cafe24ApiConnector.class);
 
     /**
      * 429 hint when the official X-Cafe24-Call-Remain header is absent. One
@@ -206,9 +210,12 @@ public class Cafe24ApiConnector implements PullConnector {
     /**
      * REVIEW: one page of board-4 (구매후기) articles mapped to
      * {@link CanonicalCommunityArticle} — the richer, upsertable community/VOC asset.
+     * Private (비밀글) posts are excluded fail-closed ({@code excludeSecret=true}): only
+     * posts that positively read public are stored, so a private review's title/content
+     * never reach the mapper, storage, or any log.
      */
     private FetchPage fetchReviewArticles(FetchRequest request) {
-        return fetchArticlePage(request, Cafe24BoardArticleMapper::toCanonical);
+        return fetchArticlePage(request, Cafe24BoardArticleMapper::toCanonical, true);
     }
 
     /**
@@ -216,10 +223,12 @@ public class Cafe24ApiConnector implements PullConnector {
      * {@link CanonicalInquiry}, so the shared ingestion path opens exactly one OPEN
      * {@code InquiryWorkItem} bound to the seller connection (the reply lifecycle).
      * Board 6 is the mall's <b>native</b> inquiry board — no external-marketplace
-     * origin is read or assumed; board 9 (1:1 맞춤상담) is never collected.
+     * origin is read or assumed; board 9 (1:1 맞춤상담) is never collected. The
+     * board-6 handling is unchanged ({@code excludeSecret=false}): the private-post
+     * gate is scoped to the review path only.
      */
     private FetchPage fetchInquiries(FetchRequest request) {
-        return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry);
+        return fetchArticlePage(request, Cafe24InquiryArticleMapper::toCanonicalInquiry, false);
     }
 
     /**
@@ -229,8 +238,16 @@ public class Cafe24ApiConnector implements PullConnector {
      * {@code article_no} cannot be keyed and is dropped. The {@code mapper} decides
      * the canonical record type (community article for REVIEW, inquiry for INQUIRY);
      * paging, the windowed backfill cursor, and rate-limit handling are identical.
+     *
+     * <p>When {@code excludeSecret} is set (the review path), a row that does not
+     * {@link Cafe24BoardArticleRow#isPublicPost() positively read public} is excluded
+     * <b>before</b> mapping — its fields never reach the mapper, storage, or a log. The
+     * cursor still advances by the number of rows <b>fetched</b> (not stored), so paging
+     * stays correct on a mixed public/private page; {@code records} carries the public
+     * count. Only a sanitized exclusion count is logged.
      */
-    private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper) {
+    private FetchPage fetchArticlePage(FetchRequest request, ArticleRecordMapper mapper,
+                                       boolean excludeSecret) {
         int boardNo = primaryBoard(request.dataType());
         Cafe24ArticleCursor cursor = Cafe24ArticleCursor.decode(request.cursorValue(), boardNo);
         try {
@@ -243,12 +260,22 @@ public class Cafe24ApiConnector implements PullConnector {
 
             List<Object> records = new ArrayList<>();
             int position = 0;
+            int excludedSecret = 0;
             for (Cafe24BoardArticleRow row : rows) {
                 position++;
+                if (excludeSecret && !row.isPublicPost()) {
+                    // 비밀글(또는 판정 불가): 본문·제목·식별자를 mapper·저장·로그로 넘기지 않고 제외.
+                    excludedSecret++;
+                    continue;
+                }
                 if (row.articleNo() == null) {
                     continue; // cannot dedupe/store without the natural-key article number
                 }
                 records.add(mapper.map(boardNo, row, position));
+            }
+            if (excludedSecret > 0) {
+                // Sanitized metric only — a count, never an article id/title/content/writer.
+                log.info("카페24 REVIEW 비밀글 제외: board={} 제외건수={}", boardNo, excludedSecret);
             }
             boolean hasMore = rows.size() == request.limit();
             String nextCursor = cursor.advance(rows.size()).encode();
