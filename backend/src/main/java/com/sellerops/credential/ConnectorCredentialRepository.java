@@ -12,4 +12,7 @@ public interface ConnectorCredentialRepository extends JpaRepository<ConnectorCr
     Optional<ConnectorCredential> findByOrgIdAndSellerAccountId(UUID orgId, UUID sellerAccountId);
 
     boolean existsBySellerAccountId(UUID sellerAccountId);
+
+    /** Row count for one account — lets a caller assert single-row (no duplicate). */
+    long countBySellerAccountId(UUID sellerAccountId);
 }

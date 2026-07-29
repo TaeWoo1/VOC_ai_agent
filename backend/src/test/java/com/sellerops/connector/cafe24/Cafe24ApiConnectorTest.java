@@ -69,8 +69,9 @@ class Cafe24ApiConnectorTest {
     private static final String APP_CLIENT_SECRET = "test-app-client-secret";
 
     private Cafe24ApiConnector connectorWith(CredentialVault v) {
-        return new Cafe24ApiConnector(new Cafe24TokenClient(http), v, new Cafe24OrdersClient(http),
-                new Cafe24BoardArticlesClient(http), CLOCK, APP_CLIENT_ID, APP_CLIENT_SECRET);
+        return new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), v, APP_CLIENT_ID, APP_CLIENT_SECRET),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK);
     }
 
     private CredentialVault vaultWithKey(String masterKeyBase64) {
@@ -202,8 +203,9 @@ class Cafe24ApiConnectorTest {
         // The app client_id/client_secret are server config; absent config must fail
         // closed before any token grant — never read from the vault.
         storeCafe24Credential();
-        Cafe24ApiConnector noAppCreds = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
-                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK, "", "");
+        Cafe24ApiConnector noAppCreds = new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "", ""),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), CLOCK);
 
         assertThatThrownBy(() -> noAppCreds.fetch(request(DataType.ORDER_SUMMARY, null)))
                 .isInstanceOf(IllegalStateException.class)
@@ -343,7 +345,7 @@ class Cafe24ApiConnectorTest {
                 .contains("start_date=" + WINDOW_START)
                 .contains("end_date=" + WINDOW_END)
                 .contains("date_type=order_date")
-                .contains("limit=1000")
+                .contains("limit=100")
                 .contains("offset=0");
         assertThat(ordersGet.headers().get("Authorization")).isEqualTo("Bearer access-1");
     }
@@ -364,14 +366,19 @@ class Cafe24ApiConnectorTest {
 
         FetchPage page = connector.fetch(request(DataType.ORDER_SUMMARY, null));
 
+        // A full page (== ORDER_PAGE_LIMIT) is NOT treated as end-of-data: the
+        // connector fetches the next page, so every order is aggregated (no silent
+        // truncation). ORDER_PAGE_LIMIT (100) full + 2 short = 102 orders, one day.
         List<CanonicalOrderSummary> rows = summaries(page);
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).orderCount()).isEqualTo(1002);
-        assertThat(rows.get(0).salesAmount()).isEqualTo(1_002_000L);
+        assertThat(rows.get(0).orderCount()).isEqualTo(Cafe24ApiConnector.ORDER_PAGE_LIMIT + 2);
+        assertThat(rows.get(0).salesAmount())
+                .isEqualTo((Cafe24ApiConnector.ORDER_PAGE_LIMIT + 2) * 1000L);
         // Two orders GETs at advancing offsets (plus the token POST).
         assertThat(http.sent).hasSize(3);
         assertThat(http.sent.get(1).uri().toString()).contains("offset=0");
-        assertThat(http.sent.get(2).uri().toString()).contains("offset=1000");
+        assertThat(http.sent.get(2).uri().toString())
+                .contains("offset=" + Cafe24ApiConnector.ORDER_PAGE_LIMIT);
     }
 
     @Test

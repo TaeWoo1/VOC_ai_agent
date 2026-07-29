@@ -125,9 +125,9 @@ class Cafe24ArticleBackfillFlowTest {
 
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders,
                 new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
-        Cafe24ApiConnector connector = new Cafe24ApiConnector(new Cafe24TokenClient(http), vault,
-                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC(),
-                "app-client-id", "app-client-secret");
+        Cafe24ApiConnector connector = new Cafe24ApiConnector(
+                new Cafe24Authorizer(new Cafe24TokenClient(http), vault, "app-client-id", "app-client-secret"),
+                new Cafe24OrdersClient(http), new Cafe24BoardArticlesClient(http), Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(connector));
         com.sellerops.order.ChannelOrderIngestionService orderIngestion =
                 new com.sellerops.order.ChannelOrderIngestionService(channelOrders, channelOrderStatusEvents, txManager);

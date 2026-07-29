@@ -27,7 +27,23 @@ class Cafe24ConnectorConfigurationTest {
                 // The connector only needs a vault reference at fetch time; a
                 // repository-less instance satisfies wiring without a database.
                 .withBean(CredentialVault.class,
-                        () -> new CredentialVault(null, new ObjectMapper(), "", "test"));
+                        () -> new CredentialVault(null, new ObjectMapper(), "", "test"))
+                // A pinned Admin-API version is required once the connector is enabled
+                // (blank fails closed — see apiVersionMissingFailsClosedWhenEnabled).
+                .withPropertyValues("sellerops.connector.cafe24.api-version=2025-12-01");
+    }
+
+    @Test
+    void apiVersionMissingFailsClosedWhenEnabled() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(Cafe24ConnectorConfiguration.class)
+                .withBean(CredentialVault.class,
+                        () -> new CredentialVault(null, new ObjectMapper(), "", "test"))
+                .withPropertyValues("sellerops.connector.cafe24.enabled=true")
+                .run(ctx -> {
+                    assertThat(ctx).hasFailed();
+                    assertThat(ctx.getStartupFailure()).hasMessageContaining("API 버전");
+                });
     }
 
     @Test

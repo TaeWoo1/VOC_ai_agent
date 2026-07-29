@@ -341,10 +341,12 @@ class SyncRunExecutorTest {
                 };
         com.sellerops.connector.cafe24.Cafe24ApiConnector cafe24 =
                 new com.sellerops.connector.cafe24.Cafe24ApiConnector(
-                        new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null,
+                        new com.sellerops.connector.cafe24.Cafe24Authorizer(
+                                new com.sellerops.connector.cafe24.Cafe24TokenClient(neverCalled), null,
+                                "app-client-id", "app-client-secret"),
                         new com.sellerops.connector.cafe24.Cafe24OrdersClient(neverCalled),
                         new com.sellerops.connector.cafe24.Cafe24BoardArticlesClient(neverCalled),
-                        java.time.Clock.systemUTC(), "app-client-id", "app-client-secret");
+                        java.time.Clock.systemUTC());
         ConnectorRegistry registry = new ConnectorRegistry(List.of(cafe24, mock));
         IngestionService ingestion = new IngestionService(reviews, inquiries, orders, new ProductService(products), communityArticles, channels, new InquiryWorkItemWriter(inquiries, workItems, audits, txManager));
         SyncRunExecutor cafe24Executor = new SyncRunExecutor(

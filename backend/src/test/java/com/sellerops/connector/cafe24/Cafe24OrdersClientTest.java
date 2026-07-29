@@ -25,7 +25,7 @@ class Cafe24OrdersClientTest {
     void buildsTheMallOrdersUrlWithWindowParamsAndBearer() {
         http.enqueue(FakeCafe24HttpClient.ordersOk());
 
-        client.fetchPage("access-1", "samplemall", START, END, 1000, 0);
+        client.fetchPage("access-1", "samplemall", START, END, 100, 0);
 
         FakeCafe24HttpClient.Sent sent = http.sent.get(0);
         assertThat(sent.method()).isEqualTo("GET");
@@ -34,7 +34,7 @@ class Cafe24OrdersClientTest {
                 .contains("start_date=2026-06-09")
                 .contains("end_date=2026-06-23")
                 .contains("date_type=order_date")
-                .contains("limit=1000")
+                .contains("limit=100")
                 .contains("offset=0");
         assertThat(sent.headers().get("Authorization")).isEqualTo("Bearer access-1");
     }
@@ -44,7 +44,7 @@ class Cafe24OrdersClientTest {
         http.enqueue(FakeCafe24HttpClient.ordersOk(
                 FakeCafe24HttpClient.order("o1", "2026-06-20T10:00:00+09:00", "1000.00")));
 
-        List<Cafe24OrderRow> rows = client.fetchPage("access-1", "samplemall", START, END, 1000, 0);
+        List<Cafe24OrderRow> rows = client.fetchPage("access-1", "samplemall", START, END, 100, 0);
 
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).orderId()).isEqualTo("o1");
