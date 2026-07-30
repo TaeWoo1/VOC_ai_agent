@@ -281,10 +281,17 @@ a separate `ReviewSpringClient` interface that `HttpSpringClient` also implement
    *review ID, draft version ID, fingerprint, phase* and requires restart to resume with the
    *same draft version*. Both are satisfied cleanly by persisting the draft first (a real
    server version + fingerprint), which also matches the flow's own ordering (draft provider
-   precedes the checkpoint; "record approved version" follows). A rejected review therefore
-   keeps an **inert, non-committal prepared draft** — `reject` writes no approval, no guided
-   session, and no state transition, so the review is left exactly as approvable as before.
-   *This is the interpretation of "reject 무변경" for reviews: no commitment, not "no draft."*
+   precedes the checkpoint; "record approved version" follows).
+
+   **What "reject 무변경" means here, precisely.** On reject the run records **no approval, no
+   action intent, no submission-run (guided session), no outcome, and no external send** — it
+   makes zero backend writes on the reject branch. The one thing that already exists is the
+   **unapproved draft version created before the checkpoint**, which is deliberately left in
+   place: it is what lets a killed-then-restarted run resume against the *same* draft version
+   (restart stability), and it is a non-committal artifact — no approval binds it, nothing
+   dispatches it, and the review stays exactly as approvable as before. So "무변경" is about the
+   commitment (approval → guided session → outcome → send), all of which reject leaves untouched;
+   it is explicitly **not** a claim that no draft row exists.
 2. **The checkpoint carries NO review content.** Unlike the inquiry checkpoint (which held the
    candidate text in the in-memory MemorySaver state), the review graph state holds only
    sanitized metadata + the saved version/fingerprint. The redacted body and the suggestion
@@ -308,11 +315,20 @@ inquiry slice's LLM-resume regeneration gate).
 
 ### Live proof (real Spring backend + disposable Postgres, torn down)
 
+**Scope of this proof.** It is evidence of the **Agent Runtime ↔ Spring review-domain
+integration** — that the subgraph drives the real review-reply endpoints (prep/draft/approval/
+submission-run) correctly, idempotently, and fail-closed. It is **not** evidence of channel
+acquisition: no marketplace was contacted, no channel API was called, and the review rows are
+local fixtures, not collected data. Channel acquisition remains proven separately in its own
+workstreams.
+
 Proven end-to-end against a real backend on a disposable `review_subgraph_proof` DB (the
-`sellerops` dev DB untouched; env torn down after). Reviews were seeded directly into the
-disposable DB (the mock connector does not serve REVIEW sync, and the demo-content review
-seeder is unrelatedly broken on a NOT-NULL `dedup_key_version`), then triaged RESPONSE_NEEDED
-through the real endpoint. Verified: fail-closed capability; the draft saved once BEFORE the
+`sellerops` dev DB untouched; env torn down after). Because the mock connector does not serve
+REVIEW sync (and the demo-content review seeder is unrelatedly broken on a NOT-NULL
+`dedup_key_version`), the review rows were inserted directly into the disposable DB as **SQL
+fixtures** and then triaged RESPONSE_NEEDED through the real endpoint — a deliberate fixture
+seed, chosen so the proof exercises the integration boundary rather than any acquisition path.
+Verified: fail-closed capability; the draft saved once BEFORE the
 checkpoint (real backend rule provider, `providerVersion=templates-v1`); approve binds the
 version + prepares a guided session (opaque 16-hex `submissionRef` + privacy-safe target hint);
 reject leaves an inert draft with no approval and RESPONSE_NEEDED retained; double-resume
