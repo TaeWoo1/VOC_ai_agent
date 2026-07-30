@@ -9,6 +9,7 @@
  * never reaches the client.
  */
 import { SpringApiError } from "../spring/SpringClient";
+import { StaleRunVersionError } from "../spring/AgentRunStateClient";
 import { UnrecognizedGoalError } from "../goal/parseGoal";
 import { ExecutionEnabledError } from "../runtime";
 
@@ -56,6 +57,11 @@ export function toHttpError(err: unknown): HttpError {
 
   if (err instanceof ExecutionEnabledError) {
     return new HttpError(409, "EXECUTION_ENABLED", "refusing to run: the backend external-send path is enabled");
+  }
+
+  if (err instanceof StaleRunVersionError) {
+    // A version-guarded run-state write lost a race — fail closed rather than overwrite.
+    return new HttpError(409, "RESUME_CONFLICT", "run state changed concurrently; retry the read");
   }
 
   // Fallback: never surface the raw message (it could carry content). A coarse 500.

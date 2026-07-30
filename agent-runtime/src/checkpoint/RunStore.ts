@@ -20,6 +20,21 @@ import type { RunOutcome } from "../state/AgentState";
 export type RunStatus = "AWAITING_APPROVAL" | "DONE";
 
 /**
+ * Outcome of trying to CLAIM the right to resume a run — the exactly-once gate.
+ *  - `CLAIMED`: this caller won and may drive the (possibly non-idempotent) resume exactly once;
+ *  - `ALREADY_DONE`: the run already finished, so the caller replays the recorded outcome (a
+ *    sequential double-resume is idempotent);
+ *  - `CONFLICT`: a concurrent resume is already in flight, so this caller fails closed.
+ *
+ * The durable Spring-backed store enforces this with a version-guarded conditional update (true
+ * cross-instance exclusion); the file/in-memory stores enforce it within a single process only
+ * (they are dev/proof stores and are refused in production).
+ */
+export interface ClaimResult {
+  readonly outcome: "CLAIMED" | "ALREADY_DONE" | "CONFLICT";
+}
+
+/**
  * The ONLY fields persisted. No title/body/comments/candidate, no token, no credential.
  * `approvedFingerprint` inside `outcome` is a one-way content hash, not content.
  */
@@ -39,11 +54,14 @@ export interface RunStore {
   save(snapshot: RunSnapshot): Promise<void>;
   load(threadId: string): Promise<RunSnapshot | null>;
   delete(threadId: string): Promise<void>;
+  /** Acquire the exactly-once right to resume this thread. See {@link ClaimResult}. */
+  claim(threadId: string): Promise<ClaimResult>;
 }
 
 /** Same-process store. Lost on restart — use a durable impl to prove restart-resume. */
 export class InMemoryRunStore implements RunStore {
   private readonly byThread = new Map<string, RunSnapshot>();
+  private readonly claimed = new Set<string>();
 
   async save(snapshot: RunSnapshot): Promise<void> {
     this.byThread.set(snapshot.threadId, snapshot);
@@ -53,6 +71,16 @@ export class InMemoryRunStore implements RunStore {
   }
   async delete(threadId: string): Promise<void> {
     this.byThread.delete(threadId);
+    this.claimed.delete(threadId);
+  }
+  async claim(threadId: string): Promise<ClaimResult> {
+    const snap = this.byThread.get(threadId);
+    if (!snap) return { outcome: "CONFLICT" };
+    if (snap.status === "DONE") return { outcome: "ALREADY_DONE" };
+    // Synchronous check-and-set (no await between has() and add()) → real in-process exclusion.
+    if (this.claimed.has(threadId)) return { outcome: "CONFLICT" };
+    this.claimed.add(threadId);
+    return { outcome: "CLAIMED" };
   }
 }
 
@@ -62,6 +90,8 @@ export class InMemoryRunStore implements RunStore {
  * swap a transactional store; this is the simplest durable, dependency-free impl.
  */
 export class FileRunStore implements RunStore {
+  private readonly claimed = new Set<string>();
+
   constructor(private readonly dir: string) {
     mkdirSync(dir, { recursive: true });
   }
@@ -83,5 +113,15 @@ export class FileRunStore implements RunStore {
   async delete(threadId: string): Promise<void> {
     const p = this.path(threadId);
     if (existsSync(p)) rmSync(p);
+    this.claimed.delete(threadId);
+  }
+  async claim(threadId: string): Promise<ClaimResult> {
+    const snap = await this.load(threadId);
+    if (!snap) return { outcome: "CONFLICT" };
+    if (snap.status === "DONE") return { outcome: "ALREADY_DONE" };
+    // In-process exclusion only (a file store is single-instance; production uses the Spring store).
+    if (this.claimed.has(threadId)) return { outcome: "CONFLICT" };
+    this.claimed.add(threadId);
+    return { outcome: "CLAIMED" };
   }
 }

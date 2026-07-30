@@ -111,7 +111,9 @@ export class AgentRunService {
   private async tenant(token: string): Promise<{ bundle: SpringClientBundle; stores: RunStores }> {
     const bundle = this.deps.clientFactory(token);
     const { orgId } = await bundle.identity.whoami(); // throws (→ 401/…) on an invalid token
-    const stores = this.deps.storeProvider.storesFor(scopeFor(orgId));
+    // Spring store: isolated at the backend by the forwarded token. File/memory: keyed by an org
+    // fingerprint. Passing both lets the provider pick per store kind without the service knowing which.
+    const stores = this.deps.storeProvider.storesForRequest({ token, scope: scopeFor(orgId) });
     return { bundle, stores };
   }
 
@@ -176,8 +178,23 @@ export class AgentRunService {
       throw new HttpError(409, "NO_CHECKPOINT", "issue-memory runs have no checkpoint to resume; start again to refresh");
     }
 
-    log("http_resume", { domain, approved: decision.approved });
     const rt = this.runtimes(bundle, stores);
+    const runner = domain === "REVIEW" ? rt.review : rt.inquiry;
+    const store = domain === "REVIEW" ? stores.review : stores.inquiry;
+
+    // Fail closed BEFORE claiming, so a refused run never leaves a wasted claim behind.
+    await runner.assertExecutionDisabled();
+
+    // Exactly-once gate. Claim the resume BEFORE driving the (possibly non-idempotent) mutation — the
+    // review guided-session mint is not idempotent, so only the claim winner may run it. A concurrent
+    // resume that lost the claim fails closed; a run that already finished replays through the runtime's
+    // own DONE-snapshot guard (idempotent double resume).
+    const claim = await store.claim(threadId);
+    if (claim.outcome === "CONFLICT") {
+      throw new HttpError(409, "RESUME_IN_PROGRESS", "a concurrent resume is already in progress for this run");
+    }
+    log("http_resume", { domain, approved: decision.approved, claim: claim.outcome });
+
     // The inquiry decision is the superset; the review runtime reads only {approved, approvedBy}.
     const full: CheckpointDecision = {
       approved: decision.approved,

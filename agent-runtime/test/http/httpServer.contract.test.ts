@@ -145,6 +145,38 @@ describe("HTTP server contract", () => {
     expect(res.status).toBe(404);
     expect((await json(res)).error.code).toBe("NOT_FOUND");
   });
+
+  it("GET /ready is 503 when the backend dependency is unreachable", async () => {
+    // The default probe pings http://unused/health, which never resolves ok → not ready.
+    const res = await fetch(`${base}/ready`);
+    expect(res.status).toBe(503);
+    const body = await json(res);
+    expect(body.status).toBe("unavailable");
+    expect(body.backendReachable).toBe(false);
+  });
+});
+
+describe("readiness with a reachable backend", () => {
+  let server: Server;
+  let base: string;
+
+  beforeAll(async () => {
+    server = createHttpServer(buildService(), CONFIG, { readinessProbe: async () => ({ backendReachable: true }) });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it("GET /ready is 200 and reports the run store when dependencies are up", async () => {
+    const res = await fetch(`${base}/ready`);
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.status).toBe("ready");
+    expect(body.backendReachable).toBe(true);
+    expect(body.runStore.kind).toBe("memory");
+  });
 });
 
 describe("production run-store fail-closed", () => {
@@ -158,5 +190,12 @@ describe("production run-store fail-closed", () => {
     expect(() => new RunStoreProvider({ ...CONFIG, env: "production", runStoreKind: "memory" })).toThrow(
       ProductionStoreNotConfiguredError,
     );
+  });
+
+  it("allows the spring store in production and reports it multi-instance safe", () => {
+    const provider = new RunStoreProvider({ ...CONFIG, env: "production", runStoreKind: "spring" });
+    expect(provider.kind).toBe("spring");
+    expect(provider.durable).toBe(true);
+    expect(provider.multiInstanceSafe).toBe(true);
   });
 });

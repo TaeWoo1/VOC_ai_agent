@@ -5,8 +5,10 @@
 # and NO JWT signing key; it only forwards the operator's bearer token to the backend, so there
 # are no secrets to bake in. Configure it entirely through env vars (see .env.example).
 #
-# NOTE: booting with APP_ENV=production on the file/in-memory store FAILS CLOSED — a durable
-# multi-instance store is future work. This image is for local/proof/pilot deployment.
+# NOTE: booting with APP_ENV=production requires AGENT_RUNTIME_RUNSTORE_KIND=spring (the
+# backend-owned, org-isolated, optimistic-locked store); a file/in-memory store FAILS CLOSED at
+# boot in production. The defaults below are dev/proof (file store); the pilot stack
+# (docker-compose.yml) overrides APP_ENV=production + the spring store.
 FROM node:20-slim
 
 ENV NODE_ENV=production
