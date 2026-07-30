@@ -9,13 +9,21 @@
  */
 
 /** The closed set of intents the runtime can currently orchestrate. */
-export type AgentIntent = "HANDLE_UNANSWERED_INQUIRIES";
+export type AgentIntent = "HANDLE_UNANSWERED_INQUIRIES" | "HANDLE_REVIEW_REPLIES";
+
+/** The subgraph domain an intent routes to. */
+export type AgentDomain = "INQUIRY" | "REVIEW";
 
 export interface AgentGoal {
   readonly intent: AgentIntent;
   /** Optional paging hints for the search step; defaults applied downstream. */
   readonly page?: number;
   readonly size?: number;
+  /**
+   * Seller account the run acts within. Required for the REVIEW domain (its endpoints are
+   * account-scoped); unused by the org-scoped inquiry queue.
+   */
+  readonly accountId?: string;
 }
 
 export interface GoalRequest {
@@ -23,6 +31,7 @@ export interface GoalRequest {
   readonly text?: string;
   readonly page?: number;
   readonly size?: number;
+  readonly accountId?: string;
 }
 
 export class UnrecognizedGoalError extends Error {
@@ -32,15 +41,31 @@ export class UnrecognizedGoalError extends Error {
   }
 }
 
-/** Fixed keyword table for the free-text path. Deterministic, order-independent. */
+/**
+ * Fixed keyword table for the free-text path. Deterministic, order-independent. The review
+ * row is listed FIRST so a request that mentions both (e.g. "리뷰 답변") resolves to the
+ * review intent; the inquiry keywords are broader ("답변") and would otherwise shadow it.
+ */
 const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly string[] }> = [
+  {
+    intent: "HANDLE_REVIEW_REPLIES",
+    keywords: ["리뷰", "후기", "리뷰 답변", "답글", "review", "review reply", "review replies"],
+  },
   {
     intent: "HANDLE_UNANSWERED_INQUIRIES",
     keywords: ["미답변", "문의", "답변 필요", "unanswered", "inquiry", "inquiries"],
   },
 ];
 
-const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>(["HANDLE_UNANSWERED_INQUIRIES"]);
+const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>([
+  "HANDLE_UNANSWERED_INQUIRIES",
+  "HANDLE_REVIEW_REPLIES",
+]);
+
+/** Map an intent onto the subgraph domain that handles it — the goal router's core. */
+export function routeIntent(intent: AgentIntent): AgentDomain {
+  return intent === "HANDLE_REVIEW_REPLIES" ? "REVIEW" : "INQUIRY";
+}
 
 /**
  * Parse an operator request into a supported goal. Precedence: an explicit `intent`
@@ -48,7 +73,7 @@ const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>(["HANDLE_UNANSWE
  * no match → {@link UnrecognizedGoalError}.
  */
 export function parseGoal(request: GoalRequest): AgentGoal {
-  const paging = { page: request.page, size: request.size };
+  const paging = { page: request.page, size: request.size, accountId: request.accountId };
 
   if (request.intent) {
     if (!KNOWN_INTENTS.has(request.intent)) {

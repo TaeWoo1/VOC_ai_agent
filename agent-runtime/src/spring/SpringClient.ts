@@ -21,7 +21,16 @@ import type {
   PublishStatusView,
   ReplyDraftRequest,
   ReplyDraftView,
+  ReviewReplyApprovalRequest,
+  ReviewReplyApprovalResponse,
+  ReviewReplyDraftRequest,
+  ReviewReplyDraftView,
+  ReviewReplyPrepView,
+  ReviewReplySubmissionRunRequest,
+  ReviewReplySubmissionRunResponse,
+  ReviewReplyWorkResponse,
 } from "./types";
+import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 
 export interface ListInquiriesParams {
   readonly phase?: string;
@@ -67,7 +76,7 @@ export interface HttpSpringClientOptions {
  * exercised by `npm test` (which injects a fake). Live cross-process integration
  * against a running backend is the next step and is intentionally out of this slice.
  */
-export class HttpSpringClient implements SpringClient {
+export class HttpSpringClient implements SpringClient, ReviewSpringClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
@@ -116,6 +125,59 @@ export class HttpSpringClient implements SpringClient {
     return this.request<PublishStatusView>(
       "POST",
       `/api/inquiries/${encodeURIComponent(workItemId)}/confirm-publish`,
+      request,
+    );
+  }
+
+  // --- review-reply domain (ReviewSpringClient) -------------------------------------
+
+  private reviewBase(accountId: string, actionRef: string): string {
+    return `/api/seller-accounts/${encodeURIComponent(accountId)}/attention/items/${encodeURIComponent(actionRef)}/reply`;
+  }
+
+  async listReplyWork(accountId: string, params: ListReplyWorkParams): Promise<ReviewReplyWorkResponse> {
+    const q = new URLSearchParams();
+    if (params.todoLimit != null) q.set("todoLimit", String(params.todoLimit));
+    if (params.recentLimit != null) q.set("recentLimit", String(params.recentLimit));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ReviewReplyWorkResponse>(
+      "GET",
+      `/api/seller-accounts/${encodeURIComponent(accountId)}/reply-work${suffix}`,
+    );
+  }
+
+  async getReviewReplyPrep(accountId: string, actionRef: string): Promise<ReviewReplyPrepView> {
+    return this.request<ReviewReplyPrepView>("GET", this.reviewBase(accountId, actionRef));
+  }
+
+  async saveReviewDraft(
+    accountId: string,
+    actionRef: string,
+    request: ReviewReplyDraftRequest,
+  ): Promise<ReviewReplyDraftView> {
+    return this.request<ReviewReplyDraftView>("PUT", `${this.reviewBase(accountId, actionRef)}/draft`, request);
+  }
+
+  async decideReviewApproval(
+    accountId: string,
+    actionRef: string,
+    request: ReviewReplyApprovalRequest,
+  ): Promise<ReviewReplyApprovalResponse> {
+    return this.request<ReviewReplyApprovalResponse>(
+      "POST",
+      `${this.reviewBase(accountId, actionRef)}/approval`,
+      request,
+    );
+  }
+
+  async startReviewSubmissionRun(
+    accountId: string,
+    actionRef: string,
+    request: ReviewReplySubmissionRunRequest,
+  ): Promise<ReviewReplySubmissionRunResponse> {
+    return this.request<ReviewReplySubmissionRunResponse>(
+      "POST",
+      `${this.reviewBase(accountId, actionRef)}/submission-run`,
       request,
     );
   }
