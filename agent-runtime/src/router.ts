@@ -15,6 +15,8 @@ import { InquiryAgentRuntime } from "./runtime";
 import type { RunResult } from "./runtime";
 import { ReviewAgentRuntime } from "./reviewRuntime";
 import type { ReviewRunResult } from "./reviewRuntime";
+import { IssueAgentRuntime } from "./issueRuntime";
+import type { IssueRunResult } from "./issueRuntime";
 import { parseGoal, routeIntent } from "./goal/parseGoal";
 import type { AgentDomain, GoalRequest } from "./goal/parseGoal";
 import type { CheckpointDecision } from "./checkpoint/CheckpointContract";
@@ -22,11 +24,13 @@ import { log } from "./log";
 
 export type RouterRunResult =
   | { readonly domain: "INQUIRY"; readonly result: RunResult }
-  | { readonly domain: "REVIEW"; readonly result: ReviewRunResult };
+  | { readonly domain: "REVIEW"; readonly result: ReviewRunResult }
+  | { readonly domain: "ISSUE"; readonly result: IssueRunResult };
 
 export interface AgentRouterDeps {
   readonly inquiry: InquiryAgentRuntime;
   readonly review: ReviewAgentRuntime;
+  readonly issue: IssueAgentRuntime;
 }
 
 export class UnknownThreadError extends Error {
@@ -39,11 +43,13 @@ export class UnknownThreadError extends Error {
 export class AgentRouter {
   readonly inquiry: InquiryAgentRuntime;
   readonly review: ReviewAgentRuntime;
+  readonly issue: IssueAgentRuntime;
   private readonly threadDomain = new Map<string, AgentDomain>();
 
   constructor(deps: AgentRouterDeps) {
     this.inquiry = deps.inquiry;
     this.review = deps.review;
+    this.issue = deps.issue;
   }
 
   /** The domain a request routes to, without running anything (pure aside from parsing). */
@@ -59,6 +65,10 @@ export class AgentRouter {
     if (domain === "REVIEW") {
       return { domain, result: await this.review.start(threadId, request) };
     }
+    if (domain === "ISSUE") {
+      // The issue-memory subgraph has no checkpoint: it runs straight to a DONE brief here.
+      return { domain, result: await this.issue.run(threadId, request) };
+    }
     return { domain, result: await this.inquiry.start(threadId, request) };
   }
 
@@ -68,10 +78,18 @@ export class AgentRouter {
    * runtime uses only {approved, approvedBy} and ignores the rest, so one signature serves
    * both without narrowing the inquiry runtime's edit capability. For a cross-process restart
    * (no recorded domain) resume against the domain-specific runtime directly.
+   *
+   * The ISSUE domain never pauses (no checkpoint), so there is nothing to resume — resuming an
+   * issue thread is a caller error, not a silent no-op.
    */
   async resume(threadId: string, decision: CheckpointDecision): Promise<RouterRunResult> {
     const domain = this.threadDomain.get(threadId);
     if (!domain) throw new UnknownThreadError(threadId);
+    if (domain === "ISSUE") {
+      throw new Error(
+        `thread ${threadId} is an issue-memory run: it has no checkpoint to resume. Start again to refresh the brief.`,
+      );
+    }
     if (domain === "REVIEW") {
       return { domain, result: await this.review.resume(threadId, decision) };
     }

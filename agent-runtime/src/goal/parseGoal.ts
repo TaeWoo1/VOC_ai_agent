@@ -9,10 +9,13 @@
  */
 
 /** The closed set of intents the runtime can currently orchestrate. */
-export type AgentIntent = "HANDLE_UNANSWERED_INQUIRIES" | "HANDLE_REVIEW_REPLIES";
+export type AgentIntent =
+  | "HANDLE_UNANSWERED_INQUIRIES"
+  | "HANDLE_REVIEW_REPLIES"
+  | "HANDLE_OPERATIONS_ISSUES";
 
 /** The subgraph domain an intent routes to. */
-export type AgentDomain = "INQUIRY" | "REVIEW";
+export type AgentDomain = "INQUIRY" | "REVIEW" | "ISSUE";
 
 export interface AgentGoal {
   readonly intent: AgentIntent;
@@ -21,9 +24,15 @@ export interface AgentGoal {
   readonly size?: number;
   /**
    * Seller account the run acts within. Required for the REVIEW domain (its endpoints are
-   * account-scoped); unused by the org-scoped inquiry queue.
+   * account-scoped); unused by the org-scoped inquiry queue and issue memory.
    */
   readonly accountId?: string;
+  /**
+   * ISO date-only (YYYY-MM-DD) reproducibility anchor for the ISSUE domain's change/trend
+   * judgements. When set, the whole run is pinned to that date and is deterministic across a
+   * restart; when absent, the backend uses today. Unused by the inquiry/review domains.
+   */
+  readonly referenceDate?: string;
 }
 
 export interface GoalRequest {
@@ -32,6 +41,7 @@ export interface GoalRequest {
   readonly page?: number;
   readonly size?: number;
   readonly accountId?: string;
+  readonly referenceDate?: string;
 }
 
 export class UnrecognizedGoalError extends Error {
@@ -42,14 +52,38 @@ export class UnrecognizedGoalError extends Error {
 }
 
 /**
- * Fixed keyword table for the free-text path. Deterministic, order-independent. The review
- * row is listed FIRST so a request that mentions both (e.g. "리뷰 답변") resolves to the
- * review intent; the inquiry keywords are broader ("답변") and would otherwise shadow it.
+ * Fixed keyword table for the free-text path. Deterministic; the first matching row wins.
+ * Ordered review → issue → inquiry so that a request mentioning both a review word and the
+ * broad inquiry "답변" resolves to review; the issue row sits before inquiry so an operations
+ * request is never shadowed by a broad inquiry word. The three keyword sets are mutually
+ * substring-free, so canonical requests route the same regardless of order.
  */
 const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly string[] }> = [
   {
     intent: "HANDLE_REVIEW_REPLIES",
     keywords: ["리뷰", "후기", "리뷰 답변", "답글", "review", "review reply", "review replies"],
+  },
+  {
+    // Operations-issue signals. Listed before the inquiry row so an issue request that also says
+    // a broad inquiry word does not get shadowed; none of these keywords overlaps the review or
+    // inquiry rows, so the examples ("악화된 상품 문제", "반복되는 고객 불만", "먼저 확인할 운영
+    // 이슈") resolve here regardless of order.
+    intent: "HANDLE_OPERATIONS_ISSUES",
+    keywords: [
+      "운영 이슈",
+      "이슈",
+      "악화",
+      "반복",
+      "고객 불만",
+      "불만",
+      "상품 문제",
+      "먼저 확인",
+      "operations issue",
+      "issue",
+      "recurring",
+      "worsening",
+      "complaint",
+    ],
   },
   {
     intent: "HANDLE_UNANSWERED_INQUIRIES",
@@ -60,11 +94,19 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly s
 const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>([
   "HANDLE_UNANSWERED_INQUIRIES",
   "HANDLE_REVIEW_REPLIES",
+  "HANDLE_OPERATIONS_ISSUES",
 ]);
 
 /** Map an intent onto the subgraph domain that handles it — the goal router's core. */
 export function routeIntent(intent: AgentIntent): AgentDomain {
-  return intent === "HANDLE_REVIEW_REPLIES" ? "REVIEW" : "INQUIRY";
+  switch (intent) {
+    case "HANDLE_REVIEW_REPLIES":
+      return "REVIEW";
+    case "HANDLE_OPERATIONS_ISSUES":
+      return "ISSUE";
+    default:
+      return "INQUIRY";
+  }
 }
 
 /**
@@ -73,7 +115,12 @@ export function routeIntent(intent: AgentIntent): AgentDomain {
  * no match → {@link UnrecognizedGoalError}.
  */
 export function parseGoal(request: GoalRequest): AgentGoal {
-  const paging = { page: request.page, size: request.size, accountId: request.accountId };
+  const paging = {
+    page: request.page,
+    size: request.size,
+    accountId: request.accountId,
+    referenceDate: request.referenceDate,
+  };
 
   if (request.intent) {
     if (!KNOWN_INTENTS.has(request.intent)) {

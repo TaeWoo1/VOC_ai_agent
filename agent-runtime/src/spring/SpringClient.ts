@@ -16,11 +16,15 @@ import type {
   ConfirmPublishRequest,
   InquiryDetail,
   InquiryQueueResponse,
+  IssueContext,
+  IssueEvidenceSummary,
+  IssueTrend,
   ProposalResult,
   PublishCapabilityView,
   PublishStatusView,
   ReplyDraftRequest,
   ReplyDraftView,
+  ReviewIssueSummary,
   ReviewReplyApprovalRequest,
   ReviewReplyApprovalResponse,
   ReviewReplyDraftRequest,
@@ -31,6 +35,7 @@ import type {
   ReviewReplyWorkResponse,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
+import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
 
 export interface ListInquiriesParams {
   readonly phase?: string;
@@ -76,7 +81,7 @@ export interface HttpSpringClientOptions {
  * exercised by `npm test` (which injects a fake). Live cross-process integration
  * against a running backend is the next step and is intentionally out of this slice.
  */
-export class HttpSpringClient implements SpringClient, ReviewSpringClient {
+export class HttpSpringClient implements SpringClient, ReviewSpringClient, IssueSpringClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
@@ -179,6 +184,41 @@ export class HttpSpringClient implements SpringClient, ReviewSpringClient {
       "POST",
       `${this.reviewBase(accountId, actionRef)}/submission-run`,
       request,
+    );
+  }
+
+  // --- review-issue-memory domain (IssueSpringClient) -------------------------------
+  // All GET, all read-only. The subgraph never calls the mutating issue endpoints
+  // (/extract, /lifecycle-pass, /acting, /remediated, /dismiss, /restore).
+
+  async searchReviewIssues(params: ListReviewIssuesParams): Promise<ReviewIssueSummary[]> {
+    const q = new URLSearchParams();
+    if (params.referenceDate) q.set("referenceDate", params.referenceDate);
+    if (params.dismissed != null) q.set("dismissed", String(params.dismissed));
+    const suffix = q.toString() ? `?${q.toString()}` : "";
+    return this.request<ReviewIssueSummary[]>("GET", `/api/review-issues${suffix}`);
+  }
+
+  async getIssueContext(issueId: string, referenceDate?: string): Promise<IssueContext> {
+    const suffix = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    return this.request<IssueContext>(
+      "GET",
+      `/api/review-issues/${encodeURIComponent(issueId)}/context${suffix}`,
+    );
+  }
+
+  async getIssueEvidenceSummary(issueId: string): Promise<IssueEvidenceSummary> {
+    return this.request<IssueEvidenceSummary>(
+      "GET",
+      `/api/review-issues/${encodeURIComponent(issueId)}/evidence-summary`,
+    );
+  }
+
+  async getIssueTrend(issueId: string, referenceDate?: string): Promise<IssueTrend> {
+    const suffix = referenceDate ? `?referenceDate=${encodeURIComponent(referenceDate)}` : "";
+    return this.request<IssueTrend>(
+      "GET",
+      `/api/review-issues/${encodeURIComponent(issueId)}/trend${suffix}`,
     );
   }
 

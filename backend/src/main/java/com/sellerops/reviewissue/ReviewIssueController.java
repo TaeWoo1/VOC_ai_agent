@@ -3,6 +3,8 @@ package com.sellerops.reviewissue;
 import com.sellerops.auth.AuthPrincipal;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
+import com.sellerops.reviewissue.dto.IssueContextView;
+import com.sellerops.reviewissue.dto.IssueEvidenceSummaryView;
 import com.sellerops.reviewissue.dto.ReviewIssueDetailView;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
 import java.time.LocalDate;
@@ -68,6 +70,34 @@ public class ReviewIssueController {
                                        @PathVariable UUID issueId,
                                        @RequestParam(required = false) LocalDate referenceDate) {
         return query.detail(principal.orgId(), issueId, orToday(referenceDate));
+    }
+
+    /**
+     * Read-only, quote-free issue drill-downs for the operations-brief agent. Three narrow reads so
+     * an agent never has to pull the human detail surface (whose evidence carries masked customer
+     * quotes and whose history carries the operator's free-text note): {@code /context} is identity +
+     * lifecycle history (note-free), {@code /evidence-summary} is the sanitized evidence roll-up, and
+     * {@code /trend} is the current severity/change/concentration signal. All org-scoped, all
+     * side-effect-free — they read the same {@link ReviewIssueQueryService} the human surface uses.
+     */
+    @GetMapping("/{issueId}/context")
+    public IssueContextView context(@AuthenticationPrincipal AuthPrincipal principal,
+                                    @PathVariable UUID issueId,
+                                    @RequestParam(required = false) LocalDate referenceDate) {
+        return query.context(principal.orgId(), issueId, orToday(referenceDate));
+    }
+
+    @GetMapping("/{issueId}/evidence-summary")
+    public IssueEvidenceSummaryView evidenceSummary(@AuthenticationPrincipal AuthPrincipal principal,
+                                                    @PathVariable UUID issueId) {
+        return query.evidenceSummary(principal.orgId(), issueId);
+    }
+
+    @GetMapping("/{issueId}/trend")
+    public ReviewIssueView trend(@AuthenticationPrincipal AuthPrincipal principal,
+                                 @PathVariable UUID issueId,
+                                 @RequestParam(required = false) LocalDate referenceDate) {
+        return query.issueView(principal.orgId(), issueId, orToday(referenceDate));
     }
 
     /**

@@ -268,3 +268,99 @@ export interface ReviewReplySubmissionRunResponse {
   readonly targetHint: ReviewReplyTargetHintView | null;
   readonly asOfDate: string | null;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Review-issue memory domain (/api/review-issues/*). Mirrors of the backend
+ * DTOs the issue-memory subgraph shuttles across the boundary. Every shape
+ * here is QUOTE-FREE and PII-FREE by construction: issue title/aspect/problem
+ * are closed-vocabulary labels (never a review body), and the drill-downs the
+ * subgraph uses (/context, /evidence-summary, /trend) never carry a masked
+ * quote or an operator note. The backend owns every extraction, aggregation,
+ * and lifecycle rule; the runtime only reads these summaries.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The change/trend judgement for one issue (mirror of IssueChangeView). `kinds` are the fired
+ * judgement enum names (NEW/SURGING/PERSISTENT/CONCENTRATED/IMPROVED); `labelsKo` the operator
+ * labels. The two surge numbers let a brief say "최근 N일 X건 · 이전 평균 주 Y건" without prose.
+ */
+export interface IssueChangeInfo {
+  readonly kinds: string[];
+  readonly labelsKo: string[];
+  readonly highSurge: boolean;
+  readonly surgeWindowCount: number;
+  readonly surgeBaselineWeekly: number;
+}
+
+/**
+ * One issue as an operational signal (mirror of ReviewIssueView) — the row of GET
+ * /api/review-issues and the body of GET /{id}/trend. All fields are vocabulary labels or
+ * aggregate counts; there is NO customer text. Dates are ISO date strings (LocalDate) or null.
+ */
+export interface ReviewIssueSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly aspect: string;
+  readonly problem: string;
+  readonly severity: string;
+  readonly lifecycleState: string;
+  readonly lifecycleLabelKo: string;
+  readonly evidenceCount: number;
+  readonly firstEvidenceOn: string | null;
+  readonly lastEvidenceOn: string | null;
+  readonly dominantProductId: string | null;
+  readonly dominantProductName: string | null;
+  readonly dismissed: boolean;
+  readonly extractorKind: string;
+  readonly change: IssueChangeInfo;
+}
+
+/** One lifecycle transition, note-free (mirror of IssueTransitionView). No operator free-text. */
+export interface IssueTransition {
+  readonly fromState: string | null;
+  readonly toState: string;
+  readonly toStateLabelKo: string;
+  readonly actor: string;
+  readonly reason: string;
+  readonly at: string;
+}
+
+/** GET /{id}/context — issue identity + lifecycle history, quote-free and note-free. */
+export interface IssueContext {
+  readonly issue: ReviewIssueSummary;
+  readonly history: IssueTransition[];
+}
+
+/** All-time evidence count for one product behind an issue (mirror of IssueProductEvidenceView). */
+export interface IssueProductEvidence {
+  readonly productId: string;
+  readonly productName: string | null;
+  readonly evidenceCount: number;
+}
+
+/** Per-star evidence counts plus an unrated bucket; sums to totalEvidence. */
+export interface IssueRatingDistribution {
+  readonly rating1: number;
+  readonly rating2: number;
+  readonly rating3: number;
+  readonly rating4: number;
+  readonly rating5: number;
+  readonly unrated: number;
+}
+
+/**
+ * GET /{id}/evidence-summary — the sanitized evidence roll-up (mirror of IssueEvidenceSummaryView).
+ * No review id, no quote, no buyer identity: counts, a per-product split, a rating distribution,
+ * and the all-time span only.
+ */
+export interface IssueEvidenceSummary {
+  readonly totalEvidence: number;
+  readonly byProduct: IssueProductEvidence[];
+  readonly unattributedEvidence: number;
+  readonly ratingDistribution: IssueRatingDistribution;
+  readonly firstEvidenceOn: string | null;
+  readonly lastEvidenceOn: string | null;
+}
+
+/** GET /{id}/trend returns a bare {@link ReviewIssueSummary} (severity + change + concentration). */
+export type IssueTrend = ReviewIssueSummary;
