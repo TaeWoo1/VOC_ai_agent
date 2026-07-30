@@ -1,0 +1,24 @@
+{
+  "name": "@sellerops/agent-runtime",
+  "private": true,
+  "version": "0.0.1-slice1",
+  "type": "module",
+  "description": "SellerOps Agent Runtime. A standalone Node/TypeScript orchestration service: LangGraph owns goal parsing, context assembly, tool routing, human checkpoint, and resume; LangChain Tools are thin adapters onto the Spring backend, which stays the system of record for connectors, DB, transactions, idempotency, policy, and audit. No channel API write, no external send — the human checkpoint plus the backend's fail-closed publish gate must both pass first.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "inquiry": "tsx src/cli/run-inquiry.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.48",
+    "@langchain/langgraph": "^1.4.8",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

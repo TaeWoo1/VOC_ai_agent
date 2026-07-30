@@ -46,4 +46,14 @@ public class ChannelReplyAdapterRegistry {
                 .map(Channel::getCode)
                 .map(byCode::get);
     }
+
+    /**
+     * The channel codes that currently have a reply adapter registered. Empty on the
+     * fail-closed default (execution disabled). Read-only, sanitized (codes are static
+     * channel identifiers, not secrets) — exposed for the publish-capability surface so
+     * an orchestration client can verify the send path is disabled before acting.
+     */
+    public java.util.Set<String> registeredChannelCodes() {
+        return byCode.keySet();
+    }
 }
