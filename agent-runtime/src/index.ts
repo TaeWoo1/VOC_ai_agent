@@ -6,8 +6,17 @@
  * stays the system of record. This slice covers one journey — handle unanswered
  * inquiries up to a recorded human approval — and never sends an external reply.
  */
-export { InquiryAgentRuntime } from "./runtime";
+export { InquiryAgentRuntime, ExecutionEnabledError } from "./runtime";
 export type { RuntimeDeps, RunResult } from "./runtime";
+
+export { InMemoryRunStore, FileRunStore } from "./checkpoint/RunStore";
+export type { RunStore, RunSnapshot, RunStatus } from "./checkpoint/RunStore";
+
+export { performRecord } from "./graph/performRecord";
+export type { RecordInput } from "./graph/performRecord";
+
+export { login } from "./spring/SpringSession";
+export type { LoginResult } from "./spring/SpringSession";
 
 export { parseGoal, UnrecognizedGoalError } from "./goal/parseGoal";
 export type { AgentGoal, AgentIntent, GoalRequest } from "./goal/parseGoal";

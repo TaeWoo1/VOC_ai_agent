@@ -22,6 +22,8 @@ export interface CheckpointRequest {
   readonly kind: typeof CHECKPOINT_KIND;
   readonly workItemId: string;
   readonly inquiryId: string;
+  /** Work-item phase at the checkpoint (sanitized enum; OPEN before any mutation). */
+  readonly phase: string;
   readonly priorityBucket: string;
   /** Coarse reply category of the starter draft (rule-based). */
   readonly category: string;

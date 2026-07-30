@@ -64,13 +64,30 @@ describe("human checkpoint gate", () => {
     expect(failClosed.phaseOf(OLDER_WORK_ITEM)).toBe("ACTION_PENDING");
 
     // Proof the counter is NOT inert: with a channel adapter present (execution enabled),
-    // the SAME confirm-publish endpoint DOES dispatch — the send-safety is a backend
-    // configuration property, which the runtime never enables (documents M3).
-    const enabled = new FakeSpringClient(twoInquiries(), { dispatchAdapterEnabled: true });
-    const enabledRuntime = new InquiryAgentRuntime({ client: enabled });
-    await enabledRuntime.start("t-en", { intent: "HANDLE_UNANSWERED_INQUIRIES" });
-    await enabledRuntime.resume("t-en", { approved: true, approvedBy: "user-1" });
+    // the SAME confirm-publish endpoint DOES dispatch. The runtime never reaches it —
+    // start() fails closed against an execution-enabled backend (see startup test) — so
+    // this is exercised directly to show the send path is real.
+    const wi = "33333333-3333-3333-3333-333333333333";
+    const enabled = new FakeSpringClient(
+      [{ workItemId: wi, inquiryId: "i", sellerAccountId: "a", channelId: "c", title: "t", details: "d", receivedAt: "2026-07-18T00:00:00Z" }],
+      { dispatchAdapterEnabled: true },
+    );
+    await enabled.proposeInquiry(wi);
+    const draft = await enabled.saveDraft(wi, { title: "t", comments: "c", baseVersion: 0 });
+    await enabled.confirmPublish(wi, { commandId: "x", expectedFingerprint: draft.contentFingerprint });
     expect(enabled.externalSendAttempts).toBe(1);
-    expect(enabled.phaseOf(OLDER_WORK_ITEM)).toBe("EXECUTED");
+    expect(enabled.phaseOf(wi)).toBe("EXECUTED");
+  });
+
+  it("start() fails closed against an execution-enabled backend (never runs)", async () => {
+    const enabled = new FakeSpringClient(twoInquiries(), { dispatchAdapterEnabled: true });
+    const runtime = new InquiryAgentRuntime({ client: enabled });
+    await expect(runtime.start("t-guard", { intent: "HANDLE_UNANSWERED_INQUIRIES" })).rejects.toThrow(
+      /reply-send is ENABLED/,
+    );
+    // Nothing ran: no proposal, no draft, no send.
+    expect(enabled.calls.propose).toBe(0);
+    expect(enabled.calls.saveDraft).toBe(0);
+    expect(enabled.externalSendAttempts).toBe(0);
   });
 });

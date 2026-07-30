@@ -47,8 +47,6 @@ export const AgentStateAnnotation = Annotation.Root({
   detail: Annotation<InquiryDetail | null>({ reducer: (_p, n) => n, default: () => null }),
   candidate: Annotation<DraftCandidate | null>({ reducer: (_p, n) => n, default: () => null }),
   decision: Annotation<CheckpointDecision | null>({ reducer: (_p, n) => n, default: () => null }),
-  draftVersion: Annotation<number | null>({ reducer: (_p, n) => n, default: () => null }),
-  draftFingerprint: Annotation<string | null>({ reducer: (_p, n) => n, default: () => null }),
   outcome: Annotation<RunOutcome | null>({ reducer: (_p, n) => n, default: () => null }),
   trail: Annotation<string[]>({ reducer: (p, n) => [...p, ...n], default: () => [] }),
 });

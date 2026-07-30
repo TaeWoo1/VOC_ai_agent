@@ -17,6 +17,7 @@ import type {
   InquiryDetail,
   InquiryQueueResponse,
   ProposalResult,
+  PublishCapabilityView,
   PublishStatusView,
   ReplyDraftRequest,
   ReplyDraftView,
@@ -29,6 +30,8 @@ export interface ListInquiriesParams {
 }
 
 export interface SpringClient {
+  /** Read-only fail-closed status of the external reply-send path. */
+  getPublishCapability(): Promise<PublishCapabilityView>;
   listInquiries(params: ListInquiriesParams): Promise<InquiryQueueResponse>;
   getInquiryDetail(workItemId: string): Promise<InquiryDetail>;
   proposeInquiry(workItemId: string): Promise<ProposalResult>;
@@ -73,6 +76,10 @@ export class HttpSpringClient implements SpringClient {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
     this.token = opts.token;
     this.fetchImpl = opts.fetchImpl ?? fetch;
+  }
+
+  async getPublishCapability(): Promise<PublishCapabilityView> {
+    return this.request<PublishCapabilityView>("GET", `/api/inquiry-publish/capability`);
   }
 
   async listInquiries(params: ListInquiriesParams): Promise<InquiryQueueResponse> {

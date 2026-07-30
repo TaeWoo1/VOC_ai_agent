@@ -95,6 +95,16 @@ export interface ConfirmPublishRequest {
 }
 
 /**
+ * GET /api/inquiry-publish/capability — read-only fail-closed status. `executionEnabled`
+ * false + empty `replyAdapterChannelCodes` is the guarantee that confirm-publish
+ * dispatches nothing (no external reply is sent). No secret.
+ */
+export interface PublishCapabilityView {
+  readonly executionEnabled: boolean;
+  readonly replyAdapterChannelCodes: string[];
+}
+
+/**
  * POST /api/inquiries/{id}/confirm-publish result. With live execution disabled and no
  * channel reply adapter registered (the fail-closed default), the backend records the
  * approval and creates the ACTION_PENDING intent but dispatches nothing — so

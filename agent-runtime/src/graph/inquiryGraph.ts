@@ -1,14 +1,15 @@
 /**
  * The first vertical slice as a LangGraph state graph.
  *
- *   goal → search unanswered → prioritize → detail → propose → draft
+ *   goal → search unanswered → prioritize → detail → generate draft
  *        → HUMAN CHECKPOINT (interrupt) → record approval result
  *
  * LangGraph owns the orchestration: sequencing, the human-checkpoint interrupt, and
  * resume. Every side-effecting step goes through a Tool onto the Spring backend, which
- * remains the system of record. The graph can only reach `record` after the checkpoint
- * has been resumed with a human decision — that, plus the backend's own fail-closed
- * publish gate, is why no external reply can be sent without human approval.
+ * remains the system of record. Nothing is written to the backend before the checkpoint
+ * — propose/draft/confirm run only in the approve branch (via {@link performRecord}) —
+ * so the graph can only mutate anything after the checkpoint is resumed with an approval,
+ * and even then the backend's fail-closed publish gate means no external reply is sent.
  *
  * `interrupt`/`Command` require a checkpointer; the graph is compiled with one in
  * {@link ../runtime}.
@@ -27,26 +28,17 @@ import {
   parseDecision,
   type CheckpointRequest,
 } from "../checkpoint/CheckpointContract";
-import type {
-  InquiryDetail,
-  InquiryQueueResponse,
-  ProposalResult,
-  PublishStatusView,
-  ReplyDraftView,
-} from "../spring/types";
+import type { InquiryDetail, InquiryQueueResponse } from "../spring/types";
+import { performRecord } from "./performRecord";
 import { log } from "../log";
 
-// Re-export so callers import the registry type from one place.
+// Re-export so callers import these from one place.
 export { ToolRegistry } from "../tools/ToolRegistry";
+export { approvalCommandId } from "./performRecord";
 
 export interface InquiryGraphDeps {
   readonly registry: ToolRegistry;
   readonly draftProvider?: DraftModelProvider;
-}
-
-/** Deterministic idempotency key for the approval, stable across a thread's resumes. */
-export function approvalCommandId(threadId: string, workItemId: string): string {
-  return `agent:${threadId}:approve:${workItemId}`;
 }
 
 function threadId(config: LangGraphRunnableConfig): string {
@@ -153,6 +145,7 @@ export function buildInquiryGraph(deps: InquiryGraphDeps) {
       kind: CHECKPOINT_KIND,
       workItemId: state.selected!.workItemId,
       inquiryId: state.selected!.inquiryId,
+      phase: state.detail?.phase ?? "OPEN",
       priorityBucket: state.selected!.priorityBucket,
       category: state.candidate!.category,
       candidate: state.candidate!,
@@ -166,72 +159,21 @@ export function buildInquiryGraph(deps: InquiryGraphDeps) {
   async function record(state: AgentState, config: LangGraphRunnableConfig): Promise<Partial<AgentState>> {
     const decision = state.decision!;
     const workItemId = state.selected!.workItemId;
-
-    if (!decision.approved) {
-      // Nothing was written to the backend before the checkpoint, so a rejection leaves
-      // the item exactly as it was — OPEN — and it resurfaces on the next run. The
-      // declined decision is recorded only in the orchestration trail. Nothing is sent.
-      log("inquiry_record_rejected", { workItemId: workItemId.slice(0, 8) });
-      return {
-        outcome: {
-          recorded: true,
-          decision: "REJECTED",
-          workItemId,
-          phase: state.detail?.phase ?? null,
-          executionStatus: null,
-          category: null,
-          approvedFingerprint: null,
-          externalSendAttempted: false,
-          note: "operator declined; item left OPEN, recorded in orchestration trail only (no backend write)",
-        },
-        trail: ["recorded_rejected"],
-      };
-    }
-
-    // Approved. Only now do we mutate the backend: generate the proposal (OPEN -> PROPOSED)
-    // so a draft can be saved, then save the human-approved draft (their edits, or the
-    // starter candidate) so the approval binds to an exact fingerprint.
-    const proposal = await registry.invoke<ProposalResult>(TOOL.PROPOSE_REPLY, { workItemId });
-    log("inquiry_propose", { phase: proposal.phase, category: proposal.proposal.summaryCategory });
-
     const title = decision.editedTitle ?? state.candidate!.title;
     const comments = decision.editedComments ?? state.candidate!.comments;
-    const draft = await registry.invoke<ReplyDraftView>(TOOL.SAVE_DRAFT, {
+
+    // Shared with the durable restart-resume path so both behave identically and stay
+    // idempotent. Nothing here sends an external reply.
+    const outcome = await performRecord(registry, {
+      threadId: threadId(config),
       workItemId,
+      approved: decision.approved,
       title,
       comments,
-      baseVersion: 0,
+      rejectPhase: state.detail?.phase ?? null,
     });
 
-    // Record the approval. Deterministic commandId → idempotent across resumes. The
-    // backend binds APPROVAL_GRANTED + ACTION_PENDING and, fail closed, dispatches nothing.
-    const commandId = approvalCommandId(threadId(config), workItemId);
-    const status = await registry.invoke<PublishStatusView>(TOOL.RECORD_APPROVAL, {
-      workItemId,
-      commandId,
-      expectedFingerprint: draft.contentFingerprint,
-    });
-    log("inquiry_record_approved", {
-      phase: status.phase,
-      executionStatus: status.executionStatus,
-      category: status.category,
-    });
-
-    return {
-      draftVersion: draft.version,
-      draftFingerprint: draft.contentFingerprint,
-      outcome: {
-        recorded: true,
-        decision: "APPROVED",
-        workItemId,
-        phase: status.phase,
-        executionStatus: status.executionStatus,
-        category: status.category,
-        approvedFingerprint: status.approvedFingerprint,
-        externalSendAttempted: false,
-      },
-      trail: ["recorded_approved"],
-    };
+    return { outcome, trail: [decision.approved ? "recorded_approved" : "recorded_rejected"] };
   }
 
   // `prioritize` also handles the empty queue (sets a NONE outcome), so search always
