@@ -48,7 +48,15 @@ export function prioritizeReviews(items: readonly ReviewWorkItem[]): RankedRevie
   return sorted.map((item, i) => ({ item, rank: i + 1, priorityBucket: bucketFor(i + 1) }));
 }
 
-/** The single highest-priority row, or null when the worklist is empty. */
+/**
+ * The highest-priority row the agent can still PREPARE: the oldest review with no reply
+ * preparation yet (`hasReplyPreparation === false`). A review that already has a draft or a
+ * standing approval is skipped — it is either awaiting the human's guided post (approved) or
+ * already started, so re-selecting it would strand the operator on one review while the rest
+ * of the worklist stays unreachable, and re-approving an approved review is a backend
+ * conflict. Returns null when every worklist row is already prepared (or the list is empty);
+ * the caller distinguishes those two cases from the ranked length for an honest status.
+ */
 export function selectTopReview(ranked: readonly RankedReview[]): RankedReview | null {
-  return ranked.length > 0 ? ranked[0]! : null;
+  return ranked.find((r) => !r.item.hasReplyPreparation) ?? null;
 }

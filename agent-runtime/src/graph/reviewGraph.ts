@@ -94,6 +94,10 @@ export function buildReviewGraph(deps: ReviewGraphDeps) {
     const top = selectTopReview(ranked);
     log("review_prioritize", { ranked: ranked.length, selected: top != null });
     if (!top) {
+      // Nothing left to PREPARE. Distinguish an empty worklist from one whose every review is
+      // already prepared/approved (awaiting the human's guided post), so the trail/outcome is
+      // honest rather than claiming "nothing to do" while prepared replies wait in 리뷰 운영.
+      const allPrepared = ranked.length > 0;
       return {
         ranked,
         selected: null,
@@ -109,7 +113,9 @@ export function buildReviewGraph(deps: ReviewGraphDeps) {
           submissionApprovedVersion: null,
           targetHint: null,
           externalSendAttempted: false,
-          note: "no reviews awaiting reply in worklist",
+          note: allPrepared
+            ? "all worklist reviews are already prepared/approved; approved replies await the guided post in 리뷰 운영"
+            : "no reviews awaiting reply in worklist",
         },
         trail: ["prioritized_empty"],
       };
