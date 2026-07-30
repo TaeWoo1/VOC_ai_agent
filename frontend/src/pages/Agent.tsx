@@ -253,7 +253,7 @@ function InquiryCheckpointCard({
   return (
     <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="문의 답변 승인">
       <p className="text-sm text-muted">
-        규칙 기반 초안입니다{checkpoint.provenance ? ` (${checkpoint.provenance.providerKind})` : ""}. 고객 원문은
+        규칙 기반 초안입니다. 고객 원문은
         <Link to="/inquiries" className="mx-1 text-brand underline">
           문의 응답
         </Link>
@@ -328,11 +328,30 @@ function ReviewCheckpointCard({
 
 function OutcomeCard({ domain, outcome }: { domain: string; outcome: InquiryOutcome | ReviewOutcome | null }) {
   const decision = outcome?.decision ?? "NONE";
-  const label = decision === "APPROVED" ? "승인 기록됨" : decision === "REJECTED" ? "거절 기록됨" : "처리할 항목 없음";
+  // For a REVIEW run with nothing to prepare, "처리할 항목 없음" would read as "nothing to do" even
+  // when replies are prepared/approved and only awaiting the human post — so say it precisely and
+  // point to where that post happens.
+  const label =
+    decision === "APPROVED"
+      ? "승인 기록됨"
+      : decision === "REJECTED"
+        ? "거절 기록됨"
+        : domain === "REVIEW"
+          ? "새로 준비할 리뷰가 없습니다"
+          : "처리할 항목 없음";
   return (
     <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="실행 결과">
       <p className="font-medium text-ink">{label}</p>
       <p className="mt-1 text-sm text-good">외부로 발송된 내용은 없습니다 (외부 발송 없음).</p>
+      {domain === "REVIEW" && decision === "NONE" ? (
+        <p className="mt-1 text-sm text-muted">
+          준비·승인된 답변은
+          <Link to="/operations" className="mx-1 text-brand underline">
+            리뷰 운영
+          </Link>
+          에서 등록합니다.
+        </p>
+      ) : null}
       {domain === "REVIEW" && outcome && "guidedSessionPrepared" in outcome && outcome.guidedSessionPrepared ? (
         <p className="mt-1 text-sm text-muted">
           안내형 등록 준비가 완료되었습니다.
@@ -431,6 +450,12 @@ function explain(err: unknown): string {
         return "이 실행에는 확인 단계가 없습니다.";
       case "MISSING_TOKEN":
         return "로그인이 필요합니다.";
+      case "RESUME_IN_PROGRESS":
+        return "이미 처리 중인 요청입니다. 잠시 후 다시 시도해 주세요.";
+      case "RESUME_CONFLICT":
+        return "다른 곳에서 먼저 처리되어 순서가 어긋났습니다. 새로고침 후 다시 확인해 주세요.";
+      case "HTTP_409":
+        return "이미 처리되었거나 다른 곳에서 변경된 항목입니다. 새로고침 후 다시 확인해 주세요.";
       default:
         return `요청이 거부되었습니다 (${err.status}).`;
     }

@@ -47,4 +47,19 @@ describe("prioritizeReviews", () => {
   it("selectTopReview returns null on an empty worklist", () => {
     expect(selectTopReview(prioritizeReviews([]))).toBeNull();
   });
+
+  it("selectTopReview skips already-prepared reviews and picks the oldest un-prepared one", () => {
+    // The oldest row is already prepared (drafted or approved) — re-selecting it would strand
+    // the operator on one review and 409 on re-approve. Selection must move to the next un-prepared.
+    const prepared = { ...item("review:a", "2026-07-18"), hasReplyPreparation: true };
+    const fresh = item("review:b", "2026-07-20");
+    const top = selectTopReview(prioritizeReviews([prepared, fresh]));
+    expect(top?.item.actionRef).toBe("review:b");
+  });
+
+  it("selectTopReview returns null when EVERY worklist review is already prepared", () => {
+    const a = { ...item("review:a", "2026-07-18"), hasReplyPreparation: true };
+    const b = { ...item("review:b", "2026-07-20"), hasReplyPreparation: true };
+    expect(selectTopReview(prioritizeReviews([a, b]))).toBeNull();
+  });
 });

@@ -693,3 +693,22 @@ never the body; `domain` immutable post-insert; per-request clients so no cross-
 the migration ↔ H2 entity-schema agreement and Postgres/H2-portable JPQL, the HTTP-only backend boundary
 (the runtime holds no DB handle), the fail-closed ordering (execution guard before claim; stale/absent
 writes → 409; errors/logs never echo snapshot values or tokens), and the body/size caps at both layers.
+
+## 12. Operator pilot v1 — product/operability validation of the three intents
+
+Full report: `docs/sellerops_agent_runtime_operator_pilot_v1.md`.
+
+The three intents (inquiry / review / issue) were exercised repeatedly against the real Spring
+backend on a disposable DB, driving the exact HTTP contract the frontend `/agent` page calls (no new
+channel API, no external send). The mechanics held: inquiry/review approve+reject to a human
+checkpoint with sequential-idempotent + concurrent-exactly-once double-resume, restart-during-resume
+reconstructs from the spring store, review stops at submission-run mint (no Action Window execution,
+zero `review_reply_outcome`), and the issue brief is deterministic (same `referenceDate` → identical),
+read-only (mutation 0), and content-free (no raw VOC in brief or logs).
+
+One real blocker was found and fixed: an approved-but-not-yet-posted review stayed #1 in reply-work
+and was re-selected every run (the other committed reviews unreachable; re-approval surfaced an opaque
+409). Fixed by making the review selector skip already-prepared reviews (`hasReplyPreparation`), plus
+FE error-copy for the conflict codes. Change is confined to the agent-runtime selector + FE copy — no
+backend/contract/migration change. After the fix all scenarios re-ran clean. Gates: backend 1803/0,
+agent-runtime 128 + tsc, frontend 1121 + tsc.
