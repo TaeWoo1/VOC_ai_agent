@@ -1,9 +1,10 @@
 # SellerOps Agent Runtime Migration v1
 
-**Status:** slice 1 implemented offline (this branch), not merged, not live.
+**Status:** slices 1–2 (inquiry) merged (PR #376); the review-reply subgraph (§8) is the
+second journey, coexisting via a goal router.
 **Scope of this document:** the target architecture for moving SellerOps' intelligence /
-orchestration layer onto LangChain + LangGraph — **whole-service**, not NAVER-only — and
-the first vertical slice that proves the pattern.
+orchestration layer onto LangChain + LangGraph — **whole-service**, not NAVER-only — the
+first vertical slice that proves the pattern, and the second subgraph that reuses it.
 
 This is a router-and-record document. It states the boundary and the slice; per-channel
 status stays in the channel workstreams.
@@ -228,3 +229,123 @@ item and **zero `EXECUTION_RECORDED` across the DB** (nothing dispatched).
   saved draft **version** (still not the content) to bind deterministically.
 - Live wiring of the real LLM behind `DraftModelProvider` remains gated (its own privacy
   review); the send path stays fail-closed at the backend until separately authorized.
+
+---
+
+## 8. Second subgraph — review reply (coexists with inquiry via a goal router)
+
+The review-reply subgraph attaches the SAME primitives (LangChain Tools → Spring, human
+checkpoint via `interrupt`, sanitized durable store, sanitized logger) to a second journey:
+
+```
+review-reply request → search reviews needing reply → prioritize → review/product context
+  + rule-based draft (saved) → HUMAN CHECKPOINT → record approved version + action intent
+  → prepare guided reply session
+```
+
+It reuses the **existing** backend review-reply domain with **zero backend change and no
+migration** — the endpoints under
+`/api/seller-accounts/{accountId}/attention/items/{actionRef}/reply` (GET prep + rule-based
+suggestion, `PUT /draft`, `POST /approval`, `POST /submission-run`), the account-scoped
+`GET …/reply-work` worklist, and the same `GET /api/inquiry-publish/capability` fail-closed
+read. The backend owns version binding, approval idempotency (`commandId`), the single-use
+submission ref, and audit.
+
+### Coexistence — the goal router
+
+`parseGoal` now recognises a second intent, `HANDLE_REVIEW_REPLIES` (keyword table +
+explicit intent), and `routeIntent` maps an intent onto a domain (`INQUIRY` | `REVIEW`). A
+thin `AgentRouter` holds both runtimes — the **unchanged** `InquiryAgentRuntime` and a new
+`ReviewAgentRuntime` — parses a request, and dispatches `start` to the matching one; `resume`
+routes by the domain recorded for that thread. The two runtimes are otherwise independent
+(separate graphs, tools, checkpoint contracts, durable stores), so neither can perturb the
+other. The merged inquiry code and its `FakeSpringClient` are untouched; the review client is
+a separate `ReviewSpringClient` interface that `HttpSpringClient` also implements.
+
+### Three boundary properties — and how each is guaranteed
+
+- **No LLM.** The starter draft is the backend's own rule-based `suggestion.body`
+  (`providerKind=RULE_BASED`); the runtime adopts it and saves it. No model is reachable.
+- **No send — structurally.** The review-reply surface has **no send endpoint at all**, so
+  there is nothing to type a send tool against (a stronger guarantee than the inquiry config
+  flag). The most powerful step mints a single-use *guided-submission ref* and stops;
+  `externalSendAttempted` is a standing `false`. The fail-closed capability check remains as
+  defence in depth.
+- **No clipboard / Action Window execution.** The run ends at `submission-run` (minting the
+  ref + deriving the privacy-safe target hint). It never starts an Action Window run and never
+  records an outcome — those are separate, human-performed steps outside this subgraph.
+
+### Two deliberate departures from the inquiry slice
+
+1. **The draft is saved BEFORE the checkpoint.** The task fixes the checkpoint to carry only
+   *review ID, draft version ID, fingerprint, phase* and requires restart to resume with the
+   *same draft version*. Both are satisfied cleanly by persisting the draft first (a real
+   server version + fingerprint), which also matches the flow's own ordering (draft provider
+   precedes the checkpoint; "record approved version" follows).
+
+   **What "reject 무변경" means here, precisely.** On reject the run records **no approval, no
+   action intent, no submission-run (guided session), no outcome, and no external send** — it
+   makes zero backend writes on the reject branch. The one thing that already exists is the
+   **unapproved draft version created before the checkpoint**, which is deliberately left in
+   place: it is what lets a killed-then-restarted run resume against the *same* draft version
+   (restart stability), and it is a non-committal artifact — no approval binds it, nothing
+   dispatches it, and the review stays exactly as approvable as before. So "무변경" is about the
+   commitment (approval → guided session → outcome → send), all of which reject leaves untouched;
+   it is explicitly **not** a claim that no draft row exists.
+2. **The checkpoint carries NO review content.** Unlike the inquiry checkpoint (which held the
+   candidate text in the in-memory MemorySaver state), the review graph state holds only
+   sanitized metadata + the saved version/fingerprint. The redacted body and the suggestion
+   body live only transiently inside `prepareDraft`; the operator reads the actual text via
+   `GET …/reply` out-of-band. The durable snapshot holds only
+   `{reviewRef, draftVersion, draftFingerprint, phase, sellerAccountId, priorityBucket, trail,
+   outcome}` — no body, no reply text, no PII; `submissionRef` (opaque 16-hex, not reversible)
+   and every fingerprint are one-way.
+
+### Idempotency & restart
+
+The approval carries a deterministic `commandId`, so a re-run replays it (no second bind, no
+duplicate audit). The guided-session **mint is not idempotent at the backend** (each call
+mints a fresh single-use ref); mint-once across double/restart resume is guaranteed one level
+up by the **DONE-snapshot guard** — a finished run replays its stored outcome and never
+re-enters the record step (and, defensively, the in-process resume fast-path also consults the
+durable DONE status so two runtimes sharing one store cannot double-mint). Because the draft is
+already persisted, restart-resume simply approves the stored version and mints — no re-fetch,
+no regeneration — so it binds the same draft version by construction (and does not inherit the
+inquiry slice's LLM-resume regeneration gate).
+
+### Live proof (real Spring backend + disposable Postgres, torn down)
+
+**Scope of this proof.** It is evidence of the **Agent Runtime ↔ Spring review-domain
+integration** — that the subgraph drives the real review-reply endpoints (prep/draft/approval/
+submission-run) correctly, idempotently, and fail-closed. It is **not** evidence of channel
+acquisition: no marketplace was contacted, no channel API was called, and the review rows are
+local fixtures, not collected data. Channel acquisition remains proven separately in its own
+workstreams.
+
+Proven end-to-end against a real backend on a disposable `review_subgraph_proof` DB (the
+`sellerops` dev DB untouched; env torn down after). Because the mock connector does not serve
+REVIEW sync (and the demo-content review seeder is unrelatedly broken on a NOT-NULL
+`dedup_key_version`), the review rows were inserted directly into the disposable DB as **SQL
+fixtures** and then triaged RESPONSE_NEEDED through the real endpoint — a deliberate fixture
+seed, chosen so the proof exercises the integration boundary rather than any acquisition path.
+Verified: fail-closed capability; the draft saved once BEFORE the
+checkpoint (real backend rule provider, `providerVersion=templates-v1`); approve binds the
+version + prepares a guided session (opaque 16-hex `submissionRef` + privacy-safe target hint);
+reject leaves an inert draft with no approval and RESPONSE_NEEDED retained; double-resume
+idempotent (one ref); in-process AND a **genuine 2-process CLI** restart both bind the SAME
+draft version. DB check: exactly one approval + one submission_ref per approved review, and
+**zero `review_reply_outcome` rows across the DB** (nothing executed/dispatched); the durable
+snapshot carried no review body or PII. The search-node projection (below) was exercised
+against the real reply-work rows, which do carry a `safePreview` excerpt.
+
+### Independent review response
+
+An independent adversarial review found no HIGH and did not block the PR. Fixed in-branch:
+(MEDIUM-1) the search node now projects reply-work rows to only the fields the runtime needs,
+so the backend's `safePreview` review excerpt never enters the (in-memory) graph checkpoint —
+the fake now carries `safePreview` so the projection is exercised; (MEDIUM-2) the resume
+fast-path consults the durable DONE status as above; (LOW-2) the router's resume decision type
+is the inquiry superset. Documented, not changed (LOW-1): the agent selects the oldest
+committed review, and a review already approved by a prior run would fail closed at the
+backend's freeze guard on a re-approve (no double-approval, no send) rather than being skipped;
+graceful skip-if-already-approved is a future refinement.

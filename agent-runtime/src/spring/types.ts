@@ -120,3 +120,151 @@ export interface PublishStatusView {
   readonly providerMessageNo: string | null;
   readonly resultCode: number | null;
 }
+
+/* ------------------------------------------------------------------------- *
+ * Review-reply domain (attention/reply/*). Mirrors of the backend DTOs the
+ * review subgraph shuttles across the boundary. As with the inquiry mirrors,
+ * these are the wire contract only — the backend owns every review-reply rule,
+ * version binding, and audit. The review-reply surface has NO send endpoint,
+ * so no-send is structural here (there is nothing to type a send call to).
+ * ------------------------------------------------------------------------- */
+
+/**
+ * One row of GET /api/seller-accounts/{accountId}/reply-work `todo` — a review the
+ * operator has triaged RESPONSE_NEEDED. METADATA ONLY: no raw review body/title, no
+ * customer/order/product identifier. `actionRef` is the client-opaque `review:<uuid>`
+ * address; `sourceCreatedDate` is a KST date (date-only) or null; `rating` is 1..5 or null.
+ */
+export interface ReviewWorkItem {
+  readonly actionRef: string;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly sourceType: string;
+  readonly productName: string | null;
+  readonly rating: number | null;
+  readonly replyStatus: string | null;
+  readonly sourceCreatedDate: string | null;
+  readonly triageDisposition: string | null;
+  readonly hasReplyPreparation: boolean;
+}
+
+/** GET /reply-work envelope. `todo` is the reply worklist; `recentlyReported` is unused here. */
+export interface ReviewReplyWorkResponse {
+  readonly sellerAccountId: string;
+  readonly channel: string | null;
+  readonly coverage: string;
+  readonly todo: ReviewWorkItem[];
+  readonly recentlyReported: ReviewWorkItem[];
+}
+
+/**
+ * The read-time rule-based suggestion embedded in the prep view. `body` IS the suggested
+ * reply text (the review provider emits a body, unlike the inquiry provider) — content, so
+ * it stays out of every log line and never enters the persisted graph state.
+ */
+export interface ReviewReplySuggestionView {
+  readonly body: string;
+  readonly category: string;
+  readonly providerKind: string;
+  readonly providerName: string;
+  readonly providerVersion: string;
+}
+
+/** Current reply draft for a review; `contentFingerprint` binds the approval. */
+export interface ReviewReplyDraftView {
+  readonly version: number;
+  readonly body: string;
+  readonly contentFingerprint: string;
+  readonly fingerprintAlgorithm: string;
+  readonly createdAt: string;
+}
+
+/** The standing approval, if any. `body` is present only when the server allows a copy. */
+export interface ReviewReplyApprovalView {
+  readonly state: string;
+  readonly approvedVersion: number | null;
+  readonly approvedFingerprint: string | null;
+  readonly body: string | null;
+  readonly decidedAt: string;
+}
+
+/** What the operator may do with this review's reply right now (server-computed). */
+export interface ReviewReplyCapabilities {
+  readonly canSave: boolean;
+  readonly canApprove: boolean;
+  readonly canWithdraw: boolean;
+  readonly canCopy: boolean;
+  readonly canStartSubmissionRun: boolean;
+}
+
+/**
+ * GET /reply — everything the preparation surface needs for one review, in one read.
+ * `redactedBody` and `suggestion.body` ARE review content and must be kept in memory and
+ * off every log line; the review subgraph reads them only transiently (to derive a draft)
+ * and never places them in the persisted graph state or the durable snapshot.
+ */
+export interface ReviewReplyPrepView {
+  readonly actionRef: string;
+  readonly redactedBody: string | null;
+  readonly bodyRedacted: boolean;
+  readonly triageDisposition: string | null;
+  readonly suggestion: ReviewReplySuggestionView;
+  readonly draft: ReviewReplyDraftView | null;
+  readonly approval: ReviewReplyApprovalView | null;
+  readonly capabilities: ReviewReplyCapabilities;
+  /** One-way `review-id-fingerprint/v1` digest, or null when ingested without a channel id. */
+  readonly channelReviewIdFingerprint: string | null;
+  readonly rating: number | null;
+  readonly channelReplyState: string;
+  readonly productName: string | null;
+  readonly reviewDate: string | null;
+}
+
+/** PUT /reply/draft request. */
+export interface ReviewReplyDraftRequest {
+  readonly body: string;
+  readonly baseVersion: number;
+}
+
+/** POST /reply/approval request. `state` is APPROVED here; baseVersion binds the version. */
+export interface ReviewReplyApprovalRequest {
+  readonly commandId: string;
+  readonly state: string;
+  readonly baseVersion: number | null;
+}
+
+/** POST /reply/approval result. `replayed` marks an idempotent no-op replay. */
+export interface ReviewReplyApprovalResponse {
+  readonly actionRef: string;
+  readonly state: string;
+  readonly replayed: boolean;
+}
+
+/** POST /reply/submission-run request. Guided prep sets `requireTargetHint`. */
+export interface ReviewReplySubmissionRunRequest {
+  readonly requireTargetHint: boolean;
+}
+
+/**
+ * The privacy-safe review target hint returned for guided preparation: coarse rating,
+ * a KST date-only recency bucket, and a one-way review-body fingerprint. No raw body,
+ * no raw timestamp, no channel-side id.
+ */
+export interface ReviewReplyTargetHintView {
+  readonly rating: number;
+  readonly recencyBucket: string;
+  readonly bodyFingerprint: string;
+}
+
+/**
+ * POST /reply/submission-run result = the prepared guided reply session. `submissionRef`
+ * is an opaque 16-hex token, single-use, never reversible to a review id. NO send happens:
+ * this authorizes a human-performed guided post; SellerOps only guides and observes.
+ */
+export interface ReviewReplySubmissionRunResponse {
+  readonly actionRef: string;
+  readonly submissionRef: string;
+  readonly approvedVersion: number | null;
+  readonly targetHint: ReviewReplyTargetHintView | null;
+  readonly asOfDate: string | null;
+}
