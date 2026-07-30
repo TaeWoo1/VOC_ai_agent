@@ -1,7 +1,12 @@
-# SellerOps AI — local dev stack (Phase 1 skeleton).
-# Brings up PostgreSQL + Spring Boot backend + React/Vite frontend.
+# SellerOps AI — local / pilot stack.
+# Brings up PostgreSQL + Spring Boot backend + Agent Runtime HTTP service + React/Vite frontend.
 #
 #   cp .env.example .env   # then `docker compose up --build`
+#
+# The Agent Runtime boots in production mode against the backend-owned run store (fail-closed if
+# that store is not configured), which is the pilot posture; override AGENT_RUNTIME_APP_ENV /
+# AGENT_RUNTIME_RUNSTORE_KIND for a local file-store dev run. It holds no DB and no channel
+# credential — it only forwards the operator's bearer to the backend.
 #
 # The existing Python review-ops app is NOT part of this stack and is untouched.
 services:
@@ -36,6 +41,32 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      # The backend exposes a public /health; gate the runtime on it so a production-mode boot
+      # (which fails closed if it cannot reach the backend-owned store) starts against a live backend.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  agent-runtime:
+    build:
+      context: ./agent-runtime
+    environment:
+      # System of record. Server-to-server hop, so no CORS is involved here.
+      SELLEROPS_BASE_URL: http://backend:8080
+      # Pilot posture: production mode on the backend-owned (spring) run store. Fails closed at boot
+      # on a file/memory store when APP_ENV=production — override both for a local file-store dev run.
+      APP_ENV: ${AGENT_RUNTIME_APP_ENV:-production}
+      AGENT_RUNTIME_RUNSTORE_KIND: ${AGENT_RUNTIME_RUNSTORE_KIND:-spring}
+      AGENT_RUNTIME_PORT: "8787"
+      # Browser origin allowed to call the runtime (the frontend). Backend hop needs no CORS.
+      AGENT_RUNTIME_CORS_ORIGINS: ${AGENT_RUNTIME_CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8787:8787"
+    depends_on:
+      backend:
+        condition: service_healthy
 
   frontend:
     build:
@@ -43,10 +74,14 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
         VITE_USE_MOCKS: ${VITE_USE_MOCKS:-false}
+    # The /agent page calls the runtime at VITE_AGENT_RUNTIME_URL (default http://127.0.0.1:8787,
+    # which is the runtime port published below). Set that build arg in the frontend image to point
+    # elsewhere; the runtime's AGENT_RUNTIME_CORS_ORIGINS must then allow the frontend origin.
     ports:
       - "5173:80"
     depends_on:
       - backend
+      - agent-runtime
 
 volumes:
   sellerops_pgdata:

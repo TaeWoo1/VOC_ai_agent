@@ -10,8 +10,14 @@
 /** Runtime environment. `production` is treated strictly by the run-store provider (fail-closed). */
 export type RuntimeEnv = "development" | "production" | "test";
 
-/** Which durable store backs runs. Only file/memory exist today; a production store is future work. */
-export type RunStoreKind = "file" | "memory";
+/**
+ * Which durable store backs runs:
+ *  - `spring`: the backend-owned, org-isolated, optimistic-locked store — the ONLY kind allowed in
+ *    production (durable + safe behind more than one replica);
+ *  - `file`: a local single-instance JSON store — dev/proof only (survives restart, unsafe for >1 replica);
+ *  - `memory`: same-process only — tests.
+ */
+export type RunStoreKind = "spring" | "file" | "memory";
 
 export interface RuntimeConfig {
   readonly port: number;
@@ -28,12 +34,16 @@ export interface RuntimeConfig {
 export const SERVICE_VERSION = "0.1.0-product-integration";
 
 function pickEnv(value: string | undefined): RuntimeEnv {
-  if (value === "production" || value === "test") return value;
-  return "development";
+  if (value === undefined || value === "") return "development";
+  if (value === "production" || value === "test" || value === "development") return value;
+  // Fail closed on a typo: silently downgrading `prod`/`PRODUCTION` to development would slip the
+  // single-instance store past the production guard. An unrecognized APP_ENV is a hard error.
+  throw new Error(`invalid APP_ENV="${value}" (expected one of: development, test, production)`);
 }
 
 function pickStoreKind(value: string | undefined): RunStoreKind {
-  return value === "memory" ? "memory" : "file";
+  if (value === "spring" || value === "memory") return value;
+  return "file";
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {

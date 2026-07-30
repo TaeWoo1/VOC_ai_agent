@@ -47,9 +47,16 @@ public class Review extends BaseEntity {
 
     /** Which content_hash formula produced this row: v1 = channel+product+date+body;
      *  v2 (ESM+/GMARKET) also folds in rating. Lets the formula evolve per channel
-     *  without invalidating existing hashes. Defaults to 1 in the DB. */
+     *  without invalidating existing hashes.
+     *
+     *  <p>Defaults to 1 (v1) at the object level, not just in the DB: the column is
+     *  {@code not null default 1} (V8), but Hibernate always emits the field in the INSERT,
+     *  so a null field value became an explicit {@code NULL} and violated the constraint —
+     *  which is what broke the demo-content seeder. The object default keeps every write path
+     *  (seeder + any future non-import insert) carrying a valid version. Import paths that key
+     *  on a different formula still set it explicitly. */
     @Column(name = "dedup_key_version")
-    private Integer dedupKeyVersion;
+    private Integer dedupKeyVersion = 1;
 
     /** What the CHANNEL says about whether the seller already answered — never SellerOps' own
      *  record of a guided reply (that lives in {@code review_reply_outcome}). Set from an import

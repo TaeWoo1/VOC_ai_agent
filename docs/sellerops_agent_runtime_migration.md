@@ -556,3 +556,140 @@ returns `400` (not `500`); an advisory comment marks `approvedBy` as non-authori
 JWT principal is the record). Documented, not changed: the GET review view returns coarse nulls for
 the non-persisted locating aids (a status view, not the live checkpoint); product *names* in the
 brief/review view are seller-catalog data, not customer text.
+
+## 11. Pilot readiness — durable backend-owned run store, exactly-once resume, deployment
+
+§10 made the runtime a service the frontend calls; it still kept its run state in a **local**
+`FileRunStore` — single-instance, unsafe behind more than one replica, and with no concurrency
+control. Pilot readiness moves run state into the backend so the runtime can be restarted and hit by
+concurrent requests without losing a paused run or double-committing a resume. The runtime still holds
+no DB and no channel credential: it reaches run state **only** over an org-scoped REST surface.
+
+### Backend-owned durable run store (`/api/agent-run-store`, migration V33)
+A new `agent_runs` table (`backend/.../db/migration/V33__agent_run_store.sql`) keyed by
+`(org_id, thread_id)` — the unique key IS the tenant-isolation guarantee — with `domain`, `status`
+(only `AWAITING_APPROVAL`/`DONE`), a sanitized `snapshot` (JSON as `text`), and an explicit optimistic
+-lock `version bigint`. The `AgentRunStoreController`/`AgentRunStoreService`/`AgentRunRepository`
+(`com.sellerops.agentrun`) derive the org from the JWT principal on every route (never the body), so a
+run created by one org is invisible and unresumable to any other and a client `threadId` can neither
+collide nor be read across orgs. There is no JPA `@Version` precedent in this codebase; the store uses
+hand-written version-guarded `@Modifying` conditional updates (the "0 rows affected means someone else
+won" CAS idiom of `ProductRepository.insertIfAbsent`).
+
+**Privacy, write-side.** The runtime only ever sends a sanitized snapshot (its `RunSnapshot` types
+carry no raw title/body/draft), and the store INDEPENDENTLY rejects a snapshot that carries a
+raw-content/PII field: `assertSanitizedSnapshot` requires the top-level snapshot to be present, then a
+recursive walk rejects any object key that EXACTLY (case-insensitively) matches a forbidden name
+(`body`/`comments`/`details`/`draft`/`replyDraft`/`quote`/`writer`/`email`/…). It is exact-match, never
+a substring, so sanitized look-alikes (`bodyFingerprint`, `draftVersion`) pass; and a nested `null`
+VALUE is legitimate (a rejected run's `executionStatus`/`category` are null), so the walk tolerates
+nulls and only inspects keys. A 256 KB ceiling bounds abuse.
+
+### Runtime production store + fail-closed
+`RunStoreKind` gains `spring`. `RunStoreProvider` now permits ONLY the `spring` store when
+`APP_ENV=production`; `file`/`memory` **fail closed at boot** (they are single-instance / non-durable).
+The spring stores (`http/springStores.ts`) are thin domain-stamping adapters over one shared
+`HttpAgentRunStateClient` (`spring/AgentRunStateClient.ts`) built per request from the forwarded token;
+the client threads the optimistic-lock version WITHOUT changing the `save/load/delete/claim` store
+interfaces (it remembers the version it last observed for a thread and sends it as the expected version
+on the next write). A version-guarded write that loses the race throws `StaleRunVersionError` → `409`
+(never a silent overwrite). Store-unavailable (a 5xx/network error on the backend hop) surfaces as a
+`502` and no mutation proceeds — fail closed.
+
+### Exactly-once resume (claim-before-mutate)
+The review guided-session mint is **not idempotent** at the backend, so two concurrent resumes must
+never both reach it. `AgentRunService.resume` CLAIMS the run BEFORE driving the runtime, and the claim
+is a **real lock**, not a mere version bump: `AgentRunRepository.claimForResume` transitions the row
+`AWAITING_APPROVAL → RESUMING` (a third, lock-only status the client never writes), so it moves the row
+OUT of the claimable state. A *staggered* second resume that reads the row AFTER the winner's claim
+sees `RESUMING` and cannot re-claim — this is the subtlety a "bump the version but leave it AWAITING"
+design gets wrong (a claimer reading the post-claim version would re-satisfy the CAS and mint twice).
+Exactly one live caller gets `CLAIMED` and may mutate; a concurrent claimer gets `CONFLICT`
+(→ `409 RESUME_IN_PROGRESS`, fail closed); a finished run gets `ALREADY_DONE` (the runtime's own
+DONE-snapshot guard replays the outcome, so a sequential double resume stays idempotent); and the mint
+finalizes `RESUMING → DONE`. A `claimed_at` **lease** lets a `RESUMING` row whose claimer died be
+re-claimed after it elapses, so a crash never wedges a run. The execution-disabled guard fires BEFORE
+the claim, so a fail-closed refusal never leaves a wasted claim. The file/in-memory stores implement
+`claim` with a synchronous check-and-set (in-process exclusion only; they are dev/proof stores refused
+in production).
+
+### Health, readiness, graceful shutdown
+`GET /health` is liveness (the process is up); `GET /ready` is readiness — it probes backend
+reachability (a short-timeout GET of the backend's public `/health`) and returns `503` when the
+dependency is down, so an orchestrator does not route to a runtime that cannot serve. `main.ts` shuts
+down gracefully on `SIGTERM`/`SIGINT`: stop accepting, drain in-flight, force-exit on a bounded timeout,
+and short-circuit on a second signal.
+
+### Deployment / pilot composition
+`docker-compose.yml` adds the `agent-runtime` service to the stack (postgres + backend + agent-runtime
++ frontend). It boots in the pilot posture — `APP_ENV=production` on the `spring` store — gated on a new
+backend `/health` healthcheck (so a production-mode boot starts against a live, migrated backend).
+Env/CORS/reverse-proxy contract: the browser → runtime hop is the only CORS surface
+(`AGENT_RUNTIME_CORS_ORIGINS` must allow the frontend origin); the runtime → backend hop is
+server-to-server (no CORS). The frontend `/agent` page calls the runtime at `VITE_AGENT_RUNTIME_URL`
+(default the published runtime port). `.env.example` and the `Dockerfile` document the spring-store
+production requirement.
+
+### Demo/pilot smoke seeder fix
+The demo-content seeder broke on `reviews.dedup_key_version` (a `NOT NULL DEFAULT 1` column that
+Hibernate always emitted as an explicit `NULL`). Fixed minimally by giving the entity field an
+object-level default (`Review.dedupKeyVersion = 1`), so every write path carries a valid version. This
+is what lets the pilot seed real-schema inquiry/review/issue smoke data without a marketplace call.
+
+### Live proof (real Spring backend + disposable Postgres, production+spring, torn down)
+Booted the real backend against a disposable `pilot_ready_proof` Postgres (Flyway applied **V33
+cleanly**), demo-content ON (seeded **44 reviews + 16 inquiries with no `dedup_key_version` error** —
+the seeder fix, proven live), and the runtime in **`APP_ENV=production` + `spring`** mode. Then, over
+real HTTP (frontend→runtime→Spring minus the browser), all green and torn down (`sellerops` untouched):
+- **production-mode boot** on the spring store succeeds; `APP_ENV=production` + a file store **fails
+  closed** at boot with the explicit error (no port opened);
+- `/ready` = `200` (`runStore.kind=spring`, `multiInstanceSafe=true`); liveness on `/health`;
+- **three intents**: inquiry approve → `DONE APPROVED` (no send) + reject → `DONE REJECTED` (no send) +
+  idempotent double-resume; issue → `DONE` quote-free brief + resume `409 NO_CHECKPOINT`; review start
+  reaches the backend; the inquiry checkpoint carries no raw customer title/body;
+- **concurrent double resume** of one parked run → exactly one `200 DONE` + one `409
+  RESUME_IN_PROGRESS`, and the winner's work item carries **exactly one `APPROVAL_GRANTED`** audit row
+  (the mint/approval ran once), `agent_runs.version` = 3 (insert → claim → finalize);
+- **staggered claim** (the read-after-claim case the review flagged): a first store-level claim returns
+  `CLAIMED` and moves the row `AWAITING_APPROVAL v1 → RESUMING v2`; a second claim that reads that
+  post-claim row returns `CONFLICT` — the row left the claimable state, so the lock holds even when the
+  claimers are not simultaneous;
+- **restart durability**: a run parked on one runtime process resumed to `DONE` on a **freshly
+  restarted** runtime process holding no local state (the state lived in the backend spring store);
+- **tenant isolation**: org B (an independent signed-up org) got `404` on org A's `threadId` for both
+  GET and resume; a bearer-less request got `401`;
+- **zero external send** (`externalSendAttempted=false` on every outcome); **zero raw content** — no
+  forbidden key and no customer body in any `agent_runs.snapshot`, and no 원문/token/PII in the runtime
+  logs; a gated spring integration suite (`RUN_REAL_INTEGRATION=1`) passed **5/5** against the live
+  backend.
+
+### Gates
+Backend `./gradlew test` **1803 pass / 0 fail** (+21: `AgentRunStoreServiceTest` 15, `AgentRunStoreControllerTest`
+6). Agent-runtime `tsc` clean + **126** hermetic tests (+13: spring-store CAS 6, concurrency/exactly-once
+4, readiness 2, production-spring 1; the gated integration tests stay skipped in `npm test`). Frontend
+`tsc` clean + **1121** tests (unchanged — no frontend source touched). The production-store + concurrency
+tests run inside `npm test`, so the agent-runtime CI workflow covers them.
+
+### Independent review response
+An independent adversarial architecture + security review ran over the whole diff. It surfaced **one
+HIGH, one MEDIUM, and three LOWs — all folded in** before this was finalized:
+- **HIGH — claim was not a real lock (staggered double mint).** The original claim bumped `version`
+  while leaving `status = AWAITING_APPROVAL`, so a resume that read the row AFTER the winner's claim
+  (still `AWAITING`, now at the bumped version) re-satisfied the CAS and re-claimed — during the very
+  mint window that must be exactly-once. Fixed at the root: the claim now transitions
+  `AWAITING_APPROVAL → RESUMING` (moving the row out of the claimable state) with a `claimed_at` lease
+  for crash recovery, and the finalize transitions `RESUMING → DONE`. A staggered second claim now sees
+  `RESUMING` and is refused. Regression-tested at every layer (backend `@DataJpaTest`, the runtime store
+  over the fake backend, and the live proof's staggered double-claim above).
+- **MEDIUM — `APP_ENV` typo failed open.** A misconfig like `APP_ENV=prod`/`PRODUCTION` parsed to
+  `development` + the file store and slipped past the production guard. Fixed: `loadConfig` now throws
+  on any unrecognized non-empty `APP_ENV` (fail closed at boot).
+- **LOW folded:** the raw-content denylist gained obvious content names (`content`/`text`/`subject`/
+  `message`/`reply`) as defence in depth; the snapshot size cap now runs before the recursive key walk;
+  and the run-state client tolerates a non-JSON backend 5xx body (so a gateway HTML error surfaces as
+  `502 BACKEND_UNAVAILABLE`, not `500`).
+Checked and confirmed clean by the review: tenant isolation on every route/query (org from the JWT,
+never the body; `domain` immutable post-insert; per-request clients so no cross-org version-cache bleed),
+the migration ↔ H2 entity-schema agreement and Postgres/H2-portable JPQL, the HTTP-only backend boundary
+(the runtime holds no DB handle), the fail-closed ordering (execution guard before claim; stale/absent
+writes → 409; errors/logs never echo snapshot values or tokens), and the body/size caps at both layers.

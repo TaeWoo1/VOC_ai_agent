@@ -37,9 +37,27 @@ function main(): void {
     });
   });
 
+  // Graceful shutdown: stop accepting new connections, let in-flight requests drain, then exit. A
+  // bounded timeout forces exit so a hung keep-alive connection can't block the deploy; a second
+  // signal short-circuits to an immediate exit.
+  const SHUTDOWN_TIMEOUT_MS = 10_000;
+  let shuttingDown = false;
   const shutdown = (signal: string): void => {
+    if (shuttingDown) {
+      log("agent_runtime_shutdown_forced", { signal });
+      process.exit(1);
+    }
+    shuttingDown = true;
     log("agent_runtime_shutdown", { signal });
-    server.close(() => process.exit(0));
+    const timer = setTimeout(() => {
+      log("agent_runtime_shutdown_timeout", { signal });
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    timer.unref();
+    server.close(() => {
+      clearTimeout(timer);
+      process.exit(0);
+    });
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

@@ -15,6 +15,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { ClaimResult } from "./RunStore";
 import type { ReviewReplyPhase } from "./ReviewCheckpointContract";
 import type { ReviewRunOutcome } from "../state/ReviewAgentState";
 
@@ -42,11 +43,14 @@ export interface ReviewRunStore {
   save(snapshot: ReviewRunSnapshot): Promise<void>;
   load(threadId: string): Promise<ReviewRunSnapshot | null>;
   delete(threadId: string): Promise<void>;
+  /** Acquire the exactly-once right to resume this thread. See {@link ClaimResult}. */
+  claim(threadId: string): Promise<ClaimResult>;
 }
 
 /** Same-process store. Lost on restart — use a durable impl to prove restart-resume. */
 export class InMemoryReviewRunStore implements ReviewRunStore {
   private readonly byThread = new Map<string, ReviewRunSnapshot>();
+  private readonly claimed = new Set<string>();
 
   async save(snapshot: ReviewRunSnapshot): Promise<void> {
     this.byThread.set(snapshot.threadId, snapshot);
@@ -56,6 +60,15 @@ export class InMemoryReviewRunStore implements ReviewRunStore {
   }
   async delete(threadId: string): Promise<void> {
     this.byThread.delete(threadId);
+    this.claimed.delete(threadId);
+  }
+  async claim(threadId: string): Promise<ClaimResult> {
+    const snap = this.byThread.get(threadId);
+    if (!snap) return { outcome: "CONFLICT" };
+    if (snap.status === "DONE") return { outcome: "ALREADY_DONE" };
+    if (this.claimed.has(threadId)) return { outcome: "CONFLICT" };
+    this.claimed.add(threadId);
+    return { outcome: "CLAIMED" };
   }
 }
 
@@ -65,6 +78,8 @@ export class InMemoryReviewRunStore implements ReviewRunStore {
  * transactional store; this is the simplest durable, dependency-free impl.
  */
 export class FileReviewRunStore implements ReviewRunStore {
+  private readonly claimed = new Set<string>();
+
   constructor(private readonly dir: string) {
     mkdirSync(dir, { recursive: true });
   }
@@ -85,5 +100,14 @@ export class FileReviewRunStore implements ReviewRunStore {
   async delete(threadId: string): Promise<void> {
     const p = this.path(threadId);
     if (existsSync(p)) rmSync(p);
+    this.claimed.delete(threadId);
+  }
+  async claim(threadId: string): Promise<ClaimResult> {
+    const snap = await this.load(threadId);
+    if (!snap) return { outcome: "CONFLICT" };
+    if (snap.status === "DONE") return { outcome: "ALREADY_DONE" };
+    if (this.claimed.has(threadId)) return { outcome: "CONFLICT" };
+    this.claimed.add(threadId);
+    return { outcome: "CLAIMED" };
   }
 }

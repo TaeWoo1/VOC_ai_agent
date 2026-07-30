@@ -4,7 +4,8 @@
  * minimal and the request-handling auditable in one file.
  *
  * Routes:
- *   GET  /health                                 liveness (public)
+ *   GET  /health                                 liveness (public) — the process is up
+ *   GET  /ready                                  readiness (public) — deps OK (backend reachable); 503 if not
  *   GET  /capabilities                           service metadata (public; no seller data)
  *   POST /api/agent-runs                          start a run (bearer required)
  *   POST /api/agent-runs/{threadId}/resume        resume at a checkpoint (bearer required)
@@ -28,10 +29,38 @@ import type { RuntimeConfig } from "./config";
 import type { AgentRunService } from "./AgentRunService";
 
 const MAX_BODY_BYTES = 128 * 1024;
+const READINESS_TIMEOUT_MS = 2000;
+
+/** Result of the dependency readiness check. Extend as more critical dependencies are added. */
+export interface ReadinessResult {
+  readonly backendReachable: boolean;
+}
+
+/** Injectable server dependencies. The default readiness probe pings the backend's public /health. */
+export interface ServerDeps {
+  readonly readinessProbe?: () => Promise<ReadinessResult>;
+}
 
 interface HandlerContext {
   readonly service: AgentRunService;
   readonly config: RuntimeConfig;
+  readonly readinessProbe: () => Promise<ReadinessResult>;
+}
+
+/** Best-effort backend reachability: a short-timeout GET of the backend's public /health. */
+function defaultReadinessProbe(config: RuntimeConfig): () => Promise<ReadinessResult> {
+  return async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), READINESS_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${config.backendBaseUrl}/health`, { signal: controller.signal });
+      return { backendReachable: res.ok };
+    } catch {
+      return { backendReachable: false };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 }
 
 /** Set CORS headers when the request origin is allow-listed. */
@@ -119,6 +148,21 @@ async function route(ctx: HandlerContext, req: IncomingMessage, res: ServerRespo
     return;
   }
 
+  if (method === "GET" && path === "/ready") {
+    const runStore = ctx.service.capabilities().runStore;
+    const probe = await ctx.readinessProbe();
+    const ready = probe.backendReachable;
+    sendJson(res, ready ? 200 : 503, {
+      status: ready ? "ready" : "unavailable",
+      service: "sellerops-agent-runtime",
+      version: SERVICE_VERSION,
+      env: ctx.config.env,
+      backendReachable: probe.backendReachable,
+      runStore,
+    });
+    return;
+  }
+
   if (method === "GET" && path === "/capabilities") {
     sendJson(res, 200, ctx.service.capabilities());
     return;
@@ -156,8 +200,12 @@ async function route(ctx: HandlerContext, req: IncomingMessage, res: ServerRespo
   throw new HttpError(404, "NOT_FOUND", "no such route");
 }
 
-export function createHttpServer(service: AgentRunService, config: RuntimeConfig): Server {
-  const ctx: HandlerContext = { service, config };
+export function createHttpServer(service: AgentRunService, config: RuntimeConfig, deps: ServerDeps = {}): Server {
+  const ctx: HandlerContext = {
+    service,
+    config,
+    readinessProbe: deps.readinessProbe ?? defaultReadinessProbe(config),
+  };
   return createServer((req, res) => {
     applyCors(req, res, config);
     route(ctx, req, res).catch((err) => {
