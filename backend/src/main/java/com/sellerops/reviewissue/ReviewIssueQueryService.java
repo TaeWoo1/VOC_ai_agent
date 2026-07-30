@@ -7,14 +7,20 @@ import com.sellerops.product.ProductRepository;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
 import com.sellerops.reviewissue.dto.IssueChangeView;
+import com.sellerops.reviewissue.dto.IssueContextView;
+import com.sellerops.reviewissue.dto.IssueEvidenceSummaryView;
 import com.sellerops.reviewissue.dto.IssueEvidenceView;
+import com.sellerops.reviewissue.dto.IssueProductEvidenceView;
+import com.sellerops.reviewissue.dto.IssueRatingDistributionView;
 import com.sellerops.reviewissue.dto.IssueStateEventView;
+import com.sellerops.reviewissue.dto.IssueTransitionView;
 import com.sellerops.reviewissue.dto.ReviewIssueDetailView;
 import com.sellerops.reviewissue.dto.ReviewIssueView;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -93,10 +99,7 @@ public class ReviewIssueQueryService {
 
     @Transactional(readOnly = true)
     public ReviewIssueDetailView detail(UUID orgId, UUID issueId, LocalDate referenceDate) {
-        ReviewIssue issue = issues.findById(issueId)
-                .filter(i -> i.getOrgId().equals(orgId))
-                // Same message whether it is missing or another org's, so an id cannot be probed.
-                .orElseThrow(() -> new IllegalArgumentException("이슈를 찾을 수 없습니다."));
+        ReviewIssue issue = requireIssue(orgId, issueId);
 
         List<ReviewIssueEvidence> rows =
                 evidence.findByOrgIdAndIssueIdOrderByOccurredOnDesc(orgId, issueId);
@@ -124,6 +127,89 @@ public class ReviewIssueQueryService {
 
         return new ReviewIssueDetailView(view(orgId, issue, referenceDate), List.copyOf(evidenceViews),
                 history);
+    }
+
+    /**
+     * One issue's current signal — severity, the change/trend judgement, concentration, and the
+     * evidence span — as of {@code referenceDate}. Quote-free: {@link ReviewIssueView} is built from
+     * closed-vocabulary labels and aggregate counts only. Backs {@code GET /{id}/trend}.
+     */
+    @Transactional(readOnly = true)
+    public ReviewIssueView issueView(UUID orgId, UUID issueId, LocalDate referenceDate) {
+        return view(orgId, requireIssue(orgId, issueId), referenceDate);
+    }
+
+    /**
+     * One issue's identity and lifecycle history, note-free (see {@link IssueTransitionView}). Backs
+     * {@code GET /{id}/context}. No evidence quotes are read, so no customer text is produced.
+     */
+    @Transactional(readOnly = true)
+    public IssueContextView context(UUID orgId, UUID issueId, LocalDate referenceDate) {
+        ReviewIssue issue = requireIssue(orgId, issueId);
+        List<IssueTransitionView> history =
+                stateEvents.findByOrgIdAndIssueIdOrderByCreatedAtAsc(orgId, issueId).stream()
+                        .map(ReviewIssueQueryService::transitionView)
+                        .toList();
+        return new IssueContextView(view(orgId, issue, referenceDate), history);
+    }
+
+    /**
+     * A quote-free roll-up of an issue's evidence: total, per-product split (attributed only,
+     * largest first; unattributed reported separately), the rating distribution, and the span.
+     *
+     * <p>All-time, so it needs no reference date. Reviews are loaded to read their star rating only
+     * — never a body — and the result carries no review id, no quote, and no buyer identity, so this
+     * is the "sanitized evidence summary" an operations brief may hold. Counting rows by product and
+     * rating is a presentation roll-up, not the issue judgement (severity/trend/concentration verdicts
+     * stay in {@link IssueChangeRules}/{@link ReviewIssueSnapshotService}, reused via {@link #view}).
+     */
+    @Transactional(readOnly = true)
+    public IssueEvidenceSummaryView evidenceSummary(UUID orgId, UUID issueId) {
+        ReviewIssue issue = requireIssue(orgId, issueId);
+        List<ReviewIssueEvidence> rows =
+                evidence.findByOrgIdAndIssueIdOrderByOccurredOnDesc(orgId, issueId);
+        Map<UUID, Review> reviewsById = loadReviews(rows);
+        Map<UUID, String> productNames = loadProductNames(rows.stream()
+                .map(ReviewIssueEvidence::getProductId).filter(java.util.Objects::nonNull).toList());
+
+        // Per-product tally (insertion order preserved, then sorted largest-first) and per-rating
+        // tally, both over the same evidence rows so they each sum to totalEvidence.
+        Map<UUID, Long> perProduct = new LinkedHashMap<>();
+        long unattributed = 0L;
+        long[] ratingBuckets = new long[6]; // index 1..5 = stars; index 0 = unrated
+        for (ReviewIssueEvidence row : rows) {
+            UUID productId = row.getProductId();
+            if (productId == null) {
+                unattributed++;
+            } else {
+                perProduct.merge(productId, 1L, Long::sum);
+            }
+            Review review = reviewsById.get(row.getReviewId());
+            Integer rating = review == null ? null : review.getRating();
+            ratingBuckets[rating != null && rating >= 1 && rating <= 5 ? rating : 0]++;
+        }
+
+        List<IssueProductEvidenceView> byProduct = perProduct.entrySet().stream()
+                .map(e -> new IssueProductEvidenceView(e.getKey(), productNames.get(e.getKey()),
+                        e.getValue()))
+                .sorted(Comparator.comparingLong(IssueProductEvidenceView::evidenceCount).reversed()
+                        .thenComparing(v -> v.productId().toString()))
+                .toList();
+
+        IssueRatingDistributionView distribution = new IssueRatingDistributionView(
+                ratingBuckets[1], ratingBuckets[2], ratingBuckets[3], ratingBuckets[4],
+                ratingBuckets[5], ratingBuckets[0]);
+
+        return new IssueEvidenceSummaryView(rows.size(), byProduct, unattributed, distribution,
+                issue.getFirstEvidenceOn(), issue.getLastEvidenceOn());
+    }
+
+    /** Load an issue in this org, or fail with the id-non-probing message the mutation paths use. */
+    private ReviewIssue requireIssue(UUID orgId, UUID issueId) {
+        return issues.findById(issueId)
+                .filter(i -> i.getOrgId().equals(orgId))
+                // Same message whether it is missing or another org's, so an id cannot be probed.
+                .orElseThrow(() -> new IllegalArgumentException("이슈를 찾을 수 없습니다."));
     }
 
     private ReviewIssueView view(UUID orgId, ReviewIssue issue, LocalDate referenceDate) {
@@ -203,6 +289,17 @@ public class ReviewIssueQueryService {
                 event.getActor().name(),
                 event.getReason().name(),
                 event.getNote(),
+                event.getCreatedAt());
+    }
+
+    /** Lifecycle transition without the operator's free-text note — see {@link IssueTransitionView}. */
+    private static IssueTransitionView transitionView(ReviewIssueStateEvent event) {
+        return new IssueTransitionView(
+                event.getFromState() == null ? null : event.getFromState().name(),
+                event.getToState().name(),
+                event.getToState().labelKo(),
+                event.getActor().name(),
+                event.getReason().name(),
                 event.getCreatedAt());
     }
 }

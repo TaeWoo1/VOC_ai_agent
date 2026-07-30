@@ -12,6 +12,9 @@ export type { RuntimeDeps, RunResult } from "./runtime";
 export { ReviewAgentRuntime } from "./reviewRuntime";
 export type { ReviewRuntimeDeps, ReviewRunResult } from "./reviewRuntime";
 
+export { IssueAgentRuntime } from "./issueRuntime";
+export type { IssueRuntimeDeps, IssueRunResult } from "./issueRuntime";
+
 export { AgentRouter, UnknownThreadError } from "./router";
 export type { RouterRunResult, AgentRouterDeps } from "./router";
 
@@ -20,6 +23,9 @@ export type { RunStore, RunSnapshot, RunStatus } from "./checkpoint/RunStore";
 
 export { InMemoryReviewRunStore, FileReviewRunStore } from "./checkpoint/ReviewRunStore";
 export type { ReviewRunStore, ReviewRunSnapshot, ReviewRunStatus } from "./checkpoint/ReviewRunStore";
+
+export { InMemoryIssueRunStore, FileIssueRunStore } from "./checkpoint/IssueRunStore";
+export type { IssueRunStore, IssueRunSnapshot } from "./checkpoint/IssueRunStore";
 
 export { performRecord } from "./graph/performRecord";
 export type { RecordInput } from "./graph/performRecord";
@@ -39,6 +45,9 @@ export type { RankedInquiry, PriorityBucket } from "./prioritize/prioritizeInqui
 export { prioritizeReviews, selectTopReview } from "./prioritize/prioritizeReviews";
 export type { RankedReview } from "./prioritize/prioritizeReviews";
 
+export { prioritizeIssues, selectTopIssues } from "./prioritize/prioritizeIssues";
+export type { RankedIssue, IssuePriorityBucket } from "./prioritize/prioritizeIssues";
+
 export { RuleBasedDraftProvider } from "./provider/DraftModelSeam";
 export type { DraftModelProvider, DraftCandidate, DraftInput, DraftProvenance } from "./provider/DraftModelSeam";
 
@@ -51,8 +60,13 @@ export { buildReviewToolRegistry } from "./tools/ReviewToolRegistry";
 export { REVIEW_TOOL, buildReviewTools } from "./tools/reviewTools";
 export type { ReviewToolName } from "./tools/reviewTools";
 
+export { buildIssueToolRegistry } from "./tools/IssueToolRegistry";
+export { ISSUE_TOOL, buildIssueTools } from "./tools/issueTools";
+export type { IssueToolName } from "./tools/issueTools";
+
 export { buildInquiryGraph, approvalCommandId } from "./graph/inquiryGraph";
 export { buildReviewGraph } from "./graph/reviewGraph";
+export { buildIssueGraph, DEFAULT_BRIEF_SIZE, MAX_BRIEF_SIZE } from "./graph/issueGraph";
 
 export {
   CHECKPOINT_KIND,
@@ -84,9 +98,17 @@ export type {
   ReviewTargetHint,
 } from "./state/ReviewAgentState";
 
+export type {
+  IssueAgentState,
+  IssueOperationsBrief,
+  IssueBriefEntry,
+  BriefEvidenceSummary,
+} from "./state/IssueAgentState";
+
 export { HttpSpringClient, SpringApiError } from "./spring/SpringClient";
 export type { SpringClient, ListInquiriesParams, HttpSpringClientOptions } from "./spring/SpringClient";
 export type { ReviewSpringClient, ListReplyWorkParams } from "./spring/ReviewSpringClient";
+export type { IssueSpringClient, ListReviewIssuesParams } from "./spring/IssueSpringClient";
 export type * from "./spring/types";
 
 export { log, safeMeta, getLogSink, clearLogSink } from "./log";

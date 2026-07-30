@@ -349,3 +349,88 @@ is the inquiry superset. Documented, not changed (LOW-1): the agent selects the 
 committed review, and a review already approved by a prior run would fail closed at the
 backend's freeze guard on a re-approve (no double-approval, no send) rather than being skipped;
 graceful skip-if-already-approved is a future refinement.
+
+## 9. Third subgraph — issue memory (read-only operations brief, no checkpoint)
+
+The third journey answers "what operations issues should I look at first, and why" — e.g.
+*최근 악화된 상품 문제 알려줘*, *반복되는 고객 불만 보여줘*, *지금 먼저 확인할 운영 이슈는 뭐야*. It
+coexists with the inquiry and review subgraphs through the same goal router.
+
+```
+issue request → goal router → search active issues → prioritize (deterministic)
+             → assemble per-issue context/evidence/trend → compose structured brief → DONE
+```
+
+Unlike the first two, this subgraph **only reads and derives**: it never changes an issue's
+state, starts an action, or writes feedback. So there is **no human checkpoint, no interrupt,
+no resume, and no backend mutation** — it runs straight to a DONE brief.
+
+### Coexistence — one more intent, one more domain
+`parseGoal` gains `HANDLE_OPERATIONS_ISSUES` (keywords 운영 이슈/이슈/악화/반복/불만/상품 문제/먼저
+확인/…, listed so they never shadow — or get shadowed by — the review/inquiry rows), `routeIntent`
+gains the `ISSUE` domain, and `AgentRouter` holds a third `IssueAgentRuntime`. `router.start`
+dispatches an issue goal to `issue.run` (which finishes at DONE, since nothing pauses);
+`router.resume` on an issue thread is a caller error, not a silent no-op — there is no checkpoint
+to resume.
+
+### Reuse, not re-implementation
+The backend owns all extraction, the severity/trend/concentration judgements, and the lifecycle;
+the subgraph must never re-derive any of them. The four required tools
+(`search_review_issues`, `get_review_issue_detail`, `get_review_issue_evidence_summary`,
+`get_review_issue_trend`) are thin adapters onto `/api/review-issues` reads. The existing list
+endpoint already served the working set; three **new read-only** endpoints were added only because
+the shapes an agent needs did not exist quote-free:
+`GET /{id}/context` (identity + note-free lifecycle history), `GET /{id}/evidence-summary`
+(a sanitized roll-up: total, per-product split, rating distribution, span — no evidence rows),
+and `GET /{id}/trend` (the current severity/change/concentration signal). All three delegate to
+`ReviewIssueQueryService`; no migration, no mutation. Prioritization is a deterministic total
+order over already-computed signals (severity → fired-vs-quiet → high-surge → surge count →
+recency → volume → id), mirroring the backend's own worst-first list — not a re-judgement.
+
+### Privacy — quote-free by construction
+No review/inquiry body ever crosses the boundary. Issue `title`/`aspect`/`problem` are
+closed-vocabulary labels (never a body); the drill-downs the subgraph calls carry no masked quote
+and no operator note (the human `detail`/`IssueStateEventView` surface keeps those; the agent
+surface — `context`/`IssueTransitionView` and `evidence-summary` — does not). As defence in depth
+the search node projects each row to the typed fields, so even an unexpected backend field cannot
+ride into the graph state. The composed brief holds only the allowlisted fields: issue id, product
+id, category (vocabulary), severity, counts, trend, and the sanitized evidence summary. There is
+no interrupt payload; the durable `IssueRunStore` persists the brief itself, which is already
+sanitized.
+
+### Determinism & restart (no checkpoint needed)
+For a fixed (backend state, `referenceDate`) the search order, prioritization, and every read are
+deterministic, so the brief is reproducible. `referenceDate` is the backend's own reproducibility
+anchor; pinning it makes the result clock-independent. "Same request → same brief after a restart"
+is therefore not a resume: a fresh process re-runs and produces a byte-identical brief, checked
+against the one the durable store holds.
+
+### Live proof (real Spring backend + disposable Postgres, torn down)
+Booted the real backend on a disposable `issue_subgraph_proof` DB (baseline seed; `sellerops`
+untouched). Seeded 12 reviews via SQL and built the issue memory through the human endpoints
+(`/extract` + `/lifecycle-pass` @2026-07-25) → four issues spanning severities and trends
+(포장 파손 HIGH, 배송 파손 HIGH, 배송 지연 NORMAL NEW+CONCENTRATED, 설치 난이도 LOW NEW). Driving the
+real `HttpSpringClient`: the run finished DONE with trail `searched→prioritized→assembled→composed`
+(no checkpoint); the brief ordered the two quiet HIGH issues **above** the surging NORMAL/LOW
+(severity beats trend); the restart `verify` produced a byte-identical brief; the issue-list
+fingerprint was **identical before and after** (zero mutation); and the brief carried only
+ids/labels/severity/counts/trend/rating-distribution — no review text (the gated integration test
+asserts all of this, plus three-intent routing to three distinct domains). Backend stopped, DB
+dropped, run store cleaned. This is Agent-Runtime↔Spring issue-memory integration evidence, not
+channel-acquisition evidence — no channel/marketplace API is contacted on this path.
+
+### Independent review response
+An independent adversarial architecture + security review found **no HIGH and no MEDIUM** and did
+not block the PR; every hard boundary held under scrutiny (read-only, zero subgraph mutation, no
+re-implementation, quote-free/note-free at the source, deterministic + restart-stable, three
+distinct domains, org-scoped absence). Folded in from the LOW/advisory notes: the `assemble` node
+now projects the `change` object and each `byProduct`/`ratingDistribution` sub-object field-by-field
+(symmetry with the search-node hardening, so a future text field added *inside* those shapes still
+cannot ride into the brief); and the `parseGoal` keyword-table comment was updated for the
+three-row table. Documented, not changed: the required tool name `get_review_issue_detail` maps to
+the quote-free `/context` read (not the human `/{id}` detail surface) — the name is fixed by the
+task's tool contract, and the tool doc states the safe mapping; the brief carries product *names*
+alongside product ids (seller-catalog data, not customer text/PII, consistent with the human list
+surface); and the CLI `extract` subcommand issues the mutating `/extract` + `/lifecycle-pass` seed
+calls — that is the proof harness, explicitly separate from the read-only `runtime.run` subgraph
+path.

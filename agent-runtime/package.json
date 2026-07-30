@@ -9,7 +9,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "inquiry": "tsx src/cli/run-inquiry.ts",
-    "review": "tsx src/cli/run-review.ts"
+    "review": "tsx src/cli/run-review.ts",
+    "issue": "tsx src/cli/run-issue.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.1.48",

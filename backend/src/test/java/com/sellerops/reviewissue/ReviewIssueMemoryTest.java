@@ -60,12 +60,16 @@ class ReviewIssueMemoryTest {
     }
 
     private Review review(String body, LocalDate on, UUID productId) {
+        return reviewRated(body, on, productId, 5);
+    }
+
+    private Review reviewRated(String body, LocalDate on, UUID productId, int rating) {
         Review review = new Review();
         review.setOrgId(org);
         review.setChannelId(channel);
         review.setProductId(productId);
         review.setBody(body);
-        review.setRating(5);
+        review.setRating(rating);
         review.setReceivedAt(on.atStartOfDay(ZoneOffset.UTC).toInstant());
         return reviews.save(review);
     }
@@ -475,6 +479,97 @@ class ReviewIssueMemoryTest {
         assertThatThrownBy(() -> queries.detail(UUID.randomUUID(), issue.getId(), REF))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("이슈를 찾을 수 없습니다.");
+    }
+
+    // ---- the agent-facing read side (context / evidence-summary / trend) ------------------------
+
+    /**
+     * {@code context} returns the issue and its lifecycle history but never the operator's note —
+     * the one free-text field on the read surface. The human {@code detail} surface keeps the note;
+     * this projection ({@link com.sellerops.reviewissue.dto.IssueTransitionView}) has no note at all.
+     */
+    @Test
+    void contextReturnsTheIssueAndItsLifecycleHistoryWithoutTheOperatorNote() {
+        ReviewIssue issue = seedNewIssueThatFires();
+        lifecycle.runAutomaticPass(org, REF);               // OBSERVING -> NEEDS_REVIEW
+        lifecycle.startActing(org, issue.getId(), "민감한 내부 메모");  // note lives on the human surface
+
+        var context = queries.context(org, issue.getId(), REF);
+        assertThat(context.issue().id()).isEqualTo(issue.getId());
+        assertThat(context.history()).extracting(t -> t.toState())
+                .containsExactly("OBSERVING", "NEEDS_REVIEW", "ACTING");
+
+        // The note reaches the human detail surface, but nothing on the context history can carry it.
+        assertThat(queries.detail(org, issue.getId(), REF).history())
+                .extracting(h -> h.note()).contains("민감한 내부 메모");
+    }
+
+    /** The evidence summary is a quote-free roll-up: split by product and by rating, span from the issue. */
+    @Test
+    void evidenceSummaryIsAQuoteFreeRollupSplitByProductAndRating() {
+        UUID p = UUID.randomUUID();
+        UUID q = UUID.randomUUID();
+        extraction.extract(reviewRated("배송이 늦었어요 1", REF, p, 1));
+        extraction.extract(reviewRated("배송이 늦었어요 2", REF.minusDays(1), p, 2));
+        extraction.extract(reviewRated("배송이 늦었어요 3", REF.minusDays(2), q, 1));
+        extraction.extract(reviewRated("배송이 늦었어요 4", REF.minusDays(3), null, 5));
+        ReviewIssue issue = issueByKey("배송:지연");
+
+        var summary = queries.evidenceSummary(org, issue.getId());
+
+        assertThat(summary.totalEvidence()).isEqualTo(4);
+        assertThat(summary.byProduct()).extracting(v -> v.productId()).containsExactly(p, q); // largest first
+        assertThat(summary.byProduct()).extracting(v -> v.evidenceCount()).containsExactly(2L, 1L);
+        assertThat(summary.unattributedEvidence()).isEqualTo(1);
+
+        var d = summary.ratingDistribution();
+        assertThat(d.rating1()).isEqualTo(2);
+        assertThat(d.rating2()).isEqualTo(1);
+        assertThat(d.rating5()).isEqualTo(1);
+        assertThat(d.rating1() + d.rating2() + d.rating3() + d.rating4() + d.rating5() + d.unrated())
+                .isEqualTo(summary.totalEvidence());
+        assertThat(summary.firstEvidenceOn()).isEqualTo(REF.minusDays(3));
+        assertThat(summary.lastEvidenceOn()).isEqualTo(REF);
+    }
+
+    /** {@code trend} (issueView) carries the same signal as the corresponding list entry. */
+    @Test
+    void issueViewCarriesTheSameSignalAsTheListEntry() {
+        ReviewIssue issue = seedNewIssueThatFires();
+
+        var listEntry = queries.list(org, REF, false).get(0);
+        var view = queries.issueView(org, issue.getId(), REF);
+
+        assertThat(view.id()).isEqualTo(listEntry.id());
+        assertThat(view.severity()).isEqualTo(listEntry.severity());
+        assertThat(view.change().kinds()).isEqualTo(listEntry.change().kinds());
+        assertThat(view.change().kinds()).contains("NEW");
+    }
+
+    @Test
+    void theAgentFacingReadsAreOrgScopedLikeDetail() {
+        ReviewIssue issue = seedNewIssueThatFires();
+        UUID other = UUID.randomUUID();
+
+        assertThatThrownBy(() -> queries.context(other, issue.getId(), REF))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+        assertThatThrownBy(() -> queries.evidenceSummary(other, issue.getId()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+        assertThatThrownBy(() -> queries.issueView(other, issue.getId(), REF))
+                .isInstanceOf(IllegalArgumentException.class).hasMessage("이슈를 찾을 수 없습니다.");
+    }
+
+    @Test
+    void evidenceSummaryOfAnIssueWithNoProductMappingIsAllUnattributed() {
+        for (int day = 0; day < 3; day++) {
+            extraction.extract(reviewRated("배송이 늦었어요 " + day, REF.minusDays(day), null, 3));
+        }
+        ReviewIssue issue = issueByKey("배송:지연");
+
+        var summary = queries.evidenceSummary(org, issue.getId());
+        assertThat(summary.byProduct()).isEmpty();
+        assertThat(summary.unattributedEvidence()).isEqualTo(3);
+        assertThat(summary.ratingDistribution().rating3()).isEqualTo(3);
     }
 
     @Test
