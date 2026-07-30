@@ -154,6 +154,40 @@ class Cafe24InquiryIngestionFlowTest {
     }
 
     @Test
+    void outOfWindowArticleCreatesNoInquiryAndNoWorkItemWhileInWindowAnsweredStoresSecretWithNoOpenItem() {
+        // Mirrors the halted live run: a single-day window (2026-03-24) came back with an
+        // in-window answered secret inquiry AND an out-of-window (2026-03-27) unanswered
+        // secret inquiry. Only the in-window row may be stored; the out-of-window row must
+        // create neither an inquiry nor a work item.
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(3101L, "제목", "본문", 77L, null,
+                        "2026-03-24T10:00:00+09:00", "C", "T"),    // in-window, answered, secret
+                FakeCafe24HttpClient.article(3102L, "제목", "본문2", 77L, null,
+                        "2026-03-27T10:00:00+09:00", null, "T")));  // out-of-window, unanswered, secret
+        String cursor = Cafe24ArticleCursor.window(6,
+                LocalDate.parse("2026-03-24"), LocalDate.parse("2026-03-24")).encode();
+        FetchPage page = connector.fetch(
+                new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 50));
+        @SuppressWarnings("unchecked")
+        List<CanonicalInquiry> records = (List<CanonicalInquiry>) page.records();
+        IngestOutcome out = ingestion.ingestInquiries(org, channel, account, records);
+
+        // Only the in-window row is emitted, so only it is ingested.
+        assertThat(out.success()).isEqualTo(1);
+        List<Inquiry> rows = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org);
+        assertThat(rows).hasSize(1);
+        Inquiry q = rows.get(0);
+        assertThat(q.getExternalId()).isEqualTo("cafe24:b6:a3101");
+        assertThat(q.getStatus()).isEqualTo("ANSWERED"); // C → answered
+        assertThat(q.getSecret()).isTrue();               // secret preserved, kept in queue
+        // The out-of-window article is nowhere — not stored, and no work item.
+        assertThat(rows).noneMatch(r -> r.getExternalId().equals("cafe24:b6:a3102"));
+        // The answered inquiry opens no OPEN work item, and the dropped unanswered one did not either.
+        assertThat(openWorkItems(org)).isEmpty();
+    }
+
+    @Test
     void reCollectingWithReplyStatusNtoCUpdatesInPlaceAndCompletesTheWorkItem() {
         fetchAndIngest(3020L, "본문", "N", "F");
         Inquiry before = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);

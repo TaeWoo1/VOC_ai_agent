@@ -261,6 +261,7 @@ public class Cafe24ApiConnector implements PullConnector {
             List<Object> records = new ArrayList<>();
             int position = 0;
             int excludedSecret = 0;
+            int outOfWindow = 0;
             for (Cafe24BoardArticleRow row : rows) {
                 position++;
                 if (excludeSecret && !row.isPublicPost()) {
@@ -271,11 +272,27 @@ public class Cafe24ApiConnector implements PullConnector {
                 if (row.articleNo() == null) {
                     continue; // cannot dedupe/store without the natural-key article number
                 }
+                // Exact-window guard. The platform's start_date/end_date article filter is
+                // doc-asserted, not contract-guaranteed — a live run returned an article whose
+                // created_date was AFTER end_date — so the connector re-checks inclusion by the
+                // article's own created_date (as a Cafe24/KST calendar date) and drops
+                // out-of-window rows BEFORE mapping, ingestion, or work-item creation. Enforced
+                // only on a windowed backfill cursor; a null/unparseable created_date fails
+                // closed (treated as out-of-window), never assumed in-window.
+                if (cursor.hasWindow()
+                        && !withinWindow(row.createdDate(), cursor.windowStart(), cursor.windowEnd())) {
+                    outOfWindow++;
+                    continue;
+                }
                 records.add(mapper.map(boardNo, row, position));
             }
             if (excludedSecret > 0) {
                 // Sanitized metric only — a count, never an article id/title/content/writer.
                 log.info("카페24 REVIEW 비밀글 제외: board={} 제외건수={}", boardNo, excludedSecret);
+            }
+            if (outOfWindow > 0) {
+                // Sanitized metric only — a count, never an article id/date/title/content/writer.
+                log.info("카페24 창 밖 게시글 제외: board={} 제외건수={}", boardNo, outOfWindow);
             }
             boolean hasMore = rows.size() == request.limit();
             String nextCursor = cursor.advance(rows.size()).encode();
@@ -284,6 +301,20 @@ public class Cafe24ApiConnector implements PullConnector {
             // Cursor unchanged → the next run re-requests the same offset.
             return rateLimited(request, e);
         }
+    }
+
+    /**
+     * Whether an article's {@code created_date} falls inside the operator backfill
+     * window {@code [windowStart, windowEnd]} (both ends inclusive), evaluated as a
+     * Cafe24 (KST) calendar date. Fail-closed: a missing or non-offset-bearing
+     * {@code created_date} is out-of-window (never assumed in-window).
+     */
+    private static boolean withinWindow(String createdDate, LocalDate windowStart, LocalDate windowEnd) {
+        LocalDate created = Cafe24BoardArticleMapper.parseKstDate(createdDate);
+        if (created == null) {
+            return false;
+        }
+        return !created.isBefore(windowStart) && !created.isAfter(windowEnd);
     }
 
     /** Maps one board-article row to its canonical record (community article or inquiry). */
