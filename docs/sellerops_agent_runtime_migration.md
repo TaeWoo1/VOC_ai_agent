@@ -189,11 +189,42 @@ the no-checkpoint path).
 
 ---
 
-## 6. Out of scope / not done
+## 6. Out of scope for slice 1
 
-- **No live external reply, no channel API write, no LLM call.** No push / PR / merge.
-- **No backend change.** Slice 1 reuses existing endpoints as-is.
-- **Live cross-process integration** (runtime → a running backend over HTTP) is the next
-  step; slice 1 proves the graph against a contract-faithful fake, and ships the real
-  `HttpSpringClient` adapter unused by the test suite.
+- **No live external reply, no channel API write, no LLM call.**
+- Slice 1 reused existing endpoints as-is (no backend change) and proved the graph against
+  a contract-faithful fake; live cross-process integration was slice 2 (below).
 - The NAVER review-import LangGraph shadow and its plan are untouched; #369/#371 untouched.
+
+## 7. Slice 2 — real Spring integration proof
+
+Slice 2 connected the runtime to a **real Spring backend + disposable Postgres** and proved
+checkpoint / resume / idempotency end-to-end (still no LLM, no external reply, no channel
+API — demo/fixture data via the offline MockApiConnector). It added the real
+`HttpSpringClient` wiring + `SpringSession.login`, a fail-closed startup guard on both
+`start()` and `resume()` (backed by a new read-only `GET /api/inquiry-publish/capability`),
+the durable `RunStore` (see below), the shared idempotent `performRecord`, and a CLI for
+cross-process start/resume. Live-verified: fail-closed capability, the OPEN pagination /
+detail / proposal / draft / approval contract, reject (item stays OPEN), approve (one draft,
+`ACTION_PENDING`, no send), double-resume idempotency, and a genuine cross-process
+restart-resume — with a DB check showing exactly one APPROVAL_GRANTED / draft / approval per
+item and **zero `EXECUTION_RECORDED` across the DB** (nothing dispatched).
+
+### Follow-up gates (NOT done here — required before the next steps)
+
+- **`FileRunStore` is a proof/local durable store only.** It is a JSON-file-per-thread store
+  used to demonstrate restart-resume and to keep tests dependency-free. A **production run
+  store** (e.g. a transactional Postgres-backed `RunStore` with retention/GC and concurrent
+  access) is deliberately deferred; it drops in behind the existing `RunStore` interface with
+  no graph/runtime change.
+- **When a real LLM drafter is introduced, the restart path must STOP regenerating the
+  draft.** Today the durable restart path re-fetches detail and *regenerates* the candidate
+  via the deterministic rule-based drafter — safe only because that drafter is deterministic
+  (same input → same draft → same fingerprint → idempotent confirm). A non-deterministic LLM
+  would produce a different draft on restart, breaking fingerprint idempotency. The gate:
+  once an LLM drafter is authorized, resume/reconstruction must **pin to the backend's already
+  persisted candidate/draft version** (fetch the saved draft head and reuse its fingerprint)
+  and never re-invoke the model. The sanitized `RunStore` may then also need to carry the
+  saved draft **version** (still not the content) to bind deterministically.
+- Live wiring of the real LLM behind `DraftModelProvider` remains gated (its own privacy
+  review); the send path stays fail-closed at the backend until separately authorized.
