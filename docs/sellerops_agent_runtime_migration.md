@@ -300,7 +300,36 @@ The approval carries a deterministic `commandId`, so a re-run replays it (no sec
 duplicate audit). The guided-session **mint is not idempotent at the backend** (each call
 mints a fresh single-use ref); mint-once across double/restart resume is guaranteed one level
 up by the **DONE-snapshot guard** — a finished run replays its stored outcome and never
-re-enters the record step. Because the draft is already persisted, restart-resume simply
-approves the stored version and mints — no re-fetch, no regeneration — so it binds the same
-draft version by construction (and does not inherit the inquiry slice's LLM-resume
-regeneration gate).
+re-enters the record step (and, defensively, the in-process resume fast-path also consults the
+durable DONE status so two runtimes sharing one store cannot double-mint). Because the draft is
+already persisted, restart-resume simply approves the stored version and mints — no re-fetch,
+no regeneration — so it binds the same draft version by construction (and does not inherit the
+inquiry slice's LLM-resume regeneration gate).
+
+### Live proof (real Spring backend + disposable Postgres, torn down)
+
+Proven end-to-end against a real backend on a disposable `review_subgraph_proof` DB (the
+`sellerops` dev DB untouched; env torn down after). Reviews were seeded directly into the
+disposable DB (the mock connector does not serve REVIEW sync, and the demo-content review
+seeder is unrelatedly broken on a NOT-NULL `dedup_key_version`), then triaged RESPONSE_NEEDED
+through the real endpoint. Verified: fail-closed capability; the draft saved once BEFORE the
+checkpoint (real backend rule provider, `providerVersion=templates-v1`); approve binds the
+version + prepares a guided session (opaque 16-hex `submissionRef` + privacy-safe target hint);
+reject leaves an inert draft with no approval and RESPONSE_NEEDED retained; double-resume
+idempotent (one ref); in-process AND a **genuine 2-process CLI** restart both bind the SAME
+draft version. DB check: exactly one approval + one submission_ref per approved review, and
+**zero `review_reply_outcome` rows across the DB** (nothing executed/dispatched); the durable
+snapshot carried no review body or PII. The search-node projection (below) was exercised
+against the real reply-work rows, which do carry a `safePreview` excerpt.
+
+### Independent review response
+
+An independent adversarial review found no HIGH and did not block the PR. Fixed in-branch:
+(MEDIUM-1) the search node now projects reply-work rows to only the fields the runtime needs,
+so the backend's `safePreview` review excerpt never enters the (in-memory) graph checkpoint —
+the fake now carries `safePreview` so the projection is exercised; (MEDIUM-2) the resume
+fast-path consults the durable DONE status as above; (LOW-2) the router's resume decision type
+is the inquiry superset. Documented, not changed (LOW-1): the agent selects the oldest
+committed review, and a review already approved by a prior run would fail closed at the
+backend's freeze guard on a re-approve (no double-approval, no send) rather than being skipped;
+graceful skip-if-already-approved is a future refinement.

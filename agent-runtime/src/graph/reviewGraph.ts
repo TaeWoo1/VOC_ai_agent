@@ -68,8 +68,25 @@ export function buildReviewGraph(deps: ReviewGraphDeps) {
       accountId,
       todoLimit: state.goal?.size ?? 50,
     });
-    log("review_search", { coverage: res.coverage, fetched: res.todo.length });
-    return { reviews: res.todo, trail: ["searched"] };
+    // Project to ONLY the fields the runtime needs before anything enters graph state. The
+    // backend's reply-work rows also carry a `safePreview` — a short, PII-masked but still
+    // customer-authored review excerpt — which the checkpoint contract has no business
+    // holding. Rebuilding each row here drops it (and any other extra field) so the
+    // MemorySaver checkpoint never sees review content, matching the durable snapshot.
+    const reviews = res.todo.map((r) => ({
+      actionRef: r.actionRef,
+      channelCode: r.channelCode,
+      channelNameKo: r.channelNameKo,
+      sourceType: r.sourceType,
+      productName: r.productName,
+      rating: r.rating,
+      replyStatus: r.replyStatus,
+      sourceCreatedDate: r.sourceCreatedDate,
+      triageDisposition: r.triageDisposition,
+      hasReplyPreparation: r.hasReplyPreparation,
+    }));
+    log("review_search", { coverage: res.coverage, fetched: reviews.length });
+    return { reviews, trail: ["searched"] };
   }
 
   function prioritize(state: ReviewAgentState): Partial<ReviewAgentState> {

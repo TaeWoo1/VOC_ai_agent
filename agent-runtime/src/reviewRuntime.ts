@@ -117,6 +117,14 @@ export class ReviewAgentRuntime {
     // Resume is the only path that mutates the backend; the fail-closed guard fires here too.
     await this.assertExecutionDisabled();
     if (this.liveThreads.has(threadId)) {
+      // Defence against a shared durable store with more than one live runtime: if another
+      // process already finished this thread, the guided-session mint has happened, so replay
+      // the stored outcome instead of re-entering the graph (the mint is not idempotent).
+      const durable = await this.runStore.load(threadId);
+      if (durable?.status === "DONE") {
+        this.liveThreads.delete(threadId);
+        return { status: "DONE", outcome: durable.outcome ?? null, trail: durable.trail };
+      }
       const final = await this.graph.invoke(new Command({ resume: decision }), threadConfig(threadId));
       this.liveThreads.delete(threadId);
       const result = this.toResult(final);

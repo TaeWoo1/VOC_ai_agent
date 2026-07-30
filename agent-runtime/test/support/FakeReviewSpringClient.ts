@@ -151,18 +151,25 @@ export class FakeReviewSpringClient implements ReviewSpringClient {
     this.calls.list += 1;
     const todo: ReviewWorkItem[] = [...this.reviews.values()]
       .filter((it) => it.disposition === "RESPONSE_NEEDED")
-      .map((it) => ({
-        actionRef: it.seed.actionRef,
-        channelCode: "cafe24",
-        channelNameKo: "카페24",
-        sourceType: "REVIEW",
-        productName: it.seed.productName ?? null,
-        rating: it.seed.rating,
-        replyStatus: it.seed.channelReplyState ?? "PENDING",
-        sourceCreatedDate: it.seed.sourceCreatedDate,
-        triageDisposition: "RESPONSE_NEEDED",
-        hasReplyPreparation: it.drafts.length > 0 || it.approval != null,
-      }))
+      .map(
+        (it) =>
+          ({
+            actionRef: it.seed.actionRef,
+            channelCode: "cafe24",
+            channelNameKo: "카페24",
+            sourceType: "REVIEW",
+            productName: it.seed.productName ?? null,
+            rating: it.seed.rating,
+            replyStatus: it.seed.channelReplyState ?? "PENDING",
+            sourceCreatedDate: it.seed.sourceCreatedDate,
+            triageDisposition: "RESPONSE_NEEDED",
+            hasReplyPreparation: it.drafts.length > 0 || it.approval != null,
+            // The REAL backend row (OperatorVocItem) also carries a short, PII-masked but
+            // customer-authored review excerpt. It is present here on purpose so the runtime's
+            // search-node projection is proven to DROP it — the graph state must never hold it.
+            safePreview: it.seed.body.slice(0, 60),
+          }) as ReviewWorkItem,
+      )
       .slice(0, params.todoLimit ?? 50);
     return { sellerAccountId: "acct", channel: "카페24", coverage: "OK", todo, recentlyReported: [] };
   }

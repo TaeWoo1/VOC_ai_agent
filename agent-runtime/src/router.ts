@@ -17,7 +17,7 @@ import { ReviewAgentRuntime } from "./reviewRuntime";
 import type { ReviewRunResult } from "./reviewRuntime";
 import { parseGoal, routeIntent } from "./goal/parseGoal";
 import type { AgentDomain, GoalRequest } from "./goal/parseGoal";
-import type { ReviewCheckpointDecision } from "./checkpoint/ReviewCheckpointContract";
+import type { CheckpointDecision } from "./checkpoint/CheckpointContract";
 import { log } from "./log";
 
 export type RouterRunResult =
@@ -63,11 +63,13 @@ export class AgentRouter {
   }
 
   /**
-   * Resume by the domain the router recorded for this thread on `start`. The decision shape
-   * ({approved, approvedBy}) is accepted by both runtimes. For a cross-process restart (no
-   * recorded domain) resume against the domain-specific runtime directly.
+   * Resume by the domain the router recorded for this thread on `start`. The decision type is
+   * the inquiry superset ({approved, approvedBy, editedTitle?, editedComments?}); the review
+   * runtime uses only {approved, approvedBy} and ignores the rest, so one signature serves
+   * both without narrowing the inquiry runtime's edit capability. For a cross-process restart
+   * (no recorded domain) resume against the domain-specific runtime directly.
    */
-  async resume(threadId: string, decision: ReviewCheckpointDecision): Promise<RouterRunResult> {
+  async resume(threadId: string, decision: CheckpointDecision): Promise<RouterRunResult> {
     const domain = this.threadDomain.get(threadId);
     if (!domain) throw new UnknownThreadError(threadId);
     if (domain === "REVIEW") {
