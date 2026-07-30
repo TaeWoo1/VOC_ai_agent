@@ -1,0 +1,67 @@
+# Agent Runtime CI — install, typecheck, and the hermetic test suite for the Node/TypeScript
+# orchestration service (agent-runtime/).
+#
+# Hermetic by construction: `npm test` reaches no real backend (every subgraph tool is injected
+# with a contract-faithful fake) and the real-backend integration suites stay skipped because
+# RUN_REAL_INTEGRATION is pinned BLANK below. A live marketplace run cannot originate here — the
+# service has no channel credential and no send path, and the fail-closed guard is exercised only
+# against the fake. So this job needs no database, no Docker, and no secrets.
+name: agent-runtime-ci
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # Self-contained npm project; nothing outside it feeds the build.
+      - 'agent-runtime/**'
+      - '.github/workflows/agent-runtime-ci.yml'
+  # Guard the trunk too: a merge commit lands code no PR run necessarily covered.
+  push:
+    branches: [main]
+    paths:
+      - 'agent-runtime/**'
+      - '.github/workflows/agent-runtime-ci.yml'
+
+# One run per ref; cancel superseded runs when new commits are pushed.
+concurrency:
+  group: agent-runtime-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege — the job only reads the checkout.
+permissions:
+  contents: read
+
+# Pinned BLANK, not merely unset: the real-backend integration suites are gated on this being
+# exactly "1" (`describe.skipIf(!RUN)`), so stating it here means no repo/environment default can
+# quietly arm a live-backend run inside CI.
+env:
+  RUN_REAL_INTEGRATION: ''
+
+jobs:
+  # Job id kept simple and given NO `name:` so the status-check name stays "agent-runtime-ci /
+  # agent-runtime" and branch-protection rules keep matching.
+  agent-runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent-runtime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # 20 is the version all repo workflows standardise on (no .nvmrc / engines).
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent-runtime/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Hermetic tests
+        run: npm test

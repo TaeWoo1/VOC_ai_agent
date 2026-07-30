@@ -364,3 +364,12 @@ export interface IssueEvidenceSummary {
 
 /** GET /{id}/trend returns a bare {@link ReviewIssueSummary} (severity + change + concentration). */
 export type IssueTrend = ReviewIssueSummary;
+
+/**
+ * GET /api/users/me — the caller's identity as the backend derives it from the JWT. Only the two
+ * scoping ids are mirrored here; no email/name/role is carried (not needed to tenant-scope a run).
+ */
+export interface UserIdentity {
+  readonly userId: string;
+  readonly orgId: string;
+}

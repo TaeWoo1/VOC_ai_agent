@@ -8,6 +8,7 @@ describe("nav model", () => {
     const routes = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.to));
     expect(routes).toEqual([
       "/",
+      "/agent",
       "/inbox",
       "/inquiries",
       "/orders",
