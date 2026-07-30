@@ -12,6 +12,7 @@ import com.sellerops.review.ReviewRepository;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -103,6 +104,27 @@ class InboxServiceTest {
                 .filter(i -> i.type().equals("REVIEW")).findFirst().orElseThrow();
         assertThat(inquiry.id()).isEqualTo(inquiryId);
         assertThat(review.id()).isEqualTo(reviewId);
+    }
+
+    @Test
+    void secretInquiryStaysInTheQueueFeedButIsExcludedFromTheDashboardPreview() {
+        Inquiry secret = new Inquiry();
+        secret.setOrgId(org);
+        secret.setChannelId(channel);
+        secret.setBody("비밀 문의 본문");
+        secret.setStatus("UNANSWERED");
+        secret.setSecret(true);
+        secret.setReceivedAt(Instant.parse("2026-06-11T00:00:00Z"));
+        inquiries.save(secret);
+        String secretId = secret.getId().toString();
+
+        // Work queue keeps it (default feed = includeSecret).
+        assertThat(service.recentFeed(org, 50))
+                .anyMatch(i -> i.id().equals(secretId));
+        // Dashboard preview (includeSecret=false) omits it, but the null-flag inquiry stays.
+        List<FeedItem> preview = service.recentFeed(org, 50, false);
+        assertThat(preview).noneMatch(i -> i.id().equals(secretId));
+        assertThat(preview).anyMatch(i -> i.type().equals("INQUIRY"));
     }
 
     @Test

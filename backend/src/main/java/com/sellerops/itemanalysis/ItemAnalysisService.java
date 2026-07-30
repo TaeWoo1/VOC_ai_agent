@@ -338,7 +338,8 @@ public class ItemAnalysisService {
         }
         if (INQUIRY.equals(row.getSourceType())) {
             Inquiry q = inquiries.findById(row.getSourceId()).orElse(null);
-            if (q == null || !orgId.equals(q.getOrgId())) {
+            // Skip orphan, cross-org, and secret (비밀글) inquiries — secret is out of analysis scope.
+            if (q == null || !orgId.equals(q.getOrgId()) || Boolean.TRUE.equals(q.getSecret())) {
                 return null;
             }
             return new Recomputed(
@@ -351,6 +352,11 @@ public class ItemAnalysisService {
 
     /** @return true if a new analysis was written, false if skipped (already exists). */
     private boolean analyzeInquiry(UUID orgId, Inquiry q) {
+        // Secret (비밀글) inquiries are worked only in the queue, never in general analysis.
+        // A null flag (non-Cafe24 / legacy) is not secret and is analyzed as before.
+        if (Boolean.TRUE.equals(q.getSecret())) {
+            return false;
+        }
         if (analyses.existsByOrgIdAndSourceTypeAndSourceId(orgId, INQUIRY, q.getId())) {
             return false;
         }

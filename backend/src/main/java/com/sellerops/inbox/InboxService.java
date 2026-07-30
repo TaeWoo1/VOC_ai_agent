@@ -44,6 +44,16 @@ public class InboxService {
 
     @Transactional(readOnly = true)
     public List<FeedItem> recentFeed(UUID orgId, int limit) {
+        // The inbox work queue keeps secret (비밀글) inquiries — the seller still works them.
+        return recentFeed(orgId, limit, true);
+    }
+
+    /**
+     * @param includeSecret when false, secret (비밀글) inquiries are omitted — used by the
+     *     dashboard preview. A null {@code is_secret} (non-Cafe24 / legacy) is never secret.
+     */
+    @Transactional(readOnly = true)
+    public List<FeedItem> recentFeed(UUID orgId, int limit, boolean includeSecret) {
         Map<UUID, String> channelNames = channels.findAll().stream()
                 .collect(Collectors.toMap(Channel::getId, Channel::getNameKo, (a, b) -> a));
         Map<UUID, String> productNames = products.findAllByOrgId(orgId).stream()
@@ -51,6 +61,9 @@ public class InboxService {
 
         List<FeedItem> items = new ArrayList<>();
         for (Inquiry q : inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(orgId)) {
+            if (!includeSecret && Boolean.TRUE.equals(q.getSecret())) {
+                continue;
+            }
             items.add(new FeedItem(q.getId().toString(), "INQUIRY",
                     channelNames.getOrDefault(q.getChannelId(), "기타"),
                     productNames.getOrDefault(q.getProductId(), "-"),

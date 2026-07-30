@@ -85,6 +85,21 @@ class ItemAnalysisServiceTest {
     }
 
     @Test
+    void runExcludesSecretInquiriesFromAnalysis() {
+        Inquiry secret = inquiry(org, "비밀 문의 본문", "UNANSWERED");
+        secret.setSecret(true);
+        inquiries.save(secret);
+
+        RunResult result = service.run(org);
+
+        // Only the two non-secret setUp items are analyzed; the secret inquiry is never stored.
+        assertThat(result.analyzed()).isEqualTo(2);
+        assertThat(analyses.existsByOrgIdAndSourceTypeAndSourceId(org, "INQUIRY", secret.getId()))
+                .isFalse();
+        assertThat(analyses.findAllByOrgIdOrderByCreatedAtDesc(org)).hasSize(2);
+    }
+
+    @Test
     void listReturnsOnlyDerivedMetadata() {
         service.run(org);
 

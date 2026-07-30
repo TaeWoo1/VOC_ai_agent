@@ -2,6 +2,7 @@ package com.sellerops.inquiry.workitem;
 
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
@@ -81,6 +82,49 @@ public class InquiryWorkItemWriter {
 
             postInsert.accept(savedInquiry.getId());
             return savedInquiry.getId();
+        });
+    }
+
+    /**
+     * Reconcile an <b>existing</b> connector inquiry that the source now reports answered,
+     * atomically: save the inquiry (the caller has already set {@code status = ANSWERED})
+     * and, <b>only if its work item is absent or still OPEN</b>, transition OPEN→COMPLETED
+     * plus a {@code VERIFICATION_RECORDED} audit. Terminal or mid-workflow phases
+     * (PROPOSED…DISMISSED/COMPLETED/FAILED) are never touched — so an operator's in-flight
+     * reply or dismissal is never overridden and a work item is never reopened. No reply is
+     * ever posted to the platform.
+     *
+     * <p>Idempotent: the audit is keyed {@code connector-reconcile:<workItemId>} (unique per
+     * work item), so replaying the same answered state records no second transition. Mirrors
+     * {@code EsmInquiryReconciler.reconcileAnswered} for the connector actor.
+     */
+    public UUID reconcileConnectorAnswered(Inquiry inquiry) {
+        return tx.execute(status -> {
+            Inquiry saved = inquiries.save(inquiry);
+            Optional<InquiryWorkItem> wiOpt = workItems.findByInquiryId(saved.getId());
+            if (wiOpt.isEmpty()) {
+                return saved.getId();   // history only — nothing to complete
+            }
+            InquiryWorkItem workItem = wiOpt.get();
+            if (workItem.getPhase() != InquiryWorkItemPhase.OPEN) {
+                return saved.getId();   // terminal or mid-workflow — never touched
+            }
+            workItem.setPhase(InquiryWorkItemPhase.COMPLETED);
+            workItems.save(workItem);
+
+            String commandId = "connector-reconcile:" + workItem.getId();
+            if (!audits.existsByWorkItemIdAndCommandId(workItem.getId(), commandId)) {
+                InquiryWorkItemAudit audit = new InquiryWorkItemAudit();
+                audit.setOrgId(saved.getOrgId());
+                audit.setWorkItemId(workItem.getId());
+                audit.setCommandId(commandId);
+                audit.setEventType(InquiryWorkItemEvent.VERIFICATION_RECORDED);
+                audit.setPhaseFrom(InquiryWorkItemPhase.OPEN);
+                audit.setPhaseTo(InquiryWorkItemPhase.COMPLETED);
+                audit.setActor(CONNECTOR_ACTOR);
+                audits.save(audit);
+            }
+            return saved.getId();
         });
     }
 
