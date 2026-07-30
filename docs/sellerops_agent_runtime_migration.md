@@ -434,3 +434,125 @@ alongside product ids (seller-catalog data, not customer text/PII, consistent wi
 surface); and the CLI `extract` subcommand issues the mutating `/extract` + `/lifecycle-pass` seed
 calls — that is the proof harness, explicitly separate from the read-only `runtime.run` subgraph
 path.
+
+## 10. Product integration — HTTP service + frontend command surface
+
+Slices 1–3 shipped the three subgraphs as a library driven by CLIs and tests. This step makes the
+runtime a **central HTTP service the real frontend calls**, so a seller can drive all three
+journeys from the product UI — without moving any responsibility across the boundary rule (§2): the
+runtime still holds no DB and no channel credential, and the backend stays the system of record.
+
+### The HTTP surface (`agent-runtime/src/http/`)
+A dependency-free Node `http` server (no framework — one auditable transport file) over an
+`AgentRunService`:
+
+- `POST /api/agent-runs` — start a run. Body: `{ goalText | intent, accountId?, referenceDate?,
+  threadId?, size? }`. Routes via the existing `parseGoal`/`routeIntent` and drives the matching
+  runtime. `threadId` is minted when absent and returned.
+- `POST /api/agent-runs/{threadId}/resume` — resume at a checkpoint. Body: the checkpoint decision
+  `{ approved, approvedBy?, editedComments? }`.
+- `GET /api/agent-runs/{threadId}` — the sanitized run status (from the durable store).
+- `GET /health` — liveness (public). `GET /capabilities` — static service metadata (public): the
+  three intents, whether each has a checkpoint / needs an account scope, the run-store mode, and the
+  structural `externalSend: "disabled"`.
+
+### Stateless per request, org-safe by construction
+Each request builds fresh runtimes bound to (a) an `HttpSpringClient` carrying the operator's
+**forwarded** bearer token and (b) the process-shared durable stores. The service never sees, sets,
+or can spoof an org — the backend derives it from the JWT (`principal.orgId()`), and a foreign
+account scope fails closed there (403/404), surfaced as-is. Because the runtimes are fresh, every
+resume takes the durable reconstruction path, which is already idempotent (deterministic commandId +
+DONE-snapshot guard): a double resume replays the recorded outcome, and a cross-process restart
+resumes correctly. Resume/GET resolve the owning domain by probing the three stores.
+
+### Privacy at the boundary
+No response carries raw customer 원문. The inquiry checkpoint exposes only the **templated reply
+draft** (`candidate.comments` — a closed-vocabulary template) plus coarse locating metadata, and
+deliberately DROPS `candidate.title`, which echoes the customer subject; the review checkpoint
+carries no body and no reply text at all (a version + fingerprint + coarse aids — the operator reads
+the actual draft on the authorized review screen); the issue brief is quote-free. The durable GET
+view never includes draft content (the store never persists it). Errors surface a status + coarse
+code only (never a backend body). The metadata-only logger is reused unchanged.
+
+### Fail-closed guards
+The execution-capability check runs inside every inquiry/review start & resume (a backend
+round-trip); an enabled send path aborts before any mutation (`409 EXECUTION_ENABLED`). An
+unrecognized intent (`400`), a review run with no account scope (`400`), and resuming an
+issue-memory run (`409 NO_CHECKPOINT`) are all rejected. The server enforces a bearer token on every
+`/api/*` route and answers browser CORS preflight for the configured frontend origin only.
+
+### Production readiness
+A dedicated CI workflow (`agent-runtime-ci.yml`, path-filtered) runs install + typecheck + the
+hermetic suite; `RUN_REAL_INTEGRATION` is pinned blank so no live-backend run can arm in CI. A
+`Dockerfile` + `.env.example` document the env knobs and healthcheck. The run-store provider cleanly
+separates local/proof stores (file, memory) from a future production store, and **fails closed at
+boot** if `APP_ENV=production` is set on a single-instance store — a multi-instance durable store is
+explicitly future work, not a silent single-instance deployment.
+
+### Frontend command surface (`frontend/src/pages/Agent.tsx`, route `/agent`)
+A 운영 에이전트 page: a plain-language command input, the run phase/tool trail, checkpoint
+approve/reject controls for inquiry (edit the templated reply) and review (approve the saved
+version), and the issue operations brief. It calls the Agent Runtime through a separate-origin
+client (`src/lib/agentRuntime/`, reading `VITE_AGENT_RUNTIME_URL`, reusing the same operator JWT via
+`getToken()`) — never the shared axios backend instance, and never re-implementing a domain
+endpoint. Raw customer 원문 is shown only on the existing authorized detail screens (문의 응답 /
+리뷰 운영 / 상품 이슈), which the page links to.
+
+### Live proof (real Spring backend + disposable Postgres, torn down)
+Booted the real backend on a disposable `agent_http_proof` DB (org/user/channels seeded; demo
+content off; `sellerops` untouched) and the Agent Runtime HTTP service against it, then drove the
+frontend→runtime→Spring path (minus the browser) over real HTTP with a real operator JWT. Seed: the
+mock connector synced 23 OPEN inquiry work items; 8 reviews inserted via SQL built three issues
+through `/extract` + `/lifecycle-pass` (포장 파손 HIGH, 배송 파손 HIGH, 배송 지연 NORMAL); two reviews
+triaged 대응 필요. A 30-check curl script + the gated vitest integration suite (5/5) proved, all
+green:
+- **backend send path fail-closed** throughout (`executionEnabled=false`, no reply adapters);
+- **ISSUE** — start ran read-only to a DONE brief (3 issues, quote-free — no customer text); resume
+  was rejected `409 NO_CHECKPOINT`; the issue-list fingerprint was **identical before and after**
+  (zero mutation);
+- **INQUIRY** — start parked at a checkpoint carrying only the templated reply (no customer subject/
+  body); approve → DONE APPROVED with `externalSendAttempted=false`; a **double resume replayed**
+  DONE (idempotent); a second thread rejected → DONE REJECTED, no send;
+- **REVIEW** — start parked with a version + fingerprint and **no body/reply text**; approve → DONE
+  with the guided session prepared and `externalSendAttempted=false`; double resume idempotent;
+- **cross-process restart** — a parked inquiry, resumed in a FRESH server process (killed + rebooted
+  on the same durable store), reconstructed from the sanitized snapshot and completed APPROVED
+  (trail `…drafted → resumed_after_restart → recorded_approved`);
+- **tenant isolation** — every start/resume/get resolves the caller's org via the backend `whoami`
+  (which also verifies the token) and scopes the store to a one-way org fingerprint; on disk the run
+  store nested under `…/<scope-hash>/{inquiry,review,issue}` (verified), so a run is only ever
+  visible to the same org, and a client-supplied `threadId` cannot collide across orgs;
+- **rejection paths** — bad intent `400`, review-without-account `400 MISSING_ACCOUNT_SCOPE`, no
+  bearer `401`, unknown thread `404`;
+- **no leak** — the durable snapshots hold only ids/phase/priority/category/trail (a review snapshot
+  carries a one-way `bodyFingerprint`, not a body); a precise sweep for the actual review bodies,
+  the reply template, and PII tokens across the whole run store and the agent log found **zero**
+  hits. Backend + service stopped, disposable DB dropped, `sellerops` verified present and
+  untouched. This is Agent-Runtime↔Spring product-integration evidence over real HTTP, not a
+  channel-acquisition or a browser-e2e proof. The whole 30-check + 5/5 suite was **re-run after the
+  independent-review fixes** on the tenant-scoped build, all green.
+
+### Independent review response
+Two independent adversarial reviews ran in parallel — architecture + security over the runtime/HTTP
+layer, and frontend + privacy over the Agent page. **Neither found a HIGH.** Both privacy intents
+held (no customer 원문 in any response/log/store; inquiry title dropped; review body-free; brief
+quote-free), org spoofing was impossible on every mutating path, and the fail-closed guards fired on
+both start and resume. Three MEDIUMs were folded in:
+- **Cross-tenant read + unauthenticated GET** (security F1): `GET` verified no token and the run
+  store was a process-global key space, so a caller with any/forged token could read another org's
+  sanitized run/brief by `threadId`. Fixed at the root: every start/resume/get now resolves the org
+  via the backend `whoami` (verifying the token → forged tokens 401) and the store is **tenant-scoped
+  by a one-way org fingerprint**, so a foreign `threadId` resolves to absent (404).
+- **Client-`threadId` collision/shadowing across tenants** (security F2): the per-tenant scope makes
+  a shared `threadId` land in different subtrees (no collision), and the `threadId` charset is now
+  restricted to `[A-Za-z0-9._-]` so no two ids can alias to one file. A dedicated tenant-isolation
+  contract test pins this.
+- **Stale inquiry draft across sequential runs** (frontend): the checkpoint card kept its edited
+  draft when one AWAITING inquiry run was replaced by another, risking recording run A's text against
+  run B. Fixed by keying the run view on `threadId` (remount re-seeds the draft), with a regression
+  test.
+Also folded from LOW/advisory: `.dockerignore` now lists `.env`; a malformed `%`-escape in a path
+returns `400` (not `500`); an advisory comment marks `approvedBy` as non-authoritative (the backend
+JWT principal is the record). Documented, not changed: the GET review view returns coarse nulls for
+the non-persisted locating aids (a status view, not the live checkpoint); product *names* in the
+brief/review view are seller-catalog data, not customer text.

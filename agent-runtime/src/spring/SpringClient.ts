@@ -33,9 +33,11 @@ import type {
   ReviewReplySubmissionRunRequest,
   ReviewReplySubmissionRunResponse,
   ReviewReplyWorkResponse,
+  UserIdentity,
 } from "./types";
 import type { ListReplyWorkParams, ReviewSpringClient } from "./ReviewSpringClient";
 import type { IssueSpringClient, ListReviewIssuesParams } from "./IssueSpringClient";
+import type { IdentitySpringClient } from "./IdentitySpringClient";
 
 export interface ListInquiriesParams {
   readonly phase?: string;
@@ -81,7 +83,7 @@ export interface HttpSpringClientOptions {
  * exercised by `npm test` (which injects a fake). Live cross-process integration
  * against a running backend is the next step and is intentionally out of this slice.
  */
-export class HttpSpringClient implements SpringClient, ReviewSpringClient, IssueSpringClient {
+export class HttpSpringClient implements SpringClient, ReviewSpringClient, IssueSpringClient, IdentitySpringClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
@@ -94,6 +96,14 @@ export class HttpSpringClient implements SpringClient, ReviewSpringClient, Issue
 
   async getPublishCapability(): Promise<PublishCapabilityView> {
     return this.request<PublishCapabilityView>("GET", `/api/inquiry-publish/capability`);
+  }
+
+  // --- identity (IdentitySpringClient) ----------------------------------------------
+  // Verifies the forwarded bearer at the backend and returns the org derived from the JWT.
+
+  async whoami(): Promise<UserIdentity> {
+    const me = await this.request<{ id: string; orgId: string }>("GET", `/api/users/me`);
+    return { userId: me.id, orgId: me.orgId };
   }
 
   async listInquiries(params: ListInquiriesParams): Promise<InquiryQueueResponse> {

@@ -83,6 +83,15 @@ const NAV_ICON_PATHS: Record<string, ReactElement> = {
       <circle cx="19" cy="12" r="1.4" />
     </>
   ),
+  agent: (
+    <>
+      <rect x="5" y="8" width="14" height="10" rx="2" />
+      <path d="M12 4v4" />
+      <path d="M12 4h.01" />
+      <path d="M9.5 12.5h.01M14.5 12.5h.01" />
+      <path d="M3 12v3M21 12v3" />
+    </>
+  ),
 };
 
 /** The set of known icon keys — lets callers (and tests) validate that a name resolves. */

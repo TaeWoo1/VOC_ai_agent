@@ -26,6 +26,7 @@ export const NAV_GROUPS: NavGroup[] = [
     heading: "운영",
     items: [
       { to: "/", label: "홈", icon: "home", end: true },
+      { to: "/agent", label: "운영 에이전트", icon: "agent" },
       { to: "/inbox", label: "인박스", icon: "inbox" },
       { to: "/inquiries", label: "문의 응답", icon: "mail" },
       { to: "/orders", label: "주문·매출", icon: "orders" },

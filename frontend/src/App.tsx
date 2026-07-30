@@ -16,6 +16,7 @@ import { ConnectNaver } from "./pages/ConnectNaver";
 import { Upload } from "./pages/Upload";
 import { ReviewImport } from "./pages/ReviewImport";
 import { ProductIssues } from "./pages/ProductIssues";
+import { Agent } from "./pages/Agent";
 import { Operations } from "./pages/Operations";
 import { OperationsHome } from "./pages/OperationsHome";
 import { Reports } from "./pages/Reports";
@@ -64,6 +65,7 @@ export function App() {
       >
         {/* Frontstage — daily seller operations */}
         <Route path="/" element={<Home />} />
+        <Route path="/agent" element={<Agent />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/inquiries" element={<Inquiries />} />
         <Route path="/orders" element={<Orders />} />
