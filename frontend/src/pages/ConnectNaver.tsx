@@ -181,31 +181,38 @@ export function ConnectNaver() {
     }
   }, [accountId, runFirstSync]);
 
-  // Saved-credential check (§flow 1): once the account is known, ask the backend whether a credential is
-  // already on file. If so, reuse it — go straight to the connection test with NO re-entry (a stored key
-  // means registration already happened). A failed/absent read fails closed to the path fork/entry, never
-  // a false reuse. The `phase === check_saved_credential` guard makes this fire exactly once per journey:
-  // the dispatch moves the phase off the entry, so any later run early-returns. (No ref guard — a ref would
-  // persist across StrictMode's remount and suppress the only surviving dispatch; the phase guard + `alive`
-  // handle StrictMode correctly, at worst one extra harmless GET in dev.)
+  // Read-only resume (§flow 1): once the account is known, read the backend capability snapshot — a pure
+  // read of PERSISTED state (credential presence + latest ORDER_SUMMARY sync outcome), NO live NAVER call,
+  // no token mint, no sync job. It decides where a page load lands WITHOUT running anything:
+  //   • a prior first sync succeeded → restore the completed screen (no re-test/re-sync);
+  //   • a stored key but not completed → the connection test as a USER CTA (the seller presses it);
+  //   • no stored key → the three-path fork.
+  // A capability read failure fails SAFE to the fork (never a false completion, never an auto-sync). The
+  // `phase === check_saved_credential` guard fires this once per journey and makes StrictMode's double
+  // mount at worst one extra read-only GET — never a duplicate test/sync (nothing runs here).
   useEffect(() => {
     if (!accountId || state.phase !== "check_saved_credential") return;
     let alive = true;
     (async () => {
-      let hasSaved = false;
       try {
-        hasSaved = (await api.getConnectionInfoStrict(accountId)) !== null;
+        const cap = await api.getConnectionCapabilityStrict(accountId);
+        if (!alive) return;
+        const completed =
+          cap.credentialPresent &&
+          cap.identityConfirmed &&
+          (cap.firstSyncStatus === "SUCCESS" || cap.firstSyncStatus === "PARTIAL");
+        if (completed) setCapability(cap); // seed the panel so the restored screen needs no extra read
+        dispatch({ type: "RESUME_FROM_CAPABILITY", credentialPresent: cap.credentialPresent, completed });
       } catch {
-        hasSaved = false; // fail closed: never reuse a key we could not confirm
+        // Fail safe: cannot read state → do NOT claim completion and do NOT auto-run anything; land on the
+        // fork so the seller can proceed (enter/reuse a key) with an explicit action.
+        if (alive) dispatch({ type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false });
       }
-      if (!alive) return;
-      dispatch({ type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: hasSaved });
-      if (hasSaved) void runTest();
     })();
     return () => {
       alive = false;
     };
-  }, [accountId, state.phase, runTest]);
+  }, [accountId, state.phase]);
 
   const onSubmitCredentials = useCallback(
     async (secrets: Record<string, string>) => {

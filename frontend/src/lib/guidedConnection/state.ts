@@ -2,7 +2,9 @@
 //
 // A total, DOM-free reducer over sanitized `GuidedEvent`s. Design invariants, each pinned by a
 // test in `state.test.ts` and traceable to `docs/slices/naver-guided-connection.md`:
-//   • completed ⇐ registered ∧ tested ∧ synced ONLY (§12). No event jumps to completed.
+//   • completed ⇐ registered ∧ tested ∧ synced ONLY (§12). The ONLY event that reaches `completed`
+//     directly is `RESUME_FROM_CAPABILITY{completed:true}`, and only because a read-only backend snapshot
+//     already proved a prior first sync succeeded — it re-runs nothing. No in-journey event skips ahead.
 //   • the seller's decisions (path, account/store, issuance, consent) cannot be skipped (§17.2).
 //   • unknown/low-confidence evidence fails closed to `unsupported_state`, never "proceed" (§17.3).
 //   • milestones persist across regressions so resume restores safe progress (§13).
@@ -133,15 +135,24 @@ export function guidedConnectionReducer(
       break;
   }
 
-  // Saved-credential check (the journey entry).
+  // Read-only resume from the backend capability snapshot (the journey entry). No external NAVER call, no
+  // test, no sync happens here — the reducer only maps the persisted facts the page already read to a phase.
   if (prev.phase === "check_saved_credential") {
-    if (event.type === "SAVED_CREDENTIAL_CHECKED") {
-      // A stored credential means registration already happened — reuse it: go straight to the test,
-      // no re-entry (a backend auth check needs no Local Agent). No stored key → the three-path fork,
-      // still with no agent/login gate.
-      return event.hasSavedCredential
-        ? state("connection_testing", { ...m, registered: true }, null, "saved")
-        : state("application_path_choice", m, null, "unknown");
+    if (event.type === "RESUME_FROM_CAPABILITY") {
+      if (event.completed) {
+        // A prior first ORDER_SUMMARY sync already succeeded (backend-verified) — restore the completed
+        // screen directly. This is the sole sanctioned jump to `completed`; it re-runs nothing, and the
+        // completed screen re-reads capability/health read-only. Never reached without the backend proof.
+        return state("completed", { registered: true, tested: true, synced: true }, null, "saved");
+      }
+      if (event.credentialPresent) {
+        // A stored key exists but the connection was never completed. Land on the connection test as a
+        // USER-triggered step (registered milestone only) — the page does NOT auto-run it on load, so a
+        // refresh never mints a token or a sync job; the seller presses the CTA to verify.
+        return state("connection_testing", { ...m, registered: true }, null, "saved");
+      }
+      // No stored key → the three-path fork, no agent/login gate.
+      return state("application_path_choice", m, null, "unknown");
     }
     return prev;
   }

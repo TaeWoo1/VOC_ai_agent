@@ -22,6 +22,50 @@
 
 ---
 
+## 0.1 개정 (Amendment v1.1, 2026-07-31) — **주문 API 연결은 Local Agent가 필요 없다** ⭐ 현행 계약
+
+> 제품 오너 결정(우선순위 ① 현재 태스크). **이 §0.1이 아래 본문의 readiness gate 관련 서술보다 우선한다.**
+> 본문 §5.A·§8의 `readiness_checking`/`agent_unavailable`/`renderer_unavailable`/`naver_login_required`/
+> `naver_reconnect_required` 및 "Local Agent 페어링·가용을 준비 요건으로" 두는 서술은 **HISTORICAL(대체됨)** 이며
+> **현행 주문 연결 계약이 아니다.** 구현: `feat/naver-api-issuance-tutorial-reliability-v1` (`f60328a`, `726a03f`).
+
+- **주문(ORDER) API 연결은 Local Agent 없이 완주한다.** 가이드 리듀서에서 readiness gate(브리지/렌더러/
+  NAVER-로그인)를 **제거**했다. Local Agent(G1 페어링 + 판매자센터 로그인 + Action Window)는 **연결 완료 후
+  REVIEW_IMPORT 설정에서만** 필요하며, 최초 주문 연결의 게이트가 아니다.
+- **현행 흐름**: `check_saved_credential` → (백엔드 capability **읽기 전용** 재개) → ①저장키+과거 sync 성공 시
+  `completed` 복원(재실행 없음) / ②저장키만 있고 미완료 시 `connection_testing` **사용자 CTA** / ③키 없음 시
+  3-경로 fork → **API 발급 튜토리얼**(공식 API센터 새 탭 + 체크리스트 + 단계별 도움말; 기존 앱은 재사용 안내,
+  둘째 앱 생성 유도 금지) → 자격증명 입력 → 저장 → **연결 테스트 1회** → **첫 ORDER_SUMMARY sync 1회** →
+  capability 결과 → `completed`.
+- **capability 토큰**: ORDER_READ = 실제 sync 결과(성공 시에만 AVAILABLE + identityConfirmed);
+  REVIEW_IMPORT = **SETUP_REQUIRED**(Local Agent 미페어링) ↔ **GUIDED_CONFIRMATION**(페어링) — **FE 오버레이**로
+  페어링에 의해서만 전환(백엔드 정책값 GUIDED_CONFIRMATION 불변, 백엔드 변경 없음); REVIEW_REPLY =
+  **NOT_ENABLED / UNVERIFIED**(자동 전송 없음); INQUIRY_READ = **INTEGRATION_PENDING**.
+- **완료 후 새로고침·재진입 = 읽기 전용 복원**: 백엔드 capability 스냅샷만 읽어 완료 화면을 복원한다. **연결
+  테스트·첫 sync를 재실행하지 않는다** → NAVER 토큰 mint 0 / order API 호출 0 / 신규 sync job 0. 상태가
+  불완전하거나 sync 실패면 자동 재실행하지 않고 **사용자 CTA로만** 재시도한다. capability 조회 실패 시
+  fail-safe(fork)로 안내하며 허위 완료·자동 sync 없음. React StrictMode에서도 test/sync 중복 0.
+- **프라이버시**: Client Secret은 `api.storeCredential`로만 전달(리듀서/이벤트/sessionStorage/localStorage/로그
+  미영속·미로깅); 튜토리얼 progress는 단계 id만(자격증명 값·account id 저장 금지); 재개 슬라이스는
+  `{phase, path}`만.
+- **API센터 UI 문구**: 행동 중심 hedged 문구 유지. 미확인 메뉴명·버튼명·주문 API 그룹명·정확한 URL은 **추측
+  하드코딩 금지** — 라이브 walkthrough에서 operator read-only 관찰로 확정. (외부 참조는 API센터 URL 상수 1개.)
+- **개발환경 신뢰성**: 프론트는 same-origin `/api` + Vite proxy(`SELLEROPS_BACKEND_ORIGIN`)로 단일화한다.
+  절대 `VITE_API_BASE_URL`(stale 포트)로 로그인 실패하던 원인을 제거했고, preflight가 stale `VITE_API_BASE_URL`·
+  포트 불일치를 **FAIL**한다. 브리지 flag OFF/DOWN이어도 주문 위저드는 정상이며, 브리지 상태는 REVIEW_IMPORT
+  capability에만 반영된다. 실행 도중 backend 포트 변경 금지(고정 포트 + 프록시 타깃 일치 검사).
+
+### 0.1.1 이전 live walkthrough 기록 (sanitized) — **PRECONDITION_ABORTED**
+
+2026-07-31 첫 operator walkthrough 시도는 **precondition 단계에서 중단(승인 폐기)** 되었고 **어떤 라이브 NAVER
+액션도 발생하지 않았다**: NAVER connection test = **0회**, NAVER ORDER_SUMMARY sync = **0회**, 자격증명
+입력·저장 = **없음**. 원인 두 가지 — ① 프론트 API base가 stale(`VITE_API_BASE_URL`가 죽은 포트를 가리켜
+로그인 실패), ② 최초 주문 연결에 **잘못 포함된 Local Agent readiness gate**(페어링 UI 요구). 승인은 재사용하지
+않으며(단일-사용, 폐기됨), 두 원인 모두 본 v1.1 개정에서 구조적으로 제거되었다. 향후 라이브는 **새 단일-사용
+승인 + preflight PASS** 필요.
+
+---
+
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
 
 제품 오너가 본 계약을 **NAVER SmartStore v1 흐름으로 비준**한다(우선순위 ① 현재 태스크 결정 +
@@ -161,6 +205,9 @@ Frontend Spec §16.10의 6단계를 **모두** 통과해야 성공이다. **키 
 ## 5. 여정 단계 (Journey phases)
 
 ### A. 준비 (Readiness) — 렌더러-중립
+> **⚠ HISTORICAL (대체됨) — §0.1 참조.** 아래 "Local Agent 페어링·가용을 주문 연결의 준비 요건으로" 두는
+> 서술은 **현행 주문 API 연결 계약이 아니다.** 주문 연결은 Local Agent 없이 완주하며, 페어링·렌더러·NAVER
+> 로그인 준비는 **연결 완료 후 REVIEW_IMPORT 설정 트랙에서만** 요구된다.
 G3 준비 요건은 특정 렌더러가 아니라 아래로 정의한다:
 - **Local Agent 페어링·가용**(G1);
 - **가이드 상태 엔진 가용**(§8);
@@ -216,6 +263,9 @@ G3 준비 요건은 특정 렌더러가 아니라 아래로 정의한다:
 > 이벤트·영속 상태에 인코딩하지 않는다(§3.1 프라이버시 계승).
 
 각 상태 정의(안전 증거 / 사용자 설명 / 기대 행위자 / 허용 다음 행동 / 완료 조건 / 타임아웃·실패 / 재개):
+> **⚠ HISTORICAL (대체됨) — §0.1.** 아래 `readiness_checking`/`agent_unavailable`/`renderer_unavailable`/
+> `naver_login_required`/`naver_reconnect_required` 게이트 상태들은 **현행 주문 연결 리듀서에서 제거**되었다
+> (구현: `f60328a`·`726a03f`). 현행 진입은 `check_saved_credential` → capability 읽기 전용 재개 → 3-경로 fork.
 - **readiness_checking** — 증거: 페어링·가이드 상태 엔진·**최소 1개 승인된 렌더러**·데스크톱 boolean.
   행위자: SELLEROPS_AUTOMATED. (기본 렌더러 ACTION_WINDOW; PROJECTION은 선택 — §5.A.)
 - **agent_unavailable** / **renderer_unavailable** — G1 페어링/렌더러 가용 상태 매핑. 행위자:

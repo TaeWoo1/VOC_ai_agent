@@ -7,7 +7,8 @@
 // carrying any value.
 //
 // The initial order connection is Local-Agent-free: no sequence contains a readiness/agent/session
-// event, because none exists — `SAVED_CREDENTIAL_CHECKED{false}` hands straight to the path fork.
+// event, because none exists — a read-only `RESUME_FROM_CAPABILITY` hands straight to the path fork
+// (no credential) or restores completed (a prior sync succeeded), never re-running test/sync on load.
 import type { CredentialTemplateView } from "../types";
 import type { GuidedEvent } from "./types";
 
@@ -41,7 +42,7 @@ export const NAVER_LIKE_TEMPLATE: CredentialTemplateView = {
  * confirms the store has no application (`APPLICATION_LIST_RESULT{ found: false }`). No readiness gate.
  */
 const NEW_APP_ISSUANCE: GuidedEvent[] = [
-  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
+  { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
   { type: "APPLICATION_PATH", choice: "new" },
   { type: "APPLICATION_LIST_RESULT", found: false },
   { type: "ACCOUNT_STORE_RESOLVED" },
@@ -69,16 +70,21 @@ export const INVALID_CREDENTIAL_EVENTS: GuidedEvent[] = [
   { type: "TEST_RESULT", status: "FAILED", reasonCode: "INVALID_CREDENTIAL" },
 ];
 
-/** Reuse: a stored key is found → straight to the test, no re-entry → sync → completed (§flow 1–2). */
+/** Reuse on load: the backend snapshot shows a prior sync succeeded → completed restored, NO re-test/sync. */
 export const SAVED_CREDENTIAL_REUSE_EVENTS: GuidedEvent[] = [
-  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: true },
+  { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: true },
+];
+
+/** Stored key but never completed → land on the connection test as a user CTA, then the seller verifies. */
+export const SAVED_KEY_INCOMPLETE_EVENTS: GuidedEvent[] = [
+  { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: false },
   { type: "TEST_RESULT", status: "SUCCESS", reasonCode: null },
   { type: "SYNC_RESULT", status: "SUCCESS" },
 ];
 
 /** Existing app, no stored key: fork → "have" → enter existing key → register → test → sync (§flow 3). */
 export const EXISTING_APP_EVENTS: GuidedEvent[] = [
-  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
+  { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
   { type: "APPLICATION_PATH", choice: "have" },
   { type: "SUBMIT_CREDENTIALS" },
   { type: "CREDENTIAL_REGISTERED" },
@@ -88,7 +94,7 @@ export const EXISTING_APP_EVENTS: GuidedEvent[] = [
 
 /** Existing app but the Secret cannot be produced → credential recovery (§flow 4). */
 export const SECRET_LOST_EVENTS: GuidedEvent[] = [
-  { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false },
+  { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false },
   { type: "APPLICATION_PATH", choice: "have" },
   { type: "SECRET_UNAVAILABLE" },
 ];

@@ -220,9 +220,12 @@ export function GuidedConnectionWizard({
         {phase === "connection_testing" && (
           <div className="space-y-3" role="status" aria-live="polite">
             <p className="text-muted">{PHASE_COPY.connection_testing.body}</p>
-            {failureReason && (
-              <button type="button" className="btn-ghost" onClick={onRetryTest} disabled={busy}>
-                다시 확인
+            {/* When a test is actually running (the in-session submit chain), show only the progress line.
+                Otherwise — a read-only resume that landed here, or a prior failure — the seller triggers the
+                check themselves; the page never auto-runs a test/sync on load. */}
+            {!busy && (
+              <button type="button" className="btn-primary" onClick={onRetryTest}>
+                연결 확인
               </button>
             )}
           </div>

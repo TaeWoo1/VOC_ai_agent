@@ -17,14 +17,15 @@ import {
   HAPPY_PATH_EVENTS,
   INVALID_CREDENTIAL_EVENTS,
   SAVED_CREDENTIAL_REUSE_EVENTS,
+  SAVED_KEY_INCOMPLETE_EVENTS,
   SECRET_LOST_EVENTS,
 } from "./fixtures";
 
 const run = (events: GuidedEvent[], from: GuidedConnectionState = INITIAL_STATE): GuidedConnectionState =>
   events.reduce(reduce, from);
 
-/** Entry into the three-path fork: the saved-credential check found no stored key. No gate in between. */
-const NO_SAVED: GuidedEvent = { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false };
+/** Entry into the three-path fork: the read-only capability snapshot showed no stored key. No gate. */
+const NO_SAVED: GuidedEvent = { type: "RESUME_FROM_CAPABILITY", credentialPresent: false, completed: false };
 const fork = reduce(INITIAL_STATE, NO_SAVED); // application_path_choice
 
 describe("INITIAL_STATE", () => {
@@ -37,11 +38,18 @@ describe("INITIAL_STATE", () => {
   });
 });
 
-describe("saved-credential check (§flow 1) — no readiness gate", () => {
-  it("a stored key → reuse: straight to the connection test (registered), no re-entry, no gate", () => {
-    const s = reduce(INITIAL_STATE, { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: true });
+describe("read-only capability resume (§flow 1) — no readiness gate, no re-run on load", () => {
+  it("a prior successful sync → restore completed DIRECTLY, milestones all true (re-runs nothing)", () => {
+    const s = reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: true });
+    expect(s.phase).toBe("completed");
+    expect(s.milestones).toEqual({ registered: true, tested: true, synced: true });
+    expect(s.path).toBe("saved");
+  });
+
+  it("a stored key but NOT completed → the connection test as a USER CTA (registered only, no auto-run)", () => {
+    const s = reduce(INITIAL_STATE, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: false });
     expect(s.phase).toBe("connection_testing");
-    expect(s.milestones.registered).toBe(true);
+    expect(s.milestones).toEqual({ registered: true, tested: false, synced: false });
     expect(s.path).toBe("saved");
   });
 
@@ -50,6 +58,11 @@ describe("saved-credential check (§flow 1) — no readiness gate", () => {
     expect(fork.milestones.registered).toBe(false);
     expect(fork.path).toBe("unknown");
     expect(fork.failureReason).toBeNull();
+  });
+
+  it("RESUME_FROM_CAPABILITY is honored ONLY at the entry — never clobbers later journey progress", () => {
+    const testing = run(HAPPY_PATH_EVENTS.slice(0, 8)); // connection_testing
+    expect(reduce(testing, { type: "RESUME_FROM_CAPABILITY", credentialPresent: true, completed: true })).toBe(testing);
   });
 
   it("a stray sync in check_saved_credential is a no-op (cannot jump ahead, §17.2)", () => {
@@ -105,11 +118,21 @@ describe("full journeys → completed only after registered ∧ tested ∧ synce
     expect(s.path).toBe("existing");
   });
 
-  it("saved-credential reuse (no re-entry, no gate) walks to completed", () => {
+  it("saved-credential reuse (prior sync succeeded) restores completed on load, no re-run", () => {
     const s = run(SAVED_CREDENTIAL_REUSE_EVENTS);
     expect(s.phase).toBe("completed");
     expect(s.path).toBe("saved");
     expect(s.milestones).toEqual({ registered: true, tested: true, synced: true });
+  });
+
+  it("stored-key-but-incomplete resumes to the test CTA, then a user-triggered test+sync completes", () => {
+    const s = run(SAVED_KEY_INCOMPLETE_EVENTS);
+    expect(s.phase).toBe("completed");
+    expect(s.path).toBe("saved");
+    // The intermediate phase after resume was the user-CTA connection test (registered, not yet tested).
+    const afterResume = reduce(INITIAL_STATE, SAVED_KEY_INCOMPLETE_EVENTS[0]!);
+    expect(afterResume.phase).toBe("connection_testing");
+    expect(afterResume.milestones).toEqual({ registered: true, tested: false, synced: false });
   });
 });
 

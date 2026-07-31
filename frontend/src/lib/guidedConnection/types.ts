@@ -116,8 +116,14 @@ export type GuidedSyncStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "RUNNING";
  * the Local Agent.
  */
 export type GuidedEvent =
-  /** Result of the Vault saved-credential check (§flow 1). true → reuse the stored key without re-entry. */
-  | { type: "SAVED_CREDENTIAL_CHECKED"; hasSavedCredential: boolean }
+  /**
+   * Read-only resume from the backend capability snapshot on page load (§flow 1). Carries only two derived
+   * booleans — never a secret. `completed` (a prior first ORDER_SUMMARY sync actually succeeded) restores
+   * the completed screen with NO re-test/re-sync; `credentialPresent` (a stored key, not yet completed)
+   * lands on the connection test as a USER CTA (still no auto-run); neither → the three-path fork. This is
+   * the ONLY event that may reach `completed` directly, and only because the backend read already proved it.
+   */
+  | { type: "RESUME_FROM_CAPABILITY"; credentialPresent: boolean; completed: boolean }
   /** The seller's answer to "do you already have a NAVER API app?" (§discovery three-path fork). */
   | { type: "APPLICATION_PATH"; choice: "have" | "unknown" | "new" }
   /** The seller's self-check of NAVER's application list when they were unsure (§flow 7). */

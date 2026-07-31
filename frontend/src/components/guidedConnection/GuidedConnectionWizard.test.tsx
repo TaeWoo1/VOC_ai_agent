@@ -98,10 +98,15 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(screen.getByText(/불러오는 중/)).toBeInTheDocument();
   });
 
-  it("connection_testing failure → 다시 확인 calls onRetryTest", async () => {
+  it("connection_testing (idle) → shows a user CTA '연결 확인' that calls onRetryTest (no auto-run)", async () => {
     const { props } = renderWizard(stateAt("connection_testing", "TEMPORARY_PROVIDER_ERROR"));
-    await userEvent.click(screen.getByRole("button", { name: "다시 확인" }));
+    await userEvent.click(screen.getByRole("button", { name: "연결 확인" }));
     expect(props.onRetryTest).toHaveBeenCalledOnce();
+  });
+
+  it("connection_testing while BUSY → progress only, NO CTA (the in-session test is actually running)", () => {
+    renderWizard(stateAt("connection_testing"), { busy: true });
+    expect(screen.queryByRole("button", { name: "연결 확인" })).toBeNull();
   });
 
   it("first_order_sync failure → 다시 시도 calls onRetrySync", async () => {

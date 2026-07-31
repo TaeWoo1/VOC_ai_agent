@@ -21,7 +21,10 @@ set -uo pipefail
 
 BACKEND_ORIGIN="${SELLEROPS_BACKEND_ORIGIN:-http://127.0.0.1:18090}"
 FRONTEND_ORIGIN="${SELLEROPS_FRONTEND_ORIGIN:-http://127.0.0.1:5173}"
-FRONTEND_ENV_FILE="${SELLEROPS_FRONTEND_ENV_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../frontend" && pwd)/.env.local}"
+FRONTEND_DIR="${SELLEROPS_FRONTEND_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../frontend" && pwd)}"
+# Every dev env file Vite loads (any one setting an absolute VITE_API_BASE_URL reintroduces the stale-port
+# failure). Scanning only .env.local would miss a stale value copied into .env / .env.development.
+FRONTEND_ENV_FILES=("$FRONTEND_DIR/.env" "$FRONTEND_DIR/.env.local" "$FRONTEND_DIR/.env.development" "$FRONTEND_DIR/.env.development.local")
 
 # DB baseline (must match run-backend-local.sh's disposable target).
 PGHOST="${PGHOST:-127.0.0.1}"; PGPORT="${PGPORT:-55432}"; PGDATABASE="${PGDATABASE:-naver_walkthrough}"; PGUSER="${PGUSER:-sellerops}"
@@ -46,13 +49,16 @@ if [ "$(http_status "$BACKEND_ORIGIN/health")" = "200" ]; then pass "backend /he
 FE_API_STATUS="$(http_status -X POST -H 'Content-Type: application/json' -d '{}' "$FRONTEND_ORIGIN/api/auth/login")"
 if [ "$FE_API_STATUS" != "000" ]; then pass "frontend /api reachable (HTTP $FE_API_STATUS via proxy)"; else fail "frontend /api unreachable at $FRONTEND_ORIGIN (dev proxy / server down?)"; fi
 
-# 3. Single base URL: no absolute VITE_API_BASE_URL that diverges from the proxy origin.
-if [ -f "$FRONTEND_ENV_FILE" ] && grep -qE '^[[:space:]]*VITE_API_BASE_URL=[^[:space:]]' "$FRONTEND_ENV_FILE"; then
-  ABS="$(grep -E '^[[:space:]]*VITE_API_BASE_URL=' "$FRONTEND_ENV_FILE" | tail -1 | cut -d= -f2-)"
-  fail "frontend $FRONTEND_ENV_FILE sets VITE_API_BASE_URL=$ABS — remove it and use the /api proxy (stale-port risk)"
-else
-  pass "frontend uses same-origin /api proxy (no absolute VITE_API_BASE_URL)"
-fi
+# 3. Single base URL: NO dev env file sets an absolute VITE_API_BASE_URL (would bypass the /api proxy).
+STALE_BASE=""
+for f in "${FRONTEND_ENV_FILES[@]}"; do
+  if [ -f "$f" ] && grep -qE '^[[:space:]]*VITE_API_BASE_URL=[^[:space:]]' "$f"; then
+    ABS="$(grep -E '^[[:space:]]*VITE_API_BASE_URL=' "$f" | tail -1 | cut -d= -f2-)"
+    fail "$f sets VITE_API_BASE_URL=$ABS — remove it and use the same-origin /api proxy (stale-port risk)"
+    STALE_BASE="1"
+  fi
+done
+[ -z "$STALE_BASE" ] && pass "frontend uses same-origin /api proxy (no absolute VITE_API_BASE_URL in any dev env file)"
 # Proxy target must equal the backend origin (no mid-run divergence).
 PROXY_TARGET="${SELLEROPS_BACKEND_ORIGIN:-http://127.0.0.1:8080}"
 if [ "$PROXY_TARGET" = "$BACKEND_ORIGIN" ]; then pass "dev proxy target matches backend origin ($BACKEND_ORIGIN)"; else fail "dev proxy target ($PROXY_TARGET) != backend origin ($BACKEND_ORIGIN) — export SELLEROPS_BACKEND_ORIGIN=$BACKEND_ORIGIN for the frontend"; fi
