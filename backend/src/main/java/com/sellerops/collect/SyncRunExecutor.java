@@ -16,6 +16,8 @@ import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrder;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
 import com.sellerops.ingest.canonical.CanonicalReview;
+import com.sellerops.ingest.Cafe24ReviewIssueBridge;
+import com.sellerops.ingest.Cafe24ReviewPromotionReconciler;
 import com.sellerops.order.ChannelOrderIngestionService;
 import com.sellerops.selleraccount.SellerAccount;
 import com.sellerops.selleraccount.SellerAccountRepository;
@@ -25,6 +27,7 @@ import com.sellerops.sync.SyncJob;
 import com.sellerops.sync.SyncJobRepository;
 import com.sellerops.connector.ChannelConnectionStatus;
 import com.sellerops.connector.ChannelConnectionStatusRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -52,6 +55,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class SyncRunExecutor {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SyncRunExecutor.class);
+
     /** Single cursor per (account, data type); the connector owns the value's meaning. */
     static final String CURSOR_KEY = "primary";
     private static final int PAGE_LIMIT = 50;
@@ -65,12 +71,24 @@ public class SyncRunExecutor {
     private final SyncJobRepository syncJobs;
     private final SyncCursorRepository cursors;
     private final ChannelConnectionStatusRepository connectionStatus;
+    /**
+     * Optional: promotes freshly-ingested Cafe24 public board-4 REVIEW community articles into the
+     * canonical review store so they reach the existing Issue-Memory pipeline. Null in the tests that
+     * do not exercise the bridge; Spring injects the bean in production.
+     */
+    private final Cafe24ReviewIssueBridge reviewIssueBridge;
+    /** Optional: after a successful Cafe24 board-4 REVIEW backfill, promotes the full stored window's
+     *  reviews into Issue-Memory (no Cafe24 API call). Null in the bridge-less test constructor. */
+    private final Cafe24ReviewPromotionReconciler reviewIssueReconciler;
 
+    @Autowired
     public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
                            ConnectorRegistry registry, IngestionService ingestionService,
                            ChannelOrderIngestionService orderIngestionService,
                            SyncJobRepository syncJobs, SyncCursorRepository cursors,
-                           ChannelConnectionStatusRepository connectionStatus) {
+                           ChannelConnectionStatusRepository connectionStatus,
+                           Cafe24ReviewIssueBridge reviewIssueBridge,
+                           Cafe24ReviewPromotionReconciler reviewIssueReconciler) {
         this.sellerAccounts = sellerAccounts;
         this.channels = channels;
         this.registry = registry;
@@ -79,6 +97,22 @@ public class SyncRunExecutor {
         this.syncJobs = syncJobs;
         this.cursors = cursors;
         this.connectionStatus = connectionStatus;
+        this.reviewIssueBridge = reviewIssueBridge;
+        this.reviewIssueReconciler = reviewIssueReconciler;
+    }
+
+    /**
+     * Bridge-less constructor for tests (and any caller) that do not exercise the Cafe24
+     * review→issue-memory bridge or reconciler. Delegates with nulls, which the ingest and post-run
+     * paths null-guard. Production uses the {@code @Autowired} constructor above.
+     */
+    public SyncRunExecutor(SellerAccountRepository sellerAccounts, ChannelRepository channels,
+                           ConnectorRegistry registry, IngestionService ingestionService,
+                           ChannelOrderIngestionService orderIngestionService,
+                           SyncJobRepository syncJobs, SyncCursorRepository cursors,
+                           ChannelConnectionStatusRepository connectionStatus) {
+        this(sellerAccounts, channels, registry, ingestionService, orderIngestionService,
+                syncJobs, cursors, connectionStatus, null, null);
     }
 
     /**
@@ -132,7 +166,32 @@ public class SyncRunExecutor {
         }
 
         SyncJob job = startJob(orgId, account, dataType, trigger, connector.kind());
-        return runPages(job, connector, orgId, account, channel, dataType, backfillSeed);
+        SyncJob finished = runPages(job, connector, orgId, account, channel, dataType, backfillSeed);
+        reconcileCafe24ReviewIssueMemory(finished, orgId, account, channel, dataType, backfill);
+        return finished;
+    }
+
+    /**
+     * After a <b>successful, windowed Cafe24 board-4 REVIEW backfill</b>, promote the full stored
+     * window into Issue-Memory (bounded to this account + window, no Cafe24 API call) — independent of
+     * how many rows ingestion inserted vs. skipped, so an already-stored review is never permanently
+     * missing from the issue pipeline. Best-effort: a reconcile failure never fails the sync (the run
+     * already succeeded). Skips non-Cafe24 / non-REVIEW / non-windowed / non-SUCCESS runs.
+     */
+    private void reconcileCafe24ReviewIssueMemory(SyncJob job, UUID orgId, SellerAccount account,
+                                                  Channel channel, DataType dataType,
+                                                  BackfillWindow backfill) {
+        if (reviewIssueReconciler == null || backfill == null || dataType != DataType.REVIEW
+                || !"CAFE24".equals(channel.getCode()) || !"SUCCESS".equals(job.getStatus())) {
+            return;
+        }
+        try {
+            reviewIssueReconciler.reconcile(
+                    orgId, account.getId(), backfill.startDate(), backfill.endDate());
+        } catch (RuntimeException reconcileFailure) {
+            log.warn("Cafe24 REVIEW 이슈메모리 소급 reconcile 실패(무시하고 계속): {}",
+                    reconcileFailure.getClass().getSimpleName());
+        }
     }
 
     private SyncJob runPages(SyncJob job, PullConnector connector, UUID orgId,
@@ -226,8 +285,23 @@ public class SyncRunExecutor {
         // connector emits, not by data type. Dormant until the Cafe24 community
         // article connector lands (a later PR); existing connectors never emit these.
         if (isCommunityArticlePage(page)) {
-            return ingestionService.ingestCommunityArticles(orgId, channelId, sellerAccountId,
-                    typed(page, CanonicalCommunityArticle.class));
+            List<CanonicalCommunityArticle> articles = typed(page, CanonicalCommunityArticle.class);
+            IngestOutcome outcome = ingestionService.ingestCommunityArticles(
+                    orgId, channelId, sellerAccountId, articles);
+            if (reviewIssueBridge != null) {
+                // Promote public board-4 REVIEW articles into the canonical review store so they reach
+                // the existing Issue-Memory pipeline (community articles are otherwise not analyzed).
+                // Idempotent; secret reviews never reach here (excluded pre-storage). Best-effort: the
+                // articles are already stored, so a bridge failure must never wedge the sync or its
+                // cursor. Sanitized log — never an article id/content.
+                try {
+                    reviewIssueBridge.bridgePublicReviews(orgId, channelId, sellerAccountId, articles);
+                } catch (RuntimeException bridgeFailure) {
+                    log.warn("Cafe24 REVIEW→이슈메모리 브리지 실패(무시하고 계속): {}",
+                            bridgeFailure.getClass().getSimpleName());
+                }
+            }
+            return outcome;
         }
         return switch (page.dataType()) {
             case REVIEW -> ingestionService.ingestReviews(orgId, channelId, typed(page, CanonicalReview.class));
