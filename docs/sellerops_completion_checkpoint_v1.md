@@ -232,10 +232,16 @@ not touch #371 at this checkpoint.**
 Direction only; **each step needs its own fresh approval**, and any live channel call needs a
 single-use in-turn grant naming channel/account/date/operator.
 
-1. **Cafe24 REVIEW acquisition completion** — close the REVIEW read gaps that are still *tests-only*:
-   reply_status `C`/`P` tokens observed live, secret-exclusion count observed live, and
-   `raw_received` / missing-drop counts observed. (Next unit: `Cafe24 Review Acquisition Live Proof v1`
-   — start conditions in §10.)
+> **UPDATE 2026-07-31 (`97ad192`) — Cafe24 pilot channel v1 is COMPLETE.** Priority 1 below (Cafe24
+> REVIEW acquisition completion, #386) plus the REVIEW → Issue-Memory bridge + historical reconciler
+> (#387) merged; Cafe24 v1 is declared complete (pilot-level, not production-supported). Baseline:
+> `docs/sellerops_cafe24_channel_v1_completion.md`. **Cafe24 v1.1 deferred items** now lead: live
+> complaint-issue creation, live `N`/`P`/`C` distribution + secret-review exclusion + fresh board-4
+> insert, CSV dual-ingest hard fence, scheduled historical reconciliation, reply/comment write +
+> Guided Handoff. **The next channel priority is now NAVER v1 completion (item 2).**
+
+1. **Cafe24 REVIEW acquisition completion — ✅ DONE (#386/#387).** The remaining live gaps moved to
+   Cafe24 v1.1 (see the completion baseline). Historical stored reviews now reach Issue-Memory.
 2. **NAVER v1 completion** — close remaining NAVER gaps (status transitions + non-PAYED normalization
    tests-only; guided-FE e2e walk vs the proven backend boundary; reply submission stays gate-locked).
 3. **ESM+ inquiry / API-first** — resolve the INQUIRY read skeleton `NEEDS_VERIFICATION` via a

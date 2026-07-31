@@ -285,6 +285,14 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
 > platform** (`agent-runtime/`, #376–#381; read-only draft #384) was added. §4.1 was updated for the
 > Cafe24 read rows. **Production-support is still file-upload-only** and none of these is a seller-facing
 > feature. The consolidated snapshot is `docs/sellerops_completion_checkpoint_v1.md`.
+>
+> **Forward-pointer (2026-07-31, `97ad192`) — Cafe24 pilot channel v1 declared complete.** Later PRs
+> merged: Cafe24 REVIEW acquisition completion (#386, sanitized accounting + idempotent replay) and the
+> REVIEW → Issue-Memory bridge + bounded historical reconciler (#387, reusing the existing `issue`
+> graph, no new pipeline/LangGraph/migration). Cafe24 v1 = connect + orders/inquiries/reviews +
+> exact-window/dedup + privacy + Attention/Issue-Memory + agent draft/brief; reply/comment **write**
+> stays deferred (shown honestly). **Still pilot-only — production-support remains file-upload-only.**
+> Baseline: `docs/sellerops_cafe24_channel_v1_completion.md`.
 
 ---
 
@@ -575,7 +583,9 @@ router.**
 `docs/action-window-runtime/naver-smartstore-v1-plan.md` (self-declares it does not outrank the
 canonical product docs) · `docs/channel-capability-registration-matrix.md` (derived view of §4.1) ·
 `docs/sellerops_completion_checkpoint_v1.md` (point-in-time recovery baseline at `026c113`; derived
-from §4.1 + this document, never redefines them) · `docs/slices/*` ·
+from §4.1 + this document, never redefines them) ·
+`docs/sellerops_cafe24_channel_v1_completion.md` (Cafe24 pilot-v1 completion baseline at `97ad192`;
+derived, pilot-level, not production-supported) · `docs/slices/*` ·
 `docs/workstreams/action-window-frontend/*`.
 
 ### 9.5 Frozen (append-only — never rewritten)

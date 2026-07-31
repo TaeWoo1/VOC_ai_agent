@@ -121,6 +121,16 @@ sits behind a **policy-clarification gate**.
   The earlier 2026-06-25 (905-row) run used the now-superseded community-article sink and no longer
   represents the path. Only `C → ANSWERED` was live-observed; the N→C transition and public/N/P/UNKNOWN
   tokens stay tests-only.
+- **2026-07-31 — Cafe24 REVIEW → Issue-Memory bridge + Cafe24 channel v1 complete.** Board-4 public
+  reviews now promote into the canonical review store (honest CAFE24 provenance) and reach the existing
+  Issue-Memory extraction / `issue` graph — no new pipeline, no new LangGraph, no migration (PR #387).
+  A bounded reconciler promotes already-stored reviews with **no Cafe24 API call**; a real-source
+  downstream proof promoted the stored #375 row and reached extraction (2 unknown units, 0 issues — the
+  real body carried no rule-based complaint, so complaint-issue creation stays synthetic-proven).
+  **Cafe24 pilot channel v1 is declared complete** (connect + orders/inquiries/reviews acquisition +
+  exact-window/dedup + privacy + Attention/Issue-Memory + agent draft/brief; reply/comment **write**
+  remains deferred, shown honestly). Still **not production-supported** (file-upload only). Baseline:
+  `docs/sellerops_cafe24_channel_v1_completion.md`.
 - **(structural) — Coupang / ESM+ ORDER_SUMMARY.** Provider/seller-tool registration can require
   **사업자등록 first** and may create **dual seller-tool conflicts**. Registration strategy is a
   parallel track, not a code blocker — see `docs/channel-capability-registration-matrix.md`.
