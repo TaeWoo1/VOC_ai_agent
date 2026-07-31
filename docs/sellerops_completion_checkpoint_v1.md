@@ -247,6 +247,15 @@ single-use in-turn grant naming channel/account/date/operator.
 
 ## 10. Next unit — `Cafe24 Review Acquisition Live Proof v1` start conditions
 
+> **STATUS: EXECUTED 2026-07-31 (Cafe24 Review Acquisition Completion v1).** Ran on the disposable
+> `cafe24_phaseb` over the evidence-grounded window 2026-06-29 (board 4 only) + one idempotent replay.
+> Outcome: SyncRun SUCCESS, idempotent skip of the pre-existing row (no insert/duplicate, cursor stable),
+> new sanitized full-accounting instrumentation live-observed, credential rotation, Operator Attention/VOC
+> exposure (`NEW_REVIEW=1`), zero analysis on community articles. **`reply_status` observed = UNKNOWN
+> only**; `N`/`P`/`C` tokens and the secret-exclusion boundary **stayed tests-only** (this window carried
+> neither) — a wider window from operator knowledge of the mall's history is required to advance those.
+> Evidence: `docs/sellerops_cafe24_review_acquisition_completion_live_proof.md`.
+
 **Precondition state (already true):** Cafe24 REVIEW read (board 4) is live-proven for public fresh-insert
 + idempotent replay + 비밀글 fail-closed exclusion (#375). ORDER_SUMMARY is live-proven (#374). Both use
 the same OAuth; connector flags default off.
