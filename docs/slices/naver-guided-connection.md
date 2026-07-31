@@ -55,14 +55,28 @@
   포트 불일치를 **FAIL**한다. 브리지 flag OFF/DOWN이어도 주문 위저드는 정상이며, 브리지 상태는 REVIEW_IMPORT
   capability에만 반영된다. 실행 도중 backend 포트 변경 금지(고정 포트 + 프록시 타깃 일치 검사).
 
-### 0.1.1 이전 live walkthrough 기록 (sanitized) — **PRECONDITION_ABORTED**
+### 0.1.1 live walkthrough 기록 (sanitized) — **PRECONDITION_FAILED** (2회, 라이브 액션 0)
 
-2026-07-31 첫 operator walkthrough 시도는 **precondition 단계에서 중단(승인 폐기)** 되었고 **어떤 라이브 NAVER
-액션도 발생하지 않았다**: NAVER connection test = **0회**, NAVER ORDER_SUMMARY sync = **0회**, 자격증명
-입력·저장 = **없음**. 원인 두 가지 — ① 프론트 API base가 stale(`VITE_API_BASE_URL`가 죽은 포트를 가리켜
-로그인 실패), ② 최초 주문 연결에 **잘못 포함된 Local Agent readiness gate**(페어링 UI 요구). 승인은 재사용하지
-않으며(단일-사용, 폐기됨), 두 원인 모두 본 v1.1 개정에서 구조적으로 제거되었다. 향후 라이브는 **새 단일-사용
-승인 + preflight PASS** 필요.
+operator walkthrough는 지금까지 **precondition 단계에서 두 번 막혔고, 어떤 라이브 NAVER 액션도 발생하지
+않았다**: NAVER connection test = **0회**, ORDER_SUMMARY sync = **0회**, 자격증명 입력·저장 = **0**. 단일-사용
+승인은 **소비되지 않았다**.
+
+- **1차(2026-07-31, ABORTED):** ① 프론트 API base가 stale(`VITE_API_BASE_URL`가 죽은 포트) ② 최초 주문
+  연결에 **잘못 포함된 Local Agent readiness gate**. 둘 다 v1.1 개정에서 구조적으로 제거.
+- **2차(2026-08-01, PRECONDITION_FAILED) — 확정 root cause:** **프론트 origin 불일치 (`127.0.0.1:5173` vs
+  `localhost:5173`)**. 백엔드 CORS 허용 origin은 `http://localhost:5173` 단 하나(`SELLEROPS_CORS_ORIGIN`
+  기본값)라, `127.0.0.1:5173`에서 절대 base/stale 번들로 백엔드에 교차-origin 요청을 보내면 **CORS 403 →
+  로그인 실패**(라이브 재현: Origin `127.0.0.1:5173` → 403 / Origin `localhost:5173` → 200). 이를 키운 **부차
+  원인**은 preflight가 `/health`·proxy 응답·빈 login 400만 보고 `PREFLIGHT PASS`를 선언해 **실제 UI 로그인
+  경로를 검증하지 않은 것** — operator가 사실상 product-path 통합 테스트 역할을 하게 됨.
+
+**구조적 개선(closed):** ① preflight의 **유일 승인 origin = `http://localhost:5173`** 강제(127.0.0.1 → FAIL);
+② **실제 브라우저 UI 로그인 smoke를 preflight의 최종 필수 게이트**로 추가(clean-context 로그인 → 인증 shell →
+NAVER `연결하기`, NAVER API 호출 0; 실패 시 `PREFLIGHT FAIL: browser_login`); ③ 모든 dev env 파일의 절대
+`VITE_API_BASE_URL` 금지 + proxy 타깃 == backend origin 검사; ④ sanitized runtime manifest 기록(git commit·
+origin·DB·scheduler·flag·baseline·smoke 결과, secret/token 미기록); ⑤ 회귀 self-check(wrong-host / stale-override
+/ wrong-proxy / bad-login → FAIL, normal → PASS). 도구: `tools/naver-local/{preflight.sh, ui-login-smoke.mjs,
+preflight-selfcheck.sh}`. 향후 라이브는 **새 단일-사용 승인 + preflight PASS(브라우저 smoke 포함)** 필요.
 
 ---
 
