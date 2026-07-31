@@ -51,4 +51,12 @@ public interface SyncJobRepository extends JpaRepository<SyncJob, UUID> {
 
     /** Org-scoped lookup — a cross-org id reads as absent. */
     Optional<SyncJob> findByIdAndOrgId(UUID id, UUID orgId);
+
+    /**
+     * The most recent sync of one data type for one account, newest first — used by the
+     * first-connection capability check to report order-read status from real history
+     * (no live call). Org-scoped, so a cross-org account reads as absent.
+     */
+    Optional<SyncJob> findFirstByOrgIdAndSellerAccountIdAndDataTypeOrderByCreatedAtDesc(
+            UUID orgId, UUID sellerAccountId, String dataType);
 }
