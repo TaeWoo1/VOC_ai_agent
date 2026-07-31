@@ -30,9 +30,21 @@ export SELLEROPS_SEED_ENABLED="${SELLEROPS_SEED_ENABLED:-true}"
 KC_MASTER_SERVICE="${SELLEROPS_KC_MASTER_SERVICE:-sellerops-vault-master-key}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(cd "$HERE/../../backend" && pwd)"
+RUN_ENV="$HERE/.run/current.env"
 
 die() { echo "FAIL-CLOSED: $*" >&2; exit 1; }
 kc() { security find-generic-password -s "$1" -a "$2" -w 2>/dev/null || true; }
+
+# ---- walkthrough environment identity (from bootstrap.sh; required) -----------
+[ -f "$RUN_ENV" ] || die "no run env at $RUN_ENV — run tools/naver-local/bootstrap.sh first."
+# shellcheck disable=SC1090
+set -a; . "$RUN_ENV"; set +a
+export SELLEROPS_WALKTHROUGH_MODE="true"
+export SELLEROPS_WALKTHROUGH_RUN_ID="$WALKTHROUGH_RUN_ID"
+export SELLEROPS_WALKTHROUGH_GIT_COMMIT="$WALKTHROUGH_GIT_COMMIT"
+export SELLEROPS_WALKTHROUGH_DB_ALIAS="$WALKTHROUGH_DB_ALIAS"
+export SELLEROPS_WALKTHROUGH_FRONTEND_ORIGIN="$WALKTHROUGH_FRONTEND_ORIGIN"
+export SELLEROPS_WALKTHROUGH_BACKEND_ORIGIN="$WALKTHROUGH_BACKEND_ORIGIN"
 
 # ---- refuse to boot against the real sellerops DB -----------------------------
 case "$SPRING_DATASOURCE_URL" in
@@ -47,7 +59,7 @@ export SELLEROPS_VAULT_MASTER_KEY
 export SPRING_DATASOURCE_PASSWORD="${SPRING_DATASOURCE_PASSWORD:-}"
 
 # ---- boot (still no live NAVER call until an operator-approved step) ----------
-echo "starting NAVER-walkthrough backend on :${SERVER_PORT} (JDBC=$SPRING_DATASOURCE_URL, naver.enabled=true, scheduler=$SELLEROPS_COLLECT_SCHEDULER_ENABLED, key-id=$SELLEROPS_VAULT_KEY_ID)"
+echo "starting NAVER-walkthrough backend on :${SERVER_PORT} (JDBC=$SPRING_DATASOURCE_URL, naver.enabled=true, scheduler=$SELLEROPS_COLLECT_SCHEDULER_ENABLED, key-id=$SELLEROPS_VAULT_KEY_ID, walkthroughRun=$SELLEROPS_WALKTHROUGH_RUN_ID)"
 echo "reminder: start the frontend with SELLEROPS_BACKEND_ORIGIN=http://127.0.0.1:${SERVER_PORT} npm run dev  (and leave VITE_API_BASE_URL UNSET)"
 cd "$BACKEND_DIR"
 exec ./gradlew bootRun

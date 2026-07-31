@@ -109,6 +109,31 @@ export interface ConnectionCapabilityView {
   features: ConnectionCapabilityFeatureView[];
 }
 
+/**
+ * Sanitized identity of a disposable walkthrough runtime (mirrors the backend WalkthroughContextView).
+ * Carries a per-bootstrap opaque run id (an environment identifier, NOT a credential/token), git commit,
+ * origins, a DB alias (never the full URL), flags, coarse baseline counts, and a start time. Used to prove
+ * the operator's tab is bound to THIS backend/DB/runtime.
+ */
+export interface WalkthroughContextView {
+  walkthroughRunId: string;
+  gitCommit: string;
+  frontendOrigin: string;
+  backendOrigin: string;
+  dbAlias: string;
+  schedulerEnabled: boolean;
+  naverConnectorEnabled: boolean;
+  baseline: { credentials: number; syncJobs: number; channelOrders: number; naverAccounts: number };
+  startedAt: string;
+}
+
+/** Sanitized operator-tab handshake outcome (mirrors the backend result). */
+export interface WalkthroughHandshakeResult {
+  runMatched: boolean;
+  originMatched: boolean;
+  timestamp: string;
+}
+
 export interface SellerAccountResponse {
   id: string;
   channelId: string;

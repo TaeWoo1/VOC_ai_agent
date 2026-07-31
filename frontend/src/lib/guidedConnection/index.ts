@@ -7,6 +7,7 @@ export * from "./copy";
 export * from "./persistence";
 export * from "./tutorial";
 export * from "./reviewCapability";
+export * from "./walkthrough";
 export {
   NAVER_LIKE_TEMPLATE,
   HAPPY_PATH_EVENTS,

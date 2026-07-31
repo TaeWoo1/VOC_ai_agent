@@ -33,6 +33,8 @@ vi.mock("../lib/apiClient", () => ({
     testConnection: vi.fn(),
     manualSync: vi.fn(),
     getConnectionCapabilityStrict: vi.fn(),
+    getWalkthroughContext: vi.fn(),
+    walkthroughHandshake: vi.fn(),
   },
 }));
 
@@ -457,5 +459,101 @@ describe("ConnectNaver — StrictMode double-invocation is safe", () => {
     expect(headings).toHaveLength(1);
     expect(api.testConnection).not.toHaveBeenCalled();
     expect(api.manualSync).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConnectNaver — walkthrough environment binding (VITE_WALKTHROUGH_MODE)", () => {
+  const RUN = "wt-test-1234";
+  const ORIGIN = window.location.origin;
+
+  function walkthroughContext(over: Record<string, unknown> = {}) {
+    return {
+      walkthroughRunId: RUN,
+      gitCommit: "abc1234",
+      frontendOrigin: ORIGIN,
+      backendOrigin: "http://127.0.0.1:18090",
+      dbAlias: "naver_walkthrough",
+      schedulerEnabled: false,
+      naverConnectorEnabled: true,
+      baseline: { credentials: 0, syncJobs: 0, channelOrders: 0, naverAccounts: 0 },
+      startedAt: "2026-08-01T00:00:00Z",
+      ...over,
+    };
+  }
+  function enterWalkthrough(urlRun: string | null) {
+    vi.stubEnv("VITE_WALKTHROUGH_MODE", "true");
+    vi.stubEnv("VITE_WALKTHROUGH_RUN_ID", RUN);
+    window.history.pushState({}, "", `/connect/naver${urlRun ? `?walkthroughRun=${urlRun}` : ""}`);
+  }
+  afterEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("exact-run URL + matching context + handshake → banner + wizard reachable, NO page-load account write", async () => {
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
+    vi.mocked(api.walkthroughHandshake).mockResolvedValue({ runMatched: true, originMatched: true, timestamp: "t" });
+    renderPage();
+    expect(await screen.findByRole("note", { name: "Disposable NAVER Walkthrough" })).toHaveTextContent(RUN.slice(0, 8));
+    // Gate opened → the wizard's fork is reachable, and NO account was bootstrapped just by loading.
+    expect(await screen.findByRole("button", { name: "처음 발급할게요" })).toBeInTheDocument();
+    // The handshake sent the run id from the TAB'S URL (not the /context echo) + this tab's origin.
+    expect(api.walkthroughHandshake).toHaveBeenCalledWith(
+      expect.objectContaining({ walkthroughRunId: RUN, origin: window.location.origin }),
+    );
+    expect(screen.queryByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeNull();
+    expect(api.createApiChannelAccount).not.toHaveBeenCalled();
+    expect(api.testConnection).not.toHaveBeenCalled();
+    expect(api.manualSync).not.toHaveBeenCalled();
+  });
+
+  it("missing URL run id → MISMATCH screen, wizard + handshake blocked", async () => {
+    enterWalkthrough(null);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
+    expect(api.walkthroughHandshake).not.toHaveBeenCalled();
+    expect(api.createApiChannelAccount).not.toHaveBeenCalled();
+  });
+
+  it("wrong URL run id (stale/different run) → MISMATCH, no handshake, no bootstrap", async () => {
+    enterWalkthrough("wt-STALE-999");
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(api.walkthroughHandshake).not.toHaveBeenCalled();
+  });
+
+  it("backend context run id differs (different backend) → MISMATCH", async () => {
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext({ walkthroughRunId: "wt-OTHER-BACKEND" }));
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+  });
+
+  it("origin mismatch (context frontendOrigin differs) → MISMATCH", async () => {
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext({ frontendOrigin: "http://127.0.0.1:5173" }));
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+  });
+
+  it("handshake does not match (backend rejects the tab) → MISMATCH", async () => {
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockResolvedValue(walkthroughContext());
+    vi.mocked(api.walkthroughHandshake).mockResolvedValue({ runMatched: false, originMatched: true, timestamp: "t" });
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "처음 발급할게요" })).toBeNull();
+  });
+
+  it("context endpoint 404/unreachable → MISMATCH (never a silent proceed)", async () => {
+    enterWalkthrough(RUN);
+    vi.mocked(api.getWalkthroughContext).mockRejectedValue(new Error("404"));
+    renderPage();
+    expect(await screen.findByRole("alert", { name: "WALKTHROUGH_ENVIRONMENT_MISMATCH" })).toBeInTheDocument();
+    // Banner still renders (walkthrough mode) even when the context is unknown.
+    expect(screen.getByRole("note", { name: "Disposable NAVER Walkthrough" })).toBeInTheDocument();
   });
 });

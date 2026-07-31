@@ -55,28 +55,43 @@
   포트 불일치를 **FAIL**한다. 브리지 flag OFF/DOWN이어도 주문 위저드는 정상이며, 브리지 상태는 REVIEW_IMPORT
   capability에만 반영된다. 실행 도중 backend 포트 변경 금지(고정 포트 + 프록시 타깃 일치 검사).
 
-### 0.1.1 live walkthrough 기록 (sanitized) — **PRECONDITION_FAILED** (2회, 라이브 액션 0)
+### 0.1.1 live walkthrough 기록 (sanitized) — precondition에서 3회 막힘, 라이브 액션 0
 
-operator walkthrough는 지금까지 **precondition 단계에서 두 번 막혔고, 어떤 라이브 NAVER 액션도 발생하지
+operator walkthrough는 지금까지 **precondition 단계에서 세 번 막혔고, 어떤 라이브 NAVER 액션도 발생하지
 않았다**: NAVER connection test = **0회**, ORDER_SUMMARY sync = **0회**, 자격증명 입력·저장 = **0**. 단일-사용
-승인은 **소비되지 않았다**.
+승인은 어느 시도에서도 **소비되지 않았다**.
 
 - **1차(2026-07-31, ABORTED):** ① 프론트 API base가 stale(`VITE_API_BASE_URL`가 죽은 포트) ② 최초 주문
   연결에 **잘못 포함된 Local Agent readiness gate**. 둘 다 v1.1 개정에서 구조적으로 제거.
-- **2차(2026-08-01, PRECONDITION_FAILED) — 확정 root cause:** **프론트 origin 불일치 (`127.0.0.1:5173` vs
-  `localhost:5173`)**. 백엔드 CORS 허용 origin은 `http://localhost:5173` 단 하나(`SELLEROPS_CORS_ORIGIN`
-  기본값)라, `127.0.0.1:5173`에서 절대 base/stale 번들로 백엔드에 교차-origin 요청을 보내면 **CORS 403 →
-  로그인 실패**(라이브 재현: Origin `127.0.0.1:5173` → 403 / Origin `localhost:5173` → 200). 이를 키운 **부차
-  원인**은 preflight가 `/health`·proxy 응답·빈 login 400만 보고 `PREFLIGHT PASS`를 선언해 **실제 UI 로그인
-  경로를 검증하지 않은 것** — operator가 사실상 product-path 통합 테스트 역할을 하게 됨.
+- **2차(2026-08-01, PRECONDITION_FAILED):** 프론트 origin 불일치(`127.0.0.1:5173` vs `localhost:5173`) —
+  백엔드 CORS 허용 origin은 `http://localhost:5173` 하나뿐(`SELLEROPS_CORS_ORIGIN` 기본값)이라 `127.0.0.1`에서
+  교차-origin 요청은 CORS 403(라이브 재현: 127.0.0.1→403 / localhost→200). 부차 원인: preflight가 실제 UI
+  로그인을 검증하지 않고 `/health`·proxy만으로 PASS 선언.
+- **3차(2026-08-01, ENVIRONMENT_IDENTITY_UNVERIFIED):** operator가 완료를 보고했으나 승인된 disposable 백엔드/DB
+  에는 아무 흔적이 없었고(NAVER account/credential/sync/order = 0), 실 sellerops(:5432)에도 이번 run의 write는
+  없었다(credential leak 0, external write 0). **확정 결함:** operator가 실제 조작한 브라우저 탭이 승인된
+  프론트엔드/백엔드/DB/런타임과 동일한지 **암호학적·런타임 수준으로 바인딩되지 않았다.** stale 탭이나 다른
+  환경은 **하나의 가능한 발현일 뿐** 단정하지 않는다. 결과적으로 operator가 다시 product-path 통합 검증자
+  역할을 하게 되었다.
 
-**구조적 개선(closed):** ① preflight의 **유일 승인 origin = `http://localhost:5173`** 강제(127.0.0.1 → FAIL);
-② **실제 브라우저 UI 로그인 smoke를 preflight의 최종 필수 게이트**로 추가(clean-context 로그인 → 인증 shell →
-NAVER `연결하기`, NAVER API 호출 0; 실패 시 `PREFLIGHT FAIL: browser_login`); ③ 모든 dev env 파일의 절대
-`VITE_API_BASE_URL` 금지 + proxy 타깃 == backend origin 검사; ④ sanitized runtime manifest 기록(git commit·
-origin·DB·scheduler·flag·baseline·smoke 결과, secret/token 미기록); ⑤ 회귀 self-check(wrong-host / stale-override
-/ wrong-proxy / bad-login → FAIL, normal → PASS). 도구: `tools/naver-local/{preflight.sh, ui-login-smoke.mjs,
-preflight-selfcheck.sh}`. 향후 라이브는 **새 단일-사용 승인 + preflight PASS(브라우저 smoke 포함)** 필요.
+**구조적 개선(2차, closed):** preflight의 유일 승인 origin = `http://localhost:5173` 강제(127.0.0.1 → FAIL);
+실제 브라우저 UI 로그인 smoke를 최종 필수 게이트로 추가; 모든 dev env 파일의 절대 `VITE_API_BASE_URL` 금지;
+sanitized runtime manifest; 회귀 self-check.
+
+**구조적 개선(3차 — Environment Binding v1, closed):** 탭↔런타임을 **run identity로 바인딩**한다. bootstrap이
+불투명 `walkthroughRunId`(자격증명·토큰 아님)를 1개 생성해 backend env·frontend env(`VITE_WALKTHROUGH_RUN_ID`)·
+정확한 operator URL(`?walkthroughRun=<id>`)에 주입한다. ① 백엔드 **read-only `/api/walkthrough/context`**
+(walkthrough 모드 전용 — production에서는 bean 부재 → 404; DB URL/secret/token/raw id 미노출); ② FE는 credential
+form 진입 전 **URL runId == FE runId == backend context runId + origin 일치**를 모두 요구, 불일치면
+`WALKTHROUGH_ENVIRONMENT_MISMATCH`로 fail-closed(자동 복구·다른 backend 탐색 없음); ③ **operator-tab handshake**
+(runId+tabNonce+origin, **DB write 0**, sanitized 로그만) 성공 전에는 form·account bootstrap·NAVER 호출 금지;
+④ 항상 보이는 **disposable 배너**(runId·gitSHA·dbAlias·backend origin·NAVER 호출 수)로 화면 runId를 CLI manifest와
+육안 대조; ⑤ **page-load write 제거** — seller account 생성을 명시적 credential 제출로 지연(로드·새로고침·handshake
+DB write 0); ⑥ preflight가 context runId·git 일치 + 브라우저 env-binding smoke(정확 URL→배너 runId→wizard,
+0 NAVER 호출)를 최종 게이트로 요구하고 **정확히 하나의 operator URL + expected runId/git/dbAlias**를 출력. 도구:
+`tools/naver-local/{bootstrap.sh, run-backend-local.sh, run-frontend-local.sh, env-binding-smoke.mjs, preflight.sh,
+preflight-selfcheck.sh}`. **향후 라이브는 코드/프로세스 재시작으로 기존 승인 폐기 → 바인딩 완료 + 새 runtime
+manifest 생성 후 새 단일-사용 승인 필요.**
 
 ---
 

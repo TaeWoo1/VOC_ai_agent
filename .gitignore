@@ -141,3 +141,6 @@ ops/discord_outreach_bot/generated_prompts/
 ops/discord_outreach_bot/agent_runs/
 ops/discord_outreach_bot/__pycache__/
 tests/discord_outreach_bot/__pycache__/
+
+# NAVER walkthrough runtime run-identity (never commit)
+tools/naver-local/.run/

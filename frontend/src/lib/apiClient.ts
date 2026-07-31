@@ -57,6 +57,8 @@ import type {
   SyncRunView,
   UploadType,
   UserView,
+  WalkthroughContextView,
+  WalkthroughHandshakeResult,
   ReviewIssueView,
   ReviewIssueDetailView,
 } from "./types";
@@ -220,6 +222,21 @@ export const api = {
     const { data } = await http.get<ConnectionCapabilityView>(
       `/api/seller-accounts/${accountId}/connection-capability`,
     );
+    return data;
+  },
+  // Walkthrough environment-identity: the read-only runtime context (walkthrough mode only; a 404 in
+  // production/normal mode means "not a walkthrough runtime"). No DB write, no secret.
+  async getWalkthroughContext(): Promise<WalkthroughContextView> {
+    const { data } = await http.get<WalkthroughContextView>("/api/walkthrough/context");
+    return data;
+  },
+  // Operator-tab handshake — proves this tab is bound to the bootstrapped run + origin. No DB write.
+  async walkthroughHandshake(req: {
+    walkthroughRunId: string;
+    tabNonce: string;
+    origin: string;
+  }): Promise<WalkthroughHandshakeResult> {
+    const { data } = await http.post<WalkthroughHandshakeResult>("/api/walkthrough/handshake", req);
     return data;
   },
   // Read-only masked connection-info (credential metadata) for one seller account
