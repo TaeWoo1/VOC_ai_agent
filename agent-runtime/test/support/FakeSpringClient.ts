@@ -46,6 +46,9 @@ export interface SeedInquiry {
   readonly details: string;
   readonly receivedAt: string; // ISO-8601
   readonly status?: string; // canonical status; defaults UNANSWERED
+  readonly channelCode?: string | null; // resolved catalog label; defaults null
+  readonly channelNameKo?: string | null; // resolved catalog label; defaults null
+  readonly isSecret?: boolean | null; // Cafe24 비밀글 flag; defaults null (unclassified)
 }
 
 interface ItemState {
@@ -134,6 +137,9 @@ export class FakeSpringClient implements SpringClient {
       inquiryId: it.seed.inquiryId,
       sellerAccountId: it.seed.sellerAccountId,
       channelId: it.seed.channelId,
+      channelCode: it.seed.channelCode ?? null,
+      channelNameKo: it.seed.channelNameKo ?? null,
+      isSecret: it.seed.isSecret ?? null,
       phase: it.phase,
       status: it.status,
       informStatus: it.informStatus,

@@ -111,6 +111,32 @@ const ISSUE_DONE: AgentRunView = {
   },
 };
 
+const DRAFT_PREPARED: AgentRunView = {
+  threadId: "t-draft",
+  domain: "INQUIRY_DRAFT",
+  status: "DONE",
+  trail: ["searched", "prioritized", "detailed", "drafted"],
+  draftPreparation: {
+    kind: "INQUIRY_DRAFT_PREPARATION",
+    domain: "INQUIRY_DRAFT",
+    prepared: true,
+    workItemId: "wi-c",
+    inquiryId: "iq-c",
+    phase: "OPEN",
+    priorityBucket: "HIGH",
+    category: "delivery_status_reply",
+    provenance: { providerKind: "RULE_BASED", name: "rule-drafter", version: "rules-v1" },
+    channelId: "chan-cafe24",
+    channelCode: "CAFE24",
+    channelNameKo: "카페24",
+    inquiryStatus: "UNANSWERED",
+    informStatus: "N",
+    isSecret: true,
+    generatedAt: "2026-07-31T00:00:00.000Z",
+    replyDraft: "안녕하세요, 문의해 주셔서 감사합니다. 배송 진행 상황을 확인하여 빠르게 안내드리겠습니다.",
+  },
+};
+
 describe("운영 에이전트 page", () => {
   beforeEach(() => {
     agentMock.capabilities.mockResolvedValue(CAPS);
@@ -188,6 +214,79 @@ describe("운영 에이전트 page", () => {
     const editor2 = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
     expect(editor2.value).toBe("다른 초안 내용입니다.");
     expect(editor2.value).not.toContain("운영자가 A를 수정함");
+  });
+
+  it("draft: 초안 생성 shows the draft + channel/status/secret and the not-sent line, with no send/approve control", async () => {
+    agentMock.startRun.mockResolvedValue(DRAFT_PREPARED);
+    renderWithRouter(<Agent />);
+    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+
+    const group = await screen.findByRole("group", { name: "문의 답변 초안" });
+    expect(group).toBeInTheDocument();
+    expect((screen.getByLabelText("답변 초안") as HTMLTextAreaElement).value).toContain("안녕하세요");
+    // Metadata: target channel, inquiry status, secret flag, rule-based provenance.
+    expect(screen.getByText("카페24")).toBeInTheDocument();
+    expect(screen.getByText("미답변")).toBeInTheDocument();
+    expect(screen.getByText("비밀글")).toBeInTheDocument();
+    expect(screen.getByText(/규칙 기반 · rule-drafter/)).toBeInTheDocument();
+    // The explicit not-sent status line for the target channel.
+    expect(screen.getByText(/초안만 생성되었습니다\. 카페24에는 아직 전송되지 않았습니다\./)).toBeInTheDocument();
+    // NO send/전송/발송 control and NO approve/reject — this run already finished at the checkpoint.
+    expect(screen.queryByRole("button", { name: /전송|발송|등록|Cafe24로/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "승인 (기록)" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "거절" })).toBeNull();
+    // The regenerate CTA is present and the launch used the draft intent.
+    expect(screen.getByRole("button", { name: "초안 다시 만들기" })).toBeInTheDocument();
+    expect(agentMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ intent: "PREPARE_INQUIRY_DRAFT" }));
+  });
+
+  it("draft: 초안 다시 만들기 warns before overwriting a locally edited draft, then regenerates on 계속", async () => {
+    agentMock.startRun.mockResolvedValue(DRAFT_PREPARED);
+    renderWithRouter(<Agent />);
+    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+    const editor = (await screen.findByLabelText("답변 초안")) as HTMLTextAreaElement;
+    await userEvent.type(editor, " 추가 편집");
+
+    // First click surfaces the overwrite warning — it does NOT regenerate yet.
+    await userEvent.click(screen.getByRole("button", { name: "초안 다시 만들기" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("편집한 초안이 사라집니다");
+    expect(agentMock.startRun).toHaveBeenCalledTimes(1);
+
+    // Confirming regenerates (a fresh draft run).
+    await userEvent.click(screen.getByRole("button", { name: "계속" }));
+    await waitFor(() => expect(agentMock.startRun).toHaveBeenCalledTimes(2));
+  });
+
+  it("draft: reports nothing to draft when the queue is empty", async () => {
+    agentMock.startRun.mockResolvedValue({
+      threadId: "t-draft-empty",
+      domain: "INQUIRY_DRAFT",
+      status: "DONE",
+      trail: ["searched", "prioritized_empty"],
+      draftPreparation: {
+        kind: "INQUIRY_DRAFT_PREPARATION",
+        domain: "INQUIRY_DRAFT",
+        prepared: false,
+        workItemId: null,
+        inquiryId: null,
+        phase: null,
+        priorityBucket: null,
+        category: null,
+        provenance: null,
+        channelId: null,
+        channelCode: null,
+        channelNameKo: null,
+        inquiryStatus: null,
+        informStatus: null,
+        isSecret: null,
+        generatedAt: null,
+        note: "no unanswered inquiries to draft",
+      },
+    });
+    renderWithRouter(<Agent />);
+    await userEvent.click(await screen.findByRole("button", { name: "초안 생성" }));
+    expect(await screen.findByText("지금 초안을 만들 미답변 문의가 없습니다.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("답변 초안")).toBeNull();
   });
 
   it("surfaces a missing-account-scope error with a helpful hint", async () => {

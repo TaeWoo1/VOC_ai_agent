@@ -7,7 +7,7 @@
  * Unknown names fail loudly (fail closed) rather than silently no-op.
  */
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import { buildInquiryTools } from "./inquiryTools";
+import { buildInquiryTools, buildInquiryReadTools } from "./inquiryTools";
 import type { SpringClient } from "../spring/SpringClient";
 
 export class UnknownToolError extends Error {
@@ -50,7 +50,16 @@ export class ToolRegistry {
   }
 }
 
-/** The inquiry tool registry bound to a backend client. */
+/** The inquiry tool registry bound to a backend client (full approve loop: read + mutate). */
 export function buildInquiryToolRegistry(client: SpringClient): ToolRegistry {
   return new ToolRegistry(buildInquiryTools(client));
+}
+
+/**
+ * The READ-ONLY inquiry tool registry — search + detail only. The draft-preparation graph runs
+ * on this registry, so it cannot reach any mutating capability: there is no propose/save/record
+ * tool to invoke, which is the structural half of the "draft prep never mutates" guarantee.
+ */
+export function buildInquiryReadToolRegistry(client: SpringClient): ToolRegistry {
+  return new ToolRegistry(buildInquiryReadTools(client));
 }

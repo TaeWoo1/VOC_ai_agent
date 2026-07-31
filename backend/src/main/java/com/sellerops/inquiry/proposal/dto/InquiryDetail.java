@@ -11,12 +11,25 @@ import java.util.UUID;
  * identity</b> (no author). {@code proposal} is present once the item is PROPOSED;
  * {@code draft} is the current (latest) reply draft, present once the seller has
  * saved one.
+ *
+ * <p>{@code channelCode}/{@code channelNameKo} are the resolved catalog labels for
+ * {@code channelId} (null if the channel row is absent), so a reader can name the
+ * target channel (e.g. Cafe24) without dereferencing the raw id. {@code isSecret}
+ * mirrors {@link com.sellerops.inquiry.Inquiry#getSecret()} — {@code true} for a
+ * Cafe24 비밀글 (fail-closed), {@code false} for a positively-public post, and
+ * {@code null} when the source did not classify it (legacy / non-Cafe24). It lets a
+ * reader flag a secret inquiry <b>without</b> ever exposing more of its content; it
+ * does not change what this detail returns and never widens the dashboard/analysis
+ * exposure boundary (that exclusion lives in the repository/service layer).
  */
 public record InquiryDetail(
         UUID workItemId,
         UUID inquiryId,
         UUID sellerAccountId,
         UUID channelId,
+        String channelCode,
+        String channelNameKo,
+        Boolean isSecret,
         String phase,
         String status,
         String informStatus,
