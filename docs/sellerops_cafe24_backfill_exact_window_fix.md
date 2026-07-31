@@ -1,5 +1,9 @@
 # Cafe24 Board Backfill Exact-Window Fix v1
 
+> **HISTORICAL (not final).** The fix recorded here was subsequently **live-proven** —
+> see `docs/sellerops_cafe24_inquiry_read_live_proof.md`. This document is retained only as
+> the audit trail of the run that disproved the contract and the fix that followed.
+
 **Status: fix committed offline; NOT a full INQUIRY_READ proof success.**
 This records a live run that **disproved** the exact-window contract, and the fix that
 restores it. Sanitized throughout: counts / booleans / dates / schema facts only — no
