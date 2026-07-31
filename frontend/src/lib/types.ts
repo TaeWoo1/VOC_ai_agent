@@ -57,6 +57,32 @@ export interface Cafe24ConnectStartView {
   authorizationUrl: string;
 }
 
+/**
+ * Sanitized result of the read-only Cafe24 connection capability check (first-connection
+ * tutorial). Carries no mall id, token, OAuth code/state, board name, or personal data — the
+ * mall's identity is reported only as {@link identityConfirmed}. Every string is a closed
+ * vocabulary or a fixed backend label.
+ */
+export interface Cafe24CapabilityFeatureView {
+  feature: string; // ORDER_READ | INQUIRY_COLLECT | REVIEW_COLLECT | ISSUE_ANALYSIS | INQUIRY_REPLY | ONE_TO_ONE_EXCLUDED
+  state: string; // AVAILABLE | NEEDS_ATTENTION | NOT_ENABLED
+  label: string;
+  reason: string | null;
+}
+
+export interface Cafe24CapabilityView {
+  sellerAccountId: string;
+  connectionStatus: string | null;
+  credentialPresent: boolean;
+  credentialDecryptable: boolean;
+  identityConfirmed: boolean;
+  excludedBoardHidden: boolean;
+  connectionVerified: boolean;
+  overall: string; // AVAILABLE | NEEDS_ATTENTION
+  reason: string | null;
+  features: Cafe24CapabilityFeatureView[];
+}
+
 export interface SellerAccountResponse {
   id: string;
   channelId: string;

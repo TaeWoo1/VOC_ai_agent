@@ -12,6 +12,7 @@ import { Channels } from "./pages/Channels";
 import { ChannelDetail } from "./pages/ChannelDetail";
 import { Cafe24Connect } from "./pages/Cafe24Connect";
 import { Cafe24ConnectResult } from "./pages/Cafe24ConnectResult";
+import { Cafe24Tutorial } from "./pages/Cafe24Tutorial";
 import { ConnectNaver } from "./pages/ConnectNaver";
 import { Upload } from "./pages/Upload";
 import { ReviewImport } from "./pages/ReviewImport";
@@ -82,8 +83,9 @@ export function App() {
         <Route path="/settings/review-import" element={<ReviewImport />} />
         <Route path="/settings/alerts" element={<AlertSettings />} />
 
-        {/* Cafe24 OAuth connect flow (unchanged) */}
+        {/* Cafe24 OAuth connect flow */}
         <Route path="/connect/cafe24" element={<Cafe24Connect />} />
+        <Route path="/connect/cafe24/tutorial" element={<Cafe24Tutorial />} />
         <Route path="/connect/cafe24/result" element={<Cafe24ConnectResult />} />
 
         {/* NAVER guided-connection wizard (offline; §16.10 six steps) */}

@@ -4,6 +4,7 @@ import type {
   ArticleListResponse,
   AuthResponse,
   BackfillRequest,
+  Cafe24CapabilityView,
   Cafe24ConnectStartView,
   CapabilityView,
   ChannelCapabilityOverview,
@@ -287,6 +288,16 @@ export const api = {
     const { data } = await http.post<Cafe24ConnectStartView>("/api/connect/cafe24/start", {
       mallId,
     });
+    return data;
+  },
+  // Read-only first-connection capability check. NO mock fallback — the tutorial must never
+  // render a fake "verified" from a dead backend (fail closed). POST because the check performs
+  // a live token refresh with single-use rotation. The response is fully sanitized (no mall id,
+  // token, code/state, board name, or personal data).
+  async getCafe24Capability(accountId: string): Promise<Cafe24CapabilityView> {
+    const { data } = await http.post<Cafe24CapabilityView>(
+      `/api/connect/cafe24/${accountId}/capability`,
+    );
     return data;
   },
   // Strict variant for the connection-alert list (Alerts page): no silent mock

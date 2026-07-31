@@ -1,4 +1,5 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { parseCafe24Result, type Cafe24ResultStatus } from "../lib/cafe24Connect";
 
 // Success is shown ONLY from the backend-provided status param — never inferred from
@@ -41,7 +42,23 @@ const TONE_CLASS: Record<"good" | "warn" | "bad", string> = {
 
 export function Cafe24ConnectResult() {
   const [params] = useSearchParams();
-  const { status } = parseCafe24Result(params);
+  const navigate = useNavigate();
+  const { status, accountId } = parseCafe24Result(params);
+
+  // On a successful callback, hand off to the first-connection tutorial so verification +
+  // the first read-only sync resume automatically. Only the sanitized status/accountId are
+  // forwarded — never an OAuth code/state/token. Non-success results stay on this card.
+  useEffect(() => {
+    if (status !== "connected") {
+      return;
+    }
+    const query = new URLSearchParams({ status });
+    if (accountId) {
+      query.set("accountId", accountId);
+    }
+    navigate(`/connect/cafe24/tutorial?${query.toString()}`, { replace: true });
+  }, [status, accountId, navigate]);
+
   const copy = COPY[status];
 
   return (

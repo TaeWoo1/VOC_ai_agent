@@ -155,8 +155,11 @@ function ChannelCard({
           navigate(`/settings/channels/${account.id}`);
         }
         return;
-      case "reconnect":
       case "connect-cafe24":
+        // First-time Cafe24 connection → the guided first-connection tutorial.
+        navigate(`${CAFE24_CONNECT_ROUTE}/tutorial`);
+        return;
+      case "reconnect":
         // Reuse the existing account via the OAuth flow (backend upserts, no duplicate).
         navigate(CAFE24_CONNECT_ROUTE);
         return;
