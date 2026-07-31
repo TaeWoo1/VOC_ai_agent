@@ -12,9 +12,10 @@
 > `docs/channel-capability-registration-matrix.md`; this ledger adds **lessons**, not registration
 > columns.
 >
-> **Snapshot basis.** The `status` column mirrors §4.1 **as of 2026-07-15** (NAVER REVIEW live-verify
-> update; all other rows as of 2026-07-07). Re-derive from §4.1 before citing at a later date — a
-> recorded snapshot is not a standing fact.
+> **Snapshot basis.** The `status` column mirrors §4.1 **as of 2026-07-31** (Cafe24 REVIEW live-verify
+> #375 / Cafe24 INQUIRY live-verify #382; NAVER REVIEW as of 2026-07-15; all other rows as of
+> 2026-07-07). Recovery baseline: `docs/sellerops_completion_checkpoint_v1.md` (`026c113`). Re-derive
+> from §4.1 before citing at a later date — a recorded snapshot is not a standing fact.
 
 ---
 
@@ -53,8 +54,8 @@
 | NAVER | INQUIRY | 미확정 (undecided) | **PENDING** | **Pending.** Acquisition method not yet decided; needs API-existence discovery. MANUAL only for now. |
 | NAVER | REVIEW reply (write) | Action Window `REPLY_SUBMISSION` | **PENDING** | **Pending / offline.** Guided, human-performed, observe-only (SellerOps never submits). No official API → posting is **UNVERIFIED** by design. Live is gate-locked. Never label "답변 등록 지원". (roadmap §4.1 note, `contracts/action-window/v2/`) |
 | Cafe24 (자사몰) | ORDER_SUMMARY | API (OAuth) | **VERIFIED** | **Verified** E2E PASS (token rotation + amount reconciliation). Seller's own mall only — **no proxy across malls.** Flag off; pilot-operation decision pending. |
-| Cafe24 (자사몰) | REVIEW | API (board 4 구매후기) | **VERIFIED** | **Article capture verified live** (2026-07-30, PR #375): public-review fresh insert + idempotent replay on a real mall, 비밀글(secret) fail-closed excluded. Only `reply_status` N/PENDING is live-observed; C/P are synthetic. Flag off; seller's own mall only. |
-| Cafe24 (자사몰) | INQUIRY | API (board 6 문의사항) | **PARTIAL** | **Article capture implemented** (board 6 → Inquiry + one OPEN work item; board 9 1:1 excluded). The one genuine board-6 live run (2026-06-25, 905 rows) used the **superseded** community-article sink; the current work-queue sink (2026-07-05) is **not yet live-proven** (synthetic only). Only N/PENDING live-observed. Don't label "지원" for INQUIRY yet. |
+| Cafe24 (자사몰) | REVIEW | API (board 4 구매후기) | **VERIFIED** | **Article capture verified live** (2026-07-30, PR #375): public-review fresh insert + idempotent replay on a real mall, 비밀글(secret) fail-closed excluded. Only `reply_status`=UNKNOWN was live-observed (raw not N/P/C → fail-closed; PENDING expectation withdrawn); N/P/C tokens are tests-only and raw_received/missing-drop counts are unobserved (uninstrumented). Flag off; seller's own mall only. |
+| Cafe24 (자사몰) | INQUIRY | API (board 6 문의사항) | **VERIFIED** | **Article capture verified live** on the current work-queue sink (2026-07-31, PR #382, exact-window contract): 1 in-window emitted, out-of-window excluded pre-mapper, C→ANSWERED, `is_secret=true`, secret boundary live (Inbox includes / dashboard+analysis exclude), idempotent replay. board 9 1:1 excluded, never called. **public/N/P/UNKNOWN tokens + N→C transition = tests-only.** Flag off; seller's own mall only. Don't label "지원" (not production-supported). |
 | ESM+ (GMARKET) | ORDER_SUMMARY | API | **IMPLEMENTED** | **Auth skeleton only**, no live verify. Provider onboarding requires 사업자등록 first, then provider inquiry. |
 | ESM+ (GMARKET) | INQUIRY | API (skeleton) + MANUAL (Excel) | **PARTIAL** | **Unwired.** Read skeleton `NEEDS_VERIFICATION`; Excel import backend exists but not surfaced in FE. Only Gate-1 surface confirmed. Next = constrained read-only Gate-2 probe (separate approval). |
 | ESM+ (GMARKET / AUCTION) | REVIEW | EXPORT (supervised) candidate | **PENDING** | **Policy-limited candidate.** Only the market tab surface confirmed (2026-07-07). Terms clarification required. Gmarket ↔ Auction must be **attribution-separated**. |
@@ -71,9 +72,10 @@
 | future marketplaces | — | (per §4 procedure) | **PENDING** | Open-ended by design. New channel = new adapter + mapping; core model unchanged (roadmap §2). |
 
 **One-line summary (for other docs to cite):** Production-supported = **file upload (all channels)
-only.** NAVER/Cafe24 `ORDER_SUMMARY` and NAVER review supervised capture are **live-verified** (not
-always-on). Everything else is implemented / skeleton / candidate — and every Action Window review
-path sits behind a **policy-clarification gate**.
+only.** NAVER/Cafe24 `ORDER_SUMMARY`, NAVER review supervised capture, and Cafe24 REVIEW (board 4) /
+INQUIRY (board 6) read are **live-verified** (not always-on; supervised, single-account, disposable
+backend). Everything else is implemented / skeleton / candidate — and every Action Window review path
+sits behind a **policy-clarification gate**.
 
 ---
 
@@ -96,9 +98,20 @@ path sits behind a **policy-clarification gate**.
   status — not a gap to fill.
 - **2026-07-07 — 오늘의집 (OHOU).** Direct API is partner-restricted; MANUAL upload is the honest
   ceiling until the official partner export flow is verified.
-- **2026-07 — Cafe24.** Order API is the strongest verified non-NAVER path (E2E PASS). Reviews/
-  inquiries via board API are blocked on **article capture**, and everything is **seller-own-mall
-  only** — no cross-mall proxying.
+- **2026-07 — Cafe24.** Order API is the strongest verified non-NAVER path (E2E PASS), and everything
+  is **seller-own-mall only** — no cross-mall proxying.
+- **2026-07-30 — Cafe24 REVIEW (board 4 구매후기).** Article capture verified live (PR #375): public
+  fresh-insert + idempotent replay on a real mall, 비밀글(secret) fail-closed excluded **before** the
+  mapper so secret title/body never reach DB/log. Only `reply_status`=UNKNOWN was live-observed (the
+  raw token was not N/P/C → fail-closed, PENDING expectation withdrawn); N/P/C tokens are tests-only,
+  and the secret-exclusion count + raw_received/missing-drop counts are unobserved (uninstrumented).
+- **2026-07-31 — Cafe24 INQUIRY (board 6 문의사항).** The current work-queue sink is verified live
+  (PR #382) under an **exact-window (Asia/Seoul, both-ends-inclusive)** contract: out-of-window rows
+  drop pre-mapper, `is_secret` is preserved fail-closed, and the secret boundary is live-proven —
+  secret inquiries stay in the Inbox work queue but are excluded from dashboard counts and analysis.
+  The earlier 2026-06-25 (905-row) run used the now-superseded community-article sink and no longer
+  represents the path. Only `C → ANSWERED` was live-observed; the N→C transition and public/N/P/UNKNOWN
+  tokens stay tests-only.
 - **(structural) — Coupang / ESM+ ORDER_SUMMARY.** Provider/seller-tool registration can require
   **사업자등록 first** and may create **dual seller-tool conflicts**. Registration strategy is a
   parallel track, not a code blocker — see `docs/channel-capability-registration-matrix.md`.
