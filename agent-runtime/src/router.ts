@@ -13,6 +13,8 @@
  */
 import { InquiryAgentRuntime } from "./runtime";
 import type { RunResult } from "./runtime";
+import { InquiryDraftAgentRuntime } from "./inquiryDraftRuntime";
+import type { InquiryDraftRunResult } from "./inquiryDraftRuntime";
 import { ReviewAgentRuntime } from "./reviewRuntime";
 import type { ReviewRunResult } from "./reviewRuntime";
 import { IssueAgentRuntime } from "./issueRuntime";
@@ -24,11 +26,13 @@ import { log } from "./log";
 
 export type RouterRunResult =
   | { readonly domain: "INQUIRY"; readonly result: RunResult }
+  | { readonly domain: "INQUIRY_DRAFT"; readonly result: InquiryDraftRunResult }
   | { readonly domain: "REVIEW"; readonly result: ReviewRunResult }
   | { readonly domain: "ISSUE"; readonly result: IssueRunResult };
 
 export interface AgentRouterDeps {
   readonly inquiry: InquiryAgentRuntime;
+  readonly inquiryDraft: InquiryDraftAgentRuntime;
   readonly review: ReviewAgentRuntime;
   readonly issue: IssueAgentRuntime;
 }
@@ -42,12 +46,14 @@ export class UnknownThreadError extends Error {
 
 export class AgentRouter {
   readonly inquiry: InquiryAgentRuntime;
+  readonly inquiryDraft: InquiryDraftAgentRuntime;
   readonly review: ReviewAgentRuntime;
   readonly issue: IssueAgentRuntime;
   private readonly threadDomain = new Map<string, AgentDomain>();
 
   constructor(deps: AgentRouterDeps) {
     this.inquiry = deps.inquiry;
+    this.inquiryDraft = deps.inquiryDraft;
     this.review = deps.review;
     this.issue = deps.issue;
   }
@@ -69,6 +75,10 @@ export class AgentRouter {
       // The issue-memory subgraph has no checkpoint: it runs straight to a DONE brief here.
       return { domain, result: await this.issue.run(threadId, request) };
     }
+    if (domain === "INQUIRY_DRAFT") {
+      // Draft preparation has no checkpoint either: it runs straight to a DONE draft.
+      return { domain, result: await this.inquiryDraft.run(threadId, request) };
+    }
     return { domain, result: await this.inquiry.start(threadId, request) };
   }
 
@@ -88,6 +98,11 @@ export class AgentRouter {
     if (domain === "ISSUE") {
       throw new Error(
         `thread ${threadId} is an issue-memory run: it has no checkpoint to resume. Start again to refresh the brief.`,
+      );
+    }
+    if (domain === "INQUIRY_DRAFT") {
+      throw new Error(
+        `thread ${threadId} is a draft-preparation run: it has no checkpoint to resume. Start again to prepare a fresh draft.`,
       );
     }
     if (domain === "REVIEW") {

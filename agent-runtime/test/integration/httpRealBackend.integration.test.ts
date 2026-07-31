@@ -96,7 +96,7 @@ describe.skipIf(!RUN)("Agent Runtime HTTP — real backend integration", () => {
     const health = (await (await fetch(`${base}/health`)).json()) as any;
     expect(health.status).toBe("ok");
     const caps = (await (await fetch(`${base}/capabilities`)).json()) as any;
-    expect(caps.intents).toHaveLength(3);
+    expect(caps.intents).toHaveLength(4);
     const cap = await backend(`/api/inquiry-publish/capability`);
     expect(cap.executionEnabled).toBe(false);
     expect(cap.replyAdapterChannelCodes).toEqual([]);

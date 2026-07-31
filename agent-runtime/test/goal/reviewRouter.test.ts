@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseGoal, routeIntent } from "../../src/goal/parseGoal";
 import { AgentRouter } from "../../src/router";
 import { InquiryAgentRuntime } from "../../src/runtime";
+import { InquiryDraftAgentRuntime } from "../../src/inquiryDraftRuntime";
 import { ReviewAgentRuntime } from "../../src/reviewRuntime";
 import { IssueAgentRuntime } from "../../src/issueRuntime";
 import { FakeSpringClient } from "../support/FakeSpringClient";
@@ -57,6 +58,7 @@ describe("AgentRouter coexistence", () => {
     const issue = new FakeIssueSpringClient(fourIssues());
     const r = new AgentRouter({
       inquiry: new InquiryAgentRuntime({ client: inquiry }),
+      inquiryDraft: new InquiryDraftAgentRuntime({ client: inquiry }),
       review: new ReviewAgentRuntime({ client: review }),
       issue: new IssueAgentRuntime({ client: issue }),
     });

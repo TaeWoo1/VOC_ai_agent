@@ -45,6 +45,7 @@ class InquiryProposalServiceTest {
     @Autowired InquiryProposalRepository proposals;
     @Autowired InquiryWorkItemAuditRepository audits;
     @Autowired com.sellerops.inquiry.reply.InquiryReplyDraftRepository drafts;
+    @Autowired com.sellerops.channel.ChannelRepository channels;
     @Autowired PlatformTransactionManager txManager;
 
     private InquiryProposalWriter writer;
@@ -77,7 +78,7 @@ class InquiryProposalServiceTest {
     }
 
     private InquiryProposalService service(InquiryProposalProvider provider) {
-        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts);
+        return new InquiryProposalService(workItems, proposals, inquiries, provider, writer, drafts, channels);
     }
 
     private InquiryWorkItem seedOpen(UUID orgId, String title, String body, String author) {
@@ -229,6 +230,55 @@ class InquiryProposalServiceTest {
         assertThat(after.phase()).isEqualTo("PROPOSED");
         assertThat(after.proposal()).isNotNull();
         assertThat(after.proposal().summaryCategory()).isEqualTo("delivery_status_reply");
+    }
+
+    @Test
+    void detailSurfacesChannelLabelsAndSecretFlag() {
+        // A real channel-catalog row so the labels resolve (fail-open to null otherwise).
+        com.sellerops.channel.Channel ch = new com.sellerops.channel.Channel();
+        ch.setCode("CAFE24");
+        ch.setNameKo("카페24");
+        ch.setStatus(com.sellerops.channel.ChannelStatus.AVAILABLE);
+        ch.setSupportsInquiry(true);
+        ch.setSortOrder(1);
+        UUID channelId = channels.save(ch).getId();
+
+        Inquiry q = new Inquiry();
+        q.setOrgId(org);
+        q.setChannelId(channelId);
+        q.setTitle("비밀 문의");
+        q.setBody("비밀 본문");
+        q.setStatus("UNANSWERED");
+        q.setInformStatus("N");
+        q.setSecret(true); // Cafe24 비밀글
+        q.setReceivedAt(Instant.parse("2026-06-27T00:00:00Z"));
+        UUID inquiryId = inquiries.save(q).getId();
+
+        InquiryWorkItem wi = new InquiryWorkItem();
+        wi.setOrgId(org);
+        wi.setInquiryId(inquiryId);
+        wi.setSellerAccountId(UUID.randomUUID());
+        wi.setChannelId(channelId);
+        wi.setPhase(InquiryWorkItemPhase.OPEN);
+        UUID workItemId = workItems.save(wi).getId();
+
+        InquiryDetail detail = service(new FakeProvider()).detail(org, workItemId);
+        assertThat(detail.channelId()).isEqualTo(channelId);
+        assertThat(detail.channelCode()).isEqualTo("CAFE24");
+        assertThat(detail.channelNameKo()).isEqualTo("카페24");
+        assertThat(detail.isSecret()).isTrue();
+        assertThat(detail.status()).isEqualTo("UNANSWERED");
+    }
+
+    @Test
+    void detailChannelLabelsAreNullWhenTheCatalogRowIsAbsent() {
+        // seedOpen uses a random channelId with no channels row → fail-open to null labels.
+        InquiryWorkItem wi = seedOpen(org, "일반 문의", "본문", null);
+        InquiryDetail detail = service(new FakeProvider()).detail(org, wi.getId());
+        assertThat(detail.channelCode()).isNull();
+        assertThat(detail.channelNameKo()).isNull();
+        // Non-Cafe24 / unclassified inquiries carry a null secret flag (visible everywhere).
+        assertThat(detail.isSecret()).isNull();
     }
 
     @Test

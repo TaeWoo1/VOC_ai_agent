@@ -1,5 +1,7 @@
 package com.sellerops.inquiry.proposal;
 
+import com.sellerops.channel.Channel;
+import com.sellerops.channel.ChannelRepository;
 import com.sellerops.common.ApiException;
 import com.sellerops.inquiry.Inquiry;
 import com.sellerops.inquiry.InquiryRepository;
@@ -51,16 +53,19 @@ public class InquiryProposalService {
     private final InquiryProposalProvider provider;
     private final InquiryProposalWriter writer;
     private final InquiryReplyDraftRepository drafts;
+    private final ChannelRepository channels;
 
     public InquiryProposalService(InquiryWorkItemRepository workItems, InquiryProposalRepository proposals,
                                   InquiryRepository inquiries, InquiryProposalProvider provider,
-                                  InquiryProposalWriter writer, InquiryReplyDraftRepository drafts) {
+                                  InquiryProposalWriter writer, InquiryReplyDraftRepository drafts,
+                                  ChannelRepository channels) {
         this.workItems = workItems;
         this.proposals = proposals;
         this.inquiries = inquiries;
         this.provider = provider;
         this.writer = writer;
         this.drafts = drafts;
+        this.channels = channels;
     }
 
     /** Seller-only, org-scoped detail exposing the raw title/details (never author). */
@@ -70,11 +75,19 @@ public class InquiryProposalService {
         ProposalView proposal = proposals.findByWorkItemId(workItemId).map(this::toView).orElse(null);
         ReplyDraftView draft = drafts.findTopByWorkItemIdOrderByVersionDesc(workItemId)
                 .map(ReplyDraftView::of).orElse(null);
+        // Resolve the channel labels fail-open (null if the catalog row is absent), mirroring the
+        // review reply-work read; the raw channelId still travels for callers that key on it.
+        Channel channel = channels.findById(workItem.getChannelId()).orElse(null);
+        String channelCode = channel == null ? null : channel.getCode();
+        String channelNameKo = channel == null ? null : channel.getNameKo();
         return new InquiryDetail(
                 workItem.getId(),
                 inquiry.getId(),
                 workItem.getSellerAccountId(),
                 workItem.getChannelId(),
+                channelCode,
+                channelNameKo,
+                inquiry.getSecret(),
                 workItem.getPhase().name(),
                 inquiry.getStatus(),
                 inquiry.getInformStatus(),

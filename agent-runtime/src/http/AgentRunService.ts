@@ -21,6 +21,8 @@
 import { randomUUID } from "node:crypto";
 import { InquiryAgentRuntime } from "../runtime";
 import type { RunResult } from "../runtime";
+import { InquiryDraftAgentRuntime } from "../inquiryDraftRuntime";
+import type { InquiryDraftRunResult } from "../inquiryDraftRuntime";
 import { ReviewAgentRuntime } from "../reviewRuntime";
 import type { ReviewRunResult } from "../reviewRuntime";
 import { IssueAgentRuntime } from "../issueRuntime";
@@ -42,6 +44,7 @@ import type {
   AgentRunView,
   CapabilitiesView,
   InquiryCheckpointView,
+  InquiryDraftPreparationView,
   ResumeRunRequest,
   ReviewCheckpointView,
   StartRunRequest,
@@ -72,6 +75,13 @@ const INTENT_CATALOGUE: CapabilitiesView["intents"] = [
     hasCheckpoint: true,
     requiresAccountScope: false,
     examples: ["미답변 문의 처리해줘", "답변 필요한 문의 보여줘"],
+  },
+  {
+    intent: "PREPARE_INQUIRY_DRAFT",
+    domain: "INQUIRY_DRAFT",
+    hasCheckpoint: false,
+    requiresAccountScope: false,
+    examples: ["Cafe24 문의 답변 초안 만들어줘", "문의 답변 초안 준비해줘"],
   },
   {
     intent: "HANDLE_REVIEW_REPLIES",
@@ -119,11 +129,17 @@ export class AgentRunService {
 
   private runtimes(bundle: SpringClientBundle, stores: RunStores): {
     inquiry: InquiryAgentRuntime;
+    inquiryDraft: InquiryDraftAgentRuntime;
     review: ReviewAgentRuntime;
     issue: IssueAgentRuntime;
   } {
     return {
       inquiry: new InquiryAgentRuntime({ client: bundle.inquiry, runStore: stores.inquiry }),
+      // Draft preparation is a TERMINAL read (no checkpoint, no pause): it returns the draft in the
+      // response and retains nothing. So it takes no store from the durable provider — its default
+      // in-memory store is per-request scratch, and there is no paused state to survive a restart.
+      // This is why it is safe even under APP_ENV=production despite not being the spring store.
+      inquiryDraft: new InquiryDraftAgentRuntime({ client: bundle.inquiry }),
       review: new ReviewAgentRuntime({ client: bundle.review, runStore: stores.review }),
       issue: new IssueAgentRuntime({ client: bundle.issue, runStore: stores.issue }),
     };
@@ -166,6 +182,7 @@ export class AgentRunService {
     const rt = this.runtimes(bundle, stores);
 
     if (domain === "INQUIRY") return this.inquiryView(threadId, await rt.inquiry.start(threadId, request));
+    if (domain === "INQUIRY_DRAFT") return this.draftView(threadId, await rt.inquiryDraft.run(threadId, request));
     if (domain === "REVIEW") return this.reviewView(threadId, await rt.review.start(threadId, request));
     return this.issueView(threadId, await rt.issue.run(threadId, request));
   }
@@ -330,6 +347,34 @@ export class AgentRunService {
 
   private issueView(threadId: string, result: IssueRunResult): AgentRunView {
     return { threadId, domain: "ISSUE", status: "DONE", trail: result.trail, brief: result.brief };
+  }
+
+  private draftView(threadId: string, result: InquiryDraftRunResult): AgentRunView {
+    const p = result.preparation;
+    const m = p.meta;
+    const draftPreparation: InquiryDraftPreparationView = {
+      kind: "INQUIRY_DRAFT_PREPARATION",
+      domain: "INQUIRY_DRAFT",
+      prepared: p.prepared,
+      workItemId: m?.workItemId ?? null,
+      inquiryId: m?.inquiryId ?? null,
+      phase: m?.phase ?? null,
+      priorityBucket: m?.priorityBucket ?? null,
+      category: m?.category ?? null,
+      provenance: m?.provenance ?? null,
+      channelId: m?.channelId ?? null,
+      channelCode: m?.channelCode ?? null,
+      channelNameKo: m?.channelNameKo ?? null,
+      inquiryStatus: m?.inquiryStatus ?? null,
+      informStatus: m?.informStatus ?? null,
+      isSecret: m?.isSecret ?? null,
+      generatedAt: m?.generatedAt ?? null,
+      // The generated reply text — the ONLY content here (no customer subject/body). Present in this
+      // live response only; never persisted, so a reloaded run cannot re-surface it.
+      ...(p.replyDraft != null ? { replyDraft: p.replyDraft } : {}),
+      ...(p.note != null ? { note: p.note } : {}),
+    };
+    return { threadId, domain: "INQUIRY_DRAFT", status: "DONE", trail: result.trail, draftPreparation };
   }
 }
 

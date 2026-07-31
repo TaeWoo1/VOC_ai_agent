@@ -24,7 +24,7 @@ import type { RunOutcome } from "../state/AgentState";
 import type { ReviewRunOutcome } from "../state/ReviewAgentState";
 import type { IssueOperationsBrief } from "../state/IssueAgentState";
 
-export type AgentRunDomain = "INQUIRY" | "REVIEW" | "ISSUE";
+export type AgentRunDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
 export type AgentRunStatus = "AWAITING_APPROVAL" | "DONE";
 
 // --------------------------------------------------------------------------- requests
@@ -120,6 +120,39 @@ export interface ReviewCheckpointView {
 
 export type CheckpointView = InquiryCheckpointView | ReviewCheckpointView;
 
+/**
+ * The DRAFT-PREPARATION result as surfaced over HTTP (domain INQUIRY_DRAFT, always DONE).
+ *
+ * This run reads one Cafe24/other inquiry and generates a rule-based answer draft, then STOPS at a
+ * terminal human checkpoint — it proposes nothing, saves nothing to the backend, and sends nothing.
+ * `replyDraft` is the templated reply text the operator reviews/edits locally; it carries NO customer
+ * body (the echoed subject `candidate.title` is dropped, the customer body never reaches here) and is
+ * present ONLY in the live start response — it is never persisted, so it never re-surfaces on a GET.
+ * The scalar fields (channel labels, `inquiryStatus`, `isSecret`, `generatedAt`) let the UI name the
+ * target channel, show the inquiry status, flag a 비밀글, and show when the draft was made — without
+ * ever exposing the inquiry content. `prepared` is false (with `note`) when the OPEN queue was empty.
+ */
+export interface InquiryDraftPreparationView {
+  readonly kind: "INQUIRY_DRAFT_PREPARATION";
+  readonly domain: "INQUIRY_DRAFT";
+  readonly prepared: boolean;
+  readonly workItemId: string | null;
+  readonly inquiryId: string | null;
+  readonly phase: string | null;
+  readonly priorityBucket: string | null;
+  readonly category: string | null;
+  readonly provenance: DraftProvenance | null;
+  readonly channelId: string | null;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly inquiryStatus: string | null;
+  readonly informStatus: string | null;
+  readonly isSecret: boolean | null;
+  readonly generatedAt: string | null;
+  readonly replyDraft?: string;
+  readonly note?: string;
+}
+
 /** The unified run view every endpoint returns. Sanitized: no token, no credential, no customer 원문. */
 export interface AgentRunView {
   readonly threadId: string;
@@ -132,6 +165,8 @@ export interface AgentRunView {
   readonly outcome?: RunOutcome | ReviewRunOutcome | null;
   /** Present for the issue domain (no checkpoint): the quote-free operations brief. */
   readonly brief?: IssueOperationsBrief;
+  /** Present for the inquiry-draft domain (no checkpoint): the sanitized draft-preparation result. */
+  readonly draftPreparation?: InquiryDraftPreparationView;
 }
 
 /** GET /capabilities — static service metadata. Reveals no seller data and no secret. */

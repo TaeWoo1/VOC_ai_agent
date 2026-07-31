@@ -77,7 +77,7 @@ describe("HTTP server contract", () => {
     const res = await fetch(`${base}/capabilities`);
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body.intents).toHaveLength(3);
+    expect(body.intents).toHaveLength(4);
     expect(body.externalSend).toBe("disabled");
   });
 

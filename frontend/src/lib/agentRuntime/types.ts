@@ -10,7 +10,7 @@
  * screens (문의 응답 / 리뷰 운영 / 상품 이슈), never here.
  */
 
-export type AgentRunDomain = "INQUIRY" | "REVIEW" | "ISSUE";
+export type AgentRunDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
 export type AgentRunStatus = "AWAITING_APPROVAL" | "DONE";
 
 export interface DraftProvenance {
@@ -48,6 +48,36 @@ export interface ReviewCheckpointView {
 }
 
 export type CheckpointView = InquiryCheckpointView | ReviewCheckpointView;
+
+/**
+ * The draft-preparation result (domain INQUIRY_DRAFT, always DONE). The run reads one inquiry and
+ * generates a rule-based answer DRAFT, then stops at a terminal human checkpoint — nothing is
+ * proposed, saved, or sent. `replyDraft` is the templated reply text the operator reviews/edits
+ * locally; it carries NO customer body and is present only in the live start response. The scalar
+ * fields let the UI name the target channel, show the inquiry status, flag a 비밀글, and show when
+ * the draft was made — without exposing the inquiry content. `prepared` is false when the OPEN queue
+ * was empty.
+ */
+export interface InquiryDraftPreparationView {
+  kind: "INQUIRY_DRAFT_PREPARATION";
+  domain: "INQUIRY_DRAFT";
+  prepared: boolean;
+  workItemId: string | null;
+  inquiryId: string | null;
+  phase: string | null;
+  priorityBucket: string | null;
+  category: string | null;
+  provenance: DraftProvenance | null;
+  channelId: string | null;
+  channelCode: string | null;
+  channelNameKo: string | null;
+  inquiryStatus: string | null;
+  informStatus: string | null;
+  isSecret: boolean | null;
+  generatedAt: string | null;
+  replyDraft?: string;
+  note?: string;
+}
 
 export interface InquiryOutcome {
   recorded: boolean;
@@ -138,6 +168,8 @@ export interface AgentRunView {
   checkpoint?: CheckpointView;
   outcome?: InquiryOutcome | ReviewOutcome | null;
   brief?: IssueOperationsBrief;
+  /** Present for the inquiry-draft domain (no checkpoint): the sanitized draft-preparation result. */
+  draftPreparation?: InquiryDraftPreparationView;
 }
 
 export interface CapabilitiesView {

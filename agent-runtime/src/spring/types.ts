@@ -54,12 +54,22 @@ export interface ProposalResult {
  * GET /api/inquiries/{id} — seller-owned operational detail. `title`/`details` ARE the
  * seller's own content (not buyer identity), so they are present here; the runtime must
  * keep them in memory and out of every log line (see {@link ../log}).
+ *
+ * `channelCode`/`channelNameKo` are the resolved catalog labels for `channelId` (null when
+ * the catalog row is absent), so a caller can name the target channel (e.g. Cafe24) without
+ * dereferencing the raw id. `isSecret` mirrors the backend `Inquiry.secret` flag: `true` for a
+ * Cafe24 비밀글 (fail-closed), `false` for a positively-public post, `null` when unclassified
+ * (legacy / non-Cafe24). These are scalar flags — safe to surface and log; the customer body is
+ * NOT (it stays in `details`, which never leaves the process except as a generated draft).
  */
 export interface InquiryDetail {
   readonly workItemId: string;
   readonly inquiryId: string;
   readonly sellerAccountId: string;
   readonly channelId: string;
+  readonly channelCode: string | null;
+  readonly channelNameKo: string | null;
+  readonly isSecret: boolean | null;
   readonly phase: string;
   readonly status: string;
   readonly informStatus: string | null;

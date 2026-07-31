@@ -11,11 +11,12 @@
 /** The closed set of intents the runtime can currently orchestrate. */
 export type AgentIntent =
   | "HANDLE_UNANSWERED_INQUIRIES"
+  | "PREPARE_INQUIRY_DRAFT"
   | "HANDLE_REVIEW_REPLIES"
   | "HANDLE_OPERATIONS_ISSUES";
 
 /** The subgraph domain an intent routes to. */
-export type AgentDomain = "INQUIRY" | "REVIEW" | "ISSUE";
+export type AgentDomain = "INQUIRY" | "INQUIRY_DRAFT" | "REVIEW" | "ISSUE";
 
 export interface AgentGoal {
   readonly intent: AgentIntent;
@@ -53,10 +54,13 @@ export class UnrecognizedGoalError extends Error {
 
 /**
  * Fixed keyword table for the free-text path. Deterministic; the first matching row wins.
- * Ordered review → issue → inquiry so that a request mentioning both a review word and the
- * broad inquiry "답변" resolves to review; the issue row sits before inquiry so an operations
- * request is never shadowed by a broad inquiry word. The three keyword sets are mutually
- * substring-free, so canonical requests route the same regardless of order.
+ * Ordered review → issue → inquiry-draft → inquiry so that a request mentioning both a review word
+ * and the broad inquiry "답변" resolves to review; the issue row sits before inquiry so an operations
+ * request is never shadowed by a broad inquiry word; the inquiry-draft row (a "초안"/draft request)
+ * sits before the broad inquiry row so "문의 답변 초안 만들어줘" prepares a draft rather than starting
+ * the full approve loop. The keyword sets are mutually substring-free (no set's keyword contains, or
+ * is contained by, another set's — "초안"/"draft" appear in no other set, and "답변 초안" contains no
+ * bare keyword), so canonical requests route the same regardless of order.
  */
 const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly string[] }> = [
   {
@@ -64,7 +68,7 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly s
     keywords: ["리뷰", "후기", "리뷰 답변", "답글", "review", "review reply", "review replies"],
   },
   {
-    // Operations-issue signals. Listed before the inquiry row so an issue request that also says
+    // Operations-issue signals. Listed before the inquiry rows so an issue request that also says
     // a broad inquiry word does not get shadowed; none of these keywords overlaps the review or
     // inquiry rows, so the examples ("악화된 상품 문제", "반복되는 고객 불만", "먼저 확인할 운영
     // 이슈") resolve here regardless of order.
@@ -86,6 +90,13 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly s
     ],
   },
   {
+    // Draft-preparation: read one inquiry and show a rule-based answer DRAFT, ending at the human
+    // checkpoint with no send. Listed BEFORE the broad inquiry row so a "초안"/draft request prepares
+    // a draft instead of entering the full unanswered-inquiry approve loop.
+    intent: "PREPARE_INQUIRY_DRAFT",
+    keywords: ["초안", "답변 초안", "draft", "reply draft"],
+  },
+  {
     intent: "HANDLE_UNANSWERED_INQUIRIES",
     keywords: ["미답변", "문의", "답변 필요", "unanswered", "inquiry", "inquiries"],
   },
@@ -93,6 +104,7 @@ const INTENT_KEYWORDS: ReadonlyArray<{ intent: AgentIntent; keywords: readonly s
 
 const KNOWN_INTENTS: ReadonlySet<string> = new Set<AgentIntent>([
   "HANDLE_UNANSWERED_INQUIRIES",
+  "PREPARE_INQUIRY_DRAFT",
   "HANDLE_REVIEW_REPLIES",
   "HANDLE_OPERATIONS_ISSUES",
 ]);
@@ -104,6 +116,8 @@ export function routeIntent(intent: AgentIntent): AgentDomain {
       return "REVIEW";
     case "HANDLE_OPERATIONS_ISSUES":
       return "ISSUE";
+    case "PREPARE_INQUIRY_DRAFT":
+      return "INQUIRY_DRAFT";
     default:
       return "INQUIRY";
   }

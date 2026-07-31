@@ -712,3 +712,45 @@ and was re-selected every run (the other committed reviews unreachable; re-appro
 FE error-copy for the conflict codes. Change is confined to the agent-runtime selector + FE copy — no
 backend/contract/migration change. After the fix all scenarios re-ran clean. Gates: backend 1803/0,
 agent-runtime 128 + tsc, frontend 1121 + tsc.
+
+## 13. Cafe24 inquiry draft preparation v1 — read-only draft, terminal human checkpoint
+
+A fourth domain, **`INQUIRY_DRAFT`** (intent `PREPARE_INQUIRY_DRAFT`), sits alongside inquiry /
+review / issue. It reads one OPEN inquiry (Cafe24 등), generates a rule-based answer **draft**, and
+**stops** — it never proposes, saves a draft to the backend, records an approval, or sends anything.
+The "Human Checkpoint" here is terminal presentation: the run finishes with the draft in hand and
+hands off to the operator, who edits/copies it and posts on the channel manually. It mirrors the
+issue-memory shape (`run()` → DONE, no `interrupt`, no `resume`), not the inquiry approve loop.
+
+**Structural no-mutation.** The draft graph (`graph/inquiryDraftGraph.ts`) is built on a READ-ONLY
+tool registry — `buildInquiryReadToolRegistry` = search + detail only. There is no propose/save/record
+tool to reach, no interrupt to resume, and no confirm-publish path, so the backend work item stays
+OPEN and the inquiry status is untouched by construction. It reuses the shared `prioritizeInquiries`
+and `RuleBasedDraftProvider`, so ranking and draft text match the approve loop.
+
+**Transient draft (privacy).** The generated body (`replyDraft` = the templated `candidate.comments`,
+never `candidate.title` which echoes the customer subject, never the customer body) is returned only
+in the live start response. It is NEVER persisted: the run store snapshot
+(`checkpoint/InquiryDraftRunStore.ts`) holds body-free `InquiryDraftMeta` only, and there is no file
+variant, so a draft never reaches disk. Idempotent replay is by determinism (pure drafter + OPEN
+search) with no cumulative effect; `generatedAt` records when the draft was made.
+
+**Terminal, so no durable store.** The runtime uses a per-request in-memory store (never the durable
+provider) — nothing pauses, so there is no paused state to survive a restart, which is why this is
+safe under `APP_ENV=production` without the spring store. A GET or resume of a draft thread finds
+nothing durable → 404 `UNKNOWN_THREAD` (the draft is regenerated on demand, never reloaded).
+
+**Backend touch (additive, read-only).** `InquiryDetail` gains `channelCode` / `channelNameKo`
+(resolved from the channel catalog, fail-open to null) and `isSecret` (mirrors `Inquiry.secret`), so
+the UI can name the target channel, show the inquiry status, and flag a 비밀글 — without exposing more
+content. No migration, no lifecycle change; the dashboard/analysis secret-exclusion boundary is
+untouched, and the detail still carries no buyer/author identity.
+
+**Frontend.** The `/agent` page adds a `초안 생성` launch and a draft-preparation card (no approve /
+reject / send control): an editable draft, 대상 채널 / 문의 상태 / 생성 시각 / 규칙 기반 provenance, a
+비밀글 badge, the explicit `초안만 생성되었습니다. {채널}에는 아직 전송되지 않았습니다.` line, a
+`초안 다시 만들기` that warns before overwriting a locally edited draft, and a copy control. No control
+reads as 전송/발송/등록.
+
+Gates: backend **1842/0** (6 skipped), agent-runtime **139** + tsc, frontend **1164** + tsc + build.
+Independent correctness/privacy/UX review: **HIGH=0, MEDIUM=0**. No live channel call; no send.

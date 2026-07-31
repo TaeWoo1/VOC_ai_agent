@@ -87,13 +87,64 @@ describe("AgentRunService contract", () => {
 
   afterEach(() => clearLogSink());
 
-  it("capabilities lists three intents, fail-closed send, store mode", () => {
+  it("capabilities lists four intents, fail-closed send, store mode", () => {
     const cap = service.capabilities();
-    expect(cap.intents.map((i) => i.domain).sort()).toEqual(["INQUIRY", "ISSUE", "REVIEW"]);
+    expect(cap.intents.map((i) => i.domain).sort()).toEqual([
+      "INQUIRY",
+      "INQUIRY_DRAFT",
+      "ISSUE",
+      "REVIEW",
+    ]);
     expect(cap.externalSend).toBe("disabled");
     expect(cap.runStore.kind).toBe("memory");
     expect(cap.intents.find((i) => i.domain === "REVIEW")!.requiresAccountScope).toBe(true);
     expect(cap.intents.find((i) => i.domain === "ISSUE")!.hasCheckpoint).toBe(false);
+    // Draft preparation is a terminal read: no checkpoint, org-scoped (no account needed).
+    const draft = cap.intents.find((i) => i.domain === "INQUIRY_DRAFT")!;
+    expect(draft.hasCheckpoint).toBe(false);
+    expect(draft.requiresAccountScope).toBe(false);
+  });
+
+  it("inquiry-draft: prepares a draft and finishes DONE, no send, no customer 원문 in the view or logs", async () => {
+    getLogSink();
+    const view = await service.start("tok", { intent: "PREPARE_INQUIRY_DRAFT", threadId: "draft-1" });
+
+    expect(view.domain).toBe("INQUIRY_DRAFT");
+    expect(view.status).toBe("DONE");
+    expect(view.checkpoint).toBeUndefined();
+    const dp = view.draftPreparation!;
+    expect(dp.kind).toBe("INQUIRY_DRAFT_PREPARATION");
+    expect(dp.prepared).toBe(true);
+    expect(dp.replyDraft).toContain("안녕하세요");
+    expect(dp.inquiryStatus).toBe("UNANSWERED");
+    expect(dp.provenance?.providerKind).toBe("RULE_BASED");
+
+    // The view carries the generated draft + scalar metadata but NEVER the customer body/contact.
+    const serialized = JSON.stringify(view);
+    expect(serialized).not.toContain(PHONE_TOKEN);
+    expect(serialized).not.toContain(EMAIL_TOKEN);
+
+    // No mutation, no send.
+    expect(fakes.inquiry.calls.propose).toBe(0);
+    expect(fakes.inquiry.calls.saveDraft).toBe(0);
+    expect(fakes.inquiry.calls.confirmPublish).toBe(0);
+    expect(fakes.inquiry.externalSendAttempts).toBe(0);
+
+    // No log line carries the customer body/contact or the generated draft text.
+    const logged = JSON.stringify(getLogSink());
+    expect(logged).not.toContain(PHONE_TOKEN);
+    expect(logged).not.toContain(EMAIL_TOKEN);
+    expect(logged).not.toContain(dp.replyDraft!);
+  });
+
+  it("inquiry-draft: the draft is transient — a reloaded run and a resume both fail closed (never persisted durably)", async () => {
+    await service.start("tok", { intent: "PREPARE_INQUIRY_DRAFT", threadId: "draft-2" });
+    // The draft body is never written to a durable store, so a later GET finds no run.
+    await expect(service.get("tok", "draft-2")).rejects.toMatchObject({ code: "UNKNOWN_THREAD" });
+    // There is no checkpoint to resume either.
+    await expect(
+      service.resume("tok", "draft-2", { approved: true }),
+    ).rejects.toMatchObject({ code: "UNKNOWN_THREAD" });
   });
 
   it("inquiry: start parks at a checkpoint exposing only the templated reply — no customer 원문", async () => {

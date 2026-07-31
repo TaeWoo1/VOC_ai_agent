@@ -9,6 +9,7 @@ import { agentRuntime, AgentRuntimeError } from "../lib/agentRuntime/agentClient
 import type {
   AgentRunView,
   InquiryCheckpointView,
+  InquiryDraftPreparationView,
   InquiryOutcome,
   IssueBriefEntry,
   IssueOperationsBrief,
@@ -52,6 +53,26 @@ export function Agent() {
         goalText: command.trim(),
         ...(accountId ? { accountId } : {}),
       });
+      setRun(view);
+    } catch (err) {
+      setRun(null);
+      setError(explain(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Prepare a rule-based answer draft for the top-priority unanswered inquiry (Cafe24 등). The run
+   * reads and drafts only — it never proposes, saves, or sends — and finishes at a terminal human
+   * checkpoint where the draft is shown. Each call mints a fresh run, so "초안 다시 만들기" reuses this.
+   */
+  async function prepareDraft() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const view = await agentRuntime.startRun({ intent: "PREPARE_INQUIRY_DRAFT" });
       setRun(view);
     } catch (err) {
       setRun(null);
@@ -127,6 +148,16 @@ export function Agent() {
         </form>
       </Section>
 
+      <Section title="문의 답변 초안">
+        <p className="text-sm text-muted">
+          미답변 문의를 하나 골라 규칙 기반 답변 <b>초안</b>을 만들어 보여드립니다. 초안은 검토·편집용이며,
+          SellerOps가 채널로 대신 전송하지 않습니다 <span className="text-good">(외부 발송 없음)</span>.
+        </p>
+        <button type="button" className="btn-primary mt-3" disabled={busy} onClick={prepareDraft}>
+          {busy ? "생성 중…" : "초안 생성"}
+        </button>
+      </Section>
+
       {error ? (
         <div role="alert" className="card border-bad/40 text-bad">
           <p className="font-medium">요청을 처리하지 못했습니다.</p>
@@ -136,7 +167,9 @@ export function Agent() {
 
       {/* key on threadId: a new run must remount RunView so the inquiry draft editor re-seeds
           from the new checkpoint and a stale edit can never be recorded against another thread. */}
-      {run ? <RunView key={run.threadId} run={run} busy={busy} onDecide={decide} /> : null}
+      {run ? (
+        <RunView key={run.threadId} run={run} busy={busy} onDecide={decide} onRegenerate={prepareDraft} />
+      ) : null}
     </div>
   );
 }
@@ -175,6 +208,7 @@ function ExampleChips({ onPick }: { onPick: (c: string) => void }) {
 
 const DOMAIN_LABEL: Record<string, string> = {
   INQUIRY: "문의 응답",
+  INQUIRY_DRAFT: "문의 답변 초안",
   REVIEW: "리뷰 답변",
   ISSUE: "운영 이슈",
 };
@@ -183,18 +217,26 @@ function RunView({
   run,
   busy,
   onDecide,
+  onRegenerate,
 }: {
   run: AgentRunView;
   busy: boolean;
   onDecide: (threadId: string, approved: boolean, editedComments?: string) => void;
+  onRegenerate: () => void;
 }) {
+  const statusLabel =
+    run.status === "AWAITING_APPROVAL"
+      ? "확인 필요"
+      : run.domain === "INQUIRY_DRAFT"
+        ? "초안 준비됨"
+        : "완료";
   return (
     <section className="card space-y-4" aria-label="에이전트 실행" role="region">
       <div className="flex flex-wrap items-center gap-2">
         <span className="rounded-full bg-brand/10 px-2 py-0.5 text-sm font-medium text-brand">
           {DOMAIN_LABEL[run.domain] ?? run.domain}
         </span>
-        <span className="text-sm text-muted">{run.status === "AWAITING_APPROVAL" ? "확인 필요" : "완료"}</span>
+        <span className="text-sm text-muted">{statusLabel}</span>
       </div>
 
       <RunTrail trail={run.trail} />
@@ -217,9 +259,15 @@ function RunView({
         />
       ) : null}
 
+      {run.status === "DONE" && run.domain === "INQUIRY_DRAFT" && run.draftPreparation ? (
+        <InquiryDraftPreparationCard prep={run.draftPreparation} busy={busy} onRegenerate={onRegenerate} />
+      ) : null}
+
       {run.status === "DONE" && run.domain === "ISSUE" && run.brief ? <IssueBriefCard brief={run.brief} /> : null}
 
-      {run.status === "DONE" && run.domain !== "ISSUE" ? <OutcomeCard domain={run.domain} outcome={run.outcome ?? null} /> : null}
+      {run.status === "DONE" && run.domain !== "ISSUE" && run.domain !== "INQUIRY_DRAFT" ? (
+        <OutcomeCard domain={run.domain} outcome={run.outcome ?? null} />
+      ) : null}
     </section>
   );
 }
@@ -284,6 +332,132 @@ function InquiryCheckpointCard({
           거절
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The draft-preparation result — a generated answer draft the operator reviews, edits locally, and
+ * copies to post on the channel themselves. There is deliberately NO approve/reject and NO
+ * send/전송 control: the run already finished at the human checkpoint and nothing is dispatched.
+ * "초안 다시 만들기" starts a fresh run; if the operator edited the draft, it first warns that the
+ * edit will be overwritten.
+ */
+function InquiryDraftPreparationCard({
+  prep,
+  busy,
+  onRegenerate,
+}: {
+  prep: InquiryDraftPreparationView;
+  busy: boolean;
+  onRegenerate: () => void;
+}) {
+  const [reply, setReply] = useState(prep.replyDraft ?? "");
+  const [confirmRegen, setConfirmRegen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  if (!prep.prepared) {
+    return (
+      <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="문의 답변 초안">
+        <p className="text-ink">지금 초안을 만들 미답변 문의가 없습니다.</p>
+        <button type="button" className="btn-ghost mt-3" disabled={busy} onClick={onRegenerate}>
+          다시 확인
+        </button>
+      </div>
+    );
+  }
+
+  const channel = prep.channelNameKo ?? prep.channelCode ?? "채널";
+  const edited = reply !== (prep.replyDraft ?? "");
+  const statusLabel = prep.inquiryStatus === "ANSWERED" ? "답변완료" : "미답변";
+  const provenanceText = prep.provenance
+    ? `규칙 기반 · ${prep.provenance.name} ${prep.provenance.version}`
+    : "규칙 기반";
+  const generatedLabel = prep.generatedAt ? new Date(prep.generatedAt).toLocaleString("ko-KR") : "—";
+
+  function regenerate() {
+    // Warn once before discarding a locally edited draft; a pristine draft regenerates directly.
+    if (edited && !confirmRegen) {
+      setConfirmRegen(true);
+      return;
+    }
+    setConfirmRegen(false);
+    onRegenerate();
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(reply);
+      setCopied(true);
+    } catch {
+      // clipboard unavailable — the operator can still select the text manually
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-line bg-surface p-4" role="group" aria-label="문의 답변 초안">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">답변 초안</span>
+        {prep.isSecret === true ? (
+          <span className="rounded-full bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">비밀글</span>
+        ) : null}
+      </div>
+
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+        <Meta label="대상 채널" value={channel} />
+        <Meta label="문의 상태" value={statusLabel} />
+        <Meta label="생성 시각" value={generatedLabel} />
+        <Meta label="생성 방식" value={provenanceText} />
+      </dl>
+
+      <p className="mt-3 text-sm text-muted">
+        규칙 기반 초안입니다. 고객 원문은
+        <Link to="/inquiries" className="mx-1 text-brand underline">
+          문의 응답
+        </Link>
+        화면에서 확인하세요.
+      </p>
+      <textarea
+        className="mt-3 w-full rounded-xl border border-line bg-canvas p-3 text-ink"
+        rows={4}
+        value={reply}
+        onChange={(e) => {
+          setReply(e.target.value);
+          setCopied(false);
+        }}
+        aria-label="답변 초안"
+      />
+
+      <p className="mt-2 text-sm font-medium text-good">
+        초안만 생성되었습니다. {channel}에는 아직 전송되지 않았습니다.
+      </p>
+      <p className="mt-1 text-xs text-muted">
+        SellerOps가 대신 전송하지 않습니다. 검토 후 채널에 직접 붙여넣어 답변하세요.
+      </p>
+
+      {confirmRegen ? (
+        <div role="alert" className="mt-3 rounded-xl border border-warn/40 bg-warn/5 p-3 text-sm">
+          <p className="text-ink">다시 만들면 편집한 초안이 사라집니다. 계속할까요?</p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" className="btn-primary" disabled={busy} onClick={regenerate}>
+              계속
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setConfirmRegen(false)}>
+              취소
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className="btn-ghost" disabled={busy} onClick={regenerate}>
+            초안 다시 만들기
+          </button>
+          <button type="button" className="btn-ghost" onClick={copy}>
+            복사
+          </button>
+        </div>
+      )}
+      {copied ? <p className="mt-2 text-sm text-good">복사했습니다. {channel}에 직접 붙여넣으세요.</p> : null}
     </div>
   );
 }

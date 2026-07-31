@@ -23,11 +23,12 @@ export const TOOL = {
 export type ToolName = (typeof TOOL)[keyof typeof TOOL];
 
 /**
- * Build the five inquiry tools bound to a backend client. "Unanswered" is fixed to the
- * OPEN work-item phase inside the search tool — that IS the backend's definition of an
- * inquiry still needing work.
+ * Build the two READ-ONLY inquiry tools bound to a backend client: list the OPEN queue and
+ * fetch one item's detail. Neither mutates anything. This is the whole tool set the
+ * draft-preparation graph is given, so that graph is STRUCTURALLY incapable of proposing,
+ * saving a draft, or recording an approval — there is no mutating tool to reach.
  */
-export function buildInquiryTools(client: SpringClient): StructuredToolInterface[] {
+export function buildInquiryReadTools(client: SpringClient): StructuredToolInterface[] {
   const search = tool(
     async ({ page, size }: { page?: number; size?: number }) =>
       client.listInquiries({ phase: "OPEN", page, size }),
@@ -49,6 +50,17 @@ export function buildInquiryTools(client: SpringClient): StructuredToolInterface
       schema: z.object({ workItemId: z.string().min(1) }),
     },
   );
+
+  return [search, detail];
+}
+
+/**
+ * Build the five inquiry tools bound to a backend client — the two read tools plus the three
+ * mutating tools of the full approve loop. "Unanswered" is fixed to the OPEN work-item phase
+ * inside the search tool — that IS the backend's definition of an inquiry still needing work.
+ */
+export function buildInquiryTools(client: SpringClient): StructuredToolInterface[] {
+  const readTools = buildInquiryReadTools(client);
 
   const propose = tool(
     async ({ workItemId }: { workItemId: string }) => client.proposeInquiry(workItemId),
@@ -98,5 +110,5 @@ export function buildInquiryTools(client: SpringClient): StructuredToolInterface
     },
   );
 
-  return [search, detail, propose, saveDraft, recordApproval];
+  return [...readTools, propose, saveDraft, recordApproval];
 }
