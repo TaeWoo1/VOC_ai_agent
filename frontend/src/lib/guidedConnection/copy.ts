@@ -2,16 +2,16 @@
 // final copy"). Korean, honest and non-over-claiming: no phase claims a live connection before it
 // is proven (§12 completion gate), and no copy names a selector, url, or account id. Declared as
 // `as const` records keyed by the sanitized enums so the wizard renders them by lookup.
+//
+// The initial order connection is Local-Agent-free (product decision 2026-07-31): no phase mentions
+// a bridge/renderer/NAVER-login step. The Local Agent is referenced only in the post-completion
+// REVIEW_IMPORT setup card (see REVIEW_SETUP_COPY), never in the order-connection path.
 import type { GuidedActor, GuidedFailureReason, GuidedPhase } from "./types";
 
 export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = {
   check_saved_credential: {
     title: "저장된 연결 정보 확인",
     body: "SellerOps에 저장된 NAVER 연결 정보가 있는지 확인하고 있습니다. 있으면 다시 입력하지 않고 바로 연결을 확인합니다.",
-  },
-  readiness_checking: {
-    title: "연결 준비 확인 중",
-    body: "내 PC의 로컬 에이전트와 NAVER 로그인 상태를 확인하고 있습니다.",
   },
   application_path_choice: {
     title: "애플리케이션 확인",
@@ -29,29 +29,13 @@ export const PHASE_COPY: Record<GuidedPhase, { title: string; body: string }> = 
     title: "시크릿 재확인 필요",
     body: "애플리케이션은 있지만 시크릿을 확보하지 못했습니다. NAVER 커머스 API 센터의 기존 애플리케이션 화면에서 시크릿을 다시 확인하거나, 확인이 어려우면 시크릿을 재발급해 주세요. 앱을 삭제할 필요는 없습니다 (NAVER는 앱 삭제 기능을 제공하지 않습니다). 다만 시크릿을 재발급하면 이 앱을 사용하는 다른 프로그램의 연결도 함께 끊기므로, 다른 프로그램에서 사용 중인지 먼저 확인해 주세요. SellerOps는 시크릿을 대신 확인하거나 재발급하지 않습니다.",
   },
-  agent_unavailable: {
-    title: "로컬 에이전트 필요",
-    body: "내 PC에서 SellerOps 로컬 에이전트를 실행하고 이 브라우저와 연결해 주세요.",
-  },
-  renderer_unavailable: {
-    title: "작업 창 준비 필요",
-    body: "안내를 표시할 작업 창(Action Window)을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-  },
-  naver_login_required: {
-    title: "NAVER 로그인 필요",
-    body: "전용 작업 창(Action Window)에서 NAVER에 직접 로그인해 주세요. 평소 쓰는 브라우저가 아니라 전용 창에서 로그인해야 합니다. 로그인·2단계 인증은 고객님이 진행합니다.",
-  },
-  naver_reconnect_required: {
-    title: "다시 로그인 필요",
-    body: "전용 작업 창의 NAVER 세션이 만료되었거나 이 창에 로그인되어 있지 않습니다. 전용 작업 창에서 다시 로그인한 뒤 확인해 주세요. (세션은 같은 날 전용 창 안에서만 유지되며, 창을 완전히 종료하면 다시 로그인이 필요할 수 있습니다.)",
-  },
   account_store_choice_required: {
     title: "계정·스토어 선택",
     body: "발급에 사용할 NAVER 계정과 스토어를 직접 선택해 주세요. (통합 매니저 권한이 필요합니다.)",
   },
   application_issuance: {
     title: "애플리케이션 발급",
-    body: "API 센터에서 애플리케이션을 생성하고 필요한 API 그룹·권한을 검토해 발급을 완료해 주세요.",
+    body: "아래 단계를 따라 NAVER 커머스 API 센터에서 애플리케이션을 발급하고, 주문 조회에 필요한 API 그룹을 추가한 뒤 애플리케이션 ID와 시크릿을 확인해 주세요.",
   },
   credential_issued: {
     title: "발급 완료 확인",
@@ -123,15 +107,32 @@ export const DISCONNECT_GUARDRAIL_COPY = {
 } as const;
 
 /**
+ * Post-completion REVIEW_IMPORT setup card copy. The order connection is complete and Local-Agent-free;
+ * review import is a SEPARATE, later step that DOES need the Local Agent (pairing + NAVER seller-center
+ * login + the Action Window guided export). The card explains the honest state by pairing readiness:
+ * `SETUP_REQUIRED` when the Local Agent is not yet paired, `GUIDED_CONFIRMATION` once it is. It never blocks
+ * or re-opens the order connection.
+ */
+export const REVIEW_SETUP_COPY = {
+  title: "리뷰 가져오기 설정 (선택)",
+  setupRequiredBody:
+    "주문 연결은 끝났습니다. 리뷰 가져오기는 별도 단계로, 내 PC의 SellerOps 로컬 에이전트를 실행·연결하고 판매자센터에 직접 로그인한 뒤 작업 창에서 공식 내보내기로 진행합니다. 지금 하지 않아도 주문 연결에는 영향이 없습니다.",
+  readyBody:
+    "로컬 에이전트가 연결되어 있어 리뷰 가져오기를 진행할 수 있습니다. 리뷰는 판매자센터 공식 내보내기를 작업 창에서 직접 진행합니다 (자동 수집이 아닙니다).",
+  cta: "리뷰 가져오기 설정으로 이동",
+} as const;
+
+/**
  * Capability-result copy (§capability contract). The backend sends closed feature/state codes and a
  * fixed label; the FE owns the seller-facing state chip + explanation. Honest and non-over-claiming:
- * ORDER read is only "연결됨" when a first sync actually succeeded; review import is framed as a
- * guided export (never an automatic API pull); review reply is "미활성화" (no auto-send); inquiry is
- * "연동 준비 중". The review/inquiry lines are informational — the order connection screen never mixes
- * in the review Action Window.
+ * ORDER read is only "연결됨" when a first sync actually succeeded; review import is framed as a guided
+ * export (never an automatic API pull) whose readiness depends on the Local Agent setup; review reply is
+ * "미활성화" (no auto-send); inquiry is "연동 준비 중". The review/inquiry lines are informational — the
+ * order connection screen never mixes in the review Action Window.
  */
 export const CAPABILITY_STATE_COPY: Record<string, { chip: string; tone: "good" | "muted" | "warn" }> = {
   AVAILABLE: { chip: "연결됨", tone: "good" },
+  SETUP_REQUIRED: { chip: "설정 필요", tone: "muted" },
   GUIDED_CONFIRMATION: { chip: "작업 창에서 직접 진행", tone: "muted" },
   NOT_ENABLED: { chip: "미활성화", tone: "muted" },
   INTEGRATION_PENDING: { chip: "연동 준비 중", tone: "muted" },
@@ -145,6 +146,7 @@ export const CAPABILITY_REASON_COPY: Record<string, string> = {
   SYNC_FAILED: "첫 주문 수집에 실패했습니다. 다시 시도해 주세요.",
   SYNC_IN_PROGRESS: "첫 주문 수집이 진행 중입니다.",
   GUIDED_EXPORT_ONLY: "네이버 리뷰는 공식 API가 없어, 작업 창에서 직접 내보내기로 가져옵니다.",
+  REVIEW_SETUP_REQUIRED: "리뷰 가져오기는 로컬 에이전트를 설정한 뒤 작업 창에서 진행합니다.",
   REPLY_UNVERIFIED: "리뷰 답변 자동 전송은 제공하지 않습니다.",
   INTEGRATION_PENDING: "네이버 문의 연동은 준비 중입니다.",
 };
@@ -159,10 +161,6 @@ export const SYNC_STATUS_COPY: Record<string, string> = {
 };
 
 export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
-  AGENT_UNAVAILABLE: "로컬 에이전트에 연결하지 못했습니다. 에이전트 실행 상태를 확인해 주세요.",
-  RENDERER_UNAVAILABLE: "작업 창을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
-  NAVER_LOGIN_REQUIRED: "전용 작업 창에서 NAVER 로그인이 필요합니다. 직접 로그인해 주세요.",
-  RECONNECT_REQUIRED: "전용 작업 창의 NAVER 세션이 만료되었습니다. 전용 창에서 다시 로그인해 주세요.",
   INVALID_CREDENTIAL: "연결 정보가 올바르지 않습니다. 애플리케이션 ID와 시크릿을 다시 확인해 주세요.",
   PERMISSION_INSUFFICIENT: "연결에 필요한 권한이 부족할 수 있습니다. 애플리케이션의 API 그룹·권한을 확인해 주세요.",
   CALL_ENVIRONMENT_MISMATCH: "허용된 호출 환경과 일치하지 않을 수 있습니다. 애플리케이션의 호출 IP 설정을 확인해 주세요.",

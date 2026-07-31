@@ -5,11 +5,15 @@ import type {
 } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
+import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
 import {
   ACTOR_COPY,
   DISCONNECT_GUARDRAIL_COPY,
   FAILURE_COPY,
+  NAVER_EXISTING_APP_TUTORIAL,
+  NAVER_ISSUANCE_TUTORIAL,
   PHASE_COPY,
+  REVIEW_SETUP_COPY,
   type GuidedConnectionState,
   type GuidedEvent,
 } from "../../lib/guidedConnection";
@@ -23,9 +27,13 @@ import { SecureCredentialForm } from "./SecureCredentialForm";
  * and hands the Client Secret straight to `onSubmitCredentials` — the secret NEVER enters the
  * reducer state, an event, or storage (§11, §17.4).
  *
+ * The initial order connection is Local-Agent-free: there is NO readiness/agent/renderer/NAVER-login
+ * phase to render. The Local Agent appears only in the post-completion REVIEW_IMPORT setup card, which is
+ * optional and never re-opens the order connection.
+ *
  * Side-effecting steps are the page's job: the automated phases (registration/test/sync) run their
- * `api` calls in the page and dispatch the result; retries and readiness re-checks come back in as
- * `onRetryTest` / `onRetrySync` / `onRecheck`. This keeps the wizard offline-testable with no api.
+ * `api` calls in the page and dispatch the result; retries come back in as `onRetryTest` / `onRetrySync`.
+ * This keeps the wizard offline-testable with no api.
  */
 export interface GuidedConnectionWizardProps {
   state: GuidedConnectionState;
@@ -34,27 +42,17 @@ export interface GuidedConnectionWizardProps {
   /** Real connection health, read after completion so the seller sees the state + last success time
    *  (§2 step 6). `null` until read (or if the read fails) — the completion CTA stands regardless. */
   connectionStatus: ConnectionStatusView | null;
-  /** Sanitized capability result, read after completion (order/review/inquiry status + identity +
-   *  first-sync). `null` until read (or if the read fails) — the completion CTA stands regardless. */
+  /** Sanitized capability result (already Local-Agent-overlaid on REVIEW_IMPORT), read after completion.
+   *  `null` until read (or if the read fails) — the completion CTA stands regardless. */
   capability: ConnectionCapabilityView | null;
+  /** Whether the Local Agent is paired — drives ONLY the REVIEW_IMPORT setup card copy, never the order flow. */
+  reviewImportReady: boolean;
   dispatch: (event: GuidedEvent) => void;
-  onRecheck: () => void;
-  onConfirmLogin: () => void;
   onSubmitCredentials: (secrets: Record<string, string>) => void;
   onRetryTest: () => void;
   onRetrySync: () => void;
   onGoToReviewExport: () => void;
 }
-
-// Issuance guidance uses ONLY facts confirmed from the official NAVER commerce-API docs (slice §4):
-// integration-manager permission, the app + API-group + call-IP registration, one app per store, and the
-// ID/secret issuance. Exact button labels / layout / 2FA point stay unstated (deferred to live recon, §4).
-const ISSUANCE_STEPS = [
-  "NAVER 커머스 API 센터에 접속합니다. (애플리케이션 발급에는 통합 매니저 권한이 필요합니다.)",
-  "애플리케이션을 생성하고 상품·주문(판매자) 등 필요한 API 그룹을 추가합니다. (스토어별 애플리케이션은 1개만 만들 수 있습니다.)",
-  "권한과 호출 IP 설정을 검토한 뒤 발급을 확정합니다.",
-  "발급된 애플리케이션 ID와 시크릿을 확인합니다. (시크릿은 다음 단계에서 SellerOps 보안 입력란에 직접 입력합니다.)",
-] as const;
 
 export function GuidedConnectionWizard({
   state,
@@ -62,9 +60,8 @@ export function GuidedConnectionWizard({
   busy,
   connectionStatus,
   capability,
+  reviewImportReady,
   dispatch,
-  onRecheck,
-  onConfirmLogin,
   onSubmitCredentials,
   onRetryTest,
   onRetrySync,
@@ -77,9 +74,7 @@ export function GuidedConnectionWizard({
       <StatusPanel state={state} />
 
       <div className="mt-5">
-        {(phase === "readiness_checking" ||
-          phase === "credential_registration" ||
-          phase === "check_saved_credential") && (
+        {(phase === "credential_registration" || phase === "check_saved_credential") && (
           <p className="text-muted" role="status" aria-live="polite">
             {PHASE_COPY[phase].body}
           </p>
@@ -133,12 +128,6 @@ export function GuidedConnectionWizard({
           </div>
         )}
 
-        {(phase === "agent_unavailable" || phase === "renderer_unavailable") && (
-          <button type="button" className="btn-primary" onClick={onRecheck} disabled={busy}>
-            다시 확인
-          </button>
-        )}
-
         {(phase === "recoverable_ui_drift" || phase === "unsupported_state") && (
           <button
             type="button"
@@ -147,29 +136,6 @@ export function GuidedConnectionWizard({
             disabled={busy}
           >
             화면을 확인했어요, 계속
-          </button>
-        )}
-
-        {phase === "naver_login_required" &&
-          (state.sessionSource === "detected" ? (
-            // Live detection is driving: the seller logs in inside the dedicated window and we re-detect —
-            // attestation would be ignored here (detection outranks it), so offer a re-check, not attest.
-            <button type="button" className="btn-primary" onClick={onRecheck} disabled={busy}>
-              로그인 후 다시 확인
-            </button>
-          ) : (
-            // No live detection available (offline / not wired): the seller logs in in the dedicated window
-            // and attests it here. Attestation, not a bypass or auto-login.
-            <button type="button" className="btn-primary" onClick={onConfirmLogin} disabled={busy}>
-              로그인했어요
-            </button>
-          ))}
-
-        {phase === "naver_reconnect_required" && (
-          // A DETECTED reconnect can't be cleared by mere attestation (B4): the seller re-logs-in inside
-          // the dedicated window, then we re-check the live session — no password autofill, no bypass.
-          <button type="button" className="btn-primary" onClick={onRecheck} disabled={busy}>
-            로그인 후 다시 확인
           </button>
         )}
 
@@ -184,20 +150,11 @@ export function GuidedConnectionWizard({
         )}
 
         {phase === "application_issuance" && (
-          <div className="space-y-4">
-            <ol className="list-decimal space-y-1 pl-5 text-base text-ink">
-              {ISSUANCE_STEPS.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
-            >
-              발급을 완료했어요
-            </button>
-          </div>
+          <NaverIssuanceTutorial
+            steps={NAVER_ISSUANCE_TUTORIAL}
+            onComplete={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
+            completeLabel="발급을 완료했어요"
+          />
         )}
 
         {phase === "credential_issued" && (
@@ -221,7 +178,16 @@ export function GuidedConnectionWizard({
 
         {phase === "existing_credential_entry" &&
           (template ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
+              {/* Existing app: confirm the app's order API group + read ID/Secret — never a second app. */}
+              <details className="rounded-lg border border-line px-4 py-3">
+                <summary className="cursor-pointer select-none text-sm font-medium text-ink">
+                  기존 앱에서 어디를 확인하나요?
+                </summary>
+                <div className="mt-3">
+                  <NaverIssuanceTutorial steps={NAVER_EXISTING_APP_TUTORIAL} />
+                </div>
+              </details>
               <SecureCredentialForm template={template} onSubmit={onSubmitCredentials} submitting={busy} />
               <button
                 type="button"
@@ -295,17 +261,14 @@ export function GuidedConnectionWizard({
           <div className="space-y-4">
             {capability && <ConnectionCapabilityPanel capability={capability} />}
             <ConnectionSummary status={connectionStatus} />
+            <ReviewSetupCard
+              ready={reviewImportReady}
+              onContinue={() => dispatch({ type: "CONTINUE_TO_REVIEW_EXPORT" })}
+            />
             <div className="rounded-lg bg-canvas px-4 py-3" role="note">
               <p className="text-sm font-medium text-muted">{DISCONNECT_GUARDRAIL_COPY.title}</p>
               <p className="mt-1 text-sm text-muted">{DISCONNECT_GUARDRAIL_COPY.body}</p>
             </div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => dispatch({ type: "CONTINUE_TO_REVIEW_EXPORT" })}
-            >
-              과거 리뷰 가져오기로 이동
-            </button>
           </div>
         )}
 
@@ -325,6 +288,23 @@ export function GuidedConnectionWizard({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Post-completion REVIEW_IMPORT setup card. The order connection is done and Local-Agent-free; review
+ * import is a SEPARATE optional step that needs the Local Agent. `ready` reflects bridge pairing (review
+ * capability only) and switches only the copy — the CTA always hands off to the review-export setup track.
+ */
+function ReviewSetupCard({ ready, onContinue }: { ready: boolean; onContinue: () => void }) {
+  return (
+    <div className="space-y-2 rounded-lg border border-line px-4 py-3" role="note" aria-label="리뷰 가져오기 설정">
+      <p className="text-sm font-medium text-ink">{REVIEW_SETUP_COPY.title}</p>
+      <p className="text-sm text-muted">{ready ? REVIEW_SETUP_COPY.readyBody : REVIEW_SETUP_COPY.setupRequiredBody}</p>
+      <button type="button" className="btn-primary" onClick={onContinue}>
+        {REVIEW_SETUP_COPY.cta}
+      </button>
+    </div>
   );
 }
 

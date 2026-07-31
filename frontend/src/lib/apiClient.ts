@@ -97,7 +97,12 @@ import {
   mockVocItemTriage,
 } from "./mocks";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+// Default to a SAME-ORIGIN relative base ("") so `/api/*` requests go through the Vite dev proxy (see
+// vite.config.ts) to whatever backend the dev server targets. This removes the two failure modes that
+// once cost a live run an hour (see loginError.ts): a stale absolute `VITE_API_BASE_URL` port, and a
+// cross-origin CORS rejection between localhost/127.0.0.1. Set VITE_API_BASE_URL explicitly only for a
+// deployment where the API is served from a different origin than the app.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === "true";
 const TOKEN_KEY = "sellerops_token";
 

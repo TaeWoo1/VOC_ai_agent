@@ -12,7 +12,6 @@ function at(phase: GuidedPhase, path: GuidedConnectionState["path"] = "unknown")
     actor: actorFor(phase),
     failureReason: null,
     milestones: { registered: false, tested: false, synced: false },
-    sessionSource: "none",
     path,
   };
 }
@@ -37,8 +36,7 @@ describe("guidedConnection persistence", () => {
 
   it.each<GuidedPhase>([
     "check_saved_credential",
-    "readiness_checking",
-    "naver_login_required",
+    "credential_registration",
     "connection_testing",
     "first_order_sync",
     "completed",

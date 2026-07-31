@@ -1,14 +1,14 @@
 // Guided-connection state-machine unit tests (§18). Pure/node-env — no DOM, no live NAVER.
 // Each block ties back to an acceptance criterion in docs/slices/naver-guided-connection.md §17 or the
-// discovery/reuse/recovery flows (§discovery). The journey now starts at the saved-credential check, then
-// the browser gate (only if no stored key), then a three-path fork (existing app / unknown / new).
+// discovery/reuse/recovery flows (§discovery). The journey is Local-Agent-free: it starts at the
+// saved-credential check and, with no stored key, goes STRAIGHT to the three-path fork — there is NO
+// readiness/agent/renderer/NAVER-login gate.
 import { describe, it, expect } from "vitest";
 import {
   INITIAL_STATE,
   actorFor,
   guidedConnectionReducer as reduce,
   isComplete,
-  resolveNaverSession,
   resumeFromMilestones,
 } from "./state";
 import type { GuidedConnectionState, GuidedEvent } from "./types";
@@ -16,7 +16,6 @@ import {
   EXISTING_APP_EVENTS,
   HAPPY_PATH_EVENTS,
   INVALID_CREDENTIAL_EVENTS,
-  READY_SIGNAL,
   SAVED_CREDENTIAL_REUSE_EVENTS,
   SECRET_LOST_EVENTS,
 } from "./fixtures";
@@ -24,24 +23,12 @@ import {
 const run = (events: GuidedEvent[], from: GuidedConnectionState = INITIAL_STATE): GuidedConnectionState =>
   events.reduce(reduce, from);
 
-/** A READINESS event with sensible defaults (paired, renderer up, logged-in via attestation). */
-const readiness = (
-  o: Partial<Omit<Extract<GuidedEvent, { type: "READINESS" }>, "type">> = {},
-): GuidedEvent => ({
-  type: "READINESS",
-  agentPaired: true,
-  rendererAvailable: true,
-  naverSession: "logged_in",
-  sessionSource: "attested",
-  ...o,
-});
-
-/** Entry into the browser gate: the saved-credential check found no stored key. */
+/** Entry into the three-path fork: the saved-credential check found no stored key. No gate in between. */
 const NO_SAVED: GuidedEvent = { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: false };
-const gateEntry = reduce(INITIAL_STATE, NO_SAVED); // readiness_checking
+const fork = reduce(INITIAL_STATE, NO_SAVED); // application_path_choice
 
 describe("INITIAL_STATE", () => {
-  it("starts at check_saved_credential (Vault check first, before the browser gate)", () => {
+  it("starts at check_saved_credential (Vault check first)", () => {
     expect(INITIAL_STATE.phase).toBe("check_saved_credential");
     expect(INITIAL_STATE.milestones).toEqual({ registered: false, tested: false, synced: false });
     expect(INITIAL_STATE.actor).toBe("SELLEROPS_AUTOMATED");
@@ -50,7 +37,7 @@ describe("INITIAL_STATE", () => {
   });
 });
 
-describe("saved-credential check (§flow 1)", () => {
+describe("saved-credential check (§flow 1) — no readiness gate", () => {
   it("a stored key → reuse: straight to the connection test (registered), no re-entry, no gate", () => {
     const s = reduce(INITIAL_STATE, { type: "SAVED_CREDENTIAL_CHECKED", hasSavedCredential: true });
     expect(s.phase).toBe("connection_testing");
@@ -58,9 +45,11 @@ describe("saved-credential check (§flow 1)", () => {
     expect(s.path).toBe("saved");
   });
 
-  it("no stored key → enter the browser gate", () => {
-    expect(gateEntry.phase).toBe("readiness_checking");
-    expect(gateEntry.milestones.registered).toBe(false);
+  it("no stored key → the three-path fork DIRECTLY (no agent/renderer/login step in between)", () => {
+    expect(fork.phase).toBe("application_path_choice");
+    expect(fork.milestones.registered).toBe(false);
+    expect(fork.path).toBe("unknown");
+    expect(fork.failureReason).toBeNull();
   });
 
   it("a stray sync in check_saved_credential is a no-op (cannot jump ahead, §17.2)", () => {
@@ -69,35 +58,7 @@ describe("saved-credential check (§flow 1)", () => {
   });
 });
 
-describe("readiness gate — fail-closed (§17.3)", () => {
-  it("no agent → agent_unavailable", () => {
-    const s = reduce(gateEntry, readiness({ agentPaired: false }));
-    expect(s.phase).toBe("agent_unavailable");
-    expect(s.failureReason).toBe("AGENT_UNAVAILABLE");
-  });
-
-  it("agent but no renderer → renderer_unavailable", () => {
-    expect(reduce(gateEntry, readiness({ rendererAvailable: false })).phase).toBe("renderer_unavailable");
-  });
-
-  it("logged_out → naver_login_required", () => {
-    expect(reduce(gateEntry, readiness({ naverSession: "logged_out" })).phase).toBe("naver_login_required");
-  });
-
-  it("unknown session fails closed to naver_login_required (never assumes a live session)", () => {
-    expect(reduce(gateEntry, readiness({ naverSession: "unknown", sessionSource: "none" })).phase).toBe("naver_login_required");
-  });
-
-  it("all clear → application_path_choice (the three-path fork, NOT straight to issuance)", () => {
-    const s = reduce(gateEntry, READY_SIGNAL);
-    expect(s.phase).toBe("application_path_choice");
-    expect(s.failureReason).toBeNull();
-  });
-});
-
 describe("three-path fork — reuse first, issue only when there is no app (§flow 3/6/7)", () => {
-  const fork = reduce(gateEntry, READY_SIGNAL); // application_path_choice
-
   it("'have' → existing_credential_entry (reuse the app, never a forced new one)", () => {
     const s = reduce(fork, { type: "APPLICATION_PATH", choice: "have" });
     expect(s.phase).toBe("existing_credential_entry");
@@ -168,8 +129,6 @@ describe("credential recovery when the Secret is lost (§flow 4) — reissue on 
   });
 
   it("recovery never leaves the existing app: an unmodeled event is a no-op (no delete-reissue branch exists)", () => {
-    // The former BEGIN_DELETE_REISSUE / CONFIRM_NO_OTHER_PROGRAM / CANCEL_DELETE_REISSUE events are gone;
-    // recovery advances ONLY by re-obtaining the Secret. Any other event stays put (fail-closed).
     expect(reduce(recovery, { type: "ISSUANCE_COMPLETE" })).toBe(recovery);
     expect(reduce(recovery, { type: "ACCOUNT_STORE_RESOLVED" })).toBe(recovery);
   });
@@ -177,22 +136,21 @@ describe("credential recovery when the Secret is lost (§flow 4) — reissue on 
 
 describe("the seller's decisions cannot be skipped (§17.2)", () => {
   it("cannot skip account/store resolution on the new path", () => {
-    // new → app-absence check → (no app) account_store_choice_required; issuance must not be skippable here.
-    const fork = reduce(reduce(gateEntry, READY_SIGNAL), { type: "APPLICATION_PATH", choice: "new" });
-    const store = reduce(fork, { type: "APPLICATION_LIST_RESULT", found: false });
+    const newFork = reduce(fork, { type: "APPLICATION_PATH", choice: "new" });
+    const store = reduce(newFork, { type: "APPLICATION_LIST_RESULT", found: false });
     expect(store.phase).toBe("account_store_choice_required");
     expect(reduce(store, { type: "ISSUANCE_COMPLETE" })).toBe(store); // no-op
   });
 
   it("cannot skip issuance", () => {
-    const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance
+    const issuance = run(HAPPY_PATH_EVENTS.slice(0, 4)); // application_issuance
     expect(issuance.phase).toBe("application_issuance");
     expect(reduce(issuance, { type: "BEGIN_CREDENTIAL_ENTRY" })).toBe(issuance); // no-op
   });
 });
 
 describe("test-connection result mapping (§12, §5)", () => {
-  const toTest = HAPPY_PATH_EVENTS.slice(0, 9); // reach connection_testing (…CREDENTIAL_REGISTERED)
+  const toTest = HAPPY_PATH_EVENTS.slice(0, 8); // reach connection_testing (…CREDENTIAL_REGISTERED)
 
   it("reaches connection_testing after registration, tested still false", () => {
     const s = run(toTest);
@@ -208,7 +166,7 @@ describe("test-connection result mapping (§12, §5)", () => {
   });
 
   it("INVALID_CREDENTIAL on the EXISTING path returns to existing_credential_entry (right entry)", () => {
-    const toExistingTest = EXISTING_APP_EVENTS.slice(0, 5); // …CREDENTIAL_REGISTERED on the existing path
+    const toExistingTest = EXISTING_APP_EVENTS.slice(0, 4); // …CREDENTIAL_REGISTERED on the existing path
     const s = reduce(run(toExistingTest), { type: "TEST_RESULT", status: "FAILED", reasonCode: "INVALID_CREDENTIAL" });
     expect(s.phase).toBe("existing_credential_entry");
     expect(s.path).toBe("existing");
@@ -242,7 +200,7 @@ describe("test-connection result mapping (§12, §5)", () => {
 });
 
 describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
-  const toSync = HAPPY_PATH_EVENTS.slice(0, 10); // reach first_order_sync
+  const toSync = HAPPY_PATH_EVENTS.slice(0, 9); // reach first_order_sync
 
   it("SUCCESS (incl. zero new orders) → completed", () => {
     expect(reduce(run(toSync), { type: "SYNC_RESULT", status: "SUCCESS" }).phase).toBe("completed");
@@ -259,67 +217,19 @@ describe("first sync — 0-count SUCCESS vs failure (§12, §17.9)", () => {
   });
 });
 
-describe("global regressions preserve milestones for resume (§13)", () => {
-  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 10)); // first_order_sync, registered+tested
+describe("global fail-closed regressions preserve milestones for resume (§13)", () => {
+  const midJourney = run(HAPPY_PATH_EVENTS.slice(0, 9)); // first_order_sync, registered+tested
 
-  it("AGENT_LOST → agent_unavailable, milestones kept", () => {
-    const s = reduce(midJourney, { type: "AGENT_LOST" });
-    expect(s.phase).toBe("agent_unavailable");
-    expect(s.milestones).toEqual({ registered: true, tested: true, synced: false });
-  });
-
-  it("UI_DRIFT → recoverable_ui_drift; UNKNOWN_STATE → unsupported_state", () => {
-    expect(reduce(midJourney, { type: "UI_DRIFT" }).phase).toBe("recoverable_ui_drift");
+  it("UI_DRIFT → recoverable_ui_drift; UNKNOWN_STATE → unsupported_state, milestones kept", () => {
+    const drift = reduce(midJourney, { type: "UI_DRIFT" });
+    expect(drift.phase).toBe("recoverable_ui_drift");
+    expect(drift.milestones).toEqual({ registered: true, tested: true, synced: false });
     expect(reduce(midJourney, { type: "UNKNOWN_STATE" }).phase).toBe("unsupported_state");
   });
-});
 
-describe("READINESS does not clobber journey progress past the gate", () => {
-  it("a readiness signal during connection_testing is a no-op (regress only via AGENT_LOST)", () => {
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9));
-    expect(testing.phase).toBe("connection_testing");
-    const s = reduce(testing, readiness({ agentPaired: false, rendererAvailable: false, naverSession: "logged_out", sessionSource: "detected" }));
-    expect(s).toBe(testing); // unchanged
-  });
-});
-
-describe("B4 — dedicated-profile session continuity", () => {
-  const issuance = run(HAPPY_PATH_EVENTS.slice(0, 5)); // application_issuance (session-sensitive)
-  const completed = run(HAPPY_PATH_EVENTS);
-
-  it("resolveNaverSession: live detection outranks attestation, and there is no conflict", () => {
-    expect(resolveNaverSession(true, "reconnect_required")).toEqual({ signal: "reconnect_required", source: "detected" });
-    expect(resolveNaverSession(false, "logged_in")).toEqual({ signal: "logged_in", source: "detected" });
-    expect(resolveNaverSession(true, null)).toEqual({ signal: "logged_in", source: "attested" });
-    expect(resolveNaverSession(false, null)).toEqual({ signal: "unknown", source: "none" });
-  });
-
-  it("a cold-launched dedicated profile (detected reconnect_required) → naver_reconnect_required, not fatal", () => {
-    const s = reduce(gateEntry, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
-    expect(s.phase).toBe("naver_reconnect_required");
-    expect(s.failureReason).toBe("RECONNECT_REQUIRED");
-    expect(s.actor).toBe("USER_REQUIRED");
-    expect(s.sessionSource).toBe("detected");
-  });
-
-  it("attestation cannot clear a DETECTED reconnect; only a detected logged_in clears it → the fork", () => {
-    const reconnect = reduce(gateEntry, readiness({ naverSession: "reconnect_required", sessionSource: "detected" }));
-    const stillReconnect = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "attested" }));
-    expect(stillReconnect.phase).toBe("naver_reconnect_required");
-    const cleared = reduce(reconnect, readiness({ naverSession: "logged_in", sessionSource: "detected" }));
-    expect(cleared.phase).toBe("application_path_choice");
-  });
-
-  it("completed onboarding does not imply permanent login: a later session drop does not un-complete it", () => {
-    expect(completed.phase).toBe("completed");
-    expect(reduce(completed, { type: "NAVER_RECONNECT_REQUIRED" }).phase).toBe("completed");
-    expect(reduce(completed, { type: "NAVER_LOGGED_OUT" }).phase).toBe("completed");
-  });
-
-  it("a NAVER session drop regresses ONLY from session-sensitive phases", () => {
-    expect(reduce(issuance, { type: "NAVER_LOGGED_OUT" }).phase).toBe("naver_login_required"); // sensitive
-    const testing = run(HAPPY_PATH_EVENTS.slice(0, 9)); // connection_testing — backend, not session-sensitive
-    expect(reduce(testing, { type: "NAVER_LOGGED_OUT" })).toBe(testing); // no-op
+  it("RESUME recovers to the furthest safe phase", () => {
+    const drift = reduce(midJourney, { type: "UI_DRIFT" });
+    expect(reduce(drift, { type: "RESUME" }).phase).toBe("first_order_sync");
   });
 });
 
@@ -328,7 +238,7 @@ describe("resumeFromMilestones (§13)", () => {
     expect(resumeFromMilestones({ registered: true, tested: true, synced: true }).phase).toBe("completed");
     expect(resumeFromMilestones({ registered: true, tested: true, synced: false }).phase).toBe("first_order_sync");
     expect(resumeFromMilestones({ registered: true, tested: false, synced: false }).phase).toBe("connection_testing");
-    // Not yet registered → re-run the saved-credential check from scratch (Vault/agent are live).
+    // Not yet registered → re-run the saved-credential check from scratch (the Vault is live).
     expect(resumeFromMilestones({ registered: false, tested: false, synced: false }).phase).toBe("check_saved_credential");
   });
 });
@@ -338,7 +248,7 @@ describe("misc invariants", () => {
     expect(reduce(run(HAPPY_PATH_EVENTS), { type: "RESET" })).toEqual(INITIAL_STATE);
   });
 
-  it("actorFor reflects the §6 boundary, incl. the new phases", () => {
+  it("actorFor reflects the §6 boundary — no agent/login phases exist to have an actor", () => {
     expect(actorFor("check_saved_credential")).toBe("SELLEROPS_AUTOMATED");
     expect(actorFor("application_path_choice")).toBe("USER_REQUIRED");
     expect(actorFor("existing_credential_entry")).toBe("USER_REQUIRED");
@@ -347,7 +257,7 @@ describe("misc invariants", () => {
   });
 
   it("is pure — does not mutate the previous state's milestones", () => {
-    const before = run(HAPPY_PATH_EVENTS.slice(0, 8)); // credential_registration
+    const before = run(HAPPY_PATH_EVENTS.slice(0, 7)); // credential_registration
     const snapshot = JSON.stringify(before);
     reduce(before, { type: "CREDENTIAL_REGISTERED" });
     expect(JSON.stringify(before)).toBe(snapshot);
@@ -358,5 +268,14 @@ describe("misc invariants", () => {
     const handoff = reduce(completed, { type: "CONTINUE_TO_REVIEW_EXPORT" });
     expect(handoff.phase).toBe("review_export_readiness");
     expect(reduce(handoff, { type: "ISSUANCE_COMPLETE" })).toBe(handoff);
+  });
+
+  it("a completed connection is durable — no session/agent event exists that could un-complete it", () => {
+    const completed = run(HAPPY_PATH_EVENTS);
+    // The order connection carries no session concept at all; UI_DRIFT is the only global pause, and it
+    // preserves the completion milestones for an immediate RESUME back to completed.
+    const paused = reduce(completed, { type: "UI_DRIFT" });
+    expect(paused.milestones).toEqual({ registered: true, tested: true, synced: true });
+    expect(reduce(paused, { type: "RESUME" }).phase).toBe("completed");
   });
 });

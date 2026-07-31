@@ -9,10 +9,9 @@ import {
   clearGuidedProgress,
   guidedConnectionReducer,
   loadGuidedInitialState,
-  resolveNaverSession,
+  overlayReviewImport,
   saveGuidedProgress,
 } from "../lib/guidedConnection";
-import { bridgeSessionDetection } from "../lib/guidedConnection/bridgeSession";
 import type {
   ConnectionCapabilityView,
   ConnectionStatusView,
@@ -22,13 +21,17 @@ import type {
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
 
 /**
- * NAVER guided-connection wizard page (contract §0 v1 ratification, §16.10 six steps).
+ * NAVER guided-connection wizard page (contract §0 v1 ratification).
  *
  * Thin wiring layer: it owns the guided-journey reducer, resolves the NAVER seller account +
- * credential template from the existing backend boundary, feeds bridge pairing into the readiness
- * gate, and runs the automated steps (register → test → first sync) as an imperative chain so the
- * Client Secret goes straight to `api.storeCredential` and NEVER through the reducer/an event/storage
- * (§11, §17.4). No new backend capability, no live NAVER, no cropped/projection UI.
+ * credential template from the existing backend boundary, and runs the automated steps
+ * (register → test → first sync) as an imperative chain so the Client Secret goes straight to
+ * `api.storeCredential` and NEVER through the reducer/an event/storage (§11, §17.4).
+ *
+ * **Local-Agent-free order connection.** The order connection uses ONLY backend calls — there is no
+ * bridge/agent readiness gate. The Local Agent (`useBridge`) is read solely to decide the
+ * post-completion REVIEW_IMPORT capability (SETUP_REQUIRED vs GUIDED_CONFIRMATION); it never gates the
+ * order flow, and when the bridge feature flag is off the order connection is entirely unaffected.
  */
 
 /** Map the backend SyncRunView.status onto the guided sync vocabulary. */
@@ -47,12 +50,14 @@ function toSyncStatus(run: SyncRunView): GuidedSyncStatus {
 
 export function ConnectNaver() {
   const navigate = useNavigate();
-  const bridge = useBridge();
+  // The order connection never uses the bridge. Only open a bridge client when the surface flag is on
+  // (mirrors AppShell), so a flag-off order connection opens no local connection and prompts for nothing.
+  const agentBridgeEnabled = import.meta.env.VITE_ENABLE_AGENT_BRIDGE === "true";
+  const bridge = useBridge(agentBridgeEnabled);
   // Lazy init restores a safe, secret-free pre-registration step after a browser refresh; anything
   // else starts fresh and lets the saved-credential re-check drive recovery from the backend.
   const [state, dispatch] = useReducer(guidedConnectionReducer, undefined, () => loadGuidedInitialState());
 
-  const [naverAttested, setNaverAttested] = useState(false);
   const [busy, setBusy] = useState(false);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [template, setTemplate] = useState<CredentialTemplateView | null>(null);
@@ -60,6 +65,11 @@ export function ConnectNaver() {
   const [resolveError, setResolveError] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
   const [capability, setCapability] = useState<ConnectionCapabilityView | null>(null);
+
+  // Local Agent pairing — used ONLY to reflect the REVIEW_IMPORT capability, never to gate the order flow.
+  // When the bridge surface is off the client is never opened, so review import honestly shows
+  // SETUP_REQUIRED — and the order flow is unaffected either way.
+  const agentPaired = agentBridgeEnabled && bridge.state.phase === "paired";
 
   // Persist the sanitized, resumable slice (phase + path only — never a secret) so a refresh can
   // restore a pre-registration step. Automated/terminal phases are written too but are non-restorable
@@ -144,26 +154,6 @@ export function ConnectNaver() {
     };
   }, [state.phase, accountId]);
 
-  // Feed pairing (+ the seller's login attestation) into the readiness gate. READINESS is idempotent
-  // and a no-op past the gate, so re-dispatching on every bridge tick is safe.
-  const agentPaired = bridge.state.phase === "paired";
-  // Live session detection from the paired bridge (B4). `null` when unavailable → attestation fallback.
-  const detected = bridgeSessionDetection(bridge.state);
-  useEffect(() => {
-    // resolveNaverSession makes a detected reconnect/logout outrank attestation (B4) — the seller can
-    // never attest past a live-observed reconnect; attestation drives only when detection is unavailable.
-    const { signal, source } = resolveNaverSession(naverAttested, detected);
-    dispatch({
-      type: "READINESS",
-      agentPaired,
-      rendererAvailable: agentPaired, // ACTION_WINDOW renderer is reached through the paired agent
-      naverSession: signal,
-      sessionSource: source,
-    });
-    // `state.phase` is a dep so the gate re-evaluates the moment the saved-credential check hands off to
-    // `readiness_checking` (READINESS is a no-op in any non-gate phase, so this cannot loop).
-  }, [agentPaired, naverAttested, detected, state.phase]);
-
   const runFirstSync = useCallback(async () => {
     if (!accountId) return;
     setBusy(true);
@@ -193,11 +183,11 @@ export function ConnectNaver() {
 
   // Saved-credential check (§flow 1): once the account is known, ask the backend whether a credential is
   // already on file. If so, reuse it — go straight to the connection test with NO re-entry (a stored key
-  // means registration already happened). A failed/absent read fails closed to the normal gate/entry path,
-  // never a false reuse. The `phase === check_saved_credential` guard makes this fire exactly once per
-  // journey: the dispatch moves the phase off the entry, so any later run early-returns. (No ref guard —
-  // a ref would persist across StrictMode's remount and suppress the only surviving dispatch; the phase
-  // guard + `alive` handle StrictMode correctly, at worst one extra harmless GET in dev.)
+  // means registration already happened). A failed/absent read fails closed to the path fork/entry, never
+  // a false reuse. The `phase === check_saved_credential` guard makes this fire exactly once per journey:
+  // the dispatch moves the phase off the entry, so any later run early-returns. (No ref guard — a ref would
+  // persist across StrictMode's remount and suppress the only surviving dispatch; the phase guard + `alive`
+  // handle StrictMode correctly, at worst one extra harmless GET in dev.)
   useEffect(() => {
     if (!accountId || state.phase !== "check_saved_credential") return;
     let alive = true;
@@ -240,10 +230,9 @@ export function ConnectNaver() {
     [accountId, template, runTest],
   );
 
-  const onConfirmLogin = useCallback(() => setNaverAttested(true), []);
-  const onRecheck = useCallback(() => bridge.retry(), [bridge]);
   // Hand off to the existing past-review-import track (§0 review-export-readiness). Reviews are NOT
-  // collected here — this only carries the connected seller into the Action Window export journey.
+  // collected here — this only carries the connected seller into the Action Window export journey, which
+  // is where the Local Agent (pairing + seller-center login + Action Window) is set up.
   const onGoToReviewExport = useCallback(() => {
     // Completion consumed — clear the resume slice so a later visit starts a fresh journey.
     clearGuidedProgress();
@@ -255,11 +244,17 @@ export function ConnectNaver() {
     [loading, resolveError, accountId, template],
   );
 
+  // Overlay the Local-Agent pairing onto the REVIEW_IMPORT capability line ONLY (bridge → review only).
+  const displayCapability = useMemo(
+    () => (capability ? overlayReviewImport(capability, agentPaired) : null),
+    [capability, agentPaired],
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="NAVER 스마트스토어 연결"
-        description="주문은 공식 API로 연결하고, 리뷰는 작업 창에서 직접 내보냅니다. 로그인·인증은 직접 진행합니다."
+        description="주문은 공식 API로 연결합니다. 로컬 에이전트 없이 진행할 수 있고, 리뷰 가져오기는 연결 후 별도로 설정합니다."
       />
 
       {loading && <p className="text-muted">연결 준비 정보를 불러오는 중입니다…</p>}
@@ -282,10 +277,9 @@ export function ConnectNaver() {
             template={template}
             busy={busy}
             connectionStatus={connectionStatus}
-            capability={capability}
+            capability={displayCapability}
+            reviewImportReady={agentPaired}
             dispatch={dispatch}
-            onRecheck={onRecheck}
-            onConfirmLogin={onConfirmLogin}
             onSubmitCredentials={onSubmitCredentials}
             onRetryTest={runTest}
             onRetrySync={runFirstSync}

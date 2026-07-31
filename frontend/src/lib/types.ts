@@ -92,7 +92,7 @@ export interface Cafe24CapabilityView {
  */
 export interface ConnectionCapabilityFeatureView {
   feature: string; // ORDER_READ | REVIEW_IMPORT | REVIEW_REPLY | INQUIRY_READ
-  state: string; // AVAILABLE | GUIDED_CONFIRMATION | NOT_ENABLED | INTEGRATION_PENDING | NEEDS_ATTENTION
+  state: string; // AVAILABLE | SETUP_REQUIRED | GUIDED_CONFIRMATION | NOT_ENABLED | INTEGRATION_PENDING | NEEDS_ATTENTION
   label: string;
   reason: string | null;
 }

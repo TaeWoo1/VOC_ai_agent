@@ -10,8 +10,8 @@
 //   • Pre-registration USER-DECISION phases (path choice, issuance walk, credential entry, secret
 //     recovery) are restored verbatim: they wait for the seller's input, carry no secret, and
 //     re-doing them is exactly the friction we remove. Restoring them cannot strand a spinner.
-//   • Anything else — the readiness gate, the automated phases (registration/test/sync), the
-//     terminals, and drift — is NOT restored. We return INITIAL_STATE so the page's own
+//   • Anything else — the automated phases (registration/test/sync), the terminals, and drift — is
+//     NOT restored. We return INITIAL_STATE so the page's own
 //     saved-credential re-check drives recovery from the backend (a stored key jumps straight to
 //     the connection test with no re-entry), which is the honest, self-driving path and never a
 //     non-running spinner or a falsely-claimed completion.
@@ -78,8 +78,8 @@ function readPersisted(): PersistedProgress | null {
 /**
  * Lazy `useReducer` initializer: restore a safe pre-registration phase from sessionStorage, else the
  * normal INITIAL_STATE (which lets the backend saved-credential re-check drive recovery). Restored
- * state always has cleared milestones (these phases are pre-registration), no failure, and no
- * session source — nothing here can claim progress the seller has not actually made.
+ * state always has cleared milestones (these phases are pre-registration) and no failure — nothing here
+ * can claim progress the seller has not actually made.
  */
 export function loadGuidedInitialState(): GuidedConnectionState {
   const persisted = readPersisted();
@@ -89,7 +89,6 @@ export function loadGuidedInitialState(): GuidedConnectionState {
     actor: actorFor(persisted.phase),
     failureReason: null,
     milestones: NO_MILESTONES,
-    sessionSource: "none",
     path: persisted.path,
   };
 }
