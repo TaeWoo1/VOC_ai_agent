@@ -42,8 +42,7 @@ class CommunityReplyStatusTest {
 
     @Test
     void mapsCafe24CompletedTokenCToAnswered() {
-        // "C" (처리완료) — official Cafe24 token; maps to ANSWERED. Not yet live-observed
-        // (synthetic tests only; every live-sampled row to date was unanswered).
+        // "C" (처리완료) — official Cafe24 token; maps to ANSWERED. Case-insensitive.
         assertThat(CommunityReplyStatus.normalize("C")).isEqualTo(CommunityReplyStatus.ANSWERED);
         assertThat(CommunityReplyStatus.normalize("c")).isEqualTo(CommunityReplyStatus.ANSWERED);
     }

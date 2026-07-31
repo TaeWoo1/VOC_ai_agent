@@ -54,7 +54,7 @@
 | NAVER | INQUIRY | 미확정 (undecided) | **PENDING** | **Pending.** Acquisition method not yet decided; needs API-existence discovery. MANUAL only for now. |
 | NAVER | REVIEW reply (write) | Action Window `REPLY_SUBMISSION` | **PENDING** | **Pending / offline.** Guided, human-performed, observe-only (SellerOps never submits). No official API → posting is **UNVERIFIED** by design. Live is gate-locked. Never label "답변 등록 지원". (roadmap §4.1 note, `contracts/action-window/v2/`) |
 | Cafe24 (자사몰) | ORDER_SUMMARY | API (OAuth) | **VERIFIED** | **Verified** E2E PASS (token rotation + amount reconciliation). Seller's own mall only — **no proxy across malls.** Flag off; pilot-operation decision pending. |
-| Cafe24 (자사몰) | REVIEW | API (board 4 구매후기) | **VERIFIED** | **Article capture verified live** (2026-07-30, PR #375): public-review fresh insert + idempotent replay on a real mall, 비밀글(secret) fail-closed excluded. Only `reply_status`=UNKNOWN was live-observed (raw not N/P/C → fail-closed; PENDING expectation withdrawn); N/P/C tokens are tests-only and raw_received/missing-drop counts are unobserved (uninstrumented). Flag off; seller's own mall only. |
+| Cafe24 (자사몰) | REVIEW | API (board 4 구매후기) | **VERIFIED** | **Article capture verified live** (2026-07-30, PR #375): public-review fresh insert + idempotent replay on a real mall, 비밀글(secret) fail-closed excluded. Only `reply_status`=UNKNOWN was live-observed (raw not N/P/C → fail-closed; PENDING expectation withdrawn); N/P/C tokens stay tests-only. **Completion v1 (2026-07-31): raw_received / stored / secret-excluded / out-of-window / missing-`article_no` + reply_status distribution now instrumented, and idempotent replay (row immutable, cursor stable) re-proven; surfaces as `NEW_REVIEW` in the Operator Attention/VOC queue.** The secret / out-of-window / missing-`article_no` counters were all **0** this window, so their divergence (nonzero) behavior stays tests-only; only `reply_status=UNKNOWN` was live-observed. Flag off; seller's own mall only. |
 | Cafe24 (자사몰) | INQUIRY | API (board 6 문의사항) | **VERIFIED** | **Article capture verified live** on the current work-queue sink (2026-07-31, PR #382, exact-window contract): 1 in-window emitted, out-of-window excluded pre-mapper, C→ANSWERED, `is_secret=true`, secret boundary live (Inbox includes / dashboard+analysis exclude), idempotent replay. board 9 1:1 excluded, never called. **public/N/P/UNKNOWN tokens + N→C transition = tests-only.** Flag off; seller's own mall only. Don't label "지원" (not production-supported). |
 | ESM+ (GMARKET) | ORDER_SUMMARY | API | **IMPLEMENTED** | **Auth skeleton only**, no live verify. Provider onboarding requires 사업자등록 first, then provider inquiry. |
 | ESM+ (GMARKET) | INQUIRY | API (skeleton) + MANUAL (Excel) | **PARTIAL** | **Unwired.** Read skeleton `NEEDS_VERIFICATION`; Excel import backend exists but not surfaced in FE. Only Gate-1 surface confirmed. Next = constrained read-only Gate-2 probe (separate approval). |
@@ -105,6 +105,15 @@ sits behind a **policy-clarification gate**.
   mapper so secret title/body never reach DB/log. Only `reply_status`=UNKNOWN was live-observed (the
   raw token was not N/P/C → fail-closed, PENDING expectation withdrawn); N/P/C tokens are tests-only,
   and the secret-exclusion count + raw_received/missing-drop counts are unobserved (uninstrumented).
+- **2026-07-31 — Cafe24 REVIEW acquisition completion v1.** Re-ran board-4 acquisition on the same
+  evidence-grounded window (2026-06-29) + one idempotent replay: SyncRun SUCCESS, pre-existing row
+  skipped (no insert/duplicate), row fingerprint + cursor unchanged, refresh credential rotated. Added
+  sanitized full-accounting instrumentation (raw_received / stored / secret-excluded / out-of-window /
+  missing-`article_no` + a closed-vocabulary reply_status distribution over stored rows) — so those
+  counts are now instrumented and live-observed. Only `reply_status=UNKNOWN` appeared; the stored review
+  surfaced as `NEW_REVIEW` in the Operator Attention/VOC queue and took no `item_analyses` row. `N`/`P`/
+  `C` tokens and the secret-exclusion boundary stayed tests-only (this window carried neither). Evidence:
+  `docs/sellerops_cafe24_review_acquisition_completion_live_proof.md`.
 - **2026-07-31 — Cafe24 INQUIRY (board 6 문의사항).** The current work-queue sink is verified live
   (PR #382) under an **exact-window (Asia/Seoul, both-ends-inclusive)** contract: out-of-window rows
   drop pre-mapper, `is_secret` is preserved fail-closed, and the secret boundary is live-proven —

@@ -240,6 +240,62 @@ class Cafe24ArticleBackfillFlowTest {
     }
 
     @Test
+    void reviewBackfillRecordsObservedReplyStatusDistributionAcrossTokens() {
+        // A window that carries all three official reply tokens on public in-window rows.
+        // The connector normalizes each once (N→PENDING, P→IN_PROGRESS, C→ANSWERED) and the
+        // stored canonical value is the observable record of the reply_status distribution —
+        // no raw token is stored, and unrecognized would stay UNKNOWN (never inferred).
+        enqueuePage(
+                FakeCafe24HttpClient.article(4001L, "제목", "본문a", 77L, 5, "2026-03-15T10:00:00+09:00", "N"),
+                FakeCafe24HttpClient.article(4002L, "제목", "본문b", 77L, 5, "2026-03-16T10:00:00+09:00", "P"),
+                FakeCafe24HttpClient.article(4003L, "제목", "본문c", 77L, 5, "2026-03-17T10:00:00+09:00", "C"));
+
+        SyncJob job = executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL",
+                BackfillWindow.of(START, END));
+
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
+        assertThat(job.getSuccessRows()).isEqualTo(3);
+        assertThat(job.getFailedRows()).isZero();
+
+        Map<String, Long> distribution = communityArticles.findAllByOrgId(org).stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        Cafe24CommunityArticle::getReplyStatus, java.util.stream.Collectors.counting()));
+        assertThat(distribution).containsOnly(
+                Map.entry("PENDING", 1L),
+                Map.entry("IN_PROGRESS", 1L),
+                Map.entry("ANSWERED", 1L));
+    }
+
+    @Test
+    void reviewBackfillAccountsForSecretOutOfWindowAndMissingArticleNoDrops() {
+        // One page mixing: a public in-window row (stored), a 비밀글 (secret excluded), an
+        // out-of-window row (dropped by the exact-window guard), and a row with no
+        // article_no (dropped — cannot dedupe/store). Only the first survives; the drops
+        // are accounted for pre-mapper and neither stored nor counted as failures.
+        String missingArticleNo = "{\"title\":\"제목\",\"content\":\"본문\",\"product_no\":77,"
+                + "\"rating\":5,\"created_date\":\"2026-03-18T10:00:00+09:00\","
+                + "\"reply_status\":\"N\",\"secret\":\"F\"}";
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(4201L, "제목", "공개 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N"),
+                FakeCafe24HttpClient.article(4202L, "비밀 제목", "비밀 본문", 77L, 5, "2026-03-16T10:00:00+09:00", "N", "T"),
+                FakeCafe24HttpClient.article(4203L, "제목", "창밖 본문", 77L, 5, "2026-07-01T10:00:00+09:00", "N"),
+                missingArticleNo));
+
+        SyncJob job = executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL",
+                BackfillWindow.of(START, END));
+
+        assertThat(job.getStatus()).isEqualTo("SUCCESS");
+        assertThat(job.getSuccessRows()).isEqualTo(1); // only the public in-window row stored
+        assertThat(job.getFailedRows()).isZero();
+
+        List<Cafe24CommunityArticle> rows = communityArticles.findAllByOrgId(org);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getArticleNo()).isEqualTo(4201L);
+        assertThat(rows.get(0).getReplyStatus()).isEqualTo("PENDING");
+    }
+
+    @Test
     void repeatedBackfillOverSameWindowIsNoOpNoDuplicates() {
         enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "동일 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
         executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL", BackfillWindow.of(START, END));
