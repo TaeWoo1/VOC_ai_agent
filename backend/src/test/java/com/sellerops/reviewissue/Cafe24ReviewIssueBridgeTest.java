@@ -2,7 +2,11 @@ package com.sellerops.reviewissue;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.sellerops.community.Cafe24CommunityArticle;
+import com.sellerops.community.Cafe24CommunityArticleRepository;
 import com.sellerops.ingest.Cafe24ReviewIssueBridge;
+import com.sellerops.ingest.Cafe24ReviewPromoter;
+import com.sellerops.ingest.Cafe24ReviewPromotionReconciler;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.review.Review;
 import com.sellerops.review.ReviewRepository;
@@ -40,6 +44,7 @@ class Cafe24ReviewIssueBridgeTest {
     @Autowired ReviewIssueEvidenceRepository evidence;
     @Autowired ReviewIssueUnknownUnitRepository unknowns;
     @Autowired ReviewIssueStateEventRepository stateEvents;
+    @Autowired Cafe24CommunityArticleRepository communityArticles;
 
     private static final LocalDate REF = LocalDate.of(2026, 6, 29);
     private static final String CAFE24_LATE_DELIVERY = "배송이 너무 늦었어요";
@@ -52,13 +57,37 @@ class Cafe24ReviewIssueBridgeTest {
     private final ApplicationEventPublisher publisher = published::add;
 
     private Cafe24ReviewIssueBridge bridge;
+    private Cafe24ReviewPromotionReconciler reconciler;
     private ReviewIssueExtractionService extraction;
 
     @BeforeEach
     void setUp() {
-        bridge = new Cafe24ReviewIssueBridge(reviews, publisher);
+        Cafe24ReviewPromoter promoter = new Cafe24ReviewPromoter(reviews);
+        bridge = new Cafe24ReviewIssueBridge(promoter, publisher);
+        reconciler = new Cafe24ReviewPromotionReconciler(communityArticles, promoter, publisher);
         extraction = new ReviewIssueExtractionService(
                 new RuleBasedIssueSignatureExtractor(false), issues, evidence, unknowns, stateEvents);
+    }
+
+    /** Seed an ALREADY-STORED Cafe24 community article (as a prior sync would have persisted it). */
+    private Cafe24CommunityArticle storeArticle(long articleNo, String content, int boardNo,
+                                                String sourceKind, LocalDate onKst) {
+        Cafe24CommunityArticle a = new Cafe24CommunityArticle();
+        a.setOrgId(org);
+        a.setSellerAccountId(account);
+        a.setChannelId(channel);
+        a.setBoardNo(boardNo);
+        a.setArticleNo(articleNo);
+        a.setProductNo(77L);
+        a.setSourceKind(sourceKind);
+        a.setReplyStatus("UNKNOWN");
+        a.setTitle("제목");
+        a.setContent(content);
+        a.setRating(5);
+        a.setSourceCreatedAt(onKst.atStartOfDay(ZoneOffset.UTC).toInstant());
+        a.setSourceHash("h" + articleNo);
+        a.setCollectedAt(onKst.atStartOfDay(ZoneOffset.UTC).toInstant());
+        return communityArticles.save(a);
     }
 
     private CanonicalCommunityArticle reviewArticle(long articleNo, String content) {
@@ -193,5 +222,98 @@ class Cafe24ReviewIssueBridgeTest {
                 .isEmpty();
         assertThat(reviews.findForIssueExtraction(otherOrg, PageRequest.of(0, 100))).isEmpty();
         assertThat(issues.findByOrgIdAndDismissedFalse(otherOrg)).isEmpty();
+    }
+
+    // ---- reconciler: historical stored articles, no Cafe24 API call --------------------------
+
+    @Test
+    void reconcilerPromotesAStoredPreBridgeReviewIntoIssueMemory() {
+        // A review stored by a prior sync (before the bridge existed): a REVIEW sync replay would
+        // skip it at ingestion, so only the reconciler (reading storage, no API) can promote it.
+        storeArticle(3670L, CAFE24_LATE_DELIVERY, 4, "REVIEW", REF);
+
+        Cafe24ReviewPromotionReconciler.ReconcileResult r =
+                reconciler.reconcile(org, account, REF, REF);
+
+        assertThat(r.eligible()).isEqualTo(1);
+        assertThat(r.promoted()).isEqualTo(1);
+        assertThat(r.alreadyPromoted()).isZero();
+        assertThat(r.refreshTriggered()).isTrue();
+        assertThat(published).hasSize(1);
+
+        Review promotedReview = reviews
+                .findByOrgIdAndChannelIdAndExternalId(org, channel, "cafe24:b4:a3670").orElseThrow();
+        extractAll(org);
+        ReviewIssue issue = issues.findByOrgIdAndSignatureKey(org, "배송:지연").orElseThrow();
+        assertThat(evidence.findAll())
+                .singleElement()
+                .satisfies(ev -> assertThat(ev.getReviewId()).isEqualTo(promotedReview.getId()));
+    }
+
+    @Test
+    void secondReconcileOfSameWindowPromotesNothing() {
+        storeArticle(3670L, CAFE24_LATE_DELIVERY, 4, "REVIEW", REF);
+
+        reconciler.reconcile(org, account, REF, REF);
+        extractAll(org);
+        Cafe24ReviewPromotionReconciler.ReconcileResult second =
+                reconciler.reconcile(org, account, REF, REF);
+        extractAll(org);
+
+        assertThat(second.eligible()).isEqualTo(1);
+        assertThat(second.promoted()).isZero();
+        assertThat(second.alreadyPromoted()).isEqualTo(1);
+        assertThat(second.refreshTriggered()).isFalse();
+        assertThat(reviews.findForIssueExtraction(org, PageRequest.of(0, 100))).hasSize(1);
+        assertThat(issues.findByOrgIdAndDismissedFalse(org)).hasSize(1);
+        assertThat(evidence.count()).isEqualTo(1);
+        assertThat(published).hasSize(1); // only the first reconcile published a refresh
+    }
+
+    @Test
+    void reconcileAfterTheBridgeAlreadyPromotedFindsNoNewWork() {
+        storeArticle(3670L, CAFE24_LATE_DELIVERY, 4, "REVIEW", REF);
+        // Fresh-ingest bridge already promoted the same article this run.
+        bridge.bridgePublicReviews(org, channel, account,
+                List.of(reviewArticle(3670L, CAFE24_LATE_DELIVERY)));
+
+        Cafe24ReviewPromotionReconciler.ReconcileResult r =
+                reconciler.reconcile(org, account, REF, REF);
+
+        assertThat(r.promoted()).isZero();
+        assertThat(r.alreadyPromoted()).isEqualTo(1);
+        assertThat(reviews.findForIssueExtraction(org, PageRequest.of(0, 100))).hasSize(1);
+    }
+
+    @Test
+    void reconcileExcludesOtherAccountWindowAndBoard6() {
+        storeArticle(3670L, CAFE24_LATE_DELIVERY, 4, "REVIEW", REF);
+        // board-6 inquiry in the same window must never be a target (filtered by source kind).
+        storeArticle(8801L, "곡면 가능?", 6, "PRODUCT_INQUIRY", REF);
+
+        // A window that does not contain the review's KST date promotes nothing.
+        assertThat(reconciler.reconcile(org, account, REF.plusDays(1), REF.plusDays(1)).promoted())
+                .isZero();
+        // A different account promotes nothing.
+        assertThat(reconciler.reconcile(org, UUID.randomUUID(), REF, REF).eligible()).isZero();
+
+        // The in-window reconcile sees only the REVIEW (board 6 excluded → eligible=1).
+        Cafe24ReviewPromotionReconciler.ReconcileResult r = reconciler.reconcile(org, account, REF, REF);
+        assertThat(r.eligible()).isEqualTo(1);
+        assertThat(r.promoted()).isEqualTo(1);
+    }
+
+    @Test
+    void reconcileSkipsEmptyBodyButStillPromotesTheRest() {
+        storeArticle(3670L, CAFE24_LATE_DELIVERY, 4, "REVIEW", REF);
+        storeArticle(3671L, "   ", 4, "REVIEW", REF); // rating-only, blank body
+
+        Cafe24ReviewPromotionReconciler.ReconcileResult r =
+                reconciler.reconcile(org, account, REF, REF);
+
+        assertThat(r.eligible()).isEqualTo(2);
+        assertThat(r.promoted()).isEqualTo(1);
+        assertThat(r.skippedEmptyBody()).isEqualTo(1);
+        assertThat(reviews.findForIssueExtraction(org, PageRequest.of(0, 100))).hasSize(1);
     }
 }
