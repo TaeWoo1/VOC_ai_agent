@@ -148,7 +148,7 @@ class Cafe24ArticleBackfillFlowTest {
 
     @Test
     void seededReviewBackfillBoundsBoard4Window() {
-        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "잘 쓰고 있어요", 77L, 5, null, "N"));
+        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "잘 쓰고 있어요", 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
 
         SyncJob job = executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL",
                 BackfillWindow.of(START, END));
@@ -176,7 +176,7 @@ class Cafe24ArticleBackfillFlowTest {
 
     @Test
     void seededInquiryBackfillOpensWorkItemBoundsBoard6WindowNeverBoard9() {
-        enqueuePage(FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 88L, null, null, "N"));
+        enqueuePage(FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 88L, null, "2026-03-15T10:00:00+09:00", "N"));
 
         SyncJob job = executor.execute(org, account.getId(), DataType.INQUIRY, "MANUAL",
                 BackfillWindow.of(START, END));
@@ -218,10 +218,10 @@ class Cafe24ArticleBackfillFlowTest {
         // Page 1 is a full executor page (50 rows → hasMore), page 2 is short (→ stop).
         List<String> full = new ArrayList<>();
         for (int n = 1; n <= 50; n++) {
-            full.add(FakeCafe24HttpClient.article(1000L + n, "제목", "본문" + n, 77L, 5, null, "N"));
+            full.add(FakeCafe24HttpClient.article(1000L + n, "제목", "본문" + n, 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
         }
         enqueuePage(full.toArray(String[]::new));
-        enqueuePage(FakeCafe24HttpClient.article(1051L, "제목", "본문51", 77L, 5, null, "N"));
+        enqueuePage(FakeCafe24HttpClient.article(1051L, "제목", "본문51", 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
 
         SyncJob job = executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL",
                 BackfillWindow.of(START, END));
@@ -241,12 +241,12 @@ class Cafe24ArticleBackfillFlowTest {
 
     @Test
     void repeatedBackfillOverSameWindowIsNoOpNoDuplicates() {
-        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "동일 본문", 77L, 5, null, "N"));
+        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "동일 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
         executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL", BackfillWindow.of(START, END));
 
         // A second identical backfill re-seeds the window at offset 0 and re-fetches
         // the same row; the natural key + source_hash make it an idempotent no-op.
-        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "동일 본문", 77L, 5, null, "N"));
+        enqueuePage(FakeCafe24HttpClient.article(2001L, "제목", "동일 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N"));
         SyncJob second = executor.execute(org, account.getId(), DataType.REVIEW, "MANUAL",
                 BackfillWindow.of(START, END));
 

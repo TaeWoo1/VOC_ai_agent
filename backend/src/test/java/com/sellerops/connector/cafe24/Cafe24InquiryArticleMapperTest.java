@@ -76,9 +76,9 @@ class Cafe24InquiryArticleMapperTest {
     }
 
     @Test
-    void liveObservedRawTokenCMapsToAnswered() {
-        // Regression: article 283 returned raw reply_status 'C' (처리완료); it must be
-        // ANSWERED, with the raw token preserved verbatim in informStatus.
+    void completedTokenCMapsToAnswered() {
+        // Cafe24's official 처리완료 token 'C' must map to ANSWERED, with the raw token
+        // preserved verbatim in informStatus. (Synthetic: raw 'C' is not yet live-observed.)
         CanonicalInquiry q =
                 Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row(283L, "제목", "본문", 5L, null, "C"), 1);
         assertThat(q.status()).isEqualTo("ANSWERED");
@@ -101,6 +101,25 @@ class Cafe24InquiryArticleMapperTest {
 
         // No offset → unknown by design; never an assumed zone.
         assertThat(q.receivedAt()).isNull();
+    }
+
+    @Test
+    void derivesIsSecretFailClosedFromTheSecretFlag() {
+        // Only a positively-public flag reads public; everything else is secret (fail-closed).
+        assertThat(secretFlag("F")).isFalse();
+        assertThat(secretFlag("f")).isFalse();
+        assertThat(secretFlag("false")).isFalse();
+        assertThat(secretFlag("T")).isTrue();      // 비밀글
+        assertThat(secretFlag(null)).isTrue();     // absent flag → secret
+        assertThat(secretFlag("")).isTrue();
+        assertThat(secretFlag("   ")).isTrue();
+        assertThat(secretFlag("X")).isTrue();      // unrecognized/changed → secret
+    }
+
+    private static Boolean secretFlag(String secret) {
+        Cafe24BoardArticleRow row =
+                new Cafe24BoardArticleRow(1L, "t", "b", 1L, null, null, null, "N", secret);
+        return Cafe24InquiryArticleMapper.toCanonicalInquiry(6, row, 1).isSecret();
     }
 
     private static String status(String replyStatus) {

@@ -174,7 +174,39 @@ public class IngestionService {
                         datePart(row.receivedAt()), row.body());
                 String token = hasExternal ? "ext:" + row.externalId() : "hash:" + hash;
 
-                if (!seen.add(token) || existsInquiry(orgId, channelId, hasExternal, row.externalId(), hash)) {
+                // Same key twice within one page → duplicate skip (batch-level dedup).
+                if (!seen.add(token)) {
+                    tally.skip();
+                    continue;
+                }
+
+                // Source-aware upsert on the external-id key: a re-collected inquiry whose
+                // title/body/reply-status changed updates the stored row in place instead of
+                // being skipped, so the platform's latest state is reflected. Non-external
+                // (file-upload) rows keep the content-hash insert-or-skip.
+                if (hasExternal) {
+                    Optional<Inquiry> existingOpt = inquiries
+                            .findByOrgIdAndChannelIdAndExternalId(orgId, channelId, row.externalId());
+                    if (existingOpt.isPresent()) {
+                        Inquiry existing = existingOpt.get();
+                        if (sourceUnchanged(existing, row)) {
+                            tally.skip();
+                            continue;
+                        }
+                        boolean becameAnswered = "ANSWERED".equals(row.status())
+                                && !"ANSWERED".equals(existing.getStatus());
+                        applyInquirySource(existing, row);
+                        if (becameAnswered && sellerAccountId != null) {
+                            // Reflect the platform answer and complete the OPEN work item
+                            // (absent/OPEN only) atomically — never reopen, never reply.
+                            workItemWriter.reconcileConnectorAnswered(existing);
+                        } else {
+                            inquiries.save(existing);
+                        }
+                        tally.update();
+                        continue;
+                    }
+                } else if (existsInquiry(orgId, channelId, false, null, hash)) {
                     tally.skip();
                     continue;
                 }
@@ -185,10 +217,7 @@ public class IngestionService {
                 entity.setSellerAccountId(sellerAccountId);
                 entity.setProductId(product.getId());
                 // Buyer PII (row.author()) is intentionally NOT persisted.
-                entity.setTitle(row.title());
-                entity.setBody(row.body());
-                entity.setStatus(row.status());
-                entity.setInformStatus(row.informStatus());
+                applyInquirySource(entity, row);
                 entity.setReceivedAt(row.receivedAt() != null ? row.receivedAt() : Instant.now());
                 entity.setExternalId(hasExternal ? row.externalId() : null);
                 entity.setContentHash(hash);
@@ -207,6 +236,36 @@ public class IngestionService {
             }
         }
         return tally.toOutcome();
+    }
+
+    /**
+     * Write the source-driven mutable fields of an inquiry (used by both insert and update).
+     * Buyer PII is never set. Status is <b>monotonic</b>: an inquiry already {@code ANSWERED}
+     * is never downgraded to {@code UNANSWERED} by a later re-collection (mirrors the review
+     * reply-state guard), so a stale export cannot reopen it. {@code is_secret} is preserved
+     * from the source ({@code null} for sources that do not classify secrecy).
+     */
+    private void applyInquirySource(Inquiry entity, CanonicalInquiry row) {
+        entity.setTitle(row.title());
+        entity.setBody(row.body());
+        // informStatus records the latest raw source token verbatim; canonical status is
+        // monotonic below. On Cafe24 reply_status only progresses (N→P→C), so a downgrade
+        // that would leave status=ANSWERED with a lower raw token does not occur in practice.
+        entity.setInformStatus(row.informStatus());
+        entity.setSecret(row.isSecret());
+        if (!"ANSWERED".equals(entity.getStatus())) {
+            entity.setStatus(row.status());
+        }
+    }
+
+    /** True when the stored inquiry already matches the re-collected source (a no-op upsert). */
+    private boolean sourceUnchanged(Inquiry existing, CanonicalInquiry row) {
+        String nextStatus = "ANSWERED".equals(existing.getStatus()) ? "ANSWERED" : row.status();
+        return java.util.Objects.equals(existing.getTitle(), row.title())
+                && java.util.Objects.equals(existing.getBody(), row.body())
+                && java.util.Objects.equals(existing.getStatus(), nextStatus)
+                && java.util.Objects.equals(existing.getInformStatus(), row.informStatus())
+                && java.util.Objects.equals(existing.getSecret(), row.isSecret());
     }
 
     public IngestOutcome ingestOrderSummaries(UUID orgId, UUID channelId, List<CanonicalOrderSummary> rows) {

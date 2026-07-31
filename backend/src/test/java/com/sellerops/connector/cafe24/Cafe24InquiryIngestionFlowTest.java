@@ -106,8 +106,124 @@ class Cafe24InquiryIngestionFlowTest {
         return ingestion.ingestInquiries(org, channel, account, records);
     }
 
+    /** Fetch one board-6 page carrying an explicit secret flag, then ingest for (org, account). */
+    private IngestOutcome fetchAndIngest(long articleNo, String content, String reply, String secret) {
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(articleNo, "제목", content, 77L, null,
+                        "2026-06-20T10:00:00+09:00", reply, secret)));
+        String cursor = Cafe24ArticleCursor.window(6, START, END).encode();
+        FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 3));
+        @SuppressWarnings("unchecked")
+        List<CanonicalInquiry> records = (List<CanonicalInquiry>) page.records();
+        return ingestion.ingestInquiries(org, channel, account, records);
+    }
+
     private List<InquiryWorkItem> openWorkItems(UUID orgId) {
         return workItems.findByOrgIdAndPhase(orgId, InquiryWorkItemPhase.OPEN, Pageable.unpaged()).getContent();
+    }
+
+    @Test
+    void secretBoard6InquiryIsStoredWithIsSecretTrueAndKeptInTheQueue() {
+        IngestOutcome out = fetchAndIngest(3010L, "비밀 문의 본문", "N", "T");
+
+        assertThat(out.success()).isEqualTo(1);
+        Inquiry q = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);
+        assertThat(q.getSecret()).isTrue();
+        assertThat(q.getExternalId()).isEqualTo("cafe24:b6:a3010");
+        // A secret inquiry is still an actionable seller task — it stays in the work queue.
+        assertThat(openWorkItems(org)).hasSize(1);
+    }
+
+    @Test
+    void publicBoard6InquiryIsStoredWithIsSecretFalse() {
+        fetchAndIngest(3011L, "공개 문의 본문", "N", "F");
+
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getSecret()).isFalse();
+    }
+
+    @Test
+    void reCollectingUnchangedIsANoOpUnderSourceAwareUpsert() {
+        fetchAndIngest(3030L, "본문", "N", "F");
+        IngestOutcome second = fetchAndIngest(3030L, "본문", "N", "F");
+
+        assertThat(second.success()).isZero();
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org)).hasSize(1);
+        assertThat(openWorkItems(org)).hasSize(1);
+    }
+
+    @Test
+    void outOfWindowArticleCreatesNoInquiryAndNoWorkItemWhileInWindowAnsweredStoresSecretWithNoOpenItem() {
+        // Mirrors the halted live run: a single-day window (2026-03-24) came back with an
+        // in-window answered secret inquiry AND an out-of-window (2026-03-27) unanswered
+        // secret inquiry. Only the in-window row may be stored; the out-of-window row must
+        // create neither an inquiry nor a work item.
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(3101L, "제목", "본문", 77L, null,
+                        "2026-03-24T10:00:00+09:00", "C", "T"),    // in-window, answered, secret
+                FakeCafe24HttpClient.article(3102L, "제목", "본문2", 77L, null,
+                        "2026-03-27T10:00:00+09:00", null, "T")));  // out-of-window, unanswered, secret
+        String cursor = Cafe24ArticleCursor.window(6,
+                LocalDate.parse("2026-03-24"), LocalDate.parse("2026-03-24")).encode();
+        FetchPage page = connector.fetch(
+                new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 50));
+        @SuppressWarnings("unchecked")
+        List<CanonicalInquiry> records = (List<CanonicalInquiry>) page.records();
+        IngestOutcome out = ingestion.ingestInquiries(org, channel, account, records);
+
+        // Only the in-window row is emitted, so only it is ingested.
+        assertThat(out.success()).isEqualTo(1);
+        List<Inquiry> rows = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org);
+        assertThat(rows).hasSize(1);
+        Inquiry q = rows.get(0);
+        assertThat(q.getExternalId()).isEqualTo("cafe24:b6:a3101");
+        assertThat(q.getStatus()).isEqualTo("ANSWERED"); // C → answered
+        assertThat(q.getSecret()).isTrue();               // secret preserved, kept in queue
+        // The out-of-window article is nowhere — not stored, and no work item.
+        assertThat(rows).noneMatch(r -> r.getExternalId().equals("cafe24:b6:a3102"));
+        // The answered inquiry opens no OPEN work item, and the dropped unanswered one did not either.
+        assertThat(openWorkItems(org)).isEmpty();
+    }
+
+    @Test
+    void reCollectingWithReplyStatusNtoCUpdatesInPlaceAndCompletesTheWorkItem() {
+        fetchAndIngest(3020L, "본문", "N", "F");
+        Inquiry before = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0);
+        assertThat(before.getStatus()).isEqualTo("UNANSWERED");
+        UUID inquiryId = before.getId();
+        UUID workItemId = openWorkItems(org).get(0).getId();
+
+        IngestOutcome second = fetchAndIngest(3020L, "본문", "C", "F");
+
+        // Update in place — no duplicate row, no new inserted id, no new work item.
+        assertThat(second.success()).isEqualTo(1);
+        assertThat(second.insertedIds()).isEmpty();
+        List<Inquiry> rows = inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org);
+        assertThat(rows).hasSize(1);
+        Inquiry after = rows.get(0);
+        assertThat(after.getId()).isEqualTo(inquiryId);
+        assertThat(after.getStatus()).isEqualTo("ANSWERED");
+        assertThat(after.getInformStatus()).isEqualTo("C");
+        // The one OPEN work item is COMPLETED — never reopened, never duplicated.
+        assertThat(openWorkItems(org)).isEmpty();
+        assertThat(workItems.findById(workItemId)).get()
+                .extracting(InquiryWorkItem::getPhase).isEqualTo(InquiryWorkItemPhase.COMPLETED);
+    }
+
+    @Test
+    void answeredInquiryIsNeverDowngradedByALaterUnansweredReCollection() {
+        fetchAndIngest(3040L, "본문", "C", "F");   // already answered → history, no work item
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getStatus())
+                .isEqualTo("ANSWERED");
+
+        fetchAndIngest(3040L, "본문", "N", "F");   // stale re-collection claims unanswered
+
+        // Monotonic: status is never rolled back to UNANSWERED.
+        assertThat(inquiries.findTop50ByOrgIdOrderByReceivedAtDesc(org).get(0).getStatus())
+                .isEqualTo("ANSWERED");
+        assertThat(openWorkItems(org)).isEmpty();
     }
 
     @Test

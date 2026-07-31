@@ -580,7 +580,8 @@ class Cafe24ApiConnectorTest {
         storeCafe24Credential();
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.articlesOk(
-                FakeCafe24HttpClient.article(1001L, "t", "c", null, 5, null, "N")));
+                FakeCafe24HttpClient.article(1001L, "t", "c", null, 5,
+                        "2026-03-15T10:00:00+09:00", "N")));
 
         // A windowed cursor seed (backfill) bounds the sweep to [start, end].
         String seeded = "b4:o0:s2026-01-01:e2026-06-25";
@@ -594,6 +595,118 @@ class Cafe24ApiConnectorTest {
                 .contains("offset=0");
         // The next cursor keeps the window so paging stays inside it.
         assertThat(page.nextCursorValue()).isEqualTo("b4:o1:s2026-01-01:e2026-06-25");
+    }
+
+    @Test
+    void windowedInquiryFetchDropsArticlesCreatedAfterTheEndDate() {
+        // The live-observed defect: a single-day window (2025-03-24) came back with an
+        // extra article created 2025-03-27 because the platform start_date/end_date
+        // filter did not clamp created_date. Only the in-window row may be emitted.
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(7001L, "제목", "본문", 77L, null,
+                        "2025-03-24T10:00:00+09:00", "C", "T"),   // in-window, answered, secret
+                FakeCafe24HttpClient.article(7002L, "제목", "본문2", 77L, null,
+                        "2025-03-27T10:00:00+09:00", null, "T"))); // out-of-window (after end)
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, "b6:o0:s2025-03-24:e2025-03-24"));
+
+        List<CanonicalInquiry> rows = inquiries(page);
+        assertThat(rows).hasSize(1);
+        CanonicalInquiry q = rows.get(0);
+        assertThat(q.externalId()).isEqualTo("cafe24:b6:a7001"); // the in-window article only
+        assertThat(q.status()).isEqualTo("ANSWERED");            // C → answered
+        assertThat(q.isSecret()).isTrue();                        // secret stays in the inquiry queue
+        assertThat(rows).noneMatch(r -> r.externalId().equals("cafe24:b6:a7002"));
+        // Cursor advances by rows FETCHED (2), not emitted (1), and preserves the window.
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o2:s2025-03-24:e2025-03-24");
+    }
+
+    @Test
+    void windowGuardIncludesBothBoundariesAndExcludesRowsOutsideThem() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(8001L, "t", "c", 77L, null, "2025-03-09T23:59:59+09:00", "N"), // before start
+                FakeCafe24HttpClient.article(8002L, "t", "c", 77L, null, "2025-03-10T00:00:00+09:00", "N"), // start edge
+                FakeCafe24HttpClient.article(8003L, "t", "c", 77L, null, "2025-03-15T10:00:00+09:00", "N"), // mid
+                FakeCafe24HttpClient.article(8004L, "t", "c", 77L, null, "2025-03-20T23:00:00+09:00", "N"), // end edge
+                FakeCafe24HttpClient.article(8005L, "t", "c", 77L, null, "2025-03-21T00:00:00+09:00", "N"))); // after end
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, "b6:o0:s2025-03-10:e2025-03-20"));
+
+        assertThat(inquiries(page)).extracting(CanonicalInquiry::externalId)
+                .containsExactlyInAnyOrder("cafe24:b6:a8002", "cafe24:b6:a8003", "cafe24:b6:a8004");
+        assertThat(inquiries(page)).noneMatch(r -> r.externalId().equals("cafe24:b6:a8001")
+                || r.externalId().equals("cafe24:b6:a8005"));
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o5:s2025-03-10:e2025-03-20");
+    }
+
+    @Test
+    void windowGuardFailsClosedOnMissingOrTimezoneLessCreatedDate() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(8101L, "t", "c", 77L, null, null, "N"),                 // no created_date
+                FakeCafe24HttpClient.article(8102L, "t", "c", 77L, null, "2025-03-15T10:00:00", "N"))); // timezone-less
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, "b6:o0:s2025-03-01:e2025-03-31"));
+
+        // Both look in-month, but neither carries a trustworthy offset-bearing
+        // created_date, so both fail closed (excluded) rather than assumed in-window.
+        assertThat(inquiries(page)).isEmpty();
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o2:s2025-03-01:e2025-03-31");
+    }
+
+    @Test
+    void windowGuardAlsoAppliesToTheReviewPath() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(8201L, "t", "c", 77L, 5, "2025-03-15T10:00:00+09:00", "N", "F"), // in-window public
+                FakeCafe24HttpClient.article(8202L, "t", "c", 77L, 5, "2025-04-15T10:00:00+09:00", "N", "F"))); // out-of-window public
+
+        FetchPage page = connector.fetch(request(DataType.REVIEW, "b4:o0:s2025-03-01:e2025-03-31"));
+
+        List<CanonicalCommunityArticle> rows = articles(page);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).articleNo()).isEqualTo(8201L);
+        assertThat(page.nextCursorValue()).isEqualTo("b4:o2:s2025-03-01:e2025-03-31");
+    }
+
+    @Test
+    void windowGuardEvaluatesCreatedDateInKstNotUtc() {
+        // A UTC-expressed instant near KST midnight: 2025-03-24T16:00Z is 2025-03-25 01:00
+        // KST. Under a 2025-03-25 window it must be KEPT (its KST date), which a naive
+        // UTC-date comparison would wrongly drop; a UTC instant still on the KST evening of
+        // 2025-03-24 must be dropped.
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(8301L, "t", "c", 77L, null, "2025-03-24T16:00:00+00:00", "N"), // KST 2025-03-25 → keep
+                FakeCafe24HttpClient.article(8302L, "t", "c", 77L, null, "2025-03-24T14:00:00+00:00", "N"))); // KST 2025-03-24 23:00 → drop
+
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, "b6:o0:s2025-03-25:e2025-03-25"));
+
+        assertThat(inquiries(page)).extracting(CanonicalInquiry::externalId)
+                .containsExactly("cafe24:b6:a8301");
+    }
+
+    @Test
+    void windowGuardStillDropsOutOfWindowRowsOnAResumedOffsetPage() {
+        storeCafe24Credential();
+        http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
+        http.enqueue(FakeCafe24HttpClient.articlesOk(
+                FakeCafe24HttpClient.article(8401L, "t", "c", 77L, null, "2025-03-15T10:00:00+09:00", "N"),  // in-window
+                FakeCafe24HttpClient.article(8402L, "t", "c", 77L, null, "2025-04-15T10:00:00+09:00", "N"))); // out-of-window
+
+        // Resume mid-sweep at offset 50 — the window is still enforced on the resumed page.
+        FetchPage page = connector.fetch(request(DataType.INQUIRY, "b6:o50:s2025-03-01:e2025-03-31"));
+
+        assertThat(inquiries(page)).extracting(CanonicalInquiry::externalId)
+                .containsExactly("cafe24:b6:a8401");
+        assertThat(page.nextCursorValue()).isEqualTo("b6:o52:s2025-03-01:e2025-03-31");
     }
 
     @Test

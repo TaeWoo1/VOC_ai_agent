@@ -42,6 +42,9 @@ final class Cafe24InquiryArticleMapper {
         // only when there is also no sku to key the product by.
         String productName = sku == null ? "(미지정 상품)" : null;
         String informStatus = blankToNull(row.replyStatus());
+        // Fail-closed secrecy: only a positively-public flag ("F"/"false") reads public;
+        // "T", null, blank, or any unrecognized value is treated as secret.
+        boolean isSecret = !row.isPublicPost();
         return new CanonicalInquiry(
                 productName,
                 sku,
@@ -53,7 +56,8 @@ final class Cafe24InquiryArticleMapper {
                 externalId(boardNo, row.articleNo()),
                 sourceRow,
                 row.title(),
-                informStatus);
+                informStatus,
+                isSecret);
     }
 
     /** Stable Cafe24-native dedup key preserving the mall's own board+article identity. */

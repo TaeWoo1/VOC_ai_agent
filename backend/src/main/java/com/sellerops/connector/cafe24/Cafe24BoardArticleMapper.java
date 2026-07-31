@@ -2,7 +2,9 @@ package com.sellerops.connector.cafe24;
 
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 
 /**
@@ -30,6 +32,9 @@ final class Cafe24BoardArticleMapper {
     static final int REVIEW_BOARD_NO = 4;
     static final int PRODUCT_INQUIRY_BOARD_NO = 6;
     static final int ONE_TO_ONE_BOARD_NO = 9;
+
+    /** Cafe24's explicit platform zone — board dates are KST calendar dates. */
+    static final ZoneId CAFE24_ZONE = ZoneId.of("Asia/Seoul");
 
     private Cafe24BoardArticleMapper() {
     }
@@ -77,5 +82,18 @@ final class Cafe24BoardArticleMapper {
         } catch (DateTimeParseException e) {
             return null;
         }
+    }
+
+    /**
+     * The article's {@code created_date} as a Cafe24 (KST) calendar date, or
+     * {@code null} when it is missing or not offset-bearing. Used only to enforce the
+     * operator's backfill window locally: the platform's {@code start_date}/{@code
+     * end_date} article filter is doc-asserted, not contract-guaranteed, so the
+     * connector must re-check inclusion itself. A {@code null} result is treated as
+     * out-of-window (fail closed) by the caller — never assumed in-window.
+     */
+    static LocalDate parseKstDate(String offsetBearing) {
+        Instant instant = parseOffsetInstant(offsetBearing);
+        return instant == null ? null : instant.atZone(CAFE24_ZONE).toLocalDate();
     }
 }

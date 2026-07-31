@@ -94,7 +94,8 @@ class Cafe24ArticlePersistenceFlowTest {
     private IngestOutcome runPass(DataType dataType, int boardNo, long articleNo, String content, String reply) {
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.articlesOk(
-                FakeCafe24HttpClient.article(articleNo, "제목", content, 77L, 5, null, reply)));
+                FakeCafe24HttpClient.article(articleNo, "제목", content, 77L, 5,
+                        "2026-03-15T10:00:00+09:00", reply)));
         String cursor = Cafe24ArticleCursor.window(boardNo, START, END).encode();
         FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", dataType, cursor, 3));
         @SuppressWarnings("unchecked")
@@ -116,7 +117,7 @@ class Cafe24ArticlePersistenceFlowTest {
     @Test
     void secretReviewPostsAreNeverPersistedThroughTheNormalPath() {
         IngestOutcome outcome = runReviewPass(
-                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N", "F"),
                 FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"),
                 FakeCafe24HttpClient.article(4003L, "누락 제목", "누락 본문", 77L, 5, null, "N", null));
 
@@ -139,10 +140,10 @@ class Cafe24ArticlePersistenceFlowTest {
     @Test
     void replayingAMixedPageStoresOnlyPublicRowsWithoutDuplicating() {
         runReviewPass(
-                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N", "F"),
                 FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"));
         IngestOutcome second = runReviewPass(
-                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, null, "N", "F"),
+                FakeCafe24HttpClient.article(4001L, "공개 제목", "공개 본문", 77L, 5, "2026-03-15T10:00:00+09:00", "N", "F"),
                 FakeCafe24HttpClient.article(4002L, "비밀 제목", "비밀 본문", 77L, 5, null, "N", "T"));
 
         // Replay is a no-op for the public row and the secret row never appears — the
@@ -203,7 +204,7 @@ class Cafe24ArticlePersistenceFlowTest {
     void inquiryFetchRoutesToBoard6NeverBoard9AndLeavesTheCommunityStore() {
         http.enqueue(FakeCafe24HttpClient.tokenOk("access-1", "old-refresh-token"));
         http.enqueue(FakeCafe24HttpClient.articlesOk(
-                FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 77L, null, null, "N")));
+                FakeCafe24HttpClient.article(3001L, "제목", "곡면 가능?", 77L, null, "2026-03-15T10:00:00+09:00", "N")));
         String cursor = Cafe24ArticleCursor.window(6, START, END).encode();
         FetchPage page = connector.fetch(new FetchRequest(org, account, "CAFE24", DataType.INQUIRY, cursor, 3));
 

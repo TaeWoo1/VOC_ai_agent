@@ -49,7 +49,9 @@ public class DashboardService {
         Instant since = Instant.now().minus(Duration.ofHours(24));
         LocalDate today = LocalDate.now();
 
-        long unanswered = inquiries.countByOrgIdAndStatus(orgId, "UNANSWERED");
+        // Secret (비밀글) inquiries are worked in the queue but excluded from dashboard
+        // aggregates; a null flag (non-Cafe24 / legacy) counts as non-secret.
+        long unanswered = inquiries.countByOrgIdAndStatusExcludingSecret(orgId, "UNANSWERED");
         long negative = reviews.countByOrgIdAndNegativeTrue(orgId);
 
         int todayOrders = 0;
@@ -62,7 +64,7 @@ public class DashboardService {
         DashboardCards cards = new DashboardCards(
                 todayOrders,
                 todaySales,
-                inquiries.countByOrgIdAndReceivedAtAfter(orgId, since),
+                inquiries.countByOrgIdAndReceivedAtAfterExcludingSecret(orgId, since),
                 unanswered,
                 reviews.countByOrgIdAndReceivedAtAfter(orgId, since),
                 negative,
@@ -75,7 +77,7 @@ public class DashboardService {
                 cards,
                 buildTodoItems(unanswered, negative),
                 buildTopProductIssues(orgId),
-                inboxService.recentFeed(orgId, 8),
+                inboxService.recentFeed(orgId, 8, false),
                 orderSummary.trend(),
                 orderSummary.channelShare());
     }

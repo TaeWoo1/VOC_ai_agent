@@ -68,4 +68,14 @@ public class Inquiry extends BaseEntity {
     /** Fallback dedup key when no external id: hash of channel+product+date+body. */
     @Column(name = "content_hash")
     private String contentHash;
+
+    /**
+     * Cafe24 board-6 비밀글(secret) flag, preserved for the exposure boundary. {@code true} =
+     * private inquiry (kept in the work queue but excluded from dashboards / general VOC
+     * analysis); {@code false} = public. {@code null} on legacy / non-Cafe24 (ESM, file-upload)
+     * rows = not classified, treated as visible everywhere (existing behavior). Set fail-closed
+     * by the Cafe24 connector: only a positively-public flag reads {@code false}.
+     */
+    @Column(name = "is_secret")
+    private Boolean secret;
 }

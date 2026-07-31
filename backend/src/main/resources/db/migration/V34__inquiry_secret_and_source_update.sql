@@ -1,0 +1,13 @@
+-- Cafe24 INQUIRY_READ Production Proof v1 — preserve the board-6 비밀글(secret) flag on the
+-- canonical inquiry so secret inquiries can be worked in the queue but kept out of dashboards
+-- and general analysis. Additive only: no data migration, no change to existing behavior.
+--
+-- `is_secret` is null on all pre-existing rows and on every non-Cafe24 source (ESM / file
+-- upload) — a null flag means "not classified", which every read path treats as visible
+-- (existing behavior). Only the Cafe24 board-6 connector path sets it: F/false → false,
+-- and T / null / blank / unrecognized → true (fail-closed toward secret).
+--
+-- The source-aware upsert that this proof also introduces (re-collected inquiry whose
+-- title/body/reply-status changed updates in place instead of being skipped) needs NO new
+-- column: the change is detected by comparing the incoming canonical fields to the stored row.
+alter table inquiries add column if not exists is_secret boolean;
