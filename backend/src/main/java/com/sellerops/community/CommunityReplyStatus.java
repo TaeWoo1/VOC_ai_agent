@@ -7,13 +7,16 @@ import java.util.Locale;
  *
  * <p>Cafe24's official {@code reply_status} tokens are single letters: {@code N}
  * (답변전 / no reply → {@link #PENDING}), {@code P} (처리중 / in progress →
- * {@link #IN_PROGRESS}), {@code C} (처리완료 / completed → {@link #ANSWERED}). Only
- * {@code N} has been observed on a live Cafe24 response so far — every board-4/6 row
- * sampled live to date was unanswered. {@code P} and {@code C} follow the same
- * official vocabulary (developers.cafe24.com) but are <b>not yet live-observed</b>;
- * they are exercised only by synthetic tests. The mapping is deliberately safe either
- * way: any unrecognized or blank value stays {@link #UNKNOWN} (never guessed as
- * answered), so only these four canonical values ever reach storage.
+ * {@link #IN_PROGRESS}), {@code C} (처리완료 / completed → {@link #ANSWERED}), per the
+ * official contract (developers.cafe24.com). The mapping is deliberately fail-closed:
+ * any unrecognized or blank value stays {@link #UNKNOWN} and is never guessed as
+ * answered, so only these four canonical values ever reach storage.
+ *
+ * <p>This enum states the token→status <b>contract</b>, not an observation history:
+ * which raw tokens have actually been seen on any given live run is recorded in the
+ * sanitized live-proof evidence docs (per board and per run), never asserted here — a
+ * code comment about "what has been observed live" goes stale the moment the next run
+ * sees a new token.
  */
 public enum CommunityReplyStatus {
     PENDING,
@@ -28,8 +31,7 @@ public enum CommunityReplyStatus {
         }
         return switch (raw.strip().toUpperCase(Locale.ROOT)) {
             // Cafe24's official reply_status tokens (developers.cafe24.com): N=답변전,
-            // P=처리중, C=처리완료. Only N is live-observed; P/C follow the official
-            // vocabulary but are not yet live-confirmed (synthetic tests only).
+            // P=처리중, C=처리완료. Unrecognized/blank → UNKNOWN (fail-closed, never guessed).
             case "N", "PENDING", "WAITING", "UNANSWERED" -> PENDING;
             case "P", "IN_PROGRESS", "PROGRESS", "PROCESSING" -> IN_PROGRESS;
             case "C", "ANSWERED", "COMPLETE", "COMPLETED", "DONE" -> ANSWERED;

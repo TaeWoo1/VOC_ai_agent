@@ -6,6 +6,7 @@ import com.sellerops.connector.FetchPage;
 import com.sellerops.connector.FetchRequest;
 import com.sellerops.connector.PullConnector;
 import com.sellerops.connector.UnsupportedDataTypeException;
+import com.sellerops.community.CommunityReplyStatus;
 import com.sellerops.ingest.canonical.CanonicalCommunityArticle;
 import com.sellerops.ingest.canonical.CanonicalInquiry;
 import com.sellerops.ingest.canonical.CanonicalOrderSummary;
@@ -13,6 +14,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -262,6 +264,16 @@ public class Cafe24ApiConnector implements PullConnector {
             int position = 0;
             int excludedSecret = 0;
             int outOfWindow = 0;
+            int missingArticleNo = 0;
+            // Sanitized closed-vocabulary tally of the reply state actually observed on the
+            // STORED rows — a count per canonical value, never a raw token / id / title /
+            // content. Unrecognized/blank stays UNKNOWN (never inferred). Lets a live-proof
+            // record the observed reply_status distribution without any per-row content.
+            EnumMap<CommunityReplyStatus, Integer> replyStatusStored =
+                    new EnumMap<>(CommunityReplyStatus.class);
+            for (CommunityReplyStatus s : CommunityReplyStatus.values()) {
+                replyStatusStored.put(s, 0);
+            }
             for (Cafe24BoardArticleRow row : rows) {
                 position++;
                 if (excludeSecret && !row.isPublicPost()) {
@@ -270,6 +282,7 @@ public class Cafe24ApiConnector implements PullConnector {
                     continue;
                 }
                 if (row.articleNo() == null) {
+                    missingArticleNo++;
                     continue; // cannot dedupe/store without the natural-key article number
                 }
                 // Exact-window guard. The platform's start_date/end_date article filter is
@@ -284,6 +297,8 @@ public class Cafe24ApiConnector implements PullConnector {
                     outOfWindow++;
                     continue;
                 }
+                replyStatusStored.merge(
+                        CommunityReplyStatus.normalize(row.replyStatus()), 1, Integer::sum);
                 records.add(mapper.map(boardNo, row, position));
             }
             if (excludedSecret > 0) {
@@ -293,6 +308,23 @@ public class Cafe24ApiConnector implements PullConnector {
             if (outOfWindow > 0) {
                 // Sanitized metric only — a count, never an article id/date/title/content/writer.
                 log.info("카페24 창 밖 게시글 제외: board={} 제외건수={}", boardNo, outOfWindow);
+            }
+            if (!rows.isEmpty()) {
+                // Full sanitized per-page accounting — counts only, never an article id / title /
+                // content / writer / raw token. raw_received reconciles as
+                // stored + secret + out-of-window + missing_article_no. Here "저장"(stored) is the
+                // count mapped/emitted to ingestion on THIS page, not net DB inserts — an idempotent
+                // skip still increments it; net persisted rows are the SyncRun success count. The
+                // reply_status distribution is over the mapped/emitted rows, in the closed canonical
+                // vocabulary.
+                log.info("카페24 게시판 수집 회계: board={} 수신={} 저장={} 비밀글제외={} 창밖제외={} "
+                                + "식별번호없음제외={} reply_status[PENDING={} IN_PROGRESS={} ANSWERED={} UNKNOWN={}]",
+                        boardNo, rows.size(), records.size(), excludedSecret, outOfWindow,
+                        missingArticleNo,
+                        replyStatusStored.get(CommunityReplyStatus.PENDING),
+                        replyStatusStored.get(CommunityReplyStatus.IN_PROGRESS),
+                        replyStatusStored.get(CommunityReplyStatus.ANSWERED),
+                        replyStatusStored.get(CommunityReplyStatus.UNKNOWN));
             }
             boolean hasMore = rows.size() == request.limit();
             String nextCursor = cursor.advance(rows.size()).encode();
