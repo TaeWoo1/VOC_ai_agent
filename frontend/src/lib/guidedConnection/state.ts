@@ -36,6 +36,8 @@ const ACTOR_BY_PHASE: Record<GuidedPhase, GuidedActor> = {
   application_status_unknown: "USER_REQUIRED",
   account_store_choice_required: "USER_REQUIRED",
   application_issuance: "USER_REQUIRED",
+  // The Action Window: SellerOps highlights the control step-by-step, the seller performs every real click.
+  application_issuance_guided: "SUPERVISED_ACTION",
   credential_issued: "SELLEROPS_GUIDED",
   sellerops_credential_entry: "USER_REQUIRED",
   existing_credential_entry: "USER_REQUIRED",
@@ -190,7 +192,23 @@ export function guidedConnectionReducer(
       return prev;
 
     case "application_issuance":
+      // The seller may switch the issuance INTO the Action Window guided walkthrough. `mode:"text"` here is
+      // a deliberate no-op — the static checklist already renders in place — so the only effect is entering
+      // the guided phase. The completion event is identical on both paths (guidance finished → enter credential).
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "guided") {
+        return state("application_issuance_guided", m, null, p);
+      }
       if (event.type === "ISSUANCE_COMPLETE") return state("credential_issued", m, null, p);
+      return prev;
+
+    case "application_issuance_guided":
+      // Guidance finished (COMPLETED) → the same credential-entry hand-off as the text path; the guided
+      // walkthrough never reads or stores a credential itself. `mode:"text"` is the fallback back to the
+      // static checklist (incl. when the Local Agent is unavailable). Anything else is a no-op.
+      if (event.type === "ISSUANCE_COMPLETE") return state("credential_issued", m, null, p);
+      if (event.type === "APPLICATION_ISSUANCE_MODE" && event.mode === "text") {
+        return state("application_issuance", m, null, p);
+      }
       return prev;
 
     case "credential_issued":

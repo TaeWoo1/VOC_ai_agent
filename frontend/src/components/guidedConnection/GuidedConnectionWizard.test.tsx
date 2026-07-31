@@ -64,8 +64,15 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ACCOUNT_STORE_RESOLVED" });
   });
 
-  it("application_issuance → shows the step-by-step tutorial checklist and dispatches ISSUANCE_COMPLETE", async () => {
+  it("application_issuance → mode fork; guided choice dispatches APPLICATION_ISSUANCE_MODE{guided}", async () => {
     const { props } = renderWizard(stateAt("application_issuance"));
+    await userEvent.click(screen.getByRole("button", { name: "화면을 보며 안내받기" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+  });
+
+  it("application_issuance → text choice reveals the static checklist in place and dispatches ISSUANCE_COMPLETE", async () => {
+    const { props } = renderWizard(stateAt("application_issuance"));
+    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
     expect(screen.getAllByRole("listitem").length).toBeGreaterThanOrEqual(3);
     // Each step exposes a "어디를 눌러야 하나요?" help and a checkbox; the center opens in a new tab.
     expect(screen.getAllByText("어디를 눌러야 하나요?").length).toBeGreaterThanOrEqual(3);
@@ -73,6 +80,13 @@ describe("GuidedConnectionWizard — per-phase actions dispatch sanitized events
     expect(screen.getByRole("button", { name: /API 센터 열기/ })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "발급을 완료했어요" }));
     expect(props.dispatch).toHaveBeenCalledWith({ type: "ISSUANCE_COMPLETE" });
+  });
+
+  it("application_issuance_guided → renders the Action Window walkthrough with a persistent text fallback", async () => {
+    const { props } = renderWizard(stateAt("application_issuance_guided"));
+    // The walkthrough's persistent text fallback returns to the checklist path (works even with no agent).
+    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
+    expect(props.dispatch).toHaveBeenCalledWith({ type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
   });
 
   it("credential_issued → dispatches BEGIN_CREDENTIAL_ENTRY", async () => {

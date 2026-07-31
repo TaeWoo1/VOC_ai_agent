@@ -103,12 +103,22 @@ export type ExecutionMode = (typeof EXECUTION_MODES)[number];
  *
  * Both are read-only export choreography — the seller clicks every marketplace control — so they reach
  * the ordinary `COMPLETED` terminal, unlike `REPLY_SUBMISSION`.
+ *
+ * `API_ISSUANCE_GUIDANCE` is the NAVER Commerce API-center onboarding walk: open the API center, observe
+ * which page category the seller is on, highlight the one control they must press next, observe their own
+ * click, and advance — until the Application ID / Secret is on screen for them to copy into SellerOps's
+ * masked form. It is read-only guidance choreography (the runtime never logs in, clicks, submits,
+ * auto-creates an application, selects an API group, or reads a credential value), so it too reaches the
+ * ordinary `COMPLETED` terminal — where "completed" means the ISSUANCE GUIDANCE finished, NOT that a
+ * credential was stored or a connection made. It binds to no approved marketplace work, so it carries no
+ * ref (like `EXPORT`).
  */
 export const RUN_INTENTS = [
   "EXPORT",
   "REPLY_SUBMISSION",
   "INITIAL_REVIEW_IMPORT_DISCOVERY",
   "INITIAL_REVIEW_IMPORT_SEGMENT",
+  "API_ISSUANCE_GUIDANCE",
 ] as const;
 export type RunIntent = (typeof RUN_INTENTS)[number];
 
@@ -125,6 +135,9 @@ export const INTENT_REQUIRED_REF: Readonly<Record<RunIntent, "submissionRef" | "
   REPLY_SUBMISSION: "submissionRef",
   INITIAL_REVIEW_IMPORT_DISCOVERY: "discoveryRef",
   INITIAL_REVIEW_IMPORT_SEGMENT: "importRef",
+  // API-issuance guidance binds to no approved marketplace work — it is a tutorial over the seller's own
+  // API center, authorized by the guided-connection flow, not by a minted ref. So it carries none.
+  API_ISSUANCE_GUIDANCE: null,
 };
 
 /** Every binding ref a `START_RUN` payload may carry (exactly one, chosen by intent). */

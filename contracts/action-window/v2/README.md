@@ -20,25 +20,35 @@ command shape stays valid).
 | `REPLY_SUBMISSION` | guided, human-performed reply post | `OPERATOR_REPORTED` (no read-back oracle) |
 | `INITIAL_REVIEW_IMPORT_DISCOVERY` | find the historical range the marketplace currently allows | `COMPLETED` |
 | `INITIAL_REVIEW_IMPORT_SEGMENT` | guide ONE planned monthly segment to a downloaded, ingested file | `COMPLETED` |
+| `API_ISSUANCE_GUIDANCE` | guide the seller through issuing/reusing a NAVER Commerce API application at the API center | `COMPLETED` |
 
 Both import intents are read-only export choreography — the seller clicks every marketplace
 control — so they need no new status. Discovery is separate because the **first** command has no
 plan yet: there is nothing to bind a segment ref to until the available range is known.
 
+`API_ISSUANCE_GUIDANCE` is likewise read-only guidance choreography, but over the NAVER Commerce
+**API center** rather than the store's review surface: it observes which page category the seller is on,
+highlights the one control they must press next, observes their own click, and advances — never logging
+in, clicking, submitting, auto-creating an application, selecting an API group, or reading the
+Application ID / Secret. Its `COMPLETED` terminal means the **issuance guidance finished**, not that a
+credential was stored or a connection made (the seller copies the credential into SellerOps's own masked
+form as a separate, later step). It binds to no approved marketplace work, so it carries no ref.
+
 **One binding ref per intent** (`INTENT_REQUIRED_REF`). Each intent requires exactly one opaque
 16-hex ref and **prohibits every other**: `submissionRef` iff `REPLY_SUBMISSION`, `discoveryRef` iff
-`INITIAL_REVIEW_IMPORT_DISCOVERY`, `importRef` iff `INITIAL_REVIEW_IMPORT_SEGMENT`; `EXPORT` carries
-none. A run bound to the wrong kind of approved work is thereby unrepresentable, and an *unknown*
-intent requires none — so a rejected intent cannot smuggle a binding through.
+`INITIAL_REVIEW_IMPORT_DISCOVERY`, `importRef` iff `INITIAL_REVIEW_IMPORT_SEGMENT`; `EXPORT` and
+`API_ISSUANCE_GUIDANCE` carry none. A run bound to the wrong kind of approved work is thereby
+unrepresentable, and an *unknown* intent requires none — so a rejected intent cannot smuggle a binding
+through.
 
 Refs resolve **server-side** to a seller account, plan, and segment. No plan id, segment id, or
 date crosses this boundary; required dates reach the seller as sanitized primitive `copyParams`
 under an FE-owned copy key, like any other step copy.
 
-**Carrier kind.** v2 envelopes are spoken by two different agent worlds, so
+**Carrier kind.** v2 envelopes are spoken by several different agent worlds, so
 `contracts/action-window/aw-carrier-kind.ts` announces which: `export` (v1), `reply` (v2), `import`
-(v2). Version alone cannot separate `reply` from `import`; an unrecognised or absent value fails
-closed rather than defaulting.
+(v2), `issuance` (v2). Version alone cannot separate `reply` / `import` / `issuance`; an unrecognised or
+absent value fails closed rather than defaulting.
 
 ## Location & ownership
 

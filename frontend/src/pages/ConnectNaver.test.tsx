@@ -114,11 +114,14 @@ function renderPage() {
   );
 }
 
-// New-app path with NO login/agent step: fork "new" → app-absence check → issuance tutorial → entry.
+// New-app path with NO login/agent step: fork "new" → app-absence check → issuance mode choice → the TEXT
+// checklist (the Local-Agent-free path) → entry. The guided (Action Window) mode is the alternative primary,
+// proven separately in the component tests; the order connection here stays text-only and Agent-free.
 async function newAppPath() {
   await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
   await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
   await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
+  await userEvent.click(await screen.findByRole("button", { name: "텍스트로 직접 진행하기" }));
   await userEvent.click(await screen.findByRole("button", { name: "발급을 완료했어요" }));
   await userEvent.click(await screen.findByRole("button", { name: /발급된 정보를 입력/ }));
 }
@@ -237,19 +240,23 @@ describe("ConnectNaver — page load / refresh is READ-ONLY (no test/sync re-run
   });
 });
 
-describe("ConnectNaver — API issuance tutorial", () => {
-  it("shows the step-by-step tutorial and opens the official center in a NEW TAB (no auto-click)", async () => {
+describe("ConnectNaver — API issuance mode choice + text checklist (Local-Agent-free)", () => {
+  it("offers guided vs text at issuance; the text checklist opens the official center in a NEW TAB (no auto-click)", async () => {
     renderPage();
     await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
     await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
     await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
+    // The mode fork is the primary experience; both choices are offered.
     expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "화면을 보며 안내받기" })).toBeInTheDocument();
+    // Choose the text path → the existing static checklist renders in place, unchanged behavior.
+    await userEvent.click(screen.getByRole("button", { name: "텍스트로 직접 진행하기" }));
     expect(screen.getAllByRole("checkbox").length).toBeGreaterThanOrEqual(3);
 
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     await userEvent.click(screen.getByRole("button", { name: /API 센터 열기/ }));
     expect(openSpy).toHaveBeenCalledWith(expect.stringContaining("commerce.naver.com"), "_blank", "noopener,noreferrer");
-    expect(screen.getByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument(); // checklist still on screen
+    expect(screen.getByRole("button", { name: "발급을 완료했어요" })).toBeInTheDocument(); // checklist still on screen
     openSpy.mockRestore();
   });
 });

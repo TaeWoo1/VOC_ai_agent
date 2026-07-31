@@ -19,6 +19,18 @@ const COPY: Record<string, string> = {
   "actionWindow.review.openSurface": "판매자센터 화면 열기",
   "actionWindow.review.selectAndDownload": "마켓 선택 후 내려받기",
   "actionWindow.review.processDownstream": "정리·분석",
+
+  // NAVER Commerce API-center issuance guidance (Action Window). Shared step copy keys with the collector
+  // runtime — the runtime sends only the key, this FE owns the wording. Hedged, position/role based: exact
+  // NAVER menu/button labels differ by screen version, so no label is asserted as fact. SellerOps never
+  // logs in, clicks, or reads the credential — the seller performs each step in the guided window.
+  "actionWindow.issuance.run": "API 발급 화면 안내",
+  "actionWindow.issuance.reachApplications": "애플리케이션 관리 영역으로 이동",
+  "actionWindow.issuance.createApp": "애플리케이션 만들기 (스토어당 1개)",
+  "actionWindow.issuance.openApp": "발급한 애플리케이션 열기",
+  "actionWindow.issuance.apiGroup": "주문·판매자 관련 API 그룹 추가",
+  "actionWindow.issuance.credentials": "애플리케이션 ID·시크릿 확인",
+  "actionWindow.issuance.return": "SellerOps로 돌아와 입력",
 };
 
 function interpolate(template: string, params?: CopyParams): string {

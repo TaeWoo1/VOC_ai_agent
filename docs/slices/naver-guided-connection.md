@@ -55,11 +55,13 @@
   포트 불일치를 **FAIL**한다. 브리지 flag OFF/DOWN이어도 주문 위저드는 정상이며, 브리지 상태는 REVIEW_IMPORT
   capability에만 반영된다. 실행 도중 backend 포트 변경 금지(고정 포트 + 프록시 타깃 일치 검사).
 
-### 0.1.1 live walkthrough 기록 (sanitized) — precondition에서 3회 막힘, 라이브 액션 0
+### 0.1.1 live walkthrough 기록 (sanitized) — 4회 halt, 라이브 액션 0
 
-operator walkthrough는 지금까지 **precondition 단계에서 세 번 막혔고, 어떤 라이브 NAVER 액션도 발생하지
-않았다**: NAVER connection test = **0회**, ORDER_SUMMARY sync = **0회**, 자격증명 입력·저장 = **0**. 단일-사용
-승인은 어느 시도에서도 **소비되지 않았다**.
+operator walkthrough는 지금까지 **네 번 halt됐고, 어떤 라이브 NAVER 액션도 발생하지 않았다**: NAVER
+connection test = **0회**, ORDER_SUMMARY sync = **0회**, 자격증명 입력·저장 = **0**, NAVER API 호출 = **0**.
+단일-사용 승인은 어느 시도에서도 **소비되지 않았다**. 1~3차는 precondition에서 막혔고, **4차는 모든
+precondition을 처음으로 통과한 뒤(환경 바인딩·UI 로그인·런타임 일치 PASS) product-scope 블로커에서 credential
+입력 직전에 멈췄다.**
 
 - **1차(2026-07-31, ABORTED):** ① 프론트 API base가 stale(`VITE_API_BASE_URL`가 죽은 포트) ② 최초 주문
   연결에 **잘못 포함된 Local Agent readiness gate**. 둘 다 v1.1 개정에서 구조적으로 제거.
@@ -73,6 +75,14 @@ operator walkthrough는 지금까지 **precondition 단계에서 세 번 막혔�
   프론트엔드/백엔드/DB/런타임과 동일한지 **암호학적·런타임 수준으로 바인딩되지 않았다.** stale 탭이나 다른
   환경은 **하나의 가능한 발현일 뿐** 단정하지 않는다. 결과적으로 operator가 다시 product-path 통합 검증자
   역할을 하게 되었다.
+- **4차(2026-08-01, HALTED_PRE_CREDENTIAL — product-scope 블로커):** Environment Binding v1 이후 첫 시도로
+  **모든 precondition을 통과**했다: env-binding smoke PASS, UI 로그인 PASS, 승인된 disposable 런타임(runId/git/
+  dbAlias/backend origin) 일치, 배너·handshake 정상, baseline 0 유지. operator가 **credential 입력 직전에
+  HALT**했고 라이브 액션은 0(credential 입력·저장 0, connection test 0, ORDER_SUMMARY sync 0, NAVER API 호출 0).
+  **블로커 = API 발급 tutorial UX가 제품 요구와 불일치.** 현재 구현은 **정적 체크리스트형 설명**이지만, product
+  owner가 요구한 tutorial은 **실제 NAVER API센터 페이지를 Action Window로 열고 단계별로 실제 컨트롤을 강조하는
+  guided walkthrough**다(수동 진행은 항상 유지 — 자동 클릭/체이닝 금지, fail-closed 규칙 준수). 승인은
+  **미소비로 기록하되 코드·범위 변경으로 폐기** — 재사용 금지, 향후 라이브는 새 bootstrap + 새 단일-사용 승인 필요.
 
 **구조적 개선(2차, closed):** preflight의 유일 승인 origin = `http://localhost:5173` 강제(127.0.0.1 → FAIL);
 실제 브라우저 UI 로그인 smoke를 최종 필수 게이트로 추가; 모든 dev env 파일의 절대 `VITE_API_BASE_URL` 금지;
@@ -92,6 +102,42 @@ DB write 0); ⑥ preflight가 context runId·git 일치 + 브라우저 env-bindi
 `tools/naver-local/{bootstrap.sh, run-backend-local.sh, run-frontend-local.sh, env-binding-smoke.mjs, preflight.sh,
 preflight-selfcheck.sh}`. **향후 라이브는 코드/프로세스 재시작으로 기존 승인 폐기 → 바인딩 완료 + 새 runtime
 manifest 생성 후 새 단일-사용 승인 필요.**
+
+## 0.2 개정 (Amendment v1.2, 2026-08-01) — **API 발급 tutorial = Action Window guided walkthrough** ⭐ 현행 계약
+
+> product owner 결정(우선순위 ① 현재 태스크). 4차 walkthrough halt의 블로커(§0.1.1)를 해소한다. §0.1의 "API 발급
+> 튜토리얼(공식 API센터 새 탭 + 체크리스트)" 서술은 이제 **텍스트 fallback**을 가리키며, **기본 경험은 Action
+> Window guided walkthrough**다. **오프라인/합성 전용 — 라이브 API센터 관찰·credential 입력·connection test·sync
+> 없음.** 정확한 NAVER selector·메뉴명은 여전히 **미확정(candidate)** 이다.
+
+- **무엇을 바꿨나.** `처음 발급` 경로에서 `화면을 보며 안내받기`(guided) 와 `텍스트로 직접 진행하기`(text) 를
+  고른다. text = 기존 정적 체크리스트(불변). guided = **실제 API센터를 전용 브라우저로 열어 단계별로 실제 컨트롤을
+  강조하는 Action Window**. 리듀서는 **1 phase(`application_issuance_guided`) + 1 event(`APPLICATION_ISSUANCE_MODE`)**
+  만 추가했고 기존 전이(`account_store_choice_required → application_issuance`, saved/existing/have 경로)는 **바이트
+  불변**이다.
+- **기존 Action Window 인프라 재사용.** contract는 v2에 **intent `API_ISSUANCE_GUIDANCE`(ref 없음) + carrier
+  `issuance`(fail-closed 교차-attach 방지)** 만 추가(신규 status/event/blocker 없음). 런타임은 `initial-import`을
+  거울삼은 격리 엔진(`collector/src/action-window/api-issuance/`)이고, 페이지 감지는 **기존 `observe-api-center.ts`
+  분류기 재사용**(모든 규칙 `LIVE_DOM_CALIBRATION_PENDING`). FE는 `OperationRunTimeline`·`ActionWindowControlPanel`·
+  `AgentPairingPanel`을 재사용.
+- **14개 필수 상태**(도메인 state machine → v2 계약 투영): `opening · waiting_login · locating_applications ·
+  existing_app · empty_state · guiding_create · guiding_api_group · guiding_app_detail · guiding_credentials ·
+  return_to_sellerops · guidance_complete · target_not_found · page_mismatch · operator_aborted`. 실제 UI 상태를
+  **관찰해 분기**한다(앱 존재→`existing_app`/열기, 없음→`empty_state`/생성) — 사전 질문·고정 경로 없음. 로그인 미완/
+  타깃 미발견/예상 밖 페이지는 **복구 가능한 park**, 취소는 `operator_aborted`. `guidance_complete`는 **발급 안내가
+  끝났다는 뜻일 뿐, credential 저장·연결 완료가 아니다.**
+- **Local Agent 경계.** guided sub-flow(`application_issuance_guided`) **에서만** Local Agent를 페어링한다(전용
+  Chrome + overlay). **주문 API 연결은 여전히 Agent-free**(§0.1 불변): credential 입력·test·sync·saved/existing
+  경로는 브리지에 의존하지 않는다. Agent 미가용 시 guided → **text fallback** 항상 제공.
+- **금지(구조적으로 보장).** 자동 클릭·입력·제출 0, 앱 자동 생성 0, API 그룹 자동 선택 0, Application ID/Secret
+  **DOM 값 읽기 0**(census는 counts/booleans만; wire는 opaque 16-hex sig만 — 원시 값이 sig로 오면 `target_not_found`
+  로 fail-closed), clipboard·스크린샷·로그로 Secret 수집 0. source-guard 테스트가 click/read 토큰 부재를 강제한다.
+  Secret 화면에서는 **위치만 강조**하고 값은 셀러가 SellerOps 마스킹 폼에 직접 입력한다.
+- **라이브에서 확정할 selector 목록(현재 candidate).** page-category 규칙(login=password, credential_issuance=
+  readonly, app_detail=editable, app_list=list container), existing-vs-empty(application-entry row count>0),
+  control selector(`create_app`·`open_app`·`api_group`·`credentials`·`return`), probe branch(app_list→진행, 그 외→
+  page_mismatch). 모두 라이브 G3-C walk 확정 대상 — 지금은 합성 fixture로만 검증. **collector bridge 엔드포인트
+  등록은 seam으로 남김**(agent bootstrap 광범위 변경 회피).
 
 ---
 

@@ -36,6 +36,11 @@ export type GuidedPhase =
   | "application_status_unknown"
   | "account_store_choice_required"
   | "application_issuance"
+  // The Action Window guided walkthrough for issuance: SellerOps highlights the control in a dedicated
+  // NAVER API-center browser (via the Local Agent) and the seller performs every real click. This is the
+  // ONLY place the Local Agent participates in the order connection; a `mode:"text"` fallback returns to
+  // `application_issuance` (the static checklist), incl. when the Local Agent is unavailable.
+  | "application_issuance_guided"
   | "credential_issued"
   | "sellerops_credential_entry"
   | "existing_credential_entry"
@@ -136,6 +141,13 @@ export type GuidedEvent =
    */
   | { type: "SECRET_RECHECKED" }
   | { type: "ACCOUNT_STORE_RESOLVED" }
+  /**
+   * At `application_issuance`, the seller chooses HOW to issue: `guided` opens the Action Window guided
+   * walkthrough (`application_issuance_guided`); `text` keeps the static checklist in place (a no-op at
+   * `application_issuance`). From the guided walkthrough, `text` is the fallback back to the checklist —
+   * including when the Local Agent is unavailable. It never carries a credential or an account id.
+   */
+  | { type: "APPLICATION_ISSUANCE_MODE"; mode: "guided" | "text" }
   | { type: "ISSUANCE_COMPLETE" }
   | { type: "BEGIN_CREDENTIAL_ENTRY" }
   | { type: "SUBMIT_CREDENTIALS" }

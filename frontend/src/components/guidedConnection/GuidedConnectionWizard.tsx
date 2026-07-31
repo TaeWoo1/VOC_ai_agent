@@ -6,12 +6,13 @@ import type {
 import { relativeTime } from "../../lib/format";
 import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
 import { NaverIssuanceTutorial } from "./NaverIssuanceTutorial";
+import { NaverIssuanceModeChoice } from "./NaverIssuanceModeChoice";
+import { NaverIssuanceGuidedWalkthrough } from "./NaverIssuanceGuidedWalkthrough";
 import {
   ACTOR_COPY,
   DISCONNECT_GUARDRAIL_COPY,
   FAILURE_COPY,
   NAVER_EXISTING_APP_TUTORIAL,
-  NAVER_ISSUANCE_TUTORIAL,
   PHASE_COPY,
   REVIEW_SETUP_COPY,
   type GuidedConnectionState,
@@ -149,12 +150,10 @@ export function GuidedConnectionWizard({
           </button>
         )}
 
-        {phase === "application_issuance" && (
-          <NaverIssuanceTutorial
-            steps={NAVER_ISSUANCE_TUTORIAL}
-            onComplete={() => dispatch({ type: "ISSUANCE_COMPLETE" })}
-            completeLabel="발급을 완료했어요"
-          />
+        {phase === "application_issuance" && <NaverIssuanceModeChoice dispatch={dispatch} busy={busy} />}
+
+        {phase === "application_issuance_guided" && (
+          <NaverIssuanceGuidedWalkthrough dispatch={dispatch} busy={busy} />
         )}
 
         {phase === "credential_issued" && (

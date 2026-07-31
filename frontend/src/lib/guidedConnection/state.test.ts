@@ -104,6 +104,56 @@ describe("three-path fork — reuse first, issue only when there is no app (§fl
   });
 });
 
+describe("issuance mode — guided (Action Window) vs text, same completion hand-off", () => {
+  const issuance = run(HAPPY_PATH_EVENTS.slice(0, 4)); // application_issuance (new path)
+
+  it("APPLICATION_ISSUANCE_MODE{guided} at issuance → application_issuance_guided (SUPERVISED_ACTION)", () => {
+    expect(issuance.phase).toBe("application_issuance");
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(guided.phase).toBe("application_issuance_guided");
+    expect(guided.actor).toBe("SUPERVISED_ACTION");
+    expect(guided.path).toBe("new"); // path threaded unchanged
+    expect(actorFor("application_issuance_guided")).toBe("SUPERVISED_ACTION");
+  });
+
+  it("APPLICATION_ISSUANCE_MODE{text} at issuance is a NO-OP (the checklist already renders in place)", () => {
+    expect(reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" })).toBe(issuance);
+  });
+
+  it("the TEXT path is unchanged: ISSUANCE_COMPLETE at issuance → credential_issued", () => {
+    expect(reduce(issuance, { type: "ISSUANCE_COMPLETE" }).phase).toBe("credential_issued");
+  });
+
+  it("guided + ISSUANCE_COMPLETE → credential_issued (same hand-off as text; never a stored credential)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const done = reduce(guided, { type: "ISSUANCE_COMPLETE" });
+    expect(done.phase).toBe("credential_issued");
+    expect(done.milestones).toEqual({ registered: false, tested: false, synced: false }); // no credential minted
+  });
+
+  it("guided + APPLICATION_ISSUANCE_MODE{text} → application_issuance (the text fallback / agent unavailable)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const back = reduce(guided, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    expect(back.phase).toBe("application_issuance");
+    expect(back.path).toBe("new");
+  });
+
+  it("guided is otherwise inert: an unmodeled event is a no-op (cannot skip ahead)", () => {
+    const guided = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(reduce(guided, { type: "BEGIN_CREDENTIAL_ENTRY" })).toBe(guided);
+    expect(reduce(guided, { type: "SYNC_RESULT", status: "SUCCESS" })).toBe(guided);
+  });
+
+  it("guided ⇄ text ⇄ guided round-trips without touching milestones or path", () => {
+    const g1 = reduce(issuance, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    const t1 = reduce(g1, { type: "APPLICATION_ISSUANCE_MODE", mode: "text" });
+    const g2 = reduce(t1, { type: "APPLICATION_ISSUANCE_MODE", mode: "guided" });
+    expect(g2.phase).toBe("application_issuance_guided");
+    expect(g2.milestones).toEqual(issuance.milestones);
+    expect(g2.path).toBe(issuance.path);
+  });
+});
+
 describe("full journeys → completed only after registered ∧ tested ∧ synced (§12)", () => {
   it("new-app happy path walks to completed", () => {
     const s = run(HAPPY_PATH_EVENTS);

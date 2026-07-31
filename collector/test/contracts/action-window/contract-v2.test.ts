@@ -40,6 +40,7 @@ import {
   AW_CARRIER_EXPORT,
   AW_CARRIER_REPLY,
   AW_CARRIER_IMPORT,
+  AW_CARRIER_ISSUANCE,
   parseAwCarrierKind,
 } from "../../../../contracts/action-window/aw-carrier-kind";
 
@@ -265,6 +266,47 @@ describe("Action Window v2 — initial-review-import binding rules", () => {
     expect(parseAwCarrierKind("import")).toBe("import");
     expect(new Set([AW_CARRIER_EXPORT, AW_CARRIER_REPLY, AW_CARRIER_IMPORT]).size).toBe(3);
     expect(parseAwCarrierKind("initial-import")).toBeNull(); // fail closed on anything unrecognised
+  });
+});
+
+describe("Action Window v2 — API-issuance guidance binding rules", () => {
+  const base = { protocolVersion: 2, commandId: "c", runId: "r", expectedRevision: 0, type: "START_RUN" as const };
+  const DISCOVERY = "0f1e2d3c4b5a6978";
+  const IMPORT = "9a8b7c6d5e4f3021";
+  const SUBMISSION = "a1b2c3d4e5f60718";
+
+  it("API_ISSUANCE_GUIDANCE binds to no approved work — it requires no ref (like EXPORT)", () => {
+    expect(INTENT_REQUIRED_REF.API_ISSUANCE_GUIDANCE).toBeNull();
+    expect(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", intent: "API_ISSUANCE_GUIDANCE" } })).toEqual({ ok: true });
+  });
+
+  // Issuance is a tutorial over the seller's own API center, not a run bound to a minted plan/segment/reply.
+  // Carrying any binding ref is the wiring bug this makes unrepresentable — in all three directions.
+  it.each([
+    ["a submissionRef", { intent: "API_ISSUANCE_GUIDANCE", submissionRef: SUBMISSION }],
+    ["a discoveryRef", { intent: "API_ISSUANCE_GUIDANCE", discoveryRef: DISCOVERY }],
+    ["an importRef", { intent: "API_ISSUANCE_GUIDANCE", importRef: IMPORT }],
+  ])("rejects an issuance run carrying %s", (_label, payload) => {
+    expect(errorCodes(validateCommandEnvelope({ ...base, payload: { channelCode: "naver", ...payload } }))).toContain("CONSTRAINT_VIOLATION");
+  });
+
+  // Issuance is read-only guidance choreography, so — like an import — it reaches the ordinary COMPLETED
+  // terminal, NOT the reply world's OPERATOR_REPORTED. "Completed" means the guidance finished, not that a
+  // credential was stored or a connection made.
+  it("an issuance run reaches COMPLETED (guidance finished ≠ credential stored / connected)", () => {
+    const view = {
+      protocolVersion: 2, runId: "r", revision: 4, channelCode: "naver",
+      runCopyKey: "actionWindow.issuance.run", status: "COMPLETED", executionMode: "AUTOMATIC_OPERATION",
+      intent: "API_ISSUANCE_GUIDANCE", guidanceEnabled: true, allowedCommands: [],
+      progress: { completedSteps: 6, totalSteps: 6 }, updatedAt: "2026-08-01T00:00:00Z",
+    };
+    expect(validateRunView(view)).toEqual({ ok: true });
+  });
+
+  it("the issuance carrier is its own announceable kind — no cross-attach with export/reply/import", () => {
+    expect(parseAwCarrierKind("issuance")).toBe("issuance");
+    expect(new Set([AW_CARRIER_EXPORT, AW_CARRIER_REPLY, AW_CARRIER_IMPORT, AW_CARRIER_ISSUANCE]).size).toBe(4);
+    expect(parseAwCarrierKind("api-issuance")).toBeNull(); // fail closed on anything unrecognised
   });
 });
 
