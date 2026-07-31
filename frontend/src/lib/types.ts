@@ -83,6 +83,32 @@ export interface Cafe24CapabilityView {
   features: Cafe24CapabilityFeatureView[];
 }
 
+/**
+ * Sanitized result of the read-only NAVER guided-connection capability check (mirrors the backend
+ * ConnectionCapabilityView). Carries no token, client id/secret, order id, or personal data — the
+ * seller's identity is reported ONLY as {@link identityConfirmed} (the credential authenticated and
+ * a first order sync reached this seller; NAVER exposes no whoami). Every string is a closed
+ * vocabulary or a fixed backend code; the wizard maps each code to Korean copy.
+ */
+export interface ConnectionCapabilityFeatureView {
+  feature: string; // ORDER_READ | REVIEW_IMPORT | REVIEW_REPLY | INQUIRY_READ
+  state: string; // AVAILABLE | GUIDED_CONFIRMATION | NOT_ENABLED | INTEGRATION_PENDING | NEEDS_ATTENTION
+  label: string;
+  reason: string | null;
+}
+
+export interface ConnectionCapabilityView {
+  sellerAccountId: string;
+  channelCode: string;
+  connectionStatus: string | null;
+  credentialPresent: boolean;
+  identityConfirmed: boolean;
+  firstSyncStatus: string; // NONE | SUCCESS | PARTIAL | FAILED | RUNNING
+  overall: string; // AVAILABLE | NEEDS_ATTENTION
+  reason: string | null;
+  features: ConnectionCapabilityFeatureView[];
+}
+
 export interface SellerAccountResponse {
   id: string;
   channelId: string;

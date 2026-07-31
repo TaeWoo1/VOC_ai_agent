@@ -29,6 +29,7 @@ function renderWizard(
     template: NAVER_LIKE_TEMPLATE,
     busy: false,
     connectionStatus: null,
+    capability: null,
     dispatch: vi.fn(),
     onRecheck: vi.fn(),
     onConfirmLogin: vi.fn(),

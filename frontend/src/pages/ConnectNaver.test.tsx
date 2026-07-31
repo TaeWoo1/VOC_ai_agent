@@ -3,13 +3,14 @@
 // the browser gate, the three-path fork, and the imperative register→test→sync chain, all against a real
 // (mocked) backend boundary. Also pins that the Client Secret reaches ONLY api.storeCredential.
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { StrictMode } from "react";
 import { render } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { screen, userEvent, waitFor } from "../test/renderWithRouter";
 import { NAVER_LIKE_TEMPLATE } from "../lib/guidedConnection";
 import type { BridgeState } from "../lib/bridge/bridgeClient";
 import type { BridgeConnectionState, BridgeConnectionView, BridgePendingUserAction } from "../lib/bridge/bridgeProtocol";
-import type { ConnectionInfoView, SyncRunView } from "../lib/types";
+import type { ConnectionCapabilityView, ConnectionInfoView, SyncRunView } from "../lib/types";
 
 // Configurable bridge state so tests can drive the live-detection source (B4). Default: paired with no
 // snapshot → detection unavailable → attestation fallback (the pre-B4-wiring behavior).
@@ -40,6 +41,7 @@ vi.mock("../lib/apiClient", () => ({
     storeCredential: vi.fn(),
     testConnection: vi.fn(),
     manualSync: vi.fn(),
+    getConnectionCapabilityStrict: vi.fn(),
   },
 }));
 
@@ -65,8 +67,30 @@ function mockTestAndSyncSuccess(accountId = "acc-1") {
   vi.mocked(api.manualSync).mockResolvedValue(syncRun(accountId));
 }
 
+/** A sanitized capability result for the completion screen (order live, review guided, inquiry pending). */
+function capabilityView(accountId = "acc-1", over: Partial<ConnectionCapabilityView> = {}): ConnectionCapabilityView {
+  return {
+    sellerAccountId: accountId,
+    channelCode: "NAVER",
+    connectionStatus: "CONNECTED",
+    credentialPresent: true,
+    identityConfirmed: true,
+    firstSyncStatus: "SUCCESS",
+    overall: "AVAILABLE",
+    reason: null,
+    features: [
+      { feature: "ORDER_READ", state: "AVAILABLE", label: "주문 조회", reason: null },
+      { feature: "REVIEW_IMPORT", state: "GUIDED_CONFIRMATION", label: "리뷰 가져오기 (작업 창에서 직접 내보내기)", reason: "GUIDED_EXPORT_ONLY" },
+      { feature: "REVIEW_REPLY", state: "NOT_ENABLED", label: "리뷰 답변 (자동 전송 없음 · 미검증)", reason: "REPLY_UNVERIFIED" },
+      { feature: "INQUIRY_READ", state: "INTEGRATION_PENDING", label: "문의 조회 (연동 준비 중)", reason: "INTEGRATION_PENDING" },
+    ],
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  sessionStorage.clear(); // isolate the guided-connection resume slice between tests
   h.bridge = DEFAULT_BRIDGE; // reset to detection-unavailable (attestation fallback) each test
   vi.mocked(api.getChannelsStrict).mockResolvedValue([
     { id: "ch-naver", code: "NAVER", nameKo: "네이버", status: "AVAILABLE", dataBadges: [], lastSyncedAt: null, actionLabel: "연결하기", support: {} as never },
@@ -81,6 +105,7 @@ beforeEach(() => {
     sellerAccountId: "acc-1", state: "CONNECTED", lastSuccessAt: null,
     consecutiveFailures: 0, lastError: null, lastSyncedAt: null, nextScheduledAt: null,
   });
+  vi.mocked(api.getConnectionCapabilityStrict).mockResolvedValue(capabilityView());
 });
 
 function renderPage() {
@@ -291,6 +316,107 @@ describe("ConnectNaver — completion surfaces connection health + review handof
     await userEvent.click(screen.getByRole("button", { name: "과거 리뷰 가져오기로 이동" }));
     await userEvent.click(await screen.findByRole("button", { name: "리뷰 내보내기로 이동" }));
     expect(await screen.findByText("과거 리뷰 가져오기 화면")).toBeInTheDocument();
+  });
+});
+
+describe("ConnectNaver — capability result on completion (§capability contract)", () => {
+  it("shows the honest per-surface capability contract: order live, review guided, reply off, inquiry pending", async () => {
+    mockTestAndSyncSuccess();
+    renderPage();
+    await loginThenNewApp();
+    await enterCredentials();
+    await screen.findByRole("heading", { name: "주문 연결 완료" });
+
+    const panel = await screen.findByRole("status", { name: "연결 역량 결과" });
+    // Seller identity is confirmed (from the successful first sync) — and never a fetched store name.
+    expect(panel).toHaveTextContent("자격 증명 인증됨");
+    // ORDER read is the one live capability; review/inquiry are informational labels, NOT active flows.
+    expect(panel).toHaveTextContent("주문 조회");
+    expect(panel).toHaveTextContent("연결됨");
+    expect(panel).toHaveTextContent("작업 창에서 직접 진행"); // REVIEW_IMPORT = GUIDED_CONFIRMATION
+    expect(panel).toHaveTextContent("미활성화"); // REVIEW_REPLY = NOT_ENABLED
+    expect(panel).toHaveTextContent("연동 준비 중"); // INQUIRY_READ = INTEGRATION_PENDING
+  });
+
+  it("completion stands even if the capability read fails (panel omitted, never a fake verified)", async () => {
+    mockTestAndSyncSuccess();
+    vi.mocked(api.getConnectionCapabilityStrict).mockRejectedValue(new Error("backend down"));
+    renderPage();
+    await loginThenNewApp();
+    await enterCredentials();
+    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "연결 역량 결과" })).toBeNull();
+  });
+});
+
+describe("ConnectNaver — connection test and first sync are separated (distinct failure causes)", () => {
+  it("test SUCCESS but first sync FAILED stays at the sync step with a sync-only retry (not completed)", async () => {
+    vi.mocked(api.testConnection).mockResolvedValue({ sellerAccountId: "acc-1", status: "SUCCESS", checkedAt: "", message: "", reasonCode: null });
+    vi.mocked(api.manualSync).mockResolvedValue(syncRun("acc-1", { status: "FAILED" }));
+    renderPage();
+    await loginThenNewApp();
+    await enterCredentials();
+
+    expect(await screen.findByRole("heading", { name: "첫 주문 수집 중" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "주문 연결 완료" })).toBeNull();
+    expect(screen.getByRole("alert")).toHaveTextContent(/첫 주문 수집에 실패/);
+    // The credential test already succeeded, so re-entry is not forced — only the sync is retryable.
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeInTheDocument();
+    expect(api.testConnection).toHaveBeenCalledWith("acc-1");
+  });
+
+  it("retrying only the first sync after a failure completes the connection", async () => {
+    vi.mocked(api.testConnection).mockResolvedValue({ sellerAccountId: "acc-1", status: "SUCCESS", checkedAt: "", message: "", reasonCode: null });
+    vi.mocked(api.manualSync)
+      .mockResolvedValueOnce(syncRun("acc-1", { status: "FAILED" }))
+      .mockResolvedValue(syncRun("acc-1", { status: "SUCCESS" }));
+    renderPage();
+    await loginThenNewApp();
+    await enterCredentials();
+    await userEvent.click(await screen.findByRole("button", { name: "다시 시도" }));
+
+    expect(await screen.findByRole("heading", { name: "주문 연결 완료" })).toBeInTheDocument();
+    expect(api.manualSync).toHaveBeenCalledTimes(2);
+    expect(api.storeCredential).toHaveBeenCalledTimes(1); // credential NOT re-registered on a sync retry
+  });
+});
+
+describe("ConnectNaver — refresh recovery (secret-free step restore)", () => {
+  it("restores a mid-issuance step after a page refresh WITHOUT re-login and WITHOUT a stored secret", async () => {
+    // First mount: walk to the issuance step (a pre-registration, user-decision phase).
+    const first = renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "로그인했어요" }));
+    await userEvent.click(await screen.findByRole("button", { name: "처음 발급할게요" }));
+    await userEvent.click(await screen.findByRole("button", { name: "애플리케이션이 없어요" }));
+    await userEvent.click(await screen.findByRole("button", { name: /계정·스토어를 선택/ }));
+    expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
+
+    // Simulate a browser refresh: unmount and mount a brand-new page instance.
+    first.unmount();
+    renderPage();
+
+    // Restored straight to the issuance step — no re-login, no path re-choice.
+    expect(await screen.findByRole("heading", { name: "애플리케이션 발급" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "로그인했어요" })).toBeNull();
+    // Nothing sensitive was persisted: the resume slice is phase + path only.
+    const raw = sessionStorage.getItem("naver_guided_connection_v1")!;
+    expect(Object.keys(JSON.parse(raw)).sort()).toEqual(["path", "phase"]);
+  });
+});
+
+describe("ConnectNaver — StrictMode double-invocation is safe", () => {
+  it("saved-key reuse under StrictMode reaches completion exactly once (no duplicate mint)", async () => {
+    vi.mocked(api.getConnectionInfoStrict).mockResolvedValue(SAVED_INFO);
+    mockTestAndSyncSuccess();
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/connect/naver"]}>
+          <ConnectNaver />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    const headings = await screen.findAllByRole("heading", { name: "주문 연결 완료" });
+    expect(headings).toHaveLength(1);
   });
 });
 

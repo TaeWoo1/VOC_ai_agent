@@ -122,6 +122,42 @@ export const DISCONNECT_GUARDRAIL_COPY = {
   body: "SellerOps 연결을 해제하면 SellerOps에 저장된 연결 정보만 삭제됩니다. NAVER 애플리케이션은 비활성화하거나 삭제하지 않습니다. NAVER 앱은 스토어당 1개뿐이고 삭제할 수 없으며 다른 프로그램도 함께 쓸 수 있으므로, SellerOps 연결 해제를 위해 NAVER 앱을 비활성화·삭제하지 마세요.",
 } as const;
 
+/**
+ * Capability-result copy (§capability contract). The backend sends closed feature/state codes and a
+ * fixed label; the FE owns the seller-facing state chip + explanation. Honest and non-over-claiming:
+ * ORDER read is only "연결됨" when a first sync actually succeeded; review import is framed as a
+ * guided export (never an automatic API pull); review reply is "미활성화" (no auto-send); inquiry is
+ * "연동 준비 중". The review/inquiry lines are informational — the order connection screen never mixes
+ * in the review Action Window.
+ */
+export const CAPABILITY_STATE_COPY: Record<string, { chip: string; tone: "good" | "muted" | "warn" }> = {
+  AVAILABLE: { chip: "연결됨", tone: "good" },
+  GUIDED_CONFIRMATION: { chip: "작업 창에서 직접 진행", tone: "muted" },
+  NOT_ENABLED: { chip: "미활성화", tone: "muted" },
+  INTEGRATION_PENDING: { chip: "연동 준비 중", tone: "muted" },
+  NEEDS_ATTENTION: { chip: "확인 필요", tone: "warn" },
+};
+
+/** Safe reason codes → optional one-line explanation shown under a capability line. */
+export const CAPABILITY_REASON_COPY: Record<string, string> = {
+  CREDENTIAL_MISSING: "저장된 연결 정보가 없습니다.",
+  FIRST_SYNC_REQUIRED: "첫 주문 수집이 아직 완료되지 않았습니다.",
+  SYNC_FAILED: "첫 주문 수집에 실패했습니다. 다시 시도해 주세요.",
+  SYNC_IN_PROGRESS: "첫 주문 수집이 진행 중입니다.",
+  GUIDED_EXPORT_ONLY: "네이버 리뷰는 공식 API가 없어, 작업 창에서 직접 내보내기로 가져옵니다.",
+  REPLY_UNVERIFIED: "리뷰 답변 자동 전송은 제공하지 않습니다.",
+  INTEGRATION_PENDING: "네이버 문의 연동은 준비 중입니다.",
+};
+
+/** First ORDER_SUMMARY sync status → seller-facing line for the capability summary. */
+export const SYNC_STATUS_COPY: Record<string, string> = {
+  NONE: "아직 수집 전",
+  SUCCESS: "첫 주문 수집 완료",
+  PARTIAL: "첫 주문 수집 일부 완료",
+  FAILED: "첫 주문 수집 실패",
+  RUNNING: "첫 주문 수집 진행 중",
+};
+
 export const FAILURE_COPY: Record<GuidedFailureReason, string> = {
   AGENT_UNAVAILABLE: "로컬 에이전트에 연결하지 못했습니다. 에이전트 실행 상태를 확인해 주세요.",
   RENDERER_UNAVAILABLE: "작업 창을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",

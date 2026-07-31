@@ -5,9 +5,20 @@ import { GuidedConnectionWizard } from "../components/guidedConnection/GuidedCon
 import { useBridge } from "../hooks/useBridge";
 import { api } from "../lib/apiClient";
 import { selectChannelAccount } from "../lib/channelConnection";
-import { guidedConnectionReducer, INITIAL_STATE, resolveNaverSession } from "../lib/guidedConnection";
+import {
+  clearGuidedProgress,
+  guidedConnectionReducer,
+  loadGuidedInitialState,
+  resolveNaverSession,
+  saveGuidedProgress,
+} from "../lib/guidedConnection";
 import { bridgeSessionDetection } from "../lib/guidedConnection/bridgeSession";
-import type { ConnectionStatusView, CredentialTemplateView, SyncRunView } from "../lib/types";
+import type {
+  ConnectionCapabilityView,
+  ConnectionStatusView,
+  CredentialTemplateView,
+  SyncRunView,
+} from "../lib/types";
 import type { GuidedSyncStatus } from "../lib/guidedConnection";
 
 /**
@@ -37,7 +48,9 @@ function toSyncStatus(run: SyncRunView): GuidedSyncStatus {
 export function ConnectNaver() {
   const navigate = useNavigate();
   const bridge = useBridge();
-  const [state, dispatch] = useReducer(guidedConnectionReducer, INITIAL_STATE);
+  // Lazy init restores a safe, secret-free pre-registration step after a browser refresh; anything
+  // else starts fresh and lets the saved-credential re-check drive recovery from the backend.
+  const [state, dispatch] = useReducer(guidedConnectionReducer, undefined, () => loadGuidedInitialState());
 
   const [naverAttested, setNaverAttested] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -46,6 +59,14 @@ export function ConnectNaver() {
   const [loading, setLoading] = useState(true);
   const [resolveError, setResolveError] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatusView | null>(null);
+  const [capability, setCapability] = useState<ConnectionCapabilityView | null>(null);
+
+  // Persist the sanitized, resumable slice (phase + path only — never a secret) so a refresh can
+  // restore a pre-registration step. Automated/terminal phases are written too but are non-restorable
+  // on reload (they fall back to the backend-driven recovery), so this can never strand a spinner.
+  useEffect(() => {
+    saveGuidedProgress(state);
+  }, [state.phase, state.path]);
 
   // Resolve (or START) the NAVER connection: find the API-mode account this org attaches credentials
   // to, and if a first-time seller has none, create it. Creating a PENDING account is the "연결 시작"
@@ -97,6 +118,25 @@ export function ConnectNaver() {
         if (alive) setConnectionStatus(status);
       } catch {
         /* status line omitted on failure; completion stands on its milestones */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [state.phase, accountId]);
+
+  // On completion, read the sanitized capability result (order/review/inquiry status + identity +
+  // first-sync) so the seller sees the honest per-surface capability contract. Non-fatal: a read
+  // failure just omits the panel — completion already stands on the registration→test→sync milestones.
+  useEffect(() => {
+    if (state.phase !== "completed" || !accountId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const cap = await api.getConnectionCapabilityStrict(accountId);
+        if (alive) setCapability(cap);
+      } catch {
+        /* capability panel omitted on failure; completion stands on its milestones */
       }
     })();
     return () => {
@@ -205,6 +245,8 @@ export function ConnectNaver() {
   // Hand off to the existing past-review-import track (§0 review-export-readiness). Reviews are NOT
   // collected here — this only carries the connected seller into the Action Window export journey.
   const onGoToReviewExport = useCallback(() => {
+    // Completion consumed — clear the resume slice so a later visit starts a fresh journey.
+    clearGuidedProgress();
     navigate("/settings/review-import");
   }, [navigate]);
 
@@ -240,6 +282,7 @@ export function ConnectNaver() {
             template={template}
             busy={busy}
             connectionStatus={connectionStatus}
+            capability={capability}
             dispatch={dispatch}
             onRecheck={onRecheck}
             onConfirmLogin={onConfirmLogin}

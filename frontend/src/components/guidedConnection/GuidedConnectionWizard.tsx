@@ -1,5 +1,10 @@
-import type { ConnectionStatusView, CredentialTemplateView } from "../../lib/types";
+import type {
+  ConnectionCapabilityView,
+  ConnectionStatusView,
+  CredentialTemplateView,
+} from "../../lib/types";
 import { relativeTime } from "../../lib/format";
+import { ConnectionCapabilityPanel } from "./ConnectionCapabilityPanel";
 import {
   ACTOR_COPY,
   DISCONNECT_GUARDRAIL_COPY,
@@ -29,6 +34,9 @@ export interface GuidedConnectionWizardProps {
   /** Real connection health, read after completion so the seller sees the state + last success time
    *  (§2 step 6). `null` until read (or if the read fails) — the completion CTA stands regardless. */
   connectionStatus: ConnectionStatusView | null;
+  /** Sanitized capability result, read after completion (order/review/inquiry status + identity +
+   *  first-sync). `null` until read (or if the read fails) — the completion CTA stands regardless. */
+  capability: ConnectionCapabilityView | null;
   dispatch: (event: GuidedEvent) => void;
   onRecheck: () => void;
   onConfirmLogin: () => void;
@@ -53,6 +61,7 @@ export function GuidedConnectionWizard({
   template,
   busy,
   connectionStatus,
+  capability,
   dispatch,
   onRecheck,
   onConfirmLogin,
@@ -284,6 +293,7 @@ export function GuidedConnectionWizard({
 
         {phase === "completed" && (
           <div className="space-y-4">
+            {capability && <ConnectionCapabilityPanel capability={capability} />}
             <ConnectionSummary status={connectionStatus} />
             <div className="rounded-lg bg-canvas px-4 py-3" role="note">
               <p className="text-sm font-medium text-muted">{DISCONNECT_GUARDRAIL_COPY.title}</p>

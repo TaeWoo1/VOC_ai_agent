@@ -3,6 +3,7 @@
 export * from "./types";
 export * from "./state";
 export * from "./copy";
+export * from "./persistence";
 export {
   NAVER_LIKE_TEMPLATE,
   READY_SIGNAL,

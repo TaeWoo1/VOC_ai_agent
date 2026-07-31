@@ -10,6 +10,7 @@ import type {
   ChannelCapabilityOverview,
   ChannelResponse,
   ConnectionInfoView,
+  ConnectionCapabilityView,
   ConnectionStatusView,
   ConnectionTestResultView,
   ConnectorAlertView,
@@ -202,6 +203,17 @@ export const api = {
     }
     const { data } = await http.get<ConnectionStatusView>(
       `/api/seller-accounts/${accountId}/connection-status`,
+    );
+    return data;
+  },
+  // Read-only NAVER guided-connection capability result (wizard completion screen). GET — the
+  // backend derives it from persisted state (credential presence + latest order-sync outcome) with
+  // NO live provider call. NO mock fallback: a dead backend must never render a fake "verified"
+  // capability (fail closed). The response is fully sanitized (no token, id, order id, or personal
+  // data); the seller's identity is only the `identityConfirmed` boolean.
+  async getConnectionCapabilityStrict(accountId: string): Promise<ConnectionCapabilityView> {
+    const { data } = await http.get<ConnectionCapabilityView>(
+      `/api/seller-accounts/${accountId}/connection-capability`,
     );
     return data;
   },
