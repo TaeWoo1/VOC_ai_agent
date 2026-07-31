@@ -184,7 +184,7 @@ ChannelCollectionAdapter {
 > 링크한다. UI·다른 문서는 이 표를 참조하며 중복 선언하지 않는다. 상태 4단계의 정의는
 > 부록 A를 따른다: **연결 가능 → 구현됨 → 라이브 검증 → 운영 지원**.
 
-*갱신: 2026-07-15 (NAVER REVIEW 라이브 검증 열만; 그 외 행·열은 2026-07-07 기준).*
+*갱신: 2026-07-31 (Cafe24 REVIEW 라이브 검증 열 — PR #375, 2026-07-30; Cafe24 INQUIRY 라이브 검증 열 — PR #382, 2026-07-31; NAVER REVIEW — 2026-07-15; 그 외 행·열은 2026-07-07 기준). 스냅샷 기준선: `docs/sellerops_completion_checkpoint_v1.md`(`026c113`).*
 
 | 채널 | DataType | 방식(method) | 연결 가능 | 구현됨 | 라이브 검증 | 운영 지원 | 증거 | 셀러 표기 |
 |---|---|---|---|---|---|---|---|---|
@@ -193,8 +193,8 @@ ChannelCollectionAdapter {
 | NAVER | REVIEW | EXPORT(감독형) + MANUAL | — (브라우저 세션) | ✅ collector | ✅ 캡처→저장 (2026-06-22); **export→ingest end-to-end 라이브 검증 (2026-07-15, Run 4 — 감독형·개발셀러·로컬 dev 백엔드)** | ❌ | `collector/README.md`, collector 트랙 기록, `docs/action-window-runtime/r4-evidence-pack.md` §8-17 | "네이버 리뷰 export 업로드 지원" |
 | NAVER | INQUIRY | 미확정 | — | ❌ | ❌ | ❌ | — | 표기하지 않음 (MANUAL만) |
 | Cafe24 | ORDER_SUMMARY | API(OAuth) | ✅ OAuth 연결 플로우 (FE `/connect/cafe24`) | ✅ | ✅ E2E PASS (토큰 회전·금액 대사 포함) | ❌ (플래그 off) | `docs/sellerops_cafe24_live_verification.md` | "자동 수집 지원: 주문·매출" |
-| Cafe24 | REVIEW | API(게시판 4 구매후기) | ✅ (동일 OAuth) | ✅ (CanonicalCommunityArticle + 비밀글 fail-closed 제외) | ✅ 아티클 캡처 라이브 검증 (2026-07-30, PR #375 — 공개 리뷰 fresh insert + 동일창 replay 멱등; reply_status는 N/PENDING만 관측, C/P 미관측) | ❌ (플래그 off) | `docs/sellerops_cafe24_review_read_live_verification.md` | "카페24 구매후기 수집 지원" |
-| Cafe24 | INQUIRY | API(게시판 6 문의사항) | ✅ (동일 OAuth) | ✅ (CanonicalInquiry → 문의 + OPEN 작업항목; board 9 미수집) | 부분 — board-6 라이브 백필 1회(2026-06-25, 905행)는 구(舊) community-article sink 기준; 현행 작업큐 sink(2026-07-05 도입)는 라이브 미검증(synthetic only). N/PENDING만 관측 | ❌ | `docs/sellerops_cafe24_review_inquiry_capture.md` | 검증 전 — "지원" 표기 금지 |
+| Cafe24 | REVIEW | API(게시판 4 구매후기) | ✅ (동일 OAuth) | ✅ (CanonicalCommunityArticle + 비밀글 fail-closed 제외) | ✅ 아티클 캡처 라이브 검증 (2026-07-30, PR #375 — 공개 리뷰 fresh insert + 동일창 replay 멱등; reply_status는 **UNKNOWN만 라이브 관측**(raw가 N/P/C 아님 → fail-closed; 사전 기대 PENDING 철회). N/P/C 토큰은 tests-only, raw_received·missing-drop 카운트는 미관측) | ❌ (플래그 off) | `docs/sellerops_cafe24_review_read_live_verification.md` | "카페24 구매후기 수집 지원" |
+| Cafe24 | INQUIRY | API(게시판 6 문의사항) | ✅ (동일 OAuth) | ✅ (CanonicalInquiry → 문의 + OPEN 작업항목; source-aware upsert + is_secret V34; board 9 미수집) | ✅ board-6 라이브 검증 (2026-07-31, PR #382 — 현행 작업큐 sink, exact-window 계약: in-window 1건 emit·out-of-window pre-mapper 제외·C→ANSWERED·is_secret=true·secret 경계(Inbox 포함/Dashboard·analysis 제외)·멱등 replay). public/N/P/UNKNOWN 토큰·N→C 전이는 tests-only | ❌ (플래그 off) | `docs/sellerops_cafe24_inquiry_read_live_proof.md` | 라이브 검증됨(운영 지원 아님) — "지원" 표기 금지 |
 | ESM+ (`GMARKET`) | ORDER_SUMMARY | API | ✅ 키 등록 폼 | ❌ (인증 골격만) | ❌ | ❌ | `docs/sellerops_phase3d_completion_summary.md` §3 | 표기하지 않음 |
 | ESM+ (`GMARKET`) | INQUIRY | API(스켈레톤) + MANUAL(Excel 임포트) | ✅ | 부분 — read 스켈레톤 unwired(`NEEDS_VERIFICATION`) + Excel 임포트 백엔드(FE 미노출) | Gate 1 표면 확인만; API probe ❌ | ❌ | `docs/sellerops_phase0_esm_inquiry_gate1_findings.md` | 검증 전 — 표기 금지 |
 | ESM+ (`GMARKET`/`AUCTION`) | REVIEW | EXPORT(감독형) 후보 | — | ❌ | 표면(마켓 탭)만 확인 (2026-07-07) | ❌ | `docs/esm/live-capture-plan.md` | 표기하지 않음 |
@@ -208,8 +208,9 @@ ChannelCollectionAdapter {
 | 오늘의집 | 전체 | MANUAL만 (API 파트너 제한) | — | MANUAL만 | — | MANUAL만 ✅ | 동상 §3 | "엑셀 업로드 지원" |
 
 **요약 문장 (다른 문서가 인용할 한 줄):** 운영 지원(production-supported) 수준은 현재
-**파일 업로드(전 채널)뿐**이다. NAVER·Cafe24의 ORDER_SUMMARY와 NAVER 리뷰 감독형 캡처는
-**라이브 검증됨**(상시 운영 아님), 나머지는 구현/골격/후보 단계다.
+**파일 업로드(전 채널)뿐**이다. NAVER·Cafe24의 ORDER_SUMMARY, NAVER 리뷰 감독형 캡처,
+Cafe24 REVIEW(board 4)·INQUIRY(board 6) read는 **라이브 검증됨**(상시 운영 아님, 감독형·단일계정·
+disposable 백엔드), 나머지는 구현/골격/후보 단계다.
 
 > **NAVER REVIEW 과거 리뷰 초기 연동(가이드형 세그먼트 import) — 2026-07-25 기준, 부분 라이브.**
 > 위 REVIEW 행은 **단일 export → ingest** 능력이다. 초기 연동은 그 위에 **월 단위 세그먼트를 순서대로

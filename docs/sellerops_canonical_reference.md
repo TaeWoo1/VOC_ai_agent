@@ -278,6 +278,13 @@ The four-stage model is defined in `docs/multi-channel-connector-roadmap.md` 부
 > — are recorded in the workstream home `docs/workstreams/review_operations_mvp.md`, which outranks this
 > summary for runtime state. **None of them changed production-support** (still file upload only) or
 > promoted any §4.1 row.
+>
+> **Forward-pointer (2026-07-31, `026c113`).** Since this ledger was anchored, more supervised live
+> proofs merged — **Cafe24 `ORDER_SUMMARY`** (#374), **Cafe24 REVIEW read board 4** (#375), and
+> **Cafe24 INQUIRY read board 6** (#382, exact-window contract) — and a **common LangGraph agent
+> platform** (`agent-runtime/`, #376–#381; read-only draft #384) was added. §4.1 was updated for the
+> Cafe24 read rows. **Production-support is still file-upload-only** and none of these is a seller-facing
+> feature. The consolidated snapshot is `docs/sellerops_completion_checkpoint_v1.md`.
 
 ---
 
@@ -567,7 +574,9 @@ router.**
 
 `docs/action-window-runtime/naver-smartstore-v1-plan.md` (self-declares it does not outrank the
 canonical product docs) · `docs/channel-capability-registration-matrix.md` (derived view of §4.1) ·
-`docs/slices/*` · `docs/workstreams/action-window-frontend/*`.
+`docs/sellerops_completion_checkpoint_v1.md` (point-in-time recovery baseline at `026c113`; derived
+from §4.1 + this document, never redefines them) · `docs/slices/*` ·
+`docs/workstreams/action-window-frontend/*`.
 
 ### 9.5 Frozen (append-only — never rewritten)
 
