@@ -752,5 +752,12 @@ reject / send control): an editable draft, 대상 채널 / 문의 상태 / 생�
 `초안 다시 만들기` that warns before overwriting a locally edited draft, and a copy control. No control
 reads as 전송/발송/등록.
 
+**Proof status: synthetic-proven only.** Every path is exercised with synthetic / disposable-fixture
+inquiries (OPEN Cafe24 board-6, including 비밀글): draft generated → terminal checkpoint → no send →
+inquiry/work-item unchanged; idempotent replay; empty queue; ANSWERED excluded; sanitized view + log
+sweep. There is **no** live Cafe24 call — actual Cafe24 live proof is **deferred** until a real OPEN
+board-6 inquiry exists. This is a read-only, no-send feature that depends on no external write or
+Cafe24 state transition, so it does not require a live channel call to be correct.
+
 Gates: backend **1842/0** (6 skipped), agent-runtime **139** + tsc, frontend **1164** + tsc + build.
 Independent correctness/privacy/UX review: **HIGH=0, MEDIUM=0**. No live channel call; no send.
