@@ -6,6 +6,10 @@
  *   - the session RE-ARMS capture on the newest page after a navigation/reload/new-tab, so a post-navigation
  *     hotkey capture SUCCEEDS — the exact regression that captured ZERO targets live (listeners armed once at
  *     stage start, then destroyed by the operator's navigation);
+ *   - the PER-TICK re-arm (attempt #2 fix) is the tested path: the fake `waitForStageSentinel` invokes the
+ *     orchestrator's `onTick` on each simulated poll iteration, so a navigation the operator does DURING the
+ *     blocking wait is followed by a re-arm within one tick — a hotkey BEFORE the tick captures nothing, a
+ *     hotkey AFTER the tick succeeds;
  *   - a live document is never DOUBLE-armed (`IS_CAPTURE_ARMED` gates the re-arm);
  *   - a REQUIRED stage does NOT advance on a capture-less ready (`CAPTURE_REQUIRED`), and an OPTIONAL stage
  *     advances only on an explicit skip;
@@ -121,6 +125,11 @@ class FakePage {
     if (this.armed) this.captureVar = captured;
   }
 
+  /** Current captured element (null when a fresh document / reset cleared it) — lets a turn assert pre/post-tick. */
+  capturedTarget(): RawCapturedShape | null {
+    return this.captureVar;
+  }
+
   async evaluate(fnOrStr: unknown): Promise<unknown> {
     const s = typeof fnOrStr === "string" ? fnOrStr : `[fn] ${String(fnOrStr)}`;
     this.scripts.push(s);
@@ -171,8 +180,14 @@ function asPage(fake: FakePage): Page {
   return fake as unknown as Page;
 }
 
-/** An operator turn: mutate the fake (navigate/hotkey/new-tab) and return the sentinel signal for that turn. */
-type Turn = () => Promise<CalibrationCheckpointSignal> | CalibrationCheckpointSignal;
+/**
+ * An operator turn: mutate the fake (navigate/hotkey/new-tab) and return the sentinel signal for that turn. It
+ * receives the orchestrator's `onTick` so a turn can model the exact live ordering — navigate, hotkey-before-tick
+ * (dead document), invoke a poll tick (re-arm), hotkey-after-tick (captures).
+ */
+type Turn = (
+  onTick: () => Promise<void>,
+) => Promise<CalibrationCheckpointSignal> | CalibrationCheckpointSignal;
 
 function depsWith(
   getActivePage: () => FakePage,
@@ -183,9 +198,13 @@ function depsWith(
   let ti = 0;
   return {
     ...base,
-    waitForStageSentinel: async () => {
+    waitForStageSentinel: async (_stage, onTick) => {
+      // Simulate poll ticks: the production wait re-arms the newest page on EVERY iteration. On a still-live
+      // document this is an idempotent no-op; after a navigation a tick re-installs the listener (the fix).
+      await onTick();
+      await onTick();
       const turn = turns[ti++];
-      return turn ? await turn() : "timeout";
+      return turn ? await turn(onTick) : "timeout";
     },
     ...extra,
   };
@@ -315,11 +334,12 @@ describe("runCalibrationSession — match count decides resolution per surface",
 });
 
 describe("runCalibrationSession — NAVIGATION DESTROYS LISTENERS: re-arm makes the post-nav hotkey succeed", () => {
-  it("bug reproduction: WITHOUT a re-arm, a post-navigation hotkey captures NOTHING (the live failure)", async () => {
+  it("bug reproduction: a navigation during the wait with NO post-nav tick captures NOTHING (the live failure)", async () => {
     const page = new FakePage({ appEntryCount: 1 });
     let captureRequiredSeen = 0;
     const turns: Turn[] = [
-      // app_list: operator navigates (listeners destroyed), then presses the hotkey with NO re-arm → no capture.
+      // app_list: any earlier ticks armed the PRE-nav document; the operator then navigates (listeners
+      // destroyed) and presses the hotkey with NO further re-arm tick → the exact live failure: no capture.
       () => {
         page.navigate();
         page.hotkey(shape({ candidateSelector: 'button[id="openApp"]', stableAttributes: [{ name: "id", value: "openApp" }] }));
@@ -336,6 +356,47 @@ describe("runCalibrationSession — NAVIGATION DESTROYS LISTENERS: re-arm makes 
     expect(result.summary.targets).toHaveLength(0);
     expect(result.captureRequiredCount).toBe(1);
     expect(captureRequiredSeen).toBe(1);
+  });
+
+  it("regression (attempt #2): navigation DURING the wait, then the PER-TICK onTick re-arm restores capture", async () => {
+    // Models the ACTUAL live failure + fix within one stage, driven by the REAL orchestrator threading `onTick`
+    // through `waitForStageSentinel`: the operator navigates during the blocking wait (fresh document drops the
+    // listener), a hotkey BEFORE any tick captures nothing, then a poll tick re-arms the newest page and a
+    // hotkey AFTER the tick succeeds. Walks all four stages this way and asserts each advances.
+    const first = new FakePage({ appEntryCount: 1 });
+    const tabs: FakePage[] = [first];
+    const newest = (): FakePage => tabs[tabs.length - 1]!;
+
+    const captures: RawCapturedShape[] = [
+      shape({ candidateSelector: 'button[id="openApp"]', stableAttributes: [{ name: "id", value: "openApp" }] }),
+      shape({ tagName: "h1", role: "heading", candidateSelector: 'h1[id="appTitle"]', stableAttributes: [{ name: "id", value: "appTitle" }] }),
+      shape({ candidateSelector: 'button[id="addGroup"]', stableAttributes: [{ name: "id", value: "addGroup" }] }),
+      CREDENTIAL_VALUE_SHAPE,
+    ];
+    const kindByStage: CalibrationTargetKind[] = ["open_app", "app_detail_anchor", "api_group", "credentials"];
+    const turns: Turn[] = captures.map((cap) => async (onTick): Promise<CalibrationCheckpointSignal> => {
+      // Operator navigates DURING the blocking wait → fresh document drops the in-page capture listener.
+      newest().navigate();
+      // Presses the hotkey BEFORE any re-arm tick → dead document → captures NOTHING (the exact live failure).
+      newest().hotkey(cap);
+      expect(newest().capturedTarget()).toBeNull();
+      expect(newest().armed).toBe(false);
+      // A poll tick fires (the reliability fix): onTick re-arms + re-injects the kind on the newest page.
+      await onTick();
+      expect(newest().armed).toBe(true);
+      // The operator presses again AFTER the tick → a live listener now records the capture.
+      newest().hotkey(cap);
+      expect(newest().capturedTarget()).not.toBeNull();
+      return "ready";
+    });
+
+    const result = await runCalibrationSession(depsWith(newest, turns));
+
+    // WITH the per-tick re-arm every stage advances and resolves (credential excluded) — no capture-required.
+    expect(result.stagesCompleted).toBe(4);
+    expect(result.summary.resolvedCount).toBe(3);
+    expect(result.captureRequiredCount).toBe(0);
+    expect(result.summary.targets.map((t) => t.targetKind)).toEqual(kindByStage);
   });
 
   for (const nav of ["navigate", "reload", "openNewTab"] as const) {
@@ -511,7 +572,13 @@ describe("runCalibrationSession — newest-tab retention (window kept open once)
       fresh.hotkey(cap);
       return "ready" as CalibrationCheckpointSignal;
     });
-    const deps: CalibrationSessionDeps = { ...base, waitForStageSentinel: async () => turns[ti++]?.() ?? "timeout" };
+    const deps: CalibrationSessionDeps = {
+      ...base,
+      waitForStageSentinel: async (_stage, onTick) => {
+        await onTick(); // a poll tick re-arms the newest tab (idempotent here — nothing navigated)
+        return turns[ti++]?.(onTick) ?? "timeout";
+      },
+    };
 
     const result = await runCalibrationSession(deps);
     expect(result.stagesCompleted).toBe(4);

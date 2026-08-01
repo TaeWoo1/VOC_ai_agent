@@ -170,6 +170,17 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   값 노출 없는 **capture 확인 UX** + **4단계 계약**(`app_list → app_detail_anchor → api_group → credentials`;
   `return_path`는 API센터에 복귀 컨트롤이 없으므로 calibration/`SELECTORS_CALIBRATED`에서 제외, 마지막은 "SellerOps
   탭으로 직접 돌아가세요" UI 안내로 처리).
+- **2차 라이브 보정 시도=`CALIBRATION_CAPTURE_FAILED`(again)** — host OK(`apicenter.commerce.naver.com`,
+  host-screen 무관) / Ctrl+Shift+K **toast 안 뜸**(operator 페이지에 리스너 없음) / navigation은 URL path 변경
+  (`/manage/list → /manage/detail;id=…`, 진짜 top-level 이동, iframe SPA 아님) / `stagesArmed=1`(stage 시작 초기
+  arm만 성공, 이후 operator 이동으로 리스너 소멸). 라이브 안전 0(NAVER 호출·write·credential read·자동 클릭 모두
+  0), 승인 CONSUMED. **원인**: re-arm이 stage 시작·wait 직전 2회만 실행되고, `waitForStageSentinel`이 stage 내내
+  sentinel을 blocking-poll → **wait 도중 operator가 이동하면 재-arm이 뒤따르지 않아** hotkey가 리스너 없는 문서에
+  떨어짐. event hooks(`page.on("load")`/`framenavigated`)는 이 이동에서 실제 브라우저에서 **발화하지 않음**.
+  **수정(reliability v2)**: `waitForStageSentinel(stage, onTick)`로 시그니처를 바꿔 **poll tick마다 최신 탭을
+  re-arm + kind 재주입**(≈1s 이내, `IS_CAPTURE_ARMED`로 idempotent) — event hooks는 best-effort 보조로만 유지.
+  회귀 테스트는 **wait 도중 navigation → tick 전 hotkey=0캡처 → onTick tick 후 hotkey=성공/stage advance**를
+  실제 orchestrator로 재현. `SELECTORS_CALIBRATED`는 여전히 미설정(라이브 재보정 필요, 새 승인 게이트).
 
 ---
 

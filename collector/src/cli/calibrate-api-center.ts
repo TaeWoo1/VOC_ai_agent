@@ -12,13 +12,17 @@
  * `return_path` is NOT a stage — returning to SellerOps is a printed UI instruction, never a calibrated
  * selector, so it is excluded from `SELECTORS_CALIBRATED`.
  *
- * **Capture reliability (v1 fix).** The in-page capture listeners live in the page's JS realm, so a navigation
- * / reload / new-tab (a fresh document) destroys them — the live regression was: listeners armed once at stage
- * START, the operator then navigated, and the later hotkey had no listener so ZERO targets were captured. This
- * calibrator now RE-ARMS event-driven on the NEWEST page (`context.on("page")`, and per page `page.on("load")`
- * / top-frame `page.on("framenavigated")`), idempotently (only a page reporting NOT-armed via
- * `IS_CAPTURE_ARMED` is re-armed, so a live document is never double-armed), plus a backstop re-arm each wait
- * iteration. A successful hotkey capture renders a value-free ack toast (kind + match count + resolved).
+ * **Capture reliability (v2 fix).** The in-page capture listeners live in the page's JS realm, so a navigation
+ * / reload / new-tab (a fresh document) destroys them — the live regression (attempt #2) was: listeners armed
+ * once at stage START, the operator then navigated (a real top-level path change) DURING the blocking sentinel
+ * wait, and the later hotkey had no listener so ZERO targets were captured. The event-driven hooks
+ * (`context.on("page")` / `page.on("load")` / `page.on("framenavigated")`) did NOT fire for that navigation in
+ * the real browser. The reliable mechanism is now a PER-TICK re-arm: the sentinel wait invokes an `onTick`
+ * callback on EVERY poll iteration (~1s) that re-arms + re-injects the target kind on the NEWEST page, so a
+ * navigation done at any point during the wait is followed by a re-arm within one tick. It is idempotent (only
+ * a page reporting NOT-armed via `IS_CAPTURE_ARMED` is re-armed, so a live document is never double-armed). The
+ * event hooks STAY as a best-effort supplement. A successful hotkey capture renders a value-free ack toast
+ * (kind + match count + resolved).
  *
  * It NEVER logs in, clicks, types, submits, creates, selects, autofills, or reads any field VALUE (incl.
  * Client ID / Secret). Operator navigation is the operator's OWN clicks — OBSERVED read-only via
@@ -114,8 +118,17 @@ export interface CalibrationSessionDeps {
   readClickObserved(): Promise<boolean>;
   /** Render the value-free "capture required, try again" toast on the newest page (production only). */
   notifyCaptureRequired?(): Promise<void>;
-  /** Block until the operator signals this stage ready / skip / abort / times out. */
-  waitForStageSentinel(stage: CalibrationStage): Promise<CalibrationCheckpointSignal>;
+  /**
+   * Block until the operator signals this stage ready / skip / abort / times out, invoking `onTick` on EVERY
+   * poll iteration. `onTick` re-arms capture + re-injects the target kind on the NEWEST page, so a navigation
+   * the operator performs DURING the wait is followed by a re-arm within ~1 poll tick — the hotkey then lands
+   * on a document that still has the listener. This per-tick re-arm (not the event hooks, which proved
+   * unreliable live) is the reliability mechanism.
+   */
+  waitForStageSentinel(
+    stage: CalibrationStage,
+    onTick: () => Promise<void>,
+  ): Promise<CalibrationCheckpointSignal>;
   /** Print sanitized per-stage instructions (noop in tests). */
   announceStage?(stage: CalibrationStage, targetKind: CalibrationTargetKind, optional: boolean): void;
   /** Announce that a REQUIRED stage got a capture-less ready and must be retried (noop in tests). */
@@ -185,11 +198,17 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
     let captured: RawCapturedShape | null = null;
     let waiting = true;
     while (waiting) {
-      // Backstop re-arm (idempotent): a fresh document reached during the wait must be armed before the hotkey.
+      // Pre-wait re-arm (idempotent): a fresh document reached before the wait must be armed before the hotkey.
       await deps.armCaptureOnNewestPage();
       await deps.setTargetKind(targetKind);
 
-      const signal = await deps.waitForStageSentinel(stage);
+      // Per-tick re-arm (the reliability fix): the wait invokes this on EVERY poll iteration, so a navigation
+      // the operator does DURING the blocking wait is followed by a re-arm within ~1 tick — the hotkey lands
+      // on a live-listener document. Idempotent via IS_CAPTURE_ARMED, so a still-live document is not re-armed.
+      const signal = await deps.waitForStageSentinel(stage, async () => {
+        await deps.armCaptureOnNewestPage();
+        await deps.setTargetKind(targetKind);
+      });
       if (signal === "abort") {
         outcome = "abort";
         waiting = false;
@@ -540,11 +559,14 @@ async function main(): Promise<void> {
       currentStageKind = kind;
       await base.setTargetKind(kind);
     },
-    waitForStageSentinel: async (_stage) => {
+    waitForStageSentinel: async (_stage, onTick) => {
       removeSentinel(readyPath);
       removeSentinel(skipPath);
       const maxTicks = Math.ceil(STAGE_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
       for (let i = 0; i < maxTicks; i++) {
+        // Per-tick re-arm FIRST: if the operator navigated during the previous sleep, re-install the capture
+        // listener on the newest document before we could read a ready set by a hotkey on the new surface.
+        await onTick();
         if (abortFlag.v || existsSync(abortPath)) return "abort";
         if (existsSync(skipPath)) return "skip";
         if (existsSync(readyPath)) return "ready";
