@@ -1,8 +1,9 @@
 /**
- * Source guard over the calibration LIVE surfaces (`calibration-inpage.ts` + `calibrate-api-center.ts`). The
- * in-page scripts gather STRUCTURE ONLY and the CLI observes read-only: neither may read a field VALUE, dump
- * the DOM, touch the clipboard/screenshot, or generate/block any click. Comments are stripped first so the
- * guard checks executable source, not prose.
+ * Source guard over the calibration LIVE surfaces (`calibration-inpage.ts` + `calibration-binding.ts` +
+ * `calibrate-api-center.ts`). The in-page init script gathers STRUCTURE ONLY, the Node binding channel only
+ * relays already-structural data, and the CLI observes read-only: none may read a field VALUE, dump the DOM,
+ * touch the clipboard/screenshot, or generate/block any click. Comments are stripped first so the guard checks
+ * executable source, not prose.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INPAGE = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "calibration-inpage.ts");
+const BINDING = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "calibration-binding.ts");
 const CLI = join(__dirname, "..", "..", "..", "src", "cli", "calibrate-api-center.ts");
 
 /** Remove block + line comments so the guard checks only executable source, not prose. */
@@ -21,6 +23,7 @@ function stripComments(src: string): string {
 }
 
 const inpage = stripComments(readFileSync(INPAGE, "utf8"));
+const binding = stripComments(readFileSync(BINDING, "utf8"));
 const cli = stripComments(readFileSync(CLI, "utf8"));
 
 /** Value reads, DOM dumps, exfiltration sinks, and any generated/blocked click — forbidden everywhere. */
@@ -63,11 +66,15 @@ describe("calibration-inpage.ts — structure-only, value-free", () => {
   });
 });
 
-describe("calibration-inpage.ts — capture-ack toast + set-target-kind are value-free", () => {
-  it("injects the target KIND value-free (a window var, never a selector/value)", () => {
-    expect(inpage).toContain("__cal_target_kind__");
-    expect(inpage).toContain("IS_CAPTURE_ARMED");
-    expect(inpage).toContain("buildSetTargetKind");
+describe("calibration-inpage.ts — init-script + binding capture model is value-free", () => {
+  it("exposes the init-script builder + the two binding-name constants", () => {
+    expect(inpage).toContain("buildCalibrationInitScript");
+    expect(inpage).toContain("CAL_CAPTURE_BINDING");
+    expect(inpage).toContain("CAL_STAGE_BINDING");
+  });
+
+  it("the init script is idempotent per document (install-once flag)", () => {
+    expect(inpage).toContain("__soCalInstalled__");
   });
 
   it("the ack toast shows ONLY the fixed label + target kind + match count + resolved/unresolved", () => {
@@ -93,6 +100,21 @@ describe("calibration-inpage.ts — capture-ack toast + set-target-kind are valu
   });
 });
 
+describe("calibration-binding.ts — Node channel only relays structure, never a value", () => {
+  for (const token of FORBIDDEN) {
+    it(`source contains no \`${token}\``, () => {
+      expect(binding.includes(token)).toBe(false);
+    });
+  }
+
+  it("validates host / active-tab / nonce and re-derives the frame category", () => {
+    expect(binding).toContain("classifyUrlCategory");
+    expect(binding).toContain("isActivePage");
+    expect(binding).toContain("stageNonce");
+    expect(binding).toContain("mainFrame");
+  });
+});
+
 describe("calibrate-api-center.ts — read-only observer, no automatic action", () => {
   for (const token of FORBIDDEN) {
     it(`source contains no \`${token}\``, () => {
@@ -100,7 +122,12 @@ describe("calibrate-api-center.ts — read-only observer, no automatic action", 
     });
   }
 
-  it("drives the page only through .evaluate (string form)", () => {
+  it("installs the capture listener via addInitScript + exposeBinding (no polling re-arm)", () => {
+    expect(cli).toContain("addInitScript");
+    expect(cli).toContain("exposeBinding");
+  });
+
+  it("still reads the census only through .evaluate (string form, settled checkpoint)", () => {
     expect(cli).toContain(".evaluate");
   });
 });

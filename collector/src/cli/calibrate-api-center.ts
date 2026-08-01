@@ -12,31 +12,33 @@
  * `return_path` is NOT a stage — returning to SellerOps is a printed UI instruction, never a calibrated
  * selector, so it is excluded from `SELECTORS_CALIBRATED`.
  *
- * **Capture reliability (v2 fix).** The in-page capture listeners live in the page's JS realm, so a navigation
- * / reload / new-tab (a fresh document) destroys them — the live regression (attempt #2) was: listeners armed
- * once at stage START, the operator then navigated (a real top-level path change) DURING the blocking sentinel
- * wait, and the later hotkey had no listener so ZERO targets were captured. The event-driven hooks
- * (`context.on("page")` / `page.on("load")` / `page.on("framenavigated")`) did NOT fire for that navigation in
- * the real browser. The reliable mechanism is now a PER-TICK re-arm: the sentinel wait invokes an `onTick`
- * callback on EVERY poll iteration (~1s) that re-arms + re-injects the target kind on the NEWEST page, so a
- * navigation done at any point during the wait is followed by a re-arm within one tick. It is idempotent (only
- * a page reporting NOT-armed via `IS_CAPTURE_ARMED` is re-armed, so a live document is never double-armed). The
- * event hooks STAY as a best-effort supplement. A successful hotkey capture renders a value-free ack toast
- * (kind + match count + resolved).
+ * **Capture reliability — init-script + exposeBinding (the race-immune model).** The capture listener is
+ * installed ONCE via `BrowserContext.addInitScript(buildCalibrationInitScript(...))`: Playwright auto-runs it
+ * at the start of EVERY new document (navigation / reload / new tab) and in EVERY child frame, BEFORE the
+ * page's own scripts — so a live listener is ALWAYS present after the operator navigates, with no Node-side
+ * re-arm to race. Captures are pushed Node-ward through two `BrowserContext.exposeBinding` functions (a stage
+ * pull + a capture push) that exist in every frame; Node validates host / active-tab / nonce / first-valid
+ * and re-derives the frame category authoritatively before adopting anything. This RETIRES the prior polling
+ * model — the per-tick `page.evaluate` re-arm and the `context.on("page")` / `page.on("load")` /
+ * `framenavigated` event re-arm — under which (1) listeners armed before a navigation were destroyed (0
+ * captures), (2) no re-arm happened DURING the blocking wait (0 captures), and (3) a per-tick re-arm
+ * `page.evaluate` raced the navigation, destroyed the execution context, and crashed the process. No polling
+ * `page.evaluate` can now race a navigation: the only remaining `page.evaluate` reads the SANITIZED census,
+ * and it runs solely at settled checkpoints (stage start / on ready), never in a per-tick loop.
  *
  * It NEVER logs in, clicks, types, submits, creates, selects, autofills, or reads any field VALUE (incl.
- * Client ID / Secret). Operator navigation is the operator's OWN clicks — OBSERVED read-only via
- * `READ_CLICK_OBSERVED`, never generated or blocked. The RAW capture (with real selectors) is written ONLY to
- * the gitignored `.calibration/` sink; the console/log gets ONLY the sanitized `summarize(...)` output (target
- * kind + structural hash + match count + resolution + confidence + page signatures) plus sanitized counts —
- * never a raw selector, value, or URL (a URL is reduced to a host category before launch).
+ * Client ID / Secret). Operator navigation is the operator's OWN clicks — OBSERVED read-only in the init
+ * script, never generated or blocked. The RAW capture (with real selectors) is written ONLY to the gitignored
+ * `.calibration/` sink; the console/log gets ONLY the sanitized `summarize(...)` output (target kind +
+ * structural hash + match count + resolution + page signatures) plus sanitized counts — never a raw selector,
+ * value, or URL (a URL is reduced to a host category before launch).
  *
  * Gating mirrors `observe-api-center` / `run-api-issuance-live-naver`: refuses without
  * `--i-understand-this-opens-live-naver` (`hasLiveRunApproval`); `screenApiCenterUrl`-fail-closed BEFORE Chrome
  * launches; always `ctx.close()`. `main()` runs ONLY when invoked directly (inert on import), so offline
  * build/verify launches nothing.
  */
-import type { Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
@@ -46,7 +48,6 @@ import { log } from "../log";
 import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import {
-  classifyUrlCategory,
   EXTRACT_API_CENTER_CENSUS,
   observeFrom,
   screenApiCenterUrl,
@@ -69,20 +70,19 @@ import {
   type SanitizedTargetCandidate,
 } from "../action-window/api-issuance-calibration/calibration";
 import {
-  ARM_CALIBRATION_CAPTURE,
-  buildSetTargetKind,
+  buildCalibrationInitScript,
+  CAL_CAPTURE_BINDING,
+  CAL_STAGE_BINDING,
   CAPTURE_REQUIRED_TOAST,
+  DEFAULT_CALIBRATION_HOTKEY,
   DEFAULT_CALIBRATION_HOTKEY_LABEL,
-  IS_CAPTURE_ARMED,
-  READ_CAPTURED_TARGET,
-  READ_CLICK_OBSERVED,
-  RESET_CAPTURE,
 } from "../action-window/api-issuance-calibration/calibration-inpage";
+import {
+  createCaptureChannel,
+  type CaptureRecord,
+} from "../action-window/api-issuance-calibration/calibration-binding";
 import { CANDIDATE_APP_ENTRY_SELECTOR } from "../action-window/naver-issuance-driver";
 import { isSafeCalibrationArtifactPath } from "./approval-manifest";
-
-/** The structural capture the in-page READ script returns — everything except the stage-attached `targetKind`. */
-export type RawCapturedShape = Omit<RawTargetCapture, "targetKind">;
 
 /** A per-checkpoint operator signal: proceed, skip an optional stage, abort the session, or the wait timed out. */
 export type CalibrationCheckpointSignal = "ready" | "skip" | "abort" | "timeout";
@@ -93,42 +93,29 @@ const IN_PAGE_APP_ENTRY_COUNT = `(function () {
   return document.querySelectorAll(${JSON.stringify(CANDIDATE_APP_ENTRY_SELECTOR)}).length;
 })()`;
 
-/** Injected seams so the whole multi-checkpoint walk is unit-tested offline over a fake page. */
+/** Injected seams so the whole multi-checkpoint walk is unit-tested offline over fakes (no browser/binding). */
 export interface CalibrationSessionDeps {
   urlCategory: ApiCenterUrlCategory;
-  /** Sanitized structural census of the CURRENT (newest) page. */
+  /** Sanitized structural census of the CURRENT (newest) page (settled checkpoint read). */
   readCensus(): Promise<ApiCenterStructuralCensus>;
   /** CANDIDATE app-entry row count (existing-vs-empty branch); counts only. */
   readAppEntryCount(): Promise<number>;
+  /** Mint a fresh per-stage nonce (binds a capture to exactly this stage; a late capture for a prior nonce is dropped). */
+  mintNonce(): string;
+  /** Tell the capture channel the current stage (so a hotkey during the stage is adoptable). */
+  setActiveStage(nonce: string, kind: CalibrationTargetKind): void;
+  /** Clear the current stage once it resolves (so a late hotkey for the finished stage finds none). */
+  clearActiveStage(): void;
+  /** Drain the binding-collected capture for a nonce (null when nothing was captured). */
+  takeCaptureFor(nonce: string): CaptureRecord | null;
   /**
-   * RE-ARM the read-only capture listeners on the NEWEST page — but ONLY when that page reports NOT armed (a
-   * fresh document). Idempotent: a live document is never double-armed. This is the reliability fix — a
-   * navigation / new-tab destroys the prior document's listeners, so capture must be re-installed on the new one.
+   * Block until the operator signals this stage ready / skip / abort / times out. Sentinel-file-only — it
+   * runs NO `page.evaluate` and needs NO re-arm callback: the init-script listener survives every navigation,
+   * so there is nothing to re-install while we wait.
    */
-  armCaptureOnNewestPage(): Promise<void>;
-  /** Whether the NEWEST page currently has capture listeners installed (the CAPTURE_ARMED state). */
-  readCaptureArmed(): Promise<boolean>;
-  /** Inject the current stage's target KIND (closed-vocab enum) so the ack toast can name it. Value-free. */
-  setTargetKind(kind: CalibrationTargetKind): Promise<void>;
-  /** Clear the calibration window vars before a checkpoint. */
-  resetCapture(): Promise<void>;
-  /** Read the structural capture of the hotkey-confirmed element (null when nothing was confirmed). */
-  readCapturedTarget(): Promise<RawCapturedShape | null>;
-  /** Whether the operator's own navigation click was observed since the last read. */
-  readClickObserved(): Promise<boolean>;
+  waitForStageSentinel(stage: CalibrationStage): Promise<CalibrationCheckpointSignal>;
   /** Render the value-free "capture required, try again" toast on the newest page (production only). */
   notifyCaptureRequired?(): Promise<void>;
-  /**
-   * Block until the operator signals this stage ready / skip / abort / times out, invoking `onTick` on EVERY
-   * poll iteration. `onTick` re-arms capture + re-injects the target kind on the NEWEST page, so a navigation
-   * the operator performs DURING the wait is followed by a re-arm within ~1 poll tick — the hotkey then lands
-   * on a document that still has the listener. This per-tick re-arm (not the event hooks, which proved
-   * unreliable live) is the reliability mechanism.
-   */
-  waitForStageSentinel(
-    stage: CalibrationStage,
-    onTick: () => Promise<void>,
-  ): Promise<CalibrationCheckpointSignal>;
   /** Print sanitized per-stage instructions (noop in tests). */
   announceStage?(stage: CalibrationStage, targetKind: CalibrationTargetKind, optional: boolean): void;
   /** Announce that a REQUIRED stage got a capture-less ready and must be retried (noop in tests). */
@@ -145,26 +132,32 @@ export interface CalibrationSessionResult {
   aborted: boolean;
   /** How many stages were walked (sanitized count). */
   stagesCompleted: number;
-  /** How many operator navigation clicks were observed (sanitized count). */
+  /** How many operator navigation clicks were observed via captures (sanitized count). */
   clicksObserved: number;
-  /** How many stages had capture listeners confirmed armed on the newest page (the CAPTURE_ARMED state). */
-  stagesArmed: number;
+  /** How many captures were collected + sanitized across the walk (sanitized count). */
+  capturesCollected: number;
   /** How many capture-less READY signals were refused on a required stage (sanitized count). */
   captureRequiredCount: number;
   /** How many OPTIONAL stages were advanced by an explicit skip (no capture) (sanitized count). */
   skippedCount: number;
+  /** How many adopted captures came from the TOP frame (sanitized count). */
+  topFrameCaptures: number;
+  /** How many adopted captures came from a CHILD frame (sanitized count). */
+  childFrameCaptures: number;
 }
 
 /**
- * The pure multi-checkpoint orchestrator. Walks the four stages in ONE session; at each it (re-)arms capture on
- * the newest page, injects the target kind, waits for the operator, reads the sanitized page signature, and
- * (when the operator confirmed a control) sanitizes the structural capture through the FROZEN gate.
+ * The pure multi-checkpoint orchestrator. Walks the four stages in ONE session; at each it mints a nonce, sets
+ * the active stage on the capture channel, waits for the operator (sentinel-file only), reads the sanitized
+ * page signature, and (when a capture was pushed for this stage's nonce) sanitizes the structural capture
+ * through the FROZEN gate.
  *
  * A REQUIRED stage does NOT advance on a capture-less ready — it surfaces `CAPTURE_REQUIRED`, re-instructs, and
- * keeps waiting (the re-arm stays live). An OPTIONAL stage (only `app_detail_anchor`) advances on an explicit
- * skip only — never on a bare capture-less ready — and always contributes its page signature. Abort/timeout
- * stop the walk and return the partial sanitized summary gathered so far. It never navigates, clicks, types, or
- * reads a value — those are the injected page seams, each of which is value-free.
+ * keeps waiting. An OPTIONAL stage (only `app_detail_anchor`) advances on an explicit skip only — never on a
+ * bare capture-less ready — and always contributes its page signature. `clearActiveStage()` runs once the
+ * stage resolves, so a late hotkey for the finished stage finds no active stage and is dropped. Abort/timeout
+ * stop the walk and return the partial sanitized summary gathered so far. It never navigates, clicks, types,
+ * or reads a value — those are the injected seams / the init script, each of which is value-free.
  */
 export async function runCalibrationSession(deps: CalibrationSessionDeps): Promise<CalibrationSessionResult> {
   const pages: PageSignature[] = [];
@@ -174,41 +167,31 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
   let hasExistingApp = false;
   let stagesCompleted = 0;
   let clicksObserved = 0;
-  let stagesArmed = 0;
+  let capturesCollected = 0;
   let captureRequiredCount = 0;
   let skippedCount = 0;
+  let topFrameCaptures = 0;
+  let childFrameCaptures = 0;
 
   for (const stage of CALIBRATION_STAGES) {
     const optional = stageIsOptional(stage);
-    await deps.resetCapture();
-    await deps.armCaptureOnNewestPage();
-    if (await deps.readCaptureArmed()) stagesArmed += 1;
+    const nonce = deps.mintNonce();
 
     // The existing-vs-empty branch is decided on the app-list surface (the entry page IS the app list) and
-    // carried forward. Read it before injecting the kind so the ack toast names open_app vs create_app.
+    // carried forward. Read it at stage start (settled) so the ack toast names open_app vs create_app.
     if (stage === "app_list") {
       hasExistingApp = (await deps.readAppEntryCount()) > 0;
     }
     const targetKind = stageTargetKind(stage, hasExistingApp);
-    await deps.setTargetKind(targetKind);
+    deps.setActiveStage(nonce, targetKind);
     deps.announceStage?.(stage, targetKind, optional);
 
     // Wait for a definitive advance: a capture-backed ready, an explicit skip (optional only), abort, or timeout.
     let outcome: "advance_capture" | "advance_skip" | "abort" | "timeout" = "timeout";
-    let captured: RawCapturedShape | null = null;
+    let captured: CaptureRecord | null = null;
     let waiting = true;
     while (waiting) {
-      // Pre-wait re-arm (idempotent): a fresh document reached before the wait must be armed before the hotkey.
-      await deps.armCaptureOnNewestPage();
-      await deps.setTargetKind(targetKind);
-
-      // Per-tick re-arm (the reliability fix): the wait invokes this on EVERY poll iteration, so a navigation
-      // the operator does DURING the blocking wait is followed by a re-arm within ~1 tick — the hotkey lands
-      // on a live-listener document. Idempotent via IS_CAPTURE_ARMED, so a still-live document is not re-armed.
-      const signal = await deps.waitForStageSentinel(stage, async () => {
-        await deps.armCaptureOnNewestPage();
-        await deps.setTargetKind(targetKind);
-      });
+      const signal = await deps.waitForStageSentinel(stage);
       if (signal === "abort") {
         outcome = "abort";
         waiting = false;
@@ -227,7 +210,7 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
         }
       } else {
         // signal === "ready"
-        captured = await deps.readCapturedTarget();
+        captured = deps.takeCaptureFor(nonce);
         if (captured) {
           outcome = "advance_capture";
           waiting = false;
@@ -241,6 +224,9 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
         }
       }
     }
+
+    // Resolve the stage: a late hotkey for the finished stage now finds no active stage (dropped).
+    deps.clearActiveStage();
 
     if (outcome === "abort") {
       aborted = true;
@@ -256,13 +242,16 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
     if (outcome === "advance_skip") {
       skippedCount += 1;
     } else if (captured) {
-      const raw: RawTargetCapture = { ...captured, targetKind };
+      const raw: RawTargetCapture = { ...captured.raw, targetKind };
       const { sanitized, raw: rawEntry } = sanitizeCapture(raw);
       targets.push(sanitized);
       if (rawEntry) rawEntries.push(rawEntry);
+      capturesCollected += 1;
+      if (captured.operatorClickObserved) clicksObserved += 1;
+      if (captured.frameCategory === "top") topFrameCaptures += 1;
+      else childFrameCaptures += 1;
     }
 
-    if (await deps.readClickObserved()) clicksObserved += 1;
     stagesCompleted += 1;
   }
 
@@ -272,9 +261,11 @@ export async function runCalibrationSession(deps: CalibrationSessionDeps): Promi
     aborted,
     stagesCompleted,
     clicksObserved,
-    stagesArmed,
+    capturesCollected,
     captureRequiredCount,
     skippedCount,
+    topFrameCaptures,
+    childFrameCaptures,
   };
 }
 
@@ -287,7 +278,7 @@ function evalStr<R>(page: Page, script: string): Promise<R> {
 
 /**
  * A safe, all-false census — the fallback when a page read races a navigation. Keeps the run alive (the stage
- * still gets a page signature, the next tick/stage retries) instead of letting the rejection crash the process.
+ * still gets a page signature, the next stage retries) instead of letting the rejection crash the process.
  */
 const EMPTY_CENSUS: ApiCenterStructuralCensus = {
   passwordFieldPresent: false,
@@ -300,34 +291,21 @@ const EMPTY_CENSUS: ApiCenterStructuralCensus = {
 
 /**
  * Build the page-bound subset of the deps over a getter for the ACTIVE (newest) page — the operator may open
- * the next stage in a new tab, so reads (and the re-arm) always target the newest tab (mirrors
- * `observe-api-center`). The re-arm is idempotent: it reads `IS_CAPTURE_ARMED` first and only installs
- * listeners on a page that is NOT armed (a fresh document), so a live document is never double-armed. Pure of
- * the sentinel wait + instructions, so a fake page can drive the same seams (and exercise the idempotency).
+ * the next stage in a new tab, so reads always target the newest tab (mirrors `observe-api-center`). Only the
+ * SANITIZED census reads + the value-free capture-required toast live here now; capture itself is init-script
+ * + exposeBinding driven (no page-side arm/read seams), so there is no `page.evaluate` in any polling loop.
+ * Pure of the sentinel wait + instructions, so a fake page can drive these census seams.
  */
 export function buildPageSessionDeps(
   getActivePage: () => Page,
   urlCategory: ApiCenterUrlCategory,
-): Pick<
-  CalibrationSessionDeps,
-  | "urlCategory"
-  | "readCensus"
-  | "readAppEntryCount"
-  | "armCaptureOnNewestPage"
-  | "readCaptureArmed"
-  | "setTargetKind"
-  | "resetCapture"
-  | "readCapturedTarget"
-  | "readClickObserved"
-  | "notifyCaptureRequired"
-> {
-  // CRITICAL (live-only): the operator navigates freely, so any page.evaluate can race a navigation and reject
-  // with "Execution context was destroyed" / "Target closed" / a detached frame. These seams are best-effort
-  // read-only calibration reads — a race must NEVER crash the session. `safeEval`/`safeVoid` swallow the
-  // transient error and return a safe fallback; the next poll tick / stage read retries on the settled page.
+): Pick<CalibrationSessionDeps, "urlCategory" | "readCensus" | "readAppEntryCount" | "notifyCaptureRequired"> {
+  // CRITICAL (live-only): the operator navigates freely, so a census `page.evaluate` at a checkpoint can still
+  // race a late navigation and reject with "Execution context was destroyed" / "Target closed" / a detached
+  // frame. These are best-effort read-only reads — a race must NEVER crash the session. `safeEval`/`safeVoid`
+  // swallow the transient error and return a safe fallback; the next stage read retries on the settled page.
   // Log the FIRST swallowed eval error once (sanitized — error NAME only, never its message, which could carry
-  // a URL/selector), so a persistent (non-transient) failure is observable instead of fully silent, without
-  // spamming a per-tick warning during normal navigation races.
+  // a URL/selector), so a persistent (non-transient) failure is observable instead of fully silent.
   let evalErrorLogged = false;
   const noteSwallowed = (e: unknown): void => {
     if (evalErrorLogged) return;
@@ -346,7 +324,7 @@ export function buildPageSessionDeps(
     try {
       await evalStr(getActivePage(), script);
     } catch (e) {
-      noteSwallowed(e); // transient navigation race — best-effort; the next tick retries
+      noteSwallowed(e); // transient navigation race — best-effort; the next checkpoint retries
     }
   };
 
@@ -354,27 +332,6 @@ export function buildPageSessionDeps(
     urlCategory,
     readCensus: () => safeEval<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS, EMPTY_CENSUS),
     readAppEntryCount: () => safeEval<number>(IN_PAGE_APP_ENTRY_COUNT, 0),
-    armCaptureOnNewestPage: async () => {
-      // Host-screen the re-arm: only install listeners on the API-center / auth host, never on an off-target
-      // or popup tab the operator may open in the same dedicated context (pre-launch screening covers only the
-      // entry URL). `page.url()` can also throw on a closing page — treat that as off-target (skip). Reduces
-      // the URL to a host category; the raw URL is never logged.
-      let host: ApiCenterUrlCategory = "unknown";
-      try {
-        host = classifyUrlCategory(getActivePage().url());
-      } catch {
-        host = "unknown";
-      }
-      if (host !== "api_center_host" && host !== "naver_auth_host") return;
-      // Fallback `true` on a race ⇒ skip arming this tick (do not ARM into a destroyed context); next tick retries.
-      const armed = await safeEval<boolean>(IS_CAPTURE_ARMED, true);
-      if (!armed) await safeVoid(ARM_CALIBRATION_CAPTURE);
-    },
-    readCaptureArmed: () => safeEval<boolean>(IS_CAPTURE_ARMED, false),
-    setTargetKind: (kind) => safeVoid(buildSetTargetKind(kind)),
-    resetCapture: () => safeVoid(RESET_CAPTURE),
-    readCapturedTarget: () => safeEval<RawCapturedShape | null>(READ_CAPTURED_TARGET, null),
-    readClickObserved: () => safeEval<boolean>(READ_CLICK_OBSERVED, false),
     notifyCaptureRequired: () => safeVoid(CAPTURE_REQUIRED_TOAST),
   };
 }
@@ -420,6 +377,10 @@ const HYDRATION_TIMEOUT_MS = 15_000;
 
 function mintRunId(): string {
   return `cal_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+function mintNonce(): string {
+  return randomUUID().replace(/-/g, "").slice(0, 12);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -470,7 +431,7 @@ function printStageInstructions(
   console.error(`  2) Hover the target and press ${DEFAULT_CALIBRATION_HOTKEY_LABEL} — an on-page toast confirms`);
   console.error("     the capture (target kind + match count + resolved/unresolved; no value is ever shown).");
   console.error("     A credential value field is captured by POSITION only — its value is never read.");
-  console.error("  3) Signal readiness by creating this file (or say \"ready\"):");
+  console.error('  3) Signal readiness by creating this file (or say "ready"):');
   console.error(`       ${readyPath}`);
   if (optional) {
     console.error(`     This stage is OPTIONAL — to skip it WITHOUT a capture, create: ${skipPath}`);
@@ -482,8 +443,9 @@ function printStageInstructions(
 
 /**
  * Live entry (gated). NOT run during offline build/verify. Opens the window ONCE, keeps login across stages,
- * event-drives capture re-arm on the newest page, writes the RAW artifact to the gitignored sink, prints ONLY
- * the sanitized summary, and always closes.
+ * registers the init-script capture listener + the two exposeBinding channels BEFORE the first navigation (so
+ * the listener is present in every document the operator reaches), writes the RAW artifact to the gitignored
+ * sink, prints ONLY the sanitized summary, and always closes.
  */
 async function main(): Promise<void> {
   banner();
@@ -537,7 +499,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", onSigint);
   process.on("SIGTERM", onSigint);
 
-  const ctx = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
+  const ctx: BrowserContext = await launchNaverContext(cfg.profileDir, cfg.browserChannel);
   const activePage = (): Page => {
     const list = ctx.pages();
     return (list[list.length - 1] ?? list[0]) as Page;
@@ -545,41 +507,18 @@ async function main(): Promise<void> {
 
   const base = buildPageSessionDeps(activePage, urlCategory);
 
-  // The current stage's target kind, tracked so the event-driven re-arm can RE-INJECT it onto a fresh document
-  // (a navigation / new-tab loses `window.__cal_target_kind__` along with the listeners).
-  let currentStageKind: CalibrationTargetKind | null = null;
+  // The capture channel Node-validates every pushed capture (host / active-tab / nonce / first-valid) and
+  // re-derives the frame category authoritatively. `isActivePage` accepts a capture only from the newest tab.
+  const channel = createCaptureChannel({ urlCategory, isActivePage: (p) => p === activePage() });
 
-  // EVENT-DRIVEN RE-ARM (the reliability fix). A fresh document (navigation / reload / new-tab / top-frame
-  // replacement) drops the in-page capture listeners; re-arm the NEWEST page whenever one appears, idempotently
-  // (armCaptureOnNewestPage only installs on a page reporting NOT armed). Read-only — installs listeners only.
-  const rearmNewest = async (): Promise<void> => {
-    try {
-      await base.armCaptureOnNewestPage();
-      if (currentStageKind) await base.setTargetKind(currentStageKind);
-    } catch {
-      /* the page may be mid-navigation; the backstop re-arm on the next wait tick will catch it */
-    }
-  };
-  const hookPage = (p: Page): void => {
-    const evented = p as unknown as {
-      on?: (event: string, cb: (arg?: unknown) => void) => void;
-      mainFrame?: () => unknown;
-    };
-    if (typeof evented.on !== "function") return;
-    evented.on("load", () => void rearmNewest());
-    evented.on("framenavigated", (frame?: unknown) => {
-      // Top-frame navigation only — a subframe navigation must not thrash the re-arm.
-      if (!evented.mainFrame || frame === evented.mainFrame()) void rearmNewest();
-    });
-  };
-  const eventedCtx = ctx as unknown as { on?: (event: string, cb: (p: Page) => void) => void };
-  if (typeof eventedCtx.on === "function") {
-    eventedCtx.on("page", (p: Page) => {
-      hookPage(p);
-      void rearmNewest();
-    });
-  }
-  for (const p of ctx.pages()) hookPage(p);
+  // Register the capture channel + the init-script listener BEFORE the first navigation. Playwright re-runs
+  // the init script in every subsequent document/frame (nav / reload / new tab / child frame) automatically,
+  // so no Node-side re-arm exists to race the operator's navigation. exposeBinding installs both `window`
+  // functions in every frame; the stage binding ignores its source arg and returns the current stage, the
+  // capture binding forwards `source` (with `.frame` / `.page`) so Node can validate + re-derive frame origin.
+  await ctx.exposeBinding(CAL_STAGE_BINDING, () => channel.onStageQuery());
+  await ctx.exposeBinding(CAL_CAPTURE_BINDING, (source, payload: unknown) => channel.onCapture(source, payload));
+  await ctx.addInitScript(buildCalibrationInitScript(DEFAULT_CALIBRATION_HOTKEY));
 
   // The operator navigates to the API-center once; the SAME window/login is reused across every stage.
   const entry = activePage();
@@ -591,19 +530,17 @@ async function main(): Promise<void> {
       await settle(activePage());
       return base.readCensus();
     },
-    // Track the current stage's kind so the event-driven re-arm can re-inject it after a navigation.
-    setTargetKind: async (kind) => {
-      currentStageKind = kind;
-      await base.setTargetKind(kind);
-    },
-    waitForStageSentinel: async (_stage, onTick) => {
+    mintNonce,
+    setActiveStage: (nonce, kind) => channel.setActiveStage(nonce, kind),
+    clearActiveStage: () => channel.clearActiveStage(),
+    takeCaptureFor: (nonce) => channel.takeCaptureFor(nonce),
+    waitForStageSentinel: async (_stage) => {
       removeSentinel(readyPath);
       removeSentinel(skipPath);
       const maxTicks = Math.ceil(STAGE_WAIT_TIMEOUT_MS / SENTINEL_POLL_MS);
       for (let i = 0; i < maxTicks; i++) {
-        // Per-tick re-arm FIRST: if the operator navigated during the previous sleep, re-install the capture
-        // listener on the newest document before we could read a ready set by a hotkey on the new surface.
-        await onTick();
+        // Sentinel-file-only poll — NO page.evaluate here, so nothing can race the operator's navigation. The
+        // init-script listener already survives every navigation, so there is nothing to re-arm mid-wait.
         if (abortFlag.v || existsSync(abortPath)) return "abort";
         if (existsSync(skipPath)) return "skip";
         if (existsSync(readyPath)) return "ready";
@@ -650,10 +587,12 @@ async function main(): Promise<void> {
           urlCategory,
           aborted: result.aborted,
           stagesCompleted: result.stagesCompleted,
-          stagesArmed: result.stagesArmed,
+          capturesCollected: result.capturesCollected,
           captureRequiredCount: result.captureRequiredCount,
           skippedCount: result.skippedCount,
           clicksObserved: result.clicksObserved,
+          topFrameCaptures: result.topFrameCaptures,
+          childFrameCaptures: result.childFrameCaptures,
           resolvedCount: result.summary.resolvedCount,
           unresolvedCount: result.summary.unresolvedCount,
           rawArtifact: artifactRel,
@@ -668,10 +607,12 @@ async function main(): Promise<void> {
       urlCategory,
       aborted: result.aborted,
       stagesCompleted: result.stagesCompleted,
-      stagesArmed: result.stagesArmed,
+      capturesCollected: result.capturesCollected,
       captureRequiredCount: result.captureRequiredCount,
       skippedCount: result.skippedCount,
       clicksObserved: result.clicksObserved,
+      topFrameCaptures: result.topFrameCaptures,
+      childFrameCaptures: result.childFrameCaptures,
       resolvedCount: result.summary.resolvedCount,
       unresolvedCount: result.summary.unresolvedCount,
     });

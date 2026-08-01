@@ -192,6 +192,39 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   throw 없이 fallback)로 crash 지점을 직접 커버. 독립 리뷰 HIGH=0 MED=0. **여전히 라이브 재보정 필요(새 bootstrap +
   새 단일-사용 승인); `SELECTORS_CALIBRATED` 미설정.**
 
+### 0.2.1 개정 — **polling/evaluate re-arm 모델 RETIRED → init-script event-driven capture** ⭐ 현행 capture 계약
+
+> 세 번의 라이브 실패(§0.2 1·2·3차)는 하나의 근본 원인 — **Node가 in-page 리스너를 설치/재설치하려 한다**는 설계 —
+> 의 서로 다른 증상이었다(리스너가 navigation으로 소멸 / wait 도중 재설치 부재 / 재설치 evaluate가 navigation과
+> race하여 execution context 파괴·crash). 이 재보정 시도들을 버그 목록이 아니라 **폐기 근거**로 기록한다: 위
+> 세 증상은 재설치를 Node polling에 두는 한 제거 불가능하다. capture 모델을 **race-immune**하게 교체했다.
+
+- **새 정식 capture 계약(구현: `calibration-inpage.ts`/`calibration-binding.ts`/`calibrate-api-center.ts`, 오프라인):**
+  - **`BrowserContext.addInitScript`** 로 capture 리스너(hover·passive-click·hotkey 3종, capture phase)를 **한 번**
+    설치한다 → Playwright가 **모든 새 document(navigation/reload/new-tab)와 모든 child frame에서, 페이지 자체 스크립트
+    보다 먼저 자동 재실행**한다. operator가 어디로 이동하든 리스너는 항상 살아 있으며 **Node 재-arm이 존재하지 않는다.**
+    document당 idempotent(`window.__soCalInstalled__` 플래그; 새 realm은 플래그가 없어 정확히 1회 설치).
+  - **`BrowserContext.exposeBinding`** 로 두 `window` 함수를 모든 frame에 설치: stage pull(`__soCalStage__`,
+    현재 `{nonce,kind}` 읽기 전용)과 capture push(`__soCalCapture__`, 구조 전용 payload를 fire-and-forget으로 Node에
+    전달). init script는 상수 보간으로 두 이름을 참조(divergent 하드코딩 금지).
+  - **Node 검증(fail-closed, 절대 throw 안 함)**: frame URL host allow-list(`api_center_host`/`naver_auth_host`)
+    → active-tab(newest) → active stage 존재 + `stageNonce` 일치 → **nonce당 first-valid만** 채택(tab/frame 중복
+    무시). frame category는 `source.frame === source.page.mainFrame()`로 **권위적으로 재도출**(payload 주장 신뢰 안 함).
+  - **census만 `page.evaluate`로 남는다** — 그리고 **settled checkpoint(stage 시작 / ready)에서만** 호출된다(polling
+    루프 아님). `safeEval`/`safeVoid` 래핑 유지. capture-required toast도 settled 1회. **polling `page.evaluate`가
+    navigation과 race할 지점이 더는 없다.**
+  - 폐기된 경로(명시 제거): 퍼-틱 `onTick` re-arm, `IS_CAPTURE_ARMED` 재-arm 게이트, `context.on("page")`/
+    `page.on("load")`/`framenavigated` 이벤트 재-arm, `ARM_CALIBRATION_CAPTURE`/`READ_CAPTURED_TARGET`/
+    `READ_CLICK_OBSERVED`/`RESET_CAPTURE`/`buildSetTargetKind`.
+- **회귀 테스트**: RUN_INTEGRATION real-Chromium 계약 테스트가 (#1) navigation/reload/new-tab/child-frame 자동 설치,
+  (#2) 재-arm 0으로 top·child frame hotkey capture 성공, (#3) flow 도중 navigation에서 unhandled rejection·crash
+  0을 고정한다. Node 채널 유닛 테스트가 host/tab/nonce/first-valid 거부 + 권위적 frame category + throwing
+  `source.frame.url()` 삼킴을 고정한다. 값(`.value`/text/HTML)·클립보드·스크린샷·생성/차단 클릭 0(source-guard가
+  세 파일 모두 스캔).
+- **안전 불변식 유지**: 값 미판독(자격증명 위치만), sanitized 요약만 로그(원 셀렉터·값·URL 금지; raw는 gitignored
+  `.calibration/`), 자동 로그인·클릭·발급 0. **`SELECTORS_CALIBRATED`는 여전히 false** — 라이브 재보정은 새 bootstrap +
+  새 단일-사용 승인 필요. (본 개정은 오프라인 구현·테스트만; 라이브 실행·push·PR 없음.)
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
