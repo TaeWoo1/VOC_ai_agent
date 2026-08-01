@@ -624,3 +624,44 @@ describe("runCalibrationSession — abort yields cleanup + a partial sanitized s
     expect(result.stagesCompleted).toBe(1);
   });
 });
+
+/**
+ * Seam-level crash-resilience (v2.1) — the ACTUAL live failure was a navigation destroying the execution
+ * context mid-`page.evaluate`, whose rejection was uncaught and crashed the whole calibrator. The orchestrator
+ * tests inject fake deps and never touch `buildPageSessionDeps`, where the crash lived — so this drives the
+ * production seams directly with a Page whose `evaluate` (and `url()`) reject, and asserts every seam SWALLOWS
+ * the transient error and returns its safe fallback instead of throwing.
+ */
+describe("buildPageSessionDeps — a navigation-race rejection never crashes the session", () => {
+  const rejectingPage = (): Page =>
+    ({
+      url: () => "https://apicenter.commerce.naver.com/ko/member/application/manage/list",
+      evaluate: () => Promise.reject(new Error("Execution context was destroyed, most likely because of a navigation")),
+    }) as unknown as Page;
+
+  it("every read/arm/void seam swallows a rejecting evaluate and returns a safe fallback (no throw)", async () => {
+    const deps = buildPageSessionDeps(() => rejectingPage(), "api_center_host");
+    await expect(deps.readCensus()).resolves.toMatchObject({ passwordFieldPresent: false, listLikeContainerCount: 0 });
+    await expect(deps.readAppEntryCount()).resolves.toBe(0);
+    await expect(deps.readCaptureArmed()).resolves.toBe(false);
+    await expect(deps.readCapturedTarget()).resolves.toBeNull();
+    await expect(deps.readClickObserved()).resolves.toBe(false);
+    // The exact call site that crashed live — must resolve, not reject.
+    await expect(deps.armCaptureOnNewestPage()).resolves.toBeUndefined();
+    await expect(deps.setTargetKind("api_group")).resolves.toBeUndefined();
+    await expect(deps.resetCapture()).resolves.toBeUndefined();
+    await expect(deps.notifyCaptureRequired?.()).resolves.toBeUndefined();
+  });
+
+  it("a page whose url() throws is treated as off-target — arm is skipped, never throws", async () => {
+    const closingPage = (): Page =>
+      ({
+        url: () => {
+          throw new Error("Target page, context or browser has been closed");
+        },
+        evaluate: () => Promise.reject(new Error("Target closed")),
+      }) as unknown as Page;
+    const deps = buildPageSessionDeps(() => closingPage(), "api_center_host");
+    await expect(deps.armCaptureOnNewestPage()).resolves.toBeUndefined();
+  });
+});

@@ -181,6 +181,16 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   re-arm + kind 재주입**(≈1s 이내, `IS_CAPTURE_ARMED`로 idempotent) — event hooks는 best-effort 보조로만 유지.
   회귀 테스트는 **wait 도중 navigation → tick 전 hotkey=0캡처 → onTick tick 후 hotkey=성공/stage advance**를
   실제 orchestrator로 재현. `SELECTORS_CALIBRATED`는 여전히 미설정(라이브 재보정 필요, 새 승인 게이트).
+- **3차 라이브 보정 시도=`CALIBRATION_CAPTURE_FAILED`(crash, not capture-miss)** — v2 per-tick re-arm이 실제로
+  발화했으나, operator가 **evaluate 도중 이동**하면 execution context가 파괴되어 `page.evaluate`가 reject하고,
+  이 rejection이 **uncaught → calibrator 프로세스 crash**(Chrome 닫힘). 라이브 안전 0(NAVER 호출·write·credential
+  read·자동 클릭 0), 아티팩트 미기록(캡처 전 crash), 승인 CONSUMED. **수정(reliability v2.1)**: `buildPageSessionDeps`
+  의 모든 page-bound seam을 `safeEval`/`safeVoid`로 감싸 **navigation race(“Execution context was destroyed”/
+  “Target closed”/frame detached)를 삼키고 fail-closed fallback 반환**(census→EMPTY, captured→null⇒capture-required,
+  armed-check→true⇒그 tick arm skip; 값/셀렉터 노출 0, 최초 1회만 sanitized name 로그) + `void main().catch`
+  최상위 가드(ctx는 finally에서 이미 close). seam 단위 테스트(evaluate/url가 reject하는 fake Page → 모든 seam
+  throw 없이 fallback)로 crash 지점을 직접 커버. 독립 리뷰 HIGH=0 MED=0. **여전히 라이브 재보정 필요(새 bootstrap +
+  새 단일-사용 승인); `SELECTORS_CALIBRATED` 미설정.**
 
 ---
 

@@ -286,6 +286,19 @@ function evalStr<R>(page: Page, script: string): Promise<R> {
 }
 
 /**
+ * A safe, all-false census — the fallback when a page read races a navigation. Keeps the run alive (the stage
+ * still gets a page signature, the next tick/stage retries) instead of letting the rejection crash the process.
+ */
+const EMPTY_CENSUS: ApiCenterStructuralCensus = {
+  passwordFieldPresent: false,
+  submitAffordancePresent: false,
+  formCount: 0,
+  editableTextInputCount: 0,
+  readonlyFieldCount: 0,
+  listLikeContainerCount: 0,
+};
+
+/**
  * Build the page-bound subset of the deps over a getter for the ACTIVE (newest) page — the operator may open
  * the next stage in a new tab, so reads (and the re-arm) always target the newest tab (mirrors
  * `observe-api-center`). The re-arm is idempotent: it reads `IS_CAPTURE_ARMED` first and only installs
@@ -308,37 +321,61 @@ export function buildPageSessionDeps(
   | "readClickObserved"
   | "notifyCaptureRequired"
 > {
+  // CRITICAL (live-only): the operator navigates freely, so any page.evaluate can race a navigation and reject
+  // with "Execution context was destroyed" / "Target closed" / a detached frame. These seams are best-effort
+  // read-only calibration reads — a race must NEVER crash the session. `safeEval`/`safeVoid` swallow the
+  // transient error and return a safe fallback; the next poll tick / stage read retries on the settled page.
+  // Log the FIRST swallowed eval error once (sanitized — error NAME only, never its message, which could carry
+  // a URL/selector), so a persistent (non-transient) failure is observable instead of fully silent, without
+  // spamming a per-tick warning during normal navigation races.
+  let evalErrorLogged = false;
+  const noteSwallowed = (e: unknown): void => {
+    if (evalErrorLogged) return;
+    evalErrorLogged = true;
+    log("apiCenter.calibrate.eval_swallowed", { reason: e instanceof Error ? e.name || "Error" : typeof e }, "warn");
+  };
+  const safeEval = async <R>(script: string, fallback: R): Promise<R> => {
+    try {
+      return await evalStr<R>(getActivePage(), script);
+    } catch (e) {
+      noteSwallowed(e);
+      return fallback;
+    }
+  };
+  const safeVoid = async (script: string): Promise<void> => {
+    try {
+      await evalStr(getActivePage(), script);
+    } catch (e) {
+      noteSwallowed(e); // transient navigation race — best-effort; the next tick retries
+    }
+  };
+
   return {
     urlCategory,
-    readCensus: () => evalStr<ApiCenterStructuralCensus>(getActivePage(), EXTRACT_API_CENTER_CENSUS),
-    readAppEntryCount: () => evalStr<number>(getActivePage(), IN_PAGE_APP_ENTRY_COUNT),
+    readCensus: () => safeEval<ApiCenterStructuralCensus>(EXTRACT_API_CENTER_CENSUS, EMPTY_CENSUS),
+    readAppEntryCount: () => safeEval<number>(IN_PAGE_APP_ENTRY_COUNT, 0),
     armCaptureOnNewestPage: async () => {
-      const page = getActivePage();
       // Host-screen the re-arm: only install listeners on the API-center / auth host, never on an off-target
       // or popup tab the operator may open in the same dedicated context (pre-launch screening covers only the
-      // entry URL). Reduces page.url() to a host category — the raw URL is never logged.
+      // entry URL). `page.url()` can also throw on a closing page — treat that as off-target (skip). Reduces
+      // the URL to a host category; the raw URL is never logged.
       let host: ApiCenterUrlCategory = "unknown";
       try {
-        host = classifyUrlCategory(page.url());
+        host = classifyUrlCategory(getActivePage().url());
       } catch {
         host = "unknown";
       }
       if (host !== "api_center_host" && host !== "naver_auth_host") return;
-      const armed = await evalStr<boolean>(page, IS_CAPTURE_ARMED);
-      if (!armed) await evalStr(page, ARM_CALIBRATION_CAPTURE);
+      // Fallback `true` on a race ⇒ skip arming this tick (do not ARM into a destroyed context); next tick retries.
+      const armed = await safeEval<boolean>(IS_CAPTURE_ARMED, true);
+      if (!armed) await safeVoid(ARM_CALIBRATION_CAPTURE);
     },
-    readCaptureArmed: () => evalStr<boolean>(getActivePage(), IS_CAPTURE_ARMED),
-    setTargetKind: async (kind) => {
-      await evalStr(getActivePage(), buildSetTargetKind(kind));
-    },
-    resetCapture: async () => {
-      await evalStr(getActivePage(), RESET_CAPTURE);
-    },
-    readCapturedTarget: () => evalStr<RawCapturedShape | null>(getActivePage(), READ_CAPTURED_TARGET),
-    readClickObserved: () => evalStr<boolean>(getActivePage(), READ_CLICK_OBSERVED),
-    notifyCaptureRequired: async () => {
-      await evalStr(getActivePage(), CAPTURE_REQUIRED_TOAST);
-    },
+    readCaptureArmed: () => safeEval<boolean>(IS_CAPTURE_ARMED, false),
+    setTargetKind: (kind) => safeVoid(buildSetTargetKind(kind)),
+    resetCapture: () => safeVoid(RESET_CAPTURE),
+    readCapturedTarget: () => safeEval<RawCapturedShape | null>(READ_CAPTURED_TARGET, null),
+    readClickObserved: () => safeEval<boolean>(READ_CLICK_OBSERVED, false),
+    notifyCaptureRequired: () => safeVoid(CAPTURE_REQUIRED_TOAST),
   };
 }
 
@@ -648,5 +685,12 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the live path ONLY when invoked directly (never on import) so hermetic tests launch nothing.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
+// Run the live path ONLY when invoked directly (never on import) so hermetic tests launch nothing. A
+// top-level catch guarantees a stray rejection is logged (sanitized — name only) and exits cleanly instead
+// of surfacing as an uncaughtException; main()'s own `finally` has already closed the context.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((e) => {
+    log("apiCenter.calibrate.fatal", { reason: e instanceof Error ? e.name || "Error" : typeof e }, "warn");
+    process.exit(1);
+  });
+}
