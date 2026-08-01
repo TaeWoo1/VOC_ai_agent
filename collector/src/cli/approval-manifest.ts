@@ -103,8 +103,110 @@ export const APPROVAL_PREREQ_CAUSES = [
   "UNBOUND_IDENTITY",
   "MISSING_HOTKEY",
   "ARTIFACT_PATH_UNSAFE",
+  // Operator-entrypoint contract (the phase's ONE true operator action must match its entrypoint type).
+  "ENTRYPOINT_TYPE_MISMATCH",
+  "ENTRYPOINT_CLI_MISMATCH",
+  "FRONTEND_URL_IN_CLI_ENTRYPOINT",
+  "CLI_DESC_IN_FRONTEND_ENTRYPOINT",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
+
+/**
+ * Per-phase OPERATOR ENTRYPOINT contract. The defect this closes: `preflight.sh` printed the order-connection
+ * frontend URL (`/connect/naver?walkthroughRun=…`) as THE operator action for EVERY phase — but a calibration
+ * phase's real operator action is the CLI-launched dedicated Chrome window, never a frontend URL. Each phase
+ * declares exactly ONE entrypoint so the operator is told the single true action and nothing else.
+ */
+export const ENTRYPOINT_TYPES = ["CLI_LAUNCHED_DEDICATED_WINDOW", "FRONTEND_URL"] as const;
+export type EntrypointType = (typeof ENTRYPOINT_TYPES)[number];
+
+/** The phases that carry an operator entrypoint: the two calibration phases + the guided order connection. */
+export const ENTRYPOINT_PHASES = [
+  "API_CENTER_STRUCTURE_OBSERVATION",
+  "API_ISSUANCE_HIGHLIGHT_PROOF",
+  "NAVER_GUIDED_CONNECTION",
+] as const;
+export type EntrypointPhase = (typeof ENTRYPOINT_PHASES)[number];
+
+export interface EntrypointSpec {
+  entrypointType: EntrypointType;
+  /** The EXACT CLI entrypoint (repo-relative) for a CLI_LAUNCHED_DEDICATED_WINDOW; "" for a FRONTEND_URL phase. */
+  cli: string;
+  /** A stable, sanitized command id — never a raw command line, flags, or URL. */
+  entrypointCommandId: string;
+  /** One line naming the SINGLE action the operator performs — no raw command, no frontend URL for CLI phases. */
+  operatorActionSummary: string;
+  /** Whether the operator's action is opening a bound frontend URL (true ONLY for the guided-connection phase). */
+  emitsFrontendUrl: boolean;
+}
+
+/**
+ * The one true entrypoint per phase. Calibration phases open a CLI-launched dedicated Chrome (no frontend URL);
+ * only the guided-connection phase hands the operator a bound frontend URL. `operatorActionSummary` is
+ * hotkey-agnostic (the concrete capture hotkey rides the manifest's own `hotkey` field).
+ */
+export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>> = {
+  API_CENTER_STRUCTURE_OBSERVATION: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/calibrate-api-center.ts",
+    entrypointCommandId: "calibrate-api-center",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 열린 창에서 직접 로그인·이동한 뒤 캡처 단축키로 대상을 확정하세요.",
+    emitsFrontendUrl: false,
+  },
+  API_ISSUANCE_HIGHLIGHT_PROOF: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/run-api-issuance-live-naver.ts",
+    entrypointCommandId: "run-api-issuance-live-naver",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다.",
+    emitsFrontendUrl: false,
+  },
+  NAVER_GUIDED_CONNECTION: {
+    entrypointType: "FRONTEND_URL",
+    cli: "",
+    entrypointCommandId: "frontend-connect-naver",
+    operatorActionSummary: "브라우저 새 창에서 아래 연결 마법사 주소를 여세요.",
+    emitsFrontendUrl: true,
+  },
+};
+
+/** Tokens that must never appear in a CLI phase's operator action — a CLI phase opens a window, not a URL. */
+const FRONTEND_URL_MARKERS: readonly string[] = ["http://", "https://", "/connect/naver", "?walkthroughRun="];
+/** Tokens that must never appear in a FRONTEND_URL phase's operator action — it must not describe a CLI. */
+const CLI_ONLY_MARKERS: readonly string[] = ["전용 Chrome", "dedicated window", "src/cli/", ".ts"];
+
+export type EntrypointContractResult = { ok: true } | { ok: false; cause: ApprovalPrereqCause; reason: string };
+
+/**
+ * A phase's entrypoint spec must match its canonical contract AND be internally consistent, so a manifest can
+ * never tell the operator to open a URL for a CLI phase (or describe a CLI for the URL phase). Pure, order-stable.
+ */
+export function validateEntrypointContract(phase: EntrypointPhase, spec: EntrypointSpec): EntrypointContractResult {
+  const canonical = PHASE_ENTRYPOINTS[phase];
+  if (spec.entrypointType !== canonical.entrypointType) {
+    return { ok: false, cause: "ENTRYPOINT_TYPE_MISMATCH", reason: `${phase} entrypoint type must be ${canonical.entrypointType}` };
+  }
+  const summary = spec.operatorActionSummary ?? "";
+  if (spec.entrypointType === "CLI_LAUNCHED_DEDICATED_WINDOW") {
+    // A CLI phase must name exactly its canonical CLI, and must never surface a frontend URL as the action.
+    if (!spec.cli || spec.cli !== canonical.cli) {
+      return { ok: false, cause: "ENTRYPOINT_CLI_MISMATCH", reason: `${phase} entrypoint cli must be exactly "${canonical.cli}"` };
+    }
+    if (spec.emitsFrontendUrl || FRONTEND_URL_MARKERS.some((m) => summary.includes(m))) {
+      return { ok: false, cause: "FRONTEND_URL_IN_CLI_ENTRYPOINT", reason: `${phase} is CLI-launched — its operator action must carry no frontend URL` };
+    }
+  } else {
+    // A frontend-URL phase must name NO CLI and must not describe a CLI-only action.
+    if (spec.cli || CLI_ONLY_MARKERS.some((m) => summary.includes(m))) {
+      return { ok: false, cause: "CLI_DESC_IN_FRONTEND_ENTRYPOINT", reason: `${phase} is a frontend URL entrypoint — it must not name or describe a CLI` };
+    }
+    if (!spec.emitsFrontendUrl) {
+      return { ok: false, cause: "ENTRYPOINT_TYPE_MISMATCH", reason: `${phase} is a frontend URL entrypoint and must emit a bound frontend URL` };
+    }
+  }
+  return { ok: true };
+}
 
 /** A bare internal id/token shape — pure digits (≥4) or a long hex token (≥16). Never an accountBinding. */
 const RAW_ID_SHAPE = /^[0-9]{4,}$|^[0-9a-f]{16,}$/i;
@@ -155,6 +257,12 @@ export interface ApprovalManifest {
   maxActions: string;
   operatorPresenceRequired: true;
   selectorsCalibrated: boolean;
+  /** How the operator reaches the run — a CLI-launched dedicated window, or a bound frontend URL. */
+  entrypointType: EntrypointType;
+  /** Stable, sanitized entrypoint command id — never a raw command line/flags/URL. */
+  entrypointCommandId: string;
+  /** The single operator action for this phase (no raw command; no frontend URL for CLI phases). */
+  operatorActionSummary: string;
   /** The calibration capture hotkey (Phase A); empty for phases that do not calibrate. */
   hotkey: string;
   /** The gitignored raw-artifact path (Phase A); empty for phases that write no raw artifact. */
@@ -275,6 +383,12 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
+  // 10) The operator entrypoint must match the phase. Both calibration phases are CLI-launched dedicated windows,
+  // so a calibration manifest may NEVER carry a frontend URL as the operator action (that was the defect).
+  const entrypoint = PHASE_ENTRYPOINTS[spec.phase];
+  const entryCheck = validateEntrypointContract(spec.phase, entrypoint);
+  if (!entryCheck.ok) return fail(entryCheck.cause, entryCheck.reason);
+
   const manifest: ApprovalManifest = {
     approvalId: input.approvalId,
     walkthroughRunId: input.runId,
@@ -291,6 +405,9 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     maxActions: input.maxActions,
     operatorPresenceRequired: true,
     selectorsCalibrated: calibrated,
+    entrypointType: entrypoint.entrypointType,
+    entrypointCommandId: entrypoint.entrypointCommandId,
+    operatorActionSummary: entrypoint.operatorActionSummary,
     hotkey: input.hotkey ?? "",
     artifactPath: input.artifactPath ?? "",
     expiresAt: "process-lifetime",

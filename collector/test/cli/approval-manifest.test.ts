@@ -14,7 +14,11 @@ import {
   PHASE_SPECS,
   validateApprovalPrerequisites,
   NAVER_API_CENTER_BASE_URL,
+  PHASE_ENTRYPOINTS,
+  ENTRYPOINT_PHASES,
+  validateEntrypointContract,
   type ApprovalPrereqInput,
+  type EntrypointSpec,
 } from "../../src/cli/approval-manifest";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
@@ -193,7 +197,8 @@ describe("PREPARED means immediately executable — no further operator input", 
     if (r.ok) {
       const m = r.manifest;
       // Every value the run needs to execute is on the manifest — so nothing more can be asked after PREPARED.
-      for (const v of [m.approvalId, m.walkthroughRunId, m.channel, m.surface, m.operation, m.phase, m.cli, m.driver, m.mode, m.accountBinding, m.apiCenterHost, m.maxActions, m.gitSha]) {
+      // The entrypoint trio is included: after PREPARED the operator picks/enters NOTHING to reach the run.
+      for (const v of [m.approvalId, m.walkthroughRunId, m.channel, m.surface, m.operation, m.phase, m.cli, m.driver, m.mode, m.accountBinding, m.apiCenterHost, m.maxActions, m.gitSha, m.entrypointType, m.entrypointCommandId, m.operatorActionSummary]) {
         expect(typeof v === "string" && v.length > 0).toBe(true);
       }
       expect(m.allowedActions.length).toBeGreaterThan(0);
@@ -226,5 +231,96 @@ describe("no NAVER access to prepare a manifest (pure, offline)", () => {
   it("the verified public base URL passes host screening (no per-run input needed)", () => {
     const r = validateApprovalPrerequisites({ ...baseObservation(), apiCenterUrl: NAVER_API_CENTER_BASE_URL });
     expect(r.ok).toBe(true);
+  });
+});
+
+describe("per-phase operator ENTRYPOINT contract — one true action, never a wrong URL", () => {
+  // The order-connection URL shape — NOT the bare `walkthroughRunId` field, which the manifest legitimately carries.
+  const FRONTEND_URL_TOKENS = ["/connect/naver", "?walkthroughRun=", "http://", "https://"];
+
+  it("Phase A (observation) manifest is a CLI-launched dedicated window — NO frontend URL anywhere", () => {
+    const r = validateApprovalPrerequisites(baseObservation());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("calibrate-api-center");
+      expect(m.operatorActionSummary.length).toBeGreaterThan(0);
+      // The exact defect regression: a calibration manifest must never carry the order-connection frontend URL.
+      for (const tok of FRONTEND_URL_TOKENS) {
+        expect(JSON.stringify(m).includes(tok), `Phase A manifest must not contain "${tok}"`).toBe(false);
+      }
+    }
+  });
+
+  it("Phase B (highlight, calibrated) manifest is also a CLI-launched dedicated window — NO frontend URL", () => {
+    const r = validateApprovalPrerequisites(baseHighlight(true));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("run-api-issuance-live-naver");
+      for (const tok of FRONTEND_URL_TOKENS) {
+        expect(JSON.stringify(m).includes(tok), `Phase B manifest must not contain "${tok}"`).toBe(false);
+      }
+    }
+  });
+
+  it("ONLY the guided-connection phase emits a bound frontend URL; both calibration phases do not", () => {
+    expect(PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION.entrypointType).toBe("FRONTEND_URL");
+    expect(PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION.emitsFrontendUrl).toBe(true);
+    expect(PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION.emitsFrontendUrl).toBe(false);
+    expect(PHASE_ENTRYPOINTS.API_ISSUANCE_HIGHLIGHT_PROOF.emitsFrontendUrl).toBe(false);
+    // Exactly one entrypoint phase emits a frontend URL.
+    const urlPhases = ENTRYPOINT_PHASES.filter((p) => PHASE_ENTRYPOINTS[p].emitsFrontendUrl);
+    expect(urlPhases).toEqual(["NAVER_GUIDED_CONNECTION"]);
+  });
+
+  it("every canonical phase entrypoint passes its own contract (no drift in the table)", () => {
+    for (const p of ENTRYPOINT_PHASES) {
+      expect(validateEntrypointContract(p, PHASE_ENTRYPOINTS[p]).ok, p).toBe(true);
+    }
+  });
+
+  it("a CLI phase whose action carries a frontend URL → FAIL (FRONTEND_URL_IN_CLI_ENTRYPOINT)", () => {
+    const bad: EntrypointSpec = {
+      ...PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION,
+      operatorActionSummary: "http://localhost:5173/connect/naver?walkthroughRun=x 를 여세요.",
+    };
+    const r = validateEntrypointContract("API_CENTER_STRUCTURE_OBSERVATION", bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("FRONTEND_URL_IN_CLI_ENTRYPOINT");
+
+    const bad2: EntrypointSpec = { ...PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION, emitsFrontendUrl: true };
+    const r2 = validateEntrypointContract("API_CENTER_STRUCTURE_OBSERVATION", bad2);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.cause).toBe("FRONTEND_URL_IN_CLI_ENTRYPOINT");
+  });
+
+  it("a frontend phase that names a CLI or describes a CLI-only action → FAIL (CLI_DESC_IN_FRONTEND_ENTRYPOINT)", () => {
+    const withCli: EntrypointSpec = { ...PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION, cli: "src/cli/calibrate-api-center.ts" };
+    const r = validateEntrypointContract("NAVER_GUIDED_CONNECTION", withCli);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("CLI_DESC_IN_FRONTEND_ENTRYPOINT");
+
+    const cliDesc: EntrypointSpec = {
+      ...PHASE_ENTRYPOINTS.NAVER_GUIDED_CONNECTION,
+      operatorActionSummary: "승인 후 SellerOps가 전용 Chrome 창을 엽니다.",
+    };
+    const r2 = validateEntrypointContract("NAVER_GUIDED_CONNECTION", cliDesc);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.cause).toBe("CLI_DESC_IN_FRONTEND_ENTRYPOINT");
+  });
+
+  it("entrypoint type / cli that disagree with the canonical phase → FAIL before a manifest", () => {
+    const wrongType: EntrypointSpec = { ...PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION, entrypointType: "FRONTEND_URL" };
+    const r = validateEntrypointContract("API_CENTER_STRUCTURE_OBSERVATION", wrongType);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("ENTRYPOINT_TYPE_MISMATCH");
+
+    const wrongCli: EntrypointSpec = { ...PHASE_ENTRYPOINTS.API_CENTER_STRUCTURE_OBSERVATION, cli: "src/cli/some-other.ts" };
+    const r2 = validateEntrypointContract("API_CENTER_STRUCTURE_OBSERVATION", wrongCli);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.cause).toBe("ENTRYPOINT_CLI_MISMATCH");
   });
 });

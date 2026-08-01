@@ -98,7 +98,10 @@ form 진입 전 **URL runId == FE runId == backend context runId + origin 일치
 ④ 항상 보이는 **disposable 배너**(runId·gitSHA·dbAlias·backend origin·NAVER 호출 수)로 화면 runId를 CLI manifest와
 육안 대조; ⑤ **page-load write 제거** — seller account 생성을 명시적 credential 제출로 지연(로드·새로고침·handshake
 DB write 0); ⑥ preflight가 context runId·git 일치 + 브라우저 env-binding smoke(정확 URL→배너 runId→wizard,
-0 NAVER 호출)를 최종 게이트로 요구하고 **정확히 하나의 operator URL + expected runId/git/dbAlias**를 출력. 도구:
+0 NAVER 호출)를 최종 게이트로 요구하고 **phase별 단일 operator 행동 + expected runId/git/dbAlias**를 출력한다.
+**operator 행동은 phase의 entrypoint 계약으로 결정된다**(§0.2.2): 이 guided-connection phase(`NAVER_GUIDED_CONNECTION`,
+`FRONTEND_URL`)에서만 bound `/connect/naver?walkthroughRun=<id>` URL을 출력하고, calibration phase는
+`CLI_LAUNCHED_DEDICATED_WINDOW`(SellerOps가 전용 Chrome 창을 엶)이라 frontend URL을 **절대 출력하지 않는다**. 도구:
 `tools/naver-local/{bootstrap.sh, run-backend-local.sh, run-frontend-local.sh, env-binding-smoke.mjs, preflight.sh,
 preflight-selfcheck.sh}`. **향후 라이브는 코드/프로세스 재시작으로 기존 승인 폐기 → 바인딩 완료 + 새 runtime
 manifest 생성 후 새 단일-사용 승인 필요.**
@@ -224,6 +227,32 @@ manifest 생성 후 새 단일-사용 승인 필요.**
 - **안전 불변식 유지**: 값 미판독(자격증명 위치만), sanitized 요약만 로그(원 셀렉터·값·URL 금지; raw는 gitignored
   `.calibration/`), 자동 로그인·클릭·발급 0. **`SELECTORS_CALIBRATED`는 여전히 false** — 라이브 재보정은 새 bootstrap +
   새 단일-사용 승인 필요. (본 개정은 오프라인 구현·테스트만; 라이브 실행·push·PR 없음.)
+
+### 0.2.2 개정 — **phase별 operator ENTRYPOINT 계약(공통 boilerplate 제거)** ⭐ 현행 preflight 출력 계약
+
+- **폐기된 승인(sanitized):** 2차 Phase A calibration prep(run `wt-895df…`/approval `apr-1ca6…`, git `654e663`,
+  2026-08-02, disposable `naver_walkthrough`)은 preflight PASS로 PREPARED 되었으나 라이브 액션 직전
+  **`REVOKED_BEFORE_ACTION`** 으로 폐기. 사유 **`PHASE_OPERATOR_ENTRYPOINT_MISMATCH`**: preflight PASS가 phase와
+  무관하게 주문 연결용 `/connect/naver?walkthroughRun=<id>` URL을 유일 `operator URL`로 출력했는데, Phase A의 실제
+  operator entrypoint는 **calibrator CLI가 여는 전용 Chrome**이다. 라이브 액션 0(live Chrome 0, API센터 접속 0,
+  NAVER 호출/write/credential 0, selector artifact 0, 승인 미소비). backend/frontend는 폐기 시 종료.
+- **근본 원인:** preflight PASS 블록이 **모든 phase에 대해** frontend URL 한 줄을 무조건 출력 — CLI-launched
+  calibration phase에는 존재하지 않는 행동을 지시.
+- **수정 = phase별 entrypoint 계약(순수 `approval-manifest.ts`).** phase마다 하나의 entrypoint를 선언한다:
+  - `API_CENTER_STRUCTURE_OBSERVATION` → `CLI_LAUNCHED_DEDICATED_WINDOW`, cli `src/cli/calibrate-api-center.ts`,
+    frontend URL 출력 금지. 표시: "승인 후 SellerOps가 전용 Chrome 창을 엽니다 — 열린 창에서 직접 로그인·이동 후 hotkey 캡처".
+  - `API_ISSUANCE_HIGHLIGHT_PROOF` → `CLI_LAUNCHED_DEDICATED_WINDOW`, cli `src/cli/run-api-issuance-live-naver.ts`,
+    frontend URL 출력 금지.
+  - `NAVER_GUIDED_CONNECTION` → `FRONTEND_URL`. **이 phase에서만** bound `/connect/naver?walkthroughRun=<id>` 출력.
+  - Approval Manifest에 `entrypointType`·`entrypointCommandId`·`operatorActionSummary` 추가. `validateEntrypointContract`가
+    manifest 생성 **전에** FAIL: type/CLI 불일치(`ENTRYPOINT_TYPE_MISMATCH`/`ENTRYPOINT_CLI_MISMATCH`), CLI entrypoint에
+    frontend URL(`FRONTEND_URL_IN_CLI_ENTRYPOINT`), frontend entrypoint에 CLI-only 설명(`CLI_DESC_IN_FRONTEND_ENTRYPOINT`).
+  - preflight PASS는 phase의 `entrypointType`으로 **단일 operator 행동만** 출력(URL은 FRONTEND_URL phase에서만). 원
+    command·API센터 raw URL은 로그/manifest 미노출(host 카테고리·sanitized commandId만). 승인 안전 enforcement·live
+    driver는 불변.
+- **테스트**: `approval-manifest.test.ts`(Phase A/B manifest에 frontend URL 0, guided만 URL 방출, 4개 mismatch→FAIL,
+  PREPARED 후 추가 입력 0) + `preflight-selfcheck.sh`(GUIDED만 bound URL, PHASE_A는 전용 Chrome 행동 + frontend URL 0).
+  (본 개정은 오프라인 구현·테스트 + phase-aware preflight 출력 검증만; 라이브 실행·push·PR 없음.)
 
 ---
 

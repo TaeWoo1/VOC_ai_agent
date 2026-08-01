@@ -167,8 +167,15 @@ if [ -n "${SELLEROPS_APPROVAL_PHASE:-}" ]; then
   APPROVAL_ACCOUNT="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['accountBinding'])")"
   APPROVAL_MAX="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['maxActions'])")"
   APPROVAL_PHASE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['phase'])")"
+  # The phase's ONE operator entrypoint — drives what the PASS block tells the operator to do (a calibration
+  # phase is a CLI-launched dedicated window, NEVER a frontend URL). Sourced from the tested manifest, not re-typed.
+  APPROVAL_ENTRYPOINT_TYPE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['entrypointType'])")"
+  APPROVAL_OPERATOR_ACTION="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['operatorActionSummary'])")"
 else
-  APPROVAL_PHASE=""
+  APPROVAL_PHASE="NAVER_GUIDED_CONNECTION"
+  # The guided order connection is the ONE phase whose operator action IS a bound frontend URL.
+  APPROVAL_ENTRYPOINT_TYPE="FRONTEND_URL"
+  APPROVAL_OPERATOR_ACTION="브라우저 새 창에서 아래 연결 마법사 주소를 여세요."
   APPROVAL_CHANNEL="${SELLEROPS_APPROVAL_CHANNEL:-NAVER}"
   APPROVAL_SURFACE="${SELLEROPS_APPROVAL_SURFACE:-connect/naver}"
   APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided order connection}"
@@ -186,6 +193,10 @@ else
   "approvalId": "$APPROVAL_ID",
   "walkthroughRunId": "$RUN_ID",
   "gitCommit": "$CUR_GIT",
+  "phase": "$APPROVAL_PHASE",
+  "entrypointType": "$APPROVAL_ENTRYPOINT_TYPE",
+  "entrypointCommandId": "frontend-connect-naver",
+  "operatorActionSummary": "$APPROVAL_OPERATOR_ACTION",
   "frontendOrigin": "$FRONTEND_ORIGIN",
   "backendOrigin": "$BACKEND_ORIGIN",
   "dbAlias": "$DB_ALIAS@$PGHOST:$PGPORT",
@@ -212,24 +223,43 @@ echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; cat "$MANIFEST
 echo
 if [ "$FAILED" = "0" ]; then
   echo "PREFLIGHT PASS"
-  echo "  operator URL   : $FRONTEND_ORIGIN/connect/naver?walkthroughRun=$RUN_ID"
+  # The operator performs exactly ONE action, and it differs by phase (docs/sellerops_live_approval_contract.md
+  # §3/§6). A calibration phase is a CLI-launched dedicated Chrome window with NO frontend URL; only the guided
+  # connection phase hands the operator a bound frontend URL. Print the one true action for THIS phase — never both.
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  operator URL   : $FRONTEND_ORIGIN/connect/naver?walkthroughRun=$RUN_ID"
+  else
+    echo "  operator action: $APPROVAL_OPERATOR_ACTION"
+  fi
   echo "  expected run   : ${RUN_ID:0:8}…"
   echo "  expected git   : $CUR_GIT"
   echo "  expected db    : $DB_ALIAS"
   echo
   # ---- Approval Manifest (short, screen/CLI) — the operator approves THIS, in one line -----------
-  # See docs/sellerops_live_approval_contract.md §3/§6. The Standing Safety Contract (§1) is NOT re-listed
-  # here — it always holds; the long allow/deny scope lives in that doc's "detailed safety scope".
+  # The Standing Safety Contract (§1) is NOT re-listed here — it always holds; the long allow/deny scope lives
+  # in that doc's "detailed safety scope".
   echo "  ── APPROVAL MANIFEST (sanitized) ──"
   echo "  $APPROVAL_CHANNEL · $APPROVAL_OPERATION · $APPROVAL_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $APPROVAL_MAX"
-  [ -n "${APPROVAL_PHASE:-}" ] && echo "  phase: $APPROVAL_PHASE (tested prerequisite gate — cli/driver/url/selectors confirmed)"
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  phase: $APPROVAL_PHASE · entrypoint: bound frontend URL (operator opens the wizard address above)"
+  else
+    echo "  phase: $APPROVAL_PHASE (tested prerequisite gate — cli/driver/url/selectors confirmed)"
+    echo "  entrypoint: SellerOps opens a dedicated Chrome window on approval — no frontend URL"
+  fi
   echo "  account: $APPROVAL_ACCOUNT · operator presence: required · expires: process-lifetime · git $CUR_GIT"
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo
-  echo "  Open EXACTLY that URL in a fresh window. If this manifest is correct and displayed, the operator's"
-  echo "  entire single-use approval is one line:  Seated and ready."
-  echo "  (A WRITE step — credential entry / test / sync / reply submission — is authorized by mode=WRITE above;"
-  echo "   a READ_ONLY manifest never authorizes it. Re-bootstrap ⇒ new approval id ⇒ old approval is dead.)"
+  if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then
+    echo "  Open EXACTLY that URL in a fresh window. If this manifest is correct and displayed, the operator's"
+    echo "  entire single-use approval is one line:  Seated and ready."
+    echo "  (A WRITE step — credential entry / test / sync / reply submission — is authorized by mode=WRITE above;"
+    echo "   a READ_ONLY manifest never authorizes it. Re-bootstrap ⇒ new approval id ⇒ old approval is dead.)"
+  else
+    echo "  승인 후 SellerOps가 전용 Chrome 창을 엽니다 (열어야 할 별도 브라우저 URL 없음). 이 manifest가 맞다면"
+    echo "  operator의 단일-사용 승인은 한 줄:  Seated and ready."
+    echo "  (READ_ONLY manifest는 credential/test/sync/reply 같은 WRITE 단계를 절대 승인하지 않음. 코드/브랜치/런"
+    echo "   변경 ⇒ 새 approval id 필요 ⇒ 기존 승인 폐기.)"
+  fi
   exit 0
 elif [ "$BROWSER_LOGIN_FAILED" = "1" ]; then
   echo "PREFLIGHT FAIL: browser_login — the env-binding browser run did not pass. Do NOT open the browser."

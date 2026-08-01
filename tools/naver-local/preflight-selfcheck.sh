@@ -45,6 +45,18 @@ run_smoke() {
   out="$("$@" node "$HERE/env-binding-smoke.mjs" 2>&1)"; rc=$?
   if [ "$rc" = "0" ]; then echo "  PASS  $name"; else echo "  FAIL  $name"; echo "$out" | tail -6 | sed 's/^/        | /'; FAILED=1; fi
 }
+# Like run_case but asserts the marker is ABSENT while the preflight still PASSes (exit 0).
+run_case_absent() {
+  local name="$1" absent_marker="$2"; shift 2
+  local out rc
+  out="$(env $(base_env | tr '\n' ' ') "$@" bash "$PREFLIGHT" 2>&1)"; rc=$?
+  local ok="yes"
+  [ "$rc" != "0" ] && ok="no"                        # must still PASS
+  grep -qF "$absent_marker" <<<"$out" && ok="no"     # …but the marker must NOT appear
+  if [ "$ok" = "yes" ]; then echo "  PASS  $name (exit=$rc, '$absent_marker' absent)"; else
+    echo "  FAIL  $name (exit=$rc, '$absent_marker' should be absent)"; echo "$out" | tail -8 | sed 's/^/        | /'; FAILED=1
+  fi
+}
 
 echo "preflight + env-binding self-check (requires bootstrap + backend :18090 + frontend http://localhost:5173)"
 echo
@@ -66,6 +78,15 @@ run_smoke "ENV_BINDING_WRONG → wrong run id blocked (mismatch)" \
   env SELLEROPS_FRONTEND_ORIGIN=http://localhost:5173 SMOKE_RUN_ID=wt-WRONG-run SMOKE_EXPECT=mismatch
 run_smoke "ENV_BINDING_MISSING → missing run id blocked (mismatch)" \
   env SELLEROPS_FRONTEND_ORIGIN=http://localhost:5173 SMOKE_RUN_ID= SMOKE_EXPECT=mismatch
+
+# ── phase-specific operator ENTRYPOINT — the bound /connect/naver URL appears ONLY for the guided phase ──
+# GUIDED (no SELLEROPS_APPROVAL_PHASE): the operator action IS the bound frontend URL.
+run_case "GUIDED → PASS shows the bound frontend operator URL" 0 "operator URL   : http://localhost:5173/connect/naver?walkthroughRun="
+# Phase A calibration: the operator action is a CLI-launched dedicated Chrome window — and NO frontend URL anywhere.
+run_case "PHASE_A → PASS shows the CLI dedicated-window action" 0 "전용 Chrome" \
+  SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION
+run_case_absent "PHASE_A → NO frontend operator URL is printed" "/connect/naver?walkthroughRun=" \
+  SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION
 
 echo
 if [ "$FAILED" = "0" ]; then echo "PREFLIGHT SELF-CHECK PASS — fails closed on every wrong environment / wrong-run tab, passes only when correct."; exit 0

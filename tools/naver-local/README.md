@@ -62,6 +62,18 @@ shows the run id → wizard reachable, with 0 NAVER calls) · **page load wrote 
 sanitized runtime manifest (`$SELLEROPS_MANIFEST_OUT`, default a temp file): run id, git, origins, DB alias,
 scheduler, NAVER flag, baseline counts, smoke result — no secret/token/credential/NAVER value.
 
+## Phase-specific operator entrypoint
+
+The operator's action after approval depends on the **phase**, and the preflight prints only the one true action:
+
+- **Guided order connection** (default, no `SELLEROPS_APPROVAL_PHASE`) → the operator opens the bound
+  `http://localhost:5173/connect/naver?walkthroughRun=<id>` URL. This is the ONLY phase that prints a frontend URL.
+- **Calibration phases** (`SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION` or
+  `API_ISSUANCE_HIGHLIGHT_PROOF`) → the operator action is a **CLI-launched dedicated Chrome window** that
+  SellerOps opens on approval; there is **no frontend URL**. The preflight prints the dedicated-window action
+  instead, and the manifest carries `entrypointType`/`entrypointCommandId`/`operatorActionSummary`. A manifest
+  whose phase and entrypoint disagree fails BEFORE it is emitted.
+
 ## Regression self-check
 
 `preflight-selfcheck.sh` proves the gate + binding fail closed (requires bootstrap + backend + frontend up):
