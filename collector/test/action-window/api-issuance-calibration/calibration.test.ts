@@ -5,11 +5,16 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  CALIBRATION_STAGES,
+  CALIBRATION_TARGET_KINDS,
   looksSensitive,
   pageSignature,
   sanitizeCapture,
+  stageIsOptional,
+  stageTargetKind,
   structuralSignature,
   summarize,
+  type CalibrationStage,
   type RawTargetCapture,
   type SanitizedTargetCandidate,
 } from "../../../src/action-window/api-issuance-calibration/calibration";
@@ -46,6 +51,53 @@ const SIGNALS: ApiCenterSignals = {
   readonlyFieldCountBucket: "none",
   listLikeContainerCountBucket: "few",
 };
+
+describe("4-stage contract (return_path removed)", () => {
+  it("walks exactly the four surfaces, in order, with return_path gone", () => {
+    expect([...CALIBRATION_STAGES]).toEqual(["app_list", "app_detail_anchor", "api_group", "credentials"]);
+    expect(CALIBRATION_STAGES).not.toContain("return_path" as unknown as CalibrationStage);
+  });
+
+  it("only app_detail_anchor is optional; every other stage requires a capture", () => {
+    expect(stageIsOptional("app_detail_anchor")).toBe(true);
+    for (const s of ["app_list", "api_group", "credentials"] as const) {
+      expect(stageIsOptional(s)).toBe(false);
+    }
+  });
+
+  it("stageTargetKind: app_list branches open vs create by app existence; the rest are fixed", () => {
+    expect(stageTargetKind("app_list", true)).toBe("open_app");
+    expect(stageTargetKind("app_list", false)).toBe("create_app");
+    expect(stageTargetKind("app_detail_anchor", true)).toBe("app_detail_anchor");
+    expect(stageTargetKind("app_detail_anchor", false)).toBe("app_detail_anchor");
+    expect(stageTargetKind("api_group", true)).toBe("api_group");
+    expect(stageTargetKind("credentials", true)).toBe("credentials");
+  });
+
+  it("CALIBRATION_TARGET_KINDS carries no `return` kind", () => {
+    expect(CALIBRATION_TARGET_KINDS).toContain("app_detail_anchor");
+    expect(CALIBRATION_TARGET_KINDS).not.toContain("return" as never);
+    expect([...CALIBRATION_TARGET_KINDS].sort()).toEqual(
+      ["api_group", "app_detail_anchor", "create_app", "credentials", "open_app"],
+    );
+  });
+
+  it("sanitizes an app_detail_anchor capture like any resolved control (anchor is a real target kind)", () => {
+    const r = sanitizeCapture(
+      cap({
+        targetKind: "app_detail_anchor",
+        tagName: "h1",
+        role: "heading",
+        stableAttributes: [{ name: "id", value: "appDetailTitle" }],
+        candidateSelector: 'h1[id="appDetailTitle"]',
+        matchCount: 1,
+      }),
+    );
+    expect(r.sanitized.targetKind).toBe("app_detail_anchor");
+    expect(r.sanitized.resolution).toBe("resolved");
+    expect(r.raw?.selector).toBe('h1[id="appDetailTitle"]');
+  });
+});
 
 describe("sanitizeCapture — match count decides resolution", () => {
   it("matchCount 1 → resolved (with a raw artifact entry)", () => {

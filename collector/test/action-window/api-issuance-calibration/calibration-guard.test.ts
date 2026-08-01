@@ -63,6 +63,36 @@ describe("calibration-inpage.ts — structure-only, value-free", () => {
   });
 });
 
+describe("calibration-inpage.ts — capture-ack toast + set-target-kind are value-free", () => {
+  it("injects the target KIND value-free (a window var, never a selector/value)", () => {
+    expect(inpage).toContain("__cal_target_kind__");
+    expect(inpage).toContain("IS_CAPTURE_ARMED");
+    expect(inpage).toContain("buildSetTargetKind");
+  });
+
+  it("the ack toast shows ONLY the fixed label + target kind + match count + resolved/unresolved", () => {
+    // Fixed label + the match-count word + the resolved/unresolved verdict.
+    expect(inpage).toContain("대상 캡처 완료");
+    expect(inpage).toContain("matches: ");
+    expect(inpage).toContain("unresolved");
+    // The count is the querySelectorAll length — the same structural read the capture uses (no value/text).
+    expect(inpage).toContain("querySelectorAll");
+    expect(inpage).toContain(".length");
+    // Text is assembled from a text node, never innerHTML / textContent / a raw value.
+    expect(inpage).toContain("createTextNode");
+    for (const forbidden of [".value", ".textContent", ".innerText", ".innerHTML", ".outerHTML"]) {
+      expect(inpage.includes(forbidden), `ack must not read/write ${forbidden}`).toBe(false);
+    }
+  });
+
+  it("both toasts are pointer-events:none overlays and never dispatch / block a click", () => {
+    expect(inpage).toContain("pointer-events:none");
+    for (const forbidden of ["dispatchEvent", "preventDefault", "stopPropagation", ".click("]) {
+      expect(inpage.includes(forbidden), `toast must not ${forbidden}`).toBe(false);
+    }
+  });
+});
+
 describe("calibrate-api-center.ts — read-only observer, no automatic action", () => {
   for (const token of FORBIDDEN) {
     it(`source contains no \`${token}\``, () => {

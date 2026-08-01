@@ -48,15 +48,26 @@ export function hotkeyLabel(hk: CalibrationHotkey): string {
 export const CAL_HOVER_VAR = "__cal_hover__";
 export const CAL_CAPTURE_VAR = "__cal_capture__";
 export const CAL_CLICK_VAR = "__cal_click__";
+/** The current stage's target KIND (a closed-vocabulary enum, e.g. `open_app`), injected value-free by the CLI. */
+export const CAL_TARGET_KIND_VAR = "__cal_target_kind__";
+/** Marks the calibration overlay toasts so a reset / re-arm can identify them without reading any content. */
+export const CAL_TOAST_ATTR = "data-sellerops-cal-toast";
 
 /**
  * Build the ARM script for a specific hotkey. Arms THREE read-only listeners on `document`:
  *  (a) `mouseover` (capture) → remember the hovered element in `window.__cal_hover__`;
  *  (b) `keydown` (capture) → when the calibration hotkey fires, freeze the CURRENTLY-hovered element into
- *      `window.__cal_capture__` (a reference snapshot; the structural extraction happens in READ_CAPTURED_TARGET);
+ *      `window.__cal_capture__` (a reference snapshot; the structural extraction happens in READ_CAPTURED_TARGET),
+ *      then render a **value-free acknowledgement toast** (fixed label + the injected target kind + the
+ *      `querySelectorAll` MATCH COUNT + resolved/unresolved) so the operator gets immediate feedback that the
+ *      hotkey landed. The toast NEVER shows a selector, attribute value, or any element text/value — only the
+ *      injected enum and a computed integer;
  *  (c) `click` (CAPTURE phase, passive) → set `window.__cal_click__ = true` so operator navigation can be
  *      OBSERVED. It NEVER calls preventDefault / stopPropagation and NEVER generates a click.
- * Idempotent: prior calibration listeners are removed before re-arming so they never accumulate.
+ * Idempotent: prior calibration listeners are removed before re-arming so they never accumulate; the CLI
+ * additionally only RE-ARMS a page that reports NOT armed (see {@link IS_CAPTURE_ARMED}), so a live document is
+ * never double-armed. The re-armed listeners live behind `window.__cal_listeners__`, whose presence IS the
+ * armed flag a fresh (navigated / reloaded / new-tab) document does not carry.
  */
 export function buildArmCalibrationCapture(hotkey: CalibrationHotkey): string {
   return `(function () {
@@ -69,11 +80,56 @@ export function buildArmCalibrationCapture(hotkey: CalibrationHotkey): string {
     document.removeEventListener('keydown', prior.key, true);
     document.removeEventListener('click', prior.click, true);
   }
+  /* Build a selector from STRUCTURAL attributes only (never a value/text) — mirrors READ_CAPTURED_TARGET's
+     priority order — purely so the ack toast can report the MATCH COUNT. A password field seeds no selector. */
+  function esc(s) { return String(s).replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"'); }
+  function selectorFor(el) {
+    var tag = String(el.tagName).toLowerCase();
+    var isPw = tag === 'input' && el.type && String(el.type).toLowerCase() === 'password';
+    /* Mirror the gate's credential exclusion so the ack toast's count is consistent: a password OR a
+       readonly/disabled value-display field seeds NO selector (count 0 → "unresolved"), matching
+       sanitizeCapture's excluded_credential_value. The value itself is never read either way. */
+    var isRo = (el.hasAttribute && el.hasAttribute('readonly')) || el.readOnly === true || el.disabled === true;
+    if (isPw || isRo) { return ''; }
+    var PRIORITY = ['id', 'data-testid', 'data-test', 'data-cy', 'data-qa', 'aria-label', 'name', 'role', 'class'];
+    for (var p = 0; p < PRIORITY.length; p++) {
+      var pv = el.getAttribute ? el.getAttribute(PRIORITY[p]) : null;
+      if (pv !== null && pv !== undefined && String(pv).length > 0) { return tag + '[' + PRIORITY[p] + '="' + esc(pv) + '"]'; }
+    }
+    return '';
+  }
+  function countMatches(sel) {
+    if (!sel) { return 0; }
+    try { return document.querySelectorAll(sel).length; } catch (e) { return 0; }
+  }
+  /* Value-free ack toast: fixed label + injected target KIND (a closed-vocab enum) + integer match count +
+     resolved/unresolved. Text is assembled from ONLY those pieces via a text node — never innerHTML, never any
+     element value/text. pointer-events:none so it can never intercept the operator's own clicks. */
+  function showAck(matchCount) {
+    if (!document.body) { return; }
+    /* Dedupe: remove any prior calibration toast so acks never stack. Uses the CAL_TOAST_ATTR marker. */
+    var prevT = document.querySelectorAll('[${CAL_TOAST_ATTR}]');
+    for (var pi = 0; pi < prevT.length; pi++) { if (prevT[pi].parentNode) { prevT[pi].parentNode.removeChild(prevT[pi]); } }
+    var kind = String(w.__cal_target_kind__ || 'target');
+    var resolved = matchCount === 1 ? 'resolved' : 'unresolved';
+    var text = '대상 캡처 완료 · ' + kind + ' · matches: ' + matchCount + ' · ' + resolved;
+    var t = document.createElement('div');
+    t.setAttribute('${CAL_TOAST_ATTR}', '1');
+    t.style.cssText = 'position:fixed;z-index:2147483647;left:50%;top:16px;transform:translateX(-50%);' +
+      'background:rgba(17,24,39,0.94);color:#fff;padding:8px 14px;border-radius:8px;' +
+      'font:13px/1.4 -apple-system,system-ui,sans-serif;pointer-events:none;max-width:80vw;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    t.appendChild(document.createTextNode(text));
+    document.body.appendChild(t);
+    setTimeout(function () { if (t.parentNode) { t.parentNode.removeChild(t); } }, 3000);
+  }
   function onOver(e) { w.__cal_hover__ = e.target; }
   function onKey(e) {
     if (!!e.ctrlKey === HK.ctrl && !!e.shiftKey === HK.shift && !!e.altKey === HK.alt
         && String(e.key).toUpperCase() === HK.key) {
-      w.__cal_capture__ = w.__cal_hover__ || null;
+      var el = w.__cal_hover__ || null;
+      w.__cal_capture__ = el;
+      if (el && el.tagName) { showAck(countMatches(selectorFor(el))); }
     }
   }
   function onClick() { w.__cal_click__ = true; }
@@ -88,6 +144,52 @@ export function buildArmCalibrationCapture(hotkey: CalibrationHotkey): string {
 
 /** The ARM script for the default hotkey (Ctrl+Shift+K). */
 export const ARM_CALIBRATION_CAPTURE = buildArmCalibrationCapture(DEFAULT_CALIBRATION_HOTKEY);
+
+/**
+ * Whether calibration capture listeners are CURRENTLY installed on this document — i.e. whether
+ * `window.__cal_listeners__` exists. A navigated / reloaded / newly-opened document is a fresh JS realm that
+ * does NOT carry this, so it reports `false`; the CLI re-arms only such fresh documents, which is what makes
+ * the re-arm idempotent (a live document is never double-armed). Returns a boolean only.
+ */
+export const IS_CAPTURE_ARMED = `(function () {
+  /* cal-is-armed */
+  return !!window.__cal_listeners__;
+})()`;
+
+/**
+ * Inject the CURRENT stage's target KIND (a closed-vocabulary enum such as `open_app` / `api_group`) so the
+ * in-page ack toast can name what was calibrated. Value-free: the kind is a fixed enum, never a selector,
+ * attribute value, or any page content. The CLI re-injects it after each re-arm (a fresh document lost it).
+ */
+export function buildSetTargetKind(kind: string): string {
+  return `(function () {
+  /* cal-set-kind */
+  window.__cal_target_kind__ = ${JSON.stringify(String(kind))};
+  return true;
+})()`;
+}
+
+/**
+ * A value-free "capture required / try again" toast, rendered when the operator signalled ready on a REQUIRED
+ * stage without having captured a target. Carries ONLY a fixed instruction string — no kind, selector, value,
+ * or count. pointer-events:none so it never intercepts a click.
+ */
+export const CAPTURE_REQUIRED_TOAST = `(function () {
+  /* cal-capture-required-toast */
+  if (!document.body) { return false; }
+  var prevT = document.querySelectorAll('[${CAL_TOAST_ATTR}]');
+  for (var pi = 0; pi < prevT.length; pi++) { if (prevT[pi].parentNode) { prevT[pi].parentNode.removeChild(prevT[pi]); } }
+  var t = document.createElement('div');
+  t.setAttribute('${CAL_TOAST_ATTR}', '1');
+  t.style.cssText = 'position:fixed;z-index:2147483647;left:50%;top:16px;transform:translateX(-50%);' +
+    'background:rgba(153,27,27,0.95);color:#fff;padding:8px 14px;border-radius:8px;' +
+    'font:13px/1.4 -apple-system,system-ui,sans-serif;pointer-events:none;max-width:80vw;' +
+    'box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+  t.appendChild(document.createTextNode('대상 캡처 필요 · 대상 위에 마우스를 올리고 단축키를 누르세요'));
+  document.body.appendChild(t);
+  setTimeout(function () { if (t.parentNode) { t.parentNode.removeChild(t); } }, 3000);
+  return true;
+})()`;
 
 /**
  * Read `window.__cal_capture__` (the element the operator confirmed with the hotkey) and return the STRUCTURAL

@@ -27,14 +27,70 @@
  * Pure: no I/O, no browser, no wall-clock (uses `node:crypto` only for a deterministic structural hash).
  */
 import { createHash } from "node:crypto";
-import type { IssuanceTarget } from "../api-issuance/issuance-driver";
 
-/** The five observation surfaces walked in one calibration session (maps onto where each target lives). */
-export const CALIBRATION_STAGES = ["app_list", "app_detail", "api_group", "credentials", "return_path"] as const;
+/**
+ * The FOUR observation surfaces walked in one calibration session. `return_path` was removed (v1 reliability
+ * fix): the NAVER API center has no "return to SellerOps" control to calibrate — returning is the seller
+ * switching back to the SellerOps tab, so it is a UI instruction ("SellerOps 탭으로 직접 돌아가세요"), never a
+ * calibrated selector, and it is excluded from `SELECTORS_CALIBRATED`.
+ */
+export const CALIBRATION_STAGES = ["app_list", "app_detail_anchor", "api_group", "credentials"] as const;
 export type CalibrationStage = (typeof CALIBRATION_STAGES)[number];
 
-/** The five highlightable controls a Phase-B highlight driver needs (same set as `IssuanceTarget`). */
-export const CALIBRATION_TARGET_KINDS: readonly IssuanceTarget[] = ["create_app", "open_app", "api_group", "credentials", "return"];
+/**
+ * What each surface calibrates. `app_list` calibrates a real control (open the existing app, or create one).
+ * `app_detail_anchor` does NOT re-capture the control that opened the detail — it captures a stable,
+ * non-sensitive ANCHOR that identifies the detail screen (or contributes only its page signature). `api_group`
+ * and `credentials` calibrate real controls (`credentials` = the section label/container, never the value
+ * field). `return` is deliberately absent — it is a UI instruction, not a selector.
+ */
+export type CalibrationTargetKind = "create_app" | "open_app" | "app_detail_anchor" | "api_group" | "credentials";
+export const CALIBRATION_TARGET_KINDS: readonly CalibrationTargetKind[] = ["create_app", "open_app", "app_detail_anchor", "api_group", "credentials"];
+
+/** Whether a stage calibrates a clickable CONTROL or just a stable structural ANCHOR of the surface. */
+export type CalibrationCaptureKind = "control" | "anchor";
+
+/** Per-stage contract: capture kind + whether the stage may be advanced WITHOUT a capture (optional). */
+export interface CalibrationStageContract {
+  stage: CalibrationStage;
+  captureKind: CalibrationCaptureKind;
+  /** Optional ⇒ may be skipped with an explicit `건너뛰기`/skip; required ⇒ a capture-less `ready` is refused. */
+  optional: boolean;
+}
+
+export const CALIBRATION_STAGE_CONTRACTS: Readonly<Record<CalibrationStage, CalibrationStageContract>> = {
+  // Real control (open/create the application).
+  app_list: { stage: "app_list", captureKind: "control", optional: false },
+  // A stable non-sensitive anchor of the detail screen; the page signature is the real deliverable, so the
+  // anchor itself is OPTIONAL (skippable) — never re-capture the control that opened the detail.
+  app_detail_anchor: { stage: "app_detail_anchor", captureKind: "anchor", optional: true },
+  // Real control that navigates to / expands the order-commerce API-group settings/list.
+  api_group: { stage: "api_group", captureKind: "control", optional: false },
+  // The credential section's label/container/control — never the Application ID/Secret value field.
+  credentials: { stage: "credentials", captureKind: "control", optional: false },
+};
+
+/** True when a capture-less `ready` may advance this stage (only when the stage is explicitly optional). */
+export function stageIsOptional(stage: CalibrationStage): boolean {
+  return CALIBRATION_STAGE_CONTRACTS[stage].optional;
+}
+
+/**
+ * The target kind a stage calibrates. `app_list` depends on whether an application already exists (open vs
+ * create); `app_detail_anchor` is the anchor kind; the rest are fixed. Never returns `return`.
+ */
+export function stageTargetKind(stage: CalibrationStage, hasExistingApp: boolean): CalibrationTargetKind {
+  switch (stage) {
+    case "app_list":
+      return hasExistingApp ? "open_app" : "create_app";
+    case "app_detail_anchor":
+      return "app_detail_anchor";
+    case "api_group":
+      return "api_group";
+    case "credentials":
+      return "credentials";
+  }
+}
 
 /** Closed vocabulary — anything outside each set is recorded as the safe fallback, never the raw string. */
 export const ALLOWED_TAGS = ["a", "button", "input", "select", "textarea", "label", "span", "div", "li", "td", "th", "section", "nav", "form", "summary", "details", "p", "h1", "h2", "h3"] as const;
@@ -86,7 +142,7 @@ export interface RawAttribute {
  * used to build a selector, and are screened by {@link sanitizeCapture} before anything is retained.
  */
 export interface RawTargetCapture {
-  targetKind: IssuanceTarget;
+  targetKind: CalibrationTargetKind;
   tagName: string;
   role?: string;
   inputType?: string;
@@ -115,7 +171,7 @@ export type CalibrationResolution = "resolved" | "unresolved_none" | "unresolved
 export type CalibrationConfidence = "high" | "medium" | "low";
 
 export interface SanitizedTargetCandidate {
-  targetKind: IssuanceTarget;
+  targetKind: CalibrationTargetKind;
   tagName: string; // closed vocab or "other"
   role: string; // closed vocab or "other"
   inputType: string; // closed vocab or "none"
@@ -134,7 +190,7 @@ export interface SanitizedTargetCandidate {
 
 /** The RAW artifact entry — gitignored, owner-only. Holds the actual selector for later code adoption. */
 export interface RawArtifactEntry {
-  targetKind: IssuanceTarget;
+  targetKind: CalibrationTargetKind;
   /** The safe selector (built only from screened, non-sensitive attributes). */
   selector: string;
   /** The retained stable attributes (sensitive ones already dropped). */

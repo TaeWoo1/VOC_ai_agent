@@ -161,6 +161,15 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   (사유 `INCOMPLETE_PREREQUISITES_AND_PHASE_MISMATCH`)** — 필수 URL·정확한 CLI/driver·phase가 확정되지 않은
   채 PREPARED됐던 것이 원인. 라이브 액션 0(창 0·NAVER 호출 0·credential 0). 이후 approval-prerequisite 게이트
   (`collector/src/cli/approval-manifest.ts`)가 PREPARED를 "즉시 실행 가능" 상태로만 허용하도록 강화됨.
+- **Multi-Surface 보정기(`calibrate-api-center.ts`)로 Phase A를 확장** — 한 승인으로 여러 surface를 순회하며
+  operator의 hover+hotkey(`Ctrl+Shift+K`)로 실제 target 후보를 수집(raw는 gitignored `.calibration/`, 로그는
+  sanitized 요약만). **1차 라이브 보정 시도(run wt-6b5e4…/approval apr-c337…, 2026-08-01)=`CALIBRATION_CAPTURE_FAILED`**:
+  page classifier 관측은 유효(5건)했으나 **target 후보 0건**. 원인 = 캡처 리스너를 stage 시작(이동 전)에 설치해
+  navigation/new-tab으로 소멸 → hotkey가 받을 리스너 없음. 라이브 안전 0(NAVER 호출·write·credential read·자동
+  클릭 모두 0), 승인 CONSUMED. **단순 재시도 금지 → 코드 수정(reliability v1)**: 최신 탭 event-driven **re-arm** +
+  값 노출 없는 **capture 확인 UX** + **4단계 계약**(`app_list → app_detail_anchor → api_group → credentials`;
+  `return_path`는 API센터에 복귀 컨트롤이 없으므로 calibration/`SELECTORS_CALIBRATED`에서 제외, 마지막은 "SellerOps
+  탭으로 직접 돌아가세요" UI 안내로 처리).
 
 ---
 
