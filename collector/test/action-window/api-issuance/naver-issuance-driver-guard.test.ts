@@ -1,0 +1,142 @@
+/**
+ * Source guard for the LIVE `NaverIssuanceDriver` (and its gated CLI).
+ *
+ * The driver lives OUTSIDE `api-issuance/` precisely because it legitimately runs `.evaluate` for the
+ * census / overlay / read-only tagging — so the pure `api-issuance/` strict guard (`issuance-guard.test.ts`)
+ * stays intact and is NOT touched. This guard mirrors the reply driver's boundary: it ALLOWS `.evaluate(` /
+ * `.$$(` / `setAttribute`, but still forbids EVERY click/type/submit and EVERY field-VALUE read (incl. the
+ * Application ID / Secret). Comment lines are stripped first, per collector conventions.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const DRIVER = resolve(HERE, "../../../src/action-window/naver-issuance-driver.ts");
+const CLI = resolve(HERE, "../../../src/cli/run-api-issuance-live-naver.ts");
+
+/** Strip block comments and comment/JSDoc lines so prose mentioning a forbidden token never trips. */
+function codeOnly(path: string): string {
+  const raw = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  return raw
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      return !t.startsWith("//") && !t.startsWith("*");
+    })
+    .join("\n");
+}
+
+/** No way to act on a marketplace control — the SELLER clicks; the driver observes + annotates only. */
+const NO_ACTION_TOKENS = [
+  ".click(",
+  ".dblclick(",
+  ".tap(",
+  ".hover(",
+  ".type(",
+  ".fill(",
+  ".press(",
+  ".check(",
+  ".uncheck(",
+  ".selectOption(",
+  ".setInputFiles(",
+  ".keyboard",
+  "dispatchEvent",
+  ".submit(",
+  'waitForEvent("download"',
+  "waitForEvent('download'",
+] as const;
+
+/**
+ * No way to read a field value, text, clipboard, or screenshot — the credential is never read.
+ *
+ * Includes the full-DOM slurps `page.content()` and `.outerHTML`: on the credential-issuance page those
+ * carry the displayed Application ID / Secret, so they are forbidden outright (parity with the audited reply
+ * guard, which also bans `page.content()`).
+ */
+const NO_VALUE_READ_TOKENS = [
+  ".inputValue(",
+  ".value", // a bare read (`node.value`) OR a write (`x.value =`) — both forbidden.
+  ".textContent",
+  ".innerText",
+  ".innerHTML",
+  ".outerHTML",
+  ".getAttribute(",
+  ".getProperty(",
+  ".getProperties(",
+  "page.content(",
+  "clipboard",
+  "readText(",
+  ".screenshot(",
+] as const;
+
+/**
+ * No way to navigate the seller's own dedicated window. The driver reads wherever the SELLER went; the CLI
+ * navigates exactly once, only to the pre-screened API-center URL. A back/forward/reload/programmatic
+ * navigation could send the window off the screened host (parity with the audited read-only reply CLI).
+ */
+const NO_NAV_TOKENS = [".goBack(", ".goForward(", ".reload(", "waitForNavigation", "window.open"] as const;
+
+describe("NaverIssuanceDriver — source guard (no click/type/submit, no value read)", () => {
+  const code = codeOnly(DRIVER);
+
+  it.each(NO_ACTION_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_VALUE_READ_TOKENS)("never reads a field value / clipboard / screenshot (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_NAV_TOKENS)("never navigates the seller's window (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it("never navigates at all — it reads wherever the seller went (no .goto)", () => {
+    expect(code).not.toContain(".goto(");
+  });
+
+  it("ALLOWS the observation/annotation primitives it legitimately needs (evaluate, setAttribute)", () => {
+    expect(code).toContain("evaluate");
+    expect(code).toContain("setAttribute");
+    // The read-only annotation is the tag, and the overlay/observer are reused, never reimplemented.
+    expect(code).toContain("mountOverlay");
+    expect(code).toContain("armObserver");
+  });
+
+  it("computes the target signature from STRUCTURAL facts only (tag + position + child count), never a value", () => {
+    // The in-page signature source uses tagName / childElementCount — never a value/attribute/text read.
+    expect(code).toContain("el.tagName");
+    expect(code).toContain("el.childElementCount");
+    expect(code).toContain("IN_PAGE_SIG_FACTORY");
+  });
+});
+
+describe("run-api-issuance-live-naver CLI — source guard (gated, no click/type/submit, no value read)", () => {
+  const code = codeOnly(CLI);
+
+  it.each(NO_ACTION_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_VALUE_READ_TOKENS)("never reads a field value / clipboard / screenshot (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_NAV_TOKENS)("never re-navigates the seller's window (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it("navigates exactly ONCE — to the pre-screened URL only", () => {
+    // The single `page.goto(url,...)` after screenApiCenterUrl passes; no second navigation of the window.
+    expect(code.split("page.goto(").length - 1).toBe(1);
+  });
+
+  it("is gated on the explicit live-run approval flag and fails closed on a bad URL before launch", () => {
+    expect(code).toContain("hasLiveRunApproval");
+    expect(code).toContain("screenApiCenterUrl");
+    // main() runs only when invoked directly — inert on import.
+    expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+  });
+});

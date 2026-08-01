@@ -136,8 +136,17 @@ manifest 생성 후 새 단일-사용 승인 필요.**
 - **라이브에서 확정할 selector 목록(현재 candidate).** page-category 규칙(login=password, credential_issuance=
   readonly, app_detail=editable, app_list=list container), existing-vs-empty(application-entry row count>0),
   control selector(`create_app`·`open_app`·`api_group`·`credentials`·`return`), probe branch(app_list→진행, 그 외→
-  page_mismatch). 모두 라이브 G3-C walk 확정 대상 — 지금은 합성 fixture로만 검증. **collector bridge 엔드포인트
-  등록은 seam으로 남김**(agent bootstrap 광범위 변경 회피).
+  page_mismatch). 모두 라이브 G3-C walk 확정 대상 — 지금은 합성 fixture로만 검증.
+- **v1.2 live wiring (2026-08-01, 합성 검증 완료 · 라이브 접속 0).** issuance 엔드포인트를 **Local Agent
+  bootstrap에 등록**(`agent-bridge.ts`의 `apiIssuance` 캐리어 — export/reply/import과 **정확히 하나만** 상호배타;
+  dev flag `--dev-action-window-issuance`는 production에서 OFF, fixture 드라이버) + **실제 Chrome 드라이버**
+  `NaverIssuanceDriver`(`src/action-window/naver-issuance-driver.ts`; 전용 프로필·overlay·observer·census 재사용;
+  창 열기·surface 분류·target highlight·사용자 이동/새 탭 감지만; 자동 click/input/submit 0; ID/Secret은 **영역
+  존재만 구조 signature로 감지, 값 읽기 0**; URL은 host 카테고리로 축약해 로그/전송 안 함) + **게이트드 라이브
+  진입점** `cli/run-api-issuance-live-naver.ts`(`--i-understand-this-opens-live-naver` 필수 + `screenApiCenterUrl`
+  사전 fail-closed + import 시 inert; **이번 유닛에서 실행하지 않음**). 오프라인 fake-Page 테스트가 실제
+  엔진·세션을 구동해 Secret-read=0·click=0를 증명. **다음 = fresh single-use 승인 후 read-only 라이브 관찰로
+  위 candidate selector 보정.**
 
 ---
 
