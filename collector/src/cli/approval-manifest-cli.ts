@@ -55,6 +55,10 @@ export function runApprovalManifestCli(): number {
     driver: spec.driver,
     // The manifest declares exactly the phase driver's real capability (Phase A therefore never highlights).
     declaredActions: spec.capableActions,
+    // Phase-A calibration prerequisites: a defined capture hotkey and a gitignored raw-artifact path (screened
+    // in validate). Defaults: Ctrl+Shift+K and `.calibration/api-center-<runId>.json`.
+    hotkey: env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K",
+    artifactPath: env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",

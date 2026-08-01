@@ -31,6 +31,8 @@ function baseObservation(): ApprovalPrereqInput {
     cli: OBS.cli,
     driver: OBS.driver,
     declaredActions: OBS.capableActions,
+    hotkey: "Ctrl+Shift+K",
+    artifactPath: ".calibration/api-center-wt-testrun0001.json",
     runId: "wt-testrun0001",
     approvalId: "apr-testappr01",
     gitSha: "abc1234",
@@ -117,6 +119,22 @@ describe("approval prerequisites — refuse before a manifest exists", () => {
       if (!r.ok) expect(r.cause).toBe("UNBOUND_IDENTITY");
     }
   });
+
+  it("missing calibration hotkey → FAIL (Phase A cannot arm capture)", () => {
+    for (const hotkey of [undefined, "", "   "]) {
+      const r = validateApprovalPrerequisites({ ...baseObservation(), hotkey });
+      expect(r.ok, String(hotkey)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("MISSING_HOTKEY");
+    }
+  });
+
+  it("raw-artifact path not under the gitignored .calibration/ dir → FAIL (ARTIFACT_PATH_UNSAFE)", () => {
+    for (const artifactPath of [undefined, "", "/tmp/api-center.json", "docs/api-center.json", ".calibration/../secrets.json", "C:\\calibration\\x.json"]) {
+      const r = validateApprovalPrerequisites({ ...baseObservation(), artifactPath });
+      expect(r.ok, String(artifactPath)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("ARTIFACT_PATH_UNSAFE");
+    }
+  });
 });
 
 describe("calibration phase separation", () => {
@@ -137,6 +155,17 @@ describe("calibration phase separation", () => {
       expect(r.manifest.cli).toBe(OBS.cli);
       expect(r.manifest.mode).toBe("READ_ONLY");
       expect(r.manifest.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+    }
+  });
+
+  it("Phase A is now the multi-checkpoint calibrator, and its manifest surfaces the hotkey + gitignored artifact path", () => {
+    expect(OBS.cli).toBe("src/cli/calibrate-api-center.ts");
+    expect(OBS.driver).toContain("calibrate-api-center");
+    const r = validateApprovalPrerequisites(baseObservation());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manifest.hotkey).toBe("Ctrl+Shift+K");
+      expect(r.manifest.artifactPath.startsWith(".calibration/")).toBe(true);
     }
   });
 

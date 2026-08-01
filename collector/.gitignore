@@ -32,6 +32,12 @@ findings/*.local.md
 # entry was missing until the first live run produced markers.
 .import-runs/
 
+# API-center selector calibration artifacts (NAVER API Center Multi-Surface Calibration). These hold RAW
+# selector candidates (id/class/data-attr values) captured live for later code adoption after an independent
+# security review — owner-only local state, NEVER committed. Only the sanitized summary (target kind + hash +
+# match count) is ever documented/logged.
+.calibration/
+
 # Guided reply target hint (privacy-safe match metadata, single-use, owner-only; never committed)
 .reply-target/
 

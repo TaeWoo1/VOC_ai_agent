@@ -10,9 +10,11 @@
  *
  * It also splits API-center calibration into two phases whose TOOLS differ, so a single manifest can never
  * promise an action its driver cannot perform:
- *  - `API_CENTER_STRUCTURE_OBSERVATION` (Phase A) — the audited read-only `observe-api-center` observer. It
- *    classifies the sanitized page category and reads a structural census; it does NOT highlight or click.
- *    A Phase-A manifest that declares `HIGHLIGHT_REAL_CONTROL` is a phase/capability mismatch and is refused.
+ *  - `API_CENTER_STRUCTURE_OBSERVATION` (Phase A) — the audited read-only `calibrate-api-center` multi-checkpoint
+ *    calibrator. It classifies the sanitized page category, reads a structural census, and calibrates each
+ *    surface's control from the operator's hover+hotkey — read-only; it does NOT highlight or click. A Phase-A
+ *    manifest that declares `HIGHLIGHT_REAL_CONTROL` is a phase/capability mismatch and is refused. It also
+ *    requires a defined capture hotkey and a gitignored raw-artifact path (`ARTIFACT_PATH_UNSAFE` otherwise).
  *  - `API_ISSUANCE_HIGHLIGHT_PROOF` (Phase B) — the `NaverIssuanceDriver` Action Window that highlights real
  *    controls and observes the operator's own click. It is refused until the control selectors have actually
  *    been calibrated against the live API center (`SELECTORS_CALIBRATED`), because the fixture markers park
@@ -58,8 +60,8 @@ export interface PhaseSpec {
 export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
     phase: "API_CENTER_STRUCTURE_OBSERVATION",
-    cli: "src/cli/observe-api-center.ts",
-    driver: "observe-api-center (read-only census/observer)",
+    cli: "src/cli/calibrate-api-center.ts",
+    driver: "calibrate-api-center (multi-checkpoint read-only calibrator)",
     capableActions: [
       "OPEN_DEDICATED_WINDOW",
       "WAIT_OPERATOR_LOGIN_NAV",
@@ -99,6 +101,8 @@ export const APPROVAL_PREREQ_CAUSES = [
   "MODE_MISMATCH",
   "RAW_ACCOUNT_ID",
   "UNBOUND_IDENTITY",
+  "MISSING_HOTKEY",
+  "ARTIFACT_PATH_UNSAFE",
 ] as const;
 export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 
@@ -122,6 +126,10 @@ export interface ApprovalPrereqInput {
   missingEnv?: readonly string[];
   /** Override for tests; defaults to the code-level `SELECTORS_CALIBRATED` flag. */
   selectorsCalibrated?: boolean;
+  /** The calibration capture hotkey label (Phase A only) — must be defined for the calibrator to arm capture. */
+  hotkey?: string;
+  /** The gitignored raw-artifact path (Phase A only) — must resolve under the `.calibration/` dir. */
+  artifactPath?: string;
   runId: string;
   approvalId: string;
   gitSha: string;
@@ -147,8 +155,27 @@ export interface ApprovalManifest {
   maxActions: string;
   operatorPresenceRequired: true;
   selectorsCalibrated: boolean;
+  /** The calibration capture hotkey (Phase A); empty for phases that do not calibrate. */
+  hotkey: string;
+  /** The gitignored raw-artifact path (Phase A); empty for phases that write no raw artifact. */
+  artifactPath: string;
   expiresAt: "process-lifetime";
   gitSha: string;
+}
+
+/**
+ * A calibration raw-artifact path is safe ONLY when it is a repo-relative path under the gitignored
+ * `.calibration/` dir with no traversal — so a manifest can never point the RAW selector sink at a committed
+ * or out-of-tree location. Fail-closed: anything else is unsafe.
+ */
+export function isSafeCalibrationArtifactPath(p: string): boolean {
+  if (!p) return false;
+  const norm = p.replace(/\\/g, "/").trim();
+  if (norm.length === 0) return false;
+  if (norm.startsWith("/")) return false; // must be repo-relative, never absolute
+  if (/^[A-Za-z]:/.test(norm)) return false; // never an absolute Windows path
+  if (norm.split("/").some((seg) => seg === "..")) return false; // no traversal
+  return norm.startsWith(".calibration/");
 }
 
 export type ApprovalPrereqResult =
@@ -217,6 +244,18 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     );
   }
 
+  // 7b) The calibration OBSERVATION phase must carry a defined capture hotkey and a gitignored raw-artifact
+  // path. The hotkey is what the operator presses to confirm a control; the raw selectors must land ONLY in
+  // the gitignored `.calibration/` sink, never a committed/out-of-tree file.
+  if (spec.phase === "API_CENTER_STRUCTURE_OBSERVATION") {
+    if (!input.hotkey || input.hotkey.trim().length === 0) {
+      return fail("MISSING_HOTKEY", "the calibration capture hotkey must be defined before the manifest is prepared");
+    }
+    if (!input.artifactPath || !isSafeCalibrationArtifactPath(input.artifactPath)) {
+      return fail("ARTIFACT_PATH_UNSAFE", "the raw artifact path must be a repo-relative path under the gitignored .calibration/ dir");
+    }
+  }
+
   // 8) The account binding must be a sanitized DESCRIPTION — never a raw internal id/token. Guarded HERE (the
   // single gate every caller — phased CLI and inline preflight alike — passes through) so no path can echo a
   // raw account/store/org id into the manifest.
@@ -252,6 +291,8 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     maxActions: input.maxActions,
     operatorPresenceRequired: true,
     selectorsCalibrated: calibrated,
+    hotkey: input.hotkey ?? "",
+    artifactPath: input.artifactPath ?? "",
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,
   };
