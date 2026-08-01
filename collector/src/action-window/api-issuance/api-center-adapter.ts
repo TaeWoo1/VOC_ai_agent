@@ -39,6 +39,18 @@ export const LIVE_DOM_CALIBRATION_PENDING = "LIVE_DOM_CALIBRATION_PENDING" as co
  * the real API-center controls. They are DATA: counted/used only by the synthetic fixture driver, and NEVER
  * emitted on the wire (the wire carries an opaque 16-hex signature, never a selector).
  */
+/**
+ * **Whether the control selectors below have been calibrated against the REAL API center.**
+ *
+ * `false` while {@link CANDIDATE_TARGET_SELECTORS} are the synthetic `[data-aw-target]` fixture markers —
+ * they do NOT match the live NAVER API center, so a live highlight run parks `target_not_found`. The
+ * approval-prerequisite gate reads this: the highlight-proof phase (`API_ISSUANCE_HIGHLIGHT_PROOF`) is
+ * refused until this is `true`, which happens only after a Phase-A structure-observation run informs real
+ * selectors and they replace the fixture markers here. Flip to `true` in the SAME commit that lands the
+ * calibrated selectors — never before.
+ */
+export const SELECTORS_CALIBRATED = false;
+
 export const CANDIDATE_TARGET_SELECTORS: Readonly<Record<IssuanceTarget, string>> = {
   // CANDIDATE / unverified, calibrate live — none of these is a confirmed API-center control.
   create_app: "[data-aw-target='create_app']",

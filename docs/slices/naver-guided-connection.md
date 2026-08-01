@@ -153,7 +153,14 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   사전 fail-closed + import 시 inert; **이번 유닛에서 실행하지 않음**). 오프라인 fake-Page 테스트가 실제
   엔진·세션을 구동해 Secret-read=0·click=0를 증명. **다음 = read-only 라이브 관찰로 위 candidate selector
   보정** — 승인은 정본 계약(`docs/sellerops_live_approval_contract.md`)의 READ_ONLY Approval Manifest +
-  한 줄 `Seated and ready.`(surface=API Center UI, operation=API Center UI calibration, mode=READ_ONLY).
+  한 줄 `Seated and ready.`. 보정은 **2단계로 분리**됐다: **Phase A `API_CENTER_STRUCTURE_OBSERVATION`**
+  (`observe-api-center.ts`, 관찰·census·구조 힌트만 — highlight 0) → 결과를 selector adapter에 반영하고
+  `SELECTORS_CALIBRATED=true`로 만든 뒤에야 **Phase B `API_ISSUANCE_HIGHLIGHT_PROOF`**
+  (`run-api-issuance-live-naver.ts`, 실제 컨트롤 highlight 증명). 각 phase는 별도 manifest+승인이다.
+  **1차 calibration prep(run wt-d44e9…/approval apr-e2b1…, 2026-08-01)은 `REVOKED_BEFORE_ACTION`
+  (사유 `INCOMPLETE_PREREQUISITES_AND_PHASE_MISMATCH`)** — 필수 URL·정확한 CLI/driver·phase가 확정되지 않은
+  채 PREPARED됐던 것이 원인. 라이브 액션 0(창 0·NAVER 호출 0·credential 0). 이후 approval-prerequisite 게이트
+  (`collector/src/cli/approval-manifest.ts`)가 PREPARED를 "즉시 실행 가능" 상태로만 허용하도록 강화됨.
 
 ---
 

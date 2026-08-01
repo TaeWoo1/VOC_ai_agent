@@ -70,6 +70,23 @@ being re-typed. The manifest carries **no secret and no raw account/store id** �
 id/token (pure digits, or a long hex/token), so only a sanitized description ever reaches the JSON
 or the CLI.
 
+> **PREPARED means immediately executable — no further operator input.** A manifest may only reach
+> `PREPARED` when the approved run can start **with nothing more asked of the operator**: the exact
+> CLI + driver are confirmed, the required URL/config is present and host-screened, every required
+> env var is set, the declared actions match the driver's **real capability**, and the run command
+> dry-validates. If **any** of these is missing, the tooling **must not build a manifest and must not
+> request approval** — it exits `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. A manifest records
+> **only capability the run can actually execute** — never an action its driver cannot perform. This
+> is enforced by the tested gate `collector/src/cli/approval-manifest.ts`
+> (`validateApprovalPrerequisites`) which `preflight.sh` calls for every phased run.
+>
+> **After `PREPARED`, the operator is never re-asked** for a URL, a tool choice, or a required
+> setting. If one of those was not fixed, the manifest was never `PREPARED` in the first place.
+>
+> **Phased calibration = separate manifests + separate approvals.** When a goal's phases use
+> **different tools** (e.g. API-center calibration — see §7), each phase has its **own** manifest and
+> its **own** one-line approval; a single manifest never spans two drivers.
+
 | Field | Meaning |
 |---|---|
 | `approvalId` | Opaque id this approval binds to (`apr-<hex>`), minted at bootstrap. |
@@ -132,23 +149,34 @@ The assistant binds the grant to the **manifest id**, not to a long natural-lang
 
 ## 4. Approval lifecycle
 
-States: **PREPARED → APPROVED → CONSUMED**, with **REVOKED** / **EXPIRED** as terminal offsets.
+States: **PREPARED → APPROVED → CONSUMED**, with **REVOKED** / **REVOKED_BEFORE_ACTION** / **EXPIRED**
+as terminal offsets.
 
-- **PREPARED** — `bootstrap`/`preflight` generated + displayed the manifest; no approval yet.
+- **PREPARED** — `bootstrap`/`preflight` generated + displayed the manifest; no approval yet. (Only
+  reachable when the run is immediately executable — §2.)
 - **APPROVED** — the operator answered `Seated and ready.` (or a detail grant, per §3) against the
   displayed manifest.
 - **CONSUMED** — the first permitted live action ran. The approval is spent.
 - **REVOKED** — code / branch / run / environment / scope changed after preparation (§1.6), or the
   prepared process restarted. A REVOKED approval authorizes nothing; re-bootstrap for a new
   `approvalId`.
+- **REVOKED_BEFORE_ACTION** — the run was ended (or the approval retired) **before any live action
+  ran** — zero window open, zero channel call, zero credential access. Distinct from `CONSUMED`
+  (nothing happened) and from a plain `REVOKED` (it names *why it never started*), recorded with a
+  reason, e.g. `INCOMPLETE_PREREQUISITES_AND_PHASE_MISMATCH`. It is terminal: the `approvalId` is
+  dead and a new `bootstrap` is required.
 - **EXPIRED** — past `expiresAt`, or the prepared process/run ended.
 
 Rules:
 - A change to code/branch/run/environment/scope **after preflight** ⇒ `REVOKED`.
+- **A change of the execution TOOL (CLI/driver) or the calibration PHASE ⇒ the existing manifest is
+  immediately `REVOKED`.** The tool is part of the manifest; you cannot approve one tool and run
+  another. A new phase/tool needs a new `bootstrap` + new `approvalId`.
 - The first **permitted** live action ⇒ `CONSUMED`.
-- A **HALT before any live action** leaves it **unconsumed**; whether it may still be used is
-  decided by whether the **same run + same scope** still hold (same-session, same-scope retries
-  need no re-approval — see §5). If the code/scope changed, treat as `REVOKED`, not reusable.
+- A **HALT before any live action** leaves it **unconsumed**; if it was ended deliberately it is
+  recorded `REVOKED_BEFORE_ACTION`. Whether an unconsumed grant may still be reused is decided by
+  whether the **same run + same scope + same tool** still hold (same-session, same-scope retries
+  need no re-approval — see §5). Any change ⇒ `REVOKED`, not reusable.
 - A new `bootstrap` mints a **new `approvalId`** (the old one is dead).
 
 ---
@@ -178,30 +206,42 @@ The long allow/deny lists and the Standing Safety Contract live behind a collaps
 
 ---
 
-## 7. Applied: NAVER `API_ISSUANCE_GUIDANCE` read-only calibration
+## 7. Applied: NAVER API-center calibration — TWO phases, TWO manifests
 
-The current NAVER calibration run (`collector/src/cli/run-api-issuance-live-naver.ts`) prepares
-this manifest:
+API-center selector calibration is split into two phases whose **tools differ**, so each has its own
+manifest and its own one-line approval (§2). The phase specs are enforced by
+`collector/src/cli/approval-manifest.ts` (`PHASE_SPECS`).
 
-- `channel: NAVER`, `surface: API Center UI`, `operation: API Center UI calibration`,
-  `mode: READ_ONLY`, `operatorPresenceRequired: true`.
-- `allowedLiveActions`: **only** — open the API-center dedicated window; the seller logs in and
-  navigates themselves; classify the surface (sanitized page category); highlight the next control
-  read-only; observe the seller's own click.
-- `maxActions`: probes/observations only (no counted mutating action).
-- **Blocked by the Standing Safety Contract + this manifest** (not re-listed per approval):
-  application create / modify / save, credential (Application ID / Secret) read, connection test,
-  and order sync.
+### Phase A — `API_CENTER_STRUCTURE_OBSERVATION` (READ_ONLY, observe only)
+
+- CLI `src/cli/observe-api-center.ts`; driver = the audited read-only observer.
+- `allowedActions`: open the dedicated window · the operator logs in and navigates themselves ·
+  classify the sanitized page category · read the structural census · derive **sanitized structural
+  hints** for the existing-app/empty-state branch and the control candidates.
+- **No highlight, no click, no submit; credential value read = 0.** A Phase-A manifest that declares
+  `HIGHLIGHT_REAL_CONTROL` is refused (`HIGHLIGHT_ACTION_IN_OBSERVATION_PHASE`) — the observer's
+  driver cannot highlight, so the manifest may not promise it.
 
 Approval UX:
-
 ```
-NAVER API센터 화면 보정 · READ_ONLY · run <prefix>
+NAVER · API Center structure observation · READ_ONLY · run <prefix>
 → operator: Seated and ready.
 ```
 
-A WRITE step (guided reply submission, credential entry + connection test + first sync) is a
-**different manifest with `mode: WRITE`** and always needs its own explicit approval (§3).
+### Phase B — `API_ISSUANCE_HIGHLIGHT_PROOF` (READ_ONLY, highlight proof)
+
+- CLI `src/cli/run-api-issuance-live-naver.ts`; driver = `NaverIssuanceDriver` (Action Window).
+- Runs **only after Phase A's findings are reflected into the selector adapter in code** and
+  `SELECTORS_CALIBRATED` is `true`. Until then the manifest is refused
+  (`SELECTORS_NOT_CALIBRATED`) — the fixture markers park every highlight `target_not_found`, so a
+  highlight-proof against them would prove nothing.
+- `allowedActions`: highlight the real create/open/api-group/credentials/return control · observe
+  the operator's own click and the surface transition. **Auto click/input/submit = 0; credential
+  value read = 0.**
+
+Both phases are `READ_ONLY`. A WRITE step (guided reply submission; credential entry + connection
+test + first sync) is a **different manifest with `mode: WRITE`** and always needs its own explicit
+approval (§3). Switching phase/tool `REVOKED`s the current manifest (§4).
 
 ---
 

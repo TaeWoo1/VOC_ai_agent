@@ -140,31 +140,48 @@ else
   fail "page load mutated the DB (accts $NAVER_ACCTS→$NAVER_ACCTS_AFTER, creds $CREDS→$CREDS_AFTER, syncs $SYNCS→$SYNCS_AFTER, orders $ORDERS→$ORDERS_AFTER)"
 fi
 
-# ---- approval manifest facts (sanitized; env-parameterized with safe defaults) ----------------
-# The approval-fact half of the Approval Manifest (docs/sellerops_live_approval_contract.md §2). Defaults
-# describe the guided ORDER connection this preflight precedes (mode WRITE: it stores a credential + runs
-# test + first sync). A READ-ONLY calibration run overrides these (e.g. OPERATION="API Center UI calibration",
-# MODE="READ_ONLY"). No secret / no raw account id — only a sanitized description.
+# ---- Approval Manifest ---------------------------------------------------------
+# PREPARED means the approved run is IMMEDIATELY executable with no further operator input
+# (docs/sellerops_live_approval_contract.md §2/§3). Two paths:
+#   * Calibration run (SELLEROPS_APPROVAL_PHASE set) → the tested prerequisite gate
+#     `collector/src/cli/approval-manifest-cli.ts` is the SOLE manifest source. It confirms the exact
+#     CLI+driver for the phase, screens the API-center URL, checks actions match the driver's real
+#     capability, and refuses the highlight phase until selectors are calibrated. Any missing prerequisite
+#     ⇒ `PREFLIGHT FAIL: approval_prerequisite (<cause>)` and NO manifest / NO approval request.
+#   * Order-connection walkthrough (no phase) → the inline WRITE manifest, unchanged.
+COLLECTOR_DIR="${SELLEROPS_COLLECTOR_DIR:-$(cd "$HERE/../../collector" && pwd)}"
 APPROVAL_ID="${WALKTHROUGH_APPROVAL_ID:-unknown}"
-APPROVAL_CHANNEL="${SELLEROPS_APPROVAL_CHANNEL:-NAVER}"
-APPROVAL_SURFACE="${SELLEROPS_APPROVAL_SURFACE:-connect/naver}"
-APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided order connection}"
-APPROVAL_MODE="${SELLEROPS_APPROVAL_MODE:-WRITE}"
-APPROVAL_ACCOUNT="${SELLEROPS_APPROVAL_ACCOUNT:-operator-owned NAVER seller/API account (test)}"
-APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1}"
 
-# The account binding must be a sanitized DESCRIPTION, never a raw internal id/token (contract §2). Fail
-# closed if an override looks like a bare id — pure digits (≥4) or a long hex/token (≥16) — so a raw
-# account/store/org id can never reach the manifest JSON or the CLI echo. Store display names and phrases
-# (which carry spaces/punctuation/non-hex chars) pass; a raw numeric/hex id does not.
-if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; then
-  # Fail closed BEFORE the manifest is written/echoed, so a raw id never reaches the JSON or the CLI.
-  echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description, never a raw account/store id. Refusing before emitting the manifest."
-  exit 1
-fi
-
-# ---- sanitized runtime + approval manifest -----------------------------------
-cat > "$MANIFEST_OUT" <<JSON
+if [ -n "${SELLEROPS_APPROVAL_PHASE:-}" ]; then
+  if ! ( cd "$COLLECTOR_DIR" && npx --no-install tsx src/cli/approval-manifest-cli.ts ) > "$MANIFEST_OUT" 2> "$MANIFEST_OUT.err"; then
+    echo; cat "$MANIFEST_OUT.err" >&2 2>/dev/null || true
+    rm -f "$MANIFEST_OUT" "$MANIFEST_OUT.err"
+    echo "PREFLIGHT FAIL — approval prerequisites not met; no manifest prepared, no approval requested."
+    exit 1
+  fi
+  rm -f "$MANIFEST_OUT.err"
+  # Derive the display fields from the tested manifest (never re-typed; raw URL never in it — host only).
+  APPROVAL_CHANNEL="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['channel'])")"
+  APPROVAL_OPERATION="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['operation'])")"
+  APPROVAL_MODE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['mode'])")"
+  APPROVAL_ACCOUNT="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['accountBinding'])")"
+  APPROVAL_MAX="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['maxActions'])")"
+  APPROVAL_PHASE="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT'))['phase'])")"
+else
+  APPROVAL_PHASE=""
+  APPROVAL_CHANNEL="${SELLEROPS_APPROVAL_CHANNEL:-NAVER}"
+  APPROVAL_SURFACE="${SELLEROPS_APPROVAL_SURFACE:-connect/naver}"
+  APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided order connection}"
+  APPROVAL_MODE="${SELLEROPS_APPROVAL_MODE:-WRITE}"
+  APPROVAL_ACCOUNT="${SELLEROPS_APPROVAL_ACCOUNT:-operator-owned NAVER seller/API account (test)}"
+  APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1}"
+  # The account binding must be a sanitized DESCRIPTION, never a raw internal id/token (contract §2). Fail
+  # closed if an override looks like a bare id — pure digits (≥4) or a long hex/token (≥16).
+  if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; then
+    echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description, never a raw account/store id. Refusing before emitting the manifest."
+    exit 1
+  fi
+  cat > "$MANIFEST_OUT" <<JSON
 {
   "approvalId": "$APPROVAL_ID",
   "walkthroughRunId": "$RUN_ID",
@@ -188,6 +205,7 @@ cat > "$MANIFEST_OUT" <<JSON
   }
 }
 JSON
+fi
 echo
 echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; cat "$MANIFEST_OUT" | sed 's/^/  /'
 
@@ -204,6 +222,7 @@ if [ "$FAILED" = "0" ]; then
   # here — it always holds; the long allow/deny scope lives in that doc's "detailed safety scope".
   echo "  ── APPROVAL MANIFEST (sanitized) ──"
   echo "  $APPROVAL_CHANNEL · $APPROVAL_OPERATION · $APPROVAL_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $APPROVAL_MAX"
+  [ -n "${APPROVAL_PHASE:-}" ] && echo "  phase: $APPROVAL_PHASE (tested prerequisite gate — cli/driver/url/selectors confirmed)"
   echo "  account: $APPROVAL_ACCOUNT · operator presence: required · expires: process-lifetime · git $CUR_GIT"
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo
