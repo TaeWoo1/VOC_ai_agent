@@ -215,13 +215,17 @@ guidelines.
 
 1. **Live NAVER runs require explicit, per-run operator approval.** Every live
    CLI refuses to act without the `--i-understand-this-opens-live-naver` flag
-   (`cli/live-run-approval.ts`, pure + unit-tested). Never run a live action
-   during planning or implementation, never on a schedule, never on standing
-   authorization. A human always performs login / 2FA / CAPTCHA — the collector
-   never types NAVER credentials and never bypasses auth. User-owned **test**
-   seller account only. **Current standing state: NAVER live work is paused** —
-   do not launch a browser, log in, or run discovery until the operator approves
-   a specific run in a stable environment.
+   (`cli/live-run-approval.ts`, `hasLiveRunApproval`, pure + unit-tested). Never
+   run a live action during planning or implementation, never on a schedule,
+   never on standing authorization. A human always performs login / 2FA /
+   CAPTCHA — the collector never types NAVER credentials and never bypasses auth.
+   User-owned **test** seller account only. **Current standing state: NAVER live
+   work is paused** — do not launch a browser, log in, or run discovery until the
+   operator approves a specific run in a stable environment.
+   Approval contract: `docs/sellerops_live_approval_contract.md` (default
+   one-line `Seated and ready.` against a prepared Approval Manifest; READ vs
+   WRITE flags are non-substitutable — this READ flag never authorizes the
+   `--i-understand-this-posts-a-live-naver-reply` WRITE path).
 2. **Milestone-1 = discovery, not ingestion.** Run discovery `--classify-only`
    (alias `--no-upload`): classify the export mechanism with no SellerOps login,
    no channel resolve, no `/api/uploads`, no `saveAs` of a real file. The backend

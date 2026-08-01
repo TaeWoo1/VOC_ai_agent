@@ -229,8 +229,9 @@ not touch #371 at this checkpoint.**
 
 ## 9. Priorities (next work order)
 
-Direction only; **each step needs its own fresh approval**, and any live channel call needs a
-single-use in-turn grant naming channel/account/date/operator.
+Direction only; **each step needs its own fresh approval**, and any live channel call is governed by
+the canonical contract `docs/sellerops_live_approval_contract.md` (§3: default one-line
+`Seated and ready.` against a prepared, displayed Approval Manifest; single-use).
 
 > **UPDATE 2026-07-31 (`97ad192`) — Cafe24 pilot channel v1 is COMPLETE.** Priority 1 below (Cafe24
 > REVIEW acquisition completion, #386) plus the REVIEW → Issue-Memory bridge + historical reconciler
@@ -273,7 +274,9 @@ the same OAuth; connector flags default off.
 - 비밀글(secret) exclusion count observed on a window that actually contains a secret review.
 - `raw_received` vs ingested vs missing-drop counts observed (the #375 code does not instrument them).
 
-**Start conditions (all required):**
+**Start conditions (all required):** _(historical record; the current standard for the approval itself
+is the canonical contract `docs/sellerops_live_approval_contract.md` — a prepared/displayed Approval
+Manifest + the one-line `Seated and ready.` grant, §3.)_
 1. A **fresh single-use in-turn approval** naming channel = Cafe24, account (the disposable mall,
    e.g. 전선몰딩), date = the run day, operator = the seated user. A plan or prior approval is never
    authorization. ("Seated and ready" after an in-turn preflight that fixes those four facts counts.)

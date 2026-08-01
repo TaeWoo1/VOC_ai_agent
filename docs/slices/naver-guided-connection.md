@@ -103,6 +103,12 @@ DB write 0); ⑥ preflight가 context runId·git 일치 + 브라우저 env-bindi
 preflight-selfcheck.sh}`. **향후 라이브는 코드/프로세스 재시작으로 기존 승인 폐기 → 바인딩 완료 + 새 runtime
 manifest 생성 후 새 단일-사용 승인 필요.**
 
+> **승인 규칙 정본:** live-run 승인(Standing Safety Contract · Approval Manifest · 한 줄 `Seated and ready.` ·
+> lifecycle · READ_ONLY vs WRITE)은 이제 [`docs/sellerops_live_approval_contract.md`](../sellerops_live_approval_contract.md)
+> 에 한 번만 정의된다. 이 슬라이스는 그 계약을 참조하며 승인 규칙을 재기술하지 않는다. bootstrap/preflight가
+> Approval Manifest를 준비·표시하면 기본 승인은 한 줄이고, 상세 승인이 필요한 예외는 정본 §3에 있다. 아래
+> §0.1.1의 과거 walkthrough 기록에 남은 긴 승인문은 **당시 기록**이며 현재 표준이 아니다.
+
 ## 0.2 개정 (Amendment v1.2, 2026-08-01) — **API 발급 tutorial = Action Window guided walkthrough** ⭐ 현행 계약
 
 > product owner 결정(우선순위 ① 현재 태스크). 4차 walkthrough halt의 블로커(§0.1.1)를 해소한다. §0.1의 "API 발급
@@ -145,8 +151,9 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   존재만 구조 signature로 감지, 값 읽기 0**; URL은 host 카테고리로 축약해 로그/전송 안 함) + **게이트드 라이브
   진입점** `cli/run-api-issuance-live-naver.ts`(`--i-understand-this-opens-live-naver` 필수 + `screenApiCenterUrl`
   사전 fail-closed + import 시 inert; **이번 유닛에서 실행하지 않음**). 오프라인 fake-Page 테스트가 실제
-  엔진·세션을 구동해 Secret-read=0·click=0를 증명. **다음 = fresh single-use 승인 후 read-only 라이브 관찰로
-  위 candidate selector 보정.**
+  엔진·세션을 구동해 Secret-read=0·click=0를 증명. **다음 = read-only 라이브 관찰로 위 candidate selector
+  보정** — 승인은 정본 계약(`docs/sellerops_live_approval_contract.md`)의 READ_ONLY Approval Manifest +
+  한 줄 `Seated and ready.`(surface=API Center UI, operation=API Center UI calibration, mode=READ_ONLY).
 
 ---
 

@@ -140,9 +140,33 @@ else
   fail "page load mutated the DB (accts $NAVER_ACCTS→$NAVER_ACCTS_AFTER, creds $CREDS→$CREDS_AFTER, syncs $SYNCS→$SYNCS_AFTER, orders $ORDERS→$ORDERS_AFTER)"
 fi
 
-# ---- sanitized runtime manifest ----------------------------------------------
+# ---- approval manifest facts (sanitized; env-parameterized with safe defaults) ----------------
+# The approval-fact half of the Approval Manifest (docs/sellerops_live_approval_contract.md §2). Defaults
+# describe the guided ORDER connection this preflight precedes (mode WRITE: it stores a credential + runs
+# test + first sync). A READ-ONLY calibration run overrides these (e.g. OPERATION="API Center UI calibration",
+# MODE="READ_ONLY"). No secret / no raw account id — only a sanitized description.
+APPROVAL_ID="${WALKTHROUGH_APPROVAL_ID:-unknown}"
+APPROVAL_CHANNEL="${SELLEROPS_APPROVAL_CHANNEL:-NAVER}"
+APPROVAL_SURFACE="${SELLEROPS_APPROVAL_SURFACE:-connect/naver}"
+APPROVAL_OPERATION="${SELLEROPS_APPROVAL_OPERATION:-guided order connection}"
+APPROVAL_MODE="${SELLEROPS_APPROVAL_MODE:-WRITE}"
+APPROVAL_ACCOUNT="${SELLEROPS_APPROVAL_ACCOUNT:-operator-owned NAVER seller/API account (test)}"
+APPROVAL_MAX="${SELLEROPS_APPROVAL_MAX:-credential=1, test=1, sync=1}"
+
+# The account binding must be a sanitized DESCRIPTION, never a raw internal id/token (contract §2). Fail
+# closed if an override looks like a bare id — pure digits (≥4) or a long hex/token (≥16) — so a raw
+# account/store/org id can never reach the manifest JSON or the CLI echo. Store display names and phrases
+# (which carry spaces/punctuation/non-hex chars) pass; a raw numeric/hex id does not.
+if printf '%s' "$APPROVAL_ACCOUNT" | grep -Eq '^[0-9]{4,}$|^[0-9a-fA-F]{16,}$'; then
+  # Fail closed BEFORE the manifest is written/echoed, so a raw id never reaches the JSON or the CLI.
+  echo "PREFLIGHT FAIL: SELLEROPS_APPROVAL_ACCOUNT looks like a raw id/token — the manifest carries only a sanitized description, never a raw account/store id. Refusing before emitting the manifest."
+  exit 1
+fi
+
+# ---- sanitized runtime + approval manifest -----------------------------------
 cat > "$MANIFEST_OUT" <<JSON
 {
+  "approvalId": "$APPROVAL_ID",
   "walkthroughRunId": "$RUN_ID",
   "gitCommit": "$CUR_GIT",
   "frontendOrigin": "$FRONTEND_ORIGIN",
@@ -151,11 +175,21 @@ cat > "$MANIFEST_OUT" <<JSON
   "scheduler": "${SELLEROPS_COLLECT_SCHEDULER_ENABLED:-false}",
   "naverFlag": "${SELLEROPS_CONNECTOR_NAVER_ENABLED:-false}",
   "baseline": { "credentials": "$CREDS", "syncJobs": "$SYNCS", "channelOrders": "$ORDERS", "naverAccounts": "$NAVER_ACCTS" },
-  "envBindingSmoke": "$SMOKE_RESULT"
+  "envBindingSmoke": "$SMOKE_RESULT",
+  "approval": {
+    "channel": "$APPROVAL_CHANNEL",
+    "surface": "$APPROVAL_SURFACE",
+    "operation": "$APPROVAL_OPERATION",
+    "mode": "$APPROVAL_MODE",
+    "accountBinding": "$APPROVAL_ACCOUNT",
+    "maxActions": "$APPROVAL_MAX",
+    "operatorPresenceRequired": true,
+    "expiresAt": "process-lifetime"
+  }
 }
 JSON
 echo
-echo "runtime manifest (sanitized) → $MANIFEST_OUT"; cat "$MANIFEST_OUT" | sed 's/^/  /'
+echo "runtime + approval manifest (sanitized) → $MANIFEST_OUT"; cat "$MANIFEST_OUT" | sed 's/^/  /'
 
 echo
 if [ "$FAILED" = "0" ]; then
@@ -164,7 +198,19 @@ if [ "$FAILED" = "0" ]; then
   echo "  expected run   : ${RUN_ID:0:8}…"
   echo "  expected git   : $CUR_GIT"
   echo "  expected db    : $DB_ALIAS"
-  echo "  Open EXACTLY that URL in a fresh window. Live credential entry / test / sync still require a fresh, single-use, in-turn approval."
+  echo
+  # ---- Approval Manifest (short, screen/CLI) — the operator approves THIS, in one line -----------
+  # See docs/sellerops_live_approval_contract.md §3/§6. The Standing Safety Contract (§1) is NOT re-listed
+  # here — it always holds; the long allow/deny scope lives in that doc's "detailed safety scope".
+  echo "  ── APPROVAL MANIFEST (sanitized) ──"
+  echo "  $APPROVAL_CHANNEL · $APPROVAL_OPERATION · $APPROVAL_MODE · run ${RUN_ID:0:8}… · approval ${APPROVAL_ID:0:8}… · max: $APPROVAL_MAX"
+  echo "  account: $APPROVAL_ACCOUNT · operator presence: required · expires: process-lifetime · git $CUR_GIT"
+  echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
+  echo
+  echo "  Open EXACTLY that URL in a fresh window. If this manifest is correct and displayed, the operator's"
+  echo "  entire single-use approval is one line:  Seated and ready."
+  echo "  (A WRITE step — credential entry / test / sync / reply submission — is authorized by mode=WRITE above;"
+  echo "   a READ_ONLY manifest never authorizes it. Re-bootstrap ⇒ new approval id ⇒ old approval is dead.)"
   exit 0
 elif [ "$BROWSER_LOGIN_FAILED" = "1" ]; then
   echo "PREFLIGHT FAIL: browser_login — the env-binding browser run did not pass. Do NOT open the browser."

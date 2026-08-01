@@ -445,12 +445,17 @@ partner access is verified. See §4.1 and §5.2.
 
 ### 6.2 Gated deferrals — open only with an explicit, fresh grant
 
-- **Every live marketplace run** requires a **fresh, single-use, in-turn G6 approval** naming
-  channel / account / date / operator.
-  > *A plan, a prior approval, or goal pressure is never authorization.*
-  A generic live grant never covers a state-mutating action. Before any live dispatch, the
-  **product-boundary check** must be answered: is this product-path behavior or a labeled diagnostic
-  exception, and if the latter, what is the human-driven product alternative?
+- **Every live marketplace run** requires a **fresh, single-use, in-turn approval**. The mechanism,
+  the Standing Safety Contract, the Approval Manifest, and the lifecycle are defined once in the
+  **canonical Live-Run Approval Contract — [`docs/sellerops_live_approval_contract.md`](sellerops_live_approval_contract.md)**;
+  this section does not restate them. In short: the operator approves a prepared, displayed manifest
+  (channel / account / surface / operation / mode / allowed actions), so the default grant is the one
+  line **"Seated and ready."**
+  > *A plan, a prior approval, a restored environment, or goal pressure is never authorization.*
+  A generic/READ grant never covers a state-mutating (WRITE) action — a WRITE always needs its own
+  explicit mode-`WRITE` approval. Before any live dispatch, the **product-boundary check** must be
+  answered: is this product-path behavior or a labeled diagnostic exception, and if the latter, what
+  is the human-driven product alternative?
 - **Live guided reply submission** — requires the 6th G3 scope (`reply submission`) plus a one-shot
   G6. Neither is granted.
 - **Browser Projection against a real marketplace** — §20 gate: marketplace terms-permissibility

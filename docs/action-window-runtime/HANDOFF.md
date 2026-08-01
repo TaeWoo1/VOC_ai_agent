@@ -650,8 +650,9 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
 ## Forbidden without explicit, in-turn operator approval
 
 - **Any live NAVER contact** — no browser launch, no login, no export, no marketplace page. Every live run
-  needs a **fresh single-use G6** naming channel/account/date/operator + §7 criteria. **Every G6 to date is
-  consumed.** Goal pressure, prior approvals, a plan, and a Stop-hook are **never** authorization.
+  is authorized only per the canonical contract `docs/sellerops_live_approval_contract.md` (default one-line
+  `Seated and ready.` against a prepared Approval Manifest; single-use; §1.5 — a plan, prior approval, or a
+  restored environment is never authorization). **R4 evidence: every G6 to date is consumed.**
 - **Any commit, branch, PR, merge, or push.** No force-push. Stage exact files; **never `git add .`**.
 - **Never stage or delete:** `.env`, `.profile/`, `.status/`, `.connections/`, `downloads/`,
   `.claude-worktree-owner`, screenshots, raw HTML, exported marketplace files, real seller data, credentials.
@@ -696,7 +697,8 @@ findings for the FE workstream, both **pre-existing and neither caused by A2-B**
   call-sequence lock was **updated, not added**) and **+1 skipped** (31 → 32) — the `RUN_INTEGRATION`-only IDL
   discriminator in the gated browser suite, **written but not run; file count unchanged at 179**. **A docs-only
   or backend-only change that moves this number is a red flag, not drift.**
-- Ask for an explicit **"seated and ready"** before any headed/human-in-the-loop run. A no-click failure
-  means **operator-absent first**, not a code bug.
+- Live approval follows the canonical contract `docs/sellerops_live_approval_contract.md` (§3: the
+  default grant for a prepared/displayed manifest is the one line `Seated and ready.`) before any
+  headed/human-in-the-loop run. A no-click failure means **operator-absent first**, not a code bug.
 - Source-guard tests read module source and grep forbidden tokens — **strip comment lines first**
   (`collector/CLAUDE.md` §5). Prose has caused false failures before.

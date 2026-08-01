@@ -56,17 +56,19 @@ one place on disk and are **not** recoverable from git.
 
 - Work from **feature branches** (never commit product changes directly to `main`).
 - **No force-push** unless explicitly approved.
-- **No live marketplace runs** without a fresh, single-use, in-turn approval naming
-  channel / account / date / operator. A plan or prior approval is never authorization.
-  - **Preflight-fixed shortcut.** When the in-turn preflight has already fixed and stated the
-    channel, account, and scope (and date = today, operator = the seated user), the user's single
-    sentence **"Seated and ready"** (or equivalent explicit go) *is* that single-use in-turn
-    approval — the four facts are already on the record, so they need not be re-typed. It still
-    lifts any standing pause for that one run only.
-  - **Same-session, same-scope retries need no re-approval.** Within that approved session, fixes
-    and retries against the *same* channel / account / scope proceed without a new grant (the live
-    debug-loop pattern). A change of channel, account, or scope — or a new session — requires a
-    fresh approval.
+- **No live marketplace runs** without a fresh, single-use, in-turn approval. A plan, a prior
+  approval, or a restored environment is never authorization. **Canonical contract:
+  `docs/sellerops_live_approval_contract.md`** — the single source for the Standing Safety Contract,
+  the Approval Manifest, and the approval lifecycle. Do not restate the rule elsewhere; link there.
+  - **Default = one line.** When `bootstrap`/`preflight` has prepared and displayed a valid
+    **Approval Manifest** (channel / account / surface / operation / mode / allowed actions on the
+    record), the operator's entire single-use grant is the one line **"Seated and ready."**, bound
+    to that manifest's `approvalId` + `runId` + scope. Ask for more only in the exceptions the
+    canonical contract §3 lists (no manifest; account/operator/date unfixed; scope changed; process
+    restarted; or a **WRITE/submission**, which always needs its own explicit mode-`WRITE` approval).
+  - **Same-session, same-scope retries need no re-approval** (the live debug-loop). A change of
+    channel / account / scope, a new session, or any code/branch/run/environment change ⇒ the
+    approval is `REVOKED`; re-bootstrap for a new `approvalId` and a fresh grant.
 - Never print secrets. Stage exact files — never `git add .`; never stage `.env`, `.profile/`,
   `.status/`, `.connections/`, `downloads/`, credentials, or real seller data.
 
