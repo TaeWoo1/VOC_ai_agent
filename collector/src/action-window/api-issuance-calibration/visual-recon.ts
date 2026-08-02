@@ -51,6 +51,43 @@ import { countBucket, observeFrom, type ApiCenterPageCategory, type ApiCenterSig
 export const VISUAL_RECON_SCREENS = ["app_list", "app_detail", "api_group", "credentials"] as const;
 export type VisualReconScreen = (typeof VISUAL_RECON_SCREENS)[number];
 
+/**
+ * The API center presents these four screens across just TWO real pages: the applications LIST, and a single
+ * application DETAIL page whose credential section and API-group section are the SAME page at different scroll
+ * positions (operator-confirmed live). So `app_detail` / `api_group` / `credentials` are VIEWPORT CHECKPOINTS of
+ * one `application_detail` page — the operator navigates once and then just scrolls — while `app_list` is its own
+ * page. This drives the operator instruction (navigate to a new page vs. scroll within the same page) and keeps
+ * the recon honest about how many real page loads there are. `VISUAL_RECON_SCREENS` (and the manifest) are
+ * unchanged; this is grouping metadata only.
+ */
+export type VisualReconPage = "application_list" | "application_detail";
+export interface VisualReconCheckpoint {
+  screen: VisualReconScreen;
+  page: VisualReconPage;
+  /** "page" = a distinct page load; "viewport_checkpoint" = the same page as the previous checkpoint, scrolled. */
+  kind: "page" | "viewport_checkpoint";
+  /** Operator guidance: open/navigate to a new page, or scroll to the section on the SAME page (no navigation). */
+  navigation: "navigate" | "scroll_same_page";
+}
+export const VISUAL_RECON_CHECKPOINTS: readonly VisualReconCheckpoint[] = [
+  { screen: "app_list", page: "application_list", kind: "page", navigation: "navigate" },
+  { screen: "app_detail", page: "application_detail", kind: "page", navigation: "navigate" },
+  { screen: "api_group", page: "application_detail", kind: "viewport_checkpoint", navigation: "scroll_same_page" },
+  { screen: "credentials", page: "application_detail", kind: "viewport_checkpoint", navigation: "scroll_same_page" },
+];
+/** The checkpoint metadata for a screen (defaults to a standalone page if — impossibly — unmapped). */
+export function checkpointFor(screen: VisualReconScreen): VisualReconCheckpoint {
+  return VISUAL_RECON_CHECKPOINTS.find((c) => c.screen === screen) ?? { screen, page: "application_list", kind: "page", navigation: "navigate" };
+}
+
+/** A read-only fixed-label match result: how many elements a fixed NAVER-label probe matched (value-free). */
+export interface FixedLabelMatch {
+  /** A stable, sanitized target id — never a selector, never user data. */
+  targetId: string;
+  /** Live `count` of elements whose role + accessible name equals the fixed label (integer only). */
+  matchCount: number;
+}
+
 /* ────────────────────────────── redaction categories + report ────────────────────────────── */
 
 /**
@@ -302,6 +339,8 @@ export interface SanitizedVisualSummary {
     widthBucket: CountBucket;
     heightBucket: CountBucket;
   };
+  /** Read-only fixed-label probe results for this screen (value-free integer counts); empty if not probed. */
+  labelMatchCounts: FixedLabelMatch[];
   /** Always true: these are unproven candidates awaiting reviewer adoption, never a proven detector. */
   calibrationPending: true;
 }
@@ -329,6 +368,9 @@ function boxBucketOf(box: RawVisualControl["boundingBox"], vp: RawVisualControl[
 
 /** Attribute names that may indicate a stable hook (presence only — the VALUE is screened, never emitted). */
 const SELECTOR_ATTR_NAMES = ["id", "data-testid", "data-test", "data-cy", "data-qa", "aria-label", "name", "role", "class"];
+
+/** The fixed shape of a visual-recon target id (`<group>.<name>`, lowercase snake) — the only `targetId` emitted. */
+const TARGET_ID_SHAPE = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
 
 function sanitizeControl(raw: RawVisualControl): SanitizedVisualControl {
   const tagName = inVocab(raw.tagName?.toLowerCase(), ALLOWED_TAGS);
@@ -385,8 +427,17 @@ export function sanitizeVisualSummary(input: {
   verdict: RedactionVerdict;
   screenshotTaken: boolean;
   viewport: { w: number; h: number };
+  /** Raw fixed-label probe results (from the in-page probe). Coerced to value-free integer counts here. */
+  labelMatches?: readonly { targetId: string; matchCount: number }[];
 }): SanitizedVisualSummary {
   const obs = observeFrom(input.urlCategory, input.raw.census);
+  // `targetId` is the one verbatim string channel in the summary, so screen it like every other emitted string:
+  // it must have our fixed `<group>.<name>` snake shape AND pass the sensitive-value gate. A page that tampered
+  // with the probe's output to smuggle a page-derived string (e.g. a credential fragment) is dropped here.
+  // `matchCount` is coerced to a non-negative int.
+  const labelMatchCounts: FixedLabelMatch[] = (input.labelMatches ?? [])
+    .filter((m) => typeof m?.targetId === "string" && TARGET_ID_SHAPE.test(m.targetId) && !looksSensitive(m.targetId))
+    .map((m) => ({ targetId: m.targetId, matchCount: isNonNegInt(m.matchCount) ? m.matchCount : 0 }));
   return {
     screen: input.screen,
     pageCategory: obs.pageCategory,
@@ -406,6 +457,7 @@ export function sanitizeVisualSummary(input: {
       widthBucket: countBucket(input.viewport.w),
       heightBucket: countBucket(input.viewport.h),
     },
+    labelMatchCounts,
     calibrationPending: true,
   };
 }

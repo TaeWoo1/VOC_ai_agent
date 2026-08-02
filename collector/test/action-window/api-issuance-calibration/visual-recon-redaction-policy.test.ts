@@ -13,7 +13,21 @@ import {
   IDENTITY_REDACT_PATTERN_SOURCES,
   isIdentityTextToRedact,
 } from "../../../src/action-window/api-issuance-calibration/visual-recon";
-import { buildRedactionScript } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import {
+  buildRedactionScript,
+  buildFixedLabelProbeScript,
+  REDACTION_CLEAR_SCRIPT,
+} from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import {
+  VISUAL_RECON_CHECKPOINTS,
+  VISUAL_RECON_SCREENS,
+  checkpointFor,
+  sanitizeVisualSummary,
+} from "../../../src/action-window/api-issuance-calibration/visual-recon";
+import {
+  VISUAL_RECON_LABEL_PROBES,
+  labelProbesForScreen,
+} from "../../../src/action-window/api-issuance-calibration/visual-recon-candidates";
 import {
   evaluateVisualReconCandidates,
   MATCH_COUNT_UNMEASURED,
@@ -171,5 +185,101 @@ describe("proposed selector candidates — recorded, screenshot-derived, NOT ado
     const register = VISUAL_RECON_CANDIDATES.find((c) => c.targetId === "app_list.register_application")!;
     const measured = { ...register.candidate, matchCount: 1 };
     expect(evaluateSelectorCandidate(measured).adoptable).toBe(true);
+  });
+});
+
+describe("viewport-checkpoint model — app_detail/api_group/credentials are one page, app_list is its own", () => {
+  it("maps every screen; the detail trio share application_detail (scroll), app_list navigates on its own page", () => {
+    expect(VISUAL_RECON_CHECKPOINTS.map((c) => c.screen)).toEqual([...VISUAL_RECON_SCREENS]);
+    expect(checkpointFor("app_list").page).toBe("application_list");
+    expect(checkpointFor("app_list").navigation).toBe("navigate");
+    for (const s of ["app_detail", "api_group", "credentials"] as const) {
+      expect(checkpointFor(s).page).toBe("application_detail");
+    }
+    // app_detail is the first (navigate) checkpoint of the detail page; api_group/credentials just scroll.
+    expect(checkpointFor("app_detail").kind).toBe("page");
+    expect(checkpointFor("api_group").navigation).toBe("scroll_same_page");
+    expect(checkpointFor("credentials").navigation).toBe("scroll_same_page");
+    // exactly one real page load for the detail trio.
+    const detailNavs = ["app_detail", "api_group", "credentials"].filter((s) => checkpointFor(s as never).navigation === "navigate");
+    expect(detailNavs).toEqual(["app_detail"]);
+  });
+});
+
+describe("fixed-label read-only matchCount probe — value-free integer counts", () => {
+  it("covers the requested labels and each probe is screen-scoped + fixed-label (no user data)", () => {
+    const byId = Object.fromEntries(VISUAL_RECON_LABEL_PROBES.map((p) => [p.targetId, p]));
+    for (const id of ["app_list.register_application", "app_list.reactivate_application", "app_detail.application_section", "api_group.section", "credentials.application_id_label", "credentials.secret_view_button", "credentials.secret_copy_button"] as const) {
+      expect(byId[id], id).toBeTruthy();
+    }
+    // register/reactivate map to the two state-dependent labels.
+    expect(byId["app_list.register_application"]!.exactText).toBe("애플리케이션 등록");
+    expect(byId["app_list.reactivate_application"]!.exactText).toBe("다시사용");
+    // candidateQuery is a plain structural selector — never a value attribute or user data.
+    for (const p of VISUAL_RECON_LABEL_PROBES) {
+      expect(/\[value=|데이터수집/.test(p.candidateQuery)).toBe(false);
+    }
+    expect(labelProbesForScreen("credentials").map((p) => p.exactText)).toEqual(["애플리케이션 ID", "보기", "복사"]);
+  });
+
+  it("the probe script embeds the probes and RETURNS only {targetId, matchCount} — never page text", () => {
+    const probes = labelProbesForScreen("app_list");
+    const script = buildFixedLabelProbeScript(probes);
+    expect(script.includes(JSON.stringify(probes))).toBe(true);
+    // every return literal carries only targetId + matchCount (no text/value leaves the page).
+    const returns = [...script.matchAll(/out\.push\(\{([^}]*)\}\)/g)].map((m) => m[1]!);
+    expect(returns.length).toBeGreaterThan(0);
+    for (const block of returns) {
+      const keys = block.split(",").map((kv) => kv.split(":")[0]!.trim()).filter(Boolean);
+      expect(keys.sort()).toEqual(["matchCount", "targetId"]);
+    }
+    // it reads text ONLY to compare against the known fixed label (documented), and never emits it.
+    expect(script).toContain("el.textContent");
+    for (const forbidden of [".value", ".innerHTML", ".outerHTML", ".click(", ".type(", "clipboard"]) {
+      expect(script.includes(forbidden), forbidden).toBe(false);
+    }
+  });
+
+  it("the clear script removes overlays and returns only an integer count (value-free)", () => {
+    expect(REDACTION_CLEAR_SCRIPT).toContain("data-sellerops-redact");
+    expect(REDACTION_CLEAR_SCRIPT).toContain("removeChild");
+    expect(REDACTION_CLEAR_SCRIPT).toContain("removed: removed");
+    for (const forbidden of [".value", ".innerHTML", ".textContent", ".click(", ".screenshot("]) {
+      expect(REDACTION_CLEAR_SCRIPT.includes(forbidden), forbidden).toBe(false);
+    }
+  });
+});
+
+describe("sanitizeVisualSummary — fixed-label counts are coerced value-free", () => {
+  const base = {
+    screen: "app_list" as const,
+    urlCategory: "api_center_host" as const,
+    raw: { controls: [], census: { passwordFieldPresent: false, submitAffordancePresent: false, formCount: 0, editableTextInputCount: 0, readonlyFieldCount: 0, listLikeContainerCount: 0 } },
+    reports: [],
+    verdict: { status: "pass" as const, totalDetected: 0, totalCovered: 0, overlayCount: 0, framesInspected: 1, reasons: [] },
+    screenshotTaken: false,
+    viewport: { w: 1280, h: 800 },
+  };
+
+  it("passes through valid {targetId, matchCount}, coerces a bad count to 0, drops empty/misshapen/smuggled targetIds", () => {
+    const s = sanitizeVisualSummary({
+      ...base,
+      labelMatches: [
+        { targetId: "app_list.register_application", matchCount: 1 },
+        { targetId: "app_list.reactivate_application", matchCount: -3 as unknown as number },
+        { targetId: "", matchCount: 2 }, // empty → dropped
+        { targetId: "not a target id", matchCount: 1 }, // wrong shape → dropped
+        { targetId: "credentials.애플리케이션시크릿AB12CD34EF56", matchCount: 1 }, // page-smuggled string → dropped
+        { targetId: "a".repeat(200) + ".x", matchCount: 1 }, // long/sensitive → dropped
+      ],
+    });
+    expect(s.labelMatchCounts).toEqual([
+      { targetId: "app_list.register_application", matchCount: 1 },
+      { targetId: "app_list.reactivate_application", matchCount: 0 },
+    ]);
+  });
+
+  it("defaults to an empty array when no probe ran", () => {
+    expect(sanitizeVisualSummary(base).labelMatchCounts).toEqual([]);
   });
 });

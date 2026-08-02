@@ -22,6 +22,7 @@ export const MATCH_COUNT_UNMEASURED = -1;
 /** Stable, sanitized target ids — never a selector, never user data. */
 export const VISUAL_RECON_TARGET_IDS = [
   "app_list.register_application",
+  "app_list.reactivate_application",
   "app_detail.application_section",
   "api_group.section",
   "credentials.application_id_label",
@@ -62,8 +63,14 @@ export const VISUAL_RECON_CANDIDATES: readonly ProposedCandidate[] = [
   {
     targetId: "app_list.register_application",
     screen: "app_list",
-    note: "app_list 스토어 섹션 우상단의 등록 버튼. 앱이 일시중단이면 라벨이 '다시사용'으로 바뀌므로 상태별 라벨을 라이브에서 확인.",
+    note: "app_list 스토어 섹션 우상단의 등록 버튼(등록 가능 상태). 일시중단이면 같은 자리 라벨이 '다시사용'으로 바뀜.",
     candidate: fixedLabelCandidate("app_list", 'role=button[name="애플리케이션 등록"]'),
+  },
+  {
+    targetId: "app_list.reactivate_application",
+    screen: "app_list",
+    note: "app_list 스토어 섹션 우상단의 재사용 버튼(앱 일시중단 상태에서 '애플리케이션 등록' 대신 노출). 상태별로 둘 중 하나만 존재.",
+    candidate: fixedLabelCandidate("app_list", 'role=button[name="다시사용"]'),
   },
   {
     targetId: "app_detail.application_section",
@@ -118,4 +125,35 @@ export function evaluateVisualReconCandidates(): EvaluatedCandidate[] {
     const { adoptable, reasons } = evaluateSelectorCandidate(p.candidate);
     return { ...p, adoptable, reasons };
   });
+}
+
+/**
+ * A READ-ONLY fixed-label matchCount probe spec. NAVER's API-center controls carry no aria-label/name/id for
+ * these targets (run #3 census proved it) — they are labelled by visible TEXT only, which the attribute-only
+ * census cannot count. Each probe names a STRUCTURAL candidate set (a plain querySelectorAll — no user data) and
+ * a FIXED NAVER label; the in-page probe counts how many candidates have that exact accessible name and returns
+ * only an integer. It never clicks, types, reads a credential value, or emits any page text.
+ */
+export interface FixedLabelProbe {
+  targetId: VisualReconTargetId;
+  screen: VisualReconScreen;
+  /** A structural querySelectorAll for candidate elements — no user data, no value attribute. */
+  candidateQuery: string;
+  /** The FIXED NAVER UI label to match by accessible name / normalized text (never user/app/credential data). */
+  exactText: string;
+}
+
+export const VISUAL_RECON_LABEL_PROBES: readonly FixedLabelProbe[] = [
+  { targetId: "app_list.register_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "애플리케이션 등록" },
+  { targetId: "app_list.reactivate_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "다시사용" },
+  { targetId: "app_detail.application_section", screen: "app_detail", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "애플리케이션" },
+  { targetId: "api_group.section", screen: "api_group", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "API 그룹" },
+  { targetId: "credentials.application_id_label", screen: "credentials", candidateQuery: "th,td,dt,label,span,div", exactText: "애플리케이션 ID" },
+  { targetId: "credentials.secret_view_button", screen: "credentials", candidateQuery: "button, a, [role='button']", exactText: "보기" },
+  { targetId: "credentials.secret_copy_button", screen: "credentials", candidateQuery: "button, a, [role='button']", exactText: "복사" },
+];
+
+/** The fixed-label probes that apply to a given screen (the CLI runs these on that screen's live viewport). */
+export function labelProbesForScreen(screen: VisualReconScreen): FixedLabelProbe[] {
+  return VISUAL_RECON_LABEL_PROBES.filter((p) => p.screen === screen);
 }

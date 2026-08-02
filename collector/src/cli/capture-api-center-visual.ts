@@ -36,10 +36,12 @@ import { launchNaverContext } from "../profile";
 import { approvalRequiredMessage, hasLiveRunApproval } from "./live-run-approval";
 import { EXTRACT_API_CENTER_CENSUS, screenApiCenterUrl, type ApiCenterStructuralCensus, type ApiCenterUrlCategory } from "./observe-api-center";
 import {
+  checkpointFor,
   mayScreenshot,
   sanitizeVisualSummary,
   verifyRedaction,
   VISUAL_RECON_SCREENS,
+  type FixedLabelMatch,
   type RawRedactionReport,
   type RawVisualControl,
   type RawVisualSummary,
@@ -48,9 +50,12 @@ import {
   type VisualReconScreen,
 } from "../action-window/api-issuance-calibration/visual-recon";
 import {
+  buildFixedLabelProbeScript,
   buildRedactionScript,
   EXTRACT_VISUAL_CONTROLS,
+  REDACTION_CLEAR_SCRIPT,
 } from "../action-window/api-issuance-calibration/visual-recon-inpage";
+import { labelProbesForScreen } from "../action-window/api-issuance-calibration/visual-recon-candidates";
 
 /** A per-screen operator signal: capture, skip this screen, abort the session, or the wait timed out. */
 export type VisualCheckpointSignal = "ready" | "skip" | "abort" | "timeout";
@@ -74,6 +79,10 @@ export interface VisualReconSessionDeps {
   readRawSummary(): Promise<RawVisualSummary>;
   /** Read the current viewport size (for coarse buckets only). */
   readViewport(): Promise<{ w: number; h: number }>;
+  /** READ-ONLY: count how many elements match each fixed-label probe for this screen (value-free integers). */
+  probeFixedLabels(screen: VisualReconScreen): Promise<FixedLabelMatch[]>;
+  /** Remove every redaction overlay so the operator's view returns to normal before the next checkpoint. */
+  clearOverlaysAllFrames(): Promise<void>;
   /** Persist the sanitized per-screen summary (production: JSON to `.calibration/visual/`). */
   persistSummary(summary: SanitizedVisualSummary): Promise<void>;
   announceScreen?(screen: VisualReconScreen): void;
@@ -167,6 +176,8 @@ export async function runVisualReconSession(deps: VisualReconSessionDeps): Promi
 
     const raw = await deps.readRawSummary();
     const viewport = await deps.readViewport();
+    // READ-ONLY fixed-label matchCount probe for this screen (value-free integer counts; never a page value).
+    const labelMatches = await deps.probeFixedLabels(screen);
     const summary = sanitizeVisualSummary({
       screen,
       urlCategory: deps.urlCategory,
@@ -175,10 +186,15 @@ export async function runVisualReconSession(deps: VisualReconSessionDeps): Promi
       verdict: gateVerdict,
       screenshotTaken,
       viewport,
+      labelMatches,
     });
     await deps.persistSummary(summary);
     summaries.push(summary);
     screensWalked += 1;
+
+    // Capture/HALT for this screen is done — remove the overlays so the operator can navigate/scroll to the next
+    // checkpoint on a clean page (they no longer linger until the next apply).
+    await deps.clearOverlaysAllFrames();
   }
 
   return { summaries, aborted, screensWalked, screenshotsTaken, screensHalted, screensSkipped };
@@ -427,20 +443,36 @@ async function main(): Promise<void> {
       const page = activePage();
       return evalStr<{ w: number; h: number }>(page, "({ w: window.innerWidth||0, h: window.innerHeight||0 })").catch(() => ({ w: 0, h: 0 }));
     },
+    probeFixedLabels: async (scr) => {
+      const probes = labelProbesForScreen(scr);
+      if (probes.length === 0) return [];
+      // Value-free: the probe returns [{targetId, matchCount}] integers only; fail closed to [] on any eval error.
+      const res = await evalStr<FixedLabelMatch[]>(activePage(), buildFixedLabelProbeScript(probes)).catch(() => [] as FixedLabelMatch[]);
+      return Array.isArray(res) ? res : [];
+    },
+    clearOverlaysAllFrames: async () => {
+      await evalAllFrames(activePage(), REDACTION_CLEAR_SCRIPT).catch(() => undefined);
+    },
     persistSummary: async (summary) => {
       const out = visualSummaryAbsPath(runId, summary.screen);
       if (!isSafeVisualArtifactPath(out)) return;
       writeFileSync(out, JSON.stringify(summary, null, 2), "utf8");
     },
     announceScreen: (scr) => {
+      const cp = checkpointFor(scr);
       console.error("");
-      console.error(`Visual-recon screen: ${scr}.`);
-      console.error("  1) Navigate MANUALLY to this screen in the opened dedicated Chrome window.");
-      console.error('  2) When the screen is fully loaded, signal ready by creating this file (or say "ready"):');
+      console.error(`Visual-recon checkpoint: ${scr}  (page: ${cp.page}, ${cp.kind}).`);
+      if (cp.navigation === "scroll_same_page") {
+        console.error("  1) This is the SAME page as the previous checkpoint — do NOT navigate away; just SCROLL");
+        console.error("     MANUALLY so this section is in view.");
+      } else {
+        console.error("  1) Navigate MANUALLY to this page in the opened dedicated Chrome window.");
+      }
+      console.error('  2) When the section is in view, signal ready by creating this file (or say "ready"):');
       console.error(`       ${readyPath}`);
-      console.error(`     To SKIP this screen: create ${skipPath} (or say "skip").`);
+      console.error(`     To SKIP this checkpoint: create ${skipPath} (or say "skip").`);
       console.error(`     To ABORT the session: create ${abortPath} (or press Ctrl+C).`);
-      console.error("  The tool then redacts every sensitive region, VERIFIES coverage, and only then captures.");
+      console.error("  The tool redacts every sensitive region, VERIFIES coverage, captures, then clears the overlays.");
     },
     announceHalt: (scr, verdict) => {
       console.error("");

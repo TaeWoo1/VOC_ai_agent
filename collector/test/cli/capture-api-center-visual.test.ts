@@ -25,7 +25,7 @@ const RAW: RawVisualSummary = { controls: [], census: { passwordFieldPresent: fa
 
 interface Harness {
   deps: VisualReconSessionDeps;
-  calls: { screenshot: string[]; commit: string[]; discard: string[]; persisted: SanitizedVisualSummary[]; apply: number; verify: number };
+  calls: { screenshot: string[]; commit: string[]; discard: string[]; persisted: SanitizedVisualSummary[]; apply: number; verify: number; clear: number; probed: string[] };
 }
 
 /**
@@ -34,7 +34,7 @@ interface Harness {
  * verify pass (gate verify, then post-shot verify).
  */
 function harness(opts: { signals: VisualCheckpointSignal[]; applyQ: RawRedactionReport[][]; verifyQ: RawRedactionReport[][] }): Harness {
-  const calls = { screenshot: [] as string[], commit: [] as string[], discard: [] as string[], persisted: [] as SanitizedVisualSummary[], apply: 0, verify: 0 };
+  const calls = { screenshot: [] as string[], commit: [] as string[], discard: [] as string[], persisted: [] as SanitizedVisualSummary[], apply: 0, verify: 0, clear: 0, probed: [] as string[] };
   let sigIdx = 0;
   const applyQ = [...opts.applyQ];
   const verifyQ = [...opts.verifyQ];
@@ -61,6 +61,13 @@ function harness(opts: { signals: VisualCheckpointSignal[]; applyQ: RawRedaction
     },
     readRawSummary: async () => RAW,
     readViewport: async () => ({ w: 1280, h: 800 }),
+    probeFixedLabels: async (scr) => {
+      calls.probed.push(scr);
+      return [{ targetId: `probe.${scr}`, matchCount: 1 }];
+    },
+    clearOverlaysAllFrames: async () => {
+      calls.clear += 1;
+    },
     persistSummary: async (s) => {
       calls.persisted.push(s);
     },
@@ -78,6 +85,23 @@ describe("runVisualReconSession — screenshot only after redaction verifies", (
     expect(r.screenshotsTaken).toBe(1);
     expect(r.screensSkipped).toBe(3);
     expect(h.calls.persisted[0]!.screenshot.taken).toBe(true);
+  });
+
+  it("probes fixed labels + clears overlays for every WALKED screen (capture OR halt); label counts land in the summary", async () => {
+    // app_list: ready+pass → capture (walked); app_detail: ready+apply-FAIL → HALT (walked); api_group: skip; credentials: abort
+    const h = harness({ signals: ["ready", "ready", "skip", "abort"], applyQ: [PASS, FAIL], verifyQ: [PASS, PASS] });
+    const r = await runVisualReconSession(h.deps);
+    expect(r.screenshotsTaken).toBe(1);
+    expect(r.screensHalted).toBe(1);
+    expect(r.screensWalked).toBe(2);
+    // one probe + one overlay-clear per WALKED screen (capture AND halt alike); skip/abort don't walk.
+    expect(h.calls.probed).toEqual(["app_list", "app_detail"]);
+    expect(h.calls.clear).toBe(2);
+    // the value-free fixed-label counts flow into each screen's summary.
+    expect(h.calls.persisted.map((s) => s.labelMatchCounts)).toEqual([
+      [{ targetId: "probe.app_list", matchCount: 1 }],
+      [{ targetId: "probe.app_detail", matchCount: 1 }],
+    ]);
   });
 
   it("HALTS at the apply verdict — no screenshot, records a screenshot-less summary", async () => {

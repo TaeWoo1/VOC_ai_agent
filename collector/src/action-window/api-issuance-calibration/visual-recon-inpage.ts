@@ -332,3 +332,52 @@ export const EXTRACT_VISUAL_CONTROLS = `(function () {
   for (var i = 0; i < els.length && out.length < CAP; i++) { out.push(build(els[i])); }
   return out;
 })()`;
+
+/**
+ * Remove every redaction overlay from the page. Run AFTER a screen's capture/HALT so the operator's own view
+ * returns to normal for navigating/scrolling to the next checkpoint (overlays no longer linger between screens).
+ * Value-free: returns only an integer `removed` count; never reads a value/text.
+ */
+export const REDACTION_CLEAR_SCRIPT = `(function () {
+  /* visual-recon-clear */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var OVERLAY_ATTR = ${JSON.stringify(REDACT_OVERLAY_ATTR)};
+  if (!document.body) { return { removed: 0 }; }
+  var overlays = slice(document.querySelectorAll('[' + OVERLAY_ATTR + ']'));
+  var removed = 0;
+  for (var i = 0; i < overlays.length; i++) { if (overlays[i].parentNode) { overlays[i].parentNode.removeChild(overlays[i]); removed = removed + 1; } }
+  return { removed: removed };
+})()`;
+
+/**
+ * A READ-ONLY fixed-label match probe. For each probe it counts how many candidate elements have an accessible
+ * name (aria-label, else normalized text) EXACTLY equal to a FIXED NAVER UI label (e.g. "애플리케이션 등록").
+ * It reads element text SOLELY to compare against a KNOWN, fixed label supplied by the caller — it returns only
+ * `{ targetId, matchCount }` integers, NEVER any page text/value/selector. It never clicks, types, or mutates.
+ * This is what lets a reviewer learn whether a text-labelled control (NAVER exposes no aria-label/id for these)
+ * resolves uniquely on the live DOM — which the attribute-only census cannot measure.
+ */
+export function buildFixedLabelProbeScript(probes: readonly { targetId: string; candidateQuery: string; exactText: string }[]): string {
+  return `(function () {
+  /* visual-recon-fixed-label-probe (value-free OUTPUT: integers + the caller's own target ids only) */
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  var PROBES = ${JSON.stringify(probes)};
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; only a COUNT is returned, never the text. */
+    return norm(el.textContent || '');
+  }
+  var out = [];
+  for (var p = 0; p < PROBES.length; p++) {
+    var probe = PROBES[p];
+    var want = norm(probe.exactText);
+    var els; try { els = slice(document.querySelectorAll(probe.candidateQuery)); } catch (e) { els = []; }
+    var n = 0, CAP = 4000;
+    for (var i = 0; i < els.length && i < CAP; i++) { if (accName(els[i]) === want) { n = n + 1; } }
+    out.push({ targetId: probe.targetId, matchCount: n });
+  }
+  return out;
+})()`;
+}
