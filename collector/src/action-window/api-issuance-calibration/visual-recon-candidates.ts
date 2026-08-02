@@ -141,12 +141,25 @@ export interface FixedLabelProbe {
   candidateQuery: string;
   /** The FIXED NAVER UI label to match by accessible name / normalized text (never user/app/credential data). */
   exactText: string;
+  /**
+   * Optional: a structural selector for chrome/navigation ancestors. A candidate whose `closest(excludeWithin)`
+   * is non-null is NOT counted — used to drop a label that also appears in the sidebar nav / breadcrumb / header
+   * so only the MAIN-CONTENT occurrence is measured (run #4 found "애플리케이션" matched 3× incl. nav + breadcrumb).
+   */
+  excludeWithin?: string;
 }
+
+/** Chrome/navigation ancestors whose copy of a label must not be counted (sidebar nav, breadcrumb, header). */
+const CHROME_NAV_ANCESTORS = "nav, aside, header, [role='navigation'], [role='banner'], [role='complementary'], ol, ul";
 
 export const VISUAL_RECON_LABEL_PROBES: readonly FixedLabelProbe[] = [
   { targetId: "app_list.register_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "애플리케이션 등록" },
   { targetId: "app_list.reactivate_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "다시사용" },
-  { targetId: "app_detail.application_section", screen: "app_detail", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "애플리케이션" },
+  // app_detail: exclude the sidebar-nav group label + breadcrumb copies of "애플리케이션" so only the main-content
+  // section heading is counted (was matchCount=3; this narrows toward 1 — confirm on the next live re-measure).
+  // NOTE: only THIS probe gets excludeWithin — the others already measured matchCount=1 live (run #4) and the
+  // aggressive `ol, ul` exclusion could wrongly drop them, so they stay unchanged until separately re-measured.
+  { targetId: "app_detail.application_section", screen: "app_detail", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "애플리케이션", excludeWithin: CHROME_NAV_ANCESTORS },
   { targetId: "api_group.section", screen: "api_group", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "API 그룹" },
   { targetId: "credentials.application_id_label", screen: "credentials", candidateQuery: "th,td,dt,label,span,div", exactText: "애플리케이션 ID" },
   { targetId: "credentials.secret_view_button", screen: "credentials", candidateQuery: "button, a, [role='button']", exactText: "보기" },

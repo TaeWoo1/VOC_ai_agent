@@ -357,7 +357,7 @@ export const REDACTION_CLEAR_SCRIPT = `(function () {
  * This is what lets a reviewer learn whether a text-labelled control (NAVER exposes no aria-label/id for these)
  * resolves uniquely on the live DOM — which the attribute-only census cannot measure.
  */
-export function buildFixedLabelProbeScript(probes: readonly { targetId: string; candidateQuery: string; exactText: string }[]): string {
+export function buildFixedLabelProbeScript(probes: readonly { targetId: string; candidateQuery: string; exactText: string; excludeWithin?: string }[]): string {
   return `(function () {
   /* visual-recon-fixed-label-probe (value-free OUTPUT: integers + the caller's own target ids only) */
   var slice = Function.prototype.call.bind(Array.prototype.slice);
@@ -369,13 +369,20 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
     /* text read ONLY to compare against a KNOWN fixed label; only a COUNT is returned, never the text. */
     return norm(el.textContent || '');
   }
+  /* A candidate inside a chrome/nav ancestor (sidebar nav, breadcrumb, header) is not the main-content control. */
+  function excluded(el, sel) {
+    if (!sel || !el || !el.closest) { return false; }
+    try { return !!el.closest(sel); } catch (e) { return false; }
+  }
   var out = [];
   for (var p = 0; p < PROBES.length; p++) {
     var probe = PROBES[p];
     var want = norm(probe.exactText);
     var els; try { els = slice(document.querySelectorAll(probe.candidateQuery)); } catch (e) { els = []; }
     var n = 0, CAP = 4000;
-    for (var i = 0; i < els.length && i < CAP; i++) { if (accName(els[i]) === want) { n = n + 1; } }
+    for (var i = 0; i < els.length && i < CAP; i++) {
+      if (accName(els[i]) === want && !excluded(els[i], probe.excludeWithin)) { n = n + 1; }
+    }
     out.push({ targetId: probe.targetId, matchCount: n });
   }
   return out;
