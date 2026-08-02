@@ -25,6 +25,30 @@ export type IssuanceTarget = "create_app" | "open_app" | "api_group" | "credenti
 export const ISSUANCE_TARGETS: readonly IssuanceTarget[] = ["create_app", "open_app", "api_group", "credentials", "return"];
 
 /**
+ * The ONE target for which SellerOps observes a real NAVER click / page TRANSITION: opening (or creating and
+ * thereby reaching) the app detail page is a genuine `app_list → app_detail` navigation the runtime watches
+ * (`OBSERVE_USER_CLICK_TRANSITION`, open_app only). Everything after it lives on that SAME detail page.
+ */
+export const ISSUANCE_TRANSITION_OBSERVE_TARGET: IssuanceTarget = "open_app";
+
+/**
+ * **Same-page VIEWPORT CHECKPOINTS.** Once the seller has reached the app detail page, the API group and the
+ * Application ID are NOT controls the runtime waits for a NAVER click on — they are SECTIONS on the one page the
+ * seller is already looking at. A checkpoint STABILIZES the page, LOCATES its section, SCROLLS it into view, and
+ * OVERLAYS a "여기입니다" pointer; it never arms a click observer and never waits for a NAVER interaction. The
+ * seller reads the section, then advances with SellerOps's own "다음" (a `REQUEST_STEP_RECHECK` at the
+ * checkpoint stage). `create_app` is here too: SellerOps points at the register control and the seller creates
+ * the app themselves, then presses "다음" — the following `api_group` checkpoint's own locate gates that they
+ * actually reached the detail page. `return` is a guidance-only checkpoint (no NAVER section to locate).
+ */
+export const ISSUANCE_CHECKPOINT_TARGETS: readonly IssuanceTarget[] = ["create_app", "api_group", "credentials", "return"];
+
+/** True for a same-page viewport checkpoint (advance on operator "다음"); false only for {@link ISSUANCE_TRANSITION_OBSERVE_TARGET}. */
+export function isCheckpointTarget(target: IssuanceTarget): boolean {
+  return ISSUANCE_CHECKPOINT_TARGETS.includes(target);
+}
+
+/**
  * The seller-barrier stage each control rests on. Shared (rather than kept private in the engine) so the
  * session can ask "is this barrier still open for this target" without reaching into engine internals.
  */

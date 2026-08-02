@@ -485,6 +485,47 @@ read가 발화. 동일 고정라벨 locate는 페이지가 수동 안정화되�
   (새 stage/status/enum/마이그레이션 없음; `page_mismatch`·`REQUEST_STEP_RECHECK` 재사용). **FE 변경 없음.** **라이브 실행·
   push/PR 없음.** 완료 후 existing-app Phase B live-proof runtime을 **fresh PREPARED까지만** 만들고 승인 대기.
 
+### 0.2.11 개정 — **`NAVER Existing-App Same-Page Guidance v1`: app_detail 상의 api_group·credentials를 클릭 barrier가 아닌 viewport CHECKPOINT로** ⭐ 현행 issuance 상태
+
+0.2.10의 봉합(settle+park+bounded recheck) 뒤에도 **라이브 재시도(2026-08-02)에서 `api_group` locate가 여전히
+execution-context-destroyed로 throw**됐다: NAVER app_detail SPA가 `networkidle` 뒤에도 재렌더되어 in-page read를
+파괴. 오버레이가 mount 전에 실패 → 조작자 화면에 아무 안내도 안 뜸. 근본 재설계: **app_detail 진입 후에는 NAVER 클릭을
+기다리지 않는다.** open_app만 실제 전환을 관찰하고, `api_group`/`애플리케이션 ID`는 **같은 페이지의 viewport checkpoint**로
+처리한다.
+
+- **타깃 분류(신규, `issuance-driver.ts`):** `ISSUANCE_TRANSITION_OBSERVE_TARGET = open_app`(유일 관찰 대상) vs
+  `ISSUANCE_CHECKPOINT_TARGETS = [create_app, api_group, credentials, return]`(`isCheckpointTarget`). `OBSERVE_
+  USER_CLICK_TRANSITION`은 이제 **open_app 전용**.
+- **checkpoint 처리(각 단계):** ① 페이지 안정화(`settleSurface`) ② 섹션 locator 확인 ③ 섹션으로 scroll(오버레이 mount가
+  `scrollIntoView(center)` 수행 — `overlay.ts`, 중복 스크롤 없음) ④ 오버레이로 위치 안내("여기입니다 → SellerOps에서
+  '다음'") ⑤ **NAVER 요소 클릭을 기다리지 않음**(observer arm 제거) ⑥ **SellerOps '다음'으로 진행**.
+- **엔진(`issuance-engine.ts`):** checkpoint의 `onTargetHighlighted`는 `{observe}` 대신 **`"NONE"`(정지·대기)** 반환 →
+  observer 무장 없음. barrier에서의 `REQUEST_STEP_RECHECK`는 checkpoint면 **`advanceCheckpoint`("다음": STEP_COMPLETED
+  후 다음 컨트롤 guide)**, open_app이면 **재관찰**(`{observe}`). `resume`은 checkpoint를 **재-guide**(재정착·재locate·재scroll·
+  재overlay), open_app은 재관찰. **open_app은 그대로** 전환 관찰 barrier(`{observe}` + `VERIFY_OPEN`) — 불변.
+- **드라이버(`naver-issuance-driver.ts`):** `armObserve` = **완전 no-op**(클릭 observer 제거; 유일 관찰 open_app은 category
+  poll). `observeUserAction`은 open_app만 `observeLeftApplicationsList`; checkpoint는 호출 안 됨(도달 시 fail-closed).
+  **bounded in-page 재시도** `evalWithSettleRetry`(settle→read; exec-context throw 시 재settle+재read,
+  `MAX_INPAGE_RETRIES=2`, 재시도 간격 옵션화) — 모두 실패해야 throw → 엔진 recoverable park. 오버레이 라벨을 "확인 후
+  SellerOps에서 '다음'"으로 갱신.
+- **회복은 in-place 재-guide(독립 리뷰 M1 반영):** open_app 뒤 런은 app_detail에 상주하므로, checkpoint park의 회복을
+  **상단 재-probe로 하면 app_detail이 `page_mismatch`로 오분류되어 dead-end**가 된다. 그래서 `recheck`는 **checkpoint를
+  guide 중일 때 park면 그 섹션을 제자리에서 재-guide**(re-settle→re-locate→re-scroll→re-overlay)한다 — 일시적 locate miss
+  (`target_not_found`), `page_mismatch`, surface-close, exec-context throw **모두** 동일 경로로 self-heal(화면에 섹션이 오면
+  즉시 성공). checkpoint가 아닌 park(초기 probe/login/open_app 전환)만 상단 재-probe. **0.2.10의 guideFaultTarget latch +
+  consecutiveDriveFaults cap 제거**(체크포인트 모델에선 dead-end 원인) — "bounded"는 이제 드라이버 `evalWithSettleRetry`
+  (attempt당) + **명시적 '다음' 회복(auto-loop 없음)**이 담당.
+- **매니페스트(`approval-manifest.ts`):** 새 read-only 능력 **`REVEAL_SECTION_IN_VIEWPORT`**(섹션 scroll, value-free) 추가 +
+  `OBSERVE_USER_CLICK_TRANSITION` **open_app 전용** 명시.
+- **자동 recheck 의존 제거:** checkpoint는 park가 아니라 barrier이므로 "park에서 10초 auto-recheck" 루프로는 진행되지 않는다 —
+  진행은 **명시적 '다음'(REQUEST_STEP_RECHECK) 한 번씩**. 즉 minimal-bridge-client의 auto-recheck 스팸 의존이 구조적으로
+  제거됨(라이브 구동은 checkpoint마다 명시적 advance; auto-recheck는 park 회복에만).
+- **게이트·리뷰:** collector typecheck 그린 + 전체 **6158 tests 그린**(+checkpoint 계약 3 + bounded-retry 드라이버 2 +
+  in-place 회복 3; 회귀 갱신). 독립 적대적 리뷰 **HIGH=0**; **MEDIUM 1건(M1: checkpoint park가 상단 재-probe로 dead-end)
+  반영 = in-place 재-guide로 수정**; LOW 반영(observeUserAction fail-closed). **계약 불변**(새 stage/status/enum/마이그레이션
+  없음). **FE 변경 없음.** **라이브 실행·push/PR 없음.** api_group/credentials의 existing-app 라이브 증명은 이 재설계 뒤에도
+  **미증명(다음 gated 승인 필요)**.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

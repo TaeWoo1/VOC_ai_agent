@@ -12,6 +12,36 @@
 
 ---
 
+## 2026-08-02 부록 (7) — Existing-App Same-Page Guidance: api_group·credentials = viewport CHECKPOINT (현행)
+
+> `NAVER Existing-App Same-Page Guidance v1`. 부록(6)의 라이브 재시도에서 `api_group` locate가 settle 뒤에도
+> execution-context-destroyed로 계속 throw → app_detail에서는 **NAVER 클릭을 기다리지 않는** 재설계. 세부: 슬라이스 §0.2.11.
+> **라이브 실행 없음.**
+
+- **재설계:** open_app만 실제 NAVER 클릭/전환을 관찰(`OBSERVE_USER_CLICK_TRANSITION` open_app 전용). app_detail 진입 후
+  `api_group`·`애플리케이션 ID`는 **같은 페이지 viewport CHECKPOINT** — ① 안정화 ② 섹션 locate ③ scroll(오버레이 mount가
+  수행) ④ 오버레이 위치 안내 ⑤ **클릭 대기 안 함(observer arm 제거)** ⑥ **SellerOps '다음'으로 진행**. `create_app`도
+  checkpoint(등록 컨트롤 안내 → 직접 생성 → '다음'; 다음 api_group checkpoint의 locate가 app_detail 게이트). `return`은
+  guidance-only checkpoint.
+- **엔진:** checkpoint `onTargetHighlighted`→`"NONE"`(정지) → observer 무장 0. barrier에서 `REQUEST_STEP_RECHECK`는
+  checkpoint면 `advanceCheckpoint`("다음"), open_app이면 재관찰. `resume`은 checkpoint 재-guide. open_app 전환 관찰
+  barrier + VERIFY_OPEN 불변.
+- **드라이버:** `armObserve` 완전 no-op. **bounded in-page 재시도**(settle→read; exec-context throw 시 재settle+재read,
+  `MAX_INPAGE_RETRIES=2`) → 모두 실패해야 throw → recoverable park. scroll은 기존 오버레이 mount의 `scrollIntoView(center)`
+  재사용(중복 없음).
+- **회복=in-place 재-guide(독립 리뷰 M1):** open_app 뒤 런은 app_detail 상주 → checkpoint park를 상단 재-probe하면
+  app_detail이 page_mismatch로 오분류되어 dead-end. `recheck`는 checkpoint를 guide 중이면 그 섹션을 **제자리 재-guide**
+  (target_not_found/page_mismatch/surface-close/throw 모두 self-heal); 그 외 park만 재-probe. **부록(6)의 latch+cap 제거**;
+  bound은 드라이버 재시도 + 명시적 '다음'(auto-loop 없음).
+- **매니페스트:** read-only 능력 `REVEAL_SECTION_IN_VIEWPORT` 추가; `OBSERVE_USER_CLICK_TRANSITION` open_app 전용 명시.
+- **auto-recheck 의존 제거:** checkpoint는 park가 아닌 barrier이므로 auto-recheck 루프로 진행되지 않음 — 진행은 명시적
+  '다음' 한 번씩(auto-recheck는 park 회복에만).
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**; **FE 변경 없음.** collector typecheck + 전체 **6158 tests** 그린.
+  독립 적대적 리뷰 **HIGH=0**(MEDIUM 1=M1 in-place 회복 반영; LOW 반영). **라이브 highlight·클릭·credential 값읽기·push/PR
+  없음.** api_group/credentials existing-app 라이브 증명은 **미증명(PENDING, 다음 gated 승인 필요)**.
+
+---
+
 ## 2026-08-02 부록 (6) — Post-Navigation Highlight Reliability: guide 레이스 봉합 (현행)
 
 > `NAVER Post-Navigation Highlight Reliability v1`. 부록(5) existing-app 흐름의 **라이브 부분 증명** 갭을 코드로 봉합.

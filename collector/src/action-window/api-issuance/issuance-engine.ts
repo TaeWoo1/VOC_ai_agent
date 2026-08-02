@@ -20,7 +20,7 @@
  */
 import type { ActionWindowRunView, EventEnvelope, EventPayload, EventType, RunStatus } from "../../../../contracts/action-window/v2/index";
 import { branchAfterProbe, classifyAppListPopulation } from "./api-center-adapter";
-import { TARGET_BARRIER_STAGE, type ApplicationsRead, type IssuanceSurfaceProbe, type IssuanceTarget } from "./issuance-driver";
+import { TARGET_BARRIER_STAGE, isCheckpointTarget, type ApplicationsRead, type IssuanceSurfaceProbe, type IssuanceTarget } from "./issuance-driver";
 import type { LocateResult } from "../engine";
 import {
   ISSUANCE_PAUSED_COMMANDS,
@@ -89,28 +89,6 @@ const TARGET_STEP: Readonly<Record<IssuanceTarget, number>> = {
   return: 5,
 };
 
-/**
- * Which targets a drive fault may RE-GUIDE on recheck. Only the fixed-label HIGHLIGHT controls (they are
- * located by an in-page read that can race a navigation and throw). `open_app`/`return` are guidance overlays
- * whose locate is a synthetic constant that never queries the page — a fault there recovers by re-probing, not
- * by re-locating a control that does not exist.
- */
-const GUIDE_FAULT_RETRYABLE: Readonly<Record<IssuanceTarget, boolean>> = {
-  create_app: true,
-  open_app: false,
-  api_group: true,
-  credentials: true,
-  return: false,
-};
-
-/**
- * How many CONSECUTIVE drive faults on the guided controls are re-guided before the engine stops retrying the
- * throwing operation. A settle-before-locate (in the session) makes a genuine navigation race recover on the
- * first recheck; this cap only bounds a PERMANENT fault (a page that destroys the execution context on every
- * read) so an auto-recheck loop cannot re-run it forever — past the cap a recheck re-probes from the top.
- */
-const MAX_CONSECUTIVE_DRIVE_FAULTS = 3;
-
 export class IssuanceEngine {
   private readonly runId: string;
   private readonly channelCode: string;
@@ -124,17 +102,8 @@ export class IssuanceEngine {
   private completedSteps = 0;
   private guidanceEnabled = true;
   private hasExistingApp = false;
-  /** The control the current barrier rests on, so a recheck/resume re-arms the right observation. */
+  /** The control the current barrier/checkpoint rests on, so a recheck/resume re-guides the right section. */
   private currentTarget: IssuanceTarget | null = null;
-  /**
-   * Set when a drive fault parked recoverably while guiding a highlight control: a `REQUEST_STEP_RECHECK`
-   * RE-GUIDES this target (settling the surface first) instead of re-probing from the applications list — the
-   * seller is already on the right page, the locate just raced a navigation. Cleared once the recheck consumes it
-   * or once the consecutive-fault cap is hit (then a recheck re-probes normally).
-   */
-  private guideFaultTarget: IssuanceTarget | null = null;
-  /** CONSECUTIVE drive faults since the last clean highlight — bounds re-guiding of a permanent fault. */
-  private consecutiveDriveFaults = 0;
   private targetSig: Partial<Record<IssuanceTarget, string>> = {};
   private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
   private blockerRecoverable = false;
@@ -179,30 +148,35 @@ export class IssuanceEngine {
   }
 
   /**
-   * "I did it, look again."
+   * "I did it, look again." — the repair at a park, and "다음" at a checkpoint.
    *
-   * <p>At a park (login / target-not-found / page-mismatch) this is the repair: it re-probes the surface from
-   * the top (mirroring import's `SESSION_BLOCKED → PREPARE`). At a seller barrier it re-arms observation of
-   * the current control rather than completing the step — the runtime alone decides a step is done.
+   * <p>Recovery depends on WHERE the seller is:
+   * <ul>
+   *   <li><b>Park while guiding a same-page CHECKPOINT</b> (create_app / api_group / credentials / return) →
+   *       RE-GUIDE that section IN PLACE (re-settle → re-locate → re-highlight). The seller is on the app /
+   *       detail page, NOT the applications list — re-probing for `app_list` would reclassify their legitimate
+   *       `app_detail` as `page_mismatch` and dead-end them. This one path recovers every checkpoint park: a
+   *       transient locate miss (`target_not_found`), a `page_mismatch`, a surface close, or an execution-context
+   *       throw. It self-heals — if the reopened/scrolled page is wrong it just re-parks recoverably, and the
+   *       instant the section is on screen the re-locate succeeds.</li>
+   *   <li><b>Park with no checkpoint in flight</b> (the initial probe, a login gate, or the `open_app`
+   *       transition) → re-probe the surface from the top (mirroring import's `SESSION_BLOCKED → PREPARE`); the
+   *       seller belongs back on the applications list.</li>
+   *   <li><b>Checkpoint barrier</b> → "다음" advances it (see the barrier branch below).</li>
+   *   <li><b>open_app barrier</b> → re-arm the navigation observation.</li>
+   * </ul>
    */
   private recheck(): IssuanceEffect {
     if (isIssuancePark(this.stage)) {
-      // A drive-fault park (a navigation race on a highlight control) recovers by RE-GUIDING that same control on
-      // the now-settled surface — NOT by re-probing from the applications list, which would dead-end a seller who
-      // has legitimately left the list to reach the app detail page. Bounded: past the cap this is cleared and the
-      // recheck falls through to the ordinary re-probe below (see onDriveFault).
-      if (this.guideFaultTarget) {
-        const target = this.guideFaultTarget;
-        this.guideFaultTarget = null;
+      if (this.currentTarget && isCheckpointTarget(this.currentTarget)) {
+        const target = this.currentTarget;
         this.blockerCode = null;
         this.blockerRecoverable = false;
-        this.currentTarget = target;
         this.activeStepIndex = TARGET_STEP[target];
         // Re-locate as AUTOMATIC work (RUNNING), NOT a barrier: the frontend must never see a "press this
-        // highlighted control" barrier before the re-highlight exists (that window has no highlight on the page
-        // after the fault's CLEAR_HIGHLIGHT), and while this automatic stage is showing a concurrent
-        // REQUEST_STEP_RECHECK resolves to NONE — so it cannot arm a SECOND observation racing the re-guide. The
-        // guide then re-locates → re-highlights and sets the proper barrier. Bumps the revision (a state change).
+        // highlighted control" barrier before the re-highlight exists, and while this automatic stage shows a
+        // concurrent REQUEST_STEP_RECHECK resolves to NONE — so it cannot double-guide. The guide then re-locates,
+        // re-scrolls, re-highlights, and rests at the checkpoint again. Bumps the revision (a state change).
         this.stage = "locating_applications";
         this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
         return { guide: target };
@@ -215,8 +189,28 @@ export class IssuanceEngine {
       this.emit("RUN_STATUS_CHANGED", { status: "PREPARING" });
       return "PROBE";
     }
-    if (isIssuanceBarrier(this.stage) && this.currentTarget) return { observe: this.currentTarget };
+    if (isIssuanceBarrier(this.stage) && this.currentTarget) {
+      // At a same-page VIEWPORT CHECKPOINT, `REQUEST_STEP_RECHECK` IS the operator's "다음": there is no NAVER
+      // action to re-observe — the seller read the highlighted section — so it COMPLETES the checkpoint and guides
+      // the next control. At the transition-observe barrier (open_app) it re-arms the navigation observation
+      // (the runtime alone decides the transition happened, by observing it).
+      if (isCheckpointTarget(this.currentTarget)) return this.advanceCheckpoint(this.currentTarget);
+      return { observe: this.currentTarget };
+    }
     return "NONE";
+  }
+
+  /**
+   * "다음" at a viewport checkpoint: the operator confirmed they saw the highlighted section (API group /
+   * Application ID / register control / return guidance). No NAVER click was observed — a checkpoint is a
+   * same-page pointer, not a click barrier — so this COMPLETES the step and guides the next control. Only
+   * meaningful while resting on that checkpoint's own barrier for its current target.
+   */
+  private advanceCheckpoint(target: IssuanceTarget): IssuanceEffect {
+    if (this.currentTarget !== target || this.stage !== TARGET_BARRIER[target]) return "NONE";
+    this.completedSteps = this.activeStepIndex;
+    this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
+    return this.advanceAfterBarrier(target);
   }
 
   /* ── automatic-drive callbacks ────────────────────────────────────────────── */
@@ -225,8 +219,6 @@ export class IssuanceEngine {
     this.started = true;
     this.stage = "opening";
     this.activeStepIndex = 1;
-    this.consecutiveDriveFaults = 0;
-    this.guideFaultTarget = null;
     this.emit("RUN_STARTED", { status: "PREPARING" });
     this.emit("RUN_STATUS_CHANGED", { status: "PREPARING" });
     return "PROBE";
@@ -294,13 +286,15 @@ export class IssuanceEngine {
     this.stage = TARGET_BARRIER[target];
     this.activeStepIndex = TARGET_STEP[target];
     this.currentTarget = target;
-    // A clean highlight breaks any drive-fault chain — reset the consecutive-fault cap.
-    this.consecutiveDriveFaults = 0;
     this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
     this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
     this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: res.sig });
     this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
-    return { observe: target };
+    // A same-page VIEWPORT CHECKPOINT (api_group / credentials / create_app / return) does NOT arm a NAVER-click
+    // observation — the section is highlighted + scrolled into view and the run RESTS until the operator presses
+    // SellerOps's "다음" (a REQUEST_STEP_RECHECK at this stage advances it). Only the transition-observe target
+    // (open_app) arms an observation of the seller's own `app_list → app_detail` navigation.
+    return isCheckpointTarget(target) ? "NONE" : { observe: target };
   }
 
   /**
@@ -309,14 +303,14 @@ export class IssuanceEngine {
    */
   onUserActionObserved(target: IssuanceTarget): IssuanceEffect {
     if (this.currentTarget !== target || this.stage !== TARGET_BARRIER[target]) return "NONE";
-    // `open_app` is NAVIGATION guidance: the driver observed the seller LEAVE the applications list, but the
+    // `open_app` is the ONLY observed target: the driver observed the seller LEAVE the applications list, but the
     // step is not done until we re-probe and confirm they reached the app DETAIL page. Defer the observation /
     // completion events to `onOpenAppVerified` so a wrong page / multiple transitions parks instead of advancing.
     if (target === "open_app") return "VERIFY_OPEN";
-    this.emit("USER_ACTION_OBSERVED", { stepId: this.stepId(), observed: true });
-    this.completedSteps = this.activeStepIndex;
-    this.emit("STEP_COMPLETED", { stepId: this.stepId(), stepStatus: "COMPLETED" });
-    return this.advanceAfterBarrier(target);
+    // A viewport CHECKPOINT never completes on an observed NAVER action — it advances only on the operator's own
+    // "다음" (`advanceCheckpoint`). This branch is unreachable today (no checkpoint arms an observer); if a future
+    // change ever armed one, FAIL CLOSED here rather than silently completing a step the seller never confirmed.
+    return "NONE";
   }
 
   /**
@@ -381,10 +375,6 @@ export class IssuanceEngine {
    */
   onSurfaceClosed(): IssuanceEffect {
     if (isIssuanceTerminal(this.stage)) return "NONE";
-    // A closed window is never "already on the right page": drop any drive-fault re-guide latch so a recheck
-    // after reopening re-probes from the top rather than re-guiding a stale control on a freshly loaded (and
-    // possibly wrong) page. Done before the idempotent early-return, which would otherwise skip park()'s own clear.
-    this.guideFaultTarget = null;
     if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
     this.park("page_mismatch", "UI_DRIFT");
     return "CLEAR_HIGHLIGHT";
@@ -392,26 +382,18 @@ export class IssuanceEngine {
 
   /**
    * A drive effect threw — most often a navigation RACE: the seller's own page moved under an in-page
-   * locate/highlight read (right after they opened the app), destroying the execution context. This is not a
-   * failure; it PARKS recoverably on `page_mismatch` rather than leaving the run idle with no barrier. Below the
-   * consecutive-fault cap it remembers the control being guided so a `REQUEST_STEP_RECHECK` RE-GUIDES it (the
-   * session settles the surface first, so the retry lands on a stable page); at/above the cap it forgets the
-   * target so a recheck re-probes from the top instead of re-running the operation that keeps throwing — a
-   * permanent fault therefore stops retrying. Returns `CLEAR_HIGHLIGHT` so any half-applied annotation is dropped.
+   * locate/highlight read, destroying the execution context. This is not a failure; it PARKS recoverably on
+   * `page_mismatch` rather than leaving the run idle with no barrier. Recovery is decided in {@link recheck}: a
+   * fault while guiding a same-page CHECKPOINT re-guides that section IN PLACE (the driver already bounded the
+   * in-page read with `evalWithSettleRetry`, so a transient beat has passed; a genuinely broken page just re-parks
+   * — it never dead-ends and never auto-loops, because progress is operator-driven "다음", not an auto-recheck).
+   * Sets `activeStepIndex` to the guided control's step (`onOpenAppVerified` flips currentTarget to `api_group`
+   * before its highlight lands) and returns `CLEAR_HIGHLIGHT` so any half-applied annotation is dropped.
    */
   onDriveFault(): IssuanceEffect {
     if (isIssuanceTerminal(this.stage)) return "NONE";
-    this.consecutiveDriveFaults += 1;
-    const target = this.currentTarget;
-    const retryable = !!target && GUIDE_FAULT_RETRYABLE[target] && this.consecutiveDriveFaults <= MAX_CONSECUTIVE_DRIVE_FAULTS;
-    // Show the step of the control we were guiding — `onOpenAppVerified` flips currentTarget to `api_group` but
-    // leaves activeStepIndex at 2 until the highlight lands, so a fault before highlight would otherwise park on
-    // the stale step-2 copy.
-    if (retryable && target) this.activeStepIndex = TARGET_STEP[target];
-    // park() clears any prior guideFaultTarget (only a drive fault may arm it) — so set the latch AFTER the park,
-    // and only for a retryable highlight target under the cap.
+    if (this.currentTarget) this.activeStepIndex = TARGET_STEP[this.currentTarget];
     this.park("page_mismatch", "UI_DRIFT");
-    this.guideFaultTarget = retryable ? target : null;
     return "CLEAR_HIGHLIGHT";
   }
 
@@ -426,7 +408,10 @@ export class IssuanceEngine {
   private resume(): IssuanceEffect {
     this.paused = false;
     this.emit("RUN_STATUS_CHANGED", { status: "WAITING_FOR_HUMAN" });
-    return this.currentTarget ? { observe: this.currentTarget } : "NONE";
+    if (!this.currentTarget) return "NONE";
+    // Resume RE-GUIDES a viewport checkpoint (re-settle → re-locate → re-scroll → re-overlay the section, since a
+    // pause may have scrolled/re-rendered the page under it); it re-arms the navigation observation for open_app.
+    return isCheckpointTarget(this.currentTarget) ? { guide: this.currentTarget } : { observe: this.currentTarget };
   }
 
   /** Cancel, or leave for the manual path — both are the same benign, non-completing terminal. */
@@ -444,10 +429,6 @@ export class IssuanceEngine {
    * `RUN_FAILED`: the run is not over. A `REQUEST_STEP_RECHECK` re-probes the surface from the top.
    */
   private park(stage: "waiting_login" | "target_not_found" | "page_mismatch", code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT"): IssuanceEffect {
-    // A drive-fault re-guide latch belongs ONLY to a drive fault (which re-arms it immediately AFTER calling
-    // park). Any other park — login, probe mismatch, target-not-found, surface close — clears it, so a later
-    // recheck never re-guides a stale control on a page the seller has since left.
-    this.guideFaultTarget = null;
     // Idempotent while already parked on this exact cause.
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

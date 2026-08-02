@@ -60,6 +60,8 @@ interface FakePageOptions {
    * happy landing); set to `UNKNOWN_CENSUS` / `LOGIN_CENSUS` to model a wrong page / expired session.
    */
   postOpenCensus?: ApiCenterStructuralCensus;
+  /** Throw an execution-context error on the first N fixed-label locate/tag reads (models a post-nav re-render). */
+  throwLocateTimes?: number;
 }
 
 /** A scripted, browser-free Page: records every evaluate, returns scripted values, and spies on `click`. */
@@ -75,6 +77,7 @@ class FakePage {
 
   readonly scripts: string[] = [];
   clickCalls = 0;
+  private throwLocateLeft: number;
   private readonly closeHandlers: Array<() => void> = [];
 
   constructor(o: FakePageOptions = {}) {
@@ -84,6 +87,7 @@ class FakePage {
     this.appEntryCount = o.appEntryCount ?? 0; // default = EMPTY app list → the calibrated new-app (create) path
     this.observed = o.observed ?? true;
     this.postOpenCensus = o.postOpenCensus ?? APP_DETAIL_CENSUS;
+    this.throwLocateLeft = o.throwLocateTimes ?? 0;
   }
 
   url(): string {
@@ -103,7 +107,14 @@ class FakePage {
       this.opened = true;
       return this.appEntryCount;
     }
-    if (s.includes("issuance-fixed-label-tag") || s.includes("issuance-fixed-label-locate")) return this.locate;
+    if (s.includes("issuance-fixed-label-tag") || s.includes("issuance-fixed-label-locate")) {
+      // Model a post-navigation re-render destroying the execution context under the fixed-label read.
+      if (this.throwLocateLeft > 0) {
+        this.throwLocateLeft -= 1;
+        throw new Error("execution context was destroyed");
+      }
+      return this.locate;
+    }
     if (s.includes("issuance-cleartag")) return true;
     return undefined;
   }
@@ -206,11 +217,29 @@ function allScripts(...pages: FakePage[]): string[] {
   return pages.flatMap((p) => p.scripts);
 }
 
+/**
+ * Press SellerOps's "다음" (a REQUEST_STEP_RECHECK) through every remaining viewport checkpoint until the run
+ * completes — api_group / credentials / create_app / return no longer wait for a NAVER click, so the operator
+ * advances each. Bounded so a stuck run can't spin the test. (At a recoverable park this also re-probes.)
+ */
+async function pressNextToComplete(
+  io: ReturnType<typeof loopback>,
+  engine: IssuanceEngine,
+  session: IssuanceGuidanceSession,
+): Promise<void> {
+  for (let i = 0; i < 8 && engine.currentStage() !== "guidance_complete"; i++) {
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, `nx${i}`);
+    await session.whenSettled();
+  }
+}
+
 describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (create) happy path (end-to-end)", () => {
   it("walks probe → read → create_app → api_group → credentials → return → COMPLETED, never clicking", async () => {
     const { io, engine, session, page } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
+    // create_app / api_group / credentials / return are same-page checkpoints now — advance each with "다음".
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
@@ -229,9 +258,10 @@ describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (creat
   });
 
   it("annotates read-only (data-aw-target set then cleared) and mounts then unmounts the overlay", async () => {
-    const { io, session, page } = build({ appEntryCount: 0 });
+    const { io, engine, session, page } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
+    await pressNextToComplete(io, engine, session); // walk to completion so cleanup (clear-tag / untrack) runs
 
     const scripts = allScripts(page);
     // The read-only tag is set by the fixed-label locate/tag script…
@@ -289,6 +319,8 @@ describe("NaverIssuanceDriver — the EXISTING-app branch (open_app = navigation
     const { io, engine, session, page } = build({ appEntryCount: 1 });
     startRun(io);
     await session.whenSettled();
+    // open_app is the ONLY observed transition; api_group / credentials / return are checkpoints — advance them.
+    await pressNextToComplete(io, engine, session);
 
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
     expect(step2?.copyParams?.targetKind).toBe("open_app");
@@ -329,10 +361,10 @@ describe("NaverIssuanceDriver — login wait (recoverable park)", () => {
     expect(io.lastView()?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
 
-    // The seller logs in on their own screen; the page is now the (empty) app list. Re-check → re-probe → drive on.
+    // The seller logs in on their own screen; the page is now the (empty) app list. Re-check → re-probe → drive
+    // to the create checkpoint, then "다음" through the remaining checkpoints to completion.
     page.census = APP_LIST_CENSUS;
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.blocker).toBeUndefined();
@@ -352,6 +384,7 @@ describe("NaverIssuanceDriver — newest-tab handling", () => {
 
     startRun(io);
     await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
 
     // The run completed off the FRESH (newest) tab; the stale tab was never read.
     expect(engine.currentStage()).toBe("guidance_complete");
@@ -405,5 +438,26 @@ describe("NaverIssuanceDriver — read-only probeTargetMatch (Phase-B selector p
     const driver = new NaverIssuanceDriver(asPage(page));
     const res = await driver.probeTargetMatch("api_group");
     expect(res).toEqual({ matchCount: 3, canHighlight: false });
+  });
+});
+
+describe("NaverIssuanceDriver — bounded in-page retry on an execution-context race", () => {
+  it("RECOVERS a transient execution-context error on a locate (settle + bounded retry), no park needed", async () => {
+    // The app-detail SPA re-rendered under the FIRST fixed-label read; the driver settles and retries and the
+    // second read succeeds — so a one-off post-navigation race never reaches the engine as a fault.
+    const page = new FakePage({ locate: { count: 1, sig: "abcd1234abcd1234" }, throwLocateTimes: 1 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    const res = await driver.locateTarget("api_group");
+    expect(res).toEqual({ count: 1, sig: "abcd1234abcd1234" });
+  });
+
+  it("GIVES UP after the bounded retries and throws (→ the engine parks recoverably), never looping forever", async () => {
+    // A page that destroys the execution context on EVERY read is a genuine fault: after the bounded retries the
+    // driver throws, and the session/engine turn that into a recoverable page_mismatch park (tested elsewhere).
+    const page = new FakePage({ throwLocateTimes: 99 });
+    const driver = new NaverIssuanceDriver(asPage(page), { inpageRetryMs: 0 });
+    await expect(driver.locateTarget("api_group")).rejects.toThrow();
+    // Bounded: MAX_INPAGE_RETRIES(2) + 1 = 3 attempts, never more.
+    expect(page.scripts.filter((s) => s.includes("issuance-fixed-label")).length).toBe(3);
   });
 });

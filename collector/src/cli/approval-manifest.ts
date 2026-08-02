@@ -18,11 +18,15 @@
  *  - `API_ISSUANCE_HIGHLIGHT_PROOF` (Phase B) — the `NaverIssuanceDriver` Action Window that highlights real
  *    controls and observes the operator's own click / navigation. It requires `SELECTORS_CALIBRATED` (now
  *    `true`): the three highlighted controls (create_app/api_group/credentials) are live-proven
- *    `matchCount===1`. Both onboarding branches are provable: the NEW-app (create) branch highlights create_app
- *    then api_group/credentials; the EXISTING-app branch guides the operator to open their app by TEXT and
- *    observes the `app_list → app_detail` transition (open_app is navigation guidance, not a highlighted row),
- *    then reuses the same api_group/credentials highlights. The empty-app (create) branch remains provable only
- *    on a store with no application; the existing-app branch on a store that already has one.
+ *    `matchCount===1`. **Same-page checkpoint model:** `OBSERVE_USER_CLICK_TRANSITION` is used for `open_app`
+ *    ONLY — the one genuine `app_list → app_detail` navigation the runtime watches. Once on the detail page, the
+ *    API group and Application ID are SAME-PAGE viewport checkpoints: the driver stabilizes, locates the section,
+ *    `REVEAL_SECTION_IN_VIEWPORT` (scrolls it into view), and overlays a pointer — it arms NO click observer and
+ *    waits for NO NAVER click; the operator advances each checkpoint with SellerOps's own "다음". Both branches
+ *    are provable: the NEW-app (create) branch points at the register control (a checkpoint), the EXISTING-app
+ *    branch guides the operator to open their app by TEXT and observes the transition, then both reach the same
+ *    api_group/credentials checkpoints. The empty-app (create) branch remains provable only on a store with no
+ *    application; the existing-app branch on a store that already has one.
  *  - `API_ISSUANCE_SELECTOR_PROBE` (Phase-B calibration) — a READ-ONLY run of the SAME `NaverIssuanceDriver`
  *    that only COUNTS how many candidates each highlight target's calibrated fixed-label locator matches (a
  *    value-free integer + a highlightable boolean); it never highlights, tags, clicks, or reads a value. It is
@@ -64,6 +68,9 @@ export const APPROVAL_ACTIONS = [
   "STRUCTURAL_CONTROL_HINTS",
   "HIGHLIGHT_REAL_CONTROL",
   "OBSERVE_USER_CLICK_TRANSITION",
+  // Phase-B same-page checkpoint: SCROLL a located section (API group / Application ID) into the viewport centre
+  // so the operator can see it. Value-free (reads nothing); it moves the viewport, never clicks/types/reads.
+  "REVEAL_SECTION_IN_VIEWPORT",
   "REDACT_SENSITIVE_REGIONS",
   "CAPTURE_REDACTED_VIEWPORT",
   // Read-only Phase-B selector probe: count how many candidates a target's FIXED-LABEL locator matches
@@ -124,6 +131,9 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
       "WAIT_OPERATOR_LOGIN_NAV",
       "CLASSIFY_SANITIZED_PAGE_CATEGORY",
       "HIGHLIGHT_REAL_CONTROL",
+      // Same-page viewport checkpoint: scroll a located section into view (value-free) before overlaying it.
+      "REVEAL_SECTION_IN_VIEWPORT",
+      // open_app ONLY: the one genuine app_list → app_detail navigation the runtime observes.
       "OBSERVE_USER_CLICK_TRANSITION",
     ],
     allowsHighlight: true,

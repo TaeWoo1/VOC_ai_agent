@@ -83,6 +83,23 @@ function command(io: ReturnType<typeof loopback>, type: string, revision: number
   });
 }
 
+/**
+ * Press SellerOps's "다음" (a REQUEST_STEP_RECHECK) through every remaining same-page viewport checkpoint until
+ * the run completes. api_group / credentials / create_app / return no longer wait for a NAVER click — the
+ * operator advances each with "다음". Bounded so a stuck run cannot spin the test; at a recoverable park a
+ * REQUEST_STEP_RECHECK also re-probes/re-guides, so this drives those recoveries too.
+ */
+async function pressNextToComplete(
+  io: ReturnType<typeof loopback>,
+  engine: IssuanceEngine,
+  session: IssuanceGuidanceSession,
+): Promise<void> {
+  for (let i = 0; i < 8 && engine.currentStage() !== "guidance_complete"; i++) {
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, `nx${i}`);
+    await session.whenSettled();
+  }
+}
+
 /** existing → 1 entry row; empty → 0 rows. */
 const EXISTING: IssuanceFixtureScript = { applications: { census: emptyCensus(), applicationEntryRowCount: 1 } };
 const EMPTY: IssuanceFixtureScript = { applications: { census: emptyCensus(), applicationEntryRowCount: 0 } };
@@ -95,12 +112,13 @@ describe("issuance session — the app-exists path", () => {
     const { io, engine, driver, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
+    // Step 2 (open_app) is the ONLY observed transition (observe:open_app + wait:open_app). api_group /
+    // credentials / return are same-page viewport checkpoints — the runtime highlights the section and RESTS
+    // (no observe/wait); the operator advances each with "다음".
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
-    // Step 2 (open the existing app) is guidance + an OBSERVED navigation: after the seller opens their app
-    // (wait:open_app), the runtime RE-PROBES (probeSurface) to verify the app_detail landing before reusing the
-    // calibrated api_group highlight. No control is "clicked" by the runtime.
     expect(driver.calls).toEqual([
       "probeSurface",
       "readApplications",
@@ -110,17 +128,11 @@ describe("issuance session — the app-exists path", () => {
       "wait:open_app",
       "probeSurface", // VERIFY_OPEN: confirm the seller reached app_detail
       "locate:api_group",
-      "highlight:api_group",
-      "observe:api_group",
-      "wait:api_group",
+      "highlight:api_group", // checkpoint — rest (no observe/wait); "다음" advances
       "locate:credentials",
-      "highlight:credentials",
-      "observe:credentials",
-      "wait:credentials",
+      "highlight:credentials", // checkpoint
       "locate:return",
-      "highlight:return",
-      "observe:return",
-      "wait:return",
+      "highlight:return", // checkpoint
       "cleanup",
     ]);
     // Step 2 used the OPEN copy/target for an existing application.
@@ -145,6 +157,8 @@ describe("issuance session — the no-app path", () => {
     const { io, engine, driver, session } = build(EMPTY);
     startRun(io);
     await session.whenSettled();
+    // create_app is a checkpoint too (point at the register control; the seller creates it, then "다음").
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     // The step-2 control is the CREATE control, not OPEN.
@@ -194,13 +208,14 @@ describe("issuance session — login wait", () => {
     expect(io.lastView()?.allowedCommands).not.toContain("PAUSE_RUN");
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
 
-    // The seller logs in on their own screen, then re-checks. Re-probe finds the app list and drives on.
+    // The seller logs in on their own screen, then re-checks. Re-probe finds the app list and drives on; the
+    // first "다음" recovers the login park, the rest advance the same-page checkpoints to completion.
     driver.setProbe({ ok: true, pageCategory: "app_list" });
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     // Three probes: the initial login park, the re-probe after login, and the VERIFY_OPEN app_detail check.
+    // (The viewport checkpoints advance on "다음" and never re-probe the surface.)
     expect(driver.calls.filter((c) => c === "probeSurface")).toHaveLength(3);
     expect(io.lastView()?.blocker).toBeUndefined();
   });
@@ -274,11 +289,65 @@ describe("issuance session — recoverable parks", () => {
   });
 });
 
+describe("issuance session — same-page viewport checkpoints (다음-driven)", () => {
+  it("rests at the api_group checkpoint after open_app — arms NO click observer — and 다음 advances (not completes)", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+
+    // After the observed open_app transition, the run RESTS at the api_group checkpoint: highlighted, waiting,
+    // but with NO observer armed and NO NAVER-click wait.
+    expect(engine.currentStage()).toBe("guiding_api_group");
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(driver.calls).toContain("highlight:api_group");
+    expect(driver.calls).not.toContain("observe:api_group");
+    expect(driver.calls).not.toContain("wait:api_group");
+
+    // "다음" ADVANCES to the next checkpoint (credentials) — it does not complete the run on its own.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guiding_credentials");
+    expect(driver.calls).toContain("highlight:credentials");
+    expect(driver.calls).not.toContain("observe:credentials");
+  });
+
+  it("observes a NAVER click/transition ONLY for open_app — never for a viewport checkpoint", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
+
+    expect(driver.calls).toContain("observe:open_app");
+    expect(driver.calls).toContain("wait:open_app");
+    for (const t of ["api_group", "credentials", "return", "create_app"]) {
+      expect(driver.calls, `observe:${t}`).not.toContain(`observe:${t}`);
+      expect(driver.calls, `wait:${t}`).not.toContain(`wait:${t}`);
+    }
+  });
+
+  it("a checkpoint completes its step on 다음 without a USER_ACTION_OBSERVED (no NAVER click was observed)", async () => {
+    const { io, engine, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled(); // rests at api_group checkpoint
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision); // 다음
+    await session.whenSettled();
+
+    const completed = io.events().filter((e) => e.type === "STEP_COMPLETED").map((e) => e.payload.stepId);
+    expect(completed).toContain("aw.issuance_api_group"); // step 3 completed by 다음
+    // USER_ACTION_OBSERVED is emitted only for the ONE observed target (open_app, step 2), never a checkpoint.
+    const observed = io.events().filter((e) => e.type === "USER_ACTION_OBSERVED").map((e) => e.payload.stepId);
+    expect(observed).toContain("aw.issuance_open_or_create_app");
+    expect(observed).not.toContain("aw.issuance_api_group");
+  });
+});
+
 describe("issuance session — post-navigation highlight reliability", () => {
   it("settles the surface before every locate (a guide never locates a still-navigating page)", async () => {
     const { io, engine, driver, session } = build(EXISTING);
     startRun(io);
     await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     // The session settled the surface at the top of each guide, and EVERY locate happened after a settle — so a
@@ -314,16 +383,16 @@ describe("issuance session — post-navigation highlight reliability", () => {
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
 
-    // "I did it, look again": the recheck re-settles + re-guides the SAME control on the now-stable page.
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-    await session.whenSettled();
+    // "다음": the first recheck re-settles + re-guides the SAME control on the now-stable page; the rest advance
+    // the recovered api_group checkpoint and the remaining checkpoints to completion.
+    await pressNextToComplete(io, engine, session);
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
-    // api_group was highlighted and observed EXACTLY ONCE (the failed attempt threw before highlighting; the
-    // recovery highlighted once) — no duplicate highlight / observer arm.
+    // api_group was highlighted EXACTLY ONCE (the failed attempt threw before highlighting; the recovery
+    // highlighted once) and NEVER observed — a checkpoint arms no click observer, so no duplicate highlight / arm.
     expect(driver.calls.filter((c) => c === "highlight:api_group")).toHaveLength(1);
-    expect(driver.calls.filter((c) => c === "observe:api_group")).toHaveLength(1);
+    expect(driver.calls.filter((c) => c === "observe:api_group")).toHaveLength(0);
   });
 
   it("recovers a race that throws during HIGHLIGHT too, clearing the half-highlight before it re-guides", async () => {
@@ -335,8 +404,7 @@ describe("issuance session — post-navigation highlight reliability", () => {
     expect(engine.currentStage()).toBe("page_mismatch");
     expect(driver.calls).toContain("clearHighlight");
 
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
@@ -348,58 +416,81 @@ describe("issuance session — post-navigation highlight reliability", () => {
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
 
-    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
-    await session.whenSettled();
+    await pressNextToComplete(io, engine, session);
     expect(engine.currentStage()).toBe("guidance_complete");
   });
 
-  it("drops the re-guide latch when the seller CLOSES the window mid-fault, so a recheck re-probes instead", async () => {
-    // A drive fault armed a re-guide of api_group. If the seller then closes the API-center window and reopens it
-    // (possibly landing back on the applications list), the recheck must NOT re-guide api_group on the wrong page —
-    // a surface close clears the latch so the recovery re-probes from the top.
+  it("recovers a CHECKPOINT park by re-guiding IN PLACE, never re-probing (the seller is on app_detail, not the list)", async () => {
+    // M1: after open_app the run lives on app_detail across the checkpoints. A checkpoint park must NOT re-probe
+    // for app_list (that would reclassify the legitimate app_detail as page_mismatch and dead-end) — it re-guides
+    // the SAME section in place. Even a surface-close at a checkpoint recovers in place. Proven with a single
+    // transient throw (recovers to the highlighted checkpoint) then completes.
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
-    const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length; // 1 (the thrown attempt)
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
+    const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length; // 1 (the thrown attempt)
 
+    // A surface close at the checkpoint does not change the recovery: still in place, never a re-probe.
     driver.closeSurface();
     await session.whenSettled();
-
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
 
-    // The recovery re-PROBED (latch dropped) rather than re-running the throwing api_group locate.
-    expect(driver.calls.filter((c) => c === "locate:api_group").length).toBe(locatesBefore);
-    expect(driver.calls.filter((c) => c === "probeSurface").length).toBeGreaterThan(probesBefore);
+    // Re-guided IN PLACE: api_group was re-located (not re-probed) and the run is back at its checkpoint.
+    expect(engine.currentStage()).toBe("guiding_api_group");
+    expect(driver.calls.filter((c) => c === "locate:api_group").length).toBeGreaterThan(locatesBefore);
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore); // NO re-probe
     expect(io.eventTypes()).not.toContain("RUN_FAILED");
+
+    await pressNextToComplete(io, engine, session);
+    expect(engine.currentStage()).toBe("guidance_complete");
   });
 
-  it("does NOT retry a PERMANENT locate fault forever — it stops re-guiding after the cap and re-probes", async () => {
-    // A page that destroys the execution context on EVERY read. The engine re-guides a bounded number of times
-    // (settle + recheck cannot help a genuinely broken page), then stops re-running the throwing locate: a recheck
-    // re-probes from the top instead, so an auto-recheck loop cannot spin the fault forever.
+  it("a PERMANENT checkpoint fault stays RECOVERABLE and re-guides in place on each 다음 — never a dead-end, never RUN_FAILED", async () => {
+    // A page that destroys the execution context on EVERY read (past the driver's bounded in-page retry). Each
+    // "다음" re-guides the section in place and re-parks recoverably — it never re-probes into a page_mismatch
+    // dead-end and never hard-fails. Progress is operator-driven (no auto-recheck), so there is no auto-loop; the
+    // per-attempt bound lives in the driver (evalWithSettleRetry, covered in the driver tests).
     const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 99 } });
     startRun(io);
     await session.whenSettled();
     expect(engine.currentStage()).toBe("page_mismatch");
 
     const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
-    for (let i = 0; i < 6; i++) {
+    const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length;
+    for (let i = 0; i < 5; i++) {
       command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, `rc${i}`);
       await session.whenSettled();
     }
 
-    // The throwing locate ran at most MAX_CONSECUTIVE_DRIVE_FAULTS + 1 times (initial + 3 re-guides), never more,
-    // no matter how many rechecks arrive — the permanent fault stopped being re-run.
-    expect(driver.calls.filter((c) => c === "locate:api_group")).toHaveLength(4);
-    // Past the cap, rechecks re-PROBE the surface instead of re-locating the throwing control.
-    expect(driver.calls.filter((c) => c === "probeSurface").length).toBeGreaterThan(probesBefore);
-    // Still a recoverable park, never a hard failure.
+    // Every 다음 re-guided IN PLACE (locate grew, no re-probe), and the run stayed a recoverable park throughout.
+    expect(driver.calls.filter((c) => c === "locate:api_group").length).toBeGreaterThan(locatesBefore);
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore); // never dead-ended to a re-probe
     expect(engine.currentStage()).toBe("page_mismatch");
-    expect(io.eventTypes()).not.toContain("RUN_FAILED");
     expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+  });
+
+  it("recovers a CLEAN target_not_found at a checkpoint by re-guiding in place (no throw involved)", async () => {
+    // Not every checkpoint miss is a throw: a transient hydration miss returns count:0 (target_not_found), which
+    // is NOT a drive fault. It must still recover in place, not re-probe for app_list. Here the miss is permanent
+    // (count:0) so it stays target_not_found, re-guiding the section each 다음 — recoverable, no dead-end.
+    const { io, engine, driver, session } = build({ ...EXISTING, locate: { api_group: { count: 0 } } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("target_not_found");
+    const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
+    const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length;
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+
+    expect(driver.calls.filter((c) => c === "locate:api_group").length).toBeGreaterThan(locatesBefore); // re-guided in place
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBe(probesBefore); // NOT re-probed
+    expect(engine.currentStage()).toBe("target_not_found"); // still recoverable, no dead-end
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
   });
 
   it("keeps every reliability-path view + event contract-valid and prohibited-field-free", async () => {
@@ -571,6 +662,15 @@ describe("issuance session — loopback E2E over the real v2 transport", () => {
       command: { protocolVersion: 2, commandId: "e2e1", runId: RUN_ID, expectedRevision: 0, type: "START_RUN", payload: { channelCode: "naver", intent: "API_ISSUANCE_GUIDANCE" } },
     });
     await session.whenSettled();
+    // The client presses "다음" (REQUEST_STEP_RECHECK) through the same-page checkpoints to completion.
+    for (let i = 0; i < 6 && engine.currentStage() !== "guidance_complete"; i++) {
+      const rev = clientViews[clientViews.length - 1]!.revision;
+      client.send({
+        kind: "aw_command",
+        command: { protocolVersion: 2, commandId: `e2e-nx${i}`, runId: RUN_ID, expectedRevision: rev, type: "REQUEST_STEP_RECHECK" },
+      });
+      await session.whenSettled();
+    }
 
     expect(engine.currentStage()).toBe("guidance_complete");
     const last = clientViews[clientViews.length - 1];

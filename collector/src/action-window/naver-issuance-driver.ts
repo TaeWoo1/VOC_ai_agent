@@ -46,7 +46,7 @@
 import type { Page } from "playwright";
 import { log } from "../log";
 import { mountOverlay, unmountOverlay } from "./overlay";
-import { armObserver, disarmObserver, waitForUserAction } from "./observer";
+import { disarmObserver } from "./observer";
 import {
   EXTRACT_API_CENTER_CENSUS,
   classifyUrlCategory,
@@ -84,6 +84,18 @@ export const DEFAULT_ISSUANCE_OBSERVE_TIMEOUT_MS = 10 * 60_000;
 /** Bounded settle before a probe read — best-effort; a thin/never-idle page just fails closed downstream. */
 const SETTLE_TIMEOUT_MS = 15_000;
 
+/**
+ * Bounded IN-PAGE retry for a locate/highlight read: the NAVER app-detail SPA can re-render/hydrate for a beat
+ * AFTER `networkidle`, destroying the execution context under a fixed-label `.evaluate` (the live-proof failure).
+ * So a locate/highlight settles then reads, and on an execution-context error it settles again and retries — up
+ * to this many EXTRA attempts before it gives up and throws (→ the engine parks recoverably). Small: a page that
+ * keeps destroying the context on every read is a genuine fault, not a transient beat.
+ */
+const MAX_INPAGE_RETRIES = 2;
+
+/** Pause between in-page retries — lets a one-off post-navigation re-render land before the next read. */
+const INPAGE_RETRY_MS = 400;
+
 /** Poll interval while observing the seller's own `app_list → app_detail` navigation for `open_app`. */
 const OPEN_NAV_POLL_MS = 1_000;
 
@@ -107,11 +119,11 @@ const OVERLAY_STEP: Readonly<Record<IssuanceTarget, number>> = {
  * every step; SellerOps never copies the Client ID / Secret (a separate masked SellerOps form does that).
  */
 const OPERATOR_STEP_LABELS: Readonly<Record<IssuanceTarget, string>> = {
-  create_app: "API 애플리케이션을 직접 생성하세요.",
-  open_app: "기존 API 애플리케이션을 직접 여세요.",
-  api_group: "커머스 API 그룹을 직접 추가하세요.",
-  credentials: "발급된 Client ID/Secret을 직접 확인하세요 (도구는 값을 읽지 않습니다).",
-  return: "SellerOps로 돌아오세요.",
+  create_app: "표시된 'API 애플리케이션 등록' 위치입니다. 직접 생성한 뒤 SellerOps에서 '다음'을 누르세요.",
+  open_app: "기존 API 애플리케이션을 직접 여세요. (SellerOps가 상세 화면 진입을 관찰합니다.)",
+  api_group: "표시된 '커머스 API' 그룹 위치를 확인한 뒤 SellerOps에서 '다음'을 누르세요.",
+  credentials: "표시된 애플리케이션 ID/Secret 위치를 확인한 뒤 SellerOps에서 '다음'을 누르세요 (도구는 값을 읽지 않습니다).",
+  return: "SellerOps로 돌아와 '다음'을 누르세요.",
 };
 
 /** A browser context whose newest tab may hold the step the seller opened. Structural subset of Playwright's. */
@@ -129,6 +141,8 @@ export interface NaverIssuanceDriverOptions {
    * tab (mirrors `observe-api-center`'s newest-tab handling). Absent → the single injected page is used.
    */
   context?: IssuanceContextLike;
+  /** Pause between in-page locate/highlight retries. Defaults to {@link INPAGE_RETRY_MS}; tests set 0. */
+  inpageRetryMs?: number;
 }
 
 /**
@@ -236,6 +250,27 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     await this.settle(this.activePage());
   }
 
+  /**
+   * SETTLE then run an in-page locate/highlight read, retrying on an execution-context error (the app-detail SPA
+   * re-rendered under the `.evaluate` right after `networkidle`). Bounded by {@link MAX_INPAGE_RETRIES}: each
+   * retry re-settles and pauses so a one-off post-navigation re-render can land, then re-reads. If every attempt
+   * throws, the last error propagates — the engine then parks recoverably (`onDriveFault`), so a genuinely broken
+   * page fails closed rather than looping. Value-free: it only runs the caller's value-free script.
+   */
+  private async evalWithSettleRetry<R>(page: Page, script: string): Promise<R> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= MAX_INPAGE_RETRIES; attempt++) {
+      await this.settle(page);
+      try {
+        return await this.evalStr<R>(page, script);
+      } catch (e) {
+        lastErr = e;
+        if (attempt < MAX_INPAGE_RETRIES) await sleep(this.opts.inpageRetryMs ?? INPAGE_RETRY_MS);
+      }
+    }
+    throw lastErr;
+  }
+
   async probeSurface(): Promise<IssuanceSurfaceProbe> {
     const page = this.activePage();
     await this.settle(page);
@@ -270,7 +305,8 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
     const script = guidedLocateScript(target, false);
     if (!script) return { count: 0 }; // fail closed rather than highlight a non-calibrated control
-    const res = await this.evalStr<LocateResult>(this.activePage(), script);
+    // Settle + bounded retry: the fixed-label read must not race a still-settling post-navigation re-render.
+    const res = await this.evalWithSettleRetry<LocateResult>(this.activePage(), script);
     return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
   }
 
@@ -289,10 +325,13 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     if (!isIssuanceHighlightTarget(target)) return { count: 0 };
     const script = guidedLocateScript(target, true);
     if (!script) return { count: 0 }; // fail closed → park, never a wrong highlight
-    // Anti-drift: RE-locate AND tag in one in-page pass. The engine compares this sig against the locate sig
-    // and parks on page_mismatch if the unique match drifted between the two reads.
-    const res = await this.evalStr<LocateResult>(page, script);
+    // Anti-drift: RE-locate AND tag in one in-page pass (settle + bounded retry against a post-nav re-render). The
+    // engine compares this sig against the locate sig and parks on page_mismatch if the unique match drifted.
+    const res = await this.evalWithSettleRetry<LocateResult>(page, script);
     if (res.count === 1 && res.sig) {
+      // Same-page viewport checkpoint: mount the reused overlay, which SCROLLS the tagged section into the
+      // viewport centre (see `overlay.ts`) and shows the "여기입니다" pointer — the operator sees where the API
+      // group / Application ID is without any NAVER click being awaited (`REVEAL_SECTION_IN_VIEWPORT`).
       await this.mountStepOverlay(page, target);
       return { count: 1, sig: res.sig };
     }
@@ -316,29 +355,23 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     await this.evalStr(page, IN_PAGE_CLEAR_TAG).catch(() => undefined);
   }
 
-  async armObserve(target: IssuanceTarget): Promise<void> {
-    // `return` (SellerOps-side action) and `open_app` (a NAVIGATION observed by category poll, not a click on a
-    // tagged control) have no NAVER control to arm a click observer on. For the fixed-label controls, re-tag the
-    // control (a resume/recheck may arm without a fresh highlight) then arm the read-only click observer.
-    if (target === "return" || target === "open_app" || !isIssuanceHighlightTarget(target)) return;
-    const page = this.activePage();
-    const script = guidedLocateScript(target, true);
-    if (script) await this.evalStr(page, script).catch(() => undefined);
-    await armObserver(page);
+  async armObserve(_target: IssuanceTarget): Promise<void> {
+    // No click observer is EVER armed for issuance now. The only observed target — `open_app` — is watched as a
+    // page CATEGORY transition (see `observeUserAction` → `observeLeftApplicationsList`), not as a click on a
+    // tagged control; the same-page viewport checkpoints (api_group / credentials / create_app / return) advance
+    // on the operator's own SellerOps "다음", never on a NAVER click. So arming observation is a deliberate no-op.
+    return;
   }
 
   async observeUserAction(target: IssuanceTarget): Promise<boolean> {
-    // The `return` guidance has no NAVER control to observe — its guidance is complete once shown (the seller's
-    // return to SellerOps is a SellerOps-side action). `guidance_complete` means the TUTORIAL finished, never a
-    // stored credential or a made connection, so advancing here claims nothing more.
-    if (target === "return") return true;
-    // `open_app` completes when the seller navigates away from the applications list into the app detail — an
-    // OBSERVED transition, not a highlighted click. The engine then re-probes and verifies the landing page is
-    // app_detail (a wrong page / multiple transitions parks recoverably) before reusing api_group/credentials.
+    // `open_app` is the ONE observed target: it completes when the seller navigates from the applications list
+    // into the app detail — an OBSERVED page-category transition, not a click on a tagged control. The engine
+    // then re-probes (VERIFY_OPEN) and verifies the landing page is app_detail before the same-page checkpoints.
     if (isIssuanceNavigationTarget(target)) return this.observeLeftApplicationsList();
-    return waitForUserAction(this.activePage(), {
-      timeoutMs: this.opts.observeTimeoutMs ?? DEFAULT_ISSUANCE_OBSERVE_TIMEOUT_MS,
-    });
+    // Every other target is a same-page viewport checkpoint (or `return` guidance): SellerOps never waits for a
+    // NAVER action on it — the operator advances with "다음" — so this is never armed for them. Return true as a
+    // safe default should it ever be called, so no barrier can hang.
+    return true;
   }
 
   /**
