@@ -82,6 +82,37 @@ export type RedactionCategory = (typeof REDACTION_CATEGORIES)[number];
 export type RedactionCounts = Record<RedactionCategory, number>;
 
 /**
+ * The `identity_text` redaction POLICY — the one category driven by a TEXT match. It covers what is genuinely
+ * identifying/sensitive: the operator ACCOUNT handle, an API-call IP, and any long credential/token/secret
+ * string. It deliberately does NOT cover a PUBLIC store name or a general (Korean-prose) app description —
+ * neither carries an ASCII identifier pattern, so both stay visible for the reviewer.
+ *
+ * Single source of truth: the in-page redaction script builds its regexes from these same sources, and
+ * {@link isIdentityTextToRedact} is the Node-side predicate a unit test exercises directly.
+ */
+export const IDENTITY_REDACT_PATTERN_SOURCES: readonly string[] = [
+  "[^\\s@]+@[^\\s@]+\\.[^\\s@]+", // email
+  "\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}", // IPv4 (e.g. an API-call IP)
+  "\\d{6,}", // a long numeric id
+  "(?=[A-Za-z0-9_-]*\\d)[A-Za-z0-9_-]{12,}", // a long credential/token/secret/client-id (12+ chars incl. a digit)
+  "[A-Za-z][A-Za-z0-9]{2,}\\d{2,}", // a login-id-like account handle (letters then ≥2 digits)
+  "[\\uAC00-\\uD7A3A-Za-z0-9_.\\-]{1,}\\s*님", // the logged-in account greeting "<id-or-name> 님" (Hangul or ASCII)
+];
+
+/**
+ * Node-side mirror of the in-page `identity_text` decision: does this element's own text carry an
+ * account/IP/credential identifier that must be redacted? A public store name or a general app description
+ * (no ASCII identifier pattern) → `false`. Empty/oversized text → `false` (nothing to cover).
+ */
+export function isIdentityTextToRedact(text: string): boolean {
+  if (typeof text !== "string" || text.length === 0 || text.length > 4000) return false;
+  for (const src of IDENTITY_REDACT_PATTERN_SOURCES) {
+    if (new RegExp(src).test(text)) return true;
+  }
+  return false;
+}
+
+/**
  * The RAW redaction report the in-page pass returns for ONE frame. Integers + booleans ONLY — it carries no
  * text, value, selector, or URL (the in-page pass reads text solely to DECIDE coverage and returns only counts).
  */

@@ -21,7 +21,7 @@
  * absent in the page, so a serialized function throws `ReferenceError: __name`. Kept ES5-plain (no arrow / `Set`
  * / spread) so they run across page runtimes. The Node module `./visual-recon.ts` decides what any of this means.
  */
-import { REDACTION_CATEGORIES } from "./visual-recon";
+import { IDENTITY_REDACT_PATTERN_SOURCES, REDACTION_CATEGORIES } from "./visual-recon";
 
 /** Data attribute marking a redaction overlay so apply/verify can find + integrity-check them (never content). */
 export const REDACT_OVERLAY_ATTR = "data-sellerops-redact";
@@ -44,8 +44,11 @@ export type RedactionMode = "apply" | "verify";
  *  - readonly_or_code: [readonly] / [disabled] / code / pre
  *  - credential_area: a node whose id/name/class/aria-label/title mentions client-id / secret / application-id
  *  - copy_linked: a "복사/copy" control + its adjacent value box
- *  - identity_text: a leaf whose TEXT is an email / long numeric id / secret-like token (counted, never emitted)
- *  - chrome_region: header / [role=banner] / footer / [role=contentinfo] (logged-in account + store identity)
+ *  - identity_text: own-text carrying an ACCOUNT handle / IP / long credential-token / "<handle> 님" — the shared
+ *    {@link IDENTITY_REDACT_PATTERN_SOURCES} (counted, never emitted). A public store name / app description has
+ *    no ASCII identifier and is deliberately left visible.
+ *  - chrome_region: retained as a report category but NO LONGER blanket-covered (the account handle it used to
+ *    hide is now caught precisely by identity_text; the rest of the header/footer is public UI structure)
  */
 export function buildRedactionScript(mode: RedactionMode): string {
   return `(function () {
@@ -149,8 +152,16 @@ export function buildRedactionScript(mode: RedactionMode): string {
   }
 
   function cover(el, cat) {
-    detected[cat] = detected[cat] + 1;
+    /* Only redact what is IN the viewport-only screenshot. Skip ONLY when the element's OWN real box is wholly
+       outside the viewport (not in the shot) — this fixes the api_group HALT where a scrolled-off credential row
+       was counted-but-unpainted (overlayCount 0 ⇒ NO_OVERLAY backstop). Keyed on the element's OWN box (not the
+       effective/ancestor box): a zero-area leaf whose text may overflow in-view is NOT skipped, so an overflowing
+       on-screen value can never leak. A partially visible box (any in-view slice) also is NOT skipped. */
+    var ownR = (el && el.getBoundingClientRect) ? el.getBoundingClientRect() : null;
+    if (ownR && ownR.width > 0 && ownR.height > 0 &&
+        (ownR.bottom <= 0 || ownR.top >= VH || ownR.right <= 0 || ownR.left >= VW)) { return; }
     var r = effectiveRect(el);
+    detected[cat] = detected[cat] + 1;
     if (!r) {
       /* No rendered box anywhere up the chain. Only safe to call covered if nothing visible is there. */
       var t = (el && el.textContent ? String(el.textContent) : '').replace(/\\s+/g, '');
@@ -215,23 +226,26 @@ export function buildRedactionScript(mode: RedactionMode): string {
     if (ctrls) { var tgt = document.getElementById(ctrls); if (tgt) { cover(tgt, 'copy_linked'); } }
   }
 
-  /* ── identity_text: the ONE text read — decides coverage of stray identifiers, returns only a count. Scans
-     the DIRECT own-text of every element (not just leaves), so a value in a mixed node is caught. ── */
-  var EMAIL = /[^\\s@]+@[^\\s@]+\\.[^\\s@]+/;
-  var LONGNUM = /\\d{6,}/;
-  var TOKEN = /[A-Za-z0-9_\\-]{12,}/;
+  /* ── identity_text: the ONE text read — decides coverage of an ACCOUNT / IP / credential identifier and
+     returns only a count. Scans the DIRECT own-text of every element (not just leaves), so a value in a mixed
+     node is caught. The patterns are the shared IDENTITY_REDACT_PATTERN_SOURCES, built once here as RegExps: a
+     PUBLIC store name or a Korean-prose app description carries no ASCII identifier, so both stay visible. ── */
+  var IDSRC = ${JSON.stringify(IDENTITY_REDACT_PATTERN_SOURCES)};
+  var IDRE = [];
+  for (var pi = 0; pi < IDSRC.length; pi++) { IDRE.push(new RegExp(IDSRC[pi])); }
   for (var i = 0; i < all.length; i++) {
     var lf = all[i];
     if (lf.getAttribute && lf.getAttribute(OVERLAY_ATTR) != null) { continue; }
     var txt = ownText(lf);
     if (txt.length === 0 || txt.length > 4000) { continue; }
-    var tm = txt.match(TOKEN);
-    if (EMAIL.test(txt) || LONGNUM.test(txt) || (tm && /\\d/.test(tm[0]))) { cover(lf, 'identity_text'); }
+    var idhit = false;
+    for (var ri = 0; ri < IDRE.length; ri++) { if (IDRE[ri].test(txt)) { idhit = true; break; } }
+    if (idhit) { cover(lf, 'identity_text'); }
   }
 
-  /* ── chrome_region: global header/footer identity chrome (account + store name live here) ── */
-  var chrome = slice(document.querySelectorAll("header, [role='banner'], footer, [role='contentinfo']"));
-  for (var i = 0; i < chrome.length; i++) { cover(chrome[i], 'chrome_region'); }
+  /* ── chrome_region: retained as a report-shape category, but NO LONGER blanket-covered. Over-covering the
+     whole header/footer hid the very Korean UI structure the reviewer needs; the only sensitive item in the
+     chrome — the logged-in account handle — is now caught precisely by identity_text above. ── */
 
   /* overlay integrity: every overlay currently in the DOM must be opaque + intact */
   var overlays = slice(document.querySelectorAll('[' + OVERLAY_ATTR + ']'));
