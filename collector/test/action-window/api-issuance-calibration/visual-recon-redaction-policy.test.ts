@@ -95,6 +95,21 @@ describe("in-page redaction script — shares the policy, gates to the viewport,
     expect(apply.includes("[role='contentinfo']")).toBe(false);
   });
 
+  it("a box-less element that renders NOTHING (display:none / zero client rects, not display:contents) is covered, not a HALT", () => {
+    // Stops a not-rendered node (e.g. a collapsed header account menu still in the DOM) from forcing a
+    // fail-closed HALT for text that never appears in the viewport-only screenshot …
+    expect(apply).toContain("cs.display === 'none'");
+    expect(apply).toContain("getClientRects().length === 0");
+    // … but display:contents (children DO paint) is excluded from the zero-client-rects path.
+    expect(apply).toContain("cs.display === 'contents'");
+    expect(apply).toContain("isContents");
+    expect(apply).toContain("paintsNothing");
+    // the not-rendered relaxation keys on display:none / paintsNothing — it does NOT relax on visibility:hidden.
+    expect(apply).toContain("(cs && cs.display === 'none') || paintsNothing");
+    // genuinely-rendered text we could not box still HALTs (the branch only relaxes for not-rendered nodes).
+    expect(apply).toContain("UNCOVERED → HALT");
+  });
+
   it("still draws opaque, hit-testable, max-z overlays (coverage proof unchanged)", () => {
     expect(apply).toContain("elementFromPoint");
     expect(apply).toContain("pointer-events:auto");

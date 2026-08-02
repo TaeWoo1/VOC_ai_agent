@@ -163,10 +163,19 @@ export function buildRedactionScript(mode: RedactionMode): string {
     var r = effectiveRect(el);
     detected[cat] = detected[cat] + 1;
     if (!r) {
-      /* No rendered box anywhere up the chain. Only safe to call covered if nothing visible is there. */
+      /* No coverable box anywhere up the chain. Safe to call covered ONLY when the element paints NOTHING in the
+         shot: it has no text, OR it is not rendered — display:none, OR it generates zero client rects and is not
+         a display:contents box (whose children DO paint). A collapsed header account menu (display:none, still in
+         the DOM) is the case this handles. visibility:hidden is deliberately NOT relaxed here (such elements keep
+         a real box, so they take the normal overlay path above, and a visible descendant could re-reveal text).
+         Any genuinely-rendered element whose visible text we could not box stays UNCOVERED → HALT (fail-closed). */
       var t = (el && el.textContent ? String(el.textContent) : '').replace(/\\s+/g, '');
-      if (t.length === 0) { covered[cat] = covered[cat] + 1; }
-      return; /* has text but no coverable box → left UNCOVERED → verifyRedaction HALTs (fail-closed) */
+      if (t.length === 0) { covered[cat] = covered[cat] + 1; return; }
+      var cs = (el && window.getComputedStyle) ? window.getComputedStyle(el) : null;
+      var isContents = !!(cs && cs.display === 'contents');
+      var paintsNothing = !!(el && el.getClientRects && el.getClientRects().length === 0) && !isContents;
+      if ((cs && cs.display === 'none') || paintsNothing) { covered[cat] = covered[cat] + 1; }
+      return; /* rendered text but no coverable box → UNCOVERED → HALT (fail-closed) */
     }
     if (MODE === 'apply' && !hittestCovered(r)) { drawOverlay(r); }
     if (hittestCovered(r)) { covered[cat] = covered[cat] + 1; }
