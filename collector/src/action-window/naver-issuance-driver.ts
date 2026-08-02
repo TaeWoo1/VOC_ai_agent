@@ -225,6 +225,17 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
     }
   }
 
+  /**
+   * Best-effort settle of the current surface before the engine's next locate. The session calls this at the top
+   * of a `guide` so the fixed-label locate/highlight never fires on a still-settling post-navigation page (the
+   * `app_list → app_detail` transition that destroyed the execution context in the live proof). Bounded and
+   * value-free — it waits for `networkidle` only, reads nothing, and a page that never idles just proceeds and
+   * fails closed downstream, exactly like {@link probeSurface}.
+   */
+  async settleSurface(): Promise<void> {
+    await this.settle(this.activePage());
+  }
+
   async probeSurface(): Promise<IssuanceSurfaceProbe> {
     const page = this.activePage();
     await this.settle(page);

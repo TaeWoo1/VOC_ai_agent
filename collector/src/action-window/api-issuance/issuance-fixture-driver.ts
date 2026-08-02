@@ -34,6 +34,14 @@ export interface IssuanceFixtureScript {
   highlight?: Partial<Record<IssuanceTarget, LocateResult>>;
   /** What the seller does at each barrier. Missing → they act. */
   action?: Partial<Record<IssuanceTarget, boolean>>;
+  /**
+   * Model a NAVIGATION RACE: how many times `locateTarget(target)` should THROW (execution-context-destroyed)
+   * before it returns normally. Each throw decrements the count, so `1` reproduces a single post-navigation race
+   * that a settle + recheck recovers, and a large value models a PERMANENT fault. Missing → never throws.
+   */
+  locateThrows?: Partial<Record<IssuanceTarget, number>>;
+  /** Same, for `highlightTarget(target)` — a race that throws AFTER a clean locate. Missing → never throws. */
+  highlightThrows?: Partial<Record<IssuanceTarget, number>>;
 }
 
 /** Deterministic 16-hex signature per target — opaque, and stable across a run so drift is detectable. */
@@ -61,13 +69,33 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
   private readonly script: IssuanceFixtureScript;
   /** Every call, in order — so a test can assert the runtime never armed a control it should not have. */
   readonly calls: string[] = [];
+  /** How many times `settleSurface` was called (the session settles before each guide). */
+  settleCount = 0;
+  /**
+   * For each `locateTarget` call, whether a `settleSurface` had been called since the previous locate — lets a
+   * test prove the guide SETTLES the surface before it locates, without changing the `calls` sequence (so the
+   * exact-sequence happy-path assertions stay untouched). Cleared when consumed by a locate.
+   */
+  readonly locateSettledFirst: boolean[] = [];
+  private settlePending = false;
   private cleanedUp = 0;
   private closeResolve: (() => void) | null = null;
   /** Latches once the seller has "opened" their existing app, so the next probe reports the landing page. */
   private openedApp = false;
+  /** Remaining scheduled throws per target (a copy of the script counts, decremented per call). */
+  private readonly locateThrowsLeft: Partial<Record<IssuanceTarget, number>>;
+  private readonly highlightThrowsLeft: Partial<Record<IssuanceTarget, number>>;
 
   constructor(script: IssuanceFixtureScript = {}) {
     this.script = script;
+    this.locateThrowsLeft = { ...(script.locateThrows ?? {}) };
+    this.highlightThrowsLeft = { ...(script.highlightThrows ?? {}) };
+  }
+
+  /** Best-effort settle (a no-op offline) — records that the guide settled the surface before it located. */
+  async settleSurface(): Promise<void> {
+    this.settleCount += 1;
+    this.settlePending = true;
   }
 
   async probeSurface(): Promise<IssuanceSurfaceProbe> {
@@ -86,12 +114,25 @@ export class IssuanceFixtureDriver implements IssuanceProbeDriver {
   async locateTarget(target: IssuanceTarget): Promise<LocateResult> {
     // The CANDIDATE selector is CONSULTED (as the live driver would) but never emitted — only counted.
     void CANDIDATE_TARGET_SELECTORS[target];
+    this.locateSettledFirst.push(this.settlePending);
+    this.settlePending = false;
     this.calls.push(`locate:${target}`);
+    const throwsLeft = this.locateThrowsLeft[target] ?? 0;
+    if (throwsLeft > 0) {
+      this.locateThrowsLeft[target] = throwsLeft - 1;
+      // Model the execution context being destroyed by a navigation mid-read (name "Error", no value leaked).
+      throw new Error("execution context was destroyed");
+    }
     return this.script.locate?.[target] ?? { count: 1, sig: sigFor(target) };
   }
 
   async highlightTarget(target: IssuanceTarget): Promise<LocateResult> {
     this.calls.push(`highlight:${target}`);
+    const throwsLeft = this.highlightThrowsLeft[target] ?? 0;
+    if (throwsLeft > 0) {
+      this.highlightThrowsLeft[target] = throwsLeft - 1;
+      throw new Error("execution context was destroyed");
+    }
     return this.script.highlight?.[target] ?? this.script.locate?.[target] ?? { count: 1, sig: sigFor(target) };
   }
 

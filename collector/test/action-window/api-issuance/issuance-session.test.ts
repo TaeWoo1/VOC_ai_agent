@@ -274,6 +274,158 @@ describe("issuance session — recoverable parks", () => {
   });
 });
 
+describe("issuance session — post-navigation highlight reliability", () => {
+  it("settles the surface before every locate (a guide never locates a still-navigating page)", async () => {
+    const { io, engine, driver, session } = build(EXISTING);
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    // The session settled the surface at the top of each guide, and EVERY locate happened after a settle — so a
+    // fixed-label read never fires on a page that is still navigating (the live-proof execution-context race).
+    expect(driver.settleCount).toBeGreaterThan(0);
+    expect(driver.locateSettledFirst.length).toBeGreaterThan(0);
+    expect(driver.locateSettledFirst.every(Boolean)).toBe(true);
+  });
+
+  it("reproduces the app_list→app_detail race: a locate that throws PARKS recoverably instead of stranding the run", async () => {
+    // The seller opened their app; the very next api_group locate raced the navigation and threw
+    // (execution-context-destroyed). The run must PARK recoverably on page_mismatch — never sit idle with no
+    // barrier (the live-proof gap), never RUN_FAILED.
+    const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
+    startRun(io);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.blockers()).toContainEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.lastView()?.status).toBe("WAITING_FOR_HUMAN");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+    expect(io.lastView()?.allowedCommands).toContain("REQUEST_STEP_RECHECK");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    // The throwing locate WAS preceded by a settle (the settle happened; the page still raced) — and the control
+    // was never highlighted, so no half-highlight lingers.
+    expect(driver.locateSettledFirst.every(Boolean)).toBe(true);
+    expect(driver.calls).not.toContain("highlight:api_group");
+  });
+
+  it("recovers a raced locate: park → REQUEST_STEP_RECHECK re-guides → highlight succeeds → run completes", async () => {
+    const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+
+    // "I did it, look again": the recheck re-settles + re-guides the SAME control on the now-stable page.
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.lastView()?.status).toBe("COMPLETED");
+    // api_group was highlighted and observed EXACTLY ONCE (the failed attempt threw before highlighting; the
+    // recovery highlighted once) — no duplicate highlight / observer arm.
+    expect(driver.calls.filter((c) => c === "highlight:api_group")).toHaveLength(1);
+    expect(driver.calls.filter((c) => c === "observe:api_group")).toHaveLength(1);
+  });
+
+  it("recovers a race that throws during HIGHLIGHT too, clearing the half-highlight before it re-guides", async () => {
+    // A clean locate, then the highlight read raced the navigation and threw. Same recoverable park; on recovery
+    // the engine returns CLEAR_HIGHLIGHT so the half-applied annotation is dropped before the control is re-guided.
+    const { io, engine, driver, session } = build({ ...EXISTING, highlightThrows: { api_group: 1 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(driver.calls).toContain("clearHighlight");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guidance_complete");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+  });
+
+  it("applies the same recovery to a create_app race (the empty-app branch), not only api_group", async () => {
+    // Reliability is target-generic: the empty-app step-2 create control gets the same settle + park + re-guide.
+    const { io, engine, session } = build({ ...EMPTY, locateThrows: { create_app: 1 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("guidance_complete");
+  });
+
+  it("drops the re-guide latch when the seller CLOSES the window mid-fault, so a recheck re-probes instead", async () => {
+    // A drive fault armed a re-guide of api_group. If the seller then closes the API-center window and reopens it
+    // (possibly landing back on the applications list), the recheck must NOT re-guide api_group on the wrong page —
+    // a surface close clears the latch so the recovery re-probes from the top.
+    const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 1 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+    const locatesBefore = driver.calls.filter((c) => c === "locate:api_group").length; // 1 (the thrown attempt)
+    const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
+
+    driver.closeSurface();
+    await session.whenSettled();
+
+    command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+    await session.whenSettled();
+
+    // The recovery re-PROBED (latch dropped) rather than re-running the throwing api_group locate.
+    expect(driver.calls.filter((c) => c === "locate:api_group").length).toBe(locatesBefore);
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBeGreaterThan(probesBefore);
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+  });
+
+  it("does NOT retry a PERMANENT locate fault forever — it stops re-guiding after the cap and re-probes", async () => {
+    // A page that destroys the execution context on EVERY read. The engine re-guides a bounded number of times
+    // (settle + recheck cannot help a genuinely broken page), then stops re-running the throwing locate: a recheck
+    // re-probes from the top instead, so an auto-recheck loop cannot spin the fault forever.
+    const { io, engine, driver, session } = build({ ...EXISTING, locateThrows: { api_group: 99 } });
+    startRun(io);
+    await session.whenSettled();
+    expect(engine.currentStage()).toBe("page_mismatch");
+
+    const probesBefore = driver.calls.filter((c) => c === "probeSurface").length;
+    for (let i = 0; i < 6; i++) {
+      command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision, `rc${i}`);
+      await session.whenSettled();
+    }
+
+    // The throwing locate ran at most MAX_CONSECUTIVE_DRIVE_FAULTS + 1 times (initial + 3 re-guides), never more,
+    // no matter how many rechecks arrive — the permanent fault stopped being re-run.
+    expect(driver.calls.filter((c) => c === "locate:api_group")).toHaveLength(4);
+    // Past the cap, rechecks re-PROBE the surface instead of re-locating the throwing control.
+    expect(driver.calls.filter((c) => c === "probeSurface").length).toBeGreaterThan(probesBefore);
+    // Still a recoverable park, never a hard failure.
+    expect(engine.currentStage()).toBe("page_mismatch");
+    expect(io.eventTypes()).not.toContain("RUN_FAILED");
+    expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
+  });
+
+  it("keeps every reliability-path view + event contract-valid and prohibited-field-free", async () => {
+    for (const script of [
+      { ...EXISTING, locateThrows: { api_group: 1 } as Partial<Record<string, number>> },
+      { ...EXISTING, highlightThrows: { api_group: 1 } as Partial<Record<string, number>> },
+      { ...EXISTING, locateThrows: { api_group: 99 } as Partial<Record<string, number>> },
+    ]) {
+      const { io, session } = build(script as IssuanceFixtureScript);
+      startRun(io);
+      await session.whenSettled();
+      // Push one recovery cycle through as well, so the re-guide views are covered.
+      command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
+      await session.whenSettled();
+      for (const e of io.events()) {
+        expect(validateEventEnvelope(e), `event ${e.type}`).toEqual({ ok: true });
+        expect(findProhibitedFields(e)).toEqual([]);
+      }
+      for (const v of io.views()) {
+        expect(validateRunView(v), `view ${v.status}`).toEqual({ ok: true });
+        expect(findProhibitedFields(v)).toEqual([]);
+      }
+    }
+  });
+});
+
 describe("issuance session — operator control", () => {
   it("aborts to operator_aborted / CANCELLED and cleans up", async () => {
     const { io, engine, driver, session } = build({ ...EXISTING, action: { open_app: false } });

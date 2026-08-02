@@ -74,6 +74,15 @@ export interface IssuanceProbeDriver {
    */
   readApplications(): Promise<ApplicationsRead>;
 
+  /**
+   * Optional: best-effort SETTLE of the current surface (wait for it to stop navigating) before the engine's
+   * next locate. The session calls this at the top of a `guide` so a fixed-label locate/highlight never fires on
+   * a still-settling post-navigation page (which would destroy the execution context and throw). A driver with no
+   * real page (every scripted test driver) may omit it or make it a no-op — it changes no engine decision, only
+   * the timing of the in-page read.
+   */
+  settleSurface?(): Promise<void>;
+
   /** How many candidates match {@code target}, and the opaque signature of the one (if exactly one). */
   locateTarget(target: IssuanceTarget): Promise<LocateResult>;
 

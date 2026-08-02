@@ -89,6 +89,28 @@ const TARGET_STEP: Readonly<Record<IssuanceTarget, number>> = {
   return: 5,
 };
 
+/**
+ * Which targets a drive fault may RE-GUIDE on recheck. Only the fixed-label HIGHLIGHT controls (they are
+ * located by an in-page read that can race a navigation and throw). `open_app`/`return` are guidance overlays
+ * whose locate is a synthetic constant that never queries the page — a fault there recovers by re-probing, not
+ * by re-locating a control that does not exist.
+ */
+const GUIDE_FAULT_RETRYABLE: Readonly<Record<IssuanceTarget, boolean>> = {
+  create_app: true,
+  open_app: false,
+  api_group: true,
+  credentials: true,
+  return: false,
+};
+
+/**
+ * How many CONSECUTIVE drive faults on the guided controls are re-guided before the engine stops retrying the
+ * throwing operation. A settle-before-locate (in the session) makes a genuine navigation race recover on the
+ * first recheck; this cap only bounds a PERMANENT fault (a page that destroys the execution context on every
+ * read) so an auto-recheck loop cannot re-run it forever — past the cap a recheck re-probes from the top.
+ */
+const MAX_CONSECUTIVE_DRIVE_FAULTS = 3;
+
 export class IssuanceEngine {
   private readonly runId: string;
   private readonly channelCode: string;
@@ -104,6 +126,15 @@ export class IssuanceEngine {
   private hasExistingApp = false;
   /** The control the current barrier rests on, so a recheck/resume re-arms the right observation. */
   private currentTarget: IssuanceTarget | null = null;
+  /**
+   * Set when a drive fault parked recoverably while guiding a highlight control: a `REQUEST_STEP_RECHECK`
+   * RE-GUIDES this target (settling the surface first) instead of re-probing from the applications list — the
+   * seller is already on the right page, the locate just raced a navigation. Cleared once the recheck consumes it
+   * or once the consecutive-fault cap is hit (then a recheck re-probes normally).
+   */
+  private guideFaultTarget: IssuanceTarget | null = null;
+  /** CONSECUTIVE drive faults since the last clean highlight — bounds re-guiding of a permanent fault. */
+  private consecutiveDriveFaults = 0;
   private targetSig: Partial<Record<IssuanceTarget, string>> = {};
   private blockerCode: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT" | null = null;
   private blockerRecoverable = false;
@@ -156,6 +187,26 @@ export class IssuanceEngine {
    */
   private recheck(): IssuanceEffect {
     if (isIssuancePark(this.stage)) {
+      // A drive-fault park (a navigation race on a highlight control) recovers by RE-GUIDING that same control on
+      // the now-settled surface — NOT by re-probing from the applications list, which would dead-end a seller who
+      // has legitimately left the list to reach the app detail page. Bounded: past the cap this is cleared and the
+      // recheck falls through to the ordinary re-probe below (see onDriveFault).
+      if (this.guideFaultTarget) {
+        const target = this.guideFaultTarget;
+        this.guideFaultTarget = null;
+        this.blockerCode = null;
+        this.blockerRecoverable = false;
+        this.currentTarget = target;
+        this.activeStepIndex = TARGET_STEP[target];
+        // Re-locate as AUTOMATIC work (RUNNING), NOT a barrier: the frontend must never see a "press this
+        // highlighted control" barrier before the re-highlight exists (that window has no highlight on the page
+        // after the fault's CLEAR_HIGHLIGHT), and while this automatic stage is showing a concurrent
+        // REQUEST_STEP_RECHECK resolves to NONE — so it cannot arm a SECOND observation racing the re-guide. The
+        // guide then re-locates → re-highlights and sets the proper barrier. Bumps the revision (a state change).
+        this.stage = "locating_applications";
+        this.emit("RUN_STATUS_CHANGED", { status: "RUNNING" });
+        return { guide: target };
+      }
       this.blockerCode = null;
       this.blockerRecoverable = false;
       this.stage = "opening";
@@ -174,6 +225,8 @@ export class IssuanceEngine {
     this.started = true;
     this.stage = "opening";
     this.activeStepIndex = 1;
+    this.consecutiveDriveFaults = 0;
+    this.guideFaultTarget = null;
     this.emit("RUN_STARTED", { status: "PREPARING" });
     this.emit("RUN_STATUS_CHANGED", { status: "PREPARING" });
     return "PROBE";
@@ -241,6 +294,8 @@ export class IssuanceEngine {
     this.stage = TARGET_BARRIER[target];
     this.activeStepIndex = TARGET_STEP[target];
     this.currentTarget = target;
+    // A clean highlight breaks any drive-fault chain — reset the consecutive-fault cap.
+    this.consecutiveDriveFaults = 0;
     this.emit("STEP_READY", { stepId: this.stepId(), stepStatus: "READY" });
     this.emit("HUMAN_ACTION_REQUIRED", { stepId: this.stepId() });
     this.emit("TARGET_HIGHLIGHTED", { stepId: this.stepId(), targetRef: res.sig });
@@ -326,8 +381,37 @@ export class IssuanceEngine {
    */
   onSurfaceClosed(): IssuanceEffect {
     if (isIssuanceTerminal(this.stage)) return "NONE";
+    // A closed window is never "already on the right page": drop any drive-fault re-guide latch so a recheck
+    // after reopening re-probes from the top rather than re-guiding a stale control on a freshly loaded (and
+    // possibly wrong) page. Done before the idempotent early-return, which would otherwise skip park()'s own clear.
+    this.guideFaultTarget = null;
     if (this.stage === "page_mismatch" && this.blockerCode === "UI_DRIFT") return "NONE";
     this.park("page_mismatch", "UI_DRIFT");
+    return "CLEAR_HIGHLIGHT";
+  }
+
+  /**
+   * A drive effect threw — most often a navigation RACE: the seller's own page moved under an in-page
+   * locate/highlight read (right after they opened the app), destroying the execution context. This is not a
+   * failure; it PARKS recoverably on `page_mismatch` rather than leaving the run idle with no barrier. Below the
+   * consecutive-fault cap it remembers the control being guided so a `REQUEST_STEP_RECHECK` RE-GUIDES it (the
+   * session settles the surface first, so the retry lands on a stable page); at/above the cap it forgets the
+   * target so a recheck re-probes from the top instead of re-running the operation that keeps throwing — a
+   * permanent fault therefore stops retrying. Returns `CLEAR_HIGHLIGHT` so any half-applied annotation is dropped.
+   */
+  onDriveFault(): IssuanceEffect {
+    if (isIssuanceTerminal(this.stage)) return "NONE";
+    this.consecutiveDriveFaults += 1;
+    const target = this.currentTarget;
+    const retryable = !!target && GUIDE_FAULT_RETRYABLE[target] && this.consecutiveDriveFaults <= MAX_CONSECUTIVE_DRIVE_FAULTS;
+    // Show the step of the control we were guiding — `onOpenAppVerified` flips currentTarget to `api_group` but
+    // leaves activeStepIndex at 2 until the highlight lands, so a fault before highlight would otherwise park on
+    // the stale step-2 copy.
+    if (retryable && target) this.activeStepIndex = TARGET_STEP[target];
+    // park() clears any prior guideFaultTarget (only a drive fault may arm it) — so set the latch AFTER the park,
+    // and only for a retryable highlight target under the cap.
+    this.park("page_mismatch", "UI_DRIFT");
+    this.guideFaultTarget = retryable ? target : null;
     return "CLEAR_HIGHLIGHT";
   }
 
@@ -360,6 +444,10 @@ export class IssuanceEngine {
    * `RUN_FAILED`: the run is not over. A `REQUEST_STEP_RECHECK` re-probes the surface from the top.
    */
   private park(stage: "waiting_login" | "target_not_found" | "page_mismatch", code: "LOGIN_REQUIRED" | "TARGET_NOT_FOUND" | "UI_DRIFT"): IssuanceEffect {
+    // A drive-fault re-guide latch belongs ONLY to a drive fault (which re-arms it immediately AFTER calling
+    // park). Any other park — login, probe mismatch, target-not-found, surface close — clears it, so a later
+    // recheck never re-guides a stale control on a page the seller has since left.
+    this.guideFaultTarget = null;
     // Idempotent while already parked on this exact cause.
     if (this.stage === stage && this.blockerCode === code) return "NONE";
     this.paused = false;

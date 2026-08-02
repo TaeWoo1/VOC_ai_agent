@@ -12,6 +12,31 @@
 
 ---
 
+## 2026-08-02 부록 (6) — Post-Navigation Highlight Reliability: guide 레이스 봉합 (현행)
+
+> `NAVER Post-Navigation Highlight Reliability v1`. 부록(5) existing-app 흐름의 **라이브 부분 증명** 갭을 코드로 봉합.
+> 세부: 슬라이스 §0.2.10. **라이브 실행 없음.**
+
+- **라이브 부분 증명(2026-08-02, 실 NAVER, 단일사용 승인 소진):** existing-app 분기 + `open_app` 안내 + 관찰된
+  `app_list→app_detail` 전환 + `VERIFY_OPEN`(일시 unknown fail-closed park + auto-recheck 복구) + **step 2 완료**까지
+  라이브 성립(2회 재현). **차단:** step 2 직후 `guide(api_group)` 고정라벨 locate가 app_detail probe ~7ms 뒤
+  execution-context-destroyed로 throw → 런이 park 없이 idle. 근본 원인 = `guide()`에 locate 전 settle 부재.
+- **봉합(코드):** ① `guide()`가 locate 전 `driver.settleSurface()`(networkidle 바운드, value-free)로 surface 정착 →
+  nav 직후 페이지에서 in-page read 미발화(모든 강조 단계 target-generic). ② settle에도 read가 nav를 race해 throw하면
+  `onDriveError`→엔진 `onDriveFault()`가 **recoverable `page_mismatch` park + CLEAR_HIGHLIGHT**(idle 멈춤 제거,
+  `RUN_FAILED` 아님). ③ `REQUEST_STEP_RECHECK`가 (상단 재-probe 대신) **같은 강조 타깃 재-guide**(판매자는 이미 상세
+  페이지). ④ 연속 fault를 **`MAX_CONSECUTIVE_DRIVE_FAULTS=3`으로 바운드**(정상 highlight마다 리셋) → 캡 초과 시 재-guide
+  중단·상단 재-probe 폴백(영구 오류 무한 재시도 불가). ⑤ 태그 스크립트 사전-clear + `CLEAR_HIGHLIGHT` + `autoBusy`
+  직렬화 + **재-guide를 barrier 아닌 자동(RUNNING) stage로** 수행 → 중복 highlight·이중 arm 방지. ⑥ surface-close 등
+  non-fault park는 재-guide latch를 해제(닫았다 다시 열면 상단 재-probe로 정상 복구).
+- **계약·범위:** 새 stage/status/enum/마이그레이션 **없음**(`page_mismatch`·`REQUEST_STEP_RECHECK` 재사용). **FE 변경
+  없음.** collector typecheck + 전체 **6152 tests** 그린(+8 신뢰성). 독립 적대적 리뷰 **HIGH=0**(MEDIUM 1=surface-close
+  latch 반영; LOW 반영). **라이브 highlight·클릭·credential 값읽기·push/PR 없음.** 완료 후 existing-app Phase B live-proof
+  runtime을 **fresh PREPARED까지만** 만들고 승인 대기.
+  api_group/credentials 강조의 existing-app 라이브 증명은 이 봉합 뒤에도 **미증명(PENDING)** — 다음 gated 승인 필요.
+
+---
+
 ## 2026-08-02 부록 (5) — Existing-App Guided Connection: open_app = NAVIGATION 안내, 두 경로 모두 ready_candidate (현행)
 
 > `NAVER Existing-App Guided Connection v1`. 기존 앱 판매자도 issuance 튜토리얼을 완료하게 함. 세부: 슬라이스 §0.2.9.

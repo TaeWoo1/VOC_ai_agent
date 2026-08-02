@@ -447,6 +447,44 @@ new-app(신규 앱 생성) 경로로 한정**하고 `SELECTORS_CALIBRATED`를 �
 - **정직한 한계(라이브 미검증):** `open_app`의 실제 `app_list→app_detail` 관찰은 **오프라인 fake로만 증명**; 라이브
   전환 관찰·타이밍은 미확인(별도 gated 승인 필요). new-app 경로의 Phase B highlight proof도 여전히 PENDING(0.2.8).
 
+### 0.2.10 개정 — **`NAVER Post-Navigation Highlight Reliability v1`: 라이브 부분 증명의 갭(guide 레이스) 봉합** ⭐ 현행 issuance 상태
+
+0.2.9의 existing-app 흐름을 **라이브에서 부분 증명**(실 NAVER 스토어, 단일사용 승인 소진, 2회 재현)한 결과: existing-app
+분기 + `open_app` 안내 + 관찰된 `app_list→app_detail` 전환 + `VERIFY_OPEN`(일시적 unknown fail-closed park + auto-recheck
+복구) + **step 2 완료**까지는 라이브 성립. **그러나** step 2 직후 `guide(api_group)`의 고정라벨 locate가 **app_detail probe
+~7ms 뒤 execution-context-destroyed로 throw**(`aw_issuance_drive_error {reason:"Error"}`) → 런이 park 없이 idle로 멈춤
+(recheck로도 복구 불가). 근본 원인: **`guide()`에 locate 전 `settle()`이 없어** 아직 정착 중인 nav 직후 페이지에서 in-page
+read가 발화. 동일 고정라벨 locate는 페이지가 수동 안정화되면 라이브 유효(selector-probe에서 api_group matchCount=1 확인). 본
+단위는 이 **선재(先在) 신뢰성 갭**을 코드로 봉합한다(라이브 실행 없음).
+
+- **guide는 locate 전에 surface를 settle한다.** 세션 `guide()`가 locate/highlight 전에 `driver.settleSurface?.()` 호출
+  (`NaverIssuanceDriver.settleSurface` = `waitForLoadState('networkidle')` 바운드, value-free). fixture는 no-op(기록만).
+  → nav 직후 아직 정착 중인 페이지에서 고정라벨 read가 발화하지 않는다. **api_group 뿐 아니라 create_app/credentials 등 모든
+  강조 단계에 target-generic으로 적용**(guide 경로가 타깃 불변).
+- **nav 레이스 throw = recoverable `page_mismatch` park.** settle에도 read가 nav를 race하여 throw하면, 세션
+  `onDriveError`가 (기존의 로그-후-idle 대신) **엔진 `onDriveFault()`로 위임** → `page_mismatch`(UI_DRIFT) 회복 park +
+  `CLEAR_HIGHLIGHT`(반쯤 붙은 태그 제거). 런이 barrier 없이 멈추지 않는다. `RUN_FAILED` 아님.
+- **`REQUEST_STEP_RECHECK`로 정상 재개.** drive-fault park는 (앱 목록으로 상단 재-probe하지 않고) **같은 강조 타깃을
+  재-guide**한다: `recheck()`가 `guideFaultTarget`을 기억해 settle→locate→highlight를 재실행(판매자는 이미 올바른 상세
+  페이지에 있으므로 목록으로 되돌리면 dead-end). fixture에서 최초 locate throw→park→recheck→highlight 성공→완료를 재현.
+- **영구 오류는 무한 재시도하지 않음.** 연속 drive-fault를 `MAX_CONSECUTIVE_DRIVE_FAULTS=3`로 바운드
+  (`consecutiveDriveFaults`, 정상 highlight마다 0으로 리셋). 캡 초과 시 `guideFaultTarget`을 비워 recheck가 **재-guide 대신
+  상단 재-probe**로 폴백 → throw하는 locate를 재실행하지 않음(자동 recheck 루프도 발산 불가). 캡까지도 회복 park 유지,
+  `RUN_FAILED` 없음.
+- **중복 highlight·observer arm 방지.** 강조 태그 스크립트가 매 태깅 전 기존 `data-aw-target`을 모두 제거(멱등),
+  drive-fault는 `CLEAR_HIGHLIGHT`를 먼저 반환, 세션 `autoBusy` 직렬화로 동시 guide/arm 없음. **재-guide는 barrier가 아닌
+  자동(RUNNING) stage로 재-locate**하므로 settle 대기 중 도착한 recheck가 두 번째 관찰을 arm하지 못한다(highlight 전에
+  barrier를 노출하지 않음) → 재-guide가 중복 강조/이중 arm을 남기지 않음(테스트: 회복 후 `highlight:api_group`·
+  `observe:api_group` 정확히 1회).
+- **surface-close = 재-guide latch 해제.** drive-fault로 무장된 `guideFaultTarget`은 어떤 non-fault park(login/probe
+  mismatch/surface close)에서도 해제 → 판매자가 창을 닫았다 다시 열면 recheck가 (잘못된 페이지에서 재-guide하지 않고)
+  상단부터 재-probe로 정상 복구(독립 리뷰 MEDIUM 반영).
+- **게이트·리뷰:** collector typecheck 그린 + 전체 **6152 tests 그린**(+8 신뢰성 테스트: settle-before-locate, 레이스
+  park, recheck 회복, highlight-phase 레이스, create_app 분기, surface-close latch 해제, 영구-오류 캡, 계약 유효성). 독립
+  적대적 리뷰 **HIGH=0**(MEDIUM 1건=surface-close latch 반영; LOW 반영=자동 re-locate stage·step index). **계약 불변**
+  (새 stage/status/enum/마이그레이션 없음; `page_mismatch`·`REQUEST_STEP_RECHECK` 재사용). **FE 변경 없음.** **라이브 실행·
+  push/PR 없음.** 완료 후 existing-app Phase B live-proof runtime을 **fresh PREPARED까지만** 만들고 승인 대기.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

@@ -114,10 +114,24 @@ export class IssuanceGuidanceSession {
     }
   }
 
-  private onDriveError(e: unknown): void {
-    // No reliability-park vocabulary for issuance: a genuine drive fault fails closed. Sanitized name only.
-    void this.driver.cleanup().catch((err) => log("aw_issuance_cleanup_failed", { reason: errName(err) }, "warn"));
+  private async onDriveError(e: unknown): Promise<void> {
+    // A drive fault is most often a NAVIGATION RACE — an in-page locate/highlight read fired while the seller's
+    // own page was still moving (the `app_list → app_detail` transition), destroying the execution context. Do
+    // NOT fail the run closed and leave it idle with no barrier: ask the engine to PARK recoverably on
+    // page_mismatch, so a `REQUEST_STEP_RECHECK` re-settles and re-guides. The engine bounds this — a permanent
+    // fault stops re-guiding after a few consecutive faults. Sanitized name only in the log.
     log("aw_issuance_drive_error", { reason: errName(e) }, "warn");
+    const effect = this.engine.onDriveFault();
+    this.publishState();
+    if (!isNoop(effect)) {
+      try {
+        await this.drive(effect);
+      } catch (err) {
+        // The recovery drive (CLEAR_HIGHLIGHT) itself faulted — clean up quietly; do NOT re-park (avoid a loop).
+        void this.driver.cleanup().catch(() => undefined);
+        log("aw_issuance_cleanup_failed", { reason: errName(err) }, "warn");
+      }
+    }
   }
 
   private async drive(effect: IssuanceEffect): Promise<void> {
@@ -173,6 +187,11 @@ export class IssuanceGuidanceSession {
    * stage before its `TARGET_HIGHLIGHTED` event exists.
    */
   private async guide(target: IssuanceTarget): Promise<void> {
+    // Settle the surface BEFORE the locate so a fixed-label locate/highlight never fires on a still-settling
+    // post-navigation page (the `app_list → app_detail` transition that destroyed the execution context and left
+    // the run idle in the live proof). Best-effort and value-free; a driver without a real page omits it. If a
+    // read still races a navigation and throws, `onDriveError → engine.onDriveFault` parks recoverably.
+    await this.driver.settleSurface?.();
     const loc = await this.driver.locateTarget(target);
     const afterLoc = this.engine.onTargetLocated(target, loc);
     if (typeof afterLoc === "object" && "guide" in afterLoc) {
@@ -210,7 +229,7 @@ export class IssuanceGuidanceSession {
       this.publishState();
       await this.drive(next);
     } catch (e) {
-      this.onDriveError(e);
+      await this.onDriveError(e);
     } finally {
       this.autoBusy = false;
     }
