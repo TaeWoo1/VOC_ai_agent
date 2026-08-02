@@ -24,13 +24,24 @@
  * (the CLI entrypoint file exists) and env reads; `preflight.sh` calls it.
  */
 import { SELECTORS_CALIBRATED } from "../action-window/api-issuance/api-center-adapter";
+import { VISUAL_RECON_SCREENS } from "../action-window/api-issuance-calibration/visual-recon";
 import { screenApiCenterUrl } from "./observe-api-center";
 
-/** The two calibration phases. Their driver capabilities differ, so their manifests/approvals are separate. */
-export const CALIBRATION_PHASES = ["API_CENTER_STRUCTURE_OBSERVATION", "API_ISSUANCE_HIGHLIGHT_PROOF"] as const;
+/**
+ * The calibration phases. Their driver capabilities differ, so their manifests/approvals are separate:
+ *  - `API_CENTER_STRUCTURE_OBSERVATION` — hotkey calibrator (hover+hotkey).
+ *  - `API_ISSUANCE_HIGHLIGHT_PROOF` — highlight/observe Action Window (needs calibrated selectors).
+ *  - `API_CENTER_VISUAL_RECON` — the redacted-screenshot recon (`capture-api-center-visual`): NO hotkey, NO
+ *    highlight; it redacts every sensitive region, verifies coverage, then screenshots the redacted viewport
+ *    and writes a sanitized closed-vocabulary summary into the gitignored `.calibration/visual/` sink.
+ */
+export const CALIBRATION_PHASES = ["API_CENTER_STRUCTURE_OBSERVATION", "API_ISSUANCE_HIGHLIGHT_PROOF", "API_CENTER_VISUAL_RECON"] as const;
 export type CalibrationPhase = (typeof CALIBRATION_PHASES)[number];
 
-/** Sanitized action codes a manifest may declare. `HIGHLIGHT_REAL_CONTROL` is Phase-B-only. */
+/**
+ * Sanitized action codes a manifest may declare. `HIGHLIGHT_REAL_CONTROL` is Phase-B-only;
+ * `REDACT_SENSITIVE_REGIONS` / `CAPTURE_REDACTED_VIEWPORT` are visual-recon-only.
+ */
 export const APPROVAL_ACTIONS = [
   "OPEN_DEDICATED_WINDOW",
   "WAIT_OPERATOR_LOGIN_NAV",
@@ -39,6 +50,8 @@ export const APPROVAL_ACTIONS = [
   "STRUCTURAL_CONTROL_HINTS",
   "HIGHLIGHT_REAL_CONTROL",
   "OBSERVE_USER_CLICK_TRANSITION",
+  "REDACT_SENSITIVE_REGIONS",
+  "CAPTURE_REDACTED_VIEWPORT",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -55,7 +68,20 @@ export interface PhaseSpec {
   /** Whether this phase highlights a real control (⇒ requires calibrated selectors). */
   allowsHighlight: boolean;
   mode: "READ_ONLY";
+  /** Visual-recon only: the fixed, closed set of API-center screens the redacted-screenshot recon may capture. */
+  captureScreens?: readonly string[];
+  /** Visual-recon only: the gitignored sink category the redacted PNG + sanitized JSON summary land in. */
+  artifactCategory?: string;
+  /** Visual-recon only: the screenshot policy — a redacted viewport only, never a raw screen. */
+  screenshotPolicy?: string;
+  /** Visual-recon only: the structural summary policy — sanitized closed-vocabulary only, never raw text/values. */
+  structuralSummaryPolicy?: string;
 }
+
+/** The gitignored artifact category for the redacted-screenshot recon (a `.calibration/` sub-sink). */
+export const VISUAL_RECON_ARTIFACT_CATEGORY = ".calibration/visual/";
+const VISUAL_RECON_SCREENSHOT_POLICY = "redacted viewport only";
+const VISUAL_RECON_SUMMARY_POLICY = "sanitized closed-vocabulary only";
 
 export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
   API_CENTER_STRUCTURE_OBSERVATION: {
@@ -86,6 +112,28 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     allowsHighlight: true,
     mode: "READ_ONLY",
   },
+  API_CENTER_VISUAL_RECON: {
+    phase: "API_CENTER_VISUAL_RECON",
+    cli: "src/cli/capture-api-center-visual.ts",
+    driver: "capture-api-center-visual (redacted-screenshot visual recon)",
+    // Read-only: open window, wait for the operator to navigate, classify + census the sanitized page, then
+    // redact every sensitive region and (only after coverage verifies) screenshot the redacted viewport. It
+    // NEVER highlights, clicks, or observes a click — the redact + capture pair is its whole added capability.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "REDACT_SENSITIVE_REGIONS",
+      "CAPTURE_REDACTED_VIEWPORT",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+    captureScreens: VISUAL_RECON_SCREENS,
+    artifactCategory: VISUAL_RECON_ARTIFACT_CATEGORY,
+    screenshotPolicy: VISUAL_RECON_SCREENSHOT_POLICY,
+    structuralSummaryPolicy: VISUAL_RECON_SUMMARY_POLICY,
+  },
 };
 
 /** Why the prerequisites were not met. Each maps to a `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. */
@@ -103,6 +151,8 @@ export const APPROVAL_PREREQ_CAUSES = [
   "UNBOUND_IDENTITY",
   "MISSING_HOTKEY",
   "ARTIFACT_PATH_UNSAFE",
+  // Visual-recon: the captured screens declared by the phase must be exactly the driver's fixed screen set.
+  "VISUAL_SCREENS_MISMATCH",
   // Operator-entrypoint contract (the phase's ONE true operator action must match its entrypoint type).
   "ENTRYPOINT_TYPE_MISMATCH",
   "ENTRYPOINT_CLI_MISMATCH",
@@ -120,10 +170,11 @@ export type ApprovalPrereqCause = (typeof APPROVAL_PREREQ_CAUSES)[number];
 export const ENTRYPOINT_TYPES = ["CLI_LAUNCHED_DEDICATED_WINDOW", "FRONTEND_URL"] as const;
 export type EntrypointType = (typeof ENTRYPOINT_TYPES)[number];
 
-/** The phases that carry an operator entrypoint: the two calibration phases + the guided order connection. */
+/** The phases that carry an operator entrypoint: the three calibration phases + the guided order connection. */
 export const ENTRYPOINT_PHASES = [
   "API_CENTER_STRUCTURE_OBSERVATION",
   "API_ISSUANCE_HIGHLIGHT_PROOF",
+  "API_CENTER_VISUAL_RECON",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
 export type EntrypointPhase = (typeof ENTRYPOINT_PHASES)[number];
@@ -160,6 +211,14 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "run-api-issuance-live-naver",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 강조된 실제 컨트롤을 직접 클릭하면 SellerOps가 관찰합니다.",
+    emitsFrontendUrl: false,
+  },
+  API_CENTER_VISUAL_RECON: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/capture-api-center-visual.ts",
+    entrypointCommandId: "capture-api-center-visual",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 민감 영역을 가린 뒤에만 화면을 캡처합니다.",
     emitsFrontendUrl: false,
   },
   NAVER_GUIDED_CONNECTION: {
@@ -267,6 +326,14 @@ export interface ApprovalManifest {
   hotkey: string;
   /** The gitignored raw-artifact path (Phase A); empty for phases that write no raw artifact. */
   artifactPath: string;
+  /** Visual-recon only: the fixed, closed set of screens the redacted-screenshot recon may capture. */
+  captureScreens?: readonly string[];
+  /** Visual-recon only: the gitignored sink category for the redacted PNG + sanitized JSON summary. */
+  artifactCategory?: string;
+  /** Visual-recon only: the screenshot policy — a redacted viewport only. */
+  screenshotPolicy?: string;
+  /** Visual-recon only: the structural summary policy — sanitized closed-vocabulary only. */
+  structuralSummaryPolicy?: string;
   expiresAt: "process-lifetime";
   gitSha: string;
 }
@@ -364,6 +431,22 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     }
   }
 
+  // 7c) The visual-recon phase has NO hotkey (it never calibrates a control from a keypress). Its redacted PNG +
+  // sanitized summary must land ONLY under the gitignored `.calibration/visual/` sink, and the screens it
+  // declares must be exactly the driver's fixed screen set (a self-consistency guard against contract drift).
+  if (spec.phase === "API_CENTER_VISUAL_RECON") {
+    const artifact = (input.artifactPath ?? "").replace(/\\/g, "/");
+    if (!artifact || !isSafeCalibrationArtifactPath(artifact) || !artifact.startsWith(VISUAL_RECON_ARTIFACT_CATEGORY)) {
+      return fail("ARTIFACT_PATH_UNSAFE", `the visual-recon artifact path must be under the gitignored ${VISUAL_RECON_ARTIFACT_CATEGORY} sink`);
+    }
+    // Defense-in-depth: today `spec.captureScreens` IS the `VISUAL_RECON_SCREENS` reference, so this holds by
+    // construction; it exists to fail closed if a future hand-edit hardcodes a different literal into the spec.
+    const screens = spec.captureScreens ?? [];
+    if (screens.length !== VISUAL_RECON_SCREENS.length || !VISUAL_RECON_SCREENS.every((s, i) => screens[i] === s)) {
+      return fail("VISUAL_SCREENS_MISMATCH", `visual-recon capture screens must be exactly ${VISUAL_RECON_SCREENS.join(", ")}`);
+    }
+  }
+
   // 8) The account binding must be a sanitized DESCRIPTION — never a raw internal id/token. Guarded HERE (the
   // single gate every caller — phased CLI and inline preflight alike — passes through) so no path can echo a
   // raw account/store/org id into the manifest.
@@ -410,6 +493,16 @@ export function validateApprovalPrerequisites(input: ApprovalPrereqInput): Appro
     operatorActionSummary: entrypoint.operatorActionSummary,
     hotkey: input.hotkey ?? "",
     artifactPath: input.artifactPath ?? "",
+    // Visual-recon only: surface the fixed screen set, the gitignored sink, and the redaction/summary policies
+    // so the operator approves exactly what the recon may capture and where it lands.
+    ...(spec.phase === "API_CENTER_VISUAL_RECON"
+      ? {
+          captureScreens: spec.captureScreens,
+          artifactCategory: spec.artifactCategory,
+          screenshotPolicy: spec.screenshotPolicy,
+          structuralSummaryPolicy: spec.structuralSummaryPolicy,
+        }
+      : {}),
     expiresAt: "process-lifetime",
     gitSha: input.gitSha,
   };

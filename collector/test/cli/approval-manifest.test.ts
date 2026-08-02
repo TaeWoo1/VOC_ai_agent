@@ -17,12 +17,31 @@ import {
   PHASE_ENTRYPOINTS,
   ENTRYPOINT_PHASES,
   validateEntrypointContract,
+  VISUAL_RECON_ARTIFACT_CATEGORY,
   type ApprovalPrereqInput,
   type EntrypointSpec,
 } from "../../src/cli/approval-manifest";
+import { VISUAL_RECON_SCREENS } from "../../src/action-window/api-issuance-calibration/visual-recon";
 
 const OBS = PHASE_SPECS.API_CENTER_STRUCTURE_OBSERVATION;
 const HL = PHASE_SPECS.API_ISSUANCE_HIGHLIGHT_PROOF;
+const VR = PHASE_SPECS.API_CENTER_VISUAL_RECON;
+
+/** A fully-valid visual-recon input; individual tests override one field to prove a refusal. */
+function baseVisualRecon(): ApprovalPrereqInput {
+  return {
+    ...baseObservation(),
+    phase: VR.phase,
+    cli: VR.cli,
+    driver: VR.driver,
+    declaredActions: VR.capableActions,
+    // Visual recon has NO hotkey and writes only under the gitignored `.calibration/visual/` sink.
+    hotkey: undefined,
+    artifactPath: VISUAL_RECON_ARTIFACT_CATEGORY,
+    maxActions: "1 redacted visual recon session",
+    operation: "API Center redacted visual recon",
+  };
+}
 
 /** A fully-valid Phase-A (observation) input; individual tests override one field to prove a refusal. */
 function baseObservation(): ApprovalPrereqInput {
@@ -186,6 +205,81 @@ describe("calibration phase separation", () => {
       expect(r.manifest.phase).toBe("API_ISSUANCE_HIGHLIGHT_PROOF");
       expect(r.manifest.allowedActions).toContain("HIGHLIGHT_REAL_CONTROL");
       expect(r.manifest.selectorsCalibrated).toBe(true);
+    }
+  });
+});
+
+describe("visual-recon phase — redacted-screenshot recon manifest", () => {
+  it("the phase spec is the redacted-screenshot recon: read-only, no highlight, capture screens = the driver's fixed set", () => {
+    expect(VR.cli).toBe("src/cli/capture-api-center-visual.ts");
+    expect(VR.driver).toContain("capture-api-center-visual");
+    expect(VR.allowsHighlight).toBe(false);
+    expect(VR.mode).toBe("READ_ONLY");
+    // Single source of truth: the phase declares EXACTLY the driver's fixed screen set (drift guard).
+    expect(VR.captureScreens).toEqual([...VISUAL_RECON_SCREENS]);
+    expect(VR.artifactCategory).toBe(VISUAL_RECON_ARTIFACT_CATEGORY);
+    // It can never declare a highlight or click-observe action.
+    expect(VR.capableActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+    expect(VR.capableActions).not.toContain("OBSERVE_USER_CLICK_TRANSITION");
+  });
+
+  it("a PREPARED visual-recon manifest carries the screens/sink/policies and NO hotkey", () => {
+    const r = validateApprovalPrerequisites(baseVisualRecon());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      expect(m.phase).toBe("API_CENTER_VISUAL_RECON");
+      expect(m.cli).toBe("src/cli/capture-api-center-visual.ts");
+      expect(m.driver).toContain("capture-api-center-visual");
+      expect(m.mode).toBe("READ_ONLY");
+      expect(m.entrypointType).toBe("CLI_LAUNCHED_DEDICATED_WINDOW");
+      expect(m.entrypointCommandId).toBe("capture-api-center-visual");
+      expect(m.captureScreens).toEqual([...VISUAL_RECON_SCREENS]);
+      expect(m.artifactCategory).toBe(VISUAL_RECON_ARTIFACT_CATEGORY);
+      expect(m.screenshotPolicy).toBe("redacted viewport only");
+      expect(m.structuralSummaryPolicy).toBe("sanitized closed-vocabulary only");
+      expect(m.allowedActions).toContain("REDACT_SENSITIVE_REGIONS");
+      expect(m.allowedActions).toContain("CAPTURE_REDACTED_VIEWPORT");
+      expect(m.allowedActions).not.toContain("HIGHLIGHT_REAL_CONTROL");
+      // No hotkey (it never calibrates a control from a keypress).
+      expect(m.hotkey).toBe("");
+      expect(m.operatorPresenceRequired).toBe(true);
+      expect(m.expiresAt).toBe("process-lifetime");
+    }
+  });
+
+  it("declaring a highlight action in the visual-recon phase → FAIL (its driver only observes/redacts)", () => {
+    const r = validateApprovalPrerequisites({
+      ...baseVisualRecon(),
+      declaredActions: [...VR.capableActions, "HIGHLIGHT_REAL_CONTROL"],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("HIGHLIGHT_ACTION_IN_OBSERVATION_PHASE");
+  });
+
+  it("an artifact path outside the gitignored .calibration/visual/ sink → FAIL (ARTIFACT_PATH_UNSAFE)", () => {
+    for (const artifactPath of [undefined, "", ".calibration/api-center-x.json", ".calibration/visual/../escape.png", "/tmp/visual/x.png", "docs/visual.png"]) {
+      const r = validateApprovalPrerequisites({ ...baseVisualRecon(), artifactPath });
+      expect(r.ok, String(artifactPath)).toBe(false);
+      if (!r.ok) expect(r.cause).toBe("ARTIFACT_PATH_UNSAFE");
+    }
+  });
+
+  it("the visual-recon CLI/driver must be confirmed exactly (a wrong driver → FAIL)", () => {
+    const r = validateApprovalPrerequisites({ ...baseVisualRecon(), driver: "calibrate-api-center (multi-checkpoint read-only calibrator)" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.cause).toBe("CLI_DRIVER_UNCONFIRMED");
+  });
+
+  it("the visual-recon manifest is a CLI-launched dedicated window — NO frontend URL, NO raw API-center URL", () => {
+    const r = validateApprovalPrerequisites(baseVisualRecon());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const m = r.manifest;
+      for (const tok of ["/connect/naver", "?walkthroughRun=", "http://", "https://", "apicenter.commerce.naver.com"]) {
+        expect(JSON.stringify(m).includes(tok), `visual-recon manifest must not contain "${tok}"`).toBe(false);
+      }
+      expect(m.apiCenterHost).toBe("api_center_host");
     }
   });
 });

@@ -247,6 +247,14 @@ if [ "$FAILED" = "0" ]; then
     echo "  entrypoint: SellerOps opens a dedicated Chrome window on approval — no frontend URL"
   fi
   echo "  account: $APPROVAL_ACCOUNT · operator presence: required · expires: process-lifetime · git $CUR_GIT"
+  # Visual-recon phase: surface the redact-then-capture gate, the fixed screen set, and the gitignored sink so the
+  # operator approves exactly what the recon may capture and where it lands (values read from the tested manifest).
+  if [ "$APPROVAL_PHASE" = "API_CENTER_VISUAL_RECON" ]; then
+    VR_SCREENS="$(python3 -c "import json;print(', '.join(json.load(open('$MANIFEST_OUT')).get('captureScreens',[])))" 2>/dev/null || echo)"
+    VR_SINK="$(python3 -c "import json;print(json.load(open('$MANIFEST_OUT')).get('artifactCategory',''))" 2>/dev/null || echo)"
+    echo "  visual recon: redact-then-capture — screens: $VR_SCREENS"
+    echo "  artifacts: redacted PNG + sanitized closed-vocab JSON → $VR_SINK (gitignored); any uncovered sensitive region ⇒ HALT, no screenshot"
+  fi
   echo "  Standing Safety Contract + full scope: docs/sellerops_live_approval_contract.md"
   echo
   if [ "$APPROVAL_ENTRYPOINT_TYPE" = "FRONTEND_URL" ]; then

@@ -280,6 +280,29 @@ manifest 생성 후 새 단일-사용 승인 필요.**
 - **미수행(명시):** 라이브 runtime·스크린샷·API센터 접속·selector 채택·`SELECTORS_CALIBRATED=true`·push/PR 없음.
   다음 라이브는 새 single-use 승인 필요.
 
+### 0.2.4 개정 — **Visual Recon을 approval-manifest/preflight 계약의 1급 phase로 배선** (오프라인)
+
+- **동기:** §0.2.3의 Visual Recon 드라이버(`capture-api-center-visual`)는 **자체 플래그 게이트 + 자체 runId**만
+  가진 독립 CLI였고, `approvalId`+PREPARED manifest를 발급하는 preflight/approval-manifest 계약과 **미배선**
+  이었다. 그 계약은 `API_CENTER_STRUCTURE_OBSERVATION` phase를 **hotkey 드라이버**에 고정하고 있어, 그대로 preflight를
+  돌리면 hotkey 드라이버 manifest가 나와 Visual Recon 계약과 모순된다. → 제품 오너 결정: **기존 phase 재지정이 아니라
+  새 phase 추가**로 hotkey 경로를 보존한다.
+- **변경(collector + tools만, 마이그레이션/백엔드/contract 없음):** 새 calibration phase **`API_CENTER_VISUAL_RECON`**
+  추가(`approval-manifest.ts`): 드라이버 `capture-api-center-visual`, 액션 `REDACT_SENSITIVE_REGIONS`/
+  `CAPTURE_REDACTED_VIEWPORT`(highlight/click-observe 불가), CLI-launched dedicated-window 엔트리포인트
+  `capture-api-center-visual`(frontend URL 없음). manifest에 `captureScreens`(=드라이버 고정 `VISUAL_RECON_SCREENS`
+  단일 출처), `artifactCategory`=`.calibration/visual/`(gitignored), `screenshotPolicy`="redacted viewport only",
+  `structuralSummaryPolicy`="sanitized closed-vocabulary only", `hotkey`=""(없음), `operatorPresenceRequired`=true,
+  `expiresAt`=process-lifetime. **hotkey 강제 없음**; artifact 경로는 `.calibration/visual/` sink 하위만 허용
+  (아니면 `ARTIFACT_PATH_UNSAFE`), 화면 세트 자기일치 위반은 `VISUAL_SCREENS_MISMATCH`. 원본 URL은 host 카테고리로만.
+- **preflight:** 기존 generic calibration 분기가 그대로 처리(phase/entrypoint를 tested manifest에서 도출) + Visual
+  Recon 전용 요약(redact-then-capture·screens·gitignored sink·미커버 시 HALT) 출력.
+- **테스트:** `approval-manifest.test.ts`에 Visual Recon 6종 추가(PREPARED 필드, highlight 거부, sink-외 경로 거부,
+  cli/driver 확정, dedicated-window·원본 URL 부재, 스펙=`VISUAL_RECON_SCREENS` 드리프트 가드). collector 6034 green,
+  typecheck clean.
+- **미수행(명시):** 라이브 runtime·스크린샷·API센터 접속·selector 채택·`SELECTORS_CALIBRATED=true`·push/PR 없음.
+  라이브 준비(격리 DB/backend/frontend/bootstrap/preflight·전용 Chrome)는 **다음 턴** + 새 single-use 승인.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수

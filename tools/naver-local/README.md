@@ -68,18 +68,26 @@ The operator's action after approval depends on the **phase**, and the preflight
 
 - **Guided order connection** (default, no `SELLEROPS_APPROVAL_PHASE`) → the operator opens the bound
   `http://localhost:5173/connect/naver?walkthroughRun=<id>` URL. This is the ONLY phase that prints a frontend URL.
-- **Calibration phases** (`SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION` or
-  `API_ISSUANCE_HIGHLIGHT_PROOF`) → the operator action is a **CLI-launched dedicated Chrome window** that
-  SellerOps opens on approval; there is **no frontend URL**. The preflight prints the dedicated-window action
-  instead, and the manifest carries `entrypointType`/`entrypointCommandId`/`operatorActionSummary`. A manifest
-  whose phase and entrypoint disagree fails BEFORE it is emitted.
+- **Calibration phases** (`SELLEROPS_APPROVAL_PHASE=API_CENTER_STRUCTURE_OBSERVATION`,
+  `API_ISSUANCE_HIGHLIGHT_PROOF`, or `API_CENTER_VISUAL_RECON`) → the operator action is a **CLI-launched
+  dedicated Chrome window** that SellerOps opens on approval; there is **no frontend URL**. The preflight prints
+  the dedicated-window action instead, and the manifest carries
+  `entrypointType`/`entrypointCommandId`/`operatorActionSummary`. A manifest whose phase and entrypoint disagree
+  fails BEFORE it is emitted. The **visual-recon** phase additionally carries `captureScreens` (the fixed screen
+  set), `artifactCategory` (the gitignored `.calibration/visual/` sink), and the `screenshotPolicy` /
+  `structuralSummaryPolicy` (redacted viewport + sanitized closed-vocabulary only), and its driver is
+  `capture-api-center-visual` — never the hotkey calibrator.
 
 ## API-center Visual Recon (redacted-screenshot calibration)
 
 An alternative to the hotkey selector calibrator (`calibrate-api-center`). Instead of the operator hovering one
 element and pressing a hotkey, SellerOps captures a **redacted screenshot** of each API-center screen the
 operator navigated to, plus a sanitized structural summary, and a HUMAN reviewer reads that redacted image to
-identify controls and later propose selector candidates. Live entry (gated, human-attended):
+identify controls and later propose selector candidates. It is a first-class approval **phase**
+(`SELLEROPS_APPROVAL_PHASE=API_CENTER_VISUAL_RECON`), so the same preflight gate prepares a sanitized PREPARED
+manifest for it (driver `capture-api-center-visual`, the four capture screens, the gitignored sink, and the
+redacted-viewport / sanitized-summary policies) — the run stays fully gated, never adopts a selector, and never
+flips `SELECTORS_CALIBRATED`. Live entry (gated, human-attended):
 
 ```
 set -a && . ./.env && set +a          # NAVER_API_CENTER_URL (operator-owned; never logged)

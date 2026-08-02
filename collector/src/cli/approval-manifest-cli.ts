@@ -17,6 +17,7 @@ import {
   NAVER_API_CENTER_BASE_URL,
   PHASE_SPECS,
   validateApprovalPrerequisites,
+  VISUAL_RECON_ARTIFACT_CATEGORY,
   type CalibrationPhase,
   type ApprovalPrereqInput,
 } from "./approval-manifest";
@@ -44,6 +45,21 @@ export function runApprovalManifestCli(): number {
   // Dry-validate the run command: the exact CLI entrypoint file must exist.
   const cliExists = existsSync(resolve(COLLECTOR_ROOT, spec.cli));
 
+  // The visual-recon phase has NO capture hotkey and writes its redacted PNG + sanitized summary under the
+  // gitignored `.calibration/visual/` sink (the driver manages the per-screen file names). Only the hotkey
+  // calibrator phase supplies a hotkey + a per-run raw-artifact path.
+  const isVisualRecon = phase === "API_CENTER_VISUAL_RECON";
+  const hotkey = isVisualRecon ? undefined : (env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K");
+  const artifactPath = isVisualRecon
+    ? VISUAL_RECON_ARTIFACT_CATEGORY
+    : (env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`);
+  const defaultOperation = isVisualRecon
+    ? "API Center redacted visual recon"
+    : phase === "API_CENTER_STRUCTURE_OBSERVATION"
+      ? "API Center structure observation"
+      : "API issuance highlight proof";
+  const defaultMaxActions = isVisualRecon ? "1 redacted visual recon session" : "1 calibration session";
+
   const input: ApprovalPrereqInput = {
     phase,
     channel: env("SELLEROPS_APPROVAL_CHANNEL") ?? "NAVER",
@@ -55,16 +71,14 @@ export function runApprovalManifestCli(): number {
     driver: spec.driver,
     // The manifest declares exactly the phase driver's real capability (Phase A therefore never highlights).
     declaredActions: spec.capableActions,
-    // Phase-A calibration prerequisites: a defined capture hotkey and a gitignored raw-artifact path (screened
-    // in validate). Defaults: Ctrl+Shift+K and `.calibration/api-center-<runId>.json`.
-    hotkey: env("SELLEROPS_CALIBRATION_HOTKEY") ?? "Ctrl+Shift+K",
-    artifactPath: env("SELLEROPS_CALIBRATION_ARTIFACT") ?? `.calibration/api-center-${env("WALKTHROUGH_RUN_ID") ?? "unknown"}.json`,
+    hotkey,
+    artifactPath,
     runId: env("WALKTHROUGH_RUN_ID") ?? "unknown",
     approvalId: env("WALKTHROUGH_APPROVAL_ID") ?? "unknown",
     gitSha: env("WALKTHROUGH_GIT_COMMIT") ?? "unknown",
-    maxActions: env("SELLEROPS_APPROVAL_MAX") ?? "1 calibration session",
+    maxActions: env("SELLEROPS_APPROVAL_MAX") ?? defaultMaxActions,
     surface: env("SELLEROPS_APPROVAL_SURFACE") ?? "Commerce API Center",
-    operation: env("SELLEROPS_APPROVAL_OPERATION") ?? (phase === "API_CENTER_STRUCTURE_OBSERVATION" ? "API Center structure observation" : "API issuance highlight proof"),
+    operation: env("SELLEROPS_APPROVAL_OPERATION") ?? defaultOperation,
   };
 
   const res = validateApprovalPrerequisites(input);
