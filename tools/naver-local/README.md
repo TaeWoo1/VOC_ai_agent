@@ -74,6 +74,42 @@ The operator's action after approval depends on the **phase**, and the preflight
   instead, and the manifest carries `entrypointType`/`entrypointCommandId`/`operatorActionSummary`. A manifest
   whose phase and entrypoint disagree fails BEFORE it is emitted.
 
+## API-center Visual Recon (redacted-screenshot calibration)
+
+An alternative to the hotkey selector calibrator (`calibrate-api-center`). Instead of the operator hovering one
+element and pressing a hotkey, SellerOps captures a **redacted screenshot** of each API-center screen the
+operator navigated to, plus a sanitized structural summary, and a HUMAN reviewer reads that redacted image to
+identify controls and later propose selector candidates. Live entry (gated, human-attended):
+
+```
+set -a && . ./.env && set +a          # NAVER_API_CENTER_URL (operator-owned; never logged)
+npx tsx collector/src/cli/capture-api-center-visual.ts -- --i-understand-this-opens-live-naver
+npx tsx collector/src/cli/capture-api-center-visual.ts -- --cleanup   # delete recon artifacts, launch nothing
+```
+
+Per screen the operator navigates manually and signals `ready`; the tool then, **fail-closed**:
+
+1. **Redacts first.** Opaque overlays are drawn over every sensitive region in every frame — form-field values,
+   password/readonly/`code`/`pre`, credential (Client ID / Application ID / Secret) areas, copy-linked value
+   boxes, stray identity text (email / account / store id), and the site header/footer chrome. Fixed UI labels
+   are deliberately left visible so the reviewer can still read the layout.
+2. **Verifies coverage.** Every detected sensitive element must be covered by an intact opaque overlay (checked
+   per category, per frame). Any uncovered element, integrity failure, or malformed report ⇒ **HALT, no
+   screenshot** for that screen.
+3. **Only then screenshots** the already-redacted viewport (to a buffer, no auto-write), re-verifies the
+   overlays still hold, and discards the image if they regressed.
+
+**What the reviewer sees** (gitignored `collector/.calibration/visual/`): the redacted PNG + a sanitized JSON
+summary (closed-vocab control roles, coarse bounding-box buckets, sibling position, ancestry tag chain,
+presence booleans, structural hashes, integer redaction counts, page category). **Never** a raw selector,
+attribute value, element text, field value, credential string, or raw URL. The Client ID/Secret value stays
+hidden even from the reviewer; only the credential *section/label/control position* may ever be identified.
+
+Selector adoption stays a separate, explicitly-authorized step (`SELECTORS_CALIBRATED` is not flipped by this
+tool): a proposed selector is eligible only when the screenshot target and structural candidate are the same
+control, it matches exactly one element, it does not depend on an account/credential value, it is not
+position-only, and any text it uses is a fixed UI label.
+
 ## Regression self-check
 
 `preflight-selfcheck.sh` proves the gate + binding fail closed (requires bootstrap + backend + frontend up):

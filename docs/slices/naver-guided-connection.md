@@ -254,6 +254,32 @@ manifest 생성 후 새 단일-사용 승인 필요.**
   PREPARED 후 추가 입력 0) + `preflight-selfcheck.sh`(GUIDED만 bound URL, PHASE_A는 전용 Chrome 행동 + frontend URL 0).
   (본 개정은 오프라인 구현·테스트 + phase-aware preflight 출력 검증만; 라이브 실행·push·PR 없음.)
 
+### 0.2.3 개정 — **hotkey calibration 반복 중단 → Visual Recon(redacted-screenshot) 전환** ⭐ 현행 calibration 전략
+
+- **동기(sanitized):** `3f4f94d`에서 라이브 Phase A hotkey calibration 1회 수행(4 stage walk, crash/abort 0 —
+  init-script 신뢰성 모델 입증) 결과 **1/3만 resolved**(create_app matchCount=1; api_group matchCount=3
+  unresolved_multiple; credentials matchCount=0 unresolved_none). 어떤 대상도 stableId/testAttr 없음. hotkey로
+  operator가 요소를 하나씩 지목하는 방식은 API센터 DOM에서 안정 selector를 얻지 못함. **`SELECTORS_CALIBRATED=false` 유지.**
+- **전환:** operator가 요소를 직접 선택하는 대신, SellerOps가 **민감정보를 먼저 가린 실제 화면을 캡처**하고 Claude가
+  redacted 이미지 + 제한된 구조 정보를 함께 검토해 selector 후보를 찾는다. hotkey capture는 즉시 재실행하지 않는다.
+- **구현(오프라인만):** 순수 코어 `collector/src/action-window/api-issuance-calibration/visual-recon.ts`
+  (`verifyRedaction` fail-closed 게이트 + `mayScreenshot` + `sanitizeVisualSummary` no-leak + `evaluateSelectorCandidate`
+  5조건), in-page 문자열 스크립트 `visual-recon-inpage.ts`(redaction apply/verify 오버레이 + 구조-only census;
+  page를 떠나는 값은 정수/불리언뿐 — redaction 검출용 텍스트 read는 count만 반환, 원문 미방출), 게이트된 CLI
+  `collector/src/cli/capture-api-center-visual.ts`(inert on import).
+- **강제 순서(fail-closed):** operator `ready` → 모든 frame에 opaque 오버레이 적용 → 카테고리별·frame별 커버리지 검증
+  → **PASS일 때만** viewport 스크린샷(버퍼, `path:` 옵션 없음) → 사후 재검증(오버레이 유지 확인, regression 시 이미지 폐기)
+  → gitignored `.calibration/visual/`에 redacted PNG + sanitized JSON 저장. **redaction 검증 실패 = 스크린샷 0(HALT).**
+- **redaction 대상:** input/textarea/select 값, password/readonly/`code`/`pre`, Client ID/Application ID/Secret 영역,
+  복사-연결 값 상자, 식별 텍스트(이메일/계정/스토어 id), header/footer 크롬. 고정 UI 라벨은 보이도록 남긴다.
+  **credentials 값/필드는 selector 대상 아님** — 섹션/라벨/컨트롤 위치만. 값은 redaction 뒤 Claude에게도 안 보인다.
+- **테스트:** `visual-recon.test.ts`(verdict fail-closed 9종, hostile no-leak, 채택 게이트 5조건),
+  `visual-recon-guard.test.ts`(in-page 반환 정수-only + 금지 sink 부재; CLI gated + `.screenshot(`는 `mayScreenshot`
+  게이트 뒤 + `path:` 옵션 없음), `capture-api-center-visual.test.ts`(오케스트레이터 fakes: HALT/pass/사후-regression 폐기/
+  ready당 1회/skip/abort). collector 오프라인 스위트 전체 green.
+- **미수행(명시):** 라이브 runtime·스크린샷·API센터 접속·selector 채택·`SELECTORS_CALIBRATED=true`·push/PR 없음.
+  다음 라이브는 새 single-use 승인 필요.
+
 ---
 
 ## 0. v1 비준 (Ratification 2026-07-19) — 오프라인 구현 착수
