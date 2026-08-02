@@ -15,6 +15,7 @@ import { dirname, resolve } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DRIVER = resolve(HERE, "../../../src/action-window/naver-issuance-driver.ts");
 const CLI = resolve(HERE, "../../../src/cli/run-api-issuance-live-naver.ts");
+const PROBE_CLI = resolve(HERE, "../../../src/cli/probe-issuance-selectors.ts");
 
 /** Strip block comments and comment/JSDoc lines so prose mentioning a forbidden token never trips. */
 function codeOnly(path: string): string {
@@ -97,19 +98,27 @@ describe("NaverIssuanceDriver — source guard (no click/type/submit, no value r
     expect(code).not.toContain(".goto(");
   });
 
-  it("ALLOWS the observation/annotation primitives it legitimately needs (evaluate, setAttribute)", () => {
+  it("ALLOWS the observation/annotation primitives it legitimately needs (evaluate)", () => {
     expect(code).toContain("evaluate");
-    expect(code).toContain("setAttribute");
-    // The read-only annotation is the tag, and the overlay/observer are reused, never reimplemented.
+    // The overlay/observer are reused, never reimplemented.
     expect(code).toContain("mountOverlay");
     expect(code).toContain("armObserver");
   });
 
-  it("computes the target signature from STRUCTURAL facts only (tag + position + child count), never a value", () => {
-    // The in-page signature source uses tagName / childElementCount — never a value/attribute/text read.
-    expect(code).toContain("el.tagName");
-    expect(code).toContain("el.childElementCount");
-    expect(code).toContain("IN_PAGE_SIG_FACTORY");
+  it("locates by the VALUE-FREE fixed-label locate script (never by a value / raw text read in the driver)", () => {
+    // The driver delegates location to the audited `buildFixedLabelLocateScript` (guarded separately for
+    // value-free OUTPUT). The driver source itself contains NO text/attribute read — those live only inside
+    // that imported script string, which reads text solely to compare against a KNOWN fixed label and returns
+    // only a count + an opaque structural signature.
+    expect(code).toContain("buildFixedLabelLocateScript");
+    // The signature source (tagName/childElementCount/IN_PAGE_SIG_FACTORY) is NOT in the driver — it moved into
+    // the audited inpage script, so the driver's own code cannot read an element's structure/value directly.
+    expect(code).not.toContain("el.childElementCount");
+    expect(code).not.toContain("IN_PAGE_SIG_FACTORY");
+  });
+
+  it("treats `return` as guidance-only — a fixed synthetic signature, never a queried NAVER control", () => {
+    expect(code).toContain("RETURN_GUIDANCE_SIG");
   });
 });
 
@@ -137,6 +146,42 @@ describe("run-api-issuance-live-naver CLI — source guard (gated, no click/type
     expect(code).toContain("hasLiveRunApproval");
     expect(code).toContain("screenApiCenterUrl");
     // main() runs only when invoked directly — inert on import.
+    expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
+  });
+});
+
+describe("probe-issuance-selectors CLI — source guard (gated, read-only, no click/type/value read/highlight)", () => {
+  const code = codeOnly(PROBE_CLI);
+
+  it.each(NO_ACTION_TOKENS)("never contains %s", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_VALUE_READ_TOKENS)("never reads a field value / clipboard / screenshot (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it.each(NO_NAV_TOKENS)("never re-navigates the seller's window (%s)", (token) => {
+    expect(code).not.toContain(token);
+  });
+
+  it("navigates exactly ONCE — to the pre-screened URL only", () => {
+    expect(code.split(".goto(").length - 1).toBe(1);
+  });
+
+  it("is READ-ONLY: it measures matchCount but never highlights, tags, or observes a click", () => {
+    // It uses the driver's read-only probe, never its highlight/observe path.
+    expect(code).toContain("probeTargetMatch");
+    expect(code).not.toContain("highlightTarget");
+    expect(code).not.toContain("armObserve");
+    expect(code).not.toContain("observeUserAction");
+    // It never draws an overlay (mounting an overlay would be a highlight, which is Phase B, not this probe).
+    expect(code).not.toContain("mountOverlay");
+  });
+
+  it("is gated on the explicit live-run approval flag and fails closed on a bad URL before launch", () => {
+    expect(code).toContain("hasLiveRunApproval");
+    expect(code).toContain("screenApiCenterUrl");
     expect(code).toContain("import.meta.url === pathToFileURL(process.argv[1]).href");
   });
 });

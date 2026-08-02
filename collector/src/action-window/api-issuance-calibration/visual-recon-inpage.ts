@@ -22,6 +22,7 @@
  * / spread) so they run across page runtimes. The Node module `./visual-recon.ts` decides what any of this means.
  */
 import { IDENTITY_REDACT_PATTERN_SOURCES, REDACTION_CATEGORIES } from "./visual-recon";
+import { IN_PAGE_SIG_FACTORY } from "../signature";
 
 /** Data attribute marking a redaction overlay so apply/verify can find + integrity-check them (never content). */
 export const REDACT_OVERLAY_ATTR = "data-sellerops-redact";
@@ -379,5 +380,51 @@ export function buildFixedLabelProbeScript(probes: readonly { targetId: string; 
     out.push({ targetId: probe.targetId, matchCount: n });
   }
   return out;
+})()`;
+}
+
+/**
+ * A READ-ONLY fixed-label LOCATE (+ optional read-only TAG) script — the value-free OUTPUT half of the Phase-B
+ * issuance highlight driver's locator. Given a STRUCTURAL candidate query and a FIXED NAVER UI label, it finds
+ * the candidates whose accessible name (aria-label, else normalized text) EXACTLY equals that label. If exactly
+ * ONE matches it returns `{ count: 1, sig }` where `sig` is an opaque 16-hex hash computed IN-PAGE from the
+ * element's tag + document position + child count — never from any value/attribute/text. When `tag` is true it
+ * ALSO moves the read-only `data-aw-target` annotation onto that single match (clearing any prior tag first) so
+ * the reused overlay/observer can attach to it. When zero or many match it returns only `{ count }`.
+ *
+ * **Value-free OUTPUT, like {@link buildFixedLabelProbeScript}.** Element text is read SOLELY to compare against
+ * the caller's KNOWN fixed label (`accName(el) === want`); the matched text is NEVER returned — only a count and,
+ * for a unique match, the structural signature. It NEVER clicks, types, reads a field value, or mutates anything
+ * beyond the read-only `data-aw-target` marker. Kept ES5-plain + string-form so esbuild's `__name` shim is never
+ * referenced in the page.
+ */
+export function buildFixedLabelLocateScript(input: { candidateQuery: string; exactText: string; tag: boolean }): string {
+  return `(function () {
+  /* issuance-fixed-label-${input.tag ? "tag" : "locate"} (value-free OUTPUT: { count, sig? }) */
+  var sig = ${IN_PAGE_SIG_FACTORY};
+  var slice = Function.prototype.call.bind(Array.prototype.slice);
+  function norm(s) { return String(s == null ? '' : s).replace(/\\s+/g, ' ').trim(); }
+  function accName(el) {
+    var al = el.getAttribute ? el.getAttribute('aria-label') : null;
+    if (al && norm(al).length) { return norm(al); }
+    /* text read ONLY to compare against a KNOWN fixed label; only a COUNT / structural sig is returned. */
+    return norm(el.textContent || '');
+  }
+  var want = norm(${JSON.stringify(input.exactText)});
+  var cands; try { cands = slice(document.querySelectorAll(${JSON.stringify(input.candidateQuery)})); } catch (e) { cands = []; }
+  var matches = [], CAP = 4000;
+  for (var i = 0; i < cands.length && i < CAP; i++) { if (accName(cands[i]) === want) { matches.push(cands[i]); } }
+  if (matches.length !== 1) { return { count: matches.length }; }
+  var el = matches[0];
+  ${
+    input.tag
+      ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
+  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
+  el.setAttribute('data-aw-target', '');`
+      : ``
+  }
+  var all = slice(document.querySelectorAll('*'));
+  var idx = all.indexOf(el);
+  return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
 })()`;
 }

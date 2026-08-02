@@ -19,6 +19,11 @@
  *    controls and observes the operator's own click. It is refused until the control selectors have actually
  *    been calibrated against the live API center (`SELECTORS_CALIBRATED`), because the fixture markers park
  *    every highlight `target_not_found`.
+ *  - `API_ISSUANCE_SELECTOR_PROBE` (Phase-B calibration) — a READ-ONLY run of the SAME `NaverIssuanceDriver`
+ *    that only COUNTS how many candidates each highlight target's calibrated fixed-label locator matches (a
+ *    value-free integer + a highlightable boolean); it never highlights, tags, clicks, or reads a value. It is
+ *    the step that VALIDATES the driver's own locate mechanism live, so it does NOT itself require
+ *    `SELECTORS_CALIBRATED` — confirming it is what later justifies flipping that flag.
  *
  * Pure: no I/O, no browser, no network. The CLI wrapper (`approval-manifest-cli.ts`) adds the fs dry-check
  * (the CLI entrypoint file exists) and env reads; `preflight.sh` calls it.
@@ -35,7 +40,12 @@ import { screenApiCenterUrl } from "./observe-api-center";
  *    highlight; it redacts every sensitive region, verifies coverage, then screenshots the redacted viewport
  *    and writes a sanitized closed-vocabulary summary into the gitignored `.calibration/visual/` sink.
  */
-export const CALIBRATION_PHASES = ["API_CENTER_STRUCTURE_OBSERVATION", "API_ISSUANCE_HIGHLIGHT_PROOF", "API_CENTER_VISUAL_RECON"] as const;
+export const CALIBRATION_PHASES = [
+  "API_CENTER_STRUCTURE_OBSERVATION",
+  "API_ISSUANCE_HIGHLIGHT_PROOF",
+  "API_CENTER_VISUAL_RECON",
+  "API_ISSUANCE_SELECTOR_PROBE",
+] as const;
 export type CalibrationPhase = (typeof CALIBRATION_PHASES)[number];
 
 /**
@@ -52,6 +62,9 @@ export const APPROVAL_ACTIONS = [
   "OBSERVE_USER_CLICK_TRANSITION",
   "REDACT_SENSITIVE_REGIONS",
   "CAPTURE_REDACTED_VIEWPORT",
+  // Read-only Phase-B selector probe: count how many candidates a target's FIXED-LABEL locator matches
+  // (value-free integer + a highlightable boolean). It NEVER highlights, tags, clicks, or reads a value.
+  "PROBE_TARGET_MATCHCOUNT",
 ] as const;
 export type ApprovalAction = (typeof APPROVAL_ACTIONS)[number];
 
@@ -134,6 +147,24 @@ export const PHASE_SPECS: Readonly<Record<CalibrationPhase, PhaseSpec>> = {
     screenshotPolicy: VISUAL_RECON_SCREENSHOT_POLICY,
     structuralSummaryPolicy: VISUAL_RECON_SUMMARY_POLICY,
   },
+  API_ISSUANCE_SELECTOR_PROBE: {
+    phase: "API_ISSUANCE_SELECTOR_PROBE",
+    cli: "src/cli/probe-issuance-selectors.ts",
+    driver: "NaverIssuanceDriver (read-only fixed-label matchCount probe)",
+    // Read-only: open window, wait for the operator to navigate each screen, classify + census the sanitized
+    // page, then COUNT how many candidates each highlight target's calibrated fixed-label locator matches
+    // (a value-free integer + a highlightable boolean). It NEVER highlights, tags, clicks, or reads a value —
+    // it validates the DRIVER's own locate mechanism before `SELECTORS_CALIBRATED` may ever flip.
+    capableActions: [
+      "OPEN_DEDICATED_WINDOW",
+      "WAIT_OPERATOR_LOGIN_NAV",
+      "CLASSIFY_SANITIZED_PAGE_CATEGORY",
+      "STRUCTURAL_CENSUS",
+      "PROBE_TARGET_MATCHCOUNT",
+    ],
+    allowsHighlight: false,
+    mode: "READ_ONLY",
+  },
 };
 
 /** Why the prerequisites were not met. Each maps to a `PREFLIGHT FAIL: approval_prerequisite (<cause>)`. */
@@ -175,6 +206,7 @@ export const ENTRYPOINT_PHASES = [
   "API_CENTER_STRUCTURE_OBSERVATION",
   "API_ISSUANCE_HIGHLIGHT_PROOF",
   "API_CENTER_VISUAL_RECON",
+  "API_ISSUANCE_SELECTOR_PROBE",
   "NAVER_GUIDED_CONNECTION",
 ] as const;
 export type EntrypointPhase = (typeof ENTRYPOINT_PHASES)[number];
@@ -219,6 +251,14 @@ export const PHASE_ENTRYPOINTS: Readonly<Record<EntrypointPhase, EntrypointSpec>
     entrypointCommandId: "capture-api-center-visual",
     operatorActionSummary:
       "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 민감 영역을 가린 뒤에만 화면을 캡처합니다.",
+    emitsFrontendUrl: false,
+  },
+  API_ISSUANCE_SELECTOR_PROBE: {
+    entrypointType: "CLI_LAUNCHED_DEDICATED_WINDOW",
+    cli: "src/cli/probe-issuance-selectors.ts",
+    entrypointCommandId: "probe-issuance-selectors",
+    operatorActionSummary:
+      "승인 후 SellerOps가 전용 Chrome 창을 엽니다. 직접 로그인·이동한 뒤 각 화면에서 준비되면 ready 를 보내세요. SellerOps는 강조 없이 각 대상의 고정 라벨 일치 수만 읽습니다(클릭·입력·값 읽기 없음).",
     emitsFrontendUrl: false,
   },
   NAVER_GUIDED_CONNECTION: {

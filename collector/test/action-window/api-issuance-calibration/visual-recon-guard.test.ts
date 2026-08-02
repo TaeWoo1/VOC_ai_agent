@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildRedactionScript, EXTRACT_VISUAL_CONTROLS, REDACT_OVERLAY_ATTR } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
+import { buildFixedLabelLocateScript, buildRedactionScript, EXTRACT_VISUAL_CONTROLS, REDACT_OVERLAY_ATTR } from "../../../src/action-window/api-issuance-calibration/visual-recon-inpage";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const INPAGE = join(__dirname, "..", "..", "..", "src", "action-window", "api-issuance-calibration", "visual-recon-inpage.ts");
@@ -70,6 +70,29 @@ describe("visual-recon-inpage.ts — value-free OUTPUT", () => {
       // the local holding matched text (`txt`) never appears inside a returned literal
       for (const block of returns) expect(block.includes("txt")).toBe(false);
     }
+  });
+
+  it("the fixed-label LOCATE script (Phase-B highlight locator) has value-free OUTPUT — only { count, sig }", () => {
+    for (const tag of [true, false]) {
+      const script = buildFixedLabelLocateScript({ candidateQuery: "button, a, [role='button']", exactText: "애플리케이션 등록", tag });
+      const returns = [...script.matchAll(/return\s*\{[^;]*?\};?/g)].map((m) => m[0]!);
+      // Exactly the two known-safe return shapes: the non-unique `{ count }` and the unique `{ count, sig }`.
+      expect(returns.some((r) => /return\s*\{\s*count:\s*matches\.length\s*\}/.test(r))).toBe(true);
+      expect(returns.some((r) => /return\s*\{\s*count:\s*1,\s*sig:/.test(r))).toBe(true);
+      // Text is read ONLY to COMPARE against the caller's known fixed label — never RETURNED. The locals holding
+      // accessible-name text (`want`, element `.textContent`) never appear inside a returned literal.
+      for (const block of returns) {
+        expect(block.includes("want"), "must not return the compared text").toBe(false);
+        expect(block.includes("textContent"), "must not return element text").toBe(false);
+      }
+      // No value read / click / type anywhere in the locate script (defense in depth over the module-wide scan).
+      for (const forbidden of [".value", ".click(", ".type(", "inputValue", "clipboard", ".screenshot("]) {
+        expect(script.includes(forbidden), `locate script must not ${forbidden}`).toBe(false);
+      }
+    }
+    // The TAG variant writes the read-only marker; the LOCATE variant does not mutate the page at all.
+    expect(buildFixedLabelLocateScript({ candidateQuery: "*", exactText: "x", tag: true })).toContain("setAttribute('data-aw-target'");
+    expect(buildFixedLabelLocateScript({ candidateQuery: "*", exactText: "x", tag: false })).not.toContain("setAttribute");
   });
 
   it("the census script never reads a value/text (structure + attributes only)", () => {

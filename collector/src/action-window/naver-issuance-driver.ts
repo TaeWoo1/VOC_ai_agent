@@ -27,21 +27,34 @@
  *   - **Sanitized outputs only.** Counts, booleans, fixed category enums, and an opaque 16-hex signature. No
  *     selector, raw URL, path, page content, or value ever leaves this module.
  *
- * CANDIDATE selectors (`CANDIDATE_TARGET_SELECTORS`, `CANDIDATE_APP_ENTRY_SELECTOR`) are HYPOTHESES —
- * `LIVE_DOM_CALIBRATION_PENDING` — used ONLY in-page to COUNT matches; a selector never crosses the wire, and
- * a live run must confirm them (see the implementation report's "candidates a live run must confirm").
+ * CALIBRATED highlight locators come from {@link ISSUANCE_TARGET_SELECTORS} (`issuance-highlight-selectors`):
+ * each highlightable target is resolved by a FIXED NAVER label (a structural candidate query + an exact label
+ * such as "애플리케이션 등록"), derived without drift from the live-confirmed visual-recon adopted set. NAVER's
+ * API-center controls expose no aria-label/id, so a fixed label is the only value-free anchor. Boundaries:
+ *   - **`open_app` is UNCALIBRATED** (opening a specific app needs its identity — no fixed label): its locate
+ *     fails closed with `count:0`, so the EXISTING-app branch parks `target_not_found` recoverably. The NEW-app
+ *     branch (create_app → api_group → credentials) is calibrated.
+ *   - **`return` is guidance-only** — never a located NAVER control. Its locate/highlight show the "return to
+ *     SellerOps" overlay and return a fixed, synthetic guidance signature (not derived from any page element).
+ *   - `CANDIDATE_APP_ENTRY_SELECTOR` remains a `LIVE_DOM_CALIBRATION_PENDING` COUNT-only hypothesis. A selector /
+ *     fixed label never crosses the wire (only the opaque 16-hex signature does).
  */
 import type { Page } from "playwright";
 import { log } from "../log";
 import { mountOverlay, unmountOverlay } from "./overlay";
 import { armObserver, disarmObserver, waitForUserAction } from "./observer";
-import { IN_PAGE_SIG_FACTORY } from "./signature";
 import {
   EXTRACT_API_CENTER_CENSUS,
   classifyUrlCategory,
   type ApiCenterStructuralCensus,
 } from "../cli/observe-api-center";
-import { CANDIDATE_TARGET_SELECTORS, pageCategoryFromCensus } from "./api-issuance/api-center-adapter";
+import { pageCategoryFromCensus } from "./api-issuance/api-center-adapter";
+import { buildFixedLabelLocateScript } from "./api-issuance-calibration/visual-recon-inpage";
+import {
+  isIssuanceHighlightTarget,
+  locatorFor,
+  type IssuanceHighlightTarget,
+} from "./api-issuance-calibration/issuance-highlight-selectors";
 import { ISSUANCE_TOTAL_STEPS } from "./api-issuance/issuance-stages";
 import type {
   ApplicationsRead,
@@ -104,31 +117,21 @@ export interface NaverIssuanceDriverOptions {
 }
 
 /**
- * Build the in-page locate script for one candidate selector. When `tag` is true it ALSO moves the read-only
- * `data-aw-target` annotation onto the single match (clearing any prior tag first) so the generic overlay /
- * observer attach to it. It NEVER clicks and reads NO field value: the signature is computed in-page from the
- * element's tag name + document position + child count only. Returns `{ count, sig? }` (sig only on a unique
- * match). Kept ES5-plain and string-form so esbuild's `__name` shim is never referenced in the page.
+ * A FIXED, synthetic guidance signature for `return`. Returning to SellerOps is NOT a NAVER control — it is
+ * text guidance — so this signature is NOT derived from any page element. It is a stable opaque 16-hex constant
+ * so the engine's locate↔highlight anti-drift check (which requires the two signatures to match) still passes.
  */
-function inPageLocate(selector: string, tag: boolean): string {
-  return `(function () {
-  /* issuance-${tag ? "tag" : "locate"} */
-  var sig = ${IN_PAGE_SIG_FACTORY};
-  var slice = Function.prototype.call.bind(Array.prototype.slice);
-  var nodes = slice(document.querySelectorAll(${JSON.stringify(selector)}));
-  if (nodes.length !== 1) { return { count: nodes.length }; }
-  var el = nodes[0];
-  ${
-    tag
-      ? `var prior = slice(document.querySelectorAll('[data-aw-target]'));
-  for (var p = 0; p < prior.length; p++) { prior[p].removeAttribute('data-aw-target'); }
-  el.setAttribute('data-aw-target', '');`
-      : ``
-  }
-  var all = slice(document.querySelectorAll('*'));
-  var idx = all.indexOf(el);
-  return { count: 1, sig: sig(el.tagName + ':' + idx, 'children:' + el.childElementCount) };
-})()`;
+const RETURN_GUIDANCE_SIG = "5e11e40b5e11e40b";
+
+/**
+ * The value-free fixed-label locate/tag script for a highlightable target — or null when the target has no
+ * calibrated locator (`open_app`, which no fixed label resolves). When `tag` is true it also moves the
+ * read-only `data-aw-target` annotation onto the unique match. The script (in `visual-recon-inpage`) reads text
+ * ONLY to compare against the KNOWN fixed label and returns only `{ count, sig? }` — never any text/value.
+ */
+function issuanceLocateScript(target: IssuanceHighlightTarget, tag: boolean): string | null {
+  const loc = locatorFor(target);
+  return loc ? buildFixedLabelLocateScript({ candidateQuery: loc.candidateQuery, exactText: loc.exactText, tag }) : null;
 }
 
 /** Remove every read-only `data-aw-target` annotation. Value-free; safe on a page with none. */
@@ -216,27 +219,45 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
   }
 
   async locateTarget(target: IssuanceTarget): Promise<LocateResult> {
-    const page = this.activePage();
-    const res = await this.evalStr<LocateResult>(page, inPageLocate(CANDIDATE_TARGET_SELECTORS[target], false));
+    // `return` is guidance-only — it resolves to a fixed synthetic signature, NEVER a queried NAVER control.
+    if (target === "return") return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    // Only the four real controls are highlightable; `open_app` has no calibrated locator (fail-closed count:0).
+    if (!isIssuanceHighlightTarget(target)) return { count: 0 };
+    const script = issuanceLocateScript(target, false);
+    if (!script) return { count: 0 }; // uncalibrated (open_app) → engine parks target_not_found (fail-closed)
+    const res = await this.evalStr<LocateResult>(this.activePage(), script);
     return res.count === 1 && res.sig ? { count: 1, sig: res.sig } : { count: res.count };
   }
 
   async highlightTarget(target: IssuanceTarget): Promise<LocateResult> {
     const page = this.activePage();
+    // `return` shows the "return to SellerOps" guidance overlay — no NAVER control is located/tagged.
+    if (target === "return") {
+      await this.mountStepOverlay(page, "return");
+      return { count: 1, sig: RETURN_GUIDANCE_SIG };
+    }
+    if (!isIssuanceHighlightTarget(target)) return { count: 0 };
+    const script = issuanceLocateScript(target, true);
+    if (!script) return { count: 0 }; // uncalibrated (open_app) → engine parks (fail-closed), never a wrong highlight
     // Anti-drift: RE-locate AND tag in one in-page pass. The engine compares this sig against the locate sig
     // and parks on page_mismatch if the unique match drifted between the two reads.
-    const res = await this.evalStr<LocateResult>(page, inPageLocate(CANDIDATE_TARGET_SELECTORS[target], true));
+    const res = await this.evalStr<LocateResult>(page, script);
     if (res.count === 1 && res.sig) {
-      await mountOverlay(page, {
-        stepNumber: OVERLAY_STEP[target],
-        totalSteps: ISSUANCE_TOTAL_STEPS,
-        copyKey: `actionWindow.issuance.step.${target}`,
-        label: OPERATOR_STEP_LABELS[target],
-        guidanceEnabled: this.opts.guidanceEnabled ?? true,
-      });
+      await this.mountStepOverlay(page, target);
       return { count: 1, sig: res.sig };
     }
     return { count: res.count };
+  }
+
+  /** Mount the reused read-only step overlay for one target's operator-legible dev badge. Never clicks/types. */
+  private mountStepOverlay(page: Page, target: IssuanceTarget): Promise<void> {
+    return mountOverlay(page, {
+      stepNumber: OVERLAY_STEP[target],
+      totalSteps: ISSUANCE_TOTAL_STEPS,
+      copyKey: `actionWindow.issuance.step.${target}`,
+      label: OPERATOR_STEP_LABELS[target],
+      guidanceEnabled: this.opts.guidanceEnabled ?? true,
+    });
   }
 
   async clearHighlight(): Promise<void> {
@@ -246,17 +267,39 @@ export class NaverIssuanceDriver implements IssuanceProbeDriver {
   }
 
   async armObserve(target: IssuanceTarget): Promise<void> {
+    // `return` is guidance-only: there is no NAVER control to observe — the seller returns to SellerOps on their
+    // own screen, which is not a NAVER action. Nothing is armed.
+    if (target === "return" || !isIssuanceHighlightTarget(target)) return;
     const page = this.activePage();
     // Re-tag the control (a resume/recheck may arm without a fresh highlight) then arm the read-only observer.
-    await this.evalStr(page, inPageLocate(CANDIDATE_TARGET_SELECTORS[target], true)).catch(() => undefined);
+    const script = issuanceLocateScript(target, true);
+    if (script) await this.evalStr(page, script).catch(() => undefined);
     await armObserver(page);
   }
 
-  async observeUserAction(_target: IssuanceTarget): Promise<boolean> {
-    void _target;
+  async observeUserAction(target: IssuanceTarget): Promise<boolean> {
+    // The `return` guidance has no NAVER control to observe — its guidance is complete once shown (the seller's
+    // return to SellerOps is a SellerOps-side action). `guidance_complete` means the TUTORIAL finished, never a
+    // stored credential or a made connection, so advancing here claims nothing more.
+    if (target === "return") return true;
     return waitForUserAction(this.activePage(), {
       timeoutMs: this.opts.observeTimeoutMs ?? DEFAULT_ISSUANCE_OBSERVE_TIMEOUT_MS,
     });
+  }
+
+  /**
+   * READ-ONLY: measure how many candidates a highlight target's calibrated fixed-label locator matches on the
+   * CURRENT page, and whether it can be highlighted uniquely (matchCount===1). Value-free — it runs the locate
+   * script WITHOUT tagging (no `data-aw-target` write) and mounts NO overlay, so it never mutates the page,
+   * clicks, types, or reads any value. `open_app` (no calibrated locator) reports `matchCount:0, canHighlight:false`.
+   * This is what the read-only `API_ISSUANCE_SELECTOR_PROBE` phase calls to confirm the driver's own mechanism.
+   */
+  async probeTargetMatch(target: IssuanceHighlightTarget): Promise<{ matchCount: number; canHighlight: boolean }> {
+    const script = issuanceLocateScript(target, false);
+    if (!script) return { matchCount: 0, canHighlight: false }; // uncalibrated (open_app)
+    const res = await this.evalStr<LocateResult>(this.activePage(), script);
+    const matchCount = typeof res?.count === "number" && res.count >= 0 ? res.count : 0;
+    return { matchCount, canHighlight: matchCount === 1 };
   }
 
   async cleanup(): Promise<void> {

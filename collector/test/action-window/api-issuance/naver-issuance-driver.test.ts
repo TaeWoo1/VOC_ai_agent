@@ -8,6 +8,11 @@
  * primitives, stringified), so the tests can assert directly that:
  *   - no evaluate ever reads a credential value (`.value` / `inputValue` / clipboard / screenshot);  and
  *   - the driver never invokes a marketplace action (the fake's `click` spy stays at 0).
+ *
+ * **Calibration reality this file pins (see `issuance-highlight-selectors`):** the NEW-app path
+ * (create_app → api_group → credentials → return) is calibrated by fixed labels and completes; the
+ * EXISTING-app path is NOT ready — `open_app` has no fixed label, so it parks `target_not_found`
+ * recoverably. `return` is guidance-only (a fixed synthetic signature; no NAVER control queried).
  */
 import { describe, expect, it } from "vitest";
 import type { Page } from "playwright";
@@ -61,7 +66,7 @@ class FakePage {
     this.urlValue = o.url ?? API_CENTER_URL;
     this.census = o.census ?? APP_LIST_CENSUS;
     this.locate = o.locate ?? { count: 1, sig: "abcd1234abcd1234" };
-    this.appEntryCount = o.appEntryCount ?? 1;
+    this.appEntryCount = o.appEntryCount ?? 0; // default = EMPTY app list → the calibrated new-app (create) path
     this.observed = o.observed ?? true;
   }
 
@@ -77,7 +82,7 @@ class FakePage {
     if (typeof fnOrStr !== "string") return undefined; // overlay/observer function-form → no-op
     if (s.includes("passwordFieldPresent")) return this.census; // EXTRACT_API_CENTER_CENSUS
     if (s.includes("issuance-appcount")) return this.appEntryCount;
-    if (s.includes("issuance-tag") || s.includes("issuance-locate")) return this.locate;
+    if (s.includes("issuance-fixed-label-tag") || s.includes("issuance-fixed-label-locate")) return this.locate;
     if (s.includes("issuance-cleartag")) return true;
     return undefined;
   }
@@ -180,21 +185,22 @@ function allScripts(...pages: FakePage[]): string[] {
   return pages.flatMap((p) => p.scripts);
 }
 
-describe("NaverIssuanceDriver over a fake Page — the app-exists happy path (end-to-end through the real engine)", () => {
-  it("walks probe → read → open_app → api_group → credentials → return → COMPLETED, never clicking", async () => {
-    const { io, engine, session, page } = build({ appEntryCount: 1 });
+describe("NaverIssuanceDriver over a fake Page — the calibrated NEW-app (create) happy path (end-to-end)", () => {
+  it("walks probe → read → create_app → api_group → credentials → return → COMPLETED, never clicking", async () => {
+    const { io, engine, session, page } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
 
     expect(engine.currentStage()).toBe("guidance_complete");
     expect(io.lastView()?.status).toBe("COMPLETED");
-    // Existing application → the step-2 control is OPEN, not CREATE.
+    // Empty application list → the step-2 control is CREATE (the calibrated new-app path).
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
-    expect(step2?.copyParams?.targetKind).toBe("open_app");
+    expect(step2?.copyParams?.targetKind).toBe("create_app");
 
-    // Every highlighted target ref is an opaque 16-hex — never a selector or value.
+    // Every highlighted target ref is an opaque 16-hex — never a selector or value. Four barriers highlight:
+    // create_app, api_group, credentials, and the guidance-only `return`.
     const refs = io.events().filter((e) => e.type === "TARGET_HIGHLIGHTED").map((e) => e.payload.targetRef as string);
-    expect(refs.length).toBe(4); // open_app, api_group, credentials, return
+    expect(refs.length).toBe(4);
     for (const ref of refs) expect(ref).toMatch(HEX16);
 
     // AUTOMATIC ACTION = 0: the driver never invoked the page's click.
@@ -202,12 +208,12 @@ describe("NaverIssuanceDriver over a fake Page — the app-exists happy path (en
   });
 
   it("annotates read-only (data-aw-target set then cleared) and mounts then unmounts the overlay", async () => {
-    const { io, session, page } = build({ appEntryCount: 1 });
+    const { io, session, page } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
 
     const scripts = allScripts(page);
-    // The read-only tag is set…
+    // The read-only tag is set by the fixed-label locate/tag script…
     expect(scripts.some((s) => s.includes("setAttribute('data-aw-target'"))).toBe(true);
     // …and cleared on cleanup (the value-free clear-tag snippet ran).
     expect(scripts.some((s) => s.includes("issuance-cleartag"))).toBe(true);
@@ -216,8 +222,18 @@ describe("NaverIssuanceDriver over a fake Page — the app-exists happy path (en
     expect(scripts.some((s) => s.includes("untrack"))).toBe(true);
   });
 
+  it("locates by a FIXED NAVER LABEL, never the synthetic [data-aw-target] fixture selector", async () => {
+    const { io, session, page } = build({ appEntryCount: 0 });
+    startRun(io);
+    await session.whenSettled();
+    const scripts = allScripts(page);
+    // The calibrated locate is the fixed-label script (structural query + exact label), not the old fixture CSS.
+    expect(scripts.some((s) => s.includes("issuance-fixed-label"))).toBe(true);
+    expect(scripts.some((s) => s.includes("[data-aw-target='create_app']"))).toBe(false);
+  });
+
   it("SECRET READ = 0: no evaluate — string snippet or overlay/observer function — ever reads/exfiltrates a value", async () => {
-    const { io, session, page } = build({ appEntryCount: 1 });
+    const { io, session, page } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
 
@@ -226,18 +242,17 @@ describe("NaverIssuanceDriver over a fake Page — the app-exists happy path (en
       for (const tok of [".value", "inputValue", "clipboard", "readText(", ".screenshot("]) {
         expect(s, `leaked ${tok}`).not.toContain(tok);
       }
-      // The DRIVER'S OWN in-page reads (string snippets) never read DOM text either — only counts/structure.
-      // (The audited overlay primitive legitimately WRITES its own badge `.textContent`, which is not a read.)
-      if (!s.startsWith("[fn]")) {
-        for (const tok of [".textContent", ".innerHTML", ".getAttribute("]) {
-          expect(s, `driver snippet read ${tok}`).not.toContain(tok);
-        }
+      // Any evaluated snippet that reads element TEXT must be the AUDITED value-free fixed-label locate script
+      // (guarded for value-free OUTPUT in visual-recon-guard) — never some other, unaudited text read. This
+      // catches a future driver change that started reading DOM text outside that one audited path.
+      if (!s.startsWith("[fn]") && (s.includes(".textContent") || s.includes(".getAttribute("))) {
+        expect(s, "text read must be the audited fixed-label locate script").toContain("issuance-fixed-label");
       }
     }
   });
 
   it("no sanitized wire value ever carries the raw API-center URL host", async () => {
-    const { io, session } = build({ appEntryCount: 1 });
+    const { io, session } = build({ appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
     const wire = JSON.stringify({ views: io.views(), events: io.events() });
@@ -245,21 +260,27 @@ describe("NaverIssuanceDriver over a fake Page — the app-exists happy path (en
   });
 });
 
-describe("NaverIssuanceDriver — the empty-app branch", () => {
-  it("guides CREATE instead of OPEN when the application list is empty, then completes", async () => {
-    const { io, engine, session } = build({ appEntryCount: 0 });
+describe("NaverIssuanceDriver — the EXISTING-app branch is NOT calibrated (open_app has no fixed label)", () => {
+  it("parks target_not_found recoverably at open_app (never a wrong highlight, never a click)", async () => {
+    const { io, engine, session, page } = build({ appEntryCount: 1 });
     startRun(io);
     await session.whenSettled();
 
-    expect(engine.currentStage()).toBe("guidance_complete");
+    // Existing application → step 2 is OPEN, which is uncalibrated → the run parks recoverably, not a failure.
     const step2 = io.views().find((v) => v.currentStep?.stepNumber === 2)?.currentStep;
-    expect(step2?.copyParams?.targetKind).toBe("create_app");
+    expect(step2?.copyParams?.targetKind).toBe("open_app");
+    expect(engine.currentStage()).toBe("target_not_found");
+    expect(io.lastView()?.blocker).toEqual({ code: "TARGET_NOT_FOUND", recoverable: true });
+    expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
+    // No control was highlighted (open_app never resolved), and nothing was clicked.
+    expect(io.events().some((e) => e.type === "TARGET_HIGHLIGHTED")).toBe(false);
+    expect(page.clickCalls).toBe(0);
   });
 });
 
 describe("NaverIssuanceDriver — login wait (recoverable park)", () => {
   it("parks on LOGIN_REQUIRED for a login page; a re-check after the seller logs in advances the run", async () => {
-    const { io, engine, session, page } = build({ census: LOGIN_CENSUS, appEntryCount: 1 });
+    const { io, engine, session, page } = build({ census: LOGIN_CENSUS, appEntryCount: 0 });
     startRun(io);
     await session.whenSettled();
 
@@ -267,7 +288,7 @@ describe("NaverIssuanceDriver — login wait (recoverable park)", () => {
     expect(io.lastView()?.blocker).toEqual({ code: "LOGIN_REQUIRED", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
 
-    // The seller logs in on their own screen; the page is now the app list. Re-check → re-probe → drive on.
+    // The seller logs in on their own screen; the page is now the (empty) app list. Re-check → re-probe → drive on.
     page.census = APP_LIST_CENSUS;
     command(io, "REQUEST_STEP_RECHECK", io.lastView()!.revision);
     await session.whenSettled();
@@ -280,7 +301,7 @@ describe("NaverIssuanceDriver — login wait (recoverable park)", () => {
 describe("NaverIssuanceDriver — newest-tab handling", () => {
   it("reads the NEWEST tab when a context is injected (a stale tab is never read)", async () => {
     const stale = new FakePage({ census: LOGIN_CENSUS }); // an old login tab left behind
-    const fresh = new FakePage({ census: APP_LIST_CENSUS, appEntryCount: 1 });
+    const fresh = new FakePage({ census: APP_LIST_CENSUS, appEntryCount: 0 });
     const context = { pages: (): Page[] => [asPage(stale), asPage(fresh)], on: () => undefined };
     const io = loopback();
     const engine = new IssuanceEngine({ runId: RUN_ID, channelCode: "naver" }, { clock: makeIssuanceClock() });
@@ -308,8 +329,8 @@ describe("NaverIssuanceDriver — abort / recovery", () => {
   });
 
   it("a closed API-center window parks the run recoverably on page_mismatch (never re-arms a dead page)", async () => {
-    // observed:false → the run rests at the first barrier (open_app) after highlighting.
-    const { io, engine, session, page } = build({ appEntryCount: 1, observed: false });
+    // observed:false → the run rests at the first barrier (create_app) after highlighting.
+    const { io, engine, session, page } = build({ appEntryCount: 0, observed: false });
     startRun(io);
     await session.whenSettled();
     expect(engine.isAtBarrier()).toBe(true);
@@ -322,5 +343,34 @@ describe("NaverIssuanceDriver — abort / recovery", () => {
     expect(io.lastView()?.blocker).toEqual({ code: "UI_DRIFT", recoverable: true });
     expect(io.events().map((e) => e.type)).not.toContain("RUN_FAILED");
     expect(page.clickCalls).toBe(0);
+  });
+});
+
+describe("NaverIssuanceDriver — read-only probeTargetMatch (Phase-B selector probe mechanism)", () => {
+  it("reports matchCount + canHighlight for a calibrated target WITHOUT tagging or overlaying (read-only)", async () => {
+    const page = new FakePage({ locate: { count: 1, sig: "abcd1234abcd1234" } });
+    const driver = new NaverIssuanceDriver(asPage(page));
+    const res = await driver.probeTargetMatch("create_app");
+    expect(res).toEqual({ matchCount: 1, canHighlight: true });
+    // Read-only: the probe ran the LOCATE (never the TAG) script — no data-aw-target write, and no overlay mount.
+    expect(page.scripts.some((s) => s.includes("issuance-fixed-label-locate"))).toBe(true);
+    expect(page.scripts.some((s) => s.includes("issuance-fixed-label-tag"))).toBe(false);
+    expect(page.scripts.some((s) => s.includes("scrollIntoView"))).toBe(false);
+    expect(page.clickCalls).toBe(0);
+  });
+
+  it("reports the uncalibrated open_app as not highlightable, querying NOTHING on the page", async () => {
+    const page = new FakePage();
+    const driver = new NaverIssuanceDriver(asPage(page));
+    const res = await driver.probeTargetMatch("open_app");
+    expect(res).toEqual({ matchCount: 0, canHighlight: false });
+    expect(page.scripts.length).toBe(0); // uncalibrated → no page query at all
+  });
+
+  it("reports a non-unique match as not highlightable", async () => {
+    const page = new FakePage({ locate: { count: 3 } });
+    const driver = new NaverIssuanceDriver(asPage(page));
+    const res = await driver.probeTargetMatch("api_group");
+    expect(res).toEqual({ matchCount: 3, canHighlight: false });
   });
 });

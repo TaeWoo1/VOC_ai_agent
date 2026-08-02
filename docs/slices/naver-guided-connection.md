@@ -327,8 +327,44 @@ manifest 생성 후 새 단일-사용 승인 필요.**
 - **미완료(명시):** ① create_app/open_app/api_group/credentials/return용 **실제 CSS(클릭 대상) selector 보정**,
   ② **Phase B `API_ISSUANCE_HIGHLIGHT_PROOF`**(highlight proof). 이 둘을 완료하는 커밋에서만
   `SELECTORS_CALIBRATED=true`로 전환한다.
-- **다음 큰 개발 단위 = `NAVER API Issuance Highlight Selector Calibration`** (issuance CSS/clickable selector
-  라이브 보정 → CANDIDATE_TARGET_SELECTORS 교체 + 같은 커밋에서 `SELECTORS_CALIBRATED=true` → Phase B highlight proof).
+- **다음 큰 개발 단위 = `NAVER API Issuance Highlight Selector Calibration`** (issuance clickable selector
+  라이브 보정 → highlight locator 교체 + 조건 충족 시 `SELECTORS_CALIBRATED=true` → Phase B highlight proof).
+  → **이 단위는 §0.2.6에서 착수·구현되었다** (아래가 현행 calibration 상태로 §0.2.5의 driver-selector 서술을 갱신).
+
+### 0.2.6 개정 — **Phase-B highlight selector 보정 + read-only selector-probe 단계** ⭐ 현행 calibration 상태
+
+`NAVER API Issuance Highlight Selector Calibration v1` 단위. Phase B highlight driver를 실제 강조 가능한 4개
+컨트롤 기준으로 보정하고, driver 자체 locate 메커니즘을 라이브로 검증할 **read-only selector probe** 단계를
+추가했다. **오프라인/합성 전용 — 라이브 highlight 실행·클릭·credential 입력 없음.**
+
+- **highlight locator 보정(드리프트 없음):** 새 순수 모듈
+  `collector/src/action-window/api-issuance-calibration/issuance-highlight-selectors.ts`가 4개 highlight target을
+  **고정 라벨 locator**(`{candidateQuery, exactText}` — 구조 쿼리 + 고정 NAVER 라벨)로 매핑한다. `create_app`·
+  `api_group`·`credentials`는 §0.2.5의 visual-recon **채택 세트에서 그대로 파생**(단일 소스, `VISUAL_RECON_LABEL_PROBES`
+  재사용, 앱이름/credential값/좌표 비의존) → live `matchCount=1` 근거 위에 `live_confirmed`. NAVER 컨트롤은 aria-label/
+  id가 없어 **고정 라벨이 유일한 value-free 앵커**다. **§0.2.5의 "driver는 CSS `[data-aw-target]` 픽스처를 쓴다"
+  서술을 이 개정이 갱신한다** — highlightable target은 이제 fixed-label locator를 쓴다(합성 픽스처 아님).
+- **`open_app` 미보정(정직한 분리):** 기존 앱 "열기"는 그 앱의 정체성에 의존(고정 라벨 없음)이라 `no_fixed_label`로
+  두고 locator 없음 → **existing-app 경로 = `not_ready`**, **new-app 경로(create_app→api_group→credentials) =
+  `ready_candidate`**. driver는 `open_app`을 fail-closed(`count:0`)로 처리해 존재-앱 분기가 **복구 가능한
+  `target_not_found` park**(오강조·클릭 0)로 멈춘다.
+- **`return`은 selector 대상에서 제거 → 안내 전용:** API센터에 복귀 컨트롤이 없으므로 NAVER DOM을 조회하지 않고
+  "SellerOps 탭으로 돌아가세요" 오버레이만 표시, 합성 고정 signature(HEX16, 페이지 요소 비파생) 반환. `guidance_complete`
+  는 튜토리얼 종료를 뜻할 뿐 credential 저장·연결 아님(마켓 액션 0).
+- **fixed-label locate = value-free OUTPUT:** driver는 `buildFixedLabelLocateScript`(visual-recon-inpage)로 라벨을
+  대조하고 **`{count, sig}`만 반환**(텍스트/값 미반환; sig=tag+문서index+childCount 구조 해시). 별도 소스가드로
+  value-free 출력 증명. 읽기전용 `probeTargetMatch(target)`(count+highlight 가능 여부, 태깅·오버레이·클릭 0) 추가.
+- **새 read-only 단계 `API_ISSUANCE_SELECTOR_PROBE`:** 게이트드 CLI `collector/src/cli/probe-issuance-selectors.ts`
+  + 순수 orchestrator. 각 화면에서 operator가 이동·ready하면 각 target의 고정 라벨 matchCount·highlight 가능
+  여부만 측정(강조·클릭·값 읽기 0, sanitized 정수/불리언 출력). **`allowsHighlight:false`라 `SELECTORS_CALIBRATED`
+  없이도 PREPARE 가능** — 이 단계가 driver 메커니즘을 라이브 확인하는 근거이자, 이후 플래그 전환의 선결 조건이다.
+- **`SELECTORS_CALIBRATED`는 여전히 false, `api-center-adapter.ts` 무변경.** 전환 조건: ① selector-probe가 driver
+  자체 메커니즘으로 각 calibrated target을 라이브 `matchCount=1` 확인 **AND** ② `open_app` 보정 → 그 뒤 Phase B
+  highlight proof. 지금 커밋은 어느 것도 하지 않는다.
+- **게이트·리뷰:** collector 전체(typecheck + 6138 tests) 그린; 독립 적대적 리뷰 **HIGH=0 MED=0**(2 LOW 반영:
+  candidateQuery 드리프트 핀 + 텍스트-읽기 스니펫은 감사된 fixed-label locate만 허용). **라이브 highlight 실행·
+  클릭·credential 입력·push/PR 없음.** 완료 후 **fresh `API_ISSUANCE_SELECTOR_PROBE` runtime을 PREPARED**까지만
+  만들고 승인 대기.
 
 ---
 

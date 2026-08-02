@@ -12,9 +12,32 @@
 
 ---
 
+## 2026-08-02 부록 (2) — Phase-B highlight selector 보정 + read-only selector-probe 단계 (현행)
+
+> 이 블록이 issuance highlight calibration의 **현행** 상태다(바로 아래 부록(1)의 selector 서술을 갱신).
+> 세부 계약: [`docs/slices/naver-guided-connection.md`](slices/naver-guided-connection.md) §0.2.6.
+
+- **Phase B highlight driver를 fixed-label locator로 보정.** 새 순수 모듈 `issuance-highlight-selectors.ts`가
+  4개 highlight target을 고정 라벨 locator로 매핑; `create_app`·`api_group`·`credentials`는 부록(1)의 visual-recon
+  채택 세트에서 **그대로 파생**(단일 소스, 드리프트 없음) → `live_confirmed`. **driver는 더 이상 CSS `[data-aw-target]`
+  픽스처가 아니라 fixed-label locator로 강조 대상을 찾는다.**
+- **경로 readiness 분리:** new-app(create_app→api_group→credentials) = `ready_candidate`; existing-app = `not_ready`
+  (`open_app`은 고정 라벨 없음 → `no_fixed_label`, driver fail-closed `count:0` → 복구 가능한 `target_not_found` park).
+- **`return`은 selector 대상 제거 → 안내 전용**(NAVER DOM 조회 0, 합성 고정 sig, 마켓 액션 0).
+- **fixed-label locate = value-free OUTPUT**(`{count, sig}`만 반환; 텍스트/값 미반환) + 읽기전용 `probeTargetMatch`.
+- **새 read-only 단계 `API_ISSUANCE_SELECTOR_PROBE`**(게이트드 CLI `probe-issuance-selectors.ts`): 각 target의
+  라벨 matchCount·highlight 가능 여부만 측정(강조·클릭·값읽기 0). `allowsHighlight:false`라 `SELECTORS_CALIBRATED`
+  없이 PREPARE 가능 — driver 메커니즘 라이브 확인의 근거.
+- **`SELECTORS_CALIBRATED`는 여전히 false, `api-center-adapter.ts` 무변경.** 전환 조건 = selector-probe가 driver
+  메커니즘으로 각 calibrated target 라이브 `matchCount=1` 확인 **AND** `open_app` 보정 → 그 뒤 Phase B highlight proof.
+- **게이트:** collector typecheck + 6138 tests 그린; 독립 리뷰 HIGH=0 MED=0. **라이브 highlight·클릭·credential·push/PR
+  없음.** fresh `API_ISSUANCE_SELECTOR_PROBE` runtime을 PREPARED까지만 만들고 승인 대기.
+
+---
+
 ## 2026-08-02 부록 — NAVER API센터 Visual Recon calibration (현행, HEAD `a256c91`)
 
-> 최신 current-state 부록. 아래 본문(2026-07-08 스냅샷)이 아니라 이 블록이 이 주제의 현행 상태다.
+> current-state 부록(1). 아래 본문(2026-07-08 스냅샷)이 아니라 이 블록이 이 주제의 현행 상태다.
 > 제품·전략 정본은 여전히 [`docs/sellerops_canonical_reference.md`](sellerops_canonical_reference.md),
 > 세부 계약은 [`docs/slices/naver-guided-connection.md`](slices/naver-guided-connection.md) §0.2.5.
 
