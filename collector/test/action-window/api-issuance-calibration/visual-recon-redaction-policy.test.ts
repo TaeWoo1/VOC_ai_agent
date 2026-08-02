@@ -220,13 +220,9 @@ describe("fixed-label read-only matchCount probe — value-free integer counts",
       expect(/\[value=|데이터수집/.test(p.candidateQuery)).toBe(false);
     }
     expect(labelProbesForScreen("credentials").map((p) => p.exactText)).toEqual(["애플리케이션 ID", "보기", "복사"]);
-    // Only app_detail (the bare "애플리케이션" that also lives in nav/breadcrumb) narrows via excludeWithin; the
-    // probes that already measured matchCount=1 live stay unscoped so the aggressive ol/ul exclusion can't drop them.
-    const detail = byId["app_detail.application_section"]!;
-    expect(detail.excludeWithin && /nav/.test(detail.excludeWithin)).toBeTruthy();
-    for (const id of ["api_group.section", "credentials.application_id_label", "credentials.secret_view_button", "credentials.secret_copy_button"] as const) {
-      expect(byId[id]!.excludeWithin).toBeUndefined();
-    }
+    // app_detail SECTION is anchored on the unique "애플리케이션 ID" label (the bare "애플리케이션" heading is
+    // non-unique on this page: run #5 measured 3 copies incl. sidebar + breadcrumb).
+    expect(byId["app_detail.application_section"]!.exactText).toBe("애플리케이션 ID");
   });
 
   it("the probe script embeds the probes and RETURNS only {targetId, matchCount} — never page text", () => {
@@ -245,14 +241,6 @@ describe("fixed-label read-only matchCount probe — value-free integer counts",
     for (const forbidden of [".value", ".innerHTML", ".outerHTML", ".click(", ".type(", "clipboard"]) {
       expect(script.includes(forbidden), forbidden).toBe(false);
     }
-  });
-
-  it("the probe excludes candidates inside a chrome/nav ancestor (excludeWithin via closest)", () => {
-    const script = buildFixedLabelProbeScript(labelProbesForScreen("app_detail"));
-    expect(script).toContain("el.closest(sel)");
-    expect(script).toContain("!excluded(els[i], probe.excludeWithin)");
-    // a probe without excludeWithin never excludes (closest is only called when a selector is present).
-    expect(script).toContain("if (!sel || !el || !el.closest) { return false; }");
   });
 
   it("the clear script removes overlays and returns only an integer count (value-free)", () => {

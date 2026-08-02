@@ -75,8 +75,12 @@ export const VISUAL_RECON_CANDIDATES: readonly ProposedCandidate[] = [
   {
     targetId: "app_detail.application_section",
     screen: "app_detail",
-    note: "app_detail 본문의 '애플리케이션' 섹션 제목. 네비/브레드크럼의 '내 스토어 애플리케이션'과 구분되도록 정확 일치 heading으로 앵커.",
-    candidate: fixedLabelCandidate("app_detail", 'role=heading[name="애플리케이션"]'),
+    // The bare "애플리케이션" heading is NON-unique on this page: run #5 measured 3 exact copies (sidebar group
+    // label + breadcrumb item + the section heading), and NAVER's sidebar/breadcrumb are non-semantic divs so a
+    // nav/aside exclusion can't isolate it. Anchor the SECTION on its unique first-row label "애플리케이션 ID"
+    // (matchCount=1 live) instead — never a value, always a fixed label.
+    note: "app_detail 애플리케이션 섹션 — 고유한 '애플리케이션 ID' 라벨(matchCount=1 live)로 앵커. 본문 '애플리케이션' heading은 사이드바+브레드크럼과 동일 텍스트 3중복이라 사용하지 않음.",
+    candidate: fixedLabelCandidate("app_detail", 'text="애플리케이션 ID"'),
   },
   {
     targetId: "api_group.section",
@@ -141,25 +145,15 @@ export interface FixedLabelProbe {
   candidateQuery: string;
   /** The FIXED NAVER UI label to match by accessible name / normalized text (never user/app/credential data). */
   exactText: string;
-  /**
-   * Optional: a structural selector for chrome/navigation ancestors. A candidate whose `closest(excludeWithin)`
-   * is non-null is NOT counted — used to drop a label that also appears in the sidebar nav / breadcrumb / header
-   * so only the MAIN-CONTENT occurrence is measured (run #4 found "애플리케이션" matched 3× incl. nav + breadcrumb).
-   */
-  excludeWithin?: string;
 }
-
-/** Chrome/navigation ancestors whose copy of a label must not be counted (sidebar nav, breadcrumb, header). */
-const CHROME_NAV_ANCESTORS = "nav, aside, header, [role='navigation'], [role='banner'], [role='complementary'], ol, ul";
 
 export const VISUAL_RECON_LABEL_PROBES: readonly FixedLabelProbe[] = [
   { targetId: "app_list.register_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "애플리케이션 등록" },
   { targetId: "app_list.reactivate_application", screen: "app_list", candidateQuery: "button, a, [role='button']", exactText: "다시사용" },
-  // app_detail: exclude the sidebar-nav group label + breadcrumb copies of "애플리케이션" so only the main-content
-  // section heading is counted (was matchCount=3; this narrows toward 1 — confirm on the next live re-measure).
-  // NOTE: only THIS probe gets excludeWithin — the others already measured matchCount=1 live (run #4) and the
-  // aggressive `ol, ul` exclusion could wrongly drop them, so they stay unchanged until separately re-measured.
-  { targetId: "app_detail.application_section", screen: "app_detail", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "애플리케이션", excludeWithin: CHROME_NAV_ANCESTORS },
+  // app_detail SECTION anchored on its unique "애플리케이션 ID" label — the bare "애플리케이션" heading is
+  // non-unique (run #5: 3 copies incl. sidebar + breadcrumb, non-semantic so unexcludable). Same label the
+  // credentials probe measures at matchCount=1; on the app_detail viewport it is likewise unique.
+  { targetId: "app_detail.application_section", screen: "app_detail", candidateQuery: "th,td,dt,label,span,div", exactText: "애플리케이션 ID" },
   { targetId: "api_group.section", screen: "api_group", candidateQuery: "h1,h2,h3,h4,h5,h6,[role='heading']", exactText: "API 그룹" },
   { targetId: "credentials.application_id_label", screen: "credentials", candidateQuery: "th,td,dt,label,span,div", exactText: "애플리케이션 ID" },
   { targetId: "credentials.secret_view_button", screen: "credentials", candidateQuery: "button, a, [role='button']", exactText: "보기" },
